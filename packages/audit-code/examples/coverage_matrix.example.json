@@ -1,0 +1,12 @@
+{
+  "files": [
+    {
+      "path": "src/api/auth.ts",
+      "unit_ids": ["api-auth"],
+      "classification_status": "classified",
+      "audit_status": "partial",
+      "required_lenses": ["security", "correctness", "tests"],
+      "completed_lenses": ["security"]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "closing_result.schema.json",
+  "title": "Remediation Closing Result",
+  "type": "object",
+  "required": ["contract_version", "action", "status", "commands"],
+  "properties": {
+    "contract_version": { "const": "remediate-code-closing-result/v1alpha1" },
+    "action": { "$ref": "shared.schema.json#/$defs/closing_action" },
+    "status": { "type": "string", "enum": ["success", "failed", "skipped"] },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "exit_code"],
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "exit_code": { "type": ["integer", "null"] },
+          "stdout": { "type": "string" },
+          "stderr": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

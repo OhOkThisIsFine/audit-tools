@@ -1,0 +1,14 @@
+{
+  "results": [
+    {
+      "task_id": "runtime:flow:flow:surface:src-api-auth-ts",
+      "status": "confirmed",
+      "summary": "Repeated session refresh showed missing idempotency protection.",
+      "evidence": [
+        "Two identical refresh requests created duplicate downstream effects.",
+        "No replay guard was observed in the exercised path."
+      ],
+      "notes": ["Manual runtime check executed against staging environment."]
+    }
+  ]
+}

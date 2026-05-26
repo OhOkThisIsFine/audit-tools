@@ -1,0 +1,14 @@
+{
+  "files": [
+    {
+      "path": "src/api/auth.ts",
+      "status": "included",
+      "reason": "Runtime source file."
+    },
+    {
+      "path": "dist/index.js",
+      "status": "generated",
+      "reason": "Build output."
+    }
+  ]
+}

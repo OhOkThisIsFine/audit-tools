@@ -1,0 +1,75 @@
+import type { ArtifactBundle } from "../io/artifacts.js";
+import type { AuditObligation, AuditState } from "../types/auditState.js";
+import { EXECUTOR_REGISTRY } from "./executors.js";
+import { deriveAuditState } from "./state.js";
+
+export interface NextStepDecision {
+  state: AuditState;
+  selected_obligation: string | null;
+  selected_executor: string | null;
+  reason: string;
+}
+
+const PRIORITY: string[] = [
+  "repo_manifest",
+  "file_disposition",
+  "auto_fixes_applied",
+  "syntax_resolved",
+  "structure_artifacts",
+  "design_assessment_current",
+  "design_review_completed",
+  "planning_artifacts",
+  "audit_tasks_completed",
+  "audit_results_ingested",
+  "runtime_validation_current",
+  "synthesis_current",
+];
+
+function findObligation(
+  obligations: AuditObligation[],
+): AuditObligation | undefined {
+  for (const id of PRIORITY) {
+    const item = obligations.find((o) => o.id === id);
+    if (item && (item.state === "missing" || item.state === "stale")) {
+      return item;
+    }
+  }
+  return undefined;
+}
+
+export function decideNextStep(bundle: ArtifactBundle): NextStepDecision {
+  // After intermediate artifacts are cleaned up, trust the persisted complete
+  // state so re-runs don't attempt to rebuild from an empty bundle.
+  if (bundle.audit_state?.status === "complete") {
+    return {
+      state: bundle.audit_state,
+      selected_obligation: null,
+      selected_executor: null,
+      reason: "All known obligations are currently satisfied.",
+    };
+  }
+  const state = deriveAuditState(bundle);
+  const next = findObligation(state.obligations);
+
+  if (!next) {
+    return {
+      state,
+      selected_obligation: null,
+      selected_executor: null,
+      reason:
+        state.status === "complete"
+          ? "All known obligations are currently satisfied."
+          : "No actionable missing obligation was found.",
+    };
+  }
+
+  const executor = EXECUTOR_REGISTRY.find((item) =>
+    item.obligation_ids.includes(next.id),
+  );
+  return {
+    state,
+    selected_obligation: next.id,
+    selected_executor: executor?.id ?? null,
+    reason: `Selected highest-priority actionable obligation ${next.id}.`,
+  };
+}

@@ -1,0 +1,37 @@
+{
+  "task_id": "api-auth:security",
+  "unit_id": "api-auth",
+  "pass_id": "pass:security",
+  "lens": "security",
+  "agent_role": "security-auditor",
+  "file_coverage": [{ "path": "src/api/auth.ts", "total_lines": 180 }],
+  "findings": [
+    {
+      "id": "SEC-001",
+      "title": "Session refresh path lacks tenant ownership check",
+      "category": "authorization",
+      "severity": "high",
+      "confidence": "high",
+      "lens": "security",
+      "summary": "The refresh endpoint validates the session token but does not verify that the requested tenant matches the authenticated principal.",
+      "affected_files": [
+        { "path": "src/api/auth.ts", "line_start": 44, "line_end": 79 }
+      ],
+      "impact": "A user may refresh or access a session scoped to another tenant.",
+      "evidence": [
+        "Request reads tenantId from input.",
+        "Token is validated, but ownership is not compared before downstream fetch."
+      ],
+      "remediation": [
+        "Enforce tenant ownership before refresh.",
+        "Centralize ownership checks in shared policy logic."
+      ],
+      "systemic": true
+    }
+  ],
+  "notes": ["No rate-limit evidence was available in provided excerpts."],
+  "requires_followup": true,
+  "followup_tasks": [
+    "Trace session refresh flow into downstream tenant fetches."
+  ]
+}

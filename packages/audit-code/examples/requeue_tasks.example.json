@@ -1,0 +1,10 @@
+[
+  {
+    "task_id": "requeue:correctness:src/api/auth.ts",
+    "unit_id": "requeue:src/api/auth.ts",
+    "pass_id": "requeue:correctness",
+    "lens": "correctness",
+    "file_paths": ["src/api/auth.ts"],
+    "rationale": "Requeue src/api/auth.ts because the correctness lens is still missing."
+  }
+]

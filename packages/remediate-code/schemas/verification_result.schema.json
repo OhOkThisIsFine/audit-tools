@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "verification_result.schema.json",
+  "title": "Verification Result",
+  "type": "object",
+  "required": ["finding_id", "passed"],
+  "properties": {
+    "finding_id": { "type": "string" },
+    "passed": { "type": "boolean" },
+    "reason": { "type": "string" }
+  },
+  "additionalProperties": false
+}

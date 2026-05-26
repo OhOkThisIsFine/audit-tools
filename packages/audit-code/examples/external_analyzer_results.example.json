@@ -1,0 +1,25 @@
+{
+  "tool": "semgrep",
+  "generated_at": "2026-03-22T00:00:00Z",
+  "ownership_roots": [
+    {
+      "root": "src/api",
+      "paths": ["src/api/auth.ts"],
+      "kind": "service-module",
+      "confidence": 0.84,
+      "reason": "Analyzer module inventory groups API handlers under src/api."
+    }
+  ],
+  "results": [
+    {
+      "id": "sg-001",
+      "category": "security",
+      "severity": "high",
+      "path": "src/api/auth.ts",
+      "line_start": 44,
+      "line_end": 79,
+      "summary": "Potential missing authorization check on tenant-scoped action.",
+      "rule": "custom.auth.missing-ownership-check"
+    }
+  ]
+}

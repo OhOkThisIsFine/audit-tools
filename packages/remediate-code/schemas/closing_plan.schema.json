@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "closing_plan.schema.json",
+  "title": "Closing Plan",
+  "type": "object",
+  "required": ["action"],
+  "properties": {
+    "action": {
+      "$ref": "shared.schema.json#/$defs/closing_action"
+    },
+    "custom_command": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Required if action is 'custom'"
+    }
+  },
+  "if": {
+    "properties": { "action": { "const": "custom" } }
+  },
+  "then": {
+    "required": ["custom_command"]
+  },
+  "additionalProperties": false
+}

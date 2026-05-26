@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "coverage_matrix.schema.json",
+  "title": "Coverage Matrix",
+  "type": "object",
+  "required": ["files"],
+  "properties": {
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "unit_ids", "classification_status", "audit_status", "required_lenses", "completed_lenses"],
+        "properties": {
+          "path": { "type": "string" },
+          "unit_ids": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "classification_status": {
+            "type": "string",
+            "enum": ["unclassified", "classified", "excluded", "generated", "vendor", "binary", "doc_only"]
+          },
+          "audit_status": {
+            "type": "string",
+            "enum": ["pending", "partial", "complete", "excluded"]
+          },
+          "required_lenses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["correctness", "architecture", "maintainability", "security", "reliability", "performance", "data_integrity", "tests", "operability", "config_deployment", "observability"]
+            }
+          },
+          "completed_lenses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["correctness", "architecture", "maintainability", "security", "reliability", "performance", "data_integrity", "tests", "operability", "config_deployment", "observability"]
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

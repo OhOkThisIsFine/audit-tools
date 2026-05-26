@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "flow_coverage.schema.json",
+  "title": "Flow Coverage",
+  "type": "object",
+  "required": ["flows"],
+  "properties": {
+    "flows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "flow_id",
+          "paths",
+          "required_lenses",
+          "completed_lenses",
+          "status"
+        ],
+        "properties": {
+          "flow_id": { "type": "string" },
+          "paths": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "required_lenses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["correctness", "architecture", "maintainability", "security", "reliability", "performance", "data_integrity", "tests", "operability", "config_deployment", "observability"]
+            }
+          },
+          "completed_lenses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["correctness", "architecture", "maintainability", "security", "reliability", "performance", "data_integrity", "tests", "operability", "config_deployment", "observability"]
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "partial", "complete"]
+          },
+          "notes": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

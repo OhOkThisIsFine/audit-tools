@@ -1,0 +1,66 @@
+name: fixture-deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate fixture release inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run quality gate
+        run: npm test
+
+  deploy:
+    name: Deploy fixture service
+    runs-on: ubuntu-latest
+    needs: validate
+    timeout-minutes: 15
+    environment:
+      name: staging
+    env:
+      ROLLBACK_RUNBOOK: docs/rollback.md
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Publish fixture release
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Deploying simple-app fixture for audit coverage"
+          echo "release_sha=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Emit rollback guidance
+        if: ${{ failure() }}
+        run: |
+          echo "::error::Fixture deploy failed. Follow ${ROLLBACK_RUNBOOK} and redeploy the last healthy revision."
+
+      - name: Confirm deployed revision
+        if: ${{ success() }}
+        run: |
+          echo "Fixture deploy completed for ${GITHUB_SHA}"

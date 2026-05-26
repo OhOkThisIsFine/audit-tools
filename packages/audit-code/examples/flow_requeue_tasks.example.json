@@ -1,0 +1,10 @@
+[
+  {
+    "task_id": "flow-requeue:flow:surface:src-api-auth-ts:reliability:src/lib/session.ts",
+    "unit_id": "flow:surface:src-api-auth-ts",
+    "pass_id": "flow-requeue:reliability",
+    "lens": "reliability",
+    "file_paths": ["src/lib/session.ts"],
+    "rationale": "Requeue src/lib/session.ts because critical flow flow:surface:src-api-auth-ts is still missing the reliability lens."
+  }
+]

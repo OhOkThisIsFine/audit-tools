@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime_validation_tasks.schema.json",
+  "title": "Runtime Validation Tasks",
+  "type": "object",
+  "required": ["tasks"],
+  "properties": {
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "target_paths", "reason", "priority"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": {
+            "type": "string",
+            "enum": ["unit-risk-check", "critical-flow-check"]
+          },
+          "target_paths": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
+          },
+          "reason": { "type": "string" },
+          "priority": { "type": "string", "enum": ["high", "medium", "low"] },
+          "command": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
+          },
+          "suggested_checks": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "source_artifacts": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

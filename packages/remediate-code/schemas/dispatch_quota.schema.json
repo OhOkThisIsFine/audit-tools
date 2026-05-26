@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dispatch_quota.schema.json",
+  "title": "Remediation Dispatch Quota",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "run_id",
+    "phase",
+    "host_concurrency_limit",
+    "wave_size",
+    "estimated_wave_tokens",
+    "model",
+    "confidence",
+    "source",
+    "resolved_limits",
+    "cooldown_until"
+  ],
+  "properties": {
+    "contract_version": {
+      "enum": [
+        "remediate-code-dispatch-quota/v1alpha2",
+        "remediate-code-dispatch-quota/v1alpha1"
+      ]
+    },
+    "run_id": { "type": "string" },
+    "phase": { "type": "string", "enum": ["document", "implement"] },
+    "host_concurrency_limit": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["active_subagents", "source", "description"],
+          "properties": {
+            "active_subagents": { "type": "integer", "minimum": 1 },
+            "source": {
+              "type": "string",
+              "enum": ["cli_flags", "host_reported", "session_config", "environment"]
+            },
+            "description": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "wave_size": { "type": "integer", "minimum": 1 },
+    "estimated_wave_tokens": { "type": "integer", "minimum": 0 },
+    "model": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+    "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+    "source": {
+      "type": "string",
+      "enum": ["explicit_config", "cli_flags", "known_metadata", "learned", "default"]
+    },
+    "resolved_limits": {
+      "type": "object",
+      "required": ["context_tokens", "output_tokens"],
+      "properties": {
+        "context_tokens": { "type": "integer" },
+        "output_tokens": { "type": "integer" },
+        "requests_per_minute": { "oneOf": [{ "type": "number" }, { "type": "null" }] },
+        "input_tokens_per_minute": { "oneOf": [{ "type": "number" }, { "type": "null" }] },
+        "output_tokens_per_minute": { "oneOf": [{ "type": "number" }, { "type": "null" }] }
+      },
+      "additionalProperties": false
+    },
+    "cooldown_until": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+    "quota_source_snapshot": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "properties": {
+            "remaining_pct": { "oneOf": [{ "type": "number" }, { "type": "null" }] },
+            "reset_at": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+            "requests_remaining": { "oneOf": [{ "type": "number" }, { "type": "null" }] },
+            "tokens_remaining": { "oneOf": [{ "type": "number" }, { "type": "null" }] },
+            "captured_at": { "type": "string" },
+            "source": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "backoff_state": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["consecutive_429_count", "current_cooldown_ms", "current_failure_weight"],
+          "properties": {
+            "consecutive_429_count": { "type": "integer", "minimum": 0 },
+            "current_cooldown_ms": { "type": "number" },
+            "current_failure_weight": { "type": "number" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

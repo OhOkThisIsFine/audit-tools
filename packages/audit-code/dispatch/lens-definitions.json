@@ -1,0 +1,46 @@
+{
+  "correctness": {
+    "description": "Logic errors, incorrect algorithm implementations, off-by-one bugs, type mismatches, wrong return values, incorrect state transitions, missing null/undefined guards, misuse of APIs. Focus on code that does the wrong thing.",
+    "do_not_report": "Style issues, naming problems, missing tests, or findings that belong to other lenses."
+  },
+  "maintainability": {
+    "description": "Code that is hard to change safely: excessive function length, deep nesting, tight coupling between unrelated modules, poor naming, magic constants, duplicated logic, inconsistent abstractions, unclear public APIs.",
+    "do_not_report": "Correctness bugs, test gaps, or operational concerns."
+  },
+  "tests": {
+    "description": "Test coverage gaps for important paths, tests that assert incorrect behavior (pinning bugs as expected), fragile or non-deterministic tests, missing negative/edge-case tests, tests that silently pass on stale builds (e.g. importing compiled dist/ rather than source).",
+    "do_not_report": "Source code bugs — report only issues with the tests themselves."
+  },
+  "security": {
+    "description": "Injection vulnerabilities (SQL, shell, path traversal), authentication/authorization flaws, secret exposure, insecure deserialization, privilege escalation, unsafe use of eval or child processes with user input.",
+    "do_not_report": "Performance or correctness issues that are not security-relevant."
+  },
+  "reliability": {
+    "description": "Failure modes without recovery, missing timeouts, unhandled promise rejections, race conditions, resource leaks (file handles, sockets, timers), incorrect retry logic, cascading failure risks.",
+    "do_not_report": "Correctness bugs that do not affect reliability under failure conditions."
+  },
+  "performance": {
+    "description": "Algorithmic inefficiencies (O(n²) where O(n) is possible), unnecessary re-computation, missing caching, synchronous blocking in hot paths, excessive memory allocation.",
+    "do_not_report": "Correctness bugs unrelated to performance."
+  },
+  "data_integrity": {
+    "description": "Missing input validation at trust boundaries, schema violations, inconsistent field naming across related schemas, data loss scenarios, missing required fields, enum values that are present in some schemas but not others.",
+    "do_not_report": "UI or presentation issues; operational or deployment concerns."
+  },
+  "operability": {
+    "description": "Missing or low-quality log output, error messages that don't help operators diagnose problems, missing progress indicators for long operations, no elapsed-time reporting, lack of dry-run or preview modes for destructive operations.",
+    "do_not_report": "Correctness bugs or deployment configuration."
+  },
+  "config_deployment": {
+    "description": "CI/CD pipeline correctness (wrong triggers, missing branch filters, floating version pins), deployment safety (no gate before publish, missing rollback), insecure secret handling in configs, mutable action tags that should be pinned to commit SHAs.",
+    "do_not_report": "Runtime code issues; findings that belong to other lenses."
+  },
+  "architecture": {
+    "description": "Big-picture design, conceptual elegance, over-engineering, under-engineering, appropriate use of abstractions, and identifying opportunities where custom code should be replaced by third-party tools or standard libraries. Flag structural findings that span multiple components as 'systemic: true'.",
+    "do_not_report": "Minor style issues, localized logic bugs, or formatting."
+  },
+  "observability": {
+    "description": "Logging quality, telemetry, distributed tracing context, meaningful metrics, and error reporting context.",
+    "do_not_report": "Correctness bugs or deployment configuration."
+  }
+}

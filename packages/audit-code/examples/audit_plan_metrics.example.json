@@ -1,0 +1,56 @@
+{
+  "generated_at": "2026-04-22T00:00:00.000Z",
+  "task_count": 2,
+  "packet_count": 1,
+  "estimated_agent_reduction": 1,
+  "estimated_agent_reduction_ratio": 0.5,
+  "unique_file_count": 2,
+  "task_file_reference_count": 4,
+  "repeated_file_reference_count": 2,
+  "total_task_lines": 552,
+  "total_packet_lines": 276,
+  "repeated_line_reference_count": 276,
+  "min_task_lines": 276,
+  "max_task_lines": 276,
+  "average_task_lines": 276,
+  "largest_task_id": "api-auth:security",
+  "largest_packet_id": "api-auth:security-correctness:packet-1-13579bdf24",
+  "lens_task_counts": {
+    "correctness": 1,
+    "security": 1
+  },
+  "priority_task_counts": {
+    "high": 1,
+    "medium": 1,
+    "low": 0
+  },
+  "packet_quality": {
+    "average_cohesion_score": 1,
+    "boundary_crossing_count": 1,
+    "merge_edge_kind_counts": {
+      "esm": 1
+    },
+    "boundary_edge_kind_counts": {
+      "audit-log-link": 1
+    },
+    "orphan_task_count": 0,
+    "high_fan_in_file_count": 0,
+    "high_fan_out_file_count": 0,
+    "weakly_explained_gap_counts": {
+      "missing_internal_edges": 0,
+      "unexplained_files": 0,
+      "partial_cohesion": 0
+    },
+    "weakly_explained_file_extension_counts": {},
+    "weakly_explained_packet_count": 0,
+    "weakly_explained_packet_ids": [],
+    "weakly_explained_packet_samples": [],
+    "largest_unexplained_packet_files": 0
+  },
+  "packet_size": {
+    "single_task_packets": 0,
+    "multi_task_packets": 1,
+    "max_tasks_per_packet": 2,
+    "max_files_per_packet": 2
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@audit-tools/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./types/*": "./dist/types/*.js",
+    "./io/*": "./dist/io/*.js",
+    "./quota/*": "./dist/quota/*.js",
+    "./providers/*": "./dist/providers/*.js",
+    "./validation/*": "./dist/validation/*.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

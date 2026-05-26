@@ -1,0 +1,14 @@
+{
+  "status": "active",
+  "last_executor": "structure_executor",
+  "last_obligation": "structure_artifacts",
+  "blockers": [],
+  "obligations": [
+    { "id": "repo_manifest", "state": "satisfied" },
+    { "id": "file_disposition", "state": "satisfied" },
+    { "id": "structure_artifacts", "state": "satisfied" },
+    { "id": "planning_artifacts", "state": "present" },
+    { "id": "audit_results_ingested", "state": "missing" },
+    { "id": "synthesis_current", "state": "stale" }
+  ]
+}

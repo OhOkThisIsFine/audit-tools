@@ -1,0 +1,22 @@
+{
+  "repository": {
+    "name": "sample-repo",
+    "root": ".",
+    "default_branch": "main"
+  },
+  "generated_at": "2026-03-22T00:00:00Z",
+  "files": [
+    {
+      "path": "src/api/auth.ts",
+      "language": "typescript",
+      "size_bytes": 1240,
+      "hash": "abc123"
+    },
+    {
+      "path": "infra/deploy.yml",
+      "language": "yaml",
+      "size_bytes": 512,
+      "hash": "def456"
+    }
+  ]
+}

@@ -1,0 +1,355 @@
+import type { AuditResult, Finding } from "../types.js";
+import type { DesignAssessment } from "../types/designAssessment.js";
+import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
+
+function normalizeText(value: string | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function wordSet(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean),
+  );
+}
+
+function wordJaccard(a: string, b: string): number {
+  const sa = wordSet(a);
+  const sb = wordSet(b);
+  let intersection = 0;
+  for (const w of sa) {
+    if (sb.has(w)) intersection++;
+  }
+  const union = sa.size + sb.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function filePathOverlap(a: Finding, b: Finding): number {
+  const setA = new Set(a.affected_files.map((f) => f.path));
+  const setB = new Set(b.affected_files.map((f) => f.path));
+  let intersection = 0;
+  for (const path of setA) {
+    if (setB.has(path)) intersection++;
+  }
+  const union = setA.size + setB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function primaryPath(finding: Finding): string {
+  return finding.affected_files[0]?.path ?? "";
+}
+
+function findingKey(finding: Finding): string {
+  return [
+    normalizeText(finding.lens),
+    normalizeText(finding.category),
+    normalizeText(finding.title),
+    primaryPath(finding),
+    String(finding.affected_files[0]?.line_start ?? ""),
+    String(finding.affected_files[0]?.line_end ?? ""),
+  ].join("|");
+}
+
+function severityRank(severity: Finding["severity"]): number {
+  switch (severity) {
+    case "critical":
+      return 5;
+    case "high":
+      return 4;
+    case "medium":
+      return 3;
+    case "low":
+      return 2;
+    case "info":
+      return 1;
+  }
+}
+
+function confidenceRank(confidence: Finding["confidence"]): number {
+  switch (confidence) {
+    case "high":
+      return 3;
+    case "medium":
+      return 2;
+    case "low":
+      return 1;
+  }
+}
+
+function runtimeSummary(report?: RuntimeValidationReport): string[] {
+  if (!report) {
+    return [];
+  }
+
+  return report.results
+    .filter((result) => result.status !== "pending")
+    .map((result) => `${result.task_id}: ${result.status} — ${result.summary}`);
+}
+
+function externalSummary(results?: ExternalAnalyzerResults): string[] {
+  if (!results) {
+    return [];
+  }
+  return results.results.map(
+    (item) => `external:${results.tool}:${item.path}:${item.summary}`,
+  );
+}
+
+function mergeAffectedFiles(existing: Finding, incoming: Finding): void {
+  const seen = new Set(
+    existing.affected_files.map(
+      (f) =>
+        `${f.path}:${f.line_start ?? ""}:${f.line_end ?? ""}:${f.symbol ?? ""}`,
+    ),
+  );
+  for (const file of incoming.affected_files) {
+    const key = `${file.path}:${file.line_start ?? ""}:${file.line_end ?? ""}:${file.symbol ?? ""}`;
+    if (!seen.has(key)) {
+      existing.affected_files.push(file);
+      seen.add(key);
+    }
+  }
+  existing.affected_files.sort(
+    (a, b) =>
+      a.path.localeCompare(b.path) || (a.line_start ?? 0) - (b.line_start ?? 0),
+  );
+}
+
+function absorbFinding(survivor: Finding, absorbed: Finding): void {
+  mergeAffectedFiles(survivor, absorbed);
+  survivor.evidence = [
+    ...new Set([
+      ...(survivor.evidence ?? []),
+      ...(absorbed.evidence ?? []),
+    ]),
+  ];
+  survivor.systemic = Boolean(survivor.systemic || absorbed.systemic);
+  if (absorbed.summary.length > survivor.summary.length) {
+    survivor.summary = absorbed.summary;
+  }
+}
+
+function lineRangeOverlaps(a: Finding, b: Finding): boolean {
+  const aFile = a.affected_files[0];
+  const bFile = b.affected_files[0];
+  if (!aFile || !bFile) return false;
+  if (aFile.path !== bFile.path) return false;
+  const aStart = aFile.line_start ?? 0;
+  const aEnd = aFile.line_end ?? aStart;
+  const bStart = bFile.line_start ?? 0;
+  const bEnd = bFile.line_end ?? bStart;
+  if (aEnd === 0 && bEnd === 0) return true;
+  return aStart <= bEnd && bStart <= aEnd;
+}
+
+function deduplicateSameLens(findings: Finding[]): Finding[] {
+  const groups = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    const key = `${normalizeText(finding.lens)}:${primaryPath(finding)}`;
+    const group = groups.get(key);
+    if (group) {
+      group.push(finding);
+    } else {
+      groups.set(key, [finding]);
+    }
+  }
+
+  const removed = new Set<Finding>();
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    for (let i = 0; i < group.length; i++) {
+      if (removed.has(group[i])) continue;
+      for (let j = i + 1; j < group.length; j++) {
+        if (removed.has(group[j])) continue;
+        const a = group[i];
+        const b = group[j];
+
+        const titleSim = wordJaccard(a.title, b.title);
+        const catMatch =
+          normalizeText(a.category) === normalizeText(b.category);
+        const threshold = catMatch ? 0.35 : 0.45;
+        if (titleSim < threshold) continue;
+        if (!lineRangeOverlaps(a, b) && filePathOverlap(a, b) < 0.5) continue;
+
+        const aSev = severityRank(a.severity);
+        const bSev = severityRank(b.severity);
+        const aConf = confidenceRank(a.confidence);
+        const bConf = confidenceRank(b.confidence);
+        const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
+        const [survivor, absorbed] = keepA ? [a, b] : [b, a];
+        absorbFinding(survivor, absorbed);
+        removed.add(absorbed);
+      }
+    }
+  }
+
+  return findings.filter((f) => !removed.has(f));
+}
+
+function deduplicateCrossLens(findings: Finding[]): Finding[] {
+  const groups = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    const key = primaryPath(finding);
+    const group = groups.get(key);
+    if (group) {
+      group.push(finding);
+    } else {
+      groups.set(key, [finding]);
+    }
+  }
+
+  const removed = new Set<Finding>();
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    for (let i = 0; i < group.length; i++) {
+      if (removed.has(group[i])) continue;
+      for (let j = i + 1; j < group.length; j++) {
+        if (removed.has(group[j])) continue;
+        const a = group[i];
+        const b = group[j];
+        if (normalizeText(a.lens) === normalizeText(b.lens)) continue;
+
+        const titleSim = wordJaccard(a.title, b.title);
+        const catMatch =
+          normalizeText(a.category) === normalizeText(b.category);
+        const threshold = catMatch ? 0.4 : 0.5;
+        if (titleSim < threshold) continue;
+        if (filePathOverlap(a, b) < 0.5) continue;
+
+        const aSev = severityRank(a.severity);
+        const bSev = severityRank(b.severity);
+        const aConf = confidenceRank(a.confidence);
+        const bConf = confidenceRank(b.confidence);
+        const keepA =
+          aSev > bSev || (aSev === bSev && aConf >= bConf);
+        const [survivor, absorbed] = keepA ? [a, b] : [b, a];
+        absorbFinding(survivor, absorbed);
+        removed.add(absorbed);
+      }
+    }
+  }
+
+  return findings.filter((f) => !removed.has(f));
+}
+
+function relevantRuntimeEvidence(
+  finding: Finding,
+  report?: RuntimeValidationReport,
+): string[] {
+  if (!report) return [];
+  const findingPaths = new Set(finding.affected_files.map((f) => f.path));
+  return report.results
+    .filter((result) => result.status !== "pending")
+    .filter((result) => {
+      const taskPaths = result.notes
+        ?.flatMap((note) => {
+          const match = note.match(/Target paths:\s*(.+)/);
+          return match ? match[1].split(",").map((p) => p.trim()) : [];
+        }) ?? [];
+      if (taskPaths.length === 0) return true;
+      return taskPaths.some((p) => findingPaths.has(p));
+    })
+    .map((result) => `${result.task_id}: ${result.status} — ${result.summary}`);
+}
+
+function relevantExternalEvidence(
+  finding: Finding,
+  results?: ExternalAnalyzerResults,
+): string[] {
+  if (!results) return [];
+  const findingPaths = new Set(finding.affected_files.map((f) => f.path));
+  return results.results
+    .filter((item) => findingPaths.has(item.path))
+    .map((item) => `external:${results.tool}:${item.path}:${item.summary}`);
+}
+
+export function mergeFindings(
+  results: AuditResult[],
+  runtimeReport?: RuntimeValidationReport,
+  externalAnalyzerResults?: ExternalAnalyzerResults,
+  designAssessment?: DesignAssessment,
+): Finding[] {
+  const merged = new Map<string, Finding>();
+
+  const allDesignFindings = [
+    ...(designAssessment?.findings ?? []),
+    ...(designAssessment?.review_findings ?? []),
+  ];
+  for (const finding of allDesignFindings) {
+    const key = findingKey(finding);
+    merged.set(key, {
+      ...finding,
+      affected_files: [...finding.affected_files],
+      evidence: [...(finding.evidence ?? [])],
+    });
+  }
+
+  for (const result of results) {
+    for (const finding of result.findings) {
+      const key = findingKey(finding);
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, {
+          ...finding,
+          affected_files: [...finding.affected_files],
+          evidence: [...(finding.evidence ?? [])],
+        });
+        continue;
+      }
+
+      if (severityRank(finding.severity) > severityRank(existing.severity)) {
+        existing.severity = finding.severity;
+      }
+      if (
+        confidenceRank(finding.confidence) > confidenceRank(existing.confidence)
+      ) {
+        existing.confidence = finding.confidence;
+      }
+      existing.systemic = Boolean(existing.systemic || finding.systemic);
+      existing.impact = existing.impact ?? finding.impact;
+      existing.likelihood = existing.likelihood ?? finding.likelihood;
+      existing.summary =
+        existing.summary.length >= finding.summary.length
+          ? existing.summary
+          : finding.summary;
+
+      mergeAffectedFiles(existing, finding);
+      existing.evidence = [
+        ...new Set([
+          ...(existing.evidence ?? []),
+          ...(finding.evidence ?? []),
+        ]),
+      ];
+    }
+  }
+
+  for (const finding of merged.values()) {
+    const runtimeEv = relevantRuntimeEvidence(finding, runtimeReport);
+    const externalEv = relevantExternalEvidence(finding, externalAnalyzerResults);
+    if (runtimeEv.length > 0 || externalEv.length > 0) {
+      finding.evidence = [
+        ...new Set([
+          ...(finding.evidence ?? []),
+          ...runtimeEv,
+          ...externalEv,
+        ]),
+      ];
+    }
+  }
+
+  const dedupedSameLens = deduplicateSameLens([...merged.values()]);
+  return deduplicateCrossLens(dedupedSameLens).sort((a, b) => {
+    const severityDelta = severityRank(b.severity) - severityRank(a.severity);
+    if (severityDelta !== 0) return severityDelta;
+    const confidenceDelta =
+      confidenceRank(b.confidence) - confidenceRank(a.confidence);
+    if (confidenceDelta !== 0) return confidenceDelta;
+    return a.title.localeCompare(b.title);
+  });
+}

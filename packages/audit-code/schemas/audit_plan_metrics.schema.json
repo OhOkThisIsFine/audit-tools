@@ -1,0 +1,347 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audit_plan_metrics.schema.json",
+  "title": "Audit Plan Metrics",
+  "type": "object",
+  "required": [
+    "generated_at",
+    "task_count",
+    "packet_count",
+    "estimated_agent_reduction",
+    "estimated_agent_reduction_ratio",
+    "unique_file_count",
+    "task_file_reference_count",
+    "repeated_file_reference_count",
+    "total_task_lines",
+    "total_packet_lines",
+    "repeated_line_reference_count",
+    "min_task_lines",
+    "max_task_lines",
+    "average_task_lines",
+    "lens_task_counts",
+    "priority_task_counts",
+    "packet_quality",
+    "packet_size"
+  ],
+  "properties": {
+    "generated_at": { "type": "string" },
+    "task_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "packet_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "estimated_agent_reduction": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "estimated_agent_reduction_ratio": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "unique_file_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "task_file_reference_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "repeated_file_reference_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "total_task_lines": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "total_packet_lines": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "repeated_line_reference_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "min_task_lines": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_task_lines": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "average_task_lines": {
+      "type": "number",
+      "minimum": 0
+    },
+    "largest_task_id": { "type": "string" },
+    "largest_packet_id": { "type": "string" },
+    "lens_task_counts": {
+      "$ref": "#/$defs/lensCounts"
+    },
+    "priority_task_counts": {
+      "type": "object",
+      "required": ["high", "medium", "low"],
+      "properties": {
+        "high": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "medium": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "low": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "packet_quality": {
+      "type": "object",
+      "required": [
+        "average_cohesion_score",
+        "boundary_crossing_count",
+        "merge_edge_kind_counts",
+        "boundary_edge_kind_counts",
+        "orphan_task_count",
+        "high_fan_in_file_count",
+        "high_fan_out_file_count",
+        "weakly_explained_gap_counts",
+        "weakly_explained_file_extension_counts",
+        "weakly_explained_packet_count",
+        "weakly_explained_packet_ids",
+        "weakly_explained_packet_samples",
+        "largest_unexplained_packet_files"
+      ],
+      "properties": {
+        "average_cohesion_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "boundary_crossing_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "merge_edge_kind_counts": {
+          "$ref": "#/$defs/edgeKindCounts"
+        },
+        "boundary_edge_kind_counts": {
+          "$ref": "#/$defs/edgeKindCounts"
+        },
+        "orphan_task_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "high_fan_in_file_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "high_fan_out_file_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "weakly_explained_gap_counts": {
+          "$ref": "#/$defs/weaklyExplainedGapCounts"
+        },
+        "weakly_explained_file_extension_counts": {
+          "$ref": "#/$defs/countRecord"
+        },
+        "weakly_explained_packet_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "weakly_explained_packet_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "weakly_explained_packet_samples": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/weaklyExplainedPacketSample" }
+        },
+        "largest_unexplained_packet_id": { "type": "string" },
+        "largest_unexplained_packet_files": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "packet_size": {
+      "type": "object",
+      "required": [
+        "single_task_packets",
+        "multi_task_packets",
+        "max_tasks_per_packet",
+        "max_files_per_packet"
+      ],
+      "properties": {
+        "single_task_packets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "multi_task_packets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_tasks_per_packet": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_files_per_packet": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "countRecord": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "edgeKindCounts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "weaklyExplainedPacketSample": {
+      "type": "object",
+      "required": [
+        "packet_id",
+        "primary_gap",
+        "file_count",
+        "sample_file_paths",
+        "cohesion_score",
+        "internal_edge_count",
+        "boundary_edge_count",
+        "unexplained_file_count"
+      ],
+      "properties": {
+        "packet_id": { "type": "string" },
+        "primary_gap": {
+          "type": "string",
+          "enum": [
+            "missing_internal_edges",
+            "unexplained_files",
+            "partial_cohesion"
+          ]
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sample_file_paths": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string" }
+        },
+        "cohesion_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "internal_edge_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "boundary_edge_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unexplained_file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "weaklyExplainedGapCounts": {
+      "type": "object",
+      "required": [
+        "missing_internal_edges",
+        "unexplained_files",
+        "partial_cohesion"
+      ],
+      "properties": {
+        "missing_internal_edges": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unexplained_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "partial_cohesion": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "lensCounts": {
+      "type": "object",
+      "properties": {
+        "correctness": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "architecture": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maintainability": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "security": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reliability": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "performance": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "data_integrity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "operability": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "config_deployment": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observability": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

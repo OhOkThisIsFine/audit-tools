@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audit_results.schema.json",
+  "title": "Audit Results",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "$ref": "audit_result.schema.json"
+  }
+}

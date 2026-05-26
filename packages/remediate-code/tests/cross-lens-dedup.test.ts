@@ -1,0 +1,161 @@
+import { describe, it, expect } from "vitest";
+import type { Finding, RemediationBlock } from "../src/state/types.js";
+import {
+  deduplicateCrossLensFindings,
+  fixupBlocksAfterDedup,
+  wordJaccard,
+} from "../src/dedup/crossLensDedup.js";
+
+function makeFinding(overrides: Partial<Finding> & { id: string }): Finding {
+  return {
+    title: "Example finding",
+    category: "General",
+    severity: "medium",
+    confidence: "medium",
+    lens: "correctness",
+    summary: "Example summary.",
+    affected_files: [{ path: "src/foo.ts" }],
+    evidence: ["ev-1"],
+    ...overrides,
+  };
+}
+
+describe("wordJaccard", () => {
+  it("returns 1 for identical strings", () => {
+    expect(wordJaccard("hello world", "hello world")).toBe(1);
+  });
+
+  it("returns 0 for completely different strings", () => {
+    expect(wordJaccard("hello world", "foo bar")).toBe(0);
+  });
+
+  it("handles partial overlap", () => {
+    const score = wordJaccard("compiled dist output", "compiled dist artifacts");
+    expect(score).toBeGreaterThan(0.4);
+    expect(score).toBeLessThan(1);
+  });
+
+  it("returns 0 for empty strings", () => {
+    expect(wordJaccard("", "")).toBe(0);
+  });
+});
+
+describe("deduplicateCrossLensFindings", () => {
+  it("merges findings with same title and file from different lenses", () => {
+    const { findings, mergeMap } = deduplicateCrossLensFindings([
+      makeFinding({ id: "TST-001", title: "Suite executes compiled dist", lens: "tests" }),
+      makeFinding({ id: "COR-001", title: "Suite executes compiled dist", lens: "correctness" }),
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(mergeMap.size).toBe(1);
+  });
+
+  it("merges findings with similar titles (Jaccard > 0.5) from different lenses", () => {
+    const { findings } = deduplicateCrossLensFindings([
+      makeFinding({
+        id: "TST-001",
+        title: "Missing test coverage for compiled dist",
+        lens: "tests",
+        severity: "medium",
+      }),
+      makeFinding({
+        id: "COR-001",
+        title: "Test coverage gaps for compiled dist output",
+        lens: "correctness",
+        severity: "high",
+      }),
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("high");
+  });
+
+  it("keeps findings with different titles from different lenses", () => {
+    const { findings } = deduplicateCrossLensFindings([
+      makeFinding({ id: "SEC-001", title: "SQL injection in login handler", lens: "security" }),
+      makeFinding({ id: "TST-001", title: "Test coverage below threshold", lens: "tests" }),
+    ]);
+    expect(findings).toHaveLength(2);
+  });
+
+  it("does not merge same-lens findings", () => {
+    const { findings } = deduplicateCrossLensFindings([
+      makeFinding({ id: "SEC-001", title: "Missing validation", lens: "security" }),
+      makeFinding({ id: "SEC-002", title: "Missing validation", lens: "security" }),
+    ]);
+    expect(findings).toHaveLength(2);
+  });
+
+  it("does not merge findings with different files", () => {
+    const { findings } = deduplicateCrossLensFindings([
+      makeFinding({
+        id: "A-001",
+        title: "Missing validation",
+        lens: "security",
+        affected_files: [{ path: "src/a.ts" }],
+      }),
+      makeFinding({
+        id: "B-001",
+        title: "Missing validation",
+        lens: "correctness",
+        affected_files: [{ path: "src/b.ts" }],
+      }),
+    ]);
+    expect(findings).toHaveLength(2);
+  });
+
+  it("merges evidence from absorbed finding", () => {
+    const { findings } = deduplicateCrossLensFindings([
+      makeFinding({ id: "A-001", title: "Missing validation", lens: "security", evidence: ["ev-sec"] }),
+      makeFinding({ id: "B-001", title: "Missing validation", lens: "correctness", evidence: ["ev-cor"] }),
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].evidence).toContain("ev-sec");
+    expect(findings[0].evidence).toContain("ev-cor");
+  });
+
+  it("keeps higher severity finding as survivor", () => {
+    const { findings, mergeMap } = deduplicateCrossLensFindings([
+      makeFinding({ id: "A-001", title: "Missing validation", lens: "security", severity: "low" }),
+      makeFinding({ id: "B-001", title: "Missing validation", lens: "correctness", severity: "high" }),
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].id).toBe("B-001");
+    expect(mergeMap.get("A-001")).toBe("B-001");
+  });
+
+  it("returns empty mergeMap when no duplicates", () => {
+    const { mergeMap } = deduplicateCrossLensFindings([
+      makeFinding({ id: "A-001", title: "Finding A", lens: "security" }),
+      makeFinding({ id: "B-001", title: "Finding B", lens: "correctness" }),
+    ]);
+    expect(mergeMap.size).toBe(0);
+  });
+});
+
+describe("fixupBlocksAfterDedup", () => {
+  it("replaces merged finding IDs in block items", () => {
+    const blocks: RemediationBlock[] = [
+      { block_id: "B-001", items: ["A-001", "B-001"], parallel_safe: true },
+    ];
+    const mergeMap = new Map([["A-001", "B-001"]]);
+    const result = fixupBlocksAfterDedup(blocks, mergeMap);
+    expect(result[0].items).toEqual(["B-001"]);
+  });
+
+  it("deduplicates block items after replacement", () => {
+    const blocks: RemediationBlock[] = [
+      { block_id: "B-001", items: ["TST-001", "COR-001", "SEC-001"], parallel_safe: true },
+    ];
+    const mergeMap = new Map([["TST-001", "COR-001"]]);
+    const result = fixupBlocksAfterDedup(blocks, mergeMap);
+    expect(result[0].items).toEqual(["COR-001", "SEC-001"]);
+  });
+
+  it("returns blocks unchanged when mergeMap is empty", () => {
+    const blocks: RemediationBlock[] = [
+      { block_id: "B-001", items: ["A-001", "B-001"], parallel_safe: true },
+    ];
+    const result = fixupBlocksAfterDedup(blocks, new Map());
+    expect(result).toBe(blocks);
+  });
+});

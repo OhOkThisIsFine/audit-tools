@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dispatch_plan.schema.json",
+  "title": "Remediation Dispatch Plan",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "phase",
+    "run_id",
+    "repo_root",
+    "artifacts_dir",
+    "items"
+  ],
+  "properties": {
+    "contract_version": { "const": "remediate-code-dispatch-plan/v1alpha1" },
+    "phase": { "type": "string", "enum": ["document", "implement"] },
+    "run_id": { "type": "string" },
+    "repo_root": { "type": "string" },
+    "artifacts_dir": { "type": "string" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task_id", "prompt_path", "result_path"],
+        "properties": {
+          "task_id": { "type": "string" },
+          "finding_id": { "type": "string" },
+          "block_id": { "type": "string" },
+          "prompt_path": { "type": "string" },
+          "result_path": { "type": "string" },
+          "artifact_paths": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "model_hint": {
+            "type": "object",
+            "properties": {
+              "tier": { "type": "string", "enum": ["small", "standard", "deep"] },
+              "reasons": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["tier", "reasons"]
+          },
+          "access": { "$ref": "shared.schema.json#/$defs/access_declaration" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

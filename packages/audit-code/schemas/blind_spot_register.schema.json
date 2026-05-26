@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "blind_spot_register.schema.json",
+  "title": "Blind Spot Register",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "kind", "summary", "evidence"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "coverage-gap",
+              "trust-boundary",
+              "dynamic-behavior",
+              "operational-risk",
+              "documentation-drift",
+              "external-dependency"
+            ]
+          },
+          "summary": { "type": "string" },
+          "affected_paths": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "evidence": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "suggested_lenses": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "suggested_runtime_checks": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

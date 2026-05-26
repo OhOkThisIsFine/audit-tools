@@ -1,0 +1,13 @@
+# audit-code
+
+Use `audit-code next-step` as the primary interface to the audit workflow.
+
+1. Run `audit-code next-step` directly when shell access is available.
+2. If MCP is your only available interface, call `auditor_start_audit` or `auditor_continue_audit`; both return the same one-step contract.
+3. Read `prompt_content` in the response and follow it.
+4. When a step completes (not blocked), run `audit-code next-step` again or call `auditor_continue_audit` as the compatibility adapter.
+5. Stop when the step instructions say to stop.
+
+Use the `task` tool or equivalent for subagent dispatch when the step tells you to fan out review work.
+
+If neither shell access nor `auditor_start_audit` is available, stop and report that no next-step interface is connected.

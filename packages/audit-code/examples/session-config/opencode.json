@@ -1,0 +1,9 @@
+{
+  "provider": "opencode",
+  "ui_mode": "visible",
+  "timeout_ms": 1800000,
+  "opencode": {
+    "command": "opencode",
+    "extra_args": []
+  }
+}

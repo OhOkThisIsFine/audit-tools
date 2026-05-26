@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "critical_flows.schema.json",
+  "title": "Critical Flows",
+  "type": "object",
+  "required": ["flows"],
+  "properties": {
+    "flows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "entrypoints", "paths", "concerns"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "entrypoints": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "paths": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "concerns": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "notes": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "low"]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
