@@ -1,0 +1,155 @@
+import type { ArtifactBundle } from "../io/artifacts.js";
+import type { ExecutorRunResult } from "./internalExecutors.js";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { isAuditExcludedStatus } from "../extractors/disposition.js";
+import {
+  resolveNodeTool,
+  runFirstAvailableCommand,
+  type LocalCommandCandidate,
+} from "./localCommands.js";
+
+function tryRunConfiguredFormatter(
+  root: string,
+  candidates: LocalCommandCandidate[],
+): boolean {
+  const result = runFirstAvailableCommand(root, candidates);
+  return result !== null && !result.error && result.exitCode === 0;
+}
+
+const PRETTIER_CONFIG_FILES = [
+  ".prettierrc",
+  ".prettierrc.json",
+  ".prettierrc.yml",
+  ".prettierrc.yaml",
+  ".prettierrc.json5",
+  ".prettierrc.js",
+  ".prettierrc.cjs",
+  ".prettierrc.mjs",
+  "prettier.config.js",
+  "prettier.config.cjs",
+  "prettier.config.mjs",
+];
+
+function hasPrettierConfig(root: string): boolean {
+  if (PRETTIER_CONFIG_FILES.some((file) => existsSync(join(root, file)))) {
+    return true;
+  }
+
+  const packageJsonPath = join(root, "package.json");
+  if (!existsSync(packageJsonPath)) {
+    return false;
+  }
+
+  try {
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+      prettier?: unknown;
+    };
+    return packageJson.prettier !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+export function runAutoFixExecutor(
+  bundle: ArtifactBundle,
+  root: string,
+): ExecutorRunResult {
+  if (!bundle.file_disposition) {
+    throw new Error("Cannot run auto fix executor without file_disposition");
+  }
+
+  const extensions = new Set<string>();
+  for (const file of bundle.file_disposition.files) {
+    if (!isAuditExcludedStatus(file.status)) {
+      const match = file.path.match(/\.([^.]+)$/);
+      if (match) {
+        extensions.add(match[1].toLowerCase());
+      }
+    }
+  }
+
+  const executedTools: string[] = [];
+
+  // JS, TS, HTML, CSS, JSON, YAML, MD
+  if (
+    hasPrettierConfig(root) &&
+    (extensions.has("ts") ||
+      extensions.has("js") ||
+      extensions.has("tsx") ||
+      extensions.has("jsx") ||
+      extensions.has("html") ||
+      extensions.has("css") ||
+      extensions.has("json") ||
+      extensions.has("yml") ||
+      extensions.has("yaml") ||
+      extensions.has("md"))
+  ) {
+    if (
+      tryRunConfiguredFormatter(root, [
+        ...resolveNodeTool(
+          root,
+          join("node_modules", "prettier", "bin", "prettier.cjs"),
+          ["--write", "."],
+          "prettier --write .",
+        ),
+        { command: "prettier", args: ["--write", "."], display: "prettier --write ." },
+        { command: "npx", args: ["--yes", "prettier", "--write", "."], display: "npx --yes prettier --write ." },
+      ])
+    ) {
+      executedTools.push("prettier");
+    }
+  }
+
+  // Python
+  if (extensions.has("py")) {
+    if (
+      tryRunConfiguredFormatter(root, [
+        { command: "black", args: ["."], display: "black ." },
+        { command: "python", args: ["-m", "black", "."], display: "python -m black ." },
+        { command: "uvx", args: ["black", "."], display: "uvx black ." },
+        { command: "pipx", args: ["run", "black", "."], display: "pipx run black ." },
+      ])
+    ) {
+      executedTools.push("black");
+    }
+  }
+
+  // SQL
+  if (extensions.has("sql")) {
+    if (
+      tryRunConfiguredFormatter(root, [
+        { command: "sqlfluff", args: ["fix", "--force", "."], display: "sqlfluff fix --force ." },
+        { command: "uvx", args: ["sqlfluff", "fix", "--force", "."], display: "uvx sqlfluff fix --force ." },
+        { command: "pipx", args: ["run", "sqlfluff", "fix", "--force", "."], display: "pipx run sqlfluff fix --force ." },
+      ])
+    ) {
+      executedTools.push("sqlfluff");
+    }
+  }
+
+  // Go
+  if (extensions.has("go")) {
+    if (
+      tryRunConfiguredFormatter(root, [
+        { command: "gofmt", args: ["-w", "."], display: "gofmt -w ." },
+      ])
+    ) {
+      executedTools.push("gofmt");
+    }
+  }
+
+  const resultsArtifact = {
+    executed_tools: executedTools,
+    timestamp: new Date().toISOString(),
+  };
+
+  return {
+    updated: {
+      ...bundle,
+      auto_fixes_applied: resultsArtifact,
+    },
+    artifacts_written: ["auto_fixes_applied.json"],
+    progress_summary: `Phase 1 Deterministic Auto-Fix complete. Formatters executed: ${executedTools.length > 0 ? executedTools.join(", ") : "None"}.`,
+  };
+}

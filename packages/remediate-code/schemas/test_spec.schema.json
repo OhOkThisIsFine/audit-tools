@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "test_spec.schema.json",
+  "title": "Test Specification",
+  "type": "object",
+  "required": ["finding_id", "test_file", "test_name", "assertions", "status"],
+  "properties": {
+    "finding_id": { "type": "string" },
+    "test_file": { "type": "string" },
+    "test_name": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "written", "failing", "passing"]
+    },
+    "assertions": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

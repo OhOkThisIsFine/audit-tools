@@ -1,0 +1,324 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(here, "..");
+const distCliUrl = pathToFileURL(join(repoRoot, "dist", "cli.js")).href;
+const { runCli } = await import(distCliUrl);
+
+async function runValidate(root) {
+  const previousExitCode = process.exitCode;
+  const previousConsoleLog = console.log;
+  const previousConsoleError = console.error;
+  let stdout = "";
+  let stderr = "";
+
+  const argv = [
+    process.execPath,
+    join(repoRoot, "dist", "cli.js"),
+    "validate",
+    "--root",
+    root,
+    "--artifacts-dir",
+    join(root, ".audit-artifacts"),
+  ];
+  process.exitCode = 0;
+  console.log = (...values) => {
+    stdout += `${values.join(" ")}\n`;
+  };
+  console.error = (...values) => {
+    stderr += `${values.join(" ")}\n`;
+  };
+
+  try {
+    await runCli(argv);
+    return {
+      code: process.exitCode ?? 0,
+      stdout,
+      stderr,
+    };
+  } finally {
+    process.exitCode = previousExitCode;
+    console.log = previousConsoleLog;
+    console.error = previousConsoleError;
+  }
+}
+
+function parseJsonOutput(result) {
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    assert.fail(
+      [
+        "Expected audit-code validate to write JSON to stdout.",
+        `stdout: ${result.stdout}`,
+        `stderr: ${result.stderr}`,
+        `parse error: ${error instanceof Error ? error.message : String(error)}`,
+      ].join("\n"),
+    );
+  }
+}
+
+async function withTempRepo(fn) {
+  const tempDir = await mkdtemp(join(tmpdir(), "audit-code-validate-"));
+  const root = join(tempDir, "repo");
+  try {
+    await mkdir(root, { recursive: true });
+    return await fn(root);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+test("audit-code validate exits non-zero when validation issues exist", async () => {
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-artifacts");
+    await mkdir(artifactsDir, { recursive: true });
+
+    await writeFile(
+      join(artifactsDir, "repo_manifest.json"),
+      JSON.stringify(
+        {
+          repository: { name: "fixture" },
+          generated_at: "2026-04-17T00:00:00Z",
+          files: [
+            {
+              path: "src/api/auth.ts",
+              size_bytes: 10,
+              language: "ts",
+            },
+            {
+              path: "src/lib/session.ts",
+              size_bytes: 12,
+              language: "ts",
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(artifactsDir, "file_disposition.json"),
+      JSON.stringify(
+        {
+          files: [
+            {
+              path: "src/api/auth.ts",
+              status: "included",
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(artifactsDir, "unit_manifest.json"),
+      JSON.stringify(
+        {
+          units: [
+            {
+              unit_id: "auth-unit",
+              name: "auth-unit",
+              files: ["src/api/auth.ts", "src/ghost.ts"],
+              required_lenses: ["security"],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(artifactsDir, "coverage_matrix.json"),
+      JSON.stringify(
+        {
+          files: [
+            {
+              path: "src/api/auth.ts",
+              unit_ids: ["auth-unit"],
+              classification_status: "classified",
+              audit_status: "pending",
+              required_lenses: ["security"],
+              completed_lenses: ["security", "tests"],
+            },
+            {
+              path: "src/ghost.ts",
+              unit_ids: ["ghost-unit"],
+              classification_status: "classified",
+              audit_status: "pending",
+              required_lenses: ["security"],
+              completed_lenses: [],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = await runValidate(root);
+    const parsed = parseJsonOutput(result);
+
+    assert.notEqual(result.code, 0);
+    assert.ok(parsed.issue_count >= 4);
+    assert.ok(
+      parsed.issues.some(
+        (issue) =>
+          issue.path === "file_disposition" &&
+          /missing disposition entry for src\/lib\/session\.ts/i.test(
+            issue.message,
+          ),
+      ),
+    );
+    assert.ok(
+      parsed.issues.some(
+        (issue) =>
+          issue.path === "coverage_matrix" &&
+          /missing coverage entry for src\/lib\/session\.ts/i.test(
+            issue.message,
+          ),
+      ),
+    );
+    assert.ok(
+      parsed.issues.some(
+        (issue) =>
+          issue.path === "unit_manifest:auth-unit" &&
+          /unknown file src\/ghost\.ts/i.test(issue.message),
+      ),
+    );
+  });
+});
+
+test("audit-code validate exits zero when no validation issues exist", async () => {
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-artifacts");
+    await mkdir(artifactsDir, { recursive: true });
+
+    await writeFile(
+      join(artifactsDir, "repo_manifest.json"),
+      JSON.stringify(
+        {
+          repository: { name: "fixture" },
+          generated_at: "2026-04-17T00:00:00Z",
+          files: [],
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = await runValidate(root);
+    const parsed = parseJsonOutput(result);
+
+    assert.equal(result.code, 0);
+    assert.equal(parsed.issue_count, 0);
+    assert.equal(parsed.session_config_present, false);
+    assert.equal(parsed.resolved_provider, "local-subprocess");
+    assert.deepEqual(parsed.issues, []);
+  });
+});
+
+test("audit-code validate exits non-zero when session-config has provider issues", async () => {
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-artifacts");
+    await mkdir(artifactsDir, { recursive: true });
+
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      JSON.stringify(
+        {
+          provider: "subprocess-template",
+          subprocess_template: {
+            command_template: [],
+            env: {
+              AUDIT_TOKEN: 42,
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = await runValidate(root);
+    const parsed = parseJsonOutput(result);
+
+    assert.notEqual(result.code, 0);
+    assert.equal(parsed.session_config_present, true);
+    assert.equal(parsed.resolved_provider, null);
+    assert.equal(parsed.artifact_issue_count, 0);
+    assert.equal(parsed.session_config_issue_count, parsed.issue_count);
+    assert.ok(
+      parsed.issues.some(
+        (issue) =>
+          issue.path ===
+            "session_config.subprocess_template.command_template" &&
+          /must not be empty/i.test(issue.message),
+      ),
+    );
+    assert.ok(
+      parsed.issues.some(
+        (issue) =>
+          issue.path === "session_config.subprocess_template.env.AUDIT_TOKEN" &&
+          /must be strings/i.test(issue.message),
+      ),
+    );
+  });
+});
+
+test("audit-code validate rejects review packets missing listed file line counts", async () => {
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-artifacts");
+    await mkdir(artifactsDir, { recursive: true });
+
+    await writeFile(
+      join(artifactsDir, "review_packets.json"),
+      JSON.stringify(
+        [
+          {
+            packet_id: "packet-1",
+            task_ids: ["task-1"],
+            unit_ids: ["unit-1"],
+            pass_ids: ["pass:security"],
+            lenses: ["security"],
+            file_paths: ["src/api/auth.ts", "src/lib/session.ts"],
+            file_line_counts: { "src/api/auth.ts": 12 },
+            total_lines: 12,
+            priority: "high",
+            quality: {
+              cohesion_score: 1,
+              internal_edge_count: 0,
+              boundary_edge_count: 0,
+              unexplained_file_count: 0,
+            },
+            rationale: "Review auth.",
+            estimated_tokens: 1000,
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const result = await runValidate(root);
+    const parsed = parseJsonOutput(result);
+
+    assert.notEqual(result.code, 0);
+    assert.ok(
+      parsed.issues.some(
+        (issue) =>
+          issue.path === "review_packets:packet-1" &&
+          /every listed file must have a corresponding file_line_counts entry/i.test(
+            issue.message,
+          ) &&
+          /src\/lib\/session\.ts/i.test(issue.message),
+      ),
+    );
+  });
+});

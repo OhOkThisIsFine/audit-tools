@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "remediation_report.schema.json",
+  "title": "Remediation Report",
+  "type": "object",
+  "required": [
+    "resolved",
+    "inappropriate",
+    "ignored",
+    "combined_test_result",
+    "closing_result"
+  ],
+  "properties": {
+    "resolved": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "summary"],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "summary": { "type": "string" },
+          "verification_evidence": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "inappropriate": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "rationale"],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "rationale": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "ignored": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "rationale"],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "rationale": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "combined_test_result": {
+      "type": "object",
+      "required": ["passed"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "output": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "e2e_result": {
+      "type": "object",
+      "required": ["passed"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "output": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "closing_result": {
+      "type": "object",
+      "required": ["action", "status"],
+      "properties": {
+        "action": {
+          "$ref": "shared.schema.json#/$defs/closing_action"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["success", "skipped", "failed"]
+        },
+        "output": { "type": "string" },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["command", "exit_code"],
+            "properties": {
+              "command": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "exit_code": { "type": ["integer", "null"] },
+              "stdout": { "type": "string" },
+              "stderr": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

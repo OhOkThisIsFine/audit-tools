@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "unit_id": "api-auth",
+      "risk_score": 9,
+      "signals": [
+        "security_sensitive_bucket",
+        "public_interface",
+        "session_handling"
+      ],
+      "notes": ["Authentication surface touches tenant-scoped state."]
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "item_spec.schema.json",
+  "title": "Item Specification",
+  "type": "object",
+  "required": [
+    "finding_id",
+    "concrete_change",
+    "tests_to_write",
+    "not_applicable_steps"
+  ],
+  "properties": {
+    "finding_id": { "type": "string" },
+    "concrete_change": { "type": "string" },
+    "tests_to_write": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "assertions"],
+        "properties": {
+          "name": { "type": "string" },
+          "assertions": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "not_applicable_steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["step", "rationale"],
+        "properties": {
+          "step": {
+            "type": "string",
+            "enum": [
+              "Document",
+              "Write Tests",
+              "Refactor Code",
+              "Verify Code Against Tests",
+              "Verify Code Against Documentation"
+            ]
+          },
+          "rationale": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

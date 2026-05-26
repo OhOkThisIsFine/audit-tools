@@ -1,0 +1,16 @@
+{
+  "tasks": [
+    {
+      "id": "runtime:flow:surface:src-api-auth-ts",
+      "kind": "critical-flow-check",
+      "target_paths": ["src/api/auth.ts", "src/lib/session.ts"],
+      "reason": "Critical flow is still missing reliability and correctness coverage.",
+      "priority": "high",
+      "suggested_checks": [
+        "Exercise login flow with malformed input.",
+        "Exercise repeated session refresh to inspect idempotency and failure behavior."
+      ],
+      "source_artifacts": ["critical_flows.json", "flow_coverage.json"]
+    }
+  ]
+}

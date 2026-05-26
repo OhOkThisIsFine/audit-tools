@@ -1,0 +1,14 @@
+{
+  "results": [
+    {
+      "task_id": "runtime:flow:surface:src-api-auth-ts",
+      "status": "inconclusive",
+      "summary": "Login flow exercised, but retry and failure-path behavior were not fully observed.",
+      "evidence": [
+        "Manual request run reached auth handler successfully.",
+        "No repeated-submission trace was attached."
+      ],
+      "notes": ["Example report entry with preserved evidence."]
+    }
+  ]
+}

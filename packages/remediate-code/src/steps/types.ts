@@ -1,0 +1,135 @@
+export const REMEDIATION_STEP_CONTRACT_VERSION =
+  "remediate-code-step/v1alpha1" as const;
+
+export const REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION =
+  "remediate-code-dispatch-plan/v1alpha1" as const;
+
+export const REMEDIATION_WORKER_RESULT_CONTRACT_VERSION =
+  "remediate-code-worker-result/v1alpha1" as const;
+
+export type RemediationStepKind =
+  | "locate_input"
+  | "collect_starting_point"
+  | "synthesize_intake"
+  | "collect_intake_clarifications"
+  | "extract_findings"
+  | "dispatch_document"
+  | "document_single_item"
+  | "collect_clarifications"
+  | "classify_impl_risks"
+  | "preview_implement"
+  | "dispatch_implement"
+  | "implement_single_item"
+  | "collect_triage"
+  | "close_run"
+  | "present_report"
+  | "unhandled_state";
+
+export type RemediationStepStatus = "ready" | "blocked" | "complete";
+
+export interface RemediationStep {
+  contract_version: typeof REMEDIATION_STEP_CONTRACT_VERSION;
+  step_kind: RemediationStepKind;
+  status: RemediationStepStatus;
+  prompt_path: string;
+  run_id: string;
+  repo_root: string;
+  artifacts_dir: string;
+  allowed_commands: string[];
+  stop_condition: string;
+  artifact_paths: Record<string, string>;
+  access?: AccessDeclaration;
+}
+
+export type DispatchPhase = "document" | "implement";
+
+export type DispatchModelTier = "small" | "standard" | "deep";
+
+export interface DispatchModelHint {
+  tier: DispatchModelTier;
+  reasons: string[];
+}
+
+export interface AccessDeclaration {
+  read_paths: string[];
+  write_paths: string[];
+  forbidden_patterns?: string[];
+}
+
+export interface DispatchPlanItem {
+  task_id: string;
+  finding_id?: string;
+  block_id?: string;
+  prompt_path: string;
+  result_path: string;
+  artifact_paths?: Record<string, string>;
+  model_hint?: DispatchModelHint;
+  access?: AccessDeclaration;
+}
+
+export interface RemediationDispatchPlan {
+  contract_version: typeof REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION;
+  phase: DispatchPhase;
+  run_id: string;
+  repo_root: string;
+  artifacts_dir: string;
+  items: DispatchPlanItem[];
+}
+
+export interface DocumentWorkerResult {
+  type: "item_spec" | "clarification_request";
+  item_spec?: unknown;
+  clarifications?: unknown[];
+}
+
+export interface ImplementWorkerItemResult {
+  finding_id: string;
+  status: "resolved" | "blocked";
+  evidence?: string[];
+  failure_reason?: string;
+}
+
+export interface ImplementWorkerResult {
+  contract_version: typeof REMEDIATION_WORKER_RESULT_CONTRACT_VERSION;
+  phase: "implement";
+  item_results: ImplementWorkerItemResult[];
+}
+
+export const REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION =
+  "remediate-code-dispatch-quota/v1alpha2" as const;
+
+export type { HostConcurrencyLimitSource, HostConcurrencyLimit } from "../quota/types.js";
+export type {
+  LimitSource,
+  LimitConfidence,
+  ResolvedLimits,
+  BackoffState,
+} from "../quota/types.js";
+export type { QuotaUsageSnapshot } from "../quota/quotaSource.js";
+
+import type {
+  HostConcurrencyLimit,
+  LimitSource,
+  LimitConfidence,
+  ResolvedLimits,
+  BackoffState,
+} from "../quota/types.js";
+import type { QuotaUsageSnapshot } from "../quota/quotaSource.js";
+
+export interface RemediationDispatchQuota {
+  contract_version:
+    | typeof REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION
+    | "remediate-code-dispatch-quota/v1alpha1";
+  run_id: string;
+  phase: DispatchPhase;
+  host_concurrency_limit: HostConcurrencyLimit | null;
+  wave_size: number;
+  estimated_wave_tokens: number;
+  model: string | null;
+  confidence: LimitConfidence;
+  source: LimitSource;
+  resolved_limits: ResolvedLimits;
+  cooldown_until: string | null;
+  quota_source_snapshot?: QuotaUsageSnapshot | null;
+  backoff_state?: BackoffState | null;
+}

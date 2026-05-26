@@ -1,0 +1,98 @@
+name: product-entrypoint
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/product-e2e.yml
+      - audit-code*.mjs
+      - package.json
+      - package-lock.json
+      - schemas/**
+      - scripts/**
+      - src/**
+      - tests/**
+      - tsconfig.json
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI_NODE_VERSION: "22.14.0"
+  NPM_CONFIG_LOGLEVEL: notice
+
+jobs:
+  audit-code-wrapper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        # actions/checkout v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - name: Set up Node.js
+        # actions/setup-node v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: ${{ env.CI_NODE_VERSION }}
+          cache: npm
+      - name: Validate package-lock.json
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::package-lock.json is missing or malformed. Regenerate it with npm install and commit the updated lockfile before retrying the product workflow."' ERR
+          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('package-lock.json is missing lockfileVersion'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('package-lock.json is missing package name'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
+      - name: Install dependencies
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm ci failed. Inspect the uploaded product-e2e npm logs artifact and rerun npm ci locally."' ERR
+          npm ci
+      - name: Type-check
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm run check failed. Review the product-e2e npm logs artifact and confirm the current branch type-checks locally."' ERR
+          npm run check
+      - name: Build
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm run build failed. Review the product-e2e npm logs artifact and rerun npm run build locally."' ERR
+          npm run build
+      - name: Run product e2e tests
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::Product e2e tests failed. Review the product-e2e npm logs artifact and rerun the listed node --test command locally on Node ${{ env.CI_NODE_VERSION }}."' ERR
+          node --test tests/audit-code-wrapper.test.mjs tests/audit-code-lifecycle.test.mjs tests/audit-code-completion.test.mjs tests/provider-auto-resolution.test.mjs tests/orchestration.test.mjs tests/fixture-repo.test.mjs tests/staleness.test.mjs
+      - name: Smoke-test linked audit-code
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::Linked-install smoke test failed. Review the product-e2e npm logs artifact and rerun npm run smoke:linked-audit-code locally."' ERR
+          npm run smoke:linked-audit-code
+      - name: Upload npm debug logs
+        if: ${{ failure() }}
+        # actions/upload-artifact v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: product-e2e-npm-logs
+          path: |
+            ~/.npm/_logs
+            npm-debug.log*
+          if-no-files-found: ignore
+      - name: Emit troubleshooting guidance
+        if: ${{ failure() }}
+        shell: bash
+        run: |
+          echo "::error::Product workflow failed on Node ${{ env.CI_NODE_VERSION }}. Review the product-e2e-npm-logs artifact and rerun npm ci, npm run build, and the failing smoke command locally."

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clarification_request.schema.json",
+  "title": "Clarification Request",
+  "type": "object",
+  "required": ["finding_id", "category", "description"],
+  "properties": {
+    "finding_id": { "type": "string" },
+    "category": {
+      "type": "string",
+      "enum": [
+        "public_contract",
+        "behavioral_semantics",
+        "scope_of_fix",
+        "dependency_introduction",
+        "compatibility_policy",
+        "intent_vs_symptom",
+        "issue_appropriateness"
+      ]
+    },
+    "description": { "type": "string" },
+    "options": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}

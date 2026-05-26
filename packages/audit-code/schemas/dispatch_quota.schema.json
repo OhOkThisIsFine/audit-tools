@@ -1,0 +1,123 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "audit-code-dispatch-quota/v1alpha2",
+  "title": "DispatchQuota",
+  "description": "Quota schedule for a prepare-dispatch run. Written beside dispatch-plan.json. Hosts must launch at most wave_size packets per wave, then re-read this file before the next wave to pick up any updated limits.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "run_id",
+    "model",
+    "resolved_limits",
+    "confidence",
+    "source",
+    "host_concurrency_limit",
+    "wave_size",
+    "estimated_wave_tokens",
+    "cooldown_until"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "enum": ["audit-code-dispatch-quota/v1alpha1", "audit-code-dispatch-quota/v1alpha2"]
+    },
+    "run_id": {
+      "type": "string",
+      "description": "The dispatch run this quota schedule applies to."
+    },
+    "model": {
+      "type": ["string", "null"],
+      "description": "The host model this schedule was computed for, or null if unknown."
+    },
+    "resolved_limits": {
+      "type": "object",
+      "description": "The rate and context limits used to compute the wave size.",
+      "required": [
+        "context_tokens",
+        "output_tokens",
+        "requests_per_minute",
+        "input_tokens_per_minute",
+        "output_tokens_per_minute"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "context_tokens": { "type": "integer", "minimum": 1 },
+        "output_tokens": { "type": "integer", "minimum": 1 },
+        "requests_per_minute": { "type": ["integer", "null"], "minimum": 1 },
+        "input_tokens_per_minute": { "type": ["integer", "null"], "minimum": 1 },
+        "output_tokens_per_minute": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "How confident the scheduler is in the resolved limits."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["explicit_config", "cli_flags", "known_metadata", "learned", "default"],
+      "description": "Where the resolved limits came from."
+    },
+    "host_concurrency_limit": {
+      "type": ["object", "null"],
+      "description": "A hard host ceiling on simultaneously active subagents, if detected or reported.",
+      "required": [
+        "active_subagents",
+        "source",
+        "description"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "active_subagents": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "type": "string",
+          "enum": ["cli_flags", "session_config", "environment"]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "wave_size": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum number of packets to dispatch in a single wave."
+    },
+    "estimated_wave_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Estimated total input tokens for one wave at the recommended wave_size."
+    },
+    "cooldown_until": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "If non-null, the host should wait until this timestamp before launching the next wave."
+    },
+    "quota_source_snapshot": {
+      "type": ["object", "null"],
+      "description": "Real-time usage snapshot from a QuotaSource, if available.",
+      "properties": {
+        "remaining_pct": { "type": ["number", "null"] },
+        "reset_at": { "type": ["string", "null"], "format": "date-time" },
+        "requests_remaining": { "type": ["integer", "null"] },
+        "tokens_remaining": { "type": ["integer", "null"] },
+        "captured_at": { "type": "string", "format": "date-time" },
+        "source": { "type": "string" }
+      }
+    },
+    "backoff_state": {
+      "type": ["object", "null"],
+      "description": "Exponential backoff state for repeated rate-limit errors.",
+      "properties": {
+        "consecutive_429_count": { "type": "integer", "minimum": 0 },
+        "current_cooldown_ms": { "type": "integer", "minimum": 0 },
+        "current_failure_weight": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "surface_manifest.schema.json",
+  "title": "Surface Manifest",
+  "type": "object",
+  "required": ["surfaces"],
+  "properties": {
+    "surfaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "entrypoint"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": {
+            "type": "string",
+            "enum": ["interface", "background"]
+          },
+          "entrypoint": { "type": "string" },
+          "exposure": {
+            "type": "string",
+            "enum": ["network", "local"]
+          },
+          "methods": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "notes": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

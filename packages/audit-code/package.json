@@ -1,0 +1,74 @@
+{
+  "name": "auditor-lambda",
+  "version": "0.3.40",
+  "private": false,
+  "description": "Portable hybrid code-auditing framework for arbitrary repositories.",
+  "type": "module",
+  "bin": {
+    "audit-code": "audit-code.mjs"
+  },
+  "files": [
+    "dist/**",
+    "audit-code.mjs",
+    "audit-code-wrapper-lib.mjs",
+    "dispatch/**",
+    "schemas/**",
+    "skills/audit-code/**",
+    "scripts/postinstall.mjs",
+    "README.md",
+    "docs/**"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.mjs",
+    "update-languages": "node scripts/update-languages.mjs",
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "release:patch": "node scripts/release-and-publish.mjs patch --bump-only",
+    "release:minor": "node scripts/release-and-publish.mjs minor --bump-only",
+    "release:major": "node scripts/release-and-publish.mjs major --bump-only",
+    "release:patch:publish": "node scripts/release-and-publish.mjs patch",
+    "release:minor:publish": "node scripts/release-and-publish.mjs minor",
+    "release:major:publish": "node scripts/release-and-publish.mjs major",
+    "verify:release": "npm run check && npm test && npm run smoke:linked-audit-code && npm run smoke:packaged-audit-code",
+    "smoke:linked-audit-code": "node scripts/smoke-linked-audit-code.mjs",
+    "smoke:packaged-audit-code": "node scripts/smoke-packaged-audit-code.mjs",
+    "prepack": "npm run build",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run verify:release",
+    "start": "node dist/index.js",
+    "audit-code": "node audit-code.mjs",
+    "sample-run": "node dist/index.js sample-run",
+    "dispatch:prepare": "node audit-code.mjs prepare-dispatch",
+    "dispatch:merge": "node dispatch/merge-results.mjs",
+    "dispatch:validate": "node dispatch/validate-result.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OhOkThisIsFine/auditor-lambda.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://github.com/OhOkThisIsFine/auditor-lambda#readme",
+  "bugs": {
+    "url": "https://github.com/OhOkThisIsFine/auditor-lambda/issues"
+  },
+  "keywords": [
+    "audit",
+    "cli",
+    "code-audit",
+    "static-analysis",
+    "orchestration",
+    "agents"
+  ],
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "ajv": "^8.17.1",
+    "linguist-languages": "^9.3.2",
+    "typescript": "^5.9.2"
+  }
+}

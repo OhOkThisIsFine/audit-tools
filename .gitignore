@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.audit-artifacts/
+.audit-code/
+.remediation-artifacts/
+.claude/
+.opencode/
+.vscode/

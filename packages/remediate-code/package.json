@@ -1,0 +1,69 @@
+{
+  "name": "remediator-lambda",
+  "version": "0.3.5",
+  "private": false,
+  "description": "Autonomous remediation orchestrator for arbitrary repositories.",
+  "keywords": [
+    "remediation"
+  ],
+  "homepage": "https://github.com/OhOkThisIsFine/remediator-lambda#readme",
+  "bugs": {
+    "url": "https://github.com/OhOkThisIsFine/remediator-lambda/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OhOkThisIsFine/remediator-lambda.git"
+  },
+  "license": "ISC",
+  "author": "wheatiest",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "remediate-code": "remediate-code.mjs"
+  },
+  "directories": {
+    "test": "tests"
+  },
+  "files": [
+    "dist/**",
+    "remediate-code.mjs",
+    "schemas/**",
+    "skills/remediate-code/**",
+    "templates/**",
+    "scripts/postinstall.mjs",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.mjs",
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && vitest run",
+    "release:patch": "node scripts/release-and-publish.mjs patch --bump-only",
+    "release:minor": "node scripts/release-and-publish.mjs minor --bump-only",
+    "release:major": "node scripts/release-and-publish.mjs major --bump-only",
+    "release:patch:publish": "node scripts/release-and-publish.mjs patch",
+    "release:minor:publish": "node scripts/release-and-publish.mjs minor",
+    "release:major:publish": "node scripts/release-and-publish.mjs major",
+    "verify:release": "npm run check && npm test && npm run smoke:linked && npm run smoke:packaged",
+    "smoke:linked": "node scripts/smoke-linked-remediate-code.mjs",
+    "smoke:packaged": "node scripts/smoke-packaged-remediate-code.mjs",
+    "fixtures:auditor-contract": "node scripts/generate-auditor-contract-fixture.mjs",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run verify:release",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "commander": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

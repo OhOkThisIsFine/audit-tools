@@ -1,0 +1,4776 @@
+import { mkdir, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { createReadStream, existsSync } from "node:fs";
+import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildRepoManifest } from "./extractors/fileInventory.js";
+import { buildFileDisposition } from "./extractors/disposition.js";
+import { buildCriticalFlowManifest } from "./extractors/flows.js";
+import { buildSurfaceManifest } from "./extractors/surfaces.js";
+import { buildUnitManifest } from "./orchestrator/unitBuilder.js";
+import { buildFlowCoverage } from "./orchestrator/flowCoverage.js";
+import {
+  buildRuntimeValidationTasks,
+  discoverRuntimeValidationCommand,
+} from "./orchestrator/runtimeValidation.js";
+import { initializeCoverageFromPlan } from "./orchestrator/planning.js";
+import {
+  type ArtifactBundle,
+  loadArtifactBundle,
+  writeCoreArtifacts,
+  promoteFinalAuditReport,
+} from "./io/artifacts.js";
+import { isFileMissingError, readJsonFile, writeJsonFile } from "./io/json.js";
+import { validateArtifactBundle } from "./validation/artifacts.js";
+import {
+  validateAuditResults,
+  formatAuditResultIssues,
+} from "./validation/auditResults.js";
+import { prefixValidationIssues } from "./validation/basic.js";
+import {
+  validateConfiguredProviderEnvironment,
+  validateSessionConfig,
+} from "./validation/sessionConfig.js";
+import {
+  buildAuditReportModel,
+  renderAuditReportMarkdown,
+} from "./reporting/synthesis.js";
+import { deriveAuditState } from "./orchestrator/state.js";
+import { advanceAudit } from "./orchestrator/advance.js";
+import { checkFileIntegrity } from "./orchestrator/fileIntegrity.js";
+import { decideNextStep } from "./orchestrator/nextStep.js";
+import { renderDesignReviewPrompt } from "./orchestrator/designReviewPrompt.js";
+import {
+  createFreshSessionProvider,
+  resolveFreshSessionProviderName,
+} from "./providers/index.js";
+import { appendRunLedgerEntry, loadRunLedger } from "./supervisor/runLedger.js";
+import {
+  buildAuditCodeHandoff,
+  writeAuditCodeHandoffArtifacts,
+  type AuditCodeHandoff,
+  type ActiveReviewRun,
+} from "./supervisor/operatorHandoff.js";
+import {
+  getSessionConfigPath,
+  loadSessionConfig,
+  readSessionConfigFile,
+} from "./supervisor/sessionConfig.js";
+import {
+  clearDispatchFiles,
+  buildRunId,
+  ensureSupervisorDirs,
+  getRunPaths,
+  writeDispatchBatchFiles,
+  writeWorkerTaskFiles,
+  type RunPaths,
+} from "./io/runArtifacts.js";
+import { renderWorkerPrompt } from "./prompts/renderWorkerPrompt.js";
+import {
+  buildReviewPackets,
+  orderTasksForPacketReview,
+  estimateTaskGroupTokens,
+} from "./orchestrator/reviewPackets.js";
+import {
+  buildFileAnchorSummary,
+  type FileAnchorSummary,
+} from "./orchestrator/fileAnchors.js";
+import type { AuditResult, AuditTask, Finding, RepoManifest } from "./types.js";
+import type { AuditState } from "./types/auditState.js";
+import type { SessionConfig } from "./types/sessionConfig.js";
+import type { RuntimeValidationReport } from "./types/runtimeValidation.js";
+import type { ExternalAnalyzerResults } from "./types/externalAnalyzer.js";
+import type { WorkerTask } from "./types/workerSession.js";
+import type { WorkerResult } from "./types/workerResult.js";
+import { LOCAL_SUBPROCESS_PROVIDER_NAME } from "./providers/constants.js";
+import { runAuditCodeMcpServer } from "./mcp/server.js";
+import {
+  scheduleWave,
+  buildProviderModelKey,
+  readQuotaState,
+  recordWaveOutcome,
+  resolveLimits,
+  resolveHostActiveSubagentLimit,
+  probeProvider,
+  computeMaxSafeConcurrency,
+  getQuotaStatePath,
+  detectRateLimitError,
+  computeCooldownUntil,
+  runSlidingWindow,
+  LearnedQuotaSource,
+  CompositeQuotaSource,
+  lookupDiscoveredLimits,
+  updateDiscoveredLimits,
+  mergeDiscoveredLimits,
+  getHeaderExtractorForProvider,
+} from "./quota/index.js";
+import type { DiscoveredRateLimits, DispatchQuota } from "./quota/index.js";
+
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+const ADVANCE_AUDIT_CONTRACT_VERSION = "audit-code/v1alpha1";
+const WORKER_RESULT_CONTRACT_VERSION = "audit-code-worker-result/v1alpha1";
+const STEP_CONTRACT_VERSION = "audit-code-step/v1alpha1";
+const LARGE_FILE_PACKET_TARGET_LINES = 2500;
+const SMALL_MODEL_HINT_MAX_LINES = 500;
+const SMALL_MODEL_HINT_MAX_ESTIMATED_TOKENS = 3000;
+const DEEP_MODEL_HINT_MIN_ESTIMATED_TOKENS = 9000;
+
+type UiMode = "visible" | "headless";
+type DispatchModelTier = "small" | "standard" | "deep";
+type StepKind =
+  | "dispatch_review"
+  | "single_task_fallback"
+  | "design_review"
+  | "present_report"
+  | "blocked";
+type StepStatus = "ready" | "blocked" | "complete";
+
+interface StepArtifact {
+  contract_version: typeof STEP_CONTRACT_VERSION;
+  step_kind: StepKind;
+  prompt_path: string;
+  status: StepStatus;
+  run_id: string | null;
+  allowed_commands: string[];
+  stop_condition: string;
+  repo_root: string;
+  artifacts_dir: string;
+  artifact_paths: Record<string, string | null>;
+  access?: import("./types/workerSession.js").AccessDeclaration;
+}
+
+interface DispatchComplexity {
+  priority: NonNullable<AuditTask["priority"]>;
+  task_count: number;
+  file_count: number;
+  total_lines: number;
+  estimated_tokens: number;
+  lenses: AuditTask["lens"][];
+  tags: string[];
+  large_file_mode: boolean;
+}
+
+interface DispatchModelHint {
+  tier: DispatchModelTier;
+  reasons: string[];
+}
+
+const DIRECT_CLI_DEFAULTS = {
+  rootDir: ".",
+  artifactsDir: ".artifacts",
+  maxRuns: 1000,
+  agentBatchSize: 6,
+  parallelWorkers: 1,
+  timeoutMs: 30 * 60 * 1000, // 30 minutes
+  uiMode: "headless" as UiMode,
+};
+
+// Keep the sample-run payload explicit so the demo command is deterministic.
+const SAMPLE_REPO_FILES = [
+  { path: "src/api/auth.ts", size_bytes: 1240, hash: "abc123" },
+  { path: "src/lib/session.ts", size_bytes: 980, hash: "def456" },
+  { path: "infra/deploy.yml", size_bytes: 420, hash: "ghi789" },
+  { path: "docs/notes.md", size_bytes: 300, hash: "doc111" },
+];
+
+function isLongFlagToken(value: string | undefined): boolean {
+  return typeof value === "string" && value.startsWith("--");
+}
+
+// Read a long-form CLI flag while treating a following flag token as "missing".
+function getFlag(
+  argv: string[],
+  name: string,
+  fallback?: string,
+): string | undefined {
+  const index = argv.indexOf(name);
+  if (index < 0) return fallback;
+  const candidate = argv[index + 1];
+  if (!candidate || isLongFlagToken(candidate)) return fallback;
+  return candidate;
+}
+
+// Boolean flags only care whether the token is present at all.
+function hasFlag(argv: string[], name: string): boolean {
+  return argv.includes(name);
+}
+
+function getOptionalBooleanFlag(
+  argv: string[],
+  name: string,
+): boolean | undefined {
+  const raw = getFlag(argv, name);
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (raw === "true") {
+    return true;
+  }
+  if (raw === "false") {
+    return false;
+  }
+  throw new Error(`${name} must be either true or false.`);
+}
+
+function optionalBooleanEnv(value: string | undefined): boolean | undefined {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return undefined;
+}
+
+export function resolveHostDispatchCapability(options: {
+  explicit?: boolean;
+  sessionConfig: SessionConfig;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  if (options.explicit !== undefined) {
+    return options.explicit;
+  }
+  if (options.sessionConfig.host_can_dispatch_subagents !== undefined) {
+    return options.sessionConfig.host_can_dispatch_subagents;
+  }
+  return optionalBooleanEnv(
+    (options.env ?? process.env).AUDIT_CODE_HOST_CAN_DISPATCH,
+  ) ?? true;
+}
+
+function toBase64Url(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64url");
+}
+
+function fromBase64Url(value: string): string {
+  return Buffer.from(value, "base64url").toString("utf8");
+}
+
+function digestId(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
+
+function safeArtifactStem(value: string): string {
+  const sanitized = value
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  return sanitized.length > 0 ? sanitized : "artifact";
+}
+
+function artifactNameForId(value: string, extension: string): string {
+  return `${safeArtifactStem(value)}_${digestId(value)}.${extension}`;
+}
+
+function quoteCommandArg(value: string): string {
+  return /[\s"]/u.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+}
+
+function renderCommand(argv: string[]): string {
+  return argv.map((item) => quoteCommandArg(item)).join(" ");
+}
+
+function summarizeLaunchExit(result: {
+  accepted?: boolean;
+  exitCode?: number | null;
+  signal?: string | null;
+  command?: string;
+  stdoutPath?: string;
+  stderrPath?: string;
+  error?: string;
+}): string | null {
+  if (result.accepted !== false && !result.error) {
+    return null;
+  }
+  const parts = [
+    result.signal
+      ? `signal ${result.signal}`
+      : `exit code ${result.exitCode ?? "unknown"}`,
+    result.command ? `command: ${result.command}` : null,
+    result.stdoutPath ? `stdout: ${result.stdoutPath}` : null,
+    result.stderrPath ? `stderr: ${result.stderrPath}` : null,
+    result.error ?? null,
+  ].filter((part): part is string => Boolean(part));
+  return parts.join("; ");
+}
+
+function taskResultPath(taskResultsDir: string, taskId: string): string {
+  return join(taskResultsDir, artifactNameForId(taskId, "json"));
+}
+
+function packetPromptPath(taskResultsDir: string, packetId: string): string {
+  return join(taskResultsDir, artifactNameForId(packetId, "prompt.md"));
+}
+
+async function readStdinText(): Promise<string> {
+  if (process.stdin.isTTY) {
+    return "";
+  }
+  return await new Promise((resolveInput, reject) => {
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => {
+      input += chunk;
+    });
+    process.stdin.on("end", () => resolveInput(input));
+    process.stdin.on("error", reject);
+  });
+}
+
+function resolveFlagPath(
+  argv: string[],
+  name: string,
+  fallback: string,
+): string {
+  return resolve(getFlag(argv, name, fallback) as string);
+}
+
+function normalizePositiveInteger(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return Math.floor(value);
+}
+
+function parsePositiveIntegerFlag(
+  argv: string[],
+  name: string,
+): number | undefined {
+  const raw = getFlag(argv, name);
+  if (raw === undefined) {
+    return undefined;
+  }
+  return normalizePositiveInteger(Number(raw));
+}
+
+function getArtifactsDir(argv: string[]): string {
+  return resolveFlagPath(
+    argv,
+    "--artifacts-dir",
+    DIRECT_CLI_DEFAULTS.artifactsDir,
+  );
+}
+
+function getRootDir(argv: string[]): string {
+  return resolveFlagPath(argv, "--root", DIRECT_CLI_DEFAULTS.rootDir);
+}
+
+function warnIfNotGitRepo(root: string): void {
+  const gitEntry = join(root, ".git");
+  if (!existsSync(gitEntry)) {
+    console.warn(
+      `Warning: target directory '${root}' does not appear to be a git repository. Diff-based signals will be unavailable.`,
+    );
+  }
+}
+
+function getBatchResultsDir(argv: string[]): string | undefined {
+  const value = getFlag(argv, "--batch-results");
+  return value ? resolve(value) : undefined;
+}
+
+function getMaxRuns(argv: string[]): number {
+  return parsePositiveIntegerFlag(argv, "--max-runs") ?? DIRECT_CLI_DEFAULTS.maxRuns;
+}
+
+function getAgentBatchSize(argv: string[], sessionConfig: SessionConfig): number {
+  return (
+    parsePositiveIntegerFlag(argv, "--agent-batch-size") ??
+    normalizePositiveInteger(sessionConfig.agent_task_batch_size) ??
+    DIRECT_CLI_DEFAULTS.agentBatchSize
+  );
+}
+
+function getParallelWorkers(argv: string[], sessionConfig: SessionConfig): number {
+  return (
+    parsePositiveIntegerFlag(argv, "--parallel") ??
+    normalizePositiveInteger(sessionConfig.parallel_workers) ??
+    DIRECT_CLI_DEFAULTS.parallelWorkers
+  );
+}
+
+function getTimeoutMs(argv: string[], sessionConfig: SessionConfig): number {
+  return (
+    parsePositiveIntegerFlag(argv, "--timeout") ??
+    normalizePositiveInteger(sessionConfig.timeout_ms) ??
+    DIRECT_CLI_DEFAULTS.timeoutMs
+  );
+}
+
+function getExplicitProvider(argv: string[]): string | undefined {
+  return getFlag(argv, "--provider");
+}
+
+function getHostModel(argv: string[]): string | null {
+  return getFlag(argv, "--host-model") ?? null;
+}
+
+function getHostMaxActiveSubagents(argv: string[]): number | null {
+  return parsePositiveIntegerFlag(argv, "--host-max-active-subagents") ?? null;
+}
+
+function getQuotaProbeMode(
+  argv: string[],
+  sessionConfig: SessionConfig,
+): "auto" | "never" | "force" {
+  const raw = getFlag(argv, "--quota-probe") ?? sessionConfig.quota?.probe ?? "auto";
+  if (raw === "auto" || raw === "never" || raw === "force") return raw;
+  return "auto";
+}
+
+
+function resolveRunProviderName(
+  argv: string[],
+  sessionConfig: SessionConfig,
+): string {
+  return resolveFreshSessionProviderName(
+    getExplicitProvider(argv),
+    sessionConfig,
+  );
+}
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunkSize = normalizePositiveInteger(size);
+  if (chunkSize === undefined) {
+    throw new Error("chunkArray size must be a positive integer.");
+  }
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += chunkSize) {
+    chunks.push(arr.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+function getUiMode(
+  argv: string[],
+  fallback: UiMode = DIRECT_CLI_DEFAULTS.uiMode,
+): UiMode {
+  const raw = getFlag(argv, "--ui");
+  if (raw === "visible") return "visible";
+  if (raw === "headless") return "headless";
+  return fallback;
+}
+
+function buildEnvelope(params: {
+  audit_state: unknown;
+  selected_obligation: string | null;
+  selected_executor: string | null;
+  progress_made: boolean;
+  artifacts_written: string[];
+  progress_summary: string;
+  next_likely_step: string | null;
+  handoff: AuditCodeHandoff;
+}) {
+  return {
+    contract_version: ADVANCE_AUDIT_CONTRACT_VERSION,
+    audit_state: params.audit_state,
+    selected_obligation: params.selected_obligation,
+    selected_executor: params.selected_executor,
+    progress_made: params.progress_made,
+    artifacts_written: params.artifacts_written,
+    progress_summary: params.progress_summary,
+    next_likely_step: params.next_likely_step,
+    handoff: params.handoff,
+  };
+}
+
+async function emitEnvelope(params: {
+  root: string;
+  artifactsDir: string;
+  bundle: ArtifactBundle;
+  audit_state: AuditState;
+  selected_obligation: string | null;
+  selected_executor: string | null;
+  progress_made: boolean;
+  artifacts_written: string[];
+  progress_summary: string;
+  next_likely_step: string | null;
+  providerName?: string | null;
+  isConfigError?: boolean;
+  activeReviewRun?: ActiveReviewRun;
+}): Promise<void> {
+  const handoff = buildAuditCodeHandoff({
+    root: params.root,
+    artifactsDir: params.artifactsDir,
+    state: params.audit_state,
+    bundle: params.bundle,
+    providerName: params.providerName,
+    progressSummary: params.progress_summary,
+    isConfigError: params.isConfigError,
+    activeReviewRun: params.activeReviewRun,
+  });
+  await writeAuditCodeHandoffArtifacts(handoff);
+  console.log(
+    JSON.stringify(
+      buildEnvelope({
+        audit_state: params.audit_state,
+        selected_obligation: params.selected_obligation,
+        selected_executor: params.selected_executor,
+        progress_made: params.progress_made,
+        artifacts_written: params.artifacts_written,
+        progress_summary: params.progress_summary,
+        next_likely_step: params.next_likely_step,
+        handoff,
+      }),
+      null,
+      2,
+    ),
+  );
+}
+
+function buildManualReviewBlocker(providerName: string): string {
+  return providerName === LOCAL_SUBPROCESS_PROVIDER_NAME
+    ? "Ready for LLM semantic review. If the host exposes a callable subagent tool, prepare dispatch and fan out packets. " +
+      "If not, use single-task fallback: review only the first pending task, write one AuditResult to the run audit-results path, execute worker_command, then stop."
+    : "Audit blocked: waiting for manual audit results or interactive provider configuration.";
+}
+
+function shouldRunInlineExecutor(selectedExecutor: string | null): boolean {
+  return selectedExecutor !== null && selectedExecutor !== "agent";
+}
+
+function buildBlockedAuditState(params: {
+  state: AuditState;
+  obligationId: string | null;
+  executor: string | null;
+  blocker: string;
+}): AuditState {
+  return {
+    ...params.state,
+    status: "blocked",
+    last_executor: params.executor ?? params.state.last_executor,
+    last_obligation: params.obligationId ?? params.state.last_obligation,
+    blockers: [...new Set([...(params.state.blockers ?? []), params.blocker])],
+    obligations: params.state.obligations.map((item) =>
+      item.id === params.obligationId
+        ? {
+            ...item,
+            state: "blocked",
+            reason: params.blocker,
+          }
+        : item,
+    ),
+  };
+}
+
+async function countLines(path: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let lines = 0;
+    let byteCount = 0;
+    let lastByte = -1;
+    const stream = createReadStream(path);
+    stream.on("data", (chunk: Buffer | string) => {
+      const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      byteCount += buffer.length;
+      for (let i = 0; i < buffer.length; ++i) {
+        if (buffer[i] === 10) lines++;
+        lastByte = buffer[i];
+      }
+    });
+    stream.on("end", () => {
+      if (byteCount === 0) return resolve(0);
+      // Files not ending with \n have one final line not counted above
+      resolve(lastByte !== 10 ? lines + 1 : lines);
+    });
+    stream.on("error", reject);
+  });
+}
+
+async function buildLineIndex(
+  root: string,
+  repoManifest: RepoManifest,
+): Promise<Record<string, number>> {
+  const entries: Array<readonly [string, number]> = [];
+  const batchSize = 25;
+  for (let i = 0; i < repoManifest.files.length; i += batchSize) {
+    const batch = repoManifest.files.slice(i, i + batchSize);
+    const results = await Promise.all(
+      batch.map(async (file) => {
+        try {
+          return [
+            file.path,
+            await countLines(resolve(root, file.path)),
+          ] as const;
+        } catch {
+          return [file.path, 0] as const;
+        }
+      }),
+    );
+    entries.push(...results);
+  }
+  return Object.fromEntries(entries);
+}
+
+async function buildLineIndexForPaths(
+  root: string,
+  paths: string[],
+): Promise<Record<string, number>> {
+  const uniquePaths = [...new Set(paths)].sort();
+  const entries = await Promise.all(
+    uniquePaths.map(async (path) => {
+      try {
+        return [path, await countLines(resolve(root, path))] as const;
+      } catch {
+        return [path, 0] as const;
+      }
+    }),
+  );
+  return Object.fromEntries(entries);
+}
+
+async function listBatchResultFiles(batchDir: string): Promise<string[]> {
+  const entries = await readdir(batchDir, { withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))
+    .map((entry) => join(batchDir, entry.name))
+    .sort((a, b) => a.localeCompare(b));
+
+  if (files.length === 0) {
+    throw new Error(`No JSON audit result files found in ${batchDir}.`);
+  }
+
+  return files;
+}
+
+function buildPendingAuditTasks(bundle: ArtifactBundle) {
+  const completedTaskIds = new Set(
+    (bundle.audit_results ?? []).map((result) => result.task_id),
+  );
+  const pendingTasks = (bundle.audit_tasks ?? []).filter(
+    (task) => task.status !== "complete" && !completedTaskIds.has(task.task_id),
+  );
+  const lineIndex = Object.fromEntries(
+    pendingTasks.flatMap((task) => Object.entries(task.file_line_counts ?? {})),
+  );
+  return orderTasksForPacketReview(pendingTasks, {
+    graphBundle: bundle.graph_bundle,
+    lineIndex,
+  });
+}
+
+async function addFileLineCountHints(
+  root: string,
+  tasks: AuditTask[],
+): Promise<AuditTask[]> {
+  const lineIndex = await buildLineIndexForPaths(
+    root,
+    tasks.flatMap((task) => task.file_paths),
+  );
+  return tasks.map((task) => ({
+    ...task,
+    file_line_counts: Object.fromEntries(
+      task.file_paths.map((path) => [path, lineIndex[path] ?? 0]),
+    ),
+  }));
+}
+
+function activeReviewRunFromTask(
+  artifactsDir: string,
+  task: WorkerTask,
+): ActiveReviewRun | null {
+  if (task.preferred_executor !== "agent" || !task.audit_results_path) {
+    return null;
+  }
+  const paths = getRunPaths(artifactsDir, task.run_id);
+  return {
+    run_id: task.run_id,
+    task_path: paths.taskPath,
+    prompt_path: paths.promptPath,
+    pending_audit_tasks_path: task.pending_audit_tasks_path,
+    audit_results_path: task.audit_results_path,
+    worker_command: task.worker_command,
+  };
+}
+
+async function loadCurrentActiveReviewRun(
+  artifactsDir: string,
+): Promise<ActiveReviewRun | null> {
+  try {
+    const task = await readJsonFile<WorkerTask>(
+      join(artifactsDir, "dispatch", "current-task.json"),
+    );
+    return activeReviewRunFromTask(artifactsDir, task);
+  } catch (error) {
+    if (isFileMissingError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function writeHandoffOnly(params: {
+  root: string;
+  artifactsDir: string;
+  bundle: ArtifactBundle;
+  audit_state: AuditState;
+  progress_summary: string;
+  providerName?: string | null;
+  isConfigError?: boolean;
+  activeReviewRun?: ActiveReviewRun;
+}): Promise<void> {
+  const handoff = buildAuditCodeHandoff({
+    root: params.root,
+    artifactsDir: params.artifactsDir,
+    state: params.audit_state,
+    bundle: params.bundle,
+    providerName: params.providerName,
+    progressSummary: params.progress_summary,
+    isConfigError: params.isConfigError,
+    activeReviewRun: params.activeReviewRun,
+  });
+  await writeAuditCodeHandoffArtifacts(handoff);
+}
+
+async function ensureSemanticReviewRun(params: {
+  root: string;
+  artifactsDir: string;
+  bundle: ArtifactBundle;
+  state: AuditState;
+  obligationId: string | null;
+  selfCliPath: string;
+  timeoutMs: number;
+}): Promise<{ state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun }> {
+  const existingRun = await loadCurrentActiveReviewRun(params.artifactsDir);
+  if (existingRun) {
+    const blockedState =
+      params.bundle.audit_state?.status === "blocked"
+        ? params.bundle.audit_state
+        : buildBlockedAuditState({
+            state: params.state,
+            obligationId: params.obligationId,
+            executor: "agent",
+            blocker: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
+          });
+    const blockedBundle = { ...params.bundle, audit_state: blockedState };
+    await writeCoreArtifacts(params.artifactsDir, blockedBundle);
+    await writeHandoffOnly({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      bundle: blockedBundle,
+      audit_state: blockedState,
+      progress_summary: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
+      providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+      activeReviewRun: existingRun,
+    });
+    return {
+      state: blockedState,
+      bundle: blockedBundle,
+      activeReviewRun: existingRun,
+    };
+  }
+
+  const blockedState = buildBlockedAuditState({
+    state: params.state,
+    obligationId: params.obligationId,
+    executor: "agent",
+    blocker: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
+  });
+  await writeCoreArtifacts(params.artifactsDir, {
+    ...params.bundle,
+    audit_state: blockedState,
+  });
+
+  const runId = buildRunId(params.obligationId, 1);
+  const paths = getRunPaths(params.artifactsDir, runId);
+  const pendingTasks = await addFileLineCountHints(
+    params.root,
+    buildPendingAuditTasks(params.bundle),
+  );
+  const pendingTasksPath = join(paths.runDir, "pending-audit-tasks.json");
+  const auditResultsPath = join(paths.runDir, "audit-results.json");
+  const taskReadPaths = new Set<string>();
+  for (const pt of pendingTasks) {
+    for (const fp of pt.file_paths) taskReadPaths.add(fp);
+  }
+  const task: WorkerTask = {
+    contract_version: "audit-code-worker/v1alpha1",
+    run_id: runId,
+    repo_root: params.root,
+    artifacts_dir: params.artifactsDir,
+    obligation_id: params.obligationId,
+    preferred_executor: "agent",
+    result_path: paths.resultPath,
+    worker_command: [
+      process.execPath,
+      params.selfCliPath,
+      "worker-run",
+      "--task",
+      paths.taskPath,
+    ],
+    audit_results_path: auditResultsPath,
+    pending_audit_tasks_path: pendingTasksPath,
+    timeout_ms: params.timeoutMs,
+    max_retries: 0,
+    access: {
+      read_paths: [...taskReadPaths],
+      write_paths: [auditResultsPath, paths.resultPath],
+    },
+  };
+  const prompt = renderWorkerPrompt(task);
+  await writeWorkerTaskFiles(
+    task,
+    prompt,
+    paths,
+    params.artifactsDir,
+    pendingTasks,
+  );
+  await writeJsonFile(pendingTasksPath, pendingTasks);
+
+  const activeReviewRun = activeReviewRunFromTask(params.artifactsDir, task);
+  if (!activeReviewRun) {
+    throw new Error("Internal error: failed to materialize active review run.");
+  }
+  const blockedBundle = {
+    ...params.bundle,
+    audit_state: blockedState,
+  };
+  await writeHandoffOnly({
+    root: params.root,
+    artifactsDir: params.artifactsDir,
+    bundle: blockedBundle,
+    audit_state: blockedState,
+    progress_summary: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
+    providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+    activeReviewRun,
+  });
+  return { state: blockedState, bundle: blockedBundle, activeReviewRun };
+}
+
+function nextStepCommand(
+  root: string,
+  artifactsDir: string,
+  extraArgs: string[] = [],
+): string {
+  return renderCommand([
+    "audit-code",
+    "next-step",
+    "--root",
+    root,
+    "--artifacts-dir",
+    artifactsDir,
+    ...extraArgs,
+  ]);
+}
+
+function mergeAndIngestCommand(
+  artifactsDir: string,
+  runId: string,
+): string {
+  return renderCommand([
+    "audit-code",
+    "merge-and-ingest",
+    "--run-id",
+    runId,
+    "--artifacts-dir",
+    artifactsDir,
+  ]);
+}
+
+function renderDispatchReviewPrompt(params: {
+  root: string;
+  artifactsDir: string;
+  activeReviewRun: ActiveReviewRun;
+  dispatchPlanPath: string;
+  dispatchQuotaPath: string | null;
+  hostCanRestrictSubagentTools: boolean;
+  hostCanSelectSubagentModel: boolean;
+}): string {
+  const mergeCommand = mergeAndIngestCommand(
+    params.artifactsDir,
+    params.activeReviewRun.run_id,
+  );
+  const continueCommand = nextStepCommand(params.root, params.artifactsDir);
+  const modelLine = params.hostCanSelectSubagentModel
+    ? "When launching each subagent, map `entry.model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names."
+    : "Ignore `entry.model_hint`; this host did not report per-subagent model selection.";
+  const toolsLine = params.hostCanRestrictSubagentTools
+    ? "Restrict review subagents to read/search plus the packet submit command named in their prompt. Do not give them source edit/write tools."
+    : "Do not ask the user about per-subagent tool restrictions; this host did not report a callable restriction facility.";
+
+  const dispatchDataLines = params.dispatchQuotaPath
+    ? [
+        "Read these generated files:",
+        "",
+        `  Dispatch plan:  ${params.dispatchPlanPath}`,
+        `  Dispatch quota: ${params.dispatchQuotaPath}`,
+        "",
+        "Use the `wave_size` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before starting the first wave.",
+        "",
+        "`host_concurrency_limit` records any detected hard host cap that contributed to `wave_size`.",
+        "",
+        "For each wave: use the `task` tool (or equivalent subagent dispatch) to launch up to `wave_size` subagents in parallel (one per entry), wait for all to finish, then start the next wave.",
+      ]
+    : [
+        "Read this generated dispatch plan:",
+        "",
+        `  ${params.dispatchPlanPath}`,
+        "",
+        "Launch one subagent for each entry in the plan.",
+      ];
+
+  return [
+    "# audit-code dispatch review",
+    "",
+    ...dispatchDataLines,
+    "",
+    "Pass each `entry.prompt_path` literally to its subagent; do not load packet prompt files into this orchestrator context.",
+    "",
+    "Subagent prompt shape:",
+    "",
+    '  Read and follow the audit instructions in: <entry.prompt_path>',
+    "",
+    modelLine,
+    toolsLine,
+    "",
+    "Each subagent must submit its packet through the submit command printed in its packet prompt and stop after successful submission.",
+    "",
+    "**After all waves complete:**",
+    "",
+    "Run exactly:",
+    "",
+    `  ${mergeCommand}`,
+    "",
+    "If merge-and-ingest fails, stop and report the exact command and error output. Do not manually merge results or edit audit state.",
+    "",
+    "If merge-and-ingest succeeds, run:",
+    "",
+    `  ${continueCommand}`,
+    "",
+    "Read and follow only the new step prompt path returned by that command.",
+    "",
+  ].join("\n");
+}
+
+function renderSingleTaskFallbackStepPrompt(params: {
+  singleTaskPromptPath: string;
+  activeReviewRun: ActiveReviewRun;
+}): string {
+  return [
+    "# audit-code single-task fallback step",
+    "",
+    "Use this step only because the host reported no callable subagent facility.",
+    "",
+    "Read and follow exactly this generated single-task prompt:",
+    "",
+    `  ${params.singleTaskPromptPath}`,
+    "",
+    "Complete exactly one AuditResult for the task named there, write the JSON array to the prompt's audit_results_path, run the exact worker_command from that prompt, then stop.",
+    "",
+    "Do not run dispatch commands, do not prepare packets, do not run next-step again in this turn, and do not read a report after the worker command.",
+    "",
+    "The only backend command allowed after writing the result is:",
+    "",
+    `  ${renderCommand(params.activeReviewRun.worker_command)}`,
+    "",
+  ].join("\n");
+}
+
+function renderPresentReportPrompt(finalReportPath: string): string {
+  return [
+    "# audit-code present report",
+    "",
+    "The deterministic audit is complete.",
+    "",
+    `Read the final audit report from: ${finalReportPath}`,
+    "",
+    "Present the completed audit with work blocks first.",
+    "",
+    "Do not run the orchestrator again for this completed audit.",
+    "",
+  ].join("\n");
+}
+
+function renderBlockedStepPrompt(reason: string): string {
+  return [
+    "# audit-code blocked",
+    "",
+    "The audit cannot continue automatically from this step.",
+    "",
+    "Report this blocker verbatim and stop:",
+    "",
+    reason,
+    "",
+  ].join("\n");
+}
+
+async function writeCurrentStep(params: {
+  artifactsDir: string;
+  stepKind: StepKind;
+  status: StepStatus;
+  runId: string | null;
+  allowedCommands: string[];
+  stopCondition: string;
+  repoRoot: string;
+  artifactPaths: Record<string, string | null>;
+  prompt: string;
+}): Promise<StepArtifact> {
+  const stepsDir = join(params.artifactsDir, "steps");
+  await mkdir(stepsDir, { recursive: true });
+  const promptPath = join(stepsDir, "current-prompt.md");
+  const stepPath = join(stepsDir, "current-step.json");
+  await writeFile(promptPath, params.prompt, "utf8");
+  const step: StepArtifact = {
+    contract_version: STEP_CONTRACT_VERSION,
+    step_kind: params.stepKind,
+    prompt_path: promptPath,
+    status: params.status,
+    run_id: params.runId,
+    allowed_commands: params.allowedCommands,
+    stop_condition: params.stopCondition,
+    repo_root: params.repoRoot,
+    artifacts_dir: params.artifactsDir,
+    artifact_paths: {
+      current_step: stepPath,
+      current_prompt: promptPath,
+      ...params.artifactPaths,
+    },
+  };
+  await writeJsonFile(stepPath, step);
+  return step;
+}
+
+function formatAuditResultValidationError(issues: ReturnType<typeof validateAuditResults>): string {
+  return (
+    `audit-results validation failed with ${issues.length} error(s):\n` +
+    formatAuditResultIssues(issues)
+  );
+}
+
+function buildWorkerFailureBlocker(workerResult: WorkerResult): string {
+  const details = workerResult.errors.filter((error) => error.trim().length > 0);
+  return details.length > 0
+    ? `${workerResult.summary} ${details.join(" ")}`
+    : workerResult.summary;
+}
+
+function looksLikeCliFlag(value: string | undefined): boolean {
+  return isLongFlagToken(value);
+}
+
+export const cliTestUtils = {
+  defaults: DIRECT_CLI_DEFAULTS,
+  getFlag,
+  hasFlag,
+  getArtifactsDir,
+  getRootDir,
+  getBatchResultsDir,
+  getMaxRuns,
+  getAgentBatchSize,
+  getParallelWorkers,
+  getTimeoutMs,
+  chunkArray,
+  getUiMode,
+  looksLikeCliFlag,
+  countLines,
+  warnIfNotGitRepo,
+};
+
+async function maybeArchiveLegacyPendingResults(
+  auditResultsPath: string | undefined,
+): Promise<string | undefined> {
+  if (!auditResultsPath || basename(auditResultsPath) !== "worker_results_pending.json") {
+    return undefined;
+  }
+
+  const archivedPath = join(
+    dirname(auditResultsPath),
+    `worker_results_submitted_${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+  );
+  try {
+    await rename(auditResultsPath, archivedPath);
+    return archivedPath;
+  } catch (error) {
+    process.stderr.write(
+      `[audit-results cleanup] failed to archive ${auditResultsPath}: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return undefined;
+  }
+}
+
+async function runAuditStep(options: {
+  root: string;
+  artifactsDir: string;
+  preferredExecutor?: string;
+  auditResultsPath?: string;
+  runtimeUpdatesPath?: string;
+  externalAnalyzerPath?: string;
+}) {
+  const bundle = await loadArtifactBundle(options.artifactsDir);
+  const lineIndex = bundle.repo_manifest
+    ? await buildLineIndex(options.root, bundle.repo_manifest)
+    : undefined;
+  if (looksLikeCliFlag(options.auditResultsPath)) {
+    throw new Error(
+      `Invalid audit results path '${options.auditResultsPath}'. This looks like a CLI flag rather than a file path.`,
+    );
+  }
+  const auditResults = options.auditResultsPath
+    ? await readJsonFile<unknown>(options.auditResultsPath)
+    : undefined;
+  if (auditResults !== undefined) {
+    const issues = validateAuditResults(auditResults, bundle.audit_tasks ?? [], {
+      lineIndex,
+    });
+    const errors = issues.filter((issue) => issue.severity === "error");
+    const warnings = issues.filter((issue) => issue.severity === "warning");
+
+    if (warnings.length > 0) {
+      process.stderr.write(
+        `audit-results validation: ${warnings.length} warning(s):\n` +
+          formatAuditResultIssues(warnings) +
+          "\n",
+      );
+    }
+    if (errors.length > 0) {
+      throw new Error(formatAuditResultValidationError(errors));
+    }
+  }
+  const runtimeValidationUpdates = options.runtimeUpdatesPath
+    ? await readJsonFile<RuntimeValidationReport>(options.runtimeUpdatesPath)
+    : undefined;
+  const externalAnalyzerResults = options.externalAnalyzerPath
+    ? await readJsonFile<ExternalAnalyzerResults>(options.externalAnalyzerPath)
+    : undefined;
+
+  const result = await advanceAudit(bundle, {
+    root: options.root,
+    lineIndex,
+    auditResults: auditResults as AuditResult[] | undefined,
+    runtimeValidationUpdates,
+    externalAnalyzerResults,
+    preferredExecutor: options.preferredExecutor,
+  });
+
+  await writeCoreArtifacts(options.artifactsDir, result.updated_bundle);
+  const archivedPendingResults = await maybeArchiveLegacyPendingResults(
+    options.auditResultsPath,
+  );
+  if (archivedPendingResults) {
+    result.progress_summary +=
+      ` Archived legacy staging file to ${archivedPendingResults}.`;
+  }
+  return result;
+}
+
+async function ingestBatchAuditResults(options: {
+  root: string;
+  artifactsDir: string;
+  batchDir: string;
+}) {
+  const batchFiles = await listBatchResultFiles(options.batchDir);
+  const artifactsWritten = new Set<string>();
+  const progressSummaries: string[] = [];
+  let lastStep:
+    | Awaited<ReturnType<typeof runAuditStep>>
+    | null = null;
+  let anyProgress = false;
+
+  for (const batchFile of batchFiles) {
+    const step = await runAuditStep({
+      root: options.root,
+      artifactsDir: options.artifactsDir,
+      preferredExecutor: "result_ingestion_executor",
+      auditResultsPath: batchFile,
+    });
+    lastStep = step;
+    anyProgress ||= step.progress_made;
+    for (const artifact of step.artifacts_written) {
+      artifactsWritten.add(artifact);
+    }
+    progressSummaries.push(`${basename(batchFile)}: ${step.progress_summary}`);
+  }
+
+  const bundle =
+    lastStep?.updated_bundle ??
+    (await loadArtifactBundle(options.artifactsDir));
+  const state = deriveAuditState(bundle);
+  const decision = decideNextStep(bundle);
+
+  return {
+    batchFiles,
+    bundle,
+    audit_state: state,
+    selected_obligation:
+      lastStep?.selected_obligation ?? decision.selected_obligation,
+    selected_executor:
+      lastStep?.selected_executor ?? "result_ingestion_executor",
+    progress_made: anyProgress,
+    artifacts_written: Array.from(artifactsWritten),
+    progress_summary:
+      `Imported ${batchFiles.length} batch result file${batchFiles.length === 1 ? "" : "s"} from ${options.batchDir}.` +
+      (progressSummaries.length > 0
+        ? `\n${progressSummaries.join("\n")}`
+        : ""),
+    next_likely_step:
+      state.status === "complete" ? null : decision.selected_obligation,
+  };
+}
+
+function buildWorkerResult(params: {
+  runId: string;
+  obligationId: string | null;
+  status: WorkerResult["status"];
+  progressMade: boolean;
+  selectedExecutor: string | null;
+  artifactsWritten: string[];
+  summary: string;
+  nextLikelyStep: string | null;
+  errors: string[];
+}): WorkerResult {
+  return {
+    contract_version: WORKER_RESULT_CONTRACT_VERSION,
+    run_id: params.runId,
+    obligation_id: params.obligationId,
+    status: params.status,
+    progress_made: params.progressMade,
+    selected_executor: params.selectedExecutor,
+    artifacts_written: params.artifactsWritten,
+    summary: params.summary,
+    next_likely_step: params.nextLikelyStep,
+    errors: params.errors,
+  };
+}
+
+async function persistWorkerRunArtifacts(
+  paths: RunPaths,
+  workerResult: WorkerResult,
+  executionMode: string,
+): Promise<void> {
+  await writeJsonFile(paths.resultPath, workerResult);
+  await writeJsonFile(paths.statusPath, {
+    run_id: workerResult.run_id,
+    status: workerResult.status,
+    execution_mode: executionMode,
+    result_path: paths.resultPath,
+  });
+}
+
+async function persistConfigErrorHandoff(params: {
+  root: string;
+  artifactsDir: string;
+  progressSummary: string;
+}): Promise<void> {
+  const bundle = await loadArtifactBundle(params.artifactsDir);
+  const blockedState = buildBlockedAuditState({
+    state: bundle.audit_state ?? deriveAuditState(bundle),
+    obligationId: null,
+    executor: null,
+    blocker: params.progressSummary,
+  });
+  await writeCoreArtifacts(params.artifactsDir, {
+    ...bundle,
+    audit_state: blockedState,
+  });
+  const handoff = buildAuditCodeHandoff({
+    root: params.root,
+    artifactsDir: params.artifactsDir,
+    state: blockedState,
+    bundle: { ...bundle, audit_state: blockedState },
+    progressSummary: params.progressSummary,
+    isConfigError: true,
+  });
+  await writeAuditCodeHandoffArtifacts(handoff);
+}
+
+function isWorkerResult(value: unknown): value is WorkerResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { contract_version?: unknown }).contract_version ===
+      WORKER_RESULT_CONTRACT_VERSION
+  );
+}
+
+export async function runSample(argv: string[] = process.argv): Promise<void> {
+  const repoManifest = buildRepoManifest("sample-repo", SAMPLE_REPO_FILES);
+  const disposition = buildFileDisposition(repoManifest);
+  const unitManifest = buildUnitManifest(repoManifest, disposition);
+  const surfaceManifest = buildSurfaceManifest(repoManifest, disposition);
+  const criticalFlows = buildCriticalFlowManifest(
+    repoManifest,
+    surfaceManifest,
+    disposition,
+  );
+  const coverage = initializeCoverageFromPlan(
+    repoManifest,
+    unitManifest,
+    disposition,
+  );
+  const sampleResults: AuditResult[] = [
+    {
+      task_id: "src-api:security:src/api/auth.ts:1-100",
+      unit_id: unitManifest.units[0]?.unit_id ?? "sample-unit",
+      pass_id: "pass:security",
+      lens: "security",
+      agent_role: "security-auditor",
+      file_coverage: [{ path: "src/api/auth.ts", total_lines: 100 }],
+      findings: [],
+      notes: ["Sample result ingestion path."],
+      requires_followup: false,
+    },
+  ];
+  const flowCoverage = buildFlowCoverage(criticalFlows, coverage);
+  const runtimeValidationTasks = buildRuntimeValidationTasks({
+    unitManifest,
+    criticalFlows,
+    flowCoverage,
+    command: ["npm", "test"],
+  });
+  const runtimeValidationReport = {
+    results: runtimeValidationTasks.tasks.map((task) => ({
+      task_id: task.id,
+      status: "confirmed" as const,
+      summary: "Sample runtime validation completed.",
+      evidence: [],
+      notes: [],
+    })),
+  };
+  const auditReport = renderAuditReportMarkdown(
+    buildAuditReportModel({
+      results: sampleResults,
+      unitManifest,
+      criticalFlows,
+      coverageMatrix: coverage,
+      runtimeValidationReport,
+    }),
+  );
+  const auditState = deriveAuditState({
+    repo_manifest: repoManifest,
+    file_disposition: disposition,
+    unit_manifest: unitManifest,
+    surface_manifest: surfaceManifest,
+    critical_flows: criticalFlows,
+    flow_coverage: flowCoverage,
+    coverage_matrix: coverage,
+    runtime_validation_tasks: runtimeValidationTasks,
+    runtime_validation_report: runtimeValidationReport,
+    audit_results: sampleResults,
+    audit_report: auditReport,
+  });
+  const artifactsDir = getArtifactsDir(argv);
+  await mkdir(artifactsDir, { recursive: true });
+  await writeCoreArtifacts(artifactsDir, {
+    repo_manifest: repoManifest,
+    file_disposition: disposition,
+    unit_manifest: unitManifest,
+    surface_manifest: surfaceManifest,
+    critical_flows: criticalFlows,
+    flow_coverage: flowCoverage,
+    coverage_matrix: coverage,
+    runtime_validation_tasks: runtimeValidationTasks,
+    runtime_validation_report: runtimeValidationReport,
+    audit_results: sampleResults,
+    audit_report: auditReport,
+    audit_state: auditState,
+  });
+  console.log(
+    JSON.stringify(
+      { audit_state: auditState, artifacts_dir: artifactsDir },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdAdvanceAudit(argv: string[]): Promise<void> {
+  const root = getRootDir(argv);
+  warnIfNotGitRepo(root);
+  const artifactsDir = getArtifactsDir(argv);
+  await cleanupStaleArtifactsDir(artifactsDir);
+  await mkdir(artifactsDir, { recursive: true });
+  await ensureSupervisorDirs(artifactsDir);
+  let sessionConfig: SessionConfig;
+  try {
+    sessionConfig = await loadSessionConfig(artifactsDir);
+  } catch (error) {
+    await persistConfigErrorHandoff({
+      root,
+      artifactsDir,
+      progressSummary: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+  const providerName = resolveRunProviderName(argv, sessionConfig);
+  const batchResultsDir = getBatchResultsDir(argv);
+  if (batchResultsDir && getFlag(argv, "--results")) {
+    throw new Error("Use either --results <file> or --batch-results <dir>, not both.");
+  }
+  if (batchResultsDir) {
+    const result = await ingestBatchAuditResults({
+      root,
+      artifactsDir,
+      batchDir: batchResultsDir,
+    });
+    if (result.selected_executor !== "agent") {
+      await clearDispatchFiles(artifactsDir);
+    }
+    await emitEnvelope({
+      root,
+      artifactsDir,
+      bundle: result.bundle,
+      audit_state: result.audit_state,
+      selected_obligation: result.selected_obligation,
+      selected_executor: result.selected_executor,
+      progress_made: result.progress_made,
+      artifacts_written: result.artifacts_written,
+      progress_summary: result.progress_summary,
+      next_likely_step: result.next_likely_step,
+      providerName,
+    });
+    if (result.audit_state.status === "complete") {
+      await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
+    }
+    return;
+  }
+  const externalAnalyzerPath = getFlag(argv, "--external-analyzer-results");
+  const result = await runAuditStep({
+    root,
+    artifactsDir,
+    preferredExecutor:
+      getFlag(argv, "--preferred-executor") ??
+      (externalAnalyzerPath ? "external_analyzer_import_executor" : undefined),
+    auditResultsPath: getFlag(argv, "--results"),
+    runtimeUpdatesPath: getFlag(argv, "--updates"),
+    externalAnalyzerPath,
+  });
+  if (result.selected_executor !== "agent") {
+    await clearDispatchFiles(artifactsDir);
+  }
+  await emitEnvelope({
+    root,
+    artifactsDir,
+    bundle: result.updated_bundle,
+    audit_state: result.audit_state,
+    selected_obligation: result.selected_obligation,
+    selected_executor: result.selected_executor,
+    progress_made: result.progress_made,
+    artifacts_written: result.artifacts_written,
+    progress_summary: result.progress_summary,
+    next_likely_step: result.next_likely_step,
+    providerName,
+  });
+  if (result.audit_state.status === "complete") {
+    await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
+  }
+}
+
+async function runDeterministicForNextStep(params: {
+  root: string;
+  artifactsDir: string;
+  selfCliPath: string;
+  timeoutMs: number;
+  maxRuns: number;
+}): Promise<
+  | {
+      kind: "semantic_review";
+      state: AuditState;
+      bundle: ArtifactBundle;
+      activeReviewRun: ActiveReviewRun;
+    }
+  | {
+      kind: "design_review";
+      state: AuditState;
+      bundle: ArtifactBundle;
+    }
+  | {
+      kind: "complete";
+      state: AuditState;
+      bundle: ArtifactBundle;
+      finalReportPath: string;
+    }
+  | {
+      kind: "blocked";
+      state: AuditState;
+      bundle: ArtifactBundle;
+      reason: string;
+    }
+> {
+  let lastSummary = "";
+  for (let index = 0; index < params.maxRuns; index++) {
+    const bundle = await loadArtifactBundle(params.artifactsDir);
+    const decision = decideNextStep(bundle);
+    const state = decision.state;
+
+    if (state.status === "complete") {
+      await writeHandoffOnly({
+        root: params.root,
+        artifactsDir: params.artifactsDir,
+        bundle,
+        audit_state: state,
+        progress_summary: decision.reason,
+        providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+      });
+      const promoted = await promoteFinalAuditReport({
+        artifactsDir: params.artifactsDir,
+        repoRoot: params.root,
+      });
+      return {
+        kind: "complete",
+        state,
+        bundle,
+        finalReportPath: promoted.promoted
+          ? join(params.root, "audit-report.md")
+          : join(params.artifactsDir, "audit-report.md"),
+      };
+    }
+
+    if (decision.selected_executor === "design_review") {
+      const findingsPath = join(
+        params.artifactsDir,
+        "incoming",
+        "design-review-findings.json",
+      );
+      let reviewFindings: Finding[] | undefined;
+      try {
+        reviewFindings = await readJsonFile<Finding[]>(findingsPath);
+      } catch (error) {
+        if (!isFileMissingError(error)) throw error;
+      }
+      if (reviewFindings && Array.isArray(reviewFindings)) {
+        const existing = bundle.design_assessment;
+        if (existing) {
+          existing.review_findings = reviewFindings;
+          existing.reviewed = true;
+          await writeJsonFile(
+            join(params.artifactsDir, "design_assessment.json"),
+            existing,
+          );
+          await unlink(findingsPath).catch(() => {});
+          continue;
+        }
+      }
+      return {
+        kind: "design_review",
+        state,
+        bundle,
+      };
+    }
+
+    if (decision.selected_executor === "agent") {
+      if (bundle.repo_manifest) {
+        const pendingTasks = buildPendingAuditTasks(bundle);
+        const taskFiles = new Set<string>();
+        for (const task of pendingTasks) {
+          for (const fp of Object.keys(task.file_line_counts ?? {})) taskFiles.add(fp);
+        }
+        if (taskFiles.size > 0) {
+          const integrity = await checkFileIntegrity(params.root, bundle.repo_manifest, [...taskFiles]);
+          if (!integrity.is_clean) {
+            console.log(
+              `File integrity check: ${integrity.changed_files.length} changed, ${integrity.missing_files.length} missing — re-running intake.`,
+            );
+            await advanceAudit(bundle, { root: params.root, preferredExecutor: "intake_executor" });
+            continue;
+          }
+        }
+      }
+      return {
+        kind: "semantic_review",
+        ...(await ensureSemanticReviewRun({
+          root: params.root,
+          artifactsDir: params.artifactsDir,
+          bundle,
+          state,
+          obligationId: decision.selected_obligation,
+          selfCliPath: params.selfCliPath,
+          timeoutMs: params.timeoutMs,
+        })),
+      };
+    }
+
+    if (!decision.selected_executor) {
+      await writeHandoffOnly({
+        root: params.root,
+        artifactsDir: params.artifactsDir,
+        bundle,
+        audit_state: state,
+        progress_summary: lastSummary || decision.reason,
+        providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+      });
+      return {
+        kind: "blocked",
+        state,
+        bundle,
+        reason: lastSummary || decision.reason,
+      };
+    }
+
+    const result = await runAuditStep({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+    });
+    lastSummary = result.progress_summary;
+    if (result.selected_executor !== "agent") {
+      await clearDispatchFiles(params.artifactsDir);
+    }
+    if (!result.progress_made) {
+      return {
+        kind: "blocked",
+        state: result.audit_state,
+        bundle: result.updated_bundle,
+        reason: result.progress_summary,
+      };
+    }
+  }
+
+  const bundle = await loadArtifactBundle(params.artifactsDir);
+  const state = deriveAuditState(bundle);
+  return {
+    kind: "blocked",
+    state,
+    bundle,
+    reason: `Reached max run limit (${params.maxRuns}) before a review, report, or blocker step was ready.`,
+  };
+}
+
+async function cmdNextStep(argv: string[]): Promise<void> {
+  const root = getRootDir(argv);
+  warnIfNotGitRepo(root);
+  const artifactsDir = getArtifactsDir(argv);
+  await mkdir(artifactsDir, { recursive: true });
+  await ensureSupervisorDirs(artifactsDir);
+
+  const hostCanDispatchSubagents = getOptionalBooleanFlag(
+    argv,
+    "--host-can-dispatch-subagents",
+  );
+  const hostCanRestrictSubagentTools =
+    getOptionalBooleanFlag(argv, "--host-can-restrict-subagent-tools") ??
+    false;
+  const hostCanSelectSubagentModel =
+    getOptionalBooleanFlag(argv, "--host-can-select-subagent-model") ?? false;
+  const hostMaxActiveSubagents = getHostMaxActiveSubagents(argv);
+  let sessionConfig: SessionConfig;
+  try {
+    sessionConfig = await loadSessionConfig(artifactsDir);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await persistConfigErrorHandoff({
+      root,
+      artifactsDir,
+      progressSummary: reason,
+    });
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "blocked",
+      status: "blocked",
+      runId: null,
+      allowedCommands: [],
+      stopCondition: "Report the configuration blocker and stop.",
+      repoRoot: root,
+      artifactPaths: {
+        operator_handoff: join(artifactsDir, "operator-handoff.json"),
+      },
+      prompt: renderBlockedStepPrompt(reason),
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  const hostCanDispatch = resolveHostDispatchCapability({
+    explicit: hostCanDispatchSubagents,
+    sessionConfig,
+  });
+
+  const result = await runDeterministicForNextStep({
+    root,
+    artifactsDir,
+    selfCliPath: resolve(argv[1] ?? process.argv[1] ?? ""),
+    timeoutMs: getTimeoutMs(argv, sessionConfig),
+    maxRuns: getMaxRuns(argv),
+  });
+
+  if (result.kind === "complete") {
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "present_report",
+      status: "complete",
+      runId: null,
+      allowedCommands: [],
+      stopCondition: "Present the final report and stop.",
+      repoRoot: root,
+      artifactPaths: {
+        final_report: result.finalReportPath,
+      },
+      prompt: renderPresentReportPrompt(result.finalReportPath),
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "blocked") {
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "blocked",
+      status: "blocked",
+      runId: null,
+      allowedCommands: [],
+      stopCondition: "Report the blocker and stop.",
+      repoRoot: root,
+      artifactPaths: {
+        operator_handoff: join(artifactsDir, "operator-handoff.json"),
+      },
+      prompt: renderBlockedStepPrompt(result.reason),
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "design_review") {
+    const designReviewResultsPath = join(
+      artifactsDir,
+      "incoming",
+      "design-review-findings.json",
+    );
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir);
+    const prompt = renderDesignReviewPrompt(result.bundle);
+    const fullPrompt = [
+      prompt,
+      "## Results path",
+      "",
+      `Write the JSON array of findings to:`,
+      "",
+      `  ${designReviewResultsPath}`,
+      "",
+      `Then run: ${continueCommand}`,
+      "",
+    ].join("\n");
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "design_review",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Write design review findings to the results path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        design_review_results: designReviewResultsPath,
+      },
+      prompt: fullPrompt,
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (!hostCanDispatch) {
+    const singleTaskPromptPath = join(
+      artifactsDir,
+      "dispatch",
+      "current-single-task-prompt.md",
+    );
+    const workerCommand = renderCommand(result.activeReviewRun.worker_command);
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "single_task_fallback",
+      status: "ready",
+      runId: result.activeReviewRun.run_id,
+      allowedCommands: [workerCommand],
+      stopCondition:
+        "Run the exact worker_command after one result, then stop without looping.",
+      repoRoot: root,
+      artifactPaths: {
+        active_review_task: result.activeReviewRun.task_path,
+        active_review_prompt: result.activeReviewRun.prompt_path,
+        pending_audit_tasks: result.activeReviewRun.pending_audit_tasks_path ?? null,
+        audit_results: result.activeReviewRun.audit_results_path,
+        single_task_prompt: singleTaskPromptPath,
+      },
+      prompt: renderSingleTaskFallbackStepPrompt({
+        singleTaskPromptPath,
+        activeReviewRun: result.activeReviewRun,
+      }),
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  const dispatch = await prepareDispatchArtifacts({
+    runId: result.activeReviewRun.run_id,
+    artifactsDir,
+    root,
+    hostActiveSubagentLimit: hostMaxActiveSubagents,
+  });
+  const mergeCommand = mergeAndIngestCommand(
+    artifactsDir,
+    result.activeReviewRun.run_id,
+  );
+  const continueCommand = nextStepCommand(root, artifactsDir);
+  const step = await writeCurrentStep({
+    artifactsDir,
+    stepKind: "dispatch_review",
+    status: "ready",
+    runId: result.activeReviewRun.run_id,
+    allowedCommands: [
+      "auditor_merge_and_ingest",
+      "auditor_continue_audit",
+      mergeCommand,
+      continueCommand,
+    ],
+    stopCondition:
+      "Dispatch every packet, run merge-and-ingest once, then run next-step.",
+    repoRoot: root,
+    artifactPaths: {
+      dispatch_plan: dispatch.dispatch_plan_path,
+      dispatch_quota: dispatch.dispatch_quota_path,
+      dispatch_warnings: dispatch.dispatch_warnings_path,
+      active_review_task: result.activeReviewRun.task_path,
+      pending_audit_tasks: result.activeReviewRun.pending_audit_tasks_path ?? null,
+    },
+    prompt: renderDispatchReviewPrompt({
+      root,
+      artifactsDir,
+      activeReviewRun: result.activeReviewRun,
+      dispatchPlanPath: dispatch.dispatch_plan_path,
+      dispatchQuotaPath: dispatch.dispatch_quota_path,
+      hostCanRestrictSubagentTools,
+      hostCanSelectSubagentModel,
+    }),
+  });
+  console.log(JSON.stringify(step, null, 2));
+}
+
+async function cmdRunToCompletion(argv: string[]): Promise<void> {
+  const root = getRootDir(argv);
+  warnIfNotGitRepo(root);
+  const artifactsDir = getArtifactsDir(argv);
+  await cleanupStaleArtifactsDir(artifactsDir);
+  await mkdir(artifactsDir, { recursive: true });
+  await ensureSupervisorDirs(artifactsDir);
+  let sessionConfig: SessionConfig;
+  try {
+    sessionConfig = await loadSessionConfig(artifactsDir);
+  } catch (error) {
+    await persistConfigErrorHandoff({
+      root,
+      artifactsDir,
+      progressSummary: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+const explicitProvider = getExplicitProvider(argv);
+  const provider = createFreshSessionProvider(
+    explicitProvider,
+    sessionConfig,
+  );
+  const uiMode = getUiMode(argv, sessionConfig.ui_mode ?? "headless");
+  const maxRuns = getMaxRuns(argv);
+  const agentBatchSize = getAgentBatchSize(argv, sessionConfig);
+  const parallelWorkers = getParallelWorkers(argv, sessionConfig);
+  const timeoutMs = getTimeoutMs(argv, sessionConfig);
+  const hostModel = getHostModel(argv);
+  const selfCliPath = resolve(argv[1] ?? process.argv[1] ?? "");
+  const batchResultsDir = getBatchResultsDir(argv);
+  if (batchResultsDir && getFlag(argv, "--results")) {
+    throw new Error("Use either --results <file> or --batch-results <dir>, not both.");
+  }
+  let pendingBatchAuditResults = batchResultsDir
+    ? await listBatchResultFiles(batchResultsDir)
+    : [];
+
+  let pendingAuditResultsPath = getFlag(argv, "--results");
+  let pendingRuntimeUpdatesPath = getFlag(argv, "--updates");
+  let pendingExternalAnalyzerPath = getFlag(
+    argv,
+    "--external-analyzer-results",
+  );
+  let runCount = 0;
+  let deepeningCycles = 0;
+  const MAX_DEEPENING_CYCLES = 3;
+  let anyProgress = false;
+  let lastResult: WorkerResult | null = null;
+  const artifactsWritten = new Set<string>();
+
+  while (runCount < maxRuns) {
+    const bundle = await loadArtifactBundle(artifactsDir);
+    const decision = decideNextStep(bundle);
+
+    if (
+      decision.selected_executor === "agent" &&
+      bundle.audit_tasks?.some(
+        (t) =>
+          t.tags?.includes("selective_deepening") &&
+          t.status !== "complete",
+      ) &&
+      !bundle.audit_tasks?.some(
+        (t) =>
+          !t.tags?.includes("selective_deepening") &&
+          t.status !== "complete",
+      )
+    ) {
+      deepeningCycles++;
+      if (deepeningCycles > MAX_DEEPENING_CYCLES) {
+        process.stderr.write(
+          `[audit-code] Reached max deepening cycles (${MAX_DEEPENING_CYCLES}). Stopping to prevent churn.\n`,
+        );
+        break;
+      }
+    }
+
+    let preferredExecutor = decision.selected_executor;
+    let obligationId = decision.selected_obligation;
+    let auditResultsPath: string | undefined;
+    let runtimeUpdatesPath: string | undefined;
+    let externalAnalyzerPath: string | undefined;
+
+    if (pendingExternalAnalyzerPath) {
+      preferredExecutor = "external_analyzer_import_executor";
+      obligationId = "external_analyzer_import";
+      externalAnalyzerPath = pendingExternalAnalyzerPath;
+    } else if (pendingBatchAuditResults.length > 0 && bundle.coverage_matrix) {
+      preferredExecutor = "result_ingestion_executor";
+      obligationId = "audit_results_ingested";
+      auditResultsPath = pendingBatchAuditResults[0];
+    } else if (pendingAuditResultsPath && bundle.coverage_matrix) {
+      preferredExecutor = "result_ingestion_executor";
+      obligationId = "audit_results_ingested";
+      auditResultsPath = pendingAuditResultsPath;
+    } else if (pendingRuntimeUpdatesPath && bundle.runtime_validation_tasks) {
+      preferredExecutor = "runtime_validation_update_executor";
+      obligationId = "runtime_validation_current";
+      runtimeUpdatesPath = pendingRuntimeUpdatesPath;
+    }
+
+    if (preferredExecutor === "agent" && provider.name === LOCAL_SUBPROCESS_PROVIDER_NAME) {
+      const blocker = buildManualReviewBlocker(provider.name);
+      const blockedState = buildBlockedAuditState({
+        state: decision.state,
+        obligationId,
+        executor: preferredExecutor,
+        blocker,
+      });
+      await writeCoreArtifacts(artifactsDir, {
+        ...bundle,
+        audit_state: blockedState,
+      });
+
+      const blockRunId = buildRunId(obligationId, runCount + 1);
+      const blockPaths = getRunPaths(artifactsDir, blockRunId);
+      const blockPendingTasks = await addFileLineCountHints(
+        root,
+        buildPendingAuditTasks(bundle),
+      );
+      const blockPendingTasksPath = join(blockPaths.runDir, "pending-audit-tasks.json");
+      const blockAuditResultsPath = join(blockPaths.runDir, "audit-results.json");
+      const blockReadPaths = new Set<string>();
+      for (const pt of blockPendingTasks) {
+        for (const fp of pt.file_paths) blockReadPaths.add(fp);
+      }
+      const blockTask: WorkerTask = {
+        contract_version: "audit-code-worker/v1alpha1",
+        run_id: blockRunId,
+        repo_root: root,
+        artifacts_dir: artifactsDir,
+        obligation_id: obligationId,
+        preferred_executor: preferredExecutor,
+        result_path: blockPaths.resultPath,
+        worker_command: [
+          process.execPath,
+          selfCliPath,
+          "worker-run",
+          "--task",
+          blockPaths.taskPath,
+        ],
+        audit_results_path: blockAuditResultsPath,
+        pending_audit_tasks_path: blockPendingTasksPath,
+        timeout_ms: timeoutMs,
+        max_retries: 0,
+        access: {
+          read_paths: [...blockReadPaths],
+          write_paths: [blockAuditResultsPath, blockPaths.resultPath],
+        },
+      };
+      const blockPrompt = renderWorkerPrompt(blockTask);
+      await writeWorkerTaskFiles(
+        blockTask,
+        blockPrompt,
+        blockPaths,
+        artifactsDir,
+        blockPendingTasks,
+      );
+      await writeJsonFile(blockPendingTasksPath, blockPendingTasks);
+
+      await emitEnvelope({
+        root,
+        artifactsDir,
+        bundle: {
+          ...bundle,
+          audit_state: blockedState,
+        },
+        audit_state: blockedState,
+        selected_obligation: obligationId,
+        selected_executor: preferredExecutor,
+        progress_made: anyProgress,
+        artifacts_written: Array.from(
+          new Set([...artifactsWritten, "audit_state.json"]),
+        ),
+        progress_summary: blocker,
+        next_likely_step: null,
+        providerName: provider.name,
+        activeReviewRun: {
+          run_id: blockRunId,
+          task_path: blockPaths.taskPath,
+          prompt_path: blockPaths.promptPath,
+          pending_audit_tasks_path: blockPendingTasksPath,
+          audit_results_path: blockAuditResultsPath,
+          worker_command: blockTask.worker_command,
+        },
+      });
+      return;
+    }
+
+    if (!preferredExecutor) {
+      const state = decision.state;
+      await clearDispatchFiles(artifactsDir);
+      await emitEnvelope({
+        root,
+        artifactsDir,
+        bundle,
+        audit_state: state,
+        selected_obligation: anyProgress
+          ? (lastResult?.obligation_id ?? null)
+          : null,
+        selected_executor: anyProgress
+          ? (lastResult?.selected_executor ?? null)
+          : null,
+        progress_made: anyProgress,
+        artifacts_written: Array.from(artifactsWritten),
+        progress_summary:
+          anyProgress && state.status === "complete"
+            ? `Completed audit in ${runCount} fresh worker runs.`
+            : decision.reason,
+        next_likely_step:
+          state.status === "complete" ? null : decision.selected_obligation,
+        providerName: provider.name,
+      });
+      if (state.status === "complete") {
+        await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
+      }
+      return;
+    }
+
+    if (preferredExecutor === "agent" && parallelWorkers > 1) {
+      const quotaState = await readQuotaState();
+      const providerModelKey = buildProviderModelKey(provider.name, hostModel);
+      const quotaStateEntry = quotaState.entries[providerModelKey] ?? null;
+      const allCandidateTasks = buildPendingAuditTasks(bundle);
+      const candidateGroups = chunkArray(
+        allCandidateTasks.slice(0, parallelWorkers * agentBatchSize),
+        agentBatchSize,
+      );
+      const slotTokenEstimates = candidateGroups.map((g) => estimateTaskGroupTokens(g));
+
+      const providerLimits: DiscoveredRateLimits | null =
+        await provider.queryLimits?.(hostModel)
+          .then((r) => r ? { ...r, source: "provider_query" } : null)
+          .catch(() => null)
+        ?? null;
+      const cachedLimits = await lookupDiscoveredLimits(providerModelKey).catch(() => null);
+      const discoveredLimits = mergeDiscoveredLimits(providerLimits, cachedLimits);
+
+      const halfLifeHours = sessionConfig.quota?.empirical_half_life_hours ?? 24;
+      const quotaSource = new CompositeQuotaSource([new LearnedQuotaSource(halfLifeHours)]);
+      const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(providerModelKey).catch(() => null);
+
+      const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
+        sessionConfig,
+      });
+
+      const waveSchedule = scheduleWave({
+        providerName: resolveFreshSessionProviderName(getExplicitProvider(argv), sessionConfig),
+        sessionConfig,
+        hostModel,
+        requestedConcurrency: parallelWorkers,
+        estimatedSlotTokens: slotTokenEstimates,
+        quotaStateEntry,
+        hostConcurrencyLimit,
+        quotaSourceSnapshot,
+        discoveredLimits,
+      });
+      const waveSize = waveSchedule.wave_size;
+
+      if (waveSchedule.cooldown_until) {
+        const waitMs = new Date(waveSchedule.cooldown_until).getTime() - Date.now();
+        if (waitMs > 0) {
+          const cappedWait = Math.min(waitMs, 120_000);
+          process.stderr.write(
+            `[quota] Cooldown active — waiting ${Math.ceil(cappedWait / 1000)}s before next wave.\n`,
+          );
+          await new Promise<void>((r) => setTimeout(r, cappedWait));
+        }
+      }
+
+      const taskGroups = candidateGroups.slice(0, waveSize);
+
+      interface WorkerSlot {
+        runId: string;
+        paths: RunPaths;
+        auditResultsPath: string;
+        pendingTasksPath: string;
+        group: AuditTask[];
+      }
+
+      const workerSlots: WorkerSlot[] = [];
+      for (const rawGroup of taskGroups) {
+        const group = await addFileLineCountHints(root, rawGroup);
+        runCount += 1;
+        const slotRunId = buildRunId(obligationId, runCount);
+        const slotPaths = getRunPaths(artifactsDir, slotRunId);
+        const slotAuditResultsPath = join(slotPaths.runDir, "audit-results.json");
+        const slotPendingTasksPath = join(slotPaths.runDir, "pending-audit-tasks.json");
+        const slotReadPaths = new Set<string>();
+        for (const t of group) {
+          for (const fp of t.file_paths) slotReadPaths.add(fp);
+        }
+        const slotTask: WorkerTask = {
+          contract_version: "audit-code-worker/v1alpha1",
+          run_id: slotRunId,
+          repo_root: root,
+          artifacts_dir: artifactsDir,
+          obligation_id: obligationId,
+          preferred_executor: "agent",
+          result_path: slotPaths.resultPath,
+          worker_command: [process.execPath, selfCliPath, "worker-run", "--task", slotPaths.taskPath],
+          audit_results_path: slotAuditResultsPath,
+          pending_audit_tasks_path: slotPendingTasksPath,
+          worker_command_mode: "deferred",
+          timeout_ms: timeoutMs,
+          max_retries: 0,
+          access: {
+            read_paths: [...slotReadPaths],
+            write_paths: [slotAuditResultsPath, slotPaths.resultPath],
+          },
+        };
+        const slotPrompt = renderWorkerPrompt(slotTask);
+        await writeWorkerTaskFiles(
+          slotTask,
+          slotPrompt,
+          slotPaths,
+          artifactsDir,
+          group,
+          { updateDispatch: false },
+        );
+        await writeJsonFile(slotPendingTasksPath, group);
+        workerSlots.push({ runId: slotRunId, paths: slotPaths, auditResultsPath: slotAuditResultsPath, pendingTasksPath: slotPendingTasksPath, group });
+      }
+      await writeDispatchBatchFiles(
+        artifactsDir,
+        workerSlots.map((slot) => ({
+          run_id: slot.runId,
+          task_path: slot.paths.taskPath,
+          prompt_path: slot.paths.promptPath,
+          result_path: slot.paths.resultPath,
+          status_path: slot.paths.statusPath,
+          audit_results_path: slot.auditResultsPath,
+          pending_audit_tasks_path: slot.pendingTasksPath,
+        })),
+        workerSlots.flatMap((slot) => slot.group),
+      );
+
+      const parallelStartedAt = new Date().toISOString();
+
+      const { results: launchResults } = await runSlidingWindow(
+        workerSlots.map((slot) => () =>
+          provider.launch({
+            repoRoot: root,
+            runId: slot.runId,
+            obligationId,
+            promptPath: slot.paths.promptPath,
+            taskPath: slot.paths.taskPath,
+            resultPath: slot.paths.resultPath,
+            stdoutPath: slot.paths.stdoutPath,
+            stderrPath: slot.paths.stderrPath,
+            uiMode,
+            timeoutMs,
+          }),
+        ),
+        waveSize,
+      );
+      const launchErrorsByRunId = new Map<string, string>();
+      for (let index = 0; index < launchResults.length; index++) {
+        const outcome = launchResults[index];
+        if (outcome?.status === "rejected") {
+          launchErrorsByRunId.set(
+            workerSlots[index].runId,
+            outcome.reason instanceof Error
+              ? outcome.reason.message
+              : String(outcome.reason),
+          );
+        } else if (outcome?.status === "fulfilled") {
+          const launchExitSummary = summarizeLaunchExit(outcome.value);
+          if (launchExitSummary) {
+            launchErrorsByRunId.set(workerSlots[index].runId, launchExitSummary);
+          }
+        }
+      }
+
+      // Result ingestion is intentionally sequential even though agent launch
+      // was parallel. Writing to coverage_matrix.json is not atomic, so
+      // concurrent ingest calls would race and corrupt coverage state.
+      let batchProgress = false;
+      const batchErrors: string[] = [];
+      for (const slot of workerSlots) {
+        const parallelEndedAt = new Date().toISOString();
+        let workerResult = buildWorkerResult({
+          runId: slot.runId,
+          obligationId,
+          status: "no_progress",
+          progressMade: false,
+          selectedExecutor: "agent",
+          artifactsWritten: [],
+          summary: "Parallel worker batch made no progress.",
+          nextLikelyStep: obligationId,
+          errors: [],
+        });
+
+        try {
+          const launchError = launchErrorsByRunId.get(slot.runId);
+          if (launchError) {
+            throw new Error(`Worker launch failed: ${launchError}`);
+          }
+
+          const auditResults = await readJsonFile<AuditResult[]>(slot.auditResultsPath);
+          const pendingTaskIds = new Set(slot.group.map((t) => t.task_id));
+          const matchedCount = auditResults.filter((r) => pendingTaskIds.has(r.task_id)).length;
+
+          if (slot.group.length > 0 && matchedCount === 0) {
+            throw new Error("Worker did not emit any audit results for the assigned tasks.");
+          }
+
+          const issues = validateAuditResults(auditResults, slot.group, {
+            lineIndex: await buildLineIndexForPaths(
+              root,
+              slot.group.flatMap((task) => task.file_paths),
+            ),
+          });
+          const errors = issues.filter((issue) => issue.severity === "error");
+          const warnings = issues.filter((issue) => issue.severity === "warning");
+
+          if (warnings.length > 0) {
+            process.stderr.write(
+              `audit-results validation: ${warnings.length} warning(s) for ${slot.runId}:\n` +
+                formatAuditResultIssues(warnings) + "\n",
+            );
+          }
+          if (errors.length > 0) {
+            throw new Error(
+              `audit-results validation failed with ${errors.length} error(s):\n` +
+                formatAuditResultIssues(errors),
+            );
+          }
+
+          const stepResult = await runAuditStep({
+            root,
+            artifactsDir,
+            preferredExecutor: "result_ingestion_executor",
+            auditResultsPath: slot.auditResultsPath,
+          });
+
+          workerResult = buildWorkerResult({
+            runId: slot.runId,
+            obligationId,
+            status: stepResult.progress_made ? "completed" : "no_progress",
+            progressMade: stepResult.progress_made,
+            selectedExecutor: stepResult.selected_executor,
+            artifactsWritten: stepResult.artifacts_written,
+            summary: stepResult.progress_summary,
+            nextLikelyStep: stepResult.next_likely_step,
+            errors: [],
+          });
+          batchProgress ||= stepResult.progress_made;
+          if (stepResult.progress_made) anyProgress = true;
+          for (const a of stepResult.artifacts_written) artifactsWritten.add(a);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          batchErrors.push(`${slot.runId}: ${message}`);
+          workerResult = buildWorkerResult({
+            runId: slot.runId,
+            obligationId,
+            status: "failed",
+            progressMade: false,
+            selectedExecutor: "agent",
+            artifactsWritten: [],
+            summary: `Worker failed for executor agent: ${message}`,
+            nextLikelyStep: obligationId,
+            errors: [message],
+          });
+          process.stderr.write(`[agent-batch] ${slot.runId} failed: ${message}\n`);
+        }
+        await persistWorkerRunArtifacts(
+          slot.paths,
+          workerResult,
+          "parallel-deferred-agent",
+        );
+
+        await appendRunLedgerEntry(artifactsDir, {
+          run_id: slot.runId,
+          provider: provider.name,
+          obligation_id: obligationId,
+          selected_executor: workerResult.selected_executor,
+          status: workerResult.status,
+          started_at: parallelStartedAt,
+          ended_at: parallelEndedAt,
+          result_path: slot.paths.resultPath,
+        });
+        artifactsWritten.add("run-ledger.json");
+      }
+
+      // Record outcome for adaptive learning (best-effort — never blocks dispatch)
+      {
+        const rateLimitResults = batchErrors.map((e) => detectRateLimitError(e));
+        const rateLimitHit = rateLimitResults.find((r) => r.isRateLimited);
+        const retryAfterMs = rateLimitHit?.retryAfterMs ?? null;
+        await recordWaveOutcome(
+          providerModelKey,
+          {
+            concurrency: workerSlots.length,
+            estimated_tokens: slotTokenEstimates.slice(0, workerSlots.length).reduce((a, b) => a + b, 0),
+            outcome: rateLimitHit ? "rate_limited" : batchErrors.length > 0 ? "timeout" : "success",
+            cooldown_until: rateLimitHit ? computeCooldownUntil(retryAfterMs) : null,
+          },
+          sessionConfig.quota?.empirical_half_life_hours ?? 24,
+        ).catch(() => undefined);
+      }
+
+      // Extract rate-limit headers from worker stderr (best-effort)
+      {
+        const extractor = getHeaderExtractorForProvider(provider.name);
+        for (const slot of workerSlots) {
+          try {
+            const stderr = await readFile(slot.paths.stderrPath, "utf8");
+            const extracted = extractor.extract(stderr);
+            if (extracted && (extracted.requests_per_minute != null || extracted.input_tokens_per_minute != null)) {
+              await updateDiscoveredLimits(providerModelKey, {
+                requests_per_minute: extracted.requests_per_minute,
+                input_tokens_per_minute: extracted.input_tokens_per_minute,
+                source: "header_extraction",
+              });
+              break; // one successful extraction is enough
+            }
+          } catch {
+            // stderr file missing or unreadable — skip
+          }
+        }
+      }
+
+      if (batchErrors.length > 0) {
+        const bundleAfter = await loadArtifactBundle(artifactsDir);
+        const blockedState = buildBlockedAuditState({
+          state: bundleAfter.audit_state ?? deriveAuditState(bundleAfter),
+          obligationId,
+          executor: "agent",
+          blocker:
+            `Parallel worker batch failed for ${batchErrors.length} run(s). ` +
+            batchErrors.slice(0, 3).join(" | "),
+        });
+        await writeCoreArtifacts(artifactsDir, {
+          ...bundleAfter,
+          audit_state: blockedState,
+        });
+        await emitEnvelope({
+          root,
+          artifactsDir,
+          bundle: { ...bundleAfter, audit_state: blockedState },
+          audit_state: blockedState,
+          selected_obligation: obligationId,
+          selected_executor: "agent",
+          progress_made: anyProgress,
+          artifacts_written: Array.from(
+            new Set([...artifactsWritten, "audit_state.json"]),
+          ),
+          progress_summary:
+            `Parallel worker batch failed for ${batchErrors.length} run(s).\n` +
+            batchErrors.join("\n"),
+          next_likely_step: null,
+          providerName: provider.name,
+        });
+        return;
+      }
+
+      if (!batchProgress) {
+        const bundleAfter = await loadArtifactBundle(artifactsDir);
+        const state = bundleAfter.audit_state ?? deriveAuditState(bundleAfter);
+        await emitEnvelope({
+          root,
+          artifactsDir,
+          bundle: bundleAfter,
+          audit_state: state,
+          selected_obligation: obligationId,
+          selected_executor: "agent",
+          progress_made: anyProgress,
+          artifacts_written: Array.from(artifactsWritten),
+          progress_summary: "Parallel worker batch made no progress.",
+          next_likely_step: obligationId,
+          providerName: provider.name,
+        });
+        return;
+      }
+
+      continue;
+    }
+
+    runCount += 1;
+    const runId = buildRunId(obligationId, runCount);
+    const paths = getRunPaths(artifactsDir, runId);
+    if (shouldRunInlineExecutor(preferredExecutor)) {
+      await clearDispatchFiles(artifactsDir);
+      const startedAt = new Date().toISOString();
+      let workerResult: WorkerResult;
+
+      try {
+        const result = await runAuditStep({
+          root,
+          artifactsDir,
+          preferredExecutor,
+          auditResultsPath,
+          runtimeUpdatesPath,
+          externalAnalyzerPath,
+        });
+        workerResult = {
+          contract_version: WORKER_RESULT_CONTRACT_VERSION,
+          run_id: runId,
+          obligation_id: obligationId,
+          status: result.progress_made ? "completed" : "no_progress",
+          progress_made: result.progress_made,
+          selected_executor: result.selected_executor,
+          artifacts_written: result.artifacts_written,
+          summary: result.progress_summary,
+          next_likely_step: result.next_likely_step,
+          errors: [],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        workerResult = {
+          contract_version: WORKER_RESULT_CONTRACT_VERSION,
+          run_id: runId,
+          obligation_id: obligationId,
+          status: "failed",
+          progress_made: false,
+          selected_executor: preferredExecutor,
+          artifacts_written: [],
+          summary: `Inline executor failed for ${preferredExecutor}: ${message}`,
+          next_likely_step: decision.selected_obligation,
+          errors: [message],
+        };
+      }
+
+      await persistWorkerRunArtifacts(paths, workerResult, "inline");
+      await appendRunLedgerEntry(artifactsDir, {
+        run_id: runId,
+        provider: provider.name,
+        obligation_id: obligationId,
+        selected_executor: workerResult.selected_executor,
+        status: workerResult.status,
+        started_at: startedAt,
+        ended_at: new Date().toISOString(),
+        result_path: paths.resultPath,
+      });
+
+      lastResult = workerResult;
+      if (workerResult.progress_made) {
+        anyProgress = true;
+      }
+      for (const artifact of workerResult.artifacts_written) {
+        artifactsWritten.add(artifact);
+      }
+      artifactsWritten.add("run-ledger.json");
+
+      if (externalAnalyzerPath) pendingExternalAnalyzerPath = undefined;
+      if (
+        auditResultsPath &&
+        pendingBatchAuditResults[0] === auditResultsPath &&
+        preferredExecutor === "result_ingestion_executor" &&
+        workerResult.status !== "failed" &&
+        workerResult.status !== "blocked"
+      ) {
+        pendingBatchAuditResults.shift();
+      }
+      if (auditResultsPath) pendingAuditResultsPath = undefined;
+      if (runtimeUpdatesPath) pendingRuntimeUpdatesPath = undefined;
+
+      if (
+        workerResult.status === "failed" ||
+        workerResult.status === "blocked" ||
+        workerResult.status === "no_progress"
+      ) {
+        const bundleAfter = await loadArtifactBundle(artifactsDir);
+        const shouldBlock =
+          workerResult.status === "failed" || workerResult.status === "blocked";
+        const state = shouldBlock
+          ? buildBlockedAuditState({
+              state: bundleAfter.audit_state ?? deriveAuditState(bundleAfter),
+              obligationId: workerResult.obligation_id,
+              executor: workerResult.selected_executor,
+              blocker: buildWorkerFailureBlocker(workerResult),
+            })
+          : bundleAfter.audit_state ?? deriveAuditState(bundleAfter);
+        if (shouldBlock) {
+          await writeCoreArtifacts(artifactsDir, {
+            ...bundleAfter,
+            audit_state: state,
+          });
+        }
+        await emitEnvelope({
+          root,
+          artifactsDir,
+          bundle: shouldBlock
+            ? { ...bundleAfter, audit_state: state }
+            : bundleAfter,
+          audit_state: state,
+          selected_obligation: workerResult.obligation_id,
+          selected_executor: workerResult.selected_executor,
+          progress_made: anyProgress,
+          artifacts_written: Array.from(
+            shouldBlock
+              ? new Set([...artifactsWritten, "audit_state.json"])
+              : artifactsWritten,
+          ),
+          progress_summary: buildWorkerFailureBlocker(workerResult),
+          next_likely_step: shouldBlock ? null : workerResult.next_likely_step,
+          providerName: provider.name,
+        });
+        return;
+      }
+
+      continue;
+    }
+
+    const pendingAuditTasks =
+      preferredExecutor === "agent"
+        ? await addFileLineCountHints(root, buildPendingAuditTasks(bundle))
+        : undefined;
+    const pendingAuditTasksPath =
+      preferredExecutor === "agent"
+        ? join(paths.runDir, "pending-audit-tasks.json")
+        : undefined;
+    const providerAuditResultsPath =
+      preferredExecutor === "agent"
+        ? join(paths.runDir, "audit-results.json")
+        : auditResultsPath;
+    const providerReadPaths = new Set<string>();
+    if (pendingAuditTasks) {
+      for (const pt of pendingAuditTasks) {
+        for (const fp of pt.file_paths) providerReadPaths.add(fp);
+      }
+    }
+    const task: WorkerTask = {
+      contract_version: "audit-code-worker/v1alpha1",
+      run_id: runId,
+      repo_root: root,
+      artifacts_dir: artifactsDir,
+      obligation_id: obligationId,
+      preferred_executor: preferredExecutor,
+      result_path: paths.resultPath,
+      worker_command: [
+        process.execPath,
+        selfCliPath,
+        "worker-run",
+        "--task",
+        paths.taskPath,
+      ],
+      audit_results_path: providerAuditResultsPath,
+      pending_audit_tasks_path: pendingAuditTasksPath,
+      runtime_updates_path: runtimeUpdatesPath,
+      external_analyzer_results_path: externalAnalyzerPath,
+      timeout_ms: timeoutMs,
+      max_retries: 0,
+      access: providerReadPaths.size > 0 ? {
+        read_paths: [...providerReadPaths],
+        write_paths: [providerAuditResultsPath ?? paths.resultPath, paths.resultPath],
+      } : undefined,
+    };
+    const prompt = renderWorkerPrompt(task);
+    await writeWorkerTaskFiles(
+      task,
+      prompt,
+      paths,
+      artifactsDir,
+      pendingAuditTasks,
+    );
+    if (pendingAuditTasksPath && pendingAuditTasks) {
+      await writeJsonFile(pendingAuditTasksPath, pendingAuditTasks);
+    }
+
+    const startedAt = new Date().toISOString();
+    let workerResult: WorkerResult;
+    let launchResult:
+      | Awaited<ReturnType<typeof provider.launch>>
+      | null = null;
+
+    try {
+      launchResult = await provider.launch({
+        repoRoot: root,
+        runId,
+        obligationId,
+        promptPath: paths.promptPath,
+        taskPath: paths.taskPath,
+        resultPath: paths.resultPath,
+        stdoutPath: paths.stdoutPath,
+        stderrPath: paths.stderrPath,
+        uiMode,
+        timeoutMs,
+      });
+      const candidate = await readJsonFile<unknown>(paths.resultPath);
+      if (isWorkerResult(candidate)) {
+        workerResult = candidate;
+      } else {
+        const launchExitSummary = summarizeLaunchExit(launchResult);
+        workerResult = {
+            contract_version: WORKER_RESULT_CONTRACT_VERSION,
+            run_id: runId,
+            obligation_id: obligationId,
+            status: "failed",
+            progress_made: false,
+            selected_executor: preferredExecutor,
+            artifacts_written: [],
+            summary: launchExitSummary
+              ? `Worker did not emit a valid worker result after provider exit: ${launchExitSummary}`
+              : "Worker did not emit a valid worker result.",
+            next_likely_step: decision.selected_obligation,
+            errors: ["Invalid worker result contract."],
+        };
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const launchExitSummary =
+        launchResult && summarizeLaunchExit(launchResult);
+      workerResult = {
+        contract_version: WORKER_RESULT_CONTRACT_VERSION,
+        run_id: runId,
+        obligation_id: obligationId,
+        status: "failed",
+        progress_made: false,
+        selected_executor: preferredExecutor,
+        artifacts_written: [],
+        summary: `Worker launch failed for ${preferredExecutor}: ${
+          launchExitSummary ?? message
+        }`,
+        next_likely_step: decision.selected_obligation,
+        errors: launchExitSummary ? [message, launchExitSummary] : [message],
+      };
+      await persistWorkerRunArtifacts(paths, workerResult, "provider-launch");
+    }
+
+    await appendRunLedgerEntry(artifactsDir, {
+      run_id: runId,
+      provider: provider.name,
+      obligation_id: obligationId,
+      selected_executor: workerResult.selected_executor,
+      status: workerResult.status,
+      started_at: startedAt,
+      ended_at: new Date().toISOString(),
+      result_path: paths.resultPath,
+    });
+
+    lastResult = workerResult;
+    if (workerResult.progress_made) {
+      anyProgress = true;
+    }
+    for (const artifact of workerResult.artifacts_written) {
+      artifactsWritten.add(artifact);
+    }
+    artifactsWritten.add("run-ledger.json");
+
+    if (externalAnalyzerPath) pendingExternalAnalyzerPath = undefined;
+    if (
+      auditResultsPath &&
+      pendingBatchAuditResults[0] === auditResultsPath &&
+      preferredExecutor === "result_ingestion_executor" &&
+      workerResult.status !== "failed" &&
+      workerResult.status !== "blocked"
+    ) {
+      pendingBatchAuditResults.shift();
+    }
+    if (providerAuditResultsPath) pendingAuditResultsPath = undefined;
+    if (runtimeUpdatesPath) pendingRuntimeUpdatesPath = undefined;
+
+    if (
+      workerResult.status === "failed" ||
+      workerResult.status === "blocked" ||
+      workerResult.status === "no_progress"
+    ) {
+      const bundleAfter = await loadArtifactBundle(artifactsDir);
+      const shouldBlock =
+        workerResult.status === "failed" || workerResult.status === "blocked";
+      const state = shouldBlock
+        ? buildBlockedAuditState({
+            state: deriveAuditState(bundleAfter),
+            obligationId: workerResult.obligation_id,
+            executor: workerResult.selected_executor,
+            blocker: buildWorkerFailureBlocker(workerResult),
+          })
+        : deriveAuditState(bundleAfter);
+      if (shouldBlock) {
+        await writeCoreArtifacts(artifactsDir, {
+          ...bundleAfter,
+          audit_state: state,
+        });
+      }
+      await emitEnvelope({
+        root,
+        artifactsDir,
+        bundle: shouldBlock
+          ? { ...bundleAfter, audit_state: state }
+          : bundleAfter,
+        audit_state: state,
+        selected_obligation: workerResult.obligation_id,
+        selected_executor: workerResult.selected_executor,
+        progress_made: anyProgress,
+        artifacts_written: Array.from(
+          shouldBlock
+            ? new Set([...artifactsWritten, "audit_state.json"])
+            : artifactsWritten,
+        ),
+        progress_summary: buildWorkerFailureBlocker(workerResult),
+        next_likely_step: shouldBlock ? null : workerResult.next_likely_step,
+        providerName: provider.name,
+      });
+      return;
+    }
+  }
+
+  const bundle = await loadArtifactBundle(artifactsDir);
+  const decision = decideNextStep(bundle);
+  const state = decision.state;
+  if (state.status === "complete") {
+    await clearDispatchFiles(artifactsDir);
+  }
+  await emitEnvelope({
+    root,
+    artifactsDir,
+    bundle,
+    audit_state: state,
+    selected_obligation:
+      lastResult?.obligation_id ?? decision.selected_obligation,
+    selected_executor:
+      lastResult?.selected_executor ?? decision.selected_executor,
+    progress_made: anyProgress,
+    artifacts_written: Array.from(artifactsWritten),
+    progress_summary: `Reached max run limit (${maxRuns}) before terminal state.`,
+    next_likely_step:
+      state.status === "complete" ? null : decision.selected_obligation,
+    providerName: provider.name,
+  });
+  if (state.status === "complete") {
+    await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
+  }
+}
+
+async function cmdWorkerRun(argv: string[]): Promise<void> {
+  const taskPath = getFlag(argv, "--task");
+  if (!taskPath) {
+    throw new Error("worker-run requires --task <path>");
+  }
+  const task = await readJsonFile<WorkerTask>(taskPath);
+
+  let workerResult: WorkerResult;
+  try {
+    if (looksLikeCliFlag(task.audit_results_path)) {
+      throw new Error(
+        `task.audit_results_path resolved to '${task.audit_results_path}', which looks like a CLI flag instead of a file path.`,
+      );
+    }
+    if (task.preferred_executor === "agent" && !task.audit_results_path) {
+      throw new Error(
+        "agent worker-run requires audit_results_path so provider-assisted review can be ingested.",
+      );
+    }
+    if (task.preferred_executor === "agent" && task.audit_results_path) {
+      const pendingTasks = task.pending_audit_tasks_path
+        ? await readJsonFile<AuditTask[]>(task.pending_audit_tasks_path)
+        : [];
+      const auditResults = await readJsonFile<AuditResult[]>(
+        task.audit_results_path,
+      );
+      const pendingTaskIds = new Set(pendingTasks.map((item) => item.task_id));
+      const matchedResultCount = auditResults.filter((result) =>
+        pendingTaskIds.has(result.task_id),
+      ).length;
+      if (pendingTasks.length > 0 && matchedResultCount === 0) {
+        throw new Error(
+          "Provider-assisted review did not emit any audit results for the pending audit tasks.",
+        );
+      }
+
+      const issues = validateAuditResults(auditResults, pendingTasks, {
+        lineIndex: await buildLineIndexForPaths(
+          task.repo_root,
+          pendingTasks.flatMap((item) => item.file_paths),
+        ),
+      });
+      const errors = issues.filter((issue) => issue.severity === "error");
+      const warnings = issues.filter((issue) => issue.severity === "warning");
+
+      if (warnings.length > 0) {
+        process.stderr.write(
+          `audit-results validation: ${warnings.length} warning(s):\n` +
+            formatAuditResultIssues(warnings) +
+            "\n",
+        );
+      }
+      if (errors.length > 0) {
+        throw new Error(formatAuditResultValidationError(errors));
+      }
+    }
+    const preferredExecutor =
+      task.preferred_executor === "agent"
+        ? "result_ingestion_executor"
+        : task.preferred_executor;
+    const result = await runAuditStep({
+      root: task.repo_root,
+      artifactsDir: task.artifacts_dir,
+      preferredExecutor,
+      auditResultsPath: task.audit_results_path,
+      runtimeUpdatesPath: task.runtime_updates_path,
+      externalAnalyzerPath: task.external_analyzer_results_path,
+    });
+    workerResult = {
+      contract_version: WORKER_RESULT_CONTRACT_VERSION,
+      run_id: task.run_id,
+      obligation_id: task.obligation_id,
+      status: result.progress_made ? "completed" : "no_progress",
+      progress_made: result.progress_made,
+      selected_executor: result.selected_executor,
+      artifacts_written: result.artifacts_written,
+      summary: result.progress_summary,
+      next_likely_step: result.next_likely_step,
+      errors: [],
+    };
+  } catch (error) {
+    workerResult = {
+      contract_version: WORKER_RESULT_CONTRACT_VERSION,
+      run_id: task.run_id,
+      obligation_id: task.obligation_id,
+      status: "failed",
+      progress_made: false,
+      selected_executor: task.preferred_executor,
+      artifacts_written: [],
+      summary: `Worker failed for executor ${task.preferred_executor}: ${error instanceof Error ? error.message : String(error)}`,
+      next_likely_step: task.obligation_id,
+      errors: [error instanceof Error ? error.message : String(error)],
+    };
+  }
+
+  await writeJsonFile(task.result_path, workerResult);
+  console.log(JSON.stringify(workerResult, null, 2));
+  if (workerResult.status === "failed") {
+    process.exitCode = 1;
+  }
+}
+
+const DISPATCH_RESULT_MAP_FILENAME = "dispatch-result-map.json";
+const ACTIVE_DISPATCH_FILENAME = "active-dispatch.json";
+
+interface ActiveDispatchState {
+  run_id: string;
+  created_at: string;
+  packet_count: number;
+  task_count: number;
+  status: "active" | "merged";
+}
+
+interface DispatchResultMapEntry {
+  packet_id: string;
+  task_id: string;
+  result_path: string;
+}
+
+interface DispatchResultMap {
+  contract_version: "audit-code-dispatch-results/v1alpha1";
+  run_id: string;
+  entries: DispatchResultMapEntry[];
+}
+
+interface PrepareDispatchResult {
+  run_id: string;
+  dispatch_plan_path: string;
+  dispatch_quota_path: string | null;
+  packet_count: number;
+  task_count: number;
+  skipped_task_count: number;
+  largest_packet: {
+    packet_id: string;
+    total_lines: number;
+    estimated_tokens: number;
+  } | null;
+  warning_count: number;
+  dispatch_warnings_path: string | null;
+}
+
+function dispatchResultMapPath(runDir: string): string {
+  return join(runDir, DISPATCH_RESULT_MAP_FILENAME);
+}
+
+function resolveRunScopedArg(
+  argv: string[],
+  rawFlag: string,
+  b64Flag: string,
+): string | undefined {
+  const raw = getFlag(argv, rawFlag);
+  const encoded = getFlag(argv, b64Flag);
+  return raw ?? (encoded ? fromBase64Url(encoded) : undefined);
+}
+
+async function loadDispatchResultMap(
+  runDir: string,
+): Promise<DispatchResultMap | null> {
+  try {
+    return await readJsonFile<DispatchResultMap>(dispatchResultMapPath(runDir));
+  } catch (error) {
+    if (!isFileMissingError(error)) {
+      throw error;
+    }
+    return null;
+  }
+}
+
+function entriesByTaskId(
+  entries: DispatchResultMapEntry[],
+): Map<string, DispatchResultMapEntry> {
+  return new Map(entries.map((entry) => [entry.task_id, entry]));
+}
+
+function isIsolatedLargeFilePacket(packet: {
+  file_paths: string[];
+  total_lines: number;
+}): boolean {
+  return (
+    packet.file_paths.length === 1 &&
+    packet.total_lines > LARGE_FILE_PACKET_TARGET_LINES
+  );
+}
+
+function buildDispatchComplexity(
+  packet: {
+    task_ids: string[];
+    file_paths: string[];
+    total_lines: number;
+    estimated_tokens: number;
+    priority: NonNullable<AuditTask["priority"]>;
+    lenses: AuditTask["lens"][];
+    tags?: string[];
+  },
+  largeFileMode: boolean,
+): DispatchComplexity {
+  return {
+    priority: packet.priority,
+    task_count: packet.task_ids.length,
+    file_count: packet.file_paths.length,
+    total_lines: packet.total_lines,
+    estimated_tokens: packet.estimated_tokens,
+    lenses: packet.lenses,
+    tags: packet.tags ?? [],
+    large_file_mode: largeFileMode,
+  };
+}
+
+function buildDispatchModelHint(complexity: DispatchComplexity): DispatchModelHint {
+  const deepReasons: string[] = [];
+  if (complexity.priority === "high") deepReasons.push("high_priority");
+  if (complexity.large_file_mode) deepReasons.push("isolated_large_file");
+  if (complexity.estimated_tokens >= DEEP_MODEL_HINT_MIN_ESTIMATED_TOKENS) {
+    deepReasons.push("high_estimated_tokens");
+  }
+  if (
+    complexity.tags.some(
+      (tag) => tag === "critical_flow" || tag.startsWith("critical_flow:"),
+    )
+  ) {
+    deepReasons.push("critical_flow");
+  }
+  if (
+    complexity.tags.some(
+      (tag) =>
+        tag === "external_analyzer_signal" || tag.startsWith("external_tool:"),
+    )
+  ) {
+    deepReasons.push("external_analyzer_signal");
+  }
+  if (complexity.tags.includes("lens_verification")) {
+    deepReasons.push("lens_verification");
+  }
+  if (deepReasons.length > 0) {
+    return { tier: "deep", reasons: deepReasons };
+  }
+
+  const sensitiveLenses = new Set(["security", "data_integrity", "reliability"]);
+  const hasSensitiveLens = complexity.lenses.some((lens) =>
+    sensitiveLenses.has(lens),
+  );
+  if (
+    complexity.priority === "low" &&
+    complexity.total_lines <= SMALL_MODEL_HINT_MAX_LINES &&
+    complexity.estimated_tokens <= SMALL_MODEL_HINT_MAX_ESTIMATED_TOKENS &&
+    !hasSensitiveLens &&
+    complexity.tags.length === 0
+  ) {
+    return { tier: "small", reasons: ["small_low_priority_packet"] };
+  }
+
+  const reasons: string[] = [];
+  if (complexity.priority === "medium") reasons.push("medium_priority");
+  if (hasSensitiveLens) reasons.push("sensitive_lens");
+  if (complexity.total_lines > SMALL_MODEL_HINT_MAX_LINES) {
+    reasons.push("moderate_size");
+  }
+  return {
+    tier: "standard",
+    reasons: reasons.length > 0 ? reasons : ["default_review_packet"],
+  };
+}
+
+function withinRoot(root: string, path: string): string {
+  const rootPath = resolve(root);
+  const absolutePath = resolve(rootPath, path);
+  const relativePath = relative(rootPath, absolutePath);
+  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+    throw new Error(`Path '${path}' escapes repository root '${rootPath}'.`);
+  }
+  return absolutePath;
+}
+
+function renderAnchorPreview(
+  summary: FileAnchorSummary,
+  anchorPath: string,
+): string[] {
+  const preview = summary.anchors.slice(0, 24).map((anchor) => {
+    const location = anchor.line ? `${summary.path}:${anchor.line}` : summary.path;
+    const detail = anchor.detail ? ` - ${anchor.detail}` : "";
+    return `- ${location} [${anchor.kind}] ${anchor.name}${detail}`;
+  });
+  return [
+    "## Large File Review Mode",
+    "This packet is intentionally isolated because it covers one large file.",
+    "Use targeted reads/searches within this file, guided by the mechanical anchors.",
+    "Do not read unrelated files unless a finding cannot be evidenced without a direct boundary check.",
+    `Anchor file: ${anchorPath}`,
+    `Anchor counts: symbols=${summary.counts.symbols}, routes=${summary.counts.routes}, keywords=${summary.counts.keywords}, graph_edges=${summary.counts.graph_edges}, analyzer_signals=${summary.counts.analyzer_signals}, omitted=${summary.omitted_anchor_count}`,
+    "Anchor preview:",
+    ...(preview.length > 0 ? preview : ["- no anchors extracted beyond file boundaries"]),
+    "",
+  ];
+}
+
+function formatPacketConfidence(value: number | undefined): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(2)
+    : "n/a";
+}
+
+function renderPacketGraphContext(packet: {
+  entrypoints?: string[];
+  key_edges?: Array<{
+    from: string;
+    to: string;
+    kind?: string;
+    confidence?: number;
+    reason?: string;
+  }>;
+  boundary_files?: string[];
+  quality?: {
+    cohesion_score: number;
+    internal_edge_count: number;
+    boundary_edge_count: number;
+    unexplained_file_count: number;
+  };
+}): string[] {
+  const hasContext =
+    (packet.entrypoints?.length ?? 0) > 0 ||
+    (packet.key_edges?.length ?? 0) > 0 ||
+    (packet.boundary_files?.length ?? 0) > 0 ||
+    packet.quality !== undefined;
+  if (!hasContext) {
+    return [];
+  }
+
+  const lines = ["## Packet graph context"];
+  if (packet.entrypoints?.length) {
+    lines.push("Entrypoints:");
+    lines.push(...packet.entrypoints.map((entrypoint) => `- ${entrypoint}`));
+  }
+  if (packet.key_edges?.length) {
+    lines.push("Key internal edges:");
+    lines.push(
+      ...packet.key_edges.map((edge) => {
+        const kind = edge.kind ? ` [${edge.kind}]` : "";
+        const reason = edge.reason ? ` - ${edge.reason}` : "";
+        return `- ${edge.from} -> ${edge.to}${kind} confidence=${formatPacketConfidence(edge.confidence)}${reason}`;
+      }),
+    );
+  }
+  if (packet.boundary_files?.length) {
+    lines.push("Boundary files to check only when evidence crosses the packet:");
+    lines.push(...packet.boundary_files.map((path) => `- ${path}`));
+  }
+  if (packet.quality) {
+    lines.push(
+      `Quality: cohesion=${packet.quality.cohesion_score}, internal_edges=${packet.quality.internal_edge_count}, boundary_edges=${packet.quality.boundary_edge_count}, unexplained_files=${packet.quality.unexplained_file_count}`,
+    );
+  }
+  lines.push("");
+  return lines;
+}
+
+async function prepareDispatchArtifacts(params: {
+  runId: string;
+  artifactsDir: string;
+  root?: string;
+  sessionConfig?: SessionConfig;
+  hostModel?: string | null;
+  hostActiveSubagentLimit?: number | null;
+}): Promise<PrepareDispatchResult> {
+  const runId = params.runId;
+  const artifactsDir = params.artifactsDir;
+  const runDir = join(artifactsDir, "runs", runId);
+  const taskResultsDir = join(runDir, "task-results");
+  const dispatchPlanPath = join(runDir, "dispatch-plan.json");
+  let reviewRoot = params.root;
+  try {
+    const workerTask = await readJsonFile<WorkerTask>(join(runDir, "task.json"));
+    reviewRoot ??= workerTask.repo_root;
+  } catch (error) {
+    if (!isFileMissingError(error)) {
+      throw error;
+    }
+  }
+
+  const bundle = await loadArtifactBundle(artifactsDir);
+  const tasksPath = join(runDir, "pending-audit-tasks.json");
+  const tasks = await readJsonFile<AuditTask[]>(tasksPath).catch((error) => {
+    if (isFileMissingError(error)) return buildPendingAuditTasks(bundle);
+    throw error;
+  });
+  const sessionConfig: SessionConfig =
+    params.sessionConfig ?? (await loadSessionConfig(artifactsDir).catch(() => ({} as SessionConfig)));
+  const lensDefsPath = join(packageRoot, "dispatch", "lens-definitions.json");
+  const lensDefs = await readJsonFile<Record<string, { description: string; do_not_report: string }>>(lensDefsPath);
+
+  await mkdir(taskResultsDir, { recursive: true });
+
+  // On resume: skip tasks whose result files already exist from a prior dispatch.
+  const priorResultTaskIds = new Set<string>();
+  for (const task of tasks) {
+    if (existsSync(taskResultPath(taskResultsDir, task.task_id))) {
+      priorResultTaskIds.add(task.task_id);
+    }
+  }
+  const dispatchTasks = priorResultTaskIds.size > 0
+    ? tasks.filter((task) => !priorResultTaskIds.has(task.task_id))
+    : tasks;
+
+  const lineIndex = Object.fromEntries(
+    dispatchTasks.flatMap((task) =>
+      Object.entries(task.file_line_counts ?? {}),
+    ),
+  );
+  const orderedTasks = orderTasksForPacketReview(dispatchTasks, {
+    graphBundle: bundle.graph_bundle,
+    lineIndex,
+  });
+  const packets = buildReviewPackets(orderedTasks, {
+    graphBundle: bundle.graph_bundle,
+    lineIndex,
+  });
+  const tasksById = new Map(orderedTasks.map((task) => [task.task_id, task]));
+  const resultPathByTaskId = new Map(
+    orderedTasks.map((task) => [
+      task.task_id,
+      taskResultPath(taskResultsDir, task.task_id),
+    ]),
+  );
+  const resultPathSet = new Set(resultPathByTaskId.values());
+  if (resultPathSet.size !== resultPathByTaskId.size) {
+    throw new Error(
+      "prepare-dispatch generated duplicate result paths; task ids must be uniquely addressable.",
+    );
+  }
+  const plan: Array<{
+    packet_id: string;
+    description: string;
+    prompt_path: string;
+    complexity: DispatchComplexity;
+    model_hint: DispatchModelHint;
+  }> = [];
+  const resultMapEntries: DispatchResultMapEntry[] = [];
+  for (const task of tasks) {
+    if (priorResultTaskIds.has(task.task_id)) {
+      resultMapEntries.push({
+        packet_id: "__prior_dispatch__",
+        task_id: task.task_id,
+        result_path: taskResultPath(taskResultsDir, task.task_id),
+      });
+    }
+  }
+  let largestPacketId: string | null = null;
+  let largestLines = 0;
+  let largestEstimatedTokens = 0;
+  const warnings: Array<{ code: string; message: string }> = [];
+
+  for (const packet of packets) {
+    const promptPath = packetPromptPath(taskResultsDir, packet.packet_id);
+    const packetTasks = packet.task_ids
+      .map((taskId) => tasksById.get(taskId))
+      .filter((task): task is AuditTask => task !== undefined);
+
+    if (packet.total_lines > largestLines) {
+      largestLines = packet.total_lines;
+      largestEstimatedTokens = packet.estimated_tokens;
+      largestPacketId = packet.packet_id;
+    }
+    const largeFileMode = isIsolatedLargeFilePacket(packet);
+    if (packet.total_lines > LARGE_FILE_PACKET_TARGET_LINES && !largeFileMode) {
+      warnings.push({
+        code: "large_packet",
+        message: `large packet ${packet.packet_id} (~${packet.total_lines} lines) may hit quota limits`,
+      });
+    }
+
+    for (const task of packetTasks) {
+      if (!lensDefs[task.lens]) {
+        warnings.push({
+          code: "missing_lens_definition",
+          message: `no lens definition for '${task.lens}' (task ${task.task_id})`,
+        });
+      }
+    }
+
+    const fileList = packet.file_paths.map((path) => {
+      const lines = packet.file_line_counts[path] ?? 0;
+      return `- ${path} (${lines} lines)`;
+    }).join("\n");
+    let anchorPath: string | null = null;
+    let anchorSummary: FileAnchorSummary | null = null;
+    if (largeFileMode) {
+      const filePath = packet.file_paths[0]!;
+      if (!reviewRoot) {
+        warnings.push({
+          code: "large_file_anchor_unavailable",
+          message: `large single-file packet ${packet.packet_id} has no repo root available for anchor extraction`,
+        });
+      } else {
+        try {
+          const totalLines = packet.file_line_counts[filePath] ?? packet.total_lines;
+          const content = await readFile(withinRoot(reviewRoot, filePath), "utf8");
+          anchorSummary = buildFileAnchorSummary({
+            path: filePath,
+            content,
+            totalLines,
+            graphBundle: bundle.graph_bundle,
+            externalAnalyzerResults: bundle.external_analyzer_results,
+          });
+          anchorPath = join(taskResultsDir, artifactNameForId(packet.packet_id, "anchors.json"));
+          await writeJsonFile(anchorPath, anchorSummary);
+        } catch (error) {
+          warnings.push({
+            code: "large_file_anchor_failed",
+            message:
+              `large single-file packet ${packet.packet_id} could not be anchored mechanically: ` +
+              (error instanceof Error ? error.message : String(error)),
+          });
+        }
+      }
+    }
+    const largeFileSection =
+      anchorSummary && anchorPath
+        ? renderAnchorPreview(anchorSummary, anchorPath)
+        : largeFileMode
+          ? [
+              "## Large File Review Mode",
+              "This packet is intentionally isolated because it covers one large file.",
+              "Use targeted reads/searches within this file only.",
+              "No mechanical anchor file was available, so rely on targeted symbol and keyword searches before reading broad ranges.",
+              "",
+            ]
+          : [];
+    const taskSections = packetTasks.flatMap((task) => {
+      const lensDef = lensDefs[task.lens];
+      const inputLines = task.inputs
+        ? Object.entries(task.inputs)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([key, value]) => `input.${key}: ${value}`)
+        : [];
+      const isLensVerification = task.tags?.includes("lens_verification") ?? false;
+      const coverageTemplate = task.file_paths.map((path) => ({
+        path,
+        total_lines: task.file_line_counts?.[path] ?? lineIndex[path] ?? 0,
+      }));
+      return [
+        `### ${task.task_id}`,
+        `unit_id: ${task.unit_id}`,
+        `pass_id: ${task.pass_id}`,
+        `lens: ${task.lens}`,
+        ...(task.tags?.length ? [`tags: ${task.tags.join(", ")}`] : []),
+        ...inputLines,
+        `rationale: ${task.rationale}`,
+        "",
+        `Lens guidance: ${lensDef?.description ?? task.lens}`,
+        `Do NOT report: ${lensDef?.do_not_report ?? "N/A"}`,
+        ...(isLensVerification
+          ? [
+              "",
+              "Lens verification mode: review the prior result summary in the rationale and use only targeted source checks.",
+              "Do not redo every packet and do not write direct findings for this task.",
+              "Return findings: [] plus verification metadata. Include followup_tasks only for bounded, specific re-review packets.",
+            ]
+          : []),
+        "",
+        "file_coverage (copy exactly into your AuditResult for this task):",
+        "```json",
+        JSON.stringify(coverageTemplate),
+        "```",
+        "",
+      ];
+    });
+    const submitCommand =
+      `"${process.execPath}" "${join(packageRoot, "audit-code.mjs")}" submit-packet ` +
+      `--run-id-b64 ${toBase64Url(runId)} ` +
+      `--packet-id-b64 ${toBase64Url(packet.packet_id)} ` +
+      `--artifacts-dir-b64 ${toBase64Url(artifactsDir)}`;
+    const complexity = buildDispatchComplexity(packet, largeFileMode);
+    for (const task of packetTasks) {
+      resultMapEntries.push({
+        packet_id: packet.packet_id,
+        task_id: task.task_id,
+        result_path: resultPathByTaskId.get(task.task_id)!,
+      });
+    }
+
+    const prompt = [
+      "You are a code auditor. Review this packet once, then submit exactly one result per listed task.",
+      "",
+      "## Packet",
+      `packet_id: ${packet.packet_id}`,
+      `task_count: ${packet.task_ids.length}`,
+      `lenses: ${packet.lenses.join(", ")}`,
+      `estimated_tokens: ${packet.estimated_tokens}`,
+      "",
+      "## Files to read",
+      largeFileMode
+        ? "Use targeted Read/Grep calls. Paths are repo-relative from the current working directory."
+        : "Use your Read tool. Paths are repo-relative from the current working directory.",
+      "Use host Read and Grep tools for source inspection. Do not use shell search commands.",
+      fileList,
+      "",
+      ...renderPacketGraphContext(packet),
+      ...largeFileSection,
+      "## Tasks",
+      ...taskSections,
+      "## Output",
+      "Do not write files directly. Do not use a Write tool, create temp files, edit source files,",
+      "remediate findings, create extra task results, or run unrelated audits.",
+      "Produce one JSON array containing exactly one AuditResult object for each listed task.",
+      "",
+      "Required AuditResult fields:",
+      "  task_id       copy from the task metadata",
+      "  unit_id       copy from the task metadata",
+      "  pass_id       copy from the task metadata",
+      "  lens          copy from the task metadata",
+      "  file_coverage [{path, total_lines}] - copy the exact template from each task section above",
+      "  findings      [] or array of finding objects",
+      "",
+      "Lens verification tasks:",
+      "  tasks tagged lens_verification must use findings: [] and include verification:",
+      "  {verified: boolean, needs_followup: boolean, concerns?: string[],",
+      "   coverage_concerns?: string[], confidence_concerns?: string[],",
+      "   followup_tasks?: AuditTask[]}.",
+      "  Follow-up AuditTask suggestions must stay bounded to files in this packet and use the same lens.",
+      "",
+      "Each finding object:",
+      "  id            unique ID, e.g. \"COR-001\"",
+      "  title         short title",
+      "  category      specific finding category, such as missing-validation or command-execution",
+      "  severity      critical|high|medium|low|info",
+      "  confidence    high|medium|low",
+      "  lens          must match the task lens exactly",
+      "  summary       1-2 sentence description",
+      "  affected_files  [{path, line_start?, line_end?, symbol?}] - objects, not strings; min 1 entry",
+      "  evidence     [\"path/to/file.ts:42 - description of what you see there\"] - min 1 entry",
+      "",
+      "Constraints:",
+      "1. line_end must not exceed the file's actual line count.",
+      "2. affected_files entries are objects with a path key, not plain strings.",
+      "3. Only reference files from the packet unless a finding genuinely crosses a boundary.",
+      "4. findings: [] is correct when you find nothing genuine.",
+      "",
+      "## Submit",
+      "Pipe the JSON array on stdin to this command:",
+      `  ${submitCommand}`,
+      "",
+      "The command validates and writes the packet-owned result files. Exit 0 means accepted.",
+      "Non-zero: read the errors, fix the JSON, and run the same submit command again. Retry up to 3 times.",
+      "",
+      "## Final response",
+      `After the submit command succeeds, reply exactly: valid: ${packet.packet_id}, findings=<total finding count>`,
+    ].join("\n");
+
+    await writeFile(promptPath, prompt, "utf8");
+    plan.push({
+      packet_id: packet.packet_id,
+      description:
+        `Audit ${packet.file_paths.length} file(s), ${packet.task_ids.length} task(s), ${packet.lenses.length} lens(es) (~${packet.total_lines} lines)` +
+        (largeFileMode ? " [isolated large-file mode]" : ""),
+      prompt_path: promptPath,
+      complexity,
+      model_hint: buildDispatchModelHint(complexity),
+    });
+  }
+
+  await writeJsonFile(dispatchPlanPath, plan);
+  await writeJsonFile(dispatchResultMapPath(runDir), {
+    contract_version: "audit-code-dispatch-results/v1alpha1",
+    run_id: runId,
+    entries: resultMapEntries,
+  } satisfies DispatchResultMap);
+
+  // Compute and write dispatch-quota.json
+  const hostModel = params.hostModel ?? null;
+  const perPacketTokens = plan.map((p) => p.complexity.estimated_tokens);
+  const quotaProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
+  const quotaProviderKey = buildProviderModelKey(quotaProviderName, hostModel);
+  const quotaState = await readQuotaState().catch((): { version: 2; entries: Record<string, never> } => ({ version: 2, entries: {} }));
+  const quotaStateEntry = quotaState.entries[quotaProviderKey] ?? null;
+  const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
+    explicitLimit: params.hostActiveSubagentLimit,
+    sessionConfig,
+  });
+  const dispatchCachedLimits = await lookupDiscoveredLimits(quotaProviderKey).catch(() => null);
+  const waveSchedule = scheduleWave({
+    providerName: quotaProviderName,
+    sessionConfig,
+    hostModel,
+    requestedConcurrency: sessionConfig.parallel_workers ?? plan.length,
+    estimatedSlotTokens: perPacketTokens,
+    quotaStateEntry,
+    hostConcurrencyLimit,
+    discoveredLimits: dispatchCachedLimits,
+  });
+  const dispatchQuota: DispatchQuota = {
+    contract_version: "audit-code-dispatch-quota/v1alpha2",
+    run_id: runId,
+    model: hostModel,
+    resolved_limits: waveSchedule.resolved_limits,
+    confidence: waveSchedule.confidence,
+    source: waveSchedule.source,
+    host_concurrency_limit: waveSchedule.host_concurrency_limit,
+    wave_size: waveSchedule.wave_size,
+    estimated_wave_tokens: waveSchedule.estimated_wave_tokens,
+    cooldown_until: waveSchedule.cooldown_until,
+    quota_source_snapshot: waveSchedule.quota_source_snapshot ?? null,
+    backoff_state: null,
+  };
+  const dispatchQuotaPath = join(runDir, "dispatch-quota.json");
+  await writeJsonFile(dispatchQuotaPath, dispatchQuota);
+
+  // Warn about packets that exceed the context budget only when we have reliable limit
+  // information (confidence medium/high). Low-confidence limits are conservative defaults
+  // and would produce misleading warnings since the real context window is unknown.
+  if (waveSchedule.confidence !== "low") {
+    const contextBudget =
+      waveSchedule.resolved_limits.context_tokens - waveSchedule.resolved_limits.output_tokens;
+    for (const p of plan) {
+      if (p.complexity.estimated_tokens > contextBudget) {
+        warnings.push({
+          code: "oversized_packet",
+          message:
+            `Packet ${p.packet_id} estimated tokens (${p.complexity.estimated_tokens}) exceed ` +
+            `context budget (${contextBudget}). This packet may fail at dispatch. ` +
+            `Set quota.default_context_tokens or quota.models in session-config.json to override.`,
+        });
+      }
+    }
+  }
+
+  const warningsPath = warnings.length > 0
+    ? join(runDir, "dispatch-warnings.json")
+    : null;
+  if (warningsPath) {
+    await writeJsonFile(warningsPath, warnings);
+  }
+  const activeDispatch: ActiveDispatchState = {
+    run_id: runId,
+    created_at: new Date().toISOString(),
+    packet_count: plan.length,
+    task_count: orderedTasks.length,
+    status: "active",
+  };
+  await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), activeDispatch);
+
+  return {
+    run_id: runId,
+    dispatch_plan_path: dispatchPlanPath,
+    dispatch_quota_path: dispatchQuotaPath,
+    packet_count: plan.length,
+    task_count: orderedTasks.length,
+    skipped_task_count: priorResultTaskIds.size,
+    largest_packet: largestPacketId
+      ? {
+          packet_id: largestPacketId,
+          total_lines: largestLines,
+          estimated_tokens: largestEstimatedTokens,
+        }
+      : null,
+    warning_count: warnings.length,
+    dispatch_warnings_path: warningsPath,
+  };
+}
+
+async function cmdPrepareDispatch(argv: string[]): Promise<void> {
+  const runId = getFlag(argv, "--run-id");
+  if (!runId) throw new Error("prepare-dispatch requires --run-id <run_id>");
+  const result = await prepareDispatchArtifacts({
+    runId,
+    artifactsDir: getArtifactsDir(argv),
+    root: getFlag(argv, "--root") ? getRootDir(argv) : undefined,
+    hostModel: getHostModel(argv),
+    hostActiveSubagentLimit: getHostMaxActiveSubagents(argv),
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function cmdSubmitPacket(argv: string[]): Promise<void> {
+  const runId = resolveRunScopedArg(argv, "--run-id", "--run-id-b64");
+  const packetId = resolveRunScopedArg(argv, "--packet-id", "--packet-id-b64");
+  const artifactsDirB64 = getFlag(argv, "--artifacts-dir-b64");
+  const artifactsDir = artifactsDirB64
+    ? resolve(fromBase64Url(artifactsDirB64))
+    : getArtifactsDir(argv);
+  if (!runId || !packetId) {
+    throw new Error(
+      "submit-packet requires --run-id and --packet-id (or --run-id-b64/--packet-id-b64)",
+    );
+  }
+
+  const runDir = join(artifactsDir, "runs", runId);
+  const tasksPath = join(runDir, "pending-audit-tasks.json");
+  const resultMap = await loadDispatchResultMap(runDir);
+  if (!resultMap) {
+    throw new Error(
+      `No ${DISPATCH_RESULT_MAP_FILENAME} found for run ${runId}; run prepare-dispatch first.`,
+    );
+  }
+
+  let packetEntries = resultMap.entries.filter(
+    (entry) => entry.packet_id === packetId,
+  );
+  let resolvedPacketId = packetId;
+  if (packetEntries.length === 0) {
+    const trimmed = packetId.trim();
+    packetEntries = resultMap.entries.filter(
+      (entry) => entry.packet_id.trim().toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (packetEntries.length > 0) {
+      resolvedPacketId = packetEntries[0]!.packet_id;
+      process.stderr.write(
+        `[submit-packet] Resolved packet_id '${packetId}' → '${resolvedPacketId}' (case/whitespace normalization)\n`,
+      );
+    }
+  }
+  if (packetEntries.length === 0) {
+    const knownIds = [...new Set(resultMap.entries.map((e) => e.packet_id))];
+    throw new Error(
+      `Unknown packet_id '${packetId}' for run ${runId}.\n` +
+      `Valid packet IDs: ${knownIds.join(", ")}`,
+    );
+  }
+  if (entriesByTaskId(packetEntries).size !== packetEntries.length) {
+    throw new Error(`Dispatch result map has duplicate task entries for packet '${resolvedPacketId}'.`);
+  }
+
+  const allTasks = await readJsonFile<AuditTask[]>(tasksPath);
+  const taskById = new Map(allTasks.map((task) => [task.task_id, task]));
+  const packetTasks = packetEntries.map((entry) => taskById.get(entry.task_id));
+  const missingTask = packetEntries.find((entry, index) => !packetTasks[index]);
+  if (missingTask) {
+    throw new Error(
+      `Dispatch result map references unknown task '${missingTask.task_id}'.`,
+    );
+  }
+  const tasks = packetTasks as AuditTask[];
+  const expectedTaskIds = new Set(tasks.map((task) => task.task_id));
+  const lineIndex = Object.fromEntries(
+    tasks.flatMap((task) => Object.entries(task.file_line_counts ?? {})),
+  );
+  const encodedResults = getFlag(argv, "--results-b64");
+  const raw = encodedResults ? fromBase64Url(encodedResults) : await readStdinText();
+  if (raw.trim().length === 0) {
+    throw new Error(
+      "submit-packet requires an AuditResult[] JSON payload on stdin or --results-b64.",
+    );
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `Invalid submit-packet JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const resultErrors: string[] = [];
+  const issues = validateAuditResults(payload, tasks, { lineIndex });
+  const validationErrors = issues.filter((issue) => issue.severity === "error");
+  const validationWarnings = issues.filter((issue) => issue.severity === "warning");
+  if (validationWarnings.length > 0) {
+    process.stderr.write(
+      `audit-results validation: ${validationWarnings.length} warning(s):\n` +
+        formatAuditResultIssues(validationWarnings) +
+        "\n",
+    );
+  }
+  if (validationErrors.length > 0) {
+    resultErrors.push(formatAuditResultIssues(validationErrors));
+  }
+
+  if (Array.isArray(payload)) {
+    const seen = new Set<string>();
+    for (const [index, result] of payload.entries()) {
+      if (!result || typeof result !== "object" || Array.isArray(result)) {
+        continue;
+      }
+      const taskId = (result as Record<string, unknown>).task_id;
+      if (typeof taskId !== "string" || taskId.trim().length === 0) {
+        continue;
+      }
+      if (seen.has(taskId)) {
+        resultErrors.push(`Duplicate audit result for assigned task '${taskId}'.`);
+      }
+      seen.add(taskId);
+      if (!expectedTaskIds.has(taskId)) {
+        resultErrors.push(
+          `Result at index ${index} uses task_id '${taskId}', which is not assigned to packet '${resolvedPacketId}'.`,
+        );
+      }
+    }
+    for (const task of tasks) {
+      if (!seen.has(task.task_id)) {
+        resultErrors.push(`Missing audit result for assigned task '${task.task_id}'.`);
+      }
+    }
+  }
+
+  if (resultErrors.length > 0) {
+    throw new Error(`submit-packet rejected ${resolvedPacketId}:\n${resultErrors.join("\n")}`);
+  }
+
+  // Check for duplicate findings against already-submitted results in this run
+  const existingFindingKeys = new Set<string>();
+  const otherEntries = resultMap.entries.filter(
+    (e) => e.packet_id !== resolvedPacketId,
+  );
+  for (const other of otherEntries) {
+    try {
+      const existing = JSON.parse(await readFile(other.result_path, "utf8")) as AuditResult;
+      if (existing?.findings) {
+        for (const f of existing.findings) {
+          const key = [
+            (f.lens ?? "").trim().toLowerCase(),
+            (f.category ?? "").trim().toLowerCase(),
+            (f.title ?? "").trim().toLowerCase(),
+            f.affected_files?.[0]?.path ?? "",
+          ].join("|");
+          existingFindingKeys.add(key);
+        }
+      }
+    } catch { /* file doesn't exist yet or invalid — skip */ }
+  }
+  let dupCount = 0;
+  for (const result of payload as AuditResult[]) {
+    for (const f of result.findings ?? []) {
+      const key = [
+        (f.lens ?? "").trim().toLowerCase(),
+        (f.category ?? "").trim().toLowerCase(),
+        (f.title ?? "").trim().toLowerCase(),
+        f.affected_files?.[0]?.path ?? "",
+      ].join("|");
+      if (existingFindingKeys.has(key)) {
+        dupCount++;
+      }
+    }
+  }
+  if (dupCount > 0) {
+    process.stderr.write(
+      `[submit-packet] Warning: ${dupCount} finding(s) appear to duplicate findings from other packets in this run.\n`,
+    );
+  }
+
+  const entryByTaskId = entriesByTaskId(packetEntries);
+  for (const result of payload as AuditResult[]) {
+    const entry = entryByTaskId.get(result.task_id);
+    if (!entry) {
+      throw new Error(
+        `Internal error: no result path for accepted task '${result.task_id}'.`,
+      );
+    }
+    await writeJsonFile(entry.result_path, result);
+  }
+
+  const findingCount = (payload as AuditResult[]).reduce(
+    (sum, result) => sum + result.findings.length,
+    0,
+  );
+  console.log(
+    JSON.stringify(
+      {
+        run_id: runId,
+        packet_id: resolvedPacketId,
+        accepted_count: (payload as AuditResult[]).length,
+        finding_count: findingCount,
+        ...(dupCount > 0 ? { duplicate_warning_count: dupCount } : {}),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdMergeAndIngest(argv: string[]): Promise<void> {
+  const runId = getFlag(argv, "--run-id");
+  if (!runId) throw new Error("merge-and-ingest requires --run-id <run_id>");
+  const artifactsDir = getArtifactsDir(argv);
+
+  const runDir = join(artifactsDir, "runs", runId);
+  const taskResultsDir = join(runDir, "task-results");
+  const auditResultsPath = join(runDir, "audit-results.json");
+  const taskPath = join(runDir, "task.json");
+  const tasksPath = join(runDir, "pending-audit-tasks.json");
+  const workerTask = await readJsonFile<WorkerTask>(taskPath);
+  const resultMap = await loadDispatchResultMap(runDir);
+  if (!resultMap) {
+    throw new Error(
+      `No ${DISPATCH_RESULT_MAP_FILENAME} found for run ${runId}; run prepare-dispatch first.`,
+    );
+  }
+
+  let allTasks: AuditTask[] = [];
+  try { allTasks = await readJsonFile<AuditTask[]>(tasksPath); } catch { /* may not exist */ }
+  const entryByTaskId = entriesByTaskId(resultMap.entries);
+  if (entryByTaskId.size !== resultMap.entries.length) {
+    throw new Error(`Dispatch result map for run ${runId} contains duplicate task entries.`);
+  }
+  const expectedPaths = new Set(
+    resultMap.entries.map((entry) => resolve(entry.result_path)),
+  );
+
+  let files: string[];
+  try {
+    files = (await readdir(taskResultsDir)).filter(f => f.endsWith(".json")).sort();
+  } catch {
+    files = [];
+  }
+
+  const passing: AuditResult[] = [];
+  const failing: Array<{ task_id: string; errors: string[] }> = [];
+  const seenTaskIds = new Set<string>();
+  let spuriousFileCount = 0;
+
+  const fallbackByTaskId = new Map<string, unknown>();
+  for (const filename of files) {
+    const filePath = resolve(join(taskResultsDir, filename));
+    if (!expectedPaths.has(filePath)) {
+      spuriousFileCount++;
+      try {
+        const raw = await readFile(filePath, "utf8");
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const tid = typeof (parsed as Record<string, unknown>).task_id === "string"
+            ? String((parsed as Record<string, unknown>).task_id) : undefined;
+          if (tid && !fallbackByTaskId.has(tid)) {
+            fallbackByTaskId.set(tid, parsed);
+          }
+        }
+      } catch { /* not parseable — skip */ }
+      process.stderr.write(
+        `[merge-and-ingest] Warning: unexpected file in task-results/: ${filename}\n`,
+      );
+    }
+  }
+
+  for (const task of allTasks) {
+    const entry = entryByTaskId.get(task.task_id);
+    if (!entry) {
+      failing.push({
+        task_id: task.task_id,
+        errors: ["Missing dispatch result-map entry for assigned task."],
+      });
+      continue;
+    }
+    const filePath = entry.result_path;
+    let obj: unknown;
+    try {
+      obj = JSON.parse(await readFile(filePath, "utf8"));
+    } catch (e) {
+      if (isFileMissingError(e)) {
+        const fallback = fallbackByTaskId.get(task.task_id);
+        if (fallback) {
+          process.stderr.write(
+            `[merge-and-ingest] Recovered result for '${task.task_id}' from unexpected file (matched by task_id)\n`,
+          );
+          obj = fallback;
+        } else {
+          failing.push({
+            task_id: task.task_id,
+            errors: ["Missing audit result for assigned task."],
+          });
+          continue;
+        }
+      } else {
+        failing.push({ task_id: task.task_id, errors: [`Invalid JSON: ${(e as Error).message}`] });
+        continue;
+      }
+    }
+    const record = obj && typeof obj === "object" && !Array.isArray(obj)
+      ? obj as Record<string, unknown>
+      : undefined;
+    const taskId = typeof record?.task_id === "string"
+      ? String(record.task_id) : undefined;
+    const resultErrors: string[] = [];
+    if (taskId) {
+      if (seenTaskIds.has(taskId)) {
+        resultErrors.push(`Duplicate audit result for assigned task '${taskId}'.`);
+      } else {
+        seenTaskIds.add(taskId);
+      }
+      if (taskId !== task.task_id) {
+        resultErrors.push(
+          `Result file is assigned to '${task.task_id}' but contains task_id '${taskId}'.`,
+        );
+      }
+    }
+    const issues = validateAuditResults(
+      [obj],
+      [task],
+      { lineIndex: task.file_line_counts ?? {} },
+    );
+    resultErrors.push(
+      ...issues
+        .filter(i => i.severity === "error")
+        .map(i => i.message),
+    );
+    if (resultErrors.length === 0) {
+      passing.push(obj as AuditResult);
+    } else {
+      failing.push({ task_id: taskId ?? task.task_id, errors: resultErrors });
+    }
+  }
+
+  await writeJsonFile(auditResultsPath, passing);
+
+  const failedTasksPath = join(runDir, "failed-tasks.json");
+  if (failing.length > 0) {
+    await writeJsonFile(failedTasksPath, failing);
+  }
+
+  if (passing.length === 0 && failing.length > 0) {
+    throw new Error(
+      `All ${failing.length} assigned task result(s) were missing or invalid; blocked before ingestion. See ${failedTasksPath}`,
+    );
+  }
+
+  const findingCount = passing.reduce(
+    (sum, result) => sum + result.findings.length,
+    0,
+  );
+
+  let result: Awaited<ReturnType<typeof runAuditStep>> | null = null;
+  if (passing.length > 0) {
+    result = await runAuditStep({
+      root: workerTask.repo_root,
+      artifactsDir,
+      preferredExecutor: "result_ingestion_executor",
+      auditResultsPath,
+    });
+    const updatedPendingTasks = await addFileLineCountHints(
+      workerTask.repo_root,
+      buildPendingAuditTasks(result.updated_bundle),
+    );
+    await writeJsonFile(tasksPath, updatedPendingTasks);
+  }
+
+  const activeDispatchPath = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
+  try {
+    const dispatch = await readJsonFile<ActiveDispatchState>(activeDispatchPath);
+    if (dispatch.run_id === runId) {
+      dispatch.status = failing.length > 0 ? "active" : "merged";
+      await writeJsonFile(activeDispatchPath, dispatch);
+    }
+  } catch { /* no active dispatch file — skip */ }
+
+  let retryDispatchPath: string | null = null;
+  if (failing.length > 0) {
+    const failedTaskIds = new Set(failing.map((f) => f.task_id));
+    const failedPacketIds = [
+      ...new Set(
+        resultMap.entries
+          .filter((e) => failedTaskIds.has(e.task_id))
+          .map((e) => e.packet_id),
+      ),
+    ];
+    const retryDispatch = {
+      run_id: runId,
+      retry_packet_ids: failedPacketIds,
+      failed_task_count: failing.length,
+      accepted_task_count: passing.length,
+    };
+    retryDispatchPath = join(runDir, "retry-dispatch.json");
+    await writeJsonFile(retryDispatchPath, retryDispatch);
+    process.stderr.write(
+      `[merge-and-ingest] ${passing.length} accepted, ${failing.length} failed. ` +
+      `Retry packets: ${failedPacketIds.join(", ")}\n`,
+    );
+  }
+
+  const status = failing.length > 0
+    ? "partial"
+    : (result?.progress_made ? "completed" : "no_progress");
+  const workerResult = buildWorkerResult({
+    runId,
+    obligationId: workerTask.obligation_id,
+    status: failing.length > 0 ? "no_progress" : (result?.progress_made ? "completed" : "no_progress"),
+    progressMade: result?.progress_made ?? false,
+    selectedExecutor: result?.selected_executor ?? null,
+    artifactsWritten: result?.artifacts_written ?? [],
+    summary: result?.progress_summary ?? `${failing.length} task(s) failed`,
+    nextLikelyStep: result?.next_likely_step ?? null,
+    errors: [],
+  });
+  await writeJsonFile(workerTask.result_path, workerResult);
+  console.log(
+    JSON.stringify(
+      {
+        run_id: runId,
+        status,
+        accepted_count: passing.length,
+        rejected_count: failing.length,
+        spurious_file_count: spuriousFileCount,
+        finding_count: findingCount,
+        audit_results_path: auditResultsPath,
+        ...(retryDispatchPath ? { retry_dispatch_path: retryDispatchPath } : {}),
+        ...(result ? {
+          selected_executor: workerResult.selected_executor,
+          progress_made: workerResult.progress_made,
+          progress_summary: workerResult.summary,
+          next_likely_step: workerResult.next_likely_step,
+        } : {}),
+      },
+      null,
+      2,
+    ),
+  );
+
+  if (failing.length > 0) {
+    process.exitCode = 2;
+  }
+}
+
+async function cmdValidateResult(argv: string[]): Promise<void> {
+  const rawRunId = getFlag(argv, "--run-id");
+  const runIdB64 = getFlag(argv, "--run-id-b64");
+  const rawTaskId = getFlag(argv, "--task-id");
+  const artifactsDirB64 = getFlag(argv, "--artifacts-dir-b64");
+  const runId = rawRunId ?? (runIdB64 ? fromBase64Url(runIdB64) : undefined);
+  const taskIdB64 = getFlag(argv, "--task-id-b64");
+  const taskId = rawTaskId ?? (taskIdB64 ? fromBase64Url(taskIdB64) : undefined);
+  const artifactsDir = artifactsDirB64
+    ? resolve(fromBase64Url(artifactsDirB64))
+    : getArtifactsDir(argv);
+  if (!runId || !taskId) {
+    throw new Error(
+      "validate-result requires --run-id and --task-id (or --run-id-b64/--task-id-b64)",
+    );
+  }
+
+  const runDir = join(artifactsDir, "runs", runId);
+  const taskResultsDir = join(runDir, "task-results");
+  const resultMap = await loadDispatchResultMap(runDir);
+  const resultPath =
+    resultMap?.entries.find((entry) => entry.task_id === taskId)?.result_path ??
+    taskResultPath(taskResultsDir, taskId);
+  const tasksPath = join(runDir, "pending-audit-tasks.json");
+
+  let raw: string;
+  try {
+    raw = await readFile(resultPath, "utf8");
+  } catch {
+    console.error(`File not found: ${resultPath}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let obj: unknown;
+  try {
+    obj = JSON.parse(raw);
+  } catch (e) {
+    console.error(`Invalid JSON: ${(e as Error).message}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let allTasks: AuditTask[] = [];
+  try { allTasks = await readJsonFile<AuditTask[]>(tasksPath); } catch { /* may not exist */ }
+
+  const matchingTasks = allTasks.filter(t => t.task_id === taskId);
+  const lineIndex = matchingTasks[0]?.file_line_counts ?? {};
+  const issues = validateAuditResults([obj], matchingTasks, { lineIndex });
+  const errors = issues.filter(i => i.severity === "error");
+
+  if (errors.length === 0) {
+    console.log(`✓ valid: ${taskId}`);
+  } else {
+    console.error(`✗ invalid: ${taskId}`);
+    for (const e of errors) console.error(`  ${e.path}: ${e.message}`);
+    process.exitCode = 1;
+  }
+}
+
+async function cmdImportExternalAnalyzer(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const sourcePath = getFlag(
+    argv,
+    "--external-analyzer-results",
+    `${artifactsDir}/external_analyzer_results.json`,
+  ) as string;
+  const externalAnalyzerResults =
+    await readJsonFile<ExternalAnalyzerResults>(sourcePath);
+  const result = await runAuditStep({
+    root: getRootDir(argv),
+    artifactsDir,
+    preferredExecutor: "external_analyzer_import_executor",
+    externalAnalyzerPath: sourcePath,
+  });
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        tool: externalAnalyzerResults.tool,
+        imported_count: externalAnalyzerResults.results.length,
+        selected_executor: result.selected_executor,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdIntake(argv: string[]): Promise<void> {
+  const root = getRootDir(argv);
+  warnIfNotGitRepo(root);
+  const artifactsDir = getArtifactsDir(argv);
+  const result = await runAuditStep({
+    root,
+    artifactsDir,
+    preferredExecutor: "intake_executor",
+  });
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        selected_executor: result.selected_executor,
+        progress_summary: result.progress_summary,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdPlan(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const result = await runAuditStep({ root: getRootDir(argv), artifactsDir });
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        selected_executor: result.selected_executor,
+        progress_summary: result.progress_summary,
+        next_likely_step: result.next_likely_step,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdIngestResults(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const batchResultsDir = getBatchResultsDir(argv);
+  if (batchResultsDir && getFlag(argv, "--results")) {
+    throw new Error("Use either --results <file> or --batch-results <dir>, not both.");
+  }
+  if (batchResultsDir) {
+    const result = await ingestBatchAuditResults({
+      root: getRootDir(argv),
+      artifactsDir,
+      batchDir: batchResultsDir,
+    });
+    console.log(
+      JSON.stringify(
+        {
+          artifacts_dir: artifactsDir,
+          imported_files: result.batchFiles,
+          selected_executor: result.selected_executor,
+          progress_summary: result.progress_summary,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+  const result = await runAuditStep({
+    root: getRootDir(argv),
+    artifactsDir,
+    preferredExecutor: "result_ingestion_executor",
+    auditResultsPath: getFlag(argv, "--results"),
+  });
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        selected_executor: result.selected_executor,
+        progress_summary: result.progress_summary,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdExplainTask(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const taskId = getFlag(argv, "--task-id") ?? argv[3];
+  if (!taskId) {
+    throw new Error("explain-task requires <task_id> or --task-id <task_id>");
+  }
+
+  const bundle = await loadArtifactBundle(artifactsDir);
+  const task =
+    [...(bundle.audit_tasks ?? []), ...(bundle.requeue_tasks ?? [])].find(
+      (item) => item.task_id === taskId,
+    );
+  if (!task) {
+    throw new Error(`Unknown task_id '${taskId}'.`);
+  }
+
+  const coverageEntries = (bundle.coverage_matrix?.files ?? [])
+    .filter((file) => task.file_paths.includes(file.path))
+    .sort((a, b) => a.path.localeCompare(b.path));
+  const matchingResults = (bundle.audit_results ?? []).filter(
+    (result) => result.task_id === task.task_id,
+  );
+
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        task_id: task.task_id,
+        task,
+        file_count: task.file_paths.length,
+        coverage_entries: coverageEntries,
+        pending_coverage: coverageEntries
+          .map((file) => ({
+            path: file.path,
+            missing_lenses: file.required_lenses.filter(
+              (lens) => !file.completed_lenses.includes(lens),
+            ),
+          }))
+          .filter((file) => file.missing_lenses.length > 0),
+        matching_result_count: matchingResults.length,
+        matching_finding_ids: matchingResults.flatMap((result) =>
+          result.findings.map((finding) => finding.id),
+        ),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdUpdateRuntimeValidation(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const result = await runAuditStep({
+    root: getRootDir(argv),
+    artifactsDir,
+    preferredExecutor: "runtime_validation_update_executor",
+    runtimeUpdatesPath: getFlag(argv, "--updates"),
+  });
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        selected_executor: result.selected_executor,
+        progress_summary: result.progress_summary,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdValidate(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const bundle = await loadArtifactBundle(artifactsDir);
+  const sessionConfigPath = getSessionConfigPath(artifactsDir);
+  const rawSessionConfig = await readSessionConfigFile(artifactsDir);
+  const artifactIssues = validateArtifactBundle(bundle);
+  const sessionConfigIssues =
+    rawSessionConfig === undefined
+      ? []
+      : prefixValidationIssues(
+          "session_config",
+          validateSessionConfig(rawSessionConfig),
+        );
+  const providerIssues =
+    rawSessionConfig === undefined || sessionConfigIssues.length > 0
+      ? []
+      : prefixValidationIssues(
+          "session_config",
+          validateConfiguredProviderEnvironment(rawSessionConfig as SessionConfig),
+        );
+  const issues = [
+    ...artifactIssues,
+    ...sessionConfigIssues,
+    ...providerIssues,
+  ];
+  const resolvedProvider =
+    rawSessionConfig === undefined
+      ? "local-subprocess"
+      : sessionConfigIssues.length > 0
+        ? null
+        : resolveFreshSessionProviderName(
+            undefined,
+            rawSessionConfig as SessionConfig,
+          );
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        session_config_path: sessionConfigPath,
+        session_config_present: rawSessionConfig !== undefined,
+        resolved_provider: resolvedProvider,
+        artifact_issue_count: artifactIssues.length,
+        session_config_issue_count:
+          sessionConfigIssues.length + providerIssues.length,
+        issue_count: issues.length,
+        issues,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exitCode = issues.length > 0 ? 1 : 0;
+}
+
+async function cmdValidateResults(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const resultsPath = getFlag(argv, "--results");
+  if (!resultsPath) {
+    throw new Error("validate-results requires --results <file>");
+  }
+  const bundle = await loadArtifactBundle(artifactsDir);
+  const lineIndex = bundle.repo_manifest
+    ? await buildLineIndex(getRootDir(argv), bundle.repo_manifest)
+    : undefined;
+  const auditResults = await readJsonFile<unknown>(resultsPath);
+  const issues = validateAuditResults(auditResults, bundle.audit_tasks ?? [], {
+    lineIndex,
+  });
+  const errors = issues.filter((issue) => issue.severity === "error");
+  const warnings = issues.filter((issue) => issue.severity === "warning");
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        results_path: resolve(resultsPath),
+        warning_count: warnings.length,
+        error_count: errors.length,
+        issues,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exitCode = errors.length > 0 ? 1 : 0;
+}
+
+async function cmdRequeue(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const bundle = await loadArtifactBundle(artifactsDir);
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        task_count: bundle.requeue_tasks?.length ?? 0,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdSynthesize(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const result = await runAuditStep({
+    root: getRootDir(argv),
+    artifactsDir,
+    preferredExecutor: "synthesis_executor",
+  });
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        selected_executor: result.selected_executor,
+        progress_summary: result.progress_summary,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cleanupStaleArtifactsDir(artifactsDir: string): Promise<void> {
+  let status: AuditState["status"] | undefined;
+  try {
+    const state = await readJsonFile<AuditState>(
+      join(artifactsDir, "audit_state.json"),
+    );
+    status = state.status;
+  } catch (error) {
+    if (!isFileMissingError(error)) {
+      throw error;
+    }
+    return;
+  }
+  if (status === "complete" || status === "not_started") {
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+}
+
+async function cmdCleanup(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const dryRun = hasFlag(argv, "--dry-run");
+  const force = hasFlag(argv, "--force");
+
+  let status: AuditState["status"] | undefined;
+  try {
+    const state = await readJsonFile<AuditState>(
+      join(artifactsDir, "audit_state.json"),
+    );
+    status = state.status;
+  } catch (error) {
+    if (!isFileMissingError(error)) {
+      throw error;
+    }
+  }
+
+  const resumable = status === "active" || status === "blocked";
+  const unknown = status === undefined;
+
+  if ((resumable || unknown) && !force) {
+    const reason = resumable
+      ? `audit is ${status} and may be resumed`
+      : "no audit_state.json found; artifacts may be from a crashed audit";
+    console.log(
+      JSON.stringify(
+        {
+          artifacts_dir: artifactsDir,
+          action: "skipped",
+          reason: `${reason} — use --force to delete anyway`,
+          dry_run: dryRun,
+        },
+        null,
+        2,
+      ),
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!dryRun) {
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        action: dryRun ? "dry-run" : "deleted",
+        status: status ?? "unknown",
+        dry_run: dryRun,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdStatus(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const auditStatePath = join(artifactsDir, "audit_state.json");
+
+  // 1. Read audit_state.json
+  let auditState: AuditState | null = null;
+  try {
+    auditState = await readJsonFile<AuditState>(auditStatePath);
+  } catch (error) {
+    if (!isFileMissingError(error)) {
+      throw error;
+    }
+  }
+
+  if (!auditState) {
+    console.error("No audit_state.json found; no active audit in this artifacts directory.");
+    process.exitCode = 1;
+    return;
+  }
+
+  // Build obligations summary: count by state
+  const obligationStates: Record<string, number> = {
+    missing: 0,
+    present: 0,
+    stale: 0,
+    blocked: 0,
+    satisfied: 0,
+  };
+  for (const obligation of auditState.obligations ?? []) {
+    const state = obligation.state;
+    if (state in obligationStates) {
+      obligationStates[state]!++;
+    }
+  }
+
+  // 2. Read run ledger for last N entries
+  const ledger = await loadRunLedger(artifactsDir);
+  const RECENT_RUN_LIMIT = 5;
+  const recentRuns = ledger.runs
+    .slice(-RECENT_RUN_LIMIT)
+    .reverse()
+    .map((entry) => ({
+      run_id: entry.run_id,
+      obligation_id: entry.obligation_id,
+      status: entry.status,
+      started_at: entry.started_at,
+    }));
+
+  // 3. Find the most recent run directory and read pending-audit-tasks.json
+  let pendingTasksSummary: {
+    run_id: string;
+    total: number;
+    remaining: number;
+  } | null = null;
+
+  const runsDir = join(artifactsDir, "runs");
+  let runDirs: string[] = [];
+  try {
+    const entries = await readdir(runsDir, { withFileTypes: true });
+    runDirs = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort()
+      .reverse();
+  } catch {
+    // runs directory may not exist yet
+  }
+
+  for (const runDirName of runDirs) {
+    const runDir = join(runsDir, runDirName);
+    const tasksPath = join(runDir, "pending-audit-tasks.json");
+    let tasks: AuditTask[] | null = null;
+    try {
+      tasks = await readJsonFile<AuditTask[]>(tasksPath);
+    } catch {
+      continue; // no pending-audit-tasks.json in this run dir — try previous
+    }
+    if (!Array.isArray(tasks)) continue;
+
+    // Count remaining: tasks without status "complete"
+    const total = tasks.length;
+    const remaining = tasks.filter(
+      (t) => t.status !== "complete",
+    ).length;
+
+    pendingTasksSummary = {
+      run_id: runDirName,
+      total,
+      remaining,
+    };
+    break;
+  }
+
+  // 4. Surface failed-tasks.json from the most recent run that has one
+  let failedTasks: Array<{ task_id: string; errors: string[] }> | null = null;
+  for (const runDirName of runDirs) {
+    const failedTasksPath = join(runsDir, runDirName, "failed-tasks.json");
+    try {
+      const raw = await readJsonFile<Array<{ task_id: string; errors: string[] }>>(
+        failedTasksPath,
+      );
+      if (Array.isArray(raw) && raw.length > 0) {
+        failedTasks = raw;
+        break;
+      }
+    } catch {
+      // Not present in this run dir — keep looking
+    }
+  }
+
+  console.log(
+    JSON.stringify(
+      {
+        artifacts_dir: artifactsDir,
+        status: auditState.status,
+        last_obligation: auditState.last_obligation ?? null,
+        last_executor: auditState.last_executor ?? null,
+        blockers: auditState.blockers ?? [],
+        obligations_summary: obligationStates,
+        recent_runs: recentRuns,
+        pending_tasks: pendingTasksSummary,
+        failed_tasks: failedTasks,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdMcp(argv: string[]): Promise<void> {
+  await runAuditCodeMcpServer(argv.slice(3));
+}
+
+async function cmdQuota(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const sessionConfig = await loadSessionConfig(artifactsDir).catch(() => ({} as SessionConfig));
+  const explicitProvider = getExplicitProvider(argv);
+  const hostModel = getHostModel(argv);
+  const probeMode = getQuotaProbeMode(argv, sessionConfig);
+  const providerName = resolveFreshSessionProviderName(explicitProvider, sessionConfig);
+  const providerModelKey = buildProviderModelKey(providerName, hostModel);
+
+  const { limits, source, confidence } = resolveLimits({ providerName, sessionConfig, hostModel });
+
+  const probeResult = await probeProvider(providerName, probeMode);
+
+  const quotaState = await readQuotaState().catch((): { version: 2; entries: Record<string, never> } => ({ version: 2, entries: {} }));
+  const quotaStateEntry = quotaState.entries[providerModelKey] ?? null;
+  const halfLifeHours = sessionConfig.quota?.empirical_half_life_hours ?? 24;
+  const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
+    explicitLimit: getHostMaxActiveSubagents(argv),
+    sessionConfig,
+  });
+
+  const quotaSource = new CompositeQuotaSource([new LearnedQuotaSource(halfLifeHours)]);
+  const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(providerModelKey).catch(() => null);
+  const queryDiscoveredLimits = await lookupDiscoveredLimits(providerModelKey).catch(() => null);
+
+  const waveSchedule = scheduleWave({
+    providerName,
+    sessionConfig,
+    hostModel,
+    requestedConcurrency: sessionConfig.parallel_workers ?? 1,
+    quotaStateEntry,
+    hostConcurrencyLimit,
+    quotaSourceSnapshot,
+    discoveredLimits: queryDiscoveredLimits,
+  });
+
+  console.log(
+    JSON.stringify(
+      {
+        provider: providerName,
+        model: hostModel,
+        provider_model_key: providerModelKey,
+        resolved_limits: limits,
+        confidence,
+        source,
+        host_concurrency_limit: hostConcurrencyLimit,
+        probe: probeResult,
+        learned_caps: quotaStateEntry
+          ? {
+              max_safe_concurrency: computeMaxSafeConcurrency(quotaStateEntry, halfLifeHours),
+              cooldown_until: quotaStateEntry.cooldown_until,
+              last_429_at: quotaStateEntry.last_429_at,
+            }
+          : null,
+        quota_source_snapshot: quotaSourceSnapshot,
+        discovered_limits: queryDiscoveredLimits,
+        wave_schedule: waveSchedule,
+        quota_state_path: getQuotaStatePath(),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function cmdDispatchStatus(argv: string[]): Promise<void> {
+  const artifactsDir = getArtifactsDir(argv);
+  const activeDispatchPath = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
+  let activeDispatch: ActiveDispatchState | null = null;
+  try {
+    activeDispatch = await readJsonFile<ActiveDispatchState>(activeDispatchPath);
+  } catch (e) {
+    if (!isFileMissingError(e)) throw e;
+  }
+  if (!activeDispatch) {
+    console.log(JSON.stringify({ status: "no_active_dispatch" }, null, 2));
+    return;
+  }
+
+  const runDir = join(artifactsDir, "runs", activeDispatch.run_id);
+  const resultMap = await loadDispatchResultMap(runDir);
+  if (!resultMap) {
+    console.log(JSON.stringify({
+      status: "missing_result_map",
+      run_id: activeDispatch.run_id,
+    }, null, 2));
+    return;
+  }
+
+  const packetIds = [...new Set(resultMap.entries.map((e) => e.packet_id))];
+  const packetStatus: Array<{
+    packet_id: string;
+    task_count: number;
+    completed_count: number;
+    missing_task_ids: string[];
+  }> = [];
+
+  for (const pid of packetIds) {
+    if (pid === "__prior_dispatch__") continue;
+    const entries = resultMap.entries.filter((e) => e.packet_id === pid);
+    let completed = 0;
+    const missing: string[] = [];
+    for (const entry of entries) {
+      try {
+        await readFile(entry.result_path, "utf8");
+        completed++;
+      } catch {
+        missing.push(entry.task_id);
+      }
+    }
+    packetStatus.push({
+      packet_id: pid,
+      task_count: entries.length,
+      completed_count: completed,
+      missing_task_ids: missing,
+    });
+  }
+
+  const totalTasks = packetStatus.reduce((s, p) => s + p.task_count, 0);
+  const completedTasks = packetStatus.reduce((s, p) => s + p.completed_count, 0);
+  const completedPackets = packetStatus.filter((p) => p.missing_task_ids.length === 0).length;
+
+  console.log(JSON.stringify({
+    run_id: activeDispatch.run_id,
+    dispatch_status: activeDispatch.status,
+    created_at: activeDispatch.created_at,
+    total_packets: packetStatus.length,
+    completed_packets: completedPackets,
+    total_tasks: totalTasks,
+    completed_tasks: completedTasks,
+    missing_tasks: totalTasks - completedTasks,
+    packets: packetStatus,
+  }, null, 2));
+}
+
+async function main(argv: string[]): Promise<void> {
+  const command = argv[2] ?? "sample-run";
+  switch (command) {
+    case "sample-run":
+      await runSample(argv);
+      return;
+    case "advance-audit":
+      await cmdAdvanceAudit(argv);
+      return;
+    case "next-step":
+      await cmdNextStep(argv);
+      return;
+    case "run-to-completion":
+      await cmdRunToCompletion(argv);
+      return;
+    case "worker-run":
+      await cmdWorkerRun(argv);
+      return;
+    case "import-external-analyzer":
+      await cmdImportExternalAnalyzer(argv);
+      return;
+    case "intake":
+      await cmdIntake(argv);
+      return;
+    case "plan":
+      await cmdPlan(argv);
+      return;
+    case "ingest-results":
+      await cmdIngestResults(argv);
+      return;
+    case "explain-task":
+      await cmdExplainTask(argv);
+      return;
+    case "update-runtime-validation":
+      await cmdUpdateRuntimeValidation(argv);
+      return;
+    case "validate":
+      await cmdValidate(argv);
+      return;
+    case "validate-results":
+      await cmdValidateResults(argv);
+      return;
+    case "requeue":
+      await cmdRequeue(argv);
+      return;
+    case "synthesize":
+      await cmdSynthesize(argv);
+      return;
+    case "cleanup":
+      await cmdCleanup(argv);
+      return;
+    case "mcp":
+      await cmdMcp(argv);
+      return;
+    case "prepare-dispatch":
+      await cmdPrepareDispatch(argv);
+      return;
+    case "merge-and-ingest":
+      await cmdMergeAndIngest(argv);
+      return;
+    case "submit-packet":
+      await cmdSubmitPacket(argv);
+      return;
+    case "validate-result":
+      await cmdValidateResult(argv);
+      return;
+    case "quota":
+      await cmdQuota(argv);
+      return;
+    case "status":
+      await cmdStatus(argv);
+      return;
+    case "dispatch-status":
+      await cmdDispatchStatus(argv);
+      return;
+    default:
+      console.error(`Unknown command: ${command}`);
+      console.error(
+        "Available commands: sample-run, advance-audit, next-step, run-to-completion, worker-run, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, cleanup, mcp, prepare-dispatch, merge-and-ingest, submit-packet, validate-result, quota, status, dispatch-status",
+      );
+      process.exitCode = 1;
+  }
+}
+
+export async function runCli(argv: string[]): Promise<void> {
+  await main(argv).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}
+
+function isDirectCliExecution(argv: string[]): boolean {
+  const entryPath = argv[1];
+  if (!entryPath) {
+    return false;
+  }
+  return resolve(entryPath) === fileURLToPath(import.meta.url);
+}
+
+if (isDirectCliExecution(process.argv)) {
+  await runCli(process.argv);
+}

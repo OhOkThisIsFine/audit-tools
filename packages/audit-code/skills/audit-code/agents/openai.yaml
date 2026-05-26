@@ -1,0 +1,4 @@
+interface:
+  display_name: "audit-code"
+  short_description: "Run the autonomous /audit-code repository audit workflow."
+  default_prompt: "Start /audit-code for this repository and continue until the audit completes or blocks for operator input."

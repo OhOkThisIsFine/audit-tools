@@ -1,0 +1,619 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { importSourceModule } from "./helpers/sourceImport.mjs";
+
+const { validateAuditResults } = await importSourceModule(
+  "src/validation/auditResults.ts",
+);
+const { buildAuditReportModel } = await importSourceModule(
+  "src/reporting/synthesis.ts",
+);
+const { buildRequeuePayload } = await importSourceModule(
+  "src/orchestrator/requeueCommand.ts",
+);
+const { buildChunkedAuditTasks } = await importSourceModule(
+  "src/orchestrator/taskBuilder.ts",
+);
+const { initializeCoverageFromPlan } = await importSourceModule(
+  "src/orchestrator/planning.ts",
+);
+const { autoCompleteTrivialCoverage } = await importSourceModule(
+  "src/orchestrator/trivialAudit.ts",
+);
+const { loadSessionConfig } = await importSourceModule(
+  "src/supervisor/sessionConfig.ts",
+);
+
+test("validateAuditResults reports field-level evidence type errors instead of crashing", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+        findings: [
+          {
+            id: "finding-1",
+            title: "Object evidence",
+            category: "security",
+            severity: "high",
+            confidence: "high",
+            lens: "security",
+            summary: "Evidence payload shape is wrong.",
+            affected_files: [{ path: "src/api/auth.ts", line_start: 1 }],
+            evidence: [{ excerpt: "bad", line_reference: "src/api/auth.ts:1" }],
+          },
+        ],
+      },
+    ],
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts"],
+        rationale: "fixture",
+      },
+    ],
+  );
+
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.field === "findings[0].evidence[0]" &&
+        /must be a string, got object/i.test(issue.message),
+    ),
+  );
+});
+
+test("validateAuditResults enforces total_lines and cited line spans mechanically", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+        findings: [
+          {
+            id: "finding-1",
+            title: "Out of range evidence",
+            category: "security",
+            severity: "medium",
+            confidence: "high",
+            lens: "security",
+            summary: "The finding points at lines the worker did not claim to read.",
+            affected_files: [{ path: "src/api/auth.ts", line_start: 12 }],
+            evidence: ["src/api/auth.ts:12 - cited outside file coverage"],
+          },
+        ],
+      },
+    ],
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts"],
+        rationale: "fixture",
+      },
+    ],
+    {
+      lineIndex: { "src/api/auth.ts": 12 },
+    },
+  );
+
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.field === "file_coverage[0].total_lines" &&
+        /must match the current file line count/i.test(issue.message),
+    ),
+  );
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.field === "findings[0].affected_files[0]" &&
+        /falls outside the declared file_coverage/i.test(issue.message),
+    ),
+  );
+});
+
+test("validateAuditResults rejects task metadata drift and out-of-scope coverage", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-1",
+        unit_id: "wrong-unit",
+        pass_id: "pass:correctness",
+        lens: "correctness",
+        file_coverage: [
+          { path: "src/api/auth.ts", total_lines: 10 },
+          { path: "src/other.ts", total_lines: 5 },
+        ],
+        findings: [
+          {
+            id: "finding-1",
+            title: "Boundary drift",
+            category: "security",
+            severity: "high",
+            confidence: "high",
+            lens: "performance",
+            summary: "The finding tries to escape the assigned task boundary.",
+            affected_files: [{ path: "src/other.ts" }],
+            evidence: ["src/other.ts:1 - outside the assigned review packet"],
+          },
+        ],
+      },
+    ],
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts"],
+        rationale: "fixture",
+      },
+    ],
+    {
+      lineIndex: {
+        "src/api/auth.ts": 10,
+        "src/other.ts": 5,
+      },
+    },
+  );
+
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.field === "unit_id" &&
+        /must match the assigned task metadata/i.test(issue.message),
+    ),
+  );
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.field === "pass_id" &&
+        /must match the assigned task metadata/i.test(issue.message),
+    ),
+  );
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.field === "lens" &&
+        /must match the assigned task metadata/i.test(issue.message),
+    ),
+  );
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.field === "file_coverage[1].path" &&
+        issue.severity === "error" &&
+        /not listed in the task file_paths/i.test(issue.message),
+    ),
+  );
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.field === "findings[0].lens" &&
+        /must match the assigned task lens/i.test(issue.message),
+    ),
+  );
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.field === "findings[0].affected_files[0].path" &&
+        /not in the declared assigned file_coverage/i.test(issue.message),
+    ),
+  );
+});
+
+test("validateAuditResults accepts zero-line file coverage for empty files", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-empty",
+        unit_id: "unit-empty",
+        pass_id: "pass:reliability",
+        lens: "reliability",
+        file_coverage: [{ path: "src/empty.ts", total_lines: 0 }],
+        findings: [],
+      },
+    ],
+    [
+      {
+        task_id: "task-empty",
+        unit_id: "unit-empty",
+        pass_id: "pass:reliability",
+        lens: "reliability",
+        file_paths: ["src/empty.ts"],
+        rationale: "fixture",
+      },
+    ],
+    {
+      lineIndex: { "src/empty.ts": 0 },
+    },
+  );
+
+  assert.deepEqual(issues, []);
+});
+
+test("buildAuditReportModel omits pending runtime placeholder noise and builds deterministic work blocks", () => {
+  const report = buildAuditReportModel({
+    results: [
+      {
+        task_id: "task-1",
+        unit_id: "src-api-auth",
+        pass_id: "pass:security",
+        lens: "security",
+        file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+        findings: [
+          {
+            id: "finding-1",
+            title: "Missing audit trail",
+            category: "security",
+            severity: "medium",
+            confidence: "medium",
+            lens: "security",
+            summary: "Authentication events are not captured consistently.",
+            affected_files: [
+              { path: "src/api/auth.ts", line_start: 2, line_end: 8 },
+            ],
+            evidence: ["src/api/auth.ts:2 - no log emitted"],
+          },
+        ],
+      },
+    ],
+    unitManifest: {
+      units: [
+        {
+          unit_id: "src-api-auth",
+          name: "src-api-auth",
+          files: ["src/api/auth.ts"],
+          required_lenses: ["security"],
+        },
+      ],
+    },
+    runtimeValidationReport: {
+      results: [
+        {
+          task_id: "runtime:unit:src-api-auth",
+          status: "pending",
+          summary: "Deterministic runtime validation has not executed yet.",
+        },
+      ],
+    },
+  });
+
+  assert.equal(report.findings.length, 1);
+  assert.equal(report.work_blocks.length, 1);
+  assert.equal(
+    report.findings[0].evidence.some((entry) =>
+      /has not executed yet/i.test(entry),
+    ),
+    false,
+  );
+});
+
+test("buildRequeuePayload skips flow requeue duplicates when file coverage is already complete", () => {
+  const payload = buildRequeuePayload(
+    {
+      files: [
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "partial",
+          required_lenses: ["security", "reliability"],
+          completed_lenses: ["security"],
+        },
+      ],
+    },
+    {
+      flows: [
+        {
+          id: "auth-session",
+          name: "Auth session",
+          paths: ["src/api/auth.ts"],
+          entrypoints: ["src/api/auth.ts"],
+          concerns: ["security"],
+        },
+      ],
+    },
+    {
+      flows: [
+        {
+          flow_id: "auth-session",
+          status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+      ],
+    },
+  );
+
+  assert.equal(payload.tasks.length, 1);
+  assert.equal(payload.tasks[0].task_id, "requeue:reliability:src/api/auth.ts");
+});
+
+test("initializeCoverageFromPlan derives per-file required lenses instead of unit unions", () => {
+  const coverage = initializeCoverageFromPlan(
+    {
+      repository: { name: "fixture" },
+      generated_at: "2026-04-22T00:00:00Z",
+      files: [
+        { path: "src/api/auth.ts", language: "ts", size_bytes: 10 },
+        { path: "infra/deploy.yml", language: "yaml", size_bytes: 10 },
+      ],
+    },
+    {
+      units: [
+        {
+          unit_id: "mixed-unit",
+          name: "mixed-unit",
+          files: ["src/api/auth.ts", "infra/deploy.yml"],
+          required_lenses: ["security", "config_deployment"],
+        },
+      ],
+    },
+    {
+      files: [
+        { path: "src/api/auth.ts", status: "included" },
+        { path: "infra/deploy.yml", status: "included" },
+      ],
+    },
+  );
+
+  const authCoverage = coverage.files.find((file) => file.path === "src/api/auth.ts");
+  const deployCoverage = coverage.files.find((file) => file.path === "infra/deploy.yml");
+
+  assert.deepEqual(authCoverage.required_lenses, [
+    "security",
+    "correctness",
+    "reliability",
+    "observability",
+    "tests",
+  ]);
+  assert.deepEqual(deployCoverage.required_lenses, [
+    "reliability",
+    "operability",
+    "config_deployment",
+  ]);
+});
+
+test("buildChunkedAuditTasks claims critical-flow files without overlapping unit blocks", () => {
+  const tasks = buildChunkedAuditTasks(
+    {
+      files: [
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+        {
+          path: "src/lib/session.ts",
+          unit_ids: ["src-lib"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+        {
+          path: "infra/deploy.yml",
+          unit_ids: ["infra-deploy"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+      ],
+    },
+    {
+      "src/api/auth.ts": 4,
+      "src/lib/session.ts": 8,
+      "infra/deploy.yml": 5,
+    },
+    {
+      critical_flows: {
+        flows: [
+          {
+            id: "auth-session",
+            name: "Auth session",
+            paths: ["src/api/auth.ts", "src/lib/session.ts"],
+            entrypoints: ["src/api/auth.ts"],
+            concerns: ["security"],
+          },
+        ],
+      },
+    },
+  );
+
+  assert.deepEqual(
+    tasks.map((task) => ({
+      task_id: task.task_id,
+      lens: task.lens,
+      file_paths: task.file_paths,
+    })),
+    [
+      {
+        task_id: "flow:auth-session:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts", "src/lib/session.ts"],
+      },
+      {
+        task_id: "infra-deploy:security",
+        lens: "security",
+        file_paths: ["infra/deploy.yml"],
+      },
+    ],
+  );
+});
+
+test("buildChunkedAuditTasks splits aggregate review blocks by line budget", () => {
+  const tasks = buildChunkedAuditTasks(
+    {
+      files: [
+        {
+          path: "src/a.ts",
+          unit_ids: ["src-unit"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+        {
+          path: "src/b.ts",
+          unit_ids: ["src-unit"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+        {
+          path: "src/c.ts",
+          unit_ids: ["src-unit"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+      ],
+    },
+    {
+      "src/a.ts": 700,
+      "src/b.ts": 700,
+      "src/c.ts": 700,
+    },
+    {
+      max_task_lines: 1500,
+    },
+  );
+
+  assert.deepEqual(
+    tasks.map((task) => ({
+      task_id: task.task_id,
+      file_paths: task.file_paths,
+      tags: task.tags,
+    })),
+    [
+      {
+        task_id: "src-unit:correctness:part-1",
+        file_paths: ["src/a.ts", "src/b.ts"],
+        tags: ["line_budget_split"],
+      },
+      {
+        task_id: "src-unit:correctness:part-2",
+        file_paths: ["src/c.ts"],
+        tags: ["line_budget_split"],
+      },
+    ],
+  );
+});
+
+test("planning excludes trivial audit files instead of auto-completing them", () => {
+  const tasks = buildChunkedAuditTasks(
+    {
+      files: [
+        {
+          path: ".gitignore",
+          unit_ids: ["repo-root"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+        {
+          path: "pkg/__init__.py",
+          unit_ids: ["pkg"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["security", "correctness"],
+          completed_lenses: [],
+        },
+      ],
+    },
+    {
+      ".gitignore": 2,
+      "pkg/__init__.py": 1,
+      "src/api/auth.ts": 4,
+    },
+  );
+
+  assert.equal(tasks.length, 2);
+  assert.ok(tasks.every((task) => task.file_paths.includes("src/api/auth.ts")));
+
+  const coverage = {
+    files: [
+      {
+        path: ".gitignore",
+        unit_ids: ["repo-root"],
+        classification_status: "classified",
+        audit_status: "pending",
+        required_lenses: ["correctness"],
+        completed_lenses: [],
+      },
+      {
+        path: "pkg/__init__.py",
+        unit_ids: ["pkg"],
+        classification_status: "classified",
+        audit_status: "pending",
+        required_lenses: ["correctness"],
+        completed_lenses: [],
+      },
+      {
+        path: "src/api/auth.ts",
+        unit_ids: ["src-api-auth"],
+        classification_status: "classified",
+        audit_status: "pending",
+        required_lenses: ["security"],
+        completed_lenses: [],
+      },
+    ],
+  };
+
+  const skipped = autoCompleteTrivialCoverage(coverage, {
+    ".gitignore": 2,
+    "pkg/__init__.py": 1,
+    "src/api/auth.ts": 4,
+  });
+
+  assert.deepEqual(skipped, [".gitignore", "pkg/__init__.py"]);
+  assert.equal(coverage.files[0].audit_status, "excluded");
+  assert.equal(coverage.files[1].audit_status, "excluded");
+  assert.equal(coverage.files[2].audit_status, "pending");
+});
+
+test("loadSessionConfig writes a default repo-local session config when missing", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+  try {
+    const config = await loadSessionConfig(artifactsDir);
+    assert.equal(config.provider, "local-subprocess");
+
+    const persisted = JSON.parse(
+      await readFile(join(artifactsDir, "session-config.json"), "utf8"),
+    );
+    assert.equal(persisted.provider, "local-subprocess");
+  } finally {
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+});

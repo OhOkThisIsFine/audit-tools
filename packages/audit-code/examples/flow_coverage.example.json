@@ -1,0 +1,12 @@
+{
+  "flows": [
+    {
+      "flow_id": "flow:surface:src-api-auth-ts",
+      "paths": ["src/api/auth.ts", "src/lib/session.ts"],
+      "required_lenses": ["security", "reliability", "correctness"],
+      "completed_lenses": ["security"],
+      "status": "partial",
+      "notes": ["Flow still missing reliability and correctness coverage."]
+    }
+  ]
+}

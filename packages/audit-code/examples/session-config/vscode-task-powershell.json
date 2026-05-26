@@ -1,0 +1,16 @@
+{
+  "provider": "vscode-task",
+  "ui_mode": "visible",
+  "timeout_ms": 1800000,
+  "vscode_task": {
+    "command_template": [
+      "pwsh",
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      "& { {workerCommandShell} }"
+    ],
+    "env": {}
+  }
+}

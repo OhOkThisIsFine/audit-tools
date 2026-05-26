@@ -1,0 +1,9 @@
+{
+  "provider": "claude-code",
+  "ui_mode": "visible",
+  "timeout_ms": 1800000,
+  "claude_code": {
+    "command": "claude",
+    "extra_args": ["--model", "sonnet"]
+  }
+}

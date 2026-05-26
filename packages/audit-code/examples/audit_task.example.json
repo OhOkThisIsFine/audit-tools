@@ -1,0 +1,16 @@
+{
+  "task_id": "api-auth:security",
+  "unit_id": "api-auth",
+  "pass_id": "pass:security",
+  "lens": "security",
+  "file_paths": ["src/api/auth.ts", "src/lib/session.ts"],
+  "line_ranges": [{ "path": "src/api/auth.ts", "start": 1, "end": 180 }],
+  "inputs": {
+    "unit_manifest_ref": "artifacts/unit_manifest.json",
+    "graph_bundle_ref": "artifacts/graph_bundle.json",
+    "mechanical_results_ref": "artifacts/mechanical_results.json",
+    "risk_register_ref": "artifacts/risk_register.json"
+  },
+  "rationale": "Audit the authentication unit under the security lens.",
+  "status": "pending"
+}

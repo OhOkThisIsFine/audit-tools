@@ -1,0 +1,13 @@
+{
+  "units": [
+    {
+      "unit_id": "api-auth",
+      "name": "Authentication API",
+      "kind": "service",
+      "files": ["src/api/auth.ts", "src/lib/session.ts"],
+      "risk_score": 9,
+      "required_lenses": ["security", "reliability", "correctness", "tests"],
+      "critical_flows": ["login", "session-refresh"]
+    }
+  ]
+}

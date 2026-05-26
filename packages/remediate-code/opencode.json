@@ -1,0 +1,170 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "command": {
+    "remediate-code": {
+      "template": "Run `remediate-code ensure --quiet`, then `remediate-code next-step`, read only the returned prompt_path, and follow that prompt.",
+      "description": "Conversation-first code remediation",
+      "agent": "remediator",
+      "subtask": false
+    }
+  },
+  "permission": {
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "external_directory": {
+      "*": "allow"
+    },
+    "edit": {
+      "*": "ask",
+      ".audit-code/**": "allow",
+      ".audit-artifacts/**": "allow",
+      "audit-report.md": "allow",
+      ".remediation-artifacts/**": "allow",
+      "remediation-report.md": "allow",
+      "remediation-report.json": "allow",
+      "remediation-closing-result.json": "allow"
+    },
+    "bash": {
+      "*": "allow",
+      "audit-code run-to-completion*": "deny",
+      "audit-code synthesize*": "deny",
+      "audit-code cleanup*": "deny",
+      "audit-code requeue*": "deny",
+      "audit-code ingest-results*": "deny",
+      "*dist*index.js* run-to-completion*": "deny",
+      "*dist*index.js* synthesize*": "deny",
+      "*dist*index.js* cleanup*": "deny",
+      "*dist*index.js* requeue*": "deny",
+      "*dist*index.js* ingest-results*": "deny",
+      "*audit-code.mjs* run-to-completion*": "deny",
+      "*audit-code.mjs* synthesize*": "deny",
+      "*audit-code.mjs* cleanup*": "deny",
+      "*audit-code.mjs* requeue*": "deny",
+      "*audit-code.mjs* ingest-results*": "deny",
+      "audit-code": "allow",
+      "audit-code ensure*": "allow",
+      "audit-code next-step*": "allow",
+      "audit-code prepare-dispatch*": "allow",
+      "audit-code submit-packet*": "allow",
+      "audit-code merge-and-ingest*": "allow",
+      "audit-code validate*": "allow",
+      "*audit-code.mjs": "allow",
+      "*audit-code.mjs* ensure*": "allow",
+      "*audit-code.mjs* next-step*": "allow",
+      "*audit-code.mjs* prepare-dispatch*": "allow",
+      "*audit-code.mjs* submit-packet*": "allow",
+      "*audit-code.mjs* merge-and-ingest*": "allow",
+      "*audit-code.mjs* worker-run*": "allow",
+      "*audit-code.mjs* validate*": "allow",
+      "*node* *auditor-lambda*dist*index.js* worker-run*": "allow",
+      "node* .audit-code/install/run-mcp-server.mjs*": "allow",
+      "node* ./.audit-code/install/run-mcp-server.mjs*": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "grep *": "allow",
+      "Select-String *": "allow",
+      "rm *": "deny",
+      "remediate-code run*": "deny",
+      "*dist*index.js* run*": "deny",
+      "*remediate-code.mjs* run*": "deny",
+      "remediate-code ensure*": "allow",
+      "remediate-code next-step*": "allow",
+      "remediate-code prepare-document-dispatch*": "allow",
+      "remediate-code merge-document-results*": "allow",
+      "remediate-code prepare-implement-dispatch*": "allow",
+      "remediate-code merge-implement-results*": "allow",
+      "remediate-code validate-artifacts*": "allow"
+    }
+  },
+  "agent": {
+    "remediator": {
+      "description": "Bounded remediation orchestration agent for the /remediate-code workflow.",
+      "permission": {
+        "edit": {
+          "*": "ask",
+          ".remediation-artifacts/**": "allow",
+          "remediation-report.md": "allow",
+          "remediation-report.json": "allow",
+          "remediation-closing-result.json": "allow"
+        },
+        "bash": {
+          "*": "ask",
+          "remediate-code run*": "deny",
+          "remediate-code ensure*": "allow",
+          "remediate-code next-step*": "allow",
+          "remediate-code prepare-document-dispatch*": "allow",
+          "remediate-code merge-document-results*": "allow",
+          "remediate-code prepare-implement-dispatch*": "allow",
+          "remediate-code merge-implement-results*": "allow",
+          "remediate-code validate-artifacts*": "allow",
+          "git status*": "allow",
+          "git diff*": "allow"
+        },
+        "question": "allow"
+      }
+    },
+    "auditor": {
+      "description": "Read-heavy audit orchestration agent for the /audit-code workflow.",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "external_directory": {
+          "*": "allow"
+        },
+        "edit": {
+          "*": "ask",
+          ".audit-code/**": "allow",
+          ".audit-artifacts/**": "allow",
+          "audit-report.md": "allow"
+        },
+        "bash": {
+          "*": "allow",
+          "audit-code run-to-completion*": "deny",
+          "audit-code synthesize*": "deny",
+          "audit-code cleanup*": "deny",
+          "audit-code requeue*": "deny",
+          "audit-code ingest-results*": "deny",
+          "*dist*index.js* run-to-completion*": "deny",
+          "*dist*index.js* synthesize*": "deny",
+          "*dist*index.js* cleanup*": "deny",
+          "*dist*index.js* requeue*": "deny",
+          "*dist*index.js* ingest-results*": "deny",
+          "*audit-code.mjs* run-to-completion*": "deny",
+          "*audit-code.mjs* synthesize*": "deny",
+          "*audit-code.mjs* cleanup*": "deny",
+          "*audit-code.mjs* requeue*": "deny",
+          "*audit-code.mjs* ingest-results*": "deny",
+          "audit-code": "allow",
+          "audit-code ensure*": "allow",
+          "audit-code next-step*": "allow",
+          "audit-code prepare-dispatch*": "allow",
+          "audit-code submit-packet*": "allow",
+          "audit-code merge-and-ingest*": "allow",
+          "audit-code validate*": "allow",
+          "*audit-code.mjs": "allow",
+          "*audit-code.mjs* ensure*": "allow",
+          "*audit-code.mjs* next-step*": "allow",
+          "*audit-code.mjs* prepare-dispatch*": "allow",
+          "*audit-code.mjs* submit-packet*": "allow",
+          "*audit-code.mjs* merge-and-ingest*": "allow",
+          "*audit-code.mjs* worker-run*": "allow",
+          "*audit-code.mjs* validate*": "allow",
+          "*node* *auditor-lambda*dist*index.js* worker-run*": "allow",
+          "node* .audit-code/install/run-mcp-server.mjs*": "allow",
+          "node* ./.audit-code/install/run-mcp-server.mjs*": "allow",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "grep *": "allow",
+          "Select-String *": "allow",
+          "rm *": "deny"
+        },
+        "auditor_*": "allow",
+        "question": "allow",
+        "task": "allow"
+      }
+    }
+  },
+  "mcp": {}
+}
