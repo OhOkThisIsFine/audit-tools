@@ -1,8 +1,7 @@
-import { readJsonFile } from "../io/json.js";
+import { readJsonFile } from "@audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
-import type { FreshSessionProvider, LaunchFreshSessionInput } from "./types.js";
+import type { FreshSessionProvider, LaunchFreshSessionInput, SubprocessTemplateConfig, OpenTokenConfig } from "@audit-tools/shared";
 import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
-import type { SubprocessTemplateConfig } from "../types/sessionConfig.js";
 
 function shellQuote(arg: string): string {
   return JSON.stringify(arg);
@@ -38,10 +37,12 @@ function applyTemplate(
 export class SubprocessTemplateProvider implements FreshSessionProvider {
   name: string;
   private readonly config: SubprocessTemplateConfig;
+  private readonly opentoken: OpenTokenConfig;
 
-  constructor(config: SubprocessTemplateConfig, name = "subprocess-template") {
+  constructor(config: SubprocessTemplateConfig, name = "subprocess-template", opentoken: OpenTokenConfig = {}) {
     this.config = config;
     this.name = name;
+    this.opentoken = opentoken;
   }
 
   async launch(input: LaunchFreshSessionInput) {
@@ -55,6 +56,9 @@ export class SubprocessTemplateProvider implements FreshSessionProvider {
       applyTemplate(entry, input, task),
     );
     const [command, ...args] = rendered;
-    return await spawnLoggedCommand(command, args, input, this.config.env);
+    return await spawnLoggedCommand(command, args, input, this.config.env, {
+      opentoken: this.opentoken.enabled,
+      opentokenCommand: this.opentoken.command,
+    });
   }
 }

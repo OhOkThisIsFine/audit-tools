@@ -6,7 +6,7 @@ import {
   type RemediationStepKind,
   type RemediationStepStatus,
 } from "./types.js";
-import { writeJsonFile } from "../io/json.js";
+import { writeJsonFile } from "@audit-tools/shared";
 
 export interface WriteStepInput {
   stepKind: RemediationStepKind;

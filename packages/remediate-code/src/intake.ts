@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import {
   readOptionalJsonFile,
   readOptionalTextFile,
-} from "./io/json.js";
+} from "@audit-tools/shared";
 
 export const INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION =
   "remediate-code-intake-source-manifest/v1alpha1" as const;

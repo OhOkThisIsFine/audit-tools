@@ -1,8 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-const { LearnedQuotaSource } = await import("../dist/quota/learnedQuotaSource.js");
-const { CompositeQuotaSource } = await import("../dist/quota/compositeQuotaSource.js");
+const { setQuotaStateDir } = await import("@audit-tools/shared/quota/state");
+setQuotaStateDir(join(tmpdir(), ".audit-code-test"));
+
+const { LearnedQuotaSource } = await import("@audit-tools/shared/quota/learnedQuotaSource");
+const { CompositeQuotaSource } = await import("@audit-tools/shared/quota/compositeQuotaSource");
 const { scheduleWave } = await import("../dist/quota/scheduler.js");
 
 // ── LearnedQuotaSource ──────────────────────────────────────────────────────

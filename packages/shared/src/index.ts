@@ -30,6 +30,11 @@ export type {
 } from "./types/graph.js";
 export type { AccessDeclaration } from "./types/accessDeclaration.js";
 export type {
+  StepStatus,
+  DispatchModelTier,
+  DispatchModelHint,
+} from "./types/stepContract.js";
+export type {
   ProviderName,
   ResolvedProviderName,
   SessionUiMode,
@@ -40,6 +45,7 @@ export type {
   BlockQuotaConfig,
   QuotaModelLimits,
   QuotaConfig,
+  OpenTokenConfig,
   SessionConfig,
 } from "./types/sessionConfig.js";
 export {
@@ -47,6 +53,9 @@ export {
   SESSION_UI_MODES,
   PROVIDER_SECTION_KEYS,
 } from "./types/sessionConfig.js";
+
+// Contracts
+export { AUDITOR_REPORT_MARKER } from "./contracts.js";
 
 // IO
 export {
@@ -83,6 +92,9 @@ export type {
   FreshSessionProvider,
 } from "./providers/types.js";
 
+// Provider constants
+export { LOCAL_SUBPROCESS_PROVIDER_NAME } from "./providers/constants.js";
+
 // Quota
 export type {
   LimitSource,
@@ -97,3 +109,52 @@ export type {
   BackoffState,
   ObservedWaveOutcome,
 } from "./quota/types.js";
+export type { QuotaSource, QuotaUsageSnapshot } from "./quota/quotaSource.js";
+export {
+  resolveLimits,
+  lookupKnownModel,
+  classifyProvider,
+} from "./quota/limits.js";
+export type {
+  ProviderType,
+  LimitResolutionResult,
+  ResolveLimitsOptions,
+} from "./quota/limits.js";
+export {
+  setQuotaStateDir,
+  getQuotaStatePath,
+  readQuotaState,
+  writeQuotaState,
+  computeMaxSafeConcurrency,
+  recordWaveOutcome,
+  decayWeight,
+  applyDecayToEntry,
+  computeBackoffCooldownMs,
+  computeBackoffFailureWeight,
+  computeRampUpConcurrency,
+} from "./quota/state.js";
+export {
+  detectRateLimitError,
+  computeCooldownUntil,
+} from "./quota/errorParsing.js";
+export {
+  detectHostActiveSubagentLimit,
+  resolveHostActiveSubagentLimit,
+} from "./quota/hostLimits.js";
+export type { RateLimitDetectionResult } from "./quota/errorParsing.js";
+export {
+  acquireLock,
+  releaseLock,
+  withFileLock,
+  FileLockTimeoutError,
+} from "./quota/fileLock.js";
+export { runSlidingWindow } from "./quota/slidingWindow.js";
+export type { SlidingWindowResult } from "./quota/slidingWindow.js";
+export { LearnedQuotaSource } from "./quota/learnedQuotaSource.js";
+export { CompositeQuotaSource } from "./quota/compositeQuotaSource.js";
+export type { ErrorParser } from "./quota/errorParsers/index.js";
+export {
+  GenericErrorParser,
+  ClaudeCodeErrorParser,
+  getErrorParserForProvider,
+} from "./quota/errorParsers/index.js";

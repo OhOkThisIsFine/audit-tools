@@ -44,6 +44,7 @@ export interface RemediationPlan {
 export interface ItemSpec {
   finding_id: string;
   concrete_change: string;
+  no_change?: boolean;
   tests_to_write: {
     name: string;
     assertions: string[];

@@ -376,7 +376,7 @@ describe("decideNextStep", () => {
     expect(step.step_kind).toBe("dispatch_document");
   });
 
-  it("closing state emits a bounded finalization step, not the compatibility run loop", async () => {
+  it("closing state runs close inline and returns present_report", async () => {
     await saveState(
       makePlanningState({
         status: "closing",
@@ -388,15 +388,7 @@ describe("decideNextStep", () => {
     );
 
     const step = await decideNextStep({ root: REPO_DIR });
-    const prompt = await readFile(step.prompt_path, "utf8");
-
-    expect(step.step_kind).toBe("close_run");
-    expect(step.allowed_commands).toEqual([
-      "remediate-code next-step --finalize-closing",
-    ]);
-    expect(prompt).toMatch(/bounded closer/i);
-    expect(prompt).toMatch(/next-step --finalize-closing/);
-    expect(prompt).not.toMatch(/remediate-code run/);
+    expect(step.step_kind).toBe("present_report");
   });
 
   it("finalize-closing runs close and returns present_report", async () => {

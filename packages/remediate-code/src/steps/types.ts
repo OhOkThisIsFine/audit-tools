@@ -25,7 +25,9 @@ export type RemediationStepKind =
   | "present_report"
   | "unhandled_state";
 
-export type RemediationStepStatus = "ready" | "blocked" | "complete";
+import type { StepStatus, DispatchModelHint } from "@audit-tools/shared";
+
+export type RemediationStepStatus = StepStatus;
 
 export interface RemediationStep {
   contract_version: typeof REMEDIATION_STEP_CONTRACT_VERSION;
@@ -43,12 +45,7 @@ export interface RemediationStep {
 
 export type DispatchPhase = "document" | "implement";
 
-export type DispatchModelTier = "small" | "standard" | "deep";
-
-export interface DispatchModelHint {
-  tier: DispatchModelTier;
-  reasons: string[];
-}
+export type { DispatchModelTier, DispatchModelHint } from "@audit-tools/shared";
 
 export interface AccessDeclaration {
   read_paths: string[];
@@ -65,6 +62,7 @@ export interface DispatchPlanItem {
   artifact_paths?: Record<string, string>;
   model_hint?: DispatchModelHint;
   access?: AccessDeclaration;
+  worktree_path?: string;
 }
 
 export interface RemediationDispatchPlan {
@@ -98,14 +96,14 @@ export interface ImplementWorkerResult {
 export const REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION =
   "remediate-code-dispatch-quota/v1alpha2" as const;
 
-export type { HostConcurrencyLimitSource, HostConcurrencyLimit } from "../quota/types.js";
+export type { HostConcurrencyLimitSource, HostConcurrencyLimit } from "@audit-tools/shared";
 export type {
   LimitSource,
   LimitConfidence,
   ResolvedLimits,
   BackoffState,
-} from "../quota/types.js";
-export type { QuotaUsageSnapshot } from "../quota/quotaSource.js";
+} from "@audit-tools/shared";
+export type { QuotaUsageSnapshot } from "@audit-tools/shared";
 
 import type {
   HostConcurrencyLimit,
@@ -113,8 +111,8 @@ import type {
   LimitConfidence,
   ResolvedLimits,
   BackoffState,
-} from "../quota/types.js";
-import type { QuotaUsageSnapshot } from "../quota/quotaSource.js";
+  QuotaUsageSnapshot,
+} from "@audit-tools/shared";
 
 export interface RemediationDispatchQuota {
   contract_version:

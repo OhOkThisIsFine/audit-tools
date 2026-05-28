@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs
 import { createReadStream, existsSync } from "node:fs";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
+import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildRepoManifest } from "./extractors/fileInventory.js";
@@ -21,13 +22,12 @@ import {
   writeCoreArtifacts,
   promoteFinalAuditReport,
 } from "./io/artifacts.js";
-import { isFileMissingError, readJsonFile, writeJsonFile } from "./io/json.js";
+import { isFileMissingError, readJsonFile, writeJsonFile, prefixValidationIssues } from "@audit-tools/shared";
 import { validateArtifactBundle } from "./validation/artifacts.js";
 import {
   validateAuditResults,
   formatAuditResultIssues,
 } from "./validation/auditResults.js";
-import { prefixValidationIssues } from "./validation/basic.js";
 import {
   validateConfiguredProviderEnvironment,
   validateSessionConfig,
@@ -37,7 +37,7 @@ import {
   renderAuditReportMarkdown,
 } from "./reporting/synthesis.js";
 import { deriveAuditState } from "./orchestrator/state.js";
-import { advanceAudit } from "./orchestrator/advance.js";
+import { advanceAudit, type AdvanceAuditResult } from "./orchestrator/advance.js";
 import { checkFileIntegrity } from "./orchestrator/fileIntegrity.js";
 import { decideNextStep } from "./orchestrator/nextStep.js";
 import { renderDesignReviewPrompt } from "./orchestrator/designReviewPrompt.js";
@@ -68,17 +68,11 @@ import {
 } from "./io/runArtifacts.js";
 import { renderWorkerPrompt } from "./prompts/renderWorkerPrompt.js";
 import {
-  buildReviewPackets,
-  orderTasksForPacketReview,
   estimateTaskGroupTokens,
 } from "./orchestrator/reviewPackets.js";
-import {
-  buildFileAnchorSummary,
-  type FileAnchorSummary,
-} from "./orchestrator/fileAnchors.js";
 import type { AuditResult, AuditTask, Finding, RepoManifest } from "./types.js";
 import type { AuditState } from "./types/auditState.js";
-import type { SessionConfig } from "./types/sessionConfig.js";
+import type { SessionConfig, StepStatus } from "@audit-tools/shared";
 import type { RuntimeValidationReport } from "./types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "./types/externalAnalyzer.js";
 import type { WorkerTask } from "./types/workerSession.js";
@@ -104,70 +98,115 @@ import {
   updateDiscoveredLimits,
   mergeDiscoveredLimits,
   getHeaderExtractorForProvider,
+  setQuotaStateDir,
 } from "./quota/index.js";
 import type { DiscoveredRateLimits, DispatchQuota } from "./quota/index.js";
+
+// Re-exports from extracted modules
+export {
+  resolveHostDispatchCapability,
+  DIRECT_CLI_DEFAULTS,
+  getFlag,
+  hasFlag,
+  getOptionalBooleanFlag,
+  getArtifactsDir,
+  getRootDir,
+  getBatchResultsDir,
+  getMaxRuns,
+  getAgentBatchSize,
+  getParallelWorkers,
+  getTimeoutMs,
+  chunkArray,
+  getUiMode,
+  looksLikeCliFlag,
+  countLines,
+  warnIfNotGitRepo,
+} from "./cli/args.js";
+import {
+  type UiMode,
+  DIRECT_CLI_DEFAULTS,
+  getFlag,
+  hasFlag,
+  getOptionalBooleanFlag,
+  optionalBooleanEnv,
+  toBase64Url,
+  fromBase64Url,
+  digestId,
+  safeArtifactStem,
+  artifactNameForId,
+  quoteCommandArg,
+  renderCommand,
+  summarizeLaunchExit,
+  taskResultPath,
+  packetPromptPath,
+  readStdinText,
+  normalizePositiveInteger,
+  parsePositiveIntegerFlag,
+  getArtifactsDir,
+  getRootDir,
+  warnIfNotGitRepo,
+  getBatchResultsDir,
+  getMaxRuns,
+  getAgentBatchSize,
+  getParallelWorkers,
+  getTimeoutMs,
+  getExplicitProvider,
+  getHostModel,
+  getHostMaxActiveSubagents,
+  getQuotaProbeMode,
+  resolveRunProviderName,
+  chunkArray,
+  getUiMode,
+  looksLikeCliFlag,
+  resolveHostDispatchCapability,
+  countLines,
+  listBatchResultFiles,
+} from "./cli/args.js";
+import {
+  nextStepCommand,
+  mergeAndIngestCommand,
+  renderDispatchReviewPrompt,
+  renderSingleTaskFallbackStepPrompt,
+  renderPresentReportPrompt,
+  renderBlockedStepPrompt,
+} from "./cli/prompts.js";
+import {
+  STEP_CONTRACT_VERSION,
+  type StepKind,
+  type StepArtifact,
+  writeCurrentStep,
+} from "./cli/steps.js";
+import {
+  WORKER_RESULT_CONTRACT_VERSION,
+  buildWorkerResult,
+  persistWorkerRunArtifacts,
+  isWorkerResult,
+  buildWorkerFailureBlocker,
+  formatAuditResultValidationError,
+} from "./cli/workerResult.js";
+import {
+  type ActiveDispatchState,
+  type PrepareDispatchResult,
+  DISPATCH_RESULT_MAP_FILENAME,
+  ACTIVE_DISPATCH_FILENAME,
+  dispatchResultMapPath,
+  resolveRunScopedArg,
+  loadDispatchResultMap,
+  entriesByTaskId,
+  buildPendingAuditTasks,
+  prepareDispatchArtifacts,
+} from "./cli/dispatch.js";
+import {
+  readWaveManifest,
+  writeWaveManifest,
+  removeWaveManifest,
+  buildWaveSlotEntry,
+} from "./cli/waveManifest.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const ADVANCE_AUDIT_CONTRACT_VERSION = "audit-code/v1alpha1";
-const WORKER_RESULT_CONTRACT_VERSION = "audit-code-worker-result/v1alpha1";
-const STEP_CONTRACT_VERSION = "audit-code-step/v1alpha1";
-const LARGE_FILE_PACKET_TARGET_LINES = 2500;
-const SMALL_MODEL_HINT_MAX_LINES = 500;
-const SMALL_MODEL_HINT_MAX_ESTIMATED_TOKENS = 3000;
-const DEEP_MODEL_HINT_MIN_ESTIMATED_TOKENS = 9000;
 
-type UiMode = "visible" | "headless";
-type DispatchModelTier = "small" | "standard" | "deep";
-type StepKind =
-  | "dispatch_review"
-  | "single_task_fallback"
-  | "design_review"
-  | "present_report"
-  | "blocked";
-type StepStatus = "ready" | "blocked" | "complete";
-
-interface StepArtifact {
-  contract_version: typeof STEP_CONTRACT_VERSION;
-  step_kind: StepKind;
-  prompt_path: string;
-  status: StepStatus;
-  run_id: string | null;
-  allowed_commands: string[];
-  stop_condition: string;
-  repo_root: string;
-  artifacts_dir: string;
-  artifact_paths: Record<string, string | null>;
-  access?: import("./types/workerSession.js").AccessDeclaration;
-}
-
-interface DispatchComplexity {
-  priority: NonNullable<AuditTask["priority"]>;
-  task_count: number;
-  file_count: number;
-  total_lines: number;
-  estimated_tokens: number;
-  lenses: AuditTask["lens"][];
-  tags: string[];
-  large_file_mode: boolean;
-}
-
-interface DispatchModelHint {
-  tier: DispatchModelTier;
-  reasons: string[];
-}
-
-const DIRECT_CLI_DEFAULTS = {
-  rootDir: ".",
-  artifactsDir: ".artifacts",
-  maxRuns: 1000,
-  agentBatchSize: 6,
-  parallelWorkers: 1,
-  timeoutMs: 30 * 60 * 1000, // 30 minutes
-  uiMode: "headless" as UiMode,
-};
-
-// Keep the sample-run payload explicit so the demo command is deterministic.
 const SAMPLE_REPO_FILES = [
   { path: "src/api/auth.ts", size_bytes: 1240, hash: "abc123" },
   { path: "src/lib/session.ts", size_bytes: 980, hash: "def456" },
@@ -175,279 +214,6 @@ const SAMPLE_REPO_FILES = [
   { path: "docs/notes.md", size_bytes: 300, hash: "doc111" },
 ];
 
-function isLongFlagToken(value: string | undefined): boolean {
-  return typeof value === "string" && value.startsWith("--");
-}
-
-// Read a long-form CLI flag while treating a following flag token as "missing".
-function getFlag(
-  argv: string[],
-  name: string,
-  fallback?: string,
-): string | undefined {
-  const index = argv.indexOf(name);
-  if (index < 0) return fallback;
-  const candidate = argv[index + 1];
-  if (!candidate || isLongFlagToken(candidate)) return fallback;
-  return candidate;
-}
-
-// Boolean flags only care whether the token is present at all.
-function hasFlag(argv: string[], name: string): boolean {
-  return argv.includes(name);
-}
-
-function getOptionalBooleanFlag(
-  argv: string[],
-  name: string,
-): boolean | undefined {
-  const raw = getFlag(argv, name);
-  if (raw === undefined) {
-    return undefined;
-  }
-  if (raw === "true") {
-    return true;
-  }
-  if (raw === "false") {
-    return false;
-  }
-  throw new Error(`${name} must be either true or false.`);
-}
-
-function optionalBooleanEnv(value: string | undefined): boolean | undefined {
-  if (value === "true") return true;
-  if (value === "false") return false;
-  return undefined;
-}
-
-export function resolveHostDispatchCapability(options: {
-  explicit?: boolean;
-  sessionConfig: SessionConfig;
-  env?: NodeJS.ProcessEnv;
-}): boolean {
-  if (options.explicit !== undefined) {
-    return options.explicit;
-  }
-  if (options.sessionConfig.host_can_dispatch_subagents !== undefined) {
-    return options.sessionConfig.host_can_dispatch_subagents;
-  }
-  return optionalBooleanEnv(
-    (options.env ?? process.env).AUDIT_CODE_HOST_CAN_DISPATCH,
-  ) ?? true;
-}
-
-function toBase64Url(value: string): string {
-  return Buffer.from(value, "utf8").toString("base64url");
-}
-
-function fromBase64Url(value: string): string {
-  return Buffer.from(value, "base64url").toString("utf8");
-}
-
-function digestId(value: string): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, 12);
-}
-
-function safeArtifactStem(value: string): string {
-  const sanitized = value
-    .replace(/[^a-zA-Z0-9_-]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 80);
-  return sanitized.length > 0 ? sanitized : "artifact";
-}
-
-function artifactNameForId(value: string, extension: string): string {
-  return `${safeArtifactStem(value)}_${digestId(value)}.${extension}`;
-}
-
-function quoteCommandArg(value: string): string {
-  return /[\s"]/u.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
-}
-
-function renderCommand(argv: string[]): string {
-  return argv.map((item) => quoteCommandArg(item)).join(" ");
-}
-
-function summarizeLaunchExit(result: {
-  accepted?: boolean;
-  exitCode?: number | null;
-  signal?: string | null;
-  command?: string;
-  stdoutPath?: string;
-  stderrPath?: string;
-  error?: string;
-}): string | null {
-  if (result.accepted !== false && !result.error) {
-    return null;
-  }
-  const parts = [
-    result.signal
-      ? `signal ${result.signal}`
-      : `exit code ${result.exitCode ?? "unknown"}`,
-    result.command ? `command: ${result.command}` : null,
-    result.stdoutPath ? `stdout: ${result.stdoutPath}` : null,
-    result.stderrPath ? `stderr: ${result.stderrPath}` : null,
-    result.error ?? null,
-  ].filter((part): part is string => Boolean(part));
-  return parts.join("; ");
-}
-
-function taskResultPath(taskResultsDir: string, taskId: string): string {
-  return join(taskResultsDir, artifactNameForId(taskId, "json"));
-}
-
-function packetPromptPath(taskResultsDir: string, packetId: string): string {
-  return join(taskResultsDir, artifactNameForId(packetId, "prompt.md"));
-}
-
-async function readStdinText(): Promise<string> {
-  if (process.stdin.isTTY) {
-    return "";
-  }
-  return await new Promise((resolveInput, reject) => {
-    let input = "";
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => {
-      input += chunk;
-    });
-    process.stdin.on("end", () => resolveInput(input));
-    process.stdin.on("error", reject);
-  });
-}
-
-function resolveFlagPath(
-  argv: string[],
-  name: string,
-  fallback: string,
-): string {
-  return resolve(getFlag(argv, name, fallback) as string);
-}
-
-function normalizePositiveInteger(value: unknown): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return undefined;
-  }
-  return Math.floor(value);
-}
-
-function parsePositiveIntegerFlag(
-  argv: string[],
-  name: string,
-): number | undefined {
-  const raw = getFlag(argv, name);
-  if (raw === undefined) {
-    return undefined;
-  }
-  return normalizePositiveInteger(Number(raw));
-}
-
-function getArtifactsDir(argv: string[]): string {
-  return resolveFlagPath(
-    argv,
-    "--artifacts-dir",
-    DIRECT_CLI_DEFAULTS.artifactsDir,
-  );
-}
-
-function getRootDir(argv: string[]): string {
-  return resolveFlagPath(argv, "--root", DIRECT_CLI_DEFAULTS.rootDir);
-}
-
-function warnIfNotGitRepo(root: string): void {
-  const gitEntry = join(root, ".git");
-  if (!existsSync(gitEntry)) {
-    console.warn(
-      `Warning: target directory '${root}' does not appear to be a git repository. Diff-based signals will be unavailable.`,
-    );
-  }
-}
-
-function getBatchResultsDir(argv: string[]): string | undefined {
-  const value = getFlag(argv, "--batch-results");
-  return value ? resolve(value) : undefined;
-}
-
-function getMaxRuns(argv: string[]): number {
-  return parsePositiveIntegerFlag(argv, "--max-runs") ?? DIRECT_CLI_DEFAULTS.maxRuns;
-}
-
-function getAgentBatchSize(argv: string[], sessionConfig: SessionConfig): number {
-  return (
-    parsePositiveIntegerFlag(argv, "--agent-batch-size") ??
-    normalizePositiveInteger(sessionConfig.agent_task_batch_size) ??
-    DIRECT_CLI_DEFAULTS.agentBatchSize
-  );
-}
-
-function getParallelWorkers(argv: string[], sessionConfig: SessionConfig): number {
-  return (
-    parsePositiveIntegerFlag(argv, "--parallel") ??
-    normalizePositiveInteger(sessionConfig.parallel_workers) ??
-    DIRECT_CLI_DEFAULTS.parallelWorkers
-  );
-}
-
-function getTimeoutMs(argv: string[], sessionConfig: SessionConfig): number {
-  return (
-    parsePositiveIntegerFlag(argv, "--timeout") ??
-    normalizePositiveInteger(sessionConfig.timeout_ms) ??
-    DIRECT_CLI_DEFAULTS.timeoutMs
-  );
-}
-
-function getExplicitProvider(argv: string[]): string | undefined {
-  return getFlag(argv, "--provider");
-}
-
-function getHostModel(argv: string[]): string | null {
-  return getFlag(argv, "--host-model") ?? null;
-}
-
-function getHostMaxActiveSubagents(argv: string[]): number | null {
-  return parsePositiveIntegerFlag(argv, "--host-max-active-subagents") ?? null;
-}
-
-function getQuotaProbeMode(
-  argv: string[],
-  sessionConfig: SessionConfig,
-): "auto" | "never" | "force" {
-  const raw = getFlag(argv, "--quota-probe") ?? sessionConfig.quota?.probe ?? "auto";
-  if (raw === "auto" || raw === "never" || raw === "force") return raw;
-  return "auto";
-}
-
-
-function resolveRunProviderName(
-  argv: string[],
-  sessionConfig: SessionConfig,
-): string {
-  return resolveFreshSessionProviderName(
-    getExplicitProvider(argv),
-    sessionConfig,
-  );
-}
-
-function chunkArray<T>(arr: T[], size: number): T[][] {
-  const chunkSize = normalizePositiveInteger(size);
-  if (chunkSize === undefined) {
-    throw new Error("chunkArray size must be a positive integer.");
-  }
-  const chunks: T[][] = [];
-  for (let i = 0; i < arr.length; i += chunkSize) {
-    chunks.push(arr.slice(i, i + chunkSize));
-  }
-  return chunks;
-}
-
-function getUiMode(
-  argv: string[],
-  fallback: UiMode = DIRECT_CLI_DEFAULTS.uiMode,
-): UiMode {
-  const raw = getFlag(argv, "--ui");
-  if (raw === "visible") return "visible";
-  if (raw === "headless") return "headless";
-  return fallback;
-}
 
 function buildEnvelope(params: {
   audit_state: unknown;
@@ -551,28 +317,6 @@ function buildBlockedAuditState(params: {
   };
 }
 
-async function countLines(path: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    let lines = 0;
-    let byteCount = 0;
-    let lastByte = -1;
-    const stream = createReadStream(path);
-    stream.on("data", (chunk: Buffer | string) => {
-      const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
-      byteCount += buffer.length;
-      for (let i = 0; i < buffer.length; ++i) {
-        if (buffer[i] === 10) lines++;
-        lastByte = buffer[i];
-      }
-    });
-    stream.on("end", () => {
-      if (byteCount === 0) return resolve(0);
-      // Files not ending with \n have one final line not counted above
-      resolve(lastByte !== 10 ? lines + 1 : lines);
-    });
-    stream.on("error", reject);
-  });
-}
 
 async function buildLineIndex(
   root: string,
@@ -616,35 +360,7 @@ async function buildLineIndexForPaths(
   return Object.fromEntries(entries);
 }
 
-async function listBatchResultFiles(batchDir: string): Promise<string[]> {
-  const entries = await readdir(batchDir, { withFileTypes: true });
-  const files = entries
-    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))
-    .map((entry) => join(batchDir, entry.name))
-    .sort((a, b) => a.localeCompare(b));
 
-  if (files.length === 0) {
-    throw new Error(`No JSON audit result files found in ${batchDir}.`);
-  }
-
-  return files;
-}
-
-function buildPendingAuditTasks(bundle: ArtifactBundle) {
-  const completedTaskIds = new Set(
-    (bundle.audit_results ?? []).map((result) => result.task_id),
-  );
-  const pendingTasks = (bundle.audit_tasks ?? []).filter(
-    (task) => task.status !== "complete" && !completedTaskIds.has(task.task_id),
-  );
-  const lineIndex = Object.fromEntries(
-    pendingTasks.flatMap((task) => Object.entries(task.file_line_counts ?? {})),
-  );
-  return orderTasksForPacketReview(pendingTasks, {
-    graphBundle: bundle.graph_bundle,
-    lineIndex,
-  });
-}
 
 async function addFileLineCountHints(
   root: string,
@@ -834,216 +550,7 @@ async function ensureSemanticReviewRun(params: {
   return { state: blockedState, bundle: blockedBundle, activeReviewRun };
 }
 
-function nextStepCommand(
-  root: string,
-  artifactsDir: string,
-  extraArgs: string[] = [],
-): string {
-  return renderCommand([
-    "audit-code",
-    "next-step",
-    "--root",
-    root,
-    "--artifacts-dir",
-    artifactsDir,
-    ...extraArgs,
-  ]);
-}
 
-function mergeAndIngestCommand(
-  artifactsDir: string,
-  runId: string,
-): string {
-  return renderCommand([
-    "audit-code",
-    "merge-and-ingest",
-    "--run-id",
-    runId,
-    "--artifacts-dir",
-    artifactsDir,
-  ]);
-}
-
-function renderDispatchReviewPrompt(params: {
-  root: string;
-  artifactsDir: string;
-  activeReviewRun: ActiveReviewRun;
-  dispatchPlanPath: string;
-  dispatchQuotaPath: string | null;
-  hostCanRestrictSubagentTools: boolean;
-  hostCanSelectSubagentModel: boolean;
-}): string {
-  const mergeCommand = mergeAndIngestCommand(
-    params.artifactsDir,
-    params.activeReviewRun.run_id,
-  );
-  const continueCommand = nextStepCommand(params.root, params.artifactsDir);
-  const modelLine = params.hostCanSelectSubagentModel
-    ? "When launching each subagent, map `entry.model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names."
-    : "Ignore `entry.model_hint`; this host did not report per-subagent model selection.";
-  const toolsLine = params.hostCanRestrictSubagentTools
-    ? "Restrict review subagents to read/search plus the packet submit command named in their prompt. Do not give them source edit/write tools."
-    : "Do not ask the user about per-subagent tool restrictions; this host did not report a callable restriction facility.";
-
-  const dispatchDataLines = params.dispatchQuotaPath
-    ? [
-        "Read these generated files:",
-        "",
-        `  Dispatch plan:  ${params.dispatchPlanPath}`,
-        `  Dispatch quota: ${params.dispatchQuotaPath}`,
-        "",
-        "Use the `wave_size` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before starting the first wave.",
-        "",
-        "`host_concurrency_limit` records any detected hard host cap that contributed to `wave_size`.",
-        "",
-        "For each wave: use the `task` tool (or equivalent subagent dispatch) to launch up to `wave_size` subagents in parallel (one per entry), wait for all to finish, then start the next wave.",
-      ]
-    : [
-        "Read this generated dispatch plan:",
-        "",
-        `  ${params.dispatchPlanPath}`,
-        "",
-        "Launch one subagent for each entry in the plan.",
-      ];
-
-  return [
-    "# audit-code dispatch review",
-    "",
-    ...dispatchDataLines,
-    "",
-    "Pass each `entry.prompt_path` literally to its subagent; do not load packet prompt files into this orchestrator context.",
-    "",
-    "Subagent prompt shape:",
-    "",
-    '  Read and follow the audit instructions in: <entry.prompt_path>',
-    "",
-    modelLine,
-    toolsLine,
-    "",
-    "Each subagent must submit its packet through the submit command printed in its packet prompt and stop after successful submission.",
-    "",
-    "**After all waves complete:**",
-    "",
-    "Run exactly:",
-    "",
-    `  ${mergeCommand}`,
-    "",
-    "If merge-and-ingest fails, stop and report the exact command and error output. Do not manually merge results or edit audit state.",
-    "",
-    "If merge-and-ingest succeeds, run:",
-    "",
-    `  ${continueCommand}`,
-    "",
-    "Read and follow only the new step prompt path returned by that command.",
-    "",
-  ].join("\n");
-}
-
-function renderSingleTaskFallbackStepPrompt(params: {
-  singleTaskPromptPath: string;
-  activeReviewRun: ActiveReviewRun;
-}): string {
-  return [
-    "# audit-code single-task fallback step",
-    "",
-    "Use this step only because the host reported no callable subagent facility.",
-    "",
-    "Read and follow exactly this generated single-task prompt:",
-    "",
-    `  ${params.singleTaskPromptPath}`,
-    "",
-    "Complete exactly one AuditResult for the task named there, write the JSON array to the prompt's audit_results_path, run the exact worker_command from that prompt, then stop.",
-    "",
-    "Do not run dispatch commands, do not prepare packets, do not run next-step again in this turn, and do not read a report after the worker command.",
-    "",
-    "The only backend command allowed after writing the result is:",
-    "",
-    `  ${renderCommand(params.activeReviewRun.worker_command)}`,
-    "",
-  ].join("\n");
-}
-
-function renderPresentReportPrompt(finalReportPath: string): string {
-  return [
-    "# audit-code present report",
-    "",
-    "The deterministic audit is complete.",
-    "",
-    `Read the final audit report from: ${finalReportPath}`,
-    "",
-    "Present the completed audit with work blocks first.",
-    "",
-    "Do not run the orchestrator again for this completed audit.",
-    "",
-  ].join("\n");
-}
-
-function renderBlockedStepPrompt(reason: string): string {
-  return [
-    "# audit-code blocked",
-    "",
-    "The audit cannot continue automatically from this step.",
-    "",
-    "Report this blocker verbatim and stop:",
-    "",
-    reason,
-    "",
-  ].join("\n");
-}
-
-async function writeCurrentStep(params: {
-  artifactsDir: string;
-  stepKind: StepKind;
-  status: StepStatus;
-  runId: string | null;
-  allowedCommands: string[];
-  stopCondition: string;
-  repoRoot: string;
-  artifactPaths: Record<string, string | null>;
-  prompt: string;
-}): Promise<StepArtifact> {
-  const stepsDir = join(params.artifactsDir, "steps");
-  await mkdir(stepsDir, { recursive: true });
-  const promptPath = join(stepsDir, "current-prompt.md");
-  const stepPath = join(stepsDir, "current-step.json");
-  await writeFile(promptPath, params.prompt, "utf8");
-  const step: StepArtifact = {
-    contract_version: STEP_CONTRACT_VERSION,
-    step_kind: params.stepKind,
-    prompt_path: promptPath,
-    status: params.status,
-    run_id: params.runId,
-    allowed_commands: params.allowedCommands,
-    stop_condition: params.stopCondition,
-    repo_root: params.repoRoot,
-    artifacts_dir: params.artifactsDir,
-    artifact_paths: {
-      current_step: stepPath,
-      current_prompt: promptPath,
-      ...params.artifactPaths,
-    },
-  };
-  await writeJsonFile(stepPath, step);
-  return step;
-}
-
-function formatAuditResultValidationError(issues: ReturnType<typeof validateAuditResults>): string {
-  return (
-    `audit-results validation failed with ${issues.length} error(s):\n` +
-    formatAuditResultIssues(issues)
-  );
-}
-
-function buildWorkerFailureBlocker(workerResult: WorkerResult): string {
-  const details = workerResult.errors.filter((error) => error.trim().length > 0);
-  return details.length > 0
-    ? `${workerResult.summary} ${details.join(" ")}`
-    : workerResult.summary;
-}
-
-function looksLikeCliFlag(value: string | undefined): boolean {
-  return isLongFlagToken(value);
-}
 
 export const cliTestUtils = {
   defaults: DIRECT_CLI_DEFAULTS,
@@ -1092,6 +599,7 @@ async function runAuditStep(options: {
   auditResultsPath?: string;
   runtimeUpdatesPath?: string;
   externalAnalyzerPath?: string;
+  opentoken?: boolean;
 }) {
   const bundle = await loadArtifactBundle(options.artifactsDir);
   const lineIndex = bundle.repo_manifest
@@ -1137,6 +645,7 @@ async function runAuditStep(options: {
     runtimeValidationUpdates,
     externalAnalyzerResults,
     preferredExecutor: options.preferredExecutor,
+    opentoken: options.opentoken,
   });
 
   await writeCoreArtifacts(options.artifactsDir, result.updated_bundle);
@@ -1204,44 +713,6 @@ async function ingestBatchAuditResults(options: {
   };
 }
 
-function buildWorkerResult(params: {
-  runId: string;
-  obligationId: string | null;
-  status: WorkerResult["status"];
-  progressMade: boolean;
-  selectedExecutor: string | null;
-  artifactsWritten: string[];
-  summary: string;
-  nextLikelyStep: string | null;
-  errors: string[];
-}): WorkerResult {
-  return {
-    contract_version: WORKER_RESULT_CONTRACT_VERSION,
-    run_id: params.runId,
-    obligation_id: params.obligationId,
-    status: params.status,
-    progress_made: params.progressMade,
-    selected_executor: params.selectedExecutor,
-    artifacts_written: params.artifactsWritten,
-    summary: params.summary,
-    next_likely_step: params.nextLikelyStep,
-    errors: params.errors,
-  };
-}
-
-async function persistWorkerRunArtifacts(
-  paths: RunPaths,
-  workerResult: WorkerResult,
-  executionMode: string,
-): Promise<void> {
-  await writeJsonFile(paths.resultPath, workerResult);
-  await writeJsonFile(paths.statusPath, {
-    run_id: workerResult.run_id,
-    status: workerResult.status,
-    execution_mode: executionMode,
-    result_path: paths.resultPath,
-  });
-}
 
 async function persistConfigErrorHandoff(params: {
   root: string;
@@ -1270,14 +741,6 @@ async function persistConfigErrorHandoff(params: {
   await writeAuditCodeHandoffArtifacts(handoff);
 }
 
-function isWorkerResult(value: unknown): value is WorkerResult {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { contract_version?: unknown }).contract_version ===
-      WORKER_RESULT_CONTRACT_VERSION
-  );
-}
 
 export async function runSample(argv: string[] = process.argv): Promise<void> {
   const repoManifest = buildRepoManifest("sample-repo", SAMPLE_REPO_FILES);
@@ -1430,6 +893,7 @@ async function cmdAdvanceAudit(argv: string[]): Promise<void> {
     auditResultsPath: getFlag(argv, "--results"),
     runtimeUpdatesPath: getFlag(argv, "--updates"),
     externalAnalyzerPath,
+    opentoken: sessionConfig.opentoken?.enabled,
   });
   if (result.selected_executor !== "agent") {
     await clearDispatchFiles(artifactsDir);
@@ -1458,6 +922,7 @@ async function runDeterministicForNextStep(params: {
   selfCliPath: string;
   timeoutMs: number;
   maxRuns: number;
+  opentoken?: boolean;
 }): Promise<
   | {
       kind: "semantic_review";
@@ -1512,6 +977,24 @@ async function runDeterministicForNextStep(params: {
       };
     }
 
+    if (index === 0 && bundle.repo_manifest) {
+      const pendingTasks = buildPendingAuditTasks(bundle);
+      const taskFiles = new Set<string>();
+      for (const task of pendingTasks) {
+        for (const fp of Object.keys(task.file_line_counts ?? {})) taskFiles.add(fp);
+      }
+      if (taskFiles.size > 0) {
+        const integrity = await checkFileIntegrity(params.root, bundle.repo_manifest, [...taskFiles]);
+        if (!integrity.is_clean) {
+          console.log(
+            `File integrity check: ${integrity.changed_files.length} changed, ${integrity.missing_files.length} missing — re-running intake.`,
+          );
+          await advanceAudit(bundle, { root: params.root, preferredExecutor: "intake_executor", opentoken: params.opentoken });
+          continue;
+        }
+      }
+    }
+
     if (decision.selected_executor === "design_review") {
       const findingsPath = join(
         params.artifactsDir,
@@ -1545,23 +1028,6 @@ async function runDeterministicForNextStep(params: {
     }
 
     if (decision.selected_executor === "agent") {
-      if (bundle.repo_manifest) {
-        const pendingTasks = buildPendingAuditTasks(bundle);
-        const taskFiles = new Set<string>();
-        for (const task of pendingTasks) {
-          for (const fp of Object.keys(task.file_line_counts ?? {})) taskFiles.add(fp);
-        }
-        if (taskFiles.size > 0) {
-          const integrity = await checkFileIntegrity(params.root, bundle.repo_manifest, [...taskFiles]);
-          if (!integrity.is_clean) {
-            console.log(
-              `File integrity check: ${integrity.changed_files.length} changed, ${integrity.missing_files.length} missing — re-running intake.`,
-            );
-            await advanceAudit(bundle, { root: params.root, preferredExecutor: "intake_executor" });
-            continue;
-          }
-        }
-      }
       return {
         kind: "semantic_review",
         ...(await ensureSemanticReviewRun({
@@ -1593,11 +1059,44 @@ async function runDeterministicForNextStep(params: {
       };
     }
 
-    const result = await runAuditStep({
-      root: params.root,
-      artifactsDir: params.artifactsDir,
-    });
+    let result: AdvanceAuditResult;
+    try {
+      result = await runAuditStep({
+        root: params.root,
+        artifactsDir: params.artifactsDir,
+        opentoken: params.opentoken,
+      });
+    } catch (error) {
+      const current = await loadArtifactBundle(params.artifactsDir);
+      const currentState = deriveAuditState(current);
+      currentState.last_executor = decision.selected_executor ?? undefined;
+      currentState.last_obligation = decision.selected_obligation ?? undefined;
+      await writeCoreArtifacts(params.artifactsDir, { ...current, audit_state: currentState });
+      await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
+        iteration: index + 1,
+        max_runs: params.maxRuns,
+        last_executor: decision.selected_executor,
+        last_obligation: decision.selected_obligation,
+        prior_summary: lastSummary || null,
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
+      });
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Deterministic executor ${decision.selected_executor} failed on obligation ${decision.selected_obligation} (iteration ${index + 1}/${params.maxRuns}, prior progress: ${lastSummary || "none"}): ${detail}`,
+        { cause: error instanceof Error ? error : undefined },
+      );
+    }
     lastSummary = result.progress_summary;
+    await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
+      iteration: index + 1,
+      max_runs: params.maxRuns,
+      last_executor: result.selected_executor,
+      last_obligation: decision.selected_obligation,
+      progress_made: result.progress_made,
+      summary: result.progress_summary,
+      timestamp: new Date().toISOString(),
+    });
     if (result.selected_executor !== "agent") {
       await clearDispatchFiles(params.artifactsDir);
     }
@@ -1676,6 +1175,7 @@ async function cmdNextStep(argv: string[]): Promise<void> {
     selfCliPath: resolve(argv[1] ?? process.argv[1] ?? ""),
     timeoutMs: getTimeoutMs(argv, sessionConfig),
     maxRuns: getMaxRuns(argv),
+    opentoken: sessionConfig.opentoken?.enabled,
   });
 
   if (result.kind === "complete") {
@@ -1779,12 +1279,17 @@ async function cmdNextStep(argv: string[]): Promise<void> {
         singleTaskPromptPath,
         activeReviewRun: result.activeReviewRun,
       }),
+      access: {
+        read_paths: [singleTaskPromptPath],
+        write_paths: [result.activeReviewRun.audit_results_path],
+      },
     });
     console.log(JSON.stringify(step, null, 2));
     return;
   }
 
   const dispatch = await prepareDispatchArtifacts({
+    packageRoot,
     runId: result.activeReviewRun.run_id,
     artifactsDir,
     root,
@@ -1825,6 +1330,13 @@ async function cmdNextStep(argv: string[]): Promise<void> {
       hostCanRestrictSubagentTools,
       hostCanSelectSubagentModel,
     }),
+    access: {
+      read_paths: [
+        dispatch.dispatch_plan_path,
+        ...(dispatch.dispatch_quota_path ? [dispatch.dispatch_quota_path] : []),
+      ],
+      write_paths: [],
+    },
   });
   console.log(JSON.stringify(step, null, 2));
 }
@@ -1883,6 +1395,37 @@ const explicitProvider = getExplicitProvider(argv);
   while (runCount < maxRuns) {
     const bundle = await loadArtifactBundle(artifactsDir);
     const decision = decideNextStep(bundle);
+
+    // Resume interrupted parallel wave: ingest any results that workers
+    // wrote before the previous process exited.
+    const priorWave = await readWaveManifest(artifactsDir);
+    if (priorWave) {
+      process.stderr.write(
+        `[audit-code] Recovering interrupted wave (${priorWave.slots.length} slot(s), obligation ${priorWave.obligation_id}).\n`,
+      );
+      let recoveredProgress = false;
+      for (const entry of priorWave.slots) {
+        try {
+          const results = await readJsonFile<AuditResult[]>(entry.audit_results_path);
+          if (!results || results.length === 0) continue;
+          const stepResult = await runAuditStep({
+            root,
+            artifactsDir,
+            preferredExecutor: "result_ingestion_executor",
+            auditResultsPath: entry.audit_results_path,
+          });
+          if (stepResult.progress_made) {
+            recoveredProgress = true;
+            anyProgress = true;
+            for (const a of stepResult.artifacts_written) artifactsWritten.add(a);
+          }
+        } catch {
+          process.stderr.write(`[audit-code] Skipping unreadable results for ${entry.run_id}.\n`);
+        }
+      }
+      await removeWaveManifest(artifactsDir);
+      if (recoveredProgress) continue;
+    }
 
     if (
       decision.selected_executor === "agent" &&
@@ -2168,6 +1711,13 @@ const explicitProvider = getExplicitProvider(argv);
 
       const parallelStartedAt = new Date().toISOString();
 
+      await writeWaveManifest(artifactsDir, {
+        obligation_id: obligationId,
+        started_at: parallelStartedAt,
+        pid: process.pid,
+        slots: workerSlots.map(buildWaveSlotEntry),
+      });
+
       const { results: launchResults } = await runSlidingWindow(
         workerSlots.map((slot) => () =>
           provider.launch({
@@ -2352,6 +1902,8 @@ const explicitProvider = getExplicitProvider(argv);
           }
         }
       }
+
+      await removeWaveManifest(artifactsDir);
 
       if (batchErrors.length > 0) {
         const bundleAfter = await loadArtifactBundle(artifactsDir);
@@ -2858,666 +2410,11 @@ async function cmdWorkerRun(argv: string[]): Promise<void> {
   }
 }
 
-const DISPATCH_RESULT_MAP_FILENAME = "dispatch-result-map.json";
-const ACTIVE_DISPATCH_FILENAME = "active-dispatch.json";
-
-interface ActiveDispatchState {
-  run_id: string;
-  created_at: string;
-  packet_count: number;
-  task_count: number;
-  status: "active" | "merged";
-}
-
-interface DispatchResultMapEntry {
-  packet_id: string;
-  task_id: string;
-  result_path: string;
-}
-
-interface DispatchResultMap {
-  contract_version: "audit-code-dispatch-results/v1alpha1";
-  run_id: string;
-  entries: DispatchResultMapEntry[];
-}
-
-interface PrepareDispatchResult {
-  run_id: string;
-  dispatch_plan_path: string;
-  dispatch_quota_path: string | null;
-  packet_count: number;
-  task_count: number;
-  skipped_task_count: number;
-  largest_packet: {
-    packet_id: string;
-    total_lines: number;
-    estimated_tokens: number;
-  } | null;
-  warning_count: number;
-  dispatch_warnings_path: string | null;
-}
-
-function dispatchResultMapPath(runDir: string): string {
-  return join(runDir, DISPATCH_RESULT_MAP_FILENAME);
-}
-
-function resolveRunScopedArg(
-  argv: string[],
-  rawFlag: string,
-  b64Flag: string,
-): string | undefined {
-  const raw = getFlag(argv, rawFlag);
-  const encoded = getFlag(argv, b64Flag);
-  return raw ?? (encoded ? fromBase64Url(encoded) : undefined);
-}
-
-async function loadDispatchResultMap(
-  runDir: string,
-): Promise<DispatchResultMap | null> {
-  try {
-    return await readJsonFile<DispatchResultMap>(dispatchResultMapPath(runDir));
-  } catch (error) {
-    if (!isFileMissingError(error)) {
-      throw error;
-    }
-    return null;
-  }
-}
-
-function entriesByTaskId(
-  entries: DispatchResultMapEntry[],
-): Map<string, DispatchResultMapEntry> {
-  return new Map(entries.map((entry) => [entry.task_id, entry]));
-}
-
-function isIsolatedLargeFilePacket(packet: {
-  file_paths: string[];
-  total_lines: number;
-}): boolean {
-  return (
-    packet.file_paths.length === 1 &&
-    packet.total_lines > LARGE_FILE_PACKET_TARGET_LINES
-  );
-}
-
-function buildDispatchComplexity(
-  packet: {
-    task_ids: string[];
-    file_paths: string[];
-    total_lines: number;
-    estimated_tokens: number;
-    priority: NonNullable<AuditTask["priority"]>;
-    lenses: AuditTask["lens"][];
-    tags?: string[];
-  },
-  largeFileMode: boolean,
-): DispatchComplexity {
-  return {
-    priority: packet.priority,
-    task_count: packet.task_ids.length,
-    file_count: packet.file_paths.length,
-    total_lines: packet.total_lines,
-    estimated_tokens: packet.estimated_tokens,
-    lenses: packet.lenses,
-    tags: packet.tags ?? [],
-    large_file_mode: largeFileMode,
-  };
-}
-
-function buildDispatchModelHint(complexity: DispatchComplexity): DispatchModelHint {
-  const deepReasons: string[] = [];
-  if (complexity.priority === "high") deepReasons.push("high_priority");
-  if (complexity.large_file_mode) deepReasons.push("isolated_large_file");
-  if (complexity.estimated_tokens >= DEEP_MODEL_HINT_MIN_ESTIMATED_TOKENS) {
-    deepReasons.push("high_estimated_tokens");
-  }
-  if (
-    complexity.tags.some(
-      (tag) => tag === "critical_flow" || tag.startsWith("critical_flow:"),
-    )
-  ) {
-    deepReasons.push("critical_flow");
-  }
-  if (
-    complexity.tags.some(
-      (tag) =>
-        tag === "external_analyzer_signal" || tag.startsWith("external_tool:"),
-    )
-  ) {
-    deepReasons.push("external_analyzer_signal");
-  }
-  if (complexity.tags.includes("lens_verification")) {
-    deepReasons.push("lens_verification");
-  }
-  if (deepReasons.length > 0) {
-    return { tier: "deep", reasons: deepReasons };
-  }
-
-  const sensitiveLenses = new Set(["security", "data_integrity", "reliability"]);
-  const hasSensitiveLens = complexity.lenses.some((lens) =>
-    sensitiveLenses.has(lens),
-  );
-  if (
-    complexity.priority === "low" &&
-    complexity.total_lines <= SMALL_MODEL_HINT_MAX_LINES &&
-    complexity.estimated_tokens <= SMALL_MODEL_HINT_MAX_ESTIMATED_TOKENS &&
-    !hasSensitiveLens &&
-    complexity.tags.length === 0
-  ) {
-    return { tier: "small", reasons: ["small_low_priority_packet"] };
-  }
-
-  const reasons: string[] = [];
-  if (complexity.priority === "medium") reasons.push("medium_priority");
-  if (hasSensitiveLens) reasons.push("sensitive_lens");
-  if (complexity.total_lines > SMALL_MODEL_HINT_MAX_LINES) {
-    reasons.push("moderate_size");
-  }
-  return {
-    tier: "standard",
-    reasons: reasons.length > 0 ? reasons : ["default_review_packet"],
-  };
-}
-
-function withinRoot(root: string, path: string): string {
-  const rootPath = resolve(root);
-  const absolutePath = resolve(rootPath, path);
-  const relativePath = relative(rootPath, absolutePath);
-  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
-    throw new Error(`Path '${path}' escapes repository root '${rootPath}'.`);
-  }
-  return absolutePath;
-}
-
-function renderAnchorPreview(
-  summary: FileAnchorSummary,
-  anchorPath: string,
-): string[] {
-  const preview = summary.anchors.slice(0, 24).map((anchor) => {
-    const location = anchor.line ? `${summary.path}:${anchor.line}` : summary.path;
-    const detail = anchor.detail ? ` - ${anchor.detail}` : "";
-    return `- ${location} [${anchor.kind}] ${anchor.name}${detail}`;
-  });
-  return [
-    "## Large File Review Mode",
-    "This packet is intentionally isolated because it covers one large file.",
-    "Use targeted reads/searches within this file, guided by the mechanical anchors.",
-    "Do not read unrelated files unless a finding cannot be evidenced without a direct boundary check.",
-    `Anchor file: ${anchorPath}`,
-    `Anchor counts: symbols=${summary.counts.symbols}, routes=${summary.counts.routes}, keywords=${summary.counts.keywords}, graph_edges=${summary.counts.graph_edges}, analyzer_signals=${summary.counts.analyzer_signals}, omitted=${summary.omitted_anchor_count}`,
-    "Anchor preview:",
-    ...(preview.length > 0 ? preview : ["- no anchors extracted beyond file boundaries"]),
-    "",
-  ];
-}
-
-function formatPacketConfidence(value: number | undefined): string {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value.toFixed(2)
-    : "n/a";
-}
-
-function renderPacketGraphContext(packet: {
-  entrypoints?: string[];
-  key_edges?: Array<{
-    from: string;
-    to: string;
-    kind?: string;
-    confidence?: number;
-    reason?: string;
-  }>;
-  boundary_files?: string[];
-  quality?: {
-    cohesion_score: number;
-    internal_edge_count: number;
-    boundary_edge_count: number;
-    unexplained_file_count: number;
-  };
-}): string[] {
-  const hasContext =
-    (packet.entrypoints?.length ?? 0) > 0 ||
-    (packet.key_edges?.length ?? 0) > 0 ||
-    (packet.boundary_files?.length ?? 0) > 0 ||
-    packet.quality !== undefined;
-  if (!hasContext) {
-    return [];
-  }
-
-  const lines = ["## Packet graph context"];
-  if (packet.entrypoints?.length) {
-    lines.push("Entrypoints:");
-    lines.push(...packet.entrypoints.map((entrypoint) => `- ${entrypoint}`));
-  }
-  if (packet.key_edges?.length) {
-    lines.push("Key internal edges:");
-    lines.push(
-      ...packet.key_edges.map((edge) => {
-        const kind = edge.kind ? ` [${edge.kind}]` : "";
-        const reason = edge.reason ? ` - ${edge.reason}` : "";
-        return `- ${edge.from} -> ${edge.to}${kind} confidence=${formatPacketConfidence(edge.confidence)}${reason}`;
-      }),
-    );
-  }
-  if (packet.boundary_files?.length) {
-    lines.push("Boundary files to check only when evidence crosses the packet:");
-    lines.push(...packet.boundary_files.map((path) => `- ${path}`));
-  }
-  if (packet.quality) {
-    lines.push(
-      `Quality: cohesion=${packet.quality.cohesion_score}, internal_edges=${packet.quality.internal_edge_count}, boundary_edges=${packet.quality.boundary_edge_count}, unexplained_files=${packet.quality.unexplained_file_count}`,
-    );
-  }
-  lines.push("");
-  return lines;
-}
-
-async function prepareDispatchArtifacts(params: {
-  runId: string;
-  artifactsDir: string;
-  root?: string;
-  sessionConfig?: SessionConfig;
-  hostModel?: string | null;
-  hostActiveSubagentLimit?: number | null;
-}): Promise<PrepareDispatchResult> {
-  const runId = params.runId;
-  const artifactsDir = params.artifactsDir;
-  const runDir = join(artifactsDir, "runs", runId);
-  const taskResultsDir = join(runDir, "task-results");
-  const dispatchPlanPath = join(runDir, "dispatch-plan.json");
-  let reviewRoot = params.root;
-  try {
-    const workerTask = await readJsonFile<WorkerTask>(join(runDir, "task.json"));
-    reviewRoot ??= workerTask.repo_root;
-  } catch (error) {
-    if (!isFileMissingError(error)) {
-      throw error;
-    }
-  }
-
-  const bundle = await loadArtifactBundle(artifactsDir);
-  const tasksPath = join(runDir, "pending-audit-tasks.json");
-  const tasks = await readJsonFile<AuditTask[]>(tasksPath).catch((error) => {
-    if (isFileMissingError(error)) return buildPendingAuditTasks(bundle);
-    throw error;
-  });
-  const sessionConfig: SessionConfig =
-    params.sessionConfig ?? (await loadSessionConfig(artifactsDir).catch(() => ({} as SessionConfig)));
-  const lensDefsPath = join(packageRoot, "dispatch", "lens-definitions.json");
-  const lensDefs = await readJsonFile<Record<string, { description: string; do_not_report: string }>>(lensDefsPath);
-
-  await mkdir(taskResultsDir, { recursive: true });
-
-  // On resume: skip tasks whose result files already exist from a prior dispatch.
-  const priorResultTaskIds = new Set<string>();
-  for (const task of tasks) {
-    if (existsSync(taskResultPath(taskResultsDir, task.task_id))) {
-      priorResultTaskIds.add(task.task_id);
-    }
-  }
-  const dispatchTasks = priorResultTaskIds.size > 0
-    ? tasks.filter((task) => !priorResultTaskIds.has(task.task_id))
-    : tasks;
-
-  const lineIndex = Object.fromEntries(
-    dispatchTasks.flatMap((task) =>
-      Object.entries(task.file_line_counts ?? {}),
-    ),
-  );
-  const orderedTasks = orderTasksForPacketReview(dispatchTasks, {
-    graphBundle: bundle.graph_bundle,
-    lineIndex,
-  });
-  const packets = buildReviewPackets(orderedTasks, {
-    graphBundle: bundle.graph_bundle,
-    lineIndex,
-  });
-  const tasksById = new Map(orderedTasks.map((task) => [task.task_id, task]));
-  const resultPathByTaskId = new Map(
-    orderedTasks.map((task) => [
-      task.task_id,
-      taskResultPath(taskResultsDir, task.task_id),
-    ]),
-  );
-  const resultPathSet = new Set(resultPathByTaskId.values());
-  if (resultPathSet.size !== resultPathByTaskId.size) {
-    throw new Error(
-      "prepare-dispatch generated duplicate result paths; task ids must be uniquely addressable.",
-    );
-  }
-  const plan: Array<{
-    packet_id: string;
-    description: string;
-    prompt_path: string;
-    complexity: DispatchComplexity;
-    model_hint: DispatchModelHint;
-  }> = [];
-  const resultMapEntries: DispatchResultMapEntry[] = [];
-  for (const task of tasks) {
-    if (priorResultTaskIds.has(task.task_id)) {
-      resultMapEntries.push({
-        packet_id: "__prior_dispatch__",
-        task_id: task.task_id,
-        result_path: taskResultPath(taskResultsDir, task.task_id),
-      });
-    }
-  }
-  let largestPacketId: string | null = null;
-  let largestLines = 0;
-  let largestEstimatedTokens = 0;
-  const warnings: Array<{ code: string; message: string }> = [];
-
-  for (const packet of packets) {
-    const promptPath = packetPromptPath(taskResultsDir, packet.packet_id);
-    const packetTasks = packet.task_ids
-      .map((taskId) => tasksById.get(taskId))
-      .filter((task): task is AuditTask => task !== undefined);
-
-    if (packet.total_lines > largestLines) {
-      largestLines = packet.total_lines;
-      largestEstimatedTokens = packet.estimated_tokens;
-      largestPacketId = packet.packet_id;
-    }
-    const largeFileMode = isIsolatedLargeFilePacket(packet);
-    if (packet.total_lines > LARGE_FILE_PACKET_TARGET_LINES && !largeFileMode) {
-      warnings.push({
-        code: "large_packet",
-        message: `large packet ${packet.packet_id} (~${packet.total_lines} lines) may hit quota limits`,
-      });
-    }
-
-    for (const task of packetTasks) {
-      if (!lensDefs[task.lens]) {
-        warnings.push({
-          code: "missing_lens_definition",
-          message: `no lens definition for '${task.lens}' (task ${task.task_id})`,
-        });
-      }
-    }
-
-    const fileList = packet.file_paths.map((path) => {
-      const lines = packet.file_line_counts[path] ?? 0;
-      return `- ${path} (${lines} lines)`;
-    }).join("\n");
-    let anchorPath: string | null = null;
-    let anchorSummary: FileAnchorSummary | null = null;
-    if (largeFileMode) {
-      const filePath = packet.file_paths[0]!;
-      if (!reviewRoot) {
-        warnings.push({
-          code: "large_file_anchor_unavailable",
-          message: `large single-file packet ${packet.packet_id} has no repo root available for anchor extraction`,
-        });
-      } else {
-        try {
-          const totalLines = packet.file_line_counts[filePath] ?? packet.total_lines;
-          const content = await readFile(withinRoot(reviewRoot, filePath), "utf8");
-          anchorSummary = buildFileAnchorSummary({
-            path: filePath,
-            content,
-            totalLines,
-            graphBundle: bundle.graph_bundle,
-            externalAnalyzerResults: bundle.external_analyzer_results,
-          });
-          anchorPath = join(taskResultsDir, artifactNameForId(packet.packet_id, "anchors.json"));
-          await writeJsonFile(anchorPath, anchorSummary);
-        } catch (error) {
-          warnings.push({
-            code: "large_file_anchor_failed",
-            message:
-              `large single-file packet ${packet.packet_id} could not be anchored mechanically: ` +
-              (error instanceof Error ? error.message : String(error)),
-          });
-        }
-      }
-    }
-    const largeFileSection =
-      anchorSummary && anchorPath
-        ? renderAnchorPreview(anchorSummary, anchorPath)
-        : largeFileMode
-          ? [
-              "## Large File Review Mode",
-              "This packet is intentionally isolated because it covers one large file.",
-              "Use targeted reads/searches within this file only.",
-              "No mechanical anchor file was available, so rely on targeted symbol and keyword searches before reading broad ranges.",
-              "",
-            ]
-          : [];
-    const taskSections = packetTasks.flatMap((task) => {
-      const lensDef = lensDefs[task.lens];
-      const inputLines = task.inputs
-        ? Object.entries(task.inputs)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([key, value]) => `input.${key}: ${value}`)
-        : [];
-      const isLensVerification = task.tags?.includes("lens_verification") ?? false;
-      const coverageTemplate = task.file_paths.map((path) => ({
-        path,
-        total_lines: task.file_line_counts?.[path] ?? lineIndex[path] ?? 0,
-      }));
-      return [
-        `### ${task.task_id}`,
-        `unit_id: ${task.unit_id}`,
-        `pass_id: ${task.pass_id}`,
-        `lens: ${task.lens}`,
-        ...(task.tags?.length ? [`tags: ${task.tags.join(", ")}`] : []),
-        ...inputLines,
-        `rationale: ${task.rationale}`,
-        "",
-        `Lens guidance: ${lensDef?.description ?? task.lens}`,
-        `Do NOT report: ${lensDef?.do_not_report ?? "N/A"}`,
-        ...(isLensVerification
-          ? [
-              "",
-              "Lens verification mode: review the prior result summary in the rationale and use only targeted source checks.",
-              "Do not redo every packet and do not write direct findings for this task.",
-              "Return findings: [] plus verification metadata. Include followup_tasks only for bounded, specific re-review packets.",
-            ]
-          : []),
-        "",
-        "file_coverage (copy exactly into your AuditResult for this task):",
-        "```json",
-        JSON.stringify(coverageTemplate),
-        "```",
-        "",
-      ];
-    });
-    const submitCommand =
-      `"${process.execPath}" "${join(packageRoot, "audit-code.mjs")}" submit-packet ` +
-      `--run-id-b64 ${toBase64Url(runId)} ` +
-      `--packet-id-b64 ${toBase64Url(packet.packet_id)} ` +
-      `--artifacts-dir-b64 ${toBase64Url(artifactsDir)}`;
-    const complexity = buildDispatchComplexity(packet, largeFileMode);
-    for (const task of packetTasks) {
-      resultMapEntries.push({
-        packet_id: packet.packet_id,
-        task_id: task.task_id,
-        result_path: resultPathByTaskId.get(task.task_id)!,
-      });
-    }
-
-    const prompt = [
-      "You are a code auditor. Review this packet once, then submit exactly one result per listed task.",
-      "",
-      "## Packet",
-      `packet_id: ${packet.packet_id}`,
-      `task_count: ${packet.task_ids.length}`,
-      `lenses: ${packet.lenses.join(", ")}`,
-      `estimated_tokens: ${packet.estimated_tokens}`,
-      "",
-      "## Files to read",
-      largeFileMode
-        ? "Use targeted Read/Grep calls. Paths are repo-relative from the current working directory."
-        : "Use your Read tool. Paths are repo-relative from the current working directory.",
-      "Use host Read and Grep tools for source inspection. Do not use shell search commands.",
-      fileList,
-      "",
-      ...renderPacketGraphContext(packet),
-      ...largeFileSection,
-      "## Tasks",
-      ...taskSections,
-      "## Output",
-      "Do not write files directly. Do not use a Write tool, create temp files, edit source files,",
-      "remediate findings, create extra task results, or run unrelated audits.",
-      "Produce one JSON array containing exactly one AuditResult object for each listed task.",
-      "",
-      "Required AuditResult fields:",
-      "  task_id       copy from the task metadata",
-      "  unit_id       copy from the task metadata",
-      "  pass_id       copy from the task metadata",
-      "  lens          copy from the task metadata",
-      "  file_coverage [{path, total_lines}] - copy the exact template from each task section above",
-      "  findings      [] or array of finding objects",
-      "",
-      "Lens verification tasks:",
-      "  tasks tagged lens_verification must use findings: [] and include verification:",
-      "  {verified: boolean, needs_followup: boolean, concerns?: string[],",
-      "   coverage_concerns?: string[], confidence_concerns?: string[],",
-      "   followup_tasks?: AuditTask[]}.",
-      "  Follow-up AuditTask suggestions must stay bounded to files in this packet and use the same lens.",
-      "",
-      "Each finding object:",
-      "  id            unique ID, e.g. \"COR-001\"",
-      "  title         short title",
-      "  category      specific finding category, such as missing-validation or command-execution",
-      "  severity      critical|high|medium|low|info",
-      "  confidence    high|medium|low",
-      "  lens          must match the task lens exactly",
-      "  summary       1-2 sentence description",
-      "  affected_files  [{path, line_start?, line_end?, symbol?}] - objects, not strings; min 1 entry",
-      "  evidence     [\"path/to/file.ts:42 - description of what you see there\"] - min 1 entry",
-      "",
-      "Constraints:",
-      "1. line_end must not exceed the file's actual line count.",
-      "2. affected_files entries are objects with a path key, not plain strings.",
-      "3. Only reference files from the packet unless a finding genuinely crosses a boundary.",
-      "4. findings: [] is correct when you find nothing genuine.",
-      "",
-      "## Submit",
-      "Pipe the JSON array on stdin to this command:",
-      `  ${submitCommand}`,
-      "",
-      "The command validates and writes the packet-owned result files. Exit 0 means accepted.",
-      "Non-zero: read the errors, fix the JSON, and run the same submit command again. Retry up to 3 times.",
-      "",
-      "## Final response",
-      `After the submit command succeeds, reply exactly: valid: ${packet.packet_id}, findings=<total finding count>`,
-    ].join("\n");
-
-    await writeFile(promptPath, prompt, "utf8");
-    plan.push({
-      packet_id: packet.packet_id,
-      description:
-        `Audit ${packet.file_paths.length} file(s), ${packet.task_ids.length} task(s), ${packet.lenses.length} lens(es) (~${packet.total_lines} lines)` +
-        (largeFileMode ? " [isolated large-file mode]" : ""),
-      prompt_path: promptPath,
-      complexity,
-      model_hint: buildDispatchModelHint(complexity),
-    });
-  }
-
-  await writeJsonFile(dispatchPlanPath, plan);
-  await writeJsonFile(dispatchResultMapPath(runDir), {
-    contract_version: "audit-code-dispatch-results/v1alpha1",
-    run_id: runId,
-    entries: resultMapEntries,
-  } satisfies DispatchResultMap);
-
-  // Compute and write dispatch-quota.json
-  const hostModel = params.hostModel ?? null;
-  const perPacketTokens = plan.map((p) => p.complexity.estimated_tokens);
-  const quotaProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
-  const quotaProviderKey = buildProviderModelKey(quotaProviderName, hostModel);
-  const quotaState = await readQuotaState().catch((): { version: 2; entries: Record<string, never> } => ({ version: 2, entries: {} }));
-  const quotaStateEntry = quotaState.entries[quotaProviderKey] ?? null;
-  const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
-    explicitLimit: params.hostActiveSubagentLimit,
-    sessionConfig,
-  });
-  const dispatchCachedLimits = await lookupDiscoveredLimits(quotaProviderKey).catch(() => null);
-  const waveSchedule = scheduleWave({
-    providerName: quotaProviderName,
-    sessionConfig,
-    hostModel,
-    requestedConcurrency: sessionConfig.parallel_workers ?? plan.length,
-    estimatedSlotTokens: perPacketTokens,
-    quotaStateEntry,
-    hostConcurrencyLimit,
-    discoveredLimits: dispatchCachedLimits,
-  });
-  const dispatchQuota: DispatchQuota = {
-    contract_version: "audit-code-dispatch-quota/v1alpha2",
-    run_id: runId,
-    model: hostModel,
-    resolved_limits: waveSchedule.resolved_limits,
-    confidence: waveSchedule.confidence,
-    source: waveSchedule.source,
-    host_concurrency_limit: waveSchedule.host_concurrency_limit,
-    wave_size: waveSchedule.wave_size,
-    estimated_wave_tokens: waveSchedule.estimated_wave_tokens,
-    cooldown_until: waveSchedule.cooldown_until,
-    quota_source_snapshot: waveSchedule.quota_source_snapshot ?? null,
-    backoff_state: null,
-  };
-  const dispatchQuotaPath = join(runDir, "dispatch-quota.json");
-  await writeJsonFile(dispatchQuotaPath, dispatchQuota);
-
-  // Warn about packets that exceed the context budget only when we have reliable limit
-  // information (confidence medium/high). Low-confidence limits are conservative defaults
-  // and would produce misleading warnings since the real context window is unknown.
-  if (waveSchedule.confidence !== "low") {
-    const contextBudget =
-      waveSchedule.resolved_limits.context_tokens - waveSchedule.resolved_limits.output_tokens;
-    for (const p of plan) {
-      if (p.complexity.estimated_tokens > contextBudget) {
-        warnings.push({
-          code: "oversized_packet",
-          message:
-            `Packet ${p.packet_id} estimated tokens (${p.complexity.estimated_tokens}) exceed ` +
-            `context budget (${contextBudget}). This packet may fail at dispatch. ` +
-            `Set quota.default_context_tokens or quota.models in session-config.json to override.`,
-        });
-      }
-    }
-  }
-
-  const warningsPath = warnings.length > 0
-    ? join(runDir, "dispatch-warnings.json")
-    : null;
-  if (warningsPath) {
-    await writeJsonFile(warningsPath, warnings);
-  }
-  const activeDispatch: ActiveDispatchState = {
-    run_id: runId,
-    created_at: new Date().toISOString(),
-    packet_count: plan.length,
-    task_count: orderedTasks.length,
-    status: "active",
-  };
-  await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), activeDispatch);
-
-  return {
-    run_id: runId,
-    dispatch_plan_path: dispatchPlanPath,
-    dispatch_quota_path: dispatchQuotaPath,
-    packet_count: plan.length,
-    task_count: orderedTasks.length,
-    skipped_task_count: priorResultTaskIds.size,
-    largest_packet: largestPacketId
-      ? {
-          packet_id: largestPacketId,
-          total_lines: largestLines,
-          estimated_tokens: largestEstimatedTokens,
-        }
-      : null,
-    warning_count: warnings.length,
-    dispatch_warnings_path: warningsPath,
-  };
-}
-
 async function cmdPrepareDispatch(argv: string[]): Promise<void> {
   const runId = getFlag(argv, "--run-id");
   if (!runId) throw new Error("prepare-dispatch requires --run-id <run_id>");
   const result = await prepareDispatchArtifacts({
+    packageRoot,
     runId,
     artifactsDir: getArtifactsDir(argv),
     root: getFlag(argv, "--root") ? getRootDir(argv) : undefined,
@@ -4673,6 +3570,7 @@ async function cmdDispatchStatus(argv: string[]): Promise<void> {
 }
 
 async function main(argv: string[]): Promise<void> {
+  setQuotaStateDir(join(homedir(), ".audit-code"));
   const command = argv[2] ?? "sample-run";
   switch (command) {
     case "sample-run":

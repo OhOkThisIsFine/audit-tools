@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { isFileMissingError } from "../io/json.js";
+import { isFileMissingError } from "@audit-tools/shared";
 import {
   RemediationPlan,
   RemediationItemState,
@@ -72,6 +72,24 @@ async function sleep(ms: number): Promise<void> {
 async function removeStaleLockIfNeeded(lock: string): Promise<boolean> {
   try {
     const lockStat = await stat(lock);
+    // Try PID-based liveness check first
+    try {
+      const content = await readFile(lock, "utf8");
+      const pid = parseInt(content.trim(), 10);
+      if (!isNaN(pid) && pid > 0) {
+        try {
+          process.kill(pid, 0); // signal 0 = liveness check
+          // Process is alive — only remove if stale by time
+          if (Date.now() - lockStat.mtimeMs <= LOCK_STALE_MS) return false;
+        } catch {
+          // Process is dead — safe to remove
+          await rm(lock, { force: true });
+          return true;
+        }
+      }
+    } catch {
+      // Can't read PID — fall through to time-based check
+    }
     if (Date.now() - lockStat.mtimeMs <= LOCK_STALE_MS) return false;
     await rm(lock, { force: true });
     return true;
@@ -89,7 +107,9 @@ async function acquireLock(
 
   for (let attempt = 0; attempt < LOCK_RETRY_LIMIT; attempt++) {
     try {
-      return await open(lock, "wx");
+      const handle = await open(lock, "wx");
+      await handle.write(String(process.pid));
+      return handle;
     } catch (error) {
       if (!isFileExistsError(error)) throw error;
       if (await removeStaleLockIfNeeded(lock)) {

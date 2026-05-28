@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { readJsonFile } from "../io/json.js";
+import { readJsonFile } from "@audit-tools/shared";
 import { StateStore } from "../state/store.js";
 import {
   validateClarificationRequest,
@@ -10,7 +10,7 @@ import {
   validateRemediationPlan,
   validateTriageResolution,
 } from "./remediationState.js";
-import { formatValidationIssues, isRecord } from "./basic.js";
+import { formatValidationIssues, isRecord } from "@audit-tools/shared";
 import {
   REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
   REMEDIATION_STEP_CONTRACT_VERSION,

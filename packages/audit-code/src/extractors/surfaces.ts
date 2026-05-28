@@ -1,9 +1,7 @@
 import type { RepoManifest } from "../types.js";
-import type { FileDisposition } from "../types/disposition.js";
-import type { GraphBundle } from "../types/graph.js";
-import type { SurfaceManifest, SurfaceRecord } from "../types/surfaces.js";
+import type { FileDisposition, GraphBundle, SurfaceManifest, SurfaceRecord } from "@audit-tools/shared";
 import { buildBrowserExtensionSurfacesFromGraph } from "./browserExtension.js";
-import { isAuditExcludedStatus } from "./disposition.js";
+import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import {
   EXTRACTOR_HEURISTIC_NOTE,
   isBackgroundSurfacePath,
@@ -31,9 +29,7 @@ export function buildSurfaceManifest(
 ): SurfaceManifest {
   const surfaces: SurfaceRecord[] = [];
   const seen = new Set<string>();
-  const dispositionMap = new Map(
-    disposition?.files.map((item) => [item.path, item.status]) ?? [],
-  );
+  const dispositionMap = buildDispositionMap(disposition);
 
   function addSurface(surface: SurfaceRecord): void {
     const key = `${surface.kind}:${surface.entrypoint}`;

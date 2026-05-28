@@ -8,24 +8,25 @@ import {
 } from "../state/types.js";
 import { writeFile, readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
+import { AUDITOR_REPORT_MARKER } from "@audit-tools/shared";
 import { existsSync, readFileSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
   readOptionalJsonFile,
   writeJsonFile,
   readJsonFile,
-} from "../io/json.js";
+  formatValidationIssues,
+  type SessionConfig,
+} from "@audit-tools/shared";
 import { createFreshSessionProvider } from "../providers/index.js";
 import {
   deduplicateCrossLensFindings,
   fixupBlocksAfterDedup,
 } from "../dedup/crossLensDedup.js";
-import { SessionConfig } from "../types/sessionConfig.js";
 import {
   validateRemediationPlan,
   validateFinding,
 } from "../validation/remediationState.js";
-import { formatValidationIssues } from "../validation/basic.js";
 import { runCommand } from "../utils/commands.js";
 import {
   createLaunchInputForTask,
@@ -204,6 +205,7 @@ export function parseAuditReport(content: string): {
 }
 
 export function isAuditorAuditReport(content: string): boolean {
+  if (content.includes(AUDITOR_REPORT_MARKER)) return true;
   return (
     /^# Audit Report\s*$/im.test(content) &&
     /^## Work Blocks\s*$/im.test(content) &&

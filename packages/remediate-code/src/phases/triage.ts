@@ -3,9 +3,8 @@ import { OrchestratorOptions } from "../orchestrator.js";
 import { TriageBatch } from "../state/types.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { readOptionalJsonFile, writeJsonFile } from "../io/json.js";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues } from "@audit-tools/shared";
 import { validateTriageResolution } from "../validation/remediationState.js";
-import { formatValidationIssues } from "../validation/basic.js";
 
 interface TriageResolution {
   items: {

@@ -1,9 +1,5 @@
 import type { RepoManifest } from "../types.js";
-import type {
-  FileDisposition,
-  FileDispositionItem,
-  FileDispositionStatus,
-} from "../types/disposition.js";
+import type { FileDisposition, FileDispositionItem, FileDispositionStatus } from "@audit-tools/shared";
 import {
   isNodeModulesOrGit,
   isBuildOutput,
@@ -101,6 +97,14 @@ export function buildFileDisposition(
   return {
     files: repoManifest.files.map((file) => inferDisposition(file.path)),
   };
+}
+
+export function buildDispositionMap(
+  disposition?: FileDisposition,
+): Map<string, FileDispositionStatus> {
+  return new Map(
+    disposition?.files.map((item) => [item.path, item.status]) ?? [],
+  );
 }
 
 export function isAuditExcludedStatus(status: FileDispositionStatus): boolean {

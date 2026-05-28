@@ -1,0 +1,215 @@
+[
+  {
+    "task_id": "packages-remediate-code:correctness:part-3",
+    "unit_id": "packages-remediate-code",
+    "pass_id": "pass:correctness",
+    "lens": "correctness",
+    "file_coverage": [
+      {"path":"packages/remediate-code/src/phases/implement.ts","total_lines":594},
+      {"path":"packages/remediate-code/src/phases/plan.ts","total_lines":779},
+      {"path":"packages/remediate-code/src/phases/triage.ts","total_lines":112},
+      {"path":"packages/remediate-code/src/phases/workerTasks.ts","total_lines":67},
+      {"path":"packages/remediate-code/src/providers/claudeCodeProvider.ts","total_lines":43},
+      {"path":"packages/remediate-code/src/providers/index.ts","total_lines":152},
+      {"path":"packages/remediate-code/src/providers/localSubprocessProvider.ts","total_lines":30},
+      {"path":"packages/remediate-code/src/providers/opencodeProvider.ts","total_lines":31},
+      {"path":"packages/remediate-code/src/providers/subprocessTemplateProvider.ts","total_lines":84},
+      {"path":"packages/remediate-code/src/providers/vscodeTaskProvider.ts","total_lines":26},
+      {"path":"packages/remediate-code/src/providers/workerTaskLaunch.ts","total_lines":13},
+      {"path":"packages/remediate-code/src/quota/hostLimits.ts","total_lines":68},
+      {"path":"packages/remediate-code/src/quota/index.ts","total_lines":63},
+      {"path":"packages/remediate-code/src/quota/probe.ts","total_lines":25},
+      {"path":"packages/remediate-code/src/quota/scheduler.ts","total_lines":169}
+    ],
+    "findings": [
+      {
+        "id": "COR-P3-001",
+        "title": "Rebase abort skipped when rebase succeeds but tests fail in worktree merge",
+        "category": "incorrect-state-transition",
+        "severity": "low",
+        "confidence": "high",
+        "lens": "correctness",
+        "summary": "In mergeWorktreeBlock, the condition checks both rebaseAndTestSuccess being false AND rebaseRes.status being non-zero before calling git rebase --abort. When rebase succeeds but tests fail, the rebase is never aborted, leaving the worktree branch in a rebased state.",
+        "affected_files": [
+          {"path": "packages/remediate-code/src/phases/implement.ts", "line_start": 486, "line_end": 488}
+        ],
+        "evidence": [
+          "packages/remediate-code/src/phases/implement.ts:486 - condition `!rebaseAndTestSuccess && rebaseRes.status !== 0` requires both to be true; rebase-succeeded + test-failed path never triggers abort",
+          "packages/remediate-code/src/phases/implement.ts:470-484 - rebase success path sets rebaseAndTestSuccess only if tests pass; test failure leaves it false without issuing an abort",
+          "packages/remediate-code/src/phases/implement.ts:498-501 - worktree removed with --force regardless, so the branch is cleaned up, but no explicit abort is issued for the rebase"
+        ]
+      },
+      {
+        "id": "COR-P3-002",
+        "title": "splitBlocksByContextBudget copies stale dependency IDs to sub-blocks without updating dependent blocks",
+        "category": "incorrect-algorithm-implementation",
+        "severity": "medium",
+        "confidence": "high",
+        "lens": "correctness",
+        "summary": "When splitBlocksByContextBudget splits one block into sub-blocks, the original block_id is replaced by suffixed IDs, but other blocks whose dependencies array referenced the original block_id are not updated. The topological sort silently skips missing IDs, breaking dependency ordering.",
+        "affected_files": [
+          {"path": "packages/remediate-code/src/phases/plan.ts", "line_start": 513, "line_end": 520},
+          {"path": "packages/remediate-code/src/phases/implement.ts", "line_start": 106, "line_end": 116}
+        ],
+        "evidence": [
+          "packages/remediate-code/src/phases/plan.ts:513-515 - sub-block IDs are `${block.block_id}-01` etc.; original block_id no longer exists in the returned blocks array",
+          "packages/remediate-code/src/phases/plan.ts:518 - `dependencies: block.dependencies` copies the original block deps but other blocks still list the now-gone original block_id as a dependency",
+          "packages/remediate-code/src/phases/implement.ts:107-114 - visit() does `blocks.find(b => b.block_id === dep)`; if dep is the original block_id (now absent), block is undefined and the dependency edge is silently dropped"
+        ]
+      },
+      {
+        "id": "COR-P3-003",
+        "title": "enumerateTestFiles passes 'list' as a file pattern rather than using the vitest list subcommand",
+        "category": "incorrect-algorithm-implementation",
+        "severity": "low",
+        "confidence": "high",
+        "lens": "correctness",
+        "summary": "The vitest invocation passes 'list' as a trailing positional argument, treating it as a file-path filter rather than invoking the vitest list subcommand. The verbose reporter output also contains test names rather than file paths, so the returned strings are not usable as file paths in deriveBlocksFromTestGraph.",
+        "affected_files": [
+          {"path": "packages/remediate-code/src/phases/plan.ts", "line_start": 41, "line_end": 63}
+        ],
+        "evidence": [
+          "packages/remediate-code/src/phases/plan.ts:42-48 - args `['vitest', '--reporter=verbose', '--run', '--passWithNoTests', 'list']`; 'list' is a pattern, not the list subcommand",
+          "packages/remediate-code/src/phases/plan.ts:54-61 - output filtered for lines containing '.'; verbose reporter emits test names with status icons, not absolute file paths",
+          "packages/remediate-code/src/phases/plan.ts:62 - misidentified test names returned as file paths and fed into deriveBlocksFromTestGraph where they are matched against source file path segments"
+        ]
+      }
+    ]
+  },
+  {
+    "task_id": "packages-remediate-code:correctness:part-4",
+    "unit_id": "packages-remediate-code",
+    "pass_id": "pass:correctness",
+    "lens": "correctness",
+    "file_coverage": [
+      {"path":"packages/remediate-code/src/state/closingActions.ts","total_lines":11},
+      {"path":"packages/remediate-code/src/state/store.ts","total_lines":164},
+      {"path":"packages/remediate-code/src/state/types.ts","total_lines":121},
+      {"path":"packages/remediate-code/src/steps/dispatch.ts","total_lines":687},
+      {"path":"packages/remediate-code/src/steps/nextStep.ts","total_lines":1554},
+      {"path":"packages/remediate-code/src/steps/stepWriter.ts","total_lines":68},
+      {"path":"packages/remediate-code/src/steps/types.ts","total_lines":135},
+      {"path":"packages/remediate-code/src/steps/waveScheduler.ts","total_lines":149},
+      {"path":"packages/remediate-code/src/types/disposition.ts","total_lines":17},
+      {"path":"packages/remediate-code/src/types/externalAnalyzer.ts","total_lines":20},
+      {"path":"packages/remediate-code/src/types/flows.ts","total_lines":19},
+      {"path":"packages/remediate-code/src/types/graph.ts","total_lines":20},
+      {"path":"packages/remediate-code/src/types/risk.ts","total_lines":10},
+      {"path":"packages/remediate-code/src/types/runLedger.ts","total_lines":24}
+    ],
+    "findings": [
+      {
+        "id": "COR-P4-001",
+        "title": "decideNextStep drops sessionConfig in recursive state-transition calls",
+        "category": "missing-null-undefined-guards",
+        "severity": "low",
+        "confidence": "high",
+        "lens": "correctness",
+        "summary": "When decideNextStep recurses after state transitions (implementing to triage, triage to next, documenting to implementing), it omits sessionConfig from the recursive call options. Any in-memory sessionConfig override supplied by the caller is silently lost; the re-entry re-reads from disk.",
+        "affected_files": [
+          {"path": "packages/remediate-code/src/steps/nextStep.ts", "line_start": 1447, "line_end": 1452},
+          {"path": "packages/remediate-code/src/steps/nextStep.ts", "line_start": 1456, "line_end": 1463},
+          {"path": "packages/remediate-code/src/steps/nextStep.ts", "line_start": 1469, "line_end": 1474}
+        ],
+        "evidence": [
+          "packages/remediate-code/src/steps/nextStep.ts:1447-1452 - recursive call for implementing status omits sessionConfig field",
+          "packages/remediate-code/src/steps/nextStep.ts:1456-1463 - recursive call for triage status omits sessionConfig field",
+          "packages/remediate-code/src/steps/nextStep.ts:1469-1474 - recursive call when documenting with no implementable blocks also omits sessionConfig",
+          "packages/remediate-code/src/steps/nextStep.ts:972-977 - re-entry reads session config from disk; a caller-supplied in-memory value that differs from the on-disk config is silently ignored"
+        ]
+      }
+    ]
+  },
+  {
+    "task_id": "packages-remediate-code:correctness:part-5",
+    "unit_id": "packages-remediate-code",
+    "pass_id": "pass:correctness",
+    "lens": "correctness",
+    "file_coverage": [
+      {"path":"packages/remediate-code/src/types/sessionConfig.ts","total_lines":94},
+      {"path":"packages/remediate-code/src/types/surfaces.ts","total_lines":17},
+      {"path":"packages/remediate-code/src/types/workerResult.ts","total_lines":33},
+      {"path":"packages/remediate-code/src/types/workerSession.ts","total_lines":77},
+      {"path":"packages/remediate-code/src/utils/fileIntegrity.ts","total_lines":73},
+      {"path":"packages/remediate-code/src/validation/artifacts.ts","total_lines":415},
+      {"path":"packages/remediate-code/src/validation/remediationState.ts","total_lines":345},
+      {"path":"packages/remediate-code/tsconfig.json","total_lines":18},
+      {"path":"packages/remediate-code/vitest.config.ts","total_lines":14}
+    ],
+    "findings": []
+  },
+  {
+    "task_id": "packages-shared:correctness:part-1",
+    "unit_id": "packages-shared",
+    "pass_id": "pass:correctness",
+    "lens": "correctness",
+    "file_coverage": [
+      {"path":"packages/shared/package.json","total_lines":26},
+      {"path":"packages/shared/src/index.ts","total_lines":144},
+      {"path":"packages/shared/src/io/json.ts","total_lines":186},
+      {"path":"packages/shared/src/providers/types.ts","total_lines":46},
+      {"path":"packages/shared/src/quota/compositeQuotaSource.ts","total_lines":22},
+      {"path":"packages/shared/src/quota/errorParsers/claudeCodeErrorParser.ts","total_lines":47},
+      {"path":"packages/shared/src/quota/errorParsers/genericErrorParser.ts","total_lines":15},
+      {"path":"packages/shared/src/quota/errorParsers/index.ts","total_lines":18},
+      {"path":"packages/shared/src/quota/errorParsing.ts","total_lines":85},
+      {"path":"packages/shared/src/quota/fileLock.ts","total_lines":74},
+      {"path":"packages/shared/src/quota/learnedQuotaSource.ts","total_lines":32},
+      {"path":"packages/shared/src/quota/limits.ts","total_lines":103},
+      {"path":"packages/shared/src/quota/quotaSource.ts","total_lines":13},
+      {"path":"packages/shared/src/quota/slidingWindow.ts","total_lines":39},
+      {"path":"packages/shared/src/quota/state.ts","total_lines":198}
+    ],
+    "findings": [
+      {
+        "id": "COR-SH1-001",
+        "title": "recordWaveOutcomeUnsafe does not penalize lower-concurrency buckets on failure",
+        "category": "incorrect-algorithm-implementation",
+        "severity": "low",
+        "confidence": "medium",
+        "lens": "correctness",
+        "summary": "On a non-success outcome, recordWaveOutcomeUnsafe adds failure weight only to buckets at concurrency..concurrency+4, leaving lower-numbered buckets (1..concurrency-1) with only accumulated success weight. computeMaxSafeConcurrency can therefore return optimistic concurrency levels after a wave failure at a given concurrency.",
+        "affected_files": [
+          {"path": "packages/shared/src/quota/state.ts", "line_start": 185, "line_end": 194}
+        ],
+        "evidence": [
+          "packages/shared/src/quota/state.ts:185-193 - failure weight loop starts at `outcome.concurrency`, buckets 1 through concurrency-1 receive no failure weight",
+          "packages/shared/src/quota/state.ts:97-108 - computeMaxSafeConcurrency returns highest n where success_weight > failure_weight; buckets below failure level remain with unpenalized success weight",
+          "packages/shared/src/quota/state.ts:30-44 - decay reduces both weights over time but does not immediately correct the over-optimistic lower buckets after a failure"
+        ]
+      }
+    ]
+  },
+  {
+    "task_id": "packages-shared:correctness:part-2",
+    "unit_id": "packages-shared",
+    "pass_id": "pass:correctness",
+    "lens": "correctness",
+    "file_coverage": [
+      {"path":"packages/shared/src/quota/types.ts","total_lines":72},
+      {"path":"packages/shared/src/types/accessDeclaration.ts","total_lines":5},
+      {"path":"packages/shared/src/types/disposition.ts","total_lines":17},
+      {"path":"packages/shared/src/types/flows.ts","total_lines":19},
+      {"path":"packages/shared/src/types/graph.ts","total_lines":24},
+      {"path":"packages/shared/src/types/risk.ts","total_lines":10},
+      {"path":"packages/shared/src/types/runLedger.ts","total_lines":24},
+      {"path":"packages/shared/src/types/sessionConfig.ts","total_lines":85},
+      {"path":"packages/shared/src/types/surfaces.ts","total_lines":17},
+      {"path":"packages/shared/src/validation/basic.ts","total_lines":82},
+      {"path":"packages/shared/tsconfig.json","total_lines":9}
+    ],
+    "findings": []
+  },
+  {
+    "task_id": "root-config:correctness",
+    "unit_id": "root-config",
+    "pass_id": "pass:correctness",
+    "lens": "correctness",
+    "file_coverage": [
+      {"path":"opencode.json","total_lines":123},
+      {"path":"package.json","total_lines":18},
+      {"path":"tsconfig.base.json","total_lines":15}
+    ],
+    "findings": []
+  }
+]

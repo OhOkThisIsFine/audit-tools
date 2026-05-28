@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { CompositeQuotaSource } from "../src/quota/compositeQuotaSource.js";
-import type { QuotaSource, QuotaUsageSnapshot } from "../src/quota/quotaSource.js";
+import { CompositeQuotaSource } from "@audit-tools/shared";
+import type { QuotaSource, QuotaUsageSnapshot } from "@audit-tools/shared";
 
 function mockSource(name: string, result: QuotaUsageSnapshot | null): QuotaSource {
   return {

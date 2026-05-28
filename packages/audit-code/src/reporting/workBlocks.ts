@@ -1,6 +1,5 @@
 import type { Finding, UnitManifest } from "../types.js";
-import type { CriticalFlowManifest } from "../types/flows.js";
-import type { GraphBundle } from "../types/graph.js";
+import type { CriticalFlowManifest, GraphBundle } from "@audit-tools/shared";
 
 export interface WorkBlock {
   id: string;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runSlidingWindow } from "../src/quota/slidingWindow.js";
+import { runSlidingWindow } from "@audit-tools/shared";
 
 describe("runSlidingWindow", () => {
   it("runs all tasks with concurrency limit", async () => {

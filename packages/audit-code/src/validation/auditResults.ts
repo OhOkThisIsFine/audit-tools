@@ -4,7 +4,7 @@ import {
   formatValidationIssues,
   isRecord,
   type ValidationIssue,
-} from "./basic.js";
+} from "@audit-tools/shared";
 
 export type IssueSeverity = "error" | "warning";
 

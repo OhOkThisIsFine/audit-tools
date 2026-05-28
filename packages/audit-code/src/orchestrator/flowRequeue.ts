@@ -1,7 +1,7 @@
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { AuditTask, CoverageMatrix, Lens } from "../types.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
-import type { CriticalFlowManifest } from "../types/flows.js";
+import type { CriticalFlowManifest } from "@audit-tools/shared";
 
 function isLens(value: unknown): value is Lens {
   return [

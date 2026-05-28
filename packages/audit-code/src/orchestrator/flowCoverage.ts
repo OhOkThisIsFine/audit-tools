@@ -3,7 +3,7 @@ import type {
   FlowCoverageManifest,
   FlowCoverageStatus,
 } from "../types/flowCoverage.js";
-import type { CriticalFlowManifest } from "../types/flows.js";
+import type { CriticalFlowManifest } from "@audit-tools/shared";
 
 function lensSetForFlow(concerns: string[]): Lens[] {
   const allowed: Lens[] = [

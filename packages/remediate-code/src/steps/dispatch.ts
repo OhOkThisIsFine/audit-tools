@@ -13,13 +13,15 @@ import {
   readOptionalJsonFile,
   writeJsonFile,
   writeTextFile,
-} from "../io/json.js";
+  formatValidationIssues,
+  isRecord,
+  type SessionConfig,
+} from "@audit-tools/shared";
 import {
   validateClarificationRequest,
   validateDocumentResponse,
   validateItemSpec,
 } from "../validation/remediationState.js";
-import { formatValidationIssues, isRecord } from "../validation/basic.js";
 import {
   REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
@@ -30,7 +32,6 @@ import {
   type RemediationDispatchPlan,
 } from "./types.js";
 import { classifyFindingRisk, NO_CHANGE_RE } from "./nextStep.js";
-import type { SessionConfig } from "../types/sessionConfig.js";
 import { scheduleWave, buildDispatchQuota } from "./waveScheduler.js";
 import { ESTIMATED_FINDING_OVERHEAD_TOKENS, ESTIMATED_BLOCK_BASE_TOKENS } from "../phases/plan.js";
 
@@ -191,11 +192,16 @@ Use one of these shapes:
   "item_spec": {
     "finding_id": "${finding.id}",
     "concrete_change": "...",
+    "no_change": false,
     "tests_to_write": [{ "name": "...", "assertions": ["..."] }],
     "not_applicable_steps": []
   }
 }
 \`\`\`
+
+Set \`no_change\` to \`true\` when the existing code is already correct and no
+source changes are needed. When \`no_change\` is true, \`concrete_change\` should
+explain why the code is already correct.
 
 If any remediation steps do not apply to this finding, list them in
 \`not_applicable_steps\`. Each entry must be an object with a \`step\` field
@@ -642,8 +648,9 @@ export async function mergeImplementResults(
         throw new Error(`Unknown finding_id in implement result: ${itemResult.finding_id}`);
       }
       if (itemResult.status === "resolved") {
-        const concreteChange = stateItem.item_spec?.concrete_change ?? "";
-        stateItem.status = NO_CHANGE_RE.test(concreteChange) ? "resolved_no_change" : "resolved";
+        const spec = stateItem.item_spec;
+        const isNoChange = spec?.no_change === true || NO_CHANGE_RE.test(spec?.concrete_change ?? "");
+        stateItem.status = isNoChange ? "resolved_no_change" : "resolved";
         stateItem.last_successful_step = "Verify Code Against Documentation";
         if (itemResult.evidence?.length) {
           await writeJsonFile(

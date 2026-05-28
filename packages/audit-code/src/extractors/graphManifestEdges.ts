@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import type { GraphEdge } from "../types/graph.js";
+import type { GraphEdge } from "@audit-tools/shared";
 import { graphEdge, normalizeGraphPath, resolveCandidate } from "./graphPathUtils.js";
 
 const PACKAGE_ENTRYPOINT_EDGE_CONFIDENCE = 0.9;

@@ -1,5 +1,5 @@
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
-import type { GraphBundle, GraphEdge } from "../types/graph.js";
+import type { GraphBundle, GraphEdge } from "@audit-tools/shared";
 
 export type FileAnchorKind =
   | "boundary"

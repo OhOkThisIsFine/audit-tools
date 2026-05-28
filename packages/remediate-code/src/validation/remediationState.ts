@@ -4,7 +4,7 @@ import {
   pushValidationIssue,
   prefixValidationIssues,
   requireKeys,
-} from "./basic.js";
+} from "@audit-tools/shared";
 
 const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
 const VALID_CONFIDENCES = new Set(["high", "medium", "low"]);

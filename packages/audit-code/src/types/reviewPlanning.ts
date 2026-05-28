@@ -1,5 +1,5 @@
 import type { AuditTask, Lens } from "../types.js";
-import type { GraphEdge } from "./graph.js";
+import type { GraphEdge } from "@audit-tools/shared";
 
 export interface ReviewPacketGraphEdge
   extends Pick<GraphEdge, "from" | "to" | "kind" | "confidence" | "reason"> {}

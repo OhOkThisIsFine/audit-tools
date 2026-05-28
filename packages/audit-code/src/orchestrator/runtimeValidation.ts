@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import type { UnitManifest } from "../types.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
-import type { CriticalFlowManifest } from "../types/flows.js";
+import type { CriticalFlowManifest } from "@audit-tools/shared";
 import type {
   RuntimeValidationReport,
   RuntimeValidationTask,

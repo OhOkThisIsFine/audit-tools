@@ -10,13 +10,11 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile } from "../io/json.js";
-import type { SessionConfig } from "../types/sessionConfig.js";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, type SessionConfig } from "@audit-tools/shared";
 import { runPlanPhase, isAuditorAuditReport } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
 import { validateRemediationPlan } from "../validation/remediationState.js";
-import { formatValidationIssues, isRecord } from "../validation/basic.js";
 import {
   prepareDocumentDispatch,
   prepareImplementDispatch,
@@ -29,6 +27,7 @@ import {
   fixupBlocksAfterDedup,
 } from "../dedup/crossLensDedup.js";
 import { checkAffectedFileIntegrity } from "../utils/fileIntegrity.js";
+import { resolveIntakeStep } from "./intakeResolver.js";
 import {
   INTAKE_CLARIFICATION_SCHEMA_VERSION,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
@@ -683,6 +682,8 @@ Stop after presenting the summary.
   });
 }
 
+const MAX_ITERATIONS = 10;
+
 export async function decideNextStep(
   options: NextStepOptions = {},
 ): Promise<RemediationStep> {
@@ -692,6 +693,7 @@ export async function decideNextStep(
   const store = new StateStore(artifactsDir);
   let state = await store.loadState();
 
+  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
   if (state?.status === "complete" || existsSync(join(root, "remediation-report.md"))) {
     return presentReportStep(root, artifactsDir, state);
   }
@@ -699,206 +701,42 @@ export async function decideNextStep(
   if (!state) {
     const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
     if (extractedPlan) {
-      state = await saveStateForPlan(
-        artifactsDir,
-        { status: "pending" },
-        normalizeExtractedPlan(extractedPlan),
-      );
+      try {
+        state = await saveStateForPlan(
+          artifactsDir,
+          { status: "pending" },
+          normalizeExtractedPlan(extractedPlan),
+        );
+      } catch (error) {
+        const paths = intakePaths(artifactsDir);
+        try {
+          const { unlink } = await import("node:fs/promises");
+          await unlink(paths.extractedPlan);
+        } catch { /* already gone */ }
+        process.stderr.write(
+          `[remediate-code] Corrupted extracted-plan.json removed (${error instanceof Error ? error.message : String(error)}). Re-emitting extraction step.\n`,
+        );
+      }
     }
   }
 
   if (!state) {
-    const paths = intakePaths(artifactsDir);
     const inputResolution = resolveInputPaths(root, options.input);
-    let intake = await readIntakeArtifacts(artifactsDir);
-    let manifest: IntakeSourceManifest | undefined = intake.manifest;
-    let manifestRefreshed = false;
-
-    // When no explicit input was supplied but default candidates exist on disk,
-    // discard a stale manifest from a prior run so the default candidate flow fires.
-    if (!inputResolution.supplied && manifest && inputResolution.existing.length > 0) {
-      manifest = undefined;
-      manifestRefreshed = true;
-    }
-
-    if (inputResolution.supplied && inputResolution.missing.length > 0) {
-      return writeCurrentStep({
-        stepKind: "collect_starting_point",
-        status: "blocked",
-        runId: randomRunId("INPUT"),
-        repoRoot: root,
-        artifactsDir,
-        prompt: collectStartingPointPrompt(
-          root,
-          inputResolution.checked,
-          inputResolution.missing,
-          paths,
-        ),
-        allowedCommands: [loaderCommand("next-step"), loaderCommand("next-step --input <path>")],
-        stopCondition:
-          "Stop after collecting a valid remediation starting point and rerunning next-step.",
-        artifactPaths: {
-          source_manifest: paths.sourceManifest,
-          conversation_start: paths.conversationStart,
-        },
-      });
-    }
-
-    if (
-      inputResolution.existing.length > 0 &&
-      (inputResolution.supplied || !manifest)
-    ) {
-      const singleInput = inputResolution.existing[0];
-      const shouldTryAuditFastPath =
-        inputResolution.existing.length === 1 &&
-        singleInput.toLowerCase().endsWith(".md") &&
-        !intake.conversationStart;
-
-      if (shouldTryAuditFastPath) {
-        const content = await readFile(singleInput, "utf8");
-        if (isAuditorAuditReport(content)) {
-          state = await runPlanPhase(
-            { status: "pending" },
-            { root, artifactsDir, input: singleInput },
-          );
-          await store.saveState(state);
-        }
-      }
-
-      if (!state) {
-        manifest = buildDocumentSourceManifest(
-          inputResolution.existing,
-          inputResolution.supplied ? "input" : "default_candidates",
-        );
-        await writeJsonFile(paths.sourceManifest, manifest);
-        manifestRefreshed = true;
-      }
-    }
-
-    if (!state && !manifest && intake.conversationStart) {
-      manifest = buildConversationSourceManifest(paths.conversationStart);
-      await writeJsonFile(paths.sourceManifest, manifest);
-      manifestRefreshed = true;
-    }
-
-    if (!state && !manifest) {
-      return writeCurrentStep({
-        stepKind: "collect_starting_point",
-        status: "blocked",
-        runId: randomRunId("INPUT"),
-        repoRoot: root,
-        artifactsDir,
-        prompt: collectStartingPointPrompt(root, inputResolution.checked, [], paths),
-        allowedCommands: [loaderCommand("next-step"), loaderCommand("next-step --input <path>")],
-        stopCondition:
-          "Stop after collecting a remediation starting point and rerunning next-step.",
-        artifactPaths: {
-          source_manifest: paths.sourceManifest,
-          conversation_start: paths.conversationStart,
-        },
-      });
-    }
-
-    if (!state && manifest) {
-      const sourceResolution = resolveManifestSources(root, manifest);
-      if (sourceResolution.missing.length > 0) {
-        return writeCurrentStep({
-          stepKind: "collect_starting_point",
-          status: "blocked",
-          runId: randomRunId("INPUT"),
-          repoRoot: root,
-          artifactsDir,
-          prompt: collectStartingPointPrompt(
-            root,
-            inputResolution.checked,
-            sourceResolution.missing.map((source) => source.path),
-            paths,
-          ),
-          allowedCommands: [loaderCommand("next-step"), loaderCommand("next-step --input <path>")],
-          stopCondition:
-            "Stop after collecting valid remediation source paths and rerunning next-step.",
-          artifactPaths: {
-            source_manifest: paths.sourceManifest,
-            conversation_start: paths.conversationStart,
-          },
-        });
-      }
-
-      if (manifestRefreshed) {
-        intake = { manifest };
-      }
-
-      const summary = manifestRefreshed ? undefined : intake.summary;
-      const brief = manifestRefreshed ? undefined : intake.brief;
-      const clarificationResolution = manifestRefreshed
-        ? undefined
-        : intake.clarificationResolution;
-
-      if (
-        !summary ||
-        !brief ||
-        (!isIntakeReady(summary) && Boolean(clarificationResolution))
-      ) {
-        return writeCurrentStep({
-          stepKind: "synthesize_intake",
-          status: "ready",
-          runId: randomRunId("INTAKE"),
-          repoRoot: root,
-          artifactsDir,
-          prompt: synthesizeIntakePrompt(
-            paths.sourceManifest,
-            sourceResolution.resolved,
-            paths,
-            Boolean(clarificationResolution),
-          ),
-          allowedCommands: [loaderCommand("next-step")],
-          stopCondition:
-            "Stop after writing the intake summary and remediation brief, then rerunning next-step.",
-          artifactPaths: {
-            source_manifest: paths.sourceManifest,
-            intake_summary: paths.summary,
-            remediation_brief: paths.brief,
-            intake_clarifications: paths.clarificationResolution,
-          },
-        });
-      }
-
-      if (!isIntakeReady(summary)) {
-        return writeCurrentStep({
-          stepKind: "collect_intake_clarifications",
-          status: "blocked",
-          runId: randomRunId("INTAKE"),
-          repoRoot: root,
-          artifactsDir,
-          prompt: collectIntakeClarificationsPrompt(summary, paths),
-          allowedCommands: [loaderCommand("next-step")],
-          stopCondition:
-            "Stop after asking the user for intake clarification answers.",
-          artifactPaths: {
-            intake_summary: paths.summary,
-            intake_clarifications: paths.clarificationResolution,
-            remediation_brief: paths.brief,
-          },
-        });
-      }
-
-      return writeCurrentStep({
-        stepKind: "extract_findings",
-        status: "ready",
-        runId: randomRunId("EXTRACT"),
-        repoRoot: root,
-        artifactsDir,
-        prompt: extractFindingsPrompt(paths, sourceResolution.resolved),
-        allowedCommands: [loaderCommand("next-step")],
-        stopCondition:
-          "Stop after writing extracted-plan.json and rerunning next-step.",
-        artifactPaths: {
-          source_manifest: paths.sourceManifest,
-          remediation_brief: paths.brief,
-          extracted_plan: paths.extractedPlan,
-        },
-      });
-    }
+    const intakeResult = await resolveIntakeStep({
+      root,
+      artifactsDir,
+      input: options.input,
+      inputResolution,
+      store,
+      loaderCommand,
+      randomRunId,
+      collectStartingPointPrompt,
+      synthesizeIntakePrompt,
+      collectIntakeClarificationsPrompt,
+      extractFindingsPrompt,
+    });
+    if (intakeResult.kind === "step") return intakeResult.step;
+    state = intakeResult.state;
   }
 
   if (!state) {
@@ -971,6 +809,37 @@ export async function decideNextStep(
 
   const pendingFindings = documentableFindings(state);
   if (state.status === "planning" && pendingFindings.length > 0) {
+    if (state.plan) {
+      const integrity = await checkAffectedFileIntegrity(root, state.plan.findings);
+      if (!integrity.is_clean) {
+        const details = [
+          ...integrity.changed.map((p) => `changed: ${p}`),
+          ...integrity.missing.map((p) => `missing: ${p}`),
+        ];
+        const replanCommand = loaderCommand("next-step --force-replan");
+        return writeCurrentStep({
+          stepKind: "collect_starting_point",
+          status: "blocked",
+          runId: stateRunId(state),
+          repoRoot: root,
+          artifactsDir,
+          prompt: [
+            "## File integrity check failed",
+            "",
+            "The following files have changed since the remediation plan was created:",
+            ...details.map((d) => `- ${d}`),
+            "",
+            "Re-run planning to pick up the current file state before documenting begins.",
+            "Run:",
+            "",
+            `\`${replanCommand}\``,
+          ].join("\n"),
+          allowedCommands: [replanCommand],
+          stopCondition: "Stop after re-planning completes.",
+        });
+      }
+    }
+
     const sessionConfig = options.sessionConfig ??
       await readOptionalJsonFile<SessionConfig>(
         join(root, ".remediation-artifacts", "session-config.json"),
@@ -1118,6 +987,7 @@ Then run:
           summary: string;
           evidence: string[];
           concrete_change: string;
+          no_change?: boolean;
           tests_to_write: { name: string; assertions: string[] }[];
           block_id: string;
           preliminary_tier: FindingRiskTier;
@@ -1142,6 +1012,7 @@ Then run:
               summary: finding.summary,
               evidence: finding.evidence,
               concrete_change: spec.concrete_change,
+              no_change: spec.no_change,
               tests_to_write: spec.tests_to_write,
               block_id: block.block_id,
               preliminary_tier: tier,
@@ -1237,6 +1108,7 @@ Include every \`finding_id\` from the input. Then run:
         finding_id: string;
         title: string;
         concrete_change: string;
+        no_change?: boolean;
         affected_files: string[];
         preliminary_tier: string;
         preliminary_reason: string;
@@ -1264,8 +1136,9 @@ Include every \`finding_id\` from the input. Then run:
       }
 
       function isNoOp(findingId: string): boolean {
-        const change = prelimMap.get(findingId)?.concrete_change ?? "";
-        return NO_CHANGE_RE.test(change);
+        const spec = prelimMap.get(findingId);
+        if (spec?.no_change === true) return true;
+        return NO_CHANGE_RE.test(spec?.concrete_change ?? "");
       }
 
       function renderTierSection(tier: string, label: string): string {
@@ -1446,34 +1319,21 @@ Then run:
   if (state.status === "implementing") {
     const triaged = await runTriagePhase(state, { root, artifactsDir });
     await store.saveState(triaged);
-    return decideNextStep({
-      root,
-      artifactsDir,
-      hostCanDispatchSubagents: options.hostCanDispatchSubagents,
-      hostMaxConcurrent: options.hostMaxConcurrent,
-    });
+    state = triaged;
+    continue;
   }
 
   if (state.status === "triage") {
     const triaged = await runTriagePhase(state, { root, artifactsDir });
     await store.saveState(triaged);
-    return decideNextStep({
-      root,
-      artifactsDir,
-      hostCanDispatchSubagents: options.hostCanDispatchSubagents,
-      hostMaxConcurrent: options.hostMaxConcurrent,
-    });
+    state = triaged;
+    continue;
   }
 
   if (state.status === "documenting" && implementBlocks.length === 0) {
     state.status = "implementing";
     await store.saveState(state);
-    return decideNextStep({
-      root,
-      artifactsDir,
-      hostCanDispatchSubagents: options.hostCanDispatchSubagents,
-      hostMaxConcurrent: options.hostMaxConcurrent,
-    });
+    continue;
   }
 
   if (allItemsTerminal(state) && state.status !== "closing") {
@@ -1482,44 +1342,12 @@ Then run:
   }
 
   if (state.status === "closing") {
-    if (options.finalizeClosing) {
-      const closed = await runClosePhase(state, { root, artifactsDir });
-      if (closed.status !== "complete") {
-        await store.saveState(closed);
-      }
-      return decideNextStep({
-        root,
-        artifactsDir,
-        hostCanDispatchSubagents: options.hostCanDispatchSubagents,
-      });
+    const closed = await runClosePhase(state, { root, artifactsDir });
+    if (closed.status !== "complete") {
+      await store.saveState(closed);
     }
-
-    const closeCommand = loaderCommand("next-step --finalize-closing");
-    return writeCurrentStep({
-      stepKind: "close_run",
-      status: "ready",
-      runId: stateRunId(state),
-      repoRoot: root,
-      artifactsDir,
-      prompt: `
-# Close Remediation Run
-
-Run the bounded closer once:
-
-\`${closeCommand}\`
-
-It will run configured verification, write \`remediation-report.md\`,
-then clean up runtime artifacts.
-
-Read and follow only the new step returned by that command.
-`,
-      allowedCommands: [closeCommand],
-      stopCondition:
-        "Stop after the bounded closer returns the next step.",
-      artifactPaths: {
-        final_report: join(root, "remediation-report.md"),
-      },
-    });
+    state = closed;
+    continue;
   }
 
   const itemsByStatus: Record<string, string[]> = {};
@@ -1547,6 +1375,28 @@ The remediation workflow reached a state it has no transition for.
 ## Item Breakdown
 
 ${statusBreakdown || "No items in state."}
+
+Report this diagnostic to the user and stop. Do not attempt to advance the run.
+`,
+    allowedCommands: [],
+    stopCondition: "Stop after reporting the diagnostic to the user.",
+  });
+  }
+
+  return writeCurrentStep({
+    stepKind: "unhandled_state",
+    status: "blocked",
+    runId: stateRunId(state),
+    repoRoot: root,
+    artifactsDir,
+    prompt: `
+# State transition loop exhausted
+
+The remediation workflow cycled through ${MAX_ITERATIONS} internal transitions without
+reaching a step that can be returned to the host.
+
+- **Last state status**: \`${state?.status ?? "null"}\`
+- **State file**: \`${join(artifactsDir, "state.json")}\`
 
 Report this diagnostic to the user and stop. Do not attempt to advance the run.
 `,

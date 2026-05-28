@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { FreshSessionProvider, LaunchFreshSessionInput } from "./types.js";
-import type { OpenCodeConfig } from "../types/sessionConfig.js";
+import type { FreshSessionProvider, LaunchFreshSessionInput, OpenCodeConfig, OpenTokenConfig } from "@audit-tools/shared";
 import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
 
 function resolveOpenCodeSpawnCommand(
@@ -32,9 +31,11 @@ function quoteCmdArg(value: string): string {
 export class OpenCodeProvider implements FreshSessionProvider {
   name = "opencode";
   private readonly config: OpenCodeConfig;
+  private readonly opentoken: OpenTokenConfig;
 
-  constructor(config: OpenCodeConfig = {}) {
+  constructor(config: OpenCodeConfig = {}, opentoken: OpenTokenConfig = {}) {
     this.config = config;
+    this.opentoken = opentoken;
   }
 
   async launch(input: LaunchFreshSessionInput) {
@@ -42,6 +43,9 @@ export class OpenCodeProvider implements FreshSessionProvider {
     const baseCommand = this.config.command ?? "opencode";
     const baseArgs = ["run", prompt, ...(this.config.extra_args ?? [])];
     const resolved = resolveOpenCodeSpawnCommand(baseCommand, baseArgs);
-    return await spawnLoggedCommand(resolved.command, resolved.args, input);
+    return await spawnLoggedCommand(resolved.command, resolved.args, input, undefined, {
+      opentoken: this.opentoken.enabled,
+      opentokenCommand: this.opentoken.command,
+    });
   }
 }

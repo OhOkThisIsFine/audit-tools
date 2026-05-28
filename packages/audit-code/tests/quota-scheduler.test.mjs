@@ -13,7 +13,7 @@ const {
   computeRampUpConcurrency,
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
-} = await import("../dist/quota/state.js");
+} = await import("@audit-tools/shared/quota/state");
 
 // Helper to build a quota state entry with preset bucket weights
 function makeEntry(buckets, overrides = {}) {

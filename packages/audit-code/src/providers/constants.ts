@@ -1,1 +1,1 @@
-export const LOCAL_SUBPROCESS_PROVIDER_NAME = "local-subprocess" as const;
+export { LOCAL_SUBPROCESS_PROVIDER_NAME } from "@audit-tools/shared";

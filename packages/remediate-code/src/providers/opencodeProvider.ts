@@ -1,22 +1,24 @@
 import { readFile } from "node:fs/promises";
-import type { FreshSessionProvider, LaunchFreshSessionInput } from "./types.js";
-import type { OpenCodeConfig } from "../types/sessionConfig.js";
+import type { FreshSessionProvider, LaunchFreshSessionInput, OpenCodeConfig, OpenTokenConfig } from "@audit-tools/shared";
+import { readJsonFile } from "@audit-tools/shared";
 import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
-import { readJsonFile } from "../io/json.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { applyWorkerTaskLaunchSettings } from "./workerTaskLaunch.js";
 
 export class OpenCodeProvider implements FreshSessionProvider {
   name = "opencode";
   private readonly config: OpenCodeConfig;
+  private readonly opentoken: OpenTokenConfig;
   private readonly launchCommand: typeof spawnLoggedCommand;
 
   constructor(
     config: OpenCodeConfig = {},
     launchCommand: typeof spawnLoggedCommand = spawnLoggedCommand,
+    opentoken: OpenTokenConfig = {},
   ) {
     this.config = config;
     this.launchCommand = launchCommand;
+    this.opentoken = opentoken;
   }
 
   async launch(input: LaunchFreshSessionInput) {
@@ -27,6 +29,9 @@ export class OpenCodeProvider implements FreshSessionProvider {
     return await this.launchCommand(command, args, {
       ...applyWorkerTaskLaunchSettings(input, task),
       stdinText: prompt,
+    }, undefined, {
+      opentoken: this.opentoken.enabled,
+      opentokenCommand: this.opentoken.command,
     });
   }
 }

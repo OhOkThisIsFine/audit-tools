@@ -9,7 +9,7 @@ import type {
   RepoManifest,
   UnitManifest,
 } from "../types.js";
-import type { FileDisposition } from "../types/disposition.js";
+import type { FileDisposition } from "@audit-tools/shared";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import { isAuditExcludedStatus } from "../extractors/disposition.js";
 import { hasBrowserExtensionManifestFile } from "../extractors/browserExtension.js";

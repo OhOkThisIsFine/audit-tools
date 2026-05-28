@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import type {
   LaunchFreshSessionInput,
   LaunchFreshSessionResult,
-} from "./types.js";
+} from "@audit-tools/shared";
 
 const TERMINATION_SIGNAL: NodeJS.Signals = "SIGTERM";
 const FORCE_KILL_SIGNAL: NodeJS.Signals = "SIGKILL";
@@ -13,10 +13,34 @@ interface SpawnLoggedCommandOptions {
   createWriteStream?: typeof createWriteStream;
   spawn?: typeof spawn;
   killGraceMs?: number;
+  opentoken?: boolean;
+  opentokenCommand?: string;
 }
 
 function formatCommand(command: string, args: string[]): string {
   return [command, ...args].join(" ");
+}
+
+function quoteCmdArg(value: string): string {
+  if (/^[A-Za-z0-9_./:=@+-]+$/.test(value)) return value;
+  return `"${value.replace(/(["^&|<>%])/g, "^$1")}"`;
+}
+
+function applyOpenTokenWrap(
+  command: string,
+  args: string[],
+  opentokenCommand: string,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  if (platform === "win32") {
+    const shell = process.env.ComSpec ?? "cmd.exe";
+    const inner = [command, ...args].map(quoteCmdArg).join(" ");
+    return {
+      command: shell,
+      args: ["/d", "/s", "/c", `${opentokenCommand} wrap ${inner}`],
+    };
+  }
+  return { command: opentokenCommand, args: ["wrap", command, ...args] };
 }
 
 // On Windows `command` must be the resolved .cmd / .exe path because `spawn`
@@ -33,6 +57,16 @@ export async function spawnLoggedCommand(
   const openWriteStream = options.createWriteStream ?? createWriteStream;
   const spawnProcess = options.spawn ?? spawn;
   const killGraceMs = options.killGraceMs ?? FORCE_KILL_GRACE_MS;
+
+  if (options.opentoken) {
+    const wrapped = applyOpenTokenWrap(
+      command,
+      args,
+      options.opentokenCommand ?? "opentoken",
+    );
+    command = wrapped.command;
+    args = wrapped.args;
+  }
 
   return await new Promise((resolve, reject) => {
     const stdoutLog = openWriteStream(input.stdoutPath, { flags: "a" });

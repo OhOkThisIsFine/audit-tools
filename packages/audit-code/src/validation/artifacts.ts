@@ -3,7 +3,7 @@ import {
   type ValidationIssue,
   pushValidationIssue,
   requireKeys,
-} from "./basic.js";
+} from "@audit-tools/shared";
 
 function pushIssue(
   issues: ValidationIssue[],

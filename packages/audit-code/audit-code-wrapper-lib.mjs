@@ -1,6 +1,7 @@
 import { access, cp, mkdir, open, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -1215,6 +1216,21 @@ async function buildClaudeDesktopBundle(root, results) {
   await writeFile(join(bundleRoot, 'audit-code-wrapper-lib.mjs'), await readFile(join(repoRoot, 'audit-code-wrapper-lib.mjs')));
   await writeFile(join(bundleRoot, 'package.json'), await readFile(join(repoRoot, 'package.json')));
 
+  try {
+    const req = createRequire(join(repoRoot, 'package.json'));
+    const sharedEntry = req.resolve('@audit-tools/shared');
+    let sharedRoot = dirname(sharedEntry);
+    while (sharedRoot !== dirname(sharedRoot) && !(await fileExists(join(sharedRoot, 'package.json')))) {
+      sharedRoot = dirname(sharedRoot);
+    }
+    const bundleSharedRoot = join(bundleRoot, 'node_modules', '@audit-tools', 'shared');
+    await mkdir(bundleSharedRoot, { recursive: true });
+    await cp(join(sharedRoot, 'dist'), join(bundleSharedRoot, 'dist'), { recursive: true, force: true });
+    await writeFile(join(bundleSharedRoot, 'package.json'), await readFile(join(sharedRoot, 'package.json')));
+  } catch {
+    // @audit-tools/shared not resolvable — bundle will use runtime resolution
+  }
+
   results.push({ path: bundleRoot, mode: bundleExisted ? 'updated' : 'created' });
 
   const serverEntry = [
@@ -1891,6 +1907,10 @@ function createInstallMcpClient(command, args, options = {}) {
       await request('shutdown', 'shutdown');
       notify('exit');
       child.stdin.end();
+    }
+
+    if (child.exitCode !== null || child.signalCode !== null) {
+      return;
     }
 
     await new Promise((resolvePromise) => {

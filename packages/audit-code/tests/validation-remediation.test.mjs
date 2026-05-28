@@ -5,7 +5,7 @@ const {
   formatValidationIssues,
   prefixValidationIssues,
   requireKeys,
-} = await import("../dist/validation/basic.js");
+} = await import("@audit-tools/shared/validation/basic");
 const { validateArtifactBundle } = await import(
   "../dist/validation/artifacts.js"
 );

@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import type { GraphEdge } from "../types/graph.js";
+import type { GraphEdge } from "@audit-tools/shared";
 
 const RESOLVABLE_EXTENSIONS = [
   "",

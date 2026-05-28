@@ -1,8 +1,13 @@
-import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
-import type { HostConcurrencyLimit, QuotaStateEntry, ResolvedLimits, WaveSchedule } from "./types.js";
-import type { QuotaUsageSnapshot } from "./quotaSource.js";
-import { classifyProvider, resolveLimits } from "./limits.js";
-import { computeMaxSafeConcurrency, computeRampUpConcurrency } from "./state.js";
+import type {
+  ResolvedProviderName,
+  SessionConfig,
+  HostConcurrencyLimit,
+  QuotaStateEntry,
+  ResolvedLimits,
+  WaveSchedule,
+  QuotaUsageSnapshot,
+} from "@audit-tools/shared";
+import { classifyProvider, resolveLimits, computeMaxSafeConcurrency, computeRampUpConcurrency } from "@audit-tools/shared";
 
 export interface ScheduleWaveOptions {
   providerName: ResolvedProviderName;

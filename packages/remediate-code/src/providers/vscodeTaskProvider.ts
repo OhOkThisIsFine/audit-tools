@@ -1,5 +1,4 @@
-import type { FreshSessionProvider, LaunchFreshSessionInput } from "./types.js";
-import type { VSCodeTaskConfig } from "../types/sessionConfig.js";
+import type { FreshSessionProvider, LaunchFreshSessionInput, VSCodeTaskConfig, OpenTokenConfig } from "@audit-tools/shared";
 import { SubprocessTemplateProvider } from "./subprocessTemplateProvider.js";
 import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
 
@@ -10,6 +9,7 @@ export class VSCodeTaskProvider implements FreshSessionProvider {
   constructor(
     config: VSCodeTaskConfig,
     launchCommand: typeof spawnLoggedCommand = spawnLoggedCommand,
+    opentoken: OpenTokenConfig = {},
   ) {
     this.delegate = new SubprocessTemplateProvider(
       {
@@ -18,6 +18,7 @@ export class VSCodeTaskProvider implements FreshSessionProvider {
       },
       "vscode-task",
       launchCommand,
+      opentoken,
     );
   }
 

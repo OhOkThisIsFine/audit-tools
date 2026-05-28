@@ -4,11 +4,11 @@ import { SubprocessTemplateProvider } from "./subprocessTemplateProvider.js";
 import { ClaudeCodeProvider } from "./claudeCodeProvider.js";
 import { OpenCodeProvider } from "./opencodeProvider.js";
 import { VSCodeTaskProvider } from "./vscodeTaskProvider.js";
-import type { FreshSessionProvider } from "./types.js";
 import type {
+  FreshSessionProvider,
   ResolvedProviderName,
   SessionConfig,
-} from "../types/sessionConfig.js";
+} from "@audit-tools/shared";
 
 function hasEntries(values: string[] | undefined): boolean {
   return (values?.length ?? 0) > 0;
@@ -101,6 +101,7 @@ export function createFreshSessionProvider(
   sessionConfig: SessionConfig = {},
 ): FreshSessionProvider {
   const providerName = resolveFreshSessionProviderName(name, sessionConfig);
+  const opentoken = sessionConfig.opentoken ?? {};
   if (
     providerName === "local-subprocess" &&
     (name ?? sessionConfig.provider) === "auto"
@@ -121,18 +122,18 @@ export function createFreshSessionProvider(
           "subprocess-template provider requires session-config.json with subprocess_template.command_template.",
         );
       }
-      return new SubprocessTemplateProvider(sessionConfig.subprocess_template);
+      return new SubprocessTemplateProvider(sessionConfig.subprocess_template, undefined, opentoken);
     case "claude-code":
-      return new ClaudeCodeProvider(sessionConfig.claude_code);
+      return new ClaudeCodeProvider(sessionConfig.claude_code, undefined, opentoken);
     case "opencode":
-      return new OpenCodeProvider(sessionConfig.opencode);
+      return new OpenCodeProvider(sessionConfig.opencode, opentoken);
     case "vscode-task":
       if (!sessionConfig.vscode_task?.command_template?.length) {
         throw new Error(
           "vscode-task provider requires session-config.json with vscode_task.command_template.",
         );
       }
-      return new VSCodeTaskProvider(sessionConfig.vscode_task);
+      return new VSCodeTaskProvider(sessionConfig.vscode_task, opentoken);
     default:
       throw new Error(`Unknown provider: ${providerName}`);
   }

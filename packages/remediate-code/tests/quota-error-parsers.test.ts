@@ -3,7 +3,7 @@ import {
   ClaudeCodeErrorParser,
   GenericErrorParser,
   getErrorParserForProvider,
-} from "../src/quota/errorParsers/index.js";
+} from "@audit-tools/shared";
 
 describe("GenericErrorParser", () => {
   it("delegates to detectRateLimitError", () => {

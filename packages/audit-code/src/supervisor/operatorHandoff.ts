@@ -1,13 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { writeJsonFile } from "../io/json.js";
+import { writeJsonFile } from "@audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type {
   AuditState,
   AuditTopLevelStatus,
   ObligationState,
 } from "../types/auditState.js";
-import type { ProviderName } from "../types/sessionConfig.js";
+import type { ProviderName } from "@audit-tools/shared";
 import { LOCAL_SUBPROCESS_PROVIDER_NAME } from "../providers/constants.js";
 
 export interface AuditCodeHandoffInput {

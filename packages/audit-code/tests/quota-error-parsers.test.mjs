@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { GenericErrorParser, ClaudeCodeErrorParser, getErrorParserForProvider } =
-  await import("../dist/quota/errorParsers/index.js");
+  await import("@audit-tools/shared/quota/errorParsers/index");
 
 // ── GenericErrorParser ──────────────────────────────────────────────────────
 

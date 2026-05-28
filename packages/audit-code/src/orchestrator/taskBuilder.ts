@@ -4,10 +4,10 @@ import type {
   CoverageMatrix,
   Lens,
 } from "../types.js";
-import type { CriticalFlowManifest } from "../types/flows.js";
+import type { CriticalFlowManifest } from "@audit-tools/shared";
 import { claimFlowReviewBlocks } from "./flowPlanning.js";
 import { isTrivialAuditPath } from "./trivialAudit.js";
-import { LENS_ORDER } from "./unitBuilder.js";
+import { LENS_ORDER, priorityRank } from "./auditTaskUtils.js";
 import {
   isTestPath,
   normalizeExtractorPath,
@@ -65,18 +65,6 @@ function taskPriority(
     return "medium";
   }
   return lens === "security" || lens === "data_integrity" ? "medium" : "low";
-}
-
-function priorityRank(priority: AuditTask["priority"]): number {
-  switch (priority) {
-    case "high":
-      return 3;
-    case "medium":
-      return 2;
-    case "low":
-    default:
-      return 1;
-  }
 }
 
 function pickAnalyzerLens(category: string): Lens {

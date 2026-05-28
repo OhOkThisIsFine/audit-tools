@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { getQuotaStatePath } from "./state.js";
+import { getQuotaStatePath } from "@audit-tools/shared";
 
 export interface DiscoveredRateLimits {
   requests_per_minute?: number | null;

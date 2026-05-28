@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
 const { acquireLock, releaseLock, withFileLock, FileLockTimeoutError } =
-  await import("../dist/quota/fileLock.js");
+  await import("@audit-tools/shared/quota/fileLock");
 
 function tmpLock() {
   return join(tmpdir(), `test-lock-${randomUUID()}.lock`);

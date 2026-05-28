@@ -13,6 +13,7 @@ import {
   prepareImplementDispatch,
 } from "./steps/dispatch.js";
 import { validateArtifacts } from "./validation/artifacts.js";
+import { setQuotaStateDir } from "@audit-tools/shared";
 
 const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const { version: pkgVersion } = JSON.parse(
@@ -293,6 +294,7 @@ program
 
 // Only parse argv when run directly; skip when imported as a module (e.g. in tests).
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  setQuotaStateDir(join(homedir(), ".remediate-code"));
   program.parse(process.argv);
 }
 
