@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 const packageJsonPath = resolve(repoRoot, "package.json");
+const TAG_PREFIX = "audit-code-";
 const allowedBumps = new Set(["patch", "minor", "major"]);
 const bump = process.argv[2] ?? "patch";
 const bumpOnly = process.argv.includes("--bump-only");
@@ -24,6 +25,13 @@ if (!allowedBumps.has(bump)) {
 
 function commandName(name) {
   return process.platform === "win32" ? `${name}.cmd` : name;
+}
+
+function getRemoteName() {
+  const remotes = run("git", ["remote"], { capture: true }).stdout.trim().split(/\r?\n/);
+  if (remotes.includes("origin")) return "origin";
+  if (remotes.length > 0 && remotes[0].length > 0) return remotes[0];
+  throw new Error("No git remotes found.");
 }
 
 function quoteForCmd(arg) {
@@ -87,12 +95,13 @@ function readPackageJson() {
 }
 
 function getRepoSlug() {
-  const remoteUrl = run("git", ["remote", "get-url", "origin"], {
+  const remoteName = getRemoteName();
+  const remoteUrl = run("git", ["remote", "get-url", remoteName], {
     capture: true,
   }).stdout.trim();
   const httpsMatch = remoteUrl.match(/github\.com[/:]([^/]+)\/(.+?)(?:\.git)?$/);
   if (!httpsMatch) {
-    throw new Error(`Unable to determine GitHub repository from origin URL: ${remoteUrl}`);
+    throw new Error(`Unable to determine GitHub repository from remote URL: ${remoteUrl}`);
   }
   return `${httpsMatch[1]}/${httpsMatch[2]}`;
 }
@@ -107,15 +116,16 @@ function ensureCleanWorktree() {
 }
 
 function getDefaultBranch() {
-  const symref = spawnSync("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
+  const remoteName = getRemoteName();
+  const symref = spawnSync("git", ["symbolic-ref", `refs/remotes/${remoteName}/HEAD`], {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (!symref.error && symref.status === 0) {
-    return symref.stdout.trim().replace(/^refs\/remotes\/origin\//, "");
+    return symref.stdout.trim().replace(new RegExp(`^refs/remotes/${remoteName}/`), "");
   }
-  const lsRemote = spawnSync("git", ["ls-remote", "--symref", "origin", "HEAD"], {
+  const lsRemote = spawnSync("git", ["ls-remote", "--symref", remoteName, "HEAD"], {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
@@ -140,7 +150,7 @@ function bumpVersionAndTag(npm) {
   run(npm, ["version", bump, "--no-git-tag-version"]);
 
   const packageAfter = readPackageJson();
-  const tag = `v${packageAfter.version}`;
+  const tag = `${TAG_PREFIX}v${packageAfter.version}`;
 
   run("git", ["add", "package.json", "package-lock.json"]);
   run("git", ["commit", "-m", `release: ${tag}`]);
@@ -150,6 +160,7 @@ function bumpVersionAndTag(npm) {
 }
 
 async function waitForReleaseRun(repoSlug, tag) {
+  run("gh", ["workflow", "view", "publish-package.yml"]);
   const deadline = Date.now() + releaseRunTimeoutMs;
   const startedAt = Date.now();
   let attempt = 0;
@@ -256,11 +267,13 @@ async function main() {
   console.log(`[release] bumping ${bump} version`);
   const { packageAfter, tag } = bumpVersionAndTag(npm);
 
+  const remoteName = getRemoteName();
+
   console.log(`[release] pushing ${releaseBranch} (${tag})`);
-  run("git", ["push", "origin", releaseBranch]);
+  run("git", ["push", remoteName, releaseBranch]);
 
   console.log(`[release] pushing tag ${tag}`);
-  run("git", ["push", "origin", tag]);
+  run("git", ["push", remoteName, tag]);
 
   console.log(`[release] creating GitHub Release ${tag}`);
   run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"]);

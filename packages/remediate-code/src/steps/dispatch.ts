@@ -34,6 +34,7 @@ import {
 import { classifyFindingRisk, NO_CHANGE_RE } from "./nextStep.js";
 import { scheduleWave, buildDispatchQuota } from "./waveScheduler.js";
 import { ESTIMATED_FINDING_OVERHEAD_TOKENS, ESTIMATED_BLOCK_BASE_TOKENS } from "../phases/plan.js";
+import { createWorktree, mergeWorktree, isGitRepo } from "./worktreeIsolation.js";
 
 export interface DispatchOptions {
   root: string;
@@ -557,6 +558,21 @@ export async function prepareImplementDispatch(
     console.log(`Reconciliation: reused ${reconciledCount} existing implement results.`);
   }
 
+  // Create worktrees for parallel isolation when multiple blocks dispatch
+  if (items.length > 1 && await isGitRepo(options.root)) {
+    for (const item of items) {
+      if (!item.block_id) continue;
+      try {
+        const wtPath = await createWorktree(options.root, options.artifactsDir, item.block_id);
+        item.worktree_path = wtPath;
+      } catch (error) {
+        process.stderr.write(
+          `[remediate-code] Worktree creation failed for block ${item.block_id}, using shared repo: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }
+    }
+  }
+
   const plan: RemediationDispatchPlan = {
     contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
     phase: "implement",
@@ -669,6 +685,22 @@ export async function mergeImplementResults(
         stateItem.status = "blocked";
         stateItem.failure_reason =
           itemResult.failure_reason ?? "Implementation worker blocked.";
+      }
+    }
+  }
+
+  // Merge worktrees back to main branch
+  for (const item of plan.items) {
+    if (!item.worktree_path || !item.block_id) continue;
+    const mergeResult = await mergeWorktree(options.root, options.artifactsDir, item.block_id);
+    if (mergeResult.conflicted) {
+      process.stderr.write(`[remediate-code] ${mergeResult.error}\n`);
+      const block = state.plan?.blocks.find((b) => b.block_id === item.block_id);
+      for (const findingId of block?.items ?? []) {
+        if (state.items[findingId]) {
+          state.items[findingId].status = "blocked";
+          state.items[findingId].failure_reason = mergeResult.error ?? "Merge conflict";
+        }
       }
     }
   }
