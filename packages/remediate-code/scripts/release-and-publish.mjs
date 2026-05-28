@@ -118,7 +118,7 @@ function getRepoSlug() {
 }
 
 function ensureCleanWorktree() {
-  const status = run("git", ["status", "--porcelain"], {
+  const status = run("git", ["status", "--porcelain", "--ignore-submodules=all"], {
     capture: true,
   }).stdout.trim();
   if (status.length > 0) {
