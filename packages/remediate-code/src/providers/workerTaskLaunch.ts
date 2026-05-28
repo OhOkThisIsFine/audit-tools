@@ -1,4 +1,4 @@
-import type { LaunchFreshSessionInput } from "./types.js";
+import type { LaunchFreshSessionInput } from "@audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
 import { resolveWorkerTaskTimeoutMs } from "../types/workerSession.js";
 

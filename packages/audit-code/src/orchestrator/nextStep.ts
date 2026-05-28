@@ -25,7 +25,7 @@ const PRIORITY: string[] = [
   "synthesis_current",
 ];
 
-function findObligation(
+export function findObligation(
   obligations: AuditObligation[],
 ): AuditObligation | undefined {
   for (const id of PRIORITY) {

@@ -1,12 +1,17 @@
-export { resolveLimits, lookupKnownModel, classifyProvider } from "./limits.js";
-export type { LimitResolutionResult, ResolveLimitsOptions, ProviderType } from "./limits.js";
+import type {
+  ResolvedLimits as _ResolvedLimits,
+  LimitConfidence as _LimitConfidence,
+  LimitSource as _LimitSource,
+  HostConcurrencyLimit as _HostConcurrencyLimit,
+  QuotaUsageSnapshot as _QuotaUsageSnapshot,
+  BackoffState as _BackoffState,
+} from "@audit-tools/shared";
 
+// Re-exported from @audit-tools/shared
 export {
-  detectHostActiveSubagentLimit,
-  resolveHostActiveSubagentLimit,
-} from "./hostLimits.js";
-
-export {
+  resolveLimits,
+  lookupKnownModel,
+  classifyProvider,
   readQuotaState,
   writeQuotaState,
   computeMaxSafeConcurrency,
@@ -17,25 +22,54 @@ export {
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
   computeRampUpConcurrency,
-} from "./state.js";
+  setQuotaStateDir,
+  detectRateLimitError,
+  computeCooldownUntil,
+  acquireLock,
+  releaseLock,
+  withFileLock,
+  FileLockTimeoutError,
+  runSlidingWindow,
+  LearnedQuotaSource,
+  CompositeQuotaSource,
+  GenericErrorParser,
+  ClaudeCodeErrorParser,
+  getErrorParserForProvider,
+} from "@audit-tools/shared";
 
+export type {
+  LimitResolutionResult,
+  ResolveLimitsOptions,
+  ProviderType,
+  ResolvedLimits,
+  LimitSource,
+  LimitConfidence,
+  HostConcurrencyLimit,
+  HostConcurrencyLimitSource,
+  QuotaState,
+  QuotaStateEntry,
+  ConcurrencyBucket,
+  WaveSchedule,
+  BackoffState,
+  ObservedWaveOutcome,
+  RateLimitDetectionResult,
+  SlidingWindowResult,
+  QuotaSource,
+  QuotaUsageSnapshot,
+  ErrorParser,
+} from "@audit-tools/shared";
+
+// Auditor-specific: local scheduler, probe, discovered limits, header extraction
 export { scheduleWave, buildProviderModelKey } from "./scheduler.js";
 export type { ScheduleWaveOptions } from "./scheduler.js";
 
-export { detectRateLimitError, computeCooldownUntil } from "./errorParsing.js";
-export { acquireLock, releaseLock, withFileLock, FileLockTimeoutError } from "./fileLock.js";
-export { runSlidingWindow } from "./slidingWindow.js";
-export type { SlidingWindowResult } from "./slidingWindow.js";
-export type { RateLimitDetectionResult } from "./errorParsing.js";
+export {
+  detectHostActiveSubagentLimit,
+  resolveHostActiveSubagentLimit,
+} from "./hostLimits.js";
 
 export { probeProvider } from "./probe.js";
 export type { ProbeResult } from "./probe.js";
-
-export type { QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
-export type { ErrorParser } from "./errorParsers/index.js";
-export { GenericErrorParser, ClaudeCodeErrorParser, getErrorParserForProvider } from "./errorParsers/index.js";
-export { LearnedQuotaSource } from "./learnedQuotaSource.js";
-export { CompositeQuotaSource } from "./compositeQuotaSource.js";
 
 export {
   lookupDiscoveredLimits,
@@ -52,16 +86,18 @@ export type { ExtractedRateLimits } from "./headerExtraction.js";
 export type { HeaderExtractor } from "./headerExtractors/index.js";
 export { GenericHeaderExtractor, ClaudeCodeHeaderExtractor, getHeaderExtractorForProvider } from "./headerExtractors/index.js";
 
-export type {
-  ResolvedLimits,
-  LimitSource,
-  LimitConfidence,
-  HostConcurrencyLimit,
-  HostConcurrencyLimitSource,
-  QuotaState,
-  QuotaStateEntry,
-  ConcurrencyBucket,
-  WaveSchedule,
-  DispatchQuota,
-  ObservedWaveOutcome,
-} from "./types.js";
+// Auditor-only type (not in shared)
+export interface DispatchQuota {
+  contract_version: "audit-code-dispatch-quota/v1alpha1" | "audit-code-dispatch-quota/v1alpha2";
+  run_id: string;
+  model: string | null;
+  resolved_limits: _ResolvedLimits;
+  confidence: _LimitConfidence;
+  source: _LimitSource;
+  host_concurrency_limit: _HostConcurrencyLimit | null;
+  wave_size: number;
+  estimated_wave_tokens: number;
+  cooldown_until: string | null;
+  quota_source_snapshot?: _QuotaUsageSnapshot | null;
+  backoff_state?: _BackoffState | null;
+}

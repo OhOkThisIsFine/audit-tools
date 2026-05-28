@@ -1,12 +1,8 @@
-export { resolveLimits, lookupKnownModel, classifyProvider } from "./limits.js";
-export type { LimitResolutionResult, ResolveLimitsOptions, ProviderType } from "./limits.js";
-
+// Re-exported from @audit-tools/shared
 export {
-  detectHostActiveSubagentLimit,
-  resolveHostActiveSubagentLimit,
-} from "./hostLimits.js";
-
-export {
+  resolveLimits,
+  lookupKnownModel,
+  classifyProvider,
   readQuotaState,
   writeQuotaState,
   computeMaxSafeConcurrency,
@@ -17,27 +13,25 @@ export {
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
   computeRampUpConcurrency,
-} from "./state.js";
-
-export { scheduleWave, buildProviderModelKey } from "./scheduler.js";
-export type { ScheduleWaveOptions } from "./scheduler.js";
-
-export { detectRateLimitError, computeCooldownUntil } from "./errorParsing.js";
-export { acquireLock, releaseLock, withFileLock, FileLockTimeoutError } from "./fileLock.js";
-export { runSlidingWindow } from "./slidingWindow.js";
-export type { SlidingWindowResult } from "./slidingWindow.js";
-export type { RateLimitDetectionResult } from "./errorParsing.js";
-
-export { probeProvider } from "./probe.js";
-export type { ProbeResult } from "./probe.js";
-
-export type { QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
-export type { ErrorParser } from "./errorParsers/index.js";
-export { GenericErrorParser, ClaudeCodeErrorParser, getErrorParserForProvider } from "./errorParsers/index.js";
-export { LearnedQuotaSource } from "./learnedQuotaSource.js";
-export { CompositeQuotaSource } from "./compositeQuotaSource.js";
+  setQuotaStateDir,
+  detectRateLimitError,
+  computeCooldownUntil,
+  acquireLock,
+  releaseLock,
+  withFileLock,
+  FileLockTimeoutError,
+  runSlidingWindow,
+  LearnedQuotaSource,
+  CompositeQuotaSource,
+  GenericErrorParser,
+  ClaudeCodeErrorParser,
+  getErrorParserForProvider,
+} from "@audit-tools/shared";
 
 export type {
+  LimitResolutionResult,
+  ResolveLimitsOptions,
+  ProviderType,
   ResolvedLimits,
   LimitSource,
   LimitConfidence,
@@ -49,4 +43,21 @@ export type {
   WaveSchedule,
   BackoffState,
   ObservedWaveOutcome,
-} from "./types.js";
+  RateLimitDetectionResult,
+  SlidingWindowResult,
+  QuotaSource,
+  QuotaUsageSnapshot,
+  ErrorParser,
+} from "@audit-tools/shared";
+
+// Remediator-specific: local scheduler, probe, hostLimits
+export { scheduleWave, buildProviderModelKey } from "./scheduler.js";
+export type { ScheduleWaveOptions } from "./scheduler.js";
+
+export {
+  detectHostActiveSubagentLimit,
+  resolveHostActiveSubagentLimit,
+} from "./hostLimits.js";
+
+export { probeProvider } from "./probe.js";
+export type { ProbeResult } from "./probe.js";

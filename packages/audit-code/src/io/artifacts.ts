@@ -9,12 +9,9 @@ import type {
 } from "../types.js";
 import type { AuditState } from "../types/auditState.js";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
-import type { FileDisposition } from "../types/disposition.js";
+import type { FileDisposition, CriticalFlowManifest, GraphBundle, RiskRegister, SurfaceManifest } from "@audit-tools/shared";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
-import type { CriticalFlowManifest } from "../types/flows.js";
-import type { GraphBundle } from "../types/graph.js";
-import type { RiskRegister } from "../types/risk.js";
 import type {
   AuditPlanMetrics,
   ReviewPacket,
@@ -23,7 +20,6 @@ import type {
   RuntimeValidationReport,
   RuntimeValidationTaskManifest,
 } from "../types/runtimeValidation.js";
-import type { SurfaceManifest } from "../types/surfaces.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { ToolingManifest } from "../types/toolingManifest.js";
 import {
@@ -34,7 +30,7 @@ import {
   writeJsonFile,
   writeNdjsonFile,
   writeTextFile,
-} from "./json.js";
+} from "@audit-tools/shared";
 import { buildToolingManifest } from "./toolingManifest.js";
 
 type ArtifactPayloadMap = {

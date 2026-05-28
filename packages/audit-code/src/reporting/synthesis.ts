@@ -1,8 +1,8 @@
 import type { AuditResult, CoverageMatrix, Finding, UnitManifest } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
-import type { CriticalFlowManifest } from "../types/flows.js";
-import type { GraphBundle } from "../types/graph.js";
+import type { CriticalFlowManifest, GraphBundle } from "@audit-tools/shared";
+import { AUDITOR_REPORT_MARKER } from "@audit-tools/shared";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import { buildWorkBlocks, type WorkBlock } from "./workBlocks.js";
 import { mergeFindings } from "./mergeFindings.js";
@@ -107,6 +107,7 @@ export function buildAuditReportModel(params: {
 
 export function renderAuditReportMarkdown(model: AuditReportModel): string {
   const lines: string[] = [
+    AUDITOR_REPORT_MARKER,
     "# Audit Report",
     "",
     "## Summary",

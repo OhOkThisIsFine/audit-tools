@@ -1,7 +1,7 @@
 {
   "name": "@audit-tools/shared",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -13,6 +13,9 @@
     "./providers/*": "./dist/providers/*.js",
     "./validation/*": "./dist/validation/*.js"
   },
+  "files": [
+    "dist/**"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit"

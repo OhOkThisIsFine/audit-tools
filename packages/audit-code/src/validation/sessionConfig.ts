@@ -6,12 +6,10 @@ import {
   type ProviderName,
   type SessionConfig,
   type SessionUiMode,
-} from "../types/sessionConfig.js";
-import {
   type ValidationIssue,
   isRecord,
   pushValidationIssue,
-} from "./basic.js";
+} from "@audit-tools/shared";
 
 const VALID_PROVIDERS = new Set<ProviderName>(PROVIDER_NAMES);
 const VALID_UI_MODES = new Set<SessionUiMode>(SESSION_UI_MODES);
@@ -360,4 +358,4 @@ export function validateConfiguredProviderEnvironment(
   return issues;
 }
 
-export { formatValidationIssues } from "./basic.js";
+export { formatValidationIssues } from "@audit-tools/shared";

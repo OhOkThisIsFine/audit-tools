@@ -9,8 +9,8 @@ import {
   readOptionalJsonFile,
   writeJsonFile,
   readJsonFile,
-} from "../io/json.js";
-import { SessionConfig } from "../types/sessionConfig.js";
+  type SessionConfig,
+} from "@audit-tools/shared";
 import { resolveWorkerTaskMaxRetries } from "../types/workerSession.js";
 import { runCommand, runShellCommand } from "../utils/commands.js";
 import {

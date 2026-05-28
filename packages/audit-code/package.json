@@ -65,6 +65,9 @@
     "orchestration",
     "agents"
   ],
+  "dependencies": {
+    "@audit-tools/shared": "*"
+  },
   "devDependencies": {
     "@types/node": "^24.3.0",
     "ajv": "^8.17.1",

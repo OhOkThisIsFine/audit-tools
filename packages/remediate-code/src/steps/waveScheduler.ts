@@ -1,4 +1,11 @@
-import type { SessionConfig } from "../types/sessionConfig.js";
+import type {
+  SessionConfig,
+  HostConcurrencyLimit,
+  WaveSchedule,
+  QuotaStateEntry,
+  BackoffState,
+  ResolvedProviderName,
+} from "@audit-tools/shared";
 import type {
   DispatchPhase,
   RemediationDispatchQuota,
@@ -12,15 +19,8 @@ import {
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
 } from "../quota/index.js";
-import type {
-  HostConcurrencyLimit,
-  WaveSchedule,
-  QuotaStateEntry,
-  BackoffState,
-} from "../quota/types.js";
-import type { ResolvedProviderName } from "../types/sessionConfig.js";
 
-export type { HostConcurrencyLimit } from "../quota/types.js";
+export type { HostConcurrencyLimit } from "@audit-tools/shared";
 
 const DEFAULT_WAVE_SIZE = 5;
 

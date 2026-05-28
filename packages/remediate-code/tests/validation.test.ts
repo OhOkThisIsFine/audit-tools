@@ -15,7 +15,7 @@ import {
   prefixValidationIssues,
   pushValidationIssue,
   requireKeys,
-} from "../src/validation/basic.js";
+} from "@audit-tools/shared";
 
 const validFinding = {
   id: "F-001",

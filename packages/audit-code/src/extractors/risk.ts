@@ -1,7 +1,6 @@
 import type { UnitManifest } from "../types.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
-import type { CriticalFlowManifest } from "../types/flows.js";
-import type { RiskItem, RiskRegister } from "../types/risk.js";
+import type { CriticalFlowManifest, RiskItem, RiskRegister } from "@audit-tools/shared";
 
 const MAX_RISK_SCORE = 10;
 

@@ -21,6 +21,7 @@ export interface ClaudeCodeConfig {
   command?: string;
   extra_args?: string[];
   dangerously_skip_permissions?: boolean;
+  prompt_flag?: string;
 }
 
 export interface OpenCodeConfig {
@@ -69,6 +70,11 @@ export interface QuotaConfig {
   models?: Record<string, QuotaModelLimits>;
 }
 
+export interface OpenTokenConfig {
+  enabled?: boolean;
+  command?: string;
+}
+
 export interface SessionConfig {
   provider?: ProviderName;
   timeout_ms?: number;
@@ -82,4 +88,5 @@ export interface SessionConfig {
   parallel_workers?: number;
   block_quota?: BlockQuotaConfig;
   quota?: QuotaConfig;
+  opentoken?: OpenTokenConfig;
 }

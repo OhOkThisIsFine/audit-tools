@@ -1,7 +1,7 @@
 import type { OrchestratorOptions } from "../orchestrator.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { resolveWorkerTaskTimeoutMs } from "../types/workerSession.js";
-import type { LaunchFreshSessionInput } from "../providers/types.js";
+import type { LaunchFreshSessionInput } from "@audit-tools/shared";
 import { DEFAULT_WORKER_TIMEOUT_MS } from "./constants.js";
 
 export const DEFAULT_REMEDIATION_WORKER_COMMAND = [

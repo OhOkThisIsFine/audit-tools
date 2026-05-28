@@ -1,8 +1,7 @@
 import { readFile } from "node:fs/promises";
-import type { FreshSessionProvider, LaunchFreshSessionInput } from "./types.js";
-import type { ClaudeCodeConfig } from "../types/sessionConfig.js";
+import type { FreshSessionProvider, LaunchFreshSessionInput, ClaudeCodeConfig, OpenTokenConfig } from "@audit-tools/shared";
+import { readJsonFile } from "@audit-tools/shared";
 import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
-import { readJsonFile } from "../io/json.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { applyWorkerTaskLaunchSettings } from "./workerTaskLaunch.js";
 
@@ -14,14 +13,17 @@ export const ACTIVE_CLAUDE_CODE_SESSION_MESSAGE =
 export class ClaudeCodeProvider implements FreshSessionProvider {
   name = "claude-code";
   private readonly config: ClaudeCodeConfig;
+  private readonly opentoken: OpenTokenConfig;
   private readonly launchCommand: typeof spawnLoggedCommand;
 
   constructor(
     config: ClaudeCodeConfig = {},
     launchCommand: typeof spawnLoggedCommand = spawnLoggedCommand,
+    opentoken: OpenTokenConfig = {},
   ) {
     this.config = config;
     this.launchCommand = launchCommand;
+    this.opentoken = opentoken;
   }
 
   async launch(input: LaunchFreshSessionInput) {
@@ -31,14 +33,18 @@ export class ClaudeCodeProvider implements FreshSessionProvider {
     const prompt = await readFile(input.promptPath, "utf8");
     const task = await readJsonFile<WorkerTask>(input.taskPath);
     const command = this.config.command ?? "claude";
+    const promptFlag = this.config.prompt_flag ?? "-p";
     const args = [
-      "-p",
+      promptFlag,
       ...(this.config.extra_args ?? []),
       "--dangerously-skip-permissions",
     ];
     return await this.launchCommand(command, args, {
       ...applyWorkerTaskLaunchSettings(input, task),
       stdinText: prompt,
+    }, undefined, {
+      opentoken: this.opentoken.enabled,
+      opentokenCommand: this.opentoken.command,
     });
   }
 }

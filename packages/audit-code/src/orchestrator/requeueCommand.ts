@@ -3,7 +3,7 @@ import { buildRequeueTasks } from "./requeue.js";
 import { buildFlowRequeueTasks } from "./flowRequeue.js";
 import type { CoverageMatrix } from "../types.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
-import type { CriticalFlowManifest } from "../types/flows.js";
+import type { CriticalFlowManifest } from "@audit-tools/shared";
 
 function dedupeTasks<T extends { task_id: string }>(tasks: T[]): T[] {
   const seen = new Set<string>();

@@ -1,0 +1,331 @@
+import { existsSync } from "node:fs";
+import { createReadStream } from "node:fs";
+import { readdir } from "node:fs/promises";
+import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
+import { basename, join, resolve } from "node:path";
+import type { SessionConfig } from "@audit-tools/shared";
+import { resolveFreshSessionProviderName } from "../providers/index.js";
+
+export type UiMode = "visible" | "headless";
+
+export const DIRECT_CLI_DEFAULTS = {
+  rootDir: ".",
+  artifactsDir: ".artifacts",
+  maxRuns: 1000,
+  agentBatchSize: 6,
+  parallelWorkers: 1,
+  timeoutMs: 30 * 60 * 1000, // 30 minutes
+  uiMode: "headless" as UiMode,
+};
+
+function isLongFlagToken(value: string | undefined): boolean {
+  return typeof value === "string" && value.startsWith("--");
+}
+
+export function getFlag(
+  argv: string[],
+  name: string,
+  fallback?: string,
+): string | undefined {
+  const index = argv.indexOf(name);
+  if (index < 0) return fallback;
+  const candidate = argv[index + 1];
+  if (!candidate || isLongFlagToken(candidate)) return fallback;
+  return candidate;
+}
+
+export function hasFlag(argv: string[], name: string): boolean {
+  return argv.includes(name);
+}
+
+export function getOptionalBooleanFlag(
+  argv: string[],
+  name: string,
+): boolean | undefined {
+  const raw = getFlag(argv, name);
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (raw === "true") {
+    return true;
+  }
+  if (raw === "false") {
+    return false;
+  }
+  throw new Error(`${name} must be either true or false.`);
+}
+
+export function optionalBooleanEnv(value: string | undefined): boolean | undefined {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return undefined;
+}
+
+export function resolveHostDispatchCapability(options: {
+  explicit?: boolean;
+  sessionConfig: SessionConfig;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  if (options.explicit !== undefined) {
+    return options.explicit;
+  }
+  if (options.sessionConfig.host_can_dispatch_subagents !== undefined) {
+    return options.sessionConfig.host_can_dispatch_subagents;
+  }
+  return optionalBooleanEnv(
+    (options.env ?? process.env).AUDIT_CODE_HOST_CAN_DISPATCH,
+  ) ?? true;
+}
+
+export function toBase64Url(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64url");
+}
+
+export function fromBase64Url(value: string): string {
+  return Buffer.from(value, "base64url").toString("utf8");
+}
+
+export function digestId(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
+
+export function safeArtifactStem(value: string): string {
+  const sanitized = value
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  return sanitized.length > 0 ? sanitized : "artifact";
+}
+
+export function artifactNameForId(value: string, extension: string): string {
+  return `${safeArtifactStem(value)}_${digestId(value)}.${extension}`;
+}
+
+export function quoteCommandArg(value: string): string {
+  return /[\s"]/u.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+}
+
+export function renderCommand(argv: string[]): string {
+  return argv.map((item) => quoteCommandArg(item)).join(" ");
+}
+
+export function summarizeLaunchExit(result: {
+  accepted?: boolean;
+  exitCode?: number | null;
+  signal?: string | null;
+  command?: string;
+  stdoutPath?: string;
+  stderrPath?: string;
+  error?: string;
+}): string | null {
+  if (result.accepted !== false && !result.error) {
+    return null;
+  }
+  const parts = [
+    result.signal
+      ? `signal ${result.signal}`
+      : `exit code ${result.exitCode ?? "unknown"}`,
+    result.command ? `command: ${result.command}` : null,
+    result.stdoutPath ? `stdout: ${result.stdoutPath}` : null,
+    result.stderrPath ? `stderr: ${result.stderrPath}` : null,
+    result.error ?? null,
+  ].filter((part): part is string => Boolean(part));
+  return parts.join("; ");
+}
+
+export function taskResultPath(taskResultsDir: string, taskId: string): string {
+  return join(taskResultsDir, artifactNameForId(taskId, "json"));
+}
+
+export function packetPromptPath(taskResultsDir: string, packetId: string): string {
+  return join(taskResultsDir, artifactNameForId(packetId, "prompt.md"));
+}
+
+export async function readStdinText(): Promise<string> {
+  if (process.stdin.isTTY) {
+    return "";
+  }
+  return await new Promise((resolveInput, reject) => {
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => {
+      input += chunk;
+    });
+    process.stdin.on("end", () => resolveInput(input));
+    process.stdin.on("error", reject);
+  });
+}
+
+function resolveFlagPath(
+  argv: string[],
+  name: string,
+  fallback: string,
+): string {
+  return resolve(getFlag(argv, name, fallback) as string);
+}
+
+export function normalizePositiveInteger(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return Math.floor(value);
+}
+
+export function parsePositiveIntegerFlag(
+  argv: string[],
+  name: string,
+): number | undefined {
+  const raw = getFlag(argv, name);
+  if (raw === undefined) {
+    return undefined;
+  }
+  return normalizePositiveInteger(Number(raw));
+}
+
+export function getArtifactsDir(argv: string[]): string {
+  return resolveFlagPath(
+    argv,
+    "--artifacts-dir",
+    DIRECT_CLI_DEFAULTS.artifactsDir,
+  );
+}
+
+export function getRootDir(argv: string[]): string {
+  return resolveFlagPath(argv, "--root", DIRECT_CLI_DEFAULTS.rootDir);
+}
+
+export function warnIfNotGitRepo(root: string): void {
+  const gitEntry = join(root, ".git");
+  if (!existsSync(gitEntry)) {
+    console.warn(
+      `Warning: target directory '${root}' does not appear to be a git repository. Diff-based signals will be unavailable.`,
+    );
+  }
+}
+
+export function getBatchResultsDir(argv: string[]): string | undefined {
+  const value = getFlag(argv, "--batch-results");
+  return value ? resolve(value) : undefined;
+}
+
+export function getMaxRuns(argv: string[]): number {
+  return parsePositiveIntegerFlag(argv, "--max-runs") ?? DIRECT_CLI_DEFAULTS.maxRuns;
+}
+
+export function getAgentBatchSize(argv: string[], sessionConfig: SessionConfig): number {
+  return (
+    parsePositiveIntegerFlag(argv, "--agent-batch-size") ??
+    normalizePositiveInteger(sessionConfig.agent_task_batch_size) ??
+    DIRECT_CLI_DEFAULTS.agentBatchSize
+  );
+}
+
+export function getParallelWorkers(argv: string[], sessionConfig: SessionConfig): number {
+  return (
+    parsePositiveIntegerFlag(argv, "--parallel") ??
+    normalizePositiveInteger(sessionConfig.parallel_workers) ??
+    DIRECT_CLI_DEFAULTS.parallelWorkers
+  );
+}
+
+export function getTimeoutMs(argv: string[], sessionConfig: SessionConfig): number {
+  return (
+    parsePositiveIntegerFlag(argv, "--timeout") ??
+    normalizePositiveInteger(sessionConfig.timeout_ms) ??
+    DIRECT_CLI_DEFAULTS.timeoutMs
+  );
+}
+
+export function getExplicitProvider(argv: string[]): string | undefined {
+  return getFlag(argv, "--provider");
+}
+
+export function getHostModel(argv: string[]): string | null {
+  return getFlag(argv, "--host-model") ?? null;
+}
+
+export function getHostMaxActiveSubagents(argv: string[]): number | null {
+  return parsePositiveIntegerFlag(argv, "--host-max-active-subagents") ?? null;
+}
+
+export function getQuotaProbeMode(
+  argv: string[],
+  sessionConfig: SessionConfig,
+): "auto" | "never" | "force" {
+  const raw = getFlag(argv, "--quota-probe") ?? sessionConfig.quota?.probe ?? "auto";
+  if (raw === "auto" || raw === "never" || raw === "force") return raw;
+  return "auto";
+}
+
+export function resolveRunProviderName(
+  argv: string[],
+  sessionConfig: SessionConfig,
+): string {
+  return resolveFreshSessionProviderName(
+    getExplicitProvider(argv),
+    sessionConfig,
+  );
+}
+
+export function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunkSize = normalizePositiveInteger(size);
+  if (chunkSize === undefined) {
+    throw new Error("chunkArray size must be a positive integer.");
+  }
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += chunkSize) {
+    chunks.push(arr.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+export function getUiMode(
+  argv: string[],
+  fallback: UiMode = DIRECT_CLI_DEFAULTS.uiMode,
+): UiMode {
+  const raw = getFlag(argv, "--ui");
+  if (raw === "visible") return "visible";
+  if (raw === "headless") return "headless";
+  return fallback;
+}
+
+export function looksLikeCliFlag(value: string | undefined): boolean {
+  return isLongFlagToken(value);
+}
+
+export async function countLines(path: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let lines = 0;
+    let byteCount = 0;
+    let lastByte = -1;
+    const stream = createReadStream(path);
+    stream.on("data", (chunk: Buffer | string) => {
+      const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      byteCount += buffer.length;
+      for (let i = 0; i < buffer.length; ++i) {
+        if (buffer[i] === 10) lines++;
+        lastByte = buffer[i];
+      }
+    });
+    stream.on("end", () => {
+      if (byteCount === 0) return resolve(0);
+      resolve(lastByte !== 10 ? lines + 1 : lines);
+    });
+    stream.on("error", reject);
+  });
+}
+
+export async function listBatchResultFiles(batchDir: string): Promise<string[]> {
+  const entries = await readdir(batchDir, { withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))
+    .map((entry) => join(batchDir, entry.name))
+    .sort((a, b) => a.localeCompare(b));
+
+  if (files.length === 0) {
+    throw new Error(`No JSON audit result files found in ${batchDir}.`);
+  }
+
+  return files;
+}

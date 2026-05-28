@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { detectRateLimitError, computeCooldownUntil } = await import(
-  "../dist/quota/errorParsing.js"
+  "@audit-tools/shared/quota/errorParsing"
 );
 
 // ── detectRateLimitError: word-boundary matching ────────────────────────────

@@ -1,12 +1,12 @@
 import { join } from "node:path";
-import type { SessionConfig } from "../types/sessionConfig.js";
-import { readOptionalJsonFile } from "../io/json.js";
 import {
+  type SessionConfig,
+  readOptionalJsonFile,
+  writeJsonFile,
   formatValidationIssues,
   type ValidationIssue,
-} from "../validation/basic.js";
+} from "@audit-tools/shared";
 import { validateSessionConfig } from "../validation/sessionConfig.js";
-import { writeJsonFile } from "../io/json.js";
 
 const SESSION_CONFIG_FILENAME = "session-config.json";
 const DEFAULT_SESSION_CONFIG: SessionConfig = { provider: "local-subprocess" };

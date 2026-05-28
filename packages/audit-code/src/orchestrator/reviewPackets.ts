@@ -7,8 +7,10 @@ import type {
   ReviewPacketQuality,
   WeaklyExplainedPacketSample,
 } from "../types/reviewPlanning.js";
-import type { GraphBundle, GraphEdge } from "../types/graph.js";
-import { LENS_ORDER } from "./unitBuilder.js";
+import type { GraphBundle, GraphEdge } from "@audit-tools/shared";
+import { isRecord } from "@audit-tools/shared";
+import { LENS_ORDER, priorityRank, sortLenses } from "./auditTaskUtils.js";
+import { UnionFind } from "./unionFind.js";
 
 const DEFAULT_MAX_TASKS_PER_PACKET = 0;
 const DEFAULT_TARGET_PACKET_LINES = 8000;
@@ -88,25 +90,8 @@ interface ReviewPacketPlanningData {
   packets: ReviewPacket[];
 }
 
-function priorityRank(priority: AuditTask["priority"]): number {
-  switch (priority) {
-    case "high":
-      return 3;
-    case "medium":
-      return 2;
-    case "low":
-    default:
-      return 1;
-  }
-}
-
 function normalizePriority(priority: AuditTask["priority"]): NonNullable<AuditTask["priority"]> {
   return priority ?? "low";
-}
-
-function sortLenses(lenses: Iterable<Lens>): Lens[] {
-  const set = new Set(lenses);
-  return LENS_ORDER.filter((lens) => set.has(lens));
 }
 
 function lineCountForPath(
@@ -152,10 +137,6 @@ function buildTaskGroups(tasks: AuditTask[]): Map<string, AuditTask[]> {
 
 function normalizeGraphPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function collectGraphEdges(graphBundle?: GraphBundle): GraphEdge[] {
@@ -346,37 +327,19 @@ function groupsOverlap(a: Set<string>, b: Set<string>): boolean {
   return false;
 }
 
-function buildGraphConnectedComponentIndex(
+function unionFindFromGroups(
   groups: Map<string, AuditTask[]>,
   graphEdges: GraphEdge[],
-): Map<string, string> {
-  const groupKeys = [...groups.keys()];
-  const parent = new Map(groupKeys.map((key) => [key, key]));
+): UnionFind {
+  const uf = new UnionFind(groups.keys());
   const fileToGroupKeys = buildFileToGroupKeys(groups);
   const degreeIndex = buildGraphDegreeIndex(graphEdges);
-
-  function find(key: string): string {
-    const current = parent.get(key) ?? key;
-    if (current === key) return key;
-    const root = find(current);
-    parent.set(key, root);
-    return root;
-  }
-
-  function union(a: string, b: string): void {
-    const rootA = find(a);
-    const rootB = find(b);
-    if (rootA === rootB) return;
-    const [keep, move] =
-      rootA.localeCompare(rootB) <= 0 ? [rootA, rootB] : [rootB, rootA];
-    parent.set(move, keep);
-  }
 
   for (const keys of fileToGroupKeys.values()) {
     const [first, ...rest] = [...keys].sort((a, b) => a.localeCompare(b));
     if (!first) continue;
     for (const key of rest) {
-      union(first, key);
+      uf.union(first, key);
     }
   }
 
@@ -391,12 +354,20 @@ function buildGraphConnectedComponentIndex(
     }
     for (const fromKey of fromGroups) {
       for (const toKey of toGroups) {
-        union(fromKey, toKey);
+        uf.union(fromKey, toKey);
       }
     }
   }
 
-  return new Map(groupKeys.map((key) => [key, find(key)]));
+  return uf;
+}
+
+function buildGraphConnectedComponentIndex(
+  groups: Map<string, AuditTask[]>,
+  graphEdges: GraphEdge[],
+): Map<string, string> {
+  const uf = unionFindFromGroups(groups, graphEdges);
+  return new Map([...groups.keys()].map((key) => [key, uf.find(key)]));
 }
 
 function subsystemRootForPath(path: string): string | undefined {
@@ -600,33 +571,12 @@ function isMavenPomPath(path: string): boolean {
   return normalizeGraphPath(path).split("/").at(-1) === "pom.xml";
 }
 
-function typescriptProjectRoot(path: string): string | undefined {
+function configFileRoot(
+  path: string,
+  predicate: (p: string) => boolean,
+): string | undefined {
   const segments = normalizeGraphPath(path).split("/").filter(Boolean);
-  if (!isTypescriptProjectConfigPath(path) || segments.length < 2) {
-    return undefined;
-  }
-  return segments.slice(0, -1).join("/");
-}
-
-function goModuleRoot(path: string): string | undefined {
-  const segments = normalizeGraphPath(path).split("/").filter(Boolean);
-  if (!isGoModuleManifestPath(path) || segments.length < 2) {
-    return undefined;
-  }
-  return segments.slice(0, -1).join("/");
-}
-
-function cargoModuleRoot(path: string): string | undefined {
-  const segments = normalizeGraphPath(path).split("/").filter(Boolean);
-  if (!isCargoManifestPath(path) || segments.length < 2) {
-    return undefined;
-  }
-  return segments.slice(0, -1).join("/");
-}
-
-function mavenModuleRoot(path: string): string | undefined {
-  const segments = normalizeGraphPath(path).split("/").filter(Boolean);
-  if (!isMavenPomPath(path) || segments.length < 2) {
+  if (!predicate(path) || segments.length < 2) {
     return undefined;
   }
   return segments.slice(0, -1).join("/");
@@ -634,10 +584,10 @@ function mavenModuleRoot(path: string): string | undefined {
 
 function moduleConfigRoot(path: string): string | undefined {
   return (
-    typescriptProjectRoot(path) ??
-    goModuleRoot(path) ??
-    cargoModuleRoot(path) ??
-    mavenModuleRoot(path)
+    configFileRoot(path, isTypescriptProjectConfigPath) ??
+    configFileRoot(path, isGoModuleManifestPath) ??
+    configFileRoot(path, isCargoManifestPath) ??
+    configFileRoot(path, isMavenPomPath)
   );
 }
 
@@ -1191,55 +1141,11 @@ function mergeGraphConnectedGroups(
   groups: Map<string, AuditTask[]>,
   graphEdges: GraphEdge[],
 ): AuditTask[][] {
-  const groupKeys = [...groups.keys()];
-  const parent = new Map(groupKeys.map((key) => [key, key]));
-  const fileToGroupKeys = buildFileToGroupKeys(groups);
-  const degreeIndex = buildGraphDegreeIndex(graphEdges);
-
-  function find(key: string): string {
-    const current = parent.get(key) ?? key;
-    if (current === key) return key;
-    const root = find(current);
-    parent.set(key, root);
-    return root;
-  }
-
-  function union(a: string, b: string): void {
-    const rootA = find(a);
-    const rootB = find(b);
-    if (rootA === rootB) return;
-    const [keep, move] =
-      rootA.localeCompare(rootB) <= 0 ? [rootA, rootB] : [rootB, rootA];
-    parent.set(move, keep);
-  }
-
-  for (const keys of fileToGroupKeys.values()) {
-    const [first, ...rest] = [...keys].sort((a, b) => a.localeCompare(b));
-    if (!first) continue;
-    for (const key of rest) {
-      union(first, key);
-    }
-  }
-
-  for (const edge of graphEdges) {
-    if (!isPacketExpansionEdge(edge, degreeIndex)) {
-      continue;
-    }
-    const fromGroups = fileToGroupKeys.get(normalizeGraphPath(edge.from));
-    const toGroups = fileToGroupKeys.get(normalizeGraphPath(edge.to));
-    if (!fromGroups || !toGroups) {
-      continue;
-    }
-    for (const fromKey of fromGroups) {
-      for (const toKey of toGroups) {
-        union(fromKey, toKey);
-      }
-    }
-  }
+  const uf = unionFindFromGroups(groups, graphEdges);
 
   const merged = new Map<string, AuditTask[]>();
-  for (const key of groupKeys) {
-    const root = find(key);
+  for (const key of groups.keys()) {
+    const root = uf.find(key);
     const current = merged.get(root) ?? [];
     current.push(...(groups.get(key) ?? []));
     merged.set(root, current);

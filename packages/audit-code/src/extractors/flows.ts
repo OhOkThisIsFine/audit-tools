@@ -1,8 +1,6 @@
 import type { RepoManifest } from "../types.js";
-import type { FileDisposition } from "../types/disposition.js";
-import type { CriticalFlow, CriticalFlowManifest } from "../types/flows.js";
-import type { SurfaceManifest } from "../types/surfaces.js";
-import { isAuditExcludedStatus } from "./disposition.js";
+import type { FileDisposition, CriticalFlow, CriticalFlowManifest, SurfaceManifest } from "@audit-tools/shared";
+import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import {
   EXTRACTOR_HEURISTIC_NOTE,
   isAsyncTaskPath,
@@ -92,9 +90,7 @@ export function buildCriticalFlowManifest(
   surfaceManifest: SurfaceManifest,
   disposition?: FileDisposition,
 ): CriticalFlowManifest {
-  const dispositionMap = new Map(
-    disposition?.files.map((item) => [item.path, item.status]) ?? [],
-  );
+  const dispositionMap = buildDispositionMap(disposition);
   const availablePaths = repoManifest.files
     .map((file) => file.path)
     .filter((path) => {

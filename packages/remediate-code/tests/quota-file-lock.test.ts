@@ -7,7 +7,7 @@ import {
   releaseLock,
   withFileLock,
   FileLockTimeoutError,
-} from "../src/quota/fileLock.js";
+} from "@audit-tools/shared";
 
 const TEST_LOCK = join(tmpdir(), `test-lock-${process.pid}.lock`);
 

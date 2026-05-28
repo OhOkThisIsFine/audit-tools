@@ -1,14 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { scheduleWave, buildProviderModelKey } from "../src/quota/scheduler.js";
-import type { QuotaStateEntry } from "../src/quota/types.js";
-import type { SessionConfig } from "../src/types/sessionConfig.js";
+import type { QuotaStateEntry, SessionConfig } from "@audit-tools/shared";
 import {
   decayWeight,
   computeMaxSafeConcurrency,
   computeRampUpConcurrency,
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
-} from "../src/quota/state.js";
+} from "@audit-tools/shared";
 
 const baseConfig: SessionConfig = {
   provider: "claude-code",

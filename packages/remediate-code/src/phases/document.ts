@@ -9,10 +9,10 @@ import {
   readOptionalJsonFile,
   writeJsonFile,
   readJsonFile,
-} from "../io/json.js";
-import { SessionConfig } from "../types/sessionConfig.js";
+  formatValidationIssues,
+  type SessionConfig,
+} from "@audit-tools/shared";
 import { validateDocumentResponse } from "../validation/remediationState.js";
-import { formatValidationIssues } from "../validation/basic.js";
 import {
   createLaunchInputForTask,
   createRemediationWorkerTask,

@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeJsonFile } from "./json.js";
+import { writeJsonFile } from "@audit-tools/shared";
 import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 

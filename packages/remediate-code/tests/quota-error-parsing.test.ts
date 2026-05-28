@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectRateLimitError, computeCooldownUntil } from "../src/quota/errorParsing.js";
+import { detectRateLimitError, computeCooldownUntil } from "@audit-tools/shared";
 
 describe("detectRateLimitError", () => {
   it("detects 429 status code", () => {

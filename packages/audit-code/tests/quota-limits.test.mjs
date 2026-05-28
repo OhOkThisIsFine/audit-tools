@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { resolveLimits, lookupKnownModel, classifyProvider } = await import(
-  "../dist/quota/limits.js"
+  "@audit-tools/shared/quota/limits"
 );
 
 test("classifyProvider maps claude-code to hosted", () => {

@@ -1,6 +1,6 @@
-import { readJsonFile } from "../io/json.js";
+import { readJsonFile } from "@audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
-import type { FreshSessionProvider, LaunchFreshSessionInput } from "./types.js";
+import type { FreshSessionProvider, LaunchFreshSessionInput } from "@audit-tools/shared";
 import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
 
 export const MISSING_WORKER_COMMAND_MESSAGE =

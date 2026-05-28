@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,6 +8,10 @@ let compiledSourceDir;
 
 function getRepoRoot() {
   return resolve(import.meta.dirname, "..", "..");
+}
+
+function getWorkspaceRoot() {
+  return resolve(getRepoRoot(), "..", "..");
 }
 
 function ensureCompiledSource() {
@@ -41,6 +45,21 @@ function ensureCompiledSource() {
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
+
+  const destNodeModules = join(compiledSourceDir, "node_modules");
+  if (!existsSync(destNodeModules)) {
+    // Symlink node_modules so workspace-linked packages (e.g. @audit-tools/shared)
+    // resolve from the compiled temp directory. In an npm workspace, hoisted
+    // packages live in the workspace root's node_modules.
+    const candidates = [
+      join(repoRoot, "node_modules"),
+      join(getWorkspaceRoot(), "node_modules"),
+    ];
+    const src = candidates.find(
+      (p) => existsSync(join(p, "@audit-tools", "shared")),
+    ) ?? candidates[0];
+    symlinkSync(src, destNodeModules, "junction");
+  }
 
   return compiledSourceDir;
 }

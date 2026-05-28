@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { runSlidingWindow } = await import("../dist/quota/slidingWindow.js");
+const { runSlidingWindow } = await import("@audit-tools/shared/quota/slidingWindow");
 
 test("runs all tasks and returns results in order", async () => {
   const tasks = [

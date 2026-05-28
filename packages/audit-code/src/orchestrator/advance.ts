@@ -3,7 +3,7 @@ import type { AuditState } from "../types/auditState.js";
 import type { AuditResult } from "../types.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
-import { decideNextStep } from "./nextStep.js";
+import { decideNextStep, findObligation } from "./nextStep.js";
 import { deriveAuditState } from "./state.js";
 import { computeArtifactMetadata } from "./artifactMetadata.js";
 import {
@@ -28,6 +28,7 @@ export interface AdvanceAuditOptions {
   runtimeValidationUpdates?: RuntimeValidationReport;
   externalAnalyzerResults?: ExternalAnalyzerResults;
   preferredExecutor?: string;
+  opentoken?: boolean;
 }
 
 export interface AdvanceAuditResult {
@@ -131,7 +132,9 @@ export async function advanceAudit(
           throw new Error(
             "advanceAudit runtime_validation_executor requires root",
           );
-        run = await runRuntimeValidationExecutor(bundle, options.root);
+        run = await runRuntimeValidationExecutor(bundle, options.root, {
+          opentoken: options.opentoken,
+        });
         break;
       case "synthesis_executor":
         run = runSynthesisExecutor(bundle, options.auditResults);
@@ -168,7 +171,7 @@ export async function advanceAudit(
           );
         run = runSyntaxResolutionExecutor(bundle, options.root);
         break;
-      default:
+      default: {
         const state = deriveAuditState(bundle);
         state.last_executor = selectedExecutor;
         state.last_obligation = selectedObligation ?? undefined;
@@ -182,6 +185,7 @@ export async function advanceAudit(
           next_likely_step: selectedObligation,
           updated_bundle: { ...bundle, audit_state: state },
         };
+      }
     }
   } catch (error) {
     throw formatExecutorFailure(selectedExecutor, selectedObligation, error);
@@ -201,7 +205,7 @@ export async function advanceAudit(
   updatedState.last_executor = selectedExecutor;
   updatedState.last_obligation = selectedObligation ?? undefined;
   const finalizedBundle = { ...metadataBundle, audit_state: updatedState };
-  const followupDecision = decideNextStep(finalizedBundle);
+  const nextObligation = findObligation(updatedState.obligations);
 
   return {
     audit_state: updatedState,
@@ -214,7 +218,7 @@ export async function advanceAudit(
       "audit_state.json",
     ],
     progress_summary: run.progress_summary,
-    next_likely_step: followupDecision.selected_obligation,
+    next_likely_step: nextObligation?.id ?? null,
     updated_bundle: finalizedBundle,
   };
 }

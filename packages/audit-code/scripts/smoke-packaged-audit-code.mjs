@@ -504,6 +504,7 @@ async function main() {
   );
   let tarballPath;
   let tarballFilename;
+  let sharedTarballPath;
 
   try {
     await writeFile(
@@ -519,7 +520,7 @@ async function main() {
       ),
     );
 
-    step("npm pack");
+    step("npm pack @audit-tools/shared");
     if (liveCommandOutput) {
       detail(
         "Streaming child npm output because AUDIT_CODE_VERBOSE=1 or CI=true is set.",
@@ -528,6 +529,23 @@ async function main() {
     detail(
       "Isolating inherited npm_config_* overrides and publish credentials so nested npm publish --dry-run does not suppress tarball generation.",
     );
+    const sharedRoot = join(repoRoot, "..", "shared");
+    const sharedPacked = JSON.parse(
+      (
+        await runCommand(platformCommand("npm"), ["pack", "--json"], {
+          cwd: sharedRoot,
+          env: createIsolatedNpmEnv(),
+          liveOutput: liveCommandOutput,
+          label: "npm pack --json (@audit-tools/shared)",
+          failureHint:
+            "The @audit-tools/shared workspace package must be built before packing.",
+        })
+      ).stdout,
+    );
+    assert.equal(Array.isArray(sharedPacked), true);
+    sharedTarballPath = join(sharedRoot, sharedPacked[0].filename);
+
+    step("npm pack");
     const packed = JSON.parse(
       (
         await runCommand(platformCommand("npm"), ["pack", "--json"], {
@@ -550,12 +568,12 @@ async function main() {
     step("npm install from tarball");
     await runCommand(
       platformCommand("npm"),
-      ["install", "--no-package-lock", tarballPath],
+      ["install", "--no-package-lock", sharedTarballPath, tarballPath],
       {
         cwd: installDir,
         env: createIsolatedNpmEnv(),
         liveOutput: liveCommandOutput,
-        label: "npm install --no-package-lock <tarball>",
+        label: "npm install --no-package-lock <shared-tarball> <tarball>",
         failureHint:
           "Confirm the tarball exists on disk, the inherited npm publish env was stripped, and rerun with AUDIT_CODE_VERBOSE=1 if the install stalls or the registry config looks wrong.",
       },
@@ -992,6 +1010,9 @@ async function main() {
   } finally {
     if (tarballPath) {
       await rm(tarballPath, { force: true });
+    }
+    if (sharedTarballPath) {
+      await rm(sharedTarballPath, { force: true });
     }
     await rm(installDir, { recursive: true, force: true });
   }

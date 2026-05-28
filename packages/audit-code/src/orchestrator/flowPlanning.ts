@@ -1,5 +1,5 @@
 import type { Lens } from "../types.js";
-import type { CriticalFlowManifest } from "../types/flows.js";
+import type { CriticalFlowManifest } from "@audit-tools/shared";
 
 const DEFAULT_FLOW_LENS_PRIORITY: Lens[] = [
   "security",

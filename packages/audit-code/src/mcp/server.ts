@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadArtifactBundle } from "../io/artifacts.js";
-import { readOptionalJsonFile, readOptionalTextFile } from "../io/json.js";
+import { readOptionalJsonFile, readOptionalTextFile } from "@audit-tools/shared";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { decideNextStep } from "../orchestrator/nextStep.js";
 import {
@@ -12,7 +12,7 @@ import {
 } from "../supervisor/operatorHandoff.js";
 import { readSessionConfigFile } from "../supervisor/sessionConfig.js";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
-import type { SessionConfig } from "../types/sessionConfig.js";
+import type { SessionConfig } from "@audit-tools/shared";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(moduleDir, "..", "..");

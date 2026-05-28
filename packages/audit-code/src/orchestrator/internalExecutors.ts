@@ -100,15 +100,33 @@ function appendSelectiveDeepeningTasks(params: {
   };
 }
 
+function resolveOpentokenWrap(
+  resolved: { command: string; args: string[] },
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  if (platform === "win32") {
+    const shell = process.env.ComSpec ?? "cmd.exe";
+    const inner = [resolved.command, ...resolved.args]
+      .map((v) => (/^[A-Za-z0-9_./:=@+-]+$/.test(v) ? v : `"${v.replace(/(["^&|<>%])/g, "^$1")}"`))
+      .join(" ");
+    return { command: shell, args: ["/d", "/s", "/c", `opentoken wrap ${inner}`] };
+  }
+  return { command: "opentoken", args: ["wrap", resolved.command, ...resolved.args] };
+}
+
 async function runCommand(
   command: string[],
   cwd: string,
+  options: { opentoken?: boolean } = {},
 ): Promise<{
   status: "confirmed" | "not_confirmed" | "inconclusive";
   summary: string;
   evidence: string[];
 }> {
-  const spawnCommand = resolveRuntimeValidationSpawnCommand(command);
+  let spawnCommand = resolveRuntimeValidationSpawnCommand(command);
+  if (options.opentoken) {
+    spawnCommand = resolveOpentokenWrap(spawnCommand);
+  }
   const displayCommand = command.join(" ");
   return await new Promise((resolve) => {
     const child = spawn(spawnCommand.command, spawnCommand.args, {
@@ -521,6 +539,7 @@ export function runResultIngestionExecutor(
 export async function runRuntimeValidationExecutor(
   bundle: ArtifactBundle,
   root: string,
+  options: { opentoken?: boolean } = {},
 ): Promise<ExecutorRunResult> {
   if (!bundle.runtime_validation_tasks) {
     throw new Error("Cannot execute runtime validation without runtime_validation_tasks");
@@ -553,7 +572,7 @@ export async function runRuntimeValidationExecutor(
 
     const signature = task.command.join("\0");
     const outcome =
-      byCommand.get(signature) ?? (await runCommand(task.command, root));
+      byCommand.get(signature) ?? (await runCommand(task.command, root, { opentoken: options.opentoken }));
     byCommand.set(signature, outcome);
     byTaskId.set(task.id, {
       task_id: task.id,

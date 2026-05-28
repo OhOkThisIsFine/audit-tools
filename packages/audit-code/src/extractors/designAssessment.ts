@@ -1,8 +1,6 @@
 import type { Finding, UnitManifest } from "../types.js";
+import type { GraphBundle, GraphEdge, CriticalFlowManifest, RiskRegister } from "@audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
-import type { GraphBundle, GraphEdge } from "../types/graph.js";
-import type { CriticalFlowManifest } from "../types/flows.js";
-import type { RiskRegister } from "../types/risk.js";
 
 let nextFindingId = 1;
 

@@ -2,7 +2,7 @@ import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../orchestrator.js";
 import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
-import { writeTextFile, writeJsonFile } from "../io/json.js";
+import { writeTextFile, writeJsonFile } from "@audit-tools/shared";
 import { runCommand, runShellCommand } from "../utils/commands.js";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import type { ClosingAction } from "../state/closingActions.js";

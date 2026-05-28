@@ -18,7 +18,7 @@ const {
   readOptionalNdjsonFile,
   writeJsonFile,
   writeNdjsonFile,
-} = await import("../dist/io/json.js");
+} = await import("@audit-tools/shared/io/json");
 const {
   cleanupIntermediateArtifacts,
   getArtifactValue,

@@ -1,9 +1,7 @@
 import { posix } from "node:path";
 import type { Lens, RepoManifest } from "../types.js";
-import type { FileDisposition } from "../types/disposition.js";
-import type { GraphBundle, GraphEdge } from "../types/graph.js";
-import type { SurfaceRecord } from "../types/surfaces.js";
-import { isAuditExcludedStatus } from "./disposition.js";
+import type { FileDisposition, GraphBundle, GraphEdge, SurfaceRecord } from "@audit-tools/shared";
+import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import {
   graphEdge,
   normalizeGraphPath,
@@ -438,9 +436,7 @@ export function buildBrowserExtensionSurfacesFromGraph(
   const references = Array.isArray(graphBundle?.graphs.references)
     ? graphBundle.graphs.references
     : [];
-  const dispositionMap = new Map(
-    disposition?.files.map((item) => [item.path, item.status]) ?? [],
-  );
+  const dispositionMap = buildDispositionMap(disposition);
   const surfaces: SurfaceRecord[] = [];
   const seen = new Set<string>();
 

@@ -53,6 +53,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@audit-tools/shared": "*",
     "commander": "^13.0.0"
   },
   "devDependencies": {
@@ -65,5 +66,6 @@
   },
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "types": "./dist/index.d.ts"
 }

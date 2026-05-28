@@ -2,6 +2,7 @@
 import { spawnSync } from "child_process";
 import { mkdtempSync, existsSync, readFileSync, rmSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
+import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 
 const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -36,7 +37,7 @@ function defaultSmokeTmpRoot() {
   if (process.env.REMEDIATE_CODE_SMOKE_TMP_ROOT) {
     return process.env.REMEDIATE_CODE_SMOKE_TMP_ROOT;
   }
-  return join(pkgRoot, ".smoke-tmp");
+  return join(tmpdir(), ".remediate-code-smoke-tmp");
 }
 
 const smokeTmpRoot = defaultSmokeTmpRoot();
@@ -87,7 +88,30 @@ console.log(
   "  isolating inherited npm_config_* overrides so dry-run does not suppress tarball creation",
 );
 
-// 1. Pack
+// 1a. Pack @audit-tools/shared (workspace dependency not on public npm)
+const sharedRoot = join(pkgRoot, "..", "shared");
+console.log("  packing @audit-tools/shared...");
+const sharedPackResult = spawnNpm(
+  ["pack", "--json", "--ignore-scripts", "--pack-destination", packDir],
+  { cwd: sharedRoot, encoding: "utf8", env: isolatedNpmEnv() },
+);
+if (sharedPackResult.status !== 0) {
+  console.error("npm pack @audit-tools/shared failed:", sharedPackResult.stderr || sharedPackResult.error?.message);
+  rmSync(smokeRoot, { recursive: true, force: true });
+  process.exit(1);
+}
+let sharedPackOutput;
+try {
+  sharedPackOutput = JSON.parse(sharedPackResult.stdout.trim());
+} catch (err) {
+  console.error("npm pack --json @audit-tools/shared output was not valid JSON:", sharedPackResult.stdout.slice(0, 500));
+  rmSync(smokeRoot, { recursive: true, force: true });
+  process.exit(1);
+}
+const sharedTarball = join(packDir, sharedPackOutput[0].filename);
+console.log(`  packed shared: ${sharedTarball}`);
+
+// 1b. Pack remediate-code
 console.log("  packing...");
 const packResult = spawnNpm(
   ["pack", "--json", "--ignore-scripts", "--pack-destination", packDir],
@@ -132,7 +156,7 @@ try {
     stdio: "ignore",
     env: isolatedNpmEnv(),
   });
-  const installResult = spawnNpm(["install", "--no-package-lock", tarball], {
+  const installResult = spawnNpm(["install", "--no-package-lock", sharedTarball, tarball], {
     cwd: installDir,
     encoding: "utf8",
     env: isolatedNpmEnv({ HOME: fakeHome, USERPROFILE: fakeHome }),

@@ -1,13 +1,14 @@
 import type { AuditUnit, Lens, RepoManifest, UnitManifest } from "../types.js";
-import type { FileDisposition } from "../types/disposition.js";
+import type { FileDisposition } from "@audit-tools/shared";
 import {
   deriveBrowserExtensionLensesForPath,
   hasBrowserExtensionManifestFile,
   inferBrowserExtensionUnitKind,
 } from "../extractors/browserExtension.js";
 import { bucketFile, type FileBucket } from "../extractors/bucketing.js";
-import { isAuditExcludedStatus } from "../extractors/disposition.js";
+import { buildDispositionMap, isAuditExcludedStatus } from "../extractors/disposition.js";
 import { pathTokens, normalizeExtractorPath } from "../extractors/pathPatterns.js";
+import { LENS_ORDER, sortLenses } from "./auditTaskUtils.js";
 
 const LENS_MAP: Record<FileBucket, Lens[]> = {
   runtime: ["correctness", "maintainability", "tests", "observability"],
@@ -98,23 +99,7 @@ function inferUnitId(path: string, kind: string): string {
   return `${kind}-${path.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
-export const LENS_ORDER: Lens[] = [
-  "security",
-  "correctness",
-  "reliability",
-  "data_integrity",
-  "performance",
-  "operability",
-  "config_deployment",
-  "observability",
-  "maintainability",
-  "tests",
-];
-
-function sortLenses(lenses: Iterable<Lens>): Lens[] {
-  const set = new Set(lenses);
-  return LENS_ORDER.filter((lens) => set.has(lens));
-}
+export { LENS_ORDER, sortLenses } from "./auditTaskUtils.js";
 
 function applyExtensionLensGuards(path: string, lenses: Lens[]): Lens[] {
   const n = path.toLowerCase();
@@ -184,9 +169,7 @@ export function buildUnitManifest(
 ): UnitManifest {
   const units = new Map<string, AuditUnit>();
   const isBrowserExtensionProject = hasBrowserExtensionManifestFile(repoManifest);
-  const dispositionMap = new Map(
-    disposition?.files.map((item) => [item.path, item.status]) ?? [],
-  );
+  const dispositionMap = buildDispositionMap(disposition);
 
   for (const file of repoManifest.files) {
     const status = dispositionMap.get(file.path);
