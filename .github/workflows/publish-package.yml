@@ -1,53 +1,499 @@
-name: Publish Package
+name: publish-package
 
 on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package to publish"
+        required: true
+        type: choice
+        options:
+          - audit-code
+          - remediate-code
+          - shared
+      dry_run:
+        description: "Dry run (skip actual publish)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      publish_tag:
+        description: "npm dist-tag override"
+        required: false
+        default: "auto"
+        type: choice
+        options:
+          - "auto"
+          - "latest"
+          - "next"
+          - "beta"
+          - "rc"
   release:
-    types: [created]
+    types: [published]
+
+concurrency:
+  group: publish-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_NODE_VERSION: "22.14.0"
+  NPM_CONFIG_LOGLEVEL: notice
 
 jobs:
-  publish:
+  publish-audit-code:
+    if: |
+      (github.event_name == 'release' && startsWith(github.ref_name, 'audit-code-v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.package == 'audit-code')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
-      id-token: write
       contents: read
-
+      id-token: write
+    defaults:
+      run:
+        working-directory: packages/audit-code
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Install monorepo dependencies
-        run: npm ci
-
-      - name: Build @audit-tools/shared
-        run: npm run build
-        working-directory: packages/shared
-
-      - name: Detect package from tag
-        id: detect
+      - name: Gate release to default branch
+        if: github.event_name == 'release'
+        timeout-minutes: 1
+        shell: bash
+        working-directory: .
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          if [[ "$TAG" == audit-code-v* ]]; then
-            echo "workspace=packages/audit-code" >> "$GITHUB_OUTPUT"
-          elif [[ "$TAG" == remediate-code-v* ]]; then
-            echo "workspace=packages/remediate-code" >> "$GITHUB_OUTPUT"
-          elif [[ "$TAG" == shared-v* ]]; then
-            echo "workspace=packages/shared" >> "$GITHUB_OUTPUT"
-          else
-            echo "Unknown tag pattern: $TAG" >&2
+          set -euo pipefail
+          TARGET="${{ github.event.release.target_commitish }}"
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          if [[ "$TARGET" != "$DEFAULT_BRANCH" ]]; then
+            echo "::error::Release must target '${DEFAULT_BRANCH}', got '${TARGET}'. Publish aborted."
             exit 1
           fi
-
-      - name: Build package
-        if: steps.detect.outputs.workspace != 'packages/shared'
-        run: npm run build
-        working-directory: ${{ steps.detect.outputs.workspace }}
-
-      - name: Publish
-        run: npm publish --provenance --access public --ignore-scripts
-        working-directory: ${{ steps.detect.outputs.workspace }}
+          echo "Release targets '${TARGET}' — branch gate passed."
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: Upgrade npm for trusted publishing
+        timeout-minutes: 5
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          npm install -g npm@11.5.1
+      - name: Install monorepo dependencies
+        timeout-minutes: 10
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          npm ci
+      - name: Build @audit-tools/shared
+        timeout-minutes: 5
+        shell: bash
+        working-directory: packages/shared
+        run: |
+          set -euo pipefail
+          npm run build
+      - name: Validate package-lock.json
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::package-lock.json is missing or malformed."' ERR
+          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('lockfileVersion missing'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('name missing'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
+      - name: Verify release gate
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm run verify:release failed."' ERR
+          npm run verify:release
+      - name: Resolve publish metadata
+        id: publish_meta
+        timeout-minutes: 2
+        shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          INPUT_PUBLISH_TAG: ${{ inputs.publish_tag }}
+        run: |
+          set -euo pipefail
+          PACKAGE_NAME=$(node -e "process.stdout.write(require('./package.json').name)")
+          PACKAGE_VERSION=$(node -e "process.stdout.write(require('./package.json').version)")
+          if [[ -n "$INPUT_PUBLISH_TAG" && "$INPUT_PUBLISH_TAG" != "auto" ]]; then
+            PUBLISH_TAG="$INPUT_PUBLISH_TAG"
+          elif [[ "$PACKAGE_VERSION" == *-* ]]; then
+            PUBLISH_TAG="next"
+          else
+            PUBLISH_TAG="latest"
+          fi
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "publish_tag=$PUBLISH_TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved: ${PACKAGE_NAME}@${PACKAGE_VERSION} -> ${PUBLISH_TAG}"
+          MODE="live"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+            MODE="dry-run"
+          fi
+          {
+            echo "### Publish plan"
+            echo "- package: ${PACKAGE_NAME}@${PACKAGE_VERSION}"
+            echo "- dist-tag: ${PUBLISH_TAG}"
+            echo "- mode: ${MODE}"
+            echo "- Node: ${{ env.RELEASE_NODE_VERSION }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preview packed tarball contents
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --dry-run
+      - name: Publish to npm (trusted publishing / tokenless OIDC)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm publish failed. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."' ERR
+          npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+      - name: Dry run publish (no upload)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm publish --dry-run --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+      - name: Verify published package is installable
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_NAME="${{ steps.publish_meta.outputs.package_name }}"
+          PACKAGE_VERSION="${{ steps.publish_meta.outputs.package_version }}"
+          PUBLISH_TAG="${{ steps.publish_meta.outputs.publish_tag }}"
+          echo "Verifying ${PACKAGE_NAME}@${PACKAGE_VERSION} (tag: ${PUBLISH_TAG})..."
+          START_TIME=$(date +%s)
+          for attempt in {1..24}; do
+            if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version; then
+              ELAPSED=$(( $(date +%s) - START_TIME ))
+              echo "Registry propagation succeeded after ${attempt} attempt(s) (${ELAPSED}s)."
+              exit 0
+            fi
+            ELAPSED=$(( $(date +%s) - START_TIME ))
+            if [[ "$attempt" -lt 24 ]]; then
+              echo "Pending after attempt ${attempt} (${ELAPSED}s); retrying in 10s..."
+              sleep 10
+            fi
+          done
+          exit 1
+      - name: Upload npm debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: publish-npm-logs-audit-code
+          path: |
+            ~/.npm/_logs
+            npm-debug.log*
+          if-no-files-found: ignore
+      - name: Emit troubleshooting guidance
+        if: ${{ failure() }}
+        shell: bash
+        working-directory: .
+        run: |
+          echo "::error::audit-code publish failed. Review the publish-npm-logs-audit-code artifact and confirm npm Trusted Publishing is configured for OhOkThisIsFine/audit-tools."
+
+  publish-remediate-code:
+    if: |
+      (github.event_name == 'release' && startsWith(github.ref_name, 'remediate-code-v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.package == 'remediate-code')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: packages/remediate-code
+    steps:
+      - name: Gate release to default branch
+        if: github.event_name == 'release'
+        timeout-minutes: 1
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          TARGET="${{ github.event.release.target_commitish }}"
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          if [[ "$TARGET" != "$DEFAULT_BRANCH" ]]; then
+            echo "::error::Release must target '${DEFAULT_BRANCH}', got '${TARGET}'. Publish aborted."
+            exit 1
+          fi
+          echo "Release targets '${TARGET}' — branch gate passed."
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: Upgrade npm for trusted publishing
+        timeout-minutes: 5
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          npm install -g npm@11.5.1
+      - name: Install monorepo dependencies
+        timeout-minutes: 10
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          npm ci
+      - name: Build @audit-tools/shared
+        timeout-minutes: 5
+        shell: bash
+        working-directory: packages/shared
+        run: |
+          set -euo pipefail
+          npm run build
+      - name: Validate package-lock.json
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::package-lock.json is missing or malformed."' ERR
+          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('lockfileVersion missing'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('name missing'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
+      - name: Verify release gate
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm run verify:release failed."' ERR
+          npm run verify:release
+      - name: Resolve publish metadata
+        id: publish_meta
+        timeout-minutes: 2
+        shell: bash
+        env:
+          INPUT_PUBLISH_TAG: ${{ inputs.publish_tag }}
+        run: |
+          set -euo pipefail
+          PACKAGE_NAME=$(node -e "process.stdout.write(require('./package.json').name)")
+          PACKAGE_VERSION=$(node -e "process.stdout.write(require('./package.json').version)")
+          if [[ -n "$INPUT_PUBLISH_TAG" && "$INPUT_PUBLISH_TAG" != "auto" ]]; then
+            PUBLISH_TAG="$INPUT_PUBLISH_TAG"
+          elif [[ "$PACKAGE_VERSION" == *-* ]]; then
+            PUBLISH_TAG="next"
+          else
+            PUBLISH_TAG="latest"
+          fi
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "publish_tag=$PUBLISH_TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved: ${PACKAGE_NAME}@${PACKAGE_VERSION} -> ${PUBLISH_TAG}"
+          MODE="live"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+            MODE="dry-run"
+          fi
+          {
+            echo "### Publish plan"
+            echo "- package: ${PACKAGE_NAME}@${PACKAGE_VERSION}"
+            echo "- dist-tag: ${PUBLISH_TAG}"
+            echo "- mode: ${MODE}"
+            echo "- Node: ${{ env.RELEASE_NODE_VERSION }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preview packed tarball contents
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --dry-run
+      - name: Publish to npm (trusted publishing / tokenless OIDC)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm publish failed. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."' ERR
+          npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+      - name: Dry run publish (no upload)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm publish --dry-run --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+      - name: Verify published package is installable
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_NAME="${{ steps.publish_meta.outputs.package_name }}"
+          PACKAGE_VERSION="${{ steps.publish_meta.outputs.package_version }}"
+          PUBLISH_TAG="${{ steps.publish_meta.outputs.publish_tag }}"
+          echo "Verifying ${PACKAGE_NAME}@${PACKAGE_VERSION} (tag: ${PUBLISH_TAG})..."
+          START_TIME=$(date +%s)
+          for attempt in {1..24}; do
+            if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version; then
+              ELAPSED=$(( $(date +%s) - START_TIME ))
+              echo "Registry propagation succeeded after ${attempt} attempt(s) (${ELAPSED}s)."
+              exit 0
+            fi
+            ELAPSED=$(( $(date +%s) - START_TIME ))
+            if [[ "$attempt" -lt 24 ]]; then
+              echo "Pending after attempt ${attempt} (${ELAPSED}s); retrying in 10s..."
+              sleep 10
+            fi
+          done
+          exit 1
+      - name: Upload npm debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: publish-npm-logs-remediate-code
+          path: |
+            ~/.npm/_logs
+            npm-debug.log*
+          if-no-files-found: ignore
+      - name: Emit troubleshooting guidance
+        if: ${{ failure() }}
+        shell: bash
+        working-directory: .
+        run: |
+          echo "::error::remediate-code publish failed. Review the publish-npm-logs-remediate-code artifact and confirm npm Trusted Publishing is configured for OhOkThisIsFine/audit-tools."
+
+  publish-shared:
+    if: |
+      (github.event_name == 'release' && startsWith(github.ref_name, 'shared-v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.package == 'shared')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: packages/shared
+    steps:
+      - name: Gate release to default branch
+        if: github.event_name == 'release'
+        timeout-minutes: 1
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          TARGET="${{ github.event.release.target_commitish }}"
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          if [[ "$TARGET" != "$DEFAULT_BRANCH" ]]; then
+            echo "::error::Release must target '${DEFAULT_BRANCH}', got '${TARGET}'. Publish aborted."
+            exit 1
+          fi
+          echo "Release targets '${TARGET}' — branch gate passed."
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+      - name: Upgrade npm for trusted publishing
+        timeout-minutes: 5
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          npm install -g npm@11.5.1
+      - name: Build
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install
+          npm run build
+      - name: Resolve publish metadata
+        id: publish_meta
+        timeout-minutes: 2
+        shell: bash
+        env:
+          INPUT_PUBLISH_TAG: ${{ inputs.publish_tag }}
+        run: |
+          set -euo pipefail
+          PACKAGE_NAME=$(node -e "process.stdout.write(require('./package.json').name)")
+          PACKAGE_VERSION=$(node -e "process.stdout.write(require('./package.json').version)")
+          if [[ -n "$INPUT_PUBLISH_TAG" && "$INPUT_PUBLISH_TAG" != "auto" ]]; then
+            PUBLISH_TAG="$INPUT_PUBLISH_TAG"
+          elif [[ "$PACKAGE_VERSION" == *-* ]]; then
+            PUBLISH_TAG="next"
+          else
+            PUBLISH_TAG="latest"
+          fi
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "publish_tag=$PUBLISH_TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved: ${PACKAGE_NAME}@${PACKAGE_VERSION} -> ${PUBLISH_TAG}"
+          {
+            echo "### Publish plan"
+            echo "- package: ${PACKAGE_NAME}@${PACKAGE_VERSION}"
+            echo "- dist-tag: ${PUBLISH_TAG}"
+            echo "- Node: ${{ env.RELEASE_NODE_VERSION }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preview packed tarball contents
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --dry-run
+      - name: Publish to npm (trusted publishing / tokenless OIDC)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm publish failed. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."' ERR
+          npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+      - name: Dry run publish (no upload)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm publish --dry-run --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+      - name: Verify published package is installable
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_NAME="${{ steps.publish_meta.outputs.package_name }}"
+          PACKAGE_VERSION="${{ steps.publish_meta.outputs.package_version }}"
+          PUBLISH_TAG="${{ steps.publish_meta.outputs.publish_tag }}"
+          echo "Verifying ${PACKAGE_NAME}@${PACKAGE_VERSION} (tag: ${PUBLISH_TAG})..."
+          START_TIME=$(date +%s)
+          for attempt in {1..24}; do
+            if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version; then
+              ELAPSED=$(( $(date +%s) - START_TIME ))
+              echo "Registry propagation succeeded after ${attempt} attempt(s) (${ELAPSED}s)."
+              exit 0
+            fi
+            ELAPSED=$(( $(date +%s) - START_TIME ))
+            if [[ "$attempt" -lt 24 ]]; then
+              echo "Pending after attempt ${attempt} (${ELAPSED}s); retrying in 10s..."
+              sleep 10
+            fi
+          done
+          exit 1
+      - name: Upload npm debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: publish-npm-logs-shared
+          path: |
+            ~/.npm/_logs
+            npm-debug.log*
+          if-no-files-found: ignore
