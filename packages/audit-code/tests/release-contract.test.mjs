@@ -104,10 +104,10 @@ test("one-command release helper wires the trusted publishing path", async () =>
   assert.match(helper, /run\("git", \["commit", "-m", `release: \$\{tag\}`\]\)/);
   assert.match(helper, /run\("git", \["tag", "-a", tag, "-m", tag\]\)/);
   assert.match(helper, /const releaseBranch = bumpOnly \? null : ensureMainBranch\(\)/);
-  assert.match(helper, /run\("git", \["push", "origin", releaseBranch\]\)/);
+  assert.match(helper, /run\("git", \["push", remoteName, releaseBranch\]\)/);
   assert.match(helper, /waiting for publish run/);
   assert.match(helper, /waiting for npm registry/);
-  assert.match(helper, /run\("git", \["push", "origin", tag\]\)/);
+  assert.match(helper, /run\("git", \["push", remoteName, tag\]\)/);
   assert.match(helper, /run\("gh", \["release", "create", tag, "--title", tag, "--generate-notes"\]\)/);
   assert.match(helper, /publish-package\.yml/);
   assert.match(helper, /waitForRegistryVersion/);
