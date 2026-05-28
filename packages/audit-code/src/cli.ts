@@ -1712,7 +1712,7 @@ const explicitProvider = getExplicitProvider(argv);
       const parallelStartedAt = new Date().toISOString();
 
       await writeWaveManifest(artifactsDir, {
-        obligation_id: obligationId,
+        obligation_id: obligationId ?? "unknown",
         started_at: parallelStartedAt,
         pid: process.pid,
         slots: workerSlots.map(buildWaveSlotEntry),

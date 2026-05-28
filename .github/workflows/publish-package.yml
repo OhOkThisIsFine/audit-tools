@@ -1,0 +1,53 @@
+name: Publish Package
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install monorepo dependencies
+        run: npm ci
+
+      - name: Build @audit-tools/shared
+        run: npm run build
+        working-directory: packages/shared
+
+      - name: Detect package from tag
+        id: detect
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == audit-code-v* ]]; then
+            echo "workspace=packages/audit-code" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == remediate-code-v* ]]; then
+            echo "workspace=packages/remediate-code" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == shared-v* ]]; then
+            echo "workspace=packages/shared" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unknown tag pattern: $TAG" >&2
+            exit 1
+          fi
+
+      - name: Build package
+        if: steps.detect.outputs.workspace != 'packages/shared'
+        run: npm run build
+        working-directory: ${{ steps.detect.outputs.workspace }}
+
+      - name: Publish
+        run: npm publish --provenance --access public --ignore-scripts
+        working-directory: ${{ steps.detect.outputs.workspace }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
