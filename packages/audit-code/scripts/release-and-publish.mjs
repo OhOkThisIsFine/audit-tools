@@ -107,7 +107,7 @@ function getRepoSlug() {
 }
 
 function ensureCleanWorktree() {
-  const status = run("git", ["status", "--porcelain"], { capture: true }).stdout.trim();
+  const status = run("git", ["status", "--porcelain", "--ignore-submodules=all"], { capture: true }).stdout.trim();
   if (status.length > 0) {
     throw new Error(
       "Release publishing requires a clean git worktree. Commit, stash, or discard local changes first.",
