@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { decideNextStep } = await import("../dist/orchestrator/nextStep.js");
 const { advanceAudit } = await import("../dist/orchestrator/advance.js");
+const { RunLogger } = await import("@audit-tools/shared");
 const {
   computeArtifactMetadata,
 } = await import("../dist/orchestrator/artifactMetadata.js");
@@ -306,6 +307,55 @@ test("advanceAudit planning stage builds tasks without requiring runtime validat
       "satisfied",
     );
     assert.equal(planning.next_likely_step, "audit_tasks_completed");
+  });
+});
+
+test("advanceAudit emits a structured run log threading obligation → executor → artifacts", async () => {
+  await withTempDir(async (root) => {
+    await writeFixtureRepo(root);
+    const logPath = join(root, "run.log.jsonl");
+    const runLogger = new RunLogger(logPath, { now: () => 0 });
+
+    const intake = await advanceAudit({}, { root, runLogger });
+    const preparedBundle = {
+      ...intake.updated_bundle,
+      auto_fixes_applied: { executed_tools: [], timestamp: "2026-04-22T00:00:00Z" },
+      external_analyzer_results: { tool: "syntax_resolution_executor", results: [] },
+      syntax_resolution_status: {
+        tool: "syntax_resolution_executor",
+        completed_at: "2026-04-22T00:00:00Z",
+      },
+    };
+    await advanceAudit(preparedBundle, { runLogger });
+
+    const events = (await readFile(logPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    // Every line carries an ISO timestamp.
+    assert.ok(events.every((event) => typeof event.ts === "string"));
+
+    const obligations = events
+      .filter((event) => event.kind === "obligation")
+      .map((event) => event.obligation);
+    // First obligation is the top of the priority chain; the intake executor
+    // satisfies repo_manifest + file_disposition together, so the next logged
+    // obligation is structure_artifacts.
+    assert.equal(obligations[0], "repo_manifest");
+    assert.ok(obligations.includes("structure_artifacts"));
+
+    // Executor start/end pairs are emitted, and end carries a numeric duration.
+    assert.ok(events.some((event) => event.kind === "executor_start"));
+    const ends = events.filter((event) => event.kind === "executor_end");
+    assert.ok(ends.length > 0);
+    assert.ok(ends.every((event) => typeof event.duration_ms === "number"));
+
+    // Artifact writes are recorded.
+    const artifacts = events
+      .filter((event) => event.kind === "artifact_write")
+      .map((event) => event.artifact);
+    assert.ok(artifacts.includes("repo_manifest.json"));
   });
 });
 

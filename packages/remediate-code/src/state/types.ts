@@ -1,27 +1,11 @@
 import type { ClosingAction } from "./closingActions.js";
 
-export interface Finding {
-  id: string;
-  title: string;
-  category: string;
-  severity: "critical" | "high" | "medium" | "low" | "info";
-  confidence: "high" | "medium" | "low";
-  lens: string;
-  summary: string;
-  affected_files: {
-    path: string;
-    line_start?: number;
-    line_end?: number;
-    symbol?: string;
-    hash_at_plan_time?: string;
-  }[];
-  impact?: string;
-  likelihood?: string;
-  evidence: string[];
-  reproduction?: string[];
-  systemic?: boolean;
-  related_findings?: string[];
-}
+// `Finding` is the canonical machine contract owned by @audit-tools/shared.
+// The remediator consumes the auditor's `audit-findings.json` directly, so it
+// uses the shared shape verbatim rather than a divergent local copy. Imported
+// (so it is in scope for the types below) and re-exported for existing callers.
+import type { Finding } from "@audit-tools/shared";
+export type { Finding };
 
 export interface RemediationBlock {
   block_id: string;

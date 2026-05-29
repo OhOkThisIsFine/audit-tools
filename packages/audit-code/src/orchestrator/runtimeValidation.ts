@@ -1,7 +1,7 @@
-import { access, readFile } from "node:fs/promises";
 import type { UnitManifest } from "../types.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
 import type { CriticalFlowManifest } from "@audit-tools/shared";
+import { discoverProjectCommands } from "@audit-tools/shared";
 import type {
   RuntimeValidationReport,
   RuntimeValidationTask,
@@ -25,45 +25,12 @@ function checksForFlow(requiredLenses: string[]): string[] {
   return checks;
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function discoverRuntimeValidationCommand(
   root: string,
 ): Promise<string[] | undefined> {
-  const packageJsonPath = `${root}/package.json`;
-  if (await exists(packageJsonPath)) {
-    try {
-      const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
-        scripts?: Record<string, string>;
-      };
-      const testScript = packageJson.scripts?.test?.trim();
-      if (
-        testScript &&
-        !/no test specified/i.test(testScript)
-      ) {
-        return ["npm", "test"];
-      }
-    } catch {
-      // ignore unreadable package.json for runtime discovery
-    }
-  }
-
-  if (await exists(`${root}/go.mod`)) {
-    return ["go", "test", "./..."];
-  }
-
-  if (await exists(`${root}/pyproject.toml`) || await exists(`${root}/pytest.ini`)) {
-    return ["python", "-m", "pytest"];
-  }
-
-  return undefined;
+  // Shared discovery (Node test script → Go → Python) is the single source of
+  // truth; the runtime-validation command is the discovered test command.
+  return discoverProjectCommands(root).test;
 }
 
 export function buildRuntimeValidationTasks(params: {

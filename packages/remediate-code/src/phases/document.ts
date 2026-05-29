@@ -173,7 +173,7 @@ Title: ${finding.title}
 Summary: ${finding.summary}
 Affected Files: ${finding.affected_files.map((f) => f.path).join(", ")}
 Evidence:
-${finding.evidence.map((e) => `- ${e}`).join("\n")}
+${(finding.evidence ?? []).map((e) => `- ${e}`).join("\n")}
 ${extraContext}
 If the finding is clear (or clarified by the context above), output a JSON object with type "item_spec" and the item_spec.
 If the finding is ambiguous, output a JSON object with type "clarification_request" and an array of clarifications.

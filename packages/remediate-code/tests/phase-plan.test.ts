@@ -217,4 +217,38 @@ describe("runPlanPhase — audit-report.md parse path", () => {
     expect(state.plan!.block_strategy).toBe("git_cocommit");
     expect(state.plan!.blocks).toHaveLength(2);
   });
+
+  it("splits a block by byte-based context budget (Phase 2 size_bytes)", async () => {
+    // One work block holding two findings on two separate files.
+    const reportPath = join(TEST_DIR, "byte-split-report.md");
+    const report = `# Audit Report\n\n## Work Blocks\n\n### B-001\n- Findings: F-401, F-402\n- Depends on: none\n\n## Findings\n\n### F-401 — Module A issue\n- Severity: high\n- Confidence: high\n- Lens: security\n- Summary: Problem in module A.\n- Files: src/a.ts\n- Evidence:\n  - Evidence A\n\n### F-402 — Module B issue\n- Severity: medium\n- Confidence: high\n- Lens: reliability\n- Summary: Problem in module B.\n- Files: src/b.ts\n- Evidence:\n  - Evidence B\n\n## Scope and Coverage\n...\n`;
+    await writeFile(reportPath, report, "utf8");
+    await mkdir(join(TEST_DIR, "src"), { recursive: true });
+
+    // Budget fits both groups' base+overhead (~3000 tokens) but not the byte
+    // contribution of two ~50KB files (~12500 tokens each).
+    await writeFile(
+      join(TEST_DIR, "session-config.json"),
+      JSON.stringify({
+        block_quota: { context_tokens: 20000, reserved_output_tokens: 8192 },
+      }),
+      "utf8",
+    );
+
+    const big = "x".repeat(50_000);
+    await writeFile(join(TEST_DIR, "src", "a.ts"), big, "utf8");
+    await writeFile(join(TEST_DIR, "src", "b.ts"), big, "utf8");
+
+    const split = await runPlanPhase(baseState, { ...baseOptions, input: reportPath });
+    expect(split.plan!.blocks.length).toBe(2);
+    const items = split.plan!.blocks.flatMap((b) => b.items).sort();
+    expect(items).toEqual(["F-401", "F-402"]);
+
+    // Control: empty files keep the block whole, proving the split was driven
+    // by file size, not by a degenerate budget.
+    await writeFile(join(TEST_DIR, "src", "a.ts"), "", "utf8");
+    await writeFile(join(TEST_DIR, "src", "b.ts"), "", "utf8");
+    const whole = await runPlanPhase(baseState, { ...baseOptions, input: reportPath });
+    expect(whole.plan!.blocks.length).toBe(1);
+  });
 });

@@ -93,6 +93,38 @@ describe("decideNextStep", () => {
     expect(await readFile(step.prompt_path, "utf8")).toMatch(/Present Remediation Report/);
   });
 
+  it("writes a structured run log recording the state and resulting step", async () => {
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    const logRaw = await readFile(join(ARTIFACTS_DIR, "run.log.jsonl"), "utf8");
+    const events = logRaw
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    // every line carries a timestamp
+    expect(events.every((event) => typeof event.ts === "string")).toBe(true);
+
+    const stateEvent = events.find((event) => event.kind === "state");
+    expect(stateEvent?.phase).toBe("next-step");
+
+    const stepEvent = events.find((event) => event.kind === "step");
+    expect(stepEvent?.obligation).toBe(step.step_kind);
+    expect(typeof stepEvent?.duration_ms).toBe("number");
+  });
+
+  it("does not write a run log when observability.run_log is disabled", async () => {
+    await writeFile(
+      join(REPO_DIR, "session-config.json"),
+      JSON.stringify({ observability: { run_log: false } }),
+      "utf8",
+    );
+
+    await decideNextStep({ root: REPO_DIR });
+
+    expect(existsSync(join(ARTIFACTS_DIR, "run.log.jsonl"))).toBe(false);
+  });
+
   it("missing input emits a conversation-first starting-point step", async () => {
     const step = await decideNextStep({ root: REPO_DIR });
     const currentStep = JSON.parse(

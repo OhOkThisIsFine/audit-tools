@@ -9,13 +9,16 @@ import {
 import { writeFile, readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { AUDITOR_REPORT_MARKER } from "@audit-tools/shared";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
   readOptionalJsonFile,
   writeJsonFile,
   readJsonFile,
   formatValidationIssues,
+  discoverProjectCommands,
+  resolveContextBudget,
+  estimateTokensFromBytes,
   type SessionConfig,
 } from "@audit-tools/shared";
 import { createFreshSessionProvider } from "../providers/index.js";
@@ -368,41 +371,27 @@ function deriveBlocksFromGitCocommit(
   return blocks;
 }
 
-// Token estimation constants ported from auditor-lambda
-export const ESTIMATED_TOKENS_PER_LINE = 4;
+// Block-sizing constants specific to the remediator (the per-line ratio is the
+// shared `ESTIMATED_TOKENS_PER_LINE`; the model-limit table and budget math now
+// live in @audit-tools/shared).
 export const ESTIMATED_BLOCK_BASE_TOKENS = 900;
 export const ESTIMATED_FINDING_OVERHEAD_TOKENS = 600;
-const DEFAULT_CONTEXT_TOKENS = 200_000;
-const DEFAULT_OUTPUT_TOKENS = 8_192;
-const BLOCK_SAFETY_MARGIN = 0.7;
 
-// Known model context/output limits — ported from auditor-lambda quota/limits.ts
-const KNOWN_MODEL_LIMITS: Record<string, { context_tokens: number; output_tokens: number }> = {
-  "anthropic/claude-opus-4-7": { context_tokens: 200_000, output_tokens: 32_000 },
-  "anthropic/claude-sonnet-4-6": { context_tokens: 200_000, output_tokens: 8_192 },
-  "anthropic/claude-haiku-4-5": { context_tokens: 200_000, output_tokens: 8_192 },
-  "anthropic/claude-opus-4-5": { context_tokens: 200_000, output_tokens: 8_192 },
-  "anthropic/claude-sonnet-4-5": { context_tokens: 200_000, output_tokens: 8_192 },
-  "openai/gpt-4o": { context_tokens: 128_000, output_tokens: 16_384 },
-  "openai/gpt-4o-mini": { context_tokens: 128_000, output_tokens: 16_384 },
-  "google/gemini-2.0-flash": { context_tokens: 1_048_576, output_tokens: 8_192 },
-  "google/gemini-1.5-pro": { context_tokens: 2_097_152, output_tokens: 8_192 },
-};
-
-function resolveContextBudget(sessionConfig: SessionConfig | null): number {
+function resolveContextBudgetFromConfig(sessionConfig: SessionConfig | null): number {
   const quota = sessionConfig?.block_quota ?? {};
-  const model = quota.host_model?.toLowerCase().trim();
-  const known = model ? KNOWN_MODEL_LIMITS[model] : undefined;
-  const contextTokens = quota.context_tokens ?? known?.context_tokens ?? DEFAULT_CONTEXT_TOKENS;
-  const outputTokens = quota.reserved_output_tokens ?? known?.output_tokens ?? DEFAULT_OUTPUT_TOKENS;
-  return Math.floor((contextTokens - outputTokens) * BLOCK_SAFETY_MARGIN);
+  return resolveContextBudget({
+    contextTokens: quota.context_tokens ?? null,
+    reservedOutputTokens: quota.reserved_output_tokens ?? null,
+    hostModel: quota.host_model ?? null,
+  });
 }
 
-function countFileLines(filePath: string, root: string): number {
+// Phase 2: size by bytes from a stat (no full-file reads) rather than counting
+// lines, and convert to tokens via the shared estimator.
+function fileSizeBytes(filePath: string, root: string): number {
   const fullPath = isAbsolute(filePath) ? filePath : join(root, filePath);
-  if (!existsSync(fullPath)) return 0;
   try {
-    return readFileSync(fullPath, "utf8").split("\n").length;
+    return statSync(fullPath).size;
   } catch {
     return 0;
   }
@@ -453,17 +442,17 @@ function groupFindingsByFileOverlap(findingIds: string[], findings: Finding[]): 
 function estimateGroupTokens(
   findingIds: string[],
   findings: Finding[],
-  fileLineCounts: Map<string, number>,
+  fileByteCounts: Map<string, number>,
 ): number {
   const uniqueFiles = new Set<string>();
   const findingMap = new Map(findings.map((f) => [f.id, f]));
   for (const id of findingIds) {
     for (const af of findingMap.get(id)?.affected_files ?? []) uniqueFiles.add(af.path);
   }
-  const totalLines = [...uniqueFiles].reduce((sum, p) => sum + (fileLineCounts.get(p) ?? 0), 0);
+  const totalBytes = [...uniqueFiles].reduce((sum, p) => sum + (fileByteCounts.get(p) ?? 0), 0);
   return (
     ESTIMATED_BLOCK_BASE_TOKENS +
-    totalLines * ESTIMATED_TOKENS_PER_LINE +
+    estimateTokensFromBytes(totalBytes) +
     findingIds.length * ESTIMATED_FINDING_OVERHEAD_TOKENS
   );
 }
@@ -482,9 +471,9 @@ function splitBlocksByContextBudget(
     }
   }
 
-  const fileLineCounts = new Map<string, number>();
+  const fileByteCounts = new Map<string, number>();
   for (const filePath of allFiles) {
-    fileLineCounts.set(filePath, countFileLines(filePath, root));
+    fileByteCounts.set(filePath, fileSizeBytes(filePath, root));
   }
 
   const result: RemediationBlock[] = [];
@@ -497,7 +486,7 @@ function splitBlocksByContextBudget(
     let currentTokens = 0;
 
     for (const group of fileGroups) {
-      const groupTokens = estimateGroupTokens(group, findings, fileLineCounts);
+      const groupTokens = estimateGroupTokens(group, findings, fileByteCounts);
       if (currentItems.length > 0 && currentTokens + groupTokens > contextBudget) {
         subBlocks.push(currentItems);
         currentItems = group;
@@ -633,40 +622,24 @@ export async function runPlanPhase(
   const sessionConfig = await readOptionalJsonFile<SessionConfig>(
     join(options.root, "session-config.json"),
   );
-  const contextBudget = resolveContextBudget(sessionConfig ?? null);
+  const contextBudget = resolveContextBudgetFromConfig(sessionConfig ?? null);
   blocks = splitBlocksByContextBudget(blocks, findings, options.root, contextBudget);
 
-  // Project type detection
+  // Project command discovery (shared; now also covers Go and Python). The
+  // RemediationPlan stores commands as strings, so argv arrays are joined.
+  const commands = discoverProjectCommands(options.root);
+  const testCommand = commands.test ? commands.test.join(" ") : undefined;
+  const e2eCommand = commands.e2e ? commands.e2e.join(" ") : undefined;
   let projectType = "unknown";
-  let testCommand: string | undefined = undefined;
-  let e2eCommand: string | undefined = undefined;
   if (existsSync(join(options.root, "package.json"))) {
     projectType = "typescript-node";
-    try {
-      const pkgJson = JSON.parse(
-        await readFile(join(options.root, "package.json"), "utf8"),
-      );
-      if (pkgJson.scripts && pkgJson.scripts.test) {
-        testCommand = "npm test";
-      }
-      const e2eScripts = [
-        "e2e",
-        "test:e2e",
-        "test:e2e:run",
-        "test:integration",
-        "cypress:run",
-        "playwright",
-        "playwright:test",
-      ];
-      for (const scriptName of e2eScripts) {
-        if (pkgJson.scripts?.[scriptName]) {
-          e2eCommand = `npm run ${scriptName}`;
-          break;
-        }
-      }
-    } catch (e) {
-      // Ignore parsing errors
-    }
+  } else if (existsSync(join(options.root, "go.mod"))) {
+    projectType = "go";
+  } else if (
+    existsSync(join(options.root, "pyproject.toml")) ||
+    existsSync(join(options.root, "pytest.ini"))
+  ) {
+    projectType = "python";
   }
 
   snapshotAffectedFileHashes(options.root, findings);

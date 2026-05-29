@@ -484,6 +484,26 @@ test("buildFileDisposition excludes generated install and test artifacts before 
   );
 });
 
+test("buildFileDisposition excludes bundled .tmp artifacts (e.g. .tmp/opentoken)", () => {
+  const repoManifest = makeRepoManifest([
+    ".tmp/opentoken/index.js",
+    ".tmp/opentoken/package.json",
+    "src/index.ts",
+  ]);
+  const disposition = buildFileDisposition(repoManifest);
+
+  assert.equal(
+    getDispositionItem(disposition, ".tmp/opentoken/index.js")?.status,
+    "excluded",
+  );
+  assert.equal(
+    getDispositionItem(disposition, ".tmp/opentoken/package.json")?.status,
+    "excluded",
+  );
+  // Real source outside .tmp is still included.
+  assert.equal(getDispositionItem(disposition, "src/index.ts")?.status, "included");
+});
+
 test("buildFileDisposition excludes extension binary and source map artifacts", () => {
   const repoManifest = makeRepoManifest([
     "service/main.js",

@@ -75,6 +75,11 @@ export interface OpenTokenConfig {
   command?: string;
 }
 
+export interface ObservabilityConfig {
+  /** Emit the structured run log (run.log.jsonl). Defaults to true. */
+  run_log?: boolean;
+}
+
 export interface SessionConfig {
   provider?: ProviderName;
   timeout_ms?: number;
@@ -89,4 +94,5 @@ export interface SessionConfig {
   block_quota?: BlockQuotaConfig;
   quota?: QuotaConfig;
   opentoken?: OpenTokenConfig;
+  observability?: ObservabilityConfig;
 }

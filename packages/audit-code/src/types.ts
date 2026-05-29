@@ -1,3 +1,5 @@
+import type { Finding as SharedFinding } from "@audit-tools/shared";
+
 export type Lens =
   | "correctness"
   | "architecture"
@@ -88,26 +90,11 @@ export interface AuditTask {
   completion_reason?: string;
 }
 
-export interface Finding {
-  id: string;
-  title: string;
-  category: string;
-  severity: "critical" | "high" | "medium" | "low" | "info";
-  confidence: "high" | "medium" | "low";
+// The canonical field set lives in @audit-tools/shared. The auditor narrows
+// `lens` to its strongly-typed `Lens` union; everything else is inherited so
+// the wire contract stays in sync (including `theme_id` added in Phase 6).
+export interface Finding extends Omit<SharedFinding, "lens"> {
   lens: Lens;
-  summary: string;
-  affected_files: Array<{
-    path: string;
-    line_start?: number;
-    line_end?: number;
-    symbol?: string;
-  }>;
-  impact?: string;
-  likelihood?: string;
-  evidence?: string[];
-  reproduction?: string[];
-  systemic?: boolean;
-  related_findings?: string[];
 }
 
 export interface AuditVerification {

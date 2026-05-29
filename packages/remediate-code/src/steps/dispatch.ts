@@ -177,7 +177,7 @@ You are documenting one remediation item. Use only the finding context below.
 
 ## Evidence
 
-${finding.evidence.map((item) => `- ${item}`).join("\n")}
+${(finding.evidence ?? []).map((item) => `- ${item}`).join("\n")}
 
 ## Output
 

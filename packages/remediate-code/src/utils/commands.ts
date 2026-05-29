@@ -1,48 +1,37 @@
 import { spawnSync, type SpawnSyncOptions } from "node:child_process";
+import {
+  runTracked,
+  quoteForCmd,
+  platformCommand,
+  type RunTrackedOptions,
+  type RunTrackedResult,
+} from "@audit-tools/shared";
 
 type SpawnResult = ReturnType<typeof spawnSync>;
 
-export function quoteForCmd(arg: string): string {
-  if (arg.length === 0) return '""';
-  if (!/[\s"]/u.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '""')}"`;
-}
+// The Windows wrapping/quoting logic now lives in `@audit-tools/shared`
+// (tooling/exec.ts) so the auditor and remediator share one implementation.
+// These re-exports preserve the import surface callers (and tests) rely on.
+export { quoteForCmd, platformCommand };
 
-function resolveWindowsScript(
-  command: string,
-  args: string[],
-): { command: string; args: string[] } {
-  if (!(process.platform === "win32" && /\.(cmd|bat)$/iu.test(command))) {
-    return { command, args };
-  }
-
-  return {
-    command: process.env.ComSpec ?? "cmd.exe",
-    args: ["/d", "/s", "/c", [command, ...args].map(quoteForCmd).join(" ")],
-  };
-}
-
-export function platformCommand(command: string): string {
-  if (process.platform !== "win32") return command;
-  if (/\.(?:cmd|bat|com|exe)$/iu.test(command)) return command;
-  if (command === "npm" || command === "npx" || command === "pnpm") {
-    return `${command}.cmd`;
-  }
-  return command;
-}
-
+/**
+ * Run a command synchronously by argv. Delegates to the shared `runTracked`,
+ * which applies the single Windows `.cmd`/`.bat` wrapping implementation and
+ * never uses `shell: true`.
+ */
 export function runCommand(
   command: string,
   args: string[],
-  options: SpawnSyncOptions = {},
-): SpawnResult {
-  const resolved = resolveWindowsScript(platformCommand(command), args);
-  return spawnSync(resolved.command, resolved.args, {
-    ...options,
-    shell: false,
-  });
+  options: RunTrackedOptions = {},
+): RunTrackedResult {
+  return runTracked([command, ...args], options);
 }
 
+/**
+ * Run a stored command *string* (e.g. a configured `test_command`) through the
+ * platform shell. argv-based callers should use `runCommand`/`runTracked`;
+ * this exists only for opaque single-string commands that need shell parsing.
+ */
 export function runShellCommand(
   command: string,
   options: SpawnSyncOptions = {},

@@ -1,18 +1,6 @@
 import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type { LimitConfidence, LimitSource, ResolvedLimits } from "./types.js";
-
-// RPM/TPM are omitted here — they are tier-dependent and must come from learning.
-const KNOWN_MODEL_LIMITS: Record<string, Pick<ResolvedLimits, "context_tokens" | "output_tokens">> = {
-  "anthropic/claude-opus-4-7": { context_tokens: 200_000, output_tokens: 32_000 },
-  "anthropic/claude-sonnet-4-6": { context_tokens: 200_000, output_tokens: 8_192 },
-  "anthropic/claude-haiku-4-5": { context_tokens: 200_000, output_tokens: 8_192 },
-  "anthropic/claude-opus-4-5": { context_tokens: 200_000, output_tokens: 8_192 },
-  "anthropic/claude-sonnet-4-5": { context_tokens: 200_000, output_tokens: 8_192 },
-  "openai/gpt-4o": { context_tokens: 128_000, output_tokens: 16_384 },
-  "openai/gpt-4o-mini": { context_tokens: 128_000, output_tokens: 16_384 },
-  "google/gemini-2.0-flash": { context_tokens: 1_048_576, output_tokens: 8_192 },
-  "google/gemini-1.5-pro": { context_tokens: 2_097_152, output_tokens: 8_192 },
-};
+import { lookupModelLimits } from "../tokens.js";
 
 export type ProviderType = "hosted" | "local" | "unknown";
 
@@ -33,7 +21,7 @@ export function classifyProvider(providerName: ResolvedProviderName): ProviderTy
 export function lookupKnownModel(
   modelKey: string,
 ): Pick<ResolvedLimits, "context_tokens" | "output_tokens"> | undefined {
-  return KNOWN_MODEL_LIMITS[modelKey.toLowerCase().trim()];
+  return lookupModelLimits(modelKey);
 }
 
 export interface LimitResolutionResult {

@@ -1,15 +1,12 @@
 import type { Finding, UnitManifest } from "../types.js";
-import type { CriticalFlowManifest, GraphBundle } from "@audit-tools/shared";
+import type {
+  CriticalFlowManifest,
+  GraphBundle,
+  WorkBlock,
+} from "@audit-tools/shared";
 
-export interface WorkBlock {
-  id: string;
-  finding_ids: string[];
-  unit_ids: string[];
-  owned_files: string[];
-  max_severity: Finding["severity"];
-  rationale: string;
-  depends_on: string[];
-}
+// WorkBlock is the canonical report-block contract owned by @audit-tools/shared.
+export type { WorkBlock } from "@audit-tools/shared";
 
 function severityRank(severity: Finding["severity"]): number {
   switch (severity) {
