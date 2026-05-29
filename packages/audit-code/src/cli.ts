@@ -69,6 +69,7 @@ import {
 import { renderWorkerPrompt } from "./prompts/renderWorkerPrompt.js";
 import {
   estimateTaskGroupTokens,
+  sizeIndexFromManifest,
 } from "./orchestrator/reviewPackets.js";
 import type { AuditResult, AuditTask, Finding, RepoManifest } from "./types.js";
 import type { AuditState } from "./types/auditState.js";
@@ -609,6 +610,9 @@ async function runAuditStep(options: {
   const lineIndex = bundle.repo_manifest
     ? await buildLineIndex(options.root, bundle.repo_manifest)
     : undefined;
+  const sizeIndex = bundle.repo_manifest
+    ? sizeIndexFromManifest(bundle.repo_manifest)
+    : undefined;
   if (looksLikeCliFlag(options.auditResultsPath)) {
     throw new Error(
       `Invalid audit results path '${options.auditResultsPath}'. This looks like a CLI flag rather than a file path.`,
@@ -645,6 +649,7 @@ async function runAuditStep(options: {
   const result = await advanceAudit(bundle, {
     root: options.root,
     lineIndex,
+    sizeIndex,
     auditResults: auditResults as AuditResult[] | undefined,
     runtimeValidationUpdates,
     externalAnalyzerResults,
@@ -1606,7 +1611,10 @@ const explicitProvider = getExplicitProvider(argv);
         allCandidateTasks.slice(0, parallelWorkers * agentBatchSize),
         agentBatchSize,
       );
-      const slotTokenEstimates = candidateGroups.map((g) => estimateTaskGroupTokens(g));
+      const candidateSizeIndex = sizeIndexFromManifest(bundle.repo_manifest);
+      const slotTokenEstimates = candidateGroups.map((g) =>
+        estimateTaskGroupTokens(g, candidateSizeIndex),
+      );
 
       const providerLimits: DiscoveredRateLimits | null =
         await provider.queryLimits?.(hostModel)

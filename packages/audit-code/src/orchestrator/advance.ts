@@ -25,6 +25,8 @@ import { RunLogger } from "@audit-tools/shared";
 export interface AdvanceAuditOptions {
   root?: string;
   lineIndex?: Record<string, number>;
+  /** Path → size_bytes (from the repo manifest); drives byte-based packet token sizing. */
+  sizeIndex?: Record<string, number>;
   auditResults?: AuditResult[];
   runtimeValidationUpdates?: RuntimeValidationReport;
   externalAnalyzerResults?: ExternalAnalyzerResults;
@@ -136,6 +138,7 @@ export async function advanceAudit(
           bundle,
           options.root,
           options.lineIndex ?? {},
+          options.sizeIndex,
         );
         break;
       case "result_ingestion_executor":

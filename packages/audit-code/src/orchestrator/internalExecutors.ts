@@ -32,6 +32,7 @@ import {
 import {
   buildAuditPlanMetrics,
   buildReviewPackets,
+  sizeIndexFromManifest,
 } from "./reviewPackets.js";
 import { buildUnitManifest } from "./unitBuilder.js";
 import { buildRepoManifestFromFs } from "../extractors/fsIntake.js";
@@ -67,6 +68,7 @@ function appendSelectiveDeepeningTasks(params: {
   }
 
   const lineIndex = lineIndexFromTasks(params.bundle.audit_tasks);
+  const sizeIndex = sizeIndexFromManifest(params.bundle.repo_manifest);
   const selectiveDeepeningTasks = buildSelectiveDeepeningTasks({
     existingTasks: params.bundle.audit_tasks,
     results: params.results,
@@ -89,10 +91,12 @@ function appendSelectiveDeepeningTasks(params: {
       audit_plan_metrics: buildAuditPlanMetrics(auditTasks, {
         graphBundle: params.bundle.graph_bundle,
         lineIndex,
+        sizeIndex,
       }),
       review_packets: buildReviewPackets(auditTasks, {
         graphBundle: params.bundle.graph_bundle,
         lineIndex,
+        sizeIndex,
       }),
     },
     taskCount: selectiveDeepeningTasks.length,
@@ -354,10 +358,12 @@ export async function runPlanningExecutor(
   bundle: ArtifactBundle,
   root: string,
   lineIndex: Record<string, number> = {},
+  sizeIndex?: Record<string, number>,
 ): Promise<ExecutorRunResult> {
   if (!bundle.repo_manifest) {
     throw new Error("Cannot run planning executor without repo_manifest");
   }
+  const resolvedSizeIndex = sizeIndex ?? sizeIndexFromManifest(bundle.repo_manifest);
   if (
     !bundle.file_disposition ||
     !bundle.unit_manifest ||
@@ -407,10 +413,12 @@ export async function runPlanningExecutor(
   const reviewPackets = buildReviewPackets(taggedAuditTasks, {
     graphBundle: bundle.graph_bundle,
     lineIndex,
+    sizeIndex: resolvedSizeIndex,
   });
   const auditPlanMetrics = buildAuditPlanMetrics(taggedAuditTasks, {
     graphBundle: bundle.graph_bundle,
     lineIndex,
+    sizeIndex: resolvedSizeIndex,
   });
   const requeuePayload = buildRequeuePayload(
     coverage,
