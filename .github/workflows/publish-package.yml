@@ -409,12 +409,18 @@ jobs:
         run: |
           set -euo pipefail
           npm install -g npm@11.5.1
+      - name: Install monorepo dependencies
+        timeout-minutes: 10
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          npm ci
       - name: Build
         timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
-          npm install
           npm run build
       - name: Resolve publish metadata
         id: publish_meta
