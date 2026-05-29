@@ -20,6 +20,7 @@ import {
 } from "./internalExecutors.js";
 import { runAutoFixExecutor } from "./autoFixExecutor.js";
 import { runSyntaxResolutionExecutor } from "./syntaxResolutionExecutor.js";
+import { RunLogger } from "@audit-tools/shared";
 
 export interface AdvanceAuditOptions {
   root?: string;
@@ -29,6 +30,7 @@ export interface AdvanceAuditOptions {
   externalAnalyzerResults?: ExternalAnalyzerResults;
   preferredExecutor?: string;
   opentoken?: boolean;
+  runLogger?: RunLogger;
 }
 
 export interface AdvanceAuditResult {
@@ -69,12 +71,20 @@ export async function advanceAudit(
   bundle: ArtifactBundle,
   options: AdvanceAuditOptions = {},
 ): Promise<AdvanceAuditResult> {
+  const log = options.runLogger ?? RunLogger.disabled();
   const decision = decideNextStep(bundle);
   const forcedExecutor = options.preferredExecutor ?? null;
   const selectedExecutor = forcedExecutor ?? decision.selected_executor;
   const selectedObligation = forcedExecutor
     ? `forced:${forcedExecutor}`
     : decision.selected_obligation;
+
+  log.event({
+    phase: "advance",
+    kind: "obligation",
+    obligation: selectedObligation ?? undefined,
+    note: decision.reason,
+  });
 
   if (!selectedExecutor) {
     const state = cloneState(decision.state);
@@ -96,6 +106,13 @@ export async function advanceAudit(
   }
 
   let run;
+  const executorStartedAt = Date.now();
+  log.event({
+    phase: "advance",
+    kind: "executor_start",
+    obligation: selectedObligation ?? undefined,
+    note: selectedExecutor,
+  });
   try {
     switch (selectedExecutor) {
       case "intake_executor":
@@ -189,6 +206,22 @@ export async function advanceAudit(
     }
   } catch (error) {
     throw formatExecutorFailure(selectedExecutor, selectedObligation, error);
+  }
+
+  log.event({
+    phase: "advance",
+    kind: "executor_end",
+    obligation: selectedObligation ?? undefined,
+    note: selectedExecutor,
+    duration_ms: Date.now() - executorStartedAt,
+  });
+  for (const artifact of run.artifacts_written) {
+    log.event({
+      phase: "advance",
+      kind: "artifact_write",
+      obligation: selectedObligation ?? undefined,
+      artifact,
+    });
   }
 
   const metadata = computeArtifactMetadata(

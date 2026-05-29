@@ -2,7 +2,7 @@ import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../orchestrator.js";
 import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
-import { writeTextFile, writeJsonFile } from "@audit-tools/shared";
+import { writeTextFile, writeJsonFile, stagedAndUntracked } from "@audit-tools/shared";
 import { runCommand, runShellCommand } from "../utils/commands.js";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import type { ClosingAction } from "../state/closingActions.js";
@@ -61,32 +61,7 @@ const STAGING_EXCLUDE_PATTERNS = [
 ];
 
 export function collectStagingFiles(root: string): string[] {
-  const files = new Set<string>();
-
-  const diff = runCommand("git", ["diff", "--name-only", "HEAD"], {
-    cwd: root,
-    encoding: "utf8",
-  });
-  if (diff.status === 0 && diff.stdout) {
-    for (const line of diff.stdout.toString().split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (trimmed.length > 0) files.add(trimmed);
-    }
-  }
-
-  const untracked = runCommand(
-    "git",
-    ["ls-files", "--others", "--exclude-standard"],
-    { cwd: root, encoding: "utf8" },
-  );
-  if (untracked.status === 0 && untracked.stdout) {
-    for (const line of untracked.stdout.toString().split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (trimmed.length > 0) files.add(trimmed);
-    }
-  }
-
-  return [...files].filter(
+  return stagedAndUntracked(root).filter(
     (f) => !STAGING_EXCLUDE_PATTERNS.some((pattern) => pattern.test(f)),
   );
 }

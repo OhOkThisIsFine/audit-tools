@@ -1,0 +1,160 @@
+import { spawnSync, type StdioOptions } from "node:child_process";
+
+// Single synchronous command runner shared by both orchestrators. Before
+// Phase 0 the remediator (`utils/commands.ts`) and the auditor
+// (`orchestrator/localCommands.ts`) each carried their own copy of the
+// Windows `.cmd`/`.bat` wrapping and quoting logic. `runTracked` is the one
+// implementation: argv-only (never `shell: true`), with optional `opentoken`
+// wrapping, and it reports the argv it actually executed for run-log tracing.
+
+export interface RunTrackedOptions {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  encoding?: BufferEncoding;
+  timeout?: number;
+  input?: string;
+  maxBuffer?: number;
+  windowsHide?: boolean;
+  stdio?: StdioOptions;
+  /**
+   * Wrap the command as `<opentoken> wrap <argv>`. Pass the opentoken binary
+   * name or path. When unset, no wrapping is applied.
+   */
+  opentoken?: string;
+  /** Override the platform; for tests. Defaults to `process.platform`. */
+  platform?: NodeJS.Platform;
+}
+
+export interface RunTrackedResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  /** The argv actually spawned, after platform/opentoken wrapping. */
+  argv: string[];
+  error?: Error;
+}
+
+const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
+
+/** Quote a single argv token for a `cmd.exe /c "..."` command line. */
+export function quoteForCmd(arg: string): string {
+  if (arg.length === 0) return '""';
+  if (!/[\s"]/u.test(arg)) return arg;
+  return `"${arg.replace(/"/g, '""')}"`;
+}
+
+/**
+ * On Windows, package-manager shims (`npm`/`npx`/`pnpm`/`yarn`) are `.cmd`
+ * batch files that `spawn` cannot launch without a shell. Map them to their
+ * `.cmd` form so the batch-wrapping path below applies. Anything already
+ * carrying an executable extension is returned unchanged.
+ */
+export function platformCommand(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== "win32") return command;
+  if (/\.(?:cmd|bat|com|exe)$/iu.test(command)) return command;
+  if (SHELL_SHIM_COMMANDS.has(command)) return `${command}.cmd`;
+  return command;
+}
+
+function isWindowsBatch(command: string, platform: NodeJS.Platform): boolean {
+  return platform === "win32" && /\.(cmd|bat)$/iu.test(command);
+}
+
+function wrapForWindowsBatch(
+  command: string,
+  args: string[],
+  platform: NodeJS.Platform,
+): { command: string; args: string[] } {
+  if (!isWindowsBatch(command, platform)) return { command, args };
+  return {
+    command: process.env.ComSpec ?? "cmd.exe",
+    args: ["/d", "/s", "/c", [command, ...args].map(quoteForCmd).join(" ")],
+  };
+}
+
+function quoteForOpenTokenCmd(value: string): string {
+  if (/^[A-Za-z0-9_./:=@+-]+$/u.test(value)) return value;
+  return `"${value.replace(/(["^&|<>%])/g, "^$1")}"`;
+}
+
+function wrapForOpenToken(
+  command: string,
+  args: string[],
+  opentoken: string,
+  platform: NodeJS.Platform,
+): { command: string; args: string[] } {
+  if (platform === "win32") {
+    const shell = process.env.ComSpec ?? "cmd.exe";
+    const inner = [command, ...args].map(quoteForOpenTokenCmd).join(" ");
+    return { command: shell, args: ["/d", "/s", "/c", `${opentoken} wrap ${inner}`] };
+  }
+  return { command: opentoken, args: ["wrap", command, ...args] };
+}
+
+/**
+ * Resolve a logical argv into the concrete `[command, ...args]` that should be
+ * spawned on this platform, applying package-manager shim mapping, optional
+ * opentoken wrapping, and Windows batch wrapping. Exposed for callers that
+ * spawn asynchronously and only need the resolved argv.
+ */
+export function resolveExecArgv(
+  argv: string[],
+  options: { opentoken?: string; platform?: NodeJS.Platform } = {},
+): string[] {
+  if (argv.length === 0) return [];
+  const platform = options.platform ?? process.platform;
+  const command = platformCommand(argv[0], platform);
+  const args = argv.slice(1);
+  if (options.opentoken) {
+    const wrapped = wrapForOpenToken(command, args, options.opentoken, platform);
+    return [wrapped.command, ...wrapped.args];
+  }
+  const wrapped = wrapForWindowsBatch(command, args, platform);
+  return [wrapped.command, ...wrapped.args];
+}
+
+function toText(value: string | Buffer | null | undefined): string {
+  if (value == null) return "";
+  return typeof value === "string" ? value : value.toString();
+}
+
+/** Run a command synchronously. argv[0] is the command, the rest are args. */
+export function runTracked(
+  argv: string[],
+  options: RunTrackedOptions = {},
+): RunTrackedResult {
+  if (argv.length === 0) {
+    return {
+      status: null,
+      stdout: "",
+      stderr: "",
+      argv: [],
+      error: new Error("runTracked requires a non-empty argv"),
+    };
+  }
+  const resolved = resolveExecArgv(argv, {
+    opentoken: options.opentoken,
+    platform: options.platform,
+  });
+  const result = spawnSync(resolved[0], resolved.slice(1), {
+    cwd: options.cwd,
+    env: options.env,
+    encoding: options.encoding ?? "utf8",
+    timeout: options.timeout,
+    input: options.input,
+    maxBuffer: options.maxBuffer,
+    windowsHide: options.windowsHide ?? true,
+    stdio: options.stdio,
+    shell: false,
+  });
+  return {
+    status: result.status,
+    stdout: toText(result.stdout),
+    stderr: toText(result.stderr),
+    argv: resolved,
+    error: result.error,
+  };
+}

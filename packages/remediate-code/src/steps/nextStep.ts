@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, type SessionConfig } from "@audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, RunLogger, type SessionConfig } from "@audit-tools/shared";
 import { runPlanPhase, isAuditorAuditReport } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
@@ -684,14 +684,60 @@ Stop after presenting the summary.
 
 const MAX_ITERATIONS = 10;
 
+/**
+ * Public entrypoint: wraps the decision loop with structured run-log events so
+ * each bounded next-step invocation records the state it acted on and the step
+ * it produced. The logger is no-op when `observability.run_log` is disabled.
+ */
 export async function decideNextStep(
   options: NextStepOptions = {},
+): Promise<RemediationStep> {
+  const root = resolveRoot(options.root);
+  const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
+  const sessionConfig =
+    options.sessionConfig ??
+    (await readOptionalJsonFile<SessionConfig>(
+      join(root, "session-config.json"),
+    ));
+  const runLogger = new RunLogger(join(artifactsDir, "run.log.jsonl"), {
+    enabled: sessionConfig?.observability?.run_log ?? true,
+  });
+  const startedAt = Date.now();
+  try {
+    const step = await decideNextStepInner(options, runLogger);
+    runLogger.event({
+      phase: "next-step",
+      kind: "step",
+      obligation: step.step_kind,
+      note: step.status,
+      duration_ms: Date.now() - startedAt,
+    });
+    return step;
+  } catch (error) {
+    runLogger.event({
+      phase: "next-step",
+      kind: "error",
+      duration_ms: Date.now() - startedAt,
+      note: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
+async function decideNextStepInner(
+  options: NextStepOptions,
+  runLogger: RunLogger,
 ): Promise<RemediationStep> {
   const root = resolveRoot(options.root);
   const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
   await mkdir(artifactsDir, { recursive: true });
   const store = new StateStore(artifactsDir);
   let state = await store.loadState();
+  runLogger.event({
+    phase: "next-step",
+    kind: "state",
+    obligation: state?.status ?? "pending",
+  });
 
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
   if (state?.status === "complete" || existsSync(join(root, "remediation-report.md"))) {
@@ -1010,7 +1056,7 @@ Then run:
               lens: finding.lens,
               affected_files: finding.affected_files.map((f) => f.path),
               summary: finding.summary,
-              evidence: finding.evidence,
+              evidence: finding.evidence ?? [],
               concrete_change: spec.concrete_change,
               no_change: spec.no_change,
               tests_to_write: spec.tests_to_write,
@@ -1317,14 +1363,20 @@ Then run:
   }
 
   if (state.status === "implementing") {
+    const triageStart = Date.now();
+    runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
     const triaged = await runTriagePhase(state, { root, artifactsDir });
+    runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "triage", duration_ms: Date.now() - triageStart });
     await store.saveState(triaged);
     state = triaged;
     continue;
   }
 
   if (state.status === "triage") {
+    const triageStart = Date.now();
+    runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
     const triaged = await runTriagePhase(state, { root, artifactsDir });
+    runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "triage", duration_ms: Date.now() - triageStart });
     await store.saveState(triaged);
     state = triaged;
     continue;
@@ -1342,7 +1394,10 @@ Then run:
   }
 
   if (state.status === "closing") {
+    const closeStart = Date.now();
+    runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "close" });
     const closed = await runClosePhase(state, { root, artifactsDir });
+    runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "close", duration_ms: Date.now() - closeStart });
     if (closed.status !== "complete") {
       await store.saveState(closed);
     }

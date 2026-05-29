@@ -2,6 +2,7 @@ import type { RepoManifest } from "../types.js";
 import type { FileDisposition, FileDispositionItem, FileDispositionStatus } from "@audit-tools/shared";
 import {
   isNodeModulesOrGit,
+  isTmpPath,
   isBuildOutput,
   isVendorPath,
   isBinaryArtifact,
@@ -22,6 +23,13 @@ function inferDisposition(path: string): FileDispositionItem {
 
   if (isNodeModulesOrGit(normalized)) {
     return { path, status: "excluded", reason: "node_modules or .git excluded by convention." };
+  }
+  if (isTmpPath(normalized)) {
+    return {
+      path,
+      status: "excluded",
+      reason: "Temporary/bundled artifact directory (.tmp) excluded by convention.",
+    };
   }
   if (isBuildOutput(normalized)) {
     return { path, status: "generated", reason: "Build output path." };

@@ -30,6 +30,16 @@ export type {
 } from "./types/graph.js";
 export type { AccessDeclaration } from "./types/accessDeclaration.js";
 export type {
+  FindingSeverity,
+  FindingConfidence,
+  FindingLocation,
+  Finding,
+  WorkBlock,
+  FindingTheme,
+  AuditFindingsSummary,
+  AuditFindingsReport,
+} from "./types/finding.js";
+export type {
   StepStatus,
   DispatchModelTier,
   DispatchModelHint,
@@ -46,6 +56,7 @@ export type {
   QuotaModelLimits,
   QuotaConfig,
   OpenTokenConfig,
+  ObservabilityConfig,
   SessionConfig,
 } from "./types/sessionConfig.js";
 export {
@@ -56,6 +67,60 @@ export {
 
 // Contracts
 export { AUDITOR_REPORT_MARKER } from "./contracts.js";
+
+// Tokens
+export type { ModelTokenLimits } from "./tokens.js";
+export {
+  KNOWN_MODEL_LIMITS,
+  lookupModelLimits,
+  DEFAULT_CONTEXT_TOKENS,
+  DEFAULT_OUTPUT_TOKENS,
+  BLOCK_SAFETY_MARGIN,
+  BYTES_PER_TOKEN,
+  ESTIMATED_TOKENS_PER_LINE,
+  estimateTokensFromBytes,
+  resolveContextBudget,
+} from "./tokens.js";
+
+// Tooling: command execution
+export type { RunTrackedOptions, RunTrackedResult } from "./tooling/exec.js";
+export {
+  runTracked,
+  resolveExecArgv,
+  quoteForCmd,
+  platformCommand,
+} from "./tooling/exec.js";
+
+// Tooling: project command discovery
+export type { ProjectCommands } from "./tooling/testCommand.js";
+export { discoverProjectCommands } from "./tooling/testCommand.js";
+
+// Tooling: optional analyzer dependency resolution
+export type {
+  AnalyzerDepVia,
+  ResolvedAnalyzerDep,
+  ResolveAnalyzerDepOptions,
+  InstallToCacheOptions,
+  InstallToCacheResult,
+} from "./tooling/analyzerDeps.js";
+export {
+  analyzerCacheRoot,
+  parseAnalyzerSpec,
+  resolveAnalyzerDep,
+  installToCache,
+} from "./tooling/analyzerDeps.js";
+
+// Git helpers
+export {
+  isGitRepo,
+  changedFiles,
+  fileCommits,
+  stagedAndUntracked,
+} from "./git.js";
+
+// Observability
+export type { RunLogEvent, RunLoggerOptions } from "./observability/runLog.js";
+export { RunLogger } from "./observability/runLog.js";
 
 // IO
 export {

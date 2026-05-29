@@ -22,7 +22,7 @@ import {
   writeCoreArtifacts,
   promoteFinalAuditReport,
 } from "./io/artifacts.js";
-import { isFileMissingError, readJsonFile, writeJsonFile, prefixValidationIssues } from "@audit-tools/shared";
+import { isFileMissingError, readJsonFile, writeJsonFile, prefixValidationIssues, RunLogger } from "@audit-tools/shared";
 import { validateArtifactBundle } from "./validation/artifacts.js";
 import {
   validateAuditResults,
@@ -600,8 +600,12 @@ async function runAuditStep(options: {
   runtimeUpdatesPath?: string;
   externalAnalyzerPath?: string;
   opentoken?: boolean;
+  runLog?: boolean;
 }) {
   const bundle = await loadArtifactBundle(options.artifactsDir);
+  const runLogger = new RunLogger(join(options.artifactsDir, "run.log.jsonl"), {
+    enabled: options.runLog ?? true,
+  });
   const lineIndex = bundle.repo_manifest
     ? await buildLineIndex(options.root, bundle.repo_manifest)
     : undefined;
@@ -646,6 +650,7 @@ async function runAuditStep(options: {
     externalAnalyzerResults,
     preferredExecutor: options.preferredExecutor,
     opentoken: options.opentoken,
+    runLogger,
   });
 
   await writeCoreArtifacts(options.artifactsDir, result.updated_bundle);
@@ -894,6 +899,7 @@ async function cmdAdvanceAudit(argv: string[]): Promise<void> {
     runtimeUpdatesPath: getFlag(argv, "--updates"),
     externalAnalyzerPath,
     opentoken: sessionConfig.opentoken?.enabled,
+    runLog: sessionConfig.observability?.run_log,
   });
   if (result.selected_executor !== "agent") {
     await clearDispatchFiles(artifactsDir);

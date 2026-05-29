@@ -11,14 +11,19 @@
     "./io/*": "./dist/io/*.js",
     "./quota/*": "./dist/quota/*.js",
     "./providers/*": "./dist/providers/*.js",
-    "./validation/*": "./dist/validation/*.js"
+    "./validation/*": "./dist/validation/*.js",
+    "./tooling/*": "./dist/tooling/*.js",
+    "./observability/*": "./dist/observability/*.js",
+    "./tokens": "./dist/tokens.js",
+    "./git": "./dist/git.js"
   },
   "files": [
     "dist/**"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs"
   },
   "engines": {
     "node": ">=20"

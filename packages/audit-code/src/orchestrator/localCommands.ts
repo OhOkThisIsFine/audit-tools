@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { delimiter, extname, isAbsolute, join } from "node:path";
+import { resolveExecArgv } from "@audit-tools/shared";
 
 export interface LocalCommandCandidate {
   command: string;
@@ -16,36 +17,15 @@ export interface LocalCommandResult {
   error?: Error;
 }
 
-function isWindowsBatchCommand(path: string): boolean {
-  return process.platform === "win32" && /\.(cmd|bat)$/i.test(path);
-}
-
-function quoteForCmd(arg: string): string {
-  if (arg.length === 0) return '""';
-  if (!/[\s"]/u.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '""')}"`;
-}
-
 function toSpawnTuple(candidate: LocalCommandCandidate): {
   command: string;
   args: string[];
 } {
-  if (!isWindowsBatchCommand(candidate.command)) {
-    return {
-      command: candidate.command,
-      args: candidate.args,
-    };
-  }
-
-  return {
-    command: process.env.ComSpec ?? "cmd.exe",
-    args: [
-      "/d",
-      "/s",
-      "/c",
-      [candidate.command, ...candidate.args].map(quoteForCmd).join(" "),
-    ],
-  };
+  // Shared resolver applies the single Windows `.cmd`/`.bat` wrapping impl.
+  // The candidate command is already PATH-resolved (absolute path or
+  // process.execPath), so package-manager shim mapping is a no-op here.
+  const resolved = resolveExecArgv([candidate.command, ...candidate.args]);
+  return { command: resolved[0], args: resolved.slice(1) };
 }
 
 function resolveFromPath(command: string): string | null {
