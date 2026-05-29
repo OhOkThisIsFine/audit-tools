@@ -8,7 +8,7 @@ import type {
   WeaklyExplainedPacketSample,
 } from "../types/reviewPlanning.js";
 import type { GraphBundle, GraphEdge } from "@audit-tools/shared";
-import { isRecord } from "@audit-tools/shared";
+import { estimateTokensFromBytes, isRecord } from "@audit-tools/shared";
 import { LENS_ORDER, priorityRank, sortLenses } from "./auditTaskUtils.js";
 import { UnionFind } from "./unionFind.js";
 
@@ -16,16 +16,87 @@ const DEFAULT_MAX_TASKS_PER_PACKET = 0;
 const DEFAULT_TARGET_PACKET_LINES = 8000;
 export const ESTIMATED_TOKENS_PER_LINE = 4;
 export const ESTIMATED_PACKET_PROMPT_TOKENS = 900;
-export function estimateTaskGroupTokens(tasks: AuditTask[]): number {
-  let totalLines = 0;
-  for (const task of tasks) {
-    if (task.file_line_counts) {
-      for (const count of Object.values(task.file_line_counts)) {
-        totalLines += count;
-      }
-    }
+// Default per-packet content-token budget. Kept equal to the legacy
+// line-target × per-line estimate so byte-derived sizing lands on the same
+// thresholds as the old line-based sizing when the line fallback is in effect.
+const DEFAULT_TARGET_PACKET_TOKENS =
+  DEFAULT_TARGET_PACKET_LINES * ESTIMATED_TOKENS_PER_LINE;
+
+/**
+ * Build a path → size_bytes index from a repo manifest. Byte counts are
+ * recorded during intake, so this never reads files. Review packet token
+ * estimates are derived from these bytes (Phase 2) instead of counted lines.
+ */
+export function sizeIndexFromManifest(
+  repoManifest?: { files: ReadonlyArray<{ path: string; size_bytes: number }> },
+): Record<string, number> {
+  if (!repoManifest) return {};
+  return Object.fromEntries(
+    repoManifest.files.map((file) => [file.path, file.size_bytes]),
+  );
+}
+
+/**
+ * Estimated content tokens for a single file. Prefers a byte-based estimate
+ * from `sizeIndex` (sourced from the repo manifest); falls back to the legacy
+ * line-based estimate when no positive byte count is available (e.g. manually
+ * built tasks in tests, or paths absent from the manifest).
+ */
+function pathContentTokens(
+  owner: AuditTask | undefined,
+  path: string,
+  sizeIndex?: Record<string, number>,
+  lineIndex?: Record<string, number>,
+): number {
+  const bytes = sizeIndex?.[path];
+  if (typeof bytes === "number" && bytes > 0) {
+    return estimateTokensFromBytes(bytes);
   }
-  return ESTIMATED_PACKET_PROMPT_TOKENS + totalLines * ESTIMATED_TOKENS_PER_LINE;
+  const lines = owner?.file_line_counts?.[path] ?? lineIndex?.[path] ?? 0;
+  return lines * ESTIMATED_TOKENS_PER_LINE;
+}
+
+/** Estimated content tokens for one task across all of its files. */
+function taskContentTokens(
+  task: AuditTask,
+  sizeIndex?: Record<string, number>,
+  lineIndex?: Record<string, number>,
+): number {
+  return task.file_paths.reduce(
+    (sum, path) => sum + pathContentTokens(task, path, sizeIndex, lineIndex),
+    0,
+  );
+}
+
+/**
+ * Estimated content tokens across a set of file paths, resolving an owning task
+ * per path so the line fallback can read its `file_line_counts`. Shared files
+ * are counted once.
+ */
+function fileGroupContentTokens(
+  filePaths: Iterable<string>,
+  tasks: AuditTask[],
+  sizeIndex?: Record<string, number>,
+  lineIndex?: Record<string, number>,
+): number {
+  let total = 0;
+  for (const path of filePaths) {
+    const owner = tasks.find((task) => task.file_paths.includes(path));
+    total += pathContentTokens(owner, path, sizeIndex, lineIndex);
+  }
+  return total;
+}
+
+export function estimateTaskGroupTokens(
+  tasks: AuditTask[],
+  sizeIndex?: Record<string, number>,
+  lineIndex?: Record<string, number>,
+): number {
+  let contentTokens = 0;
+  for (const task of tasks) {
+    contentTokens += taskContentTokens(task, sizeIndex, lineIndex);
+  }
+  return ESTIMATED_PACKET_PROMPT_TOKENS + contentTokens;
 }
 
 const PACKET_EXPANSION_MIN_CONFIDENCE = 0.65;
@@ -74,11 +145,19 @@ const BROAD_ANALYZER_OWNERSHIP_ROOTS = new Set([
 export interface BuildReviewPacketOptions {
   graphBundle?: GraphBundle;
   lineIndex?: Record<string, number>;
+  /** Path → size_bytes (from the repo manifest); drives byte-based token sizing. */
+  sizeIndex?: Record<string, number>;
   maxTasksPerPacket?: number;
-  targetPacketLines?: number;
+  /**
+   * Soft per-packet content-token budget. Defaults to
+   * DEFAULT_TARGET_PACKET_TOKENS. A packet is split when its estimated content
+   * tokens would exceed this budget.
+   */
+  targetPacketTokens?: number;
   /**
    * Available context budget in tokens (context_tokens − reserved_output_tokens).
-   * When provided, targetPacketLines is capped to fit within this budget.
+   * When provided, targetPacketTokens is capped to fit within this budget so a
+   * packet's estimated tokens never exceed it.
    */
   maxContextTokens?: number;
 }
@@ -412,7 +491,8 @@ function buildBoundedClusterEdges(params: {
   edgeConfidence: number;
   reasonForCluster: (root: string, fileCount: number) => string;
   lineIndex?: Record<string, number>;
-  targetPacketLines?: number;
+  sizeIndex?: Record<string, number>;
+  targetPacketTokens?: number;
 }): GraphEdge[] {
   const groupToComponent = buildGraphConnectedComponentIndex(
     params.groups,
@@ -491,15 +571,18 @@ function buildBoundedClusterEdges(params: {
       0,
     );
     const clusterTasks = entries.flatMap((entry) => entry.tasks);
-    const totalLines = [...allFiles].reduce((sum, path) => {
-      const owner = clusterTasks.find((task) => task.file_paths.includes(path));
-      return sum + (owner ? lineCountForPath(owner, path, params.lineIndex) : 0);
-    }, 0);
+    const totalContentTokens = fileGroupContentTokens(
+      allFiles,
+      clusterTasks,
+      params.sizeIndex,
+      params.lineIndex,
+    );
 
     if (
       allFiles.size > MAX_SUBSYSTEM_CLUSTER_FILES ||
       totalTasks > MAX_SUBSYSTEM_CLUSTER_TASKS ||
-      totalLines > (params.targetPacketLines ?? DEFAULT_TARGET_PACKET_LINES)
+      totalContentTokens >
+        (params.targetPacketTokens ?? DEFAULT_TARGET_PACKET_TOKENS)
     ) {
       continue;
     }
@@ -525,7 +608,8 @@ function buildSubsystemClusterEdges(
   groups: Map<string, AuditTask[]>,
   graphEdges: GraphEdge[],
   lineIndex?: Record<string, number>,
-  targetPacketLines = DEFAULT_TARGET_PACKET_LINES,
+  sizeIndex?: Record<string, number>,
+  targetPacketTokens = DEFAULT_TARGET_PACKET_TOKENS,
 ): GraphEdge[] {
   return buildBoundedClusterEdges({
     groups,
@@ -536,7 +620,8 @@ function buildSubsystemClusterEdges(
     reasonForCluster: (root, fileCount) =>
       `Bounded subsystem cluster '${root}' groups ${fileCount} file(s) without stronger graph evidence.`,
     lineIndex,
-    targetPacketLines,
+    sizeIndex,
+    targetPacketTokens,
   });
 }
 
@@ -684,7 +769,8 @@ function buildPackageOwnershipClusterEdges(
   groups: Map<string, AuditTask[]>,
   graphEdges: GraphEdge[],
   lineIndex?: Record<string, number>,
-  targetPacketLines = DEFAULT_TARGET_PACKET_LINES,
+  sizeIndex?: Record<string, number>,
+  targetPacketTokens = DEFAULT_TARGET_PACKET_TOKENS,
 ): GraphEdge[] {
   const packageRoots = collectPackageOwnershipRoots(groups, graphEdges);
   if (packageRoots.size === 0) {
@@ -700,7 +786,8 @@ function buildPackageOwnershipClusterEdges(
     reasonForCluster: (root, fileCount) =>
       `Package ownership root '${root}' groups ${fileCount} file(s) across bounded package subdirectories.`,
     lineIndex,
-    targetPacketLines,
+    sizeIndex,
+    targetPacketTokens,
   });
 }
 
@@ -765,7 +852,8 @@ function buildModuleOwnershipClusterEdges(
   groups: Map<string, AuditTask[]>,
   graphEdges: GraphEdge[],
   lineIndex?: Record<string, number>,
-  targetPacketLines = DEFAULT_TARGET_PACKET_LINES,
+  sizeIndex?: Record<string, number>,
+  targetPacketTokens = DEFAULT_TARGET_PACKET_TOKENS,
 ): GraphEdge[] {
   const moduleRoots = collectModuleOwnershipRoots(groups, graphEdges);
   if (moduleRoots.size === 0) {
@@ -786,7 +874,8 @@ function buildModuleOwnershipClusterEdges(
         : `Module ownership root '${root}' from project configuration groups ${fileCount} file(s) across bounded subdirectories.`;
     },
     lineIndex,
-    targetPacketLines,
+    sizeIndex,
+    targetPacketTokens,
   });
 }
 
@@ -907,7 +996,8 @@ function buildPlanningGraphEdges(
   graphEdges: GraphEdge[],
   graphBundle?: GraphBundle,
   lineIndex?: Record<string, number>,
-  targetPacketLines = DEFAULT_TARGET_PACKET_LINES,
+  sizeIndex?: Record<string, number>,
+  targetPacketTokens = DEFAULT_TARGET_PACKET_TOKENS,
 ): GraphEdge[] {
   const bridgeEdges = buildEntrypointFlowBridgeEdges(
     groups,
@@ -920,7 +1010,8 @@ function buildPlanningGraphEdges(
     groups,
     graphWithBridges,
     lineIndex,
-    targetPacketLines,
+    sizeIndex,
+    targetPacketTokens,
   );
   const graphWithSubsystems =
     subsystemEdges.length > 0
@@ -930,7 +1021,8 @@ function buildPlanningGraphEdges(
     groups,
     graphWithSubsystems,
     lineIndex,
-    targetPacketLines,
+    sizeIndex,
+    targetPacketTokens,
   );
   const graphWithPackageOwnership =
     packageOwnershipEdges.length > 0
@@ -940,7 +1032,8 @@ function buildPlanningGraphEdges(
     groups,
     graphWithPackageOwnership,
     lineIndex,
-    targetPacketLines,
+    sizeIndex,
+    targetPacketTokens,
   );
   return moduleOwnershipEdges.length > 0
     ? [...graphWithPackageOwnership, ...moduleOwnershipEdges]
@@ -1093,8 +1186,8 @@ function comparePackets(a: ReviewPacket, b: ReviewPacket): number {
 
 function chunkPacketTasks(
   tasks: AuditTask[],
-  options: Required<Pick<BuildReviewPacketOptions, "maxTasksPerPacket" | "targetPacketLines">> &
-    Pick<BuildReviewPacketOptions, "lineIndex">,
+  options: Required<Pick<BuildReviewPacketOptions, "maxTasksPerPacket" | "targetPacketTokens">> &
+    Pick<BuildReviewPacketOptions, "lineIndex" | "sizeIndex">,
 ): AuditTask[][] {
   const chunks: AuditTask[][] = [];
   let current: AuditTask[] = [];
@@ -1102,7 +1195,8 @@ function chunkPacketTasks(
   for (const task of tasks.sort(compareTasksForPacket)) {
     const isolatedLargeFileTask =
       task.file_paths.length === 1 &&
-      taskLineCount(task, options.lineIndex) > options.targetPacketLines;
+      taskContentTokens(task, options.sizeIndex, options.lineIndex) >
+        options.targetPacketTokens;
     if (isolatedLargeFileTask) {
       if (current.length > 0) {
         chunks.push(current);
@@ -1114,16 +1208,18 @@ function chunkPacketTasks(
 
     const candidate = [...current, task];
     const uniquePaths = new Set(candidate.flatMap((item) => item.file_paths));
-    const candidateLines = [...uniquePaths].reduce((sum, path) => {
-      const owner = candidate.find((item) => item.file_paths.includes(path));
-      return sum + (owner ? lineCountForPath(owner, path, options.lineIndex) : 0);
-    }, 0);
+    const candidateContentTokens = fileGroupContentTokens(
+      uniquePaths,
+      candidate,
+      options.sizeIndex,
+      options.lineIndex,
+    );
     const wouldExceedTaskCount =
       options.maxTasksPerPacket > 0 && current.length > 0 && candidate.length > options.maxTasksPerPacket;
-    const wouldExceedLines =
-      current.length > 0 && candidateLines > options.targetPacketLines;
+    const wouldExceedTokens =
+      current.length > 0 && candidateContentTokens > options.targetPacketTokens;
 
-    if (wouldExceedTaskCount || wouldExceedLines) {
+    if (wouldExceedTaskCount || wouldExceedTokens) {
       chunks.push(current);
       current = [];
     }
@@ -1158,6 +1254,7 @@ function buildPacket(
   tasks: AuditTask[],
   packetIndex: number,
   lineIndex?: Record<string, number>,
+  sizeIndex?: Record<string, number>,
   graphEdges: GraphEdge[] = [],
   graphBundle?: GraphBundle,
 ): ReviewPacket {
@@ -1179,6 +1276,9 @@ function buildPacket(
     (sum, value) => sum + value,
     0,
   );
+  const estimatedTokens =
+    ESTIMATED_PACKET_PROMPT_TOKENS +
+    fileGroupContentTokens(filePaths, tasks, sizeIndex, lineIndex);
   const priority = tasks.reduce<NonNullable<AuditTask["priority"]>>(
     (highest, task) =>
       priorityRank(task.priority) > priorityRank(highest)
@@ -1228,7 +1328,7 @@ function buildPacket(
         : undefined,
     quality: graphContext.quality,
     rationale: `${baseRationale}${graphRationale}`,
-    estimated_tokens: ESTIMATED_PACKET_PROMPT_TOKENS + totalLines * ESTIMATED_TOKENS_PER_LINE,
+    estimated_tokens: estimatedTokens,
   };
 }
 
@@ -1237,20 +1337,15 @@ function buildReviewPacketPlanningData(
   options: BuildReviewPacketOptions = {},
 ): ReviewPacketPlanningData {
   const maxTasksPerPacket = options.maxTasksPerPacket ?? DEFAULT_MAX_TASKS_PER_PACKET;
-  const configuredTargetLines = options.targetPacketLines ?? DEFAULT_TARGET_PACKET_LINES;
-  const targetPacketLines =
+  const configuredTargetTokens =
+    options.targetPacketTokens ?? DEFAULT_TARGET_PACKET_TOKENS;
+  const targetPacketTokens =
     options.maxContextTokens != null
       ? Math.min(
-          configuredTargetLines,
-          Math.max(
-            1,
-            Math.floor(
-              (options.maxContextTokens - ESTIMATED_PACKET_PROMPT_TOKENS) /
-                ESTIMATED_TOKENS_PER_LINE,
-            ),
-          ),
+          configuredTargetTokens,
+          Math.max(1, options.maxContextTokens - ESTIMATED_PACKET_PROMPT_TOKENS),
         )
-      : configuredTargetLines;
+      : configuredTargetTokens;
   const graphEdges = collectGraphEdges(options.graphBundle);
   const groups = buildTaskGroups(tasks);
 
@@ -1259,7 +1354,8 @@ function buildReviewPacketPlanningData(
     graphEdges,
     options.graphBundle,
     options.lineIndex,
-    targetPacketLines,
+    options.sizeIndex,
+    targetPacketTokens,
   );
 
   const packets: ReviewPacket[] = [];
@@ -1277,14 +1373,16 @@ function buildReviewPacketPlanningData(
   for (const group of groupedTasks) {
     for (const chunk of chunkPacketTasks(group, {
       lineIndex: options.lineIndex,
+      sizeIndex: options.sizeIndex,
       maxTasksPerPacket,
-      targetPacketLines,
+      targetPacketTokens,
     })) {
       packets.push(
         buildPacket(
           chunk,
           packetIndex,
           options.lineIndex,
+          options.sizeIndex,
           planningGraphEdges,
           options.graphBundle,
         ),

@@ -7,7 +7,11 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
-import { orderTasksForPacketReview, buildReviewPackets } from "../orchestrator/reviewPackets.js";
+import {
+  orderTasksForPacketReview,
+  buildReviewPackets,
+  sizeIndexFromManifest,
+} from "../orchestrator/reviewPackets.js";
 import { buildFileAnchorSummary, type FileAnchorSummary } from "../orchestrator/fileAnchors.js";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
@@ -310,6 +314,7 @@ export function buildPendingAuditTasks(bundle: ArtifactBundle) {
   return orderTasksForPacketReview(pendingTasks, {
     graphBundle: bundle.graph_bundle,
     lineIndex,
+    sizeIndex: sizeIndexFromManifest(bundle.repo_manifest),
   });
 }
 
@@ -365,13 +370,16 @@ export async function prepareDispatchArtifacts(params: {
       Object.entries(task.file_line_counts ?? {}),
     ),
   );
+  const sizeIndex = sizeIndexFromManifest(bundle.repo_manifest);
   const orderedTasks = orderTasksForPacketReview(dispatchTasks, {
     graphBundle: bundle.graph_bundle,
     lineIndex,
+    sizeIndex,
   });
   const packets = buildReviewPackets(orderedTasks, {
     graphBundle: bundle.graph_bundle,
     lineIndex,
+    sizeIndex,
   });
   const tasksById = new Map(orderedTasks.map((task) => [task.task_id, task]));
   const resultPathByTaskId = new Map(
