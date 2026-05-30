@@ -2,7 +2,8 @@
 
 **Date:** 2026-05-30
 **Scope this sprint:** the **final three phases** of the frozen plan — **Phase 4** (decorator routing + LLM edge-reasoning), **Phase 5 (Py/HTML/CSS)** (tree-sitter analyzers), and **Phase 7** (remediator: consume `audit-findings.json`, theme hints, outcome capture).
-**Status:** implemented and green on `master` (committed — see _Git state_). **The frozen build order `0 → 1A + .tmp → 2 → 6 → 5.0 + 5(TS/JS) → 3 → 4 → 5(Py/HTML/CSS) → 7` is complete, and the one carried-over follow-up — wiring 4B's producing turn — is now done** (see _Phase 4B producing turn — wired_ below). No open follow-ups remain.
+**Status:** implemented and green on `master` (committed — see _Git state_). **The frozen build order `0 → 1A + .tmp → 2 → 6 → 5.0 + 5(TS/JS) → 3 → 4 → 5(Py/HTML/CSS) → 7` is complete, and the one carried-over follow-up — wiring 4B's producing turn — is now done** (see _Phase 4B producing turn — wired_ below). No open follow-ups remain. **The entire refactor plan is complete.**
+**Re-verified 2026-05-30:** clean `git status`; `build` (shared → both dependents) and `check` clean in every workspace; all three suites green at the counts below (28 / 534 / 363). No code changes were needed — this pass only reconciled the two stale doc spots noted under _Git state_ / _How to verify_.
 
 ---
 
@@ -75,13 +76,13 @@ remediate-code 363 tests   pass   (vitest)
 - Token estimates are prefer-bytes / fall-back-to-lines (Phase 2).
 
 ## Git state
-This sprint on `master`: Phase 4 `1835645`, Phase 5(Py/HTML/CSS) `c33f018`, Phase 7 `8c60e4a`. Prior: Phase 3 `de41b68`, Phase 5.0+5(TS/JS) `9019ce3`, Phase 6 `5fc32b4`, Phase 2 `a1b3cce`, Phases 0/1A `23af936`.
+This sprint on `master`: Phase 4 `1835645`, Phase 5(Py/HTML/CSS) `c33f018`, Phase 7 `8c60e4a`, then docs `f98bf39` (mark refactor complete) / `3743b9b` (next-pickup note) and the **4B producing turn `f6f04fd`** — the latest landed work. Prior: Phase 3 `de41b68`, Phase 5.0+5(TS/JS) `9019ce3`, Phase 6 `5fc32b4`, Phase 2 `a1b3cce`, Phases 0/1A `23af936`.
 
 ## How to verify
 ```bash
 npm install
 npm run build -w @audit-tools/shared && npm run build   # build order matters
 npm test -w @audit-tools/shared                          # 28
-npm test -w packages/audit-code                          # 530
+npm test -w packages/audit-code                          # 534
 npm test -w packages/remediate-code                      # 363
 ```
