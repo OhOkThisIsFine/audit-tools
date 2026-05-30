@@ -96,6 +96,7 @@ function createDecisionBundle(overrides = {}) {
     graph_bundle: { graphs: { imports: [], calls: [] } },
     critical_flows: { flows: [], fallback_required: false },
     risk_register: { entries: [] },
+    analyzer_capability: { status: "omitted", analyzers: [] },
     design_assessment: { generated_at: "2026-04-22T00:00:00Z", findings: [], review_findings: [], reviewed: true },
     coverage_matrix: createCoverageMatrix(),
     flow_coverage: { flows: [] },
@@ -235,7 +236,12 @@ async function advanceFixtureToPlanning(root) {
 
   const structure = await advanceAudit(preparedBundle);
 
-  const designAssessment = await advanceAudit(structure.updated_bundle);
+  // Graph enrichment runs between structure and design assessment. With no root
+  // the optional analyzers are unavailable, so it writes an "omitted" marker and
+  // leaves the regex-floor graph unchanged.
+  const enrichment = await advanceAudit(structure.updated_bundle);
+
+  const designAssessment = await advanceAudit(enrichment.updated_bundle);
   const designReview = await advanceAudit(designAssessment.updated_bundle);
 
   const planning = await advanceAudit(designReview.updated_bundle, {

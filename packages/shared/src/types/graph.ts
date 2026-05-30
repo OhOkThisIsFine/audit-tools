@@ -21,4 +21,10 @@ export interface GraphBundle {
     routes?: RouteEdge[];
     [key: string]: unknown;
   };
+  /**
+   * Provenance for the optional graph-enrichment pass: the ids of the language
+   * analyzers whose edges were merged into this bundle (empty/absent when only
+   * the deterministic regex floor was used). See Phase 5 analyzer seam.
+   */
+  analyzers_used?: string[];
 }

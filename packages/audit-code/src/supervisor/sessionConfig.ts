@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import {
+  type AnalyzerSetting,
   type SessionConfig,
+  isRecord,
   readOptionalJsonFile,
   writeJsonFile,
   formatValidationIssues,
@@ -44,4 +46,30 @@ export async function loadSessionConfig(
   }
 
   return rawConfig as SessionConfig;
+}
+
+/**
+ * Merge per-analyzer resolution decisions into `session-config.json`,
+ * preserving any unknown fields, validating, and persisting the result. Used by
+ * the conversation-first `analyzer_install` step to durably record the host's
+ * `{ephemeral|permanent|skip}` choices under `analyzers.<id>`.
+ */
+export async function persistAnalyzerSettings(
+  artifactsDir: string,
+  settings: Record<string, AnalyzerSetting>,
+): Promise<SessionConfig> {
+  const configPath = getSessionConfigPath(artifactsDir);
+  const raw = (await readOptionalJsonFile<unknown>(configPath)) ?? {
+    ...DEFAULT_SESSION_CONFIG,
+  };
+  const base = isRecord(raw) ? raw : { ...DEFAULT_SESSION_CONFIG };
+  const current = isRecord(base.analyzers) ? base.analyzers : {};
+  const merged = { ...base, analyzers: { ...current, ...settings } };
+
+  const issues = validateSessionConfig(merged);
+  if (issues.length > 0) {
+    throw new Error(formatConfigValidationIssues(configPath, issues));
+  }
+  await writeJsonFile(configPath, merged);
+  return merged as SessionConfig;
 }

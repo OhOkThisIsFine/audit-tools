@@ -1,4 +1,5 @@
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
+import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import { renderCommand } from "./args.js";
 
 export function nextStepCommand(root: string, artifactsDir: string): string {
@@ -138,6 +139,51 @@ export function renderPresentReportPrompt(finalReportPath: string): string {
     "Present the completed audit with work blocks first.",
     "",
     "Do not run the orchestrator again for this completed audit.",
+    "",
+  ].join("\n");
+}
+
+export function renderAnalyzerInstallPrompt(params: {
+  unresolved: AnalyzerPlanEntry[];
+  decisionsPath: string;
+  continueCommand: string;
+}): string {
+  const analyzerLines = params.unresolved.flatMap((entry) => [
+    `- **${entry.id}** — needs \`${entry.dependency ?? entry.id}\`; ${entry.supportedCount} in-scope file(s) would be analyzed.`,
+  ]);
+  const exampleObject = `{ ${params.unresolved
+    .map((entry) => `"${entry.id}": "ephemeral"`)
+    .join(", ")} }`;
+
+  return [
+    "# audit-code analyzer install",
+    "",
+    "The deterministic regex graph is built. These optional language analyzers can",
+    "produce a richer graph (real module resolution, inheritance, and a call graph),",
+    "but their compiler dependency is not installed in the audited repo:",
+    "",
+    ...analyzerLines,
+    "",
+    "Choose how to resolve each one and write a JSON object of `{ \"<analyzer-id>\": <setting> }`",
+    "to the decisions path below. Valid settings:",
+    "",
+    "- `ephemeral` — install into a shared, version-keyed cache (never touches this project); compile once, reuse across audits.",
+    "- `permanent` — same as `ephemeral` but a durable opt-in recorded in session config.",
+    "- `skip` — do not run this analyzer; keep the regex floor.",
+    "",
+    "Default if you are unsure or cannot install: choose `skip`. The audit proceeds either way.",
+    "",
+    "## Decisions path",
+    "",
+    "Write your choices to:",
+    "",
+    `  ${params.decisionsPath}`,
+    "",
+    `Example: ${exampleObject}`,
+    "",
+    `Then run: ${params.continueCommand}`,
+    "",
+    "Read and follow only the new step prompt returned by that command.",
     "",
   ].join("\n");
 }

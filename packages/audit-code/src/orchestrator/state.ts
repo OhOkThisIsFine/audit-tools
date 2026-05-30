@@ -94,6 +94,17 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
 
   obligations.push(
     obligation(
+      "graph_enrichment_current",
+      staleOrSatisfied(
+        staleArtifacts,
+        ["analyzer_capability.json"],
+        has(bundle.analyzer_capability),
+      ),
+    ),
+  );
+
+  obligations.push(
+    obligation(
       "design_assessment_current",
       staleOrSatisfied(
         staleArtifacts,

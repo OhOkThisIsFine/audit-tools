@@ -1,8 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import {
+  ANALYZER_SETTINGS,
   PROVIDER_NAMES,
   SESSION_UI_MODES,
+  type AnalyzerSetting,
   type ProviderName,
   type SessionConfig,
   type SessionUiMode,
@@ -13,6 +15,7 @@ import {
 
 const VALID_PROVIDERS = new Set<ProviderName>(PROVIDER_NAMES);
 const VALID_UI_MODES = new Set<SessionUiMode>(SESSION_UI_MODES);
+const VALID_ANALYZER_SETTINGS = new Set<AnalyzerSetting>(ANALYZER_SETTINGS);
 
 function pushIssue(
   issues: ValidationIssue[],
@@ -306,6 +309,29 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
         "synthesis.narrative",
         "synthesis.narrative must be a boolean when provided.",
       );
+    }
+  }
+
+  if (value.analyzers !== undefined) {
+    if (!isRecord(value.analyzers)) {
+      pushIssue(
+        issues,
+        "analyzers",
+        "analyzers must be a JSON object mapping analyzer id to a setting.",
+      );
+    } else {
+      for (const [id, setting] of Object.entries(value.analyzers)) {
+        if (
+          typeof setting !== "string" ||
+          !VALID_ANALYZER_SETTINGS.has(setting as AnalyzerSetting)
+        ) {
+          pushIssue(
+            issues,
+            `analyzers.${id}`,
+            `analyzers.${id} must be one of: ${Array.from(VALID_ANALYZER_SETTINGS).join(", ")}.`,
+          );
+        }
+      }
     }
   }
 

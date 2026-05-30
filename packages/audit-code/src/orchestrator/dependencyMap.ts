@@ -19,6 +19,15 @@ export const ARTIFACT_DEPENDENCY_MAP: Record<string, string[]> = {
     "runtime_validation_report.json",
     "audit-report.md",
   ],
+  // The optional graph-enrichment pass layers analyzer edges onto graph_bundle
+  // and records provenance in analyzer_capability.json. A re-built (structure)
+  // graph re-stales the marker so enrichment re-runs. No cycle: the enrichment
+  // executor writes graph_bundle AND the marker in one advanceAudit call, and
+  // computeArtifactMetadata is dependency-first, so the marker records the
+  // post-enrichment graph_bundle revision (mirrors audit-findings → narrative).
+  "graph_bundle.json": [
+    "analyzer_capability.json",
+  ],
   "file_disposition.json": [
     "unit_manifest.json",
     "surface_manifest.json",

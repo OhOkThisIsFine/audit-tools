@@ -16,6 +16,7 @@ const PRIORITY: string[] = [
   "auto_fixes_applied",
   "syntax_resolved",
   "structure_artifacts",
+  "graph_enrichment_current",
   "design_assessment_current",
   "design_review_completed",
   "planning_artifacts",

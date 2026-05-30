@@ -18,6 +18,12 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
       "Build structure artifacts such as units, surfaces, graphs, flows, and risk.",
   },
   {
+    id: "graph_enrichment_executor",
+    obligation_ids: ["graph_enrichment_current"],
+    description:
+      "Layer optional language-analyzer edges onto the deterministic graph (regex floor preserved); record analyzer provenance.",
+  },
+  {
     id: "design_assessment_executor",
     obligation_ids: ["design_assessment_current"],
     description:

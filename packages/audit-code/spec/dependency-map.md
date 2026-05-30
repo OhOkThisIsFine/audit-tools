@@ -70,8 +70,21 @@ Downstream:
 
 Downstream:
 
+- `analyzer_capability.json`
 - `design_assessment.json`
 - future clustering or structural synthesis layers
+
+### `analyzer_capability.json`
+
+Marker recording the outcome of the optional Phase 5 graph-enrichment pass
+(`applied` / `omitted`, plus per-analyzer resolution + provenance). Tracks
+`graph_bundle.json` so a re-built (structure) graph re-stales the marker and the
+analyzer edges regenerate. Satisfies the `graph_enrichment_current` obligation.
+The merged analyzer edges themselves live in `graph_bundle.json` (with
+`analyzers_used[]` provenance). No cycle: the enrichment executor writes
+`graph_bundle.json` **and** the marker in one `advanceAudit` call, and metadata
+is computed dependency-first, so the marker records the post-enrichment graph
+revision (mirrors `audit-findings.json` → `synthesis-narrative.json`).
 
 ### `critical_flows.json`
 

@@ -111,7 +111,16 @@ test("audit-code wrapper supports repeated bounded invocations in single-step mo
       (await runWrapper(["--single-step"], { cwd: root })).stdout,
     );
     assert.equal(fourth.selected_executor, "structure_executor");
-    assert.equal(fourth.next_likely_step, "design_assessment_current");
+    assert.equal(fourth.next_likely_step, "graph_enrichment_current");
+
+    // Graph enrichment runs between structure and design assessment. In
+    // single-step mode it never prompts: optional analyzers resolve or fall
+    // back to the regex floor, then the chain proceeds.
+    const enrichment = JSON.parse(
+      (await runWrapper(["--single-step"], { cwd: root })).stdout,
+    );
+    assert.equal(enrichment.selected_executor, "graph_enrichment_executor");
+    assert.equal(enrichment.next_likely_step, "design_assessment_current");
 
     const fifth = JSON.parse(
       (await runWrapper(["--single-step"], { cwd: root })).stdout,
