@@ -9,6 +9,8 @@ import {
   readOptionalJsonFile,
   writeJsonFile,
   readJsonFile,
+  detectRepoConventions,
+  formatRepoConventions,
   type SessionConfig,
 } from "@audit-tools/shared";
 import { resolveWorkerTaskMaxRetries } from "../types/workerSession.js";
@@ -316,8 +318,15 @@ async function runRefactorWithRetry(
   );
   let lastTestOutput = "";
 
+  // Phase 7A: hand the implementing worker the repo's house style so its edits
+  // match the surrounding code (parity with the document phase).
+  const conventions = formatRepoConventions(detectRepoConventions(options.root));
+
   for (let retries = 0; retries < effectiveMaxRetries; retries++) {
     let prompt = `Refactor the code to fix the following finding:\nID: ${findingId}\nSpec: ${JSON.stringify(itemSpec, null, 2)}`;
+    if (conventions) {
+      prompt += `\n\n${conventions}`;
+    }
     if (retries > 0) {
       prompt += `\n\nPREVIOUS ATTEMPT FAILED TESTS:\n${lastTestOutput}\nPlease fix the code so the tests pass.`;
     }

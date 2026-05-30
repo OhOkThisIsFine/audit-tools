@@ -1396,7 +1396,7 @@ Then run:
   if (state.status === "closing") {
     const closeStart = Date.now();
     runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "close" });
-    const closed = await runClosePhase(state, { root, artifactsDir });
+    const closed = await runClosePhase(state, { root, artifactsDir }, runLogger);
     runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "close", duration_ms: Date.now() - closeStart });
     if (closed.status !== "complete") {
       await store.saveState(closed);
