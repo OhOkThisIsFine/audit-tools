@@ -40,6 +40,12 @@ import { deriveAuditState } from "./orchestrator/state.js";
 import { advanceAudit, type AdvanceAuditResult } from "./orchestrator/advance.js";
 import { checkFileIntegrity } from "./orchestrator/fileIntegrity.js";
 import { decideNextStep } from "./orchestrator/nextStep.js";
+import {
+  collectLowConfidenceEdges,
+  buildEdgeReasoningPrompt,
+  edgeReasoningContentHash,
+  type EdgeReasoningResults,
+} from "./orchestrator/edgeReasoning.js";
 import { renderDesignReviewPrompt } from "./orchestrator/designReviewPrompt.js";
 import { renderSynthesisNarrativePrompt } from "./reporting/synthesisNarrativePrompt.js";
 import {
@@ -82,7 +88,7 @@ import {
 } from "./orchestrator/reviewPackets.js";
 import type { AuditResult, AuditTask, Finding, RepoManifest } from "./types.js";
 import type { AuditState } from "./types/auditState.js";
-import type { AnalyzerSetting, SessionConfig, StepStatus, SynthesisNarrative } from "@audit-tools/shared";
+import type { AnalyzerSetting, GraphEdge, SessionConfig, StepStatus, SynthesisNarrative } from "@audit-tools/shared";
 import type { RuntimeValidationReport } from "./types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "./types/externalAnalyzer.js";
 import type { WorkerTask } from "./types/workerSession.js";
@@ -179,6 +185,8 @@ import {
   renderSingleTaskFallbackStepPrompt,
   renderPresentReportPrompt,
   renderAnalyzerInstallPrompt,
+  renderEdgeReasoningStepPrompt,
+  renderEdgeReasoningDispatchPrompt,
   renderBlockedStepPrompt,
 } from "./cli/prompts.js";
 import {
@@ -611,6 +619,7 @@ async function runAuditStep(options: {
   runtimeUpdatesPath?: string;
   externalAnalyzerPath?: string;
   narrativeResultsPath?: string;
+  edgeReasoningResultsPath?: string;
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
   since?: string;
@@ -662,6 +671,9 @@ async function runAuditStep(options: {
   const narrativeResults = options.narrativeResultsPath
     ? await readJsonFile<SynthesisNarrative>(options.narrativeResultsPath)
     : undefined;
+  const edgeReasoningResults = options.edgeReasoningResultsPath
+    ? await readJsonFile<EdgeReasoningResults>(options.edgeReasoningResultsPath)
+    : undefined;
 
   const result = await advanceAudit(bundle, {
     root: options.root,
@@ -671,6 +683,7 @@ async function runAuditStep(options: {
     runtimeValidationUpdates,
     externalAnalyzerResults,
     narrativeResults,
+    edgeReasoningResults,
     analyzers: options.analyzers,
     graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
     since: options.since,
@@ -981,6 +994,12 @@ async function runDeterministicForNextStep(params: {
       unresolved: AnalyzerPlanEntry[];
     }
   | {
+      kind: "edge_reasoning";
+      state: AuditState;
+      bundle: ArtifactBundle;
+      candidates: GraphEdge[];
+    }
+  | {
       kind: "synthesis_narrative";
       state: AuditState;
       bundle: ArtifactBundle;
@@ -1101,8 +1120,50 @@ async function runDeterministicForNextStep(params: {
           unresolved,
         };
       }
-      // No undecided installs: fall through to run the executor below
-      // (it installs for ephemeral/permanent, uses repo/cache, skips the rest).
+
+      // Phase 4B — optional edge-reasoning producing turn. Once analyzer installs
+      // are resolved, if the flag is on and the floor carries low-confidence
+      // (< 0.65) edges, emit one bounded host turn (subagent dispatch or a single
+      // host step) to produce reason rewrites, then re-run. The enrichment
+      // executor applies the host-supplied rewrites in the SAME advanceAudit call
+      // that merges analyzer edges and writes analyzer_capability, so graph_bundle
+      // and its marker stay revision-consistent (no staleness loop). Flag off or
+      // no candidates → fall through and run the executor with no rewrites.
+      if (params.graphLlmEdgeReasoning === true && bundle.graph_bundle) {
+        const candidates = collectLowConfidenceEdges(bundle.graph_bundle);
+        if (candidates.length > 0) {
+          const edgeReasoningResultsPath = join(
+            params.artifactsDir,
+            "incoming",
+            "edge-reasoning.json",
+          );
+          let edgeReasoningResults: EdgeReasoningResults | undefined;
+          try {
+            edgeReasoningResults = await readJsonFile<EdgeReasoningResults>(
+              edgeReasoningResultsPath,
+            );
+          } catch (error) {
+            if (!isFileMissingError(error)) throw error;
+          }
+          if (edgeReasoningResults) {
+            await runAuditStep({
+              root: params.root,
+              artifactsDir: params.artifactsDir,
+              analyzers,
+              graphLlmEdgeReasoning: true,
+              edgeReasoningResultsPath,
+              since: params.since,
+              opentoken: params.opentoken,
+            });
+            await unlink(edgeReasoningResultsPath).catch(() => {});
+            continue;
+          }
+          return { kind: "edge_reasoning", state, bundle, candidates };
+        }
+      }
+      // No undecided installs (and no pending edge reasoning): fall through to run
+      // the executor below (it installs for ephemeral/permanent, uses repo/cache,
+      // skips the rest).
     }
 
     if (decision.selected_executor === "design_review") {
@@ -1427,6 +1488,85 @@ async function cmdNextStep(argv: string[]): Promise<void> {
         decisionsPath,
         continueCommand,
       }),
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "edge_reasoning") {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const edgeReasoningResultsPath = join(
+      artifactsDir,
+      "incoming",
+      "edge-reasoning.json",
+    );
+    const continueCommand = nextStepCommand(root, artifactsDir);
+    const basePrompt = buildEdgeReasoningPrompt(result.candidates);
+    const contentHash = edgeReasoningContentHash(result.candidates);
+
+    if (hostCanDispatch) {
+      // Dispatch path: isolate the (potentially large) edge-list prompt in a file
+      // and have the host fan it out to one subagent, mirroring the packet review
+      // dispatch contract. The subagent writes the rewrites file; next-step applies.
+      const edgeReasoningPromptPath = join(
+        artifactsDir,
+        "incoming",
+        "edge-reasoning-prompt.md",
+      );
+      await writeFile(edgeReasoningPromptPath, basePrompt, "utf8");
+      const step = await writeCurrentStep({
+        artifactsDir,
+        stepKind: "edge_reasoning_dispatch",
+        status: "ready",
+        runId: null,
+        allowedCommands: [continueCommand],
+        stopCondition:
+          "Dispatch one subagent to write the edge-reasoning rewrites, then run next-step.",
+        repoRoot: root,
+        artifactPaths: {
+          edge_reasoning_prompt: edgeReasoningPromptPath,
+          edge_reasoning_results: edgeReasoningResultsPath,
+        },
+        prompt: renderEdgeReasoningDispatchPrompt({
+          promptPath: edgeReasoningPromptPath,
+          resultsPath: edgeReasoningResultsPath,
+          continueCommand,
+          contentHash,
+          candidateCount: result.candidates.length,
+        }),
+        access: {
+          read_paths: [edgeReasoningPromptPath],
+          write_paths: [edgeReasoningResultsPath],
+        },
+      });
+      console.log(JSON.stringify(step, null, 2));
+      return;
+    }
+
+    // One-step fallback (no callable subagent facility): the host produces the
+    // rewrites itself in a single bounded turn, mirroring the narrative step.
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "edge_reasoning",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Write the edge-reasoning rewrites to the results path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        edge_reasoning_results: edgeReasoningResultsPath,
+      },
+      prompt: renderEdgeReasoningStepPrompt({
+        basePrompt,
+        resultsPath: edgeReasoningResultsPath,
+        continueCommand,
+        contentHash,
+      }),
+      access: {
+        read_paths: [],
+        write_paths: [edgeReasoningResultsPath],
+      },
     });
     console.log(JSON.stringify(step, null, 2));
     return;

@@ -11,6 +11,8 @@ export type StepKind =
   | "single_task_fallback"
   | "design_review"
   | "analyzer_install"
+  | "edge_reasoning"
+  | "edge_reasoning_dispatch"
   | "synthesis_narrative"
   | "present_report"
   | "blocked";
