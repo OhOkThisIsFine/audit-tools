@@ -695,7 +695,7 @@ async function main() {
     assert.equal(completed.audit_state.status, "complete");
     assert.equal(completed.progress_made, true);
     assert.equal(completed.next_likely_step, null);
-    assert.equal(completed.selected_executor, "synthesis_executor");
+    assert.equal(completed.selected_executor, "synthesis_narrative_executor");
     assert.equal(completed.handoff.status, "complete");
     assert.equal(
       await readFile(join(root, "audit-report.md"), "utf8").then((content) => /# Audit Report/.test(content)),
