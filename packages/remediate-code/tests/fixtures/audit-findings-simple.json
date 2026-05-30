@@ -1,0 +1,57 @@
+{
+  "contract_version": "audit-findings/v1alpha1",
+  "summary": {
+    "finding_count": 2,
+    "work_block_count": 2,
+    "severity_breakdown": { "high": 1, "medium": 1 },
+    "audited_file_count": 2,
+    "excluded_file_count": 0,
+    "runtime_validation_status_breakdown": {}
+  },
+  "findings": [
+    {
+      "id": "F-001",
+      "title": "Unvalidated user input in login handler",
+      "category": "General",
+      "severity": "high",
+      "confidence": "high",
+      "lens": "security",
+      "summary": "The login route passes user-supplied email directly to the query.",
+      "affected_files": [{ "path": "src/auth/login.ts" }],
+      "evidence": [
+        "Line 42: db.query(\"SELECT * FROM users WHERE email = \" + req.body.email)"
+      ]
+    },
+    {
+      "id": "F-002",
+      "title": "Missing rate limiting on password reset",
+      "category": "General",
+      "severity": "medium",
+      "confidence": "medium",
+      "lens": "security",
+      "summary": "The password reset endpoint has no rate limiting.",
+      "affected_files": [{ "path": "src/auth/reset.ts" }],
+      "evidence": ["No rate-limit middleware applied in src/auth/reset.ts"]
+    }
+  ],
+  "work_blocks": [
+    {
+      "id": "B-001",
+      "finding_ids": ["F-001"],
+      "unit_ids": [],
+      "owned_files": ["src/auth/login.ts"],
+      "max_severity": "high",
+      "rationale": "Isolated security finding in the login handler.",
+      "depends_on": []
+    },
+    {
+      "id": "B-002",
+      "finding_ids": ["F-002"],
+      "unit_ids": [],
+      "owned_files": ["src/auth/reset.ts"],
+      "max_severity": "medium",
+      "rationale": "Isolated security finding in password reset.",
+      "depends_on": []
+    }
+  ]
+}

@@ -5,10 +5,71 @@ import { runPlanPhase } from "../src/phases/plan.js";
 import { validateRemediationPlan } from "../src/validation/remediationState.js";
 
 const TEST_DIR = join(__dirname, ".test-plan-artifacts");
-const FIXTURE = join(__dirname, "fixtures", "audit-report-simple.md");
+const FIXTURE = join(__dirname, "fixtures", "audit-findings-simple.json");
 
 const baseState = { status: "pending" as const };
 const baseOptions = { root: TEST_DIR, artifactsDir: TEST_DIR };
+
+interface FindingOpts {
+  severity?: string;
+  confidence?: string;
+  lens?: string;
+  summary?: string;
+  files?: string[];
+  evidence?: string[];
+}
+
+function mkFinding(id: string, title: string, opts: FindingOpts = {}) {
+  return {
+    id,
+    title,
+    category: "General",
+    severity: opts.severity ?? "low",
+    confidence: opts.confidence ?? "low",
+    lens: opts.lens ?? "correctness",
+    summary: opts.summary ?? `${title}.`,
+    affected_files: (opts.files ?? []).map((path) => ({ path })),
+    evidence: opts.evidence ?? ["Evidence."],
+  };
+}
+
+function mkBlock(id: string, findingIds: string[], dependsOn: string[] = []) {
+  return {
+    id,
+    finding_ids: findingIds,
+    unit_ids: [],
+    owned_files: [],
+    max_severity: "low",
+    rationale: "",
+    depends_on: dependsOn,
+  };
+}
+
+function makeReport(findings: unknown[], workBlocks: unknown[] = []) {
+  return {
+    contract_version: "audit-findings/v1alpha1",
+    summary: {
+      finding_count: findings.length,
+      work_block_count: workBlocks.length,
+      severity_breakdown: {},
+      audited_file_count: 0,
+      excluded_file_count: 0,
+      runtime_validation_status_breakdown: {},
+    },
+    findings,
+    work_blocks: workBlocks,
+  };
+}
+
+async function writeReport(
+  name: string,
+  findings: unknown[],
+  workBlocks: unknown[] = [],
+): Promise<string> {
+  const path = join(TEST_DIR, name);
+  await writeFile(path, JSON.stringify(makeReport(findings, workBlocks)), "utf8");
+  return path;
+}
 
 // Windows can hold a handle on a directory briefly after spawnSync returns,
 // causing EBUSY when rm() runs immediately in afterEach.
@@ -24,7 +85,7 @@ async function rmWithRetry(path: string, retries = 20): Promise<void> {
   }
 }
 
-describe("runPlanPhase — audit-report.md parse path", () => {
+describe("runPlanPhase — audit-findings.json consume path", () => {
   beforeEach(async () => {
     await rmWithRetry(TEST_DIR);
     await mkdir(TEST_DIR, { recursive: true });
@@ -46,7 +107,7 @@ describe("runPlanPhase — audit-report.md parse path", () => {
     expect(errors).toHaveLength(0);
   });
 
-  it("parses both findings from the fixture", async () => {
+  it("consumes both findings from the fixture", async () => {
     const state = await runPlanPhase(baseState, {
       ...baseOptions,
       input: FIXTURE,
@@ -58,7 +119,7 @@ describe("runPlanPhase — audit-report.md parse path", () => {
     expect(ids).toContain("F-002");
   });
 
-  it("parses finding titles correctly", async () => {
+  it("preserves finding fields verbatim", async () => {
     const state = await runPlanPhase(baseState, {
       ...baseOptions,
       input: FIXTURE,
@@ -74,7 +135,7 @@ describe("runPlanPhase — audit-report.md parse path", () => {
     expect(f2.severity).toBe("medium");
   });
 
-  it("parses affected files", async () => {
+  it("preserves affected files", async () => {
     const state = await runPlanPhase(baseState, {
       ...baseOptions,
       input: FIXTURE,
@@ -85,7 +146,7 @@ describe("runPlanPhase — audit-report.md parse path", () => {
     expect(f1.affected_files[0].path).toBe("src/auth/login.ts");
   });
 
-  it("parses work blocks from the report", async () => {
+  it("derives blocks from the report work_blocks", async () => {
     const state = await runPlanPhase(baseState, {
       ...baseOptions,
       input: FIXTURE,
@@ -127,24 +188,50 @@ describe("runPlanPhase — audit-report.md parse path", () => {
     });
   });
 
-  it("throws when input path does not exist", async () => {
-    await expect(
-      runPlanPhase(baseState, {
-        ...baseOptions,
-        input: join(TEST_DIR, "nonexistent.md"),
-      }),
-    ).rejects.toThrow();
-  });
-
-  it("falls back to file_overlap block derivation when the report has no block entries", async () => {
-    const minimalReport = `# Audit Report\n\n## Work Blocks\n\nNo remediation work blocks were generated.\n\n## Findings\n\n### F-003 — Test finding\n- Severity: low\n- Confidence: low\n- Lens: correctness\n- Summary: Test.\n- Files: src/foo.ts\n- Evidence:\n  - Line 1: test\n\n## Scope and Coverage\n...\n`;
-    const reportPath = join(TEST_DIR, "minimal-report.md");
-    await writeFile(reportPath, minimalReport, "utf8");
+  it("carries synthesis themes onto the plan", async () => {
+    const reportPath = join(TEST_DIR, "themed.json");
+    const report = makeReport(
+      [mkFinding("F-009", "Themed finding", { files: ["src/x.ts"] })],
+      [mkBlock("B-001", ["F-009"])],
+    ) as Record<string, unknown>;
+    report.themes = [
+      {
+        theme_id: "T-1",
+        title: "Validation gaps",
+        root_cause: "No boundary validation.",
+        finding_ids: ["F-009"],
+        suggested_fix_pattern: "Validate at the entry point.",
+      },
+    ];
+    await writeFile(reportPath, JSON.stringify(report), "utf8");
 
     const state = await runPlanPhase(baseState, {
       ...baseOptions,
       input: reportPath,
-    }, { enumerateTestFiles: () => [] });
+    });
+    expect(state.plan!.themes).toHaveLength(1);
+    expect(state.plan!.themes![0].theme_id).toBe("T-1");
+  });
+
+  it("throws when input path does not exist", async () => {
+    await expect(
+      runPlanPhase(baseState, {
+        ...baseOptions,
+        input: join(TEST_DIR, "nonexistent.json"),
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("falls back to file_overlap block derivation when the report has no work_blocks", async () => {
+    const reportPath = await writeReport("minimal.json", [
+      mkFinding("F-003", "Test finding", { files: ["src/foo.ts"] }),
+    ]);
+
+    const state = await runPlanPhase(
+      baseState,
+      { ...baseOptions, input: reportPath },
+      { enumerateTestFiles: () => [] },
+    );
 
     expect(state.plan!.blocks.length).toBeGreaterThan(0);
     const allItems = state.plan!.blocks.flatMap((b) => b.items);
@@ -152,21 +239,24 @@ describe("runPlanPhase — audit-report.md parse path", () => {
   });
 
   it("uses test_graph grouping when test coverage overlaps", async () => {
-    const reportPath = join(TEST_DIR, "test-graph-report.md");
-    await writeFile(
-      reportPath,
-      `# Audit Report\n\n## Work Blocks\n\nNo remediation work blocks were generated.\n\n## Findings\n\n### F-101 — First test finding\n- Severity: low\n- Confidence: high\n- Lens: tests\n- Summary: First.\n- Files: src/shared.ts\n- Evidence:\n  - Evidence 1\n\n### F-102 — Second test finding\n- Severity: low\n- Confidence: high\n- Lens: tests\n- Summary: Second.\n- Files: lib/shared.ts\n- Evidence:\n  - Evidence 2\n\n## Scope and Coverage\n...\n`,
-      "utf8",
-    );
+    const reportPath = await writeReport("test-graph.json", [
+      mkFinding("F-101", "First test finding", {
+        lens: "tests",
+        confidence: "high",
+        files: ["src/shared.ts"],
+      }),
+      mkFinding("F-102", "Second test finding", {
+        lens: "tests",
+        confidence: "high",
+        files: ["lib/shared.ts"],
+      }),
+    ]);
 
     const state = await runPlanPhase(
       baseState,
       { ...baseOptions, input: reportPath },
       {
-        enumerateTestFiles: () => [
-          "tests/shared.ts",
-          "tests/other.ts",
-        ],
+        enumerateTestFiles: () => ["tests/shared.ts", "tests/other.ts"],
       },
     );
 
@@ -176,12 +266,18 @@ describe("runPlanPhase — audit-report.md parse path", () => {
   });
 
   it("uses git_cocommit grouping after test_graph produces no useful grouping", async () => {
-    const reportPath = join(TEST_DIR, "git-report.md");
-    await writeFile(
-      reportPath,
-      `# Audit Report\n\n## Work Blocks\n\nNo remediation work blocks were generated.\n\n## Findings\n\n### F-201 — First git finding\n- Severity: low\n- Confidence: high\n- Lens: tests\n- Summary: First.\n- Files: src/a.ts\n- Evidence:\n  - Evidence 1\n\n### F-202 — Second git finding\n- Severity: low\n- Confidence: high\n- Lens: tests\n- Summary: Second.\n- Files: src/b.ts\n- Evidence:\n  - Evidence 2\n\n## Scope and Coverage\n...\n`,
-      "utf8",
-    );
+    const reportPath = await writeReport("git.json", [
+      mkFinding("F-201", "First git finding", {
+        lens: "tests",
+        confidence: "high",
+        files: ["src/a.ts"],
+      }),
+      mkFinding("F-202", "Second git finding", {
+        lens: "tests",
+        confidence: "high",
+        files: ["src/b.ts"],
+      }),
+    ]);
 
     const state = await runPlanPhase(
       baseState,
@@ -198,12 +294,18 @@ describe("runPlanPhase — audit-report.md parse path", () => {
   });
 
   it("records git_cocommit strategy when test_graph falls back without grouping", async () => {
-    const reportPath = join(TEST_DIR, "git-no-group-report.md");
-    await writeFile(
-      reportPath,
-      `# Audit Report\n\n## Work Blocks\n\nNo remediation work blocks were generated.\n\n## Findings\n\n### F-301 — First isolated finding\n- Severity: low\n- Confidence: high\n- Lens: tests\n- Summary: First.\n- Files: src/alpha.ts\n- Evidence:\n  - Evidence 1\n\n### F-302 — Second isolated finding\n- Severity: low\n- Confidence: high\n- Lens: tests\n- Summary: Second.\n- Files: src/beta.ts\n- Evidence:\n  - Evidence 2\n\n## Scope and Coverage\n...\n`,
-      "utf8",
-    );
+    const reportPath = await writeReport("git-no-group.json", [
+      mkFinding("F-301", "First isolated finding", {
+        lens: "tests",
+        confidence: "high",
+        files: ["src/alpha.ts"],
+      }),
+      mkFinding("F-302", "Second isolated finding", {
+        lens: "tests",
+        confidence: "high",
+        files: ["src/beta.ts"],
+      }),
+    ]);
 
     const state = await runPlanPhase(
       baseState,
@@ -220,9 +322,24 @@ describe("runPlanPhase — audit-report.md parse path", () => {
 
   it("splits a block by byte-based context budget (Phase 2 size_bytes)", async () => {
     // One work block holding two findings on two separate files.
-    const reportPath = join(TEST_DIR, "byte-split-report.md");
-    const report = `# Audit Report\n\n## Work Blocks\n\n### B-001\n- Findings: F-401, F-402\n- Depends on: none\n\n## Findings\n\n### F-401 — Module A issue\n- Severity: high\n- Confidence: high\n- Lens: security\n- Summary: Problem in module A.\n- Files: src/a.ts\n- Evidence:\n  - Evidence A\n\n### F-402 — Module B issue\n- Severity: medium\n- Confidence: high\n- Lens: reliability\n- Summary: Problem in module B.\n- Files: src/b.ts\n- Evidence:\n  - Evidence B\n\n## Scope and Coverage\n...\n`;
-    await writeFile(reportPath, report, "utf8");
+    const reportPath = await writeReport(
+      "byte-split.json",
+      [
+        mkFinding("F-401", "Module A issue", {
+          severity: "high",
+          confidence: "high",
+          lens: "security",
+          files: ["src/a.ts"],
+        }),
+        mkFinding("F-402", "Module B issue", {
+          severity: "medium",
+          confidence: "high",
+          lens: "reliability",
+          files: ["src/b.ts"],
+        }),
+      ],
+      [mkBlock("B-001", ["F-401", "F-402"])],
+    );
     await mkdir(join(TEST_DIR, "src"), { recursive: true });
 
     // Budget fits both groups' base+overhead (~3000 tokens) but not the byte
@@ -239,7 +356,10 @@ describe("runPlanPhase — audit-report.md parse path", () => {
     await writeFile(join(TEST_DIR, "src", "a.ts"), big, "utf8");
     await writeFile(join(TEST_DIR, "src", "b.ts"), big, "utf8");
 
-    const split = await runPlanPhase(baseState, { ...baseOptions, input: reportPath });
+    const split = await runPlanPhase(baseState, {
+      ...baseOptions,
+      input: reportPath,
+    });
     expect(split.plan!.blocks.length).toBe(2);
     const items = split.plan!.blocks.flatMap((b) => b.items).sort();
     expect(items).toEqual(["F-401", "F-402"]);
@@ -248,7 +368,10 @@ describe("runPlanPhase — audit-report.md parse path", () => {
     // by file size, not by a degenerate budget.
     await writeFile(join(TEST_DIR, "src", "a.ts"), "", "utf8");
     await writeFile(join(TEST_DIR, "src", "b.ts"), "", "utf8");
-    const whole = await runPlanPhase(baseState, { ...baseOptions, input: reportPath });
+    const whole = await runPlanPhase(baseState, {
+      ...baseOptions,
+      input: reportPath,
+    });
     expect(whole.plan!.blocks.length).toBe(1);
   });
 });

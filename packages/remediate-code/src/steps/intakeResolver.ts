@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { StateStore } from "../state/store.js";
 import type { RemediationState } from "../state/store.js";
 import { writeJsonFile } from "@audit-tools/shared";
-import { runPlanPhase, isAuditorAuditReport } from "../phases/plan.js";
+import { runPlanPhase, isAuditFindingsReport } from "../phases/plan.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
 import {
@@ -94,12 +94,18 @@ export async function resolveIntakeStep(params: {
     const singleInput = inputResolution.existing[0];
     const shouldTryAuditFastPath =
       inputResolution.existing.length === 1 &&
-      singleInput.toLowerCase().endsWith(".md") &&
+      singleInput.toLowerCase().endsWith(".json") &&
       !intake.conversationStart;
 
     if (shouldTryAuditFastPath) {
       const content = await readFile(singleInput, "utf8");
-      if (isAuditorAuditReport(content)) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        parsed = undefined;
+      }
+      if (isAuditFindingsReport(parsed)) {
         const state = await runPlanPhase(
           { status: "pending" },
           { root, artifactsDir, input: singleInput },

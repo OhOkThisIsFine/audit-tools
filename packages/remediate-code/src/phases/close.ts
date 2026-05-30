@@ -1,11 +1,89 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../orchestrator.js";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { writeTextFile, writeJsonFile, stagedAndUntracked } from "@audit-tools/shared";
+import type {
+  RemediationOutcome,
+  RemediationOutcomeStatus,
+  RemediationOutcomesReport,
+} from "@audit-tools/shared";
 import { runCommand, runShellCommand } from "../utils/commands.js";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import type { ClosingAction } from "../state/closingActions.js";
+
+const OUTCOME_BY_STATUS: Record<string, RemediationOutcomeStatus> = {
+  resolved: "resolved",
+  resolved_no_change: "verified_no_change",
+  deemed_inappropriate: "inappropriate",
+  ignored: "ignored",
+  blocked: "blocked",
+};
+
+const OUTCOME_KEYS: RemediationOutcomeStatus[] = [
+  "resolved",
+  "verified_no_change",
+  "inappropriate",
+  "ignored",
+  "blocked",
+];
+
+/**
+ * Phase 7B — capture one outcome per finding (lens, affected file types, how it
+ * landed, rework count, closing status). Surface only: the auditor does not
+ * consume this automatically.
+ */
+export function buildRemediationOutcomesReport(
+  state: RemediationState,
+  closingStatus: string,
+): RemediationOutcomesReport {
+  const findingsById = new Map(
+    (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
+  );
+  const outcomes: RemediationOutcome[] = [];
+  for (const item of Object.values(state.items ?? {})) {
+    const outcome = OUTCOME_BY_STATUS[item.status];
+    if (!outcome) continue; // skip non-terminal items (should not occur at close)
+    const finding = findingsById.get(item.finding_id);
+    const fileExts = [
+      ...new Set(
+        (finding?.affected_files ?? [])
+          .map((file) => extname(file.path).toLowerCase())
+          .filter((ext) => ext.length > 0),
+      ),
+    ].sort();
+    outcomes.push({
+      finding_id: item.finding_id,
+      lens: finding?.lens ?? "unknown",
+      file_exts: fileExts,
+      outcome,
+      rework_count: item.rework_count ?? 0,
+      closing_status: closingStatus,
+    });
+  }
+  outcomes.sort((a, b) => a.finding_id.localeCompare(b.finding_id));
+
+  const byOutcome = Object.fromEntries(
+    OUTCOME_KEYS.map((key) => [key, 0]),
+  ) as Record<RemediationOutcomeStatus, number>;
+  const byLens: Record<
+    string,
+    Partial<Record<RemediationOutcomeStatus, number>>
+  > = {};
+  for (const entry of outcomes) {
+    byOutcome[entry.outcome] += 1;
+    const lensBucket = (byLens[entry.lens] ??= {});
+    lensBucket[entry.outcome] = (lensBucket[entry.outcome] ?? 0) + 1;
+  }
+
+  return {
+    contract_version: "remediate-code-outcomes/v1alpha1",
+    total: outcomes.length,
+    by_outcome: byOutcome,
+    by_lens: byLens,
+    outcomes,
+  };
+}
 
 interface ClosingCommandResult {
   command: string[];
@@ -309,6 +387,26 @@ export async function runClosePhase(
     reportContent += `\n## End-to-End Tests\n\nResult: ${e2ePassed ? "passed" : "failed"}\n`;
   }
 
+  // Phase 7B: capture per-finding outcomes (surface only).
+  const outcomesReport = buildRemediationOutcomesReport(
+    state,
+    closingResult.status,
+  );
+  const o = outcomesReport.by_outcome;
+  reportContent += `\n## Remediation Outcomes\n\n`;
+  reportContent += `Of ${outcomesReport.total} finding(s): ${o.resolved} resolved, ${o.verified_no_change} verified already correct, ${o.inappropriate} deemed inappropriate, ${o.ignored} ignored, ${o.blocked} blocked.\n`;
+  const lensNames = Object.keys(outcomesReport.by_lens).sort();
+  if (lensNames.length > 0) {
+    reportContent += `\nBy lens:\n`;
+    for (const lens of lensNames) {
+      const counts = outcomesReport.by_lens[lens]!;
+      const parts = OUTCOME_KEYS.filter((key) => (counts[key] ?? 0) > 0).map(
+        (key) => `${key} ${counts[key]}`,
+      );
+      reportContent += `- ${lens}: ${parts.join(", ")}\n`;
+    }
+  }
+
   const jsonReport = {
     resolved: resolvedEntries,
     verified_no_change: verifiedNoChangeEntries,
@@ -326,6 +424,10 @@ export async function runClosePhase(
   await Promise.all([
     writeTextFile(join(options.root, "remediation-report.md"), reportContent),
     writeJsonFile(join(options.root, "remediation-report.json"), jsonReport),
+    writeJsonFile(
+      join(options.root, "remediation-outcomes.json"),
+      outcomesReport,
+    ),
   ]);
   console.log("Remediation report generated.");
 

@@ -10,6 +10,8 @@ import {
   writeJsonFile,
   readJsonFile,
   formatValidationIssues,
+  detectRepoConventions,
+  formatRepoConventions,
   type SessionConfig,
 } from "@audit-tools/shared";
 import { validateDocumentResponse } from "../validation/remediationState.js";
@@ -136,6 +138,11 @@ export async function runDocumentPhase(
     }
   }
 
+  // Detected once per run: house style the worker should match (Phase 7A).
+  const repoConventions = formatRepoConventions(
+    detectRepoConventions(options.root),
+  );
+
   for (const finding of state.plan.findings) {
     const item = state.items[finding.id];
     if (
@@ -150,6 +157,15 @@ export async function runDocumentPhase(
     }
 
     console.log(`Documenting finding ${finding.id}...`);
+
+    // Phase 7A: reuse the auditor's synthesis theme (no new LLM pass) to hand the
+    // worker the shared root-cause fix pattern when this finding carries one.
+    const theme = finding.theme_id
+      ? state.plan.themes?.find((t) => t.theme_id === finding.theme_id)
+      : undefined;
+    const themeHint = theme
+      ? `\nSYNTHESIS THEME (${theme.theme_id} — ${theme.title}):\nRoot cause: ${theme.root_cause}\nSuggested fix pattern: ${theme.suggested_fix_pattern}\nApply this shared pattern where it fits this finding.\n`
+      : "";
 
     const existingClarification = resolutionsMap.get(finding.id);
     const extraContext = existingClarification
@@ -174,7 +190,7 @@ Summary: ${finding.summary}
 Affected Files: ${finding.affected_files.map((f) => f.path).join(", ")}
 Evidence:
 ${(finding.evidence ?? []).map((e) => `- ${e}`).join("\n")}
-${extraContext}
+${extraContext}${themeHint}${repoConventions ? `\n${repoConventions}\n` : ""}
 If the finding is clear (or clarified by the context above), output a JSON object with type "item_spec" and the item_spec.
 If the finding is ambiguous, output a JSON object with type "clarification_request" and an array of clarifications.
 When requesting clarifications, you MUST use one of the following exact categories:
