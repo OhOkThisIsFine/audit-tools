@@ -15,6 +15,9 @@ import {
   writeTextFile,
   formatValidationIssues,
   isRecord,
+  detectRepoConventions,
+  formatRepoConventions,
+  type FindingTheme,
   type SessionConfig,
 } from "@audit-tools/shared";
 import {
@@ -159,7 +162,25 @@ export function buildImplementModelHint(
   return { tier: "standard", reasons: ["default_implement_block"] };
 }
 
-function findingPrompt(finding: Finding, resultPath: string): string {
+// Phase 7A: reuse the auditor's synthesis theme (no new LLM pass) to hand the
+// worker the shared root-cause fix pattern when this finding carries one.
+// Mirrors the wording used in the in-process phase (`phases/document.ts`).
+function themeHint(
+  finding: Finding,
+  themes: FindingTheme[] | undefined,
+): string {
+  if (!finding.theme_id) return "";
+  const theme = themes?.find((t) => t.theme_id === finding.theme_id);
+  if (!theme) return "";
+  return `\nSYNTHESIS THEME (${theme.theme_id} — ${theme.title}):\nRoot cause: ${theme.root_cause}\nSuggested fix pattern: ${theme.suggested_fix_pattern}\nApply this shared pattern where it fits this finding.\n`;
+}
+
+function findingPrompt(
+  finding: Finding,
+  resultPath: string,
+  conventions: string,
+  themeHintText: string,
+): string {
   return `
 # Document Remediation Item
 
@@ -178,7 +199,7 @@ You are documenting one remediation item. Use only the finding context below.
 ## Evidence
 
 ${(finding.evidence ?? []).map((item) => `- ${item}`).join("\n")}
-
+${themeHintText}${conventions ? `\n${conventions}\n` : ""}
 ## Output
 
 Write JSON to exactly:
@@ -241,6 +262,7 @@ function implementPrompt(
   block: RemediationBlock,
   state: RemediationState,
   resultPath: string,
+  conventions: string,
 ): string {
   const items = block.items.flatMap((findingId) => {
     const item = state.items?.[findingId];
@@ -276,7 +298,7 @@ ${items
 `,
   )
   .join("\n")}
-
+${conventions ? `\n${conventions}\n` : ""}
 ## Output
 
 After editing and verifying the block, write JSON to exactly:
@@ -332,6 +354,10 @@ export async function prepareDocumentDispatch(
   const dir = runDir(options.artifactsDir, runId, "document");
   await mkdir(dir, { recursive: true });
 
+  // Phase 7A: detect house style once per dispatch (filesystem scan) and inject
+  // "match the surrounding code" guidance into every worker prompt.
+  const conventions = formatRepoConventions(detectRepoConventions(options.root));
+
   const seenFindingIds = new Set<string>();
   const candidateFindings = state.plan.findings.filter((finding) => {
     const item = state.items?.[finding.id];
@@ -360,7 +386,15 @@ export async function prepareDocumentDispatch(
       continue;
     }
 
-    await writeTextFile(promptPath, findingPrompt(finding, resultPath));
+    await writeTextFile(
+      promptPath,
+      findingPrompt(
+        finding,
+        resultPath,
+        conventions,
+        themeHint(finding, state.plan.themes),
+      ),
+    );
     items.push({
       task_id: taskId,
       finding_id: finding.id,
@@ -509,6 +543,10 @@ export async function prepareImplementDispatch(
   const dir = runDir(options.artifactsDir, runId, "implement");
   await mkdir(dir, { recursive: true });
 
+  // Phase 7A: same house-style guidance as the document dispatch, so the
+  // implementing worker also matches the surrounding code.
+  const conventions = formatRepoConventions(detectRepoConventions(options.root));
+
   const seenBlockIds = new Set<string>();
   const candidateBlocks = state.plan.blocks.filter((block) => {
     if (onlyBlockId && block.block_id !== onlyBlockId) return false;
@@ -541,7 +579,10 @@ export async function prepareImplementDispatch(
       const finding = state.plan?.findings.find((f) => f.id === fid);
       return finding?.affected_files.map((f) => f.path) ?? [];
     });
-    await writeTextFile(promptPath, implementPrompt(block, state, resultPath));
+    await writeTextFile(
+      promptPath,
+      implementPrompt(block, state, resultPath, conventions),
+    );
     items.push({
       task_id: taskId,
       block_id: block.block_id,

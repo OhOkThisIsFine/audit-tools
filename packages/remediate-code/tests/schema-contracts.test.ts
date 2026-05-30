@@ -12,6 +12,7 @@ const EXPECTED_SCHEMAS = [
   "finding.schema.json",
   "item_spec.schema.json",
   "remediation_block.schema.json",
+  "remediation_outcomes.schema.json",
   "remediation_plan.schema.json",
   "remediation_report.schema.json",
   "test_spec.schema.json",
@@ -111,6 +112,39 @@ describe("JSON schema field-level consistency", () => {
       false,
     );
     expect(schema.properties.closing_result.additionalProperties).toBe(false);
+  });
+
+  it("remediation_outcomes schema matches the RemediationOutcomesReport contract", async () => {
+    const schema = JSON.parse(
+      await readFile(
+        join(SCHEMA_DIR, "remediation_outcomes.schema.json"),
+        "utf8",
+      ),
+    );
+    expect(schema.properties.contract_version.const).toBe(
+      "remediate-code-outcomes/v1alpha1",
+    );
+    expect(schema.required).toEqual(
+      expect.arrayContaining(["total", "by_outcome", "by_lens", "outcomes"]),
+    );
+    const outcome = schema.$defs.remediation_outcome;
+    expect(outcome.required).toEqual(
+      expect.arrayContaining([
+        "finding_id",
+        "lens",
+        "file_exts",
+        "outcome",
+        "rework_count",
+        "closing_status",
+      ]),
+    );
+    expect(outcome.properties.outcome.enum).toEqual([
+      "resolved",
+      "verified_no_change",
+      "inappropriate",
+      "ignored",
+      "blocked",
+    ]);
   });
 
   it("finding schema requires 'lens' field", async () => {

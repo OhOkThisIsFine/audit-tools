@@ -2,8 +2,8 @@
 
 **Date:** 2026-05-30
 **Scope this sprint:** the **final three phases** of the frozen plan — **Phase 4** (decorator routing + LLM edge-reasoning), **Phase 5 (Py/HTML/CSS)** (tree-sitter analyzers), and **Phase 7** (remediator: consume `audit-findings.json`, theme hints, outcome capture).
-**Status:** implemented and green on `master` (committed — see _Git state_). **The frozen build order `0 → 1A + .tmp → 2 → 6 → 5.0 + 5(TS/JS) → 3 → 4 → 5(Py/HTML/CSS) → 7` is complete, and the one carried-over follow-up — wiring 4B's producing turn — is now done** (see _Phase 4B producing turn — wired_ below). No open follow-ups remain. **The entire refactor plan is complete.**
-**Re-verified 2026-05-30:** clean `git status`; `build` (shared → both dependents) and `check` clean in every workspace; all three suites green at the counts below (28 / 534 / 363). No code changes were needed — this pass only reconciled the two stale doc spots noted under _Git state_ / _How to verify_.
+**Status:** implemented and green on `master` (committed — see _Git state_). The frozen build order `0 → 1A + .tmp → 2 → 6 → 5.0 + 5(TS/JS) → 3 → 4 → 5(Py/HTML/CSS) → 7` is complete and 4B's producing turn is wired (see _Phase 4B producing turn — wired_ below).
+**Correction (2026-05-30):** an earlier pass declared "the entire refactor plan is complete, no open follow-ups." A deeper audit against the plan found **three Phase 7 gaps the prior handoff had silently narrowed** — all now closed (see _Phase 7 gaps found & closed_ below). Lesson: "all tests green" only covered the code that existed; the gaps were untested features applied to a dead code path and an artifact/log that was never wired.
 
 ---
 
@@ -12,10 +12,31 @@
 ```
 shared          28 tests   pass   (node --test packages/shared/tests/*.test.mjs)
 audit-code     534 tests   pass   (node --test)   # +4 next-step edge-reasoning
-remediate-code 363 tests   pass   (vitest)
+remediate-code 371 tests   pass   (vitest)        # +8 Phase 7 gap-closure tests
 ```
 
 `npm run build` (shared → both dependents) and `npm run check` are clean in every workspace.
+
+---
+
+## Phase 7 gaps found & closed ✅  (this pass)
+
+A line-by-line re-audit of Phase 7 against the frozen plan turned up three deliverables the earlier handoff had quietly narrowed in its prose. All three are now implemented with tests.
+
+### Gap A — Phase 7A house-style + theme hints landed on a dead code path (the big one)
+Plan line 95: `detectRepoConventions` + theme hints go "into the document **and implement prompts**." The prior work added them **only** to `phases/document.ts` — but `phases/*` is reached solely through `runOrchestrator`, which is **exported yet never called anywhere in `src`** (test-only). The path users actually run — `next-step` → [dispatch.ts](packages/remediate-code/src/steps/dispatch.ts) `findingPrompt`/`implementPrompt` — injected **neither**. So Phase 7A's headline feature ("match the surrounding code" + theme reuse) was inert in production.
+- **Fix:** `prepareDocumentDispatch`/`prepareImplementDispatch` now compute `formatRepoConventions(detectRepoConventions(root))` once per dispatch and inject it into both worker prompts; `findingPrompt` also gets the synthesis theme hint (mirrors `phases/document.ts` wording exactly) for findings carrying a `theme_id`. The legacy in-process [implement.ts](packages/remediate-code/src/phases/implement.ts) refactor prompt gained conventions too, for parity (its sibling `document.ts` already had them).
+- **Test:** [dispatch-conventions.test.ts](packages/remediate-code/tests/dispatch-conventions.test.ts) — conventions block in both canonical prompts; theme hint present only for the themed finding.
+
+### Gap B — `remediation_outcomes.schema.json` was never written
+Plan line 110 lists `remediation-outcomes.json` as shipping with a `schemas/*.schema.json` like every other new artifact (`scope`, `analyzer_capability`, `audit_findings` all have theirs). It was missing, and it wasn't in the `EXPECTED_SCHEMAS` list either, so nothing flagged it.
+- **Fix:** added [remediation_outcomes.schema.json](packages/remediate-code/schemas/remediation_outcomes.schema.json) matching `RemediationOutcomesReport`/`RemediationOutcome`; added it to `EXPECTED_SCHEMAS` + a field-level contract check in [schema-contracts.test.ts](packages/remediate-code/tests/schema-contracts.test.ts).
+
+### Gap C — outcomes emitted no run-log line
+Plan line 96: `close.ts` emits `remediation-outcomes.json` "+ a run-log line each." It wrote the JSON and a report section but logged nothing.
+- **Fix:** `runClosePhase` takes an optional `RunLogger` (threaded from the `next-step` close call site; the legacy path omits it); emits one `kind:"outcome"` event per finding plus a `kind:"artifact_write"` summary line.
+- **Test:** [phase-close.test.ts](packages/remediate-code/tests/phase-close.test.ts) — one outcome line per finding + the artifact-write line; logger arg is optional.
+- **Caveat (pre-existing, not Phase 7):** the run-log lives in `.remediation-artifacts/` and `runClosePhase` deletes that dir as its final cleanup step, so these lines are observable while the run is live (a host tailing the log between steps) but are not a persisted artifact. The durable outcome record is `remediation-outcomes.json` (written to repo root). Redesigning run-log persistence was out of scope for finishing Phase 7.
 
 ---
 
@@ -55,8 +76,8 @@ remediate-code 363 tests   pass   (vitest)
 ## Phase 7 — remediator integration ✅  (`8c60e4a`)
 
 - **Input contract:** the remediator now consumes the auditor's canonical `audit-findings.json` directly (`parseAuditFindingsReport` / `isAuditFindingsReport` in [plan.ts](packages/remediate-code/src/phases/plan.ts)); **`parseAuditReport` / `isAuditorAuditReport` (the markdown parse path) are deleted.** The free-form LLM extraction path stays for non-auditor input. The next-step fast-path and [intakeResolver.ts](packages/remediate-code/src/steps/intakeResolver.ts) detect a `.json` findings report. Synthesis `themes[]` ride along on `RemediationPlan`.
-- **7A prompts:** shared `detectRepoConventions(root)` / `formatRepoConventions` ([repoConventions.ts](packages/shared/src/tooling/repoConventions.ts)) inject formatter/linter/test-framework/module-style + a sampled house-style snippet ("match the surrounding code") into the document worker prompt ([document.ts](packages/remediate-code/src/phases/document.ts)); when a finding carries `theme_id`, its `suggested_fix_pattern` is included too (reuses Phase 6 — no new LLM pass).
-- **7B outcomes:** shared `RemediationOutcome` ([remediationOutcome.ts](packages/shared/src/types/remediationOutcome.ts)); [close.ts](packages/remediate-code/src/phases/close.ts) emits `remediation-outcomes.json` (`finding_id, lens, file_exts[], outcome, rework_count, closing_status`) + a report section ("of N findings: X resolved, … by lens"). Capture/surface only — no auto-calibration. `rework_count` is tracked via triage retries.
+- **7A prompts:** shared `detectRepoConventions(root)` / `formatRepoConventions` ([repoConventions.ts](packages/shared/src/tooling/repoConventions.ts)) inject formatter/linter/test-framework/module-style + a sampled house-style snippet ("match the surrounding code"), plus the synthesis theme hint when a finding carries `theme_id` (reuses Phase 6 — no new LLM pass). **Now injected into the canonical `next-step` wave prompts** (`findingPrompt`/`implementPrompt` in [dispatch.ts](packages/remediate-code/src/steps/dispatch.ts)) **and** the in-process [document.ts](packages/remediate-code/src/phases/document.ts)/[implement.ts](packages/remediate-code/src/phases/implement.ts). ⚠️ Originally only `document.ts` got this; see _Phase 7 gaps found & closed → Gap A_ for why that path is dead.
+- **7B outcomes:** shared `RemediationOutcome` ([remediationOutcome.ts](packages/shared/src/types/remediationOutcome.ts)); [close.ts](packages/remediate-code/src/phases/close.ts) emits `remediation-outcomes.json` (`finding_id, lens, file_exts[], outcome, rework_count, closing_status`) — schema [remediation_outcomes.schema.json](packages/remediate-code/schemas/remediation_outcomes.schema.json) — a report section ("of N findings: X resolved, … by lens"), and a run-log line per outcome. Capture/surface only — no auto-calibration. `rework_count` is tracked via triage retries. ⚠️ The schema and run-log lines were missing originally; see _Gap B / Gap C_.
 - **Fixtures:** migrated to JSON (`audit-findings-simple.json`, `auditor-contract-audit-findings.json`); the generator now emits JSON and no longer needs a built auditor.
 - **Tests:** [phase-plan-parse.test.ts](packages/remediate-code/tests/phase-plan-parse.test.ts) (rewritten for the JSON contract), [phase-plan.test.ts](packages/remediate-code/tests/phase-plan.test.ts) (rewritten to JSON inputs), [remediation-outcomes.test.ts](packages/remediate-code/tests/remediation-outcomes.test.ts), [repoConventions.test.mjs](packages/shared/tests/repoConventions.test.mjs).
 
@@ -76,7 +97,7 @@ remediate-code 363 tests   pass   (vitest)
 - Token estimates are prefer-bytes / fall-back-to-lines (Phase 2).
 
 ## Git state
-This sprint on `master`: Phase 4 `1835645`, Phase 5(Py/HTML/CSS) `c33f018`, Phase 7 `8c60e4a`, then docs `f98bf39` (mark refactor complete) / `3743b9b` (next-pickup note) and the **4B producing turn `f6f04fd`** — the latest landed work. Prior: Phase 3 `de41b68`, Phase 5.0+5(TS/JS) `9019ce3`, Phase 6 `5fc32b4`, Phase 2 `a1b3cce`, Phases 0/1A `23af936`.
+Latest on `master`: **Phase 7 gap closure** (Gaps A/B/C above) + this handoff update — the most recent commit. Before that: doc reconcile `c871bc3`, the **4B producing turn `f6f04fd`**, docs `f98bf39`/`3743b9b`, Phase 7 `8c60e4a`, Phase 5(Py/HTML/CSS) `c33f018`, Phase 4 `1835645`. Prior: Phase 3 `de41b68`, Phase 5.0+5(TS/JS) `9019ce3`, Phase 6 `5fc32b4`, Phase 2 `a1b3cce`, Phases 0/1A `23af936`.
 
 ## How to verify
 ```bash
@@ -84,5 +105,5 @@ npm install
 npm run build -w @audit-tools/shared && npm run build   # build order matters
 npm test -w @audit-tools/shared                          # 28
 npm test -w packages/audit-code                          # 534
-npm test -w packages/remediate-code                      # 363
+npm test -w packages/remediate-code                      # 371
 ```

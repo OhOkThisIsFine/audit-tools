@@ -7,6 +7,7 @@ import type {
   RemediationOutcome,
   RemediationOutcomeStatus,
   RemediationOutcomesReport,
+  RunLogger,
 } from "@audit-tools/shared";
 import { runCommand, runShellCommand } from "../utils/commands.js";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
@@ -204,6 +205,7 @@ function executeClosingAction(
 export async function runClosePhase(
   state: RemediationState,
   options: OrchestratorOptions,
+  runLogger?: RunLogger,
 ): Promise<RemediationState> {
   console.log("Running Close Phase...");
 
@@ -392,6 +394,15 @@ export async function runClosePhase(
     state,
     closingResult.status,
   );
+  // One run-log line per outcome, plus a summary line for the artifact write.
+  for (const outcome of outcomesReport.outcomes) {
+    runLogger?.event({
+      phase: "close",
+      kind: "outcome",
+      obligation: "closing",
+      note: `${outcome.finding_id} [${outcome.lens}] → ${outcome.outcome} (rework ${outcome.rework_count})`,
+    });
+  }
   const o = outcomesReport.by_outcome;
   reportContent += `\n## Remediation Outcomes\n\n`;
   reportContent += `Of ${outcomesReport.total} finding(s): ${o.resolved} resolved, ${o.verified_no_change} verified already correct, ${o.inappropriate} deemed inappropriate, ${o.ignored} ignored, ${o.blocked} blocked.\n`;
@@ -429,6 +440,13 @@ export async function runClosePhase(
       outcomesReport,
     ),
   ]);
+  runLogger?.event({
+    phase: "close",
+    kind: "artifact_write",
+    obligation: "closing",
+    artifact: "remediation-outcomes.json",
+    note: `${outcomesReport.total} outcome(s)`,
+  });
   console.log("Remediation report generated.");
 
   // 5. Clean up temporary branches and artifact directory

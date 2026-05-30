@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
+import { RunLogger } from "@audit-tools/shared";
 import type { RemediationState } from "../src/state/store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -107,6 +108,65 @@ describe("runClosePhase", () => {
       },
     });
 
+    const next = await runClosePhase(state, BASE_OPTIONS);
+    expect(next.status).toBe("complete");
+  });
+
+  it("emits a run-log line per outcome plus an artifact-write line", async () => {
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        findings: [
+          {
+            id: "F1",
+            title: "Finding 1",
+            category: "security",
+            severity: "low",
+            confidence: "low",
+            lens: "security",
+            summary: "",
+            affected_files: [{ path: "src/a.ts" }],
+          },
+        ],
+        blocks: [],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+      } as any,
+      items: {
+        F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
+      },
+    });
+
+    // Log outside the artifacts dir: runClosePhase deletes artifactsDir on
+    // completion (the run-log normally lives there and is ephemeral by design),
+    // so we assert emission via a path that survives cleanup.
+    const logPath = join(REPO_DIR, "run.log.jsonl");
+    const runLogger = new RunLogger(logPath, { enabled: true });
+
+    await runClosePhase(state, BASE_OPTIONS, runLogger);
+
+    const lines = (await readFile(logPath, "utf8"))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+
+    const outcomeLines = lines.filter((l) => l.kind === "outcome");
+    expect(outcomeLines).toHaveLength(1);
+    expect(outcomeLines[0].note).toContain("F1");
+    expect(outcomeLines[0].note).toContain("security");
+    expect(outcomeLines[0].note).toContain("resolved");
+
+    const artifactLine = lines.find(
+      (l) => l.kind === "artifact_write" && l.artifact === "remediation-outcomes.json",
+    );
+    expect(artifactLine).toBeDefined();
+    expect(artifactLine.note).toContain("1 outcome");
+  });
+
+  it("does not require a run logger (optional argument)", async () => {
+    const state = makeState({
+      items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+    });
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("complete");
   });
