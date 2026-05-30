@@ -152,7 +152,7 @@ function bumpVersionAndTag(npm) {
   const packageAfter = readPackageJson();
   const tag = `${TAG_PREFIX}v${packageAfter.version}`;
 
-  run("git", ["add", "package.json", "package-lock.json"]);
+  run("git", ["add", "package.json", "package-lock.json", "../../package-lock.json"]);
   run("git", ["commit", "-m", `release: ${tag}`]);
   run("git", ["tag", "-a", tag, "-m", tag]);
 
