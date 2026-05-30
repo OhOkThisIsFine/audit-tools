@@ -41,6 +41,7 @@ import { advanceAudit, type AdvanceAuditResult } from "./orchestrator/advance.js
 import { checkFileIntegrity } from "./orchestrator/fileIntegrity.js";
 import { decideNextStep } from "./orchestrator/nextStep.js";
 import { renderDesignReviewPrompt } from "./orchestrator/designReviewPrompt.js";
+import { renderSynthesisNarrativePrompt } from "./reporting/synthesisNarrativePrompt.js";
 import {
   createFreshSessionProvider,
   resolveFreshSessionProviderName,
@@ -73,7 +74,7 @@ import {
 } from "./orchestrator/reviewPackets.js";
 import type { AuditResult, AuditTask, Finding, RepoManifest } from "./types.js";
 import type { AuditState } from "./types/auditState.js";
-import type { SessionConfig, StepStatus } from "@audit-tools/shared";
+import type { SessionConfig, StepStatus, SynthesisNarrative } from "@audit-tools/shared";
 import type { RuntimeValidationReport } from "./types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "./types/externalAnalyzer.js";
 import type { WorkerTask } from "./types/workerSession.js";
@@ -600,6 +601,7 @@ async function runAuditStep(options: {
   auditResultsPath?: string;
   runtimeUpdatesPath?: string;
   externalAnalyzerPath?: string;
+  narrativeResultsPath?: string;
   opentoken?: boolean;
   runLog?: boolean;
 }) {
@@ -645,6 +647,9 @@ async function runAuditStep(options: {
   const externalAnalyzerResults = options.externalAnalyzerPath
     ? await readJsonFile<ExternalAnalyzerResults>(options.externalAnalyzerPath)
     : undefined;
+  const narrativeResults = options.narrativeResultsPath
+    ? await readJsonFile<SynthesisNarrative>(options.narrativeResultsPath)
+    : undefined;
 
   const result = await advanceAudit(bundle, {
     root: options.root,
@@ -653,6 +658,7 @@ async function runAuditStep(options: {
     auditResults: auditResults as AuditResult[] | undefined,
     runtimeValidationUpdates,
     externalAnalyzerResults,
+    narrativeResults,
     preferredExecutor: options.preferredExecutor,
     opentoken: options.opentoken,
     runLogger,
@@ -934,6 +940,7 @@ async function runDeterministicForNextStep(params: {
   timeoutMs: number;
   maxRuns: number;
   opentoken?: boolean;
+  narrativeEnabled?: boolean;
 }): Promise<
   | {
       kind: "semantic_review";
@@ -943,6 +950,11 @@ async function runDeterministicForNextStep(params: {
     }
   | {
       kind: "design_review";
+      state: AuditState;
+      bundle: ArtifactBundle;
+    }
+  | {
+      kind: "synthesis_narrative";
       state: AuditState;
       bundle: ArtifactBundle;
     }
@@ -1036,6 +1048,39 @@ async function runDeterministicForNextStep(params: {
         state,
         bundle,
       };
+    }
+
+    if (decision.selected_executor === "synthesis_narrative_executor") {
+      const narrativePath = join(
+        params.artifactsDir,
+        "incoming",
+        "synthesis-narrative.json",
+      );
+      let narrativeResults: SynthesisNarrative | undefined;
+      try {
+        narrativeResults = await readJsonFile<SynthesisNarrative>(narrativePath);
+      } catch (error) {
+        if (!isFileMissingError(error)) throw error;
+      }
+      if (narrativeResults) {
+        await runAuditStep({
+          root: params.root,
+          artifactsDir: params.artifactsDir,
+          preferredExecutor: "synthesis_narrative_executor",
+          narrativeResultsPath: narrativePath,
+          opentoken: params.opentoken,
+        });
+        await unlink(narrativePath).catch(() => {});
+        continue;
+      }
+      if (params.narrativeEnabled) {
+        return {
+          kind: "synthesis_narrative",
+          state,
+          bundle,
+        };
+      }
+      // Narrative disabled: fall through so the deterministic omit runs below.
     }
 
     if (decision.selected_executor === "agent") {
@@ -1187,6 +1232,7 @@ async function cmdNextStep(argv: string[]): Promise<void> {
     timeoutMs: getTimeoutMs(argv, sessionConfig),
     maxRuns: getMaxRuns(argv),
     opentoken: sessionConfig.opentoken?.enabled,
+    narrativeEnabled: sessionConfig.synthesis?.narrative !== false,
   });
 
   if (result.kind === "complete") {
@@ -1256,6 +1302,46 @@ async function cmdNextStep(argv: string[]): Promise<void> {
       repoRoot: root,
       artifactPaths: {
         design_review_results: designReviewResultsPath,
+      },
+      prompt: fullPrompt,
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "synthesis_narrative") {
+    const narrativeResultsPath = join(
+      artifactsDir,
+      "incoming",
+      "synthesis-narrative.json",
+    );
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir);
+    const basePrompt = result.bundle.audit_findings
+      ? renderSynthesisNarrativePrompt(result.bundle.audit_findings)
+      : "# Synthesis narrative\n\nNo findings report is available; write an empty themes array.";
+    const fullPrompt = [
+      basePrompt,
+      "## Results path",
+      "",
+      "Write the SynthesisNarrative JSON object to:",
+      "",
+      `  ${narrativeResultsPath}`,
+      "",
+      `Then run: ${continueCommand}`,
+      "",
+    ].join("\n");
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "synthesis_narrative",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Write the synthesis narrative to the results path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        synthesis_narrative_results: narrativeResultsPath,
       },
       prompt: fullPrompt,
     });

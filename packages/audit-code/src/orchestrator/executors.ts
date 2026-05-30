@@ -54,7 +54,14 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   {
     id: "synthesis_executor",
     obligation_ids: ["synthesis_current"],
-    description: "Render the final deterministic Markdown audit report.",
+    description:
+      "Emit the canonical audit-findings.json and render the deterministic Markdown audit report.",
+  },
+  {
+    id: "synthesis_narrative_executor",
+    obligation_ids: ["synthesis_narrative_current"],
+    description:
+      "Resolve the optional synthesis narrative (themes, executive summary, top risks); omit deterministically without a provider.",
   },
   {
     id: "external_analyzer_import_executor",

@@ -9,7 +9,8 @@ import type {
 } from "../types.js";
 import type { AuditState } from "../types/auditState.js";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
-import type { FileDisposition, CriticalFlowManifest, GraphBundle, RiskRegister, SurfaceManifest } from "@audit-tools/shared";
+import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, GraphBundle, RiskRegister, SurfaceManifest } from "@audit-tools/shared";
+import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
 import type {
@@ -62,6 +63,8 @@ type ArtifactPayloadMap = {
 
   // --- Phase 4: Reporting ---
   audit_report: string;
+  audit_findings: AuditFindingsReport;
+  synthesis_narrative: SynthesisNarrativeRecord;
 
   // --- Supervisor metadata ---
   audit_state: AuditState;
@@ -165,6 +168,8 @@ export const ARTIFACT_DEFINITIONS = {
   review_packets: jsonArtifact("review_packets.json", "execution"),
   requeue_tasks: jsonArtifact("requeue_tasks.json", "execution"),
   audit_report: textArtifact("audit-report.md", "reporting"),
+  audit_findings: jsonArtifact("audit-findings.json", "reporting"),
+  synthesis_narrative: jsonArtifact("synthesis-narrative.json", "reporting"),
   audit_state: jsonArtifact("audit_state.json", "supervisor"),
   artifact_metadata: jsonArtifact("artifact_metadata.json", "supervisor"),
   tooling_manifest: jsonArtifact("tooling_manifest.json", "supervisor"),
@@ -266,6 +271,17 @@ export async function promoteFinalAuditReport(params: {
       (error instanceof Error ? error.message : String(error));
     warn(warning);
     return { promoted: false, cleaned: false, warning };
+  }
+  // Promote the canonical machine contract alongside the human report. Missing
+  // (e.g. legacy bundle) or unreadable: best-effort, never blocks completion.
+  try {
+    await copy(
+      join(params.artifactsDir, "audit-findings.json"),
+      join(params.repoRoot, "audit-findings.json"),
+      { force: true },
+    );
+  } catch {
+    // audit-findings.json is optional output; absence must not fail promotion.
   }
   try {
     await remove(params.artifactsDir, { recursive: true, force: true });

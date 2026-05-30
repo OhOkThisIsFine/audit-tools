@@ -201,10 +201,12 @@ test("audit-code wrapper promotes the final report when completion lands on max-
       JSON.stringify(await buildSyntheticResults(tasks, root), null, 2),
     );
 
+    // result ingestion → synthesis → synthesis-narrative (omitted, deterministic)
+    // is three bounded runs; completion must land on the final allowed run.
     const completed = JSON.parse(
       (
         await runWrapper(
-          ["--results", resultsPath, "--max-runs", "2"],
+          ["--results", resultsPath, "--max-runs", "3"],
           { cwd: root },
         )
       ).stdout,

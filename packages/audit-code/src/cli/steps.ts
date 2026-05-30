@@ -10,6 +10,7 @@ export type StepKind =
   | "dispatch_review"
   | "single_task_fallback"
   | "design_review"
+  | "synthesis_narrative"
   | "present_report"
   | "blocked";
 

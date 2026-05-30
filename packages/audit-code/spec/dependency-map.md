@@ -146,6 +146,23 @@ Downstream:
 - `root_cause_clusters.json`
 - `synthesis_report.json`
 
+### `audit-findings.json`
+
+The canonical machine contract (shared `AuditFindingsReport`), co-produced with
+`audit-report.md` by the synthesis executor. The optional synthesis-narrative
+pass merges themes / executive summary / top risks into it.
+
+Downstream:
+
+- `synthesis-narrative.json`
+
+### `synthesis-narrative.json`
+
+Marker recording whether the synthesis narrative was `applied` or `omitted`.
+Tracks `audit-findings.json` so a re-synthesized (base) findings report
+re-stales the narrative and it regenerates. Satisfies the
+`synthesis_narrative_current` obligation.
+
 ### `external_analyzer_results.json`
 
 Downstream:

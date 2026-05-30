@@ -14,6 +14,7 @@ import {
   runRuntimeValidationExecutor,
   runRuntimeValidationUpdateExecutor,
   runSynthesisExecutor,
+  runSynthesisNarrativeExecutor,
   runDesignAssessmentExecutor,
   runDesignReviewAutoComplete,
   runExternalAnalyzerImportExecutor,
@@ -21,6 +22,7 @@ import {
 import { runAutoFixExecutor } from "./autoFixExecutor.js";
 import { runSyntaxResolutionExecutor } from "./syntaxResolutionExecutor.js";
 import { RunLogger } from "@audit-tools/shared";
+import type { SynthesisNarrative } from "@audit-tools/shared";
 
 export interface AdvanceAuditOptions {
   root?: string;
@@ -30,6 +32,8 @@ export interface AdvanceAuditOptions {
   auditResults?: AuditResult[];
   runtimeValidationUpdates?: RuntimeValidationReport;
   externalAnalyzerResults?: ExternalAnalyzerResults;
+  /** Host/provider-supplied synthesis narrative; merged by synthesis_narrative_executor. */
+  narrativeResults?: SynthesisNarrative;
   preferredExecutor?: string;
   opentoken?: boolean;
   runLogger?: RunLogger;
@@ -158,6 +162,9 @@ export async function advanceAudit(
         break;
       case "synthesis_executor":
         run = runSynthesisExecutor(bundle, options.auditResults);
+        break;
+      case "synthesis_narrative_executor":
+        run = runSynthesisNarrativeExecutor(bundle, options.narrativeResults);
         break;
       case "runtime_validation_update_executor":
         if (!options.runtimeValidationUpdates)

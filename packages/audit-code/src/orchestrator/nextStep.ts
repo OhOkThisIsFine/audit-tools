@@ -23,6 +23,7 @@ const PRIORITY: string[] = [
   "audit_results_ingested",
   "runtime_validation_current",
   "synthesis_current",
+  "synthesis_narrative_current",
 ];
 
 export function findObligation(
