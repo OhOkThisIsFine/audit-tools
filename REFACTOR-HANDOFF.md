@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-30
 **Scope this sprint:** the **final three phases** of the frozen plan — **Phase 4** (decorator routing + LLM edge-reasoning), **Phase 5 (Py/HTML/CSS)** (tree-sitter analyzers), and **Phase 7** (remediator: consume `audit-findings.json`, theme hints, outcome capture).
-**Status:** implemented and green on `master` (committed — see _Git state_). **The frozen build order `0 → 1A + .tmp → 2 → 6 → 5.0 + 5(TS/JS) → 3 → 4 → 5(Py/HTML/CSS) → 7` is now complete.**
+**Status:** implemented and green on `master` (committed — see _Git state_). **The frozen build order `0 → 1A + .tmp → 2 → 6 → 5.0 + 5(TS/JS) → 3 → 4 → 5(Py/HTML/CSS) → 7` is now complete.** One follow-up remains: **4B has no producing turn** — see _Next pickup_ below.
 
 ---
 
@@ -15,6 +15,28 @@ remediate-code 363 tests   pass   (vitest)
 ```
 
 `npm run build` (shared → both dependents) and `npm run check` are clean in every workspace.
+
+---
+
+## Next pickup — wire 4B's producing turn (subagent dispatch + one-step fallback)
+
+**The gap.** 4B (edge reasoning) is only half-wired. The *apply* half is done and tested: `applyEdgeReasoning` rewrites low-confidence edge `reason`s from host-supplied results, the `graph.llm_edge_reasoning` gate flows config → CLI → `advanceAudit` → `runGraphEnrichmentExecutor`, and `buildEdgeReasoningPrompt` / `edgeReasoningContentHash` are exported. **What's missing is the *produce* half** — nothing in the `next-step` / `run-to-completion` flow ever asks a host or subagent to generate the rewrites. So in the normal flow 4B is **inert**; it only fires if `edgeReasoningResults` is passed through the programmatic `advanceAudit` API. This violates the project's dispatch rule ("subagents for scoped tasks where advantageous; else the orchestrator does it one step at a time") — 4B currently does *neither*.
+
+**Why it happened.** The obligation it attaches to, `graph_enrichment_current`, is a **deterministic inline executor** (runs in-process, no host/subagent turn). The two existing precedents for an LLM turn are different shapes:
+- **Fan-out scoped work → subagent dispatch:** audit review packets (one per unit × lens) go out as a dispatch plan; the host spawns subagents (or the `cmdRunToCompletion` wave scheduler `launch`es them), results return as files → ingestion.
+- **Single one-shot pass → one host step:** the Phase 6 narrative (and design review) emit a single step prompt; the host writes a result file (`synthesis-narrative.json`) and re-runs `next-step`. See the `synthesis_narrative` handling in [cli.ts](packages/audit-code/src/cli.ts) (~`runDeterministicForNextStep` / `cmdNextStep`, the `synthesis_narrative` step kind) — this is the closest template.
+
+Edge reasoning is a **single scoped pass** (the "single-call" invariant), so it fits either shape.
+
+**The work (recommended: dual-mode, mirroring the audit work).**
+1. Give edge reasoning its own turn. Cleanest is a new obligation, e.g. `graph_edge_reasoning_current`, downstream of `graph_enrichment_current` and upstream of `planning_artifacts` — add to the chain in [nextStep.ts](packages/audit-code/src/orchestrator/nextStep.ts), the executor catalog in [executors.ts](packages/audit-code/src/orchestrator/executors.ts), and the staleness DAG (`dependencyMap.ts` / `spec/dependency-map.md`: depends on `graph_bundle.json`, gated on `graph.llm_edge_reasoning`). Satisfied/omitted when the flag is off or there are no `< 0.65` edges. Emit a marker artifact (e.g. `edge_reasoning.json`) so it doesn't perpetually re-fire.
+2. **Dispatch path (preferred when `hostCanDispatchSubagents`):** emit a one-item dispatch task — prompt = `buildEdgeReasoningPrompt(collectLowConfidenceEdges(bundle))`, result → `edge-reasoning.json` — through the same dispatch-plan machinery the packets use. Keeps the (potentially large) edge-list prompt isolated and parallelizable. An ingestion step reads the file and calls `applyEdgeReasoning`.
+3. **One-step fallback (when dispatch isn't available):** mirror the narrative step — `next-step` returns the prompt + a results path, host writes `edge-reasoning.json`, re-runs `next-step`, orchestrator applies it. Reuse the `narrativeResults` plumbing shape: add an `edgeReasoningResults` results-file read in the CLI (the `advanceAudit` option already exists).
+4. Cache by content hash host-side via `edgeReasoningContentHash` (skip the call when the edge set is unchanged).
+
+**Tests to add:** with `hostCanDispatchSubagents: true` → a dispatch task is emitted with the edge-reasoning prompt; with it false (or no provider) → a single host step is emitted; round-trip (write `edge-reasoning.json` → re-run → reasons rewritten, edge set invariant); flag off or zero low-confidence edges → obligation omits and the graph is byte-identical.
+
+**Reusable pieces already in place:** [edgeReasoning.ts](packages/audit-code/src/orchestrator/edgeReasoning.ts) (`applyEdgeReasoning`, `buildEdgeReasoningPrompt`, `edgeReasoningContentHash`, `collectLowConfidenceEdges`, `EdgeReasoningResults`), the `graphLlmEdgeReasoning` / `edgeReasoningResults` options on `AdvanceAuditOptions` + `ExecuteObligationOptions`, and the `graph.llm_edge_reasoning` session key.
 
 ---
 
@@ -47,7 +69,7 @@ remediate-code 363 tests   pass   (vitest)
 
 ## Decisions & deviations this sprint
 
-- **4B is host-supplied, not an in-process provider call.** The audit-code orchestrator makes no in-process LLM calls (the Phase 6 narrative is also host-supplied via a results option, despite the plan's "single cached call via FreshSessionProvider" wording — `FreshSessionProvider` is a fresh-session *launcher*, not a `runTask`). 4B mirrors that: the pure transform applies host-supplied rewrites; `buildEdgeReasoningPrompt`/`edgeReasoningContentHash` are exposed for the host's cached call. The deterministic graph-enrichment step has no host turn in the next-step CLI, so the gate flows through but rewrites arrive via the programmatic API.
+- **4B is host-supplied, not an in-process provider call.** The audit-code orchestrator makes no in-process LLM calls (the Phase 6 narrative is also host-supplied via a results option, despite the plan's "single cached call via FreshSessionProvider" wording — `FreshSessionProvider` is a fresh-session *launcher*, not a `runTask`). 4B mirrors that: the pure transform applies host-supplied rewrites; `buildEdgeReasoningPrompt`/`edgeReasoningContentHash` are exposed for the host's cached call. The deterministic graph-enrichment step has no host turn in the next-step CLI, so the gate flows through but rewrites arrive via the programmatic API. **Wiring the producing turn (subagent dispatch + one-step fallback) is the next pickup — see _Next pickup_ above.**
 - **MCP adapter ([executors.ts](packages/audit-code/src/orchestrator/executors.ts)) carries the 4B option** but, like the rest of the legacy adapter, is not the canonical path.
 - **Phase 5 uses web-tree-sitter (WASM), not native node-tree-sitter** — no native compilation, identical cross-platform parsing, and it degrades cleanly. Grammars come from `tree-sitter-wasms` (hyphenated `tree-sitter-<lang>.wasm`).
 - **Python analyzer reuses the floor's resolver** rather than reimplementing module resolution, guaranteeing the analyzer edge and the floor edge share `(from,to)` and the merge collapses them (analyzer confidence `0.97` > floor `0.95`).
