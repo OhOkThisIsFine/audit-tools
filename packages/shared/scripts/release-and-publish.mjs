@@ -153,7 +153,7 @@ function bumpVersionAndTag(npm) {
   const tag = `${TAG_PREFIX}v${packageAfter.version}`;
 
   // shared has no local package-lock.json (monorepo root owns the lock file)
-  run("git", ["add", "package.json"]);
+  run("git", ["add", "package.json", "../../package-lock.json"]);
   run("git", ["commit", "-m", `release: ${tag}`]);
   run("git", ["tag", "-a", tag, "-m", tag]);
 

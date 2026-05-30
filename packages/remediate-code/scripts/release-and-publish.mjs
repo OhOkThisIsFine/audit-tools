@@ -190,7 +190,7 @@ function bumpVersionAndTag(npm) {
   const packageAfter = readPackageJson();
   const tag = `${TAG_PREFIX}v${packageAfter.version}`;
 
-  run("git", ["add", "package.json", "package-lock.json"]);
+  run("git", ["add", "package.json", "package-lock.json", "../../package-lock.json"]);
   run("git", ["commit", "-m", `release: ${tag}`]);
   run("git", ["tag", "-a", tag, "-m", tag]);
 
@@ -321,7 +321,7 @@ async function main() {
     run(npm, ["version", bump, "--no-git-tag-version"]);
     const packageAfter = readPackageJson();
     const newTag = `${TAG_PREFIX}v${packageAfter.version}`;
-    run("git", ["add", "package.json", "package-lock.json"]);
+    run("git", ["add", "package.json", "package-lock.json", "../../package-lock.json"]);
     run("git", ["commit", "-m", `release: ${newTag}`]);
     console.log(
       `[release] bumped to ${packageAfter.name}@${packageAfter.version}. Run without --bump-only to tag and publish.`,
