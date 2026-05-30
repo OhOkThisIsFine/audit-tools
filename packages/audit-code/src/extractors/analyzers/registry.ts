@@ -4,12 +4,25 @@ import {
 } from "@audit-tools/shared";
 import type { AnalyzerPlanEntry, LanguageAnalyzer } from "./types.js";
 import { typescriptAnalyzer } from "./typescript.js";
+import { pythonAnalyzer } from "./python.js";
+import { htmlAnalyzer } from "./html.js";
+import { cssAnalyzer } from "./css.js";
+import { sqlAnalyzer } from "./sql.js";
 
 /**
- * Registered language analyzers, in within-phase order (seam → TS/JS → …).
- * Future tree-sitter analyzers (Python/HTML/CSS) register here.
+ * Registered language analyzers, in within-phase order (seam → TS/JS →
+ * Python → HTML → CSS). SQL is a registry stub (recognises `.sql`, emits no
+ * edges yet). The tree-sitter analyzers (Python/HTML/CSS) load their grammar
+ * from the optional `web-tree-sitter` dependency and degrade to the regex
+ * floor when it cannot be resolved.
  */
-export const ANALYZER_REGISTRY: LanguageAnalyzer[] = [typescriptAnalyzer];
+export const ANALYZER_REGISTRY: LanguageAnalyzer[] = [
+  typescriptAnalyzer,
+  pythonAnalyzer,
+  htmlAnalyzer,
+  cssAnalyzer,
+  sqlAnalyzer,
+];
 
 export function getAnalyzerById(id: string): LanguageAnalyzer | undefined {
   return ANALYZER_REGISTRY.find((analyzer) => analyzer.id === id);

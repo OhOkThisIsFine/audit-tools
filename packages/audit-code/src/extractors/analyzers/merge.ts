@@ -24,6 +24,16 @@ const EDGE_GROUP: Record<string, string> = {
   commonjs: "import",
   "ts-import": "import",
   "ts-reexport": "import",
+  // Python imports: the tree-sitter analyzer (py-*) supersedes the regex floor
+  // (python-*) for the same (from, to).
+  "python-import": "import",
+  "python-from-import": "import",
+  "py-import": "import",
+  "py-from-import": "import",
+  // HTML resource references: the tree-sitter analyzer (html-resource)
+  // supersedes the regex floor (html-resource-link).
+  "html-resource-link": "html-resource",
+  "html-resource": "html-resource",
   // inheritance relationship
   "ts-extends": "inheritance",
   "ts-implements": "inheritance",

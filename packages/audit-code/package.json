@@ -71,6 +71,8 @@
     "@types/node": "^24.3.0",
     "ajv": "^8.17.1",
     "linguist-languages": "^9.3.2",
-    "typescript": "^5.9.2"
+    "tree-sitter-wasms": "^0.1.13",
+    "typescript": "^5.9.2",
+    "web-tree-sitter": "^0.25.10"
   }
 }
