@@ -53,6 +53,17 @@ export function validateArtifactBundle(
       ),
     );
   }
+  if (bundle.scope) {
+    issues.push(
+      ...requireKeys(bundle.scope, "scope", [
+        "mode",
+        "since",
+        "seed_files",
+        "expanded_files",
+        "budget",
+      ]),
+    );
+  }
   if (bundle.graph_bundle) {
     issues.push(
       ...requireKeys(

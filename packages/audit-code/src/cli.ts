@@ -612,6 +612,7 @@ async function runAuditStep(options: {
   externalAnalyzerPath?: string;
   narrativeResultsPath?: string;
   analyzers?: Record<string, AnalyzerSetting>;
+  since?: string;
   opentoken?: boolean;
   runLog?: boolean;
 }) {
@@ -670,6 +671,7 @@ async function runAuditStep(options: {
     externalAnalyzerResults,
     narrativeResults,
     analyzers: options.analyzers,
+    since: options.since,
     preferredExecutor: options.preferredExecutor,
     opentoken: options.opentoken,
     runLogger,
@@ -921,6 +923,7 @@ async function cmdAdvanceAudit(argv: string[]): Promise<void> {
     runtimeUpdatesPath: getFlag(argv, "--updates"),
     externalAnalyzerPath,
     analyzers: sessionConfig.analyzers,
+    since: getFlag(argv, "--since"),
     opentoken: sessionConfig.opentoken?.enabled,
     runLog: sessionConfig.observability?.run_log,
   });
@@ -954,6 +957,7 @@ async function runDeterministicForNextStep(params: {
   opentoken?: boolean;
   narrativeEnabled?: boolean;
   analyzers?: Record<string, AnalyzerSetting>;
+  since?: string;
 }): Promise<
   | {
       kind: "semantic_review";
@@ -1200,6 +1204,7 @@ async function runDeterministicForNextStep(params: {
         root: params.root,
         artifactsDir: params.artifactsDir,
         analyzers,
+        since: params.since,
         opentoken: params.opentoken,
       });
     } catch (error) {
@@ -1314,6 +1319,7 @@ async function cmdNextStep(argv: string[]): Promise<void> {
     opentoken: sessionConfig.opentoken?.enabled,
     narrativeEnabled: sessionConfig.synthesis?.narrative !== false,
     analyzers: sessionConfig.analyzers,
+    since: getFlag(argv, "--since"),
   });
 
   if (result.kind === "complete") {
@@ -2189,6 +2195,7 @@ const explicitProvider = getExplicitProvider(argv);
           runtimeUpdatesPath,
           externalAnalyzerPath,
           analyzers: sessionConfig.analyzers,
+          since: getFlag(argv, "--since"),
         });
         workerResult = {
           contract_version: WORKER_RESULT_CONTRACT_VERSION,
@@ -3185,7 +3192,11 @@ async function cmdIntake(argv: string[]): Promise<void> {
 
 async function cmdPlan(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
-  const result = await runAuditStep({ root: getRootDir(argv), artifactsDir });
+  const result = await runAuditStep({
+    root: getRootDir(argv),
+    artifactsDir,
+    since: getFlag(argv, "--since"),
+  });
   console.log(
     JSON.stringify(
       {

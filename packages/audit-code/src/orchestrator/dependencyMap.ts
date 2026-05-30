@@ -100,6 +100,17 @@ export const ARTIFACT_DEPENDENCY_MAP: Record<string, string[]> = {
     "runtime_validation_report.json",
     "audit-report.md",
   ],
+  // Phase 3 delta scope. scope.json is produced by the planning executor (full
+  // or delta) and gates coverage: in delta mode it decides which coverage
+  // entries are (re)queued vs. inherited-complete/excluded. A changed scope
+  // (different `--since`/seed set → new content hash) re-stales coverage so the
+  // plan rebuilds. No cycle: planning writes scope.json AND coverage_matrix.json
+  // in one advanceAudit call, and computeArtifactMetadata is dependency-first,
+  // so coverage records the post-write scope revision (mirrors graph_bundle →
+  // analyzer_capability and audit-findings → narrative).
+  "scope.json": [
+    "coverage_matrix.json",
+  ],
   "coverage_matrix.json": [
     "flow_coverage.json",
     "audit_plan_metrics.json",

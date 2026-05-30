@@ -23,6 +23,7 @@ import type {
 } from "../types/runtimeValidation.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
+import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { ToolingManifest } from "../types/toolingManifest.js";
 import {
   isFileMissingError,
@@ -52,6 +53,7 @@ type ArtifactPayloadMap = {
   analyzer_capability: AnalyzerCapabilityRecord;
 
   // --- Phase 3: Audit execution ---
+  scope: AuditScopeManifest;
   coverage_matrix: CoverageMatrix;
   runtime_validation_tasks: RuntimeValidationTaskManifest;
   runtime_validation_report: RuntimeValidationReport;
@@ -148,6 +150,7 @@ export const ARTIFACT_DEFINITIONS = {
   risk_register: jsonArtifact("risk_register.json", "analysis"),
   design_assessment: jsonArtifact("design_assessment.json", "analysis"),
   analyzer_capability: jsonArtifact("analyzer_capability.json", "analysis"),
+  scope: jsonArtifact("scope.json", "execution"),
   coverage_matrix: jsonArtifact("coverage_matrix.json", "execution"),
   runtime_validation_tasks: jsonArtifact(
     "runtime_validation_tasks.json",

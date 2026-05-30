@@ -1,4 +1,5 @@
 import type { AuditResult, CoverageMatrix, Finding, UnitManifest } from "../types.js";
+import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type {
@@ -196,7 +197,15 @@ export function applyNarrative(
   };
 }
 
-export function renderAuditReportMarkdown(report: RenderableAuditReport): string {
+export interface RenderAuditReportOptions {
+  /** Scope manifest for the run; when delta, the report header reports it honestly. */
+  scope?: AuditScopeManifest;
+}
+
+export function renderAuditReportMarkdown(
+  report: RenderableAuditReport,
+  options: RenderAuditReportOptions = {},
+): string {
   const lines: string[] = [
     AUDITOR_REPORT_MARKER,
     "# Audit Report",
@@ -286,9 +295,19 @@ export function renderAuditReportMarkdown(report: RenderableAuditReport): string
   }
 
   lines.push("## Scope and Coverage", "");
-  lines.push(
-    "This report is deterministic output from the completed audit. Non-auditable files were excluded from scope before task generation.",
-  );
+  const scope = options.scope;
+  if (scope && scope.mode === "delta") {
+    lines.push(
+      `**Delta audit since \`${scope.since}\`.** This run audited ${scope.seed_files.length} changed file(s) and ${scope.expanded_files.length} graph neighbour(s); all other auditable files were left out of scope (inherited from a prior audit where complete, otherwise excluded from this run). **A full audit is advised before release.**`,
+    );
+    if (scope.dropped_note) {
+      lines.push("", scope.dropped_note);
+    }
+  } else {
+    lines.push(
+      "This report is deterministic output from the completed audit. Non-auditable files were excluded from scope before task generation.",
+    );
+  }
   lines.push("");
   return lines.join("\n");
 }

@@ -22,6 +22,8 @@ import {
 import { runAutoFixExecutor } from "./autoFixExecutor.js";
 import { runSyntaxResolutionExecutor } from "./syntaxResolutionExecutor.js";
 import { runGraphEnrichmentExecutor } from "./graphEnrichmentExecutor.js";
+import { resolveAuditScope } from "./scope.js";
+import type { AuditScopeManifest } from "../types/auditScope.js";
 import { RunLogger } from "@audit-tools/shared";
 import type { AnalyzerSetting, SynthesisNarrative } from "@audit-tools/shared";
 
@@ -37,6 +39,12 @@ export interface AdvanceAuditOptions {
   narrativeResults?: SynthesisNarrative;
   /** Per-analyzer resolution policy for the optional graph-enrichment pass. */
   analyzers?: Record<string, AnalyzerSetting>;
+  /**
+   * Git ref for Phase 3 delta mode (the `--since` flag). When set and resolvable
+   * against a git repo, planning scopes coverage to the changed files and their
+   * graph neighbours; otherwise the run is a full audit.
+   */
+  since?: string;
   preferredExecutor?: string;
   opentoken?: boolean;
   runLogger?: RunLogger;
@@ -115,6 +123,7 @@ export async function advanceAudit(
   }
 
   let run;
+  let plannedScope: AuditScopeManifest | undefined;
   const executorStartedAt = Date.now();
   log.event({
     phase: "advance",
@@ -147,11 +156,17 @@ export async function advanceAudit(
       case "planning_executor":
         if (!options.root)
           throw new Error("advanceAudit planning_executor requires root");
+        plannedScope = resolveAuditScope({
+          root: options.root,
+          since: options.since,
+          bundle,
+        });
         run = await runPlanningExecutor(
           bundle,
           options.root,
           options.lineIndex ?? {},
           options.sizeIndex,
+          plannedScope,
         );
         break;
       case "result_ingestion_executor":
@@ -234,6 +249,17 @@ export async function advanceAudit(
     note: selectedExecutor,
     duration_ms: Date.now() - executorStartedAt,
   });
+  if (plannedScope) {
+    log.event({
+      phase: "advance",
+      kind: "scope",
+      obligation: selectedObligation ?? undefined,
+      note:
+        plannedScope.mode === "delta"
+          ? `delta since ${plannedScope.since}: ${plannedScope.seed_files.length} changed + ${plannedScope.expanded_files.length} neighbors; full audit advised before release`
+          : "full audit scope",
+    });
+  }
   for (const artifact of run.artifacts_written) {
     log.event({
       phase: "advance",
