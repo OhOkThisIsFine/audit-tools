@@ -100,7 +100,7 @@ test("one-command release helper wires the trusted publishing path", async () =>
   assert.match(helper, /--bump-only/);
   assert.match(helper, /verify:release/);
   assert.match(helper, /run\(npm, \["version", bump, "--no-git-tag-version"\]\)/);
-  assert.match(helper, /run\("git", \["add", "package\.json", "package-lock\.json"\]\)/);
+  assert.match(helper, /run\("git", \["add", "package\.json", "package-lock\.json", "..\/..\/package-lock\.json"\]\)/);
   assert.match(helper, /run\("git", \["commit", "-m", `release: \$\{tag\}`\]\)/);
   assert.match(helper, /run\("git", \["tag", "-a", tag, "-m", tag\]\)/);
   assert.match(helper, /const releaseBranch = bumpOnly \? null : ensureMainBranch\(\)/);
