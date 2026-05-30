@@ -23,7 +23,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test tests/*.test.mjs"
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "verify:release": "npm run check && npm test",
+    "release:patch": "node scripts/release-and-publish.mjs patch --bump-only",
+    "release:minor": "node scripts/release-and-publish.mjs minor --bump-only",
+    "release:major": "node scripts/release-and-publish.mjs major --bump-only",
+    "release:patch:publish": "node scripts/release-and-publish.mjs patch",
+    "release:minor:publish": "node scripts/release-and-publish.mjs minor",
+    "release:major:publish": "node scripts/release-and-publish.mjs major"
   },
   "engines": {
     "node": ">=20"
