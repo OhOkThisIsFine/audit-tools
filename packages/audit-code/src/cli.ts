@@ -612,6 +612,7 @@ async function runAuditStep(options: {
   externalAnalyzerPath?: string;
   narrativeResultsPath?: string;
   analyzers?: Record<string, AnalyzerSetting>;
+  graphLlmEdgeReasoning?: boolean;
   since?: string;
   opentoken?: boolean;
   runLog?: boolean;
@@ -671,6 +672,7 @@ async function runAuditStep(options: {
     externalAnalyzerResults,
     narrativeResults,
     analyzers: options.analyzers,
+    graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
     since: options.since,
     preferredExecutor: options.preferredExecutor,
     opentoken: options.opentoken,
@@ -923,6 +925,7 @@ async function cmdAdvanceAudit(argv: string[]): Promise<void> {
     runtimeUpdatesPath: getFlag(argv, "--updates"),
     externalAnalyzerPath,
     analyzers: sessionConfig.analyzers,
+    graphLlmEdgeReasoning: sessionConfig.graph?.llm_edge_reasoning,
     since: getFlag(argv, "--since"),
     opentoken: sessionConfig.opentoken?.enabled,
     runLog: sessionConfig.observability?.run_log,
@@ -957,6 +960,7 @@ async function runDeterministicForNextStep(params: {
   opentoken?: boolean;
   narrativeEnabled?: boolean;
   analyzers?: Record<string, AnalyzerSetting>;
+  graphLlmEdgeReasoning?: boolean;
   since?: string;
 }): Promise<
   | {
@@ -1204,6 +1208,7 @@ async function runDeterministicForNextStep(params: {
         root: params.root,
         artifactsDir: params.artifactsDir,
         analyzers,
+        graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
         since: params.since,
         opentoken: params.opentoken,
       });
@@ -1319,6 +1324,7 @@ async function cmdNextStep(argv: string[]): Promise<void> {
     opentoken: sessionConfig.opentoken?.enabled,
     narrativeEnabled: sessionConfig.synthesis?.narrative !== false,
     analyzers: sessionConfig.analyzers,
+    graphLlmEdgeReasoning: sessionConfig.graph?.llm_edge_reasoning,
     since: getFlag(argv, "--since"),
   });
 

@@ -26,6 +26,7 @@ import { resolveAuditScope } from "./scope.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import { RunLogger } from "@audit-tools/shared";
 import type { AnalyzerSetting, SynthesisNarrative } from "@audit-tools/shared";
+import type { EdgeReasoningResults } from "./edgeReasoning.js";
 
 export interface AdvanceAuditOptions {
   root?: string;
@@ -39,6 +40,10 @@ export interface AdvanceAuditOptions {
   narrativeResults?: SynthesisNarrative;
   /** Per-analyzer resolution policy for the optional graph-enrichment pass. */
   analyzers?: Record<string, AnalyzerSetting>;
+  /** Phase 4B gate (session-config `graph.llm_edge_reasoning`); default off. */
+  graphLlmEdgeReasoning?: boolean;
+  /** Phase 4B host-supplied reason rewrites for low-confidence graph edges. */
+  edgeReasoningResults?: EdgeReasoningResults;
   /**
    * Git ref for Phase 3 delta mode (the `--since` flag). When set and resolvable
    * against a git repo, planning scopes coverage to the changed files and their
@@ -145,6 +150,8 @@ export async function advanceAudit(
         run = await runGraphEnrichmentExecutor(bundle, {
           root: options.root,
           analyzers: options.analyzers,
+          llmEdgeReasoning: options.graphLlmEdgeReasoning,
+          edgeReasoning: options.edgeReasoningResults,
         });
         break;
       case "design_assessment_executor":

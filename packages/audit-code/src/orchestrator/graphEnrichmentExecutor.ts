@@ -19,6 +19,11 @@ import type {
   AnalyzerCapabilityEntry,
   AnalyzerCapabilityRecord,
 } from "../types/analyzerCapability.js";
+import {
+  applyEdgeReasoning,
+  type EdgeReasoningResults,
+  type EdgeReasoningSummary,
+} from "./edgeReasoning.js";
 
 export interface GraphEnrichmentOptions {
   root?: string;
@@ -27,6 +32,13 @@ export interface GraphEnrichmentOptions {
   registry?: LanguageAnalyzer[];
   /** Injectable analyzer-cache root; defaults to ~/.audit-tools/analyzer-cache. */
   cacheRoot?: string;
+  /**
+   * Phase 4B: gate for the optional edge-reasoning pass (mirrors
+   * session-config `graph.llm_edge_reasoning`; default off).
+   */
+  llmEdgeReasoning?: boolean;
+  /** Phase 4B: host-supplied reason rewrites for low-confidence edges. */
+  edgeReasoning?: EdgeReasoningResults;
 }
 
 const BUCKET_BY_KIND: Record<string, "imports" | "calls" | "references"> = {
@@ -204,7 +216,44 @@ export async function runGraphEnrichmentExecutor(
     analyzers: entries,
   };
 
-  if (!applied) {
+  // The graph this obligation produces: the enriched bundle when analyzers
+  // contributed, otherwise the regex floor. Phase 4B may then rewrite the
+  // reasons of low-confidence edges on whichever graph stands — the floor's
+  // heuristic edges exist regardless of analyzers.
+  const graphBundle: GraphBundle = applied
+    ? {
+        ...floor,
+        graphs: {
+          ...floor.graphs,
+          imports: mergeAnalyzerEdges(
+            floor.graphs.imports ?? [],
+            bucketEdges.imports,
+          ),
+          calls: mergeAnalyzerEdges(floor.graphs.calls ?? [], bucketEdges.calls),
+          references: mergeAnalyzerEdges(
+            floor.graphs.references ?? [],
+            bucketEdges.references,
+          ),
+          ...(routeEdges.length > 0
+            ? { routes: mergeRoutes(floor.graphs.routes ?? [], routeEdges) }
+            : {}),
+        },
+        analyzers_used: [...new Set(analyzersUsed)].sort(),
+      }
+    : floor;
+
+  let reasoned: EdgeReasoningSummary = { rewritten: 0, candidates: 0 };
+  if (options.llmEdgeReasoning === true && options.edgeReasoning) {
+    reasoned = applyEdgeReasoning(graphBundle, options.edgeReasoning);
+  }
+
+  const graphChanged = applied || reasoned.rewritten > 0;
+  const reasonSuffix =
+    reasoned.rewritten > 0
+      ? ` Edge reasoning rewrote ${reasoned.rewritten} reason(s).`
+      : "";
+
+  if (!graphChanged) {
     return {
       updated: { ...bundle, analyzer_capability: record },
       artifacts_written: ["analyzer_capability.json"],
@@ -213,24 +262,12 @@ export async function runGraphEnrichmentExecutor(
     };
   }
 
-  const enriched: GraphBundle = {
-    ...floor,
-    graphs: {
-      ...floor.graphs,
-      imports: mergeAnalyzerEdges(floor.graphs.imports ?? [], bucketEdges.imports),
-      calls: mergeAnalyzerEdges(floor.graphs.calls ?? [], bucketEdges.calls),
-      references: mergeAnalyzerEdges(floor.graphs.references ?? [], bucketEdges.references),
-      ...(routeEdges.length > 0
-        ? { routes: mergeRoutes(floor.graphs.routes ?? [], routeEdges) }
-        : {}),
-    },
-    analyzers_used: [...new Set(analyzersUsed)].sort(),
-  };
-
   const totalEdges = entries.reduce((sum, entry) => sum + entry.edges_added, 0);
   return {
-    updated: { ...bundle, graph_bundle: enriched, analyzer_capability: record },
+    updated: { ...bundle, graph_bundle: graphBundle, analyzer_capability: record },
     artifacts_written: ["graph_bundle.json", "analyzer_capability.json"],
-    progress_summary: `Graph enrichment applied ${totalEdges} analyzer edge(s) from ${analyzersUsed.join(", ")}.`,
+    progress_summary: applied
+      ? `Graph enrichment applied ${totalEdges} analyzer edge(s) from ${analyzersUsed.join(", ")}.${reasonSuffix}`
+      : `Graph enrichment omitted analyzers; edge reasoning rewrote ${reasoned.rewritten} reason(s).`,
   };
 }

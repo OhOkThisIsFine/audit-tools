@@ -90,6 +90,17 @@ export interface SynthesisConfig {
   narrative?: boolean;
 }
 
+export interface GraphConfig {
+  /**
+   * Phase 4B: run the optional, bounded edge-reasoning pass that rewrites the
+   * human-readable `reason` of low-confidence graph edges (never the edge set
+   * itself). Defaults to off; it is a no-op without host-supplied rewrites.
+   */
+  llm_edge_reasoning?: boolean;
+  /** Model override for the edge-reasoning pass (host's choice otherwise). */
+  model?: string;
+}
+
 /**
  * Per-analyzer resolution policy for the optional graph-enrichment pass
  * (`analyzers.<id>`). Resolution order is repo node_modules → version-keyed
@@ -132,4 +143,6 @@ export interface SessionConfig {
   synthesis?: SynthesisConfig;
   /** Per-analyzer resolution policy for the optional graph-enrichment pass. */
   analyzers?: Record<string, AnalyzerSetting>;
+  /** Optional graph-enrichment tuning (Phase 4B edge reasoning). */
+  graph?: GraphConfig;
 }
