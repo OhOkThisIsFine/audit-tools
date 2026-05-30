@@ -366,6 +366,60 @@ function addPythonImportEdge(
   );
 }
 
+/**
+ * Resolve a single `import <spec>` module specifier to a repo file, or
+ * undefined. Shared with the tree-sitter Python analyzer so AST-extracted
+ * imports resolve to exactly the same targets as the regex floor.
+ */
+export function resolvePythonImportTarget(
+  fromPath: string,
+  specifier: string,
+  pathLookup: Map<string, string>,
+): string | undefined {
+  if (!isPythonAbsoluteModuleSpecifier(specifier)) {
+    return undefined;
+  }
+  return resolvePythonModuleSpecifier(fromPath, specifier, pathLookup);
+}
+
+/**
+ * Resolve a `from <module> import <names>` statement to repo files. Mirrors the
+ * floor: prefer submodule files (`module.name`), else the module itself. Shared
+ * with the tree-sitter Python analyzer.
+ */
+export function resolvePythonFromImportTargets(
+  fromPath: string,
+  moduleSpecifier: string,
+  importedNames: string[],
+  pathLookup: Map<string, string>,
+): Array<{ specifier: string; target: string }> {
+  if (!isPythonModuleSpecifier(moduleSpecifier)) {
+    return [];
+  }
+  const submoduleTargets = importedNames
+    .filter((name) => name !== "*" && isPythonIdentifier(name))
+    .map((name) => appendPythonImportedSpecifier(moduleSpecifier, name))
+    .map((specifier) => ({
+      specifier,
+      target: resolvePythonModuleSpecifier(fromPath, specifier, pathLookup),
+    }))
+    .filter(
+      (item): item is { specifier: string; target: string } =>
+        item.target !== undefined && item.target !== fromPath,
+    );
+  if (submoduleTargets.length > 0) {
+    return submoduleTargets;
+  }
+  const moduleTarget = resolvePythonModuleSpecifier(
+    fromPath,
+    moduleSpecifier,
+    pathLookup,
+  );
+  return moduleTarget && moduleTarget !== fromPath
+    ? [{ specifier: moduleSpecifier, target: moduleTarget }]
+    : [];
+}
+
 export function extractPythonImportEdges(
   fromPath: string,
   content: string,

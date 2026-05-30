@@ -47,6 +47,15 @@ const BUCKET_BY_KIND: Record<string, "imports" | "calls" | "references"> = {
   "ts-call": "calls",
   "ts-extends": "references",
   "ts-implements": "references",
+  // Python (tree-sitter) imports merge into the imports bucket alongside the
+  // regex floor's python-* edges.
+  "py-import": "imports",
+  "py-from-import": "imports",
+  // HTML/CSS (tree-sitter) resource references live with the floor's
+  // html-resource-link / reference edges.
+  "html-resource": "references",
+  "css-import": "references",
+  "css-url": "references",
 };
 
 function bucketForKind(kind?: string): "imports" | "calls" | "references" {
