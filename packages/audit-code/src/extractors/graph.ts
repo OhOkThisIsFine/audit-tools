@@ -1050,6 +1050,210 @@ function extractConventionalRouteEvidence(
   return routes.length > 0 ? routes : [{ path: routePath, handler: fromPath }];
 }
 
+// ---- Phase 4A: decorator / framework route detection ----
+// Deterministic route patterns for NestJS, FastAPI, Flask, and Angular. These
+// emit only the existing RouteEdge / route-handler-link shapes — no new
+// planning-topology edge kinds. Each branch is gated on a framework marker so
+// the patterns do not fire on unrelated decorators or object literals. An
+// AST-based version can later move behind the analyzer seam; this is the
+// regex floor for these frameworks.
+
+const NEST_CONTROLLER_PATTERN = /@Controller\s*\(([\s\S]{0,200}?)\)/g;
+const NEST_METHOD_DECORATOR_PATTERN =
+  /@(Get|Post|Put|Patch|Delete|Options|Head|All)\s*\(\s*(?:["'`]([^"'`]*)["'`])?/g;
+const PY_DECORATOR_METHOD_PATTERN =
+  /@\s*[A-Za-z_]\w*\s*\.\s*(get|post|put|patch|delete|options|head|trace|websocket)\s*\(\s*["']([^"']+)["']/g;
+const PY_ROUTE_DECORATOR_PATTERN =
+  /@\s*[A-Za-z_]\w*\s*\.\s*(api_route|route)\s*\(\s*["']([^"']+)["']([\s\S]{0,200}?)\)/g;
+const PY_METHODS_LIST_PATTERN = /methods\s*=\s*\[([^\]]*)\]/;
+const PY_METHOD_LITERAL_PATTERN = /["']([A-Za-z]+)["']/g;
+const ANGULAR_FILE_MARKER_PATTERN =
+  /\b(?:RouterModule|provideRouter|loadChildren|loadComponent)\b|:\s*Routes\b/;
+const ANGULAR_ROUTE_OBJECT_PATTERN =
+  /\{[^{}]*?\bpath\s*:\s*["'`]([^"'`]*)["'`][^{}]*?\}/g;
+const ANGULAR_ROUTE_KEY_PATTERN =
+  /\b(?:component|loadChildren|loadComponent|redirectTo)\s*:/;
+const ANGULAR_COMPONENT_PATTERN =
+  /\b(?:component|loadComponent)\s*:\s*([A-Za-z_$][\w$]*)/;
+const ANGULAR_LAZY_IMPORT_PATTERN =
+  /\b(?:loadChildren|loadComponent)\s*:[\s\S]*?import\s*\(\s*["']([^"']+)["']\s*\)/;
+const TS_LIKE_EXTENSION_PATTERN = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+
+/** Join route segments (controller prefix + method path) into one clean path. */
+function joinRouteSegments(...segments: string[]): string {
+  return segments
+    .map((segment) => segment.trim().replace(/^\/+|\/+$/g, ""))
+    .filter((segment) => segment.length > 0)
+    .join("/");
+}
+
+/** Controller prefixes in document order, so each method can take the nearest. */
+function nestControllerPrefixes(
+  content: string,
+): Array<{ index: number; prefix: string }> {
+  const prefixes: Array<{ index: number; prefix: string }> = [];
+  NEST_CONTROLLER_PATTERN.lastIndex = 0;
+  for (const match of content.matchAll(NEST_CONTROLLER_PATTERN)) {
+    const arg = match[1] ?? "";
+    const pathProp = arg.match(/\bpath\s*:\s*["'`]([^"'`]*)["'`]/);
+    const firstString = arg.match(/["'`]([^"'`]*)["'`]/);
+    const prefix = pathProp?.[1] ?? firstString?.[1] ?? "";
+    prefixes.push({ index: match.index ?? 0, prefix });
+  }
+  return prefixes;
+}
+
+function collectNestRoutes(
+  fromPath: string,
+  content: string,
+  routes: RouteEdge[],
+): void {
+  if (!content.includes("@Controller")) {
+    return;
+  }
+  const controllers = nestControllerPrefixes(content);
+  if (controllers.length === 0) {
+    return;
+  }
+
+  NEST_METHOD_DECORATOR_PATTERN.lastIndex = 0;
+  for (const match of content.matchAll(NEST_METHOD_DECORATOR_PATTERN)) {
+    const method = match[1];
+    if (!method) continue;
+    const subPath = match[2] ?? "";
+    const at = match.index ?? 0;
+    let prefix = "";
+    for (const controller of controllers) {
+      if (controller.index <= at) prefix = controller.prefix;
+      else break;
+    }
+    routes.push({
+      path: normalizeRoutePath(joinRouteSegments(prefix, subPath)),
+      handler: fromPath,
+      method: method.toUpperCase(),
+    });
+  }
+}
+
+function pythonRouteMethods(args: string): string[] {
+  const listMatch = args.match(PY_METHODS_LIST_PATTERN);
+  if (!listMatch?.[1]) return [];
+  PY_METHOD_LITERAL_PATTERN.lastIndex = 0;
+  return [...listMatch[1].matchAll(PY_METHOD_LITERAL_PATTERN)].map((method) =>
+    method[1]!.toUpperCase(),
+  );
+}
+
+function collectPythonFrameworkRoutes(
+  fromPath: string,
+  content: string,
+  routes: RouteEdge[],
+): void {
+  // FastAPI / Starlette: @app.get("/x"), @router.post("/y"), @router.websocket("/ws")
+  PY_DECORATOR_METHOD_PATTERN.lastIndex = 0;
+  for (const match of content.matchAll(PY_DECORATOR_METHOD_PATTERN)) {
+    const verb = match[1];
+    const routePath = match[2];
+    if (!verb || !routePath) continue;
+    const method = verb.toUpperCase();
+    routes.push({
+      path: normalizeRoutePath(routePath),
+      handler: fromPath,
+      method: method === "WEBSOCKET" ? "WS" : method,
+    });
+  }
+
+  // FastAPI api_route + Flask route: @app.route("/x", methods=["GET","POST"])
+  PY_ROUTE_DECORATOR_PATTERN.lastIndex = 0;
+  for (const match of content.matchAll(PY_ROUTE_DECORATOR_PATTERN)) {
+    const routePath = match[2];
+    if (!routePath) continue;
+    const methods = pythonRouteMethods(match[3] ?? "");
+    const path = normalizeRoutePath(routePath);
+    if (methods.length === 0) {
+      routes.push({ path, handler: fromPath, method: "GET" });
+      continue;
+    }
+    for (const method of methods) {
+      routes.push({ path, handler: fromPath, method });
+    }
+  }
+}
+
+function collectAngularRoutes(
+  fromPath: string,
+  content: string,
+  pathLookup: Map<string, string>,
+  calls: GraphEdge[],
+  routes: RouteEdge[],
+): void {
+  if (!ANGULAR_FILE_MARKER_PATTERN.test(content)) {
+    return;
+  }
+  const bindings = extractImportBindings(fromPath, content, pathLookup);
+
+  ANGULAR_ROUTE_OBJECT_PATTERN.lastIndex = 0;
+  for (const match of content.matchAll(ANGULAR_ROUTE_OBJECT_PATTERN)) {
+    const body = match[0];
+    if (!ANGULAR_ROUTE_KEY_PATTERN.test(body)) {
+      continue;
+    }
+    const routePath = normalizeRoutePath(match[1] ?? "");
+
+    let handlerPath = fromPath;
+    let handlerExpression: string | undefined;
+    const lazyImport = body.match(ANGULAR_LAZY_IMPORT_PATTERN);
+    const component = body.match(ANGULAR_COMPONENT_PATTERN);
+    if (lazyImport?.[1]) {
+      const target =
+        resolveSpecifier(fromPath, lazyImport[1], pathLookup) ??
+        resolveReferenceLiteral(fromPath, lazyImport[1], pathLookup);
+      if (target) {
+        handlerPath = target;
+        handlerExpression = lazyImport[1];
+      }
+    } else if (component?.[1]) {
+      const binding = bindings.get(component[1]);
+      if (binding) {
+        handlerPath = binding.target;
+        handlerExpression = component[1];
+      }
+    }
+
+    routes.push({ path: routePath, handler: handlerPath });
+    if (handlerPath !== fromPath) {
+      calls.push(
+        graphEdge({
+          from: fromPath,
+          to: handlerPath,
+          kind: "route-handler-link",
+          confidence: ROUTE_HANDLER_EDGE_CONFIDENCE,
+          reason: `Angular route '${routePath}' maps to '${handlerExpression ?? handlerPath}'.`,
+        }),
+      );
+    }
+  }
+}
+
+function extractFrameworkRouteEvidence(
+  fromPath: string,
+  content: string,
+  pathLookup: Map<string, string>,
+): { calls: GraphEdge[]; routes: RouteEdge[] } {
+  const normalized = normalizeGraphPath(fromPath).toLowerCase();
+  const calls: GraphEdge[] = [];
+  const routes: RouteEdge[] = [];
+
+  if (normalized.endsWith(".py")) {
+    collectPythonFrameworkRoutes(fromPath, content, routes);
+  } else if (TS_LIKE_EXTENSION_PATTERN.test(normalized)) {
+    collectNestRoutes(fromPath, content, routes);
+    collectAngularRoutes(fromPath, content, pathLookup, calls, routes);
+  }
+
+  return { calls, routes };
+}
+
 function fallbackRouteEdge(filePath: string): RouteEdge | undefined {
   const normalized = filePath.toLowerCase();
   if (normalized.includes("api/") || normalized.includes("route")) {
@@ -1354,6 +1558,13 @@ export function buildGraphBundle(
       );
       calls.push(...registeredRoutes.calls);
       fileRoutes.push(...registeredRoutes.routes);
+      const frameworkRoutes = extractFrameworkRouteEvidence(
+        file.path,
+        content,
+        pathLookup,
+      );
+      calls.push(...frameworkRoutes.calls);
+      fileRoutes.push(...frameworkRoutes.routes);
     }
     fileRoutes.push(...extractConventionalRouteEvidence(file.path, content));
     if (fileRoutes.length === 0) {

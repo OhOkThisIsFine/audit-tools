@@ -59,6 +59,7 @@ export type {
   OpenTokenConfig,
   ObservabilityConfig,
   SynthesisConfig,
+  GraphConfig,
   AnalyzerSetting,
   SessionConfig,
 } from "./types/sessionConfig.js";
