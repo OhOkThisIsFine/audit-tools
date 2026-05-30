@@ -972,7 +972,7 @@ async function main() {
         completed,
         "auditCodeResponse:completed",
       );
-      assert.equal(completed.selected_executor, "synthesis_executor");
+      assert.equal(completed.selected_executor, "synthesis_narrative_executor");
       assert.equal(completed.audit_state.status, "complete");
       assert.equal(completed.next_likely_step, null);
       assert.equal(completed.handoff.status, "complete");
