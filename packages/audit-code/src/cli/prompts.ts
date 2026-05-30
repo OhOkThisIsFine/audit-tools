@@ -128,6 +128,75 @@ export function renderSingleTaskFallbackStepPrompt(params: {
   ].join("\n");
 }
 
+export function renderEdgeReasoningStepPrompt(params: {
+  basePrompt: string;
+  resultsPath: string;
+  continueCommand: string;
+  contentHash: string;
+}): string {
+  return [
+    params.basePrompt,
+    "",
+    "## Results path",
+    "",
+    'Write the JSON object ({"rewrites":[{"from":"...","to":"...","kind":"...","reason":"..."}]}) to:',
+    "",
+    `  ${params.resultsPath}`,
+    "",
+    `Cache key (edge-set content hash): ${params.contentHash}.`,
+    "If you already produced rewrites for this exact key, you may reuse them instead of regenerating.",
+    "",
+    `Then run: ${params.continueCommand}`,
+    "",
+    "Read and follow only the new step prompt returned by that command.",
+    "",
+  ].join("\n");
+}
+
+export function renderEdgeReasoningDispatchPrompt(params: {
+  promptPath: string;
+  resultsPath: string;
+  continueCommand: string;
+  contentHash: string;
+  candidateCount: number;
+}): string {
+  return [
+    "# audit-code edge reasoning (subagent dispatch)",
+    "",
+    `The dependency graph has ${params.candidateCount} low-confidence edge(s) whose`,
+    "machine-generated `reason` text can be clarified. This is a single, bounded,",
+    "optional pass: it only rewrites the `reason` string of those edges — it never",
+    "adds, removes, re-targets, or re-weights an edge.",
+    "",
+    "Dispatch exactly ONE subagent (via the `task` tool or equivalent). Hand it this",
+    "prompt file path; do not load the file into this orchestrator context:",
+    "",
+    `  ${params.promptPath}`,
+    "",
+    "Subagent prompt shape:",
+    "",
+    "  Read and follow the edge-reasoning instructions in: <prompt path above>",
+    "",
+    'The subagent must write its JSON result ({"rewrites":[...]}) to:',
+    "",
+    `  ${params.resultsPath}`,
+    "",
+    `Cache key (edge-set content hash): ${params.contentHash}.`,
+    "If you hold a cached result for this exact key from a previous run, you may write",
+    "it to the results path directly instead of dispatching a subagent.",
+    "",
+    "**File access pre-approval:** if your host supports per-subagent file access",
+    `restrictions, allow the subagent to read ${params.promptPath} and write ${params.resultsPath}.`,
+    "",
+    "After the subagent writes the result, run exactly:",
+    "",
+    `  ${params.continueCommand}`,
+    "",
+    "Read and follow only the new step prompt returned by that command.",
+    "",
+  ].join("\n");
+}
+
 export function renderPresentReportPrompt(finalReportPath: string): string {
   return [
     "# audit-code present report",
