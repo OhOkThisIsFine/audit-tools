@@ -100,7 +100,12 @@ export function estimateTaskGroupTokens(
 }
 
 const PACKET_EXPANSION_MIN_CONFIDENCE = 0.65;
-const HIGH_FAN_DEGREE_THRESHOLD = 12;
+/**
+ * Fan-in / fan-out degree above which a node is treated as a hub. Exported so
+ * the Phase 3 delta-scope expansion skips the same hubs that packet planning
+ * skips, preventing scope blow-up through highly-connected modules.
+ */
+export const HIGH_FAN_DEGREE_THRESHOLD = 12;
 const HIGH_FAN_EXPANSION_CONFIDENCE = 0.99;
 const MAX_PACKET_KEY_EDGES = 8;
 const MAX_PACKET_BOUNDARY_FILES = 12;
@@ -214,11 +219,11 @@ function buildTaskGroups(tasks: AuditTask[]): Map<string, AuditTask[]> {
   return groups;
 }
 
-function normalizeGraphPath(path: string): string {
+export function normalizeGraphPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
 }
 
-function collectGraphEdges(graphBundle?: GraphBundle): GraphEdge[] {
+export function collectGraphEdges(graphBundle?: GraphBundle): GraphEdge[] {
   if (!graphBundle?.graphs) {
     return [];
   }
@@ -255,7 +260,7 @@ function collectGraphEdges(graphBundle?: GraphBundle): GraphEdge[] {
   return edges;
 }
 
-function graphEdgeConfidence(edge: GraphEdge): number {
+export function graphEdgeConfidence(edge: GraphEdge): number {
   if (typeof edge.confidence === "number" && Number.isFinite(edge.confidence)) {
     return Math.min(1, Math.max(0, edge.confidence));
   }
@@ -272,12 +277,12 @@ function isConcreteGraphEdge(edge: GraphEdge): boolean {
   return edge.kind !== "heuristic-container-edge";
 }
 
-interface GraphDegreeIndex {
+export interface GraphDegreeIndex {
   fanIn: Map<string, number>;
   fanOut: Map<string, number>;
 }
 
-function buildGraphDegreeIndex(edges: GraphEdge[]): GraphDegreeIndex {
+export function buildGraphDegreeIndex(edges: GraphEdge[]): GraphDegreeIndex {
   const fanIn = new Map<string, number>();
   const fanOut = new Map<string, number>();
 

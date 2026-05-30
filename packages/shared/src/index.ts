@@ -117,6 +117,7 @@ export {
 // Git helpers
 export {
   isGitRepo,
+  gitRefExists,
   changedFiles,
   fileCommits,
   stagedAndUntracked,

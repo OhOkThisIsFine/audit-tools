@@ -28,6 +28,19 @@ export function isGitRepo(root: string): boolean {
 }
 
 /**
+ * True when `ref` resolves to a commit in `root`. Lets callers distinguish a
+ * mistyped/unknown `--since` ref (fall back to a full audit) from a valid ref
+ * with no changes (`changedFiles` returns `[]` in both cases otherwise).
+ */
+export function gitRefExists(root: string, ref: string): boolean {
+  const result = runTracked(
+    ["git", "rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+    { cwd: root, encoding: "utf8" },
+  );
+  return result.status === 0 && result.stdout.trim().length > 0;
+}
+
+/**
  * Files differing between `since` (a ref/SHA) and the current working tree —
  * committed, staged, and unstaged. Backs the auditor's `--since` delta mode.
  */

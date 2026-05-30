@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scope.schema.json",
+  "title": "Audit Scope Manifest",
+  "description": "scope.json — records how a run was scoped (Phase 3 `--since` delta mode). A deterministic function of the git ref, the changed files, and the dependency graph. Sits upstream of coverage_matrix.json in the staleness DAG: in delta mode only seed + expanded files are (re)queued for audit; every other auditable file inherits its prior completion or is excluded from this run.",
+  "type": "object",
+  "required": ["mode", "since", "seed_files", "expanded_files", "budget"],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": ["full", "delta"],
+      "description": "'full' audits every auditable file; 'delta' scopes to a changed neighbourhood."
+    },
+    "since": {
+      "type": ["string", "null"],
+      "description": "Git ref/SHA the delta was measured against; null in full mode."
+    },
+    "seed_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Changed auditable files (relative to `since`) present in the repo manifest. Sorted."
+    },
+    "expanded_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Auditable graph neighbours pulled in by priority-frontier expansion. Sorted."
+    },
+    "budget": {
+      "type": "object",
+      "required": ["max_files"],
+      "properties": {
+        "max_files": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Upper bound on in-scope files (seeds + expanded); expansion stops once reached."
+        }
+      },
+      "additionalProperties": false
+    },
+    "dropped_note": {
+      "type": "string",
+      "description": "Set when scope was truncated by the budget, or when `--since` could not be honoured and the run fell back to full."
+    }
+  },
+  "additionalProperties": false
+}

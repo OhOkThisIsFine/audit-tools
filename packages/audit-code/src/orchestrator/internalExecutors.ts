@@ -15,6 +15,8 @@ import { buildCriticalFlowManifest } from "../extractors/flows.js";
 import { buildRiskRegister } from "../extractors/risk.js";
 import { buildSurfaceManifest } from "../extractors/surfaces.js";
 import { initializeCoverageFromPlan } from "./planning.js";
+import { applyScopeToCoverage, fullAuditScope } from "./scope.js";
+import type { AuditScopeManifest } from "../types/auditScope.js";
 import { buildFlowCoverage } from "./flowCoverage.js";
 import { buildRequeuePayload } from "./requeueCommand.js";
 import {
@@ -363,6 +365,7 @@ export async function runPlanningExecutor(
   root: string,
   lineIndex: Record<string, number> = {},
   sizeIndex?: Record<string, number>,
+  scope?: AuditScopeManifest,
 ): Promise<ExecutorRunResult> {
   if (!bundle.repo_manifest) {
     throw new Error("Cannot run planning executor without repo_manifest");
@@ -380,6 +383,7 @@ export async function runPlanningExecutor(
     );
   }
 
+  const resolvedScope = scope ?? fullAuditScope();
   const externalAnalyzerResults = bundle.external_analyzer_results;
   const coverage = initializeCoverageFromPlan(
     bundle.repo_manifest,
@@ -392,6 +396,9 @@ export async function runPlanningExecutor(
     lineIndex,
     externalAnalyzerResults,
   );
+  // Delta scope: only seed + expanded files stay pending; the rest inherit prior
+  // completion or are excluded from this run. Full scope is a no-op.
+  applyScopeToCoverage(coverage, resolvedScope, bundle.coverage_matrix);
   const flowCoverage = buildFlowCoverage(bundle.critical_flows, coverage);
   const runtimeCommand = await discoverRuntimeValidationCommand(root);
   const runtimeValidationTasks = buildRuntimeValidationTasks({
@@ -431,9 +438,15 @@ export async function runPlanningExecutor(
     externalAnalyzerResults,
   );
 
+  const scopeSummary =
+    resolvedScope.mode === "delta"
+      ? ` Delta scope since ${resolvedScope.since}: ${resolvedScope.seed_files.length} changed file(s) + ${resolvedScope.expanded_files.length} graph neighbour(s) queued; a full audit is advised before release.`
+      : "";
+
   return {
     updated: {
       ...bundle,
+      scope: resolvedScope,
       coverage_matrix: coverage,
       flow_coverage: flowCoverage,
       runtime_validation_tasks: runtimeValidationTasks,
@@ -445,6 +458,7 @@ export async function runPlanningExecutor(
       audit_report: undefined,
     },
     artifacts_written: [
+      "scope.json",
       "coverage_matrix.json",
       "flow_coverage.json",
       "runtime_validation_tasks.json",
@@ -456,6 +470,7 @@ export async function runPlanningExecutor(
     ],
     progress_summary:
       `Built planning artifacts; generated ${taggedAuditTasks.length} review tasks in ${reviewPackets.length} packet(s) and ${requeuePayload.task_count} requeue tasks.` +
+      scopeSummary +
       (skippedTrivialPaths.length > 0
         ? ` Skipped ${skippedTrivialPaths.length} trivial path${skippedTrivialPaths.length === 1 ? "" : "s"} from semantic review.`
         : "") +
@@ -696,7 +711,7 @@ export function runSynthesisExecutor(
       ...bundle,
       audit_results: finalResults,
       audit_findings: findings,
-      audit_report: renderAuditReportMarkdown(findings),
+      audit_report: renderAuditReportMarkdown(findings, { scope: bundle.scope }),
     },
     artifacts_written: ["audit-findings.json", "audit-report.md"],
     progress_summary: `Rendered deterministic audit report and canonical findings for ${finalResults.length} audit result entries.`,
@@ -758,7 +773,7 @@ export function runSynthesisNarrativeExecutor(
     updated: {
       ...bundle,
       audit_findings: enriched,
-      audit_report: renderAuditReportMarkdown(enriched),
+      audit_report: renderAuditReportMarkdown(enriched, { scope: bundle.scope }),
       synthesis_narrative: record,
     },
     artifacts_written: [

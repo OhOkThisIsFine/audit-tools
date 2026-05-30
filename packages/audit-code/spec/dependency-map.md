@@ -125,6 +125,22 @@ Downstream:
 - `root_cause_clusters.json`
 - `synthesis_report.json`
 
+### `scope.json`
+
+Records how a run was scoped (Phase 3 `--since` delta mode): `full` (default) or
+`delta` with the seed (changed) + expanded (graph-neighbour) file sets. Produced
+by the planning executor and consumed by it to decide which `coverage_matrix.json`
+entries are (re)queued vs. inherited-complete/excluded. A changed scope (different
+`--since` / seed set → new content hash) re-stales coverage so the plan rebuilds.
+No cycle: planning writes `scope.json` **and** `coverage_matrix.json` in one
+`advanceAudit` call, and metadata is computed dependency-first, so coverage
+records the post-write scope revision (mirrors `graph_bundle.json` →
+`analyzer_capability.json`).
+
+Downstream:
+
+- `coverage_matrix.json`
+
 ### `coverage_matrix.json`
 
 Downstream:
