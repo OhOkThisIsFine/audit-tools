@@ -407,6 +407,33 @@ test("validateSessionConfig accepts boolean host dispatch capability", () => {
   );
 });
 
+test("validateSessionConfig validates the analyzers map of resolution settings", () => {
+  assert.deepEqual(
+    validateSessionConfig({
+      provider: "local-subprocess",
+      analyzers: { typescript: "ephemeral", python: "skip" },
+    }),
+    [],
+  );
+
+  const badSetting = validateSessionConfig({ analyzers: { typescript: "yes" } });
+  assert.ok(
+    badSetting.some(
+      (issue) =>
+        issue.path === "analyzers.typescript" &&
+        /repo, ephemeral, permanent, skip, auto/.test(issue.message),
+    ),
+  );
+
+  const badShape = validateSessionConfig({ analyzers: ["typescript"] });
+  assert.ok(
+    badShape.some(
+      (issue) =>
+        issue.path === "analyzers" && /must be a JSON object/i.test(issue.message),
+    ),
+  );
+});
+
 test("validateConfiguredProviderEnvironment checks explicit executable paths without PATH probing", () => {
   let pathLookups = 0;
   let commandLookups = 0;

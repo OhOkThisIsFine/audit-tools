@@ -278,14 +278,30 @@ test("audit-code MCP server exposes tools, resources, prompts, and wrapper-backe
         started.structuredContent.contract_version,
         "audit-code-step/v1alpha1",
       );
-      if (started.structuredContent.step_kind === "design_review") {
-        const incomingDir = join(root, ".audit-artifacts", "incoming");
+      // Pass the structure-phase pauses: the graph-enrichment install prompt
+      // (skip the optional analyzers) and the design review (empty findings).
+      const incomingDir = join(root, ".audit-artifacts", "incoming");
+      for (
+        let i = 0;
+        i < 4 && started.structuredContent.step_kind !== "dispatch_review";
+        i++
+      ) {
+        const kind = started.structuredContent.step_kind;
         await mkdir(incomingDir, { recursive: true });
-        await writeFile(
-          join(incomingDir, "design-review-findings.json"),
-          JSON.stringify([], null, 2) + "\n",
-        );
-        started = await client.request("start2", "tools/call", {
+        if (kind === "analyzer_install") {
+          await writeFile(
+            join(incomingDir, "analyzer-decisions.json"),
+            JSON.stringify({ typescript: "skip" }, null, 2) + "\n",
+          );
+        } else if (kind === "design_review") {
+          await writeFile(
+            join(incomingDir, "design-review-findings.json"),
+            JSON.stringify([], null, 2) + "\n",
+          );
+        } else {
+          break;
+        }
+        started = await client.request(`start-continue-${i}`, "tools/call", {
           name: "continue_audit",
           arguments: {},
         });

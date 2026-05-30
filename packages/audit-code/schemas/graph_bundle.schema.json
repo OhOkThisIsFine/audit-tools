@@ -116,6 +116,11 @@
         }
       },
       "additionalProperties": true
+    },
+    "analyzers_used": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Ids of the language analyzers whose edges were merged into this bundle by the optional graph-enrichment pass. Absent/empty when only the regex floor was used."
     }
   },
   "additionalProperties": false

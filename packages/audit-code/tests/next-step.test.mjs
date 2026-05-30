@@ -100,21 +100,68 @@ test("next-step emits present_report for a complete audit", async () => {
   });
 });
 
+// Walk next-step past the structure-phase pauses (graph-enrichment install
+// prompt, then design review) by skipping the optional analyzers and supplying
+// empty design-review findings, returning the first non-pause step.
 async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrapperOpts = {}) {
-  const initial = JSON.parse(
-    (await runWrapper(wrapperArgs, { cwd: root, ...wrapperOpts })).stdout,
-  );
-  if (initial.step_kind !== "design_review") return initial;
   const incomingDir = join(root, ".audit-artifacts", "incoming");
-  await mkdir(incomingDir, { recursive: true });
-  await writeFile(
-    join(incomingDir, "design-review-findings.json"),
-    JSON.stringify([], null, 2) + "\n",
-  );
-  return JSON.parse(
-    (await runWrapper(wrapperArgs, { cwd: root, ...wrapperOpts })).stdout,
-  );
+  for (let i = 0; i < 6; i++) {
+    const step = JSON.parse(
+      (await runWrapper(wrapperArgs, { cwd: root, ...wrapperOpts })).stdout,
+    );
+    if (step.step_kind === "analyzer_install") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        join(incomingDir, "analyzer-decisions.json"),
+        JSON.stringify({ typescript: "skip" }, null, 2) + "\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "design_review") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        join(incomingDir, "design-review-findings.json"),
+        JSON.stringify([], null, 2) + "\n",
+      );
+      continue;
+    }
+    return step;
+  }
+  throw new Error("next-step did not advance past structure-phase pauses");
 }
+
+test("next-step proposes an analyzer install, then proceeds after a skip decision is recorded", async () => {
+  await withTempRepo(async (root) => {
+    // The fixture has a .ts file but no local `typescript`, so graph enrichment
+    // pauses to propose an install.
+    const proposed = JSON.parse(
+      (await runWrapper(["next-step"], { cwd: root })).stdout,
+    );
+    assert.equal(proposed.step_kind, "analyzer_install");
+    assert.match(proposed.artifact_paths.analyzer_decisions, /analyzer-decisions\.json$/);
+    const prompt = await readFile(proposed.prompt_path, "utf8");
+    assert.match(prompt, /typescript/);
+    assert.match(prompt, /ephemeral/);
+
+    // Host declines the install.
+    await mkdir(join(root, ".audit-artifacts", "incoming"), { recursive: true });
+    await writeFile(
+      proposed.artifact_paths.analyzer_decisions,
+      JSON.stringify({ typescript: "skip" }, null, 2) + "\n",
+    );
+
+    const next = JSON.parse(
+      (await runWrapper(["next-step"], { cwd: root })).stdout,
+    );
+    assert.notEqual(next.step_kind, "analyzer_install");
+
+    // The decision is persisted durably to session config.
+    const config = JSON.parse(
+      await readFile(join(root, ".audit-artifacts", "session-config.json"), "utf8"),
+    );
+    assert.equal(config.analyzers.typescript, "skip");
+  });
+});
 
 test("next-step defaults to dispatch_review when host dispatch capability is not configured", async () => {
   await withTempRepo(async (root) => {

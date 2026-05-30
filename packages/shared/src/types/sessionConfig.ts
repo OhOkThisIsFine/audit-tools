@@ -90,6 +90,30 @@ export interface SynthesisConfig {
   narrative?: boolean;
 }
 
+/**
+ * Per-analyzer resolution policy for the optional graph-enrichment pass
+ * (`analyzers.<id>`). Resolution order is repo node_modules → version-keyed
+ * analyzer cache → (for `ephemeral`/`permanent`) install into the cache, else
+ * the regex floor.
+ *
+ * - `repo`     — use only the audited repo's node_modules; absent ⇒ regex floor.
+ * - `ephemeral`/`permanent` — resolve repo→cache, installing into the shared
+ *   cache if absent (never touches the audited project). `permanent` is a
+ *   durable opt-in; `ephemeral` is a one-time/per-need install. Both behave the
+ *   same for resolution.
+ * - `skip`     — never run this analyzer.
+ * - `auto`     — resolve repo→cache; if absent and the analyzer has in-scope
+ *   files, the conversation-first flow proposes an install. Unanswered ⇒ skip.
+ */
+export const ANALYZER_SETTINGS = [
+  "repo",
+  "ephemeral",
+  "permanent",
+  "skip",
+  "auto",
+] as const;
+export type AnalyzerSetting = (typeof ANALYZER_SETTINGS)[number];
+
 export interface SessionConfig {
   provider?: ProviderName;
   timeout_ms?: number;
@@ -106,4 +130,6 @@ export interface SessionConfig {
   opentoken?: OpenTokenConfig;
   observability?: ObservabilityConfig;
   synthesis?: SynthesisConfig;
+  /** Per-analyzer resolution policy for the optional graph-enrichment pass. */
+  analyzers?: Record<string, AnalyzerSetting>;
 }

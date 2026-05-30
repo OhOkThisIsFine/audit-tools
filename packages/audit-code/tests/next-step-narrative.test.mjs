@@ -123,7 +123,10 @@ async function persistSynthesisReadyState(root, artifactsDir) {
     },
   };
   const structure = await advanceAudit(prepared);
-  const designAssessment = await advanceAudit(structure.updated_bundle);
+  // Graph enrichment runs between structure and design assessment; with no root
+  // it writes an "omitted" marker and leaves the regex-floor graph unchanged.
+  const enrichment = await advanceAudit(structure.updated_bundle);
+  const designAssessment = await advanceAudit(enrichment.updated_bundle);
   const designReview = await advanceAudit(designAssessment.updated_bundle);
   const planning = await advanceAudit(designReview.updated_bundle, {
     root,
@@ -148,6 +151,16 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
   try {
     await writeFixtureRepo(root);
     await persistSynthesisReadyState(root, artifactsDir);
+    // This fixture has no local `typescript`; skip the optional analyzer so the
+    // resume does not pause on the graph-enrichment install prompt.
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      JSON.stringify(
+        { provider: "local-subprocess", analyzers: { typescript: "skip" } },
+        null,
+        2,
+      ) + "\n",
+    );
 
     // First next-step lands on the narrative pause.
     const paused = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
@@ -213,7 +226,15 @@ test("next-step omits the narrative when synthesis.narrative is disabled", async
     await persistSynthesisReadyState(root, artifactsDir);
     await writeFile(
       join(artifactsDir, "session-config.json"),
-      JSON.stringify({ provider: "local-subprocess", synthesis: { narrative: false } }, null, 2) + "\n",
+      JSON.stringify(
+        {
+          provider: "local-subprocess",
+          synthesis: { narrative: false },
+          analyzers: { typescript: "skip" },
+        },
+        null,
+        2,
+      ) + "\n",
     );
 
     const done = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);

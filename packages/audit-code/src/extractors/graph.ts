@@ -178,7 +178,7 @@ function shouldReadForGraph(file: RepoManifest["files"][number]): boolean {
   );
 }
 
-function buildPathLookup(
+export function buildPathLookup(
   repoManifest: RepoManifest,
   dispositionMap: Map<string, FileDisposition["files"][number]["status"]>,
 ): Map<string, string> {

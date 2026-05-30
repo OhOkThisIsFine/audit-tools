@@ -59,12 +59,14 @@ export type {
   OpenTokenConfig,
   ObservabilityConfig,
   SynthesisConfig,
+  AnalyzerSetting,
   SessionConfig,
 } from "./types/sessionConfig.js";
 export {
   PROVIDER_NAMES,
   SESSION_UI_MODES,
   PROVIDER_SECTION_KEYS,
+  ANALYZER_SETTINGS,
 } from "./types/sessionConfig.js";
 
 // Contracts

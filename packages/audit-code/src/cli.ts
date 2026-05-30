@@ -56,8 +56,16 @@ import {
 import {
   getSessionConfigPath,
   loadSessionConfig,
+  persistAnalyzerSettings,
   readSessionConfigFile,
 } from "./supervisor/sessionConfig.js";
+import {
+  resolveAnalyzerPlan,
+  needsInstallDecision,
+} from "./extractors/analyzers/registry.js";
+import { buildPathLookup } from "./extractors/graph.js";
+import { buildDispositionMap } from "./extractors/disposition.js";
+import type { AnalyzerPlanEntry } from "./extractors/analyzers/types.js";
 import {
   clearDispatchFiles,
   buildRunId,
@@ -74,7 +82,7 @@ import {
 } from "./orchestrator/reviewPackets.js";
 import type { AuditResult, AuditTask, Finding, RepoManifest } from "./types.js";
 import type { AuditState } from "./types/auditState.js";
-import type { SessionConfig, StepStatus, SynthesisNarrative } from "@audit-tools/shared";
+import type { AnalyzerSetting, SessionConfig, StepStatus, SynthesisNarrative } from "@audit-tools/shared";
 import type { RuntimeValidationReport } from "./types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "./types/externalAnalyzer.js";
 import type { WorkerTask } from "./types/workerSession.js";
@@ -170,6 +178,7 @@ import {
   renderDispatchReviewPrompt,
   renderSingleTaskFallbackStepPrompt,
   renderPresentReportPrompt,
+  renderAnalyzerInstallPrompt,
   renderBlockedStepPrompt,
 } from "./cli/prompts.js";
 import {
@@ -602,6 +611,7 @@ async function runAuditStep(options: {
   runtimeUpdatesPath?: string;
   externalAnalyzerPath?: string;
   narrativeResultsPath?: string;
+  analyzers?: Record<string, AnalyzerSetting>;
   opentoken?: boolean;
   runLog?: boolean;
 }) {
@@ -659,6 +669,7 @@ async function runAuditStep(options: {
     runtimeValidationUpdates,
     externalAnalyzerResults,
     narrativeResults,
+    analyzers: options.analyzers,
     preferredExecutor: options.preferredExecutor,
     opentoken: options.opentoken,
     runLogger,
@@ -909,6 +920,7 @@ async function cmdAdvanceAudit(argv: string[]): Promise<void> {
     auditResultsPath: getFlag(argv, "--results"),
     runtimeUpdatesPath: getFlag(argv, "--updates"),
     externalAnalyzerPath,
+    analyzers: sessionConfig.analyzers,
     opentoken: sessionConfig.opentoken?.enabled,
     runLog: sessionConfig.observability?.run_log,
   });
@@ -941,6 +953,7 @@ async function runDeterministicForNextStep(params: {
   maxRuns: number;
   opentoken?: boolean;
   narrativeEnabled?: boolean;
+  analyzers?: Record<string, AnalyzerSetting>;
 }): Promise<
   | {
       kind: "semantic_review";
@@ -952,6 +965,12 @@ async function runDeterministicForNextStep(params: {
       kind: "design_review";
       state: AuditState;
       bundle: ArtifactBundle;
+    }
+  | {
+      kind: "analyzer_install";
+      state: AuditState;
+      bundle: ArtifactBundle;
+      unresolved: AnalyzerPlanEntry[];
     }
   | {
       kind: "synthesis_narrative";
@@ -972,6 +991,7 @@ async function runDeterministicForNextStep(params: {
     }
 > {
   let lastSummary = "";
+  let analyzers = params.analyzers;
   for (let index = 0; index < params.maxRuns; index++) {
     const bundle = await loadArtifactBundle(params.artifactsDir);
     const decision = decideNextStep(bundle);
@@ -1016,6 +1036,65 @@ async function runDeterministicForNextStep(params: {
           continue;
         }
       }
+    }
+
+    if (decision.selected_executor === "graph_enrichment_executor") {
+      const includedFiles = bundle.repo_manifest
+        ? [
+            ...new Set(
+              buildPathLookup(
+                bundle.repo_manifest,
+                buildDispositionMap(bundle.file_disposition),
+              ).values(),
+            ),
+          ]
+        : [];
+      const plan = resolveAnalyzerPlan(params.root, analyzers, includedFiles);
+      const unresolved = plan.filter(needsInstallDecision);
+      if (unresolved.length > 0) {
+        const decisionsPath = join(
+          params.artifactsDir,
+          "incoming",
+          "analyzer-decisions.json",
+        );
+        let decisions: Record<string, unknown> | undefined;
+        try {
+          decisions = await readJsonFile<Record<string, unknown>>(decisionsPath);
+        } catch (error) {
+          if (!isFileMissingError(error)) throw error;
+        }
+        if (decisions && typeof decisions === "object") {
+          const settings: Record<string, AnalyzerSetting> = {};
+          for (const [id, value] of Object.entries(decisions)) {
+            if (
+              value === "ephemeral" ||
+              value === "permanent" ||
+              value === "skip" ||
+              value === "repo" ||
+              value === "auto"
+            ) {
+              settings[id] = value;
+            }
+          }
+          if (Object.keys(settings).length > 0) {
+            const merged = await persistAnalyzerSettings(
+              params.artifactsDir,
+              settings,
+            );
+            analyzers = merged.analyzers;
+          }
+          await unlink(decisionsPath).catch(() => {});
+          continue;
+        }
+        return {
+          kind: "analyzer_install",
+          state,
+          bundle,
+          unresolved,
+        };
+      }
+      // No undecided installs: fall through to run the executor below
+      // (it installs for ephemeral/permanent, uses repo/cache, skips the rest).
     }
 
     if (decision.selected_executor === "design_review") {
@@ -1120,6 +1199,7 @@ async function runDeterministicForNextStep(params: {
       result = await runAuditStep({
         root: params.root,
         artifactsDir: params.artifactsDir,
+        analyzers,
         opentoken: params.opentoken,
       });
     } catch (error) {
@@ -1233,6 +1313,7 @@ async function cmdNextStep(argv: string[]): Promise<void> {
     maxRuns: getMaxRuns(argv),
     opentoken: sessionConfig.opentoken?.enabled,
     narrativeEnabled: sessionConfig.synthesis?.narrative !== false,
+    analyzers: sessionConfig.analyzers,
   });
 
   if (result.kind === "complete") {
@@ -1304,6 +1385,36 @@ async function cmdNextStep(argv: string[]): Promise<void> {
         design_review_results: designReviewResultsPath,
       },
       prompt: fullPrompt,
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "analyzer_install") {
+    const decisionsPath = join(
+      artifactsDir,
+      "incoming",
+      "analyzer-decisions.json",
+    );
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir);
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "analyzer_install",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Write analyzer install decisions to the results path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        analyzer_decisions: decisionsPath,
+      },
+      prompt: renderAnalyzerInstallPrompt({
+        unresolved: result.unresolved,
+        decisionsPath,
+        continueCommand,
+      }),
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -2077,6 +2188,7 @@ const explicitProvider = getExplicitProvider(argv);
           auditResultsPath,
           runtimeUpdatesPath,
           externalAnalyzerPath,
+          analyzers: sessionConfig.analyzers,
         });
         workerResult = {
           contract_version: WORKER_RESULT_CONTRACT_VERSION,

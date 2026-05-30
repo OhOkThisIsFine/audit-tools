@@ -1,10 +1,10 @@
 # audit-tools refactor — sprint handoff
 
-**Date:** 2026-05-29
-**Scope this sprint:** **Phase 6 — synthesis narrative + canonical JSON hand-off** (auditor). Adds the `synthesis_narrative_current` obligation, emits the canonical `audit-findings.json` machine contract, and renders the optional LLM narrative (themes / executive summary / top risks) into both the JSON and `audit-report.md`.
-**Status:** committed on `master` (see _Git state_ below).
+**Date:** 2026-05-30
+**Scope this sprint:** **Phase 5.0 (analyzer seam) + Phase 5(TS/JS)** (auditor). Adds the pluggable `LanguageAnalyzer` registry, the `graph_enrichment_current` obligation with its `analyzer_capability.json` marker, the **TypeScript compiler-API analyzer** (the first real call graph), and the conversation-first `analyzer_install` bounded step.
+**Status:** implemented and green on `master` working tree (not yet committed — see _Git state_ below).
 
-The frozen build order is: **0 → 1A + `.tmp` fix → 2 → 6 → 5.0 + 5(TS/JS) → 3 → 4 → 5(Py/HTML/CSS) → 7.** Everything through **Phase 6 is now done**. The next pickup is **Phase 5.0 + 5(TS/JS)** (compiler/parser graph seam + the TypeScript analyzer).
+The frozen build order is: **0 → 1A + `.tmp` fix → 2 → 6 → 5.0 + 5(TS/JS) → 3 → 4 → 5(Py/HTML/CSS) → 7.** Everything through **Phase 5.0 + 5(TS/JS) is now done**. The next pickup is **Phase 3 — `--since` delta mode**, which rides on the new TS call graph.
 
 ---
 
@@ -12,55 +12,51 @@ The frozen build order is: **0 → 1A + `.tmp` fix → 2 → 6 → 5.0 + 5(TS/JS
 
 ```
 shared          24 tests   pass   (node --test packages/shared/tests/*.test.mjs)
-audit-code     487 tests   pass   (node --test, +10 new vs. 477 baseline)
+audit-code     497 tests   pass   (node --test, +10 new vs. 487 baseline)
 remediate-code 360 tests   pass   (vitest)
 ```
 
-`npm run build` (shared → both dependents) and `npm run check` are clean in every workspace. The 10 new tests are [synthesis-narrative.test.mjs](packages/audit-code/tests/synthesis-narrative.test.mjs) (8: canonical report build, base vs. narrative render, `applyNarrative` tagging + unknown-id drop, JSON↔markdown parity, both executors, forced `advanceAudit`) and [next-step-narrative.test.mjs](packages/audit-code/tests/next-step-narrative.test.mjs) (2: conversation-first pause→ingest→complete, and config-disabled omit).
+`npm run build` (shared → both dependents) and `npm run check` are clean in every workspace. The 10 new tests: [analyzer-seam.test.mjs](packages/audit-code/tests/analyzer-seam.test.mjs) (6: merge precedence, ungrouped-survival, executor apply+provenance, graceful-skip byte-identical floor, not_applicable, `resolveAnalyzerPlan` install-decision gating), [typescript-analyzer.test.mjs](packages/audit-code/tests/typescript-analyzer.test.mjs) (2: golden import/reexport/extends/implements/call edge set + empty-set), and one each added to [validation-remediation.test.mjs](packages/audit-code/tests/validation-remediation.test.mjs) (analyzers config validation) and [next-step.test.mjs](packages/audit-code/tests/next-step.test.mjs) (install prompt → skip decision → proceed + session-config persisted).
 
-Recommended pre-release gate (not run this sprint, involves packaging smoke): `npm run verify:release` in each package.
+End-to-end sanity confirmed: enrichment against real repo files resolves `typescript` via `repo`, sets `analyzers_used: ["typescript"]`, and emits `ts-*` edges (incl. `.js`→`.ts` re-export resolution).
 
 ---
 
-## Phase 6 — synthesis narrative + canonical JSON hand-off ✅
+## Phase 5.0 + 5(TS/JS) — compiler-graph seam + TypeScript analyzer ✅
 
 ### What it does
-The synthesis step now emits the canonical **`audit-findings.json`** (shared `AuditFindingsReport`) alongside `audit-report.md` — the markdown is a render of that report model. A new downstream obligation **`synthesis_narrative_current`** optionally enriches the findings report with an LLM narrative:
+A new bounded obligation **`graph_enrichment_current`** runs between `structure_artifacts` and `design_assessment_current`. The structure executor always emits the **regex floor**; enrichment layers language-analyzer edges onto `graph_bundle.json` with **higher-confidence-kind-wins** precedence and records provenance in `analyzer_capability.json` (+ `graph_bundle.analyzers_used[]`). The first analyzer is the **TypeScript compiler API**: module resolution → `ts-import`/`ts-reexport` (honours tsconfig paths/barrels/`.js`→`.ts`), heritage → `ts-extends`/`ts-implements`, checker → cross-file `ts-call`.
 
-- **Deterministic path** (run-to-completion, MCP, programmatic `advanceAudit`): the narrative auto-**omits** — one extra bounded step writes a `synthesis-narrative.json` marker (`status: "omitted"`) and the deterministic report stands unchanged.
-- **Conversation-first path** (`next-step`, `synthesis.narrative !== false`): the orchestrator **pauses** with a new `synthesis_narrative` step prompt; the host writes a `SynthesisNarrative` JSON to `incoming/synthesis-narrative.json`, re-runs `next-step`, and the narrative is merged — `themes[]` + `executive_summary` + `top_risks[]` appended to `audit-findings.json`, findings tagged with `theme_id`, and `audit-report.md` re-rendered with the narrative sections.
-
-On completion both `audit-report.md` **and** `audit-findings.json` are promoted to the repo root (the latter is the Phase 7 remediator hand-off).
+Per-analyzer resolution (`session-config.json → analyzers.<id>`): repo `node_modules` → version-keyed `analyzer-cache` → (for `ephemeral`/`permanent`) install into the cache → else regex floor. `auto`/unset with an absent dep **and** in-scope files is the only case that pauses: the conversation-first `next-step` emits an **`analyzer_install`** step proposing `{ephemeral|permanent|skip}`; the host writes `incoming/analyzer-decisions.json`, the choice persists to session config, and the run continues. Non-interactive paths (`advance-audit`, run-to-completion) never prompt — unanswered `auto`+absent → skip → floor. An analyzer with 0 supported in-scope files is `not_applicable` (no prompt, no noise).
 
 ### Where it lives
-- **Shared:** `SynthesisConfig` (`synthesis.narrative`) on `SessionConfig` ([sessionConfig.ts](packages/shared/src/types/sessionConfig.ts)); `SynthesisNarrative` input type next to `FindingTheme` ([finding.ts](packages/shared/src/types/finding.ts)). Both re-exported from [index.ts](packages/shared/src/index.ts). `AuditFindingsReport`/`FindingTheme` were already defined (Phase 0).
-- **Reporting** ([synthesis.ts](packages/audit-code/src/reporting/synthesis.ts)): `buildAuditFindingsReport(model)` wraps the deterministic `AuditReportModel` in the canonical contract (`AUDIT_FINDINGS_CONTRACT_VERSION`); `applyNarrative(report, narrative)` keeps only themes referencing real findings, tags findings (first-claiming theme wins), attaches summary/risks; `renderAuditReportMarkdown` now takes a `RenderableAuditReport` (widened to the shared `Finding`) and renders Executive Summary / Top Risks / Themes / per-finding `Theme:` lines only when present. New narrative prompt: [synthesisNarrativePrompt.ts](packages/audit-code/src/reporting/synthesisNarrativePrompt.ts).
-- **Executors** ([internalExecutors.ts](packages/audit-code/src/orchestrator/internalExecutors.ts)): `runSynthesisExecutor` now writes `audit-findings.json` **and** `audit-report.md`; new `runSynthesisNarrativeExecutor(bundle, narrative?)` applies or omits. Registered in [executors.ts](packages/audit-code/src/orchestrator/executors.ts) (`synthesis_narrative_executor` → `synthesis_narrative_current`), wired into [advance.ts](packages/audit-code/src/orchestrator/advance.ts) (`narrativeResults` option + switch case).
-- **State / chain:** obligation added to [state.ts](packages/audit-code/src/orchestrator/state.ts) (keyed on `synthesis-narrative.json`) and the `PRIORITY` chain in [nextStep.ts](packages/audit-code/src/orchestrator/nextStep.ts), after `synthesis_current`.
-- **Artifacts / staleness:** `audit_findings` (`audit-findings.json`) and `synthesis_narrative` (`synthesis-narrative.json`) registered in [io/artifacts.ts](packages/audit-code/src/io/artifacts.ts); DAG edge `audit-findings.json → synthesis-narrative.json` in [dependencyMap.ts](packages/audit-code/src/orchestrator/dependencyMap.ts) + [spec/dependency-map.md](packages/audit-code/spec/dependency-map.md). `promoteFinalAuditReport` promotes `audit-findings.json` best-effort. `SynthesisNarrativeRecord` marker type: [types/synthesisNarrative.ts](packages/audit-code/src/types/synthesisNarrative.ts).
-- **CLI** ([cli.ts](packages/audit-code/src/cli.ts)): `runAuditStep` gains `narrativeResultsPath`; `runDeterministicForNextStep` gains `narrativeEnabled` + the `synthesis_narrative_executor` interception (ingest `incoming/synthesis-narrative.json` if present, else pause when enabled, else fall through to the deterministic omit); `cmdNextStep` passes `narrativeEnabled` from config and emits the new `synthesis_narrative` step. New `StepKind` in [cli/steps.ts](packages/audit-code/src/cli/steps.ts).
-- **Schema / validation:** [schemas/audit_findings.schema.json](packages/audit-code/schemas/audit_findings.schema.json) (new); `theme_id` added to [schemas/finding.schema.json](packages/audit-code/schemas/finding.schema.json); `synthesis.narrative` boolean validated in [validation/sessionConfig.ts](packages/audit-code/src/validation/sessionConfig.ts).
+- **Shared:** `analyzers_used?: string[]` on `GraphBundle` ([graph.ts](packages/shared/src/types/graph.ts)); `ANALYZER_SETTINGS`/`AnalyzerSetting` + `SessionConfig.analyzers` ([sessionConfig.ts](packages/shared/src/types/sessionConfig.ts)); both re-exported from [index.ts](packages/shared/src/index.ts). `resolveAnalyzerDep`/`installToCache` ([analyzerDeps.ts](packages/shared/src/tooling/analyzerDeps.ts)) were already built (Phase 0).
+- **Seam:** [`src/extractors/analyzers/`](packages/audit-code/src/extractors/analyzers) — `types.ts` (`LanguageAnalyzer`/`AnalyzerContext`/`AnalyzerPlanEntry`), `registry.ts` (`ANALYZER_REGISTRY`, `resolveAnalyzerPlan`, `needsInstallDecision`), `merge.ts` (`mergeAnalyzerEdges` group-aware precedence + analyzer confidences), `typescript.ts` (the analyzer; dynamically loads the resolved `typescript`, scopes a `ts.Program` to included files). `buildPathLookup` exported from [graph.ts](packages/audit-code/src/extractors/graph.ts).
+- **Executor:** [graphEnrichmentExecutor.ts](packages/audit-code/src/orchestrator/graphEnrichmentExecutor.ts) (`runGraphEnrichmentExecutor`; injectable `registry`/`cacheRoot` for tests). Marker type [analyzerCapability.ts](packages/audit-code/src/types/analyzerCapability.ts).
+- **State / chain:** obligation in [state.ts](packages/audit-code/src/orchestrator/state.ts) (keyed on `analyzer_capability.json`) + `PRIORITY` in [nextStep.ts](packages/audit-code/src/orchestrator/nextStep.ts) after `structure_artifacts`; executor registered in [executors.ts](packages/audit-code/src/orchestrator/executors.ts); dispatched in [advance.ts](packages/audit-code/src/orchestrator/advance.ts) (`analyzers` option + switch case).
+- **Artifacts / staleness:** `analyzer_capability` registered in [io/artifacts.ts](packages/audit-code/src/io/artifacts.ts); DAG edge `graph_bundle.json → analyzer_capability.json` in [dependencyMap.ts](packages/audit-code/src/orchestrator/dependencyMap.ts) + [spec/dependency-map.md](packages/audit-code/spec/dependency-map.md). Schemas: new [analyzer_capability.schema.json](packages/audit-code/schemas/analyzer_capability.schema.json); `analyzers_used` added to [graph_bundle.schema.json](packages/audit-code/schemas/graph_bundle.schema.json).
+- **CLI:** `analyzer_install` `StepKind` ([cli/steps.ts](packages/audit-code/src/cli/steps.ts)); `renderAnalyzerInstallPrompt` ([cli/prompts.ts](packages/audit-code/src/cli/prompts.ts)); interception + new result arm in `runDeterministicForNextStep`, step emission in `cmdNextStep`, and `analyzers` threaded through `runAuditStep`→`advanceAudit` at the generic-advance call sites ([cli.ts](packages/audit-code/src/cli.ts)). `persistAnalyzerSettings` writeback ([supervisor/sessionConfig.ts](packages/audit-code/src/supervisor/sessionConfig.ts)). `analyzers` config validation ([validation/sessionConfig.ts](packages/audit-code/src/validation/sessionConfig.ts)).
 
 ### Decisions & deviations this sprint
-- **Narrative is a real obligation/step (Approach A), not folded into synthesis.** This adds exactly **one** bounded deterministic run (the omit marker). Default `--max-runs` is 1000 so only the explicit `--max-runs 2` completion test needed bumping to `3` (legitimate — the pipeline gained a step); all other completion paths were unaffected. The conversation-first pause is gated on `synthesis.narrative !== false` (default on), mirroring `design_review`.
-- **`synthesis_current` stays keyed on `audit-report.md`** (minimal change); `audit-findings.json` is co-produced by `synthesis_executor`. The narrative marker tracks `audit-findings.json`'s revision via a single DAG edge — when synthesis re-runs (upstream change), the base `audit-findings.json` is rewritten, bumping its revision and re-staling `synthesis-narrative.json` so the narrative regenerates. No staleness cycle: the marker records the post-enrichment revision in the same `advanceAudit` call.
-- **`renderAuditReportMarkdown` signature widened** to `RenderableAuditReport` (findings typed as the shared `Finding`, `lens: string`) so both `AuditReportModel` (lens narrowed) and `AuditFindingsReport` render through one path. Existing section layout is unchanged when no narrative is present, keeping the report goldens stable.
-- **`audit-findings.json` promoted to repo root** on completion as the durable machine contract (Phase 7 input). The completion test only asserts `audit-report.md` + `.audit-artifacts` removal, so this is additive.
+- **Obligation placed before `design_assessment_current`** (not just "before planning") so the deterministic design assessment, which reads `graph_bundle`, sees enriched edges.
+- **Group-aware merge, not blanket `(from,to)` collapse.** `mergeAnalyzerEdges` collapses only within a relation group (import / inheritance / call); ungrouped floor kinds (container, auth-session, route-handler, …) are untouched, so every existing floor golden stays byte-stable when no analyzer runs.
+- **No-cycle marker pattern reused from Phase 6.** Enrichment writes `graph_bundle.json` **and** `analyzer_capability.json` in one `advanceAudit` call; dependency-first metadata records the post-enrichment graph revision. Re-running structure re-stales the marker so enrichment regenerates.
+- **TS module loading** prefers the dependency resolved from the audited repo/cache (`loadTypescript(dependencyPath)` via `pathToFileURL` on the package `main`), falling back to the bundled `typescript`; any compiler failure degrades to the regex floor.
+- **Test-harness note (not a product change):** the existing in-process narrative tests build the pipeline from `{}` without a `tooling_manifest`, which makes `next-step` re-derive on resume; with the new enrichment step that surfaces as an `analyzer_install` pause. Fixed by pinning `analyzers: { typescript: "skip" }` in those tests (real CLI runs persist incrementally and don't hit this). The orchestration/lifecycle/MCP tests gained the one extra enrichment step in their asserted sequences.
 
 ---
 
 ## Remaining phases (not started)
 
-Pick up in frozen order. The shared building blocks they need already exist (see parentheticals).
+Pick up in frozen order. Shared building blocks they need already exist (parentheticals).
 
-- **Phase 5.0 + 5(TS/JS) — compiler/parser graph seam** *(next)*. `src/extractors/analyzers/` with `LanguageAnalyzer { supports; analyze }` + registry. New obligation `graph_enrichment_current` between `structure_artifacts` and `planning_artifacts`; regex floor always emitted, analyzer edges merged higher-confidence-kind-wins in `uniqueSortedEdges`; `graph_bundle.json` gains `analyzers_used[]`. Resolve deps with `resolveAnalyzerDep` (**already built**, [tooling/analyzerDeps.ts](packages/shared/src/tooling/analyzerDeps.ts)) → propose-install as a bounded step persisted to `session-config.json → analyzers.<id>`; unanswered = skip → regex. First analyzer: the `typescript` compiler API (module resolution → `ts-import`/`ts-reexport`; checker → `ts-call`/`ts-extends`/`ts-implements`). Add the `analyzers.<id>` config key (validation mirrors the `synthesis` block just added).
-- **Phase 3 — `--since` delta mode.** `advanceAudit({since})`, CLI `--since <ref>`; new `scope.json` + schema; deterministic priority-frontier BFS using `changedFiles` (**already built**, [git.ts](packages/shared/src/git.ts)) + the degree index (`buildGraphDegreeIndex`/`HIGH_FAN_DEGREE_THRESHOLD` in [reviewPackets.ts](packages/audit-code/src/orchestrator/reviewPackets.ts)). Only in-scope coverage entries go `pending`.
-- **Phase 4 — decorator routing + LLM edge-reasoning.** 4A: extend route patterns ([graph.ts](packages/audit-code/src/extractors/graph.ts)) for NestJS/FastAPI/Flask/Angular, emitting existing `RouteEdge` shapes. 4B: optional cached LLM post-pass that only rewrites `reason` on existing low-confidence edges. Config `graph.llm_edge_reasoning` (default off).
-- **Phase 5(Py/HTML/CSS) — tree-sitter analyzers.** Python imports/decorators, HTML `<script>/<link>`, CSS `@import`/`url()`. SQL = registry stub only.
-- **Phase 7 — remediator prompts, theme hints, outcome capture.** Consume `audit-findings.json` directly (now emitted at repo root) including `theme_id`/`suggested_fix_pattern`; **delete `parseAuditReport`/`isAuditorAuditReport`** ([plan.ts](packages/remediate-code/src/phases/plan.ts)) — keep the free-form LLM extraction path for non-auditor input. Inject `detectRepoConventions(root)` into worker prompts. Emit `remediation-outcomes.json` from [close.ts](packages/remediate-code/src/phases/close.ts).
+- **Phase 3 — `--since` delta mode** *(next)*. `advanceAudit({since})`, CLI `--since <ref>`; new `scope.json` + schema; deterministic priority-frontier BFS using `changedFiles` (**already built**, [git.ts](packages/shared/src/git.ts)) + the degree index (`buildGraphDegreeIndex`/`HIGH_FAN_DEGREE_THRESHOLD` in [reviewPackets.ts](packages/audit-code/src/orchestrator/reviewPackets.ts)). Only in-scope coverage entries go `pending`. The new TS call/import graph strengthens neighbor expansion automatically.
+- **Phase 4 — decorator routing + LLM edge-reasoning.** 4A: extend route patterns ([graph.ts](packages/audit-code/src/extractors/graph.ts)) for NestJS/FastAPI/Flask/Angular, emitting existing `RouteEdge` shapes (the analyzer seam now exists for an AST-based version). 4B: optional cached LLM post-pass that only rewrites `reason` on existing low-confidence edges. Config `graph.llm_edge_reasoning` (default off).
+- **Phase 5(Py/HTML/CSS) — tree-sitter analyzers.** Register into the **existing seam** ([registry.ts](packages/audit-code/src/extractors/analyzers/registry.ts)): Python imports/decorators, HTML `<script>/<link>`, CSS `@import`/`url()`. SQL = registry stub only.
+- **Phase 7 — remediator prompts, theme hints, outcome capture.** Consume `audit-findings.json` directly (incl. `theme_id`/`suggested_fix_pattern`); **delete `parseAuditReport`/`isAuditorAuditReport`** ([plan.ts](packages/remediate-code/src/phases/plan.ts)) — keep the free-form LLM path. Inject `detectRepoConventions(root)` into worker prompts; emit `remediation-outcomes.json` from [close.ts](packages/remediate-code/src/phases/close.ts).
 
 ### New session-config keys still to add
-`analyzers.<id>` (Phase 5), `graph.llm_edge_reasoning` (Phase 4). (`observability.run_log` **done** Phase 1A; `synthesis.narrative` **done** this sprint; `--since` is a CLI flag.)
+`graph.llm_edge_reasoning` (Phase 4). (`analyzers.<id>` **done** this sprint; `observability.run_log`, `synthesis.narrative` done earlier; `--since` is a CLI flag.)
 
 ---
 
@@ -71,13 +67,13 @@ Pick up in frozen order. The shared building blocks they need already exist (see
 - Token estimates are prefer-bytes / fall-back-to-lines (Phase 2); line-based goldens stay byte-for-byte stable.
 
 ## Git state
-This sprint's Phase 6 work is committed on `master`. The prior sprint (auditor Phase 2 byte-switch) is in commit `a1b3cce`; Phases 0/1A/remediator-2 are in `23af936`.
+This sprint's Phase 5.0 + 5(TS/JS) work is on the `master` working tree, not yet committed. Prior sprints: Phase 6 in `5fc32b4`, Phase 2 byte-switch in `a1b3cce`, Phases 0/1A/remediator-2 in `23af936`.
 
 ## How to verify
 ```bash
 npm install
 npm run build -w @audit-tools/shared && npm run build   # build order matters
 npm test -w @audit-tools/shared                          # 24
-npm test -w packages/audit-code                          # 487
+npm test -w packages/audit-code                          # 497
 npm test -w packages/remediate-code                      # 360
 ```

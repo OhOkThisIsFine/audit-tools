@@ -22,6 +22,7 @@ import type {
   RuntimeValidationTaskManifest,
 } from "../types/runtimeValidation.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
+import type { AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
 import type { ToolingManifest } from "../types/toolingManifest.js";
 import {
   isFileMissingError,
@@ -48,6 +49,7 @@ type ArtifactPayloadMap = {
   flow_coverage: FlowCoverageManifest;
   risk_register: RiskRegister;
   design_assessment: DesignAssessment;
+  analyzer_capability: AnalyzerCapabilityRecord;
 
   // --- Phase 3: Audit execution ---
   coverage_matrix: CoverageMatrix;
@@ -145,6 +147,7 @@ export const ARTIFACT_DEFINITIONS = {
   flow_coverage: jsonArtifact("flow_coverage.json", "analysis"),
   risk_register: jsonArtifact("risk_register.json", "analysis"),
   design_assessment: jsonArtifact("design_assessment.json", "analysis"),
+  analyzer_capability: jsonArtifact("analyzer_capability.json", "analysis"),
   coverage_matrix: jsonArtifact("coverage_matrix.json", "execution"),
   runtime_validation_tasks: jsonArtifact(
     "runtime_validation_tasks.json",

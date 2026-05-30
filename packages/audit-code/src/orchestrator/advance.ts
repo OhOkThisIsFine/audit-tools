@@ -21,8 +21,9 @@ import {
 } from "./internalExecutors.js";
 import { runAutoFixExecutor } from "./autoFixExecutor.js";
 import { runSyntaxResolutionExecutor } from "./syntaxResolutionExecutor.js";
+import { runGraphEnrichmentExecutor } from "./graphEnrichmentExecutor.js";
 import { RunLogger } from "@audit-tools/shared";
-import type { SynthesisNarrative } from "@audit-tools/shared";
+import type { AnalyzerSetting, SynthesisNarrative } from "@audit-tools/shared";
 
 export interface AdvanceAuditOptions {
   root?: string;
@@ -34,6 +35,8 @@ export interface AdvanceAuditOptions {
   externalAnalyzerResults?: ExternalAnalyzerResults;
   /** Host/provider-supplied synthesis narrative; merged by synthesis_narrative_executor. */
   narrativeResults?: SynthesisNarrative;
+  /** Per-analyzer resolution policy for the optional graph-enrichment pass. */
+  analyzers?: Record<string, AnalyzerSetting>;
   preferredExecutor?: string;
   opentoken?: boolean;
   runLogger?: RunLogger;
@@ -128,6 +131,12 @@ export async function advanceAudit(
         break;
       case "structure_executor":
         run = await runStructureExecutor(bundle, options.root);
+        break;
+      case "graph_enrichment_executor":
+        run = await runGraphEnrichmentExecutor(bundle, {
+          root: options.root,
+          analyzers: options.analyzers,
+        });
         break;
       case "design_assessment_executor":
         run = runDesignAssessmentExecutor(bundle);
