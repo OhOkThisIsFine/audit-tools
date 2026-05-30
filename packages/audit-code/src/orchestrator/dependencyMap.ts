@@ -115,4 +115,11 @@ export const ARTIFACT_DEPENDENCY_MAP: Record<string, string[]> = {
   "runtime_validation_report.json": [
     "audit-report.md",
   ],
+  // The canonical machine contract is co-produced with audit-report.md by the
+  // synthesis executor. The optional narrative pass tracks its revision: a fresh
+  // (re-synthesized) audit-findings.json re-stales the narrative marker so the
+  // themes/executive-summary/top-risks regenerate. See spec/dependency-map.md.
+  "audit-findings.json": [
+    "synthesis-narrative.json",
+  ],
 };

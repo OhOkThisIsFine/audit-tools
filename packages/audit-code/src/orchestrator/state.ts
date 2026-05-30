@@ -192,6 +192,16 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
       ),
     ),
   );
+  obligations.push(
+    obligation(
+      "synthesis_narrative_current",
+      staleOrSatisfied(
+        staleArtifacts,
+        ["synthesis-narrative.json"],
+        has(bundle.synthesis_narrative),
+      ),
+    ),
+  );
 
   let status: AuditTopLevelStatus = "not_started";
   if (!has(bundle.repo_manifest)) {

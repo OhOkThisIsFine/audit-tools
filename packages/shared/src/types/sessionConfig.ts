@@ -80,6 +80,16 @@ export interface ObservabilityConfig {
   run_log?: boolean;
 }
 
+export interface SynthesisConfig {
+  /**
+   * Generate the optional LLM synthesis narrative (themes, executive summary,
+   * top risks) and append it to `audit-findings.json` / `audit-report.md`.
+   * Defaults to on when a provider/host agent is available; the deterministic
+   * report is unchanged when omitted.
+   */
+  narrative?: boolean;
+}
+
 export interface SessionConfig {
   provider?: ProviderName;
   timeout_ms?: number;
@@ -95,4 +105,5 @@ export interface SessionConfig {
   quota?: QuotaConfig;
   opentoken?: OpenTokenConfig;
   observability?: ObservabilityConfig;
+  synthesis?: SynthesisConfig;
 }

@@ -294,6 +294,21 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
   validateAgentProviderSection(value.claude_code, "claude_code", issues);
   validateAgentProviderSection(value.opencode, "opencode", issues);
 
+  if (value.synthesis !== undefined) {
+    if (!isRecord(value.synthesis)) {
+      pushIssue(issues, "synthesis", "synthesis must be a JSON object.");
+    } else if (
+      value.synthesis.narrative !== undefined &&
+      typeof value.synthesis.narrative !== "boolean"
+    ) {
+      pushIssue(
+        issues,
+        "synthesis.narrative",
+        "synthesis.narrative must be a boolean when provided.",
+      );
+    }
+  }
+
   return issues;
 }
 

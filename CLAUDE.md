@@ -83,11 +83,11 @@ The core loop lives in `src/orchestrator/advance.ts` (`advanceAudit`). Each invo
 3. Dispatches to exactly one executor (intake → disposition → structure → planning → agent review → ingestion → runtime validation → synthesis).
 4. Persists updated artifacts and returns a structured execution summary.
 
-The priority chain in `nextStep.ts`: `repo_manifest` → `file_disposition` → `auto_fixes_applied` → `syntax_resolved` → `structure_artifacts` → `planning_artifacts` → `audit_tasks_completed` → `audit_results_ingested` → `runtime_validation_current` → `synthesis_current`.
+The priority chain in `nextStep.ts`: `repo_manifest` → `file_disposition` → `auto_fixes_applied` → `syntax_resolved` → `structure_artifacts` → `planning_artifacts` → `audit_tasks_completed` → `audit_results_ingested` → `runtime_validation_current` → `synthesis_current` → `synthesis_narrative_current`. Synthesis emits the canonical `audit-findings.json` (the machine contract; `audit-report.md` is a render of it); the optional `synthesis_narrative_current` step layers an LLM narrative (themes / executive summary / top risks) onto it and omits cleanly without a provider.
 
 ### Artifact system
 
-Artifacts under `.audit-artifacts/` are the continuity layer: `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `coverage_matrix.json`, `audit_tasks.json`, `review_packets.json`, `audit_results.jsonl`, `runtime_validation_report.json`, `synthesis_report.json`. Staleness is tracked via an explicit dependency DAG (`spec/dependency-map.md`, implemented in `src/orchestrator/staleness.ts` and `src/orchestrator/artifactMetadata.ts`).
+Artifacts under `.audit-artifacts/` are the continuity layer: `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `coverage_matrix.json`, `audit_tasks.json`, `review_packets.json`, `audit_results.jsonl`, `runtime_validation_report.json`, `audit-findings.json` (canonical machine contract), `synthesis-narrative.json` (narrative marker). Staleness is tracked via an explicit dependency DAG (`spec/dependency-map.md`, implemented in `src/orchestrator/staleness.ts` and `src/orchestrator/artifactMetadata.ts`).
 
 ### Entrypoint, providers, schemas, lenses
 

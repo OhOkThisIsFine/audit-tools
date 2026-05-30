@@ -57,6 +57,17 @@ export interface FindingTheme {
   suggested_fix_pattern: string;
 }
 
+/**
+ * The optional LLM synthesis-narrative payload (Phase 6). Produced by a single
+ * cached host/provider pass over the deterministic findings and merged into
+ * `audit-findings.json`. Omitted entirely when no provider is available.
+ */
+export interface SynthesisNarrative {
+  themes: FindingTheme[];
+  executive_summary?: string;
+  top_risks?: string[];
+}
+
 export interface AuditFindingsSummary {
   finding_count: number;
   work_block_count: number;

@@ -36,6 +36,7 @@ export type {
   Finding,
   WorkBlock,
   FindingTheme,
+  SynthesisNarrative,
   AuditFindingsSummary,
   AuditFindingsReport,
 } from "./types/finding.js";
@@ -57,6 +58,7 @@ export type {
   QuotaConfig,
   OpenTokenConfig,
   ObservabilityConfig,
+  SynthesisConfig,
   SessionConfig,
 } from "./types/sessionConfig.js";
 export {
