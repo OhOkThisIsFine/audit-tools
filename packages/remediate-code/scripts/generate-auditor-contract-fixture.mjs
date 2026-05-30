@@ -1,31 +1,22 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
+// The remediator consumes the auditor's canonical audit-findings.json (Phase 6/7),
+// so this fixture is that machine contract. The `model` below mirrors the shape
+// the auditor's buildAuditFindingsReport emits; serialising it keeps the fixture
+// in sync without requiring a built auditor-lambda.
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const auditorRoot = resolve(
-  process.env.AUDITOR_LAMBDA_ROOT ?? join(repoRoot, "..", "auditor-lambda"),
-);
-const rendererPath = join(auditorRoot, "dist", "reporting", "synthesis.js");
 const outputPath = join(
   repoRoot,
   "tests",
   "fixtures",
-  "auditor-contract-audit-report.md",
+  "auditor-contract-audit-findings.json",
 );
 
-if (!existsSync(rendererPath)) {
-  console.error(
-    `auditor renderer not found at ${rendererPath}. Build auditor-lambda first or set AUDITOR_LAMBDA_ROOT.`,
-  );
-  process.exit(1);
-}
-
-const { renderAuditReportMarkdown } = await import(pathToFileURL(rendererPath).href);
-
 const model = {
+  contract_version: "audit-findings/v1alpha1",
   summary: {
     finding_count: 3,
     work_block_count: 2,
@@ -104,5 +95,5 @@ const model = {
 };
 
 await mkdir(dirname(outputPath), { recursive: true });
-await writeFile(outputPath, renderAuditReportMarkdown(model), "utf8");
+await writeFile(outputPath, `${JSON.stringify(model, null, 2)}\n`, "utf8");
 console.log(`wrote ${outputPath}`);

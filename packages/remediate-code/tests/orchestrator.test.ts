@@ -14,7 +14,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-orch");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(TEST_DIR, "artifacts");
-const FIXTURE = join(__dirname, "fixtures", "audit-report-simple.md");
+const FIXTURE = join(__dirname, "fixtures", "audit-findings-simple.json");
 
 const ALL_STEPS_NOT_APPLICABLE = [
   { step: "Write Tests" as const, rationale: "Fixture only" },

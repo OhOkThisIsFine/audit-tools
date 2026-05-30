@@ -14,11 +14,11 @@ const TEST_DIR = join(__dirname, ".test-next-step");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".remediation-artifacts");
 const WRAPPER = join(__dirname, "..", "remediate-code.mjs");
-const AUDIT_FIXTURE = join(__dirname, "fixtures", "audit-report-simple.md");
+const AUDIT_FIXTURE = join(__dirname, "fixtures", "audit-findings-simple.json");
 const AUDITOR_CONTRACT_FIXTURE = join(
   __dirname,
   "fixtures",
-  "auditor-contract-audit-report.md",
+  "auditor-contract-audit-findings.json",
 );
 
 function makePlanningState(overrides: Partial<RemediationState> = {}): RemediationState {

@@ -11,7 +11,7 @@ import type {
   RemediationPlan,
 } from "../state/types.js";
 import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, RunLogger, type SessionConfig } from "@audit-tools/shared";
-import { runPlanPhase, isAuditorAuditReport } from "../phases/plan.js";
+import { runPlanPhase } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
 import { validateRemediationPlan } from "../validation/remediationState.js";

@@ -54,6 +54,7 @@ export async function runTriagePhase(
           if (res.action === "retry") {
             // "documented" maps to runImplementPhase in the orchestrator switch
             item.status = "documented";
+            item.rework_count = (item.rework_count ?? 0) + 1;
             requiresRetry = true;
           } else if (res.action === "ignore") {
             item.status = "ignored";
@@ -74,6 +75,7 @@ export async function runTriagePhase(
         let autoRetried = false;
         for (const item of blockedItems) {
           item.status = "documented";
+          item.rework_count = (item.rework_count ?? 0) + 1;
           autoRetried = true;
         }
         if (autoRetried) {

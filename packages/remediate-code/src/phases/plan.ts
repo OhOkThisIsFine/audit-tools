@@ -8,7 +8,7 @@ import {
 } from "../state/types.js";
 import { writeFile, readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { AUDITOR_REPORT_MARKER } from "@audit-tools/shared";
+import type { AuditFindingsReport, FindingTheme } from "@audit-tools/shared";
 import { existsSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
@@ -87,133 +87,53 @@ function enumerateTestFiles(root: string): string[] {
   return [];
 }
 
-function applyBlockLine(line: string, block: Partial<RemediationBlock>): void {
-  if (line.startsWith("- Findings: ")) {
-    const raw = line.slice("- Findings: ".length).trim();
-    block.items = raw !== "none" ? raw.split(",").map((s) => s.trim()) : [];
-  } else if (line.startsWith("- Depends on: ")) {
-    const raw = line.slice("- Depends on: ".length).trim();
-    block.dependencies =
-      raw !== "none" ? raw.split(",").map((s) => s.trim()) : [];
-  }
-}
-
-function applyFindingLine(
-  line: string,
-  finding: Partial<Finding>,
-  inEvidence: boolean,
-): boolean {
-  if (line.startsWith("- Severity: ")) {
-    finding.severity = line.slice("- Severity: ".length).trim() as any;
-  } else if (line.startsWith("- Confidence: ")) {
-    finding.confidence = line.slice("- Confidence: ".length).trim() as any;
-  } else if (line.startsWith("- Lens: ")) {
-    finding.lens = line.slice("- Lens: ".length).trim();
-  } else if (line.startsWith("- Summary: ")) {
-    finding.summary = line.slice("- Summary: ".length).trim();
-  } else if (line.startsWith("- Files: ")) {
-    const files = line
-      .slice("- Files: ".length)
-      .trim()
-      .split(",")
-      .map((s) => s.trim());
-    finding.affected_files = files.map((f) => ({ path: f }));
-  } else if (line.startsWith("- Evidence:")) {
-    return true; // enter evidence mode
-  } else if (inEvidence && line.startsWith("  - ")) {
-    finding.evidence!.push(line.slice(4).trim());
-  } else if (line.trim() === "") {
-    return false; // exit evidence mode
-  }
-  return inEvidence;
-}
-
-export function parseAuditReport(content: string): {
+/**
+ * Parse the auditor's canonical `audit-findings.json` (the machine contract) into
+ * remediation findings, work blocks, and synthesis themes. The auditor emits this
+ * directly (Phase 6); the remediator consumes it verbatim, so there is no markdown
+ * parsing — non-auditor input still flows through the free-form LLM extractor.
+ */
+export function parseAuditFindingsReport(report: AuditFindingsReport): {
   findings: Finding[];
   blocks: RemediationBlock[];
+  themes: FindingTheme[];
 } {
-  const lines = content.split(/\r?\n/);
-  const findings: Finding[] = [];
-  const blocks: RemediationBlock[] = [];
-
-  let section: "none" | "blocks" | "findings" = "none";
-  let currentBlock: Partial<RemediationBlock> | null = null;
-  let currentFinding: Partial<Finding> | null = null;
-  let inEvidence = false;
-
-  for (const line of lines) {
-    if (line.startsWith("## Work Blocks")) {
-      section = "blocks";
-      continue;
-    } else if (line.startsWith("## Findings")) {
-      section = "findings";
-      if (currentBlock?.block_id) blocks.push(currentBlock as RemediationBlock);
-      currentBlock = null;
-      continue;
-    } else if (line.startsWith("## Scope and Coverage")) {
-      section = "none";
-      if (currentFinding?.id) findings.push(currentFinding as Finding);
-      currentFinding = null;
-      continue;
-    }
-
-    if (section === "blocks") {
-      if (line.startsWith("### ")) {
-        if (currentBlock?.block_id)
-          blocks.push(currentBlock as RemediationBlock);
-        currentBlock = {
-          block_id: line.slice(4).trim(),
-          items: [],
-          dependencies: [],
-        };
-      } else if (currentBlock) {
-        applyBlockLine(line, currentBlock);
-      }
-    } else if (section === "findings") {
-      if (line.startsWith("### ")) {
-        if (currentFinding?.id) findings.push(currentFinding as Finding);
-        const match = line.slice(4).match(/^([^\s—]+)\s*—\s*(.*)$/);
-        if (match) {
-          currentFinding = {
-            id: match[1],
-            title: match[2],
-            category: "General",
-            affected_files: [],
-            evidence: [],
-          };
-          inEvidence = false;
-        }
-      } else if (currentFinding) {
-        inEvidence = applyFindingLine(line, currentFinding, inEvidence);
-      }
-    }
-  }
-
-  if (
-    currentBlock?.block_id &&
-    !blocks.includes(currentBlock as RemediationBlock)
-  ) {
-    blocks.push(currentBlock as RemediationBlock);
-  }
-  if (currentFinding?.id && !findings.includes(currentFinding as Finding)) {
-    findings.push(currentFinding as Finding);
-  }
-
-  for (const block of blocks) {
-    block.parallel_safe =
-      !block.dependencies || block.dependencies.length === 0;
-  }
-
-  return { findings, blocks };
+  const findings = Array.isArray(report.findings) ? report.findings : [];
+  const blocks: RemediationBlock[] = Array.isArray(report.work_blocks)
+    ? report.work_blocks.map((block) => ({
+        block_id: block.id,
+        items: [...(block.finding_ids ?? [])],
+        dependencies: [...(block.depends_on ?? [])],
+        parallel_safe: (block.depends_on?.length ?? 0) === 0,
+      }))
+    : [];
+  const themes = Array.isArray(report.themes) ? report.themes : [];
+  return { findings, blocks, themes };
 }
 
-export function isAuditorAuditReport(content: string): boolean {
-  if (content.includes(AUDITOR_REPORT_MARKER)) return true;
+/** Whether a parsed JSON value looks like the auditor's audit-findings report. */
+export function isAuditFindingsReport(
+  value: unknown,
+): value is AuditFindingsReport {
+  if (!value || typeof value !== "object") return false;
+  const report = value as Partial<AuditFindingsReport>;
   return (
-    /^# Audit Report\s*$/im.test(content) &&
-    /^## Work Blocks\s*$/im.test(content) &&
-    /^## Findings\s*$/im.test(content)
+    Array.isArray(report.findings) &&
+    (typeof report.contract_version === "string" ||
+      Array.isArray(report.work_blocks))
   );
+}
+
+/** Parse JSON content into an audit-findings report, or undefined if it is not one. */
+function tryParseFindingsReport(
+  content: string,
+): AuditFindingsReport | undefined {
+  try {
+    const parsed = JSON.parse(content);
+    return isAuditFindingsReport(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 interface PlanPhaseDeps {
@@ -563,20 +483,24 @@ export async function runPlanPhase(
 
   let findings: Finding[] = [];
   let blocks: RemediationBlock[] = [];
+  let themes: FindingTheme[] = [];
 
-  if (
-    options.input &&
-    options.input.endsWith(".md") &&
-    existsSync(options.input)
-  ) {
-    console.log(`Parsing input report: ${options.input}`);
+  if (options.input && existsSync(options.input)) {
     const content = await readFile(options.input, "utf8");
-    if (isAuditorAuditReport(content)) {
-      const parsed = parseAuditReport(content);
+    // Canonical hand-off: the auditor's audit-findings.json (the machine
+    // contract). Parsed directly; any other input is free-form and flows
+    // through the LLM extractor.
+    const findingsReport = options.input.endsWith(".json")
+      ? tryParseFindingsReport(content)
+      : undefined;
+    if (findingsReport) {
+      console.log(`Consuming audit-findings report: ${options.input}`);
+      const parsed = parseAuditFindingsReport(findingsReport);
       findings = parsed.findings;
       blocks = parsed.blocks;
+      themes = parsed.themes;
     } else {
-      console.log("Input is not an auditor-shaped report; using LLM extraction.");
+      console.log(`Extracting findings from input via LLM: ${options.input}`);
       const extracted = await extractFindingsWithProvider(
         content,
         state,
@@ -586,17 +510,6 @@ export async function runPlanPhase(
       findings = extracted.findings;
       blocks = extracted.blocks;
     }
-  } else if (options.input && existsSync(options.input)) {
-    console.log(`Extracting findings from input via LLM: ${options.input}`);
-    const content = await readFile(options.input, "utf8");
-    const extracted = await extractFindingsWithProvider(
-      content,
-      state,
-      options,
-      deps,
-    );
-    findings = extracted.findings;
-    blocks = extracted.blocks;
   } else {
     console.log(
       "No input provided or file does not exist. Halting Plan phase.",
@@ -653,6 +566,7 @@ export async function runPlanPhase(
     ...(e2eCommand ? { e2e_command: e2eCommand } : {}),
     candidate_closing_actions: ["none"],
     ...(blockStrategy ? { block_strategy: blockStrategy } : {}),
+    ...(themes.length > 0 ? { themes } : {}),
   };
 
   const items: Record<string, RemediationItemState> = {};

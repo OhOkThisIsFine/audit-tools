@@ -41,6 +41,16 @@ export type {
   AuditFindingsReport,
 } from "./types/finding.js";
 export type {
+  RemediationOutcomeStatus,
+  RemediationOutcome,
+  RemediationOutcomesReport,
+} from "./types/remediationOutcome.js";
+export type { RepoConventions } from "./tooling/repoConventions.js";
+export {
+  detectRepoConventions,
+  formatRepoConventions,
+} from "./tooling/repoConventions.js";
+export type {
   StepStatus,
   DispatchModelTier,
   DispatchModelHint,
