@@ -344,8 +344,12 @@ export async function prepareDispatchArtifacts(params: {
 
   const bundle = await loadArtifactBundle(artifactsDir);
   const tasksPath = join(runDir, "pending-audit-tasks.json");
-  const tasks = await readJsonFile<AuditTask[]>(tasksPath).catch((error) => {
-    if (isFileMissingError(error)) return buildPendingAuditTasks(bundle);
+  const tasks = await readJsonFile<AuditTask[]>(tasksPath).catch(async (error) => {
+    if (isFileMissingError(error)) {
+      const generated = buildPendingAuditTasks(bundle);
+      await writeJsonFile(tasksPath, generated);
+      return generated;
+    }
     throw error;
   });
   const sessionConfig: SessionConfig =
@@ -532,7 +536,7 @@ export async function prepareDispatchArtifacts(params: {
       ];
     });
     const submitCommand =
-      `"${process.execPath}" "${join(params.packageRoot, "audit-code.mjs")}" submit-packet ` +
+      `node packages/audit-code/audit-code.mjs submit-packet ` +
       `--run-id-b64 ${toBase64Url(runId)} ` +
       `--packet-id-b64 ${toBase64Url(packet.packet_id)} ` +
       `--artifacts-dir-b64 ${toBase64Url(artifactsDir)}`;
@@ -575,7 +579,7 @@ export async function prepareDispatchArtifacts(params: {
       "  unit_id       copy from the task metadata",
       "  pass_id       copy from the task metadata",
       "  lens          copy from the task metadata",
-      "  file_coverage [{path, total_lines}] - copy the exact template from each task section above",
+      "  file_coverage [{path, total_lines}] - copy the exact template from each task section above. You MUST include total_lines. Do not omit or zero it out, as this will cause fatal validation errors.",
       "  findings      [] or array of finding objects",
       "",
       "Lens verification tasks:",
@@ -605,6 +609,7 @@ export async function prepareDispatchArtifacts(params: {
       "## Submit",
       "Pipe the JSON array on stdin to this command:",
       `  ${submitCommand}`,
+      "  (If using Windows PowerShell, you MUST use `Get-Content <file> | & <command>` instead of the `<` operator.)",
       "",
       "The command validates and writes the packet-owned result files. Exit 0 means accepted.",
       "Non-zero: read the errors, fix the JSON, and run the same submit command again. Retry up to 3 times.",

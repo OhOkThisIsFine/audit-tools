@@ -10,6 +10,8 @@ const {
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_OUTPUT_TOKENS,
   BLOCK_SAFETY_MARGIN,
+// Note: We intentionally import from the compiled build in `../dist` to guarantee we test the final distributed artifacts.
+// The `npm test` script automatically rebuilds before execution, ensuring tests are never run against stale builds.
 } = await import("../dist/tokens.js");
 
 test("estimateTokensFromBytes is monotonic and zero for non-positive/non-finite", () => {
