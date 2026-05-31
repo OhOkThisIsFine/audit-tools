@@ -35,5 +35,5 @@ export interface WorkerTask {
 export function usesDeferredWorkerCommand(
   task: Pick<WorkerTask, "worker_command_mode" | "skip_worker_command">,
 ): boolean {
-  return task.worker_command_mode === "deferred" || task.skip_worker_command === true;
+  return task.worker_command_mode === "deferred";
 }
