@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { writeJsonFile } from "@audit-tools/shared";
-import type { ArtifactBundle } from "../io/artifacts.js";
+import { type ArtifactBundle, AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import type {
   AuditState,
   AuditTopLevelStatus,
@@ -68,8 +68,6 @@ const RUN_LEDGER_FILENAME = "run-ledger.json";
 const CURRENT_TASK_FILENAME = "current-task.json";
 const CURRENT_PROMPT_FILENAME = "current-prompt.md";
 const CURRENT_TASKS_FILENAME = "current-tasks.json";
-const CURRENT_SINGLE_TASK_FILENAME = "current-single-task.json";
-const CURRENT_SINGLE_TASK_PROMPT_FILENAME = "current-single-task-prompt.md";
 const AUDIT_TASKS_FILENAME = "audit_tasks.json";
 const RUNTIME_VALIDATION_TASKS_FILENAME = "runtime_validation_tasks.json";
 const BLOCKED_STATUS: AuditTopLevelStatus = "blocked";
@@ -224,6 +222,31 @@ function buildInteractiveProviderHint(
   return `Provider: ${providerLabel}. This is a deterministic semantic-review handoff, not a failed audit. Use host subagents when the active toolset provides them; otherwise use the single-task fallback and stop after the worker command. For automatic LLM review, configure an interactive provider in ${sessionConfigPath}; that is only needed for backend-launched review.`;
 }
 
+// Single source for which artifact paths render in the markdown handoff and how
+// absent ones read. renderMarkdown and file_map both source paths from the
+// artifact path model (AuditCodeHandoffArtifactPaths), so adding or renaming a
+// handoff artifact is one edit here instead of coordinated edits across sites.
+const ARTIFACT_PATH_RENDER_FIELDS: ReadonlyArray<{
+  label: string;
+  key: keyof AuditCodeHandoffArtifactPaths;
+  fallback?: string;
+}> = [
+  { label: "operator handoff json", key: "operator_handoff_json" },
+  { label: "operator handoff markdown", key: "operator_handoff_markdown" },
+  { label: "incoming dir", key: "incoming_dir" },
+  { label: "session config", key: "session_config" },
+  { label: "run ledger", key: "run_ledger" },
+  { label: "current task", key: "current_task", fallback: "not available" },
+  { label: "current prompt", key: "current_prompt", fallback: "not available" },
+  { label: "current tasks", key: "current_tasks", fallback: "not available" },
+  { label: "audit tasks", key: "audit_tasks", fallback: "not available yet" },
+  {
+    label: "runtime validation tasks",
+    key: "runtime_validation_tasks",
+    fallback: "not available yet",
+  },
+];
+
 function renderMarkdown(handoff: AuditCodeHandoff): string {
   const lines: string[] = [
     "# audit-code operator handoff",
@@ -247,28 +270,10 @@ function renderMarkdown(handoff: AuditCodeHandoff): string {
   }
 
   lines.push("", "Useful artifact paths:");
-  lines.push(`- operator handoff json: ${handoff.artifact_paths.operator_handoff_json}`);
-  lines.push(
-    `- operator handoff markdown: ${handoff.artifact_paths.operator_handoff_markdown}`,
-  );
-  lines.push(`- incoming dir: ${handoff.artifact_paths.incoming_dir}`);
-  lines.push(`- session config: ${handoff.artifact_paths.session_config}`);
-  lines.push(`- run ledger: ${handoff.artifact_paths.run_ledger}`);
-  lines.push(
-    `- current task: ${handoff.artifact_paths.current_task ?? "not available"}`,
-  );
-  lines.push(
-    `- current prompt: ${handoff.artifact_paths.current_prompt ?? "not available"}`,
-  );
-  lines.push(
-    `- current tasks: ${handoff.artifact_paths.current_tasks ?? "not available"}`,
-  );
-  lines.push(
-    `- audit tasks: ${handoff.artifact_paths.audit_tasks ?? "not available yet"}`,
-  );
-  lines.push(
-    `- runtime validation tasks: ${handoff.artifact_paths.runtime_validation_tasks ?? "not available yet"}`,
-  );
+  for (const field of ARTIFACT_PATH_RENDER_FIELDS) {
+    const value = handoff.artifact_paths[field.key];
+    lines.push(`- ${field.label}: ${value ?? field.fallback ?? "not available"}`);
+  }
 
   if (handoff.suggested_inputs.length > 0) {
     lines.push("", "Suggested evidence inputs:");
@@ -401,24 +406,8 @@ export function buildAuditCodeHandoff(params: {
     handoff.file_map = {
       current_task: artifactPaths.current_task!,
       current_prompt: artifactPaths.current_prompt!,
-      single_task: join(
-        params.artifactsDir,
-        "dispatch",
-        CURRENT_SINGLE_TASK_FILENAME,
-      ),
-      single_task_prompt: join(
-        params.artifactsDir,
-        "dispatch",
-        CURRENT_SINGLE_TASK_PROMPT_FILENAME,
-      ),
-      dispatch_plan: join(
-        params.artifactsDir,
-        "runs",
-        params.activeReviewRun.run_id,
-        "dispatch-plan.json",
-      ),
       audit_results: params.activeReviewRun.audit_results_path,
-      final_report: join(params.root, "audit-report.md"),
+      final_report: join(params.root, AUDIT_REPORT_FILENAME),
     };
   }
 

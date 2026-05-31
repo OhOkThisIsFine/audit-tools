@@ -96,6 +96,11 @@ interface ArtifactDefinition<K extends ArtifactBundleKey = ArtifactBundleKey> {
   write: (path: string, value: ArtifactPayloadMap[K]) => Promise<void>;
 }
 
+// Canonical filename for the rendered findings report. Single source of truth
+// for path construction. The dependency table below still lists it as plain
+// data alongside its sibling artifact-name literals.
+export const AUDIT_REPORT_FILENAME = "audit-report.md";
+
 function jsonArtifact<K extends ArtifactBundleKey>(
   fileName: string,
   phase: ArtifactPhase,
@@ -173,7 +178,7 @@ export const ARTIFACT_DEFINITIONS = {
   audit_plan_metrics: jsonArtifact("audit_plan_metrics.json", "execution"),
   review_packets: jsonArtifact("review_packets.json", "execution"),
   requeue_tasks: jsonArtifact("requeue_tasks.json", "execution"),
-  audit_report: textArtifact("audit-report.md", "reporting"),
+  audit_report: textArtifact(AUDIT_REPORT_FILENAME, "reporting"),
   audit_findings: jsonArtifact("audit-findings.json", "reporting"),
   synthesis_narrative: jsonArtifact("synthesis-narrative.json", "reporting"),
   audit_state: jsonArtifact("audit_state.json", "supervisor"),
@@ -264,8 +269,8 @@ export async function promoteFinalAuditReport(params: {
   remove?: typeof rm;
   warn?: (message: string) => void;
 } = {}): Promise<{ promoted: boolean; cleaned: boolean; warning?: string }> {
-  const source = join(params.artifactsDir, "audit-report.md");
-  const destination = join(params.repoRoot, "audit-report.md");
+  const source = join(params.artifactsDir, AUDIT_REPORT_FILENAME);
+  const destination = join(params.repoRoot, AUDIT_REPORT_FILENAME);
   const copy = options.copy ?? cp;
   const remove = options.remove ?? rm;
   const warn = options.warn ?? ((message) => process.stderr.write(`${message}\n`));

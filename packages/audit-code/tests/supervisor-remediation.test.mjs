@@ -214,13 +214,20 @@ test("buildAuditCodeHandoff points active review runs at next-step", () => {
   assert.doesNotMatch(handoff.suggested_commands[0], /worker-run/);
   assert.match(handoff.quick_start ?? "", /next-step/);
   assert.doesNotMatch(handoff.quick_start ?? "", /prepare-dispatch/);
+  // file_map advertises only artifacts that exist at handoff time or are stable
+  // output destinations. next-step outputs (the dispatch plan and single-task
+  // fallback prompt) are intentionally absent so a host does not eager-read a
+  // not-yet-generated path and wrongly fall back to manual single-task review.
+  assert.equal(handoff.file_map?.single_task, undefined);
+  assert.equal(handoff.file_map?.single_task_prompt, undefined);
+  assert.equal(handoff.file_map?.dispatch_plan, undefined);
   assert.equal(
-    handoff.file_map?.single_task_prompt,
-    join(artifactsDir, "dispatch", "current-single-task-prompt.md"),
+    handoff.file_map?.current_task,
+    join(artifactsDir, "dispatch", "current-task.json"),
   );
   assert.equal(
-    handoff.file_map?.dispatch_plan,
-    join(artifactsDir, "runs", "run-7", "dispatch-plan.json"),
+    handoff.file_map?.audit_results,
+    join(artifactsDir, "runs", "run-7", "audit-results.json"),
   );
   assert.equal(handoff.active_review_run?.run_id, "run-7");
 });

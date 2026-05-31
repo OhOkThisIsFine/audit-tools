@@ -21,6 +21,7 @@ import {
   loadArtifactBundle,
   writeCoreArtifacts,
   promoteFinalAuditReport,
+  AUDIT_REPORT_FILENAME,
 } from "./io/artifacts.js";
 import { isFileMissingError, readJsonFile, writeJsonFile, prefixValidationIssues, RunLogger } from "@audit-tools/shared";
 import { validateArtifactBundle } from "./validation/artifacts.js";
@@ -1042,8 +1043,8 @@ async function runDeterministicForNextStep(params: {
         state,
         bundle,
         finalReportPath: promoted.promoted
-          ? join(params.root, "audit-report.md")
-          : join(params.artifactsDir, "audit-report.md"),
+          ? join(params.root, AUDIT_REPORT_FILENAME)
+          : join(params.artifactsDir, AUDIT_REPORT_FILENAME),
       };
     }
 
@@ -1325,6 +1326,105 @@ async function runDeterministicForNextStep(params: {
     bundle,
     reason: `Reached max run limit (${params.maxRuns}) before a review, report, or blocker step was ready.`,
   };
+}
+
+// Renders the actionable semantic-review step (packet dispatch or single-task
+// fallback) and writes steps/current-step.json. Shared by next-step and
+// run-to-completion so the backend produces the actionable step itself rather
+// than handing the host a second command. Host dispatch capability is resolved
+// by the caller (flag -> session config -> env -> default true) and is never
+// required from the host to make progress.
+async function renderSemanticReviewStep(params: {
+  root: string;
+  artifactsDir: string;
+  activeReviewRun: ActiveReviewRun;
+  hostCanDispatch: boolean;
+  hostMaxActiveSubagents: number | null;
+  hostCanRestrictSubagentTools: boolean;
+  hostCanSelectSubagentModel: boolean;
+}): Promise<Awaited<ReturnType<typeof writeCurrentStep>>> {
+  const { root, artifactsDir, activeReviewRun } = params;
+  if (!params.hostCanDispatch) {
+    const singleTaskPromptPath = join(
+      artifactsDir,
+      "dispatch",
+      "current-single-task-prompt.md",
+    );
+    const workerCommand = renderCommand(activeReviewRun.worker_command);
+    return writeCurrentStep({
+      artifactsDir,
+      stepKind: "single_task_fallback",
+      status: "ready",
+      runId: activeReviewRun.run_id,
+      allowedCommands: [workerCommand],
+      stopCondition:
+        "Run the exact worker_command after one result, then stop without looping.",
+      repoRoot: root,
+      artifactPaths: {
+        active_review_task: activeReviewRun.task_path,
+        active_review_prompt: activeReviewRun.prompt_path,
+        pending_audit_tasks: activeReviewRun.pending_audit_tasks_path ?? null,
+        audit_results: activeReviewRun.audit_results_path,
+        single_task_prompt: singleTaskPromptPath,
+      },
+      prompt: renderSingleTaskFallbackStepPrompt({
+        singleTaskPromptPath,
+        activeReviewRun,
+      }),
+      access: {
+        read_paths: [singleTaskPromptPath],
+        write_paths: [activeReviewRun.audit_results_path],
+      },
+    });
+  }
+
+  const dispatch = await prepareDispatchArtifacts({
+    packageRoot,
+    runId: activeReviewRun.run_id,
+    artifactsDir,
+    root,
+    hostActiveSubagentLimit: params.hostMaxActiveSubagents,
+  });
+  const mergeCommand = mergeAndIngestCommand(artifactsDir, activeReviewRun.run_id);
+  const continueCommand = nextStepCommand(root, artifactsDir);
+  return writeCurrentStep({
+    artifactsDir,
+    stepKind: "dispatch_review",
+    status: "ready",
+    runId: activeReviewRun.run_id,
+    allowedCommands: [
+      "auditor_merge_and_ingest",
+      "auditor_continue_audit",
+      mergeCommand,
+      continueCommand,
+    ],
+    stopCondition:
+      "Dispatch every packet, run merge-and-ingest once, then run next-step.",
+    repoRoot: root,
+    artifactPaths: {
+      dispatch_plan: dispatch.dispatch_plan_path,
+      dispatch_quota: dispatch.dispatch_quota_path,
+      dispatch_warnings: dispatch.dispatch_warnings_path,
+      active_review_task: activeReviewRun.task_path,
+      pending_audit_tasks: activeReviewRun.pending_audit_tasks_path ?? null,
+    },
+    prompt: renderDispatchReviewPrompt({
+      root,
+      artifactsDir,
+      activeReviewRun,
+      dispatchPlanPath: dispatch.dispatch_plan_path,
+      dispatchQuotaPath: dispatch.dispatch_quota_path,
+      hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
+      hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
+    }),
+    access: {
+      read_paths: [
+        dispatch.dispatch_plan_path,
+        ...(dispatch.dispatch_quota_path ? [dispatch.dispatch_quota_path] : []),
+      ],
+      write_paths: [],
+    },
+  });
 }
 
 async function cmdNextStep(argv: string[]): Promise<void> {
@@ -1612,91 +1712,14 @@ async function cmdNextStep(argv: string[]): Promise<void> {
     return;
   }
 
-  if (!hostCanDispatch) {
-    const singleTaskPromptPath = join(
-      artifactsDir,
-      "dispatch",
-      "current-single-task-prompt.md",
-    );
-    const workerCommand = renderCommand(result.activeReviewRun.worker_command);
-    const step = await writeCurrentStep({
-      artifactsDir,
-      stepKind: "single_task_fallback",
-      status: "ready",
-      runId: result.activeReviewRun.run_id,
-      allowedCommands: [workerCommand],
-      stopCondition:
-        "Run the exact worker_command after one result, then stop without looping.",
-      repoRoot: root,
-      artifactPaths: {
-        active_review_task: result.activeReviewRun.task_path,
-        active_review_prompt: result.activeReviewRun.prompt_path,
-        pending_audit_tasks: result.activeReviewRun.pending_audit_tasks_path ?? null,
-        audit_results: result.activeReviewRun.audit_results_path,
-        single_task_prompt: singleTaskPromptPath,
-      },
-      prompt: renderSingleTaskFallbackStepPrompt({
-        singleTaskPromptPath,
-        activeReviewRun: result.activeReviewRun,
-      }),
-      access: {
-        read_paths: [singleTaskPromptPath],
-        write_paths: [result.activeReviewRun.audit_results_path],
-      },
-    });
-    console.log(JSON.stringify(step, null, 2));
-    return;
-  }
-
-  const dispatch = await prepareDispatchArtifacts({
-    packageRoot,
-    runId: result.activeReviewRun.run_id,
-    artifactsDir,
+  const step = await renderSemanticReviewStep({
     root,
-    hostActiveSubagentLimit: hostMaxActiveSubagents,
-  });
-  const mergeCommand = mergeAndIngestCommand(
     artifactsDir,
-    result.activeReviewRun.run_id,
-  );
-  const continueCommand = nextStepCommand(root, artifactsDir);
-  const step = await writeCurrentStep({
-    artifactsDir,
-    stepKind: "dispatch_review",
-    status: "ready",
-    runId: result.activeReviewRun.run_id,
-    allowedCommands: [
-      "auditor_merge_and_ingest",
-      "auditor_continue_audit",
-      mergeCommand,
-      continueCommand,
-    ],
-    stopCondition:
-      "Dispatch every packet, run merge-and-ingest once, then run next-step.",
-    repoRoot: root,
-    artifactPaths: {
-      dispatch_plan: dispatch.dispatch_plan_path,
-      dispatch_quota: dispatch.dispatch_quota_path,
-      dispatch_warnings: dispatch.dispatch_warnings_path,
-      active_review_task: result.activeReviewRun.task_path,
-      pending_audit_tasks: result.activeReviewRun.pending_audit_tasks_path ?? null,
-    },
-    prompt: renderDispatchReviewPrompt({
-      root,
-      artifactsDir,
-      activeReviewRun: result.activeReviewRun,
-      dispatchPlanPath: dispatch.dispatch_plan_path,
-      dispatchQuotaPath: dispatch.dispatch_quota_path,
-      hostCanRestrictSubagentTools,
-      hostCanSelectSubagentModel,
-    }),
-    access: {
-      read_paths: [
-        dispatch.dispatch_plan_path,
-        ...(dispatch.dispatch_quota_path ? [dispatch.dispatch_quota_path] : []),
-      ],
-      write_paths: [],
-    },
+    activeReviewRun: result.activeReviewRun,
+    hostCanDispatch,
+    hostMaxActiveSubagents,
+    hostCanRestrictSubagentTools,
+    hostCanSelectSubagentModel,
   });
   console.log(JSON.stringify(step, null, 2));
 }
@@ -1892,6 +1915,52 @@ const explicitProvider = getExplicitProvider(argv);
       );
       await writeJsonFile(blockPendingTasksPath, blockPendingTasks);
 
+      const reviewRun: ActiveReviewRun = {
+        run_id: blockRunId,
+        task_path: blockPaths.taskPath,
+        prompt_path: blockPaths.promptPath,
+        pending_audit_tasks_path: blockPendingTasksPath,
+        audit_results_path: blockAuditResultsPath,
+        worker_command: blockTask.worker_command,
+      };
+      // Render the actionable dispatch / single-task step here instead of
+      // leaving the host to issue next-step as a second command. Capability is
+      // resolved from flags/config/env with a sane default, so nothing is
+      // required from the host to make progress. If rendering fails we still
+      // emit the hand-off below — run-to-completion is never worse than before,
+      // and next-step will re-render and surface the error loudly.
+      try {
+        await renderSemanticReviewStep({
+          root,
+          artifactsDir,
+          activeReviewRun: reviewRun,
+          hostCanDispatch: resolveHostDispatchCapability({
+            explicit: getOptionalBooleanFlag(
+              argv,
+              "--host-can-dispatch-subagents",
+            ),
+            sessionConfig,
+          }),
+          hostMaxActiveSubagents: getHostMaxActiveSubagents(argv),
+          hostCanRestrictSubagentTools:
+            getOptionalBooleanFlag(
+              argv,
+              "--host-can-restrict-subagent-tools",
+            ) ?? false,
+          hostCanSelectSubagentModel:
+            getOptionalBooleanFlag(
+              argv,
+              "--host-can-select-subagent-model",
+            ) ?? false,
+        });
+      } catch (stepError) {
+        process.stderr.write(
+          `[audit-code] Could not pre-render the review step; the operator hand-off points to next-step instead. ${
+            stepError instanceof Error ? stepError.message : String(stepError)
+          }\n`,
+        );
+      }
+
       await emitEnvelope({
         root,
         artifactsDir,
@@ -1909,14 +1978,7 @@ const explicitProvider = getExplicitProvider(argv);
         progress_summary: blocker,
         next_likely_step: null,
         providerName: provider.name,
-        activeReviewRun: {
-          run_id: blockRunId,
-          task_path: blockPaths.taskPath,
-          prompt_path: blockPaths.promptPath,
-          pending_audit_tasks_path: blockPendingTasksPath,
-          audit_results_path: blockAuditResultsPath,
-          worker_command: blockTask.worker_command,
-        },
+        activeReviewRun: reviewRun,
       });
       return;
     }
