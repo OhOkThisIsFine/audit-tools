@@ -1,0 +1,103 @@
+[
+  {
+    "task_id": "packages-remediate-code:config_deployment",
+    "unit_id": "packages-remediate-code",
+    "pass_id": "pass:config_deployment",
+    "lens": "config_deployment",
+    "file_coverage": [
+      { "path": "packages/remediate-code/.github/workflows/ci.yml", "total_lines": 92 },
+      { "path": "packages/remediate-code/.github/workflows/publish-package.yml", "total_lines": 196 },
+      { "path": "packages/remediate-code/scripts/generate-auditor-contract-fixture.mjs", "total_lines": 99 },
+      { "path": "packages/remediate-code/scripts/postinstall.mjs", "total_lines": 297 },
+      { "path": "packages/remediate-code/scripts/release-and-publish.mjs", "total_lines": 388 },
+      { "path": "packages/remediate-code/scripts/run-mcp-server.mjs", "total_lines": 16 },
+      { "path": "packages/remediate-code/scripts/smoke-linked-remediate-code.mjs", "total_lines": 84 },
+      { "path": "packages/remediate-code/scripts/smoke-packaged-remediate-code.mjs", "total_lines": 221 },
+      { "path": "packages/remediate-code/skills/remediate-code/agents/openai.yaml", "total_lines": 2 }
+    ],
+    "findings": [
+      {
+        "id": "DEP-REM-001",
+        "title": "Missing rollback on CI publish failure",
+        "category": "deployment-safety",
+        "severity": "medium",
+        "confidence": "high",
+        "lens": "config_deployment",
+        "summary": "If the GitHub Actions publish workflow fails, the script exits without rolling back the GitHub Release or the git tag.",
+        "affected_files": [
+          { "path": "packages/remediate-code/scripts/release-and-publish.mjs", "line_start": 375, "line_end": 376 }
+        ],
+        "evidence": [
+          "packages/remediate-code/scripts/release-and-publish.mjs:375 - waitForRunCompletion throws an error on failure, but there is no catch block to roll back the tag and GitHub Release."
+        ]
+      }
+    ]
+  },
+  {
+    "task_id": "packages-shared:config_deployment",
+    "unit_id": "packages-shared",
+    "pass_id": "pass:config_deployment",
+    "lens": "config_deployment",
+    "file_coverage": [
+      { "path": "packages/shared/scripts/release-and-publish.mjs", "total_lines": 297 }
+    ],
+    "findings": [
+      {
+        "id": "DEP-SHARED-001",
+        "title": "Missing tag rollback on GitHub release failure",
+        "category": "deployment-safety",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "config_deployment",
+        "summary": "If GitHub Release creation fails, the already-pushed git tag is not rolled back.",
+        "affected_files": [
+          { "path": "packages/shared/scripts/release-and-publish.mjs", "line_start": 279, "line_end": 280 }
+        ],
+        "evidence": [
+          "packages/shared/scripts/release-and-publish.mjs:279 - run('gh', ['release', 'create', ...]) has no try/catch to roll back the tag on failure."
+        ]
+      },
+      {
+        "id": "DEP-SHARED-002",
+        "title": "Missing rollback on CI publish failure",
+        "category": "deployment-safety",
+        "severity": "medium",
+        "confidence": "high",
+        "lens": "config_deployment",
+        "summary": "If the GitHub Actions publish workflow fails, the script exits without rolling back the GitHub Release or the git tag.",
+        "affected_files": [
+          { "path": "packages/shared/scripts/release-and-publish.mjs", "line_start": 286, "line_end": 286 }
+        ],
+        "evidence": [
+          "packages/shared/scripts/release-and-publish.mjs:286 - waitForRunCompletion throws an error on failure, but there is no catch block to roll back the tag and GitHub Release."
+        ]
+      }
+    ]
+  },
+  {
+    "task_id": "tests-tiny-files:config_deployment",
+    "unit_id": "tests-tiny-files",
+    "pass_id": "pass:config_deployment",
+    "lens": "config_deployment",
+    "file_coverage": [
+      { "path": "packages/audit-code/.github/workflows/test-suite.yml", "total_lines": 83 }
+    ],
+    "findings": [
+      {
+        "id": "CI-001",
+        "title": "Missing branch filters on CI triggers",
+        "category": "ci-correctness",
+        "severity": "medium",
+        "confidence": "high",
+        "lens": "config_deployment",
+        "summary": "The test-suite workflow triggers on all push and pull_request events without filtering to specific branches.",
+        "affected_files": [
+          { "path": "packages/audit-code/.github/workflows/test-suite.yml", "line_start": 3, "line_end": 5 }
+        ],
+        "evidence": [
+          "packages/audit-code/.github/workflows/test-suite.yml:3 - The on.push and on.pull_request triggers lack branch filters, meaning it will redundantly run on every branch push."
+        ]
+      }
+    ]
+  }
+]

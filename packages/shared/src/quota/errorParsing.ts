@@ -60,6 +60,17 @@ function detectFromJson(text: string): RateLimitDetectionResult | null {
   };
 }
 
+function extractResetsInMs(text: string): number | null {
+  const match = /Resets in (?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/i.exec(text);
+  if (!match) return null;
+  const hours = match[1] ? parseInt(match[1], 10) : 0;
+  const minutes = match[2] ? parseInt(match[2], 10) : 0;
+  const seconds = match[3] ? parseInt(match[3], 10) : 0;
+  if (hours === 0 && minutes === 0 && seconds === 0) return null;
+  // Add 5 seconds of buffer
+  return (hours * 3600 + minutes * 60 + seconds + 5) * 1000;
+}
+
 export function detectRateLimitError(text: string): RateLimitDetectionResult {
   const jsonResult = detectFromJson(text);
   if (jsonResult) return jsonResult;
@@ -67,7 +78,7 @@ export function detectRateLimitError(text: string): RateLimitDetectionResult {
   for (const pattern of RATE_LIMIT_PATTERNS) {
     const match = pattern.exec(text);
     if (match) {
-      return { isRateLimited: true, retryAfterMs: null, rawMatch: match[0] };
+      return { isRateLimited: true, retryAfterMs: extractResetsInMs(text), rawMatch: match[0] };
     }
   }
 

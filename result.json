@@ -1,0 +1,103 @@
+[
+  {
+    "task_id": "tests-tiny-files:maintainability:part-4",
+    "unit_id": "tests-tiny-files",
+    "pass_id": "pass:maintainability",
+    "lens": "maintainability",
+    "file_coverage": [
+      {"path":"packages/remediate-code/tests/phase-plan-parse.test.ts","total_lines":98},
+      {"path":"packages/remediate-code/tests/phase-triage.test.ts","total_lines":137},
+      {"path":"packages/remediate-code/tests/postinstall.test.ts","total_lines":145},
+      {"path":"packages/remediate-code/tests/quota-error-parsers.test.ts","total_lines":92},
+      {"path":"packages/remediate-code/tests/quota-error-parsing.test.ts","total_lines":108},
+      {"path":"packages/remediate-code/tests/quota-file-lock.test.ts","total_lines":65},
+      {"path":"packages/remediate-code/tests/quota-sliding-window.test.ts","total_lines":65},
+      {"path":"packages/remediate-code/tests/quota-source.test.ts","total_lines":73},
+      {"path":"packages/remediate-code/tests/remediate-code.test.ts","total_lines":89},
+      {"path":"packages/remediate-code/tests/remediation-outcomes.test.ts","total_lines":85},
+      {"path":"packages/remediate-code/tests/schema-contracts.test.ts","total_lines":165},
+      {"path":"packages/remediate-code/tests/store.test.ts","total_lines":110},
+      {"path":"packages/remediate-code/tests/wave-scheduler.test.ts","total_lines":197},
+      {"path":"packages/shared/src/tooling/testCommand.ts","total_lines":97},
+      {"path":"packages/shared/tests/analyzerDeps.test.mjs","total_lines":87}
+    ],
+    "findings": [
+      {
+        "id": "MAIN-001",
+        "title": "Highly duplicated JSON schema parsing in tests",
+        "category": "duplicated-logic",
+        "severity": "low",
+        "confidence": "high",
+        "lens": "maintainability",
+        "summary": "The schema-contracts.test.ts file repeats JSON file parsing logic excessively across many individual tests instead of using helper functions or parameterized tests.",
+        "affected_files": [{ "path": "packages/remediate-code/tests/schema-contracts.test.ts", "line_start": 62, "line_end": 164 }],
+        "evidence": ["packages/remediate-code/tests/schema-contracts.test.ts:62 - Repeated use of JSON.parse(await readFile(...)) for schemas across multiple test assertions."]
+      },
+      {
+        "id": "MAIN-002",
+        "title": "Extensive use of type assertions in wave-scheduler tests",
+        "category": "inconsistent-abstractions",
+        "severity": "medium",
+        "confidence": "high",
+        "lens": "maintainability",
+        "summary": "The wave-scheduler tests extensively use `as any` type assertions to mock the environment object, bypassing TypeScript safety and cluttering the tests.",
+        "affected_files": [{ "path": "packages/remediate-code/tests/wave-scheduler.test.ts", "line_start": 11, "line_end": 191 }],
+        "evidence": ["packages/remediate-code/tests/wave-scheduler.test.ts:13 - The `as any` assertion is used approximately 19 times to pass incomplete process.env mocks."]
+      },
+      {
+        "id": "MAIN-003",
+        "title": "Duplicated test environment setup in postinstall tests",
+        "category": "duplicated-logic",
+        "severity": "low",
+        "confidence": "high",
+        "lens": "maintainability",
+        "summary": "The postinstall tests repeatedly construct the same mock environment object with HOME and USERPROFILE, rather than extracting it to a shared variable or beforeEach hook.",
+        "affected_files": [{ "path": "packages/remediate-code/tests/postinstall.test.ts", "line_start": 28, "line_end": 136 }],
+        "evidence": ["packages/remediate-code/tests/postinstall.test.ts:28 - `env: { ...process.env, HOME: TEMP_HOME, USERPROFILE: TEMP_HOME }` is repeated 8 times."]
+      }
+    ]
+  },
+  {
+    "task_id": "tests-tiny-files:maintainability:part-5",
+    "unit_id": "tests-tiny-files",
+    "pass_id": "pass:maintainability",
+    "lens": "maintainability",
+    "file_coverage": [
+      {"path":"packages/shared/tests/exec.test.mjs","total_lines":63},
+      {"path":"packages/shared/tests/git.test.mjs","total_lines":37},
+      {"path":"packages/shared/tests/repoConventions.test.mjs","total_lines":90},
+      {"path":"packages/shared/tests/runLog.test.mjs","total_lines":47},
+      {"path":"packages/shared/tests/testCommand.test.mjs","total_lines":84},
+      {"path":"packages/shared/tests/tokens.test.mjs","total_lines":59}
+    ],
+    "findings": [
+      {
+        "id": "MAIN-004",
+        "title": "Duplicated temp directory helper across test files",
+        "category": "duplicated-logic",
+        "severity": "medium",
+        "confidence": "high",
+        "lens": "maintainability",
+        "summary": "A custom `withTempDir` helper function is copied verbatim across multiple test files instead of being extracted to a shared test utilities module.",
+        "affected_files": [
+          { "path": "packages/shared/tests/analyzerDeps.test.mjs", "line_start": 11, "line_end": 18 },
+          { "path": "packages/shared/tests/repoConventions.test.mjs", "line_start": 11, "line_end": 18 },
+          { "path": "packages/shared/tests/runLog.test.mjs", "line_start": 9, "line_end": 16 },
+          { "path": "packages/shared/tests/testCommand.test.mjs", "line_start": 9, "line_end": 16 }
+        ],
+        "evidence": ["packages/shared/tests/analyzerDeps.test.mjs:11 - The async function withTempDir(fn) block is identical in 4 separate test files."]
+      },
+      {
+        "id": "MAIN-005",
+        "title": "Inconsistent temp directory management in git.test.mjs",
+        "category": "inconsistent-abstractions",
+        "severity": "low",
+        "confidence": "high",
+        "lens": "maintainability",
+        "summary": "The git.test.mjs file manually manages temporary directories with try/finally blocks, missing out on the `withTempDir` pattern used by other test files in the same module.",
+        "affected_files": [{ "path": "packages/shared/tests/git.test.mjs", "line_start": 18, "line_end": 36 }],
+        "evidence": ["packages/shared/tests/git.test.mjs:18 - Manually implements mkdtemp and cleanup instead of using a helper."]
+      }
+    ]
+  }
+]
