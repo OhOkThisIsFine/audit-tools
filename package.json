@@ -6,7 +6,8 @@
   "scripts": {
     "build": "npm run build --workspaces",
     "check": "npm run check --workspaces",
-    "test": "npm run test --workspaces"
+    "test": "npm run test --workspaces",
+    "submit": "node \"C:\\Users\\ethan\\AppData\\Roaming\\npm\\node_modules\\auditor-lambda\\audit-code.mjs\" submit-packet"
   },
   "engines": {
     "node": ">=20"
