@@ -1,0 +1,54 @@
+[
+  {
+    "task_id": "-remediation-artifacts:correctness",
+    "unit_id": "-remediation-artifacts",
+    "pass_id": "pass:correctness",
+    "lens": "correctness",
+    "file_coverage": [
+      {
+        "path": ".remediation-artifacts/run.log.jsonl",
+        "total_lines": 2
+      }
+    ],
+    "findings": []
+  },
+  {
+    "task_id": "-remediation-artifacts:observability",
+    "unit_id": "-remediation-artifacts",
+    "pass_id": "pass:observability",
+    "lens": "observability",
+    "file_coverage": [
+      {
+        "path": ".remediation-artifacts/run.log.jsonl",
+        "total_lines": 2
+      }
+    ],
+    "findings": []
+  },
+  {
+    "task_id": "-remediation-artifacts:maintainability",
+    "unit_id": "-remediation-artifacts",
+    "pass_id": "pass:maintainability",
+    "lens": "maintainability",
+    "file_coverage": [
+      {
+        "path": ".remediation-artifacts/run.log.jsonl",
+        "total_lines": 2
+      }
+    ],
+    "findings": []
+  },
+  {
+    "task_id": "-remediation-artifacts:tests",
+    "unit_id": "-remediation-artifacts",
+    "pass_id": "pass:tests",
+    "lens": "tests",
+    "file_coverage": [
+      {
+        "path": ".remediation-artifacts/run.log.jsonl",
+        "total_lines": 2
+      }
+    ],
+    "findings": []
+  }
+]

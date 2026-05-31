@@ -1,0 +1,92 @@
+[
+  {
+    "task_id": "packages-shared:maintainability:part-1",
+    "unit_id": "packages-shared",
+    "pass_id": "pass:maintainability",
+    "lens": "maintainability",
+    "file_coverage": [{"path":"packages/shared/package.json","total_lines":41},{"path":"packages/shared/src/contracts.ts","total_lines":2},{"path":"packages/shared/src/git.ts","total_lines":70},{"path":"packages/shared/src/index.ts","total_lines":241},{"path":"packages/shared/src/io/json.ts","total_lines":186},{"path":"packages/shared/src/observability/runLog.ts","total_lines":66},{"path":"packages/shared/src/providers/types.ts","total_lines":46},{"path":"packages/shared/src/quota/compositeQuotaSource.ts","total_lines":22},{"path":"packages/shared/src/quota/errorParsers/claudeCodeErrorParser.ts","total_lines":47},{"path":"packages/shared/src/quota/errorParsers/genericErrorParser.ts","total_lines":15},{"path":"packages/shared/src/quota/errorParsers/index.ts","total_lines":18},{"path":"packages/shared/src/quota/errorParsing.ts","total_lines":85},{"path":"packages/shared/src/quota/hostLimits.ts","total_lines":71},{"path":"packages/shared/src/quota/learnedQuotaSource.ts","total_lines":32},{"path":"packages/shared/src/quota/limits.ts","total_lines":91}],
+    "findings": [
+      {
+        "id": "MAINT-P1-01",
+        "title": "Massive barrel file",
+        "category": "unclear-public-apis",
+        "severity": "medium",
+        "confidence": "high",
+        "lens": "maintainability",
+        "summary": "index.ts is an extremely large barrel file exporting many unrelated types and utilities, creating a single coupling bottleneck.",
+        "affected_files": [{"path": "packages/shared/src/index.ts"}],
+        "evidence": ["packages/shared/src/index.ts:1 - Re-exports 240+ lines of types and utilities across the entire package, obscuring domain boundaries."]
+      },
+      {
+        "id": "MAINT-P1-02",
+        "title": "Duplicated error-swallowing logic",
+        "category": "duplicated-logic",
+        "severity": "low",
+        "confidence": "high",
+        "lens": "maintainability",
+        "summary": "Multiple 'readOptional*' functions duplicate the exact same try/catch block handling for missing files.",
+        "affected_files": [{"path": "packages/shared/src/io/json.ts"}],
+        "evidence": [
+          "packages/shared/src/io/json.ts:131 - readOptionalJsonFile wraps readJsonFile in a try/catch for isFileMissingError.",
+          "packages/shared/src/io/json.ts:144 - readOptionalNdjsonFile duplicates the exact same error handler.",
+          "packages/shared/src/io/json.ts:168 - readOptionalTextFile duplicates the error handler again."
+        ]
+      }
+    ]
+  },
+  {
+    "task_id": "packages-shared:maintainability:part-2",
+    "unit_id": "packages-shared",
+    "pass_id": "pass:maintainability",
+    "lens": "maintainability",
+    "file_coverage": [{"path":"packages/shared/src/quota/quotaSource.ts","total_lines":13},{"path":"packages/shared/src/quota/slidingWindow.ts","total_lines":39},{"path":"packages/shared/src/quota/state.ts","total_lines":198},{"path":"packages/shared/src/quota/types.ts","total_lines":72},{"path":"packages/shared/src/tooling/analyzerDeps.ts","total_lines":176},{"path":"packages/shared/src/tooling/exec.ts","total_lines":160},{"path":"packages/shared/src/tooling/repoConventions.ts","total_lines":208},{"path":"packages/shared/src/types/accessDeclaration.ts","total_lines":5},{"path":"packages/shared/src/types/disposition.ts","total_lines":17},{"path":"packages/shared/src/types/finding.ts","total_lines":93},{"path":"packages/shared/src/types/flows.ts","total_lines":19},{"path":"packages/shared/src/types/graph.ts","total_lines":30},{"path":"packages/shared/src/types/remediationOutcome.ts","total_lines":33},{"path":"packages/shared/src/types/risk.ts","total_lines":10},{"path":"packages/shared/src/types/runLedger.ts","total_lines":24}],
+    "findings": [
+      {
+        "id": "MAINT-P2-01",
+        "title": "Magic constants in state decay and limits",
+        "category": "magic-constants",
+        "severity": "low",
+        "confidence": "high",
+        "lens": "maintainability",
+        "summary": "Multiple unexplained magic numbers are used throughout quota state management calculations.",
+        "affected_files": [{"path": "packages/shared/src/quota/state.ts"}],
+        "evidence": [
+          "packages/shared/src/quota/state.ts:6 - MIN_EVIDENCE_WEIGHT is hardcoded to 0.5 without contextual rationale.",
+          "packages/shared/src/quota/state.ts:35 - Elapsed hours checked against magic constant 0.001.",
+          "packages/shared/src/quota/state.ts:188 - Failed outcomes hardcode a +4 limit for applying failure weights to buckets."
+        ]
+      }
+    ]
+  },
+  {
+    "task_id": "packages-shared:maintainability:part-3",
+    "unit_id": "packages-shared",
+    "pass_id": "pass:maintainability",
+    "lens": "maintainability",
+    "file_coverage": [{"path":"packages/shared/src/types/stepContract.ts","total_lines":8},{"path":"packages/shared/src/types/surfaces.ts","total_lines":17},{"path":"packages/shared/src/validation/basic.ts","total_lines":82},{"path":"packages/shared/tsconfig.json","total_lines":9}],
+    "findings": []
+  },
+  {
+    "task_id": "root-config:maintainability",
+    "unit_id": "root-config",
+    "pass_id": "pass:maintainability",
+    "lens": "maintainability",
+    "file_coverage": [{"path":"opencode.json","total_lines":123},{"path":"package.json","total_lines":19},{"path":"remediation-outcomes.json","total_lines":74},{"path":"remediation-report.json","total_lines":40},{"path":"tsconfig.base.json","total_lines":15}],
+    "findings": [
+      {
+        "id": "MAINT-ROOT-01",
+        "title": "Duplicated agent permissions configuration",
+        "category": "duplicated-logic",
+        "severity": "medium",
+        "confidence": "high",
+        "lens": "maintainability",
+        "summary": "opencode.json duplicates a massive bash denylist identically between global permissions and agent.auditor.permission.",
+        "affected_files": [{"path": "opencode.json"}],
+        "evidence": [
+          "opencode.json:18 - Large bash deny/allow list defined globally.",
+          "opencode.json:76 - The exact same block of 40 lines is copied into the auditor agent's overrides."
+        ]
+      }
+    ]
+  }
+]

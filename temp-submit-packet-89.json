@@ -1,0 +1,97 @@
+[
+  {
+    "task_id": "packages-remediate-code:tests:part-5",
+    "unit_id": "packages-remediate-code",
+    "pass_id": "pass:tests",
+    "lens": "tests",
+    "file_coverage": [
+      {"path":"packages/remediate-code/src/utils/fileIntegrity.ts","total_lines":73},
+      {"path":"packages/remediate-code/src/validation/artifacts.ts","total_lines":415},
+      {"path":"packages/remediate-code/src/validation/remediationState.ts","total_lines":345},
+      {"path":"packages/remediate-code/tests/mcp-server.test.ts","total_lines":252},
+      {"path":"packages/remediate-code/tests/next-step.test.ts","total_lines":526},
+      {"path":"packages/remediate-code/tests/orchestrator.test.ts","total_lines":359},
+      {"path":"packages/remediate-code/tests/phase-plan.test.ts","total_lines":377},
+      {"path":"packages/remediate-code/tests/providers.test.ts","total_lines":448}
+    ],
+    "findings": [
+      {
+        "id": "TEST-001",
+        "title": "Fragile directory cleanup after spawnSync on Windows",
+        "category": "fragile-test",
+        "severity": "medium",
+        "confidence": "high",
+        "lens": "tests",
+        "summary": "Tests in next-step.test.ts and orchestrator.test.ts use direct rm() cleanup in afterEach, which is prone to EBUSY errors on Windows when preceding spawn calls briefly lock the directory.",
+        "affected_files": [
+          { "path": "packages/remediate-code/tests/next-step.test.ts", "line_start": 78, "line_end": 80 },
+          { "path": "packages/remediate-code/tests/orchestrator.test.ts", "line_start": 171, "line_end": 173 }
+        ],
+        "evidence": [
+          "packages/remediate-code/tests/next-step.test.ts:78 - `afterEach` uses standard `rm(TEST_DIR)` without retry logic, despite earlier tests calling spawnSync on the CLI.",
+          "packages/remediate-code/tests/phase-plan.test.ts:74 - A comment explicitly notes 'Windows can hold a handle on a directory briefly after spawnSync returns, causing EBUSY when rm() runs immediately in afterEach' and introduces `rmWithRetry` to fix it, but this isn't shared across other integration tests."
+        ]
+      },
+      {
+        "id": "TEST-002",
+        "title": "Fragile asynchronous state assertions using double setImmediate",
+        "category": "fragile-test",
+        "severity": "medium",
+        "confidence": "high",
+        "lens": "tests",
+        "summary": "The mcp-server test suite uses a hardcoded double setImmediate delay to wait for asynchronous stream processing, which can lead to race conditions and flaky tests.",
+        "affected_files": [
+          { "path": "packages/remediate-code/tests/mcp-server.test.ts", "line_start": 15, "line_end": 18 }
+        ],
+        "evidence": [
+          "packages/remediate-code/tests/mcp-server.test.ts:15 - `flushAsync` waits exactly two ticks via `setImmediate` instead of awaiting a deterministic event or promise resolution from the MCP server."
+        ]
+      }
+    ]
+  },
+  {
+    "task_id": "packages-remediate-code:tests:part-6",
+    "unit_id": "packages-remediate-code",
+    "pass_id": "pass:tests",
+    "lens": "tests",
+    "file_coverage": [
+      {"path":"packages/remediate-code/tests/quota-scheduler.test.ts","total_lines":344},
+      {"path":"packages/remediate-code/tests/validation.test.ts","total_lines":287},
+      {"path":"packages/remediate-code/vitest.config.ts","total_lines":14}
+    ],
+    "findings": [
+      {
+        "id": "TEST-003",
+        "title": "Missing edge-case test coverage for structural validation rules",
+        "category": "coverage-gap",
+        "severity": "medium",
+        "confidence": "high",
+        "lens": "tests",
+        "summary": "The test suite lacks negative test cases for nested array element structures, such as verifying validation errors when affected_files contains malformed elements.",
+        "affected_files": [
+          { "path": "packages/remediate-code/tests/validation.test.ts", "line_start": 86, "line_end": 92 }
+        ],
+        "evidence": [
+          "packages/remediate-code/tests/validation.test.ts:86 - Only tests that `affected_files` being entirely missing raises an error.",
+          "packages/remediate-code/src/validation/remediationState.ts:63 - The loop `for (const [i, file] of value.affected_files.entries()) { if (!isRecord(file) || typeof file.path !== 'string') ... }` is present in the source but left entirely untested."
+        ]
+      },
+      {
+        "id": "TEST-004",
+        "title": "Missing tests for artifacts validations",
+        "category": "coverage-gap",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "tests",
+        "summary": "There are no tests in the suite covering the complex validateArtifacts function.",
+        "affected_files": [
+          { "path": "packages/remediate-code/tests/validation.test.ts", "line_start": 1, "line_end": 287 }
+        ],
+        "evidence": [
+          "packages/remediate-code/tests/validation.test.ts:2 - Imports focus entirely on `remediationState.js`, completely omitting tests for `artifacts.ts`.",
+          "packages/remediate-code/src/validation/artifacts.ts:287 - `validateArtifacts` is a critical 120+ line function responsible for verifying the entire remediation artifact directory structure, but it has no unit tests."
+        ]
+      }
+    ]
+  }
+]

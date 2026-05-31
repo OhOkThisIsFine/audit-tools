@@ -1,0 +1,60 @@
+[
+  {
+    "task_id": "flow:flow:surface:-gemini-commands-audit-code-toml:correctness",
+    "unit_id": "flow:flow:surface:-gemini-commands-audit-code-toml",
+    "pass_id": "flow-pass:correctness",
+    "lens": "correctness",
+    "file_coverage": [{"path":".gemini/commands/audit-code.toml","total_lines":53}],
+    "findings": [
+      {
+        "id": "COR-001",
+        "title": "Incorrect script path for local execution in monorepo",
+        "category": "command-execution",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "correctness",
+        "summary": "The prompt instructions for running the auditor locally inside its own repository specify the wrong path `node audit-code.mjs`, which fails because the repository is a monorepo and the file is located at `packages/audit-code/audit-code.mjs`.",
+        "affected_files": [
+          {
+            "path": ".gemini/commands/audit-code.toml",
+            "line_start": 21,
+            "line_end": 25
+          },
+          {
+            "path": ".gemini/commands/audit-code.toml",
+            "line_start": 33,
+            "line_end": 37
+          }
+        ],
+        "evidence": [
+          ".gemini/commands/audit-code.toml:24 - `node audit-code.mjs ensure --quiet` is incorrect because the script is in `packages/audit-code/`.",
+          ".gemini/commands/audit-code.toml:36 - `node audit-code.mjs next-step` is incorrect because the script is in `packages/audit-code/`."
+        ]
+      }
+    ]
+  },
+  {
+    "task_id": "-gemini-commands:observability",
+    "unit_id": "-gemini-commands",
+    "pass_id": "pass:observability",
+    "lens": "observability",
+    "file_coverage": [{"path":".gemini/commands/audit-code.toml","total_lines":53}],
+    "findings": []
+  },
+  {
+    "task_id": "-gemini-commands:maintainability",
+    "unit_id": "-gemini-commands",
+    "pass_id": "pass:maintainability",
+    "lens": "maintainability",
+    "file_coverage": [{"path":".gemini/commands/audit-code.toml","total_lines":53}],
+    "findings": []
+  },
+  {
+    "task_id": "-gemini-commands:tests",
+    "unit_id": "-gemini-commands",
+    "pass_id": "pass:tests",
+    "lens": "tests",
+    "file_coverage": [{"path":".gemini/commands/audit-code.toml","total_lines":53}],
+    "findings": []
+  }
+]

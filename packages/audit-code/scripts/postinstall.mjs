@@ -99,8 +99,8 @@ function renderGlobalMcpLauncher(installedPkgRoot) {
     "import { join } from 'node:path';",
     "import { homedir } from 'node:os';",
     '',
-    'const repoRoot = process.cwd();',
-    "const artifactsDir = join(repoRoot, '.audit-artifacts');",
+    "const repoRoot = process.env.AUDIT_CODE_REPO_ROOT || process.cwd();",
+    "const artifactsDir = process.env.AUDIT_CODE_ARTIFACTS_DIR || join(repoRoot, '.audit-artifacts');",
     `const globalPackageRoot = ${JSON.stringify(installedPkgRoot)};`,
     "const logPath = join(homedir(), '.audit-code', 'mcp-server.log');",
     '',
@@ -330,6 +330,33 @@ function mergeOpenCodeGlobalConfig(existing) {
   };
 }
 
+function claudeDesktopConfigPath() {
+  if (process.platform === 'win32') {
+    return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json');
+  }
+  if (process.platform === 'darwin') {
+    return join(homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
+  }
+  return join(homedir(), '.config', 'Claude', 'claude_desktop_config.json');
+}
+
+function mergeClaudeDesktopConfig(existing, globalMcpLauncherPath) {
+  const parsed = existing ? JSON.parse(existing) : {};
+  const mcpServers = parsed.mcpServers && typeof parsed.mcpServers === 'object' && !Array.isArray(parsed.mcpServers)
+    ? parsed.mcpServers
+    : {};
+  return {
+    ...parsed,
+    mcpServers: {
+      ...mcpServers,
+      auditor: {
+        command: 'node',
+        args: [replaceBackslashes(globalMcpLauncherPath)],
+      },
+    },
+  };
+}
+
 function installMergedJson(path, buildMerged) {
   const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
   const merged = buildMerged(existing);
@@ -430,4 +457,20 @@ try {
   console.log(`audit-code: ${skillAction} Antigravity plugin skill at ${antigravityPluginSkillPath}`);
 } catch (err) {
   console.warn(`audit-code: could not install Antigravity plugin (${err.message})`);
+}
+
+// Register auditor MCP server with Claude Desktop so /audit-code appears in its slash-command menu
+const claudeDesktopConfig = claudeDesktopConfigPath();
+try {
+  const action = installMergedJson(claudeDesktopConfig, (existing) =>
+    mergeClaudeDesktopConfig(existing, globalMcpLauncherPath),
+  );
+  console.log(`audit-code: ${action} Claude Desktop MCP server entry in ${claudeDesktopConfig}`);
+  console.log(`audit-code: restart Claude Desktop for /audit-code to appear`);
+  console.log(`audit-code: to target a specific repo, set AUDIT_CODE_REPO_ROOT in Claude Desktop's MCP env settings`);
+} catch (err) {
+  console.warn(`audit-code: could not update Claude Desktop config (${err.message})`);
+  console.warn(`  To register manually, add "mcpServers.auditor" to:`);
+  console.warn(`    ${claudeDesktopConfig}`);
+  console.warn(`  with command "node" and args ["${replaceBackslashes(globalMcpLauncherPath)}"]`);
 }
