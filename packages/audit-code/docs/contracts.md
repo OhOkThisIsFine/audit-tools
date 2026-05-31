@@ -90,9 +90,16 @@ backend writes the current step contract to:
 includes `step_kind`, `prompt_path`, `status`, `run_id`, `allowed_commands`,
 `stop_condition`, `repo_root`, `artifacts_dir`, and relevant `artifact_paths`.
 
-When semantic review is blocked, `next-step` first emits a `capability_check`.
-After the host reports `--host-can-dispatch-subagents true|false`, the backend
-renders exactly one review path: packet dispatch or the single-task fallback.
+When semantic review is reached, the backend resolves host dispatch capability
+from `--host-can-dispatch-subagents true|false` (optional) → session config
+(`host_can_dispatch_subagents`) → `AUDIT_CODE_HOST_CAN_DISPATCH` → default
+`true`, then renders exactly one review path: packet dispatch (`dispatch_review`)
+or the single-task fallback (`single_task_fallback`). No capability handshake is
+required; pass the flag only to override the resolved default.
+
+`run-to-completion` renders the same step when it reaches the semantic-review
+boundary, so a host on the batch entrypoint can act on `steps/current-step.json`
+directly instead of issuing a second `next-step`.
 
 ## Dispatch packets
 

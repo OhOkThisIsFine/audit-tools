@@ -406,14 +406,24 @@ test("audit-code wrapper reaches a terminal blocked handoff from repo root with 
     assert.match(handoffMarkdown, /Active review run:/i);
     assert.match(handoffMarkdown, /next-step/i);
     assert.doesNotMatch(handoffMarkdown, /prepare-dispatch/i);
-    assert.match(
-      parsed.handoff.file_map.single_task_prompt.replaceAll("\\", "/"),
-      /\/dispatch\/current-single-task-prompt\.md$/,
+    // next-step outputs (dispatch plan / single-task prompt) live in the step
+    // contract, not the hand-off file_map.
+    assert.equal(parsed.handoff.file_map.single_task_prompt, undefined);
+    assert.equal(parsed.handoff.file_map.dispatch_plan, undefined);
+    // Collapse: run-to-completion pre-renders the actionable review step itself,
+    // so the host can act on steps/current-step.json without a second next-step
+    // round-trip.
+    const currentStep = JSON.parse(
+      await readFile(
+        join(root, ".audit-artifacts", "steps", "current-step.json"),
+        "utf8",
+      ),
     );
     assert.match(
-      await readFile(parsed.handoff.file_map.single_task_prompt, "utf8"),
-      /single-task fallback/i,
+      currentStep.step_kind,
+      /^(dispatch_review|single_task_fallback)$/,
     );
+    assert.equal(currentStep.run_id, parsed.handoff.active_review_run.run_id);
     const allAuditTasks = JSON.parse(
       await readFile(join(root, ".audit-artifacts", "audit_tasks.json"), "utf8"),
     );

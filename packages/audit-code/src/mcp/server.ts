@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadArtifactBundle } from "../io/artifacts.js";
+import { loadArtifactBundle, AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import { readOptionalJsonFile, readOptionalTextFile } from "@audit-tools/shared";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { decideNextStep } from "../orchestrator/nextStep.js";
@@ -326,8 +326,8 @@ export const resourceRegistry: ResourceRegistryEntry[] = [
     mimeType: "text/markdown",
     async read(context) {
       const report =
-        (await readOptionalTextFile(join(context.artifactsDir, "audit-report.md"))) ??
-        (await readOptionalTextFile(join(context.root, "audit-report.md"))) ??
+        (await readOptionalTextFile(join(context.artifactsDir, AUDIT_REPORT_FILENAME))) ??
+        (await readOptionalTextFile(join(context.root, AUDIT_REPORT_FILENAME))) ??
         "The audit report has not been rendered yet.";
       return { mimeType: this.mimeType, text: report };
     },
