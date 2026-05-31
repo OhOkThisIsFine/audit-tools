@@ -5,6 +5,7 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const packageVersion = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).version ?? '0.0.0';
 const promptSourceFile = join(pkgRoot, 'skills', 'audit-code', 'audit-code.prompt.md');
 const skillSourceFile = join(pkgRoot, 'skills', 'audit-code', 'SKILL.md');
 const codexOpenAiAgentSourceFile = join(pkgRoot, 'skills', 'audit-code', 'agents', 'openai.yaml');
@@ -330,6 +331,10 @@ function mergeOpenCodeGlobalConfig(existing) {
   };
 }
 
+function claudePluginExternalDir() {
+  return join(homedir(), '.claude', 'plugins', 'marketplaces', 'claude-plugins-official', 'external_plugins', 'audit-code');
+}
+
 function claudeDesktopConfigPath() {
   if (process.platform === 'win32') {
     return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json');
@@ -457,6 +462,44 @@ try {
   console.log(`audit-code: ${skillAction} Antigravity plugin skill at ${antigravityPluginSkillPath}`);
 } catch (err) {
   console.warn(`audit-code: could not install Antigravity plugin (${err.message})`);
+}
+
+// Install Claude Desktop plugin so /audit-code appears in the slash-command menu
+// Claude Desktop reads external plugins from ~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/
+const claudePluginDir = claudePluginExternalDir();
+const claudePluginManifestPath = join(claudePluginDir, '.claude-plugin', 'plugin.json');
+const claudePluginCommandPath = join(claudePluginDir, 'commands', 'audit-code.md');
+const claudePluginSkillPath = join(claudePluginDir, 'skills', 'audit-code', 'SKILL.md');
+try {
+  const manifest = {
+    name: 'audit-code',
+    description: 'Autonomous local-loop code auditing workflow',
+    version: packageVersion,
+    author: {
+      name: 'auditor-lambda',
+      url: 'https://github.com/OhOkThisIsFine/auditor-lambda',
+    },
+    homepage: 'https://github.com/OhOkThisIsFine/auditor-lambda',
+    repository: 'https://github.com/OhOkThisIsFine/auditor-lambda',
+    license: 'MIT',
+    keywords: ['audit', 'code-audit', 'static-analysis', 'orchestration'],
+  };
+  const manifestAction = writeGeneratedFile(
+    claudePluginManifestPath,
+    Buffer.from(JSON.stringify(manifest, null, 2) + '\n'),
+  );
+  console.log(`audit-code: ${manifestAction} Claude Desktop plugin manifest at ${claudePluginManifestPath}`);
+
+  const commandAction = writeGeneratedFile(claudePluginCommandPath, promptSource);
+  console.log(`audit-code: ${commandAction} Claude Desktop plugin command at ${claudePluginCommandPath}`);
+
+  const skillAction = writeGeneratedFile(claudePluginSkillPath, skillSource);
+  console.log(`audit-code: ${skillAction} Claude Desktop plugin skill at ${claudePluginSkillPath}`);
+
+  console.log(`audit-code: restart Claude Desktop for /audit-code to appear in the slash-command menu`);
+} catch (err) {
+  console.warn(`audit-code: could not install Claude Desktop plugin (${err.message})`);
+  console.warn(`  Plugin directory: ${claudePluginDir}`);
 }
 
 // Register auditor MCP server with Claude Desktop so /audit-code appears in its slash-command menu
