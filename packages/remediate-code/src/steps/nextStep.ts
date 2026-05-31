@@ -212,6 +212,24 @@ const TERMINAL_STATUSES = ["resolved", "resolved_no_change", "ignored", "deemed_
 
 export const NO_CHANGE_RE = /\b(already correct|no.?op|no change|nothing to (change|do|fix)|code is correct)\b/i;
 
+/**
+ * Decide whether an item spec represents a no-op (no source changes planned).
+ *
+ * The structured `no_change` flag is authoritative when the worker set it
+ * explicitly: an explicit `false` must win even when `concrete_change` happens
+ * to mention a no-change phrase about a sub-part (e.g. "no change is required in
+ * constants.ts" inside a finding that does change other files). The heuristic
+ * regex over the free-text spec is only a fallback for when `no_change` is
+ * unspecified.
+ */
+export function specIndicatesNoChange(
+  spec: { no_change?: boolean; concrete_change?: string } | undefined,
+): boolean {
+  if (spec?.no_change === true) return true;
+  if (spec?.no_change === false) return false;
+  return NO_CHANGE_RE.test(spec?.concrete_change ?? "");
+}
+
 function resolvedOrTerminalItems(state: RemediationState): RemediationItemState[] {
   return Object.values(state.items ?? {}).filter((item) =>
     TERMINAL_STATUSES.includes(item.status),
@@ -1182,9 +1200,7 @@ Include every \`finding_id\` from the input. Then run:
       }
 
       function isNoOp(findingId: string): boolean {
-        const spec = prelimMap.get(findingId);
-        if (spec?.no_change === true) return true;
-        return NO_CHANGE_RE.test(spec?.concrete_change ?? "");
+        return specIndicatesNoChange(prelimMap.get(findingId));
       }
 
       function renderTierSection(tier: string, label: string): string {
