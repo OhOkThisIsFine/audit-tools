@@ -1,14 +1,25 @@
+import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type {
-  ResolvedProviderName,
-  SessionConfig,
   HostConcurrencyLimit,
   QuotaStateEntry,
   ResolvedLimits,
   WaveSchedule,
-  QuotaUsageSnapshot,
-} from "@audit-tools/shared";
-import { classifyProvider, resolveLimits, computeMaxSafeConcurrency, computeRampUpConcurrency } from "@audit-tools/shared";
-import type { DiscoveredRateLimits } from "./discoveredLimits.js";
+} from "./types.js";
+import type { QuotaUsageSnapshot } from "./quotaSource.js";
+import { classifyProvider, resolveLimits } from "./limits.js";
+import { computeMaxSafeConcurrency, computeRampUpConcurrency } from "./state.js";
+
+/**
+ * Minimal structural shape of RPM/TPM limits discovered at runtime (e.g. via
+ * response-header extraction). Declared here so the scheduler stays decoupled
+ * from any package-specific discovery implementation — callers may pass a
+ * richer object (with a `source` field, etc.); only these fields are read.
+ */
+export interface DiscoveredRateLimitsInput {
+  requests_per_minute?: number | null;
+  input_tokens_per_minute?: number | null;
+  output_tokens_per_minute?: number | null;
+}
 
 export interface ScheduleWaveOptions {
   providerName: ResolvedProviderName;
@@ -23,7 +34,7 @@ export interface ScheduleWaveOptions {
   hostConcurrencyLimit?: HostConcurrencyLimit | null;
   quotaSourceSnapshot?: QuotaUsageSnapshot | null;
   /** RPM/TPM discovered from provider queries or response header extraction. */
-  discoveredLimits?: DiscoveredRateLimits | null;
+  discoveredLimits?: DiscoveredRateLimitsInput | null;
 }
 
 function sumTopN(sorted: number[], n: number): number {

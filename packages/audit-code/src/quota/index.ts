@@ -59,10 +59,13 @@ export type {
   ErrorParser,
 } from "@audit-tools/shared";
 
-// Auditor-specific: local scheduler, probe, discovered limits, header extraction
-export { scheduleWave, buildProviderModelKey } from "./scheduler.js";
-export type { ScheduleWaveOptions } from "./scheduler.js";
+// Wave scheduler now lives in @audit-tools/shared (single source of truth for
+// both orchestrators). Auditor passes its discovered-limits via the structural
+// DiscoveredRateLimitsInput the shared scheduler accepts.
+export { scheduleWave, buildProviderModelKey } from "@audit-tools/shared";
+export type { ScheduleWaveOptions } from "@audit-tools/shared";
 
+// Auditor-specific: probe, discovered limits, header extraction
 export {
   detectHostActiveSubagentLimit,
   resolveHostActiveSubagentLimit,
