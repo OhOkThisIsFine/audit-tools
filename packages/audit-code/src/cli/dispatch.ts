@@ -80,6 +80,8 @@ export interface PrepareDispatchResult {
   packet_count: number;
   task_count: number;
   skipped_task_count: number;
+  /** Subagent parallelism resolved for this dispatch run. */
+  wave_size: number;
   largest_packet: {
     packet_id: string;
     total_lines: number;
@@ -726,6 +728,7 @@ export async function prepareDispatchArtifacts(params: {
     packet_count: plan.length,
     task_count: orderedTasks.length,
     skipped_task_count: priorResultTaskIds.size,
+    wave_size: waveSchedule.wave_size,
     largest_packet: largestPacketId
       ? {
           packet_id: largestPacketId,

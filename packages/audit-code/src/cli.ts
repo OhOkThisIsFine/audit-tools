@@ -1400,6 +1400,18 @@ async function renderSemanticReviewStep(params: {
     runId: activeReviewRun.run_id,
     allowedCommands: [mergeCommand, continueCommand],
     allowedMcpTools: ["auditor_merge_and_ingest", "auditor_continue_audit"],
+    progress: {
+      summary:
+        `Dispatching ${dispatch.packet_count} review packet(s) covering ` +
+        `${dispatch.task_count} task(s) in waves of ${dispatch.wave_size}` +
+        (dispatch.skipped_task_count > 0
+          ? `; ${dispatch.skipped_task_count} task(s) already completed.`
+          : "."),
+      pending_packets: dispatch.packet_count,
+      pending_tasks: dispatch.task_count,
+      completed_tasks: dispatch.skipped_task_count,
+      wave_size: dispatch.wave_size,
+    },
     stopCondition:
       "Dispatch every packet, run merge-and-ingest once, then run next-step.",
     repoRoot: root,

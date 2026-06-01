@@ -2,9 +2,36 @@ import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import { renderCommand } from "./args.js";
 
+/**
+ * Token prefix the host should use to re-invoke the backend in generated
+ * continuation commands. Defaults to the `audit-code` bin (correct for an
+ * installed global). The wrapper sets `AUDIT_CODE_INVOCATION` to e.g.
+ * `["node","<path>/audit-code.mjs"]` when it runs from a source checkout, so a
+ * dogfooded monorepo run keeps generated commands pinned to local code instead
+ * of silently falling back to a globally-installed `audit-code`.
+ */
+function cliInvocationTokens(): string[] {
+  const raw = process.env.AUDIT_CODE_INVOCATION;
+  if (raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        Array.isArray(parsed) &&
+        parsed.length > 0 &&
+        parsed.every((t) => typeof t === "string" && t.length > 0)
+      ) {
+        return parsed as string[];
+      }
+    } catch {
+      // malformed override — fall back to the default bin
+    }
+  }
+  return ["audit-code"];
+}
+
 export function nextStepCommand(root: string, artifactsDir: string): string {
   return renderCommand([
-    "audit-code",
+    ...cliInvocationTokens(),
     "next-step",
     "--root",
     root,
@@ -18,7 +45,7 @@ export function mergeAndIngestCommand(
   runId: string,
 ): string {
   return renderCommand([
-    "audit-code",
+    ...cliInvocationTokens(),
     "merge-and-ingest",
     "--artifacts-dir",
     artifactsDir,
