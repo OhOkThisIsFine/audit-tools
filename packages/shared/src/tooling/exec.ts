@@ -44,6 +44,20 @@ export function quoteForCmd(arg: string): string {
 }
 
 /**
+ * Quote a single argv token for embedding inside a shell command line that is
+ * rendered as one string (e.g. a subprocess-template entry): `cmd.exe`
+ * double-quote doubling on Windows, POSIX single-quote escaping elsewhere.
+ * Shared by the subprocess-template provider in both orchestrators.
+ */
+export function shellQuote(
+  arg: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === "win32") return quoteForCmd(arg);
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
+
+/**
  * On Windows, package-manager shims (`npm`/`npx`/`pnpm`/`yarn`) are `.cmd`
  * batch files that `spawn` cannot launch without a shell. Map them to their
  * `.cmd` form so the batch-wrapping path below applies. Anything already

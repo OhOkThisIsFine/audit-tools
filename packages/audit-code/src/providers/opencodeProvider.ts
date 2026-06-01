@@ -1,32 +1,12 @@
 import { readFile } from "node:fs/promises";
 import type { FreshSessionProvider, LaunchFreshSessionInput, OpenCodeConfig, OpenTokenConfig } from "@audit-tools/shared";
-import { spawnLoggedCommand } from "@audit-tools/shared";
-
-function resolveOpenCodeSpawnCommand(
-  command: string,
-  args: string[],
-  platform: NodeJS.Platform = process.platform,
-  shellCommand = process.env.ComSpec ?? "cmd.exe",
-): { command: string; args: string[] } {
-  if (platform !== "win32") {
-    return { command, args };
-  }
-  const base = command.replace(/\.(cmd|bat|exe)$/i, "").toLowerCase();
-  if (base === "opencode" || base === "npx" || command.endsWith(".cmd")) {
-    return {
-      command: shellCommand,
-      args: ["/d", "/s", "/c", [command, ...args].map(quoteCmdArg).join(" ")],
-    };
-  }
-  return { command, args };
-}
-
-function quoteCmdArg(value: string): string {
-  if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) {
-    return value;
-  }
-  return `"${value.replace(/(["^&|<>%])/g, "^$1")}"`;
-}
+import {
+  readJsonFile,
+  spawnLoggedCommand,
+  resolveOpenCodeSpawnCommand,
+  applyWorkerTaskLaunchSettings,
+} from "@audit-tools/shared";
+import type { WorkerTask } from "../types/workerSession.js";
 
 export class OpenCodeProvider implements FreshSessionProvider {
   name = "opencode";
@@ -40,12 +20,21 @@ export class OpenCodeProvider implements FreshSessionProvider {
 
   async launch(input: LaunchFreshSessionInput) {
     const prompt = await readFile(input.promptPath, "utf8");
+    const task = await readJsonFile<WorkerTask>(input.taskPath);
     const baseCommand = this.config.command ?? "opencode";
     const baseArgs = ["run", prompt, ...(this.config.extra_args ?? [])];
-    const resolved = resolveOpenCodeSpawnCommand(baseCommand, baseArgs);
-    return await spawnLoggedCommand(resolved.command, resolved.args, input, undefined, {
-      opentoken: this.opentoken.enabled,
-      opentokenCommand: this.opentoken.command,
-    });
+    // On Windows the `opencode` launcher is a `.cmd` shim that `spawn` cannot
+    // run without a shell; resolve it through cmd.exe (no-op on other OSes).
+    const { command, args } = resolveOpenCodeSpawnCommand(baseCommand, baseArgs);
+    return await spawnLoggedCommand(
+      command,
+      args,
+      applyWorkerTaskLaunchSettings(input, task),
+      undefined,
+      {
+        opentoken: this.opentoken.enabled,
+        opentokenCommand: this.opentoken.command,
+      },
+    );
   }
 }

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { resolveExecArgv, quoteForCmd, platformCommand } = await import(
+const { resolveExecArgv, quoteForCmd, shellQuote, platformCommand } = await import(
   "../dist/tooling/exec.js"
 );
 
@@ -20,6 +20,14 @@ test("quoteForCmd quotes whitespace and escapes quotes", () => {
   assert.equal(quoteForCmd(""), '""');
   assert.equal(quoteForCmd("a b"), '"a b"');
   assert.equal(quoteForCmd('a"b'), '"a""b"');
+});
+
+test("shellQuote uses cmd.exe quoting on win32 and POSIX quoting elsewhere", () => {
+  assert.equal(shellQuote("plain", "win32"), "plain");
+  assert.equal(shellQuote("a b", "win32"), '"a b"');
+  assert.equal(shellQuote('a"b', "win32"), '"a""b"');
+  assert.equal(shellQuote("a b", "linux"), "'a b'");
+  assert.equal(shellQuote("it's", "linux"), "'it'\\''s'");
 });
 
 test("resolveExecArgv wraps batch shims through cmd.exe on win32", () => {

@@ -1,16 +1,8 @@
 import { readJsonFile } from "@audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
 import type { FreshSessionProvider, LaunchFreshSessionInput, SubprocessTemplateConfig, OpenTokenConfig } from "@audit-tools/shared";
-import { spawnLoggedCommand } from "@audit-tools/shared";
+import { spawnLoggedCommand, shellQuote } from "@audit-tools/shared";
 import { applyWorkerTaskLaunchSettings } from "./workerTaskLaunch.js";
-import { quoteForCmd } from "../utils/commands.js";
-
-function shellQuote(arg: string): string {
-  if (process.platform === "win32") {
-    return quoteForCmd(arg);
-  }
-  return "'" + arg.replace(/'/g, "'\\''") + "'";
-}
 
 function applyTemplate(
   template: string,
@@ -18,7 +10,9 @@ function applyTemplate(
   task: WorkerTask,
   context: { providerName: string; entryIndex: number },
 ): string {
-  const workerCommandShell = task.worker_command.map(shellQuote).join(" ");
+  const workerCommandShell = task.worker_command
+    .map((arg) => shellQuote(arg))
+    .join(" ");
   const workerCommandJson = JSON.stringify(task.worker_command);
   const values: Record<string, string> = {
     repoRoot: input.repoRoot,

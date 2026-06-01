@@ -92,6 +92,11 @@ test("ClaudeCodeProvider reads the prompt and forwards the expected command argu
   await withTempDir("audit-code-claude-provider-", async (root) => {
     const input = buildLaunchInput(root);
     await writeFile(input.promptPath, "Audit this repo", "utf8");
+    await writeFile(
+      input.taskPath,
+      JSON.stringify({ worker_command: ["claude"], timeout_ms: 12345 }),
+      "utf8",
+    );
 
     const launches = [];
     const provider = new ClaudeCodeProvider(
@@ -112,7 +117,9 @@ test("ClaudeCodeProvider reads the prompt and forwards the expected command argu
       "--model",
       "sonnet",
     ]);
-    assert.equal(launches[0].passedInput, input);
+    // The launch input is forwarded with the task's per-task timeout applied.
+    assert.equal(launches[0].passedInput.promptPath, input.promptPath);
+    assert.equal(launches[0].passedInput.timeoutMs, 12345);
   });
   } finally {
     if (savedClaude === undefined) {
@@ -130,6 +137,11 @@ test("ClaudeCodeProvider only skips permissions when explicitly configured", asy
     await withTempDir("audit-code-claude-provider-permissions-", async (root) => {
       const input = buildLaunchInput(root);
       await writeFile(input.promptPath, "Audit this repo", "utf8");
+      await writeFile(
+        input.taskPath,
+        JSON.stringify({ worker_command: ["claude"] }),
+        "utf8",
+      );
 
       const launches = [];
       const provider = new ClaudeCodeProvider(
@@ -179,7 +191,10 @@ test("LocalSubprocessProvider forwards worker_command through the launcher", asy
     await writeFile(
       input.taskPath,
       JSON.stringify(
-        { worker_command: ["node", "--test", "tests/sample.test.mjs"] },
+        {
+          worker_command: ["node", "--test", "tests/sample.test.mjs"],
+          timeout_ms: 6000,
+        },
         null,
         2,
       ),
@@ -197,7 +212,9 @@ test("LocalSubprocessProvider forwards worker_command through the launcher", asy
     assert.equal(launches.length, 1);
     assert.equal(launches[0].command, "node");
     assert.deepEqual(launches[0].args, ["--test", "tests/sample.test.mjs"]);
-    assert.equal(launches[0].passedInput, input);
+    // The launch input is forwarded with the task's per-task timeout applied.
+    assert.equal(launches[0].passedInput.repoRoot, input.repoRoot);
+    assert.equal(launches[0].passedInput.timeoutMs, 6000);
   });
 });
 

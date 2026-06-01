@@ -103,6 +103,7 @@ export {
   runTracked,
   resolveExecArgv,
   quoteForCmd,
+  shellQuote,
   platformCommand,
 } from "./tooling/exec.js";
 
@@ -179,6 +180,14 @@ export { LOCAL_SUBPROCESS_PROVIDER_NAME } from "./providers/constants.js";
 // Provider command runner (single source of truth for both orchestrators)
 export { spawnLoggedCommand } from "./providers/spawnLoggedCommand.js";
 export type { SpawnLoggedCommandOptions } from "./providers/spawnLoggedCommand.js";
+
+// Provider launch helpers (shared so both orchestrators stay in lockstep)
+export type { WorkerTaskTimeout } from "./providers/workerTaskLaunch.js";
+export {
+  resolveWorkerTaskTimeoutMs,
+  applyWorkerTaskLaunchSettings,
+} from "./providers/workerTaskLaunch.js";
+export { resolveOpenCodeSpawnCommand } from "./providers/opencodeLaunch.js";
 
 // Quota
 export type {
