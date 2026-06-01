@@ -1,0 +1,294 @@
+{
+  "findings": [
+    {
+      "id": "FINDING-001",
+      "title": "Provider resolution forces local-subprocess; active backend never detected",
+      "category": "Quota adaptation",
+      "severity": "high",
+      "confidence": "high",
+      "lens": "operability",
+      "summary": "resolveFreshSessionProviderName defaults to 'local-subprocess' and only env-sniffs when provider==='auto', so claude-code/Claude Desktop (and the other backends) are never detected by the conversation-first flow.",
+      "affected_files": [
+        { "path": "packages/audit-code/src/providers/index.ts" },
+        { "path": "packages/audit-code/src/providers/constants.ts" },
+        { "path": "packages/shared/src/quota/limits.ts" }
+      ],
+      "evidence": [
+        "meta-audit-log Cause 1: session-config pins provider:'local-subprocess'; resolveFreshSessionProviderName (providers/index.ts:46-50) returns the requested provider verbatim unless it is literally 'auto'. Verified in code during intake.",
+        "classifyProvider('local-subprocess') -> 'local' selects the first-contact ceiling of 3 (limits.ts:11-13).",
+        "User Q-002: wants detection across claude-code, claude-desktop, codex, vscode, opencode, antigravity."
+      ]
+    },
+    {
+      "id": "FINDING-002",
+      "title": "Canonical dispatch path never acquires live quota (central regression)",
+      "category": "Quota adaptation",
+      "severity": "high",
+      "confidence": "high",
+      "lens": "reliability",
+      "summary": "prepareDispatchArtifacts/cmdPrepareDispatch passes hostModel:null and never builds a QuotaSource, queries usage, or threads a snapshot to the scheduler, so the scheduler's remaining-quota logic is unreachable from the conversation-first flow.",
+      "affected_files": [
+        { "path": "packages/audit-code/src/cli/dispatch.ts" },
+        { "path": "packages/audit-code/src/cli.ts" },
+        { "path": "packages/audit-code/src/quota/scheduler.ts" },
+        { "path": "packages/audit-code/src/quota/discoveredLimits.ts" },
+        { "path": "packages/shared/src/quota/quotaSource.ts" }
+      ],
+      "evidence": [
+        "meta-audit-log Cause 2 (central): the canonical prepareDispatchArtifacts path reads only the on-disk cache via lookupDiscoveredLimits; never calls provider.queryLimits, never constructs a QuotaSource, never queries current usage, never passes quotaSourceSnapshot. The legacy in-process path (cli.ts:~2030-2056) does all of this.",
+        "scheduler.ts:168-177 (remaining_pct < 0.1 -> wave 1; < 0.3 -> halve) is therefore unreachable from the flow CLAUDE.md calls canonical.",
+        "Verified during intake: prepareDispatchArtifacts (cli/dispatch.ts:321) accepts hostModel but its body loads the bundle and builds packets without quota acquisition."
+      ]
+    },
+    {
+      "id": "FINDING-003",
+      "title": "No provider implements real quota querying (queryLimits is a stub)",
+      "category": "Quota adaptation",
+      "severity": "high",
+      "confidence": "medium",
+      "lens": "reliability",
+      "summary": "queryLimits is declared optional but implemented by zero of five providers; implement real best-effort remaining-quota querying for claude-code, claude-desktop, opencode, and vscode (per-backend feasibility varies).",
+      "affected_files": [
+        { "path": "packages/shared/src/providers/types.ts" },
+        { "path": "packages/audit-code/src/providers/claudeCodeProvider.ts" },
+        { "path": "packages/audit-code/src/providers/opencodeProvider.ts" },
+        { "path": "packages/audit-code/src/providers/vscodeTaskProvider.ts" },
+        { "path": "packages/audit-code/src/quota/probe.ts" }
+      ],
+      "evidence": [
+        "meta-audit-log Cause 3: FreshSessionProvider.queryLimits is optional (shared/providers/types.ts:45) and implemented by zero providers. Verified: the symbol appears only in the interface and the legacy caller (cli.ts).",
+        "meta-audit-log Cause 4: probeProvider is @deprecated and returns supported:false for all providers except an unimplemented subprocess-template.",
+        "User Q-002: 'I want real quota querying ... if possible' -- best-effort per backend."
+      ]
+    },
+    {
+      "id": "FINDING-004",
+      "title": "Add a cascading quota-signal fallback chain",
+      "category": "Quota adaptation",
+      "severity": "medium",
+      "confidence": "high",
+      "lens": "reliability",
+      "summary": "Compose a first-class fallback cascade (provider queryLimits -> discovered/cached -> reactive learned -> model-based default -> conservative provider/local default) so the scheduler always receives the best available signal and degrades gracefully on first contact.",
+      "affected_files": [
+        { "path": "packages/shared/src/quota/compositeQuotaSource.ts" },
+        { "path": "packages/shared/src/quota/quotaSource.ts" },
+        { "path": "packages/shared/src/quota/learnedQuotaSource.ts" },
+        { "path": "packages/shared/src/quota/limits.ts" }
+      ],
+      "evidence": [
+        "meta-audit-log Cause 4: the only dynamic source (LearnedQuotaSource) is reactive and empty on first contact; there is no proactive acquisition at plan time.",
+        "User Q-002: 'with cascading fallbacks (model-based, provider-based, etc.)'.",
+        "Constraint: graceful degradation -- absence of a signal must never throw; first contact is normal."
+      ]
+    },
+    {
+      "id": "FINDING-005",
+      "title": "Add Codex and Antigravity providers (resolution + best-effort quota)",
+      "category": "Quota adaptation",
+      "severity": "medium",
+      "confidence": "medium",
+      "lens": "operability",
+      "summary": "Add codex and antigravity as providers conforming to FreshSessionProvider, participating in provider resolution and best-effort quota querying; a distinct claude-desktop classification if it differs from claude-code.",
+      "affected_files": [
+        { "path": "packages/audit-code/src/providers/codexProvider.ts" },
+        { "path": "packages/audit-code/src/providers/antigravityProvider.ts" },
+        { "path": "packages/audit-code/src/providers/index.ts" },
+        { "path": "packages/audit-code/src/providers/constants.ts" },
+        { "path": "packages/shared/src/providers/types.ts" }
+      ],
+      "evidence": [
+        "User Q-002 names codex and antigravity, which are NOT current providers (current set: claude-code, opencode, subprocess-template, vscode-task, local-subprocess).",
+        "Minimum obligation per the brief: provider resolution + best-effort quota; full audit-worker dispatch parity is a per-backend planning decision."
+      ]
+    },
+    {
+      "id": "FINDING-006",
+      "title": "Windows path-join bug produces malformed artifacts directory name",
+      "category": "Defect",
+      "severity": "medium",
+      "confidence": "medium",
+      "lens": "correctness",
+      "summary": "Artifacts-dir/repo-root resolution concatenated 'C:\\Code' + 'auditor-lambda' without a separator, yielding 'Codeauditor-lambda.audit-artifacts'; locate and fix the path-construction site and add a Windows path test.",
+      "affected_files": [
+        { "path": "DISCOVERY TARGET: artifacts-dir / repo-root resolution (audit-code wrapper or src/io)" }
+      ],
+      "evidence": [
+        "meta-audit-log Secondary observation: 'packages/audit-code/Codeauditor-lambda.audit-artifacts/session-config.json' looks like a path-join bug ('C:\\Code' + 'auditor-lambda' concatenated without a separator).",
+        "Repo mandate is explicitly 'Windows-aware'.",
+        "Intake check: the stray directory is not currently on disk (since cleaned), so the code site must be located rather than reproduced from an artifact."
+      ]
+    },
+    {
+      "id": "FINDING-007",
+      "title": "CLAUDE.md audit priority chain drifted from live PRIORITY[]",
+      "category": "Docs",
+      "severity": "low",
+      "confidence": "high",
+      "lens": "maintainability",
+      "summary": "CLAUDE.md's documented audit priority chain omits three obligations present in the live PRIORITY[] (graph_enrichment_current, design_assessment_current, design_review_completed); reconcile, ideally with a test that fails on divergence.",
+      "affected_files": [
+        { "path": "CLAUDE.md" },
+        { "path": "packages/audit-code/src/orchestrator/nextStep.ts" }
+      ],
+      "evidence": [
+        "meta-audit-log O6: CLAUDE.md documents the priority chain but the live PRIORITY[] in nextStep.ts has three extra obligations (graph_enrichment_current, design_assessment_current, design_review_completed).",
+        "Noted as a smell that becomes a real finding (DR-007)."
+      ]
+    },
+    {
+      "id": "FINDING-008",
+      "title": "Add a single-worker canary before the dispatch fan-out",
+      "category": "Workflow UX",
+      "severity": "medium",
+      "confidence": "high",
+      "lens": "reliability",
+      "summary": "Run and verify one packet's submit round-trip before launching the full fan-out, so a submit misconfiguration is caught after one worker instead of wasting whole waves.",
+      "affected_files": [
+        { "path": "packages/audit-code/src/cli/dispatch.ts" },
+        { "path": "packages/audit-code/src/orchestrator/nextStep.ts" }
+      ],
+      "evidence": [
+        "meta-audit-log O8/O9: all 106 workers are dispatched before learning whether even one submit-packet command can run; a single-worker canary would de-risk the most expensive step.",
+        "DR-004: a broken hardcoded submit path already exists in this repo, making the canary concretely valuable."
+      ]
+    },
+    {
+      "id": "FINDING-009",
+      "title": "Add a sampling / coverage-budget (top-K) dispatch mode with honest partial reporting",
+      "category": "Workflow UX",
+      "severity": "medium",
+      "confidence": "high",
+      "lens": "architecture",
+      "summary": "Offer a top-K (by risk/priority) packet mode that synthesizes an honest PARTIAL report instead of the all-or-loop-back 'dispatch every packet' stop condition; partial coverage must be represented truthfully in coverage_matrix and synthesis.",
+      "affected_files": [
+        { "path": "packages/audit-code/src/orchestrator/nextStep.ts" },
+        { "path": "packages/audit-code/src/cli/dispatch.ts" },
+        { "path": "packages/audit-code/src/reporting" }
+      ],
+      "evidence": [
+        "meta-audit-log O8/O10: stop_condition is 'Dispatch every packet'; there is no first-class 'audit the top-K risk packets and synthesize a partial report' mode, a steep on-ramp for a quick read of a 41k-LOC repo."
+      ]
+    },
+    {
+      "id": "FINDING-010",
+      "title": "Add a human-in-the-loop confirmation before large fan-out",
+      "category": "Workflow UX",
+      "severity": "medium",
+      "confidence": "high",
+      "lens": "operability",
+      "summary": "Before launching a large dispatch, surface a 'this will launch N agents across M waves -- continue?' gate so the host pauses before the dominant-cost step.",
+      "affected_files": [
+        { "path": "DISCOVERY TARGET: /audit-code loader / host-asset source templates" },
+        { "path": "packages/audit-code/src/cli/dispatch.ts" }
+      ],
+      "evidence": [
+        "meta-audit-log O10: 106 deep subagents is a ~15x larger spend than a high-value subset and was not anticipated by 'run the skill'; a human-in-the-loop 'launch N agents, continue?' confirmation would belong in the loader."
+      ]
+    },
+    {
+      "id": "FINDING-011",
+      "title": "Anchor loader commands to an explicit cwd",
+      "category": "Workflow UX",
+      "severity": "medium",
+      "confidence": "high",
+      "lens": "operability",
+      "summary": "Make the /audit-code (and /remediate-code) loader use absolute paths or an explicit cwd anchor so bare relative commands stop breaking against stateful shell cwd.",
+      "affected_files": [
+        { "path": "DISCOVERY TARGET: /audit-code & /remediate-code loader / host-asset source templates" }
+      ],
+      "evidence": [
+        "meta-audit-log O2: the loader runs bare 'node audit-code.mjs next-step' assuming cwd == package dir; a persisted cd caused a doubled path and MODULE_NOT_FOUND. 'The single sharpest footgun so far.'"
+      ]
+    },
+    {
+      "id": "FINDING-012",
+      "title": "Echo resolved scope before writing artifacts",
+      "category": "Workflow UX",
+      "severity": "medium",
+      "confidence": "high",
+      "lens": "operability",
+      "summary": "Before creating .audit-artifacts, echo the resolved scope ('auditing X, N files, git: yes/no -- proceed?') so a mis-resolved repo_root (e.g. a sub-package) is caught before artifacts are written.",
+      "affected_files": [
+        { "path": "DISCOVERY TARGET: /audit-code loader / intake scope-resolution (wrapper)" }
+      ],
+      "evidence": [
+        "meta-audit-log O3: a cwd accident silently re-scoped the audit to 1 of 3 workspaces and disabled git diff signals; nothing forced scope confirmation before artifacts were written. A confirmation/echo would catch this class of error."
+      ]
+    },
+    {
+      "id": "FINDING-013",
+      "title": "Give design_review a bounded effort budget",
+      "category": "Workflow UX",
+      "severity": "low",
+      "confidence": "high",
+      "lens": "operability",
+      "summary": "Add a reading budget or 'focus on the top-N risk units' hint to the design_review step so its open-ended 'read the project source' instruction does not become unbounded effort on large repos.",
+      "affected_files": [
+        { "path": "DISCOVERY TARGET: design_review step-prompt template / packages/audit-code/src/orchestrator" }
+      ],
+      "evidence": [
+        "meta-audit-log O5: design_review is bounded in output but unbounded in input effort ('read the project source' over 511 files/41k LOC); no budget or prioritized reading list. A suggested file budget or top-N risk-unit hint would calibrate effort."
+      ]
+    },
+    {
+      "id": "FINDING-014",
+      "title": "Point findings output at a machine-validatable JSON Schema",
+      "category": "Workflow UX",
+      "severity": "low",
+      "confidence": "high",
+      "lens": "correctness",
+      "summary": "Reference the AuditResult JSON Schema from the step prompt so a host can self-validate its output before submit, instead of receiving validation feedback late on ingest.",
+      "affected_files": [
+        { "path": "packages/audit-code/schemas/audit_result.schema.json" },
+        { "path": "DISCOVERY TARGET: findings/dispatch step-prompt template" }
+      ],
+      "evidence": [
+        "meta-audit-log O7: the schema is restated in prose rather than pointed at a JSON Schema file, so a host can't machine-validate its own output before submitting (it's validated on ingest instead -- late feedback)."
+      ]
+    }
+  ],
+  "blocks": [
+    {
+      "block_id": "B-001",
+      "items": ["FINDING-001", "FINDING-002", "FINDING-004"],
+      "parallel_safe": false,
+      "dependencies": []
+    },
+    {
+      "block_id": "B-002",
+      "items": ["FINDING-003", "FINDING-005"],
+      "parallel_safe": false,
+      "dependencies": ["B-001"]
+    },
+    {
+      "block_id": "B-003",
+      "items": ["FINDING-008", "FINDING-009"],
+      "parallel_safe": false,
+      "dependencies": ["B-001"]
+    },
+    {
+      "block_id": "B-004",
+      "items": ["FINDING-006"],
+      "parallel_safe": true,
+      "dependencies": []
+    },
+    {
+      "block_id": "B-005",
+      "items": ["FINDING-007", "FINDING-013"],
+      "parallel_safe": false,
+      "dependencies": []
+    },
+    {
+      "block_id": "B-006",
+      "items": ["FINDING-010", "FINDING-011", "FINDING-012"],
+      "parallel_safe": true,
+      "dependencies": []
+    },
+    {
+      "block_id": "B-007",
+      "items": ["FINDING-014"],
+      "parallel_safe": true,
+      "dependencies": []
+    }
+  ]
+}

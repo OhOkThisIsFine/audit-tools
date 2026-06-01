@@ -1,0 +1,33 @@
+{
+  "type": "item_spec",
+  "item_spec": {
+    "finding_id": "FINDING-001",
+    "concrete_change": "In packages/audit-code/src/providers/index.ts, change the default in resolveFreshSessionProviderName (lines 46-47) from `name ?? sessionConfig.provider ?? \"local-subprocess\"` to `name ?? sessionConfig.provider ?? \"auto\"`, so that when no provider is explicitly requested the function runs environment auto-detection (CLAUDECODE/OPENCODE/TERM_PROGRAM + command availability) instead of short-circuiting to local-subprocess. Preserve current safe behavior: `local-subprocess` stays the final fallback inside the auto branch (line 96) when no capable backend is detected, and an explicit `name` or `sessionConfig.provider` of `local-subprocess` is still honored verbatim (the `requestedProvider !== \"auto\"` early return is unchanged). This aligns the code with the documented invariant 'auto-resolution handles the environment' (CLAUDE.md). No change is required in providers/constants.ts (a pure re-export of LOCAL_SUBPROCESS_PROVIDER_NAME). No change is required in classifyProvider (shared/quota/limits.ts) for the existing providers (claude-code -> hosted, opencode/local-subprocess -> local are correct); classification for the new backends codex/antigravity and a distinct claude-desktop is handled under FINDING-005. CROSS-FILE DEPENDENCY (outside these three files; tracked with the A1 session-config origin and the FINDING-006 artifacts-dir discovery target): the persisted .audit-artifacts/session-config.json currently hard-pins {\"provider\":\"local-subprocess\"}, which resolves BEFORE the code default, so the writer of that file must stop pinning it (omit the field or persist \"auto\") or this change has no effect in the conversation-first flow. Be aware of one intended behavior change: with the default now \"auto\", the existing stderr advisory in createFreshSessionProvider (lines 105-114, gated on `(name ?? sessionConfig.provider) === \"auto\"`) will now fire on the no-config path when nothing capable is detected — which is the desired signal, not a regression.",
+    "no_change": false,
+    "tests_to_write": [
+      {
+        "name": "resolveFreshSessionProviderName runs auto-detection when no provider is specified",
+        "assertions": [
+          "With name=undefined, sessionConfig={}, and options.env={ CLAUDECODE: '1' }, it returns 'claude-code' (previously returned 'local-subprocess').",
+          "With name=undefined, sessionConfig={}, and options.env={ OPENCODE: '1' }, it returns 'opencode'.",
+          "It does not short-circuit to 'local-subprocess' when a backend env signal is present."
+        ]
+      },
+      {
+        "name": "resolveFreshSessionProviderName honors an explicit provider request over auto-detection",
+        "assertions": [
+          "name='local-subprocess' returns 'local-subprocess' even when options.env={ CLAUDECODE: '1' } (explicit request wins; the env early-return path is unchanged).",
+          "sessionConfig.provider='opencode' (name=undefined) returns 'opencode' regardless of env."
+        ]
+      },
+      {
+        "name": "resolveFreshSessionProviderName falls back to local-subprocess when auto detects nothing",
+        "assertions": [
+          "With name=undefined, sessionConfig={}, options.env={}, and options.commandExists=()=>false, it returns 'local-subprocess' (safe fallback preserved).",
+          "The result is identical to passing name='auto' explicitly under the same inputs (default now equals auto-behavior)."
+        ]
+      }
+    ],
+    "not_applicable_steps": []
+  }
+}
