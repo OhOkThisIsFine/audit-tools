@@ -35,6 +35,11 @@
   "engines": {
     "node": ">=20"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OhOkThisIsFine/audit-tools.git",
+    "directory": "packages/shared"
+  },
   "publishConfig": {
     "access": "public"
   }
