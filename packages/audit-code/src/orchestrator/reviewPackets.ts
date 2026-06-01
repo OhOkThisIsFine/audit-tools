@@ -11,6 +11,17 @@ import type { GraphBundle, GraphEdge } from "@audit-tools/shared";
 import { estimateTokensFromBytes, isRecord } from "@audit-tools/shared";
 import { LENS_ORDER, priorityRank, sortLenses } from "./auditTaskUtils.js";
 import { UnionFind } from "./unionFind.js";
+import {
+  normalizeGraphPath,
+  isPackageManifestPath,
+  isTypescriptProjectConfigPath,
+  isGoModuleManifestPath,
+  isCargoManifestPath,
+  isMavenPomPath,
+} from "../extractors/graphPathUtils.js";
+
+// Re-exported for scope.ts, which imports the canonical path normalizer here.
+export { normalizeGraphPath };
 
 const DEFAULT_MAX_TASKS_PER_PACKET = 0;
 const DEFAULT_TARGET_PACKET_LINES = 8000;
@@ -217,10 +228,6 @@ function buildTaskGroups(tasks: AuditTask[]): Map<string, AuditTask[]> {
     groups.set(key, group);
   }
   return groups;
-}
-
-export function normalizeGraphPath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
 }
 
 export function collectGraphEdges(graphBundle?: GraphBundle): GraphEdge[] {
@@ -632,33 +639,10 @@ function buildSubsystemClusterEdges(
 
 function packageManifestRoot(path: string): string | undefined {
   const segments = normalizeGraphPath(path).split("/").filter(Boolean);
-  if (segments.at(-1) !== "package.json" || segments.length < 2) {
+  if (!isPackageManifestPath(path) || segments.length < 2) {
     return undefined;
   }
   return segments.slice(0, -1).join("/");
-}
-
-function isTypescriptProjectConfigPath(path: string): boolean {
-  const basename = normalizeGraphPath(path).split("/").at(-1);
-  if (!basename) {
-    return false;
-  }
-  return (
-    basename === "tsconfig.json" ||
-    (basename.startsWith("tsconfig.") && basename.endsWith(".json"))
-  );
-}
-
-function isGoModuleManifestPath(path: string): boolean {
-  return normalizeGraphPath(path).split("/").at(-1) === "go.mod";
-}
-
-function isCargoManifestPath(path: string): boolean {
-  return normalizeGraphPath(path).split("/").at(-1) === "cargo.toml";
-}
-
-function isMavenPomPath(path: string): boolean {
-  return normalizeGraphPath(path).split("/").at(-1) === "pom.xml";
 }
 
 function configFileRoot(

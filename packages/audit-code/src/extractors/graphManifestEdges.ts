@@ -1,6 +1,28 @@
 import { posix } from "node:path";
 import type { GraphEdge } from "@audit-tools/shared";
-import { graphEdge, normalizeGraphPath, resolveCandidate } from "./graphPathUtils.js";
+import {
+  graphEdge,
+  normalizeGraphPath,
+  resolveCandidate,
+  isCargoManifestPath,
+  isGoModuleManifestPath,
+  isGoWorkspaceManifestPath,
+  isMavenPomPath,
+  isPackageManifestPath,
+  isPnpmWorkspaceManifestPath,
+  isPyprojectPath,
+  isTypescriptProjectConfigPath,
+} from "./graphPathUtils.js";
+
+// Re-exported for the graph builder, which imports these manifest predicates
+// from here for historical reasons; the canonical definitions live in
+// graphPathUtils.
+export {
+  isCargoManifestPath,
+  isGoWorkspaceManifestPath,
+  isMavenPomPath,
+  isPyprojectPath,
+};
 
 const PACKAGE_ENTRYPOINT_EDGE_CONFIDENCE = 0.9;
 const PACKAGE_SCRIPT_EDGE_CONFIDENCE = 0.88;
@@ -11,10 +33,6 @@ const CARGO_WORKSPACE_MEMBER_EDGE_CONFIDENCE = 0.87;
 const MAVEN_MODULE_EDGE_CONFIDENCE = 0.87;
 const PACKAGE_SCRIPT_REFERENCE_PATTERN =
   /(?:^|[\s"'`])((?:\.{1,2}\/)?(?:[\w.-]+\/)*[\w.-]+\.(?:cjs|cts|js|jsx|mjs|mts|ts|tsx))(?:$|[\s"'`])/gi;
-
-function isPackageManifestPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "package.json";
-}
 
 function collectPackageEntrypointValues(
   value: unknown,
@@ -244,37 +262,6 @@ function packageWorkspacePatterns(content: string): WorkspacePattern[] {
     );
   }
   return patterns;
-}
-
-function isPnpmWorkspaceManifestPath(path: string): boolean {
-  return (
-    posix.basename(normalizeGraphPath(path)).toLowerCase() ===
-    "pnpm-workspace.yaml"
-  );
-}
-
-export function isGoWorkspaceManifestPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "go.work";
-}
-
-function isGoModuleManifestPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "go.mod";
-}
-
-export function isCargoManifestPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "cargo.toml";
-}
-
-export function isMavenPomPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "pom.xml";
-}
-
-function isTypescriptProjectConfigPath(path: string): boolean {
-  const basename = posix.basename(normalizeGraphPath(path)).toLowerCase();
-  return (
-    basename === "tsconfig.json" ||
-    (basename.startsWith("tsconfig.") && basename.endsWith(".json"))
-  );
 }
 
 function stripJsonComments(content: string): string {
@@ -1251,10 +1238,6 @@ export function extractMavenModuleEdges(
 // ─── Pyproject / pytest ───────────────────────────────────────────────────────
 
 const PYPROJECT_TESTPATHS_LINK_CONFIDENCE = 0.85;
-
-export function isPyprojectPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "pyproject.toml";
-}
 
 function pyprojectTestpaths(content: string): string[] {
   const values: string[] = [];
