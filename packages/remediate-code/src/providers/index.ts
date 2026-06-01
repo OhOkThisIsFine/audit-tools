@@ -36,6 +36,7 @@ function commandExists(command: string): boolean {
 
 interface AutoProviderContext {
   inVSCode: boolean;
+  insideOpenCode: boolean;
   insideClaudeCode: boolean;
   hasVSCodeTaskTemplate: boolean;
   hasSubprocessTemplate: boolean;
@@ -55,6 +56,7 @@ function getAutoProviderContext(
   const opencodeCommand = sessionConfig.opencode?.command ?? "opencode";
   return {
     inVSCode: (env.TERM_PROGRAM ?? "").toLowerCase() === "vscode",
+    insideOpenCode: Boolean(env.OPENCODE),
     insideClaudeCode,
     hasVSCodeTaskTemplate: hasEntries(sessionConfig.vscode_task?.command_template),
     hasSubprocessTemplate: hasEntries(
@@ -70,6 +72,8 @@ function getAutoProviderContext(
 function chooseAutoProvider(
   context: AutoProviderContext,
 ): ResolvedProviderName {
+  // Running inside an opencode session: use it directly (mirrors audit-code).
+  if (context.insideOpenCode) return "opencode";
   if (context.inVSCode && context.hasVSCodeTaskTemplate) return "vscode-task";
   if (context.hasSubprocessTemplate) return "subprocess-template";
   if (context.hasClaudeCodeConfig && context.claudeAvailable) {

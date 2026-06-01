@@ -37,7 +37,12 @@ export class ClaudeCodeProvider implements FreshSessionProvider {
     const args = [
       promptFlag,
       ...(this.config.extra_args ?? []),
-      "--dangerously-skip-permissions",
+      // The autonomous remediator skips permission prompts by default (it
+      // applies changes unattended and cannot pause mid-run), but this is now
+      // overrideable: set dangerously_skip_permissions: false to opt out.
+      ...(this.config.dangerously_skip_permissions !== false
+        ? ["--dangerously-skip-permissions"]
+        : []),
     ];
     return await this.launchCommand(command, args, {
       ...applyWorkerTaskLaunchSettings(input, task),
