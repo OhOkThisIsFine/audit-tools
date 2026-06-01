@@ -221,6 +221,11 @@ import {
   removeWaveManifest,
   buildWaveSlotEntry,
 } from "./cli/waveManifest.js";
+import {
+  buildLineIndex,
+  buildLineIndexForPaths,
+  addFileLineCountHints,
+} from "./cli/lineIndex.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -336,66 +341,6 @@ function buildBlockedAuditState(params: {
   };
 }
 
-
-async function buildLineIndex(
-  root: string,
-  repoManifest: RepoManifest,
-): Promise<Record<string, number>> {
-  const entries: Array<readonly [string, number]> = [];
-  const batchSize = 25;
-  for (let i = 0; i < repoManifest.files.length; i += batchSize) {
-    const batch = repoManifest.files.slice(i, i + batchSize);
-    const results = await Promise.all(
-      batch.map(async (file) => {
-        try {
-          return [
-            file.path,
-            await countLines(resolve(root, file.path)),
-          ] as const;
-        } catch {
-          return [file.path, 0] as const;
-        }
-      }),
-    );
-    entries.push(...results);
-  }
-  return Object.fromEntries(entries);
-}
-
-async function buildLineIndexForPaths(
-  root: string,
-  paths: string[],
-): Promise<Record<string, number>> {
-  const uniquePaths = [...new Set(paths)].sort();
-  const entries = await Promise.all(
-    uniquePaths.map(async (path) => {
-      try {
-        return [path, await countLines(resolve(root, path))] as const;
-      } catch {
-        return [path, 0] as const;
-      }
-    }),
-  );
-  return Object.fromEntries(entries);
-}
-
-
-
-async function addFileLineCountHints(
-  root: string,
-  tasks: AuditTask[],
-): Promise<AuditTask[]> {
-  const lineIndex = await buildLineIndexForPaths(
-    root,
-    tasks.flatMap((task) => task.file_paths),
-  );
-  return tasks.map((task) => ({
-    ...task,
-    file_line_counts: Object.fromEntries(
-      task.file_paths.map((path) => [path, lineIndex[path] ?? 0]),
-    ),
-  }));
-}
 
 function activeReviewRunFromTask(
   artifactsDir: string,
