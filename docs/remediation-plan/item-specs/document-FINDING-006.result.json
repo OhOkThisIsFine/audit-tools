@@ -1,0 +1,26 @@
+{
+  "type": "item_spec",
+  "item_spec": {
+    "finding_id": "FINDING-006",
+    "concrete_change": "Locate and fix a path-construction site that builds a path by string concatenation instead of path.join/resolve, producing the fused segment 'Codeauditor-lambda.audit-artifacts' (= a parent ending in 'Code' + the npm package name 'auditor-lambda' + '.audit-artifacts', with no separators). The exact line is not yet pinned (hence confidence=medium); locating it is part of this item. SEARCH STRATEGY for the implement phase (broad file access available there): grep the audit-code package for (a) the literal 'auditor-lambda' used in any path context; (b) '.audit-artifacts' built via concatenation or template literal — patterns like `+ \".audit-artifacts\"`, `${...}.audit-artifacts`, or `${root}${name}`; (c) artifacts-dir / repo-root resolution helpers (e.g. resolveArtifactsDir / DEFAULT_ARTIFACTS_DIR / artifactsDir defaults) in packages/audit-code/src/io/ and in the wrapper entrypoints audit-code.mjs / audit-code-wrapper-lib.mjs; (d) temp/smoke/fixture path builders (note the repo has a packages/audit-code/.tmp area) that may derive a dir name from the package name or process.cwd(). The fuse of three segments into one strongly implies raw `+` or template-literal path building rather than path.join. FIX: replace the concatenation with path.join(...) / path.resolve(...) so every segment is separated correctly on win32 and posix; in particular ensure the default artifacts directory is `join(repoRoot, \".audit-artifacts\")` and that any package-name-derived path also uses join. Do not change the artifacts dir NAME or layout — only how the path is assembled. Honor the repo's explicit 'Windows-aware' mandate. If, after a thorough search, no concatenation site is found (the stray dir has been cleaned and may have come from a now-removed code path), set this item to no_change with the search evidence and add the regression test below as a guard regardless.",
+    "no_change": false,
+    "tests_to_write": [
+      {
+        "name": "artifacts-dir resolution joins segments with a separator (Windows-aware)",
+        "assertions": [
+          "For a repo root like 'C:\\\\Code\\\\audit-tools', the resolved artifacts dir equals path.join(root, '.audit-artifacts') and path.basename(resolved) === '.audit-artifacts'.",
+          "The resolved path, split on the path separator, contains '.audit-artifacts' as its own final segment (never fused with a parent directory or the package name).",
+          "The resolved path never contains the substring 'auditor-lambda' fused to an adjacent segment, and never contains a 'Code' + package-name concatenation."
+        ]
+      },
+      {
+        "name": "path assembly is robust to roots with and without trailing separators",
+        "assertions": [
+          "Roots given with and without a trailing separator both resolve to the same normalized artifacts dir.",
+          "A win32-style root and a posix-style root each produce a correctly separated path (use path.win32/path.posix or the injectable resolver)."
+        ]
+      }
+    ],
+    "not_applicable_steps": []
+  }
+}

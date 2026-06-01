@@ -1,0 +1,18 @@
+{
+  "type": "item_spec",
+  "item_spec": {
+    "finding_id": "FINDING-011",
+    "concrete_change": "Make every loader command cwd-independent so a persisted shell cwd can no longer break invocation (meta-audit-log O2: bare `node audit-code.mjs next-step` assumed cwd == package dir and produced a doubled path / MODULE_NOT_FOUND). Reference point: the /remediate-code loader already invokes the ensured global bin `remediate-code next-step` and is cwd-independent — bring /audit-code to the same pattern. Changes (DISCOVERY TARGETS — locate the loader SOURCE templates rendered by `ensure` in the implement phase; edit source, not generated output):\n\n(1) /audit-code loader template: replace any bare relative `node audit-code.mjs <cmd>` (or `node packages/audit-code/audit-code.mjs <cmd>`) invocations with a cwd-independent form. Preferred: the ensured global bin `audit-code <cmd>` (ensure `audit-code ensure` places/links the bin on PATH the way remediate-code does; meta-audit-log O1 noted the audit-code bin was not on PATH, so this must be guaranteed). If a global bin cannot be guaranteed in all hosts, fall back to anchoring each command with an explicit absolute path to the wrapper, or an explicit 'from the repository root, run …' instruction. The invariant: no command may depend on an implicit current working directory.\n\n(2) /remediate-code loader template: audit it for the same anti-pattern and apply the same anchoring; it currently uses the bin form but verify no bare-relative commands remain in any branch.\n\n(3) Where the loader necessarily references a path, use an explicit/absolute anchor rather than a relative one. Document the chosen convention briefly in the loader so future edits keep commands cwd-independent.\n\nThis is a host-asset/template change; coordinate the rendering with the `ensure` flow so the fix survives re-running `ensure`.",
+    "no_change": false,
+    "tests_to_write": [
+      {
+        "name": "rendered loader assets contain no cwd-dependent invocations",
+        "assertions": [
+          "After rendering the loader/host assets via the ensure routine into a temp dir, the /audit-code and /remediate-code loader text contains no bare `node <wrapper>.mjs` command that assumes the current working directory.",
+          "Every orchestrator command in the rendered loaders is either the ensured global bin form or an explicitly anchored/absolute invocation."
+        ]
+      }
+    ],
+    "not_applicable_steps": []
+  }
+}
