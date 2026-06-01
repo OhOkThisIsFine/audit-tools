@@ -48,11 +48,15 @@ function defaultLimits(sessionConfig: SessionConfig): ResolvedLimits {
 }
 
 export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionResult {
-  const { providerName: _providerName, sessionConfig, hostModel } = options;
+  const { providerName, sessionConfig, hostModel } = options;
   const quota = sessionConfig.quota ?? {};
   const defaults = defaultLimits(sessionConfig);
 
+  // Resolution order:
   // 1. Explicit per-model config overrides
+  // 2. Static known-model metadata
+  // 3. Conservative provider-typed default
+  // 4. Generic default fallback
   if (hostModel && quota.models?.[hostModel]) {
     const override = quota.models[hostModel];
     return {
@@ -86,6 +90,13 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
     }
   }
 
-  // 3. Conservative defaults for all provider types
+  // 3. Conservative provider defaults. Concurrency caps remain in the scheduler;
+  // this rung records that the provider was part of limit resolution.
+  const providerType = classifyProvider(providerName);
+  if (providerType !== "unknown") {
+    return { limits: defaults, source: "provider_default", confidence: "low" };
+  }
+
+  // 4. Conservative defaults for all unknown provider types
   return { limits: defaults, source: "default", confidence: "low" };
 }

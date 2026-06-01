@@ -30,6 +30,32 @@ test("provider auto falls back to local-subprocess when no configured bridge or 
   assert.equal(provider, "local-subprocess");
 });
 
+test("omitted provider detects active Claude Code session", () => {
+  const provider = resolveFreshSessionProviderName(
+    undefined,
+    {},
+    {
+      commandExists: () => false,
+      env: { CLAUDECODE: "1" },
+    },
+  );
+
+  assert.equal(provider, "claude-code");
+});
+
+test("defaulted local-subprocess provider still detects active OpenCode session", () => {
+  const provider = resolveFreshSessionProviderName(
+    undefined,
+    { provider: "local-subprocess" },
+    {
+      commandExists: () => false,
+      env: { OPENCODE: "1" },
+    },
+  );
+
+  assert.equal(provider, "opencode");
+});
+
 test("provider auto selects vscode-task when running under VS Code and a vscode task template is configured", () => {
   const provider = resolveFreshSessionProviderName(
     undefined,

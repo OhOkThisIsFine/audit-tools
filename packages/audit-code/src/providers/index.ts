@@ -43,9 +43,12 @@ export function resolveFreshSessionProviderName(
     commandExists?: (command: string) => boolean;
   } = {},
 ): ResolvedProviderName {
-  const requestedProvider =
-    name ?? sessionConfig.provider ?? "local-subprocess";
-  if (requestedProvider !== "auto") {
+  const requestedProvider = name ?? sessionConfig.provider;
+  const shouldAutoDetect =
+    requestedProvider === undefined ||
+    requestedProvider === "auto" ||
+    (name === undefined && requestedProvider === "local-subprocess");
+  if (!shouldAutoDetect) {
     return requestedProvider as ResolvedProviderName;
   }
 
@@ -102,9 +105,14 @@ export function createFreshSessionProvider(
 ): FreshSessionProvider {
   const providerName = resolveFreshSessionProviderName(name, sessionConfig);
   const opentoken = sessionConfig.opentoken ?? {};
+  const requestedProvider = name ?? sessionConfig.provider;
+  const autoDetectionRequested =
+    requestedProvider === undefined ||
+    requestedProvider === "auto" ||
+    (name === undefined && requestedProvider === "local-subprocess");
   if (
     providerName === "local-subprocess" &&
-    (name ?? sessionConfig.provider) === "auto"
+    autoDetectionRequested
   ) {
     process.stderr.write(
       "audit-code: auto provider resolved to local-subprocess — no capable agent provider detected. " +

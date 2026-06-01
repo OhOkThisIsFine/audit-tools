@@ -77,13 +77,13 @@ test("resolveLimits uses known_metadata for recognized model without explicit co
   assert.equal(result.limits.requests_per_minute, null);
 });
 
-test("resolveLimits falls back to default when model is unknown", () => {
+test("resolveLimits falls back to provider_default when model is unknown", () => {
   const result = resolveLimits({
     providerName: "claude-code",
     sessionConfig: {},
     hostModel: "unknown/model",
   });
-  assert.equal(result.source, "default");
+  assert.equal(result.source, "provider_default");
   assert.equal(result.confidence, "low");
   assert.equal(result.limits.context_tokens, 32_000);
 });
@@ -97,12 +97,12 @@ test("resolveLimits uses quota.default_context_tokens from session config", () =
   assert.equal(result.limits.output_tokens, 8_192);
 });
 
-test("resolveLimits with no hostModel falls back to default for hosted provider", () => {
+test("resolveLimits with no hostModel falls back to provider_default for hosted provider", () => {
   const result = resolveLimits({
     providerName: "claude-code",
     sessionConfig: {},
   });
-  assert.equal(result.source, "default");
+  assert.equal(result.source, "provider_default");
   assert.equal(result.confidence, "low");
 });
 

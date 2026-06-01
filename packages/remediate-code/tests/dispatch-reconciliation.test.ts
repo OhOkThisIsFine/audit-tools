@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { StateStore } from "../src/state/store.js";
 import type { RemediationState } from "../src/state/store.js";
 import {
+  mergeDocumentResults,
+  mergeImplementResults,
   prepareDocumentDispatch,
   prepareImplementDispatch,
 } from "../src/steps/dispatch.js";
@@ -177,6 +179,43 @@ describe("prepareDocumentDispatch reconciliation", () => {
 
     expect(plan.items).toEqual([]);
   });
+
+  it("merges valid existing result files even when they were skipped from dispatch", async () => {
+    const state = makePlanningState();
+    await saveState(state);
+
+    const runId = "PLAN-1";
+    const resultDir = join(ARTIFACTS_DIR, "runs", runId, "document");
+    await mkdir(resultDir, { recursive: true });
+
+    await writeFile(
+      join(resultDir, "document-F-001.result.json"),
+      JSON.stringify({
+        type: "item_spec",
+        item_spec: {
+          finding_id: "F-001",
+          concrete_change: "fix",
+          tests_to_write: [],
+          not_applicable_steps: [],
+        },
+      }),
+    );
+
+    await prepareDocumentDispatch(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      runId,
+      "F-001",
+    );
+    const merged = await mergeDocumentResults(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      runId,
+    );
+
+    expect(merged.items?.["F-001"]).toMatchObject({
+      status: "documented",
+      item_spec: { finding_id: "F-001" },
+    });
+  });
 });
 
 describe("prepareImplementDispatch reconciliation", () => {
@@ -227,5 +266,40 @@ describe("prepareImplementDispatch reconciliation", () => {
     );
 
     expect(plan.items.map((i) => i.block_id)).toEqual(["B-001", "B-002"]);
+  });
+
+  it("merges valid existing result files even when they were skipped from implementation dispatch", async () => {
+    const state = makeDocumentingState();
+    await saveState(state);
+
+    const runId = "PLAN-1";
+    const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
+    await mkdir(resultDir, { recursive: true });
+
+    await writeFile(
+      join(resultDir, "implement-B-001.result.json"),
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [
+          { finding_id: "F-001", status: "resolved", evidence: ["done"] },
+        ],
+      }),
+    );
+
+    await prepareImplementDispatch(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      runId,
+      "B-001",
+    );
+    const merged = await mergeImplementResults(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      runId,
+    );
+
+    expect(merged.items?.["F-001"]).toMatchObject({
+      status: "resolved",
+      last_successful_step: "Verify Code Against Documentation",
+    });
   });
 });

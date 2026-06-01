@@ -7,7 +7,7 @@ const { setQuotaStateDir } = await import("@audit-tools/shared/quota/state");
 setQuotaStateDir(join(tmpdir(), ".audit-code-test"));
 
 const { LearnedQuotaSource } = await import("@audit-tools/shared/quota/learnedQuotaSource");
-const { CompositeQuotaSource } = await import("@audit-tools/shared/quota/compositeQuotaSource");
+const { CompositeQuotaSource, buildQuotaSource } = await import("@audit-tools/shared/quota/compositeQuotaSource");
 const { scheduleWave } = await import("../dist/quota/scheduler.js");
 
 // ── LearnedQuotaSource ──────────────────────────────────────────────────────
@@ -74,6 +74,38 @@ test("CompositeQuotaSource skips failing sources", async () => {
   const composite = new CompositeQuotaSource([failingSource, goodSource]);
   const snapshot = await composite.queryCurrentUsage("test/model");
   assert.equal(snapshot?.source, "good");
+});
+
+test("buildQuotaSource prefers additional sources before learned fallback", async () => {
+  const providerSource = {
+    name: "provider",
+    queryCurrentUsage: async () => ({
+      remaining_pct: 0.4,
+      reset_at: null,
+      requests_remaining: 4,
+      tokens_remaining: null,
+      captured_at: new Date().toISOString(),
+      source: "provider",
+    }),
+  };
+  const source = buildQuotaSource({ additionalSources: [providerSource] });
+  const snapshot = await source.queryCurrentUsage("test/model");
+
+  assert.equal(snapshot?.source, "provider");
+});
+
+test("buildQuotaSource skips failing additional sources and falls back cleanly", async () => {
+  const source = buildQuotaSource({
+    additionalSources: [
+      {
+        name: "broken",
+        queryCurrentUsage: async () => { throw new Error("failed"); },
+      },
+    ],
+  });
+  const snapshot = await source.queryCurrentUsage("missing/model");
+
+  assert.equal(snapshot, null);
 });
 
 // ── Scheduler integration with quotaSourceSnapshot ──────────────────────────
