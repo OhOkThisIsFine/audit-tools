@@ -47,14 +47,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OhOkThisIsFine/auditor-lambda.git"
+    "url": "git+https://github.com/OhOkThisIsFine/audit-tools.git",
+    "directory": "packages/audit-code"
   },
   "publishConfig": {
     "access": "public"
   },
-  "homepage": "https://github.com/OhOkThisIsFine/auditor-lambda#readme",
+  "homepage": "https://github.com/OhOkThisIsFine/audit-tools/tree/master/packages/audit-code#readme",
   "bugs": {
-    "url": "https://github.com/OhOkThisIsFine/auditor-lambda/issues"
+    "url": "https://github.com/OhOkThisIsFine/audit-tools/issues"
   },
   "keywords": [
     "audit",
