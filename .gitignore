@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
+.tmp/
 .audit-artifacts/
 .audit-code/
 .remediation-artifacts/
