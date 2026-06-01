@@ -1,7 +1,7 @@
 import { readJsonFile } from "@audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
 import type { FreshSessionProvider, LaunchFreshSessionInput } from "@audit-tools/shared";
-import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
+import { spawnLoggedCommand } from "@audit-tools/shared";
 
 export const MISSING_WORKER_COMMAND_MESSAGE =
   "local-subprocess provider requires task.worker_command.";
@@ -18,7 +18,7 @@ export class LocalSubprocessProvider implements FreshSessionProvider {
 
   async launch(input: LaunchFreshSessionInput) {
     const task = await readJsonFile<WorkerTask>(input.taskPath);
-    if (!task.worker_command.length) {
+    if (!task.worker_command?.length) {
       throw new Error(MISSING_WORKER_COMMAND_MESSAGE);
     }
     const [command, ...args] = task.worker_command;

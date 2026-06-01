@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { scheduleWave, buildProviderModelKey } from "../src/quota/scheduler.js";
 import type { QuotaStateEntry, SessionConfig } from "@audit-tools/shared";
 import {
+  scheduleWave,
+  buildProviderModelKey,
   decayWeight,
   computeMaxSafeConcurrency,
   computeRampUpConcurrency,

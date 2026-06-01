@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { FreshSessionProvider, LaunchFreshSessionInput, OpenCodeConfig, OpenTokenConfig } from "@audit-tools/shared";
 import { readJsonFile } from "@audit-tools/shared";
-import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
+import { spawnLoggedCommand } from "@audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
 import { applyWorkerTaskLaunchSettings } from "./workerTaskLaunch.js";
 
