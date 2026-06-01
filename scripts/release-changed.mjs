@@ -2,6 +2,10 @@
 
 import { spawnSync } from "node:child_process";
 
+// `internalDeps` lists the other workspaces (by label) this package depends on.
+// The dependents are built, packed, and tested against the LOCAL shared
+// workspace, so a shared change must cascade to them. Order matters: shared is
+// listed first so build/gate/publish proceed in dependency order.
 const packages = [
   {
     label: "shared",
@@ -9,6 +13,7 @@ const packages = [
     packageName: "@audit-tools/shared",
     path: "packages/shared",
     tagPrefix: "shared-",
+    internalDeps: [],
   },
   {
     label: "audit-code",
@@ -16,6 +21,7 @@ const packages = [
     packageName: "auditor-lambda",
     path: "packages/audit-code",
     tagPrefix: "audit-code-",
+    internalDeps: ["shared"],
   },
   {
     label: "remediate-code",
@@ -23,6 +29,7 @@ const packages = [
     packageName: "remediator-lambda",
     path: "packages/remediate-code",
     tagPrefix: "remediate-code-",
+    internalDeps: ["shared"],
   },
 ];
 
@@ -72,6 +79,7 @@ function spawn(command, args, options = {}) {
   return spawnSync(resolved.command, resolved.args, {
     cwd: process.cwd(),
     encoding: "utf8",
+    env: options.env ?? process.env,
     stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
   });
 }
@@ -136,6 +144,34 @@ function ensureDefaultBranch() {
   if (branch !== defaultBranch) {
     throw new Error(`Release publishing expects the default branch ('${defaultBranch}'), but current branch is '${branch}'.`);
   }
+  return { remoteName, branch };
+}
+
+// Change detection and the per-package release scripts both operate on the local
+// branch tip, and publishing pushes it. Fetch the branch itself (not just tags)
+// and require local == remote so we never under-detect changes against a stale
+// HEAD or silently publish unpushed local commits.
+function ensureInSyncWithRemote(remoteName, branch) {
+  run("git", ["fetch", remoteName, branch]);
+
+  const localSha = output("git", ["rev-parse", "HEAD"]);
+  const remoteSha = output("git", ["rev-parse", `${remoteName}/${branch}`]);
+  if (localSha === remoteSha) return;
+
+  // `--left-right` against `remote...local`: left count = behind, right = ahead.
+  const counts = output("git", [
+    "rev-list",
+    "--left-right",
+    "--count",
+    `${remoteSha}...${localSha}`,
+  ]);
+  const [behind, ahead] = counts.split(/\s+/u).map(Number);
+  throw new Error(
+    `Local '${branch}' is out of sync with ${remoteName}/${branch} ` +
+      `(${ahead} ahead, ${behind} behind). Release publishing pushes the current ` +
+      `branch, so sync first: 'git pull --ff-only ${remoteName} ${branch}', and ` +
+      `push or drop any local commits before releasing.`,
+  );
 }
 
 function fetchTags() {
@@ -189,10 +225,14 @@ function changedSince(tag, path) {
 }
 
 ensureCleanWorktree();
-if (!dryRun) ensureDefaultBranch();
+if (!dryRun) {
+  const { remoteName, branch } = ensureDefaultBranch();
+  ensureInSyncWithRemote(remoteName, branch);
+}
 fetchTags();
 
-const changed = [];
+const changedLabels = new Set();
+const reasons = new Map();
 
 for (const pkg of packages) {
   const baseline = baselineTag(pkg);
@@ -202,15 +242,43 @@ for (const pkg of packages) {
     `${pkg.label}: ${hasChanges ? "changed" : "unchanged"} since ${baseline.tag ?? "<none>"} (${baseline.source})`,
   );
 
-  if (hasChanges) changed.push(pkg);
+  if (hasChanges) {
+    changedLabels.add(pkg.label);
+    reasons.set(pkg.label, "direct changes");
+  }
 }
+
+// Cascade: a package must republish if any of its internal dependencies changed,
+// because dependents are built/tested against the local shared workspace and pin
+// it as "*". Iterate to a fixpoint so transitive dependencies cascade too.
+let grew = true;
+while (grew) {
+  grew = false;
+  for (const pkg of packages) {
+    if (changedLabels.has(pkg.label)) continue;
+    const changedDeps = pkg.internalDeps.filter((dep) => changedLabels.has(dep));
+    if (changedDeps.length > 0) {
+      changedLabels.add(pkg.label);
+      reasons.set(pkg.label, `depends on changed: ${changedDeps.join(", ")}`);
+      console.log(`${pkg.label}: included because ${changedDeps.join(", ")} changed`);
+      grew = true;
+    }
+  }
+}
+
+// Preserve dependency order (shared first) for build, gate, and publish.
+const changed = packages.filter((pkg) => changedLabels.has(pkg.label));
 
 if (changed.length === 0) {
   console.log("No package changes detected. Nothing to publish.");
   process.exit(0);
 }
 
-console.log(`Packages selected for ${bump} publish: ${changed.map((pkg) => pkg.label).join(", ")}`);
+console.log(
+  `Packages selected for ${bump} publish: ${changed
+    .map((pkg) => `${pkg.label} (${reasons.get(pkg.label)})`)
+    .join(", ")}`,
+);
 
 if (dryRun) {
   console.log("Dry run only. No packages published.");
@@ -219,7 +287,29 @@ if (dryRun) {
 
 const npm = commandName("npm");
 
+// Build @audit-tools/shared up front. Every dependent typechecks against
+// shared/dist and the packaged smoke test packs it from disk, so it must exist
+// and be current even when shared itself is not part of this release.
+console.log("Building @audit-tools/shared (dependents resolve types and pack from shared/dist)...");
+run(npm, ["run", "build", "-w", "@audit-tools/shared"]);
+
+// Front-load every gate before publishing anything. Releases are not atomic
+// across packages — each publish pushes a tag and a GitHub Release that triggers
+// CI — so verifying all changed packages first prevents a late failure from
+// leaving an earlier package half-published.
+for (const pkg of changed) {
+  console.log(`Pre-flight gate: ${pkg.label} (verify:release)...`);
+  run(npm, ["--workspace", pkg.workspace, "run", "verify:release"]);
+}
+
+// Publish in dependency order. The gate already ran above, so tell each
+// per-package release script to skip its internal verify:release rather than
+// repeat the slow build + test + packaged-smoke pass.
+const publishEnv = { ...process.env, AUDIT_TOOLS_RELEASE_GATE_VERIFIED: "1" };
+
 for (const pkg of changed) {
   console.log(`Publishing ${pkg.label} with ${bump} bump...`);
-  run(npm, ["--workspace", pkg.workspace, "run", `release:${bump}:publish`]);
+  run(npm, ["--workspace", pkg.workspace, "run", `release:${bump}:publish`], {
+    env: publishEnv,
+  });
 }
