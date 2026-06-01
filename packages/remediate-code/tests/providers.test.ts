@@ -279,6 +279,18 @@ describe("resolveFreshSessionProviderName", () => {
     expect(result).toBe("local-subprocess");
   });
 
+  it("resolves auto to opencode when running inside an opencode session", () => {
+    const result = resolveFreshSessionProviderName(
+      "auto",
+      {},
+      {
+        env: { OPENCODE: "1" },
+        commandExists: () => false,
+      },
+    );
+    expect(result).toBe("opencode");
+  });
+
   it("resolves auto to vscode-task when in VSCode and template is configured", () => {
     const result = resolveFreshSessionProviderName(
       "auto",
@@ -364,6 +376,29 @@ describe("provider launch methods", () => {
       expect(calls[0].launchInput.stdinText).toBe(prompt);
       expect(calls[0].launchInput.timeoutMs).toBe(1234);
     });
+    } finally {
+      if (savedClaudeCode !== undefined) process.env.CLAUDECODE = savedClaudeCode;
+    }
+  });
+
+  it("ClaudeCodeProvider omits --dangerously-skip-permissions when explicitly disabled", async () => {
+    const savedClaudeCode = process.env.CLAUDECODE;
+    delete process.env.CLAUDECODE;
+    try {
+      await withProviderFiles(async ({ input }) => {
+        const calls: any[] = [];
+        const provider = new ClaudeCodeProvider(
+          { command: "claude-test", dangerously_skip_permissions: false },
+          async (command, args, launchInput) => {
+            calls.push({ command, args, launchInput });
+            return { accepted: true, exitCode: 0 };
+          },
+        );
+
+        await provider.launch(input);
+
+        expect(calls[0].args).not.toContain("--dangerously-skip-permissions");
+      });
     } finally {
       if (savedClaudeCode !== undefined) process.env.CLAUDECODE = savedClaudeCode;
     }
