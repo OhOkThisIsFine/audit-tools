@@ -14,7 +14,7 @@ import {
   writeNdjsonFile,
   readOptionalTextFile,
   isFileMissingError,
-} from "../src/io/json.js";
+} from "@audit-tools/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-io");
