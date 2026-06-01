@@ -34,7 +34,7 @@ import {
   type ImplementWorkerResult,
   type RemediationDispatchPlan,
 } from "./types.js";
-import { classifyFindingRisk, NO_CHANGE_RE } from "./nextStep.js";
+import { classifyFindingRisk, specIndicatesNoChange } from "./nextStep.js";
 import { scheduleWave, buildDispatchQuota } from "./waveScheduler.js";
 import { ESTIMATED_FINDING_OVERHEAD_TOKENS, ESTIMATED_BLOCK_BASE_TOKENS } from "../phases/plan.js";
 import { createWorktree, mergeWorktree, isGitRepo } from "./worktreeIsolation.js";
@@ -706,7 +706,7 @@ export async function mergeImplementResults(
       }
       if (itemResult.status === "resolved") {
         const spec = stateItem.item_spec;
-        const isNoChange = spec?.no_change === true || NO_CHANGE_RE.test(spec?.concrete_change ?? "");
+        const isNoChange = specIndicatesNoChange(spec);
         stateItem.status = isNoChange ? "resolved_no_change" : "resolved";
         stateItem.last_successful_step = "Verify Code Against Documentation";
         if (itemResult.evidence?.length) {
