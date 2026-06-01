@@ -417,11 +417,40 @@ describe("provider launch methods", () => {
 
       await provider.launch(input);
 
+      // A custom command name is not a recognized launcher, so it is spawned
+      // directly on every platform (no cmd.exe wrapping).
       expect(calls[0].command).toBe("opencode-test");
       expect(calls[0].args).toEqual(["run", "--model", "x"]);
       expect(calls[0].args).not.toContain(prompt);
       expect(calls[0].launchInput.stdinText).toBe(prompt);
       expect(calls[0].launchInput.timeoutMs).toBe(1234);
+    });
+  });
+
+  it("OpenCodeProvider routes the default opencode launcher through the Windows cmd shim", async () => {
+    await withProviderFiles(async ({ input, prompt }) => {
+      const calls: any[] = [];
+      // No explicit command → defaults to "opencode", a recognized launcher.
+      const provider = new OpenCodeProvider(
+        {},
+        async (command, args, launchInput) => {
+          calls.push({ command, args, launchInput });
+          return { accepted: true, exitCode: 0 };
+        },
+      );
+
+      await provider.launch(input);
+
+      if (process.platform === "win32") {
+        // On Windows the opencode `.cmd` shim is wrapped through cmd.exe.
+        expect(calls[0].command).toBe(process.env.ComSpec ?? "cmd.exe");
+        expect(calls[0].args).toEqual(["/d", "/s", "/c", "opencode run"]);
+      } else {
+        expect(calls[0].command).toBe("opencode");
+        expect(calls[0].args).toEqual(["run"]);
+      }
+      // The prompt is piped via stdin regardless of platform.
+      expect(calls[0].launchInput.stdinText).toBe(prompt);
     });
   });
 

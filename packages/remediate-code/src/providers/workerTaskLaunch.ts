@@ -1,13 +1,4 @@
-import type { LaunchFreshSessionInput } from "@audit-tools/shared";
-import type { WorkerTask } from "../types/workerSession.js";
-import { resolveWorkerTaskTimeoutMs } from "../types/workerSession.js";
-
-export function applyWorkerTaskLaunchSettings(
-  input: LaunchFreshSessionInput,
-  task: Pick<WorkerTask, "timeout_ms">,
-): LaunchFreshSessionInput {
-  return {
-    ...input,
-    timeoutMs: resolveWorkerTaskTimeoutMs(task, input.timeoutMs),
-  };
-}
+// `applyWorkerTaskLaunchSettings` now lives in `@audit-tools/shared` so the
+// auditor and remediator apply per-task launch settings from one source of
+// truth. Re-exported here to preserve the existing local import surface.
+export { applyWorkerTaskLaunchSettings } from "@audit-tools/shared";

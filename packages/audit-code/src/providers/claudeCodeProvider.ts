@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { FreshSessionProvider, LaunchFreshSessionInput, ClaudeCodeConfig, OpenTokenConfig } from "@audit-tools/shared";
-import { spawnLoggedCommand } from "@audit-tools/shared";
+import { readJsonFile, spawnLoggedCommand, applyWorkerTaskLaunchSettings } from "@audit-tools/shared";
+import type { WorkerTask } from "../types/workerSession.js";
 
 export const ACTIVE_CLAUDE_CODE_SESSION_MESSAGE =
   "claude-code provider cannot be used inside an active Claude Code session. " +
@@ -28,6 +29,7 @@ export class ClaudeCodeProvider implements FreshSessionProvider {
       throw new Error(ACTIVE_CLAUDE_CODE_SESSION_MESSAGE);
     }
     const prompt = await readFile(input.promptPath, "utf8");
+    const task = await readJsonFile<WorkerTask>(input.taskPath);
     const command = this.config.command ?? "claude";
     const promptFlag = this.config.prompt_flag ?? "-p";
     const args = [
@@ -38,9 +40,15 @@ export class ClaudeCodeProvider implements FreshSessionProvider {
         ? ["--dangerously-skip-permissions"]
         : []),
     ];
-    return await this.launchCommand(command, args, input, undefined, {
-      opentoken: this.opentoken.enabled,
-      opentokenCommand: this.opentoken.command,
-    });
+    return await this.launchCommand(
+      command,
+      args,
+      applyWorkerTaskLaunchSettings(input, task),
+      undefined,
+      {
+        opentoken: this.opentoken.enabled,
+        opentokenCommand: this.opentoken.command,
+      },
+    );
   }
 }

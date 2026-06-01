@@ -40,19 +40,10 @@ export interface WorkerTask {
   max_retries?: number;
 }
 
-export function resolveWorkerTaskTimeoutMs(
-  task: Pick<WorkerTask, "timeout_ms">,
-  fallbackMs: number,
-): number {
-  if (
-    typeof task.timeout_ms === "number" &&
-    Number.isFinite(task.timeout_ms) &&
-    task.timeout_ms > 0
-  ) {
-    return Math.floor(task.timeout_ms);
-  }
-  return fallbackMs;
-}
+// Timeout resolution now lives in `@audit-tools/shared` so both orchestrators
+// honor per-task `timeout_ms` identically. Re-exported here to preserve the
+// existing local import surface.
+export { resolveWorkerTaskTimeoutMs } from "@audit-tools/shared";
 
 export function resolveWorkerTaskMaxRetries(
   task: Pick<WorkerTask, "max_retries">,
