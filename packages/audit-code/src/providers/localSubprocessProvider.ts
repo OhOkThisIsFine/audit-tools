@@ -18,7 +18,7 @@ export class LocalSubprocessProvider implements FreshSessionProvider {
 
   async launch(input: LaunchFreshSessionInput) {
     const task = await readJsonFile<WorkerTask>(input.taskPath);
-    if (!task.worker_command.length) {
+    if (!task.worker_command?.length) {
       throw new Error(MISSING_WORKER_COMMAND_MESSAGE);
     }
     const [command, ...args] = task.worker_command;
