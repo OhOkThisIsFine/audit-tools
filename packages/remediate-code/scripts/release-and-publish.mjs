@@ -329,8 +329,15 @@ async function main() {
     return;
   }
 
-  console.log("[release] running release gate");
-  run(npm, ["run", "verify:release"]);
+  // The monorepo orchestrator (scripts/release-changed.mjs) front-loads
+  // verify:release for every changed package before publishing any of them, then
+  // sets this flag so we don't repeat the slow gate. Default is to run it.
+  if (process.env.AUDIT_TOOLS_RELEASE_GATE_VERIFIED === "1") {
+    console.log("[release] release gate pre-verified by orchestrator; skipping verify:release");
+  } else {
+    console.log("[release] running release gate");
+    run(npm, ["run", "verify:release"]);
+  }
 
   console.log(`[release] bumping ${bump} version`);
   const { packageAfter, tag } = bumpVersionAndTag(npm);
