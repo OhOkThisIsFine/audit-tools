@@ -136,6 +136,13 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
         ? computeRampUpConcurrency(quotaStateEntry, halfLifeHours)
         : computeMaxSafeConcurrency(quotaStateEntry, halfLifeHours);
       waveSize = Math.min(waveSize, learnedCap);
+    } else if (hostConcurrencyLimit !== null) {
+      // The host explicitly reported its active-subagent capacity. That is a
+      // real concurrency signal, so it supersedes the conservative
+      // unknown-provider fallback (which exists only when we have no signal at
+      // all). Leaving waveSize untouched here lets applyHostConcurrencyLimit()
+      // below enforce the reported limit as the hard ceiling, while any RPM/TPM
+      // caps applied above still bind.
     } else {
       const providerType = classifyProvider(providerName);
       const fallbackCap =
