@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { FreshSessionProvider, LaunchFreshSessionInput, ClaudeCodeConfig, OpenTokenConfig } from "@audit-tools/shared";
-import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
+import { spawnLoggedCommand } from "@audit-tools/shared";
 
 export const ACTIVE_CLAUDE_CODE_SESSION_MESSAGE =
   "claude-code provider cannot be used inside an active Claude Code session. " +
