@@ -23,7 +23,15 @@ export interface StepArtifact {
   prompt_path: string;
   status: StepStatus;
   run_id: string | null;
+  /** Shell commands the host may run for this step. */
   allowed_commands: string[];
+  /**
+   * MCP tool names equivalent to `allowed_commands`, for hosts driving the
+   * backend through the MCP adapter. Omitted when the step has no MCP
+   * equivalents, so a shell host never has to guess which list entries are
+   * tool names versus runnable commands.
+   */
+  allowed_mcp_tools?: string[];
   stop_condition: string;
   repo_root: string;
   artifacts_dir: string;
@@ -37,6 +45,7 @@ export async function writeCurrentStep(params: {
   status: StepStatus;
   runId: string | null;
   allowedCommands: string[];
+  allowedMcpTools?: string[];
   stopCondition: string;
   repoRoot: string;
   artifactPaths: Record<string, string | null>;
@@ -55,6 +64,9 @@ export async function writeCurrentStep(params: {
     status: params.status,
     run_id: params.runId,
     allowed_commands: params.allowedCommands,
+    ...(params.allowedMcpTools && params.allowedMcpTools.length > 0
+      ? { allowed_mcp_tools: params.allowedMcpTools }
+      : {}),
     stop_condition: params.stopCondition,
     repo_root: params.repoRoot,
     artifacts_dir: params.artifactsDir,

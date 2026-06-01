@@ -236,6 +236,46 @@ test("scheduleWave applies host active subagent limit even when quota is disable
   assert.equal(schedule.wave_size, 6);
 });
 
+test("scheduleWave: a reported host limit supersedes the conservative unknown-hosted fallback", () => {
+  // Hosted provider, no learned quota state, and no explicit
+  // unknown_hosted_concurrency (so it would otherwise clamp to the default of
+  // 1). A host that reports its active-subagent capacity should get waves up to
+  // that capacity instead of being pinned to 1.
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {},
+    hostModel: null,
+    requestedConcurrency: 96,
+    quotaStateEntry: null,
+    hostConcurrencyLimit: {
+      active_subagents: 4,
+      source: "cli_flags",
+      description: "Host active subagent limit reported by the conversation host.",
+    },
+  });
+  assert.equal(schedule.wave_size, 4);
+});
+
+test("scheduleWave: a reported host limit never raises waves above a known RPM cap", () => {
+  // Even with a generous reported host limit and no learned state, a discovered
+  // RPM ceiling still binds — the host limit supersedes only the *fallback*, not
+  // real rate limits.
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: { quota: { safety_margin: 1 } },
+    hostModel: null,
+    requestedConcurrency: 96,
+    quotaStateEntry: null,
+    hostConcurrencyLimit: {
+      active_subagents: 8,
+      source: "cli_flags",
+      description: "Host active subagent limit reported by the conversation host.",
+    },
+    discoveredLimits: { requests_per_minute: 3, source: "provider_query" },
+  });
+  assert.equal(schedule.wave_size, 3);
+});
+
 test("scheduleWave clamps unknown hosted providers to configured fallback concurrency", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",

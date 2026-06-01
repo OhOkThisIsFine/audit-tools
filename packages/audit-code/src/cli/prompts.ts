@@ -41,9 +41,12 @@ export function renderDispatchReviewPrompt(params: {
     params.activeReviewRun.run_id,
   );
   const continueCommand = nextStepCommand(params.root, params.artifactsDir);
+  // Only mention model_hint when the host can actually act on it. When it
+  // cannot, the field is left as inert plan metadata rather than surfacing a
+  // contradictory "here is model_hint, now ignore it" instruction.
   const modelLine = params.hostCanSelectSubagentModel
     ? "When launching each subagent, map `entry.model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names."
-    : "Ignore `entry.model_hint`; this host did not report per-subagent model selection.";
+    : null;
   const toolsLine = params.hostCanRestrictSubagentTools
     ? "Restrict review subagents to read/search plus the packet submit command named in their prompt. Do not give them source edit/write tools."
     : "Do not ask the user about per-subagent tool restrictions; this host did not report a callable restriction facility.";
@@ -80,7 +83,7 @@ export function renderDispatchReviewPrompt(params: {
     "",
     '  Read and follow the audit instructions in: <entry.prompt_path>',
     "",
-    modelLine,
+    ...(modelLine ? [modelLine] : []),
     toolsLine,
     "",
     "Each subagent must submit its packet through the submit command printed in its packet prompt and stop after successful submission.",
