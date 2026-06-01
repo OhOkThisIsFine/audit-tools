@@ -1,5 +1,89 @@
 # audit-tools refactor — sprint handoff
 
+> **⏩ Latest sprint is 2026-06-01 (below). The 2026-05-30 handoff that follows it is prior history.**
+
+---
+
+# Sprint 2026-06-01 — shared-migration drift reconciliation, dead code, file splits, web hook
+
+**Scope:** finish the half-done "centralize into `@audit-tools/shared`" migration (the 2026-05-30 handoff below and `HANDOFF.md` migrated **audit-code** but left **remediate-code** forked), kill dead code, start breaking up the two largest files, and make the repo runnable in Claude Code on the web. **7 commits on `claude/upbeat-gates-ZSFJ2`, all verified + pushed.**
+
+## The root cause (why this sprint existed)
+
+`providers/` and `quota/` were **copy-pasted into both orchestrators and then forked in place**. Bug fixes landed in one copy and silently never reached the other. The audit found **10 drift bugs**; this sprint centralizes the two worst-forked subsystems into `shared` (one source of truth) and fixes 7 of the 10. The remaining 3 are documented in the roadmap with exact file pointers.
+
+## Verification status
+
+```
+shared           28 tests  pass   (node --test packages/shared/tests/*.test.mjs)
+remediate-code  380 tests  pass   (vitest)        # +2 this sprint (#4, #7 coverage)
+audit-code      110 tests  pass   (CURATED non-wrapper set — see "Verifying in remote" below)
+```
+`npm run check` (workspace typecheck) is clean. `npm run build` (shared → both dependents) clean.
+
+⚠️ **The audit-code *full* suite (~534 tests) does not run reliably in the remote container** — its wrapper/smoke tests spawn the built CLI and are slow; one run was reclaimed mid-suite. Changes here are pure moves / gated additions and are verified via the curated 110-test set + build + typecheck. One full-suite test (`provider resolves to local-subprocess`) only fails in a Claude session because `CLAUDECODE=1` is exported — it is **not a regression**. Run the full audit suite on a local machine (or with `CLAUDECODE` unset) before release.
+
+## What shipped (newest first)
+
+| Commit | Change | Drift fixed |
+|---|---|---|
+| `c713f5e` | Extract `cli/lineIndex.ts` from the 4127-line `cli.ts` (pure move) | — |
+| `64839eb` | remediate: `--dangerously-skip-permissions` now overrideable, **default-ON**; auto-resolver detects `env.OPENCODE` | **#4, #7** |
+| `4bd2dee` | audit: guard missing `worker_command` in local-subprocess provider (was a `TypeError`) | **#5** |
+| `121974c` | Centralize `spawnLoggedCommand` → `shared`; fix remediator exit-code + log-tail drift | **#1, #2** |
+| `13fa91e` | Centralize the quota **wave scheduler** → `shared`; fix remediator concurrency drift | **#9, #10** |
+| `d28f7ef` | Split the 1448-line generated language table out of `fileInventory.ts` (1486 → 35 lines) | — |
+| `89c184b` | remediate: delete 9 orphaned duplicate type files + byte-identical `io/json.ts` (dead since Phase 3D) | — |
+
+**Net: −514 lines** while fixing bugs and adding capability.
+
+### Decisions worth knowing
+- **#4 default-ON, not OFF.** The remediator applies changes unattended and can't pause mid-run, so it keeps `--dangerously-skip-permissions` by default; the flag is now *overrideable* (`dangerously_skip_permissions: false`). The **auditor stays default-off** (it's read-only) — the asymmetry is intentional, not drift.
+- **#7 ported `env.OPENCODE` only.** The `local-subprocess` auto-trigger semantics were intentionally left as-is per the agreed scope.
+
+## SessionStart hook (Claude Code on the web)
+
+The remote container starts from a fresh clone with an **empty `node_modules`**, so `npm run check`/`npm test` fail until deps are installed + `shared` is built. Added:
+- `.claude/hooks/session-start.sh` — **synchronous**, **web-only** (`CLAUDE_CODE_REMOTE` guard → no-op locally). Runs `npm install` then builds `shared` first, then the rest (root `npm run build` does **not** topo-sort, so order is explicit, mirroring CI).
+- `.claude/settings.json` — registers the hook.
+
+Validated: hook exit 0 (deps + `shared/dist` present); off-remote no-op; `npm run check` clean; one test per orchestrator green. **Effective for all future web sessions once merged to the default branch.** Switch to async mode (`{"async": true}`) if faster startup is wanted at the cost of a startup race.
+
+---
+
+## 🗺️ ROADMAP for the next agent
+
+Ordered by value/risk. Each item has exact pointers and the gotcha that makes it non-trivial.
+
+### 1. Remaining drift bugs (3 of 10) — finish the reconciliation
+- **#3 — remediate opencode provider has no Windows `.cmd` shim.** Audit's [`opencodeProvider.ts`](packages/audit-code/src/providers/opencodeProvider.ts) wraps `opencode`/`npx`/`*.cmd` through `cmd.exe` (`resolveWindowsLaunch`, lines ~9-17); remediate's [`opencodeProvider.ts`](packages/remediate-code/src/providers/opencodeProvider.ts) calls `spawnLoggedCommand` directly → launch can fail on Windows (the exact `.cmd` resolution issue CLAUDE.md's "Windows-aware" invariant warns about). **Fix:** port the shim, or centralize it into `shared` alongside `spawnLoggedCommand`.
+- **#6 — subprocess-template quoting: audit is the one lagging (counter-intuitive).** Remediate's [`subprocessTemplateProvider.ts`](packages/remediate-code/src/providers/subprocessTemplateProvider.ts) `shellQuote` is platform-aware (win32 → `quoteForCmd`; POSIX single-quote escaping) and treats `*Shell`-suffixed template keys specially. Audit's [`subprocessTemplateProvider.ts`](packages/audit-code/src/providers/subprocessTemplateProvider.ts) uses naive `JSON.stringify(arg)` for all platforms. **Fix is easy:** `quoteForCmd` **already lives in `shared`** ([`tooling/exec.ts`](packages/shared/src/tooling/exec.ts), re-exported through remediate's `utils/commands.ts`) — audit's provider just isn't using it. Mirror remediate's `shellQuote` in audit (import `quoteForCmd` from `@audit-tools/shared`), or hoist `shellQuote` itself into `shared` so both share one implementation.
+- **#8 — audit providers ignore per-task `timeout_ms`.** Remediate centralizes timeout resolution in [`workerTaskLaunch.ts`](packages/remediate-code/src/providers/workerTaskLaunch.ts) (`resolveWorkerTaskTimeoutMs(task, input.timeoutMs)`); audit providers use `input.timeoutMs` only. **First confirm** audit `WorkerTask` actually carries `timeout_ms`; if so, port `resolveWorkerTaskTimeoutMs` (good `shared` centralization candidate).
+
+> All three are continuations of the centralization theme. `shellQuote` (subprocess-template) and `resolveWorkerTaskTimeoutMs` are the natural next things to hoist into `shared` (`quoteForCmd` is already there).
+
+### 2. Contained file splits (continue what this sprint started)
+The `cli/` split pattern exists; keep lifting **leaf clusters** out of the 4127-line [`cli.ts`](packages/audit-code/src/cli.ts):
+- **`cli/envelope.ts`** — `buildEnvelope`/`emitEnvelope`/`buildManualReviewBlocker`/`shouldRunInlineExecutor`/`buildBlockedAuditState` (~237-337). Gotcha: `emitEnvelope` has **side effects** (`console.log` + handoff writes) and depends on the module const `ADVANCE_AUDIT_CONTRACT_VERSION` — pass it in or move it too. Not a pure leaf like `lineIndex` was.
+- **`cli/reviewRun.ts`** — `activeReviewRunFromTask`/`loadCurrentActiveReviewRun`/`writeHandoffOnly`/`ensureSemanticReviewRun` (~400-573). Touches review-run state machinery — verify with the review-packet tests.
+- **`graph.ts`** route/schema/suite/test-source extractors ([`extractors/graph.ts`](packages/audit-code/src/extractors/graph.ts), 1602 lines). **Gotcha I hit:** `isJsonSchemaPath` is shared by the schema-edge cluster *and* the suite-edge cluster (used at ~line 835) — factor it into a small shared `graphPathUtils` first, then the clusters lift cleanly. Also: the "duplicate manifest-path predicate" between `reviewPackets` and `graphManifestEdges` is a **behavior reconciliation** (case-sensitive vs case-insensitive matching), **not** a clean hoist — decide the correct semantics before merging.
+
+### 3. Big splits — explicitly held off this sprint (need their own review)
+`cmdRunToCompletion`, the `reviewPackets` pipeline, and the `nextStep` command pipeline in `cli.ts`. These carry real control-flow; decompose one at a time with the full audit suite available (i.e. locally), not in the remote container.
+
+### Verifying in remote (so the next agent doesn't repeat the dead end)
+- Fast, reliable curated audit set (no wrapper spawns):
+  ```bash
+  cd packages/audit-code && node --test \
+    tests/orchestration.test.mjs tests/schema-contracts.test.mjs tests/next-step.test.mjs \
+    tests/providers-remediation.test.mjs tests/orchestrator-remediation.test.mjs \
+    tests/quota-scheduler.test.mjs tests/graph-framework-routes.test.mjs
+  ```
+- For a **pure move**, `npm run build` (tsc) is the real safety net — it catches every missing/duplicate import. Add a curated run for integration.
+- Run the **full** audit suite locally (or `unset CLAUDECODE`) before any release.
+
+---
+
 **Date:** 2026-05-30
 **Scope this sprint:** the **final three phases** of the frozen plan — **Phase 4** (decorator routing + LLM edge-reasoning), **Phase 5 (Py/HTML/CSS)** (tree-sitter analyzers), and **Phase 7** (remediator: consume `audit-findings.json`, theme hints, outcome capture).
 **Status:** implemented and green on `master` (committed — see _Git state_). The frozen build order `0 → 1A + .tmp → 2 → 6 → 5.0 + 5(TS/JS) → 3 → 4 → 5(Py/HTML/CSS) → 7` is complete and 4B's producing turn is wired (see _Phase 4B producing turn — wired_ below).
