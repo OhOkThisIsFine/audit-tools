@@ -8,7 +8,7 @@ setQuotaStateDir(join(tmpdir(), ".audit-code-test"));
 
 const { LearnedQuotaSource } = await import("@audit-tools/shared/quota/learnedQuotaSource");
 const { CompositeQuotaSource, buildQuotaSource } = await import("@audit-tools/shared/quota/compositeQuotaSource");
-const { scheduleWave } = await import("../dist/quota/scheduler.js");
+const { scheduleWave } = await import("@audit-tools/shared/quota/scheduler");
 
 // ── LearnedQuotaSource ──────────────────────────────────────────────────────
 
