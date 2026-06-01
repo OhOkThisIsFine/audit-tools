@@ -1,0 +1,19 @@
+{
+  "type": "item_spec",
+  "item_spec": {
+    "finding_id": "FINDING-007",
+    "concrete_change": "Reconcile CLAUDE.md's documented audit priority chain with the live PRIORITY[] in packages/audit-code/src/orchestrator/nextStep.ts (lines 13-28), and add a test that fails if they ever diverge again. The live array (source of truth, already correct) is, in order: repo_manifest, file_disposition, auto_fixes_applied, syntax_resolved, structure_artifacts, graph_enrichment_current, design_assessment_current, design_review_completed, planning_artifacts, audit_tasks_completed, audit_results_ingested, runtime_validation_current, synthesis_current, synthesis_narrative_current. Changes:\n\n(1) CLAUDE.md (audit-code architecture > Orchestration loop): the documented chain currently reads '...structure_artifacts -> planning_artifacts -> audit_tasks_completed...' and OMITS three obligations. Insert graph_enrichment_current -> design_assessment_current -> design_review_completed between `structure_artifacts` and `planning_artifacts` so the documented chain becomes the full 14-step order above. Keep the same backtick/arrow formatting as the surrounding sentence; change only the chain contents.\n\n(2) packages/audit-code/src/orchestrator/nextStep.ts: add `export` to the PRIORITY declaration (`export const PRIORITY: string[] = [...]`) so a test can import it as the single source of truth. Do NOT reorder or alter the array contents — it is correct; only widen its visibility.\n\n(3) New test (packages/audit-code/tests/*.test.mjs, node --test): import PRIORITY from the built orchestrator, read CLAUDE.md, extract the backtick-quoted obligation ids from the 'priority chain' sentence, and assert they deep-equal PRIORITY (same ids, same order). This keeps the doc and code in lockstep going forward, as the meta-audit-log (O6/DR-007) recommends.",
+    "no_change": false,
+    "tests_to_write": [
+      {
+        "name": "CLAUDE.md priority chain stays in sync with the live PRIORITY[]",
+        "assertions": [
+          "The ordered obligation ids parsed from CLAUDE.md's priority-chain sentence deep-equal the exported PRIORITY array (same ids in the same order).",
+          "graph_enrichment_current, design_assessment_current, and design_review_completed (the three previously-omitted obligations) are present in the documented chain.",
+          "The documented chain has exactly 14 entries, matching PRIORITY.length, so neither additions nor removals can silently drift."
+        ]
+      }
+    ],
+    "not_applicable_steps": []
+  }
+}

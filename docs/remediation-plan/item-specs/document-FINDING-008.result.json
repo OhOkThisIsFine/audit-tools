@@ -1,0 +1,32 @@
+{
+  "type": "item_spec",
+  "item_spec": {
+    "finding_id": "FINDING-008",
+    "concrete_change": "Add a single-worker canary phase to the dispatch flow, reusing the machinery prepareDispatchArtifacts already has (packets are priority-ordered via orderTasksForPacketReview/buildReviewPackets, and tasks with prior results are already excluded via priorResultTaskIds). Changes:\n\n(1) packages/audit-code/src/cli/dispatch.ts (prepareDispatchArtifacts): introduce a canary phase. When this is first contact for the run (priorResultTaskIds.size === 0), there is more than one packet, and canary is enabled (sessionConfig.dispatch?.canary !== false, default on): emit ONLY the highest-priority packet (the first in the ordered packets list) into the dispatch-plan, and record canary metadata — set `phase: \"canary\"` and `canary_packet_id` on the returned PrepareDispatchResult and on the ActiveDispatchState written to ACTIVE_DISPATCH_FILENAME. On the NEXT invocation, the canary packet's tasks now have result files, so the existing priorResultTaskIds filter naturally excludes them and the remaining packets fan out; set `phase: \"fan_out\"` in that case. Make it a no-op (emit all packets as today) when there is only one packet (nothing to de-risk) or when canary is disabled. Keep the quota/wave logic (FINDING-002) intact — the canary is a packet-count gate applied to the emitted plan, orthogonal to wave sizing.\n\n(2) Canary verification: the canary's value is confirming the submit round-trip works (per DR-004's broken submit path). Lean on the existing merge/ingest validation — after the host runs the canary and submits, the result file is written and validated on ingest. In prepareDispatchArtifacts, when phase would advance from canary to fan_out, require that the canary packet produced an accepted result; if first contact already had a canary attempted but NO accepted result exists, surface a clear warning (reuse the warnings[] channel already written to dispatch-warnings.json) such as 'canary packet <id> produced no accepted result — fix the submit command before fan-out' rather than silently re-emitting the full plan.\n\n(3) packages/audit-code/src/orchestrator/nextStep.ts: ensure the dispatch-driving obligation (audit_tasks_completed) stays unsatisfied across both canary and fan_out phases (it already will, since tasks remain incomplete) so the orchestrator keeps selecting dispatch until all packets are done. If the obligation/step exposes metadata to the rendered prompt, surface the active-dispatch `phase` and `canary_packet_id` so the host-facing dispatch step can instruct 'run only the canary packet, confirm it is accepted, then continue'. No change to PRIORITY ordering.\n\nCROSS-REFERENCE (likely outside these two files): the host-facing dispatch step-prompt template must tell the host to run only the canary first and verify acceptance before fan-out; if that template lives elsewhere (cli/steps.ts or a prompt asset), update it there in the implement phase. Also add the `dispatch.canary` field to SessionConfig (shared/src/types/sessionConfig.ts) — coordinate with FINDING-005's shared-config changes.",
+    "no_change": false,
+    "tests_to_write": [
+      {
+        "name": "first-contact dispatch emits a single canary packet when multiple packets exist",
+        "assertions": [
+          "With a fixture bundle yielding >1 packet, no prior results, and canary enabled, prepareDispatchArtifacts emits exactly one plan entry (the highest-priority packet) and returns phase 'canary' with a populated canary_packet_id.",
+          "ActiveDispatchState is written with phase 'canary' and the canary_packet_id."
+        ]
+      },
+      {
+        "name": "dispatch fans out the remaining packets after the canary result exists",
+        "assertions": [
+          "After writing an accepted result file for the canary packet's task(s), the next prepareDispatchArtifacts excludes those tasks and emits the remaining packets with phase 'fan_out'.",
+          "If first contact had a canary but no accepted canary result, a 'canary produced no accepted result' warning is recorded in dispatch-warnings.json and the full plan is not silently emitted."
+        ]
+      },
+      {
+        "name": "canary is skipped when not beneficial or disabled",
+        "assertions": [
+          "With exactly one packet, no canary phase is used and the single packet is emitted directly.",
+          "With sessionConfig.dispatch.canary === false, all packets are emitted on first contact (today's behavior, no canary gate)."
+        ]
+      }
+    ],
+    "not_applicable_steps": []
+  }
+}

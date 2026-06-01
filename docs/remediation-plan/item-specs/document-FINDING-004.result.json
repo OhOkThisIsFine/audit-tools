@@ -1,0 +1,30 @@
+{
+  "type": "item_spec",
+  "item_spec": {
+    "finding_id": "FINDING-004",
+    "concrete_change": "Make the quota cascade first-class and SINGLE-SOURCED rather than reinventing it. Verified in source: the cascade mechanism mostly already exists but is (a) duplicated inline across the two scheduling call sites (cli.ts legacy + dispatch.ts canonical) — the exact drift that caused the central regression — and (b) missing the provider-based rung (resolveLimits ignores providerName, destructured as `_providerName` at limits.ts:51). Two existing axes to preserve: the LIMITS axis (mergeDiscoveredLimits provider+cache, then resolveLimits) and the SNAPSHOT/remaining axis (CompositeQuotaSource of QuotaSources). Changes within the four in-scope files:\n\n(1) packages/shared/src/quota/compositeQuotaSource.ts: add an exported factory that centralizes the snapshot-cascade ORDERING so both dispatch paths compose it identically: `export function buildQuotaSource(options?: { halfLifeHours?: number; additionalSources?: QuotaSource[] }): QuotaSource { return new CompositeQuotaSource([...(options?.additionalSources ?? []), new LearnedQuotaSource(options?.halfLifeHours ?? 24)]); }` (import LearnedQuotaSource). additionalSources are tried FIRST (e.g. a future provider-backed remaining-quota source from FINDING-005), with LearnedQuotaSource as the reactive fallback rung. Keep the existing first-non-null, skip-on-throw loop unchanged (it already guarantees graceful degradation). Add a doc comment enumerating the snapshot rung order.\n\n(2) packages/shared/src/quota/limits.ts: activate the provider-based rung in resolveLimits — stop ignoring providerName. Insert a rung AFTER known-model metadata and BEFORE the generic default: when neither explicit config nor a known model applies, derive a conservative provider-typed default keyed on classifyProvider(providerName), returning source 'provider_default' with confidence 'low'. KEEP numeric defaults conservative — do NOT invent speculative large context windows; the provider-based CONCURRENCY behavior already lives in the scheduler's classifyProvider fallback, so this rung is primarily about labeling source/confidence and (optionally) a safe per-type context/output default. Final documented order in resolveLimits: explicit_config (high) -> known_metadata (medium) -> provider_default (low) -> generic default (low). Add a comment listing the rungs.\n\n(3) packages/shared/src/quota/learnedQuotaSource.ts: no behavioral change required (it is a correct reactive rung and readQuotaState failures are already absorbed by CompositeQuotaSource's try/catch). Optionally add a defensive .catch within queryCurrentUsage only if a direct (non-composite) caller exists; otherwise leave as-is.\n\n(4) packages/shared/src/quota/quotaSource.ts: no change (the QuotaSource/QuotaUsageSnapshot contract is sufficient; snapshot.source already carries which rung answered).\n\nCROSS-REFERENCE (drift prevention — the root cause): FINDING-002's canonical wiring and the legacy cli.ts path must BOTH call buildQuotaSource(...) instead of constructing `new CompositeQuotaSource([new LearnedQuotaSource(...)])` inline. That is the single most important outcome of this finding: one ordering, used everywhere. (The call-site edits live in FINDING-002's files.) This is a @audit-tools/shared change: rebuild shared and typecheck both dependents.",
+    "no_change": false,
+    "tests_to_write": [
+      {
+        "name": "resolveLimits cascades in documented order including the provider-based rung",
+        "assertions": [
+          "An explicit per-model quota config returns source 'explicit_config' / confidence 'high'.",
+          "A known model with no explicit config returns source 'known_metadata' / confidence 'medium'.",
+          "No config and an unknown model with a known providerName returns source 'provider_default' / confidence 'low' (providerName is now used, not ignored).",
+          "A hosted vs local providerName yields the conservative provider-typed default without inventing oversized context windows.",
+          "A fully unknown provider falls through to the generic default."
+        ]
+      },
+      {
+        "name": "buildQuotaSource composes the snapshot cascade in a single shared ordering",
+        "assertions": [
+          "buildQuotaSource() returns a CompositeQuotaSource whose last rung is a LearnedQuotaSource.",
+          "An additionalSources entry that returns a snapshot takes precedence over the learned rung (additional sources tried first).",
+          "When an additional source throws, it is skipped and the learned rung is consulted (no rejection propagates).",
+          "When every rung yields null, queryCurrentUsage resolves to null (graceful first-contact)."
+        ]
+      }
+    ],
+    "not_applicable_steps": []
+  }
+}
