@@ -17,12 +17,31 @@ export type StepKind =
   | "present_report"
   | "blocked";
 
+/**
+ * Lightweight run-level orientation surfaced in the step contract so a host
+ * resuming an in-flight audit knows where it stands without reading artifacts.
+ */
+export interface StepProgress {
+  /** One-line, human-readable summary safe to show a resuming host. */
+  summary: string;
+  /** Pending review packets in the active dispatch run, when applicable. */
+  pending_packets?: number;
+  /** Audit tasks covered by the pending packets. */
+  pending_tasks?: number;
+  /** Audit tasks already completed before this run (skipped as done). */
+  completed_tasks?: number;
+  /** Subagent parallelism resolved for this dispatch run. */
+  wave_size?: number;
+}
+
 export interface StepArtifact {
   contract_version: typeof STEP_CONTRACT_VERSION;
   step_kind: StepKind;
   prompt_path: string;
   status: StepStatus;
   run_id: string | null;
+  /** Run-level orientation; omitted for steps that have no meaningful summary. */
+  progress?: StepProgress;
   /** Shell commands the host may run for this step. */
   allowed_commands: string[];
   /**
@@ -46,6 +65,7 @@ export async function writeCurrentStep(params: {
   runId: string | null;
   allowedCommands: string[];
   allowedMcpTools?: string[];
+  progress?: StepProgress;
   stopCondition: string;
   repoRoot: string;
   artifactPaths: Record<string, string | null>;
@@ -63,6 +83,7 @@ export async function writeCurrentStep(params: {
     prompt_path: promptPath,
     status: params.status,
     run_id: params.runId,
+    ...(params.progress ? { progress: params.progress } : {}),
     allowed_commands: params.allowedCommands,
     ...(params.allowedMcpTools && params.allowedMcpTools.length > 0
       ? { allowed_mcp_tools: params.allowedMcpTools }

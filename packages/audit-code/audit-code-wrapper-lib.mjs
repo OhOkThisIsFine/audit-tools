@@ -59,6 +59,25 @@ function nodeExecutable() {
   return process.execPath;
 }
 
+// When the wrapper runs from a source checkout (its package dir is NOT inside a
+// node_modules tree), generated continuation commands should re-invoke THIS
+// wrapper via `node <path>` so a dogfooded monorepo run stays pinned to local
+// code instead of silently falling back to a globally-installed `audit-code`
+// bin. Installed copies leave the hint unset so the dist CLI keeps emitting the
+// `audit-code` bin. Returned as an env fragment scoped to the spawned child so
+// it never leaks into the parent process (e.g. the test runner).
+function selfInvocationEnv() {
+  if (process.env.AUDIT_CODE_INVOCATION) {
+    return { AUDIT_CODE_INVOCATION: process.env.AUDIT_CODE_INVOCATION };
+  }
+  if (/[\\/]node_modules[\\/]/.test(repoRoot)) {
+    return {};
+  }
+  return {
+    AUDIT_CODE_INVOCATION: JSON.stringify(['node', join(repoRoot, 'audit-code.mjs')]),
+  };
+}
+
 function quoteForCmd(arg) {
   if (arg.length === 0) return '""';
   if (!/[\s"]/u.test(arg)) return arg;
@@ -82,7 +101,7 @@ function run(command, args, options = {}) {
     const child = spawn(resolved.command, resolved.args, {
       cwd: repoRoot,
       stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
-      env: process.env
+      env: options.env ?? process.env
     });
 
     let stdout = '';
@@ -1008,6 +1027,13 @@ function renderSharedMcpLauncher(sourcePackageRoot) {
     'const scriptDir = dirname(fileURLToPath(import.meta.url));',
     "const repoRoot = resolve(scriptDir, '..', '..');",
     "const artifactsDir = join(repoRoot, '.audit-artifacts');",
+    '// Absolute path to the auditor-lambda package that generated this launcher.',
+    '// Intentionally machine-specific: it is a load-bearing fallback candidate',
+    '// (tried after a repo-local dependency) that lets the launcher find the',
+    '// backend entrypoint when the target repo has no local auditor-lambda dep.',
+    '// This file is regenerated per-install by `audit-code ensure`/`install` and',
+    '// is gitignored, so the path is always re-derived for the current machine;',
+    '// if it ever goes stale the launcher degrades gracefully to PATH/npx below.',
     `const sourcePackageRoot = ${JSON.stringify(sourcePackageRoot)};`,
     '',
     'async function exists(path) {',
@@ -2767,7 +2793,9 @@ async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } 
   }
 
   await ensureBuilt();
-  await run(nodeExecutable(), [distEntry, commandName, ...commandArgs]);
+  await run(nodeExecutable(), [distEntry, commandName, ...commandArgs], {
+    env: { ...process.env, ...selfInvocationEnv() },
+  });
 }
 
 async function runDistCommandInline(commandName, argv) {
@@ -2780,6 +2808,12 @@ async function runDistCommandInline(commandName, argv) {
 
   await mkdir(artifactsDir, { recursive: true });
   await ensureBuilt();
+
+  // Propagate the invocation hint into this (long-lived) server process so it
+  // and the wrapper subprocesses it spawns emit continuation commands that
+  // match how the backend was launched. Safe here: this path is only the `mcp`
+  // server, not a shared/test process.
+  Object.assign(process.env, selfInvocationEnv());
 
   // Import the module that exports runCli (dist/cli.js). dist/index.js has no
   // exports — it is the bare entrypoint that runs `runCli(process.argv)` as an
