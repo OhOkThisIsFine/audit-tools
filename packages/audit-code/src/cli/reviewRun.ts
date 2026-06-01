@@ -1,6 +1,11 @@
 import { join } from "node:path";
 import { isFileMissingError, readJsonFile, writeJsonFile } from "@audit-tools/shared";
-import { type ArtifactBundle, writeCoreArtifacts } from "../io/artifacts.js";
+import {
+  type ArtifactBundle,
+  loadArtifactBundle,
+  writeCoreArtifacts,
+} from "../io/artifacts.js";
+import { deriveAuditState } from "../orchestrator/state.js";
 import type { AuditState } from "../types/auditState.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import {
@@ -189,4 +194,31 @@ export async function ensureSemanticReviewRun(params: {
     activeReviewRun,
   });
   return { state: blockedState, bundle: blockedBundle, activeReviewRun };
+}
+
+export async function persistConfigErrorHandoff(params: {
+  root: string;
+  artifactsDir: string;
+  progressSummary: string;
+}): Promise<void> {
+  const bundle = await loadArtifactBundle(params.artifactsDir);
+  const blockedState = buildBlockedAuditState({
+    state: bundle.audit_state ?? deriveAuditState(bundle),
+    obligationId: null,
+    executor: null,
+    blocker: params.progressSummary,
+  });
+  await writeCoreArtifacts(params.artifactsDir, {
+    ...bundle,
+    audit_state: blockedState,
+  });
+  const handoff = buildAuditCodeHandoff({
+    root: params.root,
+    artifactsDir: params.artifactsDir,
+    state: blockedState,
+    bundle: { ...bundle, audit_state: blockedState },
+    progressSummary: params.progressSummary,
+    isConfigError: true,
+  });
+  await writeAuditCodeHandoffArtifacts(handoff);
 }
