@@ -29,6 +29,60 @@ async function ensureParentDirectory(path: string): Promise<void> {
   }
 }
 
+const TRANSIENT_FS_CODES = new Set(["EPERM", "EBUSY", "EACCES", "EEXIST"]);
+
+/**
+ * Windows can transiently fail an atomic rename-over-existing with EPERM/EBUSY
+ * (antivirus, the search indexer, or a concurrent reader briefly holding the
+ * destination handle). Those are retryable; a missing path or bad input is not.
+ */
+export function isTransientFsError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && TRANSIENT_FS_CODES.has(code);
+}
+
+export interface FsRetryOptions {
+  attempts?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  /** Injectable for tests so retries don't actually wait. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+/**
+ * Retry a filesystem operation on transient Windows lock errors with bounded
+ * exponential backoff (mirrors the quota file lock's 20ms→250ms convention).
+ * Non-transient errors propagate immediately.
+ */
+export async function withFsRetry<T>(
+  operation: () => Promise<T>,
+  options: FsRetryOptions = {},
+): Promise<T> {
+  const attempts = options.attempts ?? 20;
+  const maxDelayMs = options.maxDelayMs ?? 250;
+  const sleep = options.sleep ?? defaultSleep;
+  let delayMs = options.initialDelayMs ?? 20;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt >= attempts || !isTransientFsError(error)) {
+        throw error;
+      }
+      await sleep(delayMs);
+      delayMs = Math.min(delayMs * 2, maxDelayMs);
+    }
+  }
+}
+
 async function writeFileAtomic(path: string, content: string): Promise<void> {
   await ensureParentDirectory(path);
   const temp = join(
@@ -37,7 +91,9 @@ async function writeFileAtomic(path: string, content: string): Promise<void> {
   );
   try {
     await writeFile(temp, content, "utf8");
-    await rename(temp, path);
+    // The temp name is unique per process+uuid, so only the final rename-over-
+    // existing-destination is exposed to transient Windows lock errors.
+    await withFsRetry(() => rename(temp, path));
   } catch (error) {
     throw ioError("write", path, error);
   } finally {

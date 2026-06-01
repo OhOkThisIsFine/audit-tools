@@ -8,11 +8,29 @@ export interface InventoryInputFile {
   hash?: string;
 }
 
+// The generated linguist map resolves a few common extensions to obscure
+// languages that outrank the everyday one (".md" -> GCC machine description,
+// ".yml"/".yaml" -> MiniYAML). These overrides win over the generated map so the
+// file inventory does not mislabel ordinary docs/config. Keep this list small
+// and limited to extensions whose generated mapping is demonstrably wrong.
+const EXTENSION_LANGUAGE_OVERRIDES: Record<string, string> = {
+  md: "markdown",
+  markdown: "markdown",
+  yaml: "yaml",
+  yml: "yaml",
+};
+
 function inferLanguage(path: string): string {
   const normalized = normalizeExtractorPath(path);
   const base = normalized.split("/").pop() ?? normalized;
-  const extension = base.includes(".") ? base.split(".").pop() ?? "" : "";
-  return LANGUAGE_BY_EXTENSION[extension] ?? "unknown";
+  const extension = (
+    base.includes(".") ? base.split(".").pop() ?? "" : ""
+  ).toLowerCase();
+  return (
+    EXTENSION_LANGUAGE_OVERRIDES[extension] ??
+    LANGUAGE_BY_EXTENSION[extension] ??
+    "unknown"
+  );
 }
 
 export function buildRepoManifest(
