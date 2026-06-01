@@ -231,6 +231,11 @@ export {
 } from "./quota/fileLock.js";
 export { runSlidingWindow } from "./quota/slidingWindow.js";
 export type { SlidingWindowResult } from "./quota/slidingWindow.js";
+export { scheduleWave, buildProviderModelKey } from "./quota/scheduler.js";
+export type {
+  ScheduleWaveOptions,
+  DiscoveredRateLimitsInput,
+} from "./quota/scheduler.js";
 export { LearnedQuotaSource } from "./quota/learnedQuotaSource.js";
 export { CompositeQuotaSource } from "./quota/compositeQuotaSource.js";
 export type { ErrorParser } from "./quota/errorParsers/index.js";

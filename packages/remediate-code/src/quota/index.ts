@@ -50,10 +50,13 @@ export type {
   ErrorParser,
 } from "@audit-tools/shared";
 
-// Remediator-specific: local scheduler, probe, hostLimits
-export { scheduleWave, buildProviderModelKey } from "./scheduler.js";
-export type { ScheduleWaveOptions } from "./scheduler.js";
+// Wave scheduler now lives in @audit-tools/shared (single source of truth for
+// both orchestrators). This also gives the remediator the first-contact
+// concurrency cap and host-reported-capacity handling it previously lacked.
+export { scheduleWave, buildProviderModelKey } from "@audit-tools/shared";
+export type { ScheduleWaveOptions } from "@audit-tools/shared";
 
+// Remediator-specific: probe, hostLimits
 export {
   detectHostActiveSubagentLimit,
   resolveHostActiveSubagentLimit,
