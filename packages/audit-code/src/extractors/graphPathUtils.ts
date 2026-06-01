@@ -92,3 +92,76 @@ export function graphEdge(params: GraphEdge): GraphEdge {
     direction: params.direction ?? "directed",
   };
 }
+
+// ---- Cross-cluster shared helpers ----
+// These are used by more than one graph extractor cluster (import/reference
+// edges, routes, schemas, suites, test-source). They live here so each
+// extractor module imports one implementation rather than re-forking it.
+
+/** Source file extensions the graph extractors read and reason about. */
+export const SOURCE_EXTENSIONS = [
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+  ".html",
+  ".htm",
+  ".yml",
+  ".yaml",
+  ".py",
+  ".pyi",
+  ".go",
+  ".rs",
+  ".java",
+  ".cs",
+] as const;
+
+/** Matches any single/double/back-quoted string literal (bounded length). */
+export const STRING_LITERAL_PATTERN = /["'`]([^"'`\r\n]{1,260})["'`]/g;
+
+/** Resolve a relative import specifier to a repository path, if one exists. */
+export function resolveSpecifier(
+  fromPath: string,
+  specifier: string,
+  pathLookup: Map<string, string>,
+): string | undefined {
+  if (!specifier.startsWith(".")) {
+    return undefined;
+  }
+  const baseDir = posix.dirname(normalizeGraphPath(fromPath));
+  return resolveCandidate(posix.join(baseDir, specifier), pathLookup);
+}
+
+/** Resolve a string literal (relative or repo-rooted) to a repository path. */
+export function resolveReferenceLiteral(
+  fromPath: string,
+  literal: string,
+  pathLookup: Map<string, string>,
+): string | undefined {
+  const normalizedLiteral = normalizeGraphPath(literal);
+  if (literal.startsWith(".")) {
+    return resolveSpecifier(fromPath, literal, pathLookup);
+  }
+  if (!normalizedLiteral.includes("/")) {
+    return undefined;
+  }
+  return resolveCandidate(normalizedLiteral, pathLookup);
+}
+
+/** True for `*.schema.json` files (JSON Schema documents). */
+export function isJsonSchemaPath(path: string): boolean {
+  return posix
+    .basename(normalizeGraphPath(path))
+    .toLowerCase()
+    .endsWith(".schema.json");
+}
+
+/** True for pytest `conftest.py` files. */
+export function isPytestConftestPath(path: string): boolean {
+  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "conftest.py";
+}
