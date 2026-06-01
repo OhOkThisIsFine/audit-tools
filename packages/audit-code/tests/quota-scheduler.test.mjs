@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { scheduleWave, buildProviderModelKey } = await import(
-  "../dist/quota/scheduler.js"
+  "@audit-tools/shared/quota/scheduler"
 );
 const { detectHostActiveSubagentLimit, resolveHostActiveSubagentLimit } = await import(
   "../dist/quota/hostLimits.js"

@@ -55,7 +55,7 @@ test("mergeDiscoveredLimits skips null sources in the chain", () => {
 
 // ── scheduleWave with discoveredLimits ──────────────────────────────────────
 
-const { scheduleWave } = await import("../dist/quota/scheduler.js");
+const { scheduleWave } = await import("@audit-tools/shared/quota/scheduler");
 
 test("scheduleWave caps by discovered RPM", () => {
   const schedule = scheduleWave({
