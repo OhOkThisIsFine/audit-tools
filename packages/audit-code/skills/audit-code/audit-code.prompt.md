@@ -17,10 +17,12 @@ First, make sure the repository has current local audit assets:
 audit-code ensure --quiet
 ```
 
-Inside the `auditor-lambda` repository itself, use:
+When developing `auditor-lambda` itself, the entrypoint lives at
+`packages/audit-code/audit-code.mjs` (there is no `audit-code.mjs` at the
+monorepo root). From the monorepo root use:
 
 ```bash
-node audit-code.mjs ensure --quiet
+node packages/audit-code/audit-code.mjs ensure --quiet
 ```
 
 Then ask the backend for exactly one next step:
@@ -29,10 +31,10 @@ Then ask the backend for exactly one next step:
 audit-code next-step
 ```
 
-Inside the `auditor-lambda` repository itself, use:
+When developing `auditor-lambda` itself, from the monorepo root use:
 
 ```bash
-node audit-code.mjs next-step
+node packages/audit-code/audit-code.mjs next-step
 ```
 
 Read the returned JSON only far enough to find `prompt_path`, then read and

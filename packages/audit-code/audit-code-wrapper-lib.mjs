@@ -2781,9 +2781,14 @@ async function runDistCommandInline(commandName, argv) {
   await mkdir(artifactsDir, { recursive: true });
   await ensureBuilt();
 
-  const distUrl = new URL(`file:///${distEntry.replace(/\\/g, '/')}`);
+  // Import the module that exports runCli (dist/cli.js). dist/index.js has no
+  // exports — it is the bare entrypoint that runs `runCli(process.argv)` as an
+  // import side effect — so importing it here both fails to provide runCli and
+  // double-starts the command from this process's argv.
+  const distCliEntry = join(repoRoot, 'dist', 'cli.js');
+  const distUrl = new URL(`file:///${distCliEntry.replace(/\\/g, '/')}`);
   const cli = await import(distUrl.href);
-  await cli.runCli([process.execPath, distEntry, commandName, ...commandArgs]);
+  await cli.runCli([process.execPath, distCliEntry, commandName, ...commandArgs]);
 }
 
 export async function runAuditCodeWrapper({

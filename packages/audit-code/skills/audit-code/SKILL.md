@@ -83,10 +83,12 @@ audit-code
 
 from the target repository root.
 
-When developing inside the `auditor-lambda` repository itself, prefer:
+When developing `auditor-lambda` itself, prefer the local wrapper at
+`packages/audit-code/audit-code.mjs` (there is no `audit-code.mjs` at the
+monorepo root):
 
 ```bash
-node audit-code.mjs
+node packages/audit-code/audit-code.mjs   # from the monorepo root
 ```
 
 That keeps the run pinned to the local wrapper and local `dist/` output instead
