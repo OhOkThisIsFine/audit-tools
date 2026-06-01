@@ -15,7 +15,7 @@ const {
   MISSING_WORKER_COMMAND_MESSAGE,
 } = await import("../dist/providers/localSubprocessProvider.js");
 const { spawnLoggedCommand } = await import(
-  "../dist/providers/spawnLoggedCommand.js"
+  "@audit-tools/shared/providers/spawnLoggedCommand"
 );
 
 async function withTempDir(prefix, fn) {

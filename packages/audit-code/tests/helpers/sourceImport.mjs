@@ -10,8 +10,24 @@ function getRepoRoot() {
   return resolve(import.meta.dirname, "..", "..");
 }
 
-function getWorkspaceRoot() {
-  return resolve(getRepoRoot(), "..", "..");
+// Walk up from `startDir` looking for a `node_modules` directory that contains
+// `marker`. Returns the node_modules path, or null. npm hoists dependencies to
+// whichever ancestor it installed at: the package itself, the workspace root,
+// or — when this package is checked out as a git worktree nested under the main
+// repo — the main repo's root, two or more levels above the worktree.
+function findNodeModules(startDir, marker) {
+  let dir = startDir;
+  for (;;) {
+    const nodeModules = join(dir, "node_modules");
+    if (existsSync(join(nodeModules, marker))) {
+      return nodeModules;
+    }
+    const parent = resolve(dir, "..");
+    if (parent === dir) {
+      return null;
+    }
+    dir = parent;
+  }
 }
 
 function ensureCompiledSource() {
@@ -21,13 +37,14 @@ function ensureCompiledSource() {
 
   const repoRoot = getRepoRoot();
   compiledSourceDir = mkdtempSync(join(tmpdir(), "audit-code-source-"));
-  const tscPath = join(
-    repoRoot,
-    "node_modules",
-    "typescript",
-    "bin",
-    "tsc",
-  );
+
+  const typescriptNodeModules = findNodeModules(repoRoot, "typescript");
+  if (!typescriptNodeModules) {
+    throw new Error(
+      `Could not locate the 'typescript' package in any node_modules above ${repoRoot}. Run 'npm install' from the repo root.`,
+    );
+  }
+  const tscPath = join(typescriptNodeModules, "typescript", "bin", "tsc");
 
   execFileSync(
     process.execPath,
@@ -49,15 +66,10 @@ function ensureCompiledSource() {
   const destNodeModules = join(compiledSourceDir, "node_modules");
   if (!existsSync(destNodeModules)) {
     // Symlink node_modules so workspace-linked packages (e.g. @audit-tools/shared)
-    // resolve from the compiled temp directory. In an npm workspace, hoisted
-    // packages live in the workspace root's node_modules.
-    const candidates = [
-      join(repoRoot, "node_modules"),
-      join(getWorkspaceRoot(), "node_modules"),
-    ];
-    const src = candidates.find(
-      (p) => existsSync(join(p, "@audit-tools", "shared")),
-    ) ?? candidates[0];
+    // resolve from the compiled temp directory.
+    const src =
+      findNodeModules(repoRoot, join("@audit-tools", "shared")) ??
+      typescriptNodeModules;
     symlinkSync(src, destNodeModules, "junction");
   }
 
