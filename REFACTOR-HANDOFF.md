@@ -70,9 +70,18 @@ All three done as pure moves, each verified by the full audit suite (543):
 - **`graph.ts`** ✅ — split into [`graphRoutes.ts`](packages/audit-code/src/extractors/graphRoutes.ts) (registered+conventional+framework routes), [`graphSuites.ts`](packages/audit-code/src/extractors/graphSuites.ts) (json-schema + schema-contract-test + bounded-suite; co-located since they share `MAX_BOUNDED_SUITE_EDGE_FILES`+`isJsonSchemaPath`), and [`graphTestSources.ts`](packages/audit-code/src/extractors/graphTestSources.ts). The shared predicates (`isJsonSchemaPath`/`isPytestConftestPath`/`resolveSpecifier`/`resolveReferenceLiteral`) + `SOURCE_EXTENSIONS`/`STRING_LITERAL_PATTERN` were hoisted into `graphPathUtils.ts` first, exactly as the gotcha note advised. graph.ts 1602 → 561 lines.
   - *Note:* the "duplicate manifest-path predicate behavior reconciliation" (case-sensitive vs insensitive between `reviewPackets` and `graphManifestEdges`) was **left untouched** — it's a semantics decision, not a move, and out of scope for a pure split.
 
-### 3. Big splits — partially done (2026-06-01); command-handler relocations remain
-- **✅ `cli/auditStep.ts`** — extracted the shared `advanceAudit` driver (`runAuditStep`/`ingestBatchAuditResults`/`maybeArchiveLegacyPendingResults`). These depend only on imports (no cli.ts module state), so the move was clean and it's the **foundation** the remaining command-pipeline splits build on. cli.ts 4072 → ~3640 lines across this sprint.
-- **⏳ Remaining (recommended as a dedicated follow-up, NOT bundled with a release):** relocate the `nextStep` command pipeline (`cmdNextStep`/`runDeterministicForNextStep`/`renderSemanticReviewStep`) and the 1011-line `cmdRunToCompletion`. These are genuine cross-handler control-flow, not leaf moves. The specific entanglements to handle first: (a) the `packageRoot` module const is shared by `renderSemanticReviewStep` and `cmdRunToCompletion` → hoist to a `cli/paths.ts` computed relative to `src/cli/`; (b) `persistConfigErrorHandoff` is shared by `cmdAdvanceAudit`/`cmdNextStep`/`cmdRunToCompletion` → move to a shared module (e.g. alongside `writeHandoffOnly` in `cli/reviewRun.ts`) to avoid a `cli.ts ↔ nextStepCommand.ts` import cycle; (c) `renderSemanticReviewStep` is shared by next-step and run-to-completion → export it. Decompose one at a time with the full audit suite available (locally), as before.
+### 3. Big splits — ✅ DONE (2026-06-01); command handlers relocated
+All command-handler relocations are complete, each a pure move verified by the full audit suite (543). The entanglements called out below were resolved exactly as planned:
+- **✅ `cli/auditStep.ts`** — the shared `advanceAudit` driver (`runAuditStep`/`ingestBatchAuditResults`/`maybeArchiveLegacyPendingResults`); the foundation the rest built on.
+- **✅ `cli/nextStepCommand.ts`** — `runDeterministicForNextStep` + `cmdNextStep`.
+- **✅ `cli/semanticReviewStep.ts`** — `renderSemanticReviewStep` (shared by next-step + run-to-completion).
+- **✅ `cli/runToCompletion.ts`** — the 1011-line `cmdRunToCompletion` parallel-wave dispatch loop.
+- **✅ `cli/paths.ts`** — `packageRoot` (was a cli.ts module const; computed relative to `src/cli/`).
+- **✅ `cli/cleanup.ts`** — `cleanupStaleArtifactsDir` (shared by run-to-completion + the cleanup command).
+- **✅ `persistConfigErrorHandoff`** moved into `cli/reviewRun.ts` (alongside `writeHandoffOnly`), avoiding the `cli.ts ↔ nextStepCommand.ts` cycle.
+- **✅** cli.ts's ~90 now-orphaned imports were pruned (verified clean via `tsc --noUnusedLocals`).
+
+**Net: cli.ts 4072 → 1728 lines (-58%) across the sprint.** cli.ts is now a thin command dispatcher (`main`/`runCli`) plus the smaller handlers; each large handler/pipeline lives in its own `src/cli/*` module. The only deliberate non-move left is the `reviewPackets`/`graphManifestEdges` case-sensitivity reconciliation (a semantics decision, noted under section 2).
 
 ### Verifying in remote (so the next agent doesn't repeat the dead end)
 - Fast, reliable curated audit set (no wrapper spawns):
