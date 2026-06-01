@@ -389,6 +389,37 @@ describe("decideNextStep", () => {
     expect(prompt).toMatch(/Document One Remediation Item/);
   });
 
+  it("host cannot dispatch agents ingests an existing single-item result before prompting again", async () => {
+    await saveState(makePlanningState());
+    const resultDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "document");
+    await mkdir(resultDir, { recursive: true });
+    await writeFile(
+      join(resultDir, "document-F-001.result.json"),
+      JSON.stringify({
+        type: "item_spec",
+        item_spec: {
+          finding_id: "F-001",
+          concrete_change: "fix",
+          tests_to_write: [],
+          not_applicable_steps: [],
+        },
+      }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: false,
+    });
+    const state = JSON.parse(
+      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
+    );
+
+    expect(state.items["F-001"].status).toBe("documented");
+    expect(step.step_kind).toBe("document_single_item");
+    expect(step.artifact_paths.result).toMatch(/document-F-002\.result\.json$/);
+  });
+
   it("omitted hostCanDispatchSubagents defaults to single-item (no capability_check)", async () => {
     await saveState(makePlanningState());
 

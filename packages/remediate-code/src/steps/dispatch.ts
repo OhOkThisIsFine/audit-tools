@@ -454,8 +454,38 @@ export async function mergeDocumentResults(
     throw new Error("Cannot merge document results without plan and items.");
   }
 
+  const dir = runDir(options.artifactsDir, runId, "document");
+  const plannedFindingIds = new Set(
+    plan.items.map((item) => item.finding_id).filter((id): id is string => typeof id === "string"),
+  );
+  const itemsToMerge = [...plan.items];
+  for (const finding of state.plan.findings) {
+    const stateItem = state.items[finding.id];
+    if (!stateItem || stateItem.status !== "pending" || plannedFindingIds.has(finding.id)) {
+      continue;
+    }
+
+    const taskId = `document-${finding.id}`;
+    const resultPath = join(dir, `${taskId}.result.json`);
+    if (!(await tryLoadExistingDocumentResult(resultPath))) {
+      continue;
+    }
+
+    itemsToMerge.push({
+      task_id: taskId,
+      finding_id: finding.id,
+      prompt_path: join(dir, `${taskId}.md`),
+      result_path: resultPath,
+      model_hint: buildDocumentModelHint(finding),
+      access: {
+        read_paths: finding.affected_files.map((f) => f.path),
+        write_paths: [resultPath],
+      },
+    });
+  }
+
   const clarifications: ClarificationRequest[] = [];
-  for (const item of plan.items) {
+  for (const item of itemsToMerge) {
     if (!item.finding_id) {
       throw new Error(`Document dispatch item ${item.task_id} is missing finding_id.`);
     }
@@ -682,7 +712,47 @@ export async function mergeImplementResults(
     throw new Error("Cannot merge implement results without items.");
   }
 
-  for (const item of plan.items) {
+  const dir = runDir(options.artifactsDir, runId, "implement");
+  const plannedBlockIds = new Set(
+    plan.items.map((item) => item.block_id).filter((id): id is string => typeof id === "string"),
+  );
+  const itemsToMerge = [...plan.items];
+  for (const block of state.plan?.blocks ?? []) {
+    if (plannedBlockIds.has(block.block_id)) {
+      continue;
+    }
+    const hasDocumentedWork = block.items.some((findingId) => {
+      const stateItem = state.items?.[findingId];
+      return stateItem?.status === "documented" && stateItem.item_spec;
+    });
+    if (!hasDocumentedWork) {
+      continue;
+    }
+
+    const taskId = `implement-${block.block_id}`;
+    const resultPath = join(dir, `${taskId}.result.json`);
+    if (!(await tryLoadExistingImplementResult(resultPath))) {
+      continue;
+    }
+
+    const blockFiles = block.items.flatMap((fid) => {
+      const finding = state.plan?.findings.find((f) => f.id === fid);
+      return finding?.affected_files.map((f) => f.path) ?? [];
+    });
+    itemsToMerge.push({
+      task_id: taskId,
+      block_id: block.block_id,
+      prompt_path: join(dir, `${taskId}.md`),
+      result_path: resultPath,
+      model_hint: buildImplementModelHint(block, state),
+      access: {
+        read_paths: [...new Set(blockFiles)],
+        write_paths: [...new Set(blockFiles), resultPath],
+      },
+    });
+  }
+
+  for (const item of itemsToMerge) {
     if (!existsSync(item.result_path)) {
       console.warn(`Missing implement worker result: ${item.result_path} — marking items blocked.`);
       const block = item.block_id
@@ -731,7 +801,7 @@ export async function mergeImplementResults(
   }
 
   // Merge worktrees back to main branch
-  for (const item of plan.items) {
+  for (const item of itemsToMerge) {
     if (!item.worktree_path || !item.block_id) continue;
     const mergeResult = await mergeWorktree(options.root, options.artifactsDir, item.block_id);
     if (mergeResult.conflicted) {

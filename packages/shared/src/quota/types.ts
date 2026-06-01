@@ -2,6 +2,7 @@ export type LimitSource =
   | "explicit_config"
   | "cli_flags"
   | "known_metadata"
+  | "provider_default"
   | "learned"
   | "default";
 

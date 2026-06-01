@@ -24,6 +24,7 @@ import {
   AUDIT_REPORT_FILENAME,
 } from "./io/artifacts.js";
 import { isFileMissingError, readJsonFile, writeJsonFile, prefixValidationIssues, RunLogger } from "@audit-tools/shared";
+import { buildQuotaSource } from "@audit-tools/shared/quota/compositeQuotaSource";
 import { validateArtifactBundle } from "./validation/artifacts.js";
 import {
   validateAuditResults,
@@ -109,8 +110,6 @@ import {
   detectRateLimitError,
   computeCooldownUntil,
   runSlidingWindow,
-  LearnedQuotaSource,
-  CompositeQuotaSource,
   lookupDiscoveredLimits,
   updateDiscoveredLimits,
   mergeDiscoveredLimits,
@@ -1378,11 +1377,18 @@ async function renderSemanticReviewStep(params: {
     });
   }
 
+  const sessionConfig = await loadSessionConfig(artifactsDir).catch(
+    () => ({} as SessionConfig),
+  );
+  const provider = createFreshSessionProvider(undefined, sessionConfig);
   const dispatch = await prepareDispatchArtifacts({
     packageRoot,
     runId: activeReviewRun.run_id,
     artifactsDir,
     root,
+    sessionConfig,
+    hostModel: sessionConfig.block_quota?.host_model ?? null,
+    queryLimits: provider.queryLimits?.bind(provider),
     hostActiveSubagentLimit: params.hostMaxActiveSubagents,
   });
   const mergeCommand = mergeAndIngestCommand(artifactsDir, activeReviewRun.run_id);
@@ -2036,7 +2042,7 @@ const explicitProvider = getExplicitProvider(argv);
       const discoveredLimits = mergeDiscoveredLimits(providerLimits, cachedLimits);
 
       const halfLifeHours = sessionConfig.quota?.empirical_half_life_hours ?? 24;
-      const quotaSource = new CompositeQuotaSource([new LearnedQuotaSource(halfLifeHours)]);
+      const quotaSource = buildQuotaSource({ halfLifeHours });
       const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(providerModelKey).catch(() => null);
 
       const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
@@ -2840,12 +2846,20 @@ async function cmdWorkerRun(argv: string[]): Promise<void> {
 async function cmdPrepareDispatch(argv: string[]): Promise<void> {
   const runId = getFlag(argv, "--run-id");
   if (!runId) throw new Error("prepare-dispatch requires --run-id <run_id>");
+  const artifactsDir = getArtifactsDir(argv);
+  const sessionConfig = await loadSessionConfig(artifactsDir).catch(
+    () => ({} as SessionConfig),
+  );
+  const provider = createFreshSessionProvider(getExplicitProvider(argv), sessionConfig);
+  const hostModel = getHostModel(argv) ?? sessionConfig.block_quota?.host_model ?? null;
   const result = await prepareDispatchArtifacts({
     packageRoot,
     runId,
-    artifactsDir: getArtifactsDir(argv),
+    artifactsDir,
     root: getFlag(argv, "--root") ? getRootDir(argv) : undefined,
-    hostModel: getHostModel(argv),
+    sessionConfig,
+    hostModel,
+    queryLimits: provider.queryLimits?.bind(provider),
     hostActiveSubagentLimit: getHostMaxActiveSubagents(argv),
   });
   console.log(JSON.stringify(result, null, 2));
@@ -3886,7 +3900,7 @@ async function cmdQuota(argv: string[]): Promise<void> {
     sessionConfig,
   });
 
-  const quotaSource = new CompositeQuotaSource([new LearnedQuotaSource(halfLifeHours)]);
+  const quotaSource = buildQuotaSource({ halfLifeHours });
   const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(providerModelKey).catch(() => null);
   const queryDiscoveredLimits = await lookupDiscoveredLimits(providerModelKey).catch(() => null);
 

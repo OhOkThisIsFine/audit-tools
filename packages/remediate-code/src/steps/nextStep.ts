@@ -16,6 +16,8 @@ import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
 import { validateRemediationPlan } from "../validation/remediationState.js";
 import {
+  mergeDocumentResults,
+  mergeImplementResults,
   prepareDocumentDispatch,
   prepareImplementDispatch,
   readExtractedPlanIfPresent,
@@ -930,6 +932,10 @@ async function decideNextStepInner(
 
     if (!canDispatch) {
       const item = dispatchPlan.items[0];
+      if (!item) {
+        state = await mergeDocumentResults({ root, artifactsDir }, runId);
+        continue;
+      }
       return writeCurrentStep({
         stepKind: "document_single_item",
         status: "ready",
@@ -1308,6 +1314,10 @@ Then run:
 
     if (!canDispatchImpl) {
       const item = dispatchPlan.items[0];
+      if (!item) {
+        state = await mergeImplementResults({ root, artifactsDir }, runId);
+        continue;
+      }
       return writeCurrentStep({
         stepKind: "implement_single_item",
         status: "ready",

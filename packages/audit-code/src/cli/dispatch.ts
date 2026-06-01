@@ -2,7 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { isFileMissingError, readJsonFile, writeJsonFile } from "@audit-tools/shared";
-import type { SessionConfig, DispatchModelHint } from "@audit-tools/shared";
+import type { ProviderRateLimits, SessionConfig, DispatchModelHint } from "@audit-tools/shared";
+import { buildQuotaSource } from "@audit-tools/shared/quota/compositeQuotaSource";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import type { AuditTask } from "../types.js";
@@ -21,8 +22,9 @@ import {
   readQuotaState,
   resolveHostActiveSubagentLimit,
   lookupDiscoveredLimits,
+  mergeDiscoveredLimits,
 } from "../quota/index.js";
-import type { DispatchQuota } from "../quota/index.js";
+import type { DiscoveredRateLimits, DispatchQuota } from "../quota/index.js";
 import {
   taskResultPath,
   packetPromptPath,
@@ -325,6 +327,7 @@ export async function prepareDispatchArtifacts(params: {
   root?: string;
   sessionConfig?: SessionConfig;
   hostModel?: string | null;
+  queryLimits?: (model: string | null) => Promise<ProviderRateLimits | null>;
   hostActiveSubagentLimit?: number | null;
 }): Promise<PrepareDispatchResult> {
   const runId = params.runId;
@@ -647,7 +650,16 @@ export async function prepareDispatchArtifacts(params: {
     explicitLimit: params.hostActiveSubagentLimit,
     sessionConfig,
   });
+  const providerLimits: DiscoveredRateLimits | null =
+    await params.queryLimits?.(hostModel)
+      .then((r) => r ? { ...r, source: "provider_query" } : null)
+      .catch(() => null)
+    ?? null;
   const dispatchCachedLimits = await lookupDiscoveredLimits(quotaProviderKey).catch(() => null);
+  const discoveredLimits = mergeDiscoveredLimits(providerLimits, dispatchCachedLimits);
+  const halfLifeHours = sessionConfig.quota?.empirical_half_life_hours ?? 24;
+  const quotaSource = buildQuotaSource({ halfLifeHours });
+  const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(quotaProviderKey).catch(() => null);
   const waveSchedule = scheduleWave({
     providerName: quotaProviderName,
     sessionConfig,
@@ -656,7 +668,8 @@ export async function prepareDispatchArtifacts(params: {
     estimatedSlotTokens: perPacketTokens,
     quotaStateEntry,
     hostConcurrencyLimit,
-    discoveredLimits: dispatchCachedLimits,
+    discoveredLimits,
+    quotaSourceSnapshot,
   });
   const dispatchQuota: DispatchQuota = {
     contract_version: "audit-code-dispatch-quota/v1alpha2",
