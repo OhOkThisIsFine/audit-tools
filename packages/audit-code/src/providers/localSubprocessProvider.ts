@@ -1,7 +1,7 @@
 import { readJsonFile } from "@audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
 import type { FreshSessionProvider, LaunchFreshSessionInput } from "@audit-tools/shared";
-import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
+import { spawnLoggedCommand } from "@audit-tools/shared";
 
 export const MISSING_WORKER_COMMAND_MESSAGE =
   "local-subprocess provider requires task.worker_command.";

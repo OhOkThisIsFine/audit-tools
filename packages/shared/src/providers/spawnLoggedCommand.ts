@@ -3,13 +3,14 @@ import { spawn } from "node:child_process";
 import type {
   LaunchFreshSessionInput,
   LaunchFreshSessionResult,
-} from "@audit-tools/shared";
+} from "./types.js";
 
 const TERMINATION_SIGNAL: NodeJS.Signals = "SIGTERM";
 const FORCE_KILL_SIGNAL: NodeJS.Signals = "SIGKILL";
 const FORCE_KILL_GRACE_MS = 1_000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
-interface SpawnLoggedCommandOptions {
+export interface SpawnLoggedCommandOptions {
   createWriteStream?: typeof createWriteStream;
   spawn?: typeof spawn;
   killGraceMs?: number;
@@ -43,10 +44,14 @@ function applyOpenTokenWrap(
   return { command: opentokenCommand, args: ["wrap", command, ...args] };
 }
 
+// Single source of truth for both orchestrators. Combines the auditor's
+// flush-before-settle correctness (settle on "close" only after all buffered
+// log writes have drained, and a computed `accepted`/rich result) with the
+// remediator's stdin piping and optional structured progress telemetry.
+//
 // On Windows `command` must be the resolved .cmd / .exe path because `spawn`
 // does not consult PATH for executables without a shell. Callers should use
-// `platformCommand()` (scripts/smoke-packaged-audit-code.mjs) or similar to
-// supply the correct command form for the host OS.
+// `platformCommand()` or similar to supply the correct command form per OS.
 export async function spawnLoggedCommand(
   command: string,
   args: string[],
@@ -83,6 +88,7 @@ export async function spawnLoggedCommand(
     let closeCode: number | null = null;
     let closeSignal: NodeJS.Signals | null = null;
     let logsEnded = false;
+    let stdoutLineBuf = "";
 
     const clearTimers = (): void => {
       if (timer) {
@@ -180,12 +186,23 @@ export async function spawnLoggedCommand(
       spawnedChild = spawnProcess(command, args, {
         cwd: input.repoRoot,
         env: { ...process.env, ...env },
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [input.stdinText === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       });
       child = spawnedChild;
     } catch (error) {
       fail(error);
       return;
+    }
+    if (input.stdinText !== undefined) {
+      if (!spawnedChild.stdin) {
+        fail(
+          new Error(
+            `Fresh session spawn for run ${input.runId} did not provide pipe-backed stdin.`,
+          ),
+        );
+        return;
+      }
+      spawnedChild.stdin.end(input.stdinText);
     }
     if (!spawnedChild.stdout || !spawnedChild.stderr) {
       fail(
@@ -213,12 +230,46 @@ export async function spawnLoggedCommand(
       if (input.uiMode === "visible") {
         process.stderr.write(message);
       }
-    }, 30_000);
+      // Structured telemetry only when a consumer is attached, so the auditor's
+      // stderr (which never wires onProgress) stays exactly as before.
+      if (input.onProgress) {
+        process.stderr.write(
+          JSON.stringify({
+            type: "provider_heartbeat",
+            runId: input.runId,
+            elapsedMs,
+          }) + "\n",
+        );
+        input.onProgress({
+          type: "heartbeat",
+          runId: input.runId,
+          obligationId: input.obligationId,
+          elapsedMs,
+        });
+      }
+    }, HEARTBEAT_INTERVAL_MS);
 
     spawnedChild.stdout.on("data", (chunk) => {
       writeLog(stdoutLog, chunk);
       if (input.uiMode === "visible") {
         process.stdout.write(chunk);
+      }
+      if (input.onProgress) {
+        stdoutLineBuf += chunk.toString();
+        const lines = stdoutLineBuf.split("\n");
+        stdoutLineBuf = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.length > 0) {
+            input.onProgress({
+              type: "output",
+              runId: input.runId,
+              obligationId: input.obligationId,
+              elapsedMs: Date.now() - startedAt,
+              message: trimmed,
+            });
+          }
+        }
       }
     });
     spawnedChild.stderr.on("data", (chunk) => {

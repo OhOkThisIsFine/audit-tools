@@ -176,6 +176,10 @@ export type {
 // Provider constants
 export { LOCAL_SUBPROCESS_PROVIDER_NAME } from "./providers/constants.js";
 
+// Provider command runner (single source of truth for both orchestrators)
+export { spawnLoggedCommand } from "./providers/spawnLoggedCommand.js";
+export type { SpawnLoggedCommandOptions } from "./providers/spawnLoggedCommand.js";
+
 // Quota
 export type {
   LimitSource,
