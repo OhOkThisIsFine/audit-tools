@@ -165,3 +165,56 @@ export function isJsonSchemaPath(path: string): boolean {
 export function isPytestConftestPath(path: string): boolean {
   return posix.basename(normalizeGraphPath(path)).toLowerCase() === "conftest.py";
 }
+
+// ---- Build-manifest path predicates ----
+// One canonical set, shared by the graph manifest-edge extractor and the
+// packetizer. Each preserves path case (so distinct files differing only by
+// case are never collapsed) and matches the manifest filename
+// case-insensitively, since manifest names are conventionally lowercase.
+
+/** True for `package.json` files. */
+export function isPackageManifestPath(path: string): boolean {
+  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "package.json";
+}
+
+/** True for `tsconfig.json` / `tsconfig.<name>.json` project config files. */
+export function isTypescriptProjectConfigPath(path: string): boolean {
+  const basename = posix.basename(normalizeGraphPath(path)).toLowerCase();
+  return (
+    basename === "tsconfig.json" ||
+    (basename.startsWith("tsconfig.") && basename.endsWith(".json"))
+  );
+}
+
+/** True for Go `go.mod` module manifests. */
+export function isGoModuleManifestPath(path: string): boolean {
+  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "go.mod";
+}
+
+/** True for Go `go.work` workspace manifests. */
+export function isGoWorkspaceManifestPath(path: string): boolean {
+  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "go.work";
+}
+
+/** True for Rust `Cargo.toml` manifests. */
+export function isCargoManifestPath(path: string): boolean {
+  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "cargo.toml";
+}
+
+/** True for Maven `pom.xml` manifests. */
+export function isMavenPomPath(path: string): boolean {
+  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "pom.xml";
+}
+
+/** True for Python `pyproject.toml` manifests. */
+export function isPyprojectPath(path: string): boolean {
+  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "pyproject.toml";
+}
+
+/** True for `pnpm-workspace.yaml` workspace manifests. */
+export function isPnpmWorkspaceManifestPath(path: string): boolean {
+  return (
+    posix.basename(normalizeGraphPath(path)).toLowerCase() ===
+    "pnpm-workspace.yaml"
+  );
+}
