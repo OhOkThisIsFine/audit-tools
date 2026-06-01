@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { FreshSessionProvider, LaunchFreshSessionInput, OpenCodeConfig, OpenTokenConfig } from "@audit-tools/shared";
-import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
+import { spawnLoggedCommand } from "@audit-tools/shared";
 
 function resolveOpenCodeSpawnCommand(
   command: string,

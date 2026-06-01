@@ -1,6 +1,6 @@
 import type { FreshSessionProvider, LaunchFreshSessionInput, VSCodeTaskConfig, OpenTokenConfig } from "@audit-tools/shared";
 import { SubprocessTemplateProvider } from "./subprocessTemplateProvider.js";
-import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
+import { spawnLoggedCommand } from "@audit-tools/shared";
 
 export class VSCodeTaskProvider implements FreshSessionProvider {
   name = "vscode-task";

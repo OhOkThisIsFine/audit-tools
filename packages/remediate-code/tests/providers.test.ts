@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { spawnLoggedCommand } from "../src/providers/spawnLoggedCommand.js";
+import { spawnLoggedCommand } from "@audit-tools/shared";
 import { resolveFreshSessionProviderName } from "../src/providers/index.js";
 import { usesDeferredWorkerCommand } from "../src/types/workerSession.js";
 import type { LaunchFreshSessionInput } from "../src/providers/types.js";
@@ -42,9 +42,17 @@ function makeInput(
 }
 
 function makeWriteStream(): WriteStream {
+  // The shared spawnLoggedCommand awaits write/end completion callbacks before
+  // settling (flush-before-settle correctness), so the mock must invoke them.
   const stream = {
-    write: (_chunk: any) => true,
-    end: (_cb?: any) => stream as any,
+    write: (_chunk: any, cb?: any) => {
+      if (typeof cb === "function") cb();
+      return true;
+    },
+    end: (cb?: any) => {
+      if (typeof cb === "function") cb();
+      return stream as any;
+    },
     on: (_event: string, _cb: any) => stream as any,
   };
   return stream as unknown as WriteStream;
@@ -62,7 +70,10 @@ function makeSpawnMock(
     child.stderr = new EventEmitter();
     child.kill = (sig: string) => {
       child.killed = true;
-      process.nextTick(() => child.emit("exit", exitCode, exitSignal));
+      process.nextTick(() => {
+        child.emit("exit", exitCode, exitSignal);
+        child.emit("close", exitCode, exitSignal);
+      });
     };
     return child;
   };
@@ -123,7 +134,10 @@ describe("spawnLoggedCommand", () => {
       child.stdout = new EventEmitter();
       child.stderr = new EventEmitter();
       child.kill = () => {};
-      process.nextTick(() => child.emit("exit", 0, null));
+      process.nextTick(() => {
+        child.emit("exit", 0, null);
+        child.emit("close", 0, null);
+      });
       return child;
     };
 
@@ -188,7 +202,10 @@ describe("spawnLoggedCommand", () => {
       child.kill = () => {};
       process.nextTick(() => {
         child.stdout.emit("data", Buffer.from("line one\nline two\n"));
-        process.nextTick(() => child.emit("exit", 0, null));
+        process.nextTick(() => {
+          child.emit("exit", 0, null);
+          child.emit("close", 0, null);
+        });
       });
       return child;
     };
