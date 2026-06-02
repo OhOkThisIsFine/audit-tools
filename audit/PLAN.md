@@ -57,9 +57,14 @@ audit-code 556 · remediate-code 380):
   surface the cycling obligations, instead of spinning to the 1000-cap crash.
   The deeper root-cause convergence (why runtime_validation↔synthesis ping-pong)
   is a tracked follow-up.
-- ◧ **Tier C** — covered `runAutoFixExecutor` (was zero coverage). Remaining is
-  optional/selective: large MNT file-splits (`reviewPackets.ts`,
-  `internalExecutors.ts`, `decideNextStep`), broader TST coverage, OBS — deferred.
+- ◧ **Tier C** — **coverage done** for the real gaps: `runAutoFixExecutor`,
+  `withinRoot` path-escape guard, and `worktreeIsolation` helpers (all were
+  uncovered). **Refactor:** extracted `reviewPacketSizing.ts` out of
+  `reviewPackets.ts` (pure move, verified). The **big file-splits are deferred
+  to a focused follow-up** (reviewPackets graph cluster; internalExecutors into
+  per-phase modules; remediate `decideNextStep`) — the cuts are clean, but each
+  is a large multi-step manual move better done as a dedicated careful pass than
+  a session-tail grind. OBS bulk remains deferred.
 
 ## How to read the 404 findings
 
