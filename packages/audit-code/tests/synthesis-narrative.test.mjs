@@ -17,7 +17,7 @@ const {
 const {
   runSynthesisExecutor,
   runSynthesisNarrativeExecutor,
-} = await import("../dist/orchestrator/internalExecutors.js");
+} = await import("../dist/orchestrator/synthesisExecutors.js");
 const { advanceAudit } = await import("../dist/orchestrator/advance.js");
 
 const auditFindingsSchema = JSON.parse(

@@ -12,7 +12,7 @@ const { hashArtifactValue } = await import(
   "../dist/orchestrator/artifactFreshness.js"
 );
 const { runSynthesisExecutor } = await import(
-  "../dist/orchestrator/internalExecutors.js"
+  "../dist/orchestrator/synthesisExecutors.js"
 );
 
 const LINE_INDEX = {

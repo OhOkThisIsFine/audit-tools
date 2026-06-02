@@ -1,5 +1,5 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
-import type { ExecutorRunResult } from "./internalExecutors.js";
+import type { ExecutorRunResult } from "./executorResult.js";
 import type {
   AnalyzerSetting,
   GraphBundle,

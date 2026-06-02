@@ -13,12 +13,14 @@ import {
   runResultIngestionExecutor,
   runRuntimeValidationExecutor,
   runRuntimeValidationUpdateExecutor,
-  runSynthesisExecutor,
-  runSynthesisNarrativeExecutor,
   runDesignAssessmentExecutor,
   runDesignReviewAutoComplete,
   runExternalAnalyzerImportExecutor,
 } from "./internalExecutors.js";
+import {
+  runSynthesisExecutor,
+  runSynthesisNarrativeExecutor,
+} from "./synthesisExecutors.js";
 import { runAutoFixExecutor } from "./autoFixExecutor.js";
 import { runSyntaxResolutionExecutor } from "./syntaxResolutionExecutor.js";
 import { runGraphEnrichmentExecutor } from "./graphEnrichmentExecutor.js";
