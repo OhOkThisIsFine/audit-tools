@@ -238,9 +238,9 @@ test("scheduleWave applies host active subagent limit even when quota is disable
 
 test("scheduleWave: a reported host limit supersedes the conservative unknown-hosted fallback", () => {
   // Hosted provider, no learned quota state, and no explicit
-  // unknown_hosted_concurrency (so it would otherwise clamp to the default of
-  // 1). A host that reports its active-subagent capacity should get waves up to
-  // that capacity instead of being pinned to 1.
+  // unknown_hosted_concurrency (so it would otherwise use the agent-host
+  // fallback default). A host that reports its active-subagent capacity should
+  // get waves up to that capacity instead, even when that is lower.
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {},
@@ -294,6 +294,41 @@ test("scheduleWave clamps unknown hosted providers to configured fallback concur
     quotaStateEntry: null,
   });
   assert.equal(belowCap.wave_size, 4);
+});
+
+test("scheduleWave defaults agent-host providers to parallel dispatch, not serial", () => {
+  // claude-code with no learned state, no host-reported cap, and no explicit
+  // unknown_hosted_concurrency. It delegates to a host that fans out subagents
+  // in parallel, so the fallback must default to a parallel wave (the old
+  // default of 1 forced pathological 95-deep serial dispatch).
+  const wide = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {},
+    hostModel: null,
+    requestedConcurrency: 96,
+    quotaStateEntry: null,
+  });
+  assert.equal(wide.wave_size, 8);
+
+  // The requested concurrency still caps it when smaller than the default.
+  const narrow = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {},
+    hostModel: null,
+    requestedConcurrency: 3,
+    quotaStateEntry: null,
+  });
+  assert.equal(narrow.wave_size, 3);
+
+  // A genuinely unknown (non-agent-host) provider stays conservative at 1.
+  const unknown = scheduleWave({
+    providerName: "subprocess-template",
+    sessionConfig: {},
+    hostModel: null,
+    requestedConcurrency: 96,
+    quotaStateEntry: null,
+  });
+  assert.equal(unknown.wave_size, 1);
 });
 
 test("scheduleWave clamps unknown local providers to configured fallback concurrency", () => {

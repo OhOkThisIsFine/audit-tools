@@ -18,6 +18,26 @@ export function classifyProvider(providerName: ResolvedProviderName): ProviderTy
   }
 }
 
+// Default parallel wave size for agent-host providers when nothing else
+// constrains concurrency (no host-reported cap, no learned history, no RPM/TPM,
+// no explicit config). These providers delegate to a host that runs fresh
+// subagent sessions in parallel — each with its own context window — so
+// collapsing to serial dispatch (the old default of 1) is pathological for the
+// conversation-first flow. The host's own reported cap still binds at dispatch
+// time, and an explicit quota.unknown_hosted_concurrency still overrides this.
+export const DEFAULT_AGENT_HOST_CONCURRENCY = 8;
+
+// claude-code / vscode-task fall through the hosted/unknown fallback branch but
+// are parallel agent hosts, so they default to parallel dispatch rather than 1.
+// (opencode also fans out but is classified "local" and uses the local path.)
+export function agentHostFallbackConcurrency(
+  providerName: ResolvedProviderName,
+): number {
+  return providerName === "claude-code" || providerName === "vscode-task"
+    ? DEFAULT_AGENT_HOST_CONCURRENCY
+    : 1;
+}
+
 export function lookupKnownModel(
   modelKey: string,
 ): Pick<ResolvedLimits, "context_tokens" | "output_tokens"> | undefined {
