@@ -15,6 +15,7 @@ export interface ModelTokenLimits {
 // Known-model context/output limits. RPM/TPM are tier-dependent and must come
 // from learning, so they are intentionally omitted here (see quota/limits.ts).
 export const KNOWN_MODEL_LIMITS: Record<string, ModelTokenLimits> = {
+  "anthropic/claude-opus-4-8": { context_tokens: 200_000, output_tokens: 32_000 },
   "anthropic/claude-opus-4-7": { context_tokens: 200_000, output_tokens: 32_000 },
   "anthropic/claude-sonnet-4-6": { context_tokens: 200_000, output_tokens: 8_192 },
   "anthropic/claude-haiku-4-5": { context_tokens: 200_000, output_tokens: 8_192 },

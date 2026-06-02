@@ -208,11 +208,15 @@ export {
   resolveLimits,
   lookupKnownModel,
   classifyProvider,
+  resolveHostModel,
+  agentHostFallbackConcurrency,
+  DEFAULT_AGENT_HOST_CONCURRENCY,
 } from "./quota/limits.js";
 export type {
   ProviderType,
   LimitResolutionResult,
   ResolveLimitsOptions,
+  ResolveHostModelOptions,
 } from "./quota/limits.js";
 export {
   setQuotaStateDir,

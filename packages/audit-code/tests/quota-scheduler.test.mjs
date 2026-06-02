@@ -14,6 +14,7 @@ const {
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
 } = await import("@audit-tools/shared/quota/state");
+const { resolveHostModel } = await import("../dist/quota/index.js");
 
 // Helper to build a quota state entry with preset bucket weights
 function makeEntry(buckets, overrides = {}) {
@@ -329,6 +330,49 @@ test("scheduleWave defaults agent-host providers to parallel dispatch, not seria
     quotaStateEntry: null,
   });
   assert.equal(unknown.wave_size, 1);
+});
+
+test("resolveHostModel: explicit -> config -> env -> per-provider default -> null", () => {
+  // Explicit override wins over everything.
+  assert.equal(
+    resolveHostModel({
+      providerName: "claude-code",
+      sessionConfig: { block_quota: { host_model: "x/cfg" } },
+      explicitModel: "x/explicit",
+      env: { AUDIT_CODE_HOST_MODEL: "x/env" },
+      envVar: "AUDIT_CODE_HOST_MODEL",
+    }),
+    "x/explicit",
+  );
+  // Then session-config block_quota.host_model.
+  assert.equal(
+    resolveHostModel({
+      providerName: "claude-code",
+      sessionConfig: { block_quota: { host_model: "x/cfg" } },
+      env: {},
+    }),
+    "x/cfg",
+  );
+  // Then the env hint.
+  assert.equal(
+    resolveHostModel({
+      providerName: "claude-code",
+      sessionConfig: {},
+      env: { AUDIT_CODE_HOST_MODEL: "x/env" },
+      envVar: "AUDIT_CODE_HOST_MODEL",
+    }),
+    "x/env",
+  );
+  // Then a per-provider default for a known agent host (engages per-model quota).
+  assert.equal(
+    resolveHostModel({ providerName: "claude-code", sessionConfig: {}, env: {} }),
+    "anthropic/claude-opus-4-8",
+  );
+  // A provider without a default and no signal → null (genuinely unknown model).
+  assert.equal(
+    resolveHostModel({ providerName: "subprocess-template", sessionConfig: {}, env: {} }),
+    null,
+  );
 });
 
 test("scheduleWave clamps unknown local providers to configured fallback concurrency", () => {
