@@ -98,6 +98,18 @@ export function buildConversationSourceManifest(
   };
 }
 
+export function sourceManifestsEquivalent(
+  a: IntakeSourceManifest | undefined,
+  b: IntakeSourceManifest | undefined,
+): boolean {
+  if (!a || !b) return false;
+  if (a.sources.length !== b.sources.length) return false;
+  return a.sources.every((source, index) => {
+    const other = b.sources[index];
+    return source.type === other.type && source.path === other.path;
+  });
+}
+
 export function resolveManifestSources(
   root: string,
   manifest: IntakeSourceManifest,

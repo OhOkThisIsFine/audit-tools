@@ -248,6 +248,62 @@ describe("decideNextStep", () => {
     expect(prompt).toMatch(/"category": "User Goal"/);
   });
 
+  it("ready intake survives a default-candidate manifest re-derivation instead of looping", async () => {
+    // Regression: when next-step runs without --input but a default audit-report
+    // candidate exists, the resolver re-derives the source manifest every call.
+    // An identical candidate set must not discard the persisted summary/brief and
+    // re-emit synthesize_intake forever.
+    const auditDir = join(REPO_DIR, ".audit-artifacts");
+    const reportPath = join(auditDir, "audit-report.md");
+    const intakeDir = join(ARTIFACTS_DIR, "intake");
+    await mkdir(auditDir, { recursive: true });
+    await mkdir(intakeDir, { recursive: true });
+    await writeFile(reportPath, "# Audit Report\n\nFindings here.\n", "utf8");
+    await writeFile(
+      join(intakeDir, "source-manifest.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-source-manifest/v1alpha1",
+        created_from: "default_candidates",
+        sources: [{ type: "document", path: reportPath, label: "input-01" }],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(intakeDir, "intake-summary.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-summary/v1alpha1",
+        ready: true,
+        source_type: "documents",
+        goals: ["Fix only the critical bugs."],
+        non_goals: ["Broad refactors."],
+        constraints: [],
+        affected_files: [{ path: "src/auth.ts" }],
+        open_questions: [],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(intakeDir, "remediation-brief.md"),
+      "# Remediation Brief\n\nCritical bugs only.\n",
+      "utf8",
+    );
+
+    // Run twice to prove it is not a one-shot escape: a stable candidate set must
+    // keep advancing rather than oscillating back into synthesis.
+    const first = await decideNextStep({ root: REPO_DIR });
+    expect(first.step_kind).toBe("extract_findings");
+
+    const second = await decideNextStep({ root: REPO_DIR });
+    expect(second.step_kind).toBe("extract_findings");
+
+    // The persisted summary must remain intact (scope preserved, not reset).
+    const summary = JSON.parse(
+      await readFile(join(intakeDir, "intake-summary.json"), "utf8"),
+    );
+    expect(summary.ready).toBe(true);
+    expect(summary.goals).toContain("Fix only the critical bugs.");
+  });
+
   it("ambiguous intake summary asks for clarification before extraction", async () => {
     const inputPath = join(REPO_DIR, "feedback.md");
     const intakeDir = join(ARTIFACTS_DIR, "intake");
