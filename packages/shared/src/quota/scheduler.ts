@@ -6,7 +6,11 @@ import type {
   WaveSchedule,
 } from "./types.js";
 import type { QuotaUsageSnapshot } from "./quotaSource.js";
-import { classifyProvider, resolveLimits } from "./limits.js";
+import {
+  agentHostFallbackConcurrency,
+  classifyProvider,
+  resolveLimits,
+} from "./limits.js";
 import { computeMaxSafeConcurrency, computeRampUpConcurrency } from "./state.js";
 
 /**
@@ -159,7 +163,8 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
       const fallbackCap =
         providerType === "local"
           ? quota.unknown_local_concurrency
-          : (quota.unknown_hosted_concurrency ?? 1);
+          : (quota.unknown_hosted_concurrency ??
+            agentHostFallbackConcurrency(providerName));
       if (fallbackCap === "unlimited") {
         // no cap — "unlimited" intentionally skips clamping
       } else if (typeof fallbackCap === "number" && Number.isFinite(fallbackCap)) {

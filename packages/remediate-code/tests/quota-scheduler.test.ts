@@ -209,14 +209,25 @@ describe("scheduleWave (quota module)", () => {
     expect(result.wave_size).toBeLessThan(10);
   });
 
-  it("defaults unknown hosted provider to concurrency 1", () => {
-    const result = scheduleWave({
+  it("defaults agent-host providers to parallel dispatch, unknown providers to 1", () => {
+    // claude-code fans out to parallel subagents, so an unknown model must not
+    // collapse to serial (1) — it defaults to the agent-host parallel fallback.
+    const agentHost = scheduleWave({
       providerName: "claude-code",
       sessionConfig: baseConfig,
       hostModel: null,
       requestedConcurrency: 10,
     });
-    expect(result.wave_size).toBe(1);
+    expect(agentHost.wave_size).toBe(8);
+
+    // A genuinely unknown (non-agent-host) provider stays conservative at 1.
+    const unknown = scheduleWave({
+      providerName: "subprocess-template",
+      sessionConfig: baseConfig,
+      hostModel: null,
+      requestedConcurrency: 10,
+    });
+    expect(unknown.wave_size).toBe(1);
   });
 
   it("allows unlimited for local provider", () => {
