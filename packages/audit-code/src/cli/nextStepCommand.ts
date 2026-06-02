@@ -21,6 +21,7 @@ import {
 import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
+import { computeArtifactStateSignature } from "../orchestrator/artifactMetadata.js";
 import { decideNextStep } from "../orchestrator/nextStep.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
@@ -130,6 +131,15 @@ async function runDeterministicForNextStep(params: {
 > {
   let lastSummary = "";
   let analyzers = params.analyzers;
+  // Finalization thrashing guard. A converging run produces a (mostly) new
+  // artifact state each iteration, so the iteration count tracks the number of
+  // distinct states closely (a few idempotent passes are normal). When
+  // iterations outrun distinct states by this tolerance, deterministic executors
+  // are revisiting states (a staleness ping-pong, e.g. runtime_validation <->
+  // synthesis) rather than progressing — stop instead of spinning to maxRuns.
+  const FINALIZATION_CYCLE_TOLERANCE = 16;
+  const seenStateSignatures = new Set<string>();
+  const obligationTrail: string[] = [];
   for (let index = 0; index < params.maxRuns; index++) {
     const bundle = await loadArtifactBundle(params.artifactsDir);
     const decision = decideNextStep(bundle);
@@ -424,6 +434,41 @@ async function runDeterministicForNextStep(params: {
         state: result.audit_state,
         bundle: result.updated_bundle,
         reason: result.progress_summary,
+      };
+    }
+
+    // Finalization cycle guard. If this iteration returned the audit to an
+    // artifact state already produced this run, the deterministic loop is
+    // thrashing (no net progress) rather than converging. The canonical outputs
+    // are already rendered, so stop and surface the cycling obligations instead
+    // of spinning to maxRuns and crashing.
+    obligationTrail.push(decision.selected_obligation ?? "unknown");
+    seenStateSignatures.add(computeArtifactStateSignature(result.updated_bundle));
+    if (index + 1 - seenStateSignatures.size >= FINALIZATION_CYCLE_TOLERANCE) {
+      const cycle = Array.from(
+        new Set(obligationTrail.slice(-FINALIZATION_CYCLE_TOLERANCE)),
+      );
+      await writeJsonFile(
+        join(params.artifactsDir, "steps", "deterministic-progress.json"),
+        {
+          iteration: index + 1,
+          max_runs: params.maxRuns,
+          cycle_detected: true,
+          cycling_obligations: cycle,
+          summary:
+            "Finalization kept revisiting prior artifact states without net " +
+            `progress; stopping. Cycling obligations: ${cycle.join(" -> ")}.`,
+          timestamp: new Date().toISOString(),
+        },
+      );
+      return {
+        kind: "blocked",
+        state: result.audit_state,
+        bundle: result.updated_bundle,
+        reason:
+          "Finalization is not converging: deterministic executors kept revisiting " +
+          `prior artifact states (${cycle.join(" -> ")}). The report has been ` +
+          "rendered; review whether these obligations are erroneously invalidating each other.",
       };
     }
   }

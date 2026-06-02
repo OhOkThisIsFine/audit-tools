@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { computeArtifactMetadata } =
+const { computeArtifactMetadata, computeArtifactStateSignature } =
   await import("../dist/orchestrator/artifactMetadata.js");
 const { computeStaleArtifacts } =
   await import("../dist/orchestrator/staleness.js");
@@ -14,6 +14,38 @@ const {
   hashArtifactValue,
   stableStringify,
 } = await import("../dist/orchestrator/artifactFreshness.js");
+
+test("computeArtifactStateSignature ignores revision churn but tracks content", () => {
+  const sigOf = (artifacts) =>
+    computeArtifactStateSignature({ artifact_metadata: { artifacts } });
+  const base = {
+    "repo_manifest.json": { revision: 1, content_hash: "aaa", dependency_revisions: {} },
+    "audit-report.md": { revision: 3, content_hash: "bbb", dependency_revisions: {} },
+  };
+  // Same content hashes -> same signature even when revisions differ. This is
+  // what lets the finalization cycle guard catch a ping-pong whose only churn is
+  // monotonically incrementing revisions.
+  const bumpedRevisions = {
+    "repo_manifest.json": { revision: 9, content_hash: "aaa", dependency_revisions: {} },
+    "audit-report.md": { revision: 42, content_hash: "bbb", dependency_revisions: {} },
+  };
+  assert.equal(sigOf(base), sigOf(bumpedRevisions));
+  // A genuine content change -> different signature (real progress).
+  const changedContent = {
+    ...base,
+    "audit-report.md": { revision: 3, content_hash: "ccc", dependency_revisions: {} },
+  };
+  assert.notEqual(sigOf(base), sigOf(changedContent));
+  // Order-independent, and no metadata -> a stable sentinel.
+  assert.equal(
+    sigOf(base),
+    sigOf({
+      "audit-report.md": base["audit-report.md"],
+      "repo_manifest.json": base["repo_manifest.json"],
+    }),
+  );
+  assert.equal(computeArtifactStateSignature({}), "no-metadata");
+});
 
 test("artifact freshness helpers normalize deterministic metadata hashes", () => {
   assert.equal(
