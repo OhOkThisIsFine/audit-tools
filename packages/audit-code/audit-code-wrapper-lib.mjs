@@ -2,7 +2,7 @@ import { access, cp, mkdir, open, readFile, readdir, stat, unlink, writeFile } f
 import { constants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = dirname(fileURLToPath(import.meta.url));
@@ -247,10 +247,53 @@ async function acquireBuildLock() {
   }
 }
 
+// Pure, testable core of the build preflight. `sharedManifestPath` is the
+// resolved path of @audit-tools/shared's package.json (or null if it could not
+// be resolved at all); `checkoutRoot` is the root this wrapper belongs to.
+export function assertWorkspaceInstalled({ checkoutRoot, sharedManifestPath }) {
+  if (!sharedManifestPath) {
+    throw new Error(
+      'Dependencies are not installed for this checkout. Run `npm install` from ' +
+        'the repository root, then retry — building from source needs node_modules ' +
+        '(including the @audit-tools/shared workspace link).',
+    );
+  }
+
+  const relToCheckout = relative(checkoutRoot, sharedManifestPath);
+  if (relToCheckout.startsWith('..') || isAbsolute(relToCheckout)) {
+    throw new Error(
+      `@audit-tools/shared resolved to ${sharedManifestPath}, outside this ` +
+        `checkout (${checkoutRoot}). node_modules was never installed here — ` +
+        'common in a fresh git worktree — so building would typecheck against ' +
+        "another checkout's stale dist and report phantom \"missing export\" " +
+        "errors. Run `npm install` from this checkout's root.",
+    );
+  }
+}
+
+// Catches the common fresh-checkout trap before `npm run build` runs: with no
+// local node_modules, Node/tsc resolve @audit-tools/shared against a different
+// checkout (e.g. the main repo when running inside a git worktree).
+async function preflightWorkspace() {
+  const requireFromHere = createRequire(import.meta.url);
+  let sharedManifestPath = null;
+  try {
+    sharedManifestPath = requireFromHere.resolve('@audit-tools/shared/package.json');
+  } catch {
+    sharedManifestPath = null;
+  }
+  assertWorkspaceInstalled({
+    checkoutRoot: resolve(repoRoot, '..', '..'),
+    sharedManifestPath,
+  });
+}
+
 async function ensureBuilt() {
   if (!(await shouldBuildDist())) {
     return;
   }
+
+  await preflightWorkspace();
 
   const lockHandle = await acquireBuildLock();
   if (!lockHandle) {
