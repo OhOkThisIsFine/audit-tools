@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   ArtifactMetadataEntry,
   ArtifactMetadataManifest,
@@ -47,6 +48,20 @@ function computeDependencyFirstOrder(
 export function present(bundle: ArtifactBundle, artifactName: string): boolean {
   const value = getArtifactValue(bundle, artifactName);
   return value !== undefined && value !== null;
+}
+
+// Stable signature of the overall artifact state, keyed on per-artifact CONTENT
+// hashes — deliberately NOT revisions, which only ever increment. A
+// deterministic advance loop that revisits a signature it already produced this
+// run is cycling (e.g. a runtime_validation <-> synthesis staleness ping-pong);
+// the content-hash basis catches that even while revisions churn underneath.
+export function computeArtifactStateSignature(bundle: ArtifactBundle): string {
+  const metadata = bundle.artifact_metadata;
+  if (!metadata) return "no-metadata";
+  const entries = Object.entries(metadata.artifacts)
+    .map(([name, entry]) => `${name}:${entry.content_hash}`)
+    .sort();
+  return createHash("sha256").update(entries.join("\n")).digest("hex");
 }
 
 export function computeArtifactMetadata(
