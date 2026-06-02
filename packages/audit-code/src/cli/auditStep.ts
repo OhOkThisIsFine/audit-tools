@@ -125,7 +125,13 @@ export async function runAuditStep(options: {
     runLogger,
   });
 
-  await writeCoreArtifacts(options.artifactsDir, result.updated_bundle);
+  // Prune: result.updated_bundle is the full accumulated bundle, so an artifact
+  // an executor cleared to `undefined` must be removed from disk (not left to
+  // reload as a stale "present" artifact). Safe only because this is the
+  // authoritative per-step persist.
+  await writeCoreArtifacts(options.artifactsDir, result.updated_bundle, {
+    prune: true,
+  });
   const archivedPendingResults = await maybeArchiveLegacyPendingResults(
     options.auditResultsPath,
   );

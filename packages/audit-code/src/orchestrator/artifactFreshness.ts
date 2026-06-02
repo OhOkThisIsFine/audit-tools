@@ -17,13 +17,24 @@ export function stableStringify(value: unknown): string {
   return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`;
 }
 
+// Artifacts that stamp a wall-clock `generated_at` on every (re)build. The
+// timestamp is provenance, not content: two rebuilds with identical data but
+// different timestamps must hash equal, or the artifact's revision churns every
+// rebuild and perpetually re-stales its downstreams (e.g. audit-report.md
+// depends on design_assessment) — a finalization-oscillation hazard.
+const GENERATED_AT_STRIPPED_ARTIFACTS = new Set([
+  "repo_manifest.json",
+  "tooling_manifest.json",
+  "audit_plan_metrics.json",
+  "design_assessment.json",
+]);
+
 export function normalizeForMetadataHash(
   artifactName: string,
   value: unknown,
 ): unknown {
   if (
-    (artifactName === "repo_manifest.json" ||
-      artifactName === "tooling_manifest.json") &&
+    GENERATED_AT_STRIPPED_ARTIFACTS.has(artifactName) &&
     value &&
     typeof value === "object" &&
     !Array.isArray(value)
