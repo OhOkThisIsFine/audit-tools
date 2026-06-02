@@ -709,172 +709,16 @@ const MAX_ITERATIONS = 10;
  * each bounded next-step invocation records the state it acted on and the step
  * it produced. The logger is no-op when `observability.run_log` is disabled.
  */
-export async function decideNextStep(
-  options: NextStepOptions = {},
-): Promise<RemediationStep> {
-  const root = resolveRoot(options.root);
-  const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
-  const sessionConfig =
-    options.sessionConfig ??
-    (await readOptionalJsonFile<SessionConfig>(
-      join(root, "session-config.json"),
-    ));
-  const runLogger = new RunLogger(join(artifactsDir, "run.log.jsonl"), {
-    enabled: sessionConfig?.observability?.run_log ?? true,
-  });
-  const startedAt = Date.now();
-  try {
-    const step = await decideNextStepInner(options, runLogger);
-    runLogger.event({
-      phase: "next-step",
-      kind: "step",
-      obligation: step.step_kind,
-      note: step.status,
-      duration_ms: Date.now() - startedAt,
-    });
-    return step;
-  } catch (error) {
-    runLogger.event({
-      phase: "next-step",
-      kind: "error",
-      duration_ms: Date.now() - startedAt,
-      note: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
-}
+type DispatchOutcome = RemediationStep | { continueWithState: RemediationState };
 
-async function decideNextStepInner(
-  options: NextStepOptions,
-  runLogger: RunLogger,
-): Promise<RemediationStep> {
-  const root = resolveRoot(options.root);
-  const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
-  await mkdir(artifactsDir, { recursive: true });
-  const store = new StateStore(artifactsDir);
-  let state = await store.loadState();
-  runLogger.event({
-    phase: "next-step",
-    kind: "state",
-    obligation: state?.status ?? "pending",
-  });
-
-  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-  if (state?.status === "complete" || existsSync(join(root, "remediation-report.md"))) {
-    return presentReportStep(root, artifactsDir, state);
-  }
-
-  if (!state) {
-    const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
-    if (extractedPlan) {
-      try {
-        state = await saveStateForPlan(
-          artifactsDir,
-          { status: "pending" },
-          normalizeExtractedPlan(extractedPlan),
-        );
-      } catch (error) {
-        const paths = intakePaths(artifactsDir);
-        try {
-          const { unlink } = await import("node:fs/promises");
-          await unlink(paths.extractedPlan);
-        } catch { /* already gone */ }
-        process.stderr.write(
-          `[remediate-code] Corrupted extracted-plan.json removed (${error instanceof Error ? error.message : String(error)}). Re-emitting extraction step.\n`,
-        );
-      }
-    }
-  }
-
-  if (!state) {
-    const inputResolution = resolveInputPaths(root, options.input);
-    const intakeResult = await resolveIntakeStep({
-      root,
-      artifactsDir,
-      input: options.input,
-      inputResolution,
-      store,
-      loaderCommand,
-      randomRunId,
-      collectStartingPointPrompt,
-      synthesizeIntakePrompt,
-      collectIntakeClarificationsPrompt,
-      extractFindingsPrompt,
-    });
-    if (intakeResult.kind === "step") return intakeResult.step;
-    state = intakeResult.state;
-  }
-
-  if (!state) {
-    const paths = intakePaths(artifactsDir);
-    return writeCurrentStep({
-      stepKind: "collect_starting_point",
-      status: "blocked",
-      runId: randomRunId("INPUT"),
-      repoRoot: root,
-      artifactsDir,
-      prompt: collectStartingPointPrompt(
-        root,
-        defaultInputCandidates(root),
-        [],
-        paths,
-      ),
-      allowedCommands: [loaderCommand("next-step"), loaderCommand("next-step --input <path>")],
-      stopCondition:
-        "Stop after collecting a remediation starting point and rerunning next-step.",
-      artifactPaths: {
-        source_manifest: paths.sourceManifest,
-        conversation_start: paths.conversationStart,
-      },
-    });
-  }
-
-  if (state.status === "waiting_for_clarification") {
-    const clarifications =
-      state.clarifications ??
-      (await readOptionalJsonFile<ClarificationRequest[]>(
-        join(artifactsDir, "clarification_request.json"),
-      )) ??
-      [];
-    const resolutionPath = join(artifactsDir, "clarification_resolution.json");
-    return writeCurrentStep({
-      stepKind: "collect_clarifications",
-      status: "blocked",
-      runId: stateRunId(state),
-      repoRoot: root,
-      artifactsDir,
-      prompt: clarificationPrompt(clarifications, resolutionPath),
-      allowedCommands: [loaderCommand("next-step")],
-      stopCondition:
-        "Stop after asking the user for clarification answers, unless the answers are already available and the prompt told you to continue.",
-      artifactPaths: {
-        clarification_request: join(artifactsDir, "clarification_request.json"),
-        clarification_resolution: resolutionPath,
-      },
-    });
-  }
-
-  if (state.status === "waiting_for_triage") {
-    const resolutionPath = join(artifactsDir, "triage_resolution.json");
-    return writeCurrentStep({
-      stepKind: "collect_triage",
-      status: "blocked",
-      runId: stateRunId(state),
-      repoRoot: root,
-      artifactsDir,
-      prompt: triagePrompt(state, resolutionPath),
-      allowedCommands: [loaderCommand("next-step")],
-      stopCondition:
-        "Stop after asking the user for triage decisions, unless the decisions are already available and the prompt told you to continue.",
-      artifactPaths: {
-        triage_batch: join(artifactsDir, "triage_batch.json"),
-        triage_resolution: resolutionPath,
-      },
-    });
-  }
-
-  const pendingFindings = documentableFindings(state);
-  if (state.status === "planning" && pendingFindings.length > 0) {
+async function buildDocumentDispatchStep(ctx: {
+  root: string;
+  artifactsDir: string;
+  state: RemediationState;
+  options: NextStepOptions;
+  pendingFindings: Finding[];
+}): Promise<DispatchOutcome> {
+  const { root, artifactsDir, state, options, pendingFindings } = ctx;
     if (state.plan) {
       const integrity = await checkAffectedFileIntegrity(root, state.plan.findings);
       if (!integrity.is_clean) {
@@ -933,8 +777,7 @@ async function decideNextStepInner(
     if (!canDispatch) {
       const item = dispatchPlan.items[0];
       if (!item) {
-        state = await mergeDocumentResults({ root, artifactsDir }, runId);
-        continue;
+        return { continueWithState: await mergeDocumentResults({ root, artifactsDir }, runId) };
       }
       return writeCurrentStep({
         stepKind: "document_single_item",
@@ -1003,41 +846,16 @@ Then run:
         "Stop after all document worker results have been merged and next-step has been run.",
       artifactPaths: { dispatch_plan: planPath, dispatch_quota: docQuotaPath },
     });
-  }
+}
 
-  const implementBlocks = implementableBlocks(state);
-  if (state.status === "documenting" && implementBlocks.length > 0 && state.plan) {
-    const integrity = await checkAffectedFileIntegrity(root, state.plan.findings);
-    if (!integrity.is_clean) {
-      const details = [
-        ...integrity.changed.map((p) => `changed: ${p}`),
-        ...integrity.missing.map((p) => `missing: ${p}`),
-      ];
-      const nextCommand = loaderCommand("next-step --force-replan");
-      return writeCurrentStep({
-        stepKind: "collect_starting_point",
-        status: "blocked",
-        runId: stateRunId(state),
-        repoRoot: root,
-        artifactsDir,
-        prompt: [
-          "## File integrity check failed",
-          "",
-          "The following files have changed since the remediation plan was created:",
-          ...details.map((d) => `- ${d}`),
-          "",
-          "Re-run planning to pick up the current file state before implementation begins.",
-          "Run:",
-          "",
-          `\`${nextCommand}\``,
-        ].join("\n"),
-        allowedCommands: [nextCommand],
-        stopCondition:
-          "Stop after re-planning completes.",
-      });
-    }
-  }
-  if (state.status === "documenting" && implementBlocks.length > 0) {
+async function buildImplementDispatchStep(ctx: {
+  root: string;
+  artifactsDir: string;
+  state: RemediationState;
+  options: NextStepOptions;
+  implementBlocks: RemediationBlock[];
+}): Promise<DispatchOutcome> {
+  const { root, artifactsDir, state, options, implementBlocks } = ctx;
     const preliminaryPath = join(artifactsDir, "impl_risk_preliminary.json");
     const reviewedPath = join(artifactsDir, "impl_risk_reviewed.json");
     const previewAckPath = join(artifactsDir, "impl_preview_acknowledged.json");
@@ -1315,8 +1133,7 @@ Then run:
     if (!canDispatchImpl) {
       const item = dispatchPlan.items[0];
       if (!item) {
-        state = await mergeImplementResults({ root, artifactsDir }, runId);
-        continue;
+        return { continueWithState: await mergeImplementResults({ root, artifactsDir }, runId) };
       }
       return writeCurrentStep({
         stepKind: "implement_single_item",
@@ -1386,6 +1203,215 @@ Then run:
         "Stop after all implementation results have been merged and next-step has been run.",
       artifactPaths: { dispatch_plan: planPath, dispatch_quota: implQuotaPath },
     });
+}
+
+export async function decideNextStep(
+  options: NextStepOptions = {},
+): Promise<RemediationStep> {
+  const root = resolveRoot(options.root);
+  const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
+  const sessionConfig =
+    options.sessionConfig ??
+    (await readOptionalJsonFile<SessionConfig>(
+      join(root, "session-config.json"),
+    ));
+  const runLogger = new RunLogger(join(artifactsDir, "run.log.jsonl"), {
+    enabled: sessionConfig?.observability?.run_log ?? true,
+  });
+  const startedAt = Date.now();
+  try {
+    const step = await decideNextStepInner(options, runLogger);
+    runLogger.event({
+      phase: "next-step",
+      kind: "step",
+      obligation: step.step_kind,
+      note: step.status,
+      duration_ms: Date.now() - startedAt,
+    });
+    return step;
+  } catch (error) {
+    runLogger.event({
+      phase: "next-step",
+      kind: "error",
+      duration_ms: Date.now() - startedAt,
+      note: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
+async function decideNextStepInner(
+  options: NextStepOptions,
+  runLogger: RunLogger,
+): Promise<RemediationStep> {
+  const root = resolveRoot(options.root);
+  const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
+  await mkdir(artifactsDir, { recursive: true });
+  const store = new StateStore(artifactsDir);
+  let state = await store.loadState();
+  runLogger.event({
+    phase: "next-step",
+    kind: "state",
+    obligation: state?.status ?? "pending",
+  });
+
+  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+  if (state?.status === "complete" || existsSync(join(root, "remediation-report.md"))) {
+    return presentReportStep(root, artifactsDir, state);
+  }
+
+  if (!state) {
+    const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
+    if (extractedPlan) {
+      try {
+        state = await saveStateForPlan(
+          artifactsDir,
+          { status: "pending" },
+          normalizeExtractedPlan(extractedPlan),
+        );
+      } catch (error) {
+        const paths = intakePaths(artifactsDir);
+        try {
+          const { unlink } = await import("node:fs/promises");
+          await unlink(paths.extractedPlan);
+        } catch { /* already gone */ }
+        process.stderr.write(
+          `[remediate-code] Corrupted extracted-plan.json removed (${error instanceof Error ? error.message : String(error)}). Re-emitting extraction step.\n`,
+        );
+      }
+    }
+  }
+
+  if (!state) {
+    const inputResolution = resolveInputPaths(root, options.input);
+    const intakeResult = await resolveIntakeStep({
+      root,
+      artifactsDir,
+      input: options.input,
+      inputResolution,
+      store,
+      loaderCommand,
+      randomRunId,
+      collectStartingPointPrompt,
+      synthesizeIntakePrompt,
+      collectIntakeClarificationsPrompt,
+      extractFindingsPrompt,
+    });
+    if (intakeResult.kind === "step") return intakeResult.step;
+    state = intakeResult.state;
+  }
+
+  if (!state) {
+    const paths = intakePaths(artifactsDir);
+    return writeCurrentStep({
+      stepKind: "collect_starting_point",
+      status: "blocked",
+      runId: randomRunId("INPUT"),
+      repoRoot: root,
+      artifactsDir,
+      prompt: collectStartingPointPrompt(
+        root,
+        defaultInputCandidates(root),
+        [],
+        paths,
+      ),
+      allowedCommands: [loaderCommand("next-step"), loaderCommand("next-step --input <path>")],
+      stopCondition:
+        "Stop after collecting a remediation starting point and rerunning next-step.",
+      artifactPaths: {
+        source_manifest: paths.sourceManifest,
+        conversation_start: paths.conversationStart,
+      },
+    });
+  }
+
+  if (state.status === "waiting_for_clarification") {
+    const clarifications =
+      state.clarifications ??
+      (await readOptionalJsonFile<ClarificationRequest[]>(
+        join(artifactsDir, "clarification_request.json"),
+      )) ??
+      [];
+    const resolutionPath = join(artifactsDir, "clarification_resolution.json");
+    return writeCurrentStep({
+      stepKind: "collect_clarifications",
+      status: "blocked",
+      runId: stateRunId(state),
+      repoRoot: root,
+      artifactsDir,
+      prompt: clarificationPrompt(clarifications, resolutionPath),
+      allowedCommands: [loaderCommand("next-step")],
+      stopCondition:
+        "Stop after asking the user for clarification answers, unless the answers are already available and the prompt told you to continue.",
+      artifactPaths: {
+        clarification_request: join(artifactsDir, "clarification_request.json"),
+        clarification_resolution: resolutionPath,
+      },
+    });
+  }
+
+  if (state.status === "waiting_for_triage") {
+    const resolutionPath = join(artifactsDir, "triage_resolution.json");
+    return writeCurrentStep({
+      stepKind: "collect_triage",
+      status: "blocked",
+      runId: stateRunId(state),
+      repoRoot: root,
+      artifactsDir,
+      prompt: triagePrompt(state, resolutionPath),
+      allowedCommands: [loaderCommand("next-step")],
+      stopCondition:
+        "Stop after asking the user for triage decisions, unless the decisions are already available and the prompt told you to continue.",
+      artifactPaths: {
+        triage_batch: join(artifactsDir, "triage_batch.json"),
+        triage_resolution: resolutionPath,
+      },
+    });
+  }
+
+  const pendingFindings = documentableFindings(state);
+  if (state.status === "planning" && pendingFindings.length > 0) {
+    const outcome = await buildDocumentDispatchStep({ root, artifactsDir, state, options, pendingFindings });
+    if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
+    return outcome;
+  }
+
+  const implementBlocks = implementableBlocks(state);
+  if (state.status === "documenting" && implementBlocks.length > 0 && state.plan) {
+    const integrity = await checkAffectedFileIntegrity(root, state.plan.findings);
+    if (!integrity.is_clean) {
+      const details = [
+        ...integrity.changed.map((p) => `changed: ${p}`),
+        ...integrity.missing.map((p) => `missing: ${p}`),
+      ];
+      const nextCommand = loaderCommand("next-step --force-replan");
+      return writeCurrentStep({
+        stepKind: "collect_starting_point",
+        status: "blocked",
+        runId: stateRunId(state),
+        repoRoot: root,
+        artifactsDir,
+        prompt: [
+          "## File integrity check failed",
+          "",
+          "The following files have changed since the remediation plan was created:",
+          ...details.map((d) => `- ${d}`),
+          "",
+          "Re-run planning to pick up the current file state before implementation begins.",
+          "Run:",
+          "",
+          `\`${nextCommand}\``,
+        ].join("\n"),
+        allowedCommands: [nextCommand],
+        stopCondition:
+          "Stop after re-planning completes.",
+      });
+    }
+  }
+  if (state.status === "documenting" && implementBlocks.length > 0) {
+    const outcome = await buildImplementDispatchStep({ root, artifactsDir, state, options, implementBlocks });
+    if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
+    return outcome;
   }
 
   if (state.status === "implementing") {
