@@ -13,6 +13,30 @@ export type Lens =
   | "config_deployment"
   | "observability";
 
+/** Canonical list of every valid {@link Lens}. Single source of truth — import
+ * {@link isLens} / `ALL_LENSES` instead of hand-copying lens lists into local
+ * guards, which drift (a copy omitting "observability" caused it to be wrongly
+ * rejected in flow requeue). */
+export const ALL_LENSES: readonly Lens[] = [
+  "correctness",
+  "architecture",
+  "maintainability",
+  "security",
+  "reliability",
+  "performance",
+  "data_integrity",
+  "tests",
+  "operability",
+  "config_deployment",
+  "observability",
+];
+
+export function isLens(value: unknown): value is Lens {
+  return (
+    typeof value === "string" && (ALL_LENSES as readonly string[]).includes(value)
+  );
+}
+
 export interface FileRecord {
   path: string;
   language: string;
