@@ -70,15 +70,13 @@ test("renderWorkerPrompt suppresses worker_command execution when the task uses 
   assert.doesNotMatch(prompt, /Then execute worker_command/i);
 });
 
-test("usesDeferredWorkerCommand ignores deprecated skip_worker_command", () => {
-  assert.equal(
-    usesDeferredWorkerCommand({ skip_worker_command: true }),
-    false,
-  );
+test("usesDeferredWorkerCommand keys solely on worker_command_mode", () => {
   assert.equal(
     usesDeferredWorkerCommand({ worker_command_mode: "deferred" }),
     true,
   );
+  assert.equal(usesDeferredWorkerCommand({ worker_command_mode: "run" }), false);
+  assert.equal(usesDeferredWorkerCommand({}), false);
 });
 
 test("renderWorkerPrompt renders bounded executor prompts from argv data instead of shell-quoted strings", () => {

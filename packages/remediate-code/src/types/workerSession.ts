@@ -26,8 +26,6 @@ export interface WorkerTask {
   runtime_updates_path?: string;
   external_analyzer_results_path?: string;
   worker_command_mode?: WorkerCommandMode;
-  /** @deprecated Prefer worker_command_mode: "deferred" for new task files. */
-  skip_worker_command?: boolean;
   /**
    * Subprocess timeout in milliseconds. Must be > 0; values ≤ 0 cause immediate kills.
    * Recommended range: 30_000–600_000 (30 s – 10 min). Omit to inherit the provider default.
@@ -60,9 +58,7 @@ export function resolveWorkerTaskMaxRetries(
 }
 
 export function usesDeferredWorkerCommand(
-  task: Pick<WorkerTask, "worker_command_mode" | "skip_worker_command">,
+  task: Pick<WorkerTask, "worker_command_mode">,
 ): boolean {
-  return (
-    task.worker_command_mode === "deferred" || task.skip_worker_command === true
-  );
+  return task.worker_command_mode === "deferred";
 }

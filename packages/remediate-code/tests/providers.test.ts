@@ -313,24 +313,14 @@ describe("usesDeferredWorkerCommand", () => {
     );
   });
 
-  it("returns true when skip_worker_command is true (legacy compatibility)", () => {
-    expect(usesDeferredWorkerCommand({ skip_worker_command: true })).toBe(true);
-  });
-
   it("returns false when worker_command_mode is 'run'", () => {
     expect(usesDeferredWorkerCommand({ worker_command_mode: "run" })).toBe(
       false,
     );
   });
 
-  it("returns false when both fields are absent", () => {
+  it("returns false when worker_command_mode is absent", () => {
     expect(usesDeferredWorkerCommand({})).toBe(false);
-  });
-
-  it("returns false when skip_worker_command is false", () => {
-    expect(usesDeferredWorkerCommand({ skip_worker_command: false })).toBe(
-      false,
-    );
   });
 });
 

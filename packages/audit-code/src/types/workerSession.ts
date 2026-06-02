@@ -25,15 +25,13 @@ export interface WorkerTask {
   runtime_updates_path?: string;
   external_analyzer_results_path?: string;
   worker_command_mode?: WorkerCommandMode;
-  /** @deprecated Prefer worker_command_mode: "deferred" for new task files. */
-  skip_worker_command?: boolean;
   timeout_ms?: number;
   max_retries?: number;
   access?: AccessDeclaration;
 }
 
 export function usesDeferredWorkerCommand(
-  task: Pick<WorkerTask, "worker_command_mode" | "skip_worker_command">,
+  task: Pick<WorkerTask, "worker_command_mode">,
 ): boolean {
   return task.worker_command_mode === "deferred";
 }
