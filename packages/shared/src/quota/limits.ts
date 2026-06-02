@@ -38,6 +38,45 @@ export function agentHostFallbackConcurrency(
     : 1;
 }
 
+// Per-provider default host model, used when no explicit model is configured or
+// detected. Lets per-model quota detection engage with realistic limits (Claude
+// models are 200k context) instead of the conservative unknown-model floor.
+const PROVIDER_DEFAULT_HOST_MODEL: Partial<Record<ResolvedProviderName, string>> = {
+  "claude-code": "anthropic/claude-opus-4-8",
+};
+
+export interface ResolveHostModelOptions {
+  providerName: ResolvedProviderName;
+  sessionConfig: SessionConfig;
+  /** Explicit model (e.g. from a CLI flag); highest precedence. */
+  explicitModel?: string | null;
+  env?: NodeJS.ProcessEnv;
+  /** Env var consulted for a model hint (e.g. "AUDIT_CODE_HOST_MODEL"). */
+  envVar?: string;
+}
+
+// Resolve the host model so per-model quota detection can engage. Precedence:
+// explicit override → session-config (block_quota.host_model) → env hint →
+// per-provider default for a known agent host → null (genuinely unknown).
+export function resolveHostModel(options: ResolveHostModelOptions): string | null {
+  const {
+    providerName,
+    sessionConfig,
+    explicitModel,
+    env = process.env,
+    envVar,
+  } = options;
+  const clean = (value: string | null | undefined): string | null =>
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  return (
+    clean(explicitModel) ??
+    clean(sessionConfig.block_quota?.host_model) ??
+    (envVar ? clean(env[envVar]) : null) ??
+    PROVIDER_DEFAULT_HOST_MODEL[providerName] ??
+    null
+  );
+}
+
 export function lookupKnownModel(
   modelKey: string,
 ): Pick<ResolvedLimits, "context_tokens" | "output_tokens"> | undefined {

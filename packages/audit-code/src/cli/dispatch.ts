@@ -19,6 +19,7 @@ import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import {
   scheduleWave,
   buildProviderModelKey,
+  resolveHostModel,
   readQuotaState,
   resolveHostActiveSubagentLimit,
   lookupDiscoveredLimits,
@@ -642,9 +643,18 @@ export async function prepareDispatchArtifacts(params: {
     entries: resultMapEntries,
   } satisfies DispatchResultMap);
 
-  const hostModel = params.hostModel ?? null;
   const perPacketTokens = plan.map((p) => p.complexity.estimated_tokens);
   const quotaProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
+  // Resolve the host model (explicit/CLI override → block_quota.host_model → env
+  // → per-provider default) so per-model quota detection engages with realistic
+  // limits instead of the conservative unknown-model floor. params.hostModel
+  // carries any caller/CLI override.
+  const hostModel = resolveHostModel({
+    providerName: quotaProviderName,
+    sessionConfig,
+    explicitModel: params.hostModel,
+    envVar: "AUDIT_CODE_HOST_MODEL",
+  });
   const quotaProviderKey = buildProviderModelKey(quotaProviderName, hostModel);
   const quotaState = await readQuotaState().catch((): { version: 2; entries: Record<string, never> } => ({ version: 2, entries: {} }));
   const quotaStateEntry = quotaState.entries[quotaProviderKey] ?? null;
