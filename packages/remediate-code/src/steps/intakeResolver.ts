@@ -12,6 +12,7 @@ import {
   isIntakeReady,
   readIntakeArtifacts,
   resolveManifestSources,
+  sourceManifestsEquivalent,
   type IntakeSource,
   type IntakeSourceManifest,
   type IntakeSummary,
@@ -53,12 +54,16 @@ export async function resolveIntakeStep(params: {
   const { root, artifactsDir, inputResolution, store } = params;
   const paths = intakePaths(artifactsDir);
   let intake = await readIntakeArtifacts(artifactsDir);
+  const previousManifest = intake.manifest;
   let manifest: IntakeSourceManifest | undefined = intake.manifest;
   let manifestRefreshed = false;
 
   if (!inputResolution.supplied && manifest && inputResolution.existing.length > 0) {
+    // Re-derive the manifest from the current default candidates so on-disk
+    // changes are picked up. Whether this actually invalidates downstream intake
+    // artifacts is decided below by comparing against the persisted manifest —
+    // an unchanged candidate set must NOT discard a ready summary/brief.
     manifest = undefined;
-    manifestRefreshed = true;
   }
 
   if (inputResolution.supplied && inputResolution.missing.length > 0) {
@@ -120,13 +125,17 @@ export async function resolveIntakeStep(params: {
       inputResolution.supplied ? "input" : "default_candidates",
     );
     await writeJsonFile(paths.sourceManifest, manifest);
-    manifestRefreshed = true;
+    if (!sourceManifestsEquivalent(previousManifest, manifest)) {
+      manifestRefreshed = true;
+    }
   }
 
   if (!manifest && intake.conversationStart) {
     manifest = buildConversationSourceManifest(paths.conversationStart);
     await writeJsonFile(paths.sourceManifest, manifest);
-    manifestRefreshed = true;
+    if (!sourceManifestsEquivalent(previousManifest, manifest)) {
+      manifestRefreshed = true;
+    }
   }
 
   if (!manifest) {
