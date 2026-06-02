@@ -1,4 +1,5 @@
 import type { AuditTask, Lens, UnitManifest } from "./types.js";
+import { isLens } from "./types.js";
 
 const DEFAULT_LENS_ORDER: Lens[] = [
   "correctness",
@@ -13,8 +14,6 @@ const DEFAULT_LENS_ORDER: Lens[] = [
   "config_deployment",
 ];
 
-const VALID_LENSES = new Set<string>(DEFAULT_LENS_ORDER);
-
 export interface TaskBuildOptions {
   pass_prefix?: string;
   limit_lenses?: Lens[];
@@ -22,10 +21,6 @@ export interface TaskBuildOptions {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
-}
-
-function isLens(value: unknown): value is Lens {
-  return typeof value === "string" && VALID_LENSES.has(value);
 }
 
 function assertStringArray(
