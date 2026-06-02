@@ -1,7 +1,23 @@
 # Audit Goals
 
 This document is the normative product definition for the auditor. Other specs
-and docs should defer to it.
+and docs should defer to it. The human-facing product overview and strategy live
+in [`docs/product.md`](../docs/product.md).
+
+## Product identity and boundary
+
+The auditor's product behavior is not "run a particular phase" or "run a
+particular tool." It is: **advance the audit by executing the highest-priority
+valid next step from the current audit state.** Repeated invocations of the
+single entrypoint eventually produce normalized repository understanding,
+bounded audit tasks, verified coverage, synthesized findings, runtime-validation
+follow-up where needed, and a final completion or blocked status.
+
+The auditor is a single logical skill entrypoint, a stateful audit engine, a
+deterministic artifact producer/consumer, a bounded LLM orchestration system,
+and a resumable workflow invoked repeatedly until completion. It is **not** a
+prompt pack, a CLI toolbox, a static-analysis wrapper, a bare report generator,
+or a collection of one-off audit phases.
 
 ## Core principles
 
@@ -11,6 +27,16 @@ and docs should defer to it.
    confidence bar.
 3. The audit is binary: it is either complete or it is not.
 4. The final retained output is deterministic Markdown at `audit-report.md`.
+
+## Invariants
+
+1. The system is obligation-driven, not phase-driven.
+2. Deterministic artifacts are the source of continuity.
+3. LLM work must be bounded and attributable.
+4. Progress must be resumable across invocations.
+5. Every invocation must make valid progress, report a blocker, or report completion.
+6. Prefer deterministic execution whenever possible.
+7. The orchestration layer must be able to explain why a particular next step was chosen.
 
 ## Deterministic vs LLM boundaries
 
@@ -75,13 +101,17 @@ completion blockers.
 
 ## Completion
 
-The audit is complete only when:
+The audit is complete only when all of the following hold:
 
-- all auditable coverage obligations are satisfied
-- all planned runtime-validation obligations are resolved
-- the final deterministic Markdown report has been rendered
+- intake, structure, and planning artifacts are current
+- every auditable file/lens coverage obligation is satisfied
+- every required critical-flow obligation is satisfied
+- all planned deterministic runtime-validation obligations are resolved
+- the final deterministic Markdown report (`audit-report.md`) has been rendered
+- no blocking condition remains active
 
-No partial-success status should be introduced.
+The audit is not complete if any work remains inside auditable scope, even if it
+is low priority. No partial-success status should be introduced.
 
 ## Final output and cleanup
 

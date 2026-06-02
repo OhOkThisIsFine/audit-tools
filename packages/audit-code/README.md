@@ -215,26 +215,6 @@ Optional backend config:
 - use `provider: "auto"` only when you want best-effort routing across installed backends
 - treat explicit provider bridges as compatibility fallback, not as the intended owner of semantic review
 
-## Current Development Focus
-
-The next implementation work is tracked in:
-
-- `docs/product.md`
-- `docs/development.md`
-- `docs/handoff.md`
-
-The short version is:
-
-- keep the packet dispatch workflow verified in real host environments
-- make graph-informed packetization observable before adding more ecosystem-specific parsers
-- consolidate graph extraction and exercise generic ownership hints for analyzer-supplied module roots
-- add deterministic Python import, package, and test/source graph support as a core language path
-- use semantic/NLP-style affinity only as low-authority context unless deterministic graph evidence supports it
-- keep generated Codex, Claude Desktop, OpenCode, VS Code, and Antigravity guidance aligned with real host behavior
-- tighten the repo-local MCP-first bootstrap where host smoke tests expose friction
-- polish provider-assisted continuation and failure guidance
-- keep schema contracts and examples easy for workers and host integrations to validate
-
 ## Build And Test
 
 ```bash
@@ -253,6 +233,5 @@ For GitHub Actions publication and npm Trusted Publishing setup, see `docs/relea
 - `docs/contracts.md`
 - `docs/release.md`
 - `docs/development.md`
-- `docs/handoff.md`
 - `docs/history.md`
 - `skills/audit-code/SKILL.md`
