@@ -228,16 +228,27 @@ export async function loadArtifactBundle(
 export async function writeCoreArtifacts(
   root: string,
   bundle: ArtifactBundle,
+  options: { prune?: boolean } = {},
 ): Promise<void> {
   const bundleRecord = bundle as Partial<Record<ArtifactBundleKey, unknown>>;
   for (const entry of ARTIFACT_ENTRIES) {
     const [key, definition] = entry;
     const value = bundleRecord[key];
+    const path = join(root, definition.fileName);
     if (value !== undefined) {
-      await definition.write(
-        join(root, definition.fileName),
-        value as never,
-      );
+      await definition.write(path, value as never);
+    } else if (options.prune) {
+      // The bundle is authoritative. An executor that clears an artifact to
+      // `undefined` (to force a downstream rebuild — e.g. planning/ingestion
+      // reset audit_report) intends the file gone; if it lingers it reloads as a
+      // stale "present" artifact with no metadata entry, which deriveAuditState
+      // reads as satisfied — masking the invalidation and stranding a stale
+      // report. Only callers passing the full accumulated bundle may prune.
+      try {
+        await unlink(path);
+      } catch (error) {
+        if (!isFileMissingError(error)) throw error;
+      }
     }
   }
 }

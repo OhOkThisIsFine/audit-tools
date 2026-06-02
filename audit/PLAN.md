@@ -17,12 +17,26 @@ Substantive remediation is done and released. What remains (none blocking):
    `reviewPacketSizing.ts`); `internalExecutors.ts` → per-phase modules (hoist
    `ExecutorRunResult` + shared helpers first); remediate `decideNextStep` →
    extract transition branches into helpers.
-2. **A1 finalization root-cause convergence.** The thrashing guard in
-   `cli/nextStepCommand.ts` stops the `runtime_validation ↔ synthesis` spin
-   gracefully, but the *why* (revisions churn while content is stable) is
-   unfixed — needs reproduction with a seeded `.audit-artifacts/`. Suspects:
-   `orchestrator/state.ts` `runtimeReady` vs `runtimeValidation.ts` output;
-   revision-vs-content staleness in `orchestrator/staleness.ts`.
+2. **A1 finalization root-cause — INVESTIGATED + latent bugs fixed (2026-06).**
+   Proven the deterministic staleness logic *converges*: 4 faithful persist/reload
+   repros (toy + audit-code's own 136-file `src/`, with/without deepening) reach
+   `complete` in ~10-14 iters with zero round-trip-unstable artifacts. The
+   staleness DAG **cannot** cycle `runtime_validation ↔ synthesis` (no reverse
+   edge; `runtime_validation_current` is a content check decoupled from staleness).
+   The staleness/metadata code is unchanged since before the meta-audit, so the
+   708-iter spin was environmental (Windows EPERM under concurrent procs, since
+   fixed by `243b1b0`). Fixed 3 latent persistence-consistency bugs that *could*
+   drive a re-stale loop with the right data: (a) `writeCoreArtifacts` now prunes
+   files for `undefined` artifacts at the advance-persist, so an `audit_report`
+   invalidation actually persists instead of lingering as a stale "present" file;
+   (b) synthesis no longer rewrites/materializes `audit_results` (was desyncing it
+   from metadata → re-staling coverage → planning re-run → rewrites
+   `runtime_validation_report.json`, the oscillation engine); (c) `generated_at`
+   stripped from `audit_plan_metrics`/`design_assessment` content hashes.
+   Convergence + per-fix regression tests in `tests/finalization-convergence.test.mjs`;
+   the cycle guard is retained as a backstop. Remaining (optional): one real
+   end-to-end run on a large repo to confirm no scale-specific trigger survives.
+   See memory `a1-finalization-converges`.
 3. **Quota/dispatch vision** (memory `quota-dispatch-vision`): per-model
    detection landed (`resolveHostModel`); remaining is on-the-fly adaptation in
    the conversation-first path + heterogeneous multi-agent dispatch.

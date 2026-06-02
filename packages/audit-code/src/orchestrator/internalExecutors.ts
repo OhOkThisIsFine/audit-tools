@@ -706,10 +706,16 @@ export function runSynthesisExecutor(
   // No narrative yet — that is layered by the synthesis-narrative obligation.
   const findings = buildBaseFindingsReport(bundle, finalResults);
 
+  // Synthesis renders findings; it does NOT own audit_results. Writing
+  // audit_results back here desyncs it from its metadata entry (it isn't in
+  // artifacts_written, so computeArtifactMetadata reuses the prior hash) and, in
+  // the zero-result case, materializes an empty audit_results.jsonl that did not
+  // exist before — both perpetually re-stale coverage_matrix → planning,
+  // forcing a planning re-run that rewrites runtime_validation_report.json (the
+  // finalization-oscillation engine). Leave audit_results as the ingested value.
   return {
     updated: {
       ...bundle,
-      audit_results: finalResults,
       audit_findings: findings,
       audit_report: renderAuditReportMarkdown(findings, { scope: bundle.scope }),
     },
