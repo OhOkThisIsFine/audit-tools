@@ -10,6 +10,32 @@ latest — the prior pickup mistakenly read a handoff 4 commits behind, before t
 self-audit landed). Build + the two new test files (`io-json-retry`,
 `file-inventory-language`) verified green on this base (Windows, Node 26).
 
+## Progress (execution log)
+
+Working in logical/pipeline order (not risk order), building + testing each
+unit. Per the "ideal code, no back-compat" directive, deprecated/legacy paths
+are removed, not preserved. (Tier A/B/C verdicts below are the original
+snapshot; this log records actual outcomes.)
+
+**Phase 1 — correctness point-fixes: DONE.** Four real, fixed; two advisory
+false positives:
+- ✅ **isLens observability gap** — real. Centralized canonical
+  `isLens`/`ALL_LENSES` in `types.ts`; `flowRequeue` + legacy `orchestrator.ts`
+  taskBuilder both route through it. Regression test added.
+- ✅ **worktree branch leak + swallowed commit failure** (`implement.ts`) — real.
+  Atomic `git worktree add -b` with stale-state cleanup; commit gated on
+  `git diff --cached --quiet`, real failures fall back + clean up. Regression
+  test added.
+- ✅ **REL-001 `skip_worker_command`** — real one-sided divergence. The field is
+  dead legacy (nothing writes it) → removed entirely from both packages.
+- ⊘ **MCP template tool names** — FALSE POSITIVE. opencode namespaces MCP tools
+  by server key `auditor`, so `auditor_start_audit` is correct.
+- ⊘ **`detectHostActiveSubagentLimit` test fixture** — FALSE POSITIVE. The test
+  imports audit-code's single-arg `(env)` wrapper, so the fixture is passed
+  correctly and the Codex branch is genuinely exercised.
+
+Suites green throughout: shared 36 · audit-code 548 · remediate-code 380.
+
 ## How to read the 404 findings
 
 - **The count is inflated by repeated IDs.** A finding ID (e.g. `COR-001`,
