@@ -34,7 +34,32 @@ false positives:
   imports audit-code's single-arg `(env)` wrapper, so the fixture is passed
   correctly and the Codex branch is genuinely exercised.
 
-Suites green throughout: shared 36 · audit-code 548 · remediate-code 380.
+Suites green throughout Phase 1.
+
+**Phases 2–7 — DONE** (all committed; final suites green: shared 41 ·
+audit-code 556 · remediate-code 380):
+- ✅ **A4** — root `.gitattributes` enforcing LF (498 tracked files were CRLF; a
+  `.sh` hook was CRLF-broken); `ensure` preflight that fails with an actionable
+  `npm install` message instead of phantom "missing export" TS errors.
+- ✅ **A2** — agent-host providers (claude-code/vscode-task) default to parallel
+  dispatch, not serial (kills `wave_size=1`). **+ host model detection**
+  (`resolveHostModel`) so per-model quota engages (Claude → 200k context,
+  model-keyed state) — first increment toward the per-model/provider quota
+  vision; heterogeneous multi-agent dispatch tracked separately.
+- ✅ **A3** — `detectRateLimitError` recognizes the host session/usage-limit
+  sentinel + clock-time reset → cooldown on the auditor-spawned path; the
+  dispatch prompt tells the host to pause-and-resume rather than thrash-redispatch.
+- ✅ **A5/A6** — only genuinely stray files count toward `spurious_file_count`
+  (canonical `<stem>_<digest>.json` results no longer inflate it); packet prompt
+  reinforced to submit-only.
+- ✅ **A1** — finalization **thrashing guard**: when loop iterations outrun
+  distinct artifact states, stop gracefully (the report is already rendered) and
+  surface the cycling obligations, instead of spinning to the 1000-cap crash.
+  The deeper root-cause convergence (why runtime_validation↔synthesis ping-pong)
+  is a tracked follow-up.
+- ◧ **Tier C** — covered `runAutoFixExecutor` (was zero coverage). Remaining is
+  optional/selective: large MNT file-splits (`reviewPackets.ts`,
+  `internalExecutors.ts`, `decideNextStep`), broader TST coverage, OBS — deferred.
 
 ## How to read the 404 findings
 
