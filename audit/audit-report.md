@@ -3,9 +3,9 @@
 
 ## Summary
 
-- Findings: 404
+- Findings: 392
 - Work blocks: 3
-- Severity breakdown: high: 27, medium: 127, low: 235, info: 15
+- Severity breakdown: high: 17, medium: 125, low: 235, info: 15
 - Fully audited files: 394
 - Excluded non-auditable files: 95
 
@@ -16,7 +16,7 @@
 - Max severity: high
 - Units: -github-workflows, file:packages/audit-code/src/extractors/languageMap.generated.ts, packages-audit-code, packages-remediate-code, packages-shared
 - Owned files: .gemini/commands/audit-code.toml, .github/workflows/publish-package.yml, opencode.json, packages/audit-code/.gemini/commands/audit-code.toml, packages/audit-code/.github/workflows/ci.yml, packages/audit-code/.github/workflows/packaged-entrypoint.yml, packages/audit-code/.github/workflows/product-e2e.yml, packages/audit-code/.github/workflows/publish-package.yml, packages/audit-code/.github/workflows/test-suite.yml, packages/audit-code/.gitignore, packages/audit-code/audit-code-wrapper-lib.mjs, packages/audit-code/audit-code.mjs, packages/audit-code/dispatch/lens-definitions.json, packages/audit-code/dispatch/merge-results.mjs, packages/audit-code/dispatch/validate-result.mjs, packages/audit-code/dispatch/validate.mjs, packages/audit-code/opencode.json, packages/audit-code/schemas/audit_findings.schema.json, packages/audit-code/schemas/critical_flows.schema.json, packages/audit-code/schemas/dispatch_quota.schema.json, packages/audit-code/schemas/external_analyzer_results.schema.json, packages/audit-code/schemas/finding.schema.json, packages/audit-code/schemas/graph_bundle.schema.json, packages/audit-code/schemas/repo_manifest.schema.json, packages/audit-code/schemas/review_packets.schema.json, packages/audit-code/scripts/postinstall.mjs, packages/audit-code/scripts/release-and-publish.mjs, packages/audit-code/scripts/smoke-linked-audit-code.mjs, packages/audit-code/scripts/smoke-packaged-audit-code.mjs, packages/audit-code/scripts/update-languages.mjs, packages/audit-code/skills/audit-code/opencode-command-template.txt, packages/audit-code/src/adapters/coverageSummary.ts, packages/audit-code/src/adapters/normalizeExternal.ts, packages/audit-code/src/cli.ts, packages/audit-code/src/cli/auditStep.ts, packages/audit-code/src/cli/cleanup.ts, packages/audit-code/src/cli/dispatch.ts, packages/audit-code/src/cli/envelope.ts, packages/audit-code/src/cli/lineIndex.ts, packages/audit-code/src/cli/nextStepCommand.ts, packages/audit-code/src/cli/prompts.ts, packages/audit-code/src/cli/reviewRun.ts, packages/audit-code/src/cli/runToCompletion.ts, packages/audit-code/src/cli/semanticReviewStep.ts, packages/audit-code/src/cli/steps.ts, packages/audit-code/src/cli/waveManifest.ts, packages/audit-code/src/cli/workerResult.ts, packages/audit-code/src/coverage.ts, packages/audit-code/src/extractors/analyzers/css.ts, packages/audit-code/src/extractors/analyzers/html.ts, packages/audit-code/src/extractors/analyzers/python.ts, packages/audit-code/src/extractors/analyzers/sql.ts, packages/audit-code/src/extractors/analyzers/treeSitter.ts, packages/audit-code/src/extractors/analyzers/typescript.ts, packages/audit-code/src/extractors/browserExtension.ts, packages/audit-code/src/extractors/designAssessment.ts, packages/audit-code/src/extractors/fileInventory.ts, packages/audit-code/src/extractors/fsIntake.ts, packages/audit-code/src/extractors/graph.ts, packages/audit-code/src/extractors/graphManifestEdges.ts, packages/audit-code/src/extractors/graphPathUtils.ts, packages/audit-code/src/extractors/graphPythonImports.ts, packages/audit-code/src/extractors/graphRoutes.ts, packages/audit-code/src/extractors/graphSuites.ts, packages/audit-code/src/extractors/languageMap.generated.ts, packages/audit-code/src/extractors/pathPatterns.ts, packages/audit-code/src/index.ts, packages/audit-code/src/io/artifacts.ts, packages/audit-code/src/io/runArtifacts.ts, packages/audit-code/src/io/toolingManifest.ts, packages/audit-code/src/mcp/server.ts, packages/audit-code/src/orchestrator.ts, packages/audit-code/src/orchestrator/advance.ts, packages/audit-code/src/orchestrator/artifactFreshness.ts, packages/audit-code/src/orchestrator/auditTaskUtils.ts, packages/audit-code/src/orchestrator/autoFixExecutor.ts, packages/audit-code/src/orchestrator/chunking.ts, packages/audit-code/src/orchestrator/dependencyMap.ts, packages/audit-code/src/orchestrator/designReviewPrompt.ts, packages/audit-code/src/orchestrator/fileAnchors.ts, packages/audit-code/src/orchestrator/fileIntegrity.ts, packages/audit-code/src/orchestrator/flowCoverage.ts, packages/audit-code/src/orchestrator/flowPlanning.ts, packages/audit-code/src/orchestrator/flowRequeue.ts, packages/audit-code/src/orchestrator/graphEnrichmentExecutor.ts, packages/audit-code/src/orchestrator/internalExecutors.ts, packages/audit-code/src/orchestrator/localCommands.ts, packages/audit-code/src/orchestrator/nextStep.ts, packages/audit-code/src/orchestrator/requeue.ts, packages/audit-code/src/orchestrator/requeueCommand.ts, packages/audit-code/src/orchestrator/resultIngestion.ts, packages/audit-code/src/orchestrator/reviewPackets.ts, packages/audit-code/src/orchestrator/runtimeValidation.ts, packages/audit-code/src/orchestrator/runtimeValidationUpdate.ts, packages/audit-code/src/orchestrator/scope.ts, packages/audit-code/src/orchestrator/selectiveDeepening.ts, packages/audit-code/src/orchestrator/staleness.ts, packages/audit-code/src/orchestrator/state.ts, packages/audit-code/src/orchestrator/syntaxResolutionExecutor.ts, packages/audit-code/src/orchestrator/taskBuilder.ts, packages/audit-code/src/orchestrator/unionFind.ts, packages/audit-code/src/providers/claudeCodeProvider.ts, packages/audit-code/src/providers/index.ts, packages/audit-code/src/providers/subprocessTemplateProvider.ts, packages/audit-code/src/quota/discoveredLimits.ts, packages/audit-code/src/quota/headerExtraction.ts, packages/audit-code/src/quota/headerExtractors/index.ts, packages/audit-code/src/quota/index.ts, packages/audit-code/src/quota/probe.ts, packages/audit-code/src/reporting/mergeFindings.ts, packages/audit-code/src/reporting/synthesisNarrativePrompt.ts, packages/audit-code/src/reporting/workBlocks.ts, packages/audit-code/src/supervisor/runLedger.ts, packages/audit-code/src/supervisor/sessionConfig.ts, packages/audit-code/src/types/reviewPlanning.ts, packages/audit-code/src/types/workerSession.ts, packages/audit-code/src/validation/auditResults.ts, packages/audit-code/src/validation/sessionConfig.ts, packages/audit-code/tests/adapters-remediation.test.mjs, packages/audit-code/tests/analyzer-seam.test.mjs, packages/audit-code/tests/audit-code-completion.test.mjs, packages/audit-code/tests/audit-code-lifecycle.test.mjs, packages/audit-code/tests/audit-code-wrapper.test.mjs, packages/audit-code/tests/cli-remediation.test.mjs, packages/audit-code/tests/design-assessment.test.mjs, packages/audit-code/tests/discovered-limits.test.mjs, packages/audit-code/tests/edge-reasoning.test.mjs, packages/audit-code/tests/entrypoint-contract.test.mjs, packages/audit-code/tests/extractors-remediation.test.mjs, packages/audit-code/tests/field-trial-remediation.test.mjs, packages/audit-code/tests/fixture-repo.test.mjs, packages/audit-code/tests/graph-framework-routes.test.mjs, packages/audit-code/tests/graph-path-utils.test.mjs, packages/audit-code/tests/header-extraction.test.mjs, packages/audit-code/tests/helpers/jsonSchemaAssert.mjs, packages/audit-code/tests/helpers/provider-assisted-bridge.mjs, packages/audit-code/tests/io-remediation.test.mjs, packages/audit-code/tests/json-schema-assert.test.mjs, packages/audit-code/tests/mcp-server.test.mjs, packages/audit-code/tests/next-step-edge-reasoning.test.mjs, packages/audit-code/tests/next-step-narrative.test.mjs, packages/audit-code/tests/next-step.test.mjs, packages/audit-code/tests/orchestration.test.mjs, packages/audit-code/tests/orchestrator-remediation.test.mjs, packages/audit-code/tests/orchestrator.test.mjs, packages/audit-code/tests/prompt-invocation.test.mjs, packages/audit-code/tests/provider-assisted-bridge.test.mjs, packages/audit-code/tests/provider-assisted-continuation.test.mjs, packages/audit-code/tests/provider-auto-resolution.test.mjs, packages/audit-code/tests/providers-remediation.test.mjs, packages/audit-code/tests/quota-file-lock.test.mjs, packages/audit-code/tests/quota-packets.test.mjs, packages/audit-code/tests/quota-scheduler.test.mjs, packages/audit-code/tests/render-worker-prompt.test.mjs, packages/audit-code/tests/review-packets.test.mjs, packages/audit-code/tests/schema-contracts.test.mjs, packages/audit-code/tests/scope.test.mjs, packages/audit-code/tests/staleness.test.mjs, packages/audit-code/tests/status-command.test.mjs, packages/audit-code/tests/supervisor-remediation.test.mjs, packages/audit-code/tests/syntax-resolution.test.mjs, packages/audit-code/tests/synthesis-narrative.test.mjs, packages/audit-code/tests/tree-sitter-analyzers.test.mjs, packages/audit-code/tests/typescript-analyzer.test.mjs, packages/audit-code/tests/validate-command.test.mjs, packages/audit-code/tests/validation-remediation.test.mjs, packages/remediate-code/.github/workflows/publish-package.yml, packages/remediate-code/opencode.json, packages/remediate-code/remediate-code.mjs, packages/remediate-code/schemas/clarification_request.schema.json, packages/remediate-code/schemas/item_spec.schema.json, packages/remediate-code/schemas/remediation_outcomes.schema.json, packages/remediate-code/schemas/remediation_report.schema.json, packages/remediate-code/schemas/worker_result.schema.json, packages/remediate-code/scripts/postinstall.mjs, packages/remediate-code/scripts/release-and-publish.mjs, packages/remediate-code/scripts/run-mcp-server.mjs, packages/remediate-code/scripts/smoke-packaged-remediate-code.mjs, packages/remediate-code/src/index.ts, packages/remediate-code/src/intake.ts, packages/remediate-code/src/mcp/server.ts, packages/remediate-code/src/orchestrator.ts, packages/remediate-code/src/phases/close.ts, packages/remediate-code/src/phases/document.ts, packages/remediate-code/src/phases/implement.ts, packages/remediate-code/src/phases/plan.ts, packages/remediate-code/src/phases/triage.ts, packages/remediate-code/src/phases/workerTasks.ts, packages/remediate-code/src/providers/claudeCodeProvider.ts, packages/remediate-code/src/providers/index.ts, packages/remediate-code/src/providers/localSubprocessProvider.ts, packages/remediate-code/src/providers/workerTaskLaunch.ts, packages/remediate-code/src/quota/hostLimits.ts, packages/remediate-code/src/quota/index.ts, packages/remediate-code/src/quota/probe.ts, packages/remediate-code/src/state/store.ts, packages/remediate-code/src/steps/dispatch.ts, packages/remediate-code/src/steps/intakeResolver.ts, packages/remediate-code/src/steps/nextStep.ts, packages/remediate-code/src/steps/stepWriter.ts, packages/remediate-code/src/steps/waveScheduler.ts, packages/remediate-code/src/steps/worktreeIsolation.ts, packages/remediate-code/src/types/workerSession.ts, packages/remediate-code/src/utils/fileIntegrity.ts, packages/remediate-code/src/validation/artifacts.ts, packages/remediate-code/tests/cross-lens-dedup.test.ts, packages/remediate-code/tests/dispatch-reconciliation.test.ts, packages/remediate-code/tests/mcp-server.test.ts, packages/remediate-code/tests/model-hints.test.ts, packages/remediate-code/tests/phase-close.test.ts, packages/remediate-code/tests/phase-implement.test.ts, packages/remediate-code/tests/phase-plan.test.ts, packages/remediate-code/tests/postinstall.test.ts, packages/remediate-code/tests/providers.test.ts, packages/remediate-code/tests/quota-file-lock.test.ts, packages/remediate-code/tests/quota-scheduler.test.ts, packages/remediate-code/tests/store.test.ts, packages/remediate-code/tests/wave-scheduler.test.ts, packages/shared/scripts/release-and-publish.mjs, packages/shared/src/git.ts, packages/shared/src/observability/runLog.ts, packages/shared/src/providers/opencodeLaunch.ts, packages/shared/src/providers/spawnLoggedCommand.ts, packages/shared/src/providers/types.ts, packages/shared/src/providers/workerTaskLaunch.ts, packages/shared/src/quota/compositeQuotaSource.ts, packages/shared/src/quota/errorParsers/index.ts, packages/shared/src/quota/errorParsing.ts, packages/shared/src/quota/fileLock.ts, packages/shared/src/quota/hostLimits.ts, packages/shared/src/quota/learnedQuotaSource.ts, packages/shared/src/quota/limits.ts, packages/shared/src/quota/scheduler.ts, packages/shared/src/quota/slidingWindow.ts, packages/shared/src/quota/state.ts, packages/shared/src/tokens.ts, packages/shared/src/tooling/analyzerDeps.ts, packages/shared/src/tooling/exec.ts, packages/shared/src/tooling/repoConventions.ts, packages/shared/src/tooling/testCommand.ts, packages/shared/src/types/flows.ts, packages/shared/src/types/runLedger.ts, packages/shared/src/types/sessionConfig.ts, packages/shared/src/types/stepContract.ts, packages/shared/src/types/surfaces.ts, packages/shared/src/validation/basic.ts, packages/shared/tests/analyzerDeps.test.mjs, packages/shared/tests/exec.test.mjs, packages/shared/tests/git.test.mjs, packages/shared/tests/opencode-launch.test.mjs, packages/shared/tests/repoConventions.test.mjs, packages/shared/tests/runLog.test.mjs, packages/shared/tests/testCommand.test.mjs, packages/shared/tests/tokens.test.mjs, packages/shared/tests/worker-task-launch.test.mjs
-- Findings: CD-001, COR-001, COR-001, COR-001, COR-001, COR-001, DA-002, DR-001, DR-002, DR-003, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-002, REL-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-002, TST-002, TST-002, CD-001, CD-002, CFG-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-002, COR-002, COR-002, COR-002, DA-005, DA-010, DA-012, DI-001, DI-002, DI-003, DI-003, DI-004, DR-004, DR-005, DR-006, DR-007, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-004, MNT-004, MNT-004, MNT-006, MNT-007, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OPR-001, REL-002, SHD-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-004, TST-004, TST-004, TST-004, TST-004, TST-005, TST-005, TST-005, TST-006, TST-006, TST-007, CD-002, CD-003, CD-004, COR-001, COR-001, COR-001, COR-002, COR-002, COR-002, COR-003, COR-003, COR-003, DI-001, DI-002, DI-004, DI-005, DI-005, DI-006, DI-006, DI-007, DI-008, DR-008, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-006, MNT-006, MNT-006, MNT-006, MNT-006, MNT-007, MNT-007, MNT-007, MNT-008, MNT-009, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-005, OBS-005, OBS-005, OBS-101, OBS-102, OPR-001, OPR-001, OPR-002, OPR-002, OPR-002, OPR-003, OPR-003, OPR-004, OPR-004, OPR-005, OPR-005, REL-001, REL-002, REL-003, SHD-002, SHD-003, SHD-004, SHD-005, TST-001, TST-001, TST-001, TST-001, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-006, TST-006, TST-006, TST-006, TST-006, TST-007, MNT-002, MNT-003, MNT-003, MNT-004, MNT-004, MNT-005, MNT-006, MNT-006, OBS-003, OBS-003, OBS-004, OBS-005, OBS-005, OBS-103, TST-004
+- Findings: CD-001, COR-001, DA-002, DR-001, DR-002, DR-003, MNT-001, MNT-001, MNT-001, MNT-001, MNT-002, TST-001, TST-001, TST-001, TST-001, TST-001, TST-002, CD-001, CD-002, CFG-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-001, COR-002, COR-002, COR-002, COR-002, DA-005, DA-010, DA-012, DI-001, DI-002, DI-003, DI-003, DI-004, DR-004, DR-007, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-004, MNT-004, MNT-004, MNT-006, MNT-007, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OPR-001, REL-002, SHD-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-001, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-004, TST-004, TST-004, TST-004, TST-004, TST-005, TST-005, TST-005, TST-006, TST-006, TST-007, CD-002, CD-003, CD-004, COR-001, COR-001, COR-001, COR-002, COR-002, COR-002, COR-003, COR-003, COR-003, DI-001, DI-002, DI-004, DI-005, DI-005, DI-006, DI-006, DI-007, DI-008, DR-008, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-001, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-002, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-003, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-004, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-005, MNT-006, MNT-006, MNT-006, MNT-006, MNT-006, MNT-007, MNT-007, MNT-007, MNT-008, MNT-009, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-001, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-002, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-003, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-004, OBS-005, OBS-005, OBS-005, OBS-101, OBS-102, OPR-001, OPR-001, OPR-002, OPR-002, OPR-002, OPR-003, OPR-003, OPR-004, OPR-004, OPR-005, OPR-005, REL-001, REL-002, REL-003, SHD-002, SHD-003, SHD-004, SHD-005, TST-001, TST-001, TST-001, TST-001, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-002, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-003, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-004, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-005, TST-006, TST-006, TST-006, TST-006, TST-006, TST-007, MNT-002, MNT-003, MNT-003, MNT-004, MNT-004, MNT-005, MNT-006, MNT-006, OBS-003, OBS-003, OBS-004, OBS-005, OBS-005, OBS-103, TST-004
 - Depends on: none
 - Rationale: Findings share owned units transitively and should remain one non-overlapping remediation block.
 
@@ -39,31 +39,6 @@
 - Rationale: All findings map to the same owned unit and should be remediated together.
 
 ## Findings
-
-### TST-001 — autoFixExecutor has zero test coverage
-
-- Severity: high
-- Confidence: high
-- Lens: tests
-- Files: packages/audit-code/src/orchestrator/autoFixExecutor.ts
-- Summary: runAutoFixExecutor (autoFixExecutor.ts) is the Phase 1 executor that conditionally runs code formatters but has no test coverage. Neither its returned artifact shape, nor its conditional formatter dispatch (Prettier only when config present, Black for Python, etc.), nor its behavior when file_disposition is absent are exercised by any test.
-- Evidence:
-  - packages/audit-code/src/orchestrator/autoFixExecutor.ts:54 - runAutoFixExecutor is the sole export; no test file in packages/audit-code/tests/ imports autoFixExecutor or references runAutoFixExecutor
-  - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
-
-### COR-001 — Branch not cleaned up when git worktree add fails in runBlockInWorktree
-
-- Severity: high
-- Confidence: high
-- Lens: correctness
-- Files: packages/remediate-code/src/phases/implement.ts
-- Summary: In runBlockInWorktree, git branch is created before git worktree add. If branch creation succeeds but worktree add fails, the function returns { ok: false } without deleting the dangling branch. On any subsequent invocation for the same block, git branch will fail (branch already exists), making both branchRes.status !== 0 and worktreeRes.status !== 0 true and permanently preventing worktree mode for that block ID without any diagnostic message about the root cause.
-- Evidence:
-  - packages/remediate-code/src/phases/implement.ts:418 - git branch blockBranch runs and can succeed
-  - packages/remediate-code/src/phases/implement.ts:422 - git worktree add runs second; can fail independently
-  - packages/remediate-code/src/phases/implement.ts:428 - guard checks branchRes.status !== 0 || worktreeRes.status !== 0 and returns { ok: false } without any cleanup of the already-created branch
-  - packages/remediate-code/src/phases/implement.ts:510 - branch cleanup (git branch -D) only runs inside mergeWorktreeBlock, which is never reached when runBlockInWorktree returns { ok: false }
-  - runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test
 
 ### MNT-002 — cli.ts is a 1728-line mixed-concern file combining command implementations with re-export surface
 
@@ -119,25 +94,6 @@
   - packages/audit-code/src/cli/runToCompletion.ts:106 - function declaration begins; wave recovery at ~163, parallel branch at ~395, sequential inline at ~771, single-agent branch at ~896, exit at 1115 — roughly 1000 lines of mixed concerns in one function
   - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
 
-### MNT-001 — decideNextStepInner is a ~740-line monolithic function
-
-- Severity: high
-- Confidence: high
-- Lens: maintainability
-- Files: packages/remediate-code/src/steps/nextStep.ts
-- Summary: The private function decideNextStepInner (lines 747-1487) spans ~740 lines and implements all 10+ state machine transitions as flat if-chains inside a single for-loop, with nesting depth reaching 6+ levels and local type aliases and helper closures defined mid-body. This makes individual transition logic hard to locate, test, or extend without risk of accidentally affecting adjacent branches.
-- Evidence:
-  - packages/remediate-code/src/steps/nextStep.ts:747 - function decideNextStepInner begins
-  - packages/remediate-code/src/steps/nextStep.ts:1487 - function ends; ~740 lines of state-machine logic, inline prompt strings, and nested closures all in one function body
-  - runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test
-  - packages/remediate-code/src/steps/nextStep.ts:747 - decideNextStepInner begins; function body runs to line 1487, ~740 lines total
-  - packages/remediate-code/src/steps/nextStep.ts:762 - outer for-loop contains all state-machine branches with no sub-function extraction; each iteration handles a different status via sequential if-guards
-  - packages/remediate-code/src/steps/nextStep.ts:1045-1048 - nesting reaches 5 levels: function > for-loop > if(documenting) > if(!previewAckPath) > if(!reviewedPath), then another inner for-loop at lines 1068-1092
-  - packages/remediate-code/src/steps/nextStep.ts:1050-1065 - local type alias PreliminaryEntry defined inside a nested if-branch mid-function body; should be a module-level type
-  - packages/remediate-code/src/steps/nextStep.ts:1176-1185 - two more local type aliases ReviewedEntry and PrelimEntry defined inside a second nested branch
-  - packages/remediate-code/src/steps/nextStep.ts:1208-1237 - three closure functions (isNoOp, renderTierSection, renderNoOpSection) defined inside the loop body, duplicating rendering concerns that belong at module scope
-  - packages/remediate-code/src/steps/nextStep.ts:909-914 and 1291-1296 - sessionConfig resolution duplicated verbatim in two different branches of the same function; the logic is identical but neither reuses the other's result
-
 ### DA-002 — Dependency cycle: 5 modules
 
 - Severity: high
@@ -147,24 +103,6 @@
 - Summary: Circular dependency among packages/audit-code/src/cli.ts → packages/audit-code/src/cli/auditStep.ts → packages/audit-code/src/cli/workerResult.ts → packages/audit-code/src/io/runArtifacts.ts → packages/audit-code/src/index.ts → packages/audit-code/src/cli.ts. Cycles increase coupling, complicate testing, and can cause initialization-order bugs.
 - Evidence:
   - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
-
-### REL-001 — Deprecated `skip_worker_command` no longer honoured in audit-code's `usesDeferredWorkerCommand`
-
-- Severity: high
-- Confidence: high
-- Lens: reliability
-- Files: packages/audit-code/src/types/workerSession.ts, packages/audit-code/src/types/workerSession.ts, packages/remediate-code/src/types/workerSession.ts
-- Summary: The audit-code version of `usesDeferredWorkerCommand` (packages/audit-code/src/types/workerSession.ts:35-38) was updated to check only `worker_command_mode === 'deferred'` and silently drops the deprecated `skip_worker_command` flag, while the remediate-code version still honours both. Any task.json written by older audit-code versions (or cross-package code) that sets `skip_worker_command: true` without `worker_command_mode: 'deferred'` will not be treated as deferred by the audit-code path, causing the worker command to be executed unexpectedly instead of being skipped.
-- Evidence:
-  - packages/audit-code/src/types/workerSession.ts:35-38 - usesDeferredWorkerCommand returns `task.worker_command_mode === 'deferred'` only; skip_worker_command is NOT checked despite the field being declared on WorkerTask at line 29
-  - packages/remediate-code/src/types/workerSession.ts:62-68 - usesDeferredWorkerCommand checks BOTH `worker_command_mode === 'deferred'` and `skip_worker_command === true`, the legacy field is still honoured
-  - packages/audit-code/src/types/workerSession.ts:29 - `/** @deprecated Prefer worker_command_mode: 'deferred' for new task files. */ skip_worker_command?: boolean;` is declared but the guard function no longer reads it
-  - packages/audit-code/tests/render-worker-prompt.test.mjs:73-81 - test explicitly asserts that `usesDeferredWorkerCommand({ skip_worker_command: true })` returns false, confirming the behavioural divergence is intentional but the interface still exposes the field creating a reliability trap for callers relying on the deprecated path
-  - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
-  - runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test
-  - packages/audit-code/src/types/workerSession.ts:35-39 - usesDeferredWorkerCommand returns task.worker_command_mode === 'deferred' only; skip_worker_command is never checked
-  - packages/audit-code/src/types/workerSession.ts:29 - JSDoc marks skip_worker_command as @deprecated but the guard function does not fall back to it
-  - packages/remediate-code/src/types/workerSession.ts:62-68 - the equivalent function returns task.worker_command_mode === 'deferred' || task.skip_worker_command === true, correctly handling legacy task files
 
 ### TST-001 — detectHostActiveSubagentLimit is tested with wrong argument — the env fixture is passed as envPrefix
 
@@ -209,32 +147,6 @@
   - packages/audit-code/src/orchestrator/internalExecutors.ts:566 - runRuntimeValidationExecutor begins
   - packages/audit-code/src/orchestrator/internalExecutors.ts:700 - runSynthesisExecutor begins
   - packages/audit-code/src/orchestrator/internalExecutors.ts:727 - runSynthesisNarrativeExecutor begins
-  - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
-
-### COR-001 — isLens guard missing observability — throws instead of processing
-
-- Severity: high
-- Confidence: high
-- Lens: correctness
-- Files: packages/audit-code/src/orchestrator/flowRequeue.ts
-- Summary: The isLens() predicate (lines 7-18) checks only 10 of the 11 Lens union members defined in types.ts; observability is absent. Any flow whose required_lenses includes "observability" reaches the throw at line 104, crashing buildFlowRequeueTasks instead of emitting the requeue task.
-- Evidence:
-  - packages/audit-code/src/orchestrator/flowRequeue.ts:7-18 - isLens array lists correctness, architecture, maintainability, security, reliability, performance, data_integrity, tests, operability, config_deployment — observability is not present
-  - packages/audit-code/src/orchestrator/flowRequeue.ts:102-107 - loop throws Error for any lens string that fails isLens, so a flow requiring observability triggers the throw at runtime
-  - packages/audit-code/src/types.ts:14 - Lens type union explicitly includes observability as a valid 11th member
-  - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
-
-### COR-001 — isLens() in flowRequeue.ts missing observability lens value
-
-- Severity: high
-- Confidence: high
-- Lens: correctness
-- Files: packages/audit-code/src/orchestrator/flowRequeue.ts
-- Summary: The isLens() guard in flowRequeue.ts does not include "observability" in its allowed-value list, but the Lens type in types.ts does include it. If a critical flow has "observability" as a required concern, buildFlowRequeueTasks will throw an unrecoverable error at line 104 when it tries to requeue work for that lens.
-- Evidence:
-  - packages/audit-code/src/orchestrator/flowRequeue.ts:6-17 - isLens() lists 10 lens values: correctness, architecture, maintainability, security, reliability, performance, data_integrity, tests, operability, config_deployment — observability is absent
-  - packages/audit-code/src/types.ts:14 - Lens type union includes observability as a valid member
-  - packages/audit-code/src/orchestrator/flowRequeue.ts:103-105 - throws Error when lensName passes required_lenses filter but fails isLens(), which would be the case for any observability lens from flow records
   - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
 
 ### COR-001 — MCP tool names in opencode template do not match actual server exports
@@ -287,22 +199,6 @@
 - Evidence:
   - runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test
 
-### MNT-001 — reviewPackets.ts is an 1848-line monolith mixing multiple distinct concerns
-
-- Severity: high
-- Confidence: high
-- Lens: maintainability
-- Files: packages/audit-code/src/orchestrator/reviewPackets.ts
-- Summary: The file combines graph edge collection, degree indexing, three cluster-edge strategies, entrypoint flow bridge computation, packet chunking, quality metrics, and plan metrics all in one 1848-line module. This makes navigation, testing in isolation, and safe change difficult.
-- Evidence:
-  - packages/audit-code/src/orchestrator/reviewPackets.ts:233 - collectGraphEdges(): graph edge collection concern
-  - packages/audit-code/src/orchestrator/reviewPackets.ts:292 - buildGraphDegreeIndex(): degree indexing concern
-  - packages/audit-code/src/orchestrator/reviewPackets.ts:498 - buildBoundedClusterEdges(): cluster planning concern (120 lines)
-  - packages/audit-code/src/orchestrator/reviewPackets.ts:1176 - chunkPacketTasks(): token-budget chunking concern
-  - packages/audit-code/src/orchestrator/reviewPackets.ts:1697 - buildPacketQualityMetrics(): quality metrics concern
-  - packages/audit-code/src/orchestrator/reviewPackets.ts:1773 - buildAuditPlanMetrics(): plan metrics concern (76 lines)
-  - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
-
 ### TST-001 — scheduleWave quota-enabled path and buildDispatchQuota backoff logic have no test coverage
 
 - Severity: high
@@ -342,18 +238,6 @@
   - packages/remediate-code/tests/dispatch-reconciliation.test.ts:1 - test file imports only from dispatch.js, not waveScheduler
   - runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test
 
-### TST-002 — withinRoot path-escape guard untested
-
-- Severity: high
-- Confidence: high
-- Lens: tests
-- Files: packages/audit-code/src/cli/dispatch.ts
-- Summary: withinRoot is a security-relevant path-sanitization function that throws if a path escapes the repository root, but no test verifies the throw or the normal-case return. A regression here would silently allow worker prompts to access arbitrary file system paths.
-- Evidence:
-  - packages/audit-code/src/cli/dispatch.ts:220 - if (relativePath.startsWith('..') || isAbsolute(relativePath)) throw new Error — neither the throw path nor the happy path has a dedicated test
-  - packages/audit-code/src/cli/dispatch.ts:216 - function withinRoot(root, path) used during large-file anchor extraction in prepareDispatchArtifacts but not tested in isolation
-  - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
-
 ### CD-001 — workflow_dispatch publish lacks branch gate
 
 - Severity: high
@@ -370,20 +254,6 @@
   - packages/remediate-code/.github/workflows/publish-package.yml:143 - publish step condition `github.event_name != workflow_dispatch || inputs.dry_run == false` evaluates true for default manual dispatch, so live publish runs without any branch restriction
   - packages/remediate-code/.github/workflows/publish-package.yml:149 - `npm publish --access public --tag ...` executes in the unguarded workflow_dispatch path
 
-### COR-001 — Worktree block commit failure silently ignored, causing lost file changes
-
-- Severity: high
-- Confidence: high
-- Lens: correctness
-- Files: packages/remediate-code/src/phases/implement.ts
-- Summary: In runBlockInWorktree, the return value of the git commit call is not checked. If the commit fails (empty commit, hook rejection, etc.), the function still returns { ok: true, state: blockState }. mergeWorktreeBlock then merges a branch with no new commits, so code changes from executeBlock are silently discarded while state metadata (item status=resolved) is still merged — the state diverges from the actual file state.
-- Evidence:
-  - packages/remediate-code/src/phases/implement.ts:443 - runCommand("git", ["add", "."]) result is discarded
-  - packages/remediate-code/src/phases/implement.ts:444-451 - git commit result is discarded; function falls through to return { ok: true, state: blockState } regardless
-  - packages/remediate-code/src/phases/implement.ts:499-504 - mergeWorktreeBlock merges the branch unconditionally if rebase succeeds; if commit was a no-op the merge is a no-op and changes are lost
-  - packages/remediate-code/src/phases/implement.ts:571-574 - mergeBlockState writes resolved item statuses back even when no code changes were merged
-  - runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test
-
 ### TST-002 — worktreeIsolation.ts has no dedicated unit tests; critical error-recovery branches are uncovered
 
 - Severity: high
@@ -397,19 +267,6 @@
   - packages/remediate-code/src/steps/worktreeIsolation.ts:119-129 - cleanupAllWorktrees: no test covers base-dir existence check or rm+prune path
   - packages/remediate-code/src/steps/worktreeIsolation.ts:131-138 - isGitRepo: untested; exercises git rev-parse --git-dir
   - packages/remediate-code/tests/phase-implement.test.ts:151-206 - only test referencing worktrees creates a B1 block with no commits, triggering the no-diff early-exit path; covers none of the error branches
-  - runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test
-
-### TST-002 — worktreeIsolation.ts has zero test coverage
-
-- Severity: high
-- Confidence: high
-- Lens: tests
-- Files: packages/remediate-code/src/steps/worktreeIsolation.ts
-- Summary: createWorktree, mergeWorktree, removeWorktree, cleanupAllWorktrees, and isGitRepo in worktreeIsolation.ts are untested. The crash-recovery idempotency path and the merge-conflict abort path contain non-trivial error-handling logic that is never verified.
-- Evidence:
-  - packages/remediate-code/src/steps/worktreeIsolation.ts:27-30 - crash-recovery reuse path: if existsSync(wtPath) return early - untested
-  - packages/remediate-code/src/steps/worktreeIsolation.ts:83-92 - merge-conflict abort path - untested
-  - packages/remediate-code/src/steps/worktreeIsolation.ts:131 - isGitRepo helper - untested
   - runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test
 
 ### TST-001 — All audit-code tests import compiled dist rather than source
@@ -850,16 +707,6 @@
   - packages/audit-code/src/orchestrator/auditTaskUtils.ts:3 - LENS_ORDER has 10 entries, omits architecture, includes observability
   - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
 
-### DR-006 — ensure has no environment preflight; fresh checkouts and git worktrees fail with misleading errors
-
-- Severity: medium
-- Confidence: high
-- Lens: operability
-- Files: packages/audit-code/audit-code-wrapper-lib.mjs, packages/audit-code/audit-code.mjs
-- Summary: Following the documented loader (`ensure`, then `next-step`) in a fresh checkout or a git worktree fails before any audit work begins. With no build present, `ensure` throws a raw `ENOENT ... packages/audit-code/dist`. Worse: in a git worktree that has not been `npm install`ed, the workspace symlink node_modules/@audit-tools/shared is absent, so module resolution walks up to a *different* checkout's stale shared/dist and the dependents emit ~16 TS2305 'has no exported member' errors (spawnLoggedCommand, buildQuotaSource, scheduleWave, ...) that masquerade as a broken repository — when the source is in fact consistent. This was observed first-hand during this run: this session's own Claude-Code worktree had no node_modules, so resolution resolved shared against the main checkout. Because the tool is frequently launched from throwaway worktrees, this is a real operability gap. Recommendation: add a preflight/doctor to `ensure` that verifies deps are installed, @audit-tools/shared is built, the workspace symlink resolves to the *local* shared, and the audit-code dist exists — and on any failure prints the exact remediation (install + build order) instead of a stack trace.
-- Evidence:
-  - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
-
 ### TST-002 — executeClosingAction git/npm action branches have no test coverage
 
 - Severity: medium
@@ -887,16 +734,6 @@
   - packages/audit-code/schemas/external_analyzer_results.schema.json:62 - "line_start": { "type": "integer" } with no minimum constraint
   - packages/audit-code/schemas/external_analyzer_results.schema.json:63 - "line_end": { "type": "integer" } with no minimum constraint
   - packages/audit-code/schemas/finding.schema.json:51-52 - the same fields carry minimum: 1 in the finding contract
-  - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
-
-### DR-005 — File-type classifier mislabels Markdown and YAML in the inventory the user sees first
-
-- Severity: medium
-- Confidence: high
-- Lens: data_integrity
-- Files: packages/audit-code/src/extractors/fileInventory.ts, packages/audit-code/src/extractors/languageMap.generated.ts
-- Summary: The design-review context this very run produced reports the file inventory as '489 files (typescript: 245, javascript: 90, json: 87, gcc machine description: 49, miniyaml: 11, ...)'. This repo contains zero GCC machine-description or MiniYAML files — those 49 + 11 are the project's Markdown (.md) and YAML (.yml/.yaml) files. GCC uses the .md extension for machine descriptions and OpenRA uses MiniYAML, so the generated language map (extractors/languageMap.generated.ts) is resolving an extension to a github-linguist language without weighting by popularity/primary status, letting an obscure language win over Markdown/YAML. This is the first artifact a user reads, and it visibly mislabels the project — undermining trust in every downstream finding. Recommendation: fix the precedence during language-map generation (prefer the primary/most-popular language for an extension, or special-case .md/.yml/.yaml), and add a unit test asserting .md resolves to Markdown. Consider sourcing detection from a maintained classifier rather than a hand-generated map.
-- Evidence:
   - runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test
 
 ### TST-004 — fileAnchors.ts (buildFileAnchorSummary) has zero test coverage

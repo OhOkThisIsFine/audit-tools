@@ -1,3 +1,5 @@
+> **Start with [`CLAUDE.md`](../../CLAUDE.md).** Project goals, the concepts that tie the auditor and remediator together, conventions, and a standing-decisions log live there — check the decision log before asking the user which approach to take.
+
 <!-- audit-code:begin -->
 ## /audit-code
 When the user enters `/audit-code`, treat it as this repository's autonomous audit workflow.

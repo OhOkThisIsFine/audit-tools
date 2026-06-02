@@ -1,11 +1,11 @@
 {
   "contract_version": "audit-tools/audit-findings/v1",
   "summary": {
-    "finding_count": 404,
+    "finding_count": 392,
     "work_block_count": 3,
     "severity_breakdown": {
-      "high": 27,
-      "medium": 127,
+      "high": 17,
+      "medium": 125,
       "low": 235,
       "info": 15
     },
@@ -16,50 +16,6 @@
     }
   },
   "findings": [
-    {
-      "id": "TST-001",
-      "title": "autoFixExecutor has zero test coverage",
-      "category": "missing-tests",
-      "severity": "high",
-      "confidence": "high",
-      "lens": "tests",
-      "summary": "runAutoFixExecutor (autoFixExecutor.ts) is the Phase 1 executor that conditionally runs code formatters but has no test coverage. Neither its returned artifact shape, nor its conditional formatter dispatch (Prettier only when config present, Black for Python, etc.), nor its behavior when file_disposition is absent are exercised by any test.",
-      "affected_files": [
-        {
-          "path": "packages/audit-code/src/orchestrator/autoFixExecutor.ts",
-          "line_start": 54,
-          "line_end": 155
-        }
-      ],
-      "evidence": [
-        "packages/audit-code/src/orchestrator/autoFixExecutor.ts:54 - runAutoFixExecutor is the sole export; no test file in packages/audit-code/tests/ imports autoFixExecutor or references runAutoFixExecutor",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
-      ]
-    },
-    {
-      "id": "COR-001",
-      "title": "Branch not cleaned up when git worktree add fails in runBlockInWorktree",
-      "category": "missing-cleanup-on-partial-failure",
-      "severity": "high",
-      "confidence": "high",
-      "lens": "correctness",
-      "summary": "In runBlockInWorktree, git branch is created before git worktree add. If branch creation succeeds but worktree add fails, the function returns { ok: false } without deleting the dangling branch. On any subsequent invocation for the same block, git branch will fail (branch already exists), making both branchRes.status !== 0 and worktreeRes.status !== 0 true and permanently preventing worktree mode for that block ID without any diagnostic message about the root cause.",
-      "affected_files": [
-        {
-          "path": "packages/remediate-code/src/phases/implement.ts",
-          "line_start": 418,
-          "line_end": 434,
-          "symbol": "runBlockInWorktree"
-        }
-      ],
-      "evidence": [
-        "packages/remediate-code/src/phases/implement.ts:418 - git branch blockBranch runs and can succeed",
-        "packages/remediate-code/src/phases/implement.ts:422 - git worktree add runs second; can fail independently",
-        "packages/remediate-code/src/phases/implement.ts:428 - guard checks branchRes.status !== 0 || worktreeRes.status !== 0 and returns { ok: false } without any cleanup of the already-created branch",
-        "packages/remediate-code/src/phases/implement.ts:510 - branch cleanup (git branch -D) only runs inside mergeWorktreeBlock, which is never reached when runBlockInWorktree returns { ok: false }",
-        "runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test"
-      ]
-    },
     {
       "id": "MNT-002",
       "title": "cli.ts is a 1728-line mixed-concern file combining command implementations with re-export surface",
@@ -161,36 +117,6 @@
       ]
     },
     {
-      "id": "MNT-001",
-      "title": "decideNextStepInner is a ~740-line monolithic function",
-      "category": "excessive-function-length",
-      "severity": "high",
-      "confidence": "high",
-      "lens": "maintainability",
-      "summary": "The private function decideNextStepInner (lines 747-1487) spans ~740 lines and implements all 10+ state machine transitions as flat if-chains inside a single for-loop, with nesting depth reaching 6+ levels and local type aliases and helper closures defined mid-body. This makes individual transition logic hard to locate, test, or extend without risk of accidentally affecting adjacent branches.",
-      "affected_files": [
-        {
-          "path": "packages/remediate-code/src/steps/nextStep.ts",
-          "line_start": 747,
-          "line_end": 1487,
-          "symbol": "decideNextStepInner"
-        }
-      ],
-      "evidence": [
-        "packages/remediate-code/src/steps/nextStep.ts:747 - function decideNextStepInner begins",
-        "packages/remediate-code/src/steps/nextStep.ts:1487 - function ends; ~740 lines of state-machine logic, inline prompt strings, and nested closures all in one function body",
-        "runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test",
-        "packages/remediate-code/src/steps/nextStep.ts:747 - decideNextStepInner begins; function body runs to line 1487, ~740 lines total",
-        "packages/remediate-code/src/steps/nextStep.ts:762 - outer for-loop contains all state-machine branches with no sub-function extraction; each iteration handles a different status via sequential if-guards",
-        "packages/remediate-code/src/steps/nextStep.ts:1045-1048 - nesting reaches 5 levels: function > for-loop > if(documenting) > if(!previewAckPath) > if(!reviewedPath), then another inner for-loop at lines 1068-1092",
-        "packages/remediate-code/src/steps/nextStep.ts:1050-1065 - local type alias PreliminaryEntry defined inside a nested if-branch mid-function body; should be a module-level type",
-        "packages/remediate-code/src/steps/nextStep.ts:1176-1185 - two more local type aliases ReviewedEntry and PrelimEntry defined inside a second nested branch",
-        "packages/remediate-code/src/steps/nextStep.ts:1208-1237 - three closure functions (isNoOp, renderTierSection, renderNoOpSection) defined inside the loop body, duplicating rendering concerns that belong at module scope",
-        "packages/remediate-code/src/steps/nextStep.ts:909-914 and 1291-1296 - sessionConfig resolution duplicated verbatim in two different branches of the same function; the logic is identical but neither reuses the other's result"
-      ],
-      "systemic": false
-    },
-    {
       "id": "DA-002",
       "title": "Dependency cycle: 5 modules",
       "category": "dependency_cycle",
@@ -222,47 +148,6 @@
       "evidence": [
         "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
       ]
-    },
-    {
-      "id": "REL-001",
-      "title": "Deprecated `skip_worker_command` no longer honoured in audit-code's `usesDeferredWorkerCommand`",
-      "category": "broken-deferred-mode-detection",
-      "severity": "high",
-      "confidence": "high",
-      "lens": "reliability",
-      "summary": "The audit-code version of `usesDeferredWorkerCommand` (packages/audit-code/src/types/workerSession.ts:35-38) was updated to check only `worker_command_mode === 'deferred'` and silently drops the deprecated `skip_worker_command` flag, while the remediate-code version still honours both. Any task.json written by older audit-code versions (or cross-package code) that sets `skip_worker_command: true` without `worker_command_mode: 'deferred'` will not be treated as deferred by the audit-code path, causing the worker command to be executed unexpectedly instead of being skipped.",
-      "affected_files": [
-        {
-          "path": "packages/audit-code/src/types/workerSession.ts",
-          "line_start": 27,
-          "line_end": 39,
-          "symbol": "usesDeferredWorkerCommand"
-        },
-        {
-          "path": "packages/audit-code/src/types/workerSession.ts",
-          "line_start": 35,
-          "line_end": 39,
-          "symbol": "usesDeferredWorkerCommand"
-        },
-        {
-          "path": "packages/remediate-code/src/types/workerSession.ts",
-          "line_start": 62,
-          "line_end": 68,
-          "symbol": "usesDeferredWorkerCommand"
-        }
-      ],
-      "evidence": [
-        "packages/audit-code/src/types/workerSession.ts:35-38 - usesDeferredWorkerCommand returns `task.worker_command_mode === 'deferred'` only; skip_worker_command is NOT checked despite the field being declared on WorkerTask at line 29",
-        "packages/remediate-code/src/types/workerSession.ts:62-68 - usesDeferredWorkerCommand checks BOTH `worker_command_mode === 'deferred'` and `skip_worker_command === true`, the legacy field is still honoured",
-        "packages/audit-code/src/types/workerSession.ts:29 - `/** @deprecated Prefer worker_command_mode: 'deferred' for new task files. */ skip_worker_command?: boolean;` is declared but the guard function no longer reads it",
-        "packages/audit-code/tests/render-worker-prompt.test.mjs:73-81 - test explicitly asserts that `usesDeferredWorkerCommand({ skip_worker_command: true })` returns false, confirming the behavioural divergence is intentional but the interface still exposes the field creating a reliability trap for callers relying on the deprecated path",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test",
-        "runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test",
-        "packages/audit-code/src/types/workerSession.ts:35-39 - usesDeferredWorkerCommand returns task.worker_command_mode === 'deferred' only; skip_worker_command is never checked",
-        "packages/audit-code/src/types/workerSession.ts:29 - JSDoc marks skip_worker_command as @deprecated but the guard function does not fall back to it",
-        "packages/remediate-code/src/types/workerSession.ts:62-68 - the equivalent function returns task.worker_command_mode === 'deferred' || task.skip_worker_command === true, correctly handling legacy task files"
-      ],
-      "systemic": false
     },
     {
       "id": "TST-001",
@@ -347,52 +232,6 @@
         "packages/audit-code/src/orchestrator/internalExecutors.ts:566 - runRuntimeValidationExecutor begins",
         "packages/audit-code/src/orchestrator/internalExecutors.ts:700 - runSynthesisExecutor begins",
         "packages/audit-code/src/orchestrator/internalExecutors.ts:727 - runSynthesisNarrativeExecutor begins",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
-      ]
-    },
-    {
-      "id": "COR-001",
-      "title": "isLens guard missing observability — throws instead of processing",
-      "category": "missing-validation",
-      "severity": "high",
-      "confidence": "high",
-      "lens": "correctness",
-      "summary": "The isLens() predicate (lines 7-18) checks only 10 of the 11 Lens union members defined in types.ts; observability is absent. Any flow whose required_lenses includes \"observability\" reaches the throw at line 104, crashing buildFlowRequeueTasks instead of emitting the requeue task.",
-      "affected_files": [
-        {
-          "path": "packages/audit-code/src/orchestrator/flowRequeue.ts",
-          "line_start": 7,
-          "line_end": 19,
-          "symbol": "isLens"
-        }
-      ],
-      "evidence": [
-        "packages/audit-code/src/orchestrator/flowRequeue.ts:7-18 - isLens array lists correctness, architecture, maintainability, security, reliability, performance, data_integrity, tests, operability, config_deployment — observability is not present",
-        "packages/audit-code/src/orchestrator/flowRequeue.ts:102-107 - loop throws Error for any lens string that fails isLens, so a flow requiring observability triggers the throw at runtime",
-        "packages/audit-code/src/types.ts:14 - Lens type union explicitly includes observability as a valid 11th member",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
-      ]
-    },
-    {
-      "id": "COR-001",
-      "title": "isLens() in flowRequeue.ts missing observability lens value",
-      "category": "missing-validation",
-      "severity": "high",
-      "confidence": "high",
-      "lens": "correctness",
-      "summary": "The isLens() guard in flowRequeue.ts does not include \"observability\" in its allowed-value list, but the Lens type in types.ts does include it. If a critical flow has \"observability\" as a required concern, buildFlowRequeueTasks will throw an unrecoverable error at line 104 when it tries to requeue work for that lens.",
-      "affected_files": [
-        {
-          "path": "packages/audit-code/src/orchestrator/flowRequeue.ts",
-          "line_start": 5,
-          "line_end": 18,
-          "symbol": "isLens"
-        }
-      ],
-      "evidence": [
-        "packages/audit-code/src/orchestrator/flowRequeue.ts:6-17 - isLens() lists 10 lens values: correctness, architecture, maintainability, security, reliability, performance, data_integrity, tests, operability, config_deployment — observability is absent",
-        "packages/audit-code/src/types.ts:14 - Lens type union includes observability as a valid member",
-        "packages/audit-code/src/orchestrator/flowRequeue.ts:103-105 - throws Error when lensName passes required_lenses filter but fails isLens(), which would be the case for any observability lens from flow records",
         "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
       ]
     },
@@ -497,31 +336,6 @@
       ]
     },
     {
-      "id": "MNT-001",
-      "title": "reviewPackets.ts is an 1848-line monolith mixing multiple distinct concerns",
-      "category": "excessive-file-length",
-      "severity": "high",
-      "confidence": "high",
-      "lens": "maintainability",
-      "summary": "The file combines graph edge collection, degree indexing, three cluster-edge strategies, entrypoint flow bridge computation, packet chunking, quality metrics, and plan metrics all in one 1848-line module. This makes navigation, testing in isolation, and safe change difficult.",
-      "affected_files": [
-        {
-          "path": "packages/audit-code/src/orchestrator/reviewPackets.ts",
-          "line_start": 1,
-          "line_end": 1848
-        }
-      ],
-      "evidence": [
-        "packages/audit-code/src/orchestrator/reviewPackets.ts:233 - collectGraphEdges(): graph edge collection concern",
-        "packages/audit-code/src/orchestrator/reviewPackets.ts:292 - buildGraphDegreeIndex(): degree indexing concern",
-        "packages/audit-code/src/orchestrator/reviewPackets.ts:498 - buildBoundedClusterEdges(): cluster planning concern (120 lines)",
-        "packages/audit-code/src/orchestrator/reviewPackets.ts:1176 - chunkPacketTasks(): token-budget chunking concern",
-        "packages/audit-code/src/orchestrator/reviewPackets.ts:1697 - buildPacketQualityMetrics(): quality metrics concern",
-        "packages/audit-code/src/orchestrator/reviewPackets.ts:1773 - buildAuditPlanMetrics(): plan metrics concern (76 lines)",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
-      ]
-    },
-    {
       "id": "TST-001",
       "title": "scheduleWave quota-enabled path and buildDispatchQuota backoff logic have no test coverage",
       "category": "missing-test-coverage",
@@ -600,28 +414,6 @@
       ]
     },
     {
-      "id": "TST-002",
-      "title": "withinRoot path-escape guard untested",
-      "category": "missing-edge-case-tests",
-      "severity": "high",
-      "confidence": "high",
-      "lens": "tests",
-      "summary": "withinRoot is a security-relevant path-sanitization function that throws if a path escapes the repository root, but no test verifies the throw or the normal-case return. A regression here would silently allow worker prompts to access arbitrary file system paths.",
-      "affected_files": [
-        {
-          "path": "packages/audit-code/src/cli/dispatch.ts",
-          "line_start": 216,
-          "line_end": 224,
-          "symbol": "withinRoot"
-        }
-      ],
-      "evidence": [
-        "packages/audit-code/src/cli/dispatch.ts:220 - if (relativePath.startsWith('..') || isAbsolute(relativePath)) throw new Error — neither the throw path nor the happy path has a dedicated test",
-        "packages/audit-code/src/cli/dispatch.ts:216 - function withinRoot(root, path) used during large-file anchor extraction in prepareDispatchArtifacts but not tested in isolation",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
-      ]
-    },
-    {
       "id": "CD-001",
       "title": "workflow_dispatch publish lacks branch gate",
       "category": "missing-branch-filter",
@@ -660,30 +452,6 @@
       "systemic": false
     },
     {
-      "id": "COR-001",
-      "title": "Worktree block commit failure silently ignored, causing lost file changes",
-      "category": "missing-error-check",
-      "severity": "high",
-      "confidence": "high",
-      "lens": "correctness",
-      "summary": "In runBlockInWorktree, the return value of the git commit call is not checked. If the commit fails (empty commit, hook rejection, etc.), the function still returns { ok: true, state: blockState }. mergeWorktreeBlock then merges a branch with no new commits, so code changes from executeBlock are silently discarded while state metadata (item status=resolved) is still merged — the state diverges from the actual file state.",
-      "affected_files": [
-        {
-          "path": "packages/remediate-code/src/phases/implement.ts",
-          "line_start": 443,
-          "line_end": 452,
-          "symbol": "runBlockInWorktree"
-        }
-      ],
-      "evidence": [
-        "packages/remediate-code/src/phases/implement.ts:443 - runCommand(\"git\", [\"add\", \".\"]) result is discarded",
-        "packages/remediate-code/src/phases/implement.ts:444-451 - git commit result is discarded; function falls through to return { ok: true, state: blockState } regardless",
-        "packages/remediate-code/src/phases/implement.ts:499-504 - mergeWorktreeBlock merges the branch unconditionally if rebase succeeds; if commit was a no-op the merge is a no-op and changes are lost",
-        "packages/remediate-code/src/phases/implement.ts:571-574 - mergeBlockState writes resolved item statuses back even when no code changes were merged",
-        "runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test"
-      ]
-    },
-    {
       "id": "TST-002",
       "title": "worktreeIsolation.ts has no dedicated unit tests; critical error-recovery branches are uncovered",
       "category": "missing-test-coverage",
@@ -704,28 +472,6 @@
         "packages/remediate-code/src/steps/worktreeIsolation.ts:119-129 - cleanupAllWorktrees: no test covers base-dir existence check or rm+prune path",
         "packages/remediate-code/src/steps/worktreeIsolation.ts:131-138 - isGitRepo: untested; exercises git rev-parse --git-dir",
         "packages/remediate-code/tests/phase-implement.test.ts:151-206 - only test referencing worktrees creates a B1 block with no commits, triggering the no-diff early-exit path; covers none of the error branches",
-        "runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test"
-      ]
-    },
-    {
-      "id": "TST-002",
-      "title": "worktreeIsolation.ts has zero test coverage",
-      "category": "missing-test-coverage",
-      "severity": "high",
-      "confidence": "high",
-      "lens": "tests",
-      "summary": "createWorktree, mergeWorktree, removeWorktree, cleanupAllWorktrees, and isGitRepo in worktreeIsolation.ts are untested. The crash-recovery idempotency path and the merge-conflict abort path contain non-trivial error-handling logic that is never verified.",
-      "affected_files": [
-        {
-          "path": "packages/remediate-code/src/steps/worktreeIsolation.ts",
-          "line_start": 21,
-          "line_end": 138
-        }
-      ],
-      "evidence": [
-        "packages/remediate-code/src/steps/worktreeIsolation.ts:27-30 - crash-recovery reuse path: if existsSync(wtPath) return early - untested",
-        "packages/remediate-code/src/steps/worktreeIsolation.ts:83-92 - merge-conflict abort path - untested",
-        "packages/remediate-code/src/steps/worktreeIsolation.ts:131 - isGitRepo helper - untested",
         "runtime:unit:packages-remediate-code: confirmed — Deterministic runtime command succeeded: npm test"
       ]
     },
@@ -1679,27 +1425,6 @@
       ]
     },
     {
-      "id": "DR-006",
-      "title": "ensure has no environment preflight; fresh checkouts and git worktrees fail with misleading errors",
-      "category": "missing_capability",
-      "severity": "medium",
-      "confidence": "high",
-      "lens": "operability",
-      "summary": "Following the documented loader (`ensure`, then `next-step`) in a fresh checkout or a git worktree fails before any audit work begins. With no build present, `ensure` throws a raw `ENOENT ... packages/audit-code/dist`. Worse: in a git worktree that has not been `npm install`ed, the workspace symlink node_modules/@audit-tools/shared is absent, so module resolution walks up to a *different* checkout's stale shared/dist and the dependents emit ~16 TS2305 'has no exported member' errors (spawnLoggedCommand, buildQuotaSource, scheduleWave, ...) that masquerade as a broken repository — when the source is in fact consistent. This was observed first-hand during this run: this session's own Claude-Code worktree had no node_modules, so resolution resolved shared against the main checkout. Because the tool is frequently launched from throwaway worktrees, this is a real operability gap. Recommendation: add a preflight/doctor to `ensure` that verifies deps are installed, @audit-tools/shared is built, the workspace symlink resolves to the *local* shared, and the audit-code dist exists — and on any failure prints the exact remediation (install + build order) instead of a stack trace.",
-      "affected_files": [
-        {
-          "path": "packages/audit-code/audit-code-wrapper-lib.mjs"
-        },
-        {
-          "path": "packages/audit-code/audit-code.mjs"
-        }
-      ],
-      "systemic": false,
-      "evidence": [
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
-      ]
-    },
-    {
       "id": "TST-002",
       "title": "executeClosingAction git/npm action branches have no test coverage",
       "category": "missing-test-coverage",
@@ -1743,27 +1468,6 @@
         "packages/audit-code/schemas/external_analyzer_results.schema.json:62 - \"line_start\": { \"type\": \"integer\" } with no minimum constraint",
         "packages/audit-code/schemas/external_analyzer_results.schema.json:63 - \"line_end\": { \"type\": \"integer\" } with no minimum constraint",
         "packages/audit-code/schemas/finding.schema.json:51-52 - the same fields carry minimum: 1 in the finding contract",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
-      ]
-    },
-    {
-      "id": "DR-005",
-      "title": "File-type classifier mislabels Markdown and YAML in the inventory the user sees first",
-      "category": "tool_opportunity",
-      "severity": "medium",
-      "confidence": "high",
-      "lens": "data_integrity",
-      "summary": "The design-review context this very run produced reports the file inventory as '489 files (typescript: 245, javascript: 90, json: 87, gcc machine description: 49, miniyaml: 11, ...)'. This repo contains zero GCC machine-description or MiniYAML files — those 49 + 11 are the project's Markdown (.md) and YAML (.yml/.yaml) files. GCC uses the .md extension for machine descriptions and OpenRA uses MiniYAML, so the generated language map (extractors/languageMap.generated.ts) is resolving an extension to a github-linguist language without weighting by popularity/primary status, letting an obscure language win over Markdown/YAML. This is the first artifact a user reads, and it visibly mislabels the project — undermining trust in every downstream finding. Recommendation: fix the precedence during language-map generation (prefer the primary/most-popular language for an extension, or special-case .md/.yml/.yaml), and add a unit test asserting .md resolves to Markdown. Consider sourcing detection from a maintained classifier rather than a hand-generated map.",
-      "affected_files": [
-        {
-          "path": "packages/audit-code/src/extractors/fileInventory.ts"
-        },
-        {
-          "path": "packages/audit-code/src/extractors/languageMap.generated.ts"
-        }
-      ],
-      "systemic": false,
-      "evidence": [
         "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
       ]
     },
@@ -9660,10 +9364,6 @@
       "finding_ids": [
         "CD-001",
         "COR-001",
-        "COR-001",
-        "COR-001",
-        "COR-001",
-        "COR-001",
         "DA-002",
         "DR-001",
         "DR-002",
@@ -9672,18 +9372,12 @@
         "MNT-001",
         "MNT-001",
         "MNT-001",
-        "MNT-001",
-        "MNT-001",
         "MNT-002",
-        "REL-001",
         "TST-001",
         "TST-001",
         "TST-001",
         "TST-001",
         "TST-001",
-        "TST-001",
-        "TST-002",
-        "TST-002",
         "TST-002",
         "CD-001",
         "CD-002",
@@ -9711,8 +9405,6 @@
         "DI-003",
         "DI-004",
         "DR-004",
-        "DR-005",
-        "DR-006",
         "DR-007",
         "MNT-001",
         "MNT-001",

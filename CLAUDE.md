@@ -11,6 +11,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 They form a pipeline: audit → report → remediate. Each is published independently to npm.
 
+## Project goals & the concepts that bind it
+
+The aim is a pair of autonomous orchestrators that take a codebase from *understanding* to *verified improvement* with minimal human babysitting — trustworthy because the machine parts are deterministic and the LLM parts are bounded and attributable. A handful of concepts tie the whole system together; when a decision is unclear, reason from these:
+
+- **One pipeline, two halves.** audit-code produces a findings contract; remediate-code consumes it and applies fixes. `audit-findings.json` is the seam between them — the machine contract — and `audit-report.md` is only a human-facing render of it. The JSON is the source of truth on both sides.
+- **Obligation-driven, one bounded step per invocation.** Neither tool "runs to completion" internally. Each `next-step` derives state from artifacts, picks the highest-priority unsatisfied obligation, does one bounded unit of work, persists, and returns. This is what makes runs resumable, parallelizable, and failure-isolated — and it's the shared shape both orchestrators implement.
+- **Deterministic by default; LLM only for judgment.** Anything a deterministic extractor or validator can do, it should. The LLM is reserved for semantic review, synthesis, ambiguity resolution, and explicit low-confidence fallbacks — always bounded and recorded.
+- **Artifacts are continuity; the dependency DAG is truth.** Durable state lives in artifacts, and staleness propagates along an explicit dependency map — never ad-hoc freshness checks.
+- **Language-neutral by contract.** The graph and artifact shapes are language-agnostic. New language support enriches those shared contracts; it must not fork the planning logic per ecosystem.
+- **Conversation-first.** The product is the slash workflow inside a host conversation; the CLI and MCP surfaces are backend/fallback, not the intended mental model.
+
+`@audit-tools/shared` exists to keep these concepts *single-sourced* — the step contract, the artifact/graph types, and the quota model live there precisely so the two orchestrators can't drift apart.
+
 ## Repository layout
 
 | Directory | npm package | bin / slash command | Role |
@@ -156,3 +169,13 @@ Trigger this flow with a package's `release:patch` / `:minor` / `:major` scripts
 - **Prefer deterministic execution over LLM inference** when both can satisfy an obligation. Upstream artifacts must be valid before refreshing downstream ones.
 - **Language-neutral graph contract.** Graph edges use `from`, `to`, `kind`, optional `direction`/`confidence`/`reason`. New language analyzers should enrich the shared artifacts, not invent language-specific planning paths.
 - **Windows-aware.** This repo is developed on Windows; package-manager shims (`npm`, `npx`, `pnpm`, `yarn`) run through the command shell so `.cmd` wrappers resolve reliably.
+
+## Preferences & standing decisions
+
+A living log of how to resolve recurring forks, so agents don't re-ask settled questions. **Before asking the user to choose between approaches, check here (and the Conventions above). After the user resolves an ambiguity, append the decision here** — one line: *When X, prefer Y — why.*
+
+- **Ideal code over compatibility.** One user, no external consumers → prefer the cleanest design and delete deprecated/legacy paths rather than preserving them for back-compat.
+- **Keep the two orchestrators in parity.** Mirror structure, contracts, and conventions across audit-code and remediate-code; a fix in one usually belongs in both, and genuinely shared logic belongs in `@audit-tools/shared`.
+- **Docs capture durable concepts, not current state.** This project moves fast; prefer timeless conceptual docs (and this log) over status / roadmap / file-state notes that rot. If a doc would only record "where things are now," don't write it.
+- **A needed manual flag is a bug signal.** If a task seems to require `--root`, a provider, or a model flag, fix auto-resolution rather than document the flag.
+- **Resolve toward the durable contract.** LLM-vs-deterministic → deterministic; any graph/language question → the language-neutral contract (see Conventions).

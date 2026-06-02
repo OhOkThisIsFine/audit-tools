@@ -1,9 +1,9 @@
-# Remediator Lambda Plan
+# Remediation Goals
 
-This document is the normative product definition for `remediator-lambda`, an
-automated remediation tool that may be paired with `auditor-lambda` but runs
-independently of it. When the two are paired, read alongside
-`auditor-lambda/spec/audit-goals.md`.
+This document is the normative product definition for the remediator. Other
+specs and docs should defer to it. The remediator may be paired with the auditor
+but runs independently; when the two are paired, read alongside the auditor's
+[`spec/audit-goals.md`](../../audit-code/spec/audit-goals.md).
 
 ## Core principles
 
@@ -22,15 +22,17 @@ independently of it. When the two are paired, read alongside
 
 Remediator accepts any of:
 
-- An `audit-report.md` produced by `auditor-lambda`. The report is
-  deterministic Markdown, so finding extraction from it is deterministic.
-- An external audit document in free-form Markdown or other text. Findings
-  are extracted by the LLM.
+- An `audit-findings.json` produced by `auditor-lambda` — the canonical machine
+  contract. Finding extraction from it is deterministic: findings, work-block
+  assignments, and synthesis themes are adopted verbatim, with no LLM involved.
+- An audit document in free-form Markdown or other text — including
+  `auditor-lambda`'s human-facing `audit-report.md`. Findings are extracted by
+  the LLM.
 - A conversation transcript or user-supplied list of issues. Findings are
   extracted by the LLM.
 
-Auditor-lambda only retains the finalized report on success, so remediator
-does not rely on `.audit-artifacts/` being present.
+Auditor-lambda only retains the finalized report and `audit-findings.json` on
+success, so remediator does not rely on `.audit-artifacts/` being present.
 
 Remediator does not re-run the auditor and does not modify its inputs.
 
@@ -60,13 +62,13 @@ the item record.
 
 ### Phase 1: Plan
 
-Deterministic when the input is an `audit-report.md`; LLM-assisted when the
-input is free-form or conversational.
+Deterministic when the input is an `audit-findings.json`; LLM-assisted when the
+input is Markdown, free-form, or conversational.
 
-- Extract the findings list. Deterministic parse for auditor-lambda reports,
-  LLM extraction otherwise, emitting the same `finding.schema.json` shape in
-  either case.
-- If the input already carries block assignments (as auditor-lambda's report
+- Extract the findings list. Deterministic parse of `audit-findings.json`,
+  LLM extraction otherwise (including `audit-report.md`), emitting the same
+  `finding.schema.json` shape in either case.
+- If the input already carries block assignments (as `audit-findings.json`
   does), adopt them. Otherwise, compute blocks using a deterministic hierarchy:
   1. **Test Graph:** If supported, group findings that trigger overlapping test suites.
   2. **Git Co-commit:** Group affected files historically modified together (Jaccard similarity > 0.5).
@@ -174,7 +176,7 @@ blocked items, Phase 3b is skipped.
 
 Deterministic responsibilities:
 
-- finding extraction from an auditor-lambda report
+- finding extraction from an auditor-lambda `audit-findings.json`
 - block derivation and parallel-safety computation
 - project-type and closing-action detection
 - test execution and result capture
@@ -185,7 +187,7 @@ Deterministic responsibilities:
 
 LLM responsibilities:
 
-- finding extraction from free-form or conversational inputs
+- finding extraction from Markdown, free-form, or conversational inputs
 - item write-ups and ambiguity identification
 - test authoring
 - refactor authoring

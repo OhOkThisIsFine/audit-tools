@@ -83,3 +83,15 @@ The orchestrator may mark completion only when:
 - no mandatory downstream artifact is stale
 - no required requeue remains
 - no mandatory runtime validation obligation is unresolved in a way that blocks completion
+
+## Anti-drift rule
+
+No new feature or component should be added without answering:
+
+1. which obligation does it satisfy?
+2. which executor owns it?
+3. how does the orchestrator know when to run it?
+4. which artifacts does it read and write?
+5. what becomes stale when it changes?
+
+A component that answers none of these is likely product drift.

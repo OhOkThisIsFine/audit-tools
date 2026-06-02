@@ -1,10 +1,10 @@
 # remediator-lambda
 
 Conversation-first remediation orchestrator for arbitrary repositories. It
-accepts an `audit-report.md` from
-[auditor-lambda](https://github.com/OhOkThisIsFine/auditor-lambda) or a
-feedback document, then advances through one backend-rendered step prompt at a
-time.
+accepts the auditor's `audit-findings.json` (the deterministic machine contract)
+from [auditor-lambda](https://github.com/OhOkThisIsFine/auditor-lambda), an
+`audit-report.md` or other feedback document (LLM-extracted), or conversational
+feedback — then advances through one backend-rendered step prompt at a time.
 
 ## Primary Usage
 
@@ -15,7 +15,7 @@ npm install -g remediator-lambda
 Then start from a conversation:
 
 ```text
-/remediate-code path/to/audit-report.md
+/remediate-code path/to/audit-findings.json
 ```
 
 You can also start with free-form feedback:
@@ -72,13 +72,14 @@ call `next-step` again only when the prompt says to continue. The deprecated
 
 ## Auditor Compatibility
 
-Auditor-shaped Markdown (`# Audit Report` with `## Findings`) is parsed
-deterministically only when it also includes `## Work Blocks`. Free-form or
-partial Markdown is routed through intake synthesis and then bounded finding
-extraction so it cannot silently produce a zero-finding plan. Parser
-compatibility is locked by
-`tests/fixtures/auditor-contract-audit-report.md`, regenerated with
-`npm run fixtures:auditor-contract` from auditor-lambda's report renderer.
+The auditor's canonical `audit-findings.json` is parsed **deterministically** —
+findings, work-block assignments, and synthesis themes are adopted verbatim, with
+no LLM involved. A Markdown `audit-report.md` (or any other free-form or partial
+document) is instead routed through intake synthesis and bounded LLM finding
+extraction, so it cannot silently produce a zero-finding plan. The deterministic
+contract is locked by `tests/fixtures/auditor-contract-audit-findings.json`,
+regenerated with `npm run fixtures:auditor-contract` from auditor-lambda's
+findings renderer.
 
 ## Intake
 
