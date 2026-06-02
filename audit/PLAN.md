@@ -1,9 +1,43 @@
-# Audit-tools self-audit — remediation plan
+# Audit-tools self-audit — remediation plan & handoff
 
-> Turns the remaining work in [`HANDOFF.md`](HANDOFF.md) (6 unfixed meta-audit
-> issues) and the 404 static findings in [`audit-report.md`](audit-report.md)
-> into a prioritized, fix-vs-accept plan. **No code changed yet** — this is the
-> planning deliverable.
+> **Status (2026-06-01): executed and shipped.** Began as the plan for the 6
+> unfixed meta-audit issues in [`HANDOFF.md`](HANDOFF.md) + the 404 findings in
+> [`audit-report.md`](audit-report.md); now also the record of what was done.
+> **Published:** `@audit-tools/shared@0.6.0`, `auditor-lambda@0.7.0`,
+> `remediator-lambda@0.5.0` (master @ `16b0510`). This file is the canonical
+> next-agent handoff.
+
+## Next pickup — start here
+
+Substantive remediation is done and released. What remains (none blocking):
+
+1. **Decompose the 3 large files** (clean cuts identified; careful pure-moves,
+   each verified by the full suite). `reviewPackets.ts` planning-graph-edges
+   cluster → `reviewPacketGraph.ts` (sizing already split to
+   `reviewPacketSizing.ts`); `internalExecutors.ts` → per-phase modules (hoist
+   `ExecutorRunResult` + shared helpers first); remediate `decideNextStep` →
+   extract transition branches into helpers.
+2. **A1 finalization root-cause convergence.** The thrashing guard in
+   `cli/nextStepCommand.ts` stops the `runtime_validation ↔ synthesis` spin
+   gracefully, but the *why* (revisions churn while content is stable) is
+   unfixed — needs reproduction with a seeded `.audit-artifacts/`. Suspects:
+   `orchestrator/state.ts` `runtimeReady` vs `runtimeValidation.ts` output;
+   revision-vs-content staleness in `orchestrator/staleness.ts`.
+3. **Quota/dispatch vision** (memory `quota-dispatch-vision`): per-model
+   detection landed (`resolveHostModel`); remaining is on-the-fly adaptation in
+   the conversation-first path + heterogeneous multi-agent dispatch.
+4. **Two requested features** (memory `audit-code-feature-roadmap`): user-chosen
+   lenses; choice of design-review depth.
+5. **Release robustness:** make the postinstall wrapper generator normalize
+   to LF on write (memory `audit-tools-release-crlf-trap`).
+6. The 404 findings' **advisory bulk** (MNT file-length, OBS, redundant TST) is
+   optional/intentional — not a backlog. The sharp COR/REL ones were fixed; two
+   HIGH findings were verified false positives (see the Progress log below).
+
+Project memory auto-loads the durable context: the quota vision, the
+no-back-compat directive, the CLAUDECODE test-env gotcha, the stale-worktree
+branch trap, and the release CRLF trap. Verify state with
+`git log --oneline shared-v0.5.5..HEAD` and the three published versions.
 
 **Base:** branch fast-forwarded onto `audit-tools/master` @ `1f9a640` (the real
 latest — the prior pickup mistakenly read a handoff 4 commits behind, before the
