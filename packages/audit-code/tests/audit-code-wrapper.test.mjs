@@ -14,7 +14,10 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { assertMatchesJsonSchema } from "./helpers/jsonSchemaAssert.mjs";
-import { shouldBuildDistForPaths } from "../audit-code-wrapper-lib.mjs";
+import {
+  shouldBuildDistForPaths,
+  assertWorkspaceInstalled,
+} from "../audit-code-wrapper-lib.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -795,6 +798,47 @@ test("wrapper build freshness ignores package metadata churn when dist is newer 
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+});
+
+test("assertWorkspaceInstalled flags missing or foreign @audit-tools/shared", () => {
+  const checkoutRoot = join(here, "fixture-checkout");
+
+  // Not resolvable at all → dependencies were never installed.
+  assert.throws(
+    () => assertWorkspaceInstalled({ checkoutRoot, sharedManifestPath: null }),
+    /Dependencies are not installed/,
+  );
+
+  // Resolves into a *different* checkout — the fresh-git-worktree trap.
+  assert.throws(
+    () =>
+      assertWorkspaceInstalled({
+        checkoutRoot,
+        sharedManifestPath: join(
+          here,
+          "other-checkout",
+          "node_modules",
+          "@audit-tools",
+          "shared",
+          "package.json",
+        ),
+      }),
+    /outside this checkout/,
+  );
+
+  // Resolves inside this checkout → installed correctly, no throw.
+  assert.doesNotThrow(() =>
+    assertWorkspaceInstalled({
+      checkoutRoot,
+      sharedManifestPath: join(
+        checkoutRoot,
+        "node_modules",
+        "@audit-tools",
+        "shared",
+        "package.json",
+      ),
+    }),
+  );
 });
 
 test("audit-code wrapper prints help text", async () => {
