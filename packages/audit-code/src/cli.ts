@@ -113,6 +113,7 @@ import {
   hasFlag,
   fromBase64Url,
   taskResultPath,
+  isCanonicalResultFilename,
   readStdinText,
   getArtifactsDir,
   getRootDir,
@@ -732,19 +733,29 @@ async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   const fallbackByTaskId = new Map<string, unknown>();
   for (const filename of files) {
     const filePath = resolve(join(taskResultsDir, filename));
-    if (!expectedPaths.has(filePath)) {
-      spuriousFileCount++;
-      try {
-        const raw = await readFile(filePath, "utf8");
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const tid = typeof (parsed as Record<string, unknown>).task_id === "string"
-            ? String((parsed as Record<string, unknown>).task_id) : undefined;
-          if (tid && !fallbackByTaskId.has(tid)) {
-            fallbackByTaskId.set(tid, parsed);
-          }
+    if (expectedPaths.has(filePath)) continue;
+
+    // Not part of this round's plan. Still read it so a current task can be
+    // recovered by task_id (e.g. a subagent wrote a valid result under a
+    // non-assigned name).
+    try {
+      const raw = await readFile(filePath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const tid = typeof (parsed as Record<string, unknown>).task_id === "string"
+          ? String((parsed as Record<string, unknown>).task_id) : undefined;
+        if (tid && !fallbackByTaskId.has(tid)) {
+          fallbackByTaskId.set(tid, parsed);
         }
-      } catch { /* not parseable — skip */ }
+      }
+    } catch { /* not parseable — skip */ }
+
+    // Only genuinely stray files are "spurious". Canonical per-task result files
+    // (<stem>_<digest>.json) left by prior deepening rounds in the same
+    // task-results/ dir are legitimate and must not inflate the count or bury
+    // the real stray-file signal (3 -> 191 over a run before this fix).
+    if (!isCanonicalResultFilename(filename)) {
+      spuriousFileCount++;
       process.stderr.write(
         `[merge-and-ingest] Warning: unexpected file in task-results/: ${filename}\n`,
       );

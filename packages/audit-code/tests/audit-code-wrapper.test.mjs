@@ -18,6 +18,7 @@ import {
   shouldBuildDistForPaths,
   assertWorkspaceInstalled,
 } from "../audit-code-wrapper-lib.mjs";
+const { isCanonicalResultFilename } = await import("../dist/cli/args.js");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -699,6 +700,21 @@ test("merge-and-ingest proceeds despite unexpected files in task-results/", asyn
     assert.equal(mergeSummary.spurious_file_count, 1);
     assert.match(merge.stderr, /unexpected file.*packet_spurious_results\.json/i);
   });
+});
+
+test("isCanonicalResultFilename separates canonical results from stray files", () => {
+  // Canonical per-task result name: <stem>_<12-hex digest>.json (artifactNameForId).
+  assert.equal(isCanonicalResultFilename("unit_foo_0123456789ab.json"), true);
+  assert.equal(
+    isCanonicalResultFilename("lens_security_packet-1_a1b2c3d4e5f6.json"),
+    true,
+  );
+  // Stray files a subagent might leave — no _<12hex> suffix, so a prior round's
+  // canonical results never inflate spurious_file_count while these still do.
+  assert.equal(isCanonicalResultFilename("packet-23-results.json"), false);
+  assert.equal(isCanonicalResultFilename("packet_spurious_results.json"), false);
+  assert.equal(isCanonicalResultFilename("tmp-packet-87-result.json"), false);
+  assert.equal(isCanonicalResultFilename("audit_result_packet1.json"), false);
 });
 
 test("merge-and-ingest rejects swapped task result files", async () => {
