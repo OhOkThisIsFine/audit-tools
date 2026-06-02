@@ -11,7 +11,7 @@ import {
   collectGraphEdges,
   graphEdgeConfidence,
   normalizeGraphPath,
-} from "./reviewPackets.js";
+} from "./reviewPacketGraph.js";
 
 /** Default cap on in-scope files (seeds + expanded) before expansion stops. */
 export const DEFAULT_SCOPE_MAX_FILES = 200;
