@@ -1,0 +1,26 @@
+# Enforce LF line endings in the repo and the working tree on every platform.
+# This repo is developed on Windows, where core.autocrlf=true would otherwise
+# check text files out as CRLF. That makes regenerated host assets
+# (`audit-code ensure` / `install`) show as modified on every run and can break
+# LF-sensitive files such as the `.sh` session hooks. Storing and checking out
+# LF keeps the working tree clean and cross-platform-consistent.
+* text=auto eol=lf
+
+# Shell scripts must stay LF even on a Windows checkout (CRLF breaks them).
+*.sh text eol=lf
+
+# Windows batch scripts genuinely require CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets: never normalize.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.wasm binary
+*.gz binary
+*.zip binary
+*.woff binary
+*.woff2 binary
