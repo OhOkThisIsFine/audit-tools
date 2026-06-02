@@ -13,6 +13,17 @@ const RATE_LIMIT_PATTERNS = [
   /\bquota.?exceeded\b/i,
 ];
 
+// Host *account* usage caps (e.g. Claude Code's "You've hit your session limit ·
+// resets 3:30pm"). A worker that hits one returns this sentinel instead of a
+// result; it should be treated like a rate limit — pause until the stated reset
+// rather than re-dispatch into the active cap. Kept specific to avoid matching
+// the word "limit" in ordinary audit output.
+const USAGE_LIMIT_PATTERNS = [
+  /hit your (?:session|usage|account|daily|weekly) limit/i,
+  /reached your (?:session|usage|account|daily|weekly) limit/i,
+  /\b(?:session|usage) limit reached\b/i,
+];
+
 function tryParseJson(text: string): Record<string, unknown> | null {
   const jsonStart = text.indexOf("{");
   if (jsonStart === -1) return null;
@@ -71,14 +82,40 @@ function extractResetsInMs(text: string): number | null {
   return (hours * 3600 + minutes * 60 + seconds + 5) * 1000;
 }
 
-export function detectRateLimitError(text: string): RateLimitDetectionResult {
+// Parse a wall-clock reset like "resets 3:30pm" or "resets at 15:30" into ms
+// until the next occurrence of that local time. Session-limit sentinels state a
+// clock time rather than a duration. Returns null when absent/ambiguous.
+function extractResetsAtClockMs(text: string, now: number): number | null {
+  const match = /resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i.exec(text);
+  if (!match) return null;
+  let hour = parseInt(match[1], 10);
+  const minute = match[2] ? parseInt(match[2], 10) : 0;
+  const meridiem = match[3]?.toLowerCase();
+  if (meridiem === "pm" && hour < 12) hour += 12;
+  if (meridiem === "am" && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59) return null;
+  const target = new Date(now);
+  target.setHours(hour, minute, 0, 0);
+  if (target.getTime() <= now) target.setDate(target.getDate() + 1);
+  const ms = target.getTime() - now;
+  return ms > 0 ? ms + 5000 : null;
+}
+
+export function detectRateLimitError(
+  text: string,
+  now: number = Date.now(),
+): RateLimitDetectionResult {
   const jsonResult = detectFromJson(text);
   if (jsonResult) return jsonResult;
 
-  for (const pattern of RATE_LIMIT_PATTERNS) {
+  for (const pattern of [...RATE_LIMIT_PATTERNS, ...USAGE_LIMIT_PATTERNS]) {
     const match = pattern.exec(text);
     if (match) {
-      return { isRateLimited: true, retryAfterMs: extractResetsInMs(text), rawMatch: match[0] };
+      return {
+        isRateLimited: true,
+        retryAfterMs: extractResetsInMs(text) ?? extractResetsAtClockMs(text, now),
+        rawMatch: match[0],
+      };
     }
   }
 

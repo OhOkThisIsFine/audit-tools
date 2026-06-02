@@ -90,6 +90,8 @@ export function renderDispatchReviewPrompt(params: {
         "`host_concurrency_limit` records any detected hard host cap that contributed to `wave_size`.",
         "",
         "For each wave: use the `task` tool (or equivalent subagent dispatch) to launch up to `wave_size` subagents in parallel (one per entry), wait for all to finish, then start the next wave.",
+        "",
+        'If a subagent reports a host session/usage limit (e.g. "hit your session limit · resets <time>") instead of submitting its result, do not immediately re-dispatch it: run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets. Re-dispatching into an active limit just loses the wave.',
       ]
     : [
         "Read this generated dispatch plan:",

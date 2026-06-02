@@ -37,6 +37,35 @@ test("detects 'overloaded'", () => {
   assert.equal(result.isRateLimited, true);
 });
 
+test("detects a host session-limit sentinel and extracts the clock-time reset", () => {
+  const now = new Date(2024, 0, 1, 10, 0, 0, 0).getTime(); // 10:00am local
+  const result = detectRateLimitError(
+    "You've hit your session limit · resets 3:30pm",
+    now,
+  );
+  assert.equal(result.isRateLimited, true);
+  // 3:30pm is 5h30m after 10:00am (+5s buffer).
+  assert.equal(result.retryAfterMs, (5 * 3600 + 30 * 60 + 5) * 1000);
+});
+
+test("session-limit reset already passed today rolls to tomorrow", () => {
+  const now = new Date(2024, 0, 1, 16, 0, 0, 0).getTime(); // 4:00pm local
+  const result = detectRateLimitError(
+    "You've reached your usage limit, resets 3:30pm",
+    now,
+  );
+  assert.equal(result.isRateLimited, true);
+  // 3:30pm already passed → next is +23h30m (+5s buffer).
+  assert.equal(result.retryAfterMs, (23 * 3600 + 30 * 60 + 5) * 1000);
+});
+
+test("does not flag the word 'limit' in ordinary audit output", () => {
+  const result = detectRateLimitError(
+    "The function exceeds the recommended complexity limit of 15.",
+  );
+  assert.equal(result.isRateLimited, false);
+});
+
 test("detects 'resource exhausted'", () => {
   const result = detectRateLimitError("RESOURCE_EXHAUSTED: quota depleted");
   assert.equal(result.isRateLimited, true);
