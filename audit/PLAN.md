@@ -11,24 +11,19 @@
 
 Substantive remediation is done and released. What remains (none blocking):
 
-1. **Decompose the 3 large files** (clean cuts; careful pure-moves, each verified
-   by the full suite). **`internalExecutors.ts` IN PROGRESS (2026-06): 810 → 598
-   lines.** Hoisted `ExecutorRunResult` → `executorResult.ts`; extracted the
-   runtime command helpers → `runtimeCommand.ts` and the synthesis cluster →
-   `synthesisExecutors.ts`. Remaining for internalExecutors (optional — it's a
-   reasonable size now): the planning + execution (ingestion/runtime) executors
-   could move to per-phase modules, but they share more helpers
-   (`appendSelectiveDeepeningTasks`, `lineIndexFromTasks`) so it's more import
-   juggling than the clean clusters already pulled. **Still to do:**
-   `reviewPackets.ts` (1781) planning-graph-edges cluster → `reviewPacketGraph.ts`
-   (sizing already split to `reviewPacketSizing.ts`) — the ~900-line graph/edge/
-   ownership/cluster cluster (`collectGraphEdges`…`buildPacketGraphContext`,
-   ~L166-1077) is the lower DAG layer; export `buildPlanningGraphEdges` +
-   `buildPacketGraphContext` + the metrics edge helpers, import the rest back.
-   remediate `decideNextStep` (740) → extract the planning (~L877) and
-   documenting/implement (~L1040-1390) branches into helpers (mind the loop's
-   `state = …; continue;` control flow — return a `{kind:"step"|"continue"}`
-   discriminator). Both are dedicated careful passes.
+1. **Decompose the 3 large files — DONE (2026-06).** All three split as
+   behaviour-preserving pure moves; full suites green throughout:
+   - `internalExecutors.ts` 810 → 598: hoisted `ExecutorRunResult` →
+     `executorResult.ts`; runtime command helpers → `runtimeCommand.ts`; synthesis
+     cluster → `synthesisExecutors.ts`. (Further per-phase splits of the
+     planning/execution executors are optional — it's a fine size now.)
+   - `reviewPackets.ts` 1781 → 830: planning graph-edge cluster
+     (`collectGraphEdges`…`buildPacketGraphContext`) → `reviewPacketGraph.ts` (980
+     lines, the lower DAG layer); `scope.ts` imports the cluster symbols from there.
+   - remediate `decideNextStepInner` ~740 → ~274: planning + implement dispatch
+     branches → `buildDocumentDispatchStep` / `buildImplementDispatchStep`,
+     returning `RemediationStep | { continueWithState }` (the loop dispatches on
+     `continueWithState`).
 2. **A1 finalization root-cause — INVESTIGATED + latent bugs fixed (2026-06).**
    Proven the deterministic staleness logic *converges*: 4 faithful persist/reload
    repros (toy + audit-code's own 136-file `src/`, with/without deepening) reach
@@ -52,8 +47,26 @@ Substantive remediation is done and released. What remains (none blocking):
 3. **Quota/dispatch vision** (memory `quota-dispatch-vision`): per-model
    detection landed (`resolveHostModel`); remaining is on-the-fly adaptation in
    the conversation-first path + heterogeneous multi-agent dispatch.
-4. **Two requested features** (memory `audit-code-feature-roadmap`): user-chosen
-   lenses; choice of design-review depth.
+4. **Two requested features** (memory `audit-code-feature-roadmap`) — analysed,
+   NOT yet implemented (each needs a product/design decision — risky to build
+   unattended):
+   - **User-chosen lenses.** Lenses are derived/added in 4+ places, NOT one
+     source: `unitBuilder.deriveRequiredLensesForPath` (unit `required_lenses`);
+     `planning.initializeCoverageFromPlan` RE-derives via the same fn, ignoring the
+     unit manifest (planning.ts:111); `planning.applyAnalyzerCoverage` ADDS
+     analyzer-category lenses; flow coverage. A filter that misses any one point
+     desyncs coverage-completion from task-generation → the audit NEVER completes
+     (coverage requires a lens no task covers). **Recommended:** add
+     `lenses?: string[]` to `SessionConfig`; one `effectiveRequiredLenses(required,
+     selected)` = intersection helper applied at ALL THREE boundaries — coverage
+     audit_status/completion, audit-task generation, flow-task generation — so they
+     agree by construction. Default unset = all lenses (no behaviour change). Test:
+     a security-only selection still reaches `complete`.
+   - **Design-review depth.** Needs a product decision on what "depth" controls
+     (e.g. quick = deterministic `design_assessment` only / standard = + host
+     `design_review` / deep = + per-subsystem passes). Likely a
+     `SessionConfig.design_review_depth` enum gating the `design_review` obligation
+     in `state.ts` + the prompt scope in `designReviewPrompt.ts`.
 5. **Release robustness:** make the postinstall wrapper generator normalize
    to LF on write (memory `audit-tools-release-crlf-trap`).
 6. The 404 findings' **advisory bulk** (MNT file-length, OBS, redundant TST) is
