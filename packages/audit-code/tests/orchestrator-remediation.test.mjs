@@ -5,11 +5,13 @@ import { tmpdir } from "node:os";
 
 const { advanceAudit } = await import("../dist/orchestrator/advance.js");
 const {
-  resolveRuntimeValidationSpawnCommand,
   runExternalAnalyzerImportExecutor,
   runResultIngestionExecutor,
   runRuntimeValidationUpdateExecutor,
 } = await import("../dist/orchestrator/internalExecutors.js");
+const { resolveRuntimeValidationSpawnCommand } = await import(
+  "../dist/orchestrator/runtimeCommand.js"
+);
 const { deriveAuditState } = await import("../dist/orchestrator/state.js");
 const { buildFlowCoverage } =
   await import("../dist/orchestrator/flowCoverage.js");
