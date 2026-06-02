@@ -1,5 +1,11 @@
 # Handoff
 
+> **⚠️ SUPERSEDED — use [`/audit/PLAN.md`](../../../audit/PLAN.md) at the repo
+> root.** That is the current, canonical next-agent handoff (remediation plan +
+> what was done + what remains, as of 2026-06-01, after shipping
+> shared 0.6.0 / audit-code 0.7.0 / remediate-code 0.5.0). The note below is a
+> pre-monorepo relic kept only as historical field evidence.
+
 Current pickup note for the next implementation agent. Keep durable product
 direction in `docs/product.md`, engineering workflow in `docs/development.md`,
 contracts in `docs/contracts.md`, and operator steps in
