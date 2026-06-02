@@ -11,12 +11,24 @@
 
 Substantive remediation is done and released. What remains (none blocking):
 
-1. **Decompose the 3 large files** (clean cuts identified; careful pure-moves,
-   each verified by the full suite). `reviewPackets.ts` planning-graph-edges
-   cluster → `reviewPacketGraph.ts` (sizing already split to
-   `reviewPacketSizing.ts`); `internalExecutors.ts` → per-phase modules (hoist
-   `ExecutorRunResult` + shared helpers first); remediate `decideNextStep` →
-   extract transition branches into helpers.
+1. **Decompose the 3 large files** (clean cuts; careful pure-moves, each verified
+   by the full suite). **`internalExecutors.ts` IN PROGRESS (2026-06): 810 → 598
+   lines.** Hoisted `ExecutorRunResult` → `executorResult.ts`; extracted the
+   runtime command helpers → `runtimeCommand.ts` and the synthesis cluster →
+   `synthesisExecutors.ts`. Remaining for internalExecutors (optional — it's a
+   reasonable size now): the planning + execution (ingestion/runtime) executors
+   could move to per-phase modules, but they share more helpers
+   (`appendSelectiveDeepeningTasks`, `lineIndexFromTasks`) so it's more import
+   juggling than the clean clusters already pulled. **Still to do:**
+   `reviewPackets.ts` (1781) planning-graph-edges cluster → `reviewPacketGraph.ts`
+   (sizing already split to `reviewPacketSizing.ts`) — the ~900-line graph/edge/
+   ownership/cluster cluster (`collectGraphEdges`…`buildPacketGraphContext`,
+   ~L166-1077) is the lower DAG layer; export `buildPlanningGraphEdges` +
+   `buildPacketGraphContext` + the metrics edge helpers, import the rest back.
+   remediate `decideNextStep` (740) → extract the planning (~L877) and
+   documenting/implement (~L1040-1390) branches into helpers (mind the loop's
+   `state = …; continue;` control flow — return a `{kind:"step"|"continue"}`
+   discriminator). Both are dedicated careful passes.
 2. **A1 finalization root-cause — INVESTIGATED + latent bugs fixed (2026-06).**
    Proven the deterministic staleness logic *converges*: 4 faithful persist/reload
    repros (toy + audit-code's own 136-file `src/`, with/without deepening) reach
