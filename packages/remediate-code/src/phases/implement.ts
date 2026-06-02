@@ -415,20 +415,32 @@ async function runBlockInWorktree(
   const blockBranch = `remediator-block-${block.block_id}`;
   const blockRoot = join(worktreesDir, block.block_id);
 
-  const branchRes = runCommand("git", ["branch", blockBranch], {
+  // Best-effort cleanup of any worktree/branch left over by a crashed prior
+  // attempt for this block, so a retry isn't permanently blocked by an
+  // "already exists" error. Both are harmless no-ops when nothing is left.
+  runCommand("git", ["worktree", "remove", blockRoot, "--force"], {
     cwd: options.root,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  runCommand("git", ["branch", "-D", blockBranch], {
+    cwd: options.root,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  // Create branch + worktree atomically. The previous two-step form (git branch
+  // then git worktree add) leaked the branch when the second step failed: the
+  // dangling branch then made every later `git branch` fail, permanently
+  // forcing sequential mode for this block with no diagnostic (COR-001).
   const worktreeRes = runCommand(
     "git",
-    ["worktree", "add", blockRoot, blockBranch],
+    ["worktree", "add", "-b", blockBranch, blockRoot],
     { cwd: options.root, stdio: ["ignore", "pipe", "pipe"] },
   );
 
-  if (branchRes.status !== 0 || worktreeRes.status !== 0) {
+  if (worktreeRes.status !== 0) {
     console.warn(
       `Failed to create worktree for block ${block.block_id} — will run sequentially. ` +
-        `branch: ${describeGitFailure(branchRes)}; worktree: ${describeGitFailure(worktreeRes)}`,
+        `${describeGitFailure(worktreeRes)}`,
     );
     return { ok: false };
   }
@@ -441,14 +453,42 @@ async function runBlockInWorktree(
   });
 
   runCommand("git", ["add", "."], { cwd: blockRoot });
-  runCommand(
-    "git",
-    ["commit", "-m", `Remediation for block ${block.block_id}`],
-    {
-      cwd: blockRoot,
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
+  // `git diff --cached --quiet` exits 0 when nothing is staged and 1 when there
+  // are staged changes. Only commit when there is something to commit; that way
+  // a non-zero commit status is a genuine failure (e.g. a commit hook) rather
+  // than the benign "nothing to commit" case for a block that made no edits.
+  const hasStagedChanges = runCommand("git", ["diff", "--cached", "--quiet"], {
+    cwd: blockRoot,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (hasStagedChanges.status !== 0) {
+    const commitRes = runCommand(
+      "git",
+      ["commit", "-m", `Remediation for block ${block.block_id}`],
+      {
+        cwd: blockRoot,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    if (commitRes.status !== 0) {
+      // A real commit failure would otherwise be swallowed and the block's edits
+      // silently lost. Fall back to sequential execution and clean up so the
+      // leftover worktree/branch doesn't block a retry.
+      console.warn(
+        `Failed to commit block ${block.block_id} in worktree — will run sequentially. ` +
+          `${describeGitFailure(commitRes)}`,
+      );
+      runCommand("git", ["worktree", "remove", blockRoot, "--force"], {
+        cwd: options.root,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      runCommand("git", ["branch", "-D", blockBranch], {
+        cwd: options.root,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      return { ok: false };
+    }
+  }
   return { ok: true, state: blockState };
 }
 

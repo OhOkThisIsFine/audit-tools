@@ -204,4 +204,75 @@ describe("runImplementPhase worktree execution", () => {
       await rm(TEST_DIR, { recursive: true, force: true });
     }
   }, 15_000);
+
+  it("recovers worktree mode despite a stale block branch from a crashed run", async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(REPO_DIR, { recursive: true });
+    await mkdir(ARTIFACTS_DIR, { recursive: true });
+    try {
+      git(["init"]);
+      git(["config", "user.email", "test@example.com"]);
+      git(["config", "user.name", "Test User"]);
+      await writeFile(join(REPO_DIR, "README.md"), "initial", "utf8");
+      git(["add", "."]);
+      git(["commit", "-m", "init"]);
+
+      // Simulate a crashed prior attempt that leaked the per-block branch. The
+      // old two-step creation then failed every retry on `git branch` and
+      // permanently forced sequential mode, never cleaning the branch (COR-001).
+      git(["branch", "remediator-block-B1"]);
+
+      const state = {
+        status: "documenting" as const,
+        plan: {
+          plan_id: "P-worktree",
+          findings: [],
+          blocks: [
+            { block_id: "B1", items: ["F1"], parallel_safe: true },
+          ] satisfies RemediationBlock[],
+          project_type: "unknown",
+          candidate_closing_actions: ["none" as const],
+        },
+        items: {
+          F1: {
+            finding_id: "F1",
+            status: "documented" as const,
+            block_id: "B1",
+            item_spec: {
+              finding_id: "F1",
+              concrete_change: "No-op test fixture",
+              tests_to_write: [],
+              not_applicable_steps: [
+                { step: "Write Tests" as const, rationale: "No-op" },
+                { step: "Refactor Code" as const, rationale: "No-op" },
+                {
+                  step: "Verify Code Against Documentation" as const,
+                  rationale: "No-op",
+                },
+              ],
+            },
+          },
+        },
+      };
+
+      const result = await runImplementPhase(state, {
+        root: REPO_DIR,
+        artifactsDir: ARTIFACTS_DIR,
+      });
+
+      expect(result.items!.F1.status).toBe("resolved");
+      // The stale branch must be gone: the fix deletes it, recreates the
+      // worktree atomically, then removes the branch on merge. The old code
+      // left it dangling because it bailed to sequential mode before any cleanup.
+      const branches = execFileSync(
+        "git",
+        ["branch", "--list", "remediator-block-B1"],
+        { cwd: REPO_DIR, encoding: "utf8" },
+      );
+      expect(branches.trim()).toBe("");
+      expect(existsSync(join(ARTIFACTS_DIR, "worktrees", "B1"))).toBe(false);
+    } finally {
+      await rm(TEST_DIR, { recursive: true, force: true });
+    }
+  }, 15_000);
 });
