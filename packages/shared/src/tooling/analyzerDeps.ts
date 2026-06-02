@@ -23,8 +23,15 @@ export interface ResolveAnalyzerDepOptions {
   cacheRoot?: string;
 }
 
-/** Default shared analyzer cache root. */
+/**
+ * Shared analyzer cache root. Defaults to ~/.audit-tools/analyzer-cache; the
+ * `AUDIT_TOOLS_ANALYZER_CACHE` environment variable overrides it so a run can be
+ * pinned to an isolated cache (e.g. tests that need dependency resolution to be
+ * deterministic regardless of what the host machine has previously cached).
+ */
 export function analyzerCacheRoot(): string {
+  const override = process.env.AUDIT_TOOLS_ANALYZER_CACHE;
+  if (override && override.trim().length > 0) return override;
   return join(homedir(), ".audit-tools", "analyzer-cache");
 }
 

@@ -132,10 +132,18 @@ async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrappe
 
 test("next-step proposes an analyzer install, then proceeds after a skip decision is recorded", async () => {
   await withTempRepo(async (root) => {
-    // The fixture has a .ts file but no local `typescript`, so graph enrichment
-    // pauses to propose an install.
+    // The fixture has a .ts file but no local `typescript`. Pin an isolated,
+    // empty analyzer cache so `typescript` resolves "absent" deterministically —
+    // otherwise a `typescript` already present in the host's shared cache (from a
+    // prior real audit) would resolve "cache", skip the install prompt, and the
+    // pipeline would advance straight to design_review. With the dependency
+    // genuinely absent, graph enrichment pauses to propose an install.
+    const analyzerCache = join(dirname(root), "empty-analyzer-cache");
+    await mkdir(analyzerCache, { recursive: true });
+    const env = { AUDIT_TOOLS_ANALYZER_CACHE: analyzerCache };
+
     const proposed = JSON.parse(
-      (await runWrapper(["next-step"], { cwd: root })).stdout,
+      (await runWrapper(["next-step"], { cwd: root, env })).stdout,
     );
     assert.equal(proposed.step_kind, "analyzer_install");
     assert.match(proposed.artifact_paths.analyzer_decisions, /analyzer-decisions\.json$/);
@@ -151,7 +159,7 @@ test("next-step proposes an analyzer install, then proceeds after a skip decisio
     );
 
     const next = JSON.parse(
-      (await runWrapper(["next-step"], { cwd: root })).stdout,
+      (await runWrapper(["next-step"], { cwd: root, env })).stdout,
     );
     assert.notEqual(next.step_kind, "analyzer_install");
 
