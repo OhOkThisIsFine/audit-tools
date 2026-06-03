@@ -17,6 +17,11 @@ test("resolveWorkerTaskTimeoutMs falls back for missing or invalid timeouts", ()
     resolveWorkerTaskTimeoutMs({ timeout_ms: Number.NaN }, 1000),
     1000,
   );
+  // Infinity is non-finite, so the guard rejects it and returns fallbackMs.
+  assert.equal(
+    resolveWorkerTaskTimeoutMs({ timeout_ms: Infinity }, 1000),
+    1000,
+  );
 });
 
 test("applyWorkerTaskLaunchSettings overrides only timeoutMs", () => {

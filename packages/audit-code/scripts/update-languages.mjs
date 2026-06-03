@@ -17,6 +17,7 @@ const LANGUAGE_MAP_FILE = path.join(
 function generateLanguageMap() {
   const map = {};
   const currentPriority = {};
+  let conflictCount = 0;
 
   const getTypePriority = (type) => {
     switch (type) {
@@ -30,27 +31,51 @@ function generateLanguageMap() {
 
   for (const [langName, langData] of Object.entries(linguistLanguages)) {
     if (!langData.extensions) continue;
-    
+
     const priority = getTypePriority(langData.type);
-    
+
     for (const ext of langData.extensions) {
       const cleanExt = ext.startsWith(".") ? ext.substring(1) : ext;
-      
+
       // Resolve conflicts using the rubric: programming > markup > prose > data
-      if (!currentPriority[cleanExt] || priority > currentPriority[cleanExt]) {
+      const alreadyClaimed = currentPriority[cleanExt] !== undefined;
+      if (alreadyClaimed) {
+        // A second (or later) language claims this extension; the rubric decides
+        // the winner. Either way it is a resolved conflict.
+        conflictCount++;
+      }
+      if (!alreadyClaimed || priority > currentPriority[cleanExt]) {
         map[cleanExt] = langName.toLowerCase();
         currentPriority[cleanExt] = priority;
       }
     }
   }
 
-  return map;
+  return { map, conflictCount };
 }
 
-function updateFile(map) {
+function readPriorExtensionCount() {
+  if (!fs.existsSync(LANGUAGE_MAP_FILE)) {
+    return 0;
+  }
+  try {
+    const prior = fs.readFileSync(LANGUAGE_MAP_FILE, "utf-8");
+    const match = prior.match(
+      /LANGUAGE_BY_EXTENSION: Record<string, string> = (\{[\s\S]*?\});/,
+    );
+    if (!match) return 0;
+    return Object.keys(JSON.parse(match[1])).length;
+  } catch {
+    return 0;
+  }
+}
+
+function updateFile(map, conflictCount) {
   const startMarker = "// --- AUTO-GENERATED LANGUAGE MAP START ---";
   const endMarker = "// --- AUTO-GENERATED LANGUAGE MAP END ---";
   const mapString = JSON.stringify(map, null, 2);
+
+  const priorCount = readPriorExtensionCount();
 
   const content =
     `// AUTO-GENERATED FILE — DO NOT EDIT BY HAND.\n` +
@@ -61,8 +86,14 @@ function updateFile(map) {
     `${endMarker}\n`;
 
   fs.writeFileSync(LANGUAGE_MAP_FILE, content, "utf-8");
-  console.log(`Updated ${LANGUAGE_MAP_FILE} with ${Object.keys(map).length} language extensions.`);
+
+  const newCount = Object.keys(map).length;
+  const added = Math.max(0, newCount - priorCount);
+  const removed = Math.max(0, priorCount - newCount);
+  console.log(
+    `Updated ${LANGUAGE_MAP_FILE}: ${newCount} extensions (was ${priorCount}) — +${added} added, -${removed} removed, ${conflictCount} conflicts resolved.`,
+  );
 }
 
-const map = generateLanguageMap();
-updateFile(map);
+const { map, conflictCount } = generateLanguageMap();
+updateFile(map, conflictCount);

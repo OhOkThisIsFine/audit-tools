@@ -422,6 +422,13 @@ jobs:
         run: |
           set -euo pipefail
           npm run build
+      - name: Verify release gate
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm run verify:release failed."' ERR
+          npm run verify:release
       - name: Resolve publish metadata
         id: publish_meta
         timeout-minutes: 2

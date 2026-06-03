@@ -87,27 +87,8 @@ import {
   setQuotaStateDir,
 } from "./quota/index.js";
 
-// Re-exports from extracted modules
-export {
-  resolveHostDispatchCapability,
-  DIRECT_CLI_DEFAULTS,
-  getFlag,
-  hasFlag,
-  getOptionalBooleanFlag,
-  getArtifactsDir,
-  getRootDir,
-  getBatchResultsDir,
-  getMaxRuns,
-  getAgentBatchSize,
-  getParallelWorkers,
-  getTimeoutMs,
-  chunkArray,
-  getUiMode,
-  looksLikeCliFlag,
-  countLines,
-  warnIfNotGitRepo,
-} from "./cli/args.js";
 import {
+  resolveHostDispatchCapability,
   DIRECT_CLI_DEFAULTS,
   getFlag,
   hasFlag,

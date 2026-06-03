@@ -107,6 +107,26 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
     expect(errors).toHaveLength(0);
   });
 
+  it("skips a finding with empty evidence instead of crashing the plan", async () => {
+    const reportPath = await writeReport("empty-evidence.json", [
+      mkFinding("F-001", "Has evidence", { files: ["a.ts"] }),
+      mkFinding("BAD-001", "No evidence", { files: ["b.ts"], evidence: [] }),
+    ]);
+
+    const state = await runPlanPhase(baseState, {
+      ...baseOptions,
+      input: reportPath,
+    });
+
+    const ids = state.plan!.findings.map((f) => f.id);
+    expect(ids).toContain("F-001");
+    expect(ids).not.toContain("BAD-001");
+    const errors = validateRemediationPlan(state.plan).filter(
+      (i) => i.severity === "error",
+    );
+    expect(errors).toHaveLength(0);
+  });
+
   it("consumes both findings from the fixture", async () => {
     const state = await runPlanPhase(baseState, {
       ...baseOptions,

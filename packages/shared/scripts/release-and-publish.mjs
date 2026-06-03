@@ -194,11 +194,15 @@ async function waitForRunCompletion(repoSlug, runId) {
     attempt += 1;
     const runEntry = runJson("gh", ["api", `repos/${repoSlug}/actions/runs/${runId}`]);
     if (runEntry.status === "completed") {
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
       if (runEntry.conclusion !== "success") {
         throw new Error(
           `Publish workflow failed with conclusion '${runEntry.conclusion}'. Inspect ${runEntry.html_url}.`,
         );
       }
+      console.log(
+        `[release] publish run completed after ${elapsedSec}s (${attempt} ${attempt === 1 ? "attempt" : "attempts"}).`,
+      );
       return runEntry;
     }
     console.log(
@@ -256,9 +260,17 @@ async function main() {
   const releaseBranch = bumpOnly ? null : ensureMainBranch();
 
   if (bumpOnly) {
-    console.log(`[release] bumping ${bump} version`);
-    const { packageAfter, tag } = bumpVersionAndTag(npm);
-    console.log(`[release] created ${tag} for ${packageAfter.name}@${packageAfter.version}.`);
+    // Bump the version and commit package.json / package-lock.json locally.
+    // Do NOT create a git tag here — the tag is created (and pushed) during the
+    // full release flow so that a dangling local tag can never conflict with a
+    // subsequent run or a remote tag that was already pushed.
+    console.log(`[release] bumping ${bump} version (local commit only, no tag)`);
+    run(npm, ["version", bump, "--no-git-tag-version"]);
+    const packageAfter = readPackageJson();
+    const newTag = `${TAG_PREFIX}v${packageAfter.version}`;
+    run("git", ["add", "package.json", "../../package-lock.json"]);
+    run("git", ["commit", "-m", `release: ${newTag}`]);
+    console.log(`[release] bumped to ${packageAfter.name}@${packageAfter.version}. Run without --bump-only to tag and publish.`);
     return;
   }
 

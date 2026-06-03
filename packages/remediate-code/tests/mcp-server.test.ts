@@ -134,7 +134,7 @@ describe("parseFrame — JSON parsing", () => {
   });
 });
 
-describe("parseFrame — concurrent guard precondition", () => {
+describe("parseFrame — tool call frame parsing", () => {
   it("parses start_remediation tool call frame correctly", () => {
     const payload = JSON.stringify({
       jsonrpc: "2.0",
@@ -247,6 +247,85 @@ describe("runRemediatorMcpServer — next-step compatibility bridge", () => {
     });
     expect(step.step_kind).toBe("extract_findings");
     expect(step.artifact_paths.input).toBe("audit-report.md");
+    resetMcpServerStateForTests();
+  });
+});
+
+describe("runRemediatorMcpServer — concurrent guard", () => {
+  it("rejects a second concurrent next_step call while one is already running", async () => {
+    resetMcpServerStateForTests();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const chunks: Buffer[] = [];
+    stdout.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let callCount = 0;
+
+    await runRemediatorMcpServer("/repo", "/artifacts", {
+      stdin,
+      stdout: stdout as any,
+      // The first call holds a pending promise that only resolves when
+      // releaseFirst() is invoked, so the second frame arrives while the first
+      // is still in flight and must hit the busy guard.
+      nextStep: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          await firstGate;
+        }
+        return makeStep();
+      },
+    });
+
+    const nextStepFrame = (id: number): Buffer =>
+      makeFrame(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          method: "tools/call",
+          params: { name: "next_step", arguments: {} },
+        }),
+      );
+
+    // Separate writes produce separate stdin 'data' events: the first parks on
+    // firstGate (holding nextStepRunning=true) before the second is processed.
+    stdin.write(nextStepFrame(1));
+    await flushAsync();
+    stdin.write(nextStepFrame(2));
+    await flushAsync();
+
+    // Release the first call and let the step response flush.
+    releaseFirst();
+    await flushAsync();
+
+    const responses = parseOutputFrames(Buffer.concat(chunks));
+    const byId = new Map(responses.map((r: any) => [r.id, r]));
+
+    // The second (concurrent) call is rejected with the busy message.
+    const second = byId.get(2);
+    expect(second.result.content[0].text).toBe(
+      "A next-step request is already running.",
+    );
+
+    // The first call returns a valid serialised step (not the busy message).
+    const first = byId.get(1);
+    const firstStep = JSON.parse(first.result.content[0].text);
+    expect(firstStep.contract_version).toBe("remediate-code-step/v1alpha1");
+    expect(firstStep.step_kind).toBe("locate_input");
+
+    // The running flag reset after the first call resolved: a subsequent call
+    // succeeds rather than reporting busy.
+    chunks.length = 0;
+    stdin.write(nextStepFrame(3));
+    await flushAsync();
+    const after = parseOutputFrames(Buffer.concat(chunks));
+    const third = after.find((r: any) => r.id === 3);
+    const thirdStep = JSON.parse(third.result.content[0].text);
+    expect(thirdStep.step_kind).toBe("locate_input");
+
     resetMcpServerStateForTests();
   });
 });

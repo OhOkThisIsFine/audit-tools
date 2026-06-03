@@ -5,13 +5,29 @@ import { dirname } from "node:path";
 // per line; logging never throws and is a no-op when disabled, so it can be
 // threaded through hot paths without guarding every call site.
 
+/**
+ * Stable vocabulary of run-log event kinds emitted across both orchestrators.
+ * Typed as a union so consumers can rely on a fixed set when aggregating logs.
+ */
+export type RunLogEventKind =
+  | "obligation"
+  | "executor_start"
+  | "executor_end"
+  | "artifact_write"
+  | "scope"
+  | "outcome"
+  | "provider_launch"
+  | "step"
+  | "state"
+  | "error";
+
 export interface RunLogEvent {
   /** Coarse phase/state, e.g. "advance" or "implementing". */
   phase?: string;
   /** The obligation/decision this event relates to. */
   obligation?: string;
-  /** Event kind: "obligation" | "executor_start" | "executor_end" | "artifact_write" | "provider_launch" | ... */
-  kind: string;
+  /** Event kind drawn from the stable {@link RunLogEventKind} vocabulary. */
+  kind: RunLogEventKind;
   artifact?: string;
   provider?: string;
   tokens_est?: number;

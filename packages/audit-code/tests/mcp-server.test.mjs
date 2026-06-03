@@ -353,6 +353,33 @@ function spawnMcpChild(root) {
   });
 }
 
+// Spawn an MCP child, complete the initialize handshake, then run `fn(child)`
+// for the post-initialize interaction. Always kills the child and awaits exit.
+// Tests that intentionally exercise pre-initialization error handling should
+// use spawnMcpChild directly instead.
+async function withInitializedChild(root, fn) {
+  const child = spawnMcpChild(root);
+  try {
+    child.stdin.write(
+      encodeMessage({
+        jsonrpc: "2.0",
+        id: "init",
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0.0" },
+        },
+      }),
+    );
+    await readFramedPayload(child.stdout);
+    return await fn(child);
+  } finally {
+    child.kill();
+    await new Promise((resolve) => child.on("exit", resolve));
+  }
+}
+
 test("MCP server returns parse error for invalid JSON payload", async () => {
   await withTempRepo(async (root) => {
     const child = spawnMcpChild(root);
@@ -393,8 +420,7 @@ test("MCP server returns error for request with missing method", async () => {
 
 test("MCP server returns -32601 for unknown JSON-RPC methods", async () => {
   await withTempRepo(async (root) => {
-    const child = spawnMcpChild(root);
-    try {
+    await withInitializedChild(root, async (child) => {
       child.stdin.write(
         encodeMessage({
           jsonrpc: "2.0",
@@ -406,32 +432,13 @@ test("MCP server returns -32601 for unknown JSON-RPC methods", async () => {
       assert.ok(payload.error);
       assert.equal(payload.id, "unknown-method");
       assert.equal(payload.error.code, -32601);
-    } finally {
-      child.kill();
-      await new Promise((resolve) => child.on("exit", resolve));
-    }
+    });
   });
 });
 
 test("MCP server validates tools/call requires a tool name", async () => {
   await withTempRepo(async (root) => {
-    const child = spawnMcpChild(root);
-    try {
-      // Initialize first so tools/call is accepted
-      child.stdin.write(
-        encodeMessage({
-          jsonrpc: "2.0",
-          id: "init-1",
-          method: "initialize",
-          params: {
-            protocolVersion: "2025-06-18",
-            capabilities: {},
-            clientInfo: { name: "test", version: "1.0.0" },
-          },
-        }),
-      );
-      await readFramedPayload(child.stdout);
-
+    await withInitializedChild(root, async (child) => {
       child.stdin.write(
         encodeMessage({
           jsonrpc: "2.0",
@@ -443,31 +450,13 @@ test("MCP server validates tools/call requires a tool name", async () => {
       const payload = await readFramedPayload(child.stdout);
       assert.ok(payload.error);
       assert.equal(payload.id, "tools-no-name");
-    } finally {
-      child.kill();
-      await new Promise((resolve) => child.on("exit", resolve));
-    }
+    });
   });
 });
 
 test("MCP server validates resources/read requires a uri", async () => {
   await withTempRepo(async (root) => {
-    const child = spawnMcpChild(root);
-    try {
-      child.stdin.write(
-        encodeMessage({
-          jsonrpc: "2.0",
-          id: "init-2",
-          method: "initialize",
-          params: {
-            protocolVersion: "2025-06-18",
-            capabilities: {},
-            clientInfo: { name: "test", version: "1.0.0" },
-          },
-        }),
-      );
-      await readFramedPayload(child.stdout);
-
+    await withInitializedChild(root, async (child) => {
       child.stdin.write(
         encodeMessage({
           jsonrpc: "2.0",
@@ -479,31 +468,13 @@ test("MCP server validates resources/read requires a uri", async () => {
       const payload = await readFramedPayload(child.stdout);
       assert.ok(payload.error);
       assert.equal(payload.id, "resource-no-uri");
-    } finally {
-      child.kill();
-      await new Promise((resolve) => child.on("exit", resolve));
-    }
+    });
   });
 });
 
 test("MCP server validates prompts/get requires a prompt name", async () => {
   await withTempRepo(async (root) => {
-    const child = spawnMcpChild(root);
-    try {
-      child.stdin.write(
-        encodeMessage({
-          jsonrpc: "2.0",
-          id: "init-3",
-          method: "initialize",
-          params: {
-            protocolVersion: "2025-06-18",
-            capabilities: {},
-            clientInfo: { name: "test", version: "1.0.0" },
-          },
-        }),
-      );
-      await readFramedPayload(child.stdout);
-
+    await withInitializedChild(root, async (child) => {
       child.stdin.write(
         encodeMessage({
           jsonrpc: "2.0",
@@ -515,10 +486,7 @@ test("MCP server validates prompts/get requires a prompt name", async () => {
       const payload = await readFramedPayload(child.stdout);
       assert.ok(payload.error);
       assert.equal(payload.id, "prompt-no-name");
-    } finally {
-      child.kill();
-      await new Promise((resolve) => child.on("exit", resolve));
-    }
+    });
   });
 });
 
@@ -661,22 +629,7 @@ test("prompts/get returns rendered messages for each registered prompt", async (
 
 test("prompts/get returns error for unknown prompt name", async () => {
   await withTempRepo(async (root) => {
-    const child = spawnMcpChild(root);
-    try {
-      child.stdin.write(
-        encodeMessage({
-          jsonrpc: "2.0",
-          id: "init-unk",
-          method: "initialize",
-          params: {
-            protocolVersion: "2025-06-18",
-            capabilities: {},
-            clientInfo: { name: "test", version: "1.0.0" },
-          },
-        }),
-      );
-      await readFramedPayload(child.stdout);
-
+    await withInitializedChild(root, async (child) => {
       child.stdin.write(
         encodeMessage({
           jsonrpc: "2.0",
@@ -688,10 +641,7 @@ test("prompts/get returns error for unknown prompt name", async () => {
       const payload = await readFramedPayload(child.stdout);
       assert.ok(payload.error);
       assert.equal(payload.id, "unknown-prompt");
-    } finally {
-      child.kill();
-      await new Promise((resolve) => child.on("exit", resolve));
-    }
+    });
   });
 });
 

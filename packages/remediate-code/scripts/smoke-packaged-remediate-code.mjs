@@ -91,12 +91,13 @@ console.log(
 // 1a. Pack @audit-tools/shared (workspace dependency not on public npm)
 const sharedRoot = join(pkgRoot, "..", "shared");
 console.log("  packing @audit-tools/shared...");
+const sharedPackStart = Date.now();
 const sharedPackResult = spawnNpm(
   ["pack", "--json", "--ignore-scripts", "--pack-destination", packDir],
   { cwd: sharedRoot, encoding: "utf8", env: isolatedNpmEnv() },
 );
 if (sharedPackResult.status !== 0) {
-  console.error("npm pack @audit-tools/shared failed:", sharedPackResult.stderr || sharedPackResult.error?.message);
+  console.error(`npm pack @audit-tools/shared failed after ${Date.now() - sharedPackStart}ms:`, sharedPackResult.stderr || sharedPackResult.error?.message);
   rmSync(smokeRoot, { recursive: true, force: true });
   process.exit(1);
 }
@@ -109,10 +110,11 @@ try {
   process.exit(1);
 }
 const sharedTarball = join(packDir, sharedPackOutput[0].filename);
-console.log(`  packed shared: ${sharedTarball}`);
+console.log(`  packed shared: ${sharedTarball} (${Date.now() - sharedPackStart}ms)`);
 
 // 1b. Pack remediate-code
 console.log("  packing...");
+const packStart = Date.now();
 const packResult = spawnNpm(
   ["pack", "--json", "--ignore-scripts", "--pack-destination", packDir],
   {
@@ -123,7 +125,7 @@ const packResult = spawnNpm(
 );
 if (packResult.status !== 0) {
   console.error(
-    "npm pack failed:",
+    `npm pack failed after ${Date.now() - packStart}ms:`,
     packResult.stderr || packResult.error?.message,
   );
   rmSync(smokeRoot, { recursive: true, force: true });
@@ -142,7 +144,7 @@ try {
   process.exit(1);
 }
 const tarball = join(packDir, packOutput[0].filename);
-console.log(`  packed: ${tarball}`);
+console.log(`  packed: ${tarball} (${Date.now() - packStart}ms)`);
 
 // 2. Install into temp dir
 const installDir = join(smokeRoot, "install");
@@ -156,6 +158,7 @@ try {
     stdio: "ignore",
     env: isolatedNpmEnv(),
   });
+  const installStart = Date.now();
   const installResult = spawnNpm(["install", "--no-package-lock", sharedTarball, tarball], {
     cwd: installDir,
     encoding: "utf8",
@@ -163,9 +166,10 @@ try {
   });
 
   if (installResult.status !== 0) {
-    console.error("npm install failed:", installResult.stderr);
+    console.error(`npm install failed after ${Date.now() - installStart}ms:`, installResult.stderr);
     failed++;
   } else {
+    console.log(`  installed (${Date.now() - installStart}ms)`);
     const binPath = join(nodeModulesDir, ".bin", "remediate-code");
 
     check("bin/remediate-code exists after install", () => {

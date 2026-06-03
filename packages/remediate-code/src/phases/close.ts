@@ -1,5 +1,5 @@
 import { RemediationState } from "../state/store.js";
-import { OrchestratorOptions } from "../orchestrator.js";
+import { OrchestratorOptions } from "../types/options.js";
 import { extname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { writeTextFile, writeJsonFile, stagedAndUntracked } from "@audit-tools/shared";

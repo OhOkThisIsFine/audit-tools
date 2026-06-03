@@ -45,3 +45,35 @@ test("disabled logger writes nothing", async () => {
     sink.event({ kind: "noop" }); // must not throw
   });
 });
+
+test("non-serializable event writes minimal fallback marker", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "run.log.jsonl");
+    const logger = new RunLogger(path);
+    const circular = { kind: "obligation", self: undefined };
+    circular.self = circular; // JSON.stringify throws on circular references
+    logger.event(circular);
+
+    const line = (await readFile(path, "utf8")).trim();
+    const parsed = JSON.parse(line); // must not throw
+    assert.equal(parsed.kind, "obligation");
+    assert.equal(parsed.note, "unserializable_event");
+    assert.equal(typeof parsed.ts, "string");
+  });
+});
+
+test("injectable now clock is used in the non-serializable fallback path", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "run.log.jsonl");
+    const logger = new RunLogger(path, { now: () => 0 });
+    const circular = { kind: "executor_end", self: undefined };
+    circular.self = circular;
+    logger.event(circular);
+
+    const line = (await readFile(path, "utf8")).trim();
+    const parsed = JSON.parse(line);
+    // Confirms now() was called inside the catch block, not bypassed.
+    assert.equal(parsed.ts, "1970-01-01T00:00:00.000Z");
+    assert.equal(parsed.note, "unserializable_event");
+  });
+});

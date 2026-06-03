@@ -1,5 +1,5 @@
 import { RemediationState } from "../state/store.js";
-import { OrchestratorOptions } from "../orchestrator.js";
+import { OrchestratorOptions } from "../types/options.js";
 import { ItemSpec, ClosingPlan, ClarificationRequest } from "../state/types.js";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -111,13 +111,13 @@ export async function runDocumentPhase(
 
   const clarifications: ClarificationRequest[] = [];
 
-  const resolutionsMap = new Map<string, any>();
+  const resolutionsMap = new Map<string, ClarificationResolution>();
   const resolutionPath = join(
     options.artifactsDir,
     "clarification_resolution.json",
   );
   if (existsSync(resolutionPath)) {
-    const resolutions = await readOptionalJsonFile<any>(resolutionPath);
+    const resolutions = await readOptionalJsonFile<unknown>(resolutionPath);
     const normalizedResolutions =
       normalizeClarificationResolutions(resolutions);
     if (normalizedResolutions.length === 0) {
@@ -268,7 +268,7 @@ Do not write to any other path.
       }
     } catch (e) {
       console.error(
-        `Failed to read document result from provider for ${finding.id}:`,
+        `Failed to read document result for ${finding.id} (provider: ${provider.name}, resultPath: ${resultPath}, taskPath: ${taskPath}):`,
         e,
       );
       item.status = "blocked";

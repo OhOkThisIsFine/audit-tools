@@ -1,5 +1,5 @@
 import { RemediationState } from "../state/store.js";
-import { OrchestratorOptions } from "../orchestrator.js";
+import { OrchestratorOptions } from "../types/options.js";
 import { TriageBatch } from "../state/types.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";

@@ -476,12 +476,12 @@ describe("decideNextStep", () => {
     expect(step.artifact_paths.result).toMatch(/document-F-002\.result\.json$/);
   });
 
-  it("omitted hostCanDispatchSubagents defaults to single-item (no capability_check)", async () => {
+  it("omitted hostCanDispatchSubagents defaults to parallel dispatch (conversation-first)", async () => {
     await saveState(makePlanningState());
 
     const step = await decideNextStep({ root: REPO_DIR });
 
-    expect(step.step_kind).toBe("document_single_item");
+    expect(step.step_kind).toBe("dispatch_document");
     expect(step.step_kind).not.toBe("capability_check");
   });
 
@@ -598,8 +598,8 @@ describe("resolveHostDispatchCapability", () => {
     ).toBe(false);
   });
 
-  it("defaults to false when nothing is configured", () => {
-    expect(resolveHostDispatchCapability({ env: {} as any })).toBe(false);
+  it("defaults to true when nothing is configured (conversation-first parallel dispatch)", () => {
+    expect(resolveHostDispatchCapability({ env: {} as any })).toBe(true);
   });
 
   it("CLI flag overrides session config", () => {

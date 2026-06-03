@@ -1,5 +1,5 @@
 import { RemediationState, StateStore } from "../state/store.js";
-import { OrchestratorOptions } from "../orchestrator.js";
+import { OrchestratorOptions } from "../types/options.js";
 import { VerificationResult, RemediationBlock } from "../state/types.js";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";

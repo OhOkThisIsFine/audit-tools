@@ -15,7 +15,7 @@
       },
       "additionalProperties": false
     },
-    "generated_at": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
     "files": {
       "type": "array",
       "items": {

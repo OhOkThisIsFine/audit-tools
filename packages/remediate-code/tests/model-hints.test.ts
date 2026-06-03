@@ -117,14 +117,14 @@ describe("buildDocumentModelHint", () => {
 
   it("returns standard for low severity + low confidence", () => {
     const hint = buildDocumentModelHint(
-      makeFinding({ id: "F-1", severity: "low", confidence: "low", lens: "style" }),
+      makeFinding({ id: "F-1", severity: "low", confidence: "low", lens: "maintainability" }),
     );
     expect(hint.tier).toBe("standard");
   });
 
   it("returns standard for low severity + safe lens but medium confidence", () => {
     const hint = buildDocumentModelHint(
-      makeFinding({ id: "F-1", severity: "low", confidence: "medium", lens: "format" }),
+      makeFinding({ id: "F-1", severity: "low", confidence: "medium", lens: "maintainability" }),
     );
     expect(hint.tier).toBe("standard");
   });

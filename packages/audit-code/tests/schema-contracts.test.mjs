@@ -543,6 +543,38 @@ test("dispatch quota schema enforces cooldown_until date-time format through hel
   );
 });
 
+test("repo_manifest schema enforces date-time format on generated_at", async () => {
+  const repoManifestSchema = await loadSchema("repo_manifest.schema.json");
+
+  assert.equal(repoManifestSchema.properties.generated_at.format, "date-time");
+
+  assert.doesNotThrow(() =>
+    assertMatchesJsonSchema(
+      repoManifestSchema,
+      {
+        repository: { name: "t" },
+        generated_at: "2026-04-22T00:00:00.000Z",
+        files: [],
+      },
+      "repoManifest",
+    ),
+  );
+
+  assert.throws(
+    () =>
+      assertMatchesJsonSchema(
+        repoManifestSchema,
+        {
+          repository: { name: "t" },
+          generated_at: "not-a-timestamp",
+          files: [],
+        },
+        "repoManifest",
+      ),
+    /repoManifest\.generated_at must match date-time format/i,
+  );
+});
+
 test("strict schema contracts accept real builder output and reject unexpected fields", async () => {
   const unitManifestSchema = await loadSchema("unit_manifest.schema.json");
   const surfaceManifestSchema = await loadSchema("surface_manifest.schema.json");

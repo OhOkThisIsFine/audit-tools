@@ -70,6 +70,7 @@ export function runAutoFixExecutor(
   }
 
   const executedTools: string[] = [];
+  const toolTimings: { tool: string; duration_ms: number }[] = [];
 
   // JS, TS, HTML, CSS, JSON, YAML, MD
   if (
@@ -85,6 +86,7 @@ export function runAutoFixExecutor(
       extensions.has("yaml") ||
       extensions.has("md"))
   ) {
+    const prettierStart = Date.now();
     if (
       tryRunConfiguredFormatter(root, [
         ...resolveNodeTool(
@@ -98,11 +100,13 @@ export function runAutoFixExecutor(
       ])
     ) {
       executedTools.push("prettier");
+      toolTimings.push({ tool: "prettier", duration_ms: Date.now() - prettierStart });
     }
   }
 
   // Python
   if (extensions.has("py")) {
+    const blackStart = Date.now();
     if (
       tryRunConfiguredFormatter(root, [
         { command: "black", args: ["."], display: "black ." },
@@ -112,11 +116,13 @@ export function runAutoFixExecutor(
       ])
     ) {
       executedTools.push("black");
+      toolTimings.push({ tool: "black", duration_ms: Date.now() - blackStart });
     }
   }
 
   // SQL
   if (extensions.has("sql")) {
+    const sqlfluffStart = Date.now();
     if (
       tryRunConfiguredFormatter(root, [
         { command: "sqlfluff", args: ["fix", "--force", "."], display: "sqlfluff fix --force ." },
@@ -125,22 +131,26 @@ export function runAutoFixExecutor(
       ])
     ) {
       executedTools.push("sqlfluff");
+      toolTimings.push({ tool: "sqlfluff", duration_ms: Date.now() - sqlfluffStart });
     }
   }
 
   // Go
   if (extensions.has("go")) {
+    const gofmtStart = Date.now();
     if (
       tryRunConfiguredFormatter(root, [
         { command: "gofmt", args: ["-w", "."], display: "gofmt -w ." },
       ])
     ) {
       executedTools.push("gofmt");
+      toolTimings.push({ tool: "gofmt", duration_ms: Date.now() - gofmtStart });
     }
   }
 
   const resultsArtifact = {
     executed_tools: executedTools,
+    tool_timings: toolTimings,
     timestamp: new Date().toISOString(),
   };
 

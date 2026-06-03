@@ -101,6 +101,7 @@
     "quota_source_snapshot": {
       "type": ["object", "null"],
       "description": "Real-time usage snapshot from a QuotaSource, if available.",
+      "additionalProperties": false,
       "properties": {
         "remaining_pct": { "type": ["number", "null"] },
         "reset_at": { "type": ["string", "null"], "format": "date-time" },
@@ -113,6 +114,7 @@
     "backoff_state": {
       "type": ["object", "null"],
       "description": "Exponential backoff state for repeated rate-limit errors.",
+      "additionalProperties": false,
       "properties": {
         "consecutive_429_count": { "type": "integer", "minimum": 0 },
         "current_cooldown_ms": { "type": "integer", "minimum": 0 },

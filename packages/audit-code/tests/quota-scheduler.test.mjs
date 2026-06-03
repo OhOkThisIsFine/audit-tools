@@ -187,9 +187,9 @@ test("scheduleWave caps wave size by TPM limit", () => {
     },
     hostModel: "test/model",
     requestedConcurrency: 10,
-    estimatedPacketTokens: 3_000,
+    estimatedSlotTokens: [3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000],
   });
-  // floor(10_000 / 3_000) = 3
+  // sumTopN of 4 slots (4*3000=12000) > 10000, sumTopN of 3 slots (3*3000=9000) <= 10000 → wave = 3
   assert.equal(schedule.wave_size, 3);
 });
 

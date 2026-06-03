@@ -380,6 +380,7 @@ export async function buildGraphBundleFromFs(
   const rootPath = resolve(root);
   const dispositionMap = buildDispositionMap(disposition);
   const fileContents: Record<string, string> = {};
+  const skippedFiles: { path: string; error: string }[] = [];
 
   await Promise.all(
     repoManifest.files.map(async (file) => {
@@ -400,11 +401,23 @@ export async function buildGraphBundleFromFs(
 
       try {
         fileContents[file.path] = await readFile(absolutePath, "utf8");
-      } catch {
-        // Best-effort graph extraction should not block structure planning.
+      } catch (e) {
+        // Best-effort graph extraction should not block structure planning,
+        // but record the skip so a coverage gap is observable to operators.
+        skippedFiles.push({ path: file.path, error: (e as NodeJS.ErrnoException).code ?? String(e) });
       }
     }),
   );
+
+  if (skippedFiles.length > 0) {
+    process.stderr.write(
+      "[audit-code] graph: skipped " +
+        skippedFiles.length +
+        " unreadable file(s): " +
+        skippedFiles.map((s) => s.path + " (" + s.error + ")").join(", ") +
+        "\n",
+    );
+  }
 
   return buildGraphBundle(repoManifest, disposition, { ...options, fileContents });
 }

@@ -1,5 +1,5 @@
 import { RemediationState } from "../state/store.js";
-import { OrchestratorOptions } from "../orchestrator.js";
+import { OrchestratorOptions } from "../types/options.js";
 import {
   RemediationPlan,
   Finding,
@@ -163,7 +163,7 @@ function assignFindingToBlock(
   }
 }
 
-function deriveBlocksFromTestGraph(
+export function deriveBlocksFromTestGraph(
   findings: Finding[],
   testFiles: string[],
 ): { blocks: RemediationBlock[]; useful: boolean } {
@@ -213,7 +213,7 @@ function deriveBlocksFromTestGraph(
 
   return {
     blocks,
-    useful: blocks.length < findings.length || findings.length <= 1,
+    useful: blocks.length < findings.length,
   };
 }
 
@@ -515,6 +515,26 @@ export async function runPlanPhase(
       "No input provided or file does not exist. Halting Plan phase.",
     );
     throw new Error("Missing valid input for Plan phase.");
+  }
+
+  // Robustness: a finding with empty evidence fails the plan validator and would
+  // abort the entire run. Skip such malformed findings (and prune them from
+  // blocks) with a warning instead of crashing — findings are advisory, so one
+  // bad finding must not block the whole report.
+  const findingsWithoutEvidence = findings
+    .filter((f) => !Array.isArray(f.evidence) || f.evidence.length === 0)
+    .map((f) => f.id);
+  if (findingsWithoutEvidence.length > 0) {
+    console.warn(
+      `Plan: skipping ${findingsWithoutEvidence.length} finding(s) with no evidence: ${findingsWithoutEvidence.join(", ")}`,
+    );
+    findings = findings.filter(
+      (f) => Array.isArray(f.evidence) && f.evidence.length > 0,
+    );
+    const keptIds = new Set(findings.map((f) => f.id));
+    blocks = blocks
+      .map((b) => ({ ...b, items: (b.items ?? []).filter((id) => keptIds.has(id)) }))
+      .filter((b) => (b.items ?? []).length > 0);
   }
 
   // Cross-lens dedup: merge findings that different audit lenses flagged independently

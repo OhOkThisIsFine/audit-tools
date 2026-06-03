@@ -75,13 +75,13 @@ test("scheduleWave caps by discovered TPM", () => {
     sessionConfig: {},
     hostModel: null,
     requestedConcurrency: 30,
-    estimatedPacketTokens: 10000,
+    estimatedSlotTokens: [10000, 10000, 10000, 10000, 10000],
     discoveredLimits: {
       input_tokens_per_minute: 50000,
       source: "header_extraction",
     },
   });
-  // 50000 * 0.8 / 10000 = 4
+  // sumTopN of 5 slots (50000) > 40000 budget, sumTopN of 4 slots (40000) <= 40000 → wave = 4
   assert.equal(schedule.wave_size, 4);
 });
 
