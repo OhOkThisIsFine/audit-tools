@@ -144,6 +144,16 @@ function hasSegment(normalized: string, segment: string): boolean {
   return splitSegments(normalized).includes(segment);
 }
 
+/**
+ * True when any of `segments` appears as a path segment. Splits the path once
+ * and tests all candidates against that single set, instead of re-splitting per
+ * segment as repeated `hasSegment` calls would.
+ */
+function hasAnySegment(normalized: string, segments: readonly string[]): boolean {
+  const present = new Set(splitSegments(normalized));
+  return segments.some((segment) => present.has(segment));
+}
+
 function includesAny(normalized: string, values: readonly string[]): boolean {
   return values.some((value) => normalized.includes(value));
 }
@@ -242,14 +252,18 @@ export function isInterfacePath(normalized: string): boolean {
   return hasToken(normalized, INTERFACE_KEYWORDS) || hasSegment(normalized, "api");
 }
 
+const DATA_LAYER_SEGMENTS = [
+  "models",
+  "schemas",
+  "migrations",
+  "seeds",
+  "db",
+] as const;
+
 export function isDataLayerPath(normalized: string): boolean {
   return (
     hasToken(normalized, DATA_LAYER_KEYWORDS) ||
-    hasSegment(normalized, "models") ||
-    hasSegment(normalized, "schemas") ||
-    hasSegment(normalized, "migrations") ||
-    hasSegment(normalized, "seeds") ||
-    hasSegment(normalized, "db")
+    hasAnySegment(normalized, DATA_LAYER_SEGMENTS)
   );
 }
 

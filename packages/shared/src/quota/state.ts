@@ -4,6 +4,9 @@ import type { ConcurrencyBucket, ObservedWaveOutcome, QuotaState, QuotaStateEntr
 import { withFileLock } from "./fileLock.js";
 
 const MIN_EVIDENCE_WEIGHT = 0.5;
+// A failure at concurrency N is evidence against N and the few levels above it
+// (a failure at 5 makes 6, 7, 8, 9 suspect too), so failure weight spreads over
+// this many buckets past the observed concurrency.
 const FAILURE_SPREAD_BUCKETS = 4;
 
 let _stateDir: string | undefined;

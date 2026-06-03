@@ -9,11 +9,11 @@ import { PassThrough } from "node:stream";
 const {
   ACTIVE_CLAUDE_CODE_SESSION_MESSAGE,
   ClaudeCodeProvider,
-} = await import("../dist/providers/claudeCodeProvider.js");
+} = await import("../src/providers/claudeCodeProvider.ts");
 const {
   LocalSubprocessProvider,
   MISSING_WORKER_COMMAND_MESSAGE,
-} = await import("../dist/providers/localSubprocessProvider.js");
+} = await import("@audit-tools/shared");
 const { spawnLoggedCommand } = await import(
   "@audit-tools/shared/providers/spawnLoggedCommand"
 );

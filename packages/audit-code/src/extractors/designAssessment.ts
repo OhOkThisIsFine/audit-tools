@@ -2,10 +2,12 @@ import type { Finding, UnitManifest } from "../types.js";
 import type { GraphBundle, GraphEdge, CriticalFlowManifest, RiskRegister } from "@audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
 
-let nextFindingId = 1;
-
-function findingId(): string {
-  return `DA-${String(nextFindingId++).padStart(3, "0")}`;
+// ID generation is instance-scoped per build (no shared mutable module state),
+// so repeated/concurrent buildDesignAssessment calls produce independent,
+// non-colliding DA-### sequences.
+function createFindingIdGenerator(): () => string {
+  let n = 1;
+  return () => `DA-${String(n++).padStart(3, "0")}`;
 }
 
 function allEdges(graphBundle: GraphBundle): GraphEdge[] {
@@ -60,11 +62,26 @@ function detectCycles(edges: GraphEdge[]): string[][] {
   return cycles;
 }
 
+// Canonicalize a directed cycle by rotating it so the lexicographically
+// smallest node leads, preserving order/direction. Rotation (not sort) keeps
+// distinct directed cycles over the same node set apart (A→B→C→A vs A→C→B→A)
+// while still deduping the same cycle discovered from different DFS start nodes
+// (which differ only by rotation).
+function canonicalCycleKey(cycle: string[]): string {
+  if (cycle.length === 0) return "";
+  let minIdx = 0;
+  for (let i = 1; i < cycle.length; i++) {
+    if (cycle[i]! < cycle[minIdx]!) minIdx = i;
+  }
+  const rotated = [...cycle.slice(minIdx), ...cycle.slice(0, minIdx)];
+  return rotated.join("\0");
+}
+
 function deduplicateCycles(cycles: string[][]): string[][] {
   const seen = new Set<string>();
   const unique: string[][] = [];
   for (const cycle of cycles) {
-    const normalized = [...cycle].sort().join("\0");
+    const normalized = canonicalCycleKey(cycle);
     if (!seen.has(normalized)) {
       seen.add(normalized);
       unique.push(cycle);
@@ -73,13 +90,16 @@ function deduplicateCycles(cycles: string[][]): string[][] {
   return unique;
 }
 
-function detectCycleFindings(graphBundle: GraphBundle): Finding[] {
+function detectCycleFindings(
+  graphBundle: GraphBundle,
+  nextId: () => string,
+): Finding[] {
   const edges = allEdges(graphBundle);
   const cycles = deduplicateCycles(detectCycles(edges));
   if (cycles.length === 0) return [];
 
   return cycles.slice(0, 10).map((cycle) => ({
-    id: findingId(),
+    id: nextId(),
     title: `Dependency cycle: ${cycle.length} modules`,
     category: "dependency_cycle",
     severity: cycle.length > 4 ? "high" : "medium",
@@ -91,7 +111,10 @@ function detectCycleFindings(graphBundle: GraphBundle): Finding[] {
   }));
 }
 
-function detectHubModules(graphBundle: GraphBundle): Finding[] {
+function detectHubModules(
+  graphBundle: GraphBundle,
+  nextId: () => string,
+): Finding[] {
   const edges = allEdges(graphBundle);
   const fanIn = new Map<string, number>();
   const fanOut = new Map<string, number>();
@@ -110,7 +133,7 @@ function detectHubModules(graphBundle: GraphBundle): Finding[] {
     const outCount = fanOut.get(node) ?? 0;
     if (inCount >= hubThreshold && outCount >= hubThreshold) {
       findings.push({
-        id: findingId(),
+        id: nextId(),
         title: `Hub module: ${node}`,
         category: "hub_module",
         severity: "medium",
@@ -128,6 +151,7 @@ function detectHubModules(graphBundle: GraphBundle): Finding[] {
 function detectOrphanUnits(
   unitManifest: UnitManifest,
   graphBundle: GraphBundle,
+  nextId: () => string,
 ): Finding[] {
   const edges = allEdges(graphBundle);
   const connected = new Set<string>();
@@ -150,7 +174,7 @@ function detectOrphanUnits(
   if (orphans.length > unitManifest.units.length * 0.5) return [];
 
   return [{
-    id: findingId(),
+    id: nextId(),
     title: `${orphans.length} orphan unit(s) with no graph connections`,
     category: "orphan_units",
     severity: "low",
@@ -168,6 +192,7 @@ function detectOrphanUnits(
 function detectRiskConcentration(
   riskRegister: RiskRegister,
   unitManifest: UnitManifest,
+  nextId: () => string,
 ): Finding[] {
   if (riskRegister.items.length < 4) return [];
 
@@ -185,7 +210,7 @@ function detectRiskConcentration(
   if (concentration < 0.6) return [];
 
   return [{
-    id: findingId(),
+    id: nextId(),
     title: "Risk concentrated in top quartile of units",
     category: "risk_concentration",
     severity: concentration > 0.8 ? "high" : "medium",
@@ -200,7 +225,10 @@ function detectRiskConcentration(
   }];
 }
 
-function detectUnitSprawl(unitManifest: UnitManifest): Finding[] {
+function detectUnitSprawl(
+  unitManifest: UnitManifest,
+  nextId: () => string,
+): Finding[] {
   if (unitManifest.units.length < 3) return [];
 
   const fileCounts = unitManifest.units.map((u) => u.files.length);
@@ -214,7 +242,7 @@ function detectUnitSprawl(unitManifest: UnitManifest): Finding[] {
   );
   if (dominantUnit && maxFiles > totalFiles * 0.5 && totalFiles > 10) {
     findings.push({
-      id: findingId(),
+      id: nextId(),
       title: `Dominant unit: ${dominantUnit.unit_id}`,
       category: "monolith_unit",
       severity: "medium",
@@ -230,7 +258,7 @@ function detectUnitSprawl(unitManifest: UnitManifest): Finding[] {
     const smallUnits = unitManifest.units.filter((u) => u.files.length === 1);
     if (smallUnits.length > unitManifest.units.length * 0.6) {
       findings.push({
-        id: findingId(),
+        id: nextId(),
         title: "Excessive single-file units",
         category: "unit_fragmentation",
         severity: "low",
@@ -249,6 +277,7 @@ function detectUnitSprawl(unitManifest: UnitManifest): Finding[] {
 function detectFlowGaps(
   criticalFlows: CriticalFlowManifest,
   graphBundle: GraphBundle,
+  nextId: () => string,
 ): Finding[] {
   const edges = allEdges(graphBundle);
   const connected = new Set<string>();
@@ -265,7 +294,7 @@ function detectFlowGaps(
       disconnected.length > flow.paths.length * 0.5
     ) {
       findings.push({
-        id: findingId(),
+        id: nextId(),
         title: `Critical flow "${flow.name}" has weak graph coverage`,
         category: "flow_gap",
         severity: "medium",
@@ -286,15 +315,15 @@ export function buildDesignAssessment(params: {
   criticalFlows: CriticalFlowManifest;
   riskRegister: RiskRegister;
 }): DesignAssessment {
-  nextFindingId = 1;
+  const nextId = createFindingIdGenerator();
 
   const findings: Finding[] = [
-    ...detectCycleFindings(params.graphBundle),
-    ...detectHubModules(params.graphBundle),
-    ...detectOrphanUnits(params.unitManifest, params.graphBundle),
-    ...detectRiskConcentration(params.riskRegister, params.unitManifest),
-    ...detectUnitSprawl(params.unitManifest),
-    ...detectFlowGaps(params.criticalFlows, params.graphBundle),
+    ...detectCycleFindings(params.graphBundle, nextId),
+    ...detectHubModules(params.graphBundle, nextId),
+    ...detectOrphanUnits(params.unitManifest, params.graphBundle, nextId),
+    ...detectRiskConcentration(params.riskRegister, params.unitManifest, nextId),
+    ...detectUnitSprawl(params.unitManifest, nextId),
+    ...detectFlowGaps(params.criticalFlows, params.graphBundle, nextId),
   ];
 
   return {

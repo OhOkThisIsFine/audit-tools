@@ -57,7 +57,6 @@ export interface QuotaModelLimits {
 
 export interface QuotaConfig {
   enabled?: boolean;
-  probe?: "auto" | "never" | "force";
   safety_margin?: number;
   unknown_hosted_concurrency?: number;
   unknown_local_concurrency?: number | "unlimited";

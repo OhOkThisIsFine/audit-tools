@@ -56,11 +56,8 @@ export type {
 export { scheduleWave, buildProviderModelKey } from "@audit-tools/shared";
 export type { ScheduleWaveOptions } from "@audit-tools/shared";
 
-// Remediator-specific: probe, hostLimits
+// Remediator-specific: hostLimits
 export {
   detectHostActiveSubagentLimit,
   resolveHostActiveSubagentLimit,
 } from "./hostLimits.js";
-
-export { probeProvider } from "./probe.js";
-export type { ProbeResult } from "./probe.js";

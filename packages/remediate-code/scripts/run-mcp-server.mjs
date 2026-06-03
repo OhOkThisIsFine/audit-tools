@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const distEntry = join(pkgRoot, "dist", "index.js");
 const argv = process.argv.slice(2); // forward --root, --artifacts-dir, etc.
+process.stderr.write(`[mcp-server] starting: node=${process.execPath} entry=${distEntry}\n`);
 
 const result = spawnSync(
   process.execPath,

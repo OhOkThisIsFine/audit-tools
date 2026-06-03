@@ -47,8 +47,10 @@ async function loadTypescript(dependencyPath?: string): Promise<typeof TS> {
         default?: typeof TS;
       } & typeof TS;
       return (mod.default ?? mod) as typeof TS;
-    } catch {
-      // Fall through to the bundled compiler.
+    } catch (e) {
+      process.stderr.write(
+        `[audit-code] typescript-analyzer: failed to load TypeScript from '${dependencyPath}', falling back to bundled: ${(e as Error).message ?? String(e)}\n`,
+      );
     }
   }
   const mod = (await import("typescript")) as { default?: typeof TS } & typeof TS;
@@ -77,7 +79,10 @@ function loadCompilerOptions(
       );
       options = parsed.options;
     }
-  } catch {
+  } catch (e) {
+    process.stderr.write(
+      `[audit-code] typescript-analyzer: failed to load compiler options from '${root}', using defaults: ${(e as Error).message ?? String(e)}\n`,
+    );
     options = {};
   }
   // Force a lenient, emit-free, JS-aware program: we only want resolution + the
@@ -152,8 +157,8 @@ function resolveSymbolToIncluded(
   if (resolved.flags & state.ts.SymbolFlags.Alias) {
     try {
       resolved = state.checker.getAliasedSymbol(resolved);
-    } catch {
-      // Keep the un-aliased symbol on failure.
+    } catch (_e) {
+      // getAliasedSymbol can throw for malformed programs; keep the un-aliased symbol.
     }
   }
   for (const declaration of resolved.declarations ?? []) {
@@ -329,7 +334,10 @@ async function analyze(
   let ts: typeof TS;
   try {
     ts = await loadTypescript(context.dependencyPath);
-  } catch {
+  } catch (e) {
+    process.stderr.write(
+      `[audit-code] typescript-analyzer: failed to load TypeScript compiler, skipping ${files.length} file(s): ${(e as Error).message ?? String(e)}\n`,
+    );
     return { edges: [] };
   }
 
@@ -353,8 +361,10 @@ async function analyze(
     }
 
     return { edges: [...imports, ...references, ...calls] };
-  } catch {
-    // Any compiler failure degrades cleanly to the regex floor.
+  } catch (e) {
+    process.stderr.write(
+      `[audit-code] typescript-analyzer: program analysis failed for ${files.length} file(s) under '${context.root}', degrading to regex floor: ${(e as Error).message ?? String(e)}\n`,
+    );
     return { edges: [] };
   }
 }

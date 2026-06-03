@@ -2,13 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { normalizeCoverageSummary } = await import(
-  "../dist/adapters/coverageSummary.js"
+  "../src/adapters/coverageSummary.ts"
 );
-const { normalizeEslintJson } = await import("../dist/adapters/eslint.js");
+const { normalizeEslintJson } = await import("../src/adapters/eslint.ts");
 const { normalizeNpmAuditJson } = await import(
-  "../dist/adapters/npmAudit.js"
+  "../src/adapters/npmAudit.ts"
 );
-const { normalizeSemgrepJson } = await import("../dist/adapters/semgrep.js");
+const { normalizeSemgrepJson } = await import("../src/adapters/semgrep.ts");
 
 test("normalizeCoverageSummary keeps only below-threshold files and preserves severity boundaries", () => {
   const normalized = normalizeCoverageSummary([

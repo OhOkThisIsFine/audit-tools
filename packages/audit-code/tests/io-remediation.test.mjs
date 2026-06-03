@@ -25,9 +25,9 @@ const {
   loadArtifactBundle,
   promoteFinalAuditReport,
   writeCoreArtifacts,
-} = await import("../dist/io/artifacts.js");
+} = await import("../src/io/artifacts.ts");
 const { TOOLING_INPUTS, buildToolingManifest } = await import(
-  "../dist/io/toolingManifest.js"
+  "../src/io/toolingManifest.ts"
 );
 const {
   buildRunId,
@@ -36,7 +36,7 @@ const {
   getRunPaths,
   writeDispatchBatchFiles,
   writeWorkerTaskFiles,
-} = await import("../dist/io/runArtifacts.js");
+} = await import("../src/io/runArtifacts.ts");
 
 async function withTempDir(prefix, fn) {
   const tempDir = await mkdtemp(join(tmpdir(), prefix));

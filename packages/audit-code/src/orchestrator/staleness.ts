@@ -1,6 +1,6 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
-import { ARTIFACT_DEPENDENCY_MAP } from "./dependencyMap.js";
+import { ARTIFACT_DEPENDENTS_MAP } from "./dependencyMap.js";
 import { present } from "./artifactMetadata.js";
 import {
   buildReverseDependencyMap,
@@ -72,7 +72,7 @@ export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
   }
 
   for (const [upstream, downstreamList] of Object.entries(
-    ARTIFACT_DEPENDENCY_MAP,
+    ARTIFACT_DEPENDENTS_MAP,
   )) {
     if (upstream === "tooling_manifest.json" && !present(bundle, upstream)) {
       continue;
@@ -91,7 +91,7 @@ export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
   while (changed) {
     changed = false;
     for (const [upstream, downstreamList] of Object.entries(
-      ARTIFACT_DEPENDENCY_MAP,
+      ARTIFACT_DEPENDENTS_MAP,
     )) {
       if (!stale.has(upstream)) {
         continue;

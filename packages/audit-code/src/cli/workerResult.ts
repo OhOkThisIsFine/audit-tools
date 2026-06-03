@@ -1,6 +1,6 @@
 import { writeJsonFile } from "@audit-tools/shared";
 import type { WorkerResult } from "../types/workerResult.js";
-import type { RunPaths } from "../io/runArtifacts.js";
+import type { RunPaths } from "../io/runArtifactTypes.js";
 import { formatAuditResultIssues } from "../validation/auditResults.js";
 
 export const WORKER_RESULT_CONTRACT_VERSION = "audit-code-worker-result/v1alpha1";

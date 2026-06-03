@@ -12,6 +12,7 @@ import {
   prepareImplementDispatch,
 } from "../src/steps/dispatch.js";
 import {
+  REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
 } from "../src/steps/types.js";
 
@@ -301,5 +302,79 @@ describe("prepareImplementDispatch reconciliation", () => {
       status: "resolved",
       last_successful_step: "Verify Code Against Documentation",
     });
+  });
+});
+
+describe("mergeImplementResults per-item validation", () => {
+  const runId = "PLAN-1";
+
+  // Write an implement dispatch-plan referencing block B-001 plus a result file
+  // with the given (malformed) item_results payload, then run mergeImplementResults.
+  // validateImplementWorkerResult is module-private, so this drives it through
+  // the public merge path. The contract_version/phase are valid so the per-item
+  // checks are what reject the input.
+  async function mergeWithItemResults(itemResults: unknown): Promise<void> {
+    await saveState(makeDocumentingState());
+
+    const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
+    await mkdir(resultDir, { recursive: true });
+    const resultPath = join(resultDir, "implement-B-001.result.json");
+
+    await writeFile(
+      join(resultDir, "dispatch-plan.json"),
+      JSON.stringify({
+        contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+        phase: "implement",
+        run_id: runId,
+        repo_root: REPO_DIR,
+        artifacts_dir: ARTIFACTS_DIR,
+        items: [
+          {
+            task_id: "implement-B-001",
+            block_id: "B-001",
+            prompt_path: join(resultDir, "implement-B-001.md"),
+            result_path: resultPath,
+          },
+        ],
+      }),
+    );
+
+    await writeFile(
+      resultPath,
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: itemResults,
+      }),
+    );
+
+    await mergeImplementResults(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      runId,
+    );
+  }
+
+  it("throws when item_results is not an array", async () => {
+    await expect(mergeWithItemResults({} as unknown)).rejects.toThrow(
+      /item_results must be an array/,
+    );
+  });
+
+  it("throws when an item_results entry is not an object", async () => {
+    await expect(mergeWithItemResults(["not-an-object"])).rejects.toThrow(
+      /item_results\[0\] must be an object/,
+    );
+  });
+
+  it("throws when an entry's finding_id is not a string", async () => {
+    await expect(
+      mergeWithItemResults([{ finding_id: 123, status: "resolved" }]),
+    ).rejects.toThrow(/finding_id must be a string/);
+  });
+
+  it("throws when an entry's status is neither resolved nor blocked", async () => {
+    await expect(
+      mergeWithItemResults([{ finding_id: "F-001", status: "maybe" }]),
+    ).rejects.toThrow(/status must be resolved or blocked/);
   });
 });

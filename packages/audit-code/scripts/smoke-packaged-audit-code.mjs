@@ -498,6 +498,8 @@ async function withTempRepo(fn) {
 }
 
 async function main() {
+  const smokeStart = Date.now();
+  let stepStart = Date.now();
   step("start");
   const installDir = await mkdtemp(
     join(tmpdir(), "audit-code-packed-install-"),
@@ -520,6 +522,7 @@ async function main() {
       ),
     );
 
+    stepStart = Date.now();
     step("npm pack @audit-tools/shared");
     if (liveCommandOutput) {
       detail(
@@ -544,7 +547,9 @@ async function main() {
     );
     assert.equal(Array.isArray(sharedPacked), true);
     sharedTarballPath = join(sharedRoot, sharedPacked[0].filename);
+    process.stderr.write(`[smoke:packaged] elapsed: npm pack @audit-tools/shared — ${Date.now() - stepStart}ms\n`);
 
+    stepStart = Date.now();
     step("npm pack");
     const packed = JSON.parse(
       (
@@ -564,7 +569,9 @@ async function main() {
     assertPackagedContract(packed[0]);
     tarballFilename = packed[0].filename;
     tarballPath = join(repoRoot, packed[0].filename);
+    process.stderr.write(`[smoke:packaged] elapsed: npm pack — ${Date.now() - stepStart}ms\n`);
 
+    stepStart = Date.now();
     step("npm install from tarball");
     await runCommand(
       platformCommand("npm"),
@@ -587,7 +594,9 @@ async function main() {
       "audit-code",
       "audit-code.prompt.md",
     );
+    process.stderr.write(`[smoke:packaged] elapsed: npm install from tarball — ${Date.now() - stepStart}ms\n`);
 
+    stepStart = Date.now();
     step("prompt-path check");
     const promptPathOutput = (
       await runCommand(auditCodeCommand, ["prompt-path"], { cwd: installDir })
@@ -598,14 +607,18 @@ async function main() {
       await readFile(promptPathOutput, "utf8"),
       /\/audit-code/,
     );
+    process.stderr.write(`[smoke:packaged] elapsed: prompt-path check — ${Date.now() - stepStart}ms\n`);
 
+    stepStart = Date.now();
     step("--version check");
     const versionOutput = (
       await runCommand(auditCodeCommand, ["--version"], { cwd: installDir })
     ).stdout.trim();
     assert.equal(versionOutput, packageVersion);
+    process.stderr.write(`[smoke:packaged] elapsed: --version check — ${Date.now() - stepStart}ms\n`);
 
     await withTempRepo(async (root) => {
+      stepStart = Date.now();
       step("ensure self-bootstrap");
       const ensured = JSON.parse(
         (
@@ -641,7 +654,9 @@ async function main() {
       );
       assert.equal(ensuredAgain.status, "ok");
       assert.equal(ensuredAgain.action, "skipped");
+      process.stderr.write(`[smoke:packaged] elapsed: ensure self-bootstrap — ${Date.now() - stepStart}ms\n`);
 
+      stepStart = Date.now();
       step("ensure removes stale local command surfaces");
       await writeLegacyLocalAuditCodeSurfaces(root);
       const ensuredAfterLegacySurfaces = JSON.parse(
@@ -665,7 +680,9 @@ async function main() {
         "legacy_local_audit_code_surface",
       );
       await assertLegacyLocalAuditCodeSurfacesRemoved(root);
+      process.stderr.write(`[smoke:packaged] elapsed: ensure removes stale local command surfaces — ${Date.now() - stepStart}ms\n`);
 
+      stepStart = Date.now();
       step("install");
       const installedHost = JSON.parse(
         (
@@ -862,7 +879,9 @@ async function main() {
       assert.equal(installedHost.unsupported_hosts.length, 0);
       assert.equal(installManifest.contract_version, "audit-code-install/v1alpha1");
       assert.equal(installManifest.hosts.length, 5);
+      process.stderr.write(`[smoke:packaged] elapsed: install — ${Date.now() - stepStart}ms\n`);
 
+      stepStart = Date.now();
       step("verify generated host assets");
       const verifiedInstall = JSON.parse(
         (
@@ -881,7 +900,9 @@ async function main() {
       assert.equal(verifiedInstall.status, "ok");
       assert.equal(verifiedInstall.issue_count, 0);
       assert.equal(verifiedInstall.hosts.length, 5);
+      process.stderr.write(`[smoke:packaged] elapsed: verify generated host assets — ${Date.now() - stepStart}ms\n`);
 
+      stepStart = Date.now();
       step("packaged mcp initialize");
       const mcpClient = createMcpClient(
         auditCodeCommand,
@@ -913,7 +934,9 @@ async function main() {
       } finally {
         await mcpClient.close();
       }
+      process.stderr.write(`[smoke:packaged] elapsed: packaged mcp initialize — ${Date.now() - stepStart}ms\n`);
 
+      stepStart = Date.now();
       step("first run (expect blocked)");
       const blocked = JSON.parse(
         (
@@ -938,6 +961,7 @@ async function main() {
   assert.equal(blocked.handoff.status, "blocked");
   // Provider could be opencode if available, or local-subprocess as fallback
   assert.ok(/local-subprocess|opencode|claude-code/.test(blocked.handoff.provider ?? ""));
+      process.stderr.write(`[smoke:packaged] elapsed: first run (expect blocked) — ${Date.now() - stepStart}ms\n`);
 
       const tasks = JSON.parse(
         await readFile(join(root, ".audit-artifacts", "audit_tasks.json"), "utf8"),
@@ -952,6 +976,7 @@ async function main() {
         ),
       );
 
+      stepStart = Date.now();
       step("ingest results (expect completed)");
       const completed = JSON.parse(
         (
@@ -980,7 +1005,9 @@ async function main() {
         await readFile(join(root, "audit-report.md"), "utf8").then((content) => /# Audit Report/.test(content)),
         true,
       );
+      process.stderr.write(`[smoke:packaged] elapsed: ingest results (expect completed) — ${Date.now() - stepStart}ms\n`);
 
+      stepStart = Date.now();
       step("rerun after completion (expect a fresh blocked audit)");
       const rerun = JSON.parse(
         (
@@ -1002,10 +1029,11 @@ async function main() {
       assert.equal(rerun.selected_executor, "agent");
       assert.equal(rerun.next_likely_step, null);
       assert.equal(rerun.handoff.status, "blocked");
+      process.stderr.write(`[smoke:packaged] elapsed: rerun after completion (expect a fresh blocked audit) — ${Date.now() - stepStart}ms\n`);
     });
 
     success(
-      `Validated tarball ${tarballFilename}, packaged install bootstrap surfaces, packaged MCP startup, and the blocked/completed/rerun audit flow.`,
+      `Validated tarball ${tarballFilename}, packaged install bootstrap surfaces, packaged MCP startup, and the blocked/completed/rerun audit flow. Total elapsed: ${Math.round((Date.now() - smokeStart) / 1000)}s.`,
     );
   } finally {
     if (tarballPath) {

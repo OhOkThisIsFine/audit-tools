@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { mergeDiscoveredLimits } = await import("../dist/quota/discoveredLimits.js");
+const { mergeDiscoveredLimits } = await import("../src/quota/discoveredLimits.ts");
 
 // ── mergeDiscoveredLimits ───────────────────────────────────────────────────
 

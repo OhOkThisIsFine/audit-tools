@@ -6,17 +6,19 @@ import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import { decideNextStep, findObligation } from "./nextStep.js";
 import { deriveAuditState } from "./state.js";
 import { computeArtifactMetadata } from "./artifactMetadata.js";
+import { runIntakeExecutor } from "./intakeExecutors.js";
 import {
-  runIntakeExecutor,
   runStructureExecutor,
-  runPlanningExecutor,
+  runDesignAssessmentExecutor,
+  runDesignReviewAutoComplete,
+} from "./structureExecutors.js";
+import { runPlanningExecutor } from "./planningExecutors.js";
+import {
   runResultIngestionExecutor,
   runRuntimeValidationExecutor,
   runRuntimeValidationUpdateExecutor,
-  runDesignAssessmentExecutor,
-  runDesignReviewAutoComplete,
   runExternalAnalyzerImportExecutor,
-} from "./internalExecutors.js";
+} from "./ingestionExecutors.js";
 import {
   runSynthesisExecutor,
   runSynthesisNarrativeExecutor,
@@ -66,6 +68,19 @@ export interface AdvanceAuditResult {
   progress_summary: string;
   next_likely_step: string | null;
   updated_bundle: ArtifactBundle;
+}
+
+/**
+ * Narrow an optional root to a definite string for an executor that requires
+ * it, throwing the canonical "advanceAudit <executor> requires root" error
+ * otherwise. Replaces the guard previously copy-pasted across every
+ * root-dependent executor branch below.
+ */
+function requireRoot(root: string | undefined, executorName: string): string {
+  if (!root) {
+    throw new Error(`advanceAudit ${executorName} requires root`);
+  }
+  return root;
 }
 
 function cloneState(state: AuditState): AuditState {
@@ -140,11 +155,11 @@ export async function advanceAudit(
   });
   try {
     switch (selectedExecutor) {
-      case "intake_executor":
-        if (!options.root)
-          throw new Error("advanceAudit intake_executor requires root");
-        run = await runIntakeExecutor(bundle, options.root);
+      case "intake_executor": {
+        const root = requireRoot(options.root, "intake_executor");
+        run = await runIntakeExecutor(bundle, root);
         break;
+      }
       case "structure_executor":
         run = await runStructureExecutor(bundle, options.root);
         break;
@@ -162,37 +177,35 @@ export async function advanceAudit(
       case "design_review":
         run = runDesignReviewAutoComplete(bundle);
         break;
-      case "planning_executor":
-        if (!options.root)
-          throw new Error("advanceAudit planning_executor requires root");
+      case "planning_executor": {
+        const root = requireRoot(options.root, "planning_executor");
         plannedScope = resolveAuditScope({
-          root: options.root,
+          root,
           since: options.since,
           bundle,
         });
         run = await runPlanningExecutor(
           bundle,
-          options.root,
+          root,
           options.lineIndex ?? {},
           options.sizeIndex,
           plannedScope,
         );
         break;
+      }
       case "result_ingestion_executor":
         run = runResultIngestionExecutor(
           bundle,
           options.auditResults ?? bundle.audit_results ?? [],
         );
         break;
-      case "runtime_validation_executor":
-        if (!options.root)
-          throw new Error(
-            "advanceAudit runtime_validation_executor requires root",
-          );
-        run = await runRuntimeValidationExecutor(bundle, options.root, {
+      case "runtime_validation_executor": {
+        const root = requireRoot(options.root, "runtime_validation_executor");
+        run = await runRuntimeValidationExecutor(bundle, root, {
           opentoken: options.opentoken,
         });
         break;
+      }
       case "synthesis_executor":
         run = runSynthesisExecutor(bundle, options.auditResults);
         break;
@@ -219,18 +232,16 @@ export async function advanceAudit(
           options.externalAnalyzerResults,
         );
         break;
-      case "auto_fix_executor":
-        if (!options.root)
-          throw new Error("advanceAudit auto_fix_executor requires root");
-        run = runAutoFixExecutor(bundle, options.root);
+      case "auto_fix_executor": {
+        const root = requireRoot(options.root, "auto_fix_executor");
+        run = await runAutoFixExecutor(bundle, root);
         break;
-      case "syntax_resolution_executor":
-        if (!options.root)
-          throw new Error(
-            "advanceAudit syntax_resolution_executor requires root",
-          );
-        run = runSyntaxResolutionExecutor(bundle, options.root);
+      }
+      case "syntax_resolution_executor": {
+        const root = requireRoot(options.root, "syntax_resolution_executor");
+        run = runSyntaxResolutionExecutor(bundle, root);
         break;
+      }
       default: {
         const state = deriveAuditState(bundle);
         state.last_executor = selectedExecutor;

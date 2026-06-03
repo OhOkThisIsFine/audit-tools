@@ -6,22 +6,13 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { assertMatchesJsonSchema } from "./helpers/jsonSchemaAssert.mjs";
+import { countLines } from "./helpers/countLines.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
 const wrapperPath = join(repoRoot, "audit-code.mjs");
 const schemaPath = join(repoRoot, "schemas", "audit-code-v1alpha1.schema.json");
 const responseSchema = JSON.parse(await readFile(schemaPath, "utf8"));
-
-async function countLines(root, path) {
-  const content = await readFile(join(root, path), "utf8");
-  if (content.length === 0) {
-    return 0;
-  }
-  return content.endsWith("\n")
-    ? content.split(/\r?\n/).length - 1
-    : content.split(/\r?\n/).length;
-}
 
 async function buildSyntheticResults(tasks, root) {
   return Promise.all(tasks.map(async (task) => ({

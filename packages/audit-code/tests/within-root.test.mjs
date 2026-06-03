@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-const { withinRoot } = await import("../dist/cli/dispatch.js");
+const { withinRoot } = await import("../src/cli/dispatch.ts");
 
 const ROOT = process.platform === "win32" ? "C:\\repo" : "/repo";
 

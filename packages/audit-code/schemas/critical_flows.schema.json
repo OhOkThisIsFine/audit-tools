@@ -33,8 +33,9 @@
             "items": { "type": "string" }
           },
           "confidence": {
-            "type": "string",
-            "enum": ["high", "low"]
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
           }
         },
         "additionalProperties": false

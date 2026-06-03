@@ -3,7 +3,7 @@
   "$id": "remediation_block.schema.json",
   "title": "Remediation Block",
   "type": "object",
-  "required": ["block_id", "items", "parallel_safe"],
+  "required": ["block_id", "items", "parallel_safe", "dependencies"],
   "properties": {
     "block_id": { "type": "string" },
     "items": {

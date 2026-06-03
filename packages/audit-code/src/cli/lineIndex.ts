@@ -6,12 +6,16 @@ import type { AuditTask, RepoManifest } from "../types.js";
 // manifest / task file paths — used to annotate audit tasks with per-file line
 // counts and to build line indexes for prompt rendering.
 
+// How many files to read concurrently when counting lines, bounding open file
+// descriptors so a large repo manifest does not exhaust the fd limit.
+const LINE_COUNT_BATCH_SIZE = 25;
+
 export async function buildLineIndex(
   root: string,
   repoManifest: RepoManifest,
 ): Promise<Record<string, number>> {
   const entries: Array<readonly [string, number]> = [];
-  const batchSize = 25;
+  const batchSize = LINE_COUNT_BATCH_SIZE;
   for (let i = 0; i < repoManifest.files.length; i += batchSize) {
     const batch = repoManifest.files.slice(i, i + batchSize);
     const results = await Promise.all(

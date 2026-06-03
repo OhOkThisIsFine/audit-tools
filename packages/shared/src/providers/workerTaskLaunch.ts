@@ -6,6 +6,16 @@ export interface WorkerTaskTimeout {
 }
 
 /**
+ * Minimal worker-task shape the shared provider classes need: a `worker_command`
+ * argv plus an optional per-task `timeout_ms`. Both orchestrators' richer
+ * `WorkerTask` types structurally satisfy this, so the shared providers depend on
+ * this narrow interface rather than importing either package's full task type.
+ */
+export interface WorkerTaskWithCommand extends WorkerTaskTimeout {
+  worker_command: string[];
+}
+
+/**
  * Resolve the effective subprocess timeout for a worker task: the task's own
  * `timeout_ms` when it is a positive, finite number, otherwise the caller's
  * fallback. Centralized so both orchestrators honor per-task timeouts

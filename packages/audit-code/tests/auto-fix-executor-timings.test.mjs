@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { runAutoFixExecutor } = await import(
-  "../dist/orchestrator/autoFixExecutor.js"
+  "../src/orchestrator/autoFixExecutor.ts"
 );
 
 test("runAutoFixExecutor records an empty tool_timings array when no formatter runs", async () => {
@@ -16,7 +16,7 @@ test("runAutoFixExecutor records an empty tool_timings array when no formatter r
     const bundle = {
       file_disposition: { files: [{ path: "notes/readme.txt", status: "audit" }] },
     };
-    const result = runAutoFixExecutor(bundle, root);
+    const result = await runAutoFixExecutor(bundle, root);
     const applied = result.updated.auto_fixes_applied;
     assert.deepEqual(applied.executed_tools, []);
     assert.deepEqual(applied.tool_timings, []);
@@ -35,7 +35,7 @@ test("runAutoFixExecutor keeps tool_timings aligned with executed_tools", async 
         files: [{ path: "vendor/generated.py", status: "excluded" }],
       },
     };
-    const result = runAutoFixExecutor(bundle, root);
+    const result = await runAutoFixExecutor(bundle, root);
     const applied = result.updated.auto_fixes_applied;
     // Same length and same order: each timing entry corresponds to an executed
     // tool, and every duration is a non-negative number.

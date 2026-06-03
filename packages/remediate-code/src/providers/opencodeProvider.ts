@@ -1,9 +1,6 @@
 import { readFile } from "node:fs/promises";
-import type { FreshSessionProvider, LaunchFreshSessionInput, OpenCodeConfig, OpenTokenConfig } from "@audit-tools/shared";
-import { readJsonFile } from "@audit-tools/shared";
-import { spawnLoggedCommand, resolveOpenCodeSpawnCommand } from "@audit-tools/shared";
-import type { WorkerTask } from "../types/workerSession.js";
-import { applyWorkerTaskLaunchSettings } from "./workerTaskLaunch.js";
+import type { FreshSessionProvider, LaunchFreshSessionInput, OpenCodeConfig, OpenTokenConfig, WorkerTaskWithCommand } from "@audit-tools/shared";
+import { readJsonFile, spawnLoggedCommand, resolveOpenCodeSpawnCommand, applyWorkerTaskLaunchSettings } from "@audit-tools/shared";
 
 export class OpenCodeProvider implements FreshSessionProvider {
   name = "opencode";
@@ -23,7 +20,7 @@ export class OpenCodeProvider implements FreshSessionProvider {
 
   async launch(input: LaunchFreshSessionInput) {
     const prompt = await readFile(input.promptPath, "utf8");
-    const task = await readJsonFile<WorkerTask>(input.taskPath);
+    const task = await readJsonFile<WorkerTaskWithCommand>(input.taskPath);
     const baseCommand = this.config.command ?? "opencode";
     const baseArgs = ["run", ...(this.config.extra_args ?? [])];
     // On Windows the `opencode` launcher is a `.cmd` shim that `spawn` cannot

@@ -45,6 +45,17 @@ export type {
   RemediationOutcome,
   RemediationOutcomesReport,
 } from "./types/remediationOutcome.js";
+// Canonical lens vocabulary + the runtime validation Sets derived from it.
+export type { Lens } from "./types/lens.js";
+export {
+  LENSES,
+  VALID_LENSES,
+  isLens,
+  SEVERITIES,
+  VALID_SEVERITIES,
+  CONFIDENCES,
+  VALID_CONFIDENCES,
+} from "./types/lens.js";
 export type { RepoConventions } from "./tooling/repoConventions.js";
 export {
   detectRepoConventions,
@@ -105,6 +116,8 @@ export {
   quoteForCmd,
   shellQuote,
   platformCommand,
+  quoteForOpenTokenCmd,
+  wrapForOpenToken,
 } from "./tooling/exec.js";
 
 // Tooling: project command discovery
@@ -182,12 +195,34 @@ export { spawnLoggedCommand } from "./providers/spawnLoggedCommand.js";
 export type { SpawnLoggedCommandOptions } from "./providers/spawnLoggedCommand.js";
 
 // Provider launch helpers (shared so both orchestrators stay in lockstep)
-export type { WorkerTaskTimeout } from "./providers/workerTaskLaunch.js";
+export type {
+  WorkerTaskTimeout,
+  WorkerTaskWithCommand,
+} from "./providers/workerTaskLaunch.js";
 export {
   resolveWorkerTaskTimeoutMs,
   applyWorkerTaskLaunchSettings,
 } from "./providers/workerTaskLaunch.js";
 export { resolveOpenCodeSpawnCommand } from "./providers/opencodeLaunch.js";
+
+// Shared provider classes (claude-code / opencode stay per-package because their
+// prompt-delivery and skip-permissions semantics legitimately differ)
+export { SubprocessTemplateProvider } from "./providers/subprocessTemplateProvider.js";
+export {
+  LocalSubprocessProvider,
+  MISSING_WORKER_COMMAND_MESSAGE,
+} from "./providers/localSubprocessProvider.js";
+export { VSCodeTaskProvider } from "./providers/vscodeTaskProvider.js";
+
+// Provider auto-resolution + factory (single source of truth for both orchestrators)
+export type {
+  AutoProviderContext,
+  FreshSessionProviderDeps,
+} from "./providers/providerFactory.js";
+export {
+  resolveFreshSessionProviderName,
+  createFreshSessionProvider,
+} from "./providers/providerFactory.js";
 
 // Quota
 export type {
@@ -238,6 +273,7 @@ export {
 export {
   detectHostActiveSubagentLimit,
   resolveHostActiveSubagentLimit,
+  CODEX_DESKTOP_ACTIVE_SUBAGENT_LIMIT,
 } from "./quota/hostLimits.js";
 export type { RateLimitDetectionResult } from "./quota/errorParsing.js";
 export {
@@ -248,7 +284,15 @@ export {
 } from "./quota/fileLock.js";
 export { runSlidingWindow } from "./quota/slidingWindow.js";
 export type { SlidingWindowResult } from "./quota/slidingWindow.js";
-export { scheduleWave, buildProviderModelKey } from "./quota/scheduler.js";
+export {
+  scheduleWave,
+  buildProviderModelKey,
+  DEFAULT_SAFETY_MARGIN,
+  DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
+  DEFAULT_FIRST_CONTACT_CONCURRENCY,
+  QUOTA_REMAINING_PCT_CRITICAL,
+  QUOTA_REMAINING_PCT_LOW,
+} from "./quota/scheduler.js";
 export type {
   ScheduleWaveOptions,
   DiscoveredRateLimitsInput,

@@ -4,6 +4,9 @@ import { fileURLToPath } from "node:url";
 import { writeJsonFile } from "@audit-tools/shared";
 import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
+import type { RunPaths, DispatchBatchRun } from "./runArtifactTypes.js";
+
+export type { RunPaths, DispatchBatchRun } from "./runArtifactTypes.js";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(moduleDir, "..", "..");
@@ -18,26 +21,6 @@ const CURRENT_SINGLE_TASK_PROMPT_FILENAME = "current-single-task-prompt.md";
 const CURRENT_SCHEMA_FILENAME = "audit-result.schema.json";
 const CURRENT_RESULTS_SCHEMA_FILENAME = "audit-results.schema.json";
 const CURRENT_FINDING_SCHEMA_FILENAME = "finding.schema.json";
-
-export interface RunPaths {
-  runDir: string;
-  taskPath: string;
-  promptPath: string;
-  resultPath: string;
-  stdoutPath: string;
-  stderrPath: string;
-  statusPath: string;
-}
-
-export interface DispatchBatchRun {
-  run_id: string;
-  task_path: string;
-  prompt_path: string;
-  result_path: string;
-  status_path: string;
-  audit_results_path?: string;
-  pending_audit_tasks_path?: string;
-}
 
 function pad(value: number, size = 2): string {
   return String(value).padStart(size, "0");
@@ -97,6 +80,10 @@ export async function ensureSupervisorDirs(
 
 async function writeDispatchSchemaFiles(artifactsDir: string): Promise<void> {
   const dispatchDir = join(artifactsDir, "dispatch");
+  // Ensure the dispatch dir exists: this is now written before the pointer
+  // files (which formerly created it), and parallel-slot dispatch may reach
+  // here before the canonical dispatch has run.
+  await mkdir(dispatchDir, { recursive: true });
   await writeFile(
     join(dispatchDir, CURRENT_SCHEMA_FILENAME),
     await readFile(auditResultSchemaPath, "utf8"),
@@ -188,8 +175,18 @@ export async function writeWorkerTaskFiles(
     run_id: task.run_id,
     status: "dispatched",
   });
-  if (options.updateDispatch === false) {
-    await writeDispatchSchemaFiles(artifactsDir);
+
+  // The result schema files are always required by the worker, regardless of
+  // whether this run owns the shared "current dispatch" pointer files.
+  await writeDispatchSchemaFiles(artifactsDir);
+
+  // Parallel-slot dispatch passes updateDispatch:false so each slot does NOT
+  // clobber the shared current-task / current-prompt / current-tasks pointers
+  // (only the single canonical dispatch should own them). The default path
+  // (updateDispatch unset/true) refreshes those pointers and the single-task
+  // fallback.
+  const updateDispatch = options.updateDispatch !== false;
+  if (!updateDispatch) {
     return;
   }
   await writeJsonFile(
@@ -206,7 +203,6 @@ export async function writeWorkerTaskFiles(
     currentTasks ?? [],
   );
   await writeSingleTaskFallbackFiles(artifactsDir, task, currentTasks);
-  await writeDispatchSchemaFiles(artifactsDir);
 }
 
 export async function writeDispatchBatchFiles(

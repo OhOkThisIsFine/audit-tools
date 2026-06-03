@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { resolveFreshSessionProviderName } =
-  await import("../dist/providers/index.js");
+  await import("../src/providers/index.ts");
 
 test("omitted provider defaults to local-subprocess even when external CLIs are available", () => {
   const provider = resolveFreshSessionProviderName(
@@ -30,30 +30,61 @@ test("provider auto falls back to local-subprocess when no configured bridge or 
   assert.equal(provider, "local-subprocess");
 });
 
-test("omitted provider detects active Claude Code session", () => {
-  const provider = resolveFreshSessionProviderName(
-    undefined,
-    {},
-    {
-      commandExists: () => false,
-      env: { CLAUDECODE: "1" },
-    },
+test("omitted provider does not auto-detect; active Claude Code session falls back to local-subprocess", () => {
+  // Bare `undefined` no longer triggers detection — it defaults to local-subprocess.
+  assert.equal(
+    resolveFreshSessionProviderName(
+      undefined,
+      {},
+      {
+        commandExists: () => false,
+        env: { CLAUDECODE: "1" },
+      },
+    ),
+    "local-subprocess",
   );
-
-  assert.equal(provider, "claude-code");
+  // Even under explicit auto, a fresh `claude` cannot be spawned from inside a
+  // Claude Code session: although the `claude` CLI exists, the inside-claude
+  // guard forces it unavailable, so auto-resolution falls through to
+  // local-subprocess (no other provider is available here).
+  assert.equal(
+    resolveFreshSessionProviderName(
+      undefined,
+      { provider: "auto" },
+      {
+        commandExists: (command) => command === "claude",
+        env: { CLAUDECODE: "1" },
+      },
+    ),
+    "local-subprocess",
+  );
 });
 
-test("defaulted local-subprocess provider still detects active OpenCode session", () => {
-  const provider = resolveFreshSessionProviderName(
-    undefined,
-    { provider: "local-subprocess" },
-    {
-      commandExists: () => false,
-      env: { OPENCODE: "1" },
-    },
+test("explicit local-subprocess is honored over an active OpenCode session; auto detects it", () => {
+  // An explicit provider choice is never overridden by environment detection.
+  assert.equal(
+    resolveFreshSessionProviderName(
+      undefined,
+      { provider: "local-subprocess" },
+      {
+        commandExists: () => false,
+        env: { OPENCODE: "1" },
+      },
+    ),
+    "local-subprocess",
   );
-
-  assert.equal(provider, "opencode");
+  // Auto-resolution does detect an active OpenCode session.
+  assert.equal(
+    resolveFreshSessionProviderName(
+      undefined,
+      { provider: "auto" },
+      {
+        commandExists: () => false,
+        env: { OPENCODE: "1" },
+      },
+    ),
+    "opencode",
+  );
 });
 
 test("provider auto selects vscode-task when running under VS Code and a vscode task template is configured", () => {

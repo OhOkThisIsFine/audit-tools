@@ -10,7 +10,7 @@ const {
   isPyprojectPath,
   isGoModuleManifestPath,
   isGoWorkspaceManifestPath,
-} = await import("../dist/extractors/graphPathUtils.js");
+} = await import("../src/extractors/graphPathUtils.ts");
 
 test("normalizeGraphPath preserves case so distinct-case files never collapse", () => {
   // Real on-disk casing must survive normalization (the packetizer keys on it).

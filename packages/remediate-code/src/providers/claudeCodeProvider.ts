@@ -1,9 +1,6 @@
 import { readFile } from "node:fs/promises";
-import type { FreshSessionProvider, LaunchFreshSessionInput, ClaudeCodeConfig, OpenTokenConfig } from "@audit-tools/shared";
-import { readJsonFile } from "@audit-tools/shared";
-import { spawnLoggedCommand } from "@audit-tools/shared";
-import type { WorkerTask } from "../types/workerSession.js";
-import { applyWorkerTaskLaunchSettings } from "./workerTaskLaunch.js";
+import type { FreshSessionProvider, LaunchFreshSessionInput, ClaudeCodeConfig, OpenTokenConfig, WorkerTaskWithCommand } from "@audit-tools/shared";
+import { readJsonFile, spawnLoggedCommand, applyWorkerTaskLaunchSettings } from "@audit-tools/shared";
 
 export const ACTIVE_CLAUDE_CODE_SESSION_MESSAGE =
   "claude-code provider cannot be used inside an active Claude Code session. " +
@@ -31,7 +28,7 @@ export class ClaudeCodeProvider implements FreshSessionProvider {
       throw new Error(ACTIVE_CLAUDE_CODE_SESSION_MESSAGE);
     }
     const prompt = await readFile(input.promptPath, "utf8");
-    const task = await readJsonFile<WorkerTask>(input.taskPath);
+    const task = await readJsonFile<WorkerTaskWithCommand>(input.taskPath);
     const command = this.config.command ?? "claude";
     const promptFlag = this.config.prompt_flag ?? "-p";
     const args = [

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { CompositeQuotaSource, buildQuotaSource } = await import(
-  "../dist/quota/compositeQuotaSource.js"
+  "../src/quota/compositeQuotaSource.ts"
 );
 
 function makeSnapshot(source) {

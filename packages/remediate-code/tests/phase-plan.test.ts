@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rm, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runPlanPhase } from "../src/phases/plan.js";
 import { validateRemediationPlan } from "../src/validation/remediationState.js";
 
-const TEST_DIR = join(__dirname, ".test-plan-artifacts");
-const FIXTURE = join(__dirname, "fixtures", "audit-findings-simple.json");
+// Derive the directory in ESM (no implicit `__dirname` under NodeNext/ESM).
+const testDir = dirname(fileURLToPath(import.meta.url));
+const TEST_DIR = join(testDir, ".test-plan-artifacts");
+const FIXTURE = join(testDir, "fixtures", "audit-findings-simple.json");
 
 const baseState = { status: "pending" as const };
 const baseOptions = { root: TEST_DIR, artifactsDir: TEST_DIR };

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { isTransientFsError, withFsRetry, writeJsonFile, readJsonFile } =
-  await import("../dist/io/json.js");
+  await import("../src/io/json.ts");
 
 function fsError(code) {
   return Object.assign(new Error(code), { code });

@@ -77,14 +77,17 @@ function computeDependencies(params: {
   }
 
   for (const flow of params.criticalFlows?.flows ?? []) {
-    const flowBlocks = new Set<string>();
+    // Order blocks by first appearance along the flow path so dependency
+    // direction follows the flow's traversal order, not block-id lexical order.
+    const ordered: string[] = [];
+    const seen = new Set<string>();
     for (const path of flow.paths) {
       const blockId = blockByFile.get(path);
-      if (blockId) {
-        flowBlocks.add(blockId);
+      if (blockId && !seen.has(blockId)) {
+        seen.add(blockId);
+        ordered.push(blockId);
       }
     }
-    const ordered = [...flowBlocks].sort();
     for (let i = 1; i < ordered.length; i++) {
       dependsOn.get(ordered[i - 1]!)?.add(ordered[i]!);
     }

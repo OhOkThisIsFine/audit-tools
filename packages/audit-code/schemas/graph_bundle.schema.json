@@ -115,7 +115,7 @@
           }
         }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "analyzers_used": {
       "type": "array",

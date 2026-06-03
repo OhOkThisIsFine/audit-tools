@@ -5,7 +5,7 @@ const { scheduleWave, buildProviderModelKey } = await import(
   "@audit-tools/shared/quota/scheduler"
 );
 const { detectHostActiveSubagentLimit, resolveHostActiveSubagentLimit } = await import(
-  "../dist/quota/hostLimits.js"
+  "../src/quota/hostLimits.ts"
 );
 const {
   decayWeight,
@@ -14,7 +14,7 @@ const {
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
 } = await import("@audit-tools/shared/quota/state");
-const { resolveHostModel } = await import("../dist/quota/index.js");
+const { resolveHostModel } = await import("../src/quota/index.ts");
 
 // Helper to build a quota state entry with preset bucket weights
 function makeEntry(buckets, overrides = {}) {
@@ -557,8 +557,19 @@ test("detectHostActiveSubagentLimit detects Codex Desktop limit", () => {
   const limit = detectHostActiveSubagentLimit({
     CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop",
   });
-  assert.equal(limit?.active_subagents, 6);
-  assert.equal(limit?.source, "environment");
+  assert.ok(limit !== null, "expected a non-null limit for Codex Desktop");
+  assert.equal(limit.active_subagents, 6);
+  assert.equal(limit.source, "environment");
+  assert.equal(limit.description, "Codex Desktop active subagent limit.");
+});
+
+test("detectHostActiveSubagentLimit respects AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS env var", () => {
+  const limit = detectHostActiveSubagentLimit({
+    AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "3",
+  });
+  assert.ok(limit !== null, "expected a non-null limit from env var");
+  assert.equal(limit.active_subagents, 3);
+  assert.equal(limit.source, "environment");
 });
 
 test("resolveHostActiveSubagentLimit prefers explicit host report over environment", () => {
@@ -658,4 +669,121 @@ test("scheduleWave disables ramp-up when ramp_up_enabled is false", () => {
     quotaStateEntry: entry,
   });
   assert.equal(schedule.wave_size, 2);
+});
+
+// ── binding_cap (OBS-005): which cap bound the final wave size ───────────────
+
+test("scheduleWave reports binding_cap='rpm' when the RPM limit binds", () => {
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {
+      quota: {
+        models: { "anthropic/claude-sonnet-4-6": { requests_per_minute: 10 } },
+        safety_margin: 0.8,
+        unknown_hosted_concurrency: 100,
+      },
+    },
+    hostModel: "anthropic/claude-sonnet-4-6",
+    requestedConcurrency: 22,
+  });
+  assert.equal(schedule.wave_size, 8);
+  assert.equal(schedule.binding_cap, "rpm");
+});
+
+test("scheduleWave reports binding_cap='tpm' when the TPM limit binds", () => {
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {
+      quota: {
+        models: { "test/model": { input_tokens_per_minute: 10_000 } },
+        safety_margin: 1.0,
+        unknown_hosted_concurrency: 100,
+      },
+    },
+    hostModel: "test/model",
+    requestedConcurrency: 5,
+    estimatedSlotTokens: [8000, 6000, 4000, 2000, 1000],
+  });
+  assert.equal(schedule.wave_size, 1);
+  assert.equal(schedule.binding_cap, "tpm");
+});
+
+test("scheduleWave reports binding_cap='learned' when the learned cap binds", () => {
+  const entry = makeEntry({
+    "1": { success_weight: 5, failure_weight: 0 },
+    "2": { success_weight: 5, failure_weight: 0 },
+    "3": { success_weight: 0, failure_weight: 5 },
+  });
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: { quota: { ramp_up_enabled: false } },
+    hostModel: null,
+    requestedConcurrency: 22,
+    quotaStateEntry: entry,
+  });
+  assert.equal(schedule.binding_cap, "learned");
+});
+
+test("scheduleWave reports binding_cap='first_contact' for an unconfigured local provider", () => {
+  const schedule = scheduleWave({
+    providerName: "local-subprocess",
+    sessionConfig: {},
+    hostModel: null,
+    requestedConcurrency: 22,
+    quotaStateEntry: null,
+  });
+  assert.equal(schedule.wave_size, 3);
+  assert.equal(schedule.binding_cap, "first_contact");
+});
+
+test("scheduleWave reports binding_cap='fallback' when the configured fallback binds", () => {
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: { quota: { unknown_hosted_concurrency: 3 } },
+    hostModel: null,
+    requestedConcurrency: 22,
+    quotaStateEntry: null,
+  });
+  assert.equal(schedule.wave_size, 3);
+  assert.equal(schedule.binding_cap, "fallback");
+});
+
+test("scheduleWave reports binding_cap='cooldown' during an active cooldown", () => {
+  const cooldownUntil = new Date(Date.now() + 60_000).toISOString();
+  const entry = makeEntry({}, { cooldown_until: cooldownUntil });
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {},
+    hostModel: null,
+    requestedConcurrency: 22,
+    quotaStateEntry: entry,
+  });
+  assert.equal(schedule.binding_cap, "cooldown");
+});
+
+test("scheduleWave reports binding_cap='host_concurrency' when the host limit binds", () => {
+  const schedule = scheduleWave({
+    providerName: "local-subprocess",
+    sessionConfig: { quota: { enabled: false } },
+    hostModel: null,
+    requestedConcurrency: 36,
+    hostConcurrencyLimit: {
+      active_subagents: 6,
+      source: "cli_flags",
+      description: "Host active subagent limit.",
+    },
+  });
+  assert.equal(schedule.wave_size, 6);
+  assert.equal(schedule.binding_cap, "host_concurrency");
+});
+
+test("scheduleWave reports binding_cap='none' when nothing reduces the requested wave", () => {
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: { quota: { enabled: false } },
+    hostModel: null,
+    requestedConcurrency: 4,
+  });
+  assert.equal(schedule.wave_size, 4);
+  assert.equal(schedule.binding_cap, "none");
 });

@@ -134,4 +134,38 @@ describe("runTriagePhase", () => {
       /items missing/,
     );
   });
+
+  it("auto-retries blocked items when impl_preview_acknowledged.json exists and no resolution file", async () => {
+    const state = makeState({
+      F1: {
+        finding_id: "F1",
+        status: "blocked",
+        failure_reason: "test",
+        block_id: "B1",
+      },
+      F2: {
+        finding_id: "F2",
+        status: "blocked",
+        failure_reason: "test",
+        block_id: "B1",
+        rework_count: 1,
+      },
+    });
+
+    // No triage_resolution.json; the user approved at preview time instead.
+    await writeFile(
+      join(TEST_DIR, "impl_preview_acknowledged.json"),
+      JSON.stringify({ acknowledged: true }),
+      "utf8",
+    );
+
+    const next = await runTriagePhase(state, BASE_OPTIONS);
+    expect(next.status).toBe("documenting");
+    // Every previously-blocked item is re-queued as documented.
+    expect(state.items!.F1.status).toBe("documented");
+    expect(state.items!.F2.status).toBe("documented");
+    // rework_count is incremented (from undefined->1 and from 1->2).
+    expect(state.items!.F1.rework_count).toBe(1);
+    expect(state.items!.F2.rework_count).toBe(2);
+  });
 });

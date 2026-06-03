@@ -21,7 +21,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["task_id", "prompt_path", "result_path"],
+        "required": ["task_id", "finding_id", "block_id", "prompt_path", "result_path"],
         "properties": {
           "task_id": { "type": "string" },
           "finding_id": { "type": "string" },

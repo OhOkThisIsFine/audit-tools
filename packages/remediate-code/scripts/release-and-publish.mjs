@@ -366,7 +366,7 @@ async function main() {
     console.error(`[release] creating GitHub Release failed: ${err.message}`);
     console.log(`[release] rolling back remote tag ${tag}...`);
     try {
-      run("git", ["push", "origin", `:refs/tags/${tag}`]);
+      run("git", ["push", remoteName, `:refs/tags/${tag}`]);
       console.log(`[release] remote tag ${tag} deleted.`);
     } catch (rollbackErr) {
       console.error(

@@ -27,6 +27,23 @@ export interface RemediationPlan {
   themes?: FindingTheme[];
 }
 
+/**
+ * Canonical names of the bounded remediation steps. Defined as named constants
+ * (rather than bare string literals scattered across the phases) so the
+ * implement phase, the validator, and the item-spec contract share one source
+ * of truth for these magic strings.
+ */
+export const REMEDIATION_STEP = {
+  DOCUMENT: "Document",
+  WRITE_TESTS: "Write Tests",
+  REFACTOR_CODE: "Refactor Code",
+  VERIFY_AGAINST_TESTS: "Verify Code Against Tests",
+  VERIFY_AGAINST_DOCUMENTATION: "Verify Code Against Documentation",
+} as const;
+
+export type RemediationStepName =
+  (typeof REMEDIATION_STEP)[keyof typeof REMEDIATION_STEP];
+
 export interface ItemSpec {
   finding_id: string;
   concrete_change: string;
@@ -36,12 +53,7 @@ export interface ItemSpec {
     assertions: string[];
   }[];
   not_applicable_steps: {
-    step:
-      | "Document"
-      | "Write Tests"
-      | "Refactor Code"
-      | "Verify Code Against Tests"
-      | "Verify Code Against Documentation";
+    step: RemediationStepName;
     rationale: string;
   }[];
 }

@@ -177,8 +177,12 @@ async function runDeterministicForNextStep(params: {
       if (taskFiles.size > 0) {
         const integrity = await checkFileIntegrity(params.root, bundle.repo_manifest, [...taskFiles]);
         if (!integrity.is_clean) {
-          console.log(
-            `File integrity check: ${integrity.changed_files.length} changed, ${integrity.missing_files.length} missing — re-running intake.`,
+          // Route this diagnostic OFF stdout: cmdNextStep emits the step
+          // contract as the sole stdout payload via console.log(JSON.stringify),
+          // so a console.log here would corrupt the JSON-on-stdout contract.
+          process.stderr.write(
+            `[audit-code] nextStep: integrity check — ${integrity.changed_files.length} changed, ` +
+              `${integrity.missing_files.length} missing, ${integrity.io_errors.length} io-error(s); re-running intake.\n`,
           );
           await advanceAudit(bundle, { root: params.root, preferredExecutor: "intake_executor", opentoken: params.opentoken });
           continue;

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { resolveExecArgv, quoteForCmd, shellQuote, platformCommand } = await import(
-  "../dist/tooling/exec.js"
+  "../src/tooling/exec.ts"
 );
 
 test("platformCommand maps package-manager shims to .cmd on win32 only", () => {

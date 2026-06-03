@@ -12,7 +12,7 @@ const {
   BLOCK_SAFETY_MARGIN,
 // Note: We intentionally import from the compiled build in `../dist` to guarantee we test the final distributed artifacts.
 // The `npm test` script automatically rebuilds before execution, ensuring tests are never run against stale builds.
-} = await import("../dist/tokens.js");
+} = await import("../src/tokens.ts");
 
 test("estimateTokensFromBytes is monotonic and zero for non-positive/non-finite", () => {
   assert.equal(estimateTokensFromBytes(0), 0);

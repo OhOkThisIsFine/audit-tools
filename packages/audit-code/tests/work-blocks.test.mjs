@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { buildWorkBlocks } = await import("../dist/reporting/workBlocks.js");
+const { buildWorkBlocks } = await import("../src/reporting/workBlocks.ts");
 
 // Minimal Finding shape — buildWorkBlocks only reads id, severity, and
 // affected_files[].path at runtime.
@@ -105,6 +105,37 @@ test("buildWorkBlocks re-indexes block ids sequentially after severity sort", ()
     blocks.map((b) => b.id),
     ["block-1", "block-2", "block-3"],
   );
+});
+
+test("buildWorkBlocks returns [] for empty findings (early-return guard)", () => {
+  assert.deepEqual(buildWorkBlocks({ findings: [] }), []);
+});
+
+test("buildWorkBlocks falls back to file:<path> units when no unitManifest is supplied", () => {
+  // No unitManifest -> each affected file's owned unit is `file:<path>`. Two
+  // findings on the same file share that fallback key and group into one block.
+  const sameFile = buildWorkBlocks({
+    findings: [
+      finding("F1", "high", ["src/shared.ts"]),
+      finding("F2", "low", ["src/shared.ts"]),
+    ],
+  });
+  assert.equal(sameFile.length, 1);
+  assert.ok(sameFile[0].unit_ids.includes("file:src/shared.ts"));
+  assert.deepEqual([...sameFile[0].finding_ids].sort(), ["F1", "F2"]);
+
+  // Two findings on distinct files -> distinct file:<path> units -> two blocks.
+  const distinctFiles = buildWorkBlocks({
+    findings: [
+      finding("F-A", "high", ["src/a.ts"]),
+      finding("F-B", "low", ["src/b.ts"]),
+    ],
+  });
+  assert.equal(distinctFiles.length, 2);
+  const blockA = distinctFiles.find((b) => b.owned_files.includes("src/a.ts"));
+  const blockB = distinctFiles.find((b) => b.owned_files.includes("src/b.ts"));
+  assert.ok(blockA.unit_ids.includes("file:src/a.ts"));
+  assert.ok(blockB.unit_ids.includes("file:src/b.ts"));
 });
 
 test("buildWorkBlocks derives depends_on from criticalFlows paths across blocks", () => {

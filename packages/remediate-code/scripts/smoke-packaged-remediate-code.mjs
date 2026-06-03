@@ -83,6 +83,7 @@ function check(label, fn) {
   }
 }
 
+const smokeStart = Date.now();
 console.log("smoke:packaged-remediate-code");
 console.log(
   "  isolating inherited npm_config_* overrides so dry-run does not suppress tarball creation",
@@ -221,5 +222,5 @@ try {
   rmSync(smokeRoot, { recursive: true, force: true });
 }
 
-console.log(`\n${passed} passed, ${failed} failed`);
+console.log(`\n${passed} passed, ${failed} failed (${Date.now() - smokeStart}ms total)`);
 if (failed > 0) process.exit(1);

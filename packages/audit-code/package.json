@@ -23,7 +23,7 @@
     "update-languages": "node scripts/update-languages.mjs",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test tests/*.test.mjs",
+    "test": "npm run build && node --import tsx/esm --test tests/*.test.mjs",
     "release:patch": "node scripts/release-and-publish.mjs patch --bump-only",
     "release:minor": "node scripts/release-and-publish.mjs minor --bump-only",
     "release:major": "node scripts/release-and-publish.mjs major --bump-only",
@@ -73,6 +73,7 @@
     "ajv": "^8.17.1",
     "linguist-languages": "^9.3.2",
     "tree-sitter-wasms": "^0.1.13",
+    "tsx": "^4.19.0",
     "typescript": "^5.9.2",
     "web-tree-sitter": "^0.25.10"
   }

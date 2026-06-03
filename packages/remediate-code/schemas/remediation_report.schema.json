@@ -48,6 +48,31 @@
         "additionalProperties": false
       }
     },
+    "verified_no_change": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "summary"],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "summary": { "type": "string" },
+          "verification_evidence": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "blocked": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "rationale"],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "rationale": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
     "combined_test_result": {
       "type": "object",
       "required": ["passed"],

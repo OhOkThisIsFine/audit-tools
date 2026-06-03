@@ -1,7 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { isFileMissingError, readJsonFile, writeJsonFile } from "@audit-tools/shared";
+import {
+  isFileMissingError,
+  readJsonFile,
+  writeJsonFile,
+  DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
+} from "@audit-tools/shared";
 import type { ProviderRateLimits, SessionConfig, DispatchModelHint } from "@audit-tools/shared";
 import { buildQuotaSource } from "@audit-tools/shared/quota/compositeQuotaSource";
 import type { ArtifactBundle } from "../io/artifacts.js";
@@ -671,7 +676,9 @@ export async function prepareDispatchArtifacts(params: {
     ?? null;
   const dispatchCachedLimits = await lookupDiscoveredLimits(quotaProviderKey).catch(() => null);
   const discoveredLimits = mergeDiscoveredLimits(providerLimits, dispatchCachedLimits);
-  const halfLifeHours = sessionConfig.quota?.empirical_half_life_hours ?? 24;
+  const halfLifeHours =
+    sessionConfig.quota?.empirical_half_life_hours ??
+    DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
   const quotaSource = buildQuotaSource({ halfLifeHours });
   const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(quotaProviderKey).catch(() => null);
   const waveSchedule = scheduleWave({

@@ -4,15 +4,15 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { advanceAudit } = await import("../dist/orchestrator/advance.js");
-const { decideNextStep } = await import("../dist/orchestrator/nextStep.js");
+const { advanceAudit } = await import("../src/orchestrator/advance.ts");
+const { decideNextStep } = await import("../src/orchestrator/nextStep.ts");
 const { loadArtifactBundle, writeCoreArtifacts, ARTIFACT_FILE_TO_BUNDLE_KEY } =
-  await import("../dist/io/artifacts.js");
+  await import("../src/io/artifacts.ts");
 const { hashArtifactValue } = await import(
-  "../dist/orchestrator/artifactFreshness.js"
+  "../src/orchestrator/artifactFreshness.ts"
 );
 const { runSynthesisExecutor } = await import(
-  "../dist/orchestrator/synthesisExecutors.js"
+  "../src/orchestrator/synthesisExecutors.ts"
 );
 
 const LINE_INDEX = {

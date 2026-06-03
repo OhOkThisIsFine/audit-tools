@@ -10,9 +10,11 @@ import type { LaunchFreshSessionInput } from "../src/providers/types.js";
 import type { WriteStream } from "node:fs";
 import { ClaudeCodeProvider } from "../src/providers/claudeCodeProvider.js";
 import { OpenCodeProvider } from "../src/providers/opencodeProvider.js";
-import { SubprocessTemplateProvider } from "../src/providers/subprocessTemplateProvider.js";
-import { VSCodeTaskProvider } from "../src/providers/vscodeTaskProvider.js";
-import { LocalSubprocessProvider } from "../src/providers/localSubprocessProvider.js";
+import {
+  SubprocessTemplateProvider,
+  VSCodeTaskProvider,
+  LocalSubprocessProvider,
+} from "@audit-tools/shared";
 import { quoteForCmd } from "../src/utils/commands.js";
 
 function expectedShellQuoted(value: string): string {

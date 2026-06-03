@@ -40,28 +40,13 @@ function createMcpClient(root) {
     buffer = Buffer.concat([buffer, chunk]);
 
     while (true) {
-      const separator = buffer.indexOf("\r\n\r\n");
-      if (separator < 0) {
+      const frame = parseFramedMessage(buffer);
+      if (!frame) {
         return;
       }
-      const headerBlock = buffer.slice(0, separator).toString("utf8");
-      const contentLengthHeader = headerBlock
-        .split("\r\n")
-        .find((header) => header.toLowerCase().startsWith("content-length:"));
-      if (!contentLengthHeader) {
-        return;
-      }
-      const contentLength = Number(contentLengthHeader.split(":")[1]?.trim());
-      const frameLength = separator + 4 + contentLength;
-      if (buffer.length < frameLength) {
-        return;
-      }
+      buffer = buffer.slice(frame.consumed);
 
-      const payload = JSON.parse(
-        buffer.slice(separator + 4, frameLength).toString("utf8"),
-      );
-      buffer = buffer.slice(frameLength);
-
+      const { payload } = frame;
       if (pending.has(payload.id)) {
         pending.get(payload.id)(payload);
         pending.delete(payload.id);
@@ -183,7 +168,7 @@ async function withTempRepo(fn) {
   }
 }
 
-test("audit-code MCP server rejects malformed Content-Length headers", async () => {
+test("audit-code MCP server rejects malformed Content-Length headers", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     const child = spawn(process.execPath, [
       distEntry,
@@ -211,7 +196,7 @@ test("audit-code MCP server rejects malformed Content-Length headers", async () 
   });
 });
 
-test("audit-code MCP server exposes tools, resources, prompts, and wrapper-backed workflow calls", async () => {
+test("audit-code MCP server exposes tools, resources, prompts, and wrapper-backed workflow calls", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     const client = createMcpClient(root);
     try {
@@ -380,7 +365,7 @@ async function withInitializedChild(root, fn) {
   }
 }
 
-test("MCP server returns parse error for invalid JSON payload", async () => {
+test("MCP server returns parse error for invalid JSON payload", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     const child = spawnMcpChild(root);
     try {
@@ -401,7 +386,7 @@ test("MCP server returns parse error for invalid JSON payload", async () => {
   });
 });
 
-test("MCP server returns error for request with missing method", async () => {
+test("MCP server returns error for request with missing method", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     const child = spawnMcpChild(root);
     try {
@@ -418,7 +403,7 @@ test("MCP server returns error for request with missing method", async () => {
   });
 });
 
-test("MCP server returns -32601 for unknown JSON-RPC methods", async () => {
+test("MCP server returns -32601 for unknown JSON-RPC methods", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     await withInitializedChild(root, async (child) => {
       child.stdin.write(
@@ -436,7 +421,7 @@ test("MCP server returns -32601 for unknown JSON-RPC methods", async () => {
   });
 });
 
-test("MCP server validates tools/call requires a tool name", async () => {
+test("MCP server validates tools/call requires a tool name", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     await withInitializedChild(root, async (child) => {
       child.stdin.write(
@@ -454,7 +439,7 @@ test("MCP server validates tools/call requires a tool name", async () => {
   });
 });
 
-test("MCP server validates resources/read requires a uri", async () => {
+test("MCP server validates resources/read requires a uri", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     await withInitializedChild(root, async (child) => {
       child.stdin.write(
@@ -472,7 +457,7 @@ test("MCP server validates resources/read requires a uri", async () => {
   });
 });
 
-test("MCP server validates prompts/get requires a prompt name", async () => {
+test("MCP server validates prompts/get requires a prompt name", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     await withInitializedChild(root, async (child) => {
       child.stdin.write(
@@ -492,7 +477,7 @@ test("MCP server validates prompts/get requires a prompt name", async () => {
 
 // --- MAINT-004: Resource and prompt registry tests ---
 
-test("resources/list returns URIs derived from the resource registry", async () => {
+test("resources/list returns URIs derived from the resource registry", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     const client = createMcpClient(root);
     try {
@@ -524,7 +509,7 @@ test("resources/list returns URIs derived from the resource registry", async () 
   });
 });
 
-test("resources/read succeeds for each registered resource URI", async () => {
+test("resources/read succeeds for each registered resource URI", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     const client = createMcpClient(root);
     try {
@@ -559,7 +544,7 @@ test("resources/read succeeds for each registered resource URI", async () => {
   });
 });
 
-test("prompts/list returns prompt metadata derived from the prompt registry", async () => {
+test("prompts/list returns prompt metadata derived from the prompt registry", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     const client = createMcpClient(root);
     try {
@@ -589,7 +574,7 @@ test("prompts/list returns prompt metadata derived from the prompt registry", as
   });
 });
 
-test("prompts/get returns rendered messages for each registered prompt", async () => {
+test("prompts/get returns rendered messages for each registered prompt", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     const client = createMcpClient(root);
     try {
@@ -627,7 +612,7 @@ test("prompts/get returns rendered messages for each registered prompt", async (
   });
 });
 
-test("prompts/get returns error for unknown prompt name", async () => {
+test("prompts/get returns error for unknown prompt name", { timeout: 30000 }, async () => {
   await withTempRepo(async (root) => {
     await withInitializedChild(root, async (child) => {
       child.stdin.write(
@@ -648,7 +633,7 @@ test("prompts/get returns error for unknown prompt name", async () => {
 // --- MAINT-005: Frame parser and dispatch helper tests ---
 
 test("extractFrames buffers partial frames until complete", async () => {
-  const { extractFrames } = await import("../dist/mcp/server.js");
+  const { extractFrames } = await import("../src/mcp/server.ts");
   const errors = [];
   const emit = (resp) => errors.push(resp);
 
@@ -678,7 +663,7 @@ test("extractFrames buffers partial frames until complete", async () => {
 });
 
 test("extractFrames processes multiple frames in one buffer", async () => {
-  const { extractFrames } = await import("../dist/mcp/server.js");
+  const { extractFrames } = await import("../src/mcp/server.ts");
   const errors = [];
   const emit = (resp) => errors.push(resp);
 
@@ -703,7 +688,7 @@ test("extractFrames processes multiple frames in one buffer", async () => {
 });
 
 test("extractFrames emits framing error and resets buffer on bad Content-Length", async () => {
-  const { extractFrames } = await import("../dist/mcp/server.js");
+  const { extractFrames } = await import("../src/mcp/server.ts");
   const errors = [];
   const emit = (resp) => errors.push(resp);
 
@@ -716,7 +701,7 @@ test("extractFrames emits framing error and resets buffer on bad Content-Length"
 });
 
 test("dispatchRequest returns correct responses for standard methods", async () => {
-  const { dispatchRequest } = await import("../dist/mcp/server.js");
+  const { dispatchRequest } = await import("../src/mcp/server.ts");
 
   const ctx = {
     version: "0.0.0-test",
@@ -766,7 +751,7 @@ test("dispatchRequest returns correct responses for standard methods", async () 
 });
 
 test("dispatchRequest returns -32601 for unknown methods", async () => {
-  const { dispatchRequest } = await import("../dist/mcp/server.js");
+  const { dispatchRequest } = await import("../src/mcp/server.ts");
   const ctx = {
     version: "0.0.0-test",
     defaults: { root: ".", artifactsDir: ".audit-artifacts" },
@@ -783,7 +768,7 @@ test("dispatchRequest returns -32601 for unknown methods", async () => {
 });
 
 test("dispatchRequest formats exceptions through error response", async () => {
-  const { dispatchRequest } = await import("../dist/mcp/server.js");
+  const { dispatchRequest } = await import("../src/mcp/server.ts");
   const ctx = {
     version: "0.0.0-test",
     defaults: { root: ".", artifactsDir: ".audit-artifacts" },

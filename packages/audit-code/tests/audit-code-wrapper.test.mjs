@@ -18,7 +18,7 @@ import {
   shouldBuildDistForPaths,
   assertWorkspaceInstalled,
 } from "../audit-code-wrapper-lib.mjs";
-const { isCanonicalResultFilename } = await import("../dist/cli/args.js");
+const { isCanonicalResultFilename } = await import("../src/cli/args.ts");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");

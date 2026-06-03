@@ -35,6 +35,15 @@ export interface FileAnchorSummary {
   };
 }
 
+/**
+ * Graph buckets in `graph_bundle.json` that carry file-to-file edges relevant to
+ * large-file anchoring. Named here (rather than inlined as bare strings in the
+ * collection loop) so the set of scanned buckets is a single typed source of
+ * truth and each bucket key doubles as a typed fallback edge `kind`. `as const`
+ * narrows the element type from `string` to the literal union.
+ */
+const GRAPH_EDGE_BUCKETS = ["imports", "calls", "references"] as const;
+
 const MAX_ANCHORS = 160;
 const KEYWORD_PATTERN =
   /\b(auth|token|password|secret|permission|role|sql|query|exec|spawn|eval|deserialize|encrypt|decrypt|cache|retry|timeout|transaction|lock|race|TODO|FIXME)\b/i;
@@ -131,8 +140,11 @@ function collectGraphEdges(graphBundle: GraphBundle | undefined, path: string): 
   }
   const normalizedPath = normalizePath(path).toLowerCase();
   const edges: GraphEdge[] = [];
-  for (const key of ["imports", "calls", "references"]) {
-    const raw = graphBundle.graphs[key];
+  // Typed as `string` (not the literal union) so the lookup resolves through the
+  // `[key: string]: unknown` index signature on `graphs` — the loop body then
+  // re-validates each entry's shape, matching the original deterministic parse.
+  for (const bucket of GRAPH_EDGE_BUCKETS as readonly string[]) {
+    const raw = graphBundle.graphs[bucket];
     if (!Array.isArray(raw)) {
       continue;
     }
@@ -151,7 +163,7 @@ function collectGraphEdges(graphBundle: GraphBundle | undefined, path: string): 
           edges.push({
             from: record.from,
             to: record.to,
-            kind: typeof record.kind === "string" ? record.kind : key,
+            kind: typeof record.kind === "string" ? record.kind : bucket,
           });
         }
       }

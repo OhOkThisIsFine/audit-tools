@@ -33,11 +33,23 @@ export interface ScheduleWaveInput {
   hostMaxConcurrent?: number | null;
   sessionConfig: SessionConfig | null;
   itemCount: number;
-  estimatedTokensPerItem?: number;
+  /**
+   * Per-slot estimated tokens (one entry per worker slot). The canonical
+   * token-estimate input — drives the TPM budget in the quota path and the
+   * `estimated_wave_tokens` figure in the default path. (Replaces the former
+   * `estimatedTokensPerItem` scalar, which overlapped this and was dropped.)
+   */
   estimatedSlotTokens?: number[];
   providerName?: ResolvedProviderName;
   hostModel?: string | null;
   env?: NodeJS.ProcessEnv;
+}
+
+/** Average of the per-slot token estimates (0 when none are supplied). */
+function averageSlotTokens(estimatedSlotTokens?: number[]): number {
+  if (!estimatedSlotTokens || estimatedSlotTokens.length === 0) return 0;
+  const total = estimatedSlotTokens.reduce((a, b) => a + b, 0);
+  return Math.floor(total / estimatedSlotTokens.length);
 }
 
 export interface WaveScheduleResult extends WaveSchedule {
@@ -73,7 +85,7 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
   if (!quota || quota.enabled === false) {
     const cap = hostLimit?.active_subagents ?? DEFAULT_WAVE_SIZE;
     const waveSize = Math.max(1, Math.min(cap, input.itemCount));
-    const avgTokens = input.estimatedTokensPerItem ?? 0;
+    const avgTokens = averageSlotTokens(input.estimatedSlotTokens);
     return {
       wave_size: waveSize,
       estimated_wave_tokens: waveSize * avgTokens,

@@ -22,6 +22,17 @@ anti-rot rule as CLAUDE.md's *"docs capture durable concepts, not current state"
 
 ## Deferred fixes (product bugs)
 
+- **Extraction can silently drop findings — no coverage accounting.** The
+  `extract_findings` step (and the host driving it) can consolidate a large
+  source finding set into far fewer remediation items and drop the remainder
+  with no record. On the self-audit run, 391 audit findings became 15
+  remediation items; all 15 were resolved, but the tail of medium/low findings
+  was neither fixed nor explicitly deferred. The default expectation is to
+  address *all* findings unless the user says otherwise. Fix: the extraction
+  step should either carry every distinct finding through (dedup, don't drop),
+  or emit an explicit coverage ledger marking each source finding as
+  planned / folded-into-a-bulk-item / deferred-with-rationale — so dropped
+  findings are auditable rather than silent.
 - **Implement findings whose fix spans multiple blocks.** A block's
   `access.write_paths` now permits spec-named new files in the same package
   (shipped in remediate-code@0.6.0), but a finding whose fix-set spans files owned

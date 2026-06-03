@@ -3,6 +3,9 @@ import {
   describeValue,
   formatValidationIssues,
   isRecord,
+  VALID_LENSES,
+  VALID_SEVERITIES,
+  VALID_CONFIDENCES,
   type ValidationIssue,
 } from "@audit-tools/shared";
 
@@ -33,23 +36,11 @@ const REQUIRED_FINDING_FIELDS: Array<keyof Finding> = [
   "summary",
 ];
 
-const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
-const VALID_CONFIDENCES = new Set(["high", "medium", "low"]);
+// Severity / confidence / lens validity now come from the canonical shared
+// vocabulary (`@audit-tools/shared`); previously each was re-defined here and
+// drifted from the shared Lens / FindingSeverity / FindingConfidence types.
 const VALID_PRIORITIES = new Set(["high", "medium", "low"]);
 const LENS_VERIFICATION_TAG = "lens_verification";
-const VALID_LENSES = new Set([
-  "correctness",
-  "architecture",
-  "maintainability",
-  "security",
-  "reliability",
-  "performance",
-  "data_integrity",
-  "tests",
-  "operability",
-  "config_deployment",
-  "observability",
-]);
 
 function pushIssue(
   issues: AuditResultIssue[],
@@ -130,24 +121,13 @@ function validateExpectedStringField(
   }
 }
 
-function validateFinding(
-  finding: unknown,
+function validateFindingRequiredFields(
+  finding: Record<string, unknown>,
   label: string,
   taskId: string,
   resultIndex: number,
-): AuditResultIssue[] {
-  const issues: AuditResultIssue[] = [];
-
-  if (!isRecord(finding)) {
-    pushIssue(issues, {
-      result_index: resultIndex,
-      task_id: taskId,
-      field: label,
-      message: `${label} must be an object, got ${describeValue(finding)}.`,
-    });
-    return issues;
-  }
-
+  issues: AuditResultIssue[],
+): void {
   for (const field of REQUIRED_FINDING_FIELDS) {
     validateRequiredStringField(
       finding[field],
@@ -157,7 +137,15 @@ function validateFinding(
       issues,
     );
   }
+}
 
+function validateFindingEnums(
+  finding: Record<string, unknown>,
+  label: string,
+  taskId: string,
+  resultIndex: number,
+  issues: AuditResultIssue[],
+): void {
   if (
     typeof finding.severity === "string" &&
     !VALID_SEVERITIES.has(finding.severity)
@@ -190,7 +178,15 @@ function validateFinding(
       message: `Invalid lens '${finding.lens}'. Must be one of: ${[...VALID_LENSES].join(", ")}.`,
     });
   }
+}
 
+function validateAffectedFiles(
+  finding: Record<string, unknown>,
+  label: string,
+  taskId: string,
+  resultIndex: number,
+  issues: AuditResultIssue[],
+): void {
   const affectedFiles = finding.affected_files;
   if (!Array.isArray(affectedFiles) || affectedFiles.length === 0) {
     pushIssue(issues, {
@@ -199,63 +195,71 @@ function validateFinding(
       field: `${label}.affected_files`,
       message: "affected_files must be a non-empty array.",
     });
-  } else {
-    for (let k = 0; k < affectedFiles.length; k++) {
-      const item = affectedFiles[k];
-      if (!isRecord(item)) {
-        pushIssue(issues, {
-          result_index: resultIndex,
-          task_id: taskId,
-          field: `${label}.affected_files[${k}]`,
-          message: `affected_files[${k}] must be an object, got ${describeValue(item)}.`,
-        });
-        continue;
-      }
-      if (!isNonEmptyString(item.path)) {
-        pushIssue(issues, {
-          result_index: resultIndex,
-          task_id: taskId,
-          field: `${label}.affected_files[${k}].path`,
-          message: "affected_files entry has an empty path.",
-        });
-      }
-      if (
-        item.line_start !== undefined &&
-        !Number.isInteger(item.line_start)
-      ) {
-        pushIssue(issues, {
-          result_index: resultIndex,
-          task_id: taskId,
-          field: `${label}.affected_files[${k}].line_start`,
-          message: `affected_files[${k}].line_start must be an integer, got ${describeValue(item.line_start)}.`,
-        });
-      }
-      if (
-        item.line_end !== undefined &&
-        !Number.isInteger(item.line_end)
-      ) {
-        pushIssue(issues, {
-          result_index: resultIndex,
-          task_id: taskId,
-          field: `${label}.affected_files[${k}].line_end`,
-          message: `affected_files[${k}].line_end must be an integer, got ${describeValue(item.line_end)}.`,
-        });
-      }
-      if (
-        Number.isInteger(item.line_start) &&
-        Number.isInteger(item.line_end) &&
-        Number(item.line_start) > Number(item.line_end)
-      ) {
-        pushIssue(issues, {
-          result_index: resultIndex,
-          task_id: taskId,
-          field: `${label}.affected_files[${k}]`,
-          message: "affected_files line_start must be less than or equal to line_end.",
-        });
-      }
+    return;
+  }
+  for (let k = 0; k < affectedFiles.length; k++) {
+    const item = affectedFiles[k];
+    if (!isRecord(item)) {
+      pushIssue(issues, {
+        result_index: resultIndex,
+        task_id: taskId,
+        field: `${label}.affected_files[${k}]`,
+        message: `affected_files[${k}] must be an object, got ${describeValue(item)}.`,
+      });
+      continue;
+    }
+    if (!isNonEmptyString(item.path)) {
+      pushIssue(issues, {
+        result_index: resultIndex,
+        task_id: taskId,
+        field: `${label}.affected_files[${k}].path`,
+        message: "affected_files entry has an empty path.",
+      });
+    }
+    if (
+      item.line_start !== undefined &&
+      !Number.isInteger(item.line_start)
+    ) {
+      pushIssue(issues, {
+        result_index: resultIndex,
+        task_id: taskId,
+        field: `${label}.affected_files[${k}].line_start`,
+        message: `affected_files[${k}].line_start must be an integer, got ${describeValue(item.line_start)}.`,
+      });
+    }
+    if (
+      item.line_end !== undefined &&
+      !Number.isInteger(item.line_end)
+    ) {
+      pushIssue(issues, {
+        result_index: resultIndex,
+        task_id: taskId,
+        field: `${label}.affected_files[${k}].line_end`,
+        message: `affected_files[${k}].line_end must be an integer, got ${describeValue(item.line_end)}.`,
+      });
+    }
+    if (
+      Number.isInteger(item.line_start) &&
+      Number.isInteger(item.line_end) &&
+      Number(item.line_start) > Number(item.line_end)
+    ) {
+      pushIssue(issues, {
+        result_index: resultIndex,
+        task_id: taskId,
+        field: `${label}.affected_files[${k}]`,
+        message: "affected_files line_start must be less than or equal to line_end.",
+      });
     }
   }
+}
 
+function validateEvidence(
+  finding: Record<string, unknown>,
+  label: string,
+  taskId: string,
+  resultIndex: number,
+  issues: AuditResultIssue[],
+): void {
   const evidence = finding.evidence;
   if (!Array.isArray(evidence) || evidence.length === 0) {
     pushIssue(issues, {
@@ -265,33 +269,61 @@ function validateFinding(
       message:
         "evidence is empty — provide an array of plain strings such as \"src/foo.ts:42 - variable overwritten before use\".",
     });
-  } else {
-    let hasSubstantiveEntry = false;
-    for (let k = 0; k < evidence.length; k++) {
-      const entry = evidence[k];
-      if (typeof entry !== "string") {
-        pushIssue(issues, {
-          result_index: resultIndex,
-          task_id: taskId,
-          field: `${label}.evidence[${k}]`,
-          message: `evidence[${k}] must be a string, got ${describeValue(entry)}.`,
-        });
-        continue;
-      }
-      if (entry.trim().length > 0) {
-        hasSubstantiveEntry = true;
-      }
-    }
-
-    if (!hasSubstantiveEntry) {
+    return;
+  }
+  let hasSubstantiveEntry = false;
+  for (let k = 0; k < evidence.length; k++) {
+    const entry = evidence[k];
+    if (typeof entry !== "string") {
       pushIssue(issues, {
         result_index: resultIndex,
         task_id: taskId,
-        field: `${label}.evidence`,
-        message: "All evidence entries are empty strings.",
+        field: `${label}.evidence[${k}]`,
+        message: `evidence[${k}] must be a string, got ${describeValue(entry)}.`,
       });
+      continue;
+    }
+    if (entry.trim().length > 0) {
+      hasSubstantiveEntry = true;
     }
   }
+
+  if (!hasSubstantiveEntry) {
+    pushIssue(issues, {
+      result_index: resultIndex,
+      task_id: taskId,
+      field: `${label}.evidence`,
+      message: "All evidence entries are empty strings.",
+    });
+  }
+}
+
+// Thin orchestrator: validates one finding by delegating to the per-concern
+// validators (object-shape, required strings, enums, affected_files, evidence),
+// each of which pushes into the shared issues array. Behavior and messages are
+// identical to the former single 165-line function.
+function validateFinding(
+  finding: unknown,
+  label: string,
+  taskId: string,
+  resultIndex: number,
+): AuditResultIssue[] {
+  const issues: AuditResultIssue[] = [];
+
+  if (!isRecord(finding)) {
+    pushIssue(issues, {
+      result_index: resultIndex,
+      task_id: taskId,
+      field: label,
+      message: `${label} must be an object, got ${describeValue(finding)}.`,
+    });
+    return issues;
+  }
+
+  validateFindingRequiredFields(finding, label, taskId, resultIndex, issues);
+  validateFindingEnums(finding, label, taskId, resultIndex, issues);
+  validateAffectedFiles(finding, label, taskId, resultIndex, issues);
+  validateEvidence(finding, label, taskId, resultIndex, issues);
 
   return issues;
 }

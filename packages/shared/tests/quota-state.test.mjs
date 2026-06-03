@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { setQuotaStateDir, readQuotaState, recordWaveOutcome } = await import(
-  "../dist/quota/state.js"
+  "../src/quota/state.ts"
 );
 
 async function withTempStateDir(fn) {
@@ -50,5 +50,31 @@ test("failure spread starts at the reported concurrency for rate_limited outcome
       assert.ok(buckets[String(n)]?.failure_weight > 0, `bucket ${n} should have failure_weight`);
     }
     assert.equal(buckets["6"]?.failure_weight ?? 0, 0);
+  });
+});
+
+test("success increments buckets 1..concurrency and persists across a reload", async () => {
+  await withTempStateDir(async () => {
+    // First record a 429 so consecutive_429_count is non-zero, then prove a
+    // success resets it to 0.
+    await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "rate_limited" }, 24);
+    await recordWaveOutcome(KEY, { concurrency: 3, estimated_tokens: 0, outcome: "success" }, 24);
+
+    const state = await readQuotaState();
+    const entry = state.entries[KEY];
+    const buckets = entry.buckets;
+    // Success at concurrency 3 increments success_weight on buckets 1..3.
+    for (const n of [1, 2, 3]) {
+      assert.ok(buckets[String(n)]?.success_weight > 0, `bucket ${n} should have success_weight`);
+    }
+    // Bucket 4 (above the reported concurrency) is not credited a success.
+    assert.equal(buckets["4"]?.success_weight ?? 0, 0);
+    // The success path resets the consecutive 429 counter.
+    assert.equal(entry.consecutive_429_count, 0);
+
+    // Disk round-trip: a fresh readQuotaState() returns the same persisted
+    // buckets/weights, confirming withFileLock + writeQuotaState wrote state.
+    const reread = await readQuotaState();
+    assert.deepEqual(reread.entries[KEY].buckets, buckets);
   });
 });

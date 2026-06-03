@@ -14,7 +14,7 @@ const {
   ensureSemanticReviewRun,
   writeHandoffOnly,
   persistConfigErrorHandoff,
-} = await import("../dist/cli/reviewRun.js");
+} = await import("../src/cli/reviewRun.ts");
 
 async function withTempArtifacts(fn) {
   const tempDir = await mkdtemp(join(tmpdir(), "review-run-lifecycle-"));

@@ -390,6 +390,7 @@ async function buildDocumentDispatchStep(ctx: {
         const details = [
           ...integrity.changed.map((p) => `changed: ${p}`),
           ...integrity.missing.map((p) => `missing: ${p}`),
+          ...integrity.io_errors.map((p) => `io-error: ${p}`),
         ];
         const replanCommand = loaderCommand("next-step --force-replan");
         return writeCurrentStep({
@@ -511,6 +512,64 @@ Then run:
         "Stop after all document worker results have been merged and next-step has been run.",
       artifactPaths: { dispatch_plan: planPath, dispatch_quota: docQuotaPath },
     });
+}
+
+// Shapes of the reviewed / preliminary risk-classification entries that drive
+// the implement-preview tables. Module-scoped so the render helpers below can be
+// hoisted out of the state-machine loop rather than re-created per invocation.
+type ReviewedEntry = { finding_id: string; tier: string; reason: string };
+type PrelimEntry = {
+  finding_id: string;
+  title: string;
+  concrete_change: string;
+  no_change?: boolean;
+  affected_files: string[];
+  preliminary_tier: string;
+  preliminary_reason: string;
+};
+
+function isNoOpFinding(
+  prelimMap: Map<string, PrelimEntry>,
+  findingId: string,
+): boolean {
+  return specIndicatesNoChange(prelimMap.get(findingId));
+}
+
+function renderTierSection(
+  reviewedMap: Map<string, ReviewedEntry>,
+  prelimMap: Map<string, PrelimEntry>,
+  tier: string,
+  label: string,
+): string {
+  const matches = [...reviewedMap.values()].filter(
+    (e) => e.tier === tier && !isNoOpFinding(prelimMap, e.finding_id),
+  );
+  if (matches.length === 0) return "";
+  const header = "| ID | Title | Planned Change | Files |";
+  const sep = "|---|---|---|---|";
+  const rows = matches.map((reviewed) => {
+    const prelim = prelimMap.get(reviewed.finding_id);
+    const files = (prelim?.affected_files.join(", ") ?? "—").replaceAll("|", "\\|");
+    const change = (prelim?.concrete_change ?? "—").replaceAll("|", "\\|");
+    const title = (prelim?.title ?? "—").replaceAll("|", "\\|");
+    return `| ${reviewed.finding_id} | ${title} | ${change} | ${files} |`;
+  });
+  return `## ${label}\n\n${header}\n${sep}\n${rows.join("\n")}`;
+}
+
+function renderNoOpSection(
+  reviewedMap: Map<string, ReviewedEntry>,
+  prelimMap: Map<string, PrelimEntry>,
+): string {
+  const noOps = [...reviewedMap.values()].filter((e) =>
+    isNoOpFinding(prelimMap, e.finding_id),
+  );
+  if (noOps.length === 0) return "";
+  const rows = noOps.map((e) => {
+    const title = (prelimMap.get(e.finding_id)?.title ?? "—").replaceAll("|", "\\|");
+    return `- **${e.finding_id}**: ${title}`;
+  });
+  return `## Already Correct (no changes planned)\n\n${rows.join("\n")}`;
 }
 
 async function buildImplementDispatchStep(ctx: {
@@ -656,17 +715,6 @@ Include every \`finding_id\` from the input. Then run:
 
       // Reviewed classifications exist. Build the tiered display in the backend
       // so the preview step is pure present-and-confirm — no reasoning required.
-      type ReviewedEntry = { finding_id: string; tier: string; reason: string };
-      type PrelimEntry = {
-        finding_id: string;
-        title: string;
-        concrete_change: string;
-        no_change?: boolean;
-        affected_files: string[];
-        preliminary_tier: string;
-        preliminary_reason: string;
-      };
-
       const reviewedFile = await readOptionalJsonFile<{ findings: ReviewedEntry[] }>(reviewedPath);
       const prelimFile = await readOptionalJsonFile<{ findings: PrelimEntry[] }>(preliminaryPath);
 
@@ -688,42 +736,11 @@ Include every \`finding_id\` from the input. Then run:
         }
       }
 
-      function isNoOp(findingId: string): boolean {
-        return specIndicatesNoChange(prelimMap.get(findingId));
-      }
-
-      function renderTierSection(tier: string, label: string): string {
-        const matches = [...reviewedMap.values()].filter(
-          (e) => e.tier === tier && !isNoOp(e.finding_id),
-        );
-        if (matches.length === 0) return "";
-        const header = "| ID | Title | Planned Change | Files |";
-        const sep = "|---|---|---|---|";
-        const rows = matches.map((reviewed) => {
-          const prelim = prelimMap.get(reviewed.finding_id);
-          const files = (prelim?.affected_files.join(", ") ?? "—").replaceAll("|", "\\|");
-          const change = (prelim?.concrete_change ?? "—").replaceAll("|", "\\|");
-          const title = (prelim?.title ?? "—").replaceAll("|", "\\|");
-          return `| ${reviewed.finding_id} | ${title} | ${change} | ${files} |`;
-        });
-        return `## ${label}\n\n${header}\n${sep}\n${rows.join("\n")}`;
-      }
-
-      function renderNoOpSection(): string {
-        const noOps = [...reviewedMap.values()].filter((e) => isNoOp(e.finding_id));
-        if (noOps.length === 0) return "";
-        const rows = noOps.map((e) => {
-          const title = (prelimMap.get(e.finding_id)?.title ?? "—").replaceAll("|", "\\|");
-          return `- **${e.finding_id}**: ${title}`;
-        });
-        return `## Already Correct (no changes planned)\n\n${rows.join("\n")}`;
-      }
-
       const sections = [
-        renderTierSection("safe", "Tier 1 — Unambiguously Good"),
-        renderTierSection("substantive", "Tier 2 — Substantive"),
-        renderTierSection("context_dependent", "Tier 3 — Context-Dependent"),
-        renderNoOpSection(),
+        renderTierSection(reviewedMap, prelimMap, "safe", "Tier 1 — Unambiguously Good"),
+        renderTierSection(reviewedMap, prelimMap, "substantive", "Tier 2 — Substantive"),
+        renderTierSection(reviewedMap, prelimMap, "context_dependent", "Tier 3 — Context-Dependent"),
+        renderNoOpSection(reviewedMap, prelimMap),
       ]
         .filter(Boolean)
         .join("\n\n");
@@ -870,6 +887,284 @@ Then run:
     });
 }
 
+// --- Per-state handlers -----------------------------------------------------
+// Each handler owns one branch of the original decideNextStepInner dispatch.
+// Handlers that emit a step return RemediationStep directly; handlers that need
+// the loop to continue with mutated state return { continueWithState }.
+
+async function handleComplete(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState | null,
+): Promise<RemediationStep> {
+  return presentReportStep(root, artifactsDir, state);
+}
+
+async function handlePendingExtractedPlan(
+  artifactsDir: string,
+  existing: RemediationState,
+  extractedPlan: unknown,
+): Promise<RemediationState | null> {
+  try {
+    return await saveStateForPlan(
+      artifactsDir,
+      existing,
+      normalizeExtractedPlan(extractedPlan),
+    );
+  } catch (error) {
+    const paths = intakePaths(artifactsDir);
+    try {
+      const { unlink } = await import("node:fs/promises");
+      await unlink(paths.extractedPlan);
+    } catch { /* already gone */ }
+    process.stderr.write(
+      `[remediate-code] Corrupted extracted-plan.json removed (${error instanceof Error ? error.message : String(error)}). Re-emitting extraction step.\n`,
+    );
+    return null;
+  }
+}
+
+async function handlePendingIntake(
+  root: string,
+  artifactsDir: string,
+  options: NextStepOptions,
+  store: StateStore,
+): Promise<RemediationStep | RemediationState | null> {
+  const inputResolution = resolveInputPaths(root, options.input);
+  const intakeResult = await resolveIntakeStep({
+    root,
+    artifactsDir,
+    input: options.input,
+    inputResolution,
+    store,
+    loaderCommand,
+    randomRunId,
+    collectStartingPointPrompt,
+    synthesizeIntakePrompt,
+    collectIntakeClarificationsPrompt,
+    extractFindingsPrompt,
+  });
+  if (intakeResult.kind === "step") return intakeResult.step;
+  return intakeResult.state;
+}
+
+async function handleNoState(
+  root: string,
+  artifactsDir: string,
+): Promise<RemediationStep> {
+  const paths = intakePaths(artifactsDir);
+  return writeCurrentStep({
+    stepKind: "collect_starting_point",
+    status: "blocked",
+    runId: randomRunId("INPUT"),
+    repoRoot: root,
+    artifactsDir,
+    prompt: collectStartingPointPrompt(
+      root,
+      defaultInputCandidates(root),
+      [],
+      paths,
+    ),
+    allowedCommands: [loaderCommand("next-step"), loaderCommand("next-step --input <path>")],
+    stopCondition:
+      "Stop after collecting a remediation starting point and rerunning next-step.",
+    artifactPaths: {
+      source_manifest: paths.sourceManifest,
+      conversation_start: paths.conversationStart,
+    },
+  });
+}
+
+async function handleWaitingForClarification(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+): Promise<RemediationStep> {
+  const clarifications =
+    state.clarifications ??
+    (await readOptionalJsonFile<ClarificationRequest[]>(
+      join(artifactsDir, "clarification_request.json"),
+    )) ??
+    [];
+  const resolutionPath = join(artifactsDir, "clarification_resolution.json");
+  return writeCurrentStep({
+    stepKind: "collect_clarifications",
+    status: "blocked",
+    runId: stateRunId(state),
+    repoRoot: root,
+    artifactsDir,
+    prompt: clarificationPrompt(clarifications, resolutionPath),
+    allowedCommands: [loaderCommand("next-step")],
+    stopCondition:
+      "Stop after asking the user for clarification answers, unless the answers are already available and the prompt told you to continue.",
+    artifactPaths: {
+      clarification_request: join(artifactsDir, "clarification_request.json"),
+      clarification_resolution: resolutionPath,
+    },
+  });
+}
+
+async function handleWaitingForTriage(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+): Promise<RemediationStep> {
+  const resolutionPath = join(artifactsDir, "triage_resolution.json");
+  return writeCurrentStep({
+    stepKind: "collect_triage",
+    status: "blocked",
+    runId: stateRunId(state),
+    repoRoot: root,
+    artifactsDir,
+    prompt: triagePrompt(state, resolutionPath),
+    allowedCommands: [loaderCommand("next-step")],
+    stopCondition:
+      "Stop after asking the user for triage decisions, unless the decisions are already available and the prompt told you to continue.",
+    artifactPaths: {
+      triage_batch: join(artifactsDir, "triage_batch.json"),
+      triage_resolution: resolutionPath,
+    },
+  });
+}
+
+async function handlePlanning(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+  options: NextStepOptions,
+): Promise<DispatchOutcome> {
+  const pendingFindings = documentableFindings(state);
+  return buildDocumentDispatchStep({ root, artifactsDir, state, options, pendingFindings });
+}
+
+async function handleDocumenting(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+  options: NextStepOptions,
+  store: StateStore,
+): Promise<DispatchOutcome> {
+  const implementBlocks = implementableBlocks(state);
+  if (implementBlocks.length > 0) {
+    if (state.plan) {
+      const integrity = await checkAffectedFileIntegrity(root, state.plan.findings);
+      if (!integrity.is_clean) {
+        const details = [
+          ...integrity.changed.map((p) => `changed: ${p}`),
+          ...integrity.missing.map((p) => `missing: ${p}`),
+          ...integrity.io_errors.map((p) => `io-error: ${p}`),
+        ];
+        const nextCommand = loaderCommand("next-step --force-replan");
+        return writeCurrentStep({
+          stepKind: "collect_starting_point",
+          status: "blocked",
+          runId: stateRunId(state),
+          repoRoot: root,
+          artifactsDir,
+          prompt: [
+            "## File integrity check failed",
+            "",
+            "The following files have changed since the remediation plan was created:",
+            ...details.map((d) => `- ${d}`),
+            "",
+            "Re-run planning to pick up the current file state before implementation begins.",
+            "Run:",
+            "",
+            `\`${nextCommand}\``,
+          ].join("\n"),
+          allowedCommands: [nextCommand],
+          stopCondition:
+            "Stop after re-planning completes.",
+        });
+      }
+    }
+    return buildImplementDispatchStep({ root, artifactsDir, state, options, implementBlocks });
+  }
+
+  state.status = "implementing";
+  await store.saveState(state);
+  return { continueWithState: state };
+}
+
+async function handleImplementing(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+  runLogger: RunLogger,
+  store: StateStore,
+): Promise<DispatchOutcome> {
+  const triageStart = Date.now();
+  runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
+  const triaged = await runTriagePhase(state, { root, artifactsDir });
+  runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "triage", duration_ms: Date.now() - triageStart });
+  await store.saveState(triaged);
+  return { continueWithState: triaged };
+}
+
+async function handleAllTerminalTransition(
+  state: RemediationState,
+  store: StateStore,
+): Promise<DispatchOutcome> {
+  state.status = "closing";
+  await store.saveState(state);
+  return { continueWithState: state };
+}
+
+async function handleClosing(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+  runLogger: RunLogger,
+  store: StateStore,
+): Promise<DispatchOutcome> {
+  const closeStart = Date.now();
+  runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "close" });
+  const closed = await runClosePhase(state, { root, artifactsDir }, runLogger);
+  runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "close", duration_ms: Date.now() - closeStart });
+  if (closed.status !== "complete") {
+    await store.saveState(closed);
+  }
+  return { continueWithState: closed };
+}
+
+async function handleUnhandledState(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+): Promise<RemediationStep> {
+  const itemsByStatus: Record<string, string[]> = {};
+  for (const item of Object.values(state.items ?? {})) {
+    (itemsByStatus[item.status] ??= []).push(item.finding_id);
+  }
+  const statusBreakdown = Object.entries(itemsByStatus)
+    .map(([status, ids]) => `- **${status}**: ${ids.join(", ")}`)
+    .join("\n");
+
+  return writeCurrentStep({
+    stepKind: "unhandled_state",
+    status: "blocked",
+    runId: stateRunId(state),
+    repoRoot: root,
+    artifactsDir,
+    prompt: `
+# Unhandled State
+
+The remediation workflow reached a state it has no transition for.
+
+- **State status**: \`${state.status}\`
+- **State file**: \`${join(artifactsDir, "state.json")}\`
+
+## Item Breakdown
+
+${statusBreakdown || "No items in state."}
+
+Report this diagnostic to the user and stop. Do not attempt to advance the run.
+`,
+    allowedCommands: [],
+    stopCondition: "Stop after reporting the diagnostic to the user.",
+  });
+}
+
 export async function decideNextStep(
   options: NextStepOptions = {},
 ): Promise<RemediationStep> {
@@ -921,238 +1216,70 @@ async function decideNextStepInner(
   });
 
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-  if (state?.status === "complete" || existsSync(join(root, "remediation-report.md"))) {
-    return presentReportStep(root, artifactsDir, state);
-  }
+    if (state?.status === "complete" || existsSync(join(root, "remediation-report.md"))) {
+      return handleComplete(root, artifactsDir, state);
+    }
 
-  if (!state) {
-    const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
-    if (extractedPlan) {
-      try {
-        state = await saveStateForPlan(
+    if (!state) {
+      const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
+      if (extractedPlan) {
+        state = await handlePendingExtractedPlan(
           artifactsDir,
           { status: "pending" },
-          normalizeExtractedPlan(extractedPlan),
-        );
-      } catch (error) {
-        const paths = intakePaths(artifactsDir);
-        try {
-          const { unlink } = await import("node:fs/promises");
-          await unlink(paths.extractedPlan);
-        } catch { /* already gone */ }
-        process.stderr.write(
-          `[remediate-code] Corrupted extracted-plan.json removed (${error instanceof Error ? error.message : String(error)}). Re-emitting extraction step.\n`,
+          extractedPlan,
         );
       }
     }
-  }
 
-  if (!state) {
-    const inputResolution = resolveInputPaths(root, options.input);
-    const intakeResult = await resolveIntakeStep({
-      root,
-      artifactsDir,
-      input: options.input,
-      inputResolution,
-      store,
-      loaderCommand,
-      randomRunId,
-      collectStartingPointPrompt,
-      synthesizeIntakePrompt,
-      collectIntakeClarificationsPrompt,
-      extractFindingsPrompt,
-    });
-    if (intakeResult.kind === "step") return intakeResult.step;
-    state = intakeResult.state;
-  }
-
-  if (!state) {
-    const paths = intakePaths(artifactsDir);
-    return writeCurrentStep({
-      stepKind: "collect_starting_point",
-      status: "blocked",
-      runId: randomRunId("INPUT"),
-      repoRoot: root,
-      artifactsDir,
-      prompt: collectStartingPointPrompt(
-        root,
-        defaultInputCandidates(root),
-        [],
-        paths,
-      ),
-      allowedCommands: [loaderCommand("next-step"), loaderCommand("next-step --input <path>")],
-      stopCondition:
-        "Stop after collecting a remediation starting point and rerunning next-step.",
-      artifactPaths: {
-        source_manifest: paths.sourceManifest,
-        conversation_start: paths.conversationStart,
-      },
-    });
-  }
-
-  if (state.status === "waiting_for_clarification") {
-    const clarifications =
-      state.clarifications ??
-      (await readOptionalJsonFile<ClarificationRequest[]>(
-        join(artifactsDir, "clarification_request.json"),
-      )) ??
-      [];
-    const resolutionPath = join(artifactsDir, "clarification_resolution.json");
-    return writeCurrentStep({
-      stepKind: "collect_clarifications",
-      status: "blocked",
-      runId: stateRunId(state),
-      repoRoot: root,
-      artifactsDir,
-      prompt: clarificationPrompt(clarifications, resolutionPath),
-      allowedCommands: [loaderCommand("next-step")],
-      stopCondition:
-        "Stop after asking the user for clarification answers, unless the answers are already available and the prompt told you to continue.",
-      artifactPaths: {
-        clarification_request: join(artifactsDir, "clarification_request.json"),
-        clarification_resolution: resolutionPath,
-      },
-    });
-  }
-
-  if (state.status === "waiting_for_triage") {
-    const resolutionPath = join(artifactsDir, "triage_resolution.json");
-    return writeCurrentStep({
-      stepKind: "collect_triage",
-      status: "blocked",
-      runId: stateRunId(state),
-      repoRoot: root,
-      artifactsDir,
-      prompt: triagePrompt(state, resolutionPath),
-      allowedCommands: [loaderCommand("next-step")],
-      stopCondition:
-        "Stop after asking the user for triage decisions, unless the decisions are already available and the prompt told you to continue.",
-      artifactPaths: {
-        triage_batch: join(artifactsDir, "triage_batch.json"),
-        triage_resolution: resolutionPath,
-      },
-    });
-  }
-
-  const pendingFindings = documentableFindings(state);
-  if (state.status === "planning" && pendingFindings.length > 0) {
-    const outcome = await buildDocumentDispatchStep({ root, artifactsDir, state, options, pendingFindings });
-    if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
-    return outcome;
-  }
-
-  const implementBlocks = implementableBlocks(state);
-  if (state.status === "documenting" && implementBlocks.length > 0 && state.plan) {
-    const integrity = await checkAffectedFileIntegrity(root, state.plan.findings);
-    if (!integrity.is_clean) {
-      const details = [
-        ...integrity.changed.map((p) => `changed: ${p}`),
-        ...integrity.missing.map((p) => `missing: ${p}`),
-      ];
-      const nextCommand = loaderCommand("next-step --force-replan");
-      return writeCurrentStep({
-        stepKind: "collect_starting_point",
-        status: "blocked",
-        runId: stateRunId(state),
-        repoRoot: root,
-        artifactsDir,
-        prompt: [
-          "## File integrity check failed",
-          "",
-          "The following files have changed since the remediation plan was created:",
-          ...details.map((d) => `- ${d}`),
-          "",
-          "Re-run planning to pick up the current file state before implementation begins.",
-          "Run:",
-          "",
-          `\`${nextCommand}\``,
-        ].join("\n"),
-        allowedCommands: [nextCommand],
-        stopCondition:
-          "Stop after re-planning completes.",
-      });
+    if (!state) {
+      const intakeOutcome = await handlePendingIntake(root, artifactsDir, options, store);
+      if (intakeOutcome && "step_kind" in intakeOutcome) return intakeOutcome;
+      state = intakeOutcome;
     }
-  }
-  if (state.status === "documenting" && implementBlocks.length > 0) {
-    const outcome = await buildImplementDispatchStep({ root, artifactsDir, state, options, implementBlocks });
-    if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
-    return outcome;
-  }
 
-  if (state.status === "implementing") {
-    const triageStart = Date.now();
-    runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
-    const triaged = await runTriagePhase(state, { root, artifactsDir });
-    runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "triage", duration_ms: Date.now() - triageStart });
-    await store.saveState(triaged);
-    state = triaged;
-    continue;
-  }
-
-  if (state.status === "triage") {
-    const triageStart = Date.now();
-    runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
-    const triaged = await runTriagePhase(state, { root, artifactsDir });
-    runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "triage", duration_ms: Date.now() - triageStart });
-    await store.saveState(triaged);
-    state = triaged;
-    continue;
-  }
-
-  if (state.status === "documenting" && implementBlocks.length === 0) {
-    state.status = "implementing";
-    await store.saveState(state);
-    continue;
-  }
-
-  if (allItemsTerminal(state) && state.status !== "closing") {
-    state.status = "closing";
-    await store.saveState(state);
-  }
-
-  if (state.status === "closing") {
-    const closeStart = Date.now();
-    runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "close" });
-    const closed = await runClosePhase(state, { root, artifactsDir }, runLogger);
-    runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "close", duration_ms: Date.now() - closeStart });
-    if (closed.status !== "complete") {
-      await store.saveState(closed);
+    if (!state) {
+      return handleNoState(root, artifactsDir);
     }
-    state = closed;
-    continue;
-  }
 
-  const itemsByStatus: Record<string, string[]> = {};
-  for (const item of Object.values(state.items ?? {})) {
-    (itemsByStatus[item.status] ??= []).push(item.finding_id);
-  }
-  const statusBreakdown = Object.entries(itemsByStatus)
-    .map(([status, ids]) => `- **${status}**: ${ids.join(", ")}`)
-    .join("\n");
+    if (state.status === "waiting_for_clarification") {
+      return handleWaitingForClarification(root, artifactsDir, state);
+    }
 
-  return writeCurrentStep({
-    stepKind: "unhandled_state",
-    status: "blocked",
-    runId: stateRunId(state),
-    repoRoot: root,
-    artifactsDir,
-    prompt: `
-# Unhandled State
+    if (state.status === "waiting_for_triage") {
+      return handleWaitingForTriage(root, artifactsDir, state);
+    }
 
-The remediation workflow reached a state it has no transition for.
+    if (state.status === "planning" && documentableFindings(state).length > 0) {
+      const outcome = await handlePlanning(root, artifactsDir, state, options);
+      if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
+      return outcome;
+    }
 
-- **State status**: \`${state.status}\`
-- **State file**: \`${join(artifactsDir, "state.json")}\`
+    if (state.status === "documenting") {
+      const outcome = await handleDocumenting(root, artifactsDir, state, options, store);
+      if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
+      return outcome;
+    }
 
-## Item Breakdown
+    if (state.status === "implementing" || state.status === "triage") {
+      const outcome = await handleImplementing(root, artifactsDir, state, runLogger, store);
+      if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
+      return outcome;
+    }
 
-${statusBreakdown || "No items in state."}
+    if (allItemsTerminal(state) && state.status !== "closing") {
+      const outcome = await handleAllTerminalTransition(state, store);
+      if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
+      return outcome;
+    }
 
-Report this diagnostic to the user and stop. Do not attempt to advance the run.
-`,
-    allowedCommands: [],
-    stopCondition: "Stop after reporting the diagnostic to the user.",
-  });
+    if (state.status === "closing") {
+      const outcome = await handleClosing(root, artifactsDir, state, runLogger, store);
+      if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
+      return outcome;
+    }
+
+    return handleUnhandledState(root, artifactsDir, state);
   }
 
   return writeCurrentStep({

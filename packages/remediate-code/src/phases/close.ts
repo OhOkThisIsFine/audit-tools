@@ -202,111 +202,129 @@ function executeClosingAction(
   };
 }
 
-export async function runClosePhase(
+interface CombinedTestResult {
+  passed: boolean;
+  /** Tail of combined stdout/stderr captured on failure (empty on pass). */
+  output: string;
+}
+
+/**
+ * Run the plan's combined test suite over the fully merged post-remediation
+ * state. Returns pass/fail plus the failure-output tail. No test_command =>
+ * vacuously passing.
+ */
+function runCombinedTestSuite(
   state: RemediationState,
   options: OrchestratorOptions,
-  runLogger?: RunLogger,
-): Promise<RemediationState> {
-  console.log("Running Close Phase...");
-
-  if (!state.plan || !state.items || !state.closing_plan) {
-    throw new Error(
-      "Cannot run close phase: missing plan, items, or closing_plan from state.",
-    );
-  }
-
-  // 1. Run the full test suite
+): CombinedTestResult {
   console.log("Running full test suite on combined post-remediation state...");
-  let testsPassed = true;
-
-  let testOutput = "";
-  if (state.plan.test_command) {
-    const result = runShellCommand(state.plan.test_command, {
-      cwd: options.root,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    if (result.status !== 0) {
-      testsPassed = false;
-      testOutput = (
-        (result.stdout?.toString() ?? "") + (result.stderr?.toString() ?? "")
-      )
-        .trim()
-        .slice(-FAILURE_OUTPUT_TAIL_CHARS);
-    }
+  if (!state.plan?.test_command) {
+    return { passed: true, output: "" };
   }
-
-  if (!testsPassed) {
-    console.log("Full test suite failed. Transitioning back to triage.");
-    let anyBlocked = false;
-    for (const item of Object.values(state.items)) {
-      if (item.status === "resolved" || item.status === "resolved_no_change") {
-        item.status = "blocked";
-        item.failure_reason = `Combined test suite failed after remediation (likely a cross-block interaction issue).${testOutput ? `\n\nTest output:\n${testOutput}` : ""}`;
-        anyBlocked = true;
-      }
-    }
-    if (anyBlocked) {
-      return { ...state, status: "triage" };
-    }
+  const result = runShellCommand(state.plan.test_command, {
+    cwd: options.root,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.status === 0) {
+    return { passed: true, output: "" };
   }
+  const output = (
+    (result.stdout?.toString() ?? "") + (result.stderr?.toString() ?? "")
+  )
+    .trim()
+    .slice(-FAILURE_OUTPUT_TAIL_CHARS);
+  return { passed: false, output };
+}
 
-  // 2. Run end-to-end tests on the fully merged post-remediation state.
-  // E2e tests run once here rather than per-block because individual refactors
-  // may be interdependent: a partial remediation can break e2e flows even when
-  // per-item unit tests pass. A failure here hard-errors the run — the changes
-  // are complete but not shippable until the e2e issue is investigated manually.
-  let e2ePassed: boolean | undefined;
-  if (state.plan.e2e_command) {
-    console.log(
-      "Running end-to-end tests on combined post-remediation state...",
-    );
-    const e2eResult = runShellCommand(state.plan.e2e_command, {
-      cwd: options.root,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    e2ePassed = e2eResult.status === 0;
-    if (!e2ePassed) {
-      const e2eOutput = (
-        (e2eResult.stdout?.toString() ?? "") +
-        (e2eResult.stderr?.toString() ?? "")
-      )
-        .trim()
-        .slice(-FAILURE_OUTPUT_TAIL_CHARS);
-      throw new Error(
-        `End-to-end tests failed after full remediation. The code changes are complete but the system does not pass e2e validation. Review the output and investigate before retrying.\n\n${e2eOutput}`,
-      );
-    }
-    console.log("End-to-end tests passed.");
-  }
-
-  // 3. Execute the closing action and record exact command outcomes before
-  // reporting success.
-  console.log(`Executing closing action: ${state.closing_plan.action}`);
-  const closingResult = executeClosingAction(state, options);
-  await writeJsonFile(
-    join(options.artifactsDir, "remediation-closing-result.json"),
-    closingResult,
-  );
-
-  // 4. Generate remediation-report.md and remediation-report.json
-  let reportContent = `# Remediation Report\n\n`;
-
-  const resolvedEntries: {
-    finding_id: string;
-    summary: string;
-    verification_evidence?: string;
-  }[] = [];
-  const verifiedNoChangeEntries: {
-    finding_id: string;
-    summary: string;
-    verification_evidence?: string;
-  }[] = [];
-  const inappropriateEntries: { finding_id: string; rationale: string }[] = [];
-  const ignoredEntries: { finding_id: string; rationale: string }[] = [];
-
-  for (const item of Object.values(state.items)) {
+/**
+ * On a combined-test failure, re-block every resolved item (a failure here is
+ * typically a cross-block interaction) and report whether anything was blocked
+ * — the caller transitions back to triage when so.
+ */
+function blockResolvedItemsOnCombinedFailure(
+  state: RemediationState,
+  testOutput: string,
+): boolean {
+  let anyBlocked = false;
+  for (const item of Object.values(state.items ?? {})) {
     if (item.status === "resolved" || item.status === "resolved_no_change") {
-      const finding = state.plan.findings.find((f) => f.id === item.finding_id);
+      item.status = "blocked";
+      item.failure_reason = `Combined test suite failed after remediation (likely a cross-block interaction issue).${testOutput ? `\n\nTest output:\n${testOutput}` : ""}`;
+      anyBlocked = true;
+    }
+  }
+  return anyBlocked;
+}
+
+/**
+ * Run end-to-end tests on the fully merged state. E2e runs once here (not
+ * per-block) because interdependent refactors can break e2e flows even when
+ * per-item unit tests pass. A failure hard-errors the run: the changes are
+ * complete but not shippable until investigated manually. Returns `undefined`
+ * when no e2e_command is configured.
+ */
+function runE2eTests(
+  state: RemediationState,
+  options: OrchestratorOptions,
+): boolean | undefined {
+  if (!state.plan?.e2e_command) {
+    return undefined;
+  }
+  console.log("Running end-to-end tests on combined post-remediation state...");
+  const e2eResult = runShellCommand(state.plan.e2e_command, {
+    cwd: options.root,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const e2ePassed = e2eResult.status === 0;
+  if (!e2ePassed) {
+    const e2eOutput = (
+      (e2eResult.stdout?.toString() ?? "") +
+      (e2eResult.stderr?.toString() ?? "")
+    )
+      .trim()
+      .slice(-FAILURE_OUTPUT_TAIL_CHARS);
+    throw new Error(
+      `End-to-end tests failed after full remediation. The code changes are complete but the system does not pass e2e validation. Review the output and investigate before retrying.\n\n${e2eOutput}`,
+    );
+  }
+  console.log("End-to-end tests passed.");
+  return e2ePassed;
+}
+
+interface ResolvedReportEntry {
+  finding_id: string;
+  summary: string;
+  verification_evidence?: string;
+}
+interface RationaleReportEntry {
+  finding_id: string;
+  rationale: string;
+}
+interface ReportEntries {
+  resolved: ResolvedReportEntry[];
+  verifiedNoChange: ResolvedReportEntry[];
+  inappropriate: RationaleReportEntry[];
+  ignored: RationaleReportEntry[];
+}
+
+/**
+ * Partition the terminal items into the report's resolved / verified-no-change
+ * / inappropriate / ignored buckets, pulling each resolved item's verification
+ * evidence from its `verify_code_against_documentation` result file when present.
+ */
+function collectReportEntries(
+  state: RemediationState,
+  options: OrchestratorOptions,
+): ReportEntries {
+  const entries: ReportEntries = {
+    resolved: [],
+    verifiedNoChange: [],
+    inappropriate: [],
+    ignored: [],
+  };
+  for (const item of Object.values(state.items ?? {})) {
+    if (item.status === "resolved" || item.status === "resolved_no_change") {
+      const finding = state.plan?.findings.find((f) => f.id === item.finding_id);
       const title = finding?.title ?? "Unknown";
       let verificationEvidence: string | undefined;
 
@@ -316,9 +334,7 @@ export async function runClosePhase(
       );
       if (existsSync(verificationResultPath)) {
         try {
-          const verRes = JSON.parse(
-            readFileSync(verificationResultPath, "utf8"),
-          );
+          const verRes = JSON.parse(readFileSync(verificationResultPath, "utf8"));
           if (verRes.reason) verificationEvidence = verRes.reason;
         } catch (error) {
           console.warn(
@@ -328,81 +344,84 @@ export async function runClosePhase(
         }
       }
 
-      const entry = {
+      const entry: ResolvedReportEntry = {
         finding_id: item.finding_id,
         summary: title,
         verification_evidence: verificationEvidence,
       };
       if (item.status === "resolved_no_change") {
-        verifiedNoChangeEntries.push(entry);
+        entries.verifiedNoChange.push(entry);
       } else {
-        resolvedEntries.push(entry);
+        entries.resolved.push(entry);
       }
     } else if (item.status === "deemed_inappropriate") {
-      const finding = state.plan.findings.find((f) => f.id === item.finding_id);
-      const rationale = item.failure_reason ?? "Deemed inappropriate";
-      inappropriateEntries.push({ finding_id: item.finding_id, rationale });
+      entries.inappropriate.push({
+        finding_id: item.finding_id,
+        rationale: item.failure_reason ?? "Deemed inappropriate",
+      });
     } else if (item.status === "ignored") {
-      const finding = state.plan.findings.find((f) => f.id === item.finding_id);
-      const rationale = item.failure_reason ?? "Ignored by user";
-      ignoredEntries.push({ finding_id: item.finding_id, rationale });
+      entries.ignored.push({
+        finding_id: item.finding_id,
+        rationale: item.failure_reason ?? "Ignored by user",
+      });
     }
   }
+  return entries;
+}
+
+/**
+ * Render `remediation-report.md` from the partitioned entries, closing action,
+ * e2e result, and per-finding outcomes. Pure string builder (no I/O).
+ */
+function buildRemediationReportMarkdown(
+  state: RemediationState,
+  entries: ReportEntries,
+  closingResult: ClosingResult,
+  e2ePassed: boolean | undefined,
+  outcomesReport: RemediationOutcomesReport,
+): string {
+  let reportContent = `# Remediation Report\n\n`;
 
   reportContent += `## Resolved — Changed Files\n\n`;
-  if (resolvedEntries.length === 0) {
+  if (entries.resolved.length === 0) {
     reportContent += `None.\n`;
   } else {
-    for (const entry of resolvedEntries) {
+    for (const entry of entries.resolved) {
       reportContent += `- **${entry.finding_id}**: ${entry.summary}\n`;
       if (entry.verification_evidence)
         reportContent += `  - *Verification*: ${entry.verification_evidence}\n`;
     }
   }
 
-  if (verifiedNoChangeEntries.length > 0) {
+  if (entries.verifiedNoChange.length > 0) {
     reportContent += `\n## Verified Already Correct (no changes made)\n\n`;
-    for (const entry of verifiedNoChangeEntries) {
+    for (const entry of entries.verifiedNoChange) {
       reportContent += `- **${entry.finding_id}**: ${entry.summary}\n`;
       if (entry.verification_evidence)
         reportContent += `  - *Verification*: ${entry.verification_evidence}\n`;
     }
   }
 
-  if (inappropriateEntries.length > 0) {
+  if (entries.inappropriate.length > 0) {
     reportContent += `\n## Deemed Inappropriate\n\n`;
-    for (const entry of inappropriateEntries) {
+    for (const entry of entries.inappropriate) {
       reportContent += `- **${entry.finding_id}**: ${entry.rationale}\n`;
     }
   }
 
-  if (ignoredEntries.length > 0) {
+  if (entries.ignored.length > 0) {
     reportContent += `\n## Ignored\n\n`;
-    for (const entry of ignoredEntries) {
+    for (const entry of entries.ignored) {
       reportContent += `- **${entry.finding_id}**: ${entry.rationale}\n`;
     }
   }
 
-  reportContent += `\n## Closing Action\n\nAction: ${state.closing_plan.action}\n`;
+  reportContent += `\n## Closing Action\n\nAction: ${state.closing_plan!.action}\n`;
   reportContent += `Status: ${closingResult.status}\n`;
   if (e2ePassed !== undefined) {
     reportContent += `\n## End-to-End Tests\n\nResult: ${e2ePassed ? "passed" : "failed"}\n`;
   }
 
-  // Phase 7B: capture per-finding outcomes (surface only).
-  const outcomesReport = buildRemediationOutcomesReport(
-    state,
-    closingResult.status,
-  );
-  // One run-log line per outcome, plus a summary line for the artifact write.
-  for (const outcome of outcomesReport.outcomes) {
-    runLogger?.event({
-      phase: "close",
-      kind: "outcome",
-      obligation: "closing",
-      note: `${outcome.finding_id} [${outcome.lens}] → ${outcome.outcome} (rework ${outcome.rework_count})`,
-    });
-  }
   const o = outcomesReport.by_outcome;
   reportContent += `\n## Remediation Outcomes\n\n`;
   reportContent += `Of ${outcomesReport.total} finding(s): ${o.resolved} resolved, ${o.verified_no_change} verified already correct, ${o.inappropriate} deemed inappropriate, ${o.ignored} ignored, ${o.blocked} blocked.\n`;
@@ -418,12 +437,137 @@ export async function runClosePhase(
     }
   }
 
+  return reportContent;
+}
+
+/**
+ * Clean up the remediator's temporary git branches and the artifact directory.
+ * Branches first, artifact dir last so a crash mid-cleanup leaves a recoverable
+ * state. Failures are non-fatal but recorded via structured RunLogger context
+ * (OBS-003) rather than a bare console.warn.
+ */
+async function cleanupTempBranchesAndArtifacts(
+  options: OrchestratorOptions,
+  completeState: RemediationState,
+  runLogger?: RunLogger,
+): Promise<void> {
+  try {
+    const branchResult = runCommand("git", ["branch"], {
+      cwd: options.root,
+      encoding: "utf8",
+    });
+    const branches = (branchResult.stdout?.toString() ?? "").split("\n");
+    for (const branch of branches) {
+      const b = branch.replace("*", "").trim();
+      if (b.startsWith("remediator-block-")) {
+        runCommand("git", ["branch", "-D", b], { cwd: options.root });
+      }
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn("Failed to clean up temporary git branches.", error);
+    runLogger?.event({
+      phase: "close",
+      kind: "outcome",
+      obligation: "closing",
+      note: `Failed to clean up temporary git branches: ${reason}`,
+    });
+  }
+
+  // Write final state before deleting the artifacts directory so the completion
+  // is durable even if cleanup partially fails.
+  try {
+    const { StateStore } = await import("../state/store.js");
+    const store = new StateStore(options.artifactsDir);
+    await store.saveState(completeState);
+  } catch {
+    // Non-fatal — we still return complete
+  }
+
+  try {
+    const { rm } = await import("node:fs/promises");
+    await rm(options.artifactsDir, { recursive: true, force: true });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(
+      "Failed to clean up artifacts directory — manual removal may be needed.",
+    );
+    runLogger?.event({
+      phase: "close",
+      kind: "artifact_write",
+      obligation: "closing",
+      artifact: options.artifactsDir,
+      note: `Failed to clean up artifacts directory (manual removal may be needed): ${reason}`,
+    });
+  }
+}
+
+export async function runClosePhase(
+  state: RemediationState,
+  options: OrchestratorOptions,
+  runLogger?: RunLogger,
+): Promise<RemediationState> {
+  console.log("Running Close Phase...");
+
+  if (!state.plan || !state.items || !state.closing_plan) {
+    throw new Error(
+      "Cannot run close phase: missing plan, items, or closing_plan from state.",
+    );
+  }
+
+  // 1. Run the full test suite; on failure re-block resolved items and triage.
+  const combinedTest = runCombinedTestSuite(state, options);
+  if (!combinedTest.passed) {
+    console.log("Full test suite failed. Transitioning back to triage.");
+    if (blockResolvedItemsOnCombinedFailure(state, combinedTest.output)) {
+      return { ...state, status: "triage" };
+    }
+  }
+
+  // 2. Run end-to-end tests on the fully merged post-remediation state.
+  const e2ePassed = runE2eTests(state, options);
+
+  // 3. Execute the closing action and record exact command outcomes before
+  // reporting success.
+  console.log(`Executing closing action: ${state.closing_plan.action}`);
+  const closingResult = executeClosingAction(state, options);
+  await writeJsonFile(
+    join(options.artifactsDir, "remediation-closing-result.json"),
+    closingResult,
+  );
+
+  // 4. Generate remediation-report.md and remediation-report.json
+  const entries = collectReportEntries(state, options);
+
+  // Phase 7B: capture per-finding outcomes (surface only).
+  const outcomesReport = buildRemediationOutcomesReport(
+    state,
+    closingResult.status,
+  );
+  // One run-log line per outcome, plus a summary line for the artifact write.
+  for (const outcome of outcomesReport.outcomes) {
+    runLogger?.event({
+      phase: "close",
+      kind: "outcome",
+      obligation: "closing",
+      note: `${outcome.finding_id} [${outcome.lens}] → ${outcome.outcome} (rework ${outcome.rework_count})`,
+    });
+  }
+
+  const reportContent = buildRemediationReportMarkdown(
+    state,
+    entries,
+    closingResult,
+    e2ePassed,
+    outcomesReport,
+  );
+
   const jsonReport = {
-    resolved: resolvedEntries,
-    verified_no_change: verifiedNoChangeEntries,
-    inappropriate: inappropriateEntries,
-    ignored: ignoredEntries,
-    combined_test_result: { passed: testsPassed },
+    resolved: entries.resolved,
+    verified_no_change: entries.verifiedNoChange,
+    inappropriate: entries.inappropriate,
+    ignored: entries.ignored,
+    combined_test_result: { passed: combinedTest.passed },
     ...(e2ePassed !== undefined ? { e2e_result: { passed: e2ePassed } } : {}),
     closing_result: {
       action: state.closing_plan.action,
@@ -449,44 +593,9 @@ export async function runClosePhase(
   });
   console.log("Remediation report generated.");
 
-  // 5. Clean up temporary branches and artifact directory
-  // Branches are cleaned first; artifact cleanup is last so a crash here is recoverable.
-  try {
-    const branchResult = runCommand("git", ["branch"], {
-      cwd: options.root,
-      encoding: "utf8",
-    });
-    const branches = (branchResult.stdout?.toString() ?? "").split("\n");
-    for (const branch of branches) {
-      const b = branch.replace("*", "").trim();
-      if (b.startsWith("remediator-block-")) {
-        runCommand("git", ["branch", "-D", b], { cwd: options.root });
-      }
-    }
-  } catch (error) {
-    console.warn("Failed to clean up temporary git branches.", error);
-  }
-
+  // 5. Clean up temporary branches and artifact directory.
   const completeState: RemediationState = { ...state, status: "complete" };
-
-  // Write final state before deleting the artifacts directory so the completion
-  // is durable even if cleanup partially fails.
-  try {
-    const { StateStore } = await import("../state/store.js");
-    const store = new StateStore(options.artifactsDir);
-    await store.saveState(completeState);
-  } catch {
-    // Non-fatal — we still return complete
-  }
-
-  try {
-    const { rm } = await import("node:fs/promises");
-    await rm(options.artifactsDir, { recursive: true, force: true });
-  } catch {
-    console.warn(
-      "Failed to clean up artifacts directory — manual removal may be needed.",
-    );
-  }
+  await cleanupTempBranchesAndArtifacts(options, completeState, runLogger);
 
   return completeState;
 }

@@ -1,7 +1,6 @@
 import {
   mkdir,
   readFile,
-  readdir,
   rm,
 } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -30,12 +29,12 @@ import {
   readJsonFile,
   writeJsonFile,
   prefixValidationIssues,
+  DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
 } from "@audit-tools/shared";
 import { buildQuotaSource } from "@audit-tools/shared/quota/compositeQuotaSource";
 import { validateArtifactBundle } from "./validation/artifacts.js";
 import {
   validateAuditResults,
-  formatAuditResultIssues,
 } from "./validation/auditResults.js";
 import {
   validateConfiguredProviderEnvironment,
@@ -50,9 +49,6 @@ import {
   createFreshSessionProvider,
   resolveFreshSessionProviderName,
 } from "./providers/index.js";
-import {
-  loadRunLedger,
-} from "./supervisor/runLedger.js";
 import {
   getSessionConfigPath,
   loadSessionConfig,
@@ -71,8 +67,6 @@ import type {
   SessionConfig,
 } from "@audit-tools/shared";
 import type { ExternalAnalyzerResults } from "./types/externalAnalyzer.js";
-import type { WorkerTask } from "./types/workerSession.js";
-import type { WorkerResult } from "./types/workerResult.js";
 import { runAuditCodeMcpServer } from "./mcp/server.js";
 import {
   scheduleWave,
@@ -80,7 +74,6 @@ import {
   readQuotaState,
   resolveLimits,
   resolveHostActiveSubagentLimit,
-  probeProvider,
   computeMaxSafeConcurrency,
   getQuotaStatePath,
   lookupDiscoveredLimits,
@@ -94,8 +87,6 @@ import {
   hasFlag,
   fromBase64Url,
   taskResultPath,
-  isCanonicalResultFilename,
-  readStdinText,
   getArtifactsDir,
   getRootDir,
   warnIfNotGitRepo,
@@ -107,7 +98,6 @@ import {
   getExplicitProvider,
   getHostModel,
   getHostMaxActiveSubagents,
-  getQuotaProbeMode,
   resolveRunProviderName,
   chunkArray,
   getUiMode,
@@ -115,24 +105,13 @@ import {
   countLines,
 } from "./cli/args.js";
 import {
-  WORKER_RESULT_CONTRACT_VERSION,
-  buildWorkerResult,
-  formatAuditResultValidationError,
-} from "./cli/workerResult.js";
-import {
   type ActiveDispatchState,
-  DISPATCH_RESULT_MAP_FILENAME,
   ACTIVE_DISPATCH_FILENAME,
-  resolveRunScopedArg,
   loadDispatchResultMap,
-  entriesByTaskId,
-  buildPendingAuditTasks,
   prepareDispatchArtifacts,
 } from "./cli/dispatch.js";
 import {
   buildLineIndex,
-  buildLineIndexForPaths,
-  addFileLineCountHints,
 } from "./cli/lineIndex.js";
 import {
   emitEnvelope,
@@ -145,6 +124,10 @@ import {
 import { packageRoot } from "./cli/paths.js";
 import { cmdNextStep } from "./cli/nextStepCommand.js";
 import { cmdRunToCompletion } from "./cli/runToCompletion.js";
+import { cmdWorkerRun } from "./cli/workerRunCommand.js";
+import { cmdSubmitPacket } from "./cli/submitPacketCommand.js";
+import { cmdMergeAndIngest } from "./cli/mergeAndIngestCommand.js";
+import { cmdStatus } from "./cli/statusCommand.js";
 import { cleanupStaleArtifactsDir } from "./cli/cleanup.js";
 
 const SAMPLE_REPO_FILES = [
@@ -350,108 +333,6 @@ async function cmdAdvanceAudit(argv: string[]): Promise<void> {
   }
 }
 
-async function cmdWorkerRun(argv: string[]): Promise<void> {
-  const taskPath = getFlag(argv, "--task");
-  if (!taskPath) {
-    throw new Error("worker-run requires --task <path>");
-  }
-  const task = await readJsonFile<WorkerTask>(taskPath);
-
-  let workerResult: WorkerResult;
-  try {
-    if (looksLikeCliFlag(task.audit_results_path)) {
-      throw new Error(
-        `task.audit_results_path resolved to '${task.audit_results_path}', which looks like a CLI flag instead of a file path.`,
-      );
-    }
-    if (task.preferred_executor === "agent" && !task.audit_results_path) {
-      throw new Error(
-        "agent worker-run requires audit_results_path so provider-assisted review can be ingested.",
-      );
-    }
-    if (task.preferred_executor === "agent" && task.audit_results_path) {
-      const pendingTasks = task.pending_audit_tasks_path
-        ? await readJsonFile<AuditTask[]>(task.pending_audit_tasks_path)
-        : [];
-      const auditResults = await readJsonFile<AuditResult[]>(
-        task.audit_results_path,
-      );
-      const pendingTaskIds = new Set(pendingTasks.map((item) => item.task_id));
-      const matchedResultCount = auditResults.filter((result) =>
-        pendingTaskIds.has(result.task_id),
-      ).length;
-      if (pendingTasks.length > 0 && matchedResultCount === 0) {
-        throw new Error(
-          "Provider-assisted review did not emit any audit results for the pending audit tasks.",
-        );
-      }
-
-      const issues = validateAuditResults(auditResults, pendingTasks, {
-        lineIndex: await buildLineIndexForPaths(
-          task.repo_root,
-          pendingTasks.flatMap((item) => item.file_paths),
-        ),
-      });
-      const errors = issues.filter((issue) => issue.severity === "error");
-      const warnings = issues.filter((issue) => issue.severity === "warning");
-
-      if (warnings.length > 0) {
-        process.stderr.write(
-          `audit-results validation: ${warnings.length} warning(s):\n` +
-            formatAuditResultIssues(warnings) +
-            "\n",
-        );
-      }
-      if (errors.length > 0) {
-        throw new Error(formatAuditResultValidationError(errors));
-      }
-    }
-    const preferredExecutor =
-      task.preferred_executor === "agent"
-        ? "result_ingestion_executor"
-        : task.preferred_executor;
-    const result = await runAuditStep({
-      root: task.repo_root,
-      artifactsDir: task.artifacts_dir,
-      preferredExecutor,
-      auditResultsPath: task.audit_results_path,
-      runtimeUpdatesPath: task.runtime_updates_path,
-      externalAnalyzerPath: task.external_analyzer_results_path,
-    });
-    workerResult = {
-      contract_version: WORKER_RESULT_CONTRACT_VERSION,
-      run_id: task.run_id,
-      obligation_id: task.obligation_id,
-      status: result.progress_made ? "completed" : "no_progress",
-      progress_made: result.progress_made,
-      selected_executor: result.selected_executor,
-      artifacts_written: result.artifacts_written,
-      summary: result.progress_summary,
-      next_likely_step: result.next_likely_step,
-      errors: [],
-    };
-  } catch (error) {
-    workerResult = {
-      contract_version: WORKER_RESULT_CONTRACT_VERSION,
-      run_id: task.run_id,
-      obligation_id: task.obligation_id,
-      status: "failed",
-      progress_made: false,
-      selected_executor: task.preferred_executor,
-      artifacts_written: [],
-      summary: `Worker failed for executor ${task.preferred_executor}: ${error instanceof Error ? error.message : String(error)}`,
-      next_likely_step: task.obligation_id,
-      errors: [error instanceof Error ? error.message : String(error)],
-    };
-  }
-
-  await writeJsonFile(task.result_path, workerResult);
-  console.log(JSON.stringify(workerResult, null, 2));
-  if (workerResult.status === "failed") {
-    process.exitCode = 1;
-  }
-}
-
 async function cmdPrepareDispatch(argv: string[]): Promise<void> {
   const runId = getFlag(argv, "--run-id");
   if (!runId) throw new Error("prepare-dispatch requires --run-id <run_id>");
@@ -472,452 +353,6 @@ async function cmdPrepareDispatch(argv: string[]): Promise<void> {
     hostActiveSubagentLimit: getHostMaxActiveSubagents(argv),
   });
   console.log(JSON.stringify(result, null, 2));
-}
-
-async function cmdSubmitPacket(argv: string[]): Promise<void> {
-  const runId = resolveRunScopedArg(argv, "--run-id", "--run-id-b64");
-  const packetId = resolveRunScopedArg(argv, "--packet-id", "--packet-id-b64");
-  const artifactsDirB64 = getFlag(argv, "--artifacts-dir-b64");
-  const artifactsDir = artifactsDirB64
-    ? resolve(fromBase64Url(artifactsDirB64))
-    : getArtifactsDir(argv);
-  if (!runId || !packetId) {
-    throw new Error(
-      "submit-packet requires --run-id and --packet-id (or --run-id-b64/--packet-id-b64)",
-    );
-  }
-
-  const runDir = join(artifactsDir, "runs", runId);
-  const tasksPath = join(runDir, "pending-audit-tasks.json");
-  const resultMap = await loadDispatchResultMap(runDir);
-  if (!resultMap) {
-    throw new Error(
-      `No ${DISPATCH_RESULT_MAP_FILENAME} found for run ${runId}; run prepare-dispatch first.`,
-    );
-  }
-
-  let packetEntries = resultMap.entries.filter(
-    (entry) => entry.packet_id === packetId,
-  );
-  let resolvedPacketId = packetId;
-  if (packetEntries.length === 0) {
-    const trimmed = packetId.trim();
-    packetEntries = resultMap.entries.filter(
-      (entry) => entry.packet_id.trim().toLowerCase() === trimmed.toLowerCase(),
-    );
-    if (packetEntries.length > 0) {
-      resolvedPacketId = packetEntries[0]!.packet_id;
-      process.stderr.write(
-        `[submit-packet] Resolved packet_id '${packetId}' → '${resolvedPacketId}' (case/whitespace normalization)\n`,
-      );
-    }
-  }
-  if (packetEntries.length === 0) {
-    const knownIds = [...new Set(resultMap.entries.map((e) => e.packet_id))];
-    throw new Error(
-      `Unknown packet_id '${packetId}' for run ${runId}.\n` +
-      `Valid packet IDs: ${knownIds.join(", ")}`,
-    );
-  }
-  if (entriesByTaskId(packetEntries).size !== packetEntries.length) {
-    throw new Error(`Dispatch result map has duplicate task entries for packet '${resolvedPacketId}'.`);
-  }
-
-  const allTasks = await readJsonFile<AuditTask[]>(tasksPath);
-  const taskById = new Map(allTasks.map((task) => [task.task_id, task]));
-  const packetTasks = packetEntries.map((entry) => taskById.get(entry.task_id));
-  const missingTask = packetEntries.find((entry, index) => !packetTasks[index]);
-  if (missingTask) {
-    throw new Error(
-      `Dispatch result map references unknown task '${missingTask.task_id}'.`,
-    );
-  }
-  const tasks = packetTasks as AuditTask[];
-  const expectedTaskIds = new Set(tasks.map((task) => task.task_id));
-  const lineIndex = Object.fromEntries(
-    tasks.flatMap((task) => Object.entries(task.file_line_counts ?? {})),
-  );
-  const encodedResults = getFlag(argv, "--results-b64");
-  const raw = encodedResults ? fromBase64Url(encodedResults) : await readStdinText();
-  if (raw.trim().length === 0) {
-    throw new Error(
-      "submit-packet requires an AuditResult[] JSON payload on stdin or --results-b64.",
-    );
-  }
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(raw);
-  } catch (error) {
-    throw new Error(
-      `Invalid submit-packet JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
-  const resultErrors: string[] = [];
-  const issues = validateAuditResults(payload, tasks, { lineIndex });
-  const validationErrors = issues.filter((issue) => issue.severity === "error");
-  const validationWarnings = issues.filter((issue) => issue.severity === "warning");
-  if (validationWarnings.length > 0) {
-    process.stderr.write(
-      `audit-results validation: ${validationWarnings.length} warning(s):\n` +
-        formatAuditResultIssues(validationWarnings) +
-        "\n",
-    );
-  }
-  if (validationErrors.length > 0) {
-    resultErrors.push(formatAuditResultIssues(validationErrors));
-  }
-
-  if (Array.isArray(payload)) {
-    const seen = new Set<string>();
-    for (const [index, result] of payload.entries()) {
-      if (!result || typeof result !== "object" || Array.isArray(result)) {
-        continue;
-      }
-      const taskId = (result as Record<string, unknown>).task_id;
-      if (typeof taskId !== "string" || taskId.trim().length === 0) {
-        continue;
-      }
-      if (seen.has(taskId)) {
-        resultErrors.push(`Duplicate audit result for assigned task '${taskId}'.`);
-      }
-      seen.add(taskId);
-      if (!expectedTaskIds.has(taskId)) {
-        resultErrors.push(
-          `Result at index ${index} uses task_id '${taskId}', which is not assigned to packet '${resolvedPacketId}'.`,
-        );
-      }
-    }
-    for (const task of tasks) {
-      if (!seen.has(task.task_id)) {
-        resultErrors.push(`Missing audit result for assigned task '${task.task_id}'.`);
-      }
-    }
-  }
-
-  if (resultErrors.length > 0) {
-    throw new Error(`submit-packet rejected ${resolvedPacketId}:\n${resultErrors.join("\n")}`);
-  }
-
-  // Check for duplicate findings against already-submitted results in this run
-  const existingFindingKeys = new Set<string>();
-  const otherEntries = resultMap.entries.filter(
-    (e) => e.packet_id !== resolvedPacketId,
-  );
-  for (const other of otherEntries) {
-    try {
-      const existing = JSON.parse(await readFile(other.result_path, "utf8")) as AuditResult;
-      if (existing?.findings) {
-        for (const f of existing.findings) {
-          const key = [
-            (f.lens ?? "").trim().toLowerCase(),
-            (f.category ?? "").trim().toLowerCase(),
-            (f.title ?? "").trim().toLowerCase(),
-            f.affected_files?.[0]?.path ?? "",
-          ].join("|");
-          existingFindingKeys.add(key);
-        }
-      }
-    } catch { /* file doesn't exist yet or invalid — skip */ }
-  }
-  let dupCount = 0;
-  for (const result of payload as AuditResult[]) {
-    for (const f of result.findings ?? []) {
-      const key = [
-        (f.lens ?? "").trim().toLowerCase(),
-        (f.category ?? "").trim().toLowerCase(),
-        (f.title ?? "").trim().toLowerCase(),
-        f.affected_files?.[0]?.path ?? "",
-      ].join("|");
-      if (existingFindingKeys.has(key)) {
-        dupCount++;
-      }
-    }
-  }
-  if (dupCount > 0) {
-    process.stderr.write(
-      `[submit-packet] Warning: ${dupCount} finding(s) appear to duplicate findings from other packets in this run.\n`,
-    );
-  }
-
-  const entryByTaskId = entriesByTaskId(packetEntries);
-  for (const result of payload as AuditResult[]) {
-    const entry = entryByTaskId.get(result.task_id);
-    if (!entry) {
-      throw new Error(
-        `Internal error: no result path for accepted task '${result.task_id}'.`,
-      );
-    }
-    await writeJsonFile(entry.result_path, result);
-  }
-
-  const findingCount = (payload as AuditResult[]).reduce(
-    (sum, result) => sum + result.findings.length,
-    0,
-  );
-  console.log(
-    JSON.stringify(
-      {
-        run_id: runId,
-        packet_id: resolvedPacketId,
-        accepted_count: (payload as AuditResult[]).length,
-        finding_count: findingCount,
-        ...(dupCount > 0 ? { duplicate_warning_count: dupCount } : {}),
-      },
-      null,
-      2,
-    ),
-  );
-}
-
-async function cmdMergeAndIngest(argv: string[]): Promise<void> {
-  const runId = getFlag(argv, "--run-id");
-  if (!runId) throw new Error("merge-and-ingest requires --run-id <run_id>");
-  const artifactsDir = getArtifactsDir(argv);
-
-  const runDir = join(artifactsDir, "runs", runId);
-  const taskResultsDir = join(runDir, "task-results");
-  const auditResultsPath = join(runDir, "audit-results.json");
-  const taskPath = join(runDir, "task.json");
-  const tasksPath = join(runDir, "pending-audit-tasks.json");
-  const workerTask = await readJsonFile<WorkerTask>(taskPath);
-  const resultMap = await loadDispatchResultMap(runDir);
-  if (!resultMap) {
-    throw new Error(
-      `No ${DISPATCH_RESULT_MAP_FILENAME} found for run ${runId}; run prepare-dispatch first.`,
-    );
-  }
-
-  let allTasks: AuditTask[] = [];
-  try { allTasks = await readJsonFile<AuditTask[]>(tasksPath); } catch { /* may not exist */ }
-  const entryByTaskId = entriesByTaskId(resultMap.entries);
-  if (entryByTaskId.size !== resultMap.entries.length) {
-    throw new Error(`Dispatch result map for run ${runId} contains duplicate task entries.`);
-  }
-  const expectedPaths = new Set(
-    resultMap.entries.map((entry) => resolve(entry.result_path)),
-  );
-
-  let files: string[];
-  try {
-    files = (await readdir(taskResultsDir)).filter(f => f.endsWith(".json")).sort();
-  } catch {
-    files = [];
-  }
-
-  const passing: AuditResult[] = [];
-  const failing: Array<{ task_id: string; errors: string[] }> = [];
-  const seenTaskIds = new Set<string>();
-  let spuriousFileCount = 0;
-
-  const fallbackByTaskId = new Map<string, unknown>();
-  for (const filename of files) {
-    const filePath = resolve(join(taskResultsDir, filename));
-    if (expectedPaths.has(filePath)) continue;
-
-    // Not part of this round's plan. Still read it so a current task can be
-    // recovered by task_id (e.g. a subagent wrote a valid result under a
-    // non-assigned name).
-    try {
-      const raw = await readFile(filePath, "utf8");
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const tid = typeof (parsed as Record<string, unknown>).task_id === "string"
-          ? String((parsed as Record<string, unknown>).task_id) : undefined;
-        if (tid && !fallbackByTaskId.has(tid)) {
-          fallbackByTaskId.set(tid, parsed);
-        }
-      }
-    } catch { /* not parseable — skip */ }
-
-    // Only genuinely stray files are "spurious". Canonical per-task result files
-    // (<stem>_<digest>.json) left by prior deepening rounds in the same
-    // task-results/ dir are legitimate and must not inflate the count or bury
-    // the real stray-file signal (3 -> 191 over a run before this fix).
-    if (!isCanonicalResultFilename(filename)) {
-      spuriousFileCount++;
-      process.stderr.write(
-        `[merge-and-ingest] Warning: unexpected file in task-results/: ${filename}\n`,
-      );
-    }
-  }
-
-  for (const task of allTasks) {
-    const entry = entryByTaskId.get(task.task_id);
-    if (!entry) {
-      failing.push({
-        task_id: task.task_id,
-        errors: ["Missing dispatch result-map entry for assigned task."],
-      });
-      continue;
-    }
-    const filePath = entry.result_path;
-    let obj: unknown;
-    try {
-      obj = JSON.parse(await readFile(filePath, "utf8"));
-    } catch (e) {
-      if (isFileMissingError(e)) {
-        const fallback = fallbackByTaskId.get(task.task_id);
-        if (fallback) {
-          process.stderr.write(
-            `[merge-and-ingest] Recovered result for '${task.task_id}' from unexpected file (matched by task_id)\n`,
-          );
-          obj = fallback;
-        } else {
-          failing.push({
-            task_id: task.task_id,
-            errors: ["Missing audit result for assigned task."],
-          });
-          continue;
-        }
-      } else {
-        failing.push({ task_id: task.task_id, errors: [`Invalid JSON: ${(e as Error).message}`] });
-        continue;
-      }
-    }
-    const record = obj && typeof obj === "object" && !Array.isArray(obj)
-      ? obj as Record<string, unknown>
-      : undefined;
-    const taskId = typeof record?.task_id === "string"
-      ? String(record.task_id) : undefined;
-    const resultErrors: string[] = [];
-    if (taskId) {
-      if (seenTaskIds.has(taskId)) {
-        resultErrors.push(`Duplicate audit result for assigned task '${taskId}'.`);
-      } else {
-        seenTaskIds.add(taskId);
-      }
-      if (taskId !== task.task_id) {
-        resultErrors.push(
-          `Result file is assigned to '${task.task_id}' but contains task_id '${taskId}'.`,
-        );
-      }
-    }
-    const issues = validateAuditResults(
-      [obj],
-      [task],
-      { lineIndex: task.file_line_counts ?? {} },
-    );
-    resultErrors.push(
-      ...issues
-        .filter(i => i.severity === "error")
-        .map(i => i.message),
-    );
-    if (resultErrors.length === 0) {
-      passing.push(obj as AuditResult);
-    } else {
-      failing.push({ task_id: taskId ?? task.task_id, errors: resultErrors });
-    }
-  }
-
-  await writeJsonFile(auditResultsPath, passing);
-
-  const failedTasksPath = join(runDir, "failed-tasks.json");
-  if (failing.length > 0) {
-    await writeJsonFile(failedTasksPath, failing);
-  }
-
-  if (passing.length === 0 && failing.length > 0) {
-    throw new Error(
-      `All ${failing.length} assigned task result(s) were missing or invalid; blocked before ingestion. See ${failedTasksPath}`,
-    );
-  }
-
-  const findingCount = passing.reduce(
-    (sum, result) => sum + result.findings.length,
-    0,
-  );
-
-  let result: Awaited<ReturnType<typeof runAuditStep>> | null = null;
-  if (passing.length > 0) {
-    result = await runAuditStep({
-      root: workerTask.repo_root,
-      artifactsDir,
-      preferredExecutor: "result_ingestion_executor",
-      auditResultsPath,
-    });
-    const updatedPendingTasks = await addFileLineCountHints(
-      workerTask.repo_root,
-      buildPendingAuditTasks(result.updated_bundle),
-    );
-    await writeJsonFile(tasksPath, updatedPendingTasks);
-  }
-
-  const activeDispatchPath = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
-  try {
-    const dispatch = await readJsonFile<ActiveDispatchState>(activeDispatchPath);
-    if (dispatch.run_id === runId) {
-      dispatch.status = failing.length > 0 ? "active" : "merged";
-      await writeJsonFile(activeDispatchPath, dispatch);
-    }
-  } catch { /* no active dispatch file — skip */ }
-
-  let retryDispatchPath: string | null = null;
-  if (failing.length > 0) {
-    const failedTaskIds = new Set(failing.map((f) => f.task_id));
-    const failedPacketIds = [
-      ...new Set(
-        resultMap.entries
-          .filter((e) => failedTaskIds.has(e.task_id))
-          .map((e) => e.packet_id),
-      ),
-    ];
-    const retryDispatch = {
-      run_id: runId,
-      retry_packet_ids: failedPacketIds,
-      failed_task_count: failing.length,
-      accepted_task_count: passing.length,
-    };
-    retryDispatchPath = join(runDir, "retry-dispatch.json");
-    await writeJsonFile(retryDispatchPath, retryDispatch);
-    process.stderr.write(
-      `[merge-and-ingest] ${passing.length} accepted, ${failing.length} failed. ` +
-      `Retry packets: ${failedPacketIds.join(", ")}\n`,
-    );
-  }
-
-  const status = failing.length > 0
-    ? "partial"
-    : (result?.progress_made ? "completed" : "no_progress");
-  const workerResult = buildWorkerResult({
-    runId,
-    obligationId: workerTask.obligation_id,
-    status: failing.length > 0 ? "no_progress" : (result?.progress_made ? "completed" : "no_progress"),
-    progressMade: result?.progress_made ?? false,
-    selectedExecutor: result?.selected_executor ?? null,
-    artifactsWritten: result?.artifacts_written ?? [],
-    summary: result?.progress_summary ?? `${failing.length} task(s) failed`,
-    nextLikelyStep: result?.next_likely_step ?? null,
-    errors: [],
-  });
-  await writeJsonFile(workerTask.result_path, workerResult);
-  console.log(
-    JSON.stringify(
-      {
-        run_id: runId,
-        status,
-        accepted_count: passing.length,
-        rejected_count: failing.length,
-        spurious_file_count: spuriousFileCount,
-        finding_count: findingCount,
-        audit_results_path: auditResultsPath,
-        ...(retryDispatchPath ? { retry_dispatch_path: retryDispatchPath } : {}),
-        ...(result ? {
-          selected_executor: workerResult.selected_executor,
-          progress_made: workerResult.progress_made,
-          progress_summary: workerResult.summary,
-          next_likely_step: workerResult.next_likely_step,
-        } : {}),
-      },
-      null,
-      2,
-    ),
-  );
-
-  if (failing.length > 0) {
-    process.exitCode = 2;
-  }
 }
 
 async function cmdValidateResult(argv: string[]): Promise<void> {
@@ -1186,7 +621,7 @@ async function cmdValidate(argv: string[]): Promise<void> {
       ? []
       : prefixValidationIssues(
           "session_config",
-          validateConfiguredProviderEnvironment(rawSessionConfig as SessionConfig),
+          await validateConfiguredProviderEnvironment(rawSessionConfig as SessionConfig),
         );
   const issues = [
     ...artifactIssues,
@@ -1347,135 +782,6 @@ async function cmdCleanup(argv: string[]): Promise<void> {
   );
 }
 
-async function cmdStatus(argv: string[]): Promise<void> {
-  const artifactsDir = getArtifactsDir(argv);
-  const auditStatePath = join(artifactsDir, "audit_state.json");
-
-  // 1. Read audit_state.json
-  let auditState: AuditState | null = null;
-  try {
-    auditState = await readJsonFile<AuditState>(auditStatePath);
-  } catch (error) {
-    if (!isFileMissingError(error)) {
-      throw error;
-    }
-  }
-
-  if (!auditState) {
-    console.error("No audit_state.json found; no active audit in this artifacts directory.");
-    process.exitCode = 1;
-    return;
-  }
-
-  // Build obligations summary: count by state
-  const obligationStates: Record<string, number> = {
-    missing: 0,
-    present: 0,
-    stale: 0,
-    blocked: 0,
-    satisfied: 0,
-  };
-  for (const obligation of auditState.obligations ?? []) {
-    const state = obligation.state;
-    if (state in obligationStates) {
-      obligationStates[state]!++;
-    }
-  }
-
-  // 2. Read run ledger for last N entries
-  const ledger = await loadRunLedger(artifactsDir);
-  const RECENT_RUN_LIMIT = 5;
-  const recentRuns = ledger.runs
-    .slice(-RECENT_RUN_LIMIT)
-    .reverse()
-    .map((entry) => ({
-      run_id: entry.run_id,
-      obligation_id: entry.obligation_id,
-      status: entry.status,
-      started_at: entry.started_at,
-    }));
-
-  // 3. Find the most recent run directory and read pending-audit-tasks.json
-  let pendingTasksSummary: {
-    run_id: string;
-    total: number;
-    remaining: number;
-  } | null = null;
-
-  const runsDir = join(artifactsDir, "runs");
-  let runDirs: string[] = [];
-  try {
-    const entries = await readdir(runsDir, { withFileTypes: true });
-    runDirs = entries
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      .sort()
-      .reverse();
-  } catch {
-    // runs directory may not exist yet
-  }
-
-  for (const runDirName of runDirs) {
-    const runDir = join(runsDir, runDirName);
-    const tasksPath = join(runDir, "pending-audit-tasks.json");
-    let tasks: AuditTask[] | null = null;
-    try {
-      tasks = await readJsonFile<AuditTask[]>(tasksPath);
-    } catch {
-      continue; // no pending-audit-tasks.json in this run dir — try previous
-    }
-    if (!Array.isArray(tasks)) continue;
-
-    // Count remaining: tasks without status "complete"
-    const total = tasks.length;
-    const remaining = tasks.filter(
-      (t) => t.status !== "complete",
-    ).length;
-
-    pendingTasksSummary = {
-      run_id: runDirName,
-      total,
-      remaining,
-    };
-    break;
-  }
-
-  // 4. Surface failed-tasks.json from the most recent run that has one
-  let failedTasks: Array<{ task_id: string; errors: string[] }> | null = null;
-  for (const runDirName of runDirs) {
-    const failedTasksPath = join(runsDir, runDirName, "failed-tasks.json");
-    try {
-      const raw = await readJsonFile<Array<{ task_id: string; errors: string[] }>>(
-        failedTasksPath,
-      );
-      if (Array.isArray(raw) && raw.length > 0) {
-        failedTasks = raw;
-        break;
-      }
-    } catch {
-      // Not present in this run dir — keep looking
-    }
-  }
-
-  console.log(
-    JSON.stringify(
-      {
-        artifacts_dir: artifactsDir,
-        status: auditState.status,
-        last_obligation: auditState.last_obligation ?? null,
-        last_executor: auditState.last_executor ?? null,
-        blockers: auditState.blockers ?? [],
-        obligations_summary: obligationStates,
-        recent_runs: recentRuns,
-        pending_tasks: pendingTasksSummary,
-        failed_tasks: failedTasks,
-      },
-      null,
-      2,
-    ),
-  );
-}
-
 async function cmdMcp(argv: string[]): Promise<void> {
   await runAuditCodeMcpServer(argv.slice(3));
 }
@@ -1485,17 +791,16 @@ async function cmdQuota(argv: string[]): Promise<void> {
   const sessionConfig = await loadSessionConfig(artifactsDir).catch(() => ({} as SessionConfig));
   const explicitProvider = getExplicitProvider(argv);
   const hostModel = getHostModel(argv);
-  const probeMode = getQuotaProbeMode(argv, sessionConfig);
   const providerName = resolveFreshSessionProviderName(explicitProvider, sessionConfig);
   const providerModelKey = buildProviderModelKey(providerName, hostModel);
 
   const { limits, source, confidence } = resolveLimits({ providerName, sessionConfig, hostModel });
 
-  const probeResult = await probeProvider(providerName, probeMode);
-
   const quotaState = await readQuotaState().catch((): { version: 2; entries: Record<string, never> } => ({ version: 2, entries: {} }));
   const quotaStateEntry = quotaState.entries[providerModelKey] ?? null;
-  const halfLifeHours = sessionConfig.quota?.empirical_half_life_hours ?? 24;
+  const halfLifeHours =
+    sessionConfig.quota?.empirical_half_life_hours ??
+    DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
   const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
     explicitLimit: getHostMaxActiveSubagents(argv),
     sessionConfig,
@@ -1526,7 +831,6 @@ async function cmdQuota(argv: string[]): Promise<void> {
         confidence,
         source,
         host_concurrency_limit: hostConcurrencyLimit,
-        probe: probeResult,
         learned_caps: quotaStateEntry
           ? {
               max_safe_concurrency: computeMaxSafeConcurrency(quotaStateEntry, halfLifeHours),

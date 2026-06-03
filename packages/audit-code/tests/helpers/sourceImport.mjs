@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, symlinkSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -37,6 +37,14 @@ function ensureCompiledSource() {
 
   const repoRoot = getRepoRoot();
   compiledSourceDir = mkdtempSync(join(tmpdir(), "audit-code-source-"));
+
+  // The package emits ESM (audit-code is "type": "module"), but the temp outDir
+  // has no package.json, so Node would load the compiled .js as CommonJS and
+  // choke on `export`. Mark the temp tree as ESM so the output loads correctly.
+  writeFileSync(
+    join(compiledSourceDir, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
 
   const typescriptNodeModules = findNodeModules(repoRoot, "typescript");
   if (!typescriptNodeModules) {

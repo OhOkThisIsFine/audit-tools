@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 // runToCompletion consumes these via ../quota/index.js; exercise the same
 // already-exported functions directly rather than spinning a full loop.
 const { scheduleWave, getHeaderExtractorForProvider } = await import(
-  "../dist/quota/index.js"
+  "../src/quota/index.ts"
 );
 
 const MAX_DEEPENING_CYCLES = 3;

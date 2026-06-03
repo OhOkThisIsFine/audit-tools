@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { discoverProjectCommands } = await import("../dist/tooling/testCommand.js");
+const { discoverProjectCommands } = await import("../src/tooling/testCommand.ts");
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), "audit-tools-testcmd-"));
