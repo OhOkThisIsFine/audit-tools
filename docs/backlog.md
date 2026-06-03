@@ -22,50 +22,12 @@ anti-rot rule as CLAUDE.md's *"docs capture durable concepts, not current state"
 
 ## Deferred fixes (product bugs)
 
-- **Conversation hosts default to serial single-item dispatch (effective
-  `wave_size` = 1).** `resolveHostDispatchCapability` returns false unless a
-  provider is explicitly configured, so `/remediate-code` (and the analogous
-  audit-code path) document/implement one item per `next-step` instead of parallel
-  waves. A Claude Code conversation *can* dispatch subagents but isn't
-  auto-detected; today it needs a manual
-  `.remediation-artifacts/session-config.json` (`host_can_dispatch_subagents: true`,
-  plus `quota.host_active_subagent_limit` for wave width). Fix: auto-detect host
-  dispatch capability (a needed manual flag is a bug signal) — sibling to the
-  audit-code `wave_size` issue.
-- **Implement blocks can't create new files or span block boundaries.** A block's
-  `access.write_paths` lists only the *existing* source files a finding touches —
-  not the *new* files a fix must create (extracted modules, new test files). So
-  every "extract into a new module" or "add a new test file" finding blocks in the
-  sandbox unless the host relaxes access. Separately, a finding whose fix spans
-  files owned by *different* blocks (e.g. breaking the `OrchestratorOptions` import
-  cycle, which touches all six remediate-code phase files split across blocks)
-  cannot be completed by any single block. Fix: include spec-named new files
-  (same package) in `write_paths`, and group findings whose fix-set spans blocks
-  into one block.
-- **File-integrity check treats the run's own implement edits as a stale plan.**
-  After the implement phase modifies source files, the integrity check
-  (affected-file hashes vs `hash_at_plan_time`) fires on those very edits and
-  forces `next-step --force-replan` before it will triage/retry any remaining
-  blocked findings. With blocked findings present this risks a
-  replan → retry → re-block → integrity-fail loop, and a replan rebuilds work from
-  the audit findings (which don't know about already-applied fixes). Fix: exclude
-  files the run itself modified during implement (or re-snapshot hashes
-  post-implement) so a run with applied fixes plus a few deferred findings can
-  reach `closing` without a destabilizing replan.
-- **Implement worker-result schema rejects `resolved_no_change`.** The
-  `worker_result.schema.json` implement variant enums `status` to
-  `["resolved","blocked"]`, but `resolved_no_change` is a valid state-machine
-  terminal status and the natural status for a verified-no-op finding — agents
-  emit it and `merge-implement-results` would reject it. Fix: add
-  `resolved_no_change` (and the other terminal statuses) to the worker-result
-  status enum.
-- **Plan phase hard-crashes on a single malformed finding.** One finding with
-  empty `evidence` makes `runPlanPhase` throw
-  (`remediation_plan.findings[N].evidence: Expected a non-empty array`) and aborts
-  the whole run — even though findings are advisory. A pre-existing
-  `audit-findings.json` carrying one such finding can't be remediated at all. Fix:
-  skip-and-warn on malformed/empty-evidence findings (or coerce) instead of
-  throwing, so one bad finding doesn't block the entire report.
+- **Implement findings whose fix spans multiple blocks.** A block's
+  `access.write_paths` now permits spec-named new files in the same package
+  (shipped in remediate-code@0.6.0), but a finding whose fix-set spans files owned
+  by *different* blocks (e.g. an import cycle touching files split across blocks)
+  still can't be completed by any single block. Fix: group findings whose fix-set
+  spans blocks into one block.
 - **Add a friction-logging instruction to CLAUDE.md.** A standing instruction
   telling agents to record any friction they hit — even something small, like
   reaching for `grep` in a non-greppable environment — into this doc so it can be
