@@ -53,7 +53,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "homepage": "https://github.com/OhOkThisIsFine/audit-tools/tree/master/packages/audit-code#readme",
+  "homepage": "https://github.com/OhOkThisIsFine/audit-tools/tree/main/packages/audit-code#readme",
   "bugs": {
     "url": "https://github.com/OhOkThisIsFine/audit-tools/issues"
   },
