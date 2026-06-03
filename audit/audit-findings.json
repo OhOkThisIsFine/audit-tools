@@ -1,12 +1,12 @@
 {
   "contract_version": "audit-tools/audit-findings/v1",
   "summary": {
-    "finding_count": 392,
-    "work_block_count": 3,
+    "finding_count": 391,
+    "work_block_count": 2,
     "severity_breakdown": {
       "high": 17,
       "medium": 125,
-      "low": 235,
+      "low": 234,
       "info": 15
     },
     "audited_file_count": 394,
@@ -7599,22 +7599,6 @@
       ]
     },
     {
-      "id": "DA-011",
-      "title": "1 orphan unit(s) with no graph connections",
-      "category": "orphan_units",
-      "severity": "low",
-      "confidence": "medium",
-      "lens": "architecture",
-      "summary": "Units [-vscode] have no import, call, or reference edges in the dependency graph. They may be dead code, or the graph extraction missed their connections.",
-      "affected_files": [
-        {
-          "path": ".vscode/mcp.json"
-        }
-      ],
-      "systemic": true,
-      "evidence": []
-    },
-    {
       "id": "OBS-004",
       "title": "Artifact I/O has no logging — failures in loadArtifactBundle are opaque",
       "category": "missing-logging",
@@ -10031,21 +10015,6 @@
       ],
       "owned_files": [
         "scripts/release-changed.mjs"
-      ],
-      "max_severity": "low",
-      "rationale": "All findings map to the same owned unit and should be remediated together.",
-      "depends_on": []
-    },
-    {
-      "id": "block-3",
-      "finding_ids": [
-        "DA-011"
-      ],
-      "unit_ids": [
-        "-vscode"
-      ],
-      "owned_files": [
-        ".vscode/mcp.json"
       ],
       "max_severity": "low",
       "rationale": "All findings map to the same owned unit and should be remediated together.",
