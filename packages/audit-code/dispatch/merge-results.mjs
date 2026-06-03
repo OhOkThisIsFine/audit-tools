@@ -15,7 +15,7 @@ const artifactsDir = artifactsDirIdx !== -1 && process.argv[artifactsDirIdx + 1]
   : join(process.cwd(), ".audit-artifacts");
 
 const taskResultsDir = join(artifactsDir, "runs", runId, "task-results");
-const auditResultsPath = join(artifactsDir, "runs", runId, "audit-results.json");
+const auditResultsPath = join(artifactsDir, "runs", runId, "run-results.json");
 const failedTasksPath = join(artifactsDir, "runs", runId, "failed-tasks.json");
 const tasksPath = join(artifactsDir, "runs", runId, "pending-audit-tasks.json");
 

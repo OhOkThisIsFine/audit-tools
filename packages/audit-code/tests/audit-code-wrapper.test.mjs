@@ -534,13 +534,88 @@ test("merge-and-ingest accepts packet task result files as the legacy result arr
     assert.ok("next_likely_step" in mergeSummary);
 
     const merged = JSON.parse(
-      await readFile(join(runDir, "audit-results.json"), "utf8"),
+      await readFile(join(runDir, "run-results.json"), "utf8"),
     );
     assert.deepEqual(
       merged.map((result) => result.task_id).sort(),
       tasks.map((task) => task.task_id).sort(),
     );
     assert.equal(merge.stderr, "");
+  });
+});
+
+test("merge-and-ingest is idempotent on re-run and never truncates results", async () => {
+  await withTempRepo(async (root) => {
+    const { stdout } = await runWrapper([], { cwd: root });
+    const parsed = JSON.parse(stdout);
+    const runId = parsed.handoff.active_review_run?.run_id;
+    const artifactsDir = parsed.handoff.artifacts_dir;
+
+    await runWrapper(
+      ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      { cwd: root },
+    );
+
+    const runDir = join(artifactsDir, "runs", runId);
+    const tasks = JSON.parse(
+      await readFile(join(runDir, "pending-audit-tasks.json"), "utf8"),
+    );
+    const taskById = new Map(tasks.map((task) => [task.task_id, task]));
+    const plan = JSON.parse(
+      await readFile(join(runDir, "dispatch-plan.json"), "utf8"),
+    );
+    const resultMap = JSON.parse(
+      await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
+    );
+
+    for (const packet of plan) {
+      const packetResults = resultMap.entries
+        .filter((item) => item.packet_id === packet.packet_id)
+        .map((entry) => {
+          const task = taskById.get(entry.task_id);
+          return {
+            task_id: task.task_id,
+            unit_id: task.unit_id,
+            pass_id: task.pass_id,
+            lens: task.lens,
+            file_coverage: task.file_paths.map((path) => ({
+              path,
+              total_lines: task.file_line_counts?.[path] ?? 0,
+            })),
+            findings: [],
+          };
+        });
+      await runWrapper(
+        ["submit-packet", "--run-id", runId, "--packet-id", packet.packet_id, "--artifacts-dir", artifactsDir],
+        { cwd: root, input: JSON.stringify(packetResults) },
+      );
+    }
+
+    const first = await runWrapper(
+      ["merge-and-ingest", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      { cwd: root },
+    );
+    assert.equal(JSON.parse(first.stdout).status, "completed");
+    const resultsPath = join(runDir, "run-results.json");
+    const mergedAfterFirst = await readFile(resultsPath, "utf8");
+
+    // A fully-merged run advances to the next round, which rewrites this run
+    // dir's pending-audit-tasks.json to the *next* round's tasks. A stray
+    // re-invocation must be a clean no-op (exit 0, replayed summary) and must
+    // NOT truncate the transient results file to an empty array.
+    const second = await runWrapper(
+      ["merge-and-ingest", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      { cwd: root },
+    );
+    const replaySummary = JSON.parse(second.stdout);
+    assert.equal(replaySummary.idempotent_replay, true);
+    assert.equal(replaySummary.status, "completed");
+    assert.equal(replaySummary.accepted_count, tasks.length);
+    assert.equal(
+      await readFile(resultsPath, "utf8"),
+      mergedAfterFirst,
+      "the second merge must not rewrite the transient results file",
+    );
   });
 });
 
@@ -1050,6 +1125,21 @@ const repoLocalHostCases = [
       const dxtInfo = await stat(paths.claudeDesktopDxtPath);
       assert.equal(dxtInfo.isFile(), true);
       assert.ok(dxtInfo.size > 0);
+      // The bundle must ship the top-level dispatch/ data dir: dist/cli/dispatch.js
+      // reads dispatch/lens-definitions.json from the package root at runtime, so a
+      // bundle missing it ENOENTs on the first dispatch step.
+      const bundleDispatchDefs = join(
+        root,
+        ".audit-code",
+        "install",
+        "claude-desktop",
+        "bundle",
+        "dispatch",
+        "lens-definitions.json",
+      );
+      const dispatchInfo = await stat(bundleDispatchDefs);
+      assert.equal(dispatchInfo.isFile(), true);
+      assert.ok(dispatchInfo.size > 0);
       assert.match(
         await readFile(paths.installGuidePath, "utf8"),
         /## Claude Desktop/,

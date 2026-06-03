@@ -137,7 +137,7 @@ export async function ensureSemanticReviewRun(params: {
     buildPendingAuditTasks(params.bundle),
   );
   const pendingTasksPath = join(paths.runDir, "pending-audit-tasks.json");
-  const auditResultsPath = join(paths.runDir, "audit-results.json");
+  const auditResultsPath = join(paths.runDir, "run-results.json");
   const taskReadPaths = new Set<string>();
   for (const pt of pendingTasks) {
     for (const fp of pt.file_paths) taskReadPaths.add(fp);

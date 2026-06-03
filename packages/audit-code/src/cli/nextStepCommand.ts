@@ -140,6 +140,58 @@ async function runDeterministicForNextStep(params: {
   const FINALIZATION_CYCLE_TOLERANCE = 16;
   const seenStateSignatures = new Set<string>();
   const obligationTrail: string[] = [];
+
+  // Build the terminal step for a deterministic loop that has stopped advancing
+  // (hit the run backstop or the finalization cycle guard). A rendered report is
+  // the deliverable: if synthesis already produced one — or the state is formally
+  // complete — present it instead of reporting the stopped loop as a bare
+  // "blocked" failure. A completed audit must never surface as blocked just
+  // because finalization kept churning (e.g. a runtime_validation <-> synthesis
+  // ping-pong, or revision churn from filesystem retries) after the report was
+  // written. With no report yet, the stop is a genuine block.
+  async function terminalStep(
+    bundle: ArtifactBundle,
+    state: AuditState,
+    blockedReason: string,
+  ): Promise<
+    | {
+        kind: "complete";
+        state: AuditState;
+        bundle: ArtifactBundle;
+        finalReportPath: string;
+      }
+    | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string }
+  > {
+    const reportRendered =
+      state.status === "complete" || Boolean(bundle.audit_report);
+    await writeHandoffOnly({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      bundle,
+      audit_state: state,
+      progress_summary:
+        reportRendered && state.status !== "complete"
+          ? `Audit report already rendered; ending run. ${blockedReason}`
+          : blockedReason,
+      providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+    });
+    if (!reportRendered) {
+      return { kind: "blocked", state, bundle, reason: blockedReason };
+    }
+    const promoted = await promoteFinalAuditReport({
+      artifactsDir: params.artifactsDir,
+      repoRoot: params.root,
+    });
+    return {
+      kind: "complete",
+      state,
+      bundle,
+      finalReportPath: promoted.promoted
+        ? join(params.root, AUDIT_REPORT_FILENAME)
+        : join(params.artifactsDir, AUDIT_REPORT_FILENAME),
+    };
+  }
+
   for (let index = 0; index < params.maxRuns; index++) {
     const bundle = await loadArtifactBundle(params.artifactsDir);
     const decision = decideNextStep(bundle);
@@ -465,26 +517,23 @@ async function runDeterministicForNextStep(params: {
           timestamp: new Date().toISOString(),
         },
       );
-      return {
-        kind: "blocked",
-        state: result.audit_state,
-        bundle: result.updated_bundle,
-        reason:
-          "Finalization is not converging: deterministic executors kept revisiting " +
-          `prior artifact states (${cycle.join(" -> ")}). The report has been ` +
-          "rendered; review whether these obligations are erroneously invalidating each other.",
-      };
+      return await terminalStep(
+        result.updated_bundle,
+        result.audit_state,
+        "Finalization is not converging: deterministic executors kept revisiting " +
+          `prior artifact states (${cycle.join(" -> ")}). Review whether these ` +
+          "obligations are erroneously invalidating each other.",
+      );
     }
   }
 
   const bundle = await loadArtifactBundle(params.artifactsDir);
   const state = deriveAuditState(bundle);
-  return {
-    kind: "blocked",
-    state,
+  return await terminalStep(
     bundle,
-    reason: `Reached max run limit (${params.maxRuns}) before a review, report, or blocker step was ready.`,
-  };
+    state,
+    `Reached max run limit (${params.maxRuns}) before a review, report, or blocker step was ready.`,
+  );
 }
 
 export async function cmdNextStep(argv: string[]): Promise<void> {

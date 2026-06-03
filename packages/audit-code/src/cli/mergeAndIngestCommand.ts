@@ -24,9 +24,30 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
 
   const runDir = join(artifactsDir, "runs", runId);
   const taskResultsDir = join(runDir, "task-results");
-  const auditResultsPath = join(runDir, "audit-results.json");
+  const auditResultsPath = join(runDir, "run-results.json");
   const taskPath = join(runDir, "task.json");
   const tasksPath = join(runDir, "pending-audit-tasks.json");
+  const mergeCompletePath = join(runDir, "merge-complete.json");
+
+  // Idempotency: a fully-merged run is terminal. A stray re-invocation for the
+  // same run-id (e.g. after the run already advanced to the next deepening
+  // round, which rewrites this run dir's pending-audit-tasks.json to the *next*
+  // round's tasks) must be a clean no-op — not a spurious "all results missing"
+  // hard failure that also truncates the transient results file. Replay the
+  // recorded summary and exit 0.
+  let priorSummary: Record<string, unknown> | null = null;
+  try {
+    priorSummary = await readJsonFile<Record<string, unknown>>(mergeCompletePath);
+  } catch (e) {
+    if (!isFileMissingError(e)) throw e;
+  }
+  if (priorSummary) {
+    console.log(
+      JSON.stringify({ ...priorSummary, idempotent_replay: true }, null, 2),
+    );
+    return;
+  }
+
   const workerTask = await readJsonFile<WorkerTask>(taskPath);
   const resultMap = await loadDispatchResultMap(runDir);
   if (!resultMap) {
@@ -55,7 +76,7 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   const passing: AuditResult[] = [];
   const failing: Array<{ task_id: string; errors: string[] }> = [];
   const seenTaskIds = new Set<string>();
-  let spuriousFileCount = 0;
+  const spuriousFiles: string[] = [];
 
   const fallbackByTaskId = new Map<string, unknown>();
   for (const filename of files) {
@@ -82,11 +103,18 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
     // task-results/ dir are legitimate and must not inflate the count or bury
     // the real stray-file signal (3 -> 191 over a run before this fix).
     if (!isCanonicalResultFilename(filename)) {
-      spuriousFileCount++;
-      process.stderr.write(
-        `[merge-and-ingest] Warning: unexpected file in task-results/: ${filename}\n`,
-      );
+      spuriousFiles.push(filename);
     }
+  }
+
+  // Collapse stray-file warnings into a single stderr line so the real summary
+  // (emitted as the sole stdout JSON payload) is never buried under a wall of
+  // per-file warnings.
+  if (spuriousFiles.length > 0) {
+    process.stderr.write(
+      `[merge-and-ingest] Warning: ${spuriousFiles.length} unexpected file(s) in ` +
+        `task-results/ ignored: ${spuriousFiles.join(", ")}\n`,
+    );
   }
 
   for (const task of allTasks) {
@@ -157,18 +185,22 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
     }
   }
 
-  await writeJsonFile(auditResultsPath, passing);
-
   const failedTasksPath = join(runDir, "failed-tasks.json");
   if (failing.length > 0) {
     await writeJsonFile(failedTasksPath, failing);
   }
 
   if (passing.length === 0 && failing.length > 0) {
+    // Nothing merged and at least one failure: a blocked no-op. Do NOT write the
+    // transient results file here — truncating it to [] reads as catastrophic
+    // data loss on a re-run when the cumulative audit_results.jsonl store is in
+    // fact intact and the first merge had simply already succeeded.
     throw new Error(
       `All ${failing.length} assigned task result(s) were missing or invalid; blocked before ingestion. See ${failedTasksPath}`,
     );
   }
+
+  await writeJsonFile(auditResultsPath, passing);
 
   const findingCount = passing.reduce(
     (sum, result) => sum + result.findings.length,
@@ -238,28 +270,32 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
     errors: [],
   });
   await writeJsonFile(workerTask.result_path, workerResult);
-  console.log(
-    JSON.stringify(
-      {
-        run_id: runId,
-        status,
-        accepted_count: passing.length,
-        rejected_count: failing.length,
-        spurious_file_count: spuriousFileCount,
-        finding_count: findingCount,
-        audit_results_path: auditResultsPath,
-        ...(retryDispatchPath ? { retry_dispatch_path: retryDispatchPath } : {}),
-        ...(result ? {
-          selected_executor: workerResult.selected_executor,
-          progress_made: workerResult.progress_made,
-          progress_summary: workerResult.summary,
-          next_likely_step: workerResult.next_likely_step,
-        } : {}),
-      },
-      null,
-      2,
-    ),
-  );
+  const summaryPayload = {
+    run_id: runId,
+    status,
+    accepted_count: passing.length,
+    rejected_count: failing.length,
+    spurious_file_count: spuriousFiles.length,
+    finding_count: findingCount,
+    audit_results_path: auditResultsPath,
+    ...(retryDispatchPath ? { retry_dispatch_path: retryDispatchPath } : {}),
+    ...(result ? {
+      selected_executor: workerResult.selected_executor,
+      progress_made: workerResult.progress_made,
+      progress_summary: workerResult.summary,
+      next_likely_step: workerResult.next_likely_step,
+    } : {}),
+  };
+
+  // Record a completion marker for a fully-merged run so a stray re-invocation
+  // replays this summary (above) instead of re-processing — and possibly
+  // clobbering — terminal state. Only on full success: a partial merge is meant
+  // to be re-run after the failed packets are retried, so it stays replayable.
+  if (failing.length === 0) {
+    await writeJsonFile(mergeCompletePath, summaryPayload);
+  }
+
+  console.log(JSON.stringify(summaryPayload, null, 2));
 
   if (failing.length > 0) {
     process.exitCode = 2;

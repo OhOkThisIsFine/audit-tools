@@ -62,7 +62,7 @@ test("provider-assisted bridge validates agent task and pending task structure b
     await writeFile(tasksPath, JSON.stringify([{ task_id: "task-1" }], null, 2));
 
     const resultPath = join(dir, "result.json");
-    const auditResultsPath = join(dir, "audit-results.json");
+    const auditResultsPath = join(dir, "run-results.json");
     const taskPath = join(dir, "task.json");
     await writeFile(
       taskPath,
@@ -120,7 +120,7 @@ test("provider-assisted bridge writes synthetic results for valid agent tasks", 
     );
 
     const resultPath = join(dir, "result.json");
-    const auditResultsPath = join(dir, "audit-results.json");
+    const auditResultsPath = join(dir, "run-results.json");
     const taskPath = join(dir, "task.json");
     await writeFile(
       taskPath,
