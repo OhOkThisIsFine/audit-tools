@@ -179,3 +179,7 @@ A living log of how to resolve recurring forks, so agents don't re-ask settled q
 - **Docs capture durable concepts, not current state.** This project moves fast; prefer timeless conceptual docs (and this log) over status / roadmap / file-state notes that rot. If a doc would only record "where things are now," don't write it.
 - **A needed manual flag is a bug signal.** If a task seems to require `--root`, a provider, or a model flag, fix auto-resolution rather than document the flag.
 - **Resolve toward the durable contract.** LLM-vs-deterministic → deterministic; any graph/language question → the language-neutral contract (see Conventions).
+
+## Known friction & deferred fixes
+
+Tracked in [`docs/backlog.md`](docs/backlog.md) — known friction (agent/dev-experience traps), deferred product fixes, and features to add later. Add an entry when you defer a fix; remove it once shipped.
