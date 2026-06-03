@@ -65,14 +65,11 @@ export type {
 export { scheduleWave, buildProviderModelKey, resolveHostModel } from "@audit-tools/shared";
 export type { ScheduleWaveOptions } from "@audit-tools/shared";
 
-// Auditor-specific: probe, discovered limits, header extraction
+// Auditor-specific: discovered limits, header extraction
 export {
   detectHostActiveSubagentLimit,
   resolveHostActiveSubagentLimit,
 } from "./hostLimits.js";
-
-export { probeProvider } from "./probe.js";
-export type { ProbeResult } from "./probe.js";
 
 export {
   lookupDiscoveredLimits,

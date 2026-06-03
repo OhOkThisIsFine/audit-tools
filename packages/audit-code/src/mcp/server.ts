@@ -201,6 +201,8 @@ async function runWrapperCommand(
   });
 }
 
+const SUBPROCESS_STDERR_TAIL_CHARS = 2000;
+
 async function parseCliJson(
   args: string[],
   options: ToolCallContext,
@@ -213,6 +215,16 @@ async function parseCliJson(
   }
   if (combined.length === 0) {
     throw new Error("Command completed without JSON output.");
+  }
+  // On a successful (or tolerated-nonzero) call we parse stdout for the JSON
+  // payload and otherwise discard stderr. Surface any captured stderr as a
+  // tail so subprocess diagnostics (warnings, structured stderr lines) are not
+  // lost when the command still succeeded.
+  const stderrTail = result.stderr.trim();
+  if (stderrTail.length > 0) {
+    process.stderr.write(
+      `[audit-code] mcp: subprocess stderr: ${stderrTail.slice(-SUBPROCESS_STDERR_TAIL_CHARS)}\n`,
+    );
   }
   try {
     return JSON.parse(result.stdout);

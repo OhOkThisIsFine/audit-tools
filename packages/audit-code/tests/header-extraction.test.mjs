@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { extractRateLimitHeaders } = await import("../dist/quota/headerExtraction.js");
-const { getHeaderExtractorForProvider } = await import("../dist/quota/headerExtractors/index.js");
+const { extractRateLimitHeaders } = await import("../src/quota/headerExtraction.ts");
+const { getHeaderExtractorForProvider } = await import("../src/quota/headerExtractors/index.ts");
 
 // ── extractRateLimitHeaders ─────────────────────────────────────────────────
 

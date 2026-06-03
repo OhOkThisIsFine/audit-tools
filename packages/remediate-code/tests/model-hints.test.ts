@@ -92,7 +92,12 @@ describe("buildDocumentModelHint", () => {
     expect(hint.reasons).toContain("sensitive_lens_reliability");
   });
 
-  it("returns small for low severity + high confidence + safe lens", () => {
+  // Finding.lens is a free-form string (the auditor narrows it to its Lens union),
+  // and buildDocumentModelHint's SAFE_LENS_PATTERN keys on cosmetic lens labels
+  // (style/format/lint/typo/…). These cases intentionally use such labels to
+  // exercise the small-tier "safe lens" branch — they are valid string inputs,
+  // not canonical-enum values.
+  it("returns small for low severity + high confidence + safe (cosmetic) lens", () => {
     const hint = buildDocumentModelHint(
       makeFinding({ id: "F-1", severity: "low", confidence: "high", lens: "style" }),
     );
@@ -100,7 +105,7 @@ describe("buildDocumentModelHint", () => {
     expect(hint.reasons).toContain("low_severity_safe_lens");
   });
 
-  it("returns small for info severity + high confidence + lint lens", () => {
+  it("returns small for info severity + high confidence + safe (cosmetic) lens", () => {
     const hint = buildDocumentModelHint(
       makeFinding({ id: "F-1", severity: "info", confidence: "high", lens: "lint" }),
     );

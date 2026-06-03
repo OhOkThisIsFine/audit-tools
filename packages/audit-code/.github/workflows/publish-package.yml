@@ -41,6 +41,23 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - name: Gate release to default branch
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false')
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TARGET="${{ github.ref_name }}"
+          else
+            TARGET="${{ github.event.release.target_commitish }}"
+          fi
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          if [[ "$TARGET" != "$DEFAULT_BRANCH" ]]; then
+            echo "::error::Live publish must run from the default branch ('${DEFAULT_BRANCH}'), but this run targets '${TARGET}'. Publish aborted. (Re-run workflow_dispatch with dry_run=true to validate from a non-default branch.)"
+            exit 1
+          fi
+          echo "Publish targets '${TARGET}' — branch gate passed."
       - name: Checkout
         # actions/checkout v5
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd

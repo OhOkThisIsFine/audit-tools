@@ -6,13 +6,17 @@ import type { ErrorParser } from "./genericErrorParser.js";
 import { GenericErrorParser } from "./genericErrorParser.js";
 import { ClaudeCodeErrorParser } from "./claudeCodeErrorParser.js";
 
-const PROVIDER_PARSERS: Record<string, () => ErrorParser> = {
-  "claude-code": () => new ClaudeCodeErrorParser(),
+// Error parsers are stateless, so a single shared instance per provider is
+// enough — allocate each once at module scope rather than per call. (Previously
+// the claude-code parser was re-allocated on every lookup while the others were
+// already singletons; this makes the factory uniform.)
+const genericParser = new GenericErrorParser();
+const claudeCodeParser = new ClaudeCodeErrorParser();
+
+const PROVIDER_PARSERS: Record<string, ErrorParser> = {
+  "claude-code": claudeCodeParser,
 };
 
-const genericParser = new GenericErrorParser();
-
 export function getErrorParserForProvider(providerName: string): ErrorParser {
-  const factory = PROVIDER_PARSERS[providerName];
-  return factory ? factory() : genericParser;
+  return PROVIDER_PARSERS[providerName] ?? genericParser;
 }

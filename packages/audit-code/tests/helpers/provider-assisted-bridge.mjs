@@ -1,6 +1,7 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
+import { countLines } from "./countLines.mjs";
 
 function fail(message) {
   throw new Error(message);
@@ -47,16 +48,6 @@ async function assertAccessibleDirectory(path, label) {
   } catch (error) {
     fail(`${label} does not exist or is not accessible: ${path}`);
   }
-}
-
-async function countLines(root, path) {
-  const content = await readFile(join(root, path), "utf8");
-  if (content.length === 0) {
-    return 0;
-  }
-  return content.endsWith("\n")
-    ? content.split(/\r?\n/).length - 1
-    : content.split(/\r?\n/).length;
 }
 
 async function buildFileCoverage(task, root) {

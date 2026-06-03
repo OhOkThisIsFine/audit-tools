@@ -86,10 +86,11 @@ export function buildFlowRequeueTasks(
       : [];
 
     for (const lensName of missingLenses) {
+      // Skip (rather than throw on) an unsupported lens value, consistent with
+      // the filter-based lens guards elsewhere in the orchestrator: a stray
+      // non-canonical lens in flow coverage should not abort the whole requeue.
       if (!isLens(lensName)) {
-        throw new Error(
-          `buildFlowRequeueTasks encountered unsupported lens "${String(lensName)}" for flow ${record.flow_id}.`,
-        );
+        continue;
       }
 
       for (const path of flowPaths) {

@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "audit-code-dispatch-quota/v1alpha2",
   "title": "DispatchQuota",
   "description": "Quota schedule for a prepare-dispatch run. Written beside dispatch-plan.json. Hosts must launch at most wave_size packets per wave, then re-read this file before the next wave to pick up any updated limits.",

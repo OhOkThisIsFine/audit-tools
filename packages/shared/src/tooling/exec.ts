@@ -89,16 +89,29 @@ function wrapForWindowsBatch(
   };
 }
 
-function quoteForOpenTokenCmd(value: string): string {
+/**
+ * Quote a single argv token for embedding in a `cmd.exe /c "<opentoken> wrap
+ * …>"` command line on Windows: tokens of safe characters pass through bare,
+ * everything else is double-quoted with cmd.exe metacharacters caret-escaped.
+ * Canonical owner of this charset — both `spawnLoggedCommand` and the opencode
+ * launcher import it instead of carrying their own (previously divergent) copy.
+ */
+export function quoteForOpenTokenCmd(value: string): string {
   if (/^[A-Za-z0-9_./:=@+-]+$/u.test(value)) return value;
   return `"${value.replace(/(["^&|<>%])/g, "^$1")}"`;
 }
 
-function wrapForOpenToken(
+/**
+ * Wrap `[command, ...args]` as an `<opentoken> wrap …` invocation. On Windows
+ * the wrap goes through `cmd.exe /d /s /c` with each token quoted via
+ * `quoteForOpenTokenCmd`; on every other platform opentoken is spawned argv-only.
+ * Single source of truth for the opentoken wrapping both orchestrators use.
+ */
+export function wrapForOpenToken(
   command: string,
   args: string[],
   opentoken: string,
-  platform: NodeJS.Platform,
+  platform: NodeJS.Platform = process.platform,
 ): { command: string; args: string[] } {
   if (platform === "win32") {
     const shell = process.env.ComSpec ?? "cmd.exe";

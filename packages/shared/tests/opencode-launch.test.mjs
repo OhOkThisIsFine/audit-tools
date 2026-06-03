@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { resolveOpenCodeSpawnCommand } = await import(
-  "../dist/providers/opencodeLaunch.js"
+  "../src/providers/opencodeLaunch.ts"
 );
 
 test("resolveOpenCodeSpawnCommand passes through on non-win32", () => {

@@ -44,6 +44,32 @@ export interface ReviewPacket {
   estimated_tokens: number;
 }
 
+/**
+ * Aggregate quality signals for a planned set of review packets — cohesion,
+ * boundary-crossing counts, and the weakly-explained-packet diagnostics. Promoted
+ * from an inline anonymous object on {@link AuditPlanMetrics} so it can be named
+ * and referenced.
+ */
+export interface PacketQuality {
+  average_cohesion_score: number;
+  boundary_crossing_count: number;
+  merge_edge_kind_counts: Record<string, number>;
+  boundary_edge_kind_counts: Record<string, number>;
+  orphan_task_count: number;
+  high_fan_in_file_count: number;
+  high_fan_out_file_count: number;
+  weakly_explained_gap_counts: Record<
+    WeaklyExplainedPacketSample["primary_gap"],
+    number
+  >;
+  weakly_explained_file_extension_counts: Record<string, number>;
+  weakly_explained_packet_count: number;
+  weakly_explained_packet_ids: string[];
+  weakly_explained_packet_samples: WeaklyExplainedPacketSample[];
+  largest_unexplained_packet_id?: string;
+  largest_unexplained_packet_files: number;
+}
+
 export interface AuditPlanMetrics {
   generated_at: string;
   task_count: number;
@@ -63,25 +89,7 @@ export interface AuditPlanMetrics {
   largest_packet_id?: string;
   lens_task_counts: Partial<Record<Lens, number>>;
   priority_task_counts: Record<NonNullable<AuditTask["priority"]>, number>;
-  packet_quality: {
-    average_cohesion_score: number;
-    boundary_crossing_count: number;
-    merge_edge_kind_counts: Record<string, number>;
-    boundary_edge_kind_counts: Record<string, number>;
-    orphan_task_count: number;
-    high_fan_in_file_count: number;
-    high_fan_out_file_count: number;
-    weakly_explained_gap_counts: Record<
-      WeaklyExplainedPacketSample["primary_gap"],
-      number
-    >;
-    weakly_explained_file_extension_counts: Record<string, number>;
-    weakly_explained_packet_count: number;
-    weakly_explained_packet_ids: string[];
-    weakly_explained_packet_samples: WeaklyExplainedPacketSample[];
-    largest_unexplained_packet_id?: string;
-    largest_unexplained_packet_files: number;
-  };
+  packet_quality: PacketQuality;
   packet_size: {
     single_task_packets: number;
     multi_task_packets: number;

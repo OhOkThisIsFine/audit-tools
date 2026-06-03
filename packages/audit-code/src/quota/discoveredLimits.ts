@@ -12,6 +12,7 @@ export interface DiscoveredRateLimits {
 export interface DiscoveredLimitsCacheEntry {
   requests_per_minute?: number;
   input_tokens_per_minute?: number;
+  output_tokens_per_minute?: number;
   discovered_at: string;
   source: string;
 }
@@ -72,6 +73,9 @@ export async function updateDiscoveredLimits(
   if (limits.input_tokens_per_minute != null) {
     entry.input_tokens_per_minute = limits.input_tokens_per_minute;
   }
+  if (limits.output_tokens_per_minute != null) {
+    entry.output_tokens_per_minute = limits.output_tokens_per_minute;
+  }
   cache.entries[providerModelKey] = entry;
   await writeDiscoveredLimitsCache(cache);
 }
@@ -82,10 +86,16 @@ export async function lookupDiscoveredLimits(
   const cache = await readDiscoveredLimitsCache();
   const entry = cache.entries[providerModelKey];
   if (!entry) return null;
-  if (entry.requests_per_minute == null && entry.input_tokens_per_minute == null) return null;
+  if (
+    entry.requests_per_minute == null &&
+    entry.input_tokens_per_minute == null &&
+    entry.output_tokens_per_minute == null
+  )
+    return null;
   return {
     requests_per_minute: entry.requests_per_minute ?? null,
     input_tokens_per_minute: entry.input_tokens_per_minute ?? null,
+    output_tokens_per_minute: entry.output_tokens_per_minute ?? null,
     source: entry.source,
   };
 }

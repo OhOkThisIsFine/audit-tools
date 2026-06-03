@@ -10,8 +10,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
 const wrapperPath = join(repoRoot, "audit-code.mjs");
 
-const { advanceAudit } = await import("../dist/orchestrator/advance.js");
-const { writeCoreArtifacts } = await import("../dist/io/artifacts.js");
+const { advanceAudit } = await import("../src/orchestrator/advance.ts");
+const { writeCoreArtifacts } = await import("../src/io/artifacts.ts");
 
 const FIXTURE_LINE_INDEX = {
   "src/api/auth.ts": 4,

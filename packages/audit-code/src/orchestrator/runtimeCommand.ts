@@ -1,23 +1,21 @@
 import { spawn } from "node:child_process";
+import { quoteForOpenTokenCmd, wrapForOpenToken } from "@audit-tools/shared";
 
 // Deterministic runtime-validation command execution: resolve a command to a
 // platform-correct spawn invocation (Windows package-manager shims need a
 // cmd.exe wrapper), optionally wrap it for opentoken accounting, and run it
 // capturing a confirmed/not_confirmed/inconclusive outcome. Hoisted out of
 // internalExecutors.ts as a shared, side-effect-only helper module.
+//
+// The cmd.exe quoting (both for the opentoken wrap and the package-manager
+// batch path) reuses the canonical exec.ts helpers so the safe-character set
+// stays unified — the two formerly-private copies here diverged on `@`.
 
 function resolveOpentokenWrap(
   resolved: { command: string; args: string[] },
   platform: NodeJS.Platform = process.platform,
 ): { command: string; args: string[] } {
-  if (platform === "win32") {
-    const shell = process.env.ComSpec ?? "cmd.exe";
-    const inner = [resolved.command, ...resolved.args]
-      .map((v) => (/^[A-Za-z0-9_./:=@+-]+$/.test(v) ? v : `"${v.replace(/(["^&|<>%])/g, "^$1")}"`))
-      .join(" ");
-    return { command: shell, args: ["/d", "/s", "/c", `opentoken wrap ${inner}`] };
-  }
-  return { command: "opentoken", args: ["wrap", resolved.command, ...resolved.args] };
+  return wrapForOpenToken(resolved.command, resolved.args, "opentoken", platform);
 }
 
 export async function runCommand(
@@ -86,15 +84,8 @@ export function resolveRuntimeValidationSpawnCommand(
   if (["npm", "npx", "pnpm", "yarn"].includes(packageManager)) {
     return {
       command: shellCommand,
-      args: ["/d", "/s", "/c", command.map(quoteCmdArg).join(" ")],
+      args: ["/d", "/s", "/c", command.map(quoteForOpenTokenCmd).join(" ")],
     };
   }
   return { command: executable, args };
-}
-
-function quoteCmdArg(value: string): string {
-  if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) {
-    return value;
-  }
-  return `"${value.replace(/(["^&|<>%])/g, "^$1")}"`;
 }

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { detectRepoConventions, formatRepoConventions } = await import(
-  "../dist/tooling/repoConventions.js"
+  "../src/tooling/repoConventions.ts"
 );
 
 async function withTempDir(fn) {

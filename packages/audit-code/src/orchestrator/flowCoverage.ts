@@ -13,6 +13,7 @@ function lensSetForFlow(concerns: string[]): Lens[] {
     "data_integrity",
     "operability",
     "performance",
+    "observability",
   ];
   return concerns.filter((concern): concern is Lens =>
     allowed.includes(concern as Lens),

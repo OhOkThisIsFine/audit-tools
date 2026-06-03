@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { buildReviewPackets } = await import("../dist/orchestrator/reviewPackets.js");
+const { buildReviewPackets } = await import("../src/orchestrator/reviewPackets.ts");
 
 // Packet sizing is in estimated content tokens (Phase 2). When no sizeIndex is
 // supplied the estimate falls back to lines: ESTIMATED_TOKENS_PER_LINE = 4,

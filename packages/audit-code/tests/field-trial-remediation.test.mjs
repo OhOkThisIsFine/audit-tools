@@ -345,6 +345,56 @@ test("buildRequeuePayload skips flow requeue duplicates when file coverage is al
   assert.equal(payload.tasks[0].task_id, "requeue:reliability:src/api/auth.ts");
 });
 
+test("buildRequeuePayload dedupeByScope merges a file task and flow task sharing a lens+file signature", () => {
+  // The file still needs `security`, and the same file in a critical flow also
+  // still needs `security`. The file requeue task and the flow requeue task
+  // therefore resolve to the identical `lens:sorted(file_paths)` signature
+  // (security:src/api/auth.ts) and dedupeByScope must collapse them to one
+  // task — while file_task_count / flow_task_count still report the per-source
+  // counts before the cross-source merge.
+  const payload = buildRequeuePayload(
+    {
+      files: [
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+      ],
+    },
+    {
+      flows: [
+        {
+          id: "auth-session",
+          name: "Auth session",
+          paths: ["src/api/auth.ts"],
+          entrypoints: ["src/api/auth.ts"],
+          concerns: ["security"],
+        },
+      ],
+    },
+    {
+      flows: [
+        {
+          flow_id: "auth-session",
+          status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+      ],
+    },
+  );
+
+  // Cross-source signatures collide -> exactly one merged task.
+  assert.equal(payload.tasks.length, 1);
+  // Per-source counts reflect the pre-merge totals (one file task, one flow task).
+  assert.equal(payload.file_task_count, 1);
+  assert.equal(payload.flow_task_count, 1);
+});
+
 test("initializeCoverageFromPlan derives per-file required lenses instead of unit unions", () => {
   const coverage = initializeCoverageFromPlan(
     {
@@ -520,6 +570,54 @@ test("buildChunkedAuditTasks splits aggregate review blocks by line budget", () 
       },
     ],
   );
+});
+
+test("buildChunkedAuditTasks splits an oversized file into its own large_file task", () => {
+  const tasks = buildChunkedAuditTasks(
+    {
+      files: [
+        {
+          path: "src/big.ts",
+          unit_ids: ["src-unit"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+        {
+          path: "src/small.ts",
+          unit_ids: ["src-unit"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["correctness"],
+          completed_lenses: [],
+        },
+      ],
+    },
+    {
+      "src/big.ts": 600,
+      "src/small.ts": 50,
+    },
+    // Threshold below the big file's line count so it splits out on its own,
+    // while keeping the aggregate budget high enough that the remaining small
+    // file is NOT a budget split.
+    { file_split_threshold: 100, max_task_lines: 3000 },
+  );
+
+  const bigTask = tasks.find((t) => t.task_id === "src-unit:correctness:src/big.ts");
+  const smallTask = tasks.find((t) => t.task_id === "src-unit:correctness");
+
+  // The oversized file is emitted as its own task containing only that file.
+  assert.ok(bigTask, "oversized file should get its own task");
+  assert.deepEqual(bigTask.file_paths, ["src/big.ts"]);
+  assert.ok(bigTask.tags.includes("large_file"));
+
+  // The remaining small file is grouped in a separate (non-large-file) task.
+  assert.ok(smallTask, "small file should get its own budget task");
+  assert.deepEqual(smallTask.file_paths, ["src/small.ts"]);
+  assert.ok(!(smallTask.tags ?? []).includes("large_file"));
+
+  assert.equal(tasks.length, 2);
 });
 
 test("planning excludes trivial audit files instead of auto-completing them", () => {

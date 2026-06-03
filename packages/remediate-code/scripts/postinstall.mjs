@@ -170,6 +170,10 @@ if (!promptSource || !skillSource) {
   process.exit(0);
 }
 
+const postinstallStart = Date.now();
+let succeeded = 0;
+let failed = 0;
+
 const promptBody = splitFrontmatter(promptSource.toString("utf8")).body;
 const codexOpenAiAgentSource = readOptionalSource(
   codexOpenAiAgentSourceFile,
@@ -226,6 +230,7 @@ for (const install of installs) {
     console.log(
       `remediate-code: ${action} global ${install.label} at ${install.path}`,
     );
+    succeeded++;
   } catch (err) {
     console.warn(
       `remediate-code: could not install global ${install.label} (${err.message})`,
@@ -234,6 +239,7 @@ for (const install of installs) {
     console.warn(`    ${install.sourcePath}`);
     console.warn("  to:");
     console.warn(`    ${install.path}`);
+    failed++;
   }
 }
 
@@ -250,10 +256,12 @@ try {
   console.log(
     `remediate-code: ${action} global OpenCode command in ${opencodeGlobalConfig}`,
   );
+  succeeded++;
 } catch (err) {
   console.warn(
     `remediate-code: could not install global OpenCode command (${err.message})`,
   );
+  failed++;
 }
 
 // Install Antigravity plugin (global skill for Gemini IDE / Antigravity Hub)
@@ -290,8 +298,12 @@ try {
   console.log(
     `remediate-code: ${skillAction} Antigravity plugin skill at ${antigravityPluginSkillPath}`,
   );
+  succeeded++;
 } catch (err) {
   console.warn(
     `remediate-code: could not install Antigravity plugin (${err.message})`,
   );
+  failed++;
 }
+
+console.log(`remediate-code: postinstall complete — ${succeeded} succeeded, ${failed} failed (${Date.now() - postinstallStart}ms)`);

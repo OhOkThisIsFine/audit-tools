@@ -7,16 +7,16 @@ const {
   requireKeys,
 } = await import("@audit-tools/shared/validation/basic");
 const { validateArtifactBundle } = await import(
-  "../dist/validation/artifacts.js"
+  "../src/validation/artifacts.ts"
 );
 const {
   formatAuditResultIssues,
   validateAuditResults,
-} = await import("../dist/validation/auditResults.js");
+} = await import("../src/validation/auditResults.ts");
 const {
   validateConfiguredProviderEnvironment,
   validateSessionConfig,
-} = await import("../dist/validation/sessionConfig.js");
+} = await import("../src/validation/sessionConfig.ts");
 
 test("requireKeys rejects non-object payloads and shared validation formatting stays stable", () => {
   const issues = requireKeys(["not", "an", "object"], "repo_manifest", [
@@ -339,7 +339,7 @@ test("validateAuditResults detects duplicates across normalized paths", () => {
   assert.ok(dupIssue, "should detect normalized duplicate");
 });
 
-test("validateSessionConfig rejects compound command strings and environment validation avoids probing them", () => {
+test("validateSessionConfig rejects compound command strings and environment validation avoids probing them", async () => {
   let pathLookups = 0;
   let commandLookups = 0;
 
@@ -349,7 +349,7 @@ test("validateSessionConfig rejects compound command strings and environment val
       command: "node ./bin/claude.js",
     },
   });
-  const environmentIssues = validateConfiguredProviderEnvironment(
+  const environmentIssues = await validateConfiguredProviderEnvironment(
     {
       provider: "claude-code",
       claude_code: {
@@ -359,7 +359,7 @@ test("validateSessionConfig rejects compound command strings and environment val
     {
       commandExists: () => {
         commandLookups++;
-        return true;
+        return Promise.resolve(true);
       },
       pathExists: () => {
         pathLookups++;
@@ -434,11 +434,11 @@ test("validateSessionConfig validates the analyzers map of resolution settings",
   );
 });
 
-test("validateConfiguredProviderEnvironment checks explicit executable paths without PATH probing", () => {
+test("validateConfiguredProviderEnvironment checks explicit executable paths without PATH probing", async () => {
   let pathLookups = 0;
   let commandLookups = 0;
 
-  const issues = validateConfiguredProviderEnvironment(
+  const issues = await validateConfiguredProviderEnvironment(
     {
       provider: "opencode",
       opencode: {
@@ -448,7 +448,7 @@ test("validateConfiguredProviderEnvironment checks explicit executable paths wit
     {
       commandExists: () => {
         commandLookups++;
-        return false;
+        return Promise.resolve(false);
       },
       pathExists: (commandPath) => {
         pathLookups++;

@@ -29,7 +29,7 @@
     },
     "graphEdge": {
       "type": "object",
-      "required": ["from", "to", "confidence"],
+      "required": ["from", "to"],
       "properties": {
         "from": { "type": "string" },
         "to": { "type": "string" },

@@ -10,6 +10,7 @@ import {
   isGitRepo,
   createWorktree,
   mergeWorktree,
+  removeWorktree,
   cleanupAllWorktrees,
 } from "../src/steps/worktreeIsolation.js";
 
@@ -130,6 +131,66 @@ describe("cleanupAllWorktrees", () => {
       expect(existsSync(worktreeBasePath(artifactsDir))).toBe(true);
       await cleanupAllWorktrees(dir, artifactsDir);
       expect(existsSync(worktreeBasePath(artifactsDir))).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("removeWorktree — fallback to rm+prune", () => {
+  it("resolves and clears the path when git worktree remove fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wt-iso-"));
+    const artifactsDir = join(dir, ".artifacts");
+    try {
+      makeRepo(dir);
+      const blockId = "stale-block";
+      const wtPath = await createWorktree(dir, artifactsDir, blockId);
+      expect(existsSync(wtPath)).toBe(true);
+
+      // Delete the worktree directory out from under git so
+      // `git worktree remove --force` fails and the fallback rm+prune runs.
+      await rm(wtPath, { recursive: true, force: true });
+
+      await expect(
+        removeWorktree(dir, artifactsDir, blockId),
+      ).resolves.toBeUndefined();
+      expect(existsSync(wtPath)).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("mergeWorktree — clean fast path", () => {
+  it("returns merged:true conflicted:false with no error when the branch has no diff", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wt-iso-"));
+    const artifactsDir = join(dir, ".artifacts");
+    try {
+      makeRepo(dir);
+      const blockId = "clean-block";
+      // Create the worktree but commit nothing — branch is identical to HEAD,
+      // so `git diff --stat HEAD <branch>` is empty and the fast path triggers.
+      await createWorktree(dir, artifactsDir, blockId);
+
+      const result = await mergeWorktree(dir, artifactsDir, blockId);
+      expect(result.merged).toBe(true);
+      expect(result.conflicted).toBe(false);
+      expect(result.error).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns merged:false with a 'does not exist' error when the worktree path is absent", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wt-iso-"));
+    const artifactsDir = join(dir, ".artifacts");
+    try {
+      makeRepo(dir);
+
+      const result = await mergeWorktree(dir, artifactsDir, "never-created");
+      expect(result.merged).toBe(false);
+      expect(result.conflicted).toBe(false);
+      expect(result.error).toMatch(/does not exist/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

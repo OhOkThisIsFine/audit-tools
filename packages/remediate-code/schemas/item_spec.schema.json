@@ -19,7 +19,7 @@
         "required": ["name", "assertions"],
         "properties": {
           "name": { "type": "string" },
-          "assertions": { "type": "array", "items": { "type": "string" } }
+          "assertions": { "type": "array", "minItems": 1, "items": { "type": "string" } }
         },
         "additionalProperties": false
       }

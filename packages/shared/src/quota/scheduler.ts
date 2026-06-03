@@ -3,6 +3,7 @@ import type {
   HostConcurrencyLimit,
   QuotaStateEntry,
   ResolvedLimits,
+  WaveBindingCap,
   WaveSchedule,
 } from "./types.js";
 import type { QuotaUsageSnapshot } from "./quotaSource.js";
@@ -39,6 +40,25 @@ export interface ScheduleWaveOptions {
   discoveredLimits?: DiscoveredRateLimitsInput | null;
 }
 
+// Named quota tuning defaults (previously inline magic literals). Centralised
+// here, the canonical owner of the wave-scheduling math, so callers that read
+// the same session-config defaults (e.g. the dispatch CLIs) can reference them
+// instead of re-typing the number.
+/** Fraction of a discovered RPM/TPM limit we actually schedule against. */
+export const DEFAULT_SAFETY_MARGIN = 0.8;
+/** Half-life (hours) for decaying learned concurrency evidence. */
+export const DEFAULT_EMPIRICAL_HALF_LIFE_HOURS = 24;
+/** Conservative ceiling applied on first contact with an unconfigured provider. */
+export const DEFAULT_FIRST_CONTACT_CONCURRENCY = 3;
+/**
+ * Real-time quota-source `remaining_pct` thresholds. At/under CRITICAL we throttle
+ * to a single request; at/under LOW we halve the wave.
+ */
+export const QUOTA_REMAINING_PCT_CRITICAL = 0.1;
+export const QUOTA_REMAINING_PCT_LOW = 0.3;
+/** Multiplier applied to the wave when remaining quota is in the LOW band. */
+const QUOTA_LOW_WAVE_MULTIPLIER = 0.5;
+
 function sumTopN(sorted: number[], n: number): number {
   let sum = 0;
   for (let i = 0; i < Math.min(n, sorted.length); i++) sum += sorted[i];
@@ -59,6 +79,18 @@ function sumTopN(sorted: number[], n: number): number {
  * function is that a reported host limit suppresses the conservative
  * unknown-provider fallback (which exists solely as a no-signal default).
  */
+/**
+ * Result of the uncapped wave-size computation. `binding_cap` records which of
+ * the RPM / TPM / learned / fallback / first-contact caps last reduced the
+ * value (or "none" if nothing did), so the caller can attribute the decision.
+ * The cooldown and host-concurrency caps are applied by `scheduleWave` itself
+ * and folded into the final `binding_cap` there.
+ */
+interface UncappedWaveSize {
+  size: number;
+  binding_cap: WaveBindingCap;
+}
+
 function computeUncappedWaveSize(
   waveSize: number,
   limits: ResolvedLimits,
@@ -70,13 +102,17 @@ function computeUncappedWaveSize(
   providerName: ResolvedProviderName,
   quota: QuotaConfig,
   halfLifeHours: number,
-): number {
+): UncappedWaveSize {
   let current = waveSize;
+  let bindingCap: WaveBindingCap = "none";
 
   // Cap by requests-per-minute
   if (limits.requests_per_minute != null) {
     const rpmCap = Math.max(1, Math.floor(limits.requests_per_minute * safetyMargin));
-    current = Math.min(current, rpmCap);
+    if (rpmCap < current) {
+      current = rpmCap;
+      bindingCap = "rpm";
+    }
   }
 
   // Cap by input tokens-per-minute
@@ -87,10 +123,17 @@ function computeUncappedWaveSize(
       while (candidateSize > 1 && sumTopN(slotsSorted, candidateSize) > tpmBudget) {
         candidateSize--;
       }
-      current = Math.max(1, candidateSize);
+      const capped = Math.max(1, candidateSize);
+      if (capped < current) {
+        current = capped;
+        bindingCap = "tpm";
+      }
     } else {
       const tpmCap = Math.max(1, Math.floor(tpmBudget / avgTokens));
-      current = Math.min(current, tpmCap);
+      if (tpmCap < current) {
+        current = tpmCap;
+        bindingCap = "tpm";
+      }
     }
   }
 
@@ -99,13 +142,17 @@ function computeUncappedWaveSize(
     const cap = rampUp
       ? computeRampUpConcurrency(quotaStateEntry, halfLifeHours)
       : computeMaxSafeConcurrency(quotaStateEntry, halfLifeHours);
-    return Math.min(current, cap);
+    if (cap < current) {
+      current = cap;
+      bindingCap = "learned";
+    }
+    return { size: current, binding_cap: bindingCap };
   } else if (hostConcurrencyLimit !== null) {
     // The host explicitly reported its active-subagent capacity. That is a real
     // concurrency signal, so it supersedes the conservative unknown-provider
     // fallback. The reported limit is enforced as the hard ceiling by
     // applyHostConcurrencyLimit() at the call site, so nothing is capped here.
-    return current;
+    return { size: current, binding_cap: bindingCap };
   } else {
     const providerType = classifyProvider(providerName);
     const fallbackCap =
@@ -116,7 +163,11 @@ function computeUncappedWaveSize(
     if (fallbackCap === "unlimited") {
       // no cap — "unlimited" intentionally skips clamping
     } else if (typeof fallbackCap === "number" && Number.isFinite(fallbackCap)) {
-      current = Math.min(current, Math.max(1, Math.floor(fallbackCap)));
+      const cap = Math.max(1, Math.floor(fallbackCap));
+      if (cap < current) {
+        current = cap;
+        bindingCap = "fallback";
+      }
     }
 
     // First-contact cap: when no learned history, no configured fallback, AND
@@ -129,10 +180,16 @@ function computeUncappedWaveSize(
       limits.requests_per_minute == null &&
       limits.input_tokens_per_minute == null
     ) {
-      const firstContactCap = quota.first_contact_concurrency ?? 3;
-      current = Math.min(current, Math.max(1, firstContactCap));
+      const firstContactCap = Math.max(
+        1,
+        quota.first_contact_concurrency ?? DEFAULT_FIRST_CONTACT_CONCURRENCY,
+      );
+      if (firstContactCap < current) {
+        current = firstContactCap;
+        bindingCap = "first_contact";
+      }
     }
-    return current;
+    return { size: current, binding_cap: bindingCap };
   }
 }
 
@@ -184,11 +241,13 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
       resolved_limits: limits,
       host_concurrency_limit: hostConcurrencyLimit,
       model: hostModel,
+      binding_cap: waveSize < requestedConcurrency ? "host_concurrency" : "none",
     };
   }
 
-  const safetyMargin = quota.safety_margin ?? 0.8;
-  const halfLifeHours = quota.empirical_half_life_hours ?? 24;
+  const safetyMargin = quota.safety_margin ?? DEFAULT_SAFETY_MARGIN;
+  const halfLifeHours =
+    quota.empirical_half_life_hours ?? DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
 
   const { limits, source, confidence } = resolveLimits({ providerName, sessionConfig, hostModel });
 
@@ -213,10 +272,12 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   // logic; otherwise apply RPM/TPM and learned/fallback caps. The host-concurrency
   // ceiling is enforced uniformly below by applyHostConcurrencyLimit().
   let waveSize = requestedConcurrency;
+  let bindingCap: WaveBindingCap = "none";
   if (cooldownUntil) {
     waveSize = 1;
+    bindingCap = "cooldown";
   } else {
-    waveSize = computeUncappedWaveSize(
+    const uncapped = computeUncappedWaveSize(
       waveSize,
       limits,
       safetyMargin,
@@ -228,21 +289,38 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
       quota,
       halfLifeHours,
     );
+    waveSize = uncapped.size;
+    bindingCap = uncapped.binding_cap;
   }
 
-  // Apply real-time quota source data if available
+  // Apply real-time quota source data if available. A near-exhausted quota
+  // snapshot is the strongest live signal, so when it reduces the wave it
+  // becomes the binding cap (recorded as "cooldown" since it throttles to 1).
   if (quotaSourceSnapshot && !cooldownUntil) {
-    if (quotaSourceSnapshot.remaining_pct != null && quotaSourceSnapshot.remaining_pct < 0.1) {
+    if (
+      quotaSourceSnapshot.remaining_pct != null &&
+      quotaSourceSnapshot.remaining_pct < QUOTA_REMAINING_PCT_CRITICAL
+    ) {
+      if (waveSize > 1) bindingCap = "cooldown";
       waveSize = 1;
       if (quotaSourceSnapshot.reset_at) {
         cooldownUntil = quotaSourceSnapshot.reset_at;
       }
-    } else if (quotaSourceSnapshot.remaining_pct != null && quotaSourceSnapshot.remaining_pct < 0.3) {
-      waveSize = Math.min(waveSize, Math.max(1, Math.floor(waveSize * 0.5)));
+    } else if (
+      quotaSourceSnapshot.remaining_pct != null &&
+      quotaSourceSnapshot.remaining_pct < QUOTA_REMAINING_PCT_LOW
+    ) {
+      const reduced = Math.max(1, Math.floor(waveSize * QUOTA_LOW_WAVE_MULTIPLIER));
+      if (reduced < waveSize) {
+        waveSize = reduced;
+        bindingCap = "cooldown";
+      }
     }
   }
 
+  const beforeHostCap = waveSize;
   waveSize = applyHostConcurrencyLimit(waveSize);
+  if (waveSize < beforeHostCap) bindingCap = "host_concurrency";
   waveSize = Math.max(1, waveSize);
 
   return {
@@ -255,6 +333,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     host_concurrency_limit: hostConcurrencyLimit,
     model: hostModel,
     quota_source_snapshot: quotaSourceSnapshot,
+    binding_cap: bindingCap,
   };
 }
 

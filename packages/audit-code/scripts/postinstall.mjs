@@ -284,7 +284,6 @@ function mergeOpenCodeGlobalConfig(existing) {
   const parsed = existing ? JSON.parse(existing) : {};
   const auditPermission = renderOpenCodePermissionConfig();
   const existingAuditor = objectValue(objectValue(parsed.agent).auditor);
-  const nodeExecPath = replaceBackslashes(process.execPath);
   const pkgEntrypoint = replaceBackslashes(join(pkgRoot, 'audit-code.mjs'));
   return {
     ...parsed,
@@ -303,7 +302,7 @@ function mergeOpenCodeGlobalConfig(existing) {
       ...objectValue(parsed.mcp),
       auditor: {
         type: 'local',
-        command: [nodeExecPath, pkgEntrypoint, 'mcp'],
+        command: ['node', pkgEntrypoint, 'mcp'],
         enabled: true,
         timeout: 10000,
       },
@@ -380,6 +379,10 @@ if (!promptSource || !skillSource) {
 
 const codexOpenAiAgentSource = readOptionalSource(codexOpenAiAgentSourceFile, 'Codex skill UI metadata');
 
+const postinstallStart = Date.now();
+let succeeded = 0;
+let failed = 0;
+
 const installs = [
   {
     label: 'Claude command',
@@ -415,12 +418,14 @@ for (const install of installs) {
   try {
     const action = writeGeneratedFile(install.path, install.content);
     console.log(`audit-code: ${action} global ${install.label} at ${install.path}`);
+    succeeded++;
   } catch (err) {
     console.warn(`audit-code: could not install global ${install.label} (${err.message})`);
     console.warn(`  To install manually, copy from:`);
     console.warn(`    ${install.sourcePath}`);
     console.warn(`  to:`);
     console.warn(`    ${install.path}`);
+    failed++;
   }
 }
 
@@ -429,8 +434,10 @@ const globalMcpLauncherPath = join(homedir(), '.audit-code', 'run-mcp-server.mjs
 try {
   const action = writeGeneratedFile(globalMcpLauncherPath, Buffer.from(renderGlobalMcpLauncher(pkgRoot)));
   console.log(`audit-code: ${action} global MCP launcher at ${globalMcpLauncherPath}`);
+  succeeded++;
 } catch (err) {
   console.warn(`audit-code: could not install global MCP launcher (${err.message})`);
+  failed++;
 }
 
 // Install OpenCode global command and MCP via merged config
@@ -440,10 +447,12 @@ try {
     mergeOpenCodeGlobalConfig(existing),
   );
   console.log(`audit-code: ${action} global OpenCode config in ${opencodeGlobalConfig}`);
+  succeeded++;
 } catch (err) {
   console.warn(`audit-code: could not install global OpenCode config (${err.message})`);
   console.warn(`  To install manually, add the mcp.auditor and command["audit-code"] entries to:`);
   console.warn(`    ${opencodeGlobalConfig}`);
+  failed++;
 }
 
 // Install Antigravity plugin (global skill for Gemini IDE / Antigravity Hub)
@@ -460,8 +469,10 @@ try {
 
   const skillAction = writeGeneratedFile(antigravityPluginSkillPath, skillSource);
   console.log(`audit-code: ${skillAction} Antigravity plugin skill at ${antigravityPluginSkillPath}`);
+  succeeded++;
 } catch (err) {
   console.warn(`audit-code: could not install Antigravity plugin (${err.message})`);
+  failed++;
 }
 
 // Install Claude Desktop plugin so /audit-code appears in the slash-command menu
@@ -497,9 +508,11 @@ try {
   console.log(`audit-code: ${skillAction} Claude Desktop plugin skill at ${claudePluginSkillPath}`);
 
   console.log(`audit-code: restart Claude Desktop for /audit-code to appear in the slash-command menu`);
+  succeeded++;
 } catch (err) {
   console.warn(`audit-code: could not install Claude Desktop plugin (${err.message})`);
   console.warn(`  Plugin directory: ${claudePluginDir}`);
+  failed++;
 }
 
 // Register auditor MCP server with Claude Desktop so /audit-code appears in its slash-command menu
@@ -511,9 +524,13 @@ try {
   console.log(`audit-code: ${action} Claude Desktop MCP server entry in ${claudeDesktopConfig}`);
   console.log(`audit-code: restart Claude Desktop for /audit-code to appear`);
   console.log(`audit-code: to target a specific repo, set AUDIT_CODE_REPO_ROOT in Claude Desktop's MCP env settings`);
+  succeeded++;
 } catch (err) {
   console.warn(`audit-code: could not update Claude Desktop config (${err.message})`);
   console.warn(`  To register manually, add "mcpServers.auditor" to:`);
   console.warn(`    ${claudeDesktopConfig}`);
   console.warn(`  with command "node" and args ["${replaceBackslashes(globalMcpLauncherPath)}"]`);
+  failed++;
 }
+
+console.log(`audit-code: postinstall complete — ${succeeded} succeeded, ${failed} failed (${Date.now() - postinstallStart}ms)`);

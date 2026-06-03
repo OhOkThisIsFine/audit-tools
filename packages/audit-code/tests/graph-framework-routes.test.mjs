@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-
-const { buildGraphBundle } = await import("../dist/extractors/graph.js");
+import { buildGraphBundle } from "../src/extractors/graph.ts";
+import {
+  fallbackRouteEdge,
+  uniqueSortedRoutes,
+} from "../src/extractors/graphRoutes.ts";
 
 function manifest(paths) {
   return {
@@ -170,4 +173,39 @@ test("framework route detection is language-gated (no NestJS patterns in Python,
     !routes.some((r) => r.path === "/nope"),
     "NestJS decorators are not detected in .py files",
   );
+});
+
+test("uniqueSortedRoutes dedupes by signature and sorts by path/handler/method", () => {
+  const input = [
+    { method: "GET", path: "/b", handler: "h2" },
+    { method: "GET", path: "/a", handler: "h2" },
+    { method: "GET", path: "/a", handler: "h1" },
+    // Exact duplicate of (GET, /a, h1) — must collapse to one.
+    { method: "GET", path: "/a", handler: "h1" },
+    // Differs only by method from (GET, /a, h1) — must be retained.
+    { method: "POST", path: "/a", handler: "h1" },
+  ];
+
+  const result = uniqueSortedRoutes(input);
+  // One exact dup removed -> 4 unique signatures.
+  assert.equal(result.length, 4);
+  assert.deepEqual(
+    result.map((r) => `${r.method} ${r.path} ${r.handler}`),
+    ["GET /a h1", "POST /a h1", "GET /a h2", "GET /b h2"],
+  );
+});
+
+test("fallbackRouteEdge returns a GET edge for api/route paths and undefined otherwise", () => {
+  assert.deepEqual(fallbackRouteEdge("src/api/users.ts"), {
+    method: "GET",
+    handler: "src/api/users.ts",
+    path: "/src_api_users.ts",
+  });
+  // A path containing 'route' also produces a defined fallback edge.
+  const routeEdge = fallbackRouteEdge("app/dashboard/route.ts");
+  assert.ok(routeEdge);
+  assert.equal(routeEdge.method, "GET");
+  assert.equal(routeEdge.handler, "app/dashboard/route.ts");
+  // An unrelated path yields no fallback edge.
+  assert.equal(fallbackRouteEdge("src/lib/util.ts"), undefined);
 });

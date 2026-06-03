@@ -1,6 +1,6 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
-import { existsSync, readFileSync } from "node:fs";
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isAuditExcludedStatus } from "../extractors/disposition.js";
 import {
@@ -31,30 +31,39 @@ const PRETTIER_CONFIG_FILES = [
   "prettier.config.mjs",
 ];
 
-function hasPrettierConfig(root: string): boolean {
-  if (PRETTIER_CONFIG_FILES.some((file) => existsSync(join(root, file)))) {
-    return true;
-  }
-
-  const packageJsonPath = join(root, "package.json");
-  if (!existsSync(packageJsonPath)) {
-    return false;
-  }
-
+async function pathExists(target: string): Promise<boolean> {
   try {
-    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
-      prettier?: unknown;
-    };
-    return packageJson.prettier !== undefined;
+    await access(target);
+    return true;
   } catch {
     return false;
   }
 }
 
-export function runAutoFixExecutor(
+async function hasPrettierConfig(root: string): Promise<boolean> {
+  const configChecks = await Promise.all(
+    PRETTIER_CONFIG_FILES.map((file) => pathExists(join(root, file))),
+  );
+  if (configChecks.some(Boolean)) {
+    return true;
+  }
+
+  const packageJsonPath = join(root, "package.json");
+  try {
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      prettier?: unknown;
+    };
+    return packageJson.prettier !== undefined;
+  } catch {
+    // Missing package.json or unparseable JSON => no prettier config.
+    return false;
+  }
+}
+
+export async function runAutoFixExecutor(
   bundle: ArtifactBundle,
   root: string,
-): ExecutorRunResult {
+): Promise<ExecutorRunResult> {
   if (!bundle.file_disposition) {
     throw new Error("Cannot run auto fix executor without file_disposition");
   }
@@ -74,7 +83,7 @@ export function runAutoFixExecutor(
 
   // JS, TS, HTML, CSS, JSON, YAML, MD
   if (
-    hasPrettierConfig(root) &&
+    (await hasPrettierConfig(root)) &&
     (extensions.has("ts") ||
       extensions.has("js") ||
       extensions.has("tsx") ||

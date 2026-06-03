@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { ARTIFACT_DEPENDENCY_MAP } from "./dependencyMap.js";
+import { ARTIFACT_DEPENDENTS_MAP } from "./dependencyMap.js";
 
 export function stableStringify(value: unknown): string {
   if (value === undefined) {
@@ -58,7 +58,7 @@ export function hashArtifactValue(
 export function buildReverseDependencyMap(): Record<string, string[]> {
   const reverse: Record<string, string[]> = {};
   for (const [upstream, downstreamList] of Object.entries(
-    ARTIFACT_DEPENDENCY_MAP,
+    ARTIFACT_DEPENDENTS_MAP,
   )) {
     reverse[upstream] ??= [];
     for (const downstream of downstreamList) {

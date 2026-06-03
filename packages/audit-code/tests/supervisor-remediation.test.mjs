@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { buildAuditCodeHandoff, writeAuditCodeHandoffArtifacts } = await import(
-  "../dist/supervisor/operatorHandoff.js"
+  "../src/supervisor/operatorHandoff.ts"
 );
 const { appendRunLedgerEntry, loadRunLedger } = await import(
-  "../dist/supervisor/runLedger.js"
+  "../src/supervisor/runLedger.ts"
 );
 const { getSessionConfigPath, loadSessionConfig } = await import(
-  "../dist/supervisor/sessionConfig.js"
+  "../src/supervisor/sessionConfig.ts"
 );
 
 async function withTempDir(prefix, fn) {

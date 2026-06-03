@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { runSyntaxResolutionExecutor } = await import(
-  "../dist/orchestrator/syntaxResolutionExecutor.js"
+  "../src/orchestrator/syntaxResolutionExecutor.ts"
 );
 
 async function withTempRepo(fn) {

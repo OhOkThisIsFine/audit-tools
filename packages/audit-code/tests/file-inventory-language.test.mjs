@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { buildRepoManifest } = await import(
-  "../dist/extractors/fileInventory.js"
+  "../src/extractors/fileInventory.ts"
 );
 
 test("inferLanguage classifies common docs/config without linguist false positives", () => {

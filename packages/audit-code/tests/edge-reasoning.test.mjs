@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { applyEdgeReasoning, collectLowConfidenceEdges, buildEdgeReasoningPrompt } =
-  await import("../dist/orchestrator/edgeReasoning.js");
+  await import("../src/orchestrator/edgeReasoning.ts");
 const { runGraphEnrichmentExecutor } = await import(
-  "../dist/orchestrator/graphEnrichmentExecutor.js"
+  "../src/orchestrator/graphEnrichmentExecutor.ts"
 );
 
 function sampleBundle() {

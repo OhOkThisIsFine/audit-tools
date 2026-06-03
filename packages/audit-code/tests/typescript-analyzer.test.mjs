@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { typescriptAnalyzer } = await import(
-  "../dist/extractors/analyzers/typescript.js"
+  "../src/extractors/analyzers/typescript.ts"
 );
-const { buildPathLookup } = await import("../dist/extractors/graph.js");
+const { buildPathLookup } = await import("../src/extractors/graph.ts");
 
 const FILES = {
   "src/base.ts": [

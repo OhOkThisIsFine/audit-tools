@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "step_contract.schema.json",
+  "title": "Audit Code Step Contract",
+  "description": "The step contract written to steps/current-step.json by audit-code. Describes one bounded step for the host agent to execute.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "step_kind",
+    "prompt_path",
+    "status",
+    "run_id",
+    "allowed_commands",
+    "stop_condition",
+    "repo_root",
+    "artifacts_dir",
+    "artifact_paths"
+  ],
+  "properties": {
+    "contract_version": { "const": "audit-code-step/v1alpha1" },
+    "step_kind": {
+      "type": "string",
+      "enum": [
+        "dispatch_review",
+        "single_task_fallback",
+        "design_review",
+        "analyzer_install",
+        "edge_reasoning",
+        "edge_reasoning_dispatch",
+        "synthesis_narrative",
+        "present_report",
+        "blocked"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ready", "blocked", "complete"]
+    },
+    "prompt_path": { "type": "string" },
+    "run_id": { "type": ["string", "null"] },
+    "progress": {
+      "type": "object",
+      "required": ["summary"],
+      "properties": {
+        "summary": { "type": "string" },
+        "pending_packets": { "type": "integer" },
+        "pending_tasks": { "type": "integer" },
+        "completed_tasks": { "type": "integer" },
+        "wave_size": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "allowed_commands": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "allowed_mcp_tools": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "stop_condition": { "type": "string" },
+    "repo_root": { "type": "string" },
+    "artifacts_dir": { "type": "string" },
+    "artifact_paths": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "null"] }
+    },
+    "access": {
+      "type": "object",
+      "required": ["read_paths", "write_paths"],
+      "properties": {
+        "read_paths": { "type": "array", "items": { "type": "string" } },
+        "write_paths": { "type": "array", "items": { "type": "string" } },
+        "forbidden_patterns": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

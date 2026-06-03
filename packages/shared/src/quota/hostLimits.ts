@@ -1,7 +1,12 @@
 import type { SessionConfig } from "../types/sessionConfig.js";
 import type { HostConcurrencyLimit } from "./types.js";
 
-const CODEX_DESKTOP_ACTIVE_SUBAGENT_LIMIT = 6;
+/**
+ * Codex Desktop does not report its concurrency via env, so we apply this known
+ * fixed active-subagent ceiling when the Codex Desktop originator override is
+ * present. Exported so tests assert against the constant rather than a literal.
+ */
+export const CODEX_DESKTOP_ACTIVE_SUBAGENT_LIMIT = 6;
 
 function parsePositiveInteger(value: unknown): number | null {
   if (typeof value === "number") {

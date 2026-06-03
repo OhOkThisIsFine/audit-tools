@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { mergeFindings } = await import("../dist/reporting/mergeFindings.js");
+const { mergeFindings } = await import("../src/reporting/mergeFindings.ts");
 const {
   buildAuditReportModel,
   renderAuditReportMarkdown,
-} = await import("../dist/reporting/synthesis.js");
+} = await import("../src/reporting/synthesis.ts");
 
 test("mergeFindings deduplicates duplicate findings and aggregates runtime plus analyzer evidence", () => {
   const merged = mergeFindings(

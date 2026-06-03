@@ -337,6 +337,8 @@ async function withTempRepo(fn) {
 }
 
 async function main() {
+  const smokeStart = Date.now();
+  let stepStart = Date.now();
   step("npm link");
   if (liveCommandOutput) {
     detail(
@@ -350,8 +352,10 @@ async function main() {
     failureHint:
       "Confirm the repository builds locally and that npm link has permission to create the global symlink for this user.",
   });
+  process.stderr.write(`[smoke:linked] elapsed: npm link — ${Date.now() - stepStart}ms\n`);
   const auditCodeCommand = platformCommand("audit-code");
 
+  stepStart = Date.now();
   step("--version check");
   const versionOutput = (
     await runCommand(auditCodeCommand, ["--version"], {
@@ -361,8 +365,10 @@ async function main() {
     })
   ).stdout.trim();
   assert.equal(versionOutput, packageVersion);
+  process.stderr.write(`[smoke:linked] elapsed: --version check — ${Date.now() - stepStart}ms\n`);
 
   await withTempRepo(async (root) => {
+    stepStart = Date.now();
     step("ensure self-bootstrap");
     const ensured = JSON.parse(
       (
@@ -398,7 +404,9 @@ async function main() {
     );
     assert.equal(ensuredAgain.status, "ok");
     assert.equal(ensuredAgain.action, "skipped");
+    process.stderr.write(`[smoke:linked] elapsed: ensure self-bootstrap — ${Date.now() - stepStart}ms\n`);
 
+    stepStart = Date.now();
     step("ensure removes stale local command surfaces");
     await writeLegacyLocalAuditCodeSurfaces(root);
     const ensuredAfterLegacySurfaces = JSON.parse(
@@ -422,7 +430,9 @@ async function main() {
       "legacy_local_audit_code_surface",
     );
     await assertLegacyLocalAuditCodeSurfacesRemoved(root);
+    process.stderr.write(`[smoke:linked] elapsed: ensure removes stale local command surfaces — ${Date.now() - stepStart}ms\n`);
 
+    stepStart = Date.now();
     step("install");
     const installedHost = JSON.parse(
       (
@@ -622,7 +632,9 @@ async function main() {
     assert.equal(installedHost.unsupported_hosts.length, 0);
     assert.equal(installManifest.contract_version, "audit-code-install/v1alpha1");
     assert.equal(installManifest.hosts.length, 5);
+    process.stderr.write(`[smoke:linked] elapsed: install — ${Date.now() - stepStart}ms\n`);
 
+    stepStart = Date.now();
     step("verify generated host assets");
     const verifiedInstall = JSON.parse(
       (
@@ -641,7 +653,9 @@ async function main() {
     assert.equal(verifiedInstall.status, "ok");
     assert.equal(verifiedInstall.issue_count, 0);
     assert.equal(verifiedInstall.hosts.length, 5);
+    process.stderr.write(`[smoke:linked] elapsed: verify generated host assets — ${Date.now() - stepStart}ms\n`);
 
+    stepStart = Date.now();
     step("first run (expect blocked)");
     const blocked = JSON.parse(
       (
@@ -666,7 +680,9 @@ async function main() {
   assert.equal(blocked.handoff.status, "blocked");
   // Provider could be opencode if available, or local-subprocess as fallback
   assert.ok(/local-subprocess|opencode|claude-code/.test(blocked.handoff.provider ?? ""));
+    process.stderr.write(`[smoke:linked] elapsed: first run (expect blocked) — ${Date.now() - stepStart}ms\n`);
 
+    stepStart = Date.now();
     const tasks = JSON.parse(
       await readFile(join(root, ".audit-artifacts", "audit_tasks.json"), "utf8"),
     );
@@ -676,6 +692,7 @@ async function main() {
       JSON.stringify(await buildSyntheticResults(tasks, root), null, 2),
     );
 
+    stepStart = Date.now();
     step("ingest results (expect completed)");
     const completed = JSON.parse(
       (
@@ -701,7 +718,9 @@ async function main() {
       await readFile(join(root, "audit-report.md"), "utf8").then((content) => /# Audit Report/.test(content)),
       true,
     );
+    process.stderr.write(`[smoke:linked] elapsed: ingest results (expect completed) — ${Date.now() - stepStart}ms\n`);
 
+    stepStart = Date.now();
     step("rerun after completion (expect a fresh blocked audit)");
     const rerun = JSON.parse(
       (
@@ -723,10 +742,11 @@ async function main() {
     assert.equal(rerun.progress_made, true);
     assert.equal(rerun.next_likely_step, null);
     assert.equal(rerun.handoff.status, "blocked");
+    process.stderr.write(`[smoke:linked] elapsed: rerun after completion (expect a fresh blocked audit) — ${Date.now() - stepStart}ms\n`);
   });
 
   success(
-    "Validated npm link installation, linked host bootstrap surfaces, and the blocked/completed/rerun audit flow.",
+    `Validated npm link installation, linked host bootstrap surfaces, and the blocked/completed/rerun audit flow. Total elapsed: ${Math.round((Date.now() - smokeStart) / 1000)}s.`,
   );
 }
 

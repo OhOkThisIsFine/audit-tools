@@ -1,6 +1,10 @@
 import { RemediationState, StateStore } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
-import { VerificationResult, RemediationBlock } from "../state/types.js";
+import {
+  VerificationResult,
+  RemediationBlock,
+  REMEDIATION_STEP,
+} from "../state/types.js";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
@@ -164,7 +168,7 @@ export async function executeBlock(
 
     // --- Write Tests step ---
     const skipTests = itemSpec.not_applicable_steps.find(
-      (s) => s.step === "Write Tests",
+      (s) => s.step === REMEDIATION_STEP.WRITE_TESTS,
     );
     if (!skipTests && item.status === "documented") {
       const prompt = `Write tests for the following finding:\nID: ${findingId}\nSpec: ${JSON.stringify(itemSpec, null, 2)}`;
@@ -173,7 +177,7 @@ export async function executeBlock(
         { ...options, root: blockRoot },
         state.plan!.plan_id,
         findingId,
-        "Write Tests",
+        REMEDIATION_STEP.WRITE_TESTS,
         prompt,
       );
       if (stepSuccess) {
@@ -191,7 +195,7 @@ export async function executeBlock(
           }
         }
         item.status = "tested";
-        item.last_successful_step = "Write Tests";
+        item.last_successful_step = REMEDIATION_STEP.WRITE_TESTS;
         await store.saveState(state);
       } else {
         item.status = "blocked";
@@ -201,13 +205,13 @@ export async function executeBlock(
       }
     } else if (item.status === "documented") {
       item.status = "tested";
-      item.last_successful_step = "Write Tests";
+      item.last_successful_step = REMEDIATION_STEP.WRITE_TESTS;
       await store.saveState(state);
     }
 
     // --- Refactor Code step ---
     const skipRefactor = itemSpec.not_applicable_steps.find(
-      (s) => s.step === "Refactor Code",
+      (s) => s.step === REMEDIATION_STEP.REFACTOR_CODE,
     );
     if (
       !skipRefactor &&
@@ -223,7 +227,7 @@ export async function executeBlock(
       );
       if (refactorSuccess) {
         item.status = "refactored";
-        item.last_successful_step = "Refactor Code";
+        item.last_successful_step = REMEDIATION_STEP.REFACTOR_CODE;
         await store.saveState(state);
       } else {
         item.status = "blocked";
@@ -236,13 +240,13 @@ export async function executeBlock(
       item.status === "tested_successfully"
     ) {
       item.status = "refactored";
-      item.last_successful_step = "Refactor Code";
+      item.last_successful_step = REMEDIATION_STEP.REFACTOR_CODE;
       await store.saveState(state);
     }
 
     // --- Verify step ---
     const skipVerify = itemSpec.not_applicable_steps.find(
-      (s) => s.step === "Verify Code Against Documentation",
+      (s) => s.step === REMEDIATION_STEP.VERIFY_AGAINST_DOCUMENTATION,
     );
     const verifiableStatuses = [
       "tested",
@@ -261,7 +265,7 @@ export async function executeBlock(
         { ...options, root: blockRoot },
         state.plan!.plan_id,
         findingId,
-        "Verify Code Against Documentation",
+        REMEDIATION_STEP.VERIFY_AGAINST_DOCUMENTATION,
         prompt,
         true,
       );
@@ -284,7 +288,7 @@ export async function executeBlock(
 
       if (verifySuccess) {
         item.status = "resolved";
-        item.last_successful_step = "Verify Code Against Documentation";
+        item.last_successful_step = REMEDIATION_STEP.VERIFY_AGAINST_DOCUMENTATION;
         await store.saveState(state);
       } else {
         item.status = "blocked";
@@ -297,7 +301,7 @@ export async function executeBlock(
       )
     ) {
       item.status = "resolved";
-      item.last_successful_step = "Verify Code Against Documentation";
+      item.last_successful_step = REMEDIATION_STEP.VERIFY_AGAINST_DOCUMENTATION;
       await store.saveState(state);
     }
   }
@@ -452,7 +456,21 @@ async function runBlockInWorktree(
     store: { saveState: async () => undefined },
   });
 
-  runCommand("git", ["add", "."], { cwd: blockRoot });
+  // Stage with an explicit pathspec that excludes the remediation artifact dir
+  // so any stray artifact files written into the worktree subtree are never
+  // committed into the block's commit (defensive: the top-level .gitignore also
+  // ignores .remediation-artifacts/, but a worktree-local write would bypass it).
+  runCommand(
+    "git",
+    [
+      "add",
+      "-A",
+      "--",
+      ":(exclude).remediation-artifacts/",
+      ":(exclude).remediation-artifacts",
+    ],
+    { cwd: blockRoot },
+  );
   // `git diff --cached --quiet` exits 0 when nothing is staged and 1 when there
   // are staged changes. Only commit when there is something to commit; that way
   // a non-zero commit status is a genuine failure (e.g. a commit hook) rather

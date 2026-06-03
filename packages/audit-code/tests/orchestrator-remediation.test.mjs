@@ -3,27 +3,27 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const { advanceAudit } = await import("../dist/orchestrator/advance.js");
+const { advanceAudit } = await import("../src/orchestrator/advance.ts");
 const {
   runExternalAnalyzerImportExecutor,
   runResultIngestionExecutor,
   runRuntimeValidationUpdateExecutor,
-} = await import("../dist/orchestrator/internalExecutors.js");
+} = await import("../src/orchestrator/ingestionExecutors.ts");
 const { resolveRuntimeValidationSpawnCommand } = await import(
-  "../dist/orchestrator/runtimeCommand.js"
+  "../src/orchestrator/runtimeCommand.ts"
 );
-const { deriveAuditState } = await import("../dist/orchestrator/state.js");
+const { deriveAuditState } = await import("../src/orchestrator/state.ts");
 const { buildFlowCoverage } =
-  await import("../dist/orchestrator/flowCoverage.js");
+  await import("../src/orchestrator/flowCoverage.ts");
 const { buildFlowRequeueTasks } =
-  await import("../dist/orchestrator/flowRequeue.js");
-const { buildRequeueTasks } = await import("../dist/orchestrator/requeue.js");
+  await import("../src/orchestrator/flowRequeue.ts");
+const { buildRequeueTasks } = await import("../src/orchestrator/requeue.ts");
 const { buildExternalSignalTasks } =
-  await import("../dist/orchestrator/taskBuilder.js");
+  await import("../src/orchestrator/taskBuilder.ts");
 const { buildSelectiveDeepeningTasks } =
-  await import("../dist/orchestrator/selectiveDeepening.js");
+  await import("../src/orchestrator/selectiveDeepening.ts");
 const { ingestAuditResults } =
-  await import("../dist/orchestrator/resultIngestion.js");
+  await import("../src/orchestrator/resultIngestion.ts");
 
 function findObligation(state, id) {
   return state.obligations.find((item) => item.id === id);
@@ -770,47 +770,49 @@ test("buildFlowCoverage tolerates malformed flow paths and concerns", () => {
   assert.equal(coverage.flows[0].status, "pending");
 });
 
-test("buildFlowRequeueTasks rejects unsupported flow lenses loudly", () => {
-  assert.throws(
-    () =>
-      buildFlowRequeueTasks(
+test("buildFlowRequeueTasks skips unsupported flow lenses instead of throwing", () => {
+  const tasks = buildFlowRequeueTasks(
+    {
+      flows: [
         {
-          flows: [
-            {
-              id: "auth-flow",
-              name: "Auth Flow",
-              paths: ["src/api/auth.ts"],
-              entrypoints: ["src/api/auth.ts"],
-              concerns: ["security"],
-            },
-          ],
+          id: "auth-flow",
+          name: "Auth Flow",
+          paths: ["src/api/auth.ts"],
+          entrypoints: ["src/api/auth.ts"],
+          concerns: ["security"],
         },
+      ],
+    },
+    {
+      flows: [
         {
-          flows: [
-            {
-              flow_id: "auth-flow",
-              paths: ["src/api/auth.ts"],
-              required_lenses: ["mystery"],
-              completed_lenses: [],
-              status: "pending",
-            },
-          ],
+          flow_id: "auth-flow",
+          paths: ["src/api/auth.ts"],
+          // One canonical lens (still missing) and one bogus lens; only the
+          // canonical one should yield a requeue task — the bogus one is
+          // filtered out rather than aborting the whole requeue.
+          required_lenses: ["mystery", "security"],
+          completed_lenses: [],
+          status: "pending",
         },
+      ],
+    },
+    {
+      files: [
         {
-          files: [
-            {
-              path: "src/api/auth.ts",
-              unit_ids: ["src-api-auth"],
-              classification_status: "classified",
-              audit_status: "pending",
-              required_lenses: ["security"],
-              completed_lenses: [],
-            },
-          ],
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
         },
-      ),
-    /unsupported lens "mystery"/i,
+      ],
+    },
   );
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].lens, "security");
+  assert.ok(tasks.every((task) => task.lens !== "mystery"));
 });
 
 test("buildFlowRequeueTasks ignores malformed analyzer entries but still prioritizes real signals", () => {

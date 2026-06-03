@@ -259,15 +259,6 @@ export function getHostMaxActiveSubagents(argv: string[]): number | null {
   return parsePositiveIntegerFlag(argv, "--host-max-active-subagents") ?? null;
 }
 
-export function getQuotaProbeMode(
-  argv: string[],
-  sessionConfig: SessionConfig,
-): "auto" | "never" | "force" {
-  const raw = getFlag(argv, "--quota-probe") ?? sessionConfig.quota?.probe ?? "auto";
-  if (raw === "auto" || raw === "never" || raw === "force") return raw;
-  return "auto";
-}
-
 export function resolveRunProviderName(
   argv: string[],
   sessionConfig: SessionConfig,

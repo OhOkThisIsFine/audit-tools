@@ -1,5 +1,9 @@
 import { normalizeGraphPath } from "../graphPathUtils.js";
-import type { AnalyzerOutput, LanguageAnalyzer } from "./types.js";
+import type {
+  AnalyzerContext,
+  AnalyzerOutput,
+  LanguageAnalyzer,
+} from "./types.js";
 
 /**
  * SQL is intentionally a registry stub (per the refactor plan): the seam
@@ -12,7 +16,10 @@ function supports(file: string): boolean {
   return normalizeGraphPath(file).toLowerCase().endsWith(".sql");
 }
 
-function analyze(): AnalyzerOutput {
+// Signature matches the `LanguageAnalyzer.analyze` interface (the params the
+// other analyzers receive) so the registry type stays uniform; the stub
+// ignores them and emits no edges yet.
+function analyze(_files: string[], _context: AnalyzerContext): AnalyzerOutput {
   return { edges: [] };
 }
 

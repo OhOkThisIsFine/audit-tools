@@ -1268,14 +1268,11 @@ async function createStoredZipBuffer(sourceDir) {
   return Buffer.concat([...localParts, centralDirectory, endOfCentralDirectory]);
 }
 
-async function buildClaudeDesktopBundle(root, results) {
-  const bundleRoot = join(root, '.audit-code', 'install', 'claude-desktop', 'bundle');
-  const serverRoot = join(bundleRoot, 'server');
-  const manifestPath = join(bundleRoot, 'manifest.json');
-  const serverEntrypointPath = join(serverRoot, 'index.js');
-  const dxtPath = join(root, '.audit-code', 'install', 'claude-desktop', 'auditor-lambda.dxt');
-  const mcpbPath = join(root, '.audit-code', 'install', 'claude-desktop', 'auditor-lambda.mcpb');
-
+// Copy the auditor's dist + schemas + skills + wrapper entrypoints (and, best
+// effort, the resolved @audit-tools/shared dist) into the Claude Desktop bundle
+// tree. Returns whether the bundle directory already existed (for the
+// created/updated result marker).
+async function copyClaudeDesktopBundleFiles(bundleRoot, serverRoot) {
   const bundleExisted = await fileExists(bundleRoot);
   await mkdir(serverRoot, { recursive: true });
   await cp(distEntry.replace(/dist[\\/]index\.js$/, 'dist'), join(bundleRoot, 'dist'), { recursive: true, force: true });
@@ -1300,9 +1297,13 @@ async function buildClaudeDesktopBundle(root, results) {
     // @audit-tools/shared not resolvable — bundle will use runtime resolution
   }
 
-  results.push({ path: bundleRoot, mode: bundleExisted ? 'updated' : 'created' });
+  return { bundleExisted };
+}
 
-  const serverEntry = [
+// Source for the bundle's server/index.js shim: it spawns the bundled
+// audit-code.mjs in MCP mode against the user-configured repo root.
+function renderClaudeDesktopServerEntry() {
+  return [
     "import { spawn } from 'node:child_process';",
     "import { dirname, join } from 'node:path';",
     "import { fileURLToPath } from 'node:url';",
@@ -1328,10 +1329,12 @@ async function buildClaudeDesktopBundle(root, results) {
     '});',
     '',
   ].join('\n');
+}
 
-  results.push(await writeGeneratedMarkdown(serverEntrypointPath, serverEntry));
-
-  const manifest = {
+// The DXT/MCPB manifest.json describing the bundled node MCP server and its
+// Claude Desktop user-config inputs.
+function buildClaudeDesktopManifest() {
+  return {
     manifest_version: '0.3',
     name: 'auditor-lambda',
     display_name: 'Auditor Lambda',
@@ -1386,8 +1389,26 @@ async function buildClaudeDesktopBundle(root, results) {
       },
     },
   };
+}
 
-  results.push(await writeGeneratedJson(manifestPath, manifest));
+// Orchestrates the Claude Desktop bundle: copy files, write the server shim and
+// manifest, then zip into the .dxt / .mcpb archives. Pushes each generated file
+// into `results`.
+async function buildClaudeDesktopBundle(root, results) {
+  const bundleRoot = join(root, '.audit-code', 'install', 'claude-desktop', 'bundle');
+  const serverRoot = join(bundleRoot, 'server');
+  const manifestPath = join(bundleRoot, 'manifest.json');
+  const serverEntrypointPath = join(serverRoot, 'index.js');
+  const dxtPath = join(root, '.audit-code', 'install', 'claude-desktop', 'auditor-lambda.dxt');
+  const mcpbPath = join(root, '.audit-code', 'install', 'claude-desktop', 'auditor-lambda.mcpb');
+
+  const { bundleExisted } = await copyClaudeDesktopBundleFiles(bundleRoot, serverRoot);
+  results.push({ path: bundleRoot, mode: bundleExisted ? 'updated' : 'created' });
+
+  results.push(
+    await writeGeneratedMarkdown(serverEntrypointPath, renderClaudeDesktopServerEntry()),
+  );
+  results.push(await writeGeneratedJson(manifestPath, buildClaudeDesktopManifest()));
 
   const archive = await createStoredZipBuffer(bundleRoot);
   results.push(await writeGeneratedBinary(dxtPath, archive));
@@ -2509,21 +2530,15 @@ async function ensureBootstrap(argv) {
   return payload;
 }
 
-async function installBootstrap(argv, options = {}) {
-  const host = (getFlag(argv, '--host') ?? DEFAULT_INSTALL_HOST).toLowerCase();
-  const root = resolve(getFlag(argv, '--root') ?? '.');
-  await assertDirectoryExists(root, 'Target repository root');
-  const profile = getInstallProfile(host);
-  const promptSource = await readFile(promptAssetPath, 'utf8');
-  const skillSource = (await readFile(skillAssetPath, 'utf8')).replace(/\r\n/g, '\n');
-  const { body: promptBody } = splitFrontmatter(promptSource);
+// Compute the full asset-path map for an install profile. Each per-host path is
+// gated on its profile flag (null when the host is not part of this profile).
+function buildInstallAssetPaths(root, profile) {
   const installedPromptPath = join(root, '.audit-code', 'install', INSTALLED_PROMPT_FILENAME);
-  const legacyInstalledPromptPath = join(root, '.audit-code', 'install', 'audit-code.prompt.md');
   const installedSkillPath = join(root, '.audit-code', 'install', 'SKILL.md');
   const installGuidePath = join(root, '.audit-code', 'install', INSTALL_GUIDE_FILENAME);
   const installManifestPath = join(root, '.audit-code', 'install', INSTALL_MANIFEST_FILENAME);
   const mcpLauncherPath = join(root, '.audit-code', 'install', MCP_LAUNCHER_FILENAME);
-  const assetPaths = {
+  return {
     installedPromptPath,
     installedSkillPath,
     installGuidePath,
@@ -2579,144 +2594,149 @@ async function installBootstrap(argv, options = {}) {
       ? join(root, '.agent', 'skills', 'audit-code', 'SKILL.md')
       : null,
   };
+}
 
+// Always-written core assets (installed prompt + skill, shared MCP launcher,
+// AGENTS/copilot compatibility directive blocks) plus legacy-surface cleanup.
+async function writeCoreInstallAssets(root, assetPaths, promptSource, skillSource) {
   const results = [];
+  const legacyInstalledPromptPath = join(root, '.audit-code', 'install', 'audit-code.prompt.md');
   if (await fileExists(legacyInstalledPromptPath)) {
     await unlink(legacyInstalledPromptPath).catch(() => {});
   }
+  results.push(await writeGeneratedMarkdown(assetPaths.installedPromptPath, promptSource));
+  results.push(await writeGeneratedMarkdown(assetPaths.installedSkillPath, skillSource));
   results.push(
-    await writeGeneratedMarkdown(
-      installedPromptPath,
-      promptSource,
-    ),
-  );
-  results.push(await writeGeneratedMarkdown(installedSkillPath, skillSource));
-
-  results.push(
-    await writeGeneratedMarkdown(mcpLauncherPath, renderSharedMcpLauncher(repoRoot)),
+    await writeGeneratedMarkdown(assetPaths.mcpLauncherPath, renderSharedMcpLauncher(repoRoot)),
   );
 
   const compatibilityBlockTargets = [
     assetPaths.agentsInstructionsPath,
     assetPaths.copilotInstructionsPath,
   ].filter(Boolean);
-
   for (const targetPath of compatibilityBlockTargets) {
     results.push(
       await writeManagedMarkdown(
         targetPath,
         buildInstallDirective(
-          relative(dirname(targetPath), installedPromptPath) || `./.audit-code/install/${INSTALLED_PROMPT_FILENAME}`,
+          relative(dirname(targetPath), assetPaths.installedPromptPath) || `./.audit-code/install/${INSTALLED_PROMPT_FILENAME}`,
         ),
       ),
     );
   }
 
   results.push(...await removeLegacyAuditCodeSurfaceFiles(root));
+  return results;
+}
+
+async function writeCodexAssets(assetPaths, promptSource, skillSource, root) {
+  return [
+    await writeGeneratedMarkdown(assetPaths.codexSkillPath, skillSource),
+    await writeGeneratedMarkdown(assetPaths.codexPromptPath, promptSource),
+    await writeGeneratedMarkdown(assetPaths.codexMcpSetupPath, renderCodexMcpSetupGuide(root)),
+    await writeGeneratedMarkdown(assetPaths.codexAutomationRecipePath, renderCodexAutomationRecipe()),
+  ];
+}
+
+// Builds the Claude Desktop DXT/MCPB bundle (mutating assetPaths with the
+// produced bundle paths) and writes the project template + remote connector.
+async function writeClaudeDesktopAssets(assetPaths, root) {
+  const results = [];
+  const claudeDesktopBundle = await buildClaudeDesktopBundle(root, results);
+  assetPaths.claudeDesktopDxtPath = claudeDesktopBundle.dxtPath;
+  assetPaths.claudeDesktopMcpbPath = claudeDesktopBundle.mcpbPath;
+  results.push(
+    await writeGeneratedMarkdown(
+      assetPaths.claudeDesktopProjectTemplatePath,
+      renderClaudeDesktopProjectTemplate(),
+    ),
+  );
+  results.push(
+    await writeGeneratedJson(
+      assetPaths.claudeDesktopRemoteConnectorPath,
+      JSON.parse(renderClaudeDesktopRemoteConnectorTemplate()),
+    ),
+  );
+  return results;
+}
+
+async function writeOpenCodeAssets(assetPaths, root) {
+  return [
+    await writeMergedGeneratedJson(
+      assetPaths.opencodeConfigPath,
+      'OpenCode project config',
+      (existing) => buildMergedOpenCodeProjectConfig(existing, root),
+    ),
+  ];
+}
+
+async function writeVSCodeAssets(assetPaths, promptBody) {
+  return [
+    await writeGeneratedMarkdown(
+      assetPaths.vscodePromptPath,
+      renderPromptFile(
+        {
+          name: 'audit-code',
+          description: 'Autonomous local loop code auditing',
+          agent: 'auditor',
+        },
+        promptBody,
+      ),
+    ),
+    await writeGeneratedMarkdown(assetPaths.vscodeAgentPath, renderVSCodeAgentFile()),
+    await writeMergedGeneratedJson(
+      assetPaths.vscodeMcpConfigPath,
+      'VS Code MCP config',
+      buildMergedVSCodeMcpConfig,
+    ),
+  ];
+}
+
+async function writeAntigravityAssets(assetPaths, promptBody, skillSource, root) {
+  return [
+    await writeGeneratedMarkdown(
+      assetPaths.antigravityPlanningGuidePath,
+      renderAntigravityPlanningGuide(root),
+    ),
+    await writeGeneratedMarkdown(assetPaths.geminiCommandPath, renderGeminiCommandToml(promptBody)),
+    await writeGeneratedMarkdown(assetPaths.antigravitySkillPath, skillSource),
+  ];
+}
+
+async function installBootstrap(argv, options = {}) {
+  const host = (getFlag(argv, '--host') ?? DEFAULT_INSTALL_HOST).toLowerCase();
+  const root = resolve(getFlag(argv, '--root') ?? '.');
+  await assertDirectoryExists(root, 'Target repository root');
+  const profile = getInstallProfile(host);
+  const promptSource = await readFile(promptAssetPath, 'utf8');
+  const skillSource = (await readFile(skillAssetPath, 'utf8')).replace(/\r\n/g, '\n');
+  const { body: promptBody } = splitFrontmatter(promptSource);
+  const assetPaths = buildInstallAssetPaths(root, profile);
+  const {
+    installedPromptPath,
+    installedSkillPath,
+    installGuidePath,
+    installManifestPath,
+    mcpLauncherPath,
+  } = assetPaths;
+
+  const results = [];
+  results.push(...await writeCoreInstallAssets(root, assetPaths, promptSource, skillSource));
 
   if (profile.writeCodex) {
-    results.push(
-      await writeGeneratedMarkdown(
-        assetPaths.codexSkillPath,
-        skillSource,
-      ),
-    );
-    results.push(
-      await writeGeneratedMarkdown(
-        assetPaths.codexPromptPath,
-        promptSource,
-      ),
-    );
-    results.push(
-      await writeGeneratedMarkdown(
-        assetPaths.codexMcpSetupPath,
-        renderCodexMcpSetupGuide(root),
-      ),
-    );
-    results.push(
-      await writeGeneratedMarkdown(
-        assetPaths.codexAutomationRecipePath,
-        renderCodexAutomationRecipe(),
-      ),
-    );
+    results.push(...await writeCodexAssets(assetPaths, promptSource, skillSource, root));
   }
-
   if (profile.writeClaudeDesktop) {
-    const claudeDesktopBundle = await buildClaudeDesktopBundle(root, results);
-    assetPaths.claudeDesktopDxtPath = claudeDesktopBundle.dxtPath;
-    assetPaths.claudeDesktopMcpbPath = claudeDesktopBundle.mcpbPath;
-    results.push(
-      await writeGeneratedMarkdown(
-        assetPaths.claudeDesktopProjectTemplatePath,
-        renderClaudeDesktopProjectTemplate(),
-      ),
-    );
-    results.push(
-      await writeGeneratedJson(
-        assetPaths.claudeDesktopRemoteConnectorPath,
-        JSON.parse(renderClaudeDesktopRemoteConnectorTemplate()),
-      ),
-    );
+    results.push(...await writeClaudeDesktopAssets(assetPaths, root));
   }
-
   if (profile.writeOpenCode) {
-    results.push(
-      await writeMergedGeneratedJson(
-        assetPaths.opencodeConfigPath,
-        'OpenCode project config',
-        (existing) => buildMergedOpenCodeProjectConfig(existing, root),
-      ),
-    );
+    results.push(...await writeOpenCodeAssets(assetPaths, root));
   }
-
   if (profile.writeVSCode) {
-    results.push(
-      await writeGeneratedMarkdown(
-        assetPaths.vscodePromptPath,
-        renderPromptFile(
-          {
-            name: 'audit-code',
-            description: 'Autonomous local loop code auditing',
-            agent: 'auditor',
-          },
-          promptBody,
-        ),
-      ),
-    );
-    results.push(
-      await writeGeneratedMarkdown(
-        assetPaths.vscodeAgentPath,
-        renderVSCodeAgentFile(),
-      ),
-    );
-    results.push(
-      await writeMergedGeneratedJson(
-        assetPaths.vscodeMcpConfigPath,
-        'VS Code MCP config',
-        buildMergedVSCodeMcpConfig,
-      ),
-    );
+    results.push(...await writeVSCodeAssets(assetPaths, promptBody));
   }
-
   if (profile.writeAntigravity) {
-    results.push(
-      await writeGeneratedMarkdown(
-        assetPaths.antigravityPlanningGuidePath,
-        renderAntigravityPlanningGuide(root),
-      ),
-    );
-    results.push(
-      await writeGeneratedMarkdown(
-        assetPaths.geminiCommandPath,
-        renderGeminiCommandToml(promptBody),
-      ),
-    );
-    results.push(
-      await writeGeneratedMarkdown(
-        assetPaths.antigravitySkillPath,
-        skillSource,
-      ),
-    );
+    results.push(...await writeAntigravityAssets(assetPaths, promptBody, skillSource, root));
   }
 
   const hostGuidance = buildHostCatalog({

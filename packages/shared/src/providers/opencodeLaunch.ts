@@ -1,3 +1,5 @@
+import { quoteForOpenTokenCmd } from "../tooling/exec.js";
+
 /**
  * Resolve how to spawn an `opencode` invocation per platform. On Windows the
  * `opencode` / `npx` launchers (and any explicit `*.cmd` shim) must go through
@@ -5,6 +7,10 @@
  * a shell. On every other platform the command and args pass through
  * unchanged. Shared by the opencode provider in both orchestrators so neither
  * silently loses the Windows shim.
+ *
+ * The per-token cmd.exe quoting reuses the canonical `quoteForOpenTokenCmd`
+ * from exec.ts (charset includes `@`); the former private copy here omitted
+ * `@`, the one real divergence the audit flagged.
  */
 export function resolveOpenCodeSpawnCommand(
   command: string,
@@ -19,15 +25,8 @@ export function resolveOpenCodeSpawnCommand(
   if (base === "opencode" || base === "npx" || command.endsWith(".cmd")) {
     return {
       command: shellCommand,
-      args: ["/d", "/s", "/c", [command, ...args].map(quoteOpenCodeCmdArg).join(" ")],
+      args: ["/d", "/s", "/c", [command, ...args].map(quoteForOpenTokenCmd).join(" ")],
     };
   }
   return { command, args };
-}
-
-function quoteOpenCodeCmdArg(value: string): string {
-  if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) {
-    return value;
-  }
-  return `"${value.replace(/(["^&|<>%])/g, "^$1")}"`;
 }

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { resolveAnalyzerDep, parseAnalyzerSpec } = await import(
-  "../dist/tooling/analyzerDeps.js"
+  "../src/tooling/analyzerDeps.ts"
 );
 
 async function withTempDir(fn) {

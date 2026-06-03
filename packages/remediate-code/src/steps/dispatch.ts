@@ -110,6 +110,48 @@ export function buildDocumentModelHint(finding: Finding): DispatchModelHint {
 }
 
 /**
+ * Repo-relative paths every finding in a block touches, deduped. The implement
+ * worker reads and writes exactly these.
+ */
+function blockAffectedFiles(
+  block: RemediationBlock,
+  state: RemediationState,
+): string[] {
+  const files = block.items.flatMap((findingId) => {
+    const finding = state.plan?.findings.find((f) => f.id === findingId);
+    return finding?.affected_files.map((f) => f.path) ?? [];
+  });
+  return [...new Set(files)];
+}
+
+/**
+ * Construct the DispatchPlanItem for an implement task. Single source of truth
+ * so prepareImplementDispatch and mergeImplementResults stay in lockstep on item
+ * shape. (prepareImplementDispatch additionally sets `worktree_path` on the
+ * returned item after creating the worktree — that stays at the call site.)
+ */
+function buildImplementDispatchItem(
+  block: RemediationBlock,
+  state: RemediationState,
+  dir: string,
+): DispatchPlanItem {
+  const taskId = `implement-${block.block_id}`;
+  const blockFiles = blockAffectedFiles(block, state);
+  const resultPath = join(dir, `${taskId}.result.json`);
+  return {
+    task_id: taskId,
+    block_id: block.block_id,
+    prompt_path: join(dir, `${taskId}.md`),
+    result_path: resultPath,
+    model_hint: buildImplementModelHint(block, state),
+    access: {
+      read_paths: blockFiles,
+      write_paths: [...blockFiles, resultPath],
+    },
+  };
+}
+
+/**
  * Construct the DispatchPlanItem for a document task. Single source of truth so
  * prepareDocumentDispatch and mergeDocumentResults stay in lockstep on item shape.
  */
@@ -441,8 +483,12 @@ export async function prepareDocumentDispatch(
     hostMaxConcurrent: waveOptions?.hostMaxConcurrent,
     sessionConfig: waveOptions?.sessionConfig ?? null,
     itemCount: items.length,
-    estimatedTokensPerItem: ESTIMATED_FINDING_OVERHEAD_TOKENS,
+    estimatedSlotTokens: items.map(() => ESTIMATED_FINDING_OVERHEAD_TOKENS),
   });
+  process.stderr.write(
+    `[remediate-code] dispatch: document wave_size=${schedule.wave_size} of ${items.length} item(s) ` +
+      `source=${schedule.source} cap=${schedule.binding_cap ?? "none"}\n`,
+  );
   const quota = buildDispatchQuota(runId, "document", schedule);
   await writeJsonFile(join(dir, "dispatch-quota.json"), quota);
 
@@ -559,6 +605,18 @@ export async function mergeDocumentResults(
     state.closing_plan ??= { action: "none" };
   }
 
+  const mergedItems = state.items;
+  const mergedDocumented = itemsToMerge.filter(
+    (item) => item.finding_id && mergedItems[item.finding_id]?.status === "documented",
+  ).length;
+  const rejectedDocuments = itemsToMerge.filter(
+    (item) => item.finding_id && mergedItems[item.finding_id]?.status === "blocked",
+  ).length;
+  process.stderr.write(
+    `[remediate-code] dispatch: merged ${mergedDocumented} document result(s), ` +
+      `${rejectedDocuments} rejected, ${clarifications.length} clarification(s)\n`,
+  );
+
   await store.saveState(state);
   return state;
 }
@@ -599,35 +657,19 @@ export async function prepareImplementDispatch(
   const items: DispatchPlanItem[] = [];
   let reconciledCount = 0;
   for (const block of candidateBlocks) {
-    const taskId = `implement-${block.block_id}`;
-    const promptPath = join(dir, `${taskId}.md`);
-    const resultPath = join(dir, `${taskId}.result.json`);
+    const item = buildImplementDispatchItem(block, state, dir);
 
-    if (await tryLoadExistingImplementResult(resultPath)) {
+    if (await tryLoadExistingImplementResult(item.result_path)) {
       console.log(`Reusing existing implement result for block ${block.block_id}`);
       reconciledCount++;
       continue;
     }
 
-    const blockFiles = block.items.flatMap((fid) => {
-      const finding = state.plan?.findings.find((f) => f.id === fid);
-      return finding?.affected_files.map((f) => f.path) ?? [];
-    });
     await writeTextFile(
-      promptPath,
-      implementPrompt(block, state, resultPath, conventions),
+      item.prompt_path,
+      implementPrompt(block, state, item.result_path, conventions),
     );
-    items.push({
-      task_id: taskId,
-      block_id: block.block_id,
-      prompt_path: promptPath,
-      result_path: resultPath,
-      model_hint: buildImplementModelHint(block, state),
-      access: {
-        read_paths: [...new Set(blockFiles)],
-        write_paths: [...new Set(blockFiles), resultPath],
-      },
-    });
+    items.push(item);
   }
   if (reconciledCount > 0) {
     console.log(`Reconciliation: reused ${reconciledCount} existing implement results.`);
@@ -662,8 +704,12 @@ export async function prepareImplementDispatch(
     hostMaxConcurrent: waveOptions?.hostMaxConcurrent,
     sessionConfig: waveOptions?.sessionConfig ?? null,
     itemCount: items.length,
-    estimatedTokensPerItem: ESTIMATED_BLOCK_BASE_TOKENS,
+    estimatedSlotTokens: items.map(() => ESTIMATED_BLOCK_BASE_TOKENS),
   });
+  process.stderr.write(
+    `[remediate-code] dispatch: implement wave_size=${schedule.wave_size} of ${items.length} item(s) ` +
+      `source=${schedule.source} cap=${schedule.binding_cap ?? "none"}\n`,
+  );
   const quota = buildDispatchQuota(runId, "implement", schedule);
   await writeJsonFile(join(dir, "dispatch-quota.json"), quota);
 
@@ -733,27 +779,12 @@ export async function mergeImplementResults(
       continue;
     }
 
-    const taskId = `implement-${block.block_id}`;
-    const resultPath = join(dir, `${taskId}.result.json`);
-    if (!(await tryLoadExistingImplementResult(resultPath))) {
+    const item = buildImplementDispatchItem(block, state, dir);
+    if (!(await tryLoadExistingImplementResult(item.result_path))) {
       continue;
     }
 
-    const blockFiles = block.items.flatMap((fid) => {
-      const finding = state.plan?.findings.find((f) => f.id === fid);
-      return finding?.affected_files.map((f) => f.path) ?? [];
-    });
-    itemsToMerge.push({
-      task_id: taskId,
-      block_id: block.block_id,
-      prompt_path: join(dir, `${taskId}.md`),
-      result_path: resultPath,
-      model_hint: buildImplementModelHint(block, state),
-      access: {
-        read_paths: [...new Set(blockFiles)],
-        write_paths: [...new Set(blockFiles), resultPath],
-      },
-    });
+    itemsToMerge.push(item);
   }
 
   for (const item of itemsToMerge) {
@@ -826,6 +857,26 @@ export async function mergeImplementResults(
   if (state.plan?.findings?.length) {
     resnapshotAffectedFileHashes(options.root, state.plan.findings);
   }
+
+  const mergedFindingIds = new Set(
+    itemsToMerge.flatMap((item) => {
+      if (!item.block_id) return [];
+      const block = state.plan?.blocks.find((b) => b.block_id === item.block_id);
+      return block?.items ?? [];
+    }),
+  );
+  let implementResolved = 0;
+  let implementRejected = 0;
+  for (const findingId of mergedFindingIds) {
+    const status = state.items[findingId]?.status;
+    if (status === "resolved" || status === "resolved_no_change") implementResolved++;
+    else if (status === "blocked") implementRejected++;
+  }
+  process.stderr.write(
+    `[remediate-code] dispatch: merged ${implementResolved} implement result(s), ` +
+      `${implementRejected} rejected\n`,
+  );
+
   state.status = "implementing";
   await store.saveState(state);
   return state;

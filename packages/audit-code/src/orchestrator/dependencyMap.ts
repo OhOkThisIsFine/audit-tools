@@ -1,4 +1,10 @@
-export const ARTIFACT_DEPENDENCY_MAP: Record<string, string[]> = {
+// Invalidation map keyed by UPSTREAM artifact → the list of DOWNSTREAM
+// artifacts that depend on it (and so become stale when it changes). The name
+// reflects the actual direction: each entry's value is that key's *dependents*.
+// `buildReverseDependencyMap` flips this to the "X depends on Y" view used by
+// computeArtifactMetadata. (Renamed from the misleading ARTIFACT_DEPENDENCY_MAP,
+// which read as "X's dependencies" — the opposite of what it stores.)
+export const ARTIFACT_DEPENDENTS_MAP: Record<string, string[]> = {
   "tooling_manifest.json": [
     "repo_manifest.json",
   ],

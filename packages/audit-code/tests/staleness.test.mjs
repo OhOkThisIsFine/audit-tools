@@ -2,18 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { computeArtifactMetadata, computeArtifactStateSignature } =
-  await import("../dist/orchestrator/artifactMetadata.js");
+  await import("../src/orchestrator/artifactMetadata.ts");
 const { computeStaleArtifacts } =
-  await import("../dist/orchestrator/staleness.js");
-const { deriveAuditState } = await import("../dist/orchestrator/state.js");
-const { ARTIFACT_DEPENDENCY_MAP } = await import(
-  "../dist/orchestrator/dependencyMap.js"
+  await import("../src/orchestrator/staleness.ts");
+const { deriveAuditState } = await import("../src/orchestrator/state.ts");
+const { ARTIFACT_DEPENDENTS_MAP } = await import(
+  "../src/orchestrator/dependencyMap.ts"
 );
 const {
   buildReverseDependencyMap,
   hashArtifactValue,
   stableStringify,
-} = await import("../dist/orchestrator/artifactFreshness.js");
+} = await import("../src/orchestrator/artifactFreshness.ts");
 
 test("computeArtifactStateSignature ignores revision churn but tracks content", () => {
   const sigOf = (artifacts) =>
@@ -249,7 +249,7 @@ test("external analyzer results invalidate planning-derived artifacts", () => {
     "audit-report.md",
   ]) {
     assert.ok(
-      ARTIFACT_DEPENDENCY_MAP["external_analyzer_results.json"].includes(artifact),
+      ARTIFACT_DEPENDENTS_MAP["external_analyzer_results.json"].includes(artifact),
       `${artifact} should depend on external analyzer results`,
     );
   }

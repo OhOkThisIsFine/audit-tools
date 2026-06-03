@@ -5,16 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { mergeAnalyzerEdges } = await import(
-  "../dist/extractors/analyzers/merge.js"
+  "../src/extractors/analyzers/merge.ts"
 );
 const { runGraphEnrichmentExecutor } = await import(
-  "../dist/orchestrator/graphEnrichmentExecutor.js"
+  "../src/orchestrator/graphEnrichmentExecutor.ts"
 );
 const { resolveAnalyzerPlan, needsInstallDecision } = await import(
-  "../dist/extractors/analyzers/registry.js"
+  "../src/extractors/analyzers/registry.ts"
 );
 const { typescriptAnalyzer } = await import(
-  "../dist/extractors/analyzers/typescript.js"
+  "../src/extractors/analyzers/typescript.ts"
 );
 
 function floorGraph(imports = []) {

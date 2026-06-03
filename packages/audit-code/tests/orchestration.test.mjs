@@ -4,16 +4,16 @@ import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { decideNextStep } = await import("../dist/orchestrator/nextStep.js");
-const { advanceAudit } = await import("../dist/orchestrator/advance.js");
+const { decideNextStep } = await import("../src/orchestrator/nextStep.ts");
+const { advanceAudit } = await import("../src/orchestrator/advance.ts");
 const { RunLogger } = await import("@audit-tools/shared");
 const {
   computeArtifactMetadata,
-} = await import("../dist/orchestrator/artifactMetadata.js");
+} = await import("../src/orchestrator/artifactMetadata.ts");
 const {
   buildAuditReportModel,
   renderAuditReportMarkdown,
-} = await import("../dist/reporting/synthesis.js");
+} = await import("../src/reporting/synthesis.ts");
 
 const FIXTURE_LINE_INDEX = {
   "src/api/auth.ts": 4,

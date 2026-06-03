@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { resolveWorkerTaskTimeoutMs, applyWorkerTaskLaunchSettings } =
-  await import("../dist/providers/workerTaskLaunch.js");
+  await import("../src/providers/workerTaskLaunch.ts");
 
 test("resolveWorkerTaskTimeoutMs prefers a positive task timeout", () => {
   assert.equal(resolveWorkerTaskTimeoutMs({ timeout_ms: 9000 }, 1000), 9000);

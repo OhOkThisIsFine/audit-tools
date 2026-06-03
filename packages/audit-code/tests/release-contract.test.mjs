@@ -142,7 +142,7 @@ test("primary CI workflows validate the lockfile, preserve diagnostics, and make
 
   assert.match(testSuite, /name: Orchestration tests \(Node \$\{\{ matrix\.node-version \}\}\)/);
   assert.match(testSuite, /fail-fast: false/);
-  assert.ok(testSuite.includes('- "20"'));
+  assert.ok(testSuite.includes('- "20.19.2"'));
   assert.ok(testSuite.includes('- "22.14.0"'));
   assert.match(testSuite, /test-suite-npm-logs-node-\$\{\{ matrix\.node-version \}\}/);
 });

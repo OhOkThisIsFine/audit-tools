@@ -13,12 +13,12 @@ const {
   buildAuditFindingsReport,
   applyNarrative,
   renderAuditReportMarkdown,
-} = await import("../dist/reporting/synthesis.js");
+} = await import("../src/reporting/synthesis.ts");
 const {
   runSynthesisExecutor,
   runSynthesisNarrativeExecutor,
-} = await import("../dist/orchestrator/synthesisExecutors.js");
-const { advanceAudit } = await import("../dist/orchestrator/advance.js");
+} = await import("../src/orchestrator/synthesisExecutors.ts");
+const { advanceAudit } = await import("../src/orchestrator/advance.ts");
 
 const auditFindingsSchema = JSON.parse(
   await readFile(join(repoRoot, "schemas", "audit_findings.schema.json"), "utf8"),

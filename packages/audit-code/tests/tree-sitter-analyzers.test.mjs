@@ -4,16 +4,16 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-const { pythonAnalyzer } = await import("../dist/extractors/analyzers/python.js");
-const { htmlAnalyzer } = await import("../dist/extractors/analyzers/html.js");
-const { cssAnalyzer } = await import("../dist/extractors/analyzers/css.js");
-const { sqlAnalyzer } = await import("../dist/extractors/analyzers/sql.js");
-const { mergeAnalyzerEdges } = await import("../dist/extractors/analyzers/merge.js");
+const { pythonAnalyzer } = await import("../src/extractors/analyzers/python.ts");
+const { htmlAnalyzer } = await import("../src/extractors/analyzers/html.ts");
+const { cssAnalyzer } = await import("../src/extractors/analyzers/css.ts");
+const { sqlAnalyzer } = await import("../src/extractors/analyzers/sql.ts");
+const { mergeAnalyzerEdges } = await import("../src/extractors/analyzers/merge.ts");
 const { runGraphEnrichmentExecutor } = await import(
-  "../dist/orchestrator/graphEnrichmentExecutor.js"
+  "../src/orchestrator/graphEnrichmentExecutor.ts"
 );
 const { graphLookupKey, normalizeGraphPath } = await import(
-  "../dist/extractors/graphPathUtils.js"
+  "../src/extractors/graphPathUtils.ts"
 );
 
 async function withRepo(files, run) {

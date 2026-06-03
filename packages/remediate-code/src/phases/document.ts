@@ -1,6 +1,6 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
-import { ItemSpec, ClosingPlan, ClarificationRequest } from "../state/types.js";
+import { ItemSpec, ClosingPlan, ClarificationRequest, Finding } from "../state/types.js";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
@@ -30,6 +30,53 @@ interface ClarificationResolution {
   finding_id: string;
   action: "clarified" | "deemed_inappropriate";
   rationale?: string;
+}
+
+/**
+ * Render the per-finding documentation worker prompt. Pulled out of
+ * `runDocumentPhase` so the prompt's logic (which finding fields to surface),
+ * its fixed format contract (the item_spec / clarification_request JSON shape
+ * and the allowed clarification categories), and its per-call data (paths,
+ * theme hint, conventions) are assembled in one named place rather than inline
+ * inside the document loop.
+ */
+function buildDocumentPrompt(params: {
+  finding: Finding;
+  extraContext: string;
+  themeHint: string;
+  repoConventions: string;
+  taskPath: string;
+  resultPath: string;
+}): string {
+  const { finding, extraContext, themeHint, repoConventions, taskPath, resultPath } =
+    params;
+  return `
+You are the Remediation Assistant. Your task is to analyze the following finding and produce an item_spec.json detailing how you will fix it.
+
+Finding ID: ${finding.id}
+Title: ${finding.title}
+Summary: ${finding.summary}
+Affected Files: ${finding.affected_files.map((f) => f.path).join(", ")}
+Evidence:
+${(finding.evidence ?? []).map((e) => `- ${e}`).join("\n")}
+${extraContext}${themeHint}${repoConventions ? `\n${repoConventions}\n` : ""}
+If the finding is clear (or clarified by the context above), output a JSON object with type "item_spec" and the item_spec.
+If the finding is ambiguous, output a JSON object with type "clarification_request" and an array of clarifications.
+When requesting clarifications, you MUST use one of the following exact categories:
+"public_contract", "behavioral_semantics", "scope_of_fix", "dependency_introduction", "compatibility_policy", "intent_vs_symptom", "issue_appropriateness".
+
+Output format must be exactly:
+{
+  "type": "item_spec" | "clarification_request",
+  "item_spec": { ... schema ... },
+  "clarifications": [ { "finding_id": "...", "category": "...", "description": "..." } ]
+}
+
+Your task JSON is at: ${taskPath}
+Write your result JSON to exactly this path: ${resultPath}
+Use the Write tool to create or overwrite that file.
+Do not write to any other path.
+    `.trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -181,33 +228,14 @@ export async function runDocumentPhase(
     const stderrPath = join(options.artifactsDir, `stderr_${finding.id}.txt`);
 
     const promptPath = join(options.artifactsDir, `prompt_${finding.id}.md`);
-    const promptContent = `
-You are the Remediation Assistant. Your task is to analyze the following finding and produce an item_spec.json detailing how you will fix it.
-
-Finding ID: ${finding.id}
-Title: ${finding.title}
-Summary: ${finding.summary}
-Affected Files: ${finding.affected_files.map((f) => f.path).join(", ")}
-Evidence:
-${(finding.evidence ?? []).map((e) => `- ${e}`).join("\n")}
-${extraContext}${themeHint}${repoConventions ? `\n${repoConventions}\n` : ""}
-If the finding is clear (or clarified by the context above), output a JSON object with type "item_spec" and the item_spec.
-If the finding is ambiguous, output a JSON object with type "clarification_request" and an array of clarifications.
-When requesting clarifications, you MUST use one of the following exact categories:
-"public_contract", "behavioral_semantics", "scope_of_fix", "dependency_introduction", "compatibility_policy", "intent_vs_symptom", "issue_appropriateness".
-
-Output format must be exactly:
-{
-  "type": "item_spec" | "clarification_request",
-  "item_spec": { ... schema ... },
-  "clarifications": [ { "finding_id": "...", "category": "...", "description": "..." } ]
-}
-
-Your task JSON is at: ${taskPath}
-Write your result JSON to exactly this path: ${resultPath}
-Use the Write tool to create or overwrite that file.
-Do not write to any other path.
-    `.trim();
+    const promptContent = buildDocumentPrompt({
+      finding,
+      extraContext,
+      themeHint,
+      repoConventions,
+      taskPath,
+      resultPath,
+    });
     await writeFile(promptPath, promptContent, "utf8");
 
     const task = createRemediationWorkerTask({

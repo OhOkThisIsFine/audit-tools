@@ -45,8 +45,12 @@ interface ParserModule {
 
 const requireFromHere = createRequire(import.meta.url);
 
-let modulePromise: Promise<ParserModule | undefined> | undefined;
-let initPromise: Promise<boolean> | undefined;
+// The parser module is resolved per `dependencyPath`: a call with a different
+// dependencyPath must resolve its own module rather than reusing the first
+// resolution. Keyed by `dependencyPath ?? ""` so the bare-specifier path
+// (no dependencyPath) gets a stable cache slot too.
+const moduleCache = new Map<string, Promise<ParserModule | undefined>>();
+const initCache = new Map<ParserModule, Promise<boolean>>();
 const languageCache = new Map<string, TsLanguage | null>();
 
 async function importParserModule(
@@ -77,8 +81,10 @@ async function importParserModule(
       if (resolved?.Parser && resolved.Language) {
         return resolved;
       }
-    } catch {
-      // Try the next specifier.
+    } catch (e) {
+      process.stderr.write(
+        `[audit-code] tree-sitter: failed to import '${specifier}': ${(e as Error).message ?? String(e)}\n`,
+      );
     }
   }
   return undefined;
@@ -87,19 +93,29 @@ async function importParserModule(
 async function getModule(
   dependencyPath?: string,
 ): Promise<ParserModule | undefined> {
-  if (!modulePromise) {
-    modulePromise = importParserModule(dependencyPath);
+  const key = dependencyPath ?? "";
+  let cached = moduleCache.get(key);
+  if (!cached) {
+    cached = importParserModule(dependencyPath);
+    moduleCache.set(key, cached);
   }
-  return modulePromise;
+  return cached;
 }
 
 async function ensureInit(parserModule: ParserModule): Promise<boolean> {
-  if (!initPromise) {
-    initPromise = parserModule.Parser.init()
+  let cached = initCache.get(parserModule);
+  if (!cached) {
+    cached = parserModule.Parser.init()
       .then(() => true)
-      .catch(() => false);
+      .catch((e: unknown) => {
+        process.stderr.write(
+          `[audit-code] tree-sitter: Parser.init() failed: ${(e as Error).message ?? String(e)}\n`,
+        );
+        return false;
+      });
+    initCache.set(parserModule, cached);
   }
-  return initPromise;
+  return cached;
 }
 
 function resolveGrammarPath(grammar: string): string | undefined {
@@ -135,7 +151,10 @@ async function loadLanguage(
     const language = await parserModule.Language.load(grammarPath);
     languageCache.set(grammar, language);
     return language;
-  } catch {
+  } catch (e) {
+    process.stderr.write(
+      `[audit-code] tree-sitter: failed to load grammar '${grammar}' from '${grammarPath}': ${(e as Error).message ?? String(e)}\n`,
+    );
     languageCache.set(grammar, null);
     return undefined;
   }
@@ -158,14 +177,17 @@ export async function getTreeSitterParser(
     const parser = new parserModule.Parser();
     parser.setLanguage(language);
     return parser;
-  } catch {
+  } catch (e) {
+    process.stderr.write(
+      `[audit-code] tree-sitter: failed to instantiate parser for grammar '${grammar}': ${(e as Error).message ?? String(e)}\n`,
+    );
     return undefined;
   }
 }
 
 /** Test seam: reset the memoised runtime/grammar caches. */
 export function __resetTreeSitterForTests(): void {
-  modulePromise = undefined;
-  initPromise = undefined;
+  moduleCache.clear();
+  initCache.clear();
   languageCache.clear();
 }

@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { exec } from "node:child_process";
 import { accessSync, constants } from "node:fs";
+import { promisify } from "node:util";
 import {
   ANALYZER_SETTINGS,
   PROVIDER_NAMES,
@@ -12,6 +13,8 @@ import {
   isRecord,
   pushValidationIssue,
 } from "@audit-tools/shared";
+
+const execAsync = promisify(exec);
 
 const VALID_PROVIDERS = new Set<ProviderName>(PROVIDER_NAMES);
 const VALID_UI_MODES = new Set<SessionUiMode>(SESSION_UI_MODES);
@@ -170,10 +173,14 @@ function validateAgentProviderSection(
   }
 }
 
-function commandExists(command: string): boolean {
+async function commandExists(command: string): Promise<boolean> {
   const lookupCommand = process.platform === "win32" ? "where" : "which";
-  const result = spawnSync(lookupCommand, [command], { stdio: "ignore" });
-  return result.status === 0;
+  try {
+    await execAsync(`${lookupCommand} ${command}`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function configuredPathExists(commandPath: string): boolean {
@@ -338,13 +345,13 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
   return issues;
 }
 
-export function validateConfiguredProviderEnvironment(
+export async function validateConfiguredProviderEnvironment(
   sessionConfig: SessionConfig,
   options: {
-    commandExists?: (command: string) => boolean;
+    commandExists?: (command: string) => Promise<boolean>;
     pathExists?: (commandPath: string) => boolean;
   } = {},
-): ValidationIssue[] {
+): Promise<ValidationIssue[]> {
   const issues: ValidationIssue[] = [];
   const lookupCommand = options.commandExists ?? commandExists;
   const lookupPath = options.pathExists ?? configuredPathExists;
@@ -352,7 +359,7 @@ export function validateConfiguredProviderEnvironment(
 
   if (provider === "claude-code") {
     const command = sessionConfig.claude_code?.command ?? "claude";
-    if (isBareExecutableName(command) && !lookupCommand(command)) {
+    if (isBareExecutableName(command) && !(await lookupCommand(command))) {
       pushIssue(
         issues,
         "claude_code.command",
@@ -375,7 +382,7 @@ export function validateConfiguredProviderEnvironment(
 
   if (provider === "opencode") {
     const command = sessionConfig.opencode?.command ?? "opencode";
-    if (isBareExecutableName(command) && !lookupCommand(command)) {
+    if (isBareExecutableName(command) && !(await lookupCommand(command))) {
       pushIssue(
         issues,
         "opencode.command",

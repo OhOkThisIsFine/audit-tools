@@ -95,6 +95,16 @@ const ANALYZER_OWNERSHIP_EDGE_CONFIDENCE = 0.84;
 const CONTAINER_EDGE_CONFIDENCE = 0.25;
 const AUTH_SESSION_EDGE_CONFIDENCE = 0.55;
 
+/** Named graph edge-kind keys (was a scatter of inline string literals). */
+const EDGE_KIND = {
+  heuristicContainer: "heuristic-container-edge",
+  heuristicAuthSession: "heuristic-auth-session-link",
+  conftestLink: "conftest-link",
+  analyzerOwnershipRootLink: "analyzer-ownership-root-link",
+  relativeStringReference: "relative-string-reference",
+  repoPathReference: "repo-path-reference",
+} as const;
+
 function shouldReadForGraph(file: RepoManifest["files"][number]): boolean {
   const normalized = normalizeGraphPath(file.path);
   return (
@@ -217,7 +227,7 @@ function extractAnalyzerOwnershipEdges(
         graphEdge({
           from: root,
           to: target,
-          kind: "analyzer-ownership-root-link",
+          kind: EDGE_KIND.analyzerOwnershipRootLink,
           direction: "undirected",
           confidence,
           reason:
@@ -319,8 +329,8 @@ function extractReferenceEdges(
         from: fromPath,
         to: target,
         kind: relativeReference
-          ? "relative-string-reference"
-          : "repo-path-reference",
+          ? EDGE_KIND.relativeStringReference
+          : EDGE_KIND.repoPathReference,
         direction: "directed",
         confidence: relativeReference
           ? RELATIVE_REFERENCE_EDGE_CONFIDENCE
@@ -360,7 +370,7 @@ function extractPytestConftestLinks(
         graphEdge({
           from: conftestPath,
           to: targetPath,
-          kind: "conftest-link",
+          kind: EDGE_KIND.conftestLink,
           confidence: CONFTEST_LINK_CONFIDENCE,
           reason: `Pytest conftest '${conftestPath}' applies to all Python files in its scope directory.`,
         }),
@@ -422,15 +432,189 @@ export async function buildGraphBundleFromFs(
   return buildGraphBundle(repoManifest, disposition, { ...options, fileContents });
 }
 
+/**
+ * Heuristic "container" edge: a file two-or-more directories deep is linked to
+ * its top-two-segment module root, suggesting shared module ownership.
+ */
+function extractHeuristicContainerEdges(filePath: string): GraphEdge[] {
+  const parts = filePath.split("/");
+  if (parts.length <= 2) return [];
+  return [
+    graphEdge({
+      from: filePath,
+      to: `${parts[0]}/${parts[1]}`,
+      kind: EDGE_KIND.heuristicContainer,
+      direction: "undirected",
+      confidence: CONTAINER_EDGE_CONFIDENCE,
+      reason: "Path hierarchy suggests shared module ownership.",
+    }),
+  ];
+}
+
+/**
+ * Heuristic security edge: an auth-named (non-session) file is linked to every
+ * session-named file by naming convention, flagging likely auth↔session coupling.
+ */
+function extractHeuristicAuthSessionEdges(
+  filePath: string,
+  repoManifest: RepoManifest,
+  dispositionMap: Map<string, FileDisposition["files"][number]["status"]>,
+): GraphEdge[] {
+  const normalized = filePath.toLowerCase();
+  if (!(normalized.includes("auth") && normalized.includes("session") === false)) {
+    return [];
+  }
+  const edges: GraphEdge[] = [];
+  for (const other of repoManifest.files) {
+    if (other.path === filePath) continue;
+    const otherStatus = dispositionMap.get(other.path);
+    if (otherStatus && isAuditExcludedStatus(otherStatus)) continue;
+    if (other.path.toLowerCase().includes("session")) {
+      edges.push(
+        graphEdge({
+          from: filePath,
+          to: other.path,
+          kind: EDGE_KIND.heuristicAuthSession,
+          confidence: AUTH_SESSION_EDGE_CONFIDENCE,
+          reason:
+            "Security-sensitive auth path appears coupled to a session path by naming convention.",
+        }),
+      );
+    }
+  }
+  return edges;
+}
+
+/** Accumulator the per-file extractors push into during a graph build. */
+interface GraphEdgeAccumulator {
+  imports: GraphEdge[];
+  calls: GraphEdge[];
+  references: GraphEdge[];
+  routes: RouteEdge[];
+}
+
+/**
+ * Run every content-driven edge extractor over one file's source, appending its
+ * import / call / reference / route edges into the accumulator. Mirrors the
+ * original inline body exactly (including push order) so the deduped/sorted
+ * result is byte-identical.
+ */
+function extractContentEdgesForFile(
+  filePath: string,
+  content: string,
+  pathLookup: Map<string, string>,
+  acc: GraphEdgeAccumulator,
+  fileRoutes: RouteEdge[],
+): void {
+  acc.imports.push(...extractImportEdges(filePath, content, pathLookup));
+  acc.imports.push(...extractPythonImportEdges(filePath, content, pathLookup));
+  acc.references.push(...extractReferenceEdges(filePath, content, pathLookup));
+  acc.references.push(
+    ...extractJsonSchemaReferenceEdges(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractPackageEntrypointEdges(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractChromeExtensionManifestEdges(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractHtmlResourceEdges(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractPackageScriptEdges(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractWorkspacePackageEdges(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractTypescriptProjectReferenceEdges(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractGoWorkspaceModuleEdges(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractCargoWorkspaceMemberEdges(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractMavenModuleEdges(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractPyprojectTestpathLinks(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractYamlPathReferenceEdges(filePath, content, pathLookup),
+  );
+  acc.references.push(
+    ...extractSchemaContractTestEdges(filePath, content, pathLookup),
+  );
+  const registeredRoutes = extractRegisteredRouteEvidence(
+    filePath,
+    content,
+    pathLookup,
+  );
+  acc.calls.push(...registeredRoutes.calls);
+  fileRoutes.push(...registeredRoutes.routes);
+  const frameworkRoutes = extractFrameworkRouteEvidence(
+    filePath,
+    content,
+    pathLookup,
+  );
+  acc.calls.push(...frameworkRoutes.calls);
+  fileRoutes.push(...frameworkRoutes.routes);
+}
+
+/** Concrete (all-present) graph map produced by `buildGraphBundle`. */
+interface BuiltGraphs {
+  imports: GraphEdge[];
+  calls: GraphEdge[];
+  references: GraphEdge[];
+  routes: RouteEdge[];
+}
+
+/**
+ * Emit the OBS-003 graph-extraction metric. No RunLogger is in scope in this
+ * leaf extractor, so it uses the established structured-stderr summary
+ * (FINDING-012 pattern): node count, total edge count, and the number of
+ * non-empty graph types.
+ */
+function logGraphExtractionMetric(graphs: BuiltGraphs): void {
+  const edgeCount =
+    graphs.imports.length +
+    graphs.calls.length +
+    graphs.references.length +
+    graphs.routes.length;
+  const nodes = new Set<string>();
+  for (const edge of [...graphs.imports, ...graphs.calls, ...graphs.references]) {
+    nodes.add(edge.from);
+    nodes.add(edge.to);
+  }
+  for (const route of graphs.routes) {
+    nodes.add(route.path);
+    nodes.add(route.handler);
+  }
+  const graphTypeCount = [
+    graphs.imports,
+    graphs.calls,
+    graphs.references,
+    graphs.routes,
+  ].filter((edges) => edges.length > 0).length;
+  process.stderr.write(
+    `[audit-code] graph: built bundle — ${nodes.size} nodes, ${edgeCount} edges across ${graphTypeCount} graph type(s)\n`,
+  );
+}
+
 export function buildGraphBundle(
   repoManifest: RepoManifest,
   disposition?: FileDisposition,
   options: BuildGraphBundleOptions = {},
 ): GraphBundle {
-  const imports: GraphEdge[] = [];
-  const calls: GraphEdge[] = [];
-  const references: GraphEdge[] = [];
-  const routes: RouteEdge[] = [];
+  const acc: GraphEdgeAccumulator = {
+    imports: [],
+    calls: [],
+    references: [],
+    routes: [],
+  };
   const dispositionMap = buildDispositionMap(disposition);
   const pathLookup = buildPathLookup(repoManifest, dispositionMap);
 
@@ -440,103 +624,15 @@ export function buildGraphBundle(
       continue;
     }
 
-    const parts = file.path.split("/");
-    if (parts.length > 2) {
-      imports.push(
-        graphEdge({
-          from: file.path,
-          to: `${parts[0]}/${parts[1]}`,
-          kind: "heuristic-container-edge",
-          direction: "undirected",
-          confidence: CONTAINER_EDGE_CONFIDENCE,
-          reason: "Path hierarchy suggests shared module ownership.",
-        }),
-      );
-    }
-
-    const normalized = file.path.toLowerCase();
-    if (
-      normalized.includes("auth") &&
-      normalized.includes("session") === false
-    ) {
-      for (const other of repoManifest.files) {
-        if (other.path === file.path) continue;
-        const otherStatus = dispositionMap.get(other.path);
-        if (otherStatus && isAuditExcludedStatus(otherStatus)) continue;
-        if (other.path.toLowerCase().includes("session")) {
-          imports.push(
-            graphEdge({
-              from: file.path,
-              to: other.path,
-              kind: "heuristic-auth-session-link",
-              confidence: AUTH_SESSION_EDGE_CONFIDENCE,
-              reason:
-                "Security-sensitive auth path appears coupled to a session path by naming convention.",
-            }),
-          );
-        }
-      }
-    }
+    acc.imports.push(...extractHeuristicContainerEdges(file.path));
+    acc.imports.push(
+      ...extractHeuristicAuthSessionEdges(file.path, repoManifest, dispositionMap),
+    );
 
     const content = options.fileContents?.[file.path];
     const fileRoutes: RouteEdge[] = [];
     if (content) {
-      imports.push(...extractImportEdges(file.path, content, pathLookup));
-      imports.push(...extractPythonImportEdges(file.path, content, pathLookup));
-      references.push(...extractReferenceEdges(file.path, content, pathLookup));
-      references.push(
-        ...extractJsonSchemaReferenceEdges(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractPackageEntrypointEdges(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractChromeExtensionManifestEdges(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractHtmlResourceEdges(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractPackageScriptEdges(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractWorkspacePackageEdges(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractTypescriptProjectReferenceEdges(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractGoWorkspaceModuleEdges(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractCargoWorkspaceMemberEdges(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractMavenModuleEdges(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractPyprojectTestpathLinks(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractYamlPathReferenceEdges(file.path, content, pathLookup),
-      );
-      references.push(
-        ...extractSchemaContractTestEdges(file.path, content, pathLookup),
-      );
-      const registeredRoutes = extractRegisteredRouteEvidence(
-        file.path,
-        content,
-        pathLookup,
-      );
-      calls.push(...registeredRoutes.calls);
-      fileRoutes.push(...registeredRoutes.routes);
-      const frameworkRoutes = extractFrameworkRouteEvidence(
-        file.path,
-        content,
-        pathLookup,
-      );
-      calls.push(...frameworkRoutes.calls);
-      fileRoutes.push(...frameworkRoutes.routes);
+      extractContentEdgesForFile(file.path, content, pathLookup, acc, fileRoutes);
     }
     fileRoutes.push(...extractConventionalRouteEvidence(file.path, content));
     if (fileRoutes.length === 0) {
@@ -545,30 +641,32 @@ export function buildGraphBundle(
         fileRoutes.push(fallbackRoute);
       }
     }
-    routes.push(...fileRoutes);
-    references.push(...extractTestSourceEdges(file.path, pathLookup));
+    acc.routes.push(...fileRoutes);
+    acc.references.push(...extractTestSourceEdges(file.path, pathLookup));
   }
-  references.push(
+  acc.references.push(
     ...extractAnalyzerOwnershipEdges(
       options.externalAnalyzerResults,
       pathLookup,
     ),
   );
-  references.push(...extractPytestConftestLinks(pathLookup));
-  references.push(
+  acc.references.push(...extractPytestConftestLinks(pathLookup));
+  acc.references.push(
     ...extractBoundedSuiteEdges(
       pathLookup,
       options.fileContents ?? {},
-      references,
+      acc.references,
     ),
   );
 
-  return {
-    graphs: {
-      imports: uniqueSortedEdges(imports),
-      calls: uniqueSortedEdges(calls),
-      references: uniqueSortedEdges(references),
-      routes: uniqueSortedRoutes(routes),
-    },
+  const graphs = {
+    imports: uniqueSortedEdges(acc.imports),
+    calls: uniqueSortedEdges(acc.calls),
+    references: uniqueSortedEdges(acc.references),
+    routes: uniqueSortedRoutes(acc.routes),
   };
+
+  logGraphExtractionMetric(graphs);
+
+  return { graphs };
 }

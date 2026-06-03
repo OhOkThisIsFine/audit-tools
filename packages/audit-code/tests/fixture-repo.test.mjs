@@ -4,8 +4,9 @@ import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { countLines } from "./helpers/countLines.mjs";
 
-const { advanceAudit } = await import("../dist/orchestrator/advance.js");
+const { advanceAudit } = await import("../src/orchestrator/advance.ts");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureRoot = join(here, "fixtures", "simple-app");
@@ -19,16 +20,6 @@ async function withFixtureRepo(fn) {
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
-}
-
-async function countLines(root, relativePath) {
-  const content = await readFile(join(root, relativePath), "utf8");
-  if (content.length === 0) {
-    return 0;
-  }
-  return content.endsWith("\n")
-    ? content.split(/\r?\n/).length - 1
-    : content.split(/\r?\n/).length;
 }
 
 async function buildFixtureLineIndex(root) {

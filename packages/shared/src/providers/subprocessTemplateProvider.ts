@@ -1,16 +1,23 @@
-import { readJsonFile } from "@audit-tools/shared";
-import type { WorkerTask } from "../types/workerSession.js";
-import type { FreshSessionProvider, LaunchFreshSessionInput, SubprocessTemplateConfig, OpenTokenConfig } from "@audit-tools/shared";
+import { readJsonFile } from "../io/json.js";
+import { shellQuote } from "../tooling/exec.js";
+import type {
+  FreshSessionProvider,
+  LaunchFreshSessionInput,
+} from "./types.js";
+import type {
+  SubprocessTemplateConfig,
+  OpenTokenConfig,
+} from "../types/sessionConfig.js";
+import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
 import {
-  spawnLoggedCommand,
-  shellQuote,
   applyWorkerTaskLaunchSettings,
-} from "@audit-tools/shared";
+  type WorkerTaskWithCommand,
+} from "./workerTaskLaunch.js";
 
 function applyTemplate(
   template: string,
   input: LaunchFreshSessionInput,
-  task: WorkerTask,
+  task: WorkerTaskWithCommand,
   context: { providerName: string; entryIndex: number },
 ): string {
   const workerCommandShell = task.worker_command
@@ -50,15 +57,22 @@ export class SubprocessTemplateProvider implements FreshSessionProvider {
   name: string;
   private readonly config: SubprocessTemplateConfig;
   private readonly opentoken: OpenTokenConfig;
+  private readonly launchCommand: typeof spawnLoggedCommand;
 
-  constructor(config: SubprocessTemplateConfig, name = "subprocess-template", opentoken: OpenTokenConfig = {}) {
+  constructor(
+    config: SubprocessTemplateConfig,
+    name = "subprocess-template",
+    launchCommand: typeof spawnLoggedCommand = spawnLoggedCommand,
+    opentoken: OpenTokenConfig = {},
+  ) {
     this.config = config;
     this.name = name;
+    this.launchCommand = launchCommand;
     this.opentoken = opentoken;
   }
 
   async launch(input: LaunchFreshSessionInput) {
-    const task = await readJsonFile<WorkerTask>(input.taskPath);
+    const task = await readJsonFile<WorkerTaskWithCommand>(input.taskPath);
     if (!this.config.command_template.length) {
       throw new Error(
         `${this.name} provider requires a non-empty command_template.`,
@@ -72,7 +86,7 @@ export class SubprocessTemplateProvider implements FreshSessionProvider {
       }),
     );
     const [command, ...args] = rendered;
-    return await spawnLoggedCommand(command, args, launchInput, this.config.env, {
+    return await this.launchCommand(command, args, launchInput, this.config.env, {
       opentoken: this.opentoken.enabled,
       opentokenCommand: this.opentoken.command,
     });

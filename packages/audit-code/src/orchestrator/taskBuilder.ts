@@ -20,8 +20,8 @@ export interface UnitLineIndex {
 export interface BuildChunkedTaskOptions {
   /**
    * Line count above which a single file gets its own task rather than being
-   * grouped with the rest of its unit. Default: 3000. Set to 0 to disable
-   * splitting entirely.
+   * grouped with the rest of its unit. Default: `DEFAULT_FILE_SPLIT_THRESHOLD`
+   * (5000). Set to 0 to disable splitting entirely.
    */
   file_split_threshold?: number;
   /**
@@ -96,6 +96,141 @@ const DEFAULT_TINY_TEST_FILE_LINES = 250;
 const TINY_TEST_UNIT_ID = "tests-tiny-files";
 
 type SplitKind = "none" | "large_file" | "budget";
+
+interface TaskBudgetLimits {
+  maxTaskLines: number;
+  maxTaskFiles: number;
+}
+
+// Split a flat list of file paths into review-task-sized chunks, bounded by both
+// an aggregate line budget and a max file count. Hoisted out of
+// `buildChunkedAuditTasks` so it no longer closes over the loop's locals; the
+// line index and limits are passed in explicitly.
+function chunkByTaskBudget(
+  filePaths: string[],
+  unitLineIndex: UnitLineIndex,
+  limits: TaskBudgetLimits,
+): string[][] {
+  const { maxTaskLines, maxTaskFiles } = limits;
+  if (filePaths.length === 0) {
+    return [];
+  }
+  if (maxTaskLines <= 0 && maxTaskFiles <= 0) {
+    return [filePaths];
+  }
+
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let currentLines = 0;
+
+  for (const path of filePaths) {
+    const lineCount = unitLineIndex[path] ?? 0;
+    const wouldExceedFiles = maxTaskFiles > 0 && current.length >= maxTaskFiles;
+    const wouldExceedLines =
+      maxTaskLines > 0 &&
+      current.length > 0 &&
+      currentLines + lineCount > maxTaskLines;
+
+    if (wouldExceedFiles || wouldExceedLines) {
+      chunks.push(current);
+      current = [];
+      currentLines = 0;
+    }
+
+    current.push(path);
+    currentLines += lineCount;
+  }
+
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+
+// Emit one or more audit tasks for a scope/lens. Normal-sized files are grouped
+// into budget-bounded chunks; files over `fileSplitThreshold` get their own
+// isolated task. Hoisted to module scope: the per-call mutable accumulators
+// (`tasks`, `seen`) and budget config are now explicit parameters instead of
+// captured closure state.
+function addTaskBlock(
+  params: {
+    scopeId: string;
+    unitId: string;
+    passId: string;
+    lens: Lens;
+    filePaths: string[];
+    priority: AuditTask["priority"];
+    tags: string[];
+    rationale: (filePaths: string[], splitKind: SplitKind) => string;
+  },
+  context: {
+    tasks: AuditTask[];
+    seen: Set<string>;
+    unitLineIndex: UnitLineIndex;
+    fileSplitThreshold: number;
+    budgetLimits: TaskBudgetLimits;
+  },
+): void {
+  const { tasks, seen, unitLineIndex, fileSplitThreshold, budgetLimits } =
+    context;
+  const oversizedFiles =
+    fileSplitThreshold > 0
+      ? params.filePaths.filter(
+          (path) => (unitLineIndex[path] ?? 0) > fileSplitThreshold,
+        )
+      : [];
+  const oversizedSet = new Set(oversizedFiles);
+  const normalFiles = params.filePaths.filter((path) => !oversizedSet.has(path));
+
+  const normalChunks = chunkByTaskBudget(normalFiles, unitLineIndex, budgetLimits);
+  for (let index = 0; index < normalChunks.length; index++) {
+    const chunk = normalChunks[index];
+    const splitKind: SplitKind = normalChunks.length > 1 ? "budget" : "none";
+    const taskId =
+      splitKind === "budget"
+        ? `${params.scopeId}:${params.lens}:part-${index + 1}`
+        : `${params.scopeId}:${params.lens}`;
+    if (!seen.has(taskId)) {
+      seen.add(taskId);
+      tasks.push({
+        task_id: taskId,
+        unit_id: params.unitId,
+        pass_id: params.passId,
+        lens: params.lens,
+        file_paths: chunk,
+        rationale: params.rationale(chunk, splitKind),
+        priority: params.priority,
+        tags:
+          splitKind === "budget"
+            ? [...new Set([...params.tags, "line_budget_split"])]
+            : params.tags.length > 0
+              ? params.tags
+              : undefined,
+      });
+    }
+  }
+
+  for (const filePath of oversizedFiles) {
+    const taskId = `${params.scopeId}:${params.lens}:${filePath}`;
+    if (seen.has(taskId)) {
+      continue;
+    }
+    seen.add(taskId);
+    tasks.push({
+      task_id: taskId,
+      unit_id: params.unitId,
+      pass_id: params.passId,
+      lens: params.lens,
+      file_paths: [filePath],
+      rationale: params.rationale([filePath], "large_file"),
+      priority: params.priority,
+      tags:
+        params.tags.length > 0
+          ? [...new Set([...params.tags, "large_file"])]
+          : ["large_file"],
+    });
+  }
+}
 
 function buildCoverageIndex(
   coverageMatrix: CoverageMatrix,
@@ -184,109 +319,14 @@ export function buildChunkedAuditTasks(
     }
   }
 
-  function chunkByTaskBudget(filePaths: string[]): string[][] {
-    if (filePaths.length === 0) {
-      return [];
-    }
-    if (maxTaskLines <= 0 && maxTaskFiles <= 0) {
-      return [filePaths];
-    }
-
-    const chunks: string[][] = [];
-    let current: string[] = [];
-    let currentLines = 0;
-
-    for (const path of filePaths) {
-      const lineCount = unitLineIndex[path] ?? 0;
-      const wouldExceedFiles =
-        maxTaskFiles > 0 && current.length >= maxTaskFiles;
-      const wouldExceedLines =
-        maxTaskLines > 0 &&
-        current.length > 0 &&
-        currentLines + lineCount > maxTaskLines;
-
-      if (wouldExceedFiles || wouldExceedLines) {
-        chunks.push(current);
-        current = [];
-        currentLines = 0;
-      }
-
-      current.push(path);
-      currentLines += lineCount;
-    }
-
-    if (current.length > 0) {
-      chunks.push(current);
-    }
-    return chunks;
-  }
-
-  function addTaskBlock(params: {
-    scopeId: string;
-    unitId: string;
-    passId: string;
-    lens: Lens;
-    filePaths: string[];
-    priority: AuditTask["priority"];
-    tags: string[];
-    rationale: (filePaths: string[], splitKind: SplitKind) => string;
-  }): void {
-    const oversizedFiles =
-      fileSplitThreshold > 0
-        ? params.filePaths.filter((path) => (unitLineIndex[path] ?? 0) > fileSplitThreshold)
-        : [];
-    const oversizedSet = new Set(oversizedFiles);
-    const normalFiles = params.filePaths.filter((path) => !oversizedSet.has(path));
-
-    const normalChunks = chunkByTaskBudget(normalFiles);
-    for (let index = 0; index < normalChunks.length; index++) {
-      const chunk = normalChunks[index];
-      const splitKind: SplitKind = normalChunks.length > 1 ? "budget" : "none";
-      const taskId =
-        splitKind === "budget"
-          ? `${params.scopeId}:${params.lens}:part-${index + 1}`
-          : `${params.scopeId}:${params.lens}`;
-      if (!seen.has(taskId)) {
-        seen.add(taskId);
-        tasks.push({
-          task_id: taskId,
-          unit_id: params.unitId,
-          pass_id: params.passId,
-          lens: params.lens,
-          file_paths: chunk,
-          rationale: params.rationale(chunk, splitKind),
-          priority: params.priority,
-          tags:
-            splitKind === "budget"
-              ? [...new Set([...params.tags, "line_budget_split"])]
-              : params.tags.length > 0
-                ? params.tags
-                : undefined,
-        });
-      }
-    }
-
-    for (const filePath of oversizedFiles) {
-      const taskId = `${params.scopeId}:${params.lens}:${filePath}`;
-      if (seen.has(taskId)) {
-        continue;
-      }
-      seen.add(taskId);
-      tasks.push({
-        task_id: taskId,
-        unit_id: params.unitId,
-        pass_id: params.passId,
-        lens: params.lens,
-        file_paths: [filePath],
-        rationale: params.rationale([filePath], "large_file"),
-        priority: params.priority,
-        tags:
-          params.tags.length > 0
-            ? [...new Set([...params.tags, "large_file"])]
-            : ["large_file"],
-      });
-    }
-  }
+  const budgetLimits: TaskBudgetLimits = { maxTaskLines, maxTaskFiles };
+  const taskBlockContext = {
+    tasks,
+    seen,
+    unitLineIndex,
+    fileSplitThreshold,
+    budgetLimits,
+  };
 
   const assigned = new Set<string>();
   const flowBlocks = options.critical_flows
@@ -311,7 +351,7 @@ export function buildChunkedAuditTasks(
           : splitKind === "budget"
             ? `Audit part of critical flow ${block.flow_id} (${filePaths.length} file${filePaths.length === 1 ? "" : "s"}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`
           : `Audit critical flow ${block.flow_id} (${filePaths.length} file${filePaths.length === 1 ? "" : "s"}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`,
-    });
+    }, taskBlockContext);
   }
 
   const groupedRemainders = new Map<string, { lens: Lens; unitId: string; filePaths: string[] }>();
@@ -367,7 +407,7 @@ export function buildChunkedAuditTasks(
           : splitKind === "budget"
             ? `Audit part of ${block.unitId} (${filePaths.length} file${filePaths.length === 1 ? "" : "s"}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`
           : `Audit ${block.unitId} (${filePaths.length} file${filePaths.length === 1 ? "" : "s"}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`,
-    });
+    }, taskBlockContext);
   }
 
   return tasks.sort((a, b) => {

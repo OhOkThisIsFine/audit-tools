@@ -23,7 +23,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test tests/*.test.mjs",
+    "test": "node --import tsx/esm --test tests/*.test.mjs",
     "verify:release": "npm run check && npm test",
     "release:patch": "node scripts/release-and-publish.mjs patch --bump-only",
     "release:minor": "node scripts/release-and-publish.mjs minor --bump-only",
@@ -34,6 +34,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
   },
   "repository": {
     "type": "git",

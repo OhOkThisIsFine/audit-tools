@@ -14,21 +14,26 @@ export function normalizeGenericExternalResults(
     raw?: unknown;
   }>,
 ): ExternalAnalyzerResults {
+  const valid = items.filter((item) => item.path && item.summary);
+  const dropped = items.length - valid.length;
+  if (dropped > 0) {
+    process.stderr.write(
+      `[audit-code] normalizeExternal: dropped ${dropped}/${items.length} ${tool} finding(s) missing path or summary\n`,
+    );
+  }
   return {
     tool,
     generated_at: new Date().toISOString(),
-    results: items
-      .filter((item) => item.path && item.summary)
-      .map((item, index) => ({
-        id: item.id ?? `${tool}-${index + 1}`,
-        category: item.category ?? "unknown",
-        severity: item.severity ?? "unknown",
-        path: item.path as string,
-        line_start: item.line_start,
-        line_end: item.line_end,
-        summary: item.summary as string,
-        rule: item.rule,
-        raw: item.raw,
-      })),
+    results: valid.map((item, index) => ({
+      id: item.id ?? `${tool}-${index + 1}`,
+      category: item.category ?? "unknown",
+      severity: item.severity ?? "unknown",
+      path: item.path as string,
+      line_start: item.line_start,
+      line_end: item.line_end,
+      summary: item.summary as string,
+      rule: item.rule,
+      raw: item.raw,
+    })),
   };
 }

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { buildDesignAssessment } = await import(
-  "../dist/extractors/designAssessment.js"
+  "../src/extractors/designAssessment.ts"
 );
 
 function makeParams(overrides = {}) {
@@ -232,6 +232,55 @@ test("finding ids are unique and sequentially assigned", () => {
   const ids = result.findings.map((f) => f.id);
   assert.equal(new Set(ids).size, ids.length, "all finding ids should be unique");
   assert.ok(ids.every((id) => id.startsWith("DA-")));
+});
+
+test("finding id generation is instance-scoped across two buildDesignAssessment calls (COR-003)", () => {
+  // COR-003(b) moved id generation into a per-call closure
+  // (createFindingIdGenerator) with no shared mutable module state. The
+  // observable guarantee is that each call's DA-### sequence is independent of
+  // how many times buildDesignAssessment has run before: two calls with the
+  // same finding-producing input deterministically produce the same id set,
+  // rather than the second call continuing/diverging from a leaked module
+  // counter. (A shared module-level counter would make the second run's ids
+  // shift, e.g. start at DA-005 instead of DA-001.)
+  const params = () =>
+    makeParams({
+      graphBundle: {
+        graphs: {
+          imports: [
+            { from: "a.ts", to: "b.ts" },
+            { from: "b.ts", to: "a.ts" },
+          ],
+        },
+      },
+      unitManifest: {
+        units: [
+          { unit_id: "orphan", name: "orphan", files: ["z.ts"], required_lenses: [] },
+          { unit_id: "connected", name: "connected", files: ["a.ts"], required_lenses: [] },
+        ],
+      },
+    });
+
+  const first = buildDesignAssessment(params());
+  const second = buildDesignAssessment(params());
+
+  // Both runs actually produced findings (otherwise the assertion is vacuous).
+  assert.ok(first.findings.length > 0);
+  // Within each run the ids are unique and DA-prefixed.
+  for (const result of [first, second]) {
+    const ids = result.findings.map((f) => f.id);
+    assert.equal(new Set(ids).size, ids.length, "ids unique within a single call");
+    assert.ok(ids.every((id) => id.startsWith("DA-")));
+  }
+  // Instance-scoped (not shared module state): the second call restarts its own
+  // sequence rather than continuing the first, so identical input -> identical
+  // id sequence.
+  assert.deepEqual(
+    second.findings.map((f) => f.id),
+    first.findings.map((f) => f.id),
+  );
+  assert.equal(first.findings[0].id, "DA-001");
+  assert.equal(second.findings[0].id, "DA-001");
 });
 
 test("all findings use architecture lens and systemic flag", () => {

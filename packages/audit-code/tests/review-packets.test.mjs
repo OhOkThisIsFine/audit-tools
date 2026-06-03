@@ -12,9 +12,9 @@ const {
   buildAuditPlanMetrics,
   buildReviewPackets,
   orderTasksForPacketReview,
-} = await import("../dist/orchestrator/reviewPackets.js");
+} = await import("../src/orchestrator/reviewPackets.ts");
 const { buildChunkedAuditTasks } = await import(
-  "../dist/orchestrator/taskBuilder.js"
+  "../src/orchestrator/taskBuilder.ts"
 );
 const { runCli } = await import(
   pathToFileURL(join(repoRoot, "dist", "cli.js")).href

@@ -10,8 +10,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
 const wrapperPath = join(repoRoot, "audit-code.mjs");
 
-const { advanceAudit } = await import("../dist/orchestrator/advance.js");
-const { writeCoreArtifacts } = await import("../dist/io/artifacts.js");
+const { advanceAudit } = await import("../src/orchestrator/advance.ts");
+const { writeCoreArtifacts } = await import("../src/io/artifacts.ts");
 
 // The Phase 4B candidate we inject into the regex-floor graph. Its endpoints are
 // real fixture files; its confidence (0.4) puts it below the 0.65 reasoning floor.

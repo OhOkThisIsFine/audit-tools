@@ -46,6 +46,22 @@ export interface QuotaState {
   entries: Record<string, QuotaStateEntry>;
 }
 
+/**
+ * Identifies which cap actually bound the final wave size, so an operator can
+ * see *why* a wave was throttled (or that nothing throttled it) without
+ * re-deriving the decision. Set by `scheduleWave`; logged by callers that hold a
+ * RunLogger as a `kind:"scope"` event.
+ */
+export type WaveBindingCap =
+  | "rpm"
+  | "tpm"
+  | "learned"
+  | "fallback"
+  | "first_contact"
+  | "cooldown"
+  | "host_concurrency"
+  | "none";
+
 export interface WaveSchedule {
   wave_size: number;
   estimated_wave_tokens: number;
@@ -56,6 +72,11 @@ export interface WaveSchedule {
   host_concurrency_limit: HostConcurrencyLimit | null;
   model: string | null;
   quota_source_snapshot?: import("./quotaSource.js").QuotaUsageSnapshot | null;
+  /**
+   * Which cap bound the final `wave_size` ("none" if nothing reduced the
+   * requested concurrency). Optional so existing constructions stay valid.
+   */
+  binding_cap?: WaveBindingCap;
 }
 
 export interface BackoffState {

@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { RunLogger } = await import("../dist/observability/runLog.js");
+const { RunLogger } = await import("../src/observability/runLog.ts");
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), "audit-tools-runlog-"));
@@ -75,5 +75,24 @@ test("injectable now clock is used in the non-serializable fallback path", async
     // Confirms now() was called inside the catch block, not bypassed.
     assert.equal(parsed.ts, "1970-01-01T00:00:00.000Z");
     assert.equal(parsed.note, "unserializable_event");
+  });
+});
+
+test("a BigInt payload triggers the unserializable_event fallback marker", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "run.log.jsonl");
+    const logger = new RunLogger(path, { now: () => 0 });
+    // JSON.stringify throws on BigInt, exercising the same catch as the circular
+    // case but via a different unserializable value.
+    logger.event({ kind: "outcome", tokens_est: 5n });
+
+    const line = (await readFile(path, "utf8")).trim();
+    const parsed = JSON.parse(line); // must not throw
+    assert.deepEqual(parsed, {
+      ts: "1970-01-01T00:00:00.000Z",
+      kind: "outcome",
+      note: "unserializable_event",
+    });
+    assert.equal(typeof parsed.ts, "string");
   });
 });

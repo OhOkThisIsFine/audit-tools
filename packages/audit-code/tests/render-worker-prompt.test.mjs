@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { renderWorkerPrompt } = await import(
-  "../dist/prompts/renderWorkerPrompt.js"
+  "../src/prompts/renderWorkerPrompt.ts"
 );
 const { usesDeferredWorkerCommand } = await import(
-  "../dist/types/workerSession.js"
+  "../src/types/workerSession.ts"
 );
 
 test("renderWorkerPrompt uses argv JSON for agent tasks and falls back to the default task list path", () => {

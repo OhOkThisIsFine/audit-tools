@@ -27,8 +27,9 @@
     },
     {
       "type": "object",
-      "required": ["contract_version", "phase", "item_results"],
+      "required": ["type", "contract_version", "phase", "item_results"],
       "properties": {
+        "type": { "const": "implement_result" },
         "contract_version": {
           "const": "remediate-code-worker-result/v1alpha1"
         },

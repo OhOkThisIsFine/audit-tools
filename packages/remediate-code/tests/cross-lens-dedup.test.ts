@@ -130,6 +130,41 @@ describe("deduplicateCrossLensFindings", () => {
     ]);
     expect(mergeMap.size).toBe(0);
   });
+
+  it("equal-severity duplicates pick a deterministic survivor regardless of input order", () => {
+    // Same title+file, EQUAL severity — the existing tests only cover the
+    // higher-severity survivor. With severity tied, confidence breaks the tie
+    // (keepA uses aConf >= bConf), so the higher-confidence finding survives no
+    // matter which order it appears in.
+    const a = () =>
+      makeFinding({
+        id: "A-001",
+        title: "Missing validation",
+        lens: "security",
+        severity: "medium",
+        confidence: "high",
+      });
+    const b = () =>
+      makeFinding({
+        id: "B-001",
+        title: "Missing validation",
+        lens: "correctness",
+        severity: "medium",
+        confidence: "medium",
+      });
+
+    const forward = deduplicateCrossLensFindings([a(), b()]);
+    const reverse = deduplicateCrossLensFindings([b(), a()]);
+
+    expect(forward.findings).toHaveLength(1);
+    expect(reverse.findings).toHaveLength(1);
+    // Same survivor id in both orderings — selection is stable.
+    expect(forward.findings[0].id).toBe("A-001");
+    expect(reverse.findings[0].id).toBe("A-001");
+    // mergeMap maps the absorbed finding to the survivor in both orderings.
+    expect(forward.mergeMap.get("B-001")).toBe("A-001");
+    expect(reverse.mergeMap.get("B-001")).toBe("A-001");
+  });
 });
 
 describe("fixupBlocksAfterDedup", () => {

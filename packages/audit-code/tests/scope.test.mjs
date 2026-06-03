@@ -10,7 +10,7 @@ const {
   applyScopeToCoverage,
   resolveAuditScope,
   fullAuditScope,
-} = await import("../dist/orchestrator/scope.js");
+} = await import("../src/orchestrator/scope.ts");
 
 function git(cwd, ...args) {
   execFileSync("git", args, { cwd, stdio: "pipe" });

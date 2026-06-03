@@ -4,21 +4,15 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertMatchesJsonSchema } from "./helpers/jsonSchemaAssert.mjs";
+import { buildUnitManifest } from "../src/orchestrator/unitBuilder.ts";
+import { buildRiskRegister } from "../src/extractors/risk.ts";
+import { buildSurfaceManifest } from "../src/extractors/surfaces.ts";
+import { buildGraphBundle } from "../src/extractors/graph.ts";
+import { buildRuntimeValidationTasks } from "../src/orchestrator/runtimeValidation.ts";
+import { buildAuditPlanMetrics, buildReviewPackets } from "../src/orchestrator/reviewPackets.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
-
-const { buildUnitManifest } = await import("../dist/orchestrator/unitBuilder.js");
-const { buildRiskRegister } = await import("../dist/extractors/risk.js");
-const { buildSurfaceManifest } = await import("../dist/extractors/surfaces.js");
-const { buildGraphBundle } = await import("../dist/extractors/graph.js");
-const {
-  buildRuntimeValidationTasks,
-} = await import("../dist/orchestrator/runtimeValidation.js");
-const {
-  buildAuditPlanMetrics,
-  buildReviewPackets,
-} = await import("../dist/orchestrator/reviewPackets.js");
 
 async function loadSchema(name) {
   return JSON.parse(

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { ALL_LENSES, isLens } = await import("../dist/types.js");
+const { ALL_LENSES, isLens } = await import("../src/types.ts");
 
 // Regression: a hand-copied lens list in flowRequeue.ts (and the legacy
 // orchestrator.ts taskBuilder) omitted "observability", so isLens threw away a

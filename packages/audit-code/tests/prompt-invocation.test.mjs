@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   nextStepCommand,
   mergeAndIngestCommand,
-} from "../dist/cli/prompts.js";
+} from "../src/cli/prompts.ts";
 
 function withInvocation(value, fn) {
   const prev = process.env.AUDIT_CODE_INVOCATION;

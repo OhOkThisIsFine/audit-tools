@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { buildAuditTasks } = await import("../dist/orchestrator.js");
+const { buildAuditTasks } = await import("../src/orchestrator.ts");
 
 function createUnitManifest() {
   return {

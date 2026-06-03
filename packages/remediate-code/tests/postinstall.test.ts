@@ -33,9 +33,14 @@ describe("scripts/postinstall.mjs", () => {
   });
 
   it("installs ~/.claude/commands/remediate-code.md", () => {
-    spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
+    const result = spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
       env: { ...process.env, HOME: TEMP_HOME, USERPROFILE: TEMP_HOME },
+      encoding: "utf8",
     });
+    // Surface a postinstall crash as a clear failing assertion rather than a
+    // confusing missing-file error downstream.
+    expect(result.status).toBe(0);
+    expect(result.error).toBeUndefined();
 
     const installedPath = join(
       TEMP_HOME,
@@ -47,9 +52,12 @@ describe("scripts/postinstall.mjs", () => {
   });
 
   it("installed command matches source prompt", async () => {
-    spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
+    const result = spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
       env: { ...process.env, HOME: TEMP_HOME, USERPROFILE: TEMP_HOME },
+      encoding: "utf8",
     });
+    expect(result.status).toBe(0);
+    expect(result.error).toBeUndefined();
 
     const installedPath = join(
       TEMP_HOME,
@@ -64,9 +72,12 @@ describe("scripts/postinstall.mjs", () => {
   });
 
   it("installs Codex skill files", () => {
-    spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
+    const result = spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
       env: { ...process.env, HOME: TEMP_HOME, USERPROFILE: TEMP_HOME },
+      encoding: "utf8",
     });
+    expect(result.status).toBe(0);
+    expect(result.error).toBeUndefined();
 
     const skillMd = join(
       TEMP_HOME,
@@ -99,9 +110,12 @@ describe("scripts/postinstall.mjs", () => {
   });
 
   it("installs OpenCode global command and restricted permissions", async () => {
-    spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
+    const result = spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
       env: { ...process.env, HOME: TEMP_HOME, USERPROFILE: TEMP_HOME },
+      encoding: "utf8",
     });
+    expect(result.status).toBe(0);
+    expect(result.error).toBeUndefined();
 
     const configPath = join(TEMP_HOME, ".config", "opencode", "opencode.json");
     const config = JSON.parse(await readFile(configPath, "utf8"));
@@ -114,15 +128,28 @@ describe("scripts/postinstall.mjs", () => {
 
   it("is idempotent — second run exits 0 and leaves files current", () => {
     const env = { ...process.env, HOME: TEMP_HOME, USERPROFILE: TEMP_HOME };
-    const r1 = spawnSync(process.execPath, [POSTINSTALL_SCRIPT], { env });
-    const r2 = spawnSync(process.execPath, [POSTINSTALL_SCRIPT], { env });
+    const r1 = spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
+      env,
+      encoding: "utf8",
+    });
+    const r2 = spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
+      env,
+      encoding: "utf8",
+    });
     expect(r1.status).toBe(0);
+    expect(r1.error).toBeUndefined();
     expect(r2.status).toBe(0);
+    expect(r2.error).toBeUndefined();
   });
 
   it("repairs a customized command file by updating it to the packaged loader", async () => {
     const env = { ...process.env, HOME: TEMP_HOME, USERPROFILE: TEMP_HOME };
-    spawnSync(process.execPath, [POSTINSTALL_SCRIPT], { env });
+    const setup = spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
+      env,
+      encoding: "utf8",
+    });
+    expect(setup.status).toBe(0);
+    expect(setup.error).toBeUndefined();
 
     const installedPath = join(
       TEMP_HOME,
@@ -136,9 +163,10 @@ describe("scripts/postinstall.mjs", () => {
       env,
       encoding: "utf8",
     });
-    const installed = await readFile(installedPath, "utf8");
-
     expect(result.status).toBe(0);
+    expect(result.error).toBeUndefined();
+
+    const installed = await readFile(installedPath, "utf8");
     expect(installed).toBe(await readFile(PROMPT_SOURCE, "utf8"));
     expect(result.stdout).toContain("updated global Claude command");
   });
