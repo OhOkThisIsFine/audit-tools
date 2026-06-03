@@ -297,9 +297,12 @@ run(npm, ["run", "build", "-w", "@audit-tools/shared"]);
 // across packages — each publish pushes a tag and a GitHub Release that triggers
 // CI — so verifying all changed packages first prevents a late failure from
 // leaving an earlier package half-published.
+const startTime = Date.now();
 for (const pkg of changed) {
   console.log(`Pre-flight gate: ${pkg.label} (verify:release)...`);
+  const t0 = Date.now();
   run(npm, ["--workspace", pkg.workspace, "run", "verify:release"]);
+  console.log(`Pre-flight gate: ${pkg.label} done (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 }
 
 // Publish in dependency order. The gate already ran above, so tell each
@@ -313,3 +316,5 @@ for (const pkg of changed) {
     env: publishEnv,
   });
 }
+const elapsed = Math.round((Date.now() - startTime) / 1000);
+console.log(`Release complete. ${changed.map(pkg => pkg.label).join(", ")} published in ${elapsed}s.`);

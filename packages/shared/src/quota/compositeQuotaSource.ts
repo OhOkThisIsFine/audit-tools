@@ -19,8 +19,12 @@ export class CompositeQuotaSource implements QuotaSource {
       try {
         const snapshot = await source.queryCurrentUsage(providerModelKey);
         if (snapshot) return snapshot;
-      } catch {
-        // Skip failing sources, try next
+      } catch (err) {
+        // Skip failing sources, try next — but surface the failure so operators
+        // can detect a persistently failing quota source.
+        console.warn(
+          `[compositeQuotaSource] quota source '${source.name}' threw: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
     return null;

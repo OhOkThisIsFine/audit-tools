@@ -5,7 +5,7 @@
   "oneOf": [
     {
       "type": "object",
-      "required": ["type"],
+      "required": ["type", "item_spec"],
       "properties": {
         "type": { "const": "item_spec" },
         "item_spec": { "$ref": "item_spec.schema.json" }

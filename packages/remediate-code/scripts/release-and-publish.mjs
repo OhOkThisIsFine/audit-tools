@@ -200,7 +200,10 @@ function bumpVersionAndTag(npm) {
 async function waitForReleaseRun(repoSlug, tag) {
   run("gh", ["workflow", "view", "publish-package.yml"]);
   const deadline = Date.now() + releaseRunTimeoutMs;
+  const startMs = Date.now();
+  let attempt = 0;
   while (Date.now() < deadline) {
+    attempt++;
     const response = runJson("gh", [
       "api",
       `repos/${repoSlug}/actions/workflows/publish-package.yml/runs?event=release&per_page=20`,
@@ -213,6 +216,12 @@ async function waitForReleaseRun(repoSlug, tag) {
       return match;
     }
     await sleep(pollIntervalMs);
+    if (shouldLogPoll(attempt, startMs)) {
+      const elapsedSec = Math.round((Date.now() - startMs) / 1000);
+      console.log(
+        `[release] waiting for publish-package release run for ${tag} (${elapsedSec}s elapsed, attempt ${attempt}); retrying in ${pollIntervalMs / 1000}s...`,
+      );
+    }
   }
   throw new Error(
     `Timed out waiting for publish-package release run for ${tag}.`,

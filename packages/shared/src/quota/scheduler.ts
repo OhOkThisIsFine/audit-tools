@@ -1,4 +1,4 @@
-import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
+import type { QuotaConfig, ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type {
   HostConcurrencyLimit,
   QuotaStateEntry,
@@ -32,8 +32,6 @@ export interface ScheduleWaveOptions {
   requestedConcurrency: number;
   /** Per-slot estimated tokens (one entry per worker slot). Used for TPM budget. */
   estimatedSlotTokens?: number[];
-  /** @deprecated Use estimatedSlotTokens instead. Average tokens per slot — used as fallback. */
-  estimatedPacketTokens?: number;
   quotaStateEntry?: QuotaStateEntry | null;
   hostConcurrencyLimit?: HostConcurrencyLimit | null;
   quotaSourceSnapshot?: QuotaUsageSnapshot | null;
@@ -47,6 +45,97 @@ function sumTopN(sorted: number[], n: number): number {
   return sum;
 }
 
+/**
+ * Compute the wave size after applying the RPM cap, the TPM cap, and exactly one
+ * of the learned-limit / unknown-provider-fallback caps — but BEFORE the
+ * real-time quota-source adjustment and the host-concurrency ceiling, both of
+ * which the caller applies. Pure: it never mutates an outer variable, so each
+ * cap is a single `Math.min` at the end of its branch rather than a scattered
+ * sequence of reassignments.
+ *
+ * The host-concurrency limit is deliberately NOT considered here: when the host
+ * reports its active-subagent capacity it is enforced as a hard ceiling by
+ * `applyHostConcurrencyLimit()` at the call site, so the only effect inside this
+ * function is that a reported host limit suppresses the conservative
+ * unknown-provider fallback (which exists solely as a no-signal default).
+ */
+function computeUncappedWaveSize(
+  waveSize: number,
+  limits: ResolvedLimits,
+  safetyMargin: number,
+  avgTokens: number,
+  slotsSorted: number[] | null,
+  quotaStateEntry: QuotaStateEntry | null,
+  hostConcurrencyLimit: HostConcurrencyLimit | null,
+  providerName: ResolvedProviderName,
+  quota: QuotaConfig,
+  halfLifeHours: number,
+): number {
+  let current = waveSize;
+
+  // Cap by requests-per-minute
+  if (limits.requests_per_minute != null) {
+    const rpmCap = Math.max(1, Math.floor(limits.requests_per_minute * safetyMargin));
+    current = Math.min(current, rpmCap);
+  }
+
+  // Cap by input tokens-per-minute
+  if (limits.input_tokens_per_minute != null && avgTokens > 0) {
+    const tpmBudget = limits.input_tokens_per_minute * safetyMargin;
+    if (slotsSorted && slotsSorted.length > 0) {
+      let candidateSize = current;
+      while (candidateSize > 1 && sumTopN(slotsSorted, candidateSize) > tpmBudget) {
+        candidateSize--;
+      }
+      current = Math.max(1, candidateSize);
+    } else {
+      const tpmCap = Math.max(1, Math.floor(tpmBudget / avgTokens));
+      current = Math.min(current, tpmCap);
+    }
+  }
+
+  if (quotaStateEntry) {
+    const rampUp = quota.ramp_up_enabled !== false;
+    const cap = rampUp
+      ? computeRampUpConcurrency(quotaStateEntry, halfLifeHours)
+      : computeMaxSafeConcurrency(quotaStateEntry, halfLifeHours);
+    return Math.min(current, cap);
+  } else if (hostConcurrencyLimit !== null) {
+    // The host explicitly reported its active-subagent capacity. That is a real
+    // concurrency signal, so it supersedes the conservative unknown-provider
+    // fallback. The reported limit is enforced as the hard ceiling by
+    // applyHostConcurrencyLimit() at the call site, so nothing is capped here.
+    return current;
+  } else {
+    const providerType = classifyProvider(providerName);
+    const fallbackCap =
+      providerType === "local"
+        ? quota.unknown_local_concurrency
+        : (quota.unknown_hosted_concurrency ??
+          agentHostFallbackConcurrency(providerName));
+    if (fallbackCap === "unlimited") {
+      // no cap — "unlimited" intentionally skips clamping
+    } else if (typeof fallbackCap === "number" && Number.isFinite(fallbackCap)) {
+      current = Math.min(current, Math.max(1, Math.floor(fallbackCap)));
+    }
+
+    // First-contact cap: when no learned history, no configured fallback, AND
+    // no RPM/TPM limits from any source, apply a conservative ceiling.
+    // This triggers only for unconfigured local providers (fallbackCap is
+    // undefined). Hosted providers default to 1 via unknown_hosted_concurrency,
+    // and "unlimited" is an explicit opt-out.
+    if (
+      fallbackCap == null &&
+      limits.requests_per_minute == null &&
+      limits.input_tokens_per_minute == null
+    ) {
+      const firstContactCap = quota.first_contact_concurrency ?? 3;
+      current = Math.min(current, Math.max(1, firstContactCap));
+    }
+    return current;
+  }
+}
+
 export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   const {
     providerName,
@@ -54,7 +143,6 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     hostModel,
     requestedConcurrency,
     estimatedSlotTokens,
-    estimatedPacketTokens = 0,
     quotaStateEntry = null,
     hostConcurrencyLimit = null,
     quotaSourceSnapshot = null,
@@ -66,7 +154,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     : null;
   const avgTokens = slotsSorted && slotsSorted.length > 0
     ? Math.floor(slotsSorted.reduce((a, b) => a + b, 0) / slotsSorted.length)
-    : estimatedPacketTokens;
+    : 0;
 
   const quota = sessionConfig.quota ?? {};
 
@@ -111,7 +199,6 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     limits.output_tokens_per_minute ??= discoveredLimits.output_tokens_per_minute ?? null;
   }
 
-  let waveSize = requestedConcurrency;
   let cooldownUntil: string | null = null;
 
   // Respect an active cooldown period
@@ -119,72 +206,28 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     const cooldownExpiry = new Date(quotaStateEntry.cooldown_until).getTime();
     if (cooldownExpiry > Date.now()) {
       cooldownUntil = quotaStateEntry.cooldown_until;
-      waveSize = 1;
     }
   }
 
-  if (!cooldownUntil) {
-    // Cap by requests-per-minute
-    if (limits.requests_per_minute != null) {
-      const rpmCap = Math.max(1, Math.floor(limits.requests_per_minute * safetyMargin));
-      waveSize = Math.min(waveSize, rpmCap);
-    }
-
-    // Cap by input tokens-per-minute
-    if (limits.input_tokens_per_minute != null && avgTokens > 0) {
-      const tpmBudget = limits.input_tokens_per_minute * safetyMargin;
-      if (slotsSorted && slotsSorted.length > 0) {
-        let candidateSize = waveSize;
-        while (candidateSize > 1 && sumTopN(slotsSorted, candidateSize) > tpmBudget) {
-          candidateSize--;
-        }
-        waveSize = Math.max(1, candidateSize);
-      } else {
-        const tpmCap = Math.max(1, Math.floor(tpmBudget / avgTokens));
-        waveSize = Math.min(waveSize, tpmCap);
-      }
-    }
-
-    if (quotaStateEntry) {
-      const rampUp = quota.ramp_up_enabled !== false;
-      const learnedCap = rampUp
-        ? computeRampUpConcurrency(quotaStateEntry, halfLifeHours)
-        : computeMaxSafeConcurrency(quotaStateEntry, halfLifeHours);
-      waveSize = Math.min(waveSize, learnedCap);
-    } else if (hostConcurrencyLimit !== null) {
-      // The host explicitly reported its active-subagent capacity. That is a
-      // real concurrency signal, so it supersedes the conservative
-      // unknown-provider fallback (which exists only when we have no signal at
-      // all). Leaving waveSize untouched here lets applyHostConcurrencyLimit()
-      // below enforce the reported limit as the hard ceiling, while any RPM/TPM
-      // caps applied above still bind.
-    } else {
-      const providerType = classifyProvider(providerName);
-      const fallbackCap =
-        providerType === "local"
-          ? quota.unknown_local_concurrency
-          : (quota.unknown_hosted_concurrency ??
-            agentHostFallbackConcurrency(providerName));
-      if (fallbackCap === "unlimited") {
-        // no cap — "unlimited" intentionally skips clamping
-      } else if (typeof fallbackCap === "number" && Number.isFinite(fallbackCap)) {
-        waveSize = Math.min(waveSize, Math.max(1, Math.floor(fallbackCap)));
-      }
-
-      // First-contact cap: when no learned history, no configured fallback, AND
-      // no RPM/TPM limits from any source, apply a conservative ceiling.
-      // This triggers only for unconfigured local providers (fallbackCap is
-      // undefined). Hosted providers default to 1 via unknown_hosted_concurrency,
-      // and "unlimited" is an explicit opt-out.
-      if (
-        fallbackCap == null &&
-        limits.requests_per_minute == null &&
-        limits.input_tokens_per_minute == null
-      ) {
-        const firstContactCap = quota.first_contact_concurrency ?? 3;
-        waveSize = Math.min(waveSize, Math.max(1, firstContactCap));
-      }
-    }
+  // During an active cooldown we throttle to a single request and skip all cap
+  // logic; otherwise apply RPM/TPM and learned/fallback caps. The host-concurrency
+  // ceiling is enforced uniformly below by applyHostConcurrencyLimit().
+  let waveSize = requestedConcurrency;
+  if (cooldownUntil) {
+    waveSize = 1;
+  } else {
+    waveSize = computeUncappedWaveSize(
+      waveSize,
+      limits,
+      safetyMargin,
+      avgTokens,
+      slotsSorted,
+      quotaStateEntry,
+      hostConcurrencyLimit,
+      providerName,
+      quota,
+      halfLifeHours,
+    );
   }
 
   // Apply real-time quota source data if available

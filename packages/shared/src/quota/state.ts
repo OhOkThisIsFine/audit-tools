@@ -4,6 +4,7 @@ import type { ConcurrencyBucket, ObservedWaveOutcome, QuotaState, QuotaStateEntr
 import { withFileLock } from "./fileLock.js";
 
 const MIN_EVIDENCE_WEIGHT = 0.5;
+const FAILURE_SPREAD_BUCKETS = 4;
 
 let _stateDir: string | undefined;
 let _statePath: string | undefined;
@@ -185,7 +186,7 @@ async function recordWaveOutcomeUnsafe(
     const failureWeight = outcome.outcome === "rate_limited"
       ? computeBackoffFailureWeight(new429Count)
       : 1.0;
-    for (let n = outcome.concurrency; n <= outcome.concurrency + 4; n++) {
+    for (let n = outcome.concurrency; n <= outcome.concurrency + FAILURE_SPREAD_BUCKETS; n++) {
       const bucket = entry.buckets[String(n)] ?? { success_weight: 0, failure_weight: 0 };
       bucket.failure_weight += failureWeight;
       entry.buckets[String(n)] = bucket;

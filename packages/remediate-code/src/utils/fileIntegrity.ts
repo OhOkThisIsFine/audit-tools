@@ -71,3 +71,20 @@ export function snapshotAffectedFileHashes(
     }
   }
 }
+
+/**
+ * Force-update every affected file's stored hash to its current content. Use
+ * after the implement phase legitimately rewrites files, so a later integrity
+ * check does not flag the run's own edits as a stale plan.
+ */
+export function resnapshotAffectedFileHashes(
+  root: string,
+  findings: Finding[],
+): void {
+  for (const finding of findings) {
+    for (const af of finding.affected_files) {
+      const absolute = isAbsolute(af.path) ? af.path : join(root, af.path);
+      af.hash_at_plan_time = hashFileSync(absolute);
+    }
+  }
+}

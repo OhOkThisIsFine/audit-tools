@@ -38,6 +38,7 @@ import { classifyFindingRisk, specIndicatesNoChange } from "./nextStep.js";
 import { scheduleWave, buildDispatchQuota } from "./waveScheduler.js";
 import { ESTIMATED_FINDING_OVERHEAD_TOKENS, ESTIMATED_BLOCK_BASE_TOKENS } from "../phases/plan.js";
 import { createWorktree, mergeWorktree, isGitRepo } from "./worktreeIsolation.js";
+import { resnapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 
 export interface DispatchOptions {
   root: string;
@@ -106,6 +107,27 @@ export function buildDocumentModelHint(finding: Finding): DispatchModelHint {
   }
 
   return { tier: "standard", reasons: ["default_document_item"] };
+}
+
+/**
+ * Construct the DispatchPlanItem for a document task. Single source of truth so
+ * prepareDocumentDispatch and mergeDocumentResults stay in lockstep on item shape.
+ */
+function buildDocumentDispatchItem(finding: Finding, dir: string): DispatchPlanItem {
+  const taskId = `document-${finding.id}`;
+  const promptPath = join(dir, `${taskId}.md`);
+  const resultPath = join(dir, `${taskId}.result.json`);
+  return {
+    task_id: taskId,
+    finding_id: finding.id,
+    prompt_path: promptPath,
+    result_path: resultPath,
+    model_hint: buildDocumentModelHint(finding),
+    access: {
+      read_paths: finding.affected_files.map((f) => f.path),
+      write_paths: [resultPath],
+    },
+  };
 }
 
 export function buildImplementModelHint(
@@ -274,8 +296,11 @@ function implementPrompt(
   return `
 # Implement Remediation Block
 
-You are implementing one bounded remediation block. Edit only files needed for
-the findings in this prompt. Do not change remediation state files directly.
+You are implementing one bounded remediation block. Edit the files needed for the
+findings in this prompt, and you MAY create new files (e.g. a test file or an
+extracted module) within the SAME package as those files when a finding's change
+calls for it. Do not edit unrelated files in other packages, and do not change
+remediation state files directly.
 
 ## Block
 
@@ -325,8 +350,10 @@ For an item you cannot safely finish, set \`status\` to \`blocked\` and include
 ## File access
 
 Read and write: ${[...new Set(items.flatMap(({ finding }) => finding.affected_files.map((f) => f.path)))].join(", ")}
+You may also create new files within the same package as those files (e.g. tests
+or extracted modules) when a finding requires it.
 Write result: ${resultPath}
-Do not modify files outside these paths.
+Do not modify unrelated files outside these paths or files in other packages.
 `;
 }
 
@@ -376,36 +403,24 @@ export async function prepareDocumentDispatch(
   const items: DispatchPlanItem[] = [];
   let reconciledCount = 0;
   for (const finding of candidateFindings) {
-    const taskId = `document-${finding.id}`;
-    const promptPath = join(dir, `${taskId}.md`);
-    const resultPath = join(dir, `${taskId}.result.json`);
+    const item = buildDocumentDispatchItem(finding, dir);
 
-    if (await tryLoadExistingDocumentResult(resultPath)) {
+    if (await tryLoadExistingDocumentResult(item.result_path)) {
       console.log(`Reusing existing document result for ${finding.id}`);
       reconciledCount++;
       continue;
     }
 
     await writeTextFile(
-      promptPath,
+      item.prompt_path,
       findingPrompt(
         finding,
-        resultPath,
+        item.result_path,
         conventions,
         themeHint(finding, state.plan.themes),
       ),
     );
-    items.push({
-      task_id: taskId,
-      finding_id: finding.id,
-      prompt_path: promptPath,
-      result_path: resultPath,
-      model_hint: buildDocumentModelHint(finding),
-      access: {
-        read_paths: finding.affected_files.map((f) => f.path),
-        write_paths: [resultPath],
-      },
-    });
+    items.push(item);
   }
   if (reconciledCount > 0) {
     console.log(`Reconciliation: reused ${reconciledCount} existing document results.`);
@@ -465,23 +480,12 @@ export async function mergeDocumentResults(
       continue;
     }
 
-    const taskId = `document-${finding.id}`;
-    const resultPath = join(dir, `${taskId}.result.json`);
-    if (!(await tryLoadExistingDocumentResult(resultPath))) {
+    const item = buildDocumentDispatchItem(finding, dir);
+    if (!(await tryLoadExistingDocumentResult(item.result_path))) {
       continue;
     }
 
-    itemsToMerge.push({
-      task_id: taskId,
-      finding_id: finding.id,
-      prompt_path: join(dir, `${taskId}.md`),
-      result_path: resultPath,
-      model_hint: buildDocumentModelHint(finding),
-      access: {
-        read_paths: finding.affected_files.map((f) => f.path),
-        write_paths: [resultPath],
-      },
-    });
+    itemsToMerge.push(item);
   }
 
   const clarifications: ClarificationRequest[] = [];
@@ -816,6 +820,12 @@ export async function mergeImplementResults(
     }
   }
 
+  // Re-baseline affected-file hashes: the implement phase legitimately rewrites
+  // these files, so a later integrity check must not flag the run's own edits as
+  // a stale plan when re-attempting any remaining blocked findings.
+  if (state.plan?.findings?.length) {
+    resnapshotAffectedFileHashes(options.root, state.plan.findings);
+  }
   state.status = "implementing";
   await store.saveState(state);
   return state;

@@ -7,6 +7,7 @@ import type { RepoManifest } from "../types.js";
 export interface FileIntegrityResult {
   changed_files: string[];
   missing_files: string[];
+  io_errors: string[];
   is_clean: boolean;
 }
 
@@ -22,6 +23,7 @@ export async function checkFileIntegrity(
 ): Promise<FileIntegrityResult> {
   const changed: string[] = [];
   const missing: string[] = [];
+  const ioErrors: string[] = [];
 
   const scopeSet = scope ? new Set(scope) : null;
   const files = scopeSet
@@ -42,14 +44,24 @@ export async function checkFileIntegrity(
       if (currentHash !== record.hash) {
         changed.push(record.path);
       }
-    } catch {
-      missing.push(record.path);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        missing.push(record.path);
+      } else {
+        console.warn(
+          `fileIntegrity: I/O error on ${record.path}: ${code ?? String(err)}`,
+        );
+        ioErrors.push(record.path);
+      }
     }
   }
 
   return {
     changed_files: changed,
     missing_files: missing,
-    is_clean: changed.length === 0 && missing.length === 0,
+    io_errors: ioErrors,
+    is_clean:
+      changed.length === 0 && missing.length === 0 && ioErrors.length === 0,
   };
 }

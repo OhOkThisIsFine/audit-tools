@@ -107,7 +107,6 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     hostModel,
     requestedConcurrency: input.itemCount,
     estimatedSlotTokens: input.estimatedSlotTokens,
-    estimatedPacketTokens: input.estimatedTokensPerItem,
     quotaStateEntry,
     hostConcurrencyLimit: hostLimit,
   });

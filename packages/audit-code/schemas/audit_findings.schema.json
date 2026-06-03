@@ -45,7 +45,8 @@
           "confidence",
           "lens",
           "summary",
-          "affected_files"
+          "affected_files",
+          "evidence"
         ],
         "properties": {
           "id": { "type": "string" },
@@ -76,7 +77,7 @@
           },
           "impact": { "type": "string" },
           "likelihood": { "type": "string" },
-          "evidence": { "type": "array", "items": { "type": "string" } },
+          "evidence": { "type": "array", "minItems": 1, "items": { "type": "string" } },
           "reproduction": { "type": "array", "items": { "type": "string" } },
           "systemic": { "type": "boolean" },
           "related_findings": { "type": "array", "items": { "type": "string" } },

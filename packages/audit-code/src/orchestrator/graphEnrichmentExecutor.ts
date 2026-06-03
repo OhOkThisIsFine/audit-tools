@@ -204,7 +204,10 @@ export async function runGraphEnrichmentExecutor(
         setting,
         edges_added: 0,
         routes_added: 0,
-        note: `Analyzer failed: ${error instanceof Error ? error.message : String(error)}.`,
+        note:
+          error instanceof Error
+            ? `Analyzer failed [${error.name}]: ${error.message}${error.stack ? ` — stack: ${error.stack.split("\n").slice(0, 4).join(" | ")}` : ""}`
+            : `Analyzer failed: ${String(error)}.`,
       });
       continue;
     }

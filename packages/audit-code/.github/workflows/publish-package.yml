@@ -157,7 +157,7 @@ jobs:
               exit 0
             fi
             if [[ "$attempt" -lt 24 ]]; then
-              echo "Registry propagation is still pending after attempt ${attempt}; retrying in 10 seconds..."
+              echo "Registry propagation is still pending after attempt ${attempt} (~$(( (attempt - 1) * 10 ))s elapsed); retrying in 10 seconds..."
               sleep 10
             fi
           done

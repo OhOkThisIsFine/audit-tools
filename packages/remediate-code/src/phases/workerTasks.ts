@@ -1,4 +1,4 @@
-import type { OrchestratorOptions } from "../orchestrator.js";
+import type { OrchestratorOptions } from "../types/options.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { resolveWorkerTaskTimeoutMs } from "../types/workerSession.js";
 import type { LaunchFreshSessionInput } from "@audit-tools/shared";

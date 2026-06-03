@@ -6,12 +6,9 @@ import { runDocumentPhase } from "./phases/document.js";
 import { runImplementPhase } from "./phases/implement.js";
 import { runTriagePhase } from "./phases/triage.js";
 import { runClosePhase } from "./phases/close.js";
+import { OrchestratorOptions } from "./types/options.js";
 
-export interface OrchestratorOptions {
-  root: string;
-  artifactsDir: string;
-  input?: string;
-}
+export type { OrchestratorOptions };
 
 function summarizeStateProgress(state: RemediationState): string {
   const itemStatuses = new Map<string, number>();
