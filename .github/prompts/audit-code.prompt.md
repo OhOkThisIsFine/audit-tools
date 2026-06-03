@@ -16,22 +16,30 @@ First, make sure the repository has current local audit assets:
 audit-code ensure --quiet
 ```
 
-Inside the `auditor-lambda` repository itself, use:
+When developing `auditor-lambda` itself, the entrypoint lives at
+`packages/audit-code/audit-code.mjs` (there is no `audit-code.mjs` at the
+monorepo root). From the monorepo root use:
 
 ```bash
-node audit-code.mjs ensure --quiet
+node packages/audit-code/audit-code.mjs ensure --quiet
 ```
 
-Then ask the backend for exactly one next step:
+Then ask the backend for exactly one next step. This host can dispatch review
+subagents in parallel (via the `Agent`/`task` tool), so report that capacity on
+every `next-step` call — otherwise the backend assumes it cannot parallelize and
+sizes dispatch waves to one packet at a time:
 
 ```bash
-audit-code next-step
+audit-code next-step --host-max-active-subagents 4
 ```
 
-Inside the `auditor-lambda` repository itself, use:
+`4` is a safe default for this host; raise it for more parallelism or lower it
+under rate-limit pressure. The backend's learned quota adapts from there.
+
+When developing `auditor-lambda` itself, from the monorepo root use:
 
 ```bash
-node audit-code.mjs next-step
+node packages/audit-code/audit-code.mjs next-step --host-max-active-subagents 4
 ```
 
 Read the returned JSON only far enough to find `prompt_path`, then read and
@@ -44,7 +52,8 @@ Use MCP tools only as a compatibility adapter when direct shell access to
 `continue_audit` tools return the same one-step contract; they are not a
 separate orchestration path.
 
-When a step prompt tells you to continue, run `audit-code next-step` again and
-follow only the newly returned `prompt_path`.
+When a step prompt tells you to continue, run
+`audit-code next-step --host-max-active-subagents 4` again and follow only the
+newly returned `prompt_path`.
 
 Stop when the current step prompt tells you to stop.
