@@ -750,4 +750,29 @@ async function main() {
   );
 }
 
-await main();
+// Remove the global `npm link` this smoke creates. Leaving it behind is a real
+// footgun: when this checkout (often an ephemeral git worktree) is later
+// removed, the global `auditor-lambda` package junction dangles and every
+// global `audit-code` invocation dies with a raw MODULE_NOT_FOUND. Always clean
+// up — even when the smoke fails partway — and never let cleanup failure mask
+// the smoke's own result.
+async function removeGlobalLink() {
+  await runCommand(platformCommand("npm"), ["rm", "--global", "auditor-lambda"], {
+    cwd: repoRoot,
+    label: "npm unlink (cleanup)",
+    failureHint:
+      "Run `npm rm --global auditor-lambda` to remove the smoke test's global link.",
+  }).catch((error) => {
+    process.stderr.write(
+      "[smoke:linked] warning: could not remove the global link; run " +
+        "`npm rm --global auditor-lambda` manually: " +
+        `${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  });
+}
+
+try {
+  await main();
+} finally {
+  await removeGlobalLink();
+}

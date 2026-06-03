@@ -170,7 +170,7 @@ async function buildParallelWaveSlots(params: {
     runCount += 1;
     const slotRunId = buildRunId(obligationId, runCount);
     const slotPaths = getRunPaths(artifactsDir, slotRunId);
-    const slotAuditResultsPath = join(slotPaths.runDir, "audit-results.json");
+    const slotAuditResultsPath = join(slotPaths.runDir, "run-results.json");
     const slotPendingTasksPath = join(slotPaths.runDir, "pending-audit-tasks.json");
     const slotReadPaths = new Set<string>();
     for (const t of group) {
@@ -677,7 +677,7 @@ async function runSingleWorkerStep(params: {
       : undefined;
   const providerAuditResultsPath =
     preferredExecutor === "agent"
-      ? join(paths.runDir, "audit-results.json")
+      ? join(paths.runDir, "run-results.json")
       : auditResultsPath;
   const providerReadPaths = new Set<string>();
   if (pendingAuditTasks) {
@@ -1015,7 +1015,7 @@ const explicitProvider = getExplicitProvider(argv);
         buildPendingAuditTasks(bundle),
       );
       const blockPendingTasksPath = join(blockPaths.runDir, "pending-audit-tasks.json");
-      const blockAuditResultsPath = join(blockPaths.runDir, "audit-results.json");
+      const blockAuditResultsPath = join(blockPaths.runDir, "run-results.json");
       const blockReadPaths = new Set<string>();
       for (const pt of blockPendingTasks) {
         for (const fp of pt.file_paths) blockReadPaths.add(fp);
@@ -1415,26 +1415,41 @@ const explicitProvider = getExplicitProvider(argv);
   const bundle = await loadArtifactBundle(artifactsDir);
   const decision = decideNextStep(bundle);
   const state = decision.state;
-  if (state.status === "complete") {
+  // A rendered report is the deliverable: if synthesis already produced one (or
+  // the state is formally complete), finish the run on it instead of stranding
+  // it in the artifacts dir behind a bare "max run limit" non-completion. This
+  // mirrors next-step's terminalStep so both loops present a completed audit the
+  // same way, even when finalization churned (runtime_validation <-> synthesis
+  // ping-pong, or filesystem-retry revision churn) up to the backstop. With no
+  // report yet, the run limit is a genuine non-terminal stop.
+  const reportRendered =
+    state.status === "complete" || Boolean(bundle.audit_report);
+  if (reportRendered) {
     await clearDispatchFiles(artifactsDir);
   }
+  const terminalState =
+    reportRendered && state.status !== "complete"
+      ? { ...state, status: "complete" as const }
+      : state;
   await emitEnvelope({
     root,
     artifactsDir,
     bundle,
-    audit_state: state,
+    audit_state: terminalState,
     selected_obligation:
       lastResult?.obligation_id ?? decision.selected_obligation,
     selected_executor:
       lastResult?.selected_executor ?? decision.selected_executor,
     progress_made: anyProgress,
     artifacts_written: Array.from(artifactsWritten),
-    progress_summary: `Reached max run limit (${maxRuns}) before terminal state.`,
-    next_likely_step:
-      state.status === "complete" ? null : decision.selected_obligation,
+    progress_summary:
+      reportRendered && state.status !== "complete"
+        ? `Audit report already rendered; completing the run after reaching the max run limit (${maxRuns}) during finalization.`
+        : `Reached max run limit (${maxRuns}) before terminal state.`,
+    next_likely_step: reportRendered ? null : decision.selected_obligation,
     providerName: provider.name,
   });
-  if (state.status === "complete") {
+  if (reportRendered) {
     await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
   }
 }

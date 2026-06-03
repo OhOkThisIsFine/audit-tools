@@ -146,6 +146,103 @@ test("audit-code wrapper reaches a blocked handoff by default and leaves only au
   });
 });
 
+test("run-to-completion completes on a rendered report even when finalization overruns max-runs", async () => {
+  await withTempRepo(async (root) => {
+    const blocked = JSON.parse((await runWrapper([], { cwd: root })).stdout);
+    assert.equal(blocked.audit_state.status, "blocked");
+
+    const tasks = JSON.parse(
+      await readFile(join(root, ".audit-artifacts", "audit_tasks.json"), "utf8"),
+    );
+    const resultsPath = join(root, "audit_results.json");
+    await writeFile(
+      resultsPath,
+      JSON.stringify(await buildSyntheticResults(tasks, root), null, 2),
+    );
+
+    // Ingestion (1) + synthesis (2) renders the report, but the deterministic
+    // narrative-omit completion run (3) is one past max-runs=2 — so the loop
+    // hits the backstop with the report already rendered. It must still finish
+    // on the report (complete + promote), never strand it behind a bare
+    // "max run limit" non-completion.
+    const completed = JSON.parse(
+      (
+        await runWrapper(["--results", resultsPath, "--max-runs", "2"], {
+          cwd: root,
+        })
+      ).stdout,
+    );
+    assert.equal(completed.audit_state.status, "complete");
+    assert.match(
+      await readFile(join(root, "audit-report.md"), "utf8"),
+      /# Audit Report/,
+    );
+    await assert.rejects(
+      () => access(join(root, ".audit-artifacts")),
+      /ENOENT/i,
+    );
+  });
+});
+
+test("next-step presents the rendered report instead of a run-limit block", async () => {
+  await withTempRepo(async (root) => {
+    const blocked = JSON.parse((await runWrapper([], { cwd: root })).stdout);
+    assert.equal(blocked.audit_state.status, "blocked");
+
+    const artifactsDir = join(root, ".audit-artifacts");
+    const tasks = JSON.parse(
+      await readFile(join(artifactsDir, "audit_tasks.json"), "utf8"),
+    );
+    // Disable the narrative so next-step's finalization stays fully
+    // deterministic (no synthesis_narrative host pause to interrupt the loop).
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      JSON.stringify({ synthesis: { narrative: false } }, null, 2),
+    );
+    const resultsPath = join(root, "audit_results.json");
+    await writeFile(
+      resultsPath,
+      JSON.stringify(await buildSyntheticResults(tasks, root), null, 2),
+    );
+    // Ingest the results without finishing finalization, leaving the audit one
+    // (or a few) deterministic runs short of complete with artifacts intact.
+    await runWrapper(["--results", resultsPath, "--max-runs", "1"], { cwd: root });
+
+    const reportPath = join(artifactsDir, "audit-report.md");
+    const reportExists = async () =>
+      access(reportPath).then(() => true).catch(() => false);
+
+    // Starve each next-step call to a single internal run so it repeatedly lands
+    // on the run-limit backstop while finalization is still in flight. The fix's
+    // invariant: once the report is rendered, the backstop must present it
+    // (present_report) — it must never surface a completed audit as `blocked`.
+    let presented = null;
+    for (let i = 0; i < 15 && !presented; i++) {
+      const step = JSON.parse(
+        (await runWrapper(["next-step", "--max-runs", "1"], { cwd: root })).stdout,
+      );
+      if (step.step_kind === "present_report") {
+        presented = step;
+        break;
+      }
+      assert.equal(
+        step.step_kind,
+        "blocked",
+        `expected only blocked/present_report while finalizing, got ${step.step_kind}`,
+      );
+      assert.equal(
+        await reportExists(),
+        false,
+        "a rendered report must be presented, never surfaced as a run-limit block",
+      );
+    }
+
+    assert.ok(presented, "next-step must reach present_report");
+    assert.equal(presented.status, "complete");
+    assert.match(presented.artifact_paths.final_report, /audit-report\.md$/);
+  });
+});
+
 test("audit-code wrapper can ingest a directory of batch result files and still collapse to audit-report.md", async () => {
   await withTempRepo(async (root) => {
     const blocked = JSON.parse((await runWrapper([], { cwd: root })).stdout);

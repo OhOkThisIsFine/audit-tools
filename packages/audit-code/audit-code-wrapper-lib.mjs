@@ -1277,6 +1277,11 @@ async function copyClaudeDesktopBundleFiles(bundleRoot, serverRoot) {
   await mkdir(serverRoot, { recursive: true });
   await cp(distEntry.replace(/dist[\\/]index\.js$/, 'dist'), join(bundleRoot, 'dist'), { recursive: true, force: true });
   await cp(join(repoRoot, 'schemas'), join(bundleRoot, 'schemas'), { recursive: true, force: true });
+  // dist/cli/dispatch.js reads dispatch/lens-definitions.json from the package
+  // root at runtime, so the bundle must ship the top-level dispatch/ data dir
+  // (lens-definitions.json + the standalone validate/merge helpers) the same way
+  // the npm `files` array does. Omitting it ENOENTs the first dispatch step.
+  await cp(join(repoRoot, 'dispatch'), join(bundleRoot, 'dispatch'), { recursive: true, force: true });
   await cp(join(repoRoot, 'skills', 'audit-code'), join(bundleRoot, 'skills', 'audit-code'), { recursive: true, force: true });
   await writeFile(join(bundleRoot, 'audit-code.mjs'), await readFile(join(repoRoot, 'audit-code.mjs')));
   await writeFile(join(bundleRoot, 'audit-code-wrapper-lib.mjs'), await readFile(join(repoRoot, 'audit-code-wrapper-lib.mjs')));

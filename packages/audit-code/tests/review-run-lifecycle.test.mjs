@@ -41,7 +41,7 @@ function agentTask(artifactsDir, root, runId = "RUN-1") {
     preferred_executor: "agent",
     result_path: join(artifactsDir, "runs", runId, "result.json"),
     worker_command: ["node", "cli.js", "worker-run", "--task", "task.json"],
-    audit_results_path: join(artifactsDir, "runs", runId, "audit-results.json"),
+    audit_results_path: join(artifactsDir, "runs", runId, "run-results.json"),
     pending_audit_tasks_path: join(
       artifactsDir,
       "runs",

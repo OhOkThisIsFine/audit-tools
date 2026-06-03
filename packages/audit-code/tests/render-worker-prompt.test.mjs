@@ -23,7 +23,7 @@ test("renderWorkerPrompt uses argv JSON for agent tasks and falls back to the de
     "--task",
     "/tmp/task with spaces.json",
   ],
-  audit_results_path: "/repo/.audit-artifacts/runs/run-1/audit-results.json",
+  audit_results_path: "/repo/.audit-artifacts/runs/run-1/run-results.json",
   timeout_ms: 1800000,
   max_retries: 0,
   });
@@ -56,7 +56,7 @@ test("renderWorkerPrompt suppresses worker_command execution when the task uses 
   preferred_executor: "agent",
   result_path: "/repo/.audit-artifacts/runs/run-2/result.json",
   worker_command: ["node", "/repo/audit-code.mjs", "worker-run"],
-  audit_results_path: "/repo/.audit-artifacts/runs/run-2/audit-results.json",
+  audit_results_path: "/repo/.audit-artifacts/runs/run-2/run-results.json",
   pending_audit_tasks_path:
   "/repo/.audit-artifacts/runs/run-2/pending-audit-tasks.json",
   worker_command_mode: "deferred",

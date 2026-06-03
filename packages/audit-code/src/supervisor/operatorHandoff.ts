@@ -407,7 +407,12 @@ export function buildAuditCodeHandoff(params: {
       current_task: artifactPaths.current_task!,
       current_prompt: artifactPaths.current_prompt!,
       audit_results: params.activeReviewRun.audit_results_path,
-      final_report: join(params.root, AUDIT_REPORT_FILENAME),
+      // Synthesis writes the report into the artifacts dir; it is only promoted
+      // to <repo-root>/audit-report.md at completion (which then removes the
+      // artifacts dir). A blocked-for-review handoff happens before that, so the
+      // advertised deliverable must point at its real mid-run location, not the
+      // repo-root path that does not exist yet.
+      final_report: join(params.artifactsDir, AUDIT_REPORT_FILENAME),
     };
   }
 

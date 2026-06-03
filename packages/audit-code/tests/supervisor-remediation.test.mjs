@@ -202,7 +202,7 @@ test("buildAuditCodeHandoff points active review runs at next-step", () => {
         "run-7",
         "pending-audit-tasks.json",
       ),
-      audit_results_path: join(artifactsDir, "runs", "run-7", "audit-results.json"),
+      audit_results_path: join(artifactsDir, "runs", "run-7", "run-results.json"),
       worker_command: ["node", "dist/index.js", "worker-run", "--task", "task.json"],
     },
   });
@@ -227,7 +227,15 @@ test("buildAuditCodeHandoff points active review runs at next-step", () => {
   );
   assert.equal(
     handoff.file_map?.audit_results,
-    join(artifactsDir, "runs", "run-7", "audit-results.json"),
+    join(artifactsDir, "runs", "run-7", "run-results.json"),
+  );
+  // The report lives in the artifacts dir until completion promotes it to the
+  // repo root (which also removes the artifacts dir). A blocked-for-review
+  // handoff happens before that, so final_report must advertise the artifacts
+  // location that actually exists mid-run — not the not-yet-created root path.
+  assert.equal(
+    handoff.file_map?.final_report,
+    join(artifactsDir, "audit-report.md"),
   );
   assert.equal(handoff.active_review_run?.run_id, "run-7");
 });
