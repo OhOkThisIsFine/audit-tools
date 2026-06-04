@@ -47,6 +47,31 @@ follow only that prompt. Do not read packet prompts, schemas, command catalogs,
 or handoff files unless the current step prompt explicitly instructs you to do
 so.
 
+If the returned step is a dispatch step, before launching subagents check
+`progress.confirmation_recommended` in `steps/current-step.json`:
+
+- If `progress.confirmation_recommended` is `true`, pause and ask the user:
+  "Ready to launch **{progress.dispatch_summary}** — continue?"
+  Wait for an affirmative reply before proceeding with subagent dispatch.
+- If `progress.confirmation_recommended` is `false` (or absent), proceed
+  immediately.
+
+After the **first** `next-step` (the intake step) completes, confirm the audit
+scope before proceeding. Read `scope_summary.json` from the `.audit-artifacts/`
+directory (if absent, extract the JSON that follows the `SCOPE_SUMMARY:` marker
+at the start of the step's `progress_summary`). It contains `repo_root`,
+`auditable_file_count`, `git_available`, and `mis_scope_smells`. Then:
+
+- Echo one informational line to the user:
+  `Auditing <repo_root>, <auditable_file_count> files, git: <yes|no>`.
+- If `mis_scope_smells` is **non-empty**, display each smell as a warning and ask
+  `Auditing <repo_root>, <auditable_file_count> files, git: <yes|no> — proceed? (yes/no)`.
+  Wait for an affirmative reply before the next `next-step`. If the user declines,
+  stop and suggest the correct root (e.g. the ancestor git repo or monorepo root
+  named in the smell).
+- If `mis_scope_smells` is empty, the echo is informational only — continue
+  automatically without interrupting the workflow.
+
 Use MCP tools only as a compatibility adapter when direct shell access to
 `audit-code next-step` is unavailable. The MCP `start_audit` and
 `continue_audit` tools return the same one-step contract; they are not a
