@@ -168,4 +168,29 @@ describe("runTriagePhase", () => {
     expect(state.items!.F1.rework_count).toBe(1);
     expect(state.items!.F2.rework_count).toBe(2);
   });
+
+  it("stops auto-retrying an item that has hit the rework cap and routes to human triage", async () => {
+    // Regression: a dependency-stranded item (marked blocked by handleDocumenting)
+    // must not be auto-retried forever — past the cap it routes to a real triage
+    // prompt instead of looping documenting->implement->triage.
+    const state = makeState({
+      F1: {
+        finding_id: "F1",
+        status: "blocked",
+        failure_reason: "dependency not satisfied",
+        block_id: "B1",
+        rework_count: 2,
+      },
+    });
+
+    await writeFile(
+      join(TEST_DIR, "impl_preview_acknowledged.json"),
+      JSON.stringify({ status: "confirmed" }),
+      "utf8",
+    );
+
+    const next = await runTriagePhase(state, BASE_OPTIONS);
+    expect(next.status).toBe("waiting_for_triage");
+    expect(state.items!.F1.status).toBe("blocked");
+  });
 });

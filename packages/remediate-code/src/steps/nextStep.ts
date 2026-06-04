@@ -203,15 +203,45 @@ function documentableFindings(state: RemediationState): Finding[] {
 
 function implementableBlocks(state: RemediationState): RemediationBlock[] {
   if (!state.plan || !state.items) return [];
-  return state.plan.blocks.filter((block) =>
-    block.items.some((findingId) => {
-      const item = state.items?.[findingId];
-      return item?.status === "documented" && Boolean(item.item_spec);
-    }),
+  return state.plan.blocks.filter(
+    (block) =>
+      dependenciesSatisfied(block, state) &&
+      block.items.some((findingId) => {
+        const item = state.items?.[findingId];
+        return item?.status === "documented" && Boolean(item.item_spec);
+      }),
   );
 }
 
 const TERMINAL_STATUSES = ["resolved", "resolved_no_change", "ignored", "deemed_inappropriate"];
+
+/** Whether an item status is terminal — no further implement work, and a worker result must never resurrect it. */
+export function isTerminalStatus(status: string): boolean {
+  return TERMINAL_STATUSES.includes(status);
+}
+
+/**
+ * A block is ready to implement only once every dependency block is fully
+ * resolved (all of its items terminal). Host-dispatched workers edit the main
+ * tree, so a dependent dispatched before its prerequisite would build on stale
+ * code — dependency-ordered blocks must land in separate waves. A `blocked`
+ * dependency item is NOT terminal here, so a failed prerequisite correctly
+ * leaves its dependents un-ready (they are marked blocked downstream).
+ */
+export function dependenciesSatisfied(
+  block: RemediationBlock,
+  state: RemediationState,
+): boolean {
+  for (const depId of block.dependencies ?? []) {
+    const depBlock = state.plan?.blocks.find((b) => b.block_id === depId);
+    if (!depBlock) continue; // unknown dependency: don't wait on it forever
+    for (const findingId of depBlock.items) {
+      const status = state.items?.[findingId]?.status;
+      if (!status || !TERMINAL_STATUSES.includes(status)) return false;
+    }
+  }
+  return true;
+}
 
 export const NO_CHANGE_RE = /\b(already correct|no.?op|no change|nothing to (change|do|fix)|code is correct)\b/i;
 
@@ -607,7 +637,11 @@ async function buildImplementDispatchStep(ctx: {
         };
 
         const entries: PreliminaryEntry[] = [];
-        for (const block of implementBlocks) {
+        // Build the risk preview from EVERY block with documented work, not just
+        // the dependency-ready wave-1 subset (implementableBlocks is now
+        // dependency-gated). The preview/ack is one-shot, so a later dependency
+        // wave would otherwise bypass the user's risk review entirely.
+        for (const block of state.plan?.blocks ?? []) {
           for (const id of block.items) {
             const item = state.items?.[id];
             const finding = state.plan?.findings.find((f) => f.id === id);
@@ -766,12 +800,19 @@ After showing the full tables, ask the user to choose one of:
 
 1. **Approve everything** — proceed with all changes as listed.
 2. **Skip specific Tier 3 findings** — name the IDs to exclude (they will be
-   marked \`deemed_inappropriate\`). Example: \`skip SEC-001, DI-001\`.
+   marked \`deemed_inappropriate\` and never implemented).
 3. **Decline entirely** — stop without making any source changes.
 
-If the user approves (all or in part), write \`{"status":"confirmed"}\` to exactly:
+If the user approves (all or in part), write the ack to exactly:
 
 \`${previewAckPath}\`
+
+\`\`\`json
+{ "status": "confirmed", "skip": ["FINDING-ID-TO-EXCLUDE"] }
+\`\`\`
+
+Use an empty \`skip\` array (\`[]\`) when the user approves everything; otherwise
+list the exact finding IDs they chose to skip.
 
 Then run:
 
@@ -786,6 +827,28 @@ Then run:
           impl_preview_ack: previewAckPath,
         },
       });
+    }
+
+    // The preview ack may approve only part of the plan: honor the skip list by
+    // marking those findings deemed_inappropriate so they are excluded from the
+    // implement dispatch (and cannot be resurrected by a worker result).
+    const previewAck = await readOptionalJsonFile<{ status?: string; skip?: unknown }>(
+      previewAckPath,
+    );
+    const skipIds = Array.isArray(previewAck?.skip)
+      ? previewAck.skip.filter((id): id is string => typeof id === "string")
+      : [];
+    if (skipIds.length > 0) {
+      let changed = false;
+      for (const id of skipIds) {
+        const it = state.items?.[id];
+        if (it && it.status !== "deemed_inappropriate") {
+          it.status = "deemed_inappropriate";
+          it.failure_reason = "Skipped by the user at the implementation preview.";
+          changed = true;
+        }
+      }
+      if (changed) await new StateStore(artifactsDir).saveState(state);
     }
 
     const sessionConfigImpl = options.sessionConfig ??
@@ -808,6 +871,14 @@ Then run:
       onlyBlock,
       waveOptsImpl,
     );
+    // Everything implementable may already be done or skipped (e.g. every Tier 3
+    // finding excluded) — fold straight to merge rather than dispatching a wave
+    // of zero workers.
+    if (dispatchPlan.items.length === 0) {
+      return {
+        continueWithState: await mergeImplementResults({ root, artifactsDir }, runId),
+      };
+    }
     const planPath = join(artifactsDir, "runs", runId, "implement", "dispatch-plan.json");
     const mergeCommand = loaderCommand(`merge-implement-results --run-id ${runId}`);
     const nextCommand = loaderCommand("next-step");
@@ -975,6 +1046,57 @@ async function handleNoState(
   });
 }
 
+async function handleInputConflict(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+  inputResolution: InputResolution,
+): Promise<RemediationStep> {
+  const planId = state.plan?.plan_id ?? "(none)";
+  const itemCount = state.items ? Object.keys(state.items).length : 0;
+  const suppliedInline =
+    inputResolution.checked.length > 0
+      ? inputResolution.checked.map((p) => `\`${p}\``).join(", ")
+      : "(input supplied)";
+  return writeCurrentStep({
+    stepKind: "input_conflict",
+    status: "blocked",
+    runId: stateRunId(state),
+    repoRoot: root,
+    artifactsDir,
+    prompt: `
+# New \`--input\` given, but a remediation run is already in progress
+
+A remediation run already exists in \`${artifactsDir}\` and has advanced past intake,
+so the new \`--input\` you passed will **not** replace it — it would be ignored and the
+existing plan resumed.
+
+- **Current state**: \`${state.status}\`
+- **Plan**: \`${planId}\` (${itemCount} item(s))
+- **Supplied input**: ${suppliedInline}
+
+Choose one explicitly and report the choice to the user:
+
+1. **Resume the existing run** — re-run WITHOUT \`--input\`: \`${loaderCommand("next-step")}\`
+2. **Start fresh from the new input** — first move aside or delete the existing
+   \`${artifactsDir}\` directory (and the stale repo-root \`remediation-report.md\` /
+   \`remediation-report.json\`, which would otherwise be overwritten on completion),
+   then re-run \`${loaderCommand("next-step --input <path>")}\`.
+
+Stop after presenting this choice. Do not advance the run until the user decides.
+`,
+    allowedCommands: [
+      loaderCommand("next-step"),
+      loaderCommand("next-step --input <path>"),
+    ],
+    stopCondition:
+      "Stop after presenting the resume-vs-restart choice to the user.",
+    artifactPaths: {
+      state_file: join(artifactsDir, "state.json"),
+    },
+  });
+}
+
 async function handleWaitingForClarification(
   root: string,
   artifactsDir: string,
@@ -1081,6 +1203,17 @@ async function handleDocumenting(
     return buildImplementDispatchStep({ root, artifactsDir, state, options, implementBlocks });
   }
 
+  // No dependency-ready block remains. Any item still 'documented' is stuck on a
+  // dependency that failed (a prerequisite block was blocked) or is part of a
+  // cycle — mark it blocked rather than stranding un-implementable documented work.
+  for (const it of Object.values(state.items ?? {})) {
+    if (it.status === "documented" && it.item_spec) {
+      it.status = "blocked";
+      it.failure_reason =
+        it.failure_reason ??
+        "Block dependencies were not satisfied (a prerequisite block was blocked, or dependencies are cyclic).";
+    }
+  }
   state.status = "implementing";
   await store.saveState(state);
   return { continueWithState: state };
@@ -1215,8 +1348,46 @@ async function decideNextStepInner(
     obligation: state?.status ?? "pending",
   });
 
+  const inputResolution = resolveInputPaths(root, options.input);
+
+  // A new --input against a run that already advanced past intake must not
+  // silently resume the old plan (nor silently complete on a stale report).
+  // Require the caller to choose resume-vs-restart explicitly.
+  if (inputResolution.supplied && state != null && state.status !== "pending") {
+    return handleInputConflict(root, artifactsDir, state, inputResolution);
+  }
+
+  // A finished run deletes .remediation-artifacts/ at close (state.json included),
+  // leaving only the root report. On a bare re-invocation with NO fresh-run intent
+  // (no --input, no conversation brief, no extracted plan), re-present that report
+  // instead of asking for a new starting point. Any fresh intent falls through and
+  // starts a new run, ignoring the stale report.
+  if (
+    state == null &&
+    !inputResolution.supplied &&
+    existsSync(join(root, "remediation-report.md"))
+  ) {
+    const ip = intakePaths(artifactsDir);
+    const freshIntent =
+      existsSync(ip.conversationStart) || existsSync(ip.extractedPlan);
+    if (!freshIntent) {
+      return handleComplete(root, artifactsDir, state);
+    }
+  }
+
+  // A leftover remediation-report.md while a fresh run IS being started will be
+  // overwritten at close — warn rather than treating it as "done".
+  if (
+    existsSync(join(root, "remediation-report.md")) &&
+    state?.status !== "complete"
+  ) {
+    process.stderr.write(
+      "[remediate-code] A previous remediation-report.md exists at the repo root; it will be overwritten when this run completes.\n",
+    );
+  }
+
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-    if (state?.status === "complete" || existsSync(join(root, "remediation-report.md"))) {
+    if (state?.status === "complete") {
       return handleComplete(root, artifactsDir, state);
     }
 

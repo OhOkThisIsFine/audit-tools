@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { StateStore, type RemediationState } from "../state/store.js";
 import type {
   ClarificationRequest,
@@ -34,10 +34,14 @@ import {
   type ImplementWorkerResult,
   type RemediationDispatchPlan,
 } from "./types.js";
-import { classifyFindingRisk, specIndicatesNoChange } from "./nextStep.js";
+import {
+  classifyFindingRisk,
+  specIndicatesNoChange,
+  dependenciesSatisfied,
+  isTerminalStatus,
+} from "./nextStep.js";
 import { scheduleWave, buildDispatchQuota } from "./waveScheduler.js";
 import { ESTIMATED_FINDING_OVERHEAD_TOKENS, ESTIMATED_BLOCK_BASE_TOKENS } from "../phases/plan.js";
-import { createWorktree, mergeWorktree, isGitRepo } from "./worktreeIsolation.js";
 import { resnapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 
 export interface DispatchOptions {
@@ -109,9 +113,108 @@ export function buildDocumentModelHint(finding: Finding): DispatchModelHint {
   return { tier: "standard", reasons: ["default_document_item"] };
 }
 
+const TEST_FILE_RE = /\.(test|spec)\.[cm]?[jt]sx?$/;
+const WALK_SKIP_DIRS = new Set([
+  "node_modules", ".git", "dist", "build", "coverage", "out",
+  ".next", ".turbo", ".audit-artifacts", ".remediation-artifacts",
+]);
+
+/** Bounded recursive scan for test files under `root` (skips vendor/build dirs). */
+function walkTestFiles(root: string, max = 400): string[] {
+  const out: string[] = [];
+  const stack: string[] = [root];
+  let visited = 0;
+  while (stack.length > 0 && out.length < max) {
+    const dir = stack.pop()!;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (++visited > 20000) return out;
+      if (entry.isDirectory()) {
+        if (WALK_SKIP_DIRS.has(entry.name) || entry.name.startsWith(".test-")) continue;
+        stack.push(join(dir, entry.name));
+      } else if (TEST_FILE_RE.test(entry.name)) {
+        out.push(join(dir, entry.name));
+        if (out.length >= max) break;
+      }
+    }
+  }
+  return out;
+}
+
 /**
- * Repo-relative paths every finding in a block touches, deduped. The implement
- * worker reads and writes exactly these.
+ * Best-effort: repo-relative test files that reference any of `sourceFiles` (by
+ * module basename). Pulling them into a block's access lets the worker that
+ * changes or removes a symbol also fix the tests that assert it, instead of
+ * leaving orphaned test breakage for a separate central mop-up. Matching is
+ * deliberately loose (a false positive only grants slightly broader, harmless
+ * write access; a false negative is the failure mode we want to avoid).
+ */
+export interface TestFileEntry {
+  rel: string;
+  content: string;
+}
+
+/**
+ * Walk the repo ONCE and read every test file's content (bounded). Built once per
+ * dispatch and shared across all blocks so the filesystem walk + reads are not
+ * repeated per block.
+ */
+export function buildTestFileIndex(root: string): TestFileEntry[] {
+  const index: TestFileEntry[] = [];
+  for (const testPath of walkTestFiles(root)) {
+    let content: string;
+    try {
+      content = readFileSync(testPath, "utf8");
+    } catch {
+      continue;
+    }
+    index.push({ rel: relative(root, testPath).replace(/\\/g, "/"), content });
+  }
+  return index;
+}
+
+export function collectReferencingTests(
+  index: TestFileEntry[],
+  sourceFiles: string[],
+): string[] {
+  if (sourceFiles.length === 0 || index.length === 0) return [];
+  const basenames = sourceFiles
+    .map((f) => (f.split(/[/\\]/).pop() ?? f).replace(/\.[cm]?[jt]sx?$/, ""))
+    .filter((b) => b.length > 1);
+  if (basenames.length === 0) return [];
+  const needles = basenames.map(
+    (b) => new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`),
+  );
+  const sourceSet = new Set(sourceFiles.map((f) => f.replace(/\\/g, "/")));
+  const result: string[] = [];
+  for (const { rel, content } of index) {
+    if (sourceSet.has(rel)) continue;
+    if (needles.some((re) => re.test(content))) result.push(rel);
+  }
+  return result;
+}
+
+/**
+ * The files an implement worker may touch for a finding: the pre-document
+ * affected_files PLUS any files the document phase declared in the item_spec's
+ * `touched_files` (the document worker can correct or extend the file set when
+ * the real fix lives elsewhere). Deduped.
+ */
+function itemFiles(finding: Finding, spec?: ItemSpec): string[] {
+  const files = finding.affected_files.map((f) => f.path);
+  if (spec?.touched_files) files.push(...spec.touched_files);
+  return [...new Set(files)];
+}
+
+/**
+ * Repo-relative paths every finding in a block touches, deduped — recomputed
+ * from the documented item_spec (not the frozen pre-document finding) so a fix
+ * the document phase relocated is inside the implementer's declared write set.
  */
 function blockAffectedFiles(
   block: RemediationBlock,
@@ -119,7 +222,8 @@ function blockAffectedFiles(
 ): string[] {
   const files = block.items.flatMap((findingId) => {
     const finding = state.plan?.findings.find((f) => f.id === findingId);
-    return finding?.affected_files.map((f) => f.path) ?? [];
+    if (!finding) return [];
+    return itemFiles(finding, state.items?.[findingId]?.item_spec);
   });
   return [...new Set(files)];
 }
@@ -127,8 +231,7 @@ function blockAffectedFiles(
 /**
  * Construct the DispatchPlanItem for an implement task. Single source of truth
  * so prepareImplementDispatch and mergeImplementResults stay in lockstep on item
- * shape. (prepareImplementDispatch additionally sets `worktree_path` on the
- * returned item after creating the worktree — that stays at the call site.)
+ * shape.
  */
 function buildImplementDispatchItem(
   block: RemediationBlock,
@@ -279,6 +382,7 @@ Use one of these shapes:
     "finding_id": "${finding.id}",
     "concrete_change": "...",
     "no_change": false,
+    "touched_files": ["repo/relative/path.ts"],
     "tests_to_write": [{ "name": "...", "assertions": ["..."] }],
     "not_applicable_steps": []
   }
@@ -288,6 +392,11 @@ Use one of these shapes:
 Set \`no_change\` to \`true\` when the existing code is already correct and no
 source changes are needed. When \`no_change\` is true, \`concrete_change\` should
 explain why the code is already correct.
+
+List every repo-relative path your fix will create or modify in \`touched_files\`.
+If the real fix belongs in files other than the \`Files\` listed above, put the
+correct paths there — the implementer is granted write access to exactly these
+(falling back to the finding's files only if you omit \`touched_files\`).
 
 If any remediation steps do not apply to this finding, list them in
 \`not_applicable_steps\`. Each entry must be an object with a \`step\` field
@@ -332,6 +441,9 @@ function implementPrompt(
     const item = state.items?.[findingId];
     const finding = state.plan?.findings.find((entry) => entry.id === findingId);
     if (!item?.item_spec || !finding) return [];
+    // Only render items that still need implementing — never a resolved item
+    // from a prior wave or one the user skipped (deemed_inappropriate/ignored).
+    if (item.status !== "documented") return [];
     return [{ finding, spec: item.item_spec }];
   });
 
@@ -347,7 +459,7 @@ remediation state files directly.
 ## Block
 
 - Block ID: ${block.block_id}
-- Findings: ${block.items.join(", ")}
+- Findings: ${items.map(({ finding }) => finding.id).join(", ")}
 
 ## Items
 
@@ -356,7 +468,7 @@ ${items
     ({ finding, spec }) => `
 ### ${finding.id} - ${finding.title}
 
-- Files: ${finding.affected_files.map((file) => file.path).join(", ")}
+- Files: ${itemFiles(finding, spec).join(", ")}
 - Summary: ${finding.summary}
 - Concrete change: ${spec.concrete_change}
 - Tests to write: ${spec.tests_to_write
@@ -391,9 +503,13 @@ For an item you cannot safely finish, set \`status\` to \`blocked\` and include
 
 ## File access
 
-Read and write: ${[...new Set(items.flatMap(({ finding }) => finding.affected_files.map((f) => f.path)))].join(", ")}
+Read and write: ${[...new Set(items.flatMap(({ finding, spec }) => itemFiles(finding, spec)))].join(", ")}
 You may also create new files within the same package as those files (e.g. tests
 or extracted modules) when a finding requires it.
+If your change renames, moves, or removes a symbol, also update the existing test
+files that reference it — fixing tests for a changed surface is part of this
+block, not a later cleanup. Test files that reference these files are included in
+your write access.
 Write result: ${resultPath}
 Do not modify unrelated files outside these paths or files in other packages.
 `;
@@ -643,6 +759,10 @@ export async function prepareImplementDispatch(
   const candidateBlocks = state.plan.blocks.filter((block) => {
     if (onlyBlockId && block.block_id !== onlyBlockId) return false;
     if (seenBlockIds.has(block.block_id)) return false;
+    // Honor block dependencies: a dependent block is not dispatched until every
+    // prerequisite block is fully resolved, so dependency-ordered work runs in
+    // separate waves rather than racing on the main tree.
+    if (!dependenciesSatisfied(block, state)) return false;
     const hasWork = block.items.some((findingId) => {
       const item = state.items?.[findingId];
       return item?.status === "documented" && item.item_spec;
@@ -654,16 +774,54 @@ export async function prepareImplementDispatch(
     return false;
   });
 
+  // Walk the repo for test files ONCE per dispatch (not once per block) and cache
+  // their contents; collectReferencingTests then matches in memory.
+  const testIndex = buildTestFileIndex(options.root);
+
   const items: DispatchPlanItem[] = [];
   let reconciledCount = 0;
+  // Wave-time file-disjointness: mergeBlocksSharingFiles enforced disjoint
+  // affected_files at plan time, but the document phase's touched_files and the
+  // pulled-in test files can introduce NEW shared paths. Track the write paths
+  // already claimed by this wave and defer any block that would collide, so two
+  // workers never edit the same file concurrently in the main tree. A deferred
+  // block stays `documented` and re-dispatches in a later wave.
+  const claimedWritePaths = new Set<string>();
+  let deferredForFileConflict = 0;
   for (const block of candidateBlocks) {
     const item = buildImplementDispatchItem(block, state, dir);
 
+    // Pull test files that reference this block's source into its access, so the
+    // worker that changes or removes a symbol also fixes the tests that assert it
+    // (otherwise their breakage is orphaned for a separate central mop-up).
+    const referencingTests = collectReferencingTests(
+      testIndex,
+      blockAffectedFiles(block, state),
+    );
+    if (referencingTests.length > 0 && item.access) {
+      item.access.read_paths = [
+        ...new Set([...item.access.read_paths, ...referencingTests]),
+      ];
+      item.access.write_paths = [
+        ...new Set([...item.access.write_paths, ...referencingTests]),
+      ];
+    }
+
+    // Reconcile an already-produced result regardless of wave packing.
     if (await tryLoadExistingImplementResult(item.result_path)) {
       console.log(`Reusing existing implement result for block ${block.block_id}`);
       reconciledCount++;
       continue;
     }
+
+    const writePaths = (item.access?.write_paths ?? []).filter(
+      (p) => p !== item.result_path,
+    );
+    if (writePaths.some((p) => claimedWritePaths.has(p))) {
+      deferredForFileConflict++;
+      continue;
+    }
+    for (const p of writePaths) claimedWritePaths.add(p);
 
     await writeTextFile(
       item.prompt_path,
@@ -674,21 +832,19 @@ export async function prepareImplementDispatch(
   if (reconciledCount > 0) {
     console.log(`Reconciliation: reused ${reconciledCount} existing implement results.`);
   }
-
-  // Create worktrees for parallel isolation when multiple blocks dispatch
-  if (items.length > 1 && await isGitRepo(options.root)) {
-    for (const item of items) {
-      if (!item.block_id) continue;
-      try {
-        const wtPath = await createWorktree(options.root, options.artifactsDir, item.block_id);
-        item.worktree_path = wtPath;
-      } catch (error) {
-        process.stderr.write(
-          `[remediate-code] Worktree creation failed for block ${item.block_id}, using shared repo: ${error instanceof Error ? error.message : String(error)}\n`,
-        );
-      }
-    }
+  if (deferredForFileConflict > 0) {
+    process.stderr.write(
+      `[remediate-code] dispatch: deferred ${deferredForFileConflict} block(s) with overlapping write paths to a later wave.\n`,
+    );
   }
+
+  // Host-dispatched implement workers edit the main tree directly (their prompts
+  // use repo-root-relative paths), so per-block worktrees were created but never
+  // written to — mergeWorktree no-op'd and the `remediate-<block>` branches only
+  // collided across runs. Parallel safety instead comes from the planner: blocks
+  // that share a file are merged (mergeBlocksSharingFiles) and dependency-ordered
+  // blocks dispatch in separate waves (dependenciesSatisfied), so the blocks in
+  // any one wave are file-disjoint and safe to edit concurrently in place.
 
   const plan: RemediationDispatchPlan = {
     contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
@@ -794,11 +950,14 @@ export async function mergeImplementResults(
         ? state.plan?.blocks.find((b) => b.block_id === item.block_id)
         : undefined;
       for (const findingId of block?.items ?? []) {
-        if (state.items[findingId]) {
-          state.items[findingId].status = "blocked";
-          state.items[findingId].failure_reason =
-            `Implementation worker did not produce a result file: ${item.result_path}`;
-        }
+        const stateItem = state.items[findingId];
+        // Don't flip a terminal item (resolved, or user-skipped
+        // deemed_inappropriate/ignored) to blocked — only items that were
+        // actually awaiting this worker's result.
+        if (!stateItem || isTerminalStatus(stateItem.status)) continue;
+        stateItem.status = "blocked";
+        stateItem.failure_reason =
+          `Implementation worker did not produce a result file: ${item.result_path}`;
       }
       continue;
     }
@@ -808,6 +967,11 @@ export async function mergeImplementResults(
       const stateItem = state.items[itemResult.finding_id];
       if (!stateItem) {
         throw new Error(`Unknown finding_id in implement result: ${itemResult.finding_id}`);
+      }
+      // A worker may report a finding that is already terminal (user-skipped, or
+      // resolved in a prior wave) — never let a result resurrect or overwrite it.
+      if (isTerminalStatus(stateItem.status)) {
+        continue;
       }
       if (itemResult.status === "resolved") {
         const spec = stateItem.item_spec;
@@ -831,22 +995,6 @@ export async function mergeImplementResults(
         stateItem.status = "blocked";
         stateItem.failure_reason =
           itemResult.failure_reason ?? "Implementation worker blocked.";
-      }
-    }
-  }
-
-  // Merge worktrees back to main branch
-  for (const item of itemsToMerge) {
-    if (!item.worktree_path || !item.block_id) continue;
-    const mergeResult = await mergeWorktree(options.root, options.artifactsDir, item.block_id);
-    if (mergeResult.conflicted) {
-      process.stderr.write(`[remediate-code] ${mergeResult.error}\n`);
-      const block = state.plan?.blocks.find((b) => b.block_id === item.block_id);
-      for (const findingId of block?.items ?? []) {
-        if (state.items[findingId]) {
-          state.items[findingId].status = "blocked";
-          state.items[findingId].failure_reason = mergeResult.error ?? "Merge conflict";
-        }
       }
     }
   }
@@ -877,7 +1025,14 @@ export async function mergeImplementResults(
       `${implementRejected} rejected\n`,
   );
 
-  state.status = "implementing";
+  // Route back to documenting while documented work remains (later dependency
+  // waves, or blocks deferred this wave because a prerequisite was still
+  // running) so the next next-step dispatches the now-ready blocks; otherwise
+  // advance to implementing → triage.
+  const moreToImplement = Object.values(state.items).some(
+    (it) => it.status === "documented" && Boolean(it.item_spec),
+  );
+  state.status = moreToImplement ? "documenting" : "implementing";
   await store.saveState(state);
   return state;
 }

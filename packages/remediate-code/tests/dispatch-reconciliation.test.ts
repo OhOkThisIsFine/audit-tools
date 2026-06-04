@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -376,5 +376,128 @@ describe("mergeImplementResults per-item validation", () => {
     await expect(
       mergeWithItemResults([{ finding_id: "F-001", status: "maybe" }]),
     ).rejects.toThrow(/status must be resolved or blocked/);
+  });
+});
+
+describe("host-dispatch backlog fixes — dependencies, skip, access", () => {
+  const opts = () => ({ root: REPO_DIR, artifactsDir: ARTIFACTS_DIR });
+
+  it("recomputes block access from the documented item_spec touched_files", async () => {
+    const state = makeDocumentingState();
+    state.items!["F-001"].item_spec!.touched_files = ["src/relocated.ts", "src/a.ts"];
+    await saveState(state);
+
+    const plan = await prepareImplementDispatch(opts(), "RUN-1");
+    const b1 = plan.items.find((i) => i.block_id === "B-001")!;
+    expect(b1.access!.write_paths).toContain("src/relocated.ts");
+    expect(b1.access!.write_paths).toContain("src/a.ts");
+  });
+
+  it("defers a dependent block until its dependency resolves (separate waves)", async () => {
+    const state = makeDocumentingState();
+    state.plan!.blocks[1].dependencies = ["B-001"];
+    state.plan!.blocks[1].parallel_safe = false;
+    await saveState(state);
+
+    const wave1 = await prepareImplementDispatch(opts(), "RUN-1");
+    const w1 = wave1.items.map((i) => i.block_id);
+    expect(w1).toContain("B-001");
+    expect(w1).not.toContain("B-002");
+
+    state.items!["F-001"].status = "resolved";
+    await saveState(state);
+    const wave2 = await prepareImplementDispatch(opts(), "RUN-2");
+    expect(wave2.items.map((i) => i.block_id)).toContain("B-002");
+  });
+
+  it("excludes a skipped item from its block's implement prompt", async () => {
+    const state = makeDocumentingState();
+    state.plan!.blocks = [
+      { block_id: "B-001", items: ["F-001", "F-002"], parallel_safe: true },
+    ];
+    state.items!["F-001"].block_id = "B-001";
+    state.items!["F-002"].block_id = "B-001";
+    state.items!["F-002"].status = "deemed_inappropriate";
+    await saveState(state);
+
+    const plan = await prepareImplementDispatch(opts(), "RUN-1");
+    const b1 = plan.items.find((i) => i.block_id === "B-001")!;
+    const prompt = await readFile(b1.prompt_path, "utf8");
+    expect(prompt).toContain("F-001");
+    expect(prompt).not.toContain("F-002");
+  });
+
+  it("merge does not resurrect a deemed_inappropriate (skipped) item", async () => {
+    const state = makeDocumentingState();
+    state.items!["F-002"].status = "deemed_inappropriate";
+    await saveState(state);
+
+    const plan = await prepareImplementDispatch(opts(), "RUN-1");
+    const b1 = plan.items.find((i) => i.block_id === "B-001")!;
+    expect(plan.items.map((i) => i.block_id)).not.toContain("B-002");
+
+    await writeFile(
+      b1.result_path,
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [
+          { finding_id: "F-001", status: "resolved", evidence: ["done"] },
+          { finding_id: "F-002", status: "resolved", evidence: ["sneaky"] },
+        ],
+      }),
+      "utf8",
+    );
+    const merged = await mergeImplementResults(opts(), "RUN-1");
+    expect(merged.items!["F-002"].status).toBe("deemed_inappropriate");
+    expect(merged.items!["F-001"].status).toBe("resolved");
+  });
+
+  it("pulls test files that reference a block's source into its access", async () => {
+    const state = makeDocumentingState();
+    state.plan!.findings[0].affected_files = [{ path: "src/widget.ts" }];
+    await saveState(state);
+    await mkdir(join(REPO_DIR, "src"), { recursive: true });
+    await writeFile(
+      join(REPO_DIR, "src", "widget.test.ts"),
+      `import { Widget } from "./widget.js";\ntest("widget", () => new Widget());\n`,
+      "utf8",
+    );
+
+    const plan = await prepareImplementDispatch(opts(), "RUN-1");
+    const b1 = plan.items.find((i) => i.block_id === "B-001")!;
+    expect(
+      b1.access!.write_paths.some((p) => p.endsWith("widget.test.ts")),
+    ).toBe(true);
+  });
+
+  it("a missing worker result does not flip a skipped item to blocked", async () => {
+    const state = makeDocumentingState();
+    state.plan!.blocks = [
+      { block_id: "B-001", items: ["F-001", "F-002"], parallel_safe: true },
+    ];
+    state.items!["F-001"].block_id = "B-001";
+    state.items!["F-002"].block_id = "B-001";
+    state.items!["F-002"].status = "deemed_inappropriate";
+    await saveState(state);
+
+    await prepareImplementDispatch(opts(), "RUN-1");
+    // No result file is written for B-001.
+    const merged = await mergeImplementResults(opts(), "RUN-1");
+    expect(merged.items!["F-001"].status).toBe("blocked"); // awaited the result
+    expect(merged.items!["F-002"].status).toBe("deemed_inappropriate"); // not flipped
+  });
+
+  it("defers a block whose touched_files overlap another block in the same wave", async () => {
+    const state = makeDocumentingState();
+    // Both document workers relocated their fix to the SAME new file.
+    state.items!["F-001"].item_spec!.touched_files = ["src/shared-new.ts"];
+    state.items!["F-002"].item_spec!.touched_files = ["src/shared-new.ts"];
+    await saveState(state);
+
+    const plan = await prepareImplementDispatch(opts(), "RUN-1");
+    const blocks = plan.items.map((i) => i.block_id);
+    expect(blocks).toHaveLength(1); // one deferred to a later wave
+    expect(["B-001", "B-002"]).toContain(blocks[0]);
   });
 });

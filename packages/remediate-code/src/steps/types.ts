@@ -23,6 +23,7 @@ export type RemediationStepKind =
   | "collect_triage"
   | "close_run"
   | "present_report"
+  | "input_conflict"
   | "unhandled_state";
 
 import type { StepStatus, DispatchModelHint } from "@audit-tools/shared";
@@ -62,7 +63,6 @@ export interface DispatchPlanItem {
   artifact_paths?: Record<string, string>;
   model_hint?: DispatchModelHint;
   access?: AccessDeclaration;
-  worktree_path?: string;
 }
 
 export interface RemediationDispatchPlan {
