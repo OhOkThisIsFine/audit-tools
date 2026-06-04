@@ -168,6 +168,18 @@ export function validateItemSpec(
   );
   if (!isRecord(value)) return issues;
 
+  if (
+    value.touched_files !== undefined &&
+    (!Array.isArray(value.touched_files) ||
+      value.touched_files.some((p) => typeof p !== "string"))
+  ) {
+    pushValidationIssue(
+      issues,
+      `${path}.touched_files`,
+      "Expected an array of strings when present.",
+    );
+  }
+
   if (!Array.isArray(value.tests_to_write)) {
     pushValidationIssue(issues, `${path}.tests_to_write`, "Expected an array.");
   } else {

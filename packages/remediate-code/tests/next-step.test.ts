@@ -93,6 +93,40 @@ describe("decideNextStep", () => {
     expect(await readFile(step.prompt_path, "utf8")).toMatch(/Present Remediation Report/);
   });
 
+  it("stale remediation-report.md does not complete a fresh --input run", async () => {
+    // A leftover report must NOT short-circuit a run that has fresh intent: with
+    // a new --input, planning proceeds instead of declaring the prior run done.
+    await writeFile(join(REPO_DIR, "remediation-report.md"), "# Stale prior run\n", "utf8");
+    const inputPath = join(REPO_DIR, "new-brief.md");
+    await writeFile(inputPath, "# A new brief\n", "utf8");
+
+    const step = await decideNextStep({ root: REPO_DIR, input: inputPath });
+
+    expect(step.step_kind).not.toBe("present_report");
+  });
+
+  it("re-presents the report on a bare re-invocation after a completed+cleaned run", async () => {
+    // close deletes .remediation-artifacts/ (state.json), leaving only the root
+    // report. A bare next-step with no fresh intent should re-present it.
+    await writeFile(join(REPO_DIR, "remediation-report.md"), "# Done\n", "utf8");
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("present_report");
+  });
+
+  it("new --input against an in-progress run emits input_conflict instead of silently resuming", async () => {
+    await saveState(makePlanningState());
+    const inputPath = join(REPO_DIR, "new-feedback.md");
+    await writeFile(inputPath, "# A different brief\n", "utf8");
+
+    const step = await decideNextStep({ root: REPO_DIR, input: inputPath });
+
+    expect(step.step_kind).toBe("input_conflict");
+    expect(step.status).toBe("blocked");
+    expect(await readFile(step.prompt_path, "utf8")).toMatch(/already exists/i);
+  });
+
   it("writes a structured run log recording the state and resulting step", async () => {
     const step = await decideNextStep({ root: REPO_DIR });
 

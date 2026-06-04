@@ -14,6 +14,13 @@ interface TriageResolution {
   }[];
 }
 
+// Cap on silent auto-retries (when the user approved at preview). Without it, an
+// item that fails deterministically — including one stranded by an unsatisfiable
+// block dependency, which handleDocumenting marks `blocked` — would be retried
+// forever (documenting→implement→triage→documenting). After the cap, fall through
+// to a real triage prompt so the user decides (ignore/halt).
+const MAX_AUTO_RETRIES = 2;
+
 export async function runTriagePhase(
   state: RemediationState,
   options: OrchestratorOptions,
@@ -74,6 +81,10 @@ export async function runTriagePhase(
       if (existsSync(previewAckPath)) {
         let autoRetried = false;
         for (const item of blockedItems) {
+          // Stop auto-retrying an item that has already been retried the cap
+          // number of times — it leaves it `blocked` so the fall-through below
+          // routes the run to a human triage prompt instead of looping.
+          if ((item.rework_count ?? 0) >= MAX_AUTO_RETRIES) continue;
           item.status = "documented";
           item.rework_count = (item.rework_count ?? 0) + 1;
           autoRetried = true;

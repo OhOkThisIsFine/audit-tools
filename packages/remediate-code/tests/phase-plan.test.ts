@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rm, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runPlanPhase } from "../src/phases/plan.js";
+import {
+  runPlanPhase,
+  mergeBlocksSharingFiles,
+  buildCoverageLedger,
+} from "../src/phases/plan.js";
 import { validateRemediationPlan } from "../src/validation/remediationState.js";
 
 // Derive the directory in ESM (no implicit `__dirname` under NodeNext/ESM).
@@ -396,5 +400,116 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
       input: reportPath,
     });
     expect(whole.plan!.blocks.length).toBe(1);
+  });
+
+  it("emits remediation-coverage.json accounting for every source finding", async () => {
+    const state = await runPlanPhase(baseState, { ...baseOptions, input: FIXTURE });
+    const coverage = JSON.parse(
+      await readFile(join(TEST_DIR, "remediation-coverage.json"), "utf8"),
+    );
+    expect(coverage.source_finding_count).toBe(2);
+    expect(coverage.planned_count).toBe(2);
+    expect(coverage.dropped_count).toBe(0);
+    expect(coverage.entries).toHaveLength(2);
+    expect(
+      coverage.entries.every((e: any) => e.disposition === "planned"),
+    ).toBe(true);
+    const f1 = coverage.entries.find((e: any) => e.finding_id === "F-001");
+    expect(f1.block_id).toBe(state.items!["F-001"].block_id);
+  });
+});
+
+describe("mergeBlocksSharingFiles", () => {
+  const f = (id: string, file: string) => mkFinding(id, id, { files: [file] });
+
+  it("merges parallel blocks that touch a shared file", () => {
+    const findings = [f("F-1", "shared.ts"), f("F-2", "shared.ts")];
+    const blocks = [
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
+      { block_id: "B-002", items: ["F-2"], parallel_safe: true },
+    ];
+    const merged = mergeBlocksSharingFiles(blocks, findings as any);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].items.sort()).toEqual(["F-1", "F-2"]);
+    expect(merged[0].parallel_safe).toBe(true);
+  });
+
+  it("does not merge blocks already serialized by a dependency", () => {
+    const findings = [f("F-1", "shared.ts"), f("F-2", "shared.ts")];
+    const blocks = [
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
+      {
+        block_id: "B-002",
+        items: ["F-2"],
+        parallel_safe: false,
+        dependencies: ["B-001"],
+      },
+    ];
+    const merged = mergeBlocksSharingFiles(blocks, findings as any);
+    expect(merged).toHaveLength(2);
+  });
+
+  it("leaves blocks that share no file untouched", () => {
+    const findings = [f("F-1", "a.ts"), f("F-2", "b.ts")];
+    const blocks = [
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
+      { block_id: "B-002", items: ["F-2"], parallel_safe: true },
+    ];
+    const merged = mergeBlocksSharingFiles(blocks, findings as any);
+    expect(merged).toHaveLength(2);
+  });
+
+  it("remaps an external dependency onto the merged block id", () => {
+    // B-001 and B-002 share a file and merge to B-001; B-003 depended on B-002,
+    // so after the merge it must depend on B-001 instead.
+    const findings = [
+      f("F-1", "shared.ts"),
+      f("F-2", "shared.ts"),
+      f("F-3", "other.ts"),
+    ];
+    const blocks = [
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
+      { block_id: "B-002", items: ["F-2"], parallel_safe: true },
+      {
+        block_id: "B-003",
+        items: ["F-3"],
+        parallel_safe: false,
+        dependencies: ["B-002"],
+      },
+    ];
+    const merged = mergeBlocksSharingFiles(blocks, findings as any);
+    expect(merged).toHaveLength(2);
+    const b3 = merged.find((b) => b.block_id === "B-003")!;
+    expect(b3.dependencies).toEqual(["B-001"]);
+  });
+});
+
+describe("buildCoverageLedger", () => {
+  it("classifies planned, folded, and dropped findings", () => {
+    const sourceFindings = [
+      mkFinding("A", "Kept", { files: ["a.ts"] }),
+      mkFinding("B", "Folded", { files: ["a.ts"] }),
+      mkFinding("C", "NoEvidence", { files: ["c.ts"] }),
+    ];
+    const ledger = buildCoverageLedger({
+      planId: "PLAN-X",
+      sourceFindings: sourceFindings as any,
+      droppedNoEvidence: ["C"],
+      mergeMap: new Map([["B", "A"]]),
+      items: { A: { finding_id: "A", status: "pending", block_id: "B-001" } },
+    });
+    expect(ledger.source_finding_count).toBe(3);
+    expect(ledger.planned_count).toBe(1);
+    expect(ledger.folded_count).toBe(1);
+    expect(ledger.dropped_count).toBe(1);
+    const byId = Object.fromEntries(
+      ledger.entries.map((e) => [e.finding_id, e]),
+    );
+    expect(byId.A.disposition).toBe("planned");
+    expect(byId.A.block_id).toBe("B-001");
+    expect(byId.B.disposition).toBe("folded_into");
+    expect(byId.B.folded_into).toBe("A");
+    expect(byId.C.disposition).toBe("dropped_no_evidence");
+    expect(byId.C.rationale).toBeTruthy();
   });
 });

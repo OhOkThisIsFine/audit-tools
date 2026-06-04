@@ -61,6 +61,7 @@ Evidence:
 ${(finding.evidence ?? []).map((e) => `- ${e}`).join("\n")}
 ${extraContext}${themeHint}${repoConventions ? `\n${repoConventions}\n` : ""}
 If the finding is clear (or clarified by the context above), output a JSON object with type "item_spec" and the item_spec.
+The item_spec MUST include a "touched_files" array of every repo-relative path your fix will create or modify. If the real fix belongs in files other than the Affected Files above, put the correct paths there — the implementer is granted write access to exactly these files.
 If the finding is ambiguous, output a JSON object with type "clarification_request" and an array of clarifications.
 When requesting clarifications, you MUST use one of the following exact categories:
 "public_contract", "behavioral_semantics", "scope_of_fix", "dependency_introduction", "compatibility_policy", "intent_vs_symptom", "issue_appropriateness".

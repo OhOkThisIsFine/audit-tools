@@ -48,6 +48,13 @@ export interface ItemSpec {
   finding_id: string;
   concrete_change: string;
   no_change?: boolean;
+  /**
+   * Repo-relative paths the fix will create or modify, as declared by the
+   * document worker. The document phase can correct or extend the finding's
+   * pre-document affected_files (e.g. when the real fix lives elsewhere); block
+   * access is recomputed from this union so the implementer may write them.
+   */
+  touched_files?: string[];
   tests_to_write: {
     name: string;
     assertions: string[];

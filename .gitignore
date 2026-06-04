@@ -23,6 +23,7 @@ dist/
 /remediation-report.md
 /remediation-report.json
 /remediation-outcomes.json
+/remediation-coverage.json
 /remediation-closing-result.json
 /docs/remediation-plan/
 /result.json
