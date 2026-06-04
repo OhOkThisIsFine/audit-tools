@@ -230,6 +230,48 @@ await test("FINDING-011: fan-out after an accepted canary result dispatches the 
   assert.equal(canaryPlan.length, 1);
 });
 
+await test("FINDING-011 regression: canary graduates to fan-out even after merge-and-ingest prunes the accepted canary tasks from the pending list", async (t) => {
+  const tasks = multiPacketTasks();
+  const { artifactsDir, runDir } = await makeArtifactsDir(tasks);
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  const first = await run(artifactsDir);
+  assert.equal(first.phase, "canary");
+
+  // Accept the canary packet's tasks (submit-packet writes these result files).
+  const resultMap = await readJson(join(runDir, "dispatch-result-map.json"));
+  const canaryTaskIds = resultMap.entries
+    .filter((e) => e.packet_id === first.canary_packet_id)
+    .map((e) => e.task_id);
+  await acceptPacketTasks(runDir, canaryTaskIds);
+
+  // Reproduce what merge-and-ingest does after accepting the canary: it rewrites
+  // pending-audit-tasks.json to EXCLUDE the now-completed canary tasks. The old
+  // firstContact signal (result files keyed off the pending list) broke on exactly
+  // this — the canary's task_ids leave the list, so no still-pending task has a
+  // result file, priorResultTaskIds stayed empty, and the canary re-fired forever
+  // (1 packet per cycle, never reaching fan-out). Graduation must now come from the
+  // active-dispatch marker (run_id), not the prune-corrupted result-file scan.
+  const remaining = tasks.filter((task) => !canaryTaskIds.includes(task.task_id));
+  await writeFile(
+    join(runDir, "pending-audit-tasks.json"),
+    JSON.stringify(remaining),
+    "utf8",
+  );
+
+  const second = await run(artifactsDir);
+  assert.equal(second.phase, "fan_out", "canary must graduate to fan-out, not re-fire");
+  assert.equal(second.canary_packet_id, null);
+  // Every remaining packet is dispatched in this one fan-out round (parallelizable),
+  // instead of one packet per cycle.
+  const plan2 = await readJson(join(runDir, "dispatch-plan.json"));
+  assert.equal(plan2.length, remaining.length);
+  assert.ok(
+    !plan2.some((p) => p.packet_id === first.canary_packet_id),
+    "canary packet is not re-dispatched",
+  );
+});
+
 await test("FINDING-011: fan-out warns when the prior canary produced no accepted result", async (t) => {
   const tasks = multiPacketTasks();
   const { artifactsDir, runDir } = await makeArtifactsDir(tasks);

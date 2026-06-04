@@ -134,6 +134,8 @@ export function renderDispatchReviewPrompt(params: {
     "",
     "**After all waves complete:**",
     "",
+    "Run these backend commands directly — do not pipe them through a token-compression wrapper (e.g. `opentoken wrap`). Their JSON / prompt-contract output is parsed verbatim by the backend and this host, and wrapping corrupts it.",
+    "",
     "Run exactly:",
     "",
     `  ${mergeCommand}`,

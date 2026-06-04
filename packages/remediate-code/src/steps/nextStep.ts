@@ -529,7 +529,9 @@ If your provider has rate limits, pace launches accordingly.
 For each item in \`items\`, dispatch one subagent with that item's
 \`prompt_path\`. Each subagent must write only its assigned \`result_path\`.
 
-After all results exist, run:
+After all results exist, run these backend commands directly — do not pipe them
+through a token-compression wrapper (e.g. \`opentoken wrap\`); their JSON /
+prompt-contract output is parsed verbatim and wrapping corrupts it:
 
 \`${mergeCommand}\`
 
@@ -943,7 +945,9 @@ For each item in \`items\`, dispatch one subagent with that item's
 \`prompt_path\`. Each subagent may edit source files needed for that bounded
 block and must write only its assigned \`result_path\`.
 
-After all results exist, run:
+After all results exist, run these backend commands directly — do not pipe them
+through a token-compression wrapper (e.g. \`opentoken wrap\`); their JSON /
+prompt-contract output is parsed verbatim and wrapping corrupts it:
 
 \`${mergeCommand}\`
 

@@ -106,8 +106,22 @@ export function quoteCommandArg(value: string): string {
   return /[\s"]/u.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
 }
 
+/**
+ * Normalize a generated command token to POSIX path separators. These command
+ * strings are embedded in step prompts and `allowed_commands` and run by the
+ * host — often through a bash-like shell, which treats `\` as an escape and
+ * silently corrupts Windows absolute paths (`node C:\a\b.mjs` collapses to
+ * `node C:ab.mjs`). Node accepts forward slashes on Windows, and `/` survives
+ * bash, PowerShell, and cmd alike. Only tokens that actually carry a backslash
+ * are touched, and no non-path argument in this CLI contains one, so this is a
+ * targeted normalization rather than a blanket rewrite.
+ */
+export function toPosixCommandToken(value: string): string {
+  return value.includes("\\") ? value.replace(/\\/g, "/") : value;
+}
+
 export function renderCommand(argv: string[]): string {
-  return argv.map((item) => quoteCommandArg(item)).join(" ");
+  return argv.map((item) => quoteCommandArg(toPosixCommandToken(item))).join(" ");
 }
 
 export function summarizeLaunchExit(result: {

@@ -11,11 +11,14 @@ anti-rot rule as CLAUDE.md's *"docs capture durable concepts, not current state"
   file instead of inlining. Separately, the Workflow tool's `args` can arrive as a
   JSON *string* rather than a parsed object, so `args.foo` is `undefined`; defend
   with `const a = typeof args === 'string' ? JSON.parse(args) : args`.
-- **`opentoken wrap` mangles orchestrator step JSON.** Running `remediate-code` /
-  `audit-code next-step` through `opentoken wrap` compresses the step-contract JSON
-  into an ambiguous, self-referential token dictionary. Read the rendered prompt
-  file (`.remediation-artifacts/steps/current-prompt.md`) directly instead of
-  parsing the wrapped stdout. Fix: exempt orchestrator prompt reads from wrapping.
+- **The `Bash` tool mangles Windows backslash paths.** A plain command like
+  `node C:\…\audit-code.mjs merge-and-ingest …` run through `Bash` drops the
+  backslashes (`C:\a\b` → `C:ab` → MODULE_NOT_FOUND). Use the `PowerShell` tool for
+  Windows-absolute-path commands, or forward slashes (Node accepts `C:/…`). The
+  orchestrators now emit POSIX-slash commands for this reason (`renderCommand`), so
+  the trap is mainly for hand-typed paths. (The `opentoken wrap` step-JSON mangling
+  friction graduated to a command-class wrap policy — control-plane commands are
+  wrap-exempt, encoded in the dispatch prompts + memory `opentoken-wrap-mangles-orchestrator-prompts`.)
 - **Fresh git worktrees lack `node_modules`.** A newly created worktree resolves
   `@audit-tools/shared` against a stale `dist/` → spurious "no exported member"
   type errors. Run `npm install` in the worktree before `npm run check`.
@@ -52,7 +55,10 @@ anti-rot rule as CLAUDE.md's *"docs capture durable concepts, not current state"
 
 - **User-selected lenses.** Let the operator choose which audit lenses run instead
   of always running the full set.
-- **Adaptive, multi-agent quota-aware dispatch.** Detect quota per model+provider,
-  adapt dispatch on the fly, and eventually dispatch to multiple CLI agents
-  simultaneously under different constraints (a heterogeneous fleet). Today's wave
-  scheduler is effectively single-provider.
+- **Heterogeneous multi-agent dispatch — capacity-pool foundation shipped 2026-06-04.**
+  `computeDispatchCapacity({ pools, pendingItemTokens })` in `@audit-tools/shared`
+  sizes dispatch JIT and sums concurrent slots across `CapacityPool`s; both
+  orchestrators route through it (single host pool today). Remaining toward the
+  heterogeneous fleet: per-packet provider assignment + partitioning `pendingItemTokens`
+  across pools, host-model detection (`hostModel` is usually null), and building a real
+  second pool (an IDE model or another CLI provider). See memory `quota-dispatch-vision`.
