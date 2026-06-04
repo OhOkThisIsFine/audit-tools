@@ -15,7 +15,8 @@
     "./tooling/*": "./dist/tooling/*.js",
     "./observability/*": "./dist/observability/*.js",
     "./tokens": "./dist/tokens.js",
-    "./git": "./dist/git.js"
+    "./git": "./dist/git.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "dist/**"

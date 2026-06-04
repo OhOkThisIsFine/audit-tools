@@ -56,21 +56,23 @@ test("single pool, no host ceiling: a parallel agent host fans out instead of se
   assert.ok(capacity.total_slots > 1, `expected parallel dispatch, got ${capacity.total_slots}`);
 });
 
-test("multi-pool: total capacity sums each pool's slots (heterogeneous-dispatch foundation)", () => {
-  const capacity = computeDispatchCapacity({
-    pools: [
-      hostPool("host-a", { hostConcurrencyLimit: hostLimit(4) }),
-      hostPool("host-b", { hostConcurrencyLimit: hostLimit(3) }),
-    ],
-    sessionConfig: {},
-    pendingItemTokens: new Array(12).fill(1000),
-  });
-  assert.equal(capacity.pools.length, 2);
-  assert.equal(
-    capacity.total_slots,
-    capacity.pools[0].slots + capacity.pools[1].slots,
+test("multi-pool dispatch is not implemented yet — computeDispatchCapacity fails fast on >1 pool", () => {
+  // The shape is multi-pool-ready (CapacityPool[], per-pool allocations), but
+  // until pendingItemTokens is partitioned across pools the naive per-pool sum
+  // would over-allocate capacity and double-count tokens, so >1 pool is rejected
+  // rather than returned silently wrong.
+  assert.throws(
+    () =>
+      computeDispatchCapacity({
+        pools: [
+          hostPool("host-a", { hostConcurrencyLimit: hostLimit(4) }),
+          hostPool("host-b", { hostConcurrencyLimit: hostLimit(3) }),
+        ],
+        sessionConfig: {},
+        pendingItemTokens: new Array(12).fill(1000),
+      }),
+    /multi-pool dispatch is not implemented/,
   );
-  assert.equal(capacity.total_slots, 4 + 3);
 });
 
 test("empty pools is a programming error", () => {
