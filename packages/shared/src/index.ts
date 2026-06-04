@@ -307,6 +307,13 @@ export type {
   ScheduleWaveOptions,
   DiscoveredRateLimitsInput,
 } from "./quota/scheduler.js";
+export { computeDispatchCapacity } from "./quota/capacity.js";
+export type {
+  CapacityPool,
+  PoolDispatchAllocation,
+  DispatchCapacity,
+  ComputeDispatchCapacityInput,
+} from "./quota/capacity.js";
 export { LearnedQuotaSource } from "./quota/learnedQuotaSource.js";
 export { CompositeQuotaSource } from "./quota/compositeQuotaSource.js";
 export type { ErrorParser } from "./quota/errorParsers/index.js";

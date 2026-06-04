@@ -12,7 +12,7 @@ import type {
 } from "./types.js";
 import { REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION } from "./types.js";
 import {
-  scheduleWave as scheduleWaveQuota,
+  computeDispatchCapacity,
   resolveHostActiveSubagentLimit,
   readQuotaState,
   buildProviderModelKey,
@@ -113,17 +113,27 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     // Best-effort: proceed without learned state
   }
 
-  const schedule = scheduleWaveQuota({
-    providerName,
+  // Size dispatch through the shared capacity model (single host pool today;
+  // mirrors audit-code). The full pending layout is the ambition; the pool's
+  // current limits reduce it to real capacity.
+  const capacity = computeDispatchCapacity({
+    pools: [
+      {
+        id: buildProviderModelKey(providerName, hostModel),
+        providerName,
+        hostModel,
+        hostConcurrencyLimit: hostLimit,
+        quotaStateEntry,
+      },
+    ],
     sessionConfig,
-    hostModel,
-    requestedConcurrency: input.itemCount,
-    estimatedSlotTokens: input.estimatedSlotTokens,
-    quotaStateEntry,
-    hostConcurrencyLimit: hostLimit,
+    pendingItemTokens:
+      input.estimatedSlotTokens?.length === input.itemCount
+        ? input.estimatedSlotTokens
+        : new Array(input.itemCount).fill(0),
   });
 
-  return schedule;
+  return capacity.primary.schedule;
 }
 
 export function buildDispatchQuota(

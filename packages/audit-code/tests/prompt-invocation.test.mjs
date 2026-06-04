@@ -46,6 +46,26 @@ test("continuation commands honor AUDIT_CODE_INVOCATION (source-checkout dogfood
   );
 });
 
+test("continuation commands emit POSIX separators so Windows backslash paths survive a bash host", () => {
+  withInvocation(
+    JSON.stringify(["node", "C:\\Code\\audit-tools\\packages\\audit-code\\audit-code.mjs"]),
+    () => {
+      // Backslash invocation path AND backslash root/artifacts-dir args.
+      const next = nextStepCommand("C:\\Code\\repo", "C:\\Code\\repo\\.audit-artifacts");
+      const merge = mergeAndIngestCommand("C:\\Code\\repo\\.audit-artifacts", "run-1");
+      // No backslash may survive: a bash host treats `\` as an escape and would
+      // collapse `node C:\a\b.mjs` to `node C:ab.mjs`.
+      assert.doesNotMatch(next, /\\/);
+      assert.doesNotMatch(merge, /\\/);
+      assert.match(
+        next,
+        /^node C:\/Code\/audit-tools\/packages\/audit-code\/audit-code\.mjs next-step --root C:\/Code\/repo --artifacts-dir C:\/Code\/repo\/\.audit-artifacts$/,
+      );
+      assert.match(merge, /--run-id run-1$/);
+    },
+  );
+});
+
 test("malformed AUDIT_CODE_INVOCATION falls back to the audit-code bin", () => {
   withInvocation("not-json", () => {
     assert.match(nextStepCommand("/repo", "/a"), /^audit-code next-step /);

@@ -56,6 +56,15 @@ export type {
 export { scheduleWave, buildProviderModelKey } from "@audit-tools/shared";
 export type { ScheduleWaveOptions } from "@audit-tools/shared";
 
+// Capacity model: the JIT, multi-pool-capable layer both orchestrators size
+// dispatch with. Single host pool today; provider pools slot in later.
+export { computeDispatchCapacity } from "@audit-tools/shared";
+export type {
+  CapacityPool,
+  PoolDispatchAllocation,
+  DispatchCapacity,
+} from "@audit-tools/shared";
+
 // Remediator-specific: hostLimits
 export {
   detectHostActiveSubagentLimit,

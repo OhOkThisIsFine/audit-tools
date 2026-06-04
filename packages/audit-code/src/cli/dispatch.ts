@@ -23,7 +23,7 @@ import { buildFileAnchorSummary, type FileAnchorSummary } from "../orchestrator/
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import {
-  scheduleWave,
+  computeDispatchCapacity,
   buildProviderModelKey,
   resolveHostModel,
   readQuotaState,
@@ -31,7 +31,7 @@ import {
   lookupDiscoveredLimits,
   mergeDiscoveredLimits,
 } from "../quota/index.js";
-import type { DiscoveredRateLimits, DispatchQuota } from "../quota/index.js";
+import type { CapacityPool, DiscoveredRateLimits, DispatchQuota } from "../quota/index.js";
 import {
   taskResultPath,
   packetPromptPath,
@@ -500,7 +500,17 @@ export async function prepareDispatchArtifacts(params: {
   // FINDING-011: single-worker canary. On first contact with a multi-packet run,
   // dispatch only the top packet; the held-back packets' tasks keep no result
   // file, so they re-enter `dispatchTasks` on the next call (fan-out).
-  const firstContact = priorResultTaskIds.size === 0;
+  //
+  // Graduation signal: the canary fires only on the FIRST dispatch of a run and
+  // then fans out. "First dispatch" is recorded directly by active-dispatch.json
+  // (written at the end of every prepareDispatch), so derive it from
+  // priorActiveDispatch.run_id. The previous signal — "no pending task has a
+  // result file" (priorResultTaskIds.size === 0) — silently broke: merge-and-ingest
+  // prunes accepted task_ids out of pending-audit-tasks.json, so post-canary the
+  // still-pending tasks have no result files, priorResultTaskIds stayed empty, and
+  // the canary re-fired every cycle (1 packet forever, never reaching fan-out).
+  const priorDispatchThisRun = priorActiveDispatch?.run_id === runId;
+  const firstContact = !priorDispatchThisRun;
   const canaryEnabled = sessionConfig.dispatch?.canary !== false; // default on
   const doCanary = firstContact && canaryEnabled && packets.length > 1;
   const canaryPacketId = doCanary ? packets[0]!.packet_id : null;
@@ -801,17 +811,27 @@ export async function prepareDispatchArtifacts(params: {
     DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
   const quotaSource = buildQuotaSource({ halfLifeHours });
   const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(quotaProviderKey).catch(() => null);
-  const waveSchedule = scheduleWave({
+  // Size the dispatch just-in-time against the full pending layout (one token
+  // estimate per emitted packet) and the host pool's current limits, rather than
+  // a preset wave size. `parallel_workers` is no longer the ambition — it is
+  // folded into hostConcurrencyLimit as a ceiling (resolveHostActiveSubagentLimit).
+  // Today there is a single pool (the conversation host's subagents); a
+  // heterogeneous provider pool slots in here without changing the call.
+  const hostPool: CapacityPool = {
+    id: quotaProviderKey,
     providerName: quotaProviderName,
-    sessionConfig,
     hostModel,
-    requestedConcurrency: sessionConfig.parallel_workers ?? plan.length,
-    estimatedSlotTokens: perPacketTokens,
-    quotaStateEntry,
     hostConcurrencyLimit,
+    quotaStateEntry,
     discoveredLimits,
     quotaSourceSnapshot,
+  };
+  const dispatchCapacity = computeDispatchCapacity({
+    pools: [hostPool],
+    sessionConfig,
+    pendingItemTokens: perPacketTokens,
   });
+  const waveSchedule = dispatchCapacity.primary.schedule;
   const dispatchQuota: DispatchQuota = {
     contract_version: "audit-code-dispatch-quota/v1alpha2",
     run_id: runId,
@@ -820,9 +840,9 @@ export async function prepareDispatchArtifacts(params: {
     confidence: waveSchedule.confidence,
     source: waveSchedule.source,
     host_concurrency_limit: waveSchedule.host_concurrency_limit,
-    wave_size: waveSchedule.wave_size,
-    estimated_wave_tokens: waveSchedule.estimated_wave_tokens,
-    cooldown_until: waveSchedule.cooldown_until,
+    wave_size: dispatchCapacity.total_slots,
+    estimated_wave_tokens: dispatchCapacity.estimated_wave_tokens,
+    cooldown_until: dispatchCapacity.cooldown_until,
     quota_source_snapshot: waveSchedule.quota_source_snapshot ?? null,
     backoff_state: null,
   };
@@ -897,7 +917,7 @@ export async function prepareDispatchArtifacts(params: {
   // FINDING-012: pure-arithmetic fan-out summary the loader can gate on.
   const fanout = computeDispatchFanout({
     agentCount: plan.length,
-    waveSize: waveSchedule.wave_size,
+    waveSize: dispatchCapacity.total_slots,
     confirmThreshold: sessionConfig.dispatch?.confirm_threshold,
   });
 
@@ -908,7 +928,7 @@ export async function prepareDispatchArtifacts(params: {
     packet_count: plan.length,
     task_count: orderedTasks.length,
     skipped_task_count: priorResultTaskIds.size,
-    wave_size: waveSchedule.wave_size,
+    wave_size: dispatchCapacity.total_slots,
     phase,
     canary_packet_id: canaryPacketId,
     agent_count: fanout.agent_count,

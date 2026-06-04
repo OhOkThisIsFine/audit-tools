@@ -161,7 +161,7 @@ function assertOpenCodeAuditPermissions(config) {
   assert.equal(config.agent?.auditor?.permission?.bash?.["audit-code synthesize*"], "deny");
 }
 
-async function withTempRepo(fn) {
+async function withTempRepo(fn, { canary = false } = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-wrapper-"));
   const root = join(tempDir, "repo");
   try {
@@ -193,16 +193,19 @@ async function withTempRepo(fn) {
         "",
       ].join("\n"),
     );
-    // These end-to-end tests submit every planned packet in a single round and
+    // Most end-to-end tests submit every planned packet in a single round and
     // assert all tasks are accepted. The single-worker canary (default on) would
-    // hold back all but the top packet on first contact, so pin canary off to
-    // exercise the deterministic single-round dispatch these fixtures expect.
-    // (Canary phase behavior is covered by dispatch-features.test.mjs.)
+    // hold back all but the top packet on first contact, so canary is pinned OFF
+    // by default to exercise the deterministic single-round dispatch those
+    // fixtures expect. Pass { canary: true } to drive the real canary -> fan-out
+    // cycle. (Canary unit behavior also lives in dispatch-features.test.mjs.)
     await mkdir(join(root, ".audit-artifacts"), { recursive: true });
     await writeFile(
       join(root, ".audit-artifacts", "session-config.json"),
       JSON.stringify(
-        { provider: "local-subprocess", dispatch: { canary: false } },
+        canary
+          ? { provider: "local-subprocess" }
+          : { provider: "local-subprocess", dispatch: { canary: false } },
         null,
         2,
       ) + "\n",
@@ -628,6 +631,92 @@ test("merge-and-ingest is idempotent on re-run and never truncates results", asy
       "the second merge must not rewrite the transient results file",
     );
   });
+});
+
+test("canary then fan-out: merge graduates the canary and never reports held-back tasks as failures", async () => {
+  await withTempRepo(async (root) => {
+    const { stdout } = await runWrapper([], { cwd: root });
+    const parsed = JSON.parse(stdout);
+    const runId = parsed.handoff.active_review_run?.run_id;
+    const artifactsDir = parsed.handoff.artifacts_dir;
+    assert.ok(runId);
+    assert.ok(artifactsDir);
+    const runDir = join(artifactsDir, "runs", runId);
+
+    // Submit every packet currently in the plan (reads the live result map).
+    async function submitPlannedPackets() {
+      const tasks = JSON.parse(
+        await readFile(join(runDir, "pending-audit-tasks.json"), "utf8"),
+      );
+      const taskById = new Map(tasks.map((task) => [task.task_id, task]));
+      const plan = JSON.parse(
+        await readFile(join(runDir, "dispatch-plan.json"), "utf8"),
+      );
+      const resultMap = JSON.parse(
+        await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
+      );
+      for (const packet of plan) {
+        const packetResults = resultMap.entries
+          .filter((item) => item.packet_id === packet.packet_id)
+          .map((entry) => validAuditResultForTask(taskById.get(entry.task_id)));
+        await runWrapper(
+          ["submit-packet", "--run-id", runId, "--packet-id", packet.packet_id, "--artifacts-dir", artifactsDir],
+          { cwd: root, input: JSON.stringify(packetResults) },
+        );
+      }
+      return plan;
+    }
+
+    // 1. The no-arg wrapper run advances to the agent-review obligation and
+    //    prepares the FIRST dispatch itself — the single-worker canary (one packet
+    //    of a multi-packet repo). No explicit prepare-dispatch is needed here.
+    const canaryActive = JSON.parse(
+      await readFile(join(artifactsDir, "active-dispatch.json"), "utf8"),
+    );
+    assert.equal(canaryActive.phase, "canary");
+    assert.equal(canaryActive.packet_count, 1);
+    await submitPlannedPackets();
+
+    // 2. The canary merge exits 0 (runWrapper rejects on non-zero), records the
+    //    held-back tasks as not_dispatched — NOT rejected — and does NOT write the
+    //    terminal completion marker (which would short-circuit the fan-out merge).
+    const canaryMerge = await runWrapper(
+      ["merge-and-ingest", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      { cwd: root },
+    );
+    const canarySummary = JSON.parse(canaryMerge.stdout);
+    assert.equal(canarySummary.rejected_count, 0, "held-back tasks are not failures");
+    assert.ok(canarySummary.not_dispatched_count > 0, "remaining tasks recorded as not-dispatched");
+    assert.ok(canarySummary.accepted_count >= 1);
+    await assert.rejects(
+      () => stat(join(runDir, "merge-complete.json")),
+      "a canary must not write the terminal completion marker",
+    );
+
+    // 3. Re-dispatch on the SAME run id graduates to fan-out (the bug re-fired the
+    //    canary here forever). All remaining packets dispatch in this one round.
+    await runWrapper(
+      ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      { cwd: root },
+    );
+    const fanoutActive = JSON.parse(
+      await readFile(join(artifactsDir, "active-dispatch.json"), "utf8"),
+    );
+    assert.equal(fanoutActive.phase, "fan_out", "canary graduates to fan-out");
+    assert.ok(fanoutActive.packet_count >= 1);
+    await submitPlannedPackets();
+
+    // 4. The fan-out merge ingests its results — it is NOT short-circuited by a
+    //    stale completion marker — and reports nothing held back.
+    const fanoutMerge = await runWrapper(
+      ["merge-and-ingest", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      { cwd: root },
+    );
+    const fanoutSummary = JSON.parse(fanoutMerge.stdout);
+    assert.notEqual(fanoutSummary.idempotent_replay, true, "fan-out merge must not replay the canary");
+    assert.equal(fanoutSummary.not_dispatched_count, 0, "no tasks held back after fan-out");
+    assert.ok(fanoutSummary.accepted_count >= 1);
+  }, { canary: true });
 });
 
 test("submit-packet rejects duplicate task result ids", async () => {
