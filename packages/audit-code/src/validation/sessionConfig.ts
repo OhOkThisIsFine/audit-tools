@@ -301,7 +301,14 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
     issues,
     provider === "vscode-task",
   );
+  validateTemplateProviderSection(
+    value.antigravity,
+    "antigravity",
+    issues,
+    provider === "antigravity",
+  );
   validateAgentProviderSection(value.claude_code, "claude_code", issues);
+  validateAgentProviderSection(value.codex, "codex", issues);
   validateAgentProviderSection(value.opencode, "opencode", issues);
 
   if (value.synthesis !== undefined) {
@@ -316,6 +323,45 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
         "synthesis.narrative",
         "synthesis.narrative must be a boolean when provided.",
       );
+    }
+  }
+
+  if (value.dispatch !== undefined) {
+    if (!isRecord(value.dispatch)) {
+      pushIssue(issues, "dispatch", "dispatch must be a JSON object.");
+    } else {
+      if (
+        value.dispatch.canary !== undefined &&
+        typeof value.dispatch.canary !== "boolean"
+      ) {
+        pushIssue(
+          issues,
+          "dispatch.canary",
+          "dispatch.canary must be a boolean when provided.",
+        );
+      }
+      if (
+        value.dispatch.confirm_threshold !== undefined &&
+        (!Number.isInteger(value.dispatch.confirm_threshold) ||
+          Number(value.dispatch.confirm_threshold) < 0)
+      ) {
+        pushIssue(
+          issues,
+          "dispatch.confirm_threshold",
+          "dispatch.confirm_threshold must be a non-negative integer when provided.",
+        );
+      }
+      if (
+        value.dispatch.max_packets !== undefined &&
+        (!Number.isInteger(value.dispatch.max_packets) ||
+          Number(value.dispatch.max_packets) < 0)
+      ) {
+        pushIssue(
+          issues,
+          "dispatch.max_packets",
+          "dispatch.max_packets must be a non-negative integer when provided.",
+        );
+      }
     }
   }
 
@@ -399,6 +445,29 @@ export async function validateConfiguredProviderEnvironment(
         issues,
         "opencode.command",
         "Configured opencode command must be a bare executable name or direct path. Put CLI flags in extra_args.",
+      );
+    }
+  }
+
+  if (provider === "codex") {
+    const command = sessionConfig.codex?.command ?? "codex";
+    if (isBareExecutableName(command) && !(await lookupCommand(command))) {
+      pushIssue(
+        issues,
+        "codex.command",
+        `Configured codex executable was not found on PATH: ${command}.`,
+      );
+    } else if (isDirectExecutablePath(command) && !lookupPath(command)) {
+      pushIssue(
+        issues,
+        "codex.command",
+        `Configured codex executable path does not exist: ${command}.`,
+      );
+    } else if (!isSupportedConfiguredCommand(command)) {
+      pushIssue(
+        issues,
+        "codex.command",
+        "Configured codex command must be a bare executable name or direct path. Put CLI flags in extra_args.",
       );
     }
   }

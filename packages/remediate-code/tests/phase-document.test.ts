@@ -54,7 +54,7 @@ function makeState(): RemediationState {
 }
 
 describe("runDocumentPhase clarification resolutions", () => {
-  it("applies finding-id keyed object resolutions from MCP", async () => {
+  it("applies finding-id keyed object resolutions from clarification_resolution.json", async () => {
     const state = makeState();
     await writeFile(
       join(TEST_DIR, "clarification_resolution.json"),

@@ -4,11 +4,6 @@ import { resolveWorkerTaskTimeoutMs } from "../types/workerSession.js";
 import type { LaunchFreshSessionInput } from "@audit-tools/shared";
 import { DEFAULT_WORKER_TIMEOUT_MS } from "./constants.js";
 
-export const DEFAULT_REMEDIATION_WORKER_COMMAND = [
-  "remediate-code",
-  "mcp",
-];
-
 export interface CreateRemediationWorkerTaskInput {
   runId: string;
   options: OrchestratorOptions;
@@ -36,7 +31,6 @@ export function createRemediationWorkerTask({
     obligation_id: obligationId,
     preferred_executor: preferredExecutor,
     result_path: resultPath,
-    worker_command: [...DEFAULT_REMEDIATION_WORKER_COMMAND],
     timeout_ms: timeoutMs,
     ...(maxRetries === undefined ? {} : { max_retries: maxRetries }),
   };

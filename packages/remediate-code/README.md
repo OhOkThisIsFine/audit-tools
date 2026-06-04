@@ -61,7 +61,6 @@ After close, the durable outputs are written at the repo root:
 | `remediate-code merge-implement-results --run-id <id>` | Validate implementation results and update item state |
 | `remediate-code validate-artifacts` | Validate runtime artifacts |
 | `remediate-code run --input <path>` | Deprecated compatibility alias that prints one `next-step` JSON contract |
-| `remediate-code mcp` | Deprecated IDE compatibility bridge that exposes `next_step` over MCP |
 | `remediate-code install` | Deprecated alias that repairs global assets and writes no repo-local host files |
 | `remediate-code ensure [--quiet]` | Repair/check global Claude, Codex, and OpenCode assets |
 

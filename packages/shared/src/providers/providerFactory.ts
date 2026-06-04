@@ -4,12 +4,15 @@ import type {
   ResolvedProviderName,
   SessionConfig,
   ClaudeCodeConfig,
+  CodexConfig,
   OpenCodeConfig,
   OpenTokenConfig,
 } from "../types/sessionConfig.js";
 import { LocalSubprocessProvider } from "./localSubprocessProvider.js";
 import { SubprocessTemplateProvider } from "./subprocessTemplateProvider.js";
 import { VSCodeTaskProvider } from "./vscodeTaskProvider.js";
+import { CodexProvider } from "./codexProvider.js";
+import { AntigravityProvider } from "./antigravityProvider.js";
 
 function hasEntries(values: string[] | undefined): boolean {
   return (values?.length ?? 0) > 0;
@@ -30,6 +33,10 @@ function hasConfiguredOpenCode(sessionConfig: SessionConfig): boolean {
   );
 }
 
+function hasConfiguredCodex(config: CodexConfig | undefined): boolean {
+  return Boolean(config?.command?.trim()) || hasEntries(config?.extra_args);
+}
+
 function commandExists(command: string): boolean {
   const lookupCommand = process.platform === "win32" ? "where" : "which";
   const result = spawnSync(lookupCommand, [command], { stdio: "ignore" });
@@ -44,12 +51,17 @@ export interface AutoProviderContext {
   inVSCode: boolean;
   insideOpenCode: boolean;
   insideClaudeCode: boolean;
+  insideCodex: boolean;
+  inAntigravity: boolean;
   hasVSCodeTaskTemplate: boolean;
+  hasAntigravityTemplate: boolean;
   hasSubprocessTemplate: boolean;
   hasClaudeCodeConfig: boolean;
   hasOpenCodeConfig: boolean;
+  hasCodexConfig: boolean;
   claudeAvailable: boolean;
   opencodeAvailable: boolean;
+  codexAvailable: boolean;
 }
 
 function getAutoProviderContext(
@@ -60,29 +72,60 @@ function getAutoProviderContext(
   const insideClaudeCode = Boolean(env.CLAUDECODE);
   const claudeCommand = sessionConfig.claude_code?.command ?? "claude";
   const opencodeCommand = sessionConfig.opencode?.command ?? "opencode";
+  const codexCommand = sessionConfig.codex?.command ?? "codex";
+  // TODO(verify): the in-session env signal Codex sets inside its own session.
+  // Assumed `CODEX` (mirroring CLAUDECODE / OPENCODE). Note the existing
+  // CODEX_* vars in quota/hostLimits.ts denote Anthropic's "Codex Desktop"
+  // originator, which is a distinct concept from the OpenAI Codex CLI added
+  // here — confirm the real marker before relying on auto-detection.
+  const insideCodex = Boolean(env.CODEX);
   return {
     inVSCode: (env.TERM_PROGRAM ?? "").toLowerCase() === "vscode",
     insideOpenCode: Boolean(env.OPENCODE),
     insideClaudeCode,
+    insideCodex,
+    // TODO(verify): Antigravity's in-IDE marker. Assumed an `ANTIGRAVITY` env
+    // var or TERM_PROGRAM === "antigravity"; confirm the real signal the IDE
+    // exposes to its integrated terminal.
+    inAntigravity:
+      Boolean(env.ANTIGRAVITY) ||
+      (env.TERM_PROGRAM ?? "").toLowerCase() === "antigravity",
     hasVSCodeTaskTemplate: hasEntries(sessionConfig.vscode_task?.command_template),
+    hasAntigravityTemplate: hasEntries(
+      sessionConfig.antigravity?.command_template,
+    ),
     hasSubprocessTemplate: hasEntries(
       sessionConfig.subprocess_template?.command_template,
     ),
     hasClaudeCodeConfig: hasConfiguredClaudeCode(sessionConfig),
     hasOpenCodeConfig: hasConfiguredOpenCode(sessionConfig),
+    hasCodexConfig: hasConfiguredCodex(sessionConfig.codex),
     claudeAvailable: !insideClaudeCode && lookupCommand(claudeCommand),
     opencodeAvailable: lookupCommand(opencodeCommand),
+    // Self-spawn guard mirrors claudeAvailable: a fresh `codex` subprocess
+    // cannot be spawned from inside a codex session.
+    codexAvailable: !insideCodex && lookupCommand(codexCommand),
   };
 }
 
 function chooseAutoProvider(context: AutoProviderContext): ResolvedProviderName {
   // Running inside an opencode session: use it directly.
   if (context.insideOpenCode) return "opencode";
+  // Running inside a codex session: use it directly (codexAvailable is forced
+  // false by the self-spawn guard, so the config/tie-break rungs below would
+  // not reach it — but a host already inside codex can drive it in-session).
+  if (context.insideCodex) return "codex";
   // Note: when inside a Claude Code session (CLAUDECODE set) `claudeAvailable`
   // is forced false, so we never resolve to claude-code — a fresh `claude`
   // subprocess cannot be spawned from within one. Such runs fall through to
   // local-subprocess (manual dispatch), matching ClaudeCodeProvider's guard.
   if (context.inVSCode && context.hasVSCodeTaskTemplate) return "vscode-task";
+  // Antigravity is IDE-bound and needs an operator-configured template, exactly
+  // like vscode-task. Only resolve to it when both the IDE marker and a template
+  // are present.
+  if (context.inAntigravity && context.hasAntigravityTemplate) {
+    return "antigravity";
+  }
   if (context.hasSubprocessTemplate) return "subprocess-template";
   if (context.hasClaudeCodeConfig && context.claudeAvailable) {
     return "claude-code";
@@ -90,11 +133,23 @@ function chooseAutoProvider(context: AutoProviderContext): ResolvedProviderName 
   if (context.hasOpenCodeConfig && context.opencodeAvailable) {
     return "opencode";
   }
+  if (context.hasCodexConfig && context.codexAvailable) {
+    return "codex";
+  }
   if (context.claudeAvailable && !context.opencodeAvailable) {
     return "claude-code";
   }
   if (context.opencodeAvailable && !context.claudeAvailable) {
     return "opencode";
+  }
+  // Codex is only auto-selected as a last resort when no claude/opencode is
+  // available, to avoid surprising existing setups that rely on those.
+  if (
+    context.codexAvailable &&
+    !context.claudeAvailable &&
+    !context.opencodeAvailable
+  ) {
+    return "codex";
   }
   return "local-subprocess";
 }
@@ -202,6 +257,9 @@ export function createFreshSessionProvider(
       );
     case "claude-code":
       return deps.createClaudeCodeProvider(sessionConfig.claude_code, opentoken);
+    case "codex":
+      // Codex needs no required config — the command defaults to "codex".
+      return new CodexProvider(sessionConfig.codex, undefined, opentoken);
     case "opencode":
       return deps.createOpenCodeProvider(sessionConfig.opencode, opentoken);
     case "vscode-task":
@@ -211,6 +269,17 @@ export function createFreshSessionProvider(
         );
       }
       return new VSCodeTaskProvider(sessionConfig.vscode_task, undefined, opentoken);
+    case "antigravity":
+      if (!sessionConfig.antigravity?.command_template?.length) {
+        throw new Error(
+          "antigravity provider requires session-config.json with antigravity.command_template — Antigravity is an agentic IDE, not a headless CLI, so it must be driven via a configured command/task template.",
+        );
+      }
+      return new AntigravityProvider(
+        sessionConfig.antigravity,
+        undefined,
+        opentoken,
+      );
     default:
       throw new Error(`Unknown provider: ${providerName}`);
   }

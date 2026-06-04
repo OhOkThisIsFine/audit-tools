@@ -11,6 +11,7 @@ import type { ProviderRateLimits, SessionConfig, DispatchModelHint } from "@audi
 import { buildQuotaSource } from "@audit-tools/shared/quota/compositeQuotaSource";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
+import { writePacketSchemaFiles } from "../io/runArtifacts.js";
 import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import {
@@ -62,9 +63,21 @@ export const ACTIVE_DISPATCH_FILENAME = "active-dispatch.json";
 export interface ActiveDispatchState {
   run_id: string;
   created_at: string;
+  /** Emitted packets only (after canary/budget filtering). */
   packet_count: number;
+  /** Tasks remaining this round (not-yet-done), not just emitted-packet tasks. */
   task_count: number;
   status: "active" | "merged";
+  /** "canary" on first contact when only the top packet was emitted; "fan_out" otherwise. */
+  phase: "canary" | "fan_out";
+  /** packet_id of the emitted canary packet when phase==="canary", else null. */
+  canary_packet_id: string | null;
+  /** Total packets that would have been emitted before a budget cap (present only when capped). */
+  budget_packet_count?: number;
+  /** packet_ids NOT emitted due to the budget cap. */
+  deferred_packet_ids?: string[];
+  /** task_ids NOT emitted due to the budget cap. */
+  deferred_task_ids?: string[];
 }
 
 export interface DispatchResultMapEntry {
@@ -79,6 +92,44 @@ export interface DispatchResultMap {
   entries: DispatchResultMapEntry[];
 }
 
+export const DEFAULT_DISPATCH_CONFIRM_THRESHOLD = 10;
+
+export interface DispatchFanout {
+  agent_count: number;
+  wave_count: number;
+  confirmation_recommended: boolean;
+  dispatch_summary: string;
+}
+
+/**
+ * FINDING-012: pure-arithmetic fan-out summary the loader can gate on. Given the
+ * number of agents (packets emitted this round, after canary/budget filtering)
+ * and the resolved wave size, derive the wave count, a human-readable summary,
+ * and whether the agent count exceeds the confirmation threshold (default 10).
+ * No LLM call, no side effects, no prompting.
+ */
+export function computeDispatchFanout(params: {
+  agentCount: number;
+  waveSize: number;
+  confirmThreshold?: number;
+}): DispatchFanout {
+  const agentCount = params.agentCount;
+  const waveSize = params.waveSize;
+  const waveCount = Math.ceil(agentCount / Math.max(1, waveSize));
+  const confirmThreshold =
+    params.confirmThreshold ?? DEFAULT_DISPATCH_CONFIRM_THRESHOLD;
+  const confirmationRecommended = agentCount > confirmThreshold;
+  const dispatchSummary =
+    `${agentCount} agent${agentCount !== 1 ? "s" : ""} across ` +
+    `${waveCount} wave${waveCount !== 1 ? "s" : ""} (wave_size=${waveSize})`;
+  return {
+    agent_count: agentCount,
+    wave_count: waveCount,
+    confirmation_recommended: confirmationRecommended,
+    dispatch_summary: dispatchSummary,
+  };
+}
+
 export interface PrepareDispatchResult {
   run_id: string;
   dispatch_plan_path: string;
@@ -88,6 +139,22 @@ export interface PrepareDispatchResult {
   skipped_task_count: number;
   /** Subagent parallelism resolved for this dispatch run. */
   wave_size: number;
+  /** "canary" on first contact when only the top packet was emitted; "fan_out" otherwise. */
+  phase: "canary" | "fan_out";
+  /** packet_id of the emitted canary packet when phase==="canary", else null. */
+  canary_packet_id: string | null;
+  /** Total agents that will be launched this run (packet_count after canary/budget). */
+  agent_count: number;
+  /** ceil(agent_count / max(1, wave_size)). */
+  wave_count: number;
+  /** True when agent_count exceeds sessionConfig.dispatch?.confirm_threshold (default 10). */
+  confirmation_recommended: boolean;
+  /** Human-readable summary, e.g. "12 agents across 3 waves (wave_size=4)". */
+  dispatch_summary: string;
+  /** True when a max_packets budget capped the emitted packets this run. */
+  budget_capped: boolean;
+  /** Number of packets deferred (not emitted) due to the budget cap. */
+  deferred_packet_count: number;
   largest_packet: {
     packet_id: string;
     total_lines: number;
@@ -370,6 +437,22 @@ export async function prepareDispatchArtifacts(params: {
 
   await mkdir(taskResultsDir, { recursive: true });
 
+  // FINDING-009: make the AuditResult JSON-Schema (and the two sibling schemas
+  // it $refs) reachable from this run's task-results directory so packet workers
+  // can optionally self-validate before calling submit-packet.
+  await writePacketSchemaFiles(taskResultsDir, params.packageRoot);
+
+  // FINDING-011: read the prior dispatch state (if any) so a fan-out round can
+  // detect a preceding canary that never produced an accepted result.
+  let priorActiveDispatch: ActiveDispatchState | null = null;
+  try {
+    priorActiveDispatch = await readJsonFile<ActiveDispatchState>(
+      join(artifactsDir, ACTIVE_DISPATCH_FILENAME),
+    );
+  } catch {
+    /* none yet */
+  }
+
   const priorResultTaskIds = new Set<string>();
   for (const task of tasks) {
     if (existsSync(taskResultPath(taskResultsDir, task.task_id))) {
@@ -409,6 +492,38 @@ export async function prepareDispatchArtifacts(params: {
       "prepare-dispatch generated duplicate result paths; task ids must be uniquely addressable.",
     );
   }
+
+  // Packets come back priority-ordered (high -> medium -> low), so packets[0] is
+  // the top-priority packet. Filtering composes in a fixed order: canary first
+  // (emit only the top packet on first contact), then the budget cap (top-K).
+  //
+  // FINDING-011: single-worker canary. On first contact with a multi-packet run,
+  // dispatch only the top packet; the held-back packets' tasks keep no result
+  // file, so they re-enter `dispatchTasks` on the next call (fan-out).
+  const firstContact = priorResultTaskIds.size === 0;
+  const canaryEnabled = sessionConfig.dispatch?.canary !== false; // default on
+  const doCanary = firstContact && canaryEnabled && packets.length > 1;
+  const canaryPacketId = doCanary ? packets[0]!.packet_id : null;
+  const phase: "canary" | "fan_out" = doCanary ? "canary" : "fan_out";
+  const postCanaryPackets = doCanary ? packets.slice(0, 1) : packets;
+
+  // FINDING-013: top-K coverage budget. Cap the (already priority-ordered)
+  // packets at max_packets; the remainder are recorded as DEFERRED and excluded
+  // from the completion check so the run can finish honestly under budget.
+  // Budget defaults OFF (no cap) so default behavior is unchanged. Canary takes
+  // precedence: a canary round only emits 1 packet regardless of the budget.
+  const maxPackets = sessionConfig.dispatch?.max_packets;
+  const budgetCapped =
+    typeof maxPackets === "number" &&
+    maxPackets >= 0 &&
+    maxPackets < postCanaryPackets.length;
+  const emitPackets = budgetCapped
+    ? postCanaryPackets.slice(0, maxPackets)
+    : postCanaryPackets;
+  const deferredPackets = budgetCapped
+    ? postCanaryPackets.slice(maxPackets)
+    : [];
+
   const plan: Array<{
     packet_id: string;
     description: string;
@@ -431,7 +546,7 @@ export async function prepareDispatchArtifacts(params: {
   let largestEstimatedTokens = 0;
   const warnings: Array<{ code: string; message: string }> = [];
 
-  for (const packet of packets) {
+  for (const packet of emitPackets) {
     const promptPath = packetPromptPath(taskResultsDir, packet.packet_id);
     const packetTasks = packet.task_ids
       .map((taskId) => tasksById.get(taskId))
@@ -587,6 +702,11 @@ export async function prepareDispatchArtifacts(params: {
       "way to record results, and it writes them inside the artifacts directory for you.",
       "Produce one JSON array containing exactly one AuditResult object for each listed task.",
       "",
+      "Schema file (resolve relative to this prompt's directory): audit_result.schema.json",
+      "  $refs resolved from the same directory: finding.schema.json, audit_task.schema.json",
+      "You MAY validate your JSON array against the schema before calling submit-packet. This is optional;",
+      "  the submit command performs the authoritative validation and will report any errors.",
+      "",
       "Required AuditResult fields:",
       "  task_id       copy from the task metadata",
       "  unit_id       copy from the task metadata",
@@ -725,20 +845,61 @@ export async function prepareDispatchArtifacts(params: {
     }
   }
 
+  // FINDING-011: when advancing past a canary, warn if it never produced an
+  // accepted result. submit-packet writes the per-task result file ONLY after
+  // validation passes, so presence of that file == ACCEPTED. We map the recorded
+  // canary packet_id back to its task ids via the result map and check whether
+  // those tasks now have accepted results (i.e. landed in priorResultTaskIds).
+  if (!doCanary && priorActiveDispatch?.phase === "canary" && priorActiveDispatch.canary_packet_id) {
+    const canaryAccepted =
+      priorActiveDispatch.run_id === runId
+        ? (await loadDispatchResultMap(runDir))?.entries
+            .filter((entry) => entry.packet_id === priorActiveDispatch!.canary_packet_id)
+            .every((entry) => priorResultTaskIds.has(entry.task_id)) ?? false
+        : false;
+    if (!canaryAccepted) {
+      warnings.push({
+        code: "canary_not_accepted",
+        message: `Canary packet ${priorActiveDispatch.canary_packet_id} did not produce an accepted result before fan-out; remaining packets are being dispatched anyway.`,
+      });
+    }
+  }
+
   const warningsPath = warnings.length > 0
     ? join(runDir, "dispatch-warnings.json")
     : null;
   if (warningsPath) {
     await writeJsonFile(warningsPath, warnings);
   }
+
+  // FINDING-013: record deferred packets/tasks so the completion obligation can
+  // exclude them under a budget cap (present only when actually capped).
+  const deferredPacketIds = deferredPackets.map((packet) => packet.packet_id);
+  const deferredTaskIds = deferredPackets.flatMap((packet) => packet.task_ids);
   const activeDispatch: ActiveDispatchState = {
     run_id: runId,
     created_at: new Date().toISOString(),
     packet_count: plan.length,
     task_count: orderedTasks.length,
     status: "active",
+    phase,
+    canary_packet_id: canaryPacketId,
+    ...(budgetCapped
+      ? {
+          budget_packet_count: postCanaryPackets.length,
+          deferred_packet_ids: deferredPacketIds,
+          deferred_task_ids: deferredTaskIds,
+        }
+      : {}),
   };
   await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), activeDispatch);
+
+  // FINDING-012: pure-arithmetic fan-out summary the loader can gate on.
+  const fanout = computeDispatchFanout({
+    agentCount: plan.length,
+    waveSize: waveSchedule.wave_size,
+    confirmThreshold: sessionConfig.dispatch?.confirm_threshold,
+  });
 
   return {
     run_id: runId,
@@ -748,6 +909,14 @@ export async function prepareDispatchArtifacts(params: {
     task_count: orderedTasks.length,
     skipped_task_count: priorResultTaskIds.size,
     wave_size: waveSchedule.wave_size,
+    phase,
+    canary_packet_id: canaryPacketId,
+    agent_count: fanout.agent_count,
+    wave_count: fanout.wave_count,
+    confirmation_recommended: fanout.confirmation_recommended,
+    dispatch_summary: fanout.dispatch_summary,
+    budget_capped: budgetCapped,
+    deferred_packet_count: deferredPackets.length,
     largest_packet: largestPacketId
       ? {
           packet_id: largestPacketId,

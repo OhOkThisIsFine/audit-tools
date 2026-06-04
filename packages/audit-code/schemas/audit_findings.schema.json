@@ -26,6 +26,7 @@
         },
         "audited_file_count": { "type": "integer", "minimum": 0 },
         "excluded_file_count": { "type": "integer", "minimum": 0 },
+        "budget_deferred_task_count": { "type": "integer", "minimum": 0 },
         "runtime_validation_status_breakdown": {
           "type": "object",
           "additionalProperties": { "type": "integer", "minimum": 0 }

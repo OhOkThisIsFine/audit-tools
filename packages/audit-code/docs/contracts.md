@@ -214,22 +214,6 @@ Review packets may expose graph-derived context for workers:
 - `quality` metrics for cohesion, internal edges, boundary edges, and
   unexplained files
 
-## MCP contract
-
-The local MCP server exposes:
-
-- `start_audit`
-- `get_status`
-- `continue_audit`
-- `explain_task`
-- `validate_artifacts`
-- `import_results`
-- `import_runtime_updates`
-
-It also exposes resources for current artifacts, operator handoff, install
-guidance, and the current report. MCP consumers should prefer the tool and
-resource contracts over reading internal files directly.
-
 ## Guided recovery
 
 Failure responses should distinguish:

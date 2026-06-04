@@ -7,13 +7,20 @@ export type ProviderType = "hosted" | "local" | "unknown";
 export function classifyProvider(providerName: ResolvedProviderName): ProviderType {
   switch (providerName) {
     case "claude-code":
+    case "codex":
+      // codex is a hosted model backend — engages hosted concurrency defaults +
+      // learned-limits, same as claude-code.
       return "hosted";
     case "opencode":
     case "local-subprocess":
       return "local";
     case "subprocess-template":
     case "vscode-task":
+    case "antigravity":
     default:
+      // antigravity (like vscode-task/subprocess-template) is command-template-
+      // driven and its underlying model is operator-chosen, so it classifies per
+      // its configured model — unknown until a model is configured.
       return "unknown";
   }
 }

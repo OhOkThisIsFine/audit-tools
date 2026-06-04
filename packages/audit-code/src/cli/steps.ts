@@ -32,6 +32,21 @@ export interface StepProgress {
   completed_tasks?: number;
   /** Subagent parallelism resolved for this dispatch run. */
   wave_size?: number;
+  /** "canary" when only the top packet was emitted this round; "fan_out" otherwise. */
+  phase?: "canary" | "fan_out";
+  /** packet_id of the emitted canary packet when `phase === "canary"`. */
+  canary_packet_id?: string | null;
+  /** Total agents (packets) that will be launched this run. */
+  agent_count?: number;
+  /** Number of dispatch waves for this run (`ceil(agent_count / wave_size)`). */
+  wave_count?: number;
+  /**
+   * True when `agent_count` exceeds the configured confirm threshold and the
+   * loader should pause for user confirmation before fan-out (FINDING-012).
+   */
+  confirmation_recommended?: boolean;
+  /** Human-readable fan-out summary, e.g. "12 agents across 3 waves (wave_size=4)". */
+  dispatch_summary?: string;
 }
 
 export interface StepArtifact {

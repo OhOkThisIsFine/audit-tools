@@ -10,7 +10,7 @@ export interface NextStepDecision {
   reason: string;
 }
 
-const PRIORITY: string[] = [
+export const PRIORITY: string[] = [
   "repo_manifest",
   "file_disposition",
   "auto_fixes_applied",

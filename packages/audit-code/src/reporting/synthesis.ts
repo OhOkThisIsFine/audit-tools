@@ -42,6 +42,14 @@ export interface AuditReportSummary {
   audited_file_count: number;
   excluded_file_count: number;
   runtime_validation_status_breakdown: Record<string, number>;
+  /**
+   * Distinct count of tasks/files NOT audited because a packet budget cap
+   * (FINDING-013) deferred them — kept separate from `excluded_file_count`
+   * (non-auditable files), since a budget skip is an honest partial-coverage
+   * signal, not an exclusion. Optional so the shared `AuditFindingsSummary`
+   * (which omits it) stays assignable to this render shape; defaults to 0.
+   */
+  budget_deferred_task_count?: number;
 }
 
 export interface AuditReportModel {
@@ -78,11 +86,16 @@ function runtimeStatusBreakdown(
 function coverageSummary(coverage?: CoverageMatrix): {
   audited_file_count: number;
   excluded_file_count: number;
+  budget_deferred_task_count: number;
 } {
   const files = coverage?.files ?? [];
   return {
     audited_file_count: files.filter((file) => file.audit_status === "complete").length,
     excluded_file_count: files.filter((file) => file.audit_status === "excluded").length,
+    // Distinct from excluded: files a budget cap deferred (status set by scope).
+    budget_deferred_task_count: files.filter(
+      (file) => file.audit_status === "budget_deferred",
+    ).length,
   };
 }
 
@@ -124,6 +137,7 @@ export function buildAuditReportModel(params: {
       severity_breakdown: severityBreakdown(findings),
       audited_file_count: coverage.audited_file_count,
       excluded_file_count: coverage.excluded_file_count,
+      budget_deferred_task_count: coverage.budget_deferred_task_count,
       runtime_validation_status_breakdown: runtimeStatusBreakdown(
         params.runtimeValidationReport,
       ),
@@ -224,6 +238,11 @@ export function renderAuditReportMarkdown(
     `- Severity breakdown: ${formatSeverityList(report.summary.severity_breakdown)}`,
     `- Fully audited files: ${report.summary.audited_file_count}`,
     `- Excluded non-auditable files: ${report.summary.excluded_file_count}`,
+    ...((report.summary.budget_deferred_task_count ?? 0) > 0
+      ? [
+          `- Not audited (budget): ${report.summary.budget_deferred_task_count} task(s) skipped by packet budget cap`,
+        ]
+      : []),
     "",
   );
 
@@ -299,6 +318,15 @@ export function renderAuditReportMarkdown(
   if (scope && scope.mode === "delta") {
     lines.push(
       `**Delta audit since \`${scope.since}\`.** This run audited ${scope.seed_files.length} changed file(s) and ${scope.expanded_files.length} graph neighbour(s); all other auditable files were left out of scope (inherited from a prior audit where complete, otherwise excluded from this run). **A full audit is advised before release.**`,
+    );
+    if (scope.dropped_note) {
+      lines.push("", scope.dropped_note);
+    }
+  } else if (scope && scope.mode === "budget") {
+    lines.push(
+      `**Partial audit (budget cap).** This run dispatched only the top-${scope.budget?.max_files ?? "K"} packet(s); ` +
+        `${scope.deferred_packet_count ?? 0} packet(s) covering ${scope.deferred_task_ids?.length ?? 0} task(s) were deferred and NOT audited. ` +
+        `Findings above reflect only the audited subset. **A full audit is advised before release.**`,
     );
     if (scope.dropped_note) {
       lines.push("", scope.dropped_note);

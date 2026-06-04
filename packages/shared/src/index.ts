@@ -72,8 +72,10 @@ export type {
   SessionUiMode,
   SubprocessTemplateConfig,
   ClaudeCodeConfig,
+  CodexConfig,
   OpenCodeConfig,
   VSCodeTaskConfig,
+  AntigravityConfig,
   BlockQuotaConfig,
   QuotaModelLimits,
   QuotaConfig,
@@ -81,6 +83,8 @@ export type {
   ObservabilityConfig,
   SynthesisConfig,
   GraphConfig,
+  DispatchConfig,
+  DesignReviewConfig,
   AnalyzerSetting,
   SessionConfig,
 } from "./types/sessionConfig.js";
@@ -188,7 +192,11 @@ export type {
 } from "./providers/types.js";
 
 // Provider constants
-export { LOCAL_SUBPROCESS_PROVIDER_NAME } from "./providers/constants.js";
+export {
+  LOCAL_SUBPROCESS_PROVIDER_NAME,
+  CODEX_PROVIDER_NAME,
+  ANTIGRAVITY_PROVIDER_NAME,
+} from "./providers/constants.js";
 
 // Provider command runner (single source of truth for both orchestrators)
 export { spawnLoggedCommand } from "./providers/spawnLoggedCommand.js";
@@ -213,6 +221,8 @@ export {
   MISSING_WORKER_COMMAND_MESSAGE,
 } from "./providers/localSubprocessProvider.js";
 export { VSCodeTaskProvider } from "./providers/vscodeTaskProvider.js";
+export { CodexProvider } from "./providers/codexProvider.js";
+export { AntigravityProvider } from "./providers/antigravityProvider.js";
 
 // Provider auto-resolution + factory (single source of truth for both orchestrators)
 export type {

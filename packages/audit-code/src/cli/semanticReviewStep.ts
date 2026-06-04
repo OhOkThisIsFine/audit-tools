@@ -89,6 +89,9 @@ export async function renderSemanticReviewStep(params: {
     allowedMcpTools: ["auditor_merge_and_ingest", "auditor_continue_audit"],
     progress: {
       summary:
+        (dispatch.phase === "canary"
+          ? `Canary: dispatching only the top-priority packet (${dispatch.canary_packet_id}) before fan-out. `
+          : "") +
         `Dispatching ${dispatch.packet_count} review packet(s) covering ` +
         `${dispatch.task_count} task(s) in waves of ${dispatch.wave_size}` +
         (dispatch.skipped_task_count > 0
@@ -98,6 +101,12 @@ export async function renderSemanticReviewStep(params: {
       pending_tasks: dispatch.task_count,
       completed_tasks: dispatch.skipped_task_count,
       wave_size: dispatch.wave_size,
+      phase: dispatch.phase,
+      canary_packet_id: dispatch.canary_packet_id,
+      agent_count: dispatch.agent_count,
+      wave_count: dispatch.wave_count,
+      confirmation_recommended: dispatch.confirmation_recommended,
+      dispatch_summary: dispatch.dispatch_summary,
     },
     stopCondition:
       "Dispatch every packet, run merge-and-ingest once, then run next-step.",
@@ -117,6 +126,8 @@ export async function renderSemanticReviewStep(params: {
       dispatchQuotaPath: dispatch.dispatch_quota_path,
       hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
       hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
+      phase: dispatch.phase,
+      canaryPacketId: dispatch.canary_packet_id,
     }),
     access: {
       read_paths: [

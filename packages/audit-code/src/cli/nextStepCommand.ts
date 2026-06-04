@@ -642,7 +642,9 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     );
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir);
-    const prompt = renderDesignReviewPrompt(result.bundle);
+    const prompt = renderDesignReviewPrompt(result.bundle, {
+      max_units: sessionConfig.design_review?.max_units,
+    });
     const fullPrompt = [
       prompt,
       "## Results path",

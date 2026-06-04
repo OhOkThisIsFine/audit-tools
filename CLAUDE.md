@@ -20,7 +20,7 @@ The aim is a pair of autonomous orchestrators that take a codebase from *underst
 - **Deterministic by default; LLM only for judgment.** Anything a deterministic extractor or validator can do, it should. The LLM is reserved for semantic review, synthesis, ambiguity resolution, and explicit low-confidence fallbacks — always bounded and recorded.
 - **Artifacts are continuity; the dependency DAG is truth.** Durable state lives in artifacts, and staleness propagates along an explicit dependency map — never ad-hoc freshness checks.
 - **Language-neutral by contract.** The graph and artifact shapes are language-agnostic. New language support enriches those shared contracts; it must not fork the planning logic per ecosystem.
-- **Conversation-first.** The product is the slash workflow inside a host conversation; the CLI and MCP surfaces are backend/fallback, not the intended mental model.
+- **Conversation-first.** The product is the slash workflow inside a host conversation; the CLI surface is backend/fallback, not the intended mental model.
 
 `@audit-tools/shared` exists to keep these concepts *single-sourced* — the step contract, the artifact/graph types, and the quota model live there precisely so the two orchestrators can't drift apart.
 
@@ -96,7 +96,7 @@ The core loop lives in `src/orchestrator/advance.ts` (`advanceAudit`). Each invo
 3. Dispatches to exactly one executor (intake → disposition → structure → planning → agent review → ingestion → runtime validation → synthesis).
 4. Persists updated artifacts and returns a structured execution summary.
 
-The priority chain in `nextStep.ts`: `repo_manifest` → `file_disposition` → `auto_fixes_applied` → `syntax_resolved` → `structure_artifacts` → `planning_artifacts` → `audit_tasks_completed` → `audit_results_ingested` → `runtime_validation_current` → `synthesis_current` → `synthesis_narrative_current`. Synthesis emits the canonical `audit-findings.json` (the machine contract; `audit-report.md` is a render of it); the optional `synthesis_narrative_current` step layers an LLM narrative (themes / executive summary / top risks) onto it and omits cleanly without a provider.
+The priority chain in `nextStep.ts`: `repo_manifest` → `file_disposition` → `auto_fixes_applied` → `syntax_resolved` → `structure_artifacts` → `graph_enrichment_current` → `design_assessment_current` → `design_review_completed` → `planning_artifacts` → `audit_tasks_completed` → `audit_results_ingested` → `runtime_validation_current` → `synthesis_current` → `synthesis_narrative_current`. Synthesis emits the canonical `audit-findings.json` (the machine contract; `audit-report.md` is a render of it); the optional `synthesis_narrative_current` step layers an LLM narrative (themes / executive summary / top risks) onto it and omits cleanly without a provider.
 
 ### Artifact system
 
@@ -104,8 +104,8 @@ Artifacts under `.audit-artifacts/` are the continuity layer: `repo_manifest.jso
 
 ### Entrypoint, providers, schemas, lenses
 
-- **Entrypoint:** the wrapper `audit-code.mjs` → `audit-code-wrapper-lib.mjs` is the CLI surface. The conversation-first flow uses `audit-code next-step`, which writes `steps/current-step.json` and `steps/current-prompt.md`; the host agent reads and follows only the returned step prompt. The MCP server (`src/mcp/`) is a compatibility adapter over the same step contract.
-- **Providers** (`src/providers/`) dispatch LLM worker tasks to different backends: `claude-code`, `opencode`, `subprocess-template`, `vscode-task`, or `local-subprocess` (manual fallback). Auto-resolution in `src/providers/index.ts` detects the active environment; providers implement the `FreshSessionProvider` interface from `@audit-tools/shared`.
+- **Entrypoint:** the wrapper `audit-code.mjs` → `audit-code-wrapper-lib.mjs` is the CLI surface. The conversation-first flow uses `audit-code next-step`, which writes `steps/current-step.json` and `steps/current-prompt.md`; the host agent reads and follows only the returned step prompt.
+- **Providers** (`src/providers/`) dispatch LLM worker tasks to different backends: `claude-code`, `codex`, `opencode`, `subprocess-template`, `vscode-task`, `antigravity`, or `local-subprocess` (manual fallback). `codex` is a headless CLI auto-detected like `claude-code`; `antigravity` is an agentic-IDE backend routed through a configured command/task template (like `vscode-task`). Auto-resolution in `src/providers/index.ts` detects the active environment; providers implement the `FreshSessionProvider` interface from `@audit-tools/shared`.
 - **Schemas** (`schemas/`) define all public artifact shapes. The `AuditResult` contract (`schemas/audit_result.schema.json`) is the worker submission format — `task_id`, `unit_id`, `pass_id`, and `lens` must match the assigned task; `file_coverage[].total_lines` must match actual line counts.
 - **Lenses** organize audit work: `correctness`, `architecture`, `maintainability`, `security`, `reliability`, `performance`, `data_integrity`, `tests`, `operability`, `config_deployment`, `observability`. Each audit task covers one unit under one lens.
 
@@ -138,7 +138,7 @@ Each phase in `src/phases/`:
 
 ### Dispatch, state, types
 
-- **Dispatch & wave scheduling:** document/implement work is dispatched to sub-agents in parallel waves. `src/steps/dispatch.ts` (`prepareDocumentDispatch`/`mergeDocumentResults`/`prepareImplementDispatch`/`mergeImplementResults`) and `src/steps/waveScheduler.ts` (concurrency limiting). Providers in `src/providers/` mirror audit-code's backend set; `src/mcp/server.ts` is the legacy adapter (`next-step` is canonical).
+- **Dispatch & wave scheduling:** document/implement work is dispatched to sub-agents in parallel waves. `src/steps/dispatch.ts` (`prepareDocumentDispatch`/`mergeDocumentResults`/`prepareImplementDispatch`/`mergeImplementResults`) and `src/steps/waveScheduler.ts` (concurrency limiting). Providers in `src/providers/` mirror audit-code's backend set.
 - **State persistence:** `src/state/store.ts` holds the file-backed `RemediationState` with pessimistic file locking (20ms initial backoff, 250ms max, 20 retries, 30s stale-lock cleanup).
 - **Core types:** `src/state/types.ts` defines `Finding`, `RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `RemediationItemState`, `TestSpec`, `VerificationResult`. `src/dedup/crossLensDedup.ts` deduplicates findings across audit lenses; `src/intake.ts` orchestrates source manifest, summary, and clarification resolution.
 

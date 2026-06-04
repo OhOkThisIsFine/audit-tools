@@ -61,6 +61,49 @@ function summarizeRisk(bundle: ArtifactBundle): string {
   ].join("\n");
 }
 
+function buildPrioritizedReadingList(
+  bundle: ArtifactBundle,
+  maxUnits: number,
+): string {
+  const items = bundle.risk_register?.items ?? [];
+  const units = bundle.unit_manifest?.units ?? [];
+
+  if (items.length === 0 && units.length === 0) {
+    return "No risk or unit data available; read the repository root files to orient yourself.";
+  }
+
+  // Build a map from unit_id → file list for fast lookup
+  const unitFiles = new Map<string, string[]>();
+  for (const unit of units) {
+    unitFiles.set(unit.unit_id, unit.files);
+  }
+
+  // Sort risk items by score descending, then take the top-N
+  const sorted = [...items].sort((a, b) => b.risk_score - a.risk_score);
+  const top = sorted.slice(0, maxUnits);
+
+  if (top.length === 0) {
+    // Fall back to listing all units if no risk data
+    const allUnits = units.slice(0, maxUnits);
+    const lines = allUnits.map((u) => `- **${u.unit_id}** — ${u.files.join(", ")}`);
+    return [
+      `Top ${allUnits.length} unit(s) (no risk scores available):`,
+      ...lines,
+    ].join("\n");
+  }
+
+  const lines = top.map((item) => {
+    const files = unitFiles.get(item.unit_id);
+    const fileList = files && files.length > 0 ? files.join(", ") : "(files unknown)";
+    return `- **${item.unit_id}** (risk score: ${item.risk_score}) — ${fileList}`;
+  });
+
+  return [
+    `Top ${top.length} highest-risk unit(s) by risk score (out of ${items.length} total):`,
+    ...lines,
+  ].join("\n");
+}
+
 function summarizeSurfaces(bundle: ArtifactBundle): string {
   const surfaces = bundle.surface_manifest?.surfaces ?? [];
   if (surfaces.length === 0) return "No externally reachable surfaces identified.";
@@ -106,8 +149,20 @@ function formatDeterministicFindings(findings: Finding[]): string {
   ].join("\n");
 }
 
-export function renderDesignReviewPrompt(bundle: ArtifactBundle): string {
+export interface DesignReviewOptions {
+  max_units?: number;
+}
+
+export function renderDesignReviewPrompt(
+  bundle: ArtifactBundle,
+  options: DesignReviewOptions = {},
+): string {
   const deterministicFindings = bundle.design_assessment?.findings ?? [];
+
+  const unitCount = bundle.unit_manifest?.units.length ?? 0;
+  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
+  const maxUnits = options.max_units ?? defaultMaxUnits;
+  const prioritizedReadingList = buildPrioritizedReadingList(bundle, maxUnits);
 
   return [
     "# Project design review",
@@ -148,7 +203,11 @@ export function renderDesignReviewPrompt(bundle: ArtifactBundle): string {
     "",
     "## What to assess",
     "",
-    "Read the project source to understand what it does and how it works, then produce findings about:",
+    `Focus on the ${maxUnits} highest-risk units listed below; you need not read the entire repository, though you may follow any thread that demands more context. Produce findings about:`,
+    "",
+    "### Prioritised reading list",
+    "",
+    prioritizedReadingList,
     "",
     "- **Tool and library opportunities**: third-party tools, libraries, or frameworks that would improve the project. Concrete suggestions with rationale, not generic advice.",
     "- **Architecture pattern improvements**: structural changes that would improve extensibility, testability, or maintainability. Consider whether the current abstractions match the problem domain.",

@@ -1,6 +1,3 @@
-export const WORKER_COMMAND_MODES = ["run", "deferred"] as const;
-export type WorkerCommandMode = (typeof WORKER_COMMAND_MODES)[number];
-
 /**
  * Worker tasks serialize directly to task.json, so their persisted field names
  * intentionally stay snake_case for consistency across providers and bridges.
@@ -13,19 +10,10 @@ export interface WorkerTask {
   obligation_id: string | null;
   preferred_executor: string;
   result_path: string;
-  /**
-   * Argv array passed directly to Node's spawn() as [command, ...args] with shell: false.
-   * Shell injection is not possible because no shell is involved. In practice this field is
-   * set to the compatibility worker bridge command when provider mode is used
-   * (for example, ["remediate-code", "mcp"]).
-   * and is never derived from user-controlled input.
-   */
-  worker_command: string[];
   audit_results_path?: string;
   pending_audit_tasks_path?: string;
   runtime_updates_path?: string;
   external_analyzer_results_path?: string;
-  worker_command_mode?: WorkerCommandMode;
   /**
    * Subprocess timeout in milliseconds. Must be > 0; values ≤ 0 cause immediate kills.
    * Recommended range: 30_000–600_000 (30 s – 10 min). Omit to inherit the provider default.
@@ -57,8 +45,3 @@ export function resolveWorkerTaskMaxRetries(
   return fallbackRetries;
 }
 
-export function usesDeferredWorkerCommand(
-  task: Pick<WorkerTask, "worker_command_mode">,
-): boolean {
-  return task.worker_command_mode === "deferred";
-}

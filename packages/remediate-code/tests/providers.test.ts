@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnLoggedCommand } from "@audit-tools/shared";
 import { resolveFreshSessionProviderName } from "../src/providers/index.js";
-import { usesDeferredWorkerCommand } from "../src/types/workerSession.js";
 import type { LaunchFreshSessionInput } from "../src/providers/types.js";
 import type { WriteStream } from "node:fs";
 import { ClaudeCodeProvider } from "../src/providers/claudeCodeProvider.js";
@@ -308,26 +307,8 @@ describe("resolveFreshSessionProviderName", () => {
   });
 });
 
-describe("usesDeferredWorkerCommand", () => {
-  it("returns true when worker_command_mode is 'deferred'", () => {
-    expect(usesDeferredWorkerCommand({ worker_command_mode: "deferred" })).toBe(
-      true,
-    );
-  });
-
-  it("returns false when worker_command_mode is 'run'", () => {
-    expect(usesDeferredWorkerCommand({ worker_command_mode: "run" })).toBe(
-      false,
-    );
-  });
-
-  it("returns false when worker_command_mode is absent", () => {
-    expect(usesDeferredWorkerCommand({})).toBe(false);
-  });
-});
-
 describe("createRemediationWorkerTask", () => {
-  it("defaults to the global remediate-code MCP bridge, not a relative dist command", () => {
+  it("does not include worker_command field", () => {
     const task = createRemediationWorkerTask({
       runId: "RUN-1",
       options: { root: "/repo", artifactsDir: "/repo/.remediation-artifacts" },
@@ -336,8 +317,8 @@ describe("createRemediationWorkerTask", () => {
       resultPath: "/repo/.remediation-artifacts/result.json",
     });
 
-    expect(task.worker_command).toEqual(["remediate-code", "mcp"]);
-    expect(task.worker_command.join(" ")).not.toContain("dist/index.js");
+    expect(Object.prototype.hasOwnProperty.call(task, "worker_command")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(task, "worker_command_mode")).toBe(false);
   });
 });
 

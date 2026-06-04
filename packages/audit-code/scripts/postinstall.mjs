@@ -92,114 +92,6 @@ function renderOpenCodeExternalDirectoryPermission() {
   return { '*': 'allow' };
 }
 
-function renderGlobalMcpLauncher(installedPkgRoot) {
-  return [
-    "import { access, readFile, appendFile } from 'node:fs/promises';",
-    "import { constants } from 'node:fs';",
-    "import { spawn } from 'node:child_process';",
-    "import { join } from 'node:path';",
-    "import { homedir } from 'node:os';",
-    '',
-    "const repoRoot = process.env.AUDIT_CODE_REPO_ROOT || process.cwd();",
-    "const artifactsDir = process.env.AUDIT_CODE_ARTIFACTS_DIR || join(repoRoot, '.audit-artifacts');",
-    `const globalPackageRoot = ${JSON.stringify(installedPkgRoot)};`,
-    "const logPath = join(homedir(), '.audit-code', 'mcp-server.log');",
-    '',
-    'async function log(msg) {',
-    '  try {',
-    '    const ts = new Date().toISOString();',
-    "    await appendFile(logPath, `${ts} ${msg}\\n`, 'utf8');",
-    '  } catch {',
-    '    // ignore log failures',
-    '  }',
-    '}',
-    '',
-    'async function exists(path) {',
-    '  try {',
-    '    await access(path, constants.F_OK);',
-    '    return true;',
-    '  } catch {',
-    '    return false;',
-    '  }',
-    '}',
-    '',
-    'function spawnForward(command, args) {',
-    '  return new Promise((resolvePromise, rejectPromise) => {',
-    '    const child = spawn(command, args, {',
-    '      cwd: repoRoot,',
-    '      env: process.env,',
-    "      stdio: ['inherit', 'inherit', 'inherit'],",
-    '    });',
-    "    child.on('error', rejectPromise);",
-    "    child.on('exit', (code) => resolvePromise(code ?? 1));",
-    '  });',
-    '}',
-    '',
-    'async function tryCandidates() {',
-    "  const localPackageEntrypoint = join(repoRoot, 'node_modules', 'auditor-lambda', 'audit-code.mjs');",
-    "  const localBin = process.platform === 'win32'",
-    "    ? join(repoRoot, 'node_modules', '.bin', 'audit-code.cmd')",
-    "    : join(repoRoot, 'node_modules', '.bin', 'audit-code');",
-    "  const repoPackageJsonPath = join(repoRoot, 'package.json');",
-    "  const globalPackageEntrypoint = globalPackageRoot ? join(globalPackageRoot, 'audit-code.mjs') : null;",
-    "  const sharedArgs = ['mcp', '--root', repoRoot, '--artifacts-dir', artifactsDir];",
-    '',
-    '  if (await exists(localPackageEntrypoint)) {',
-    "    await log(`launching local node_modules candidate: ${localPackageEntrypoint}`);",
-    '    return await spawnForward(process.execPath, [localPackageEntrypoint, ...sharedArgs]);',
-    '  }',
-    '',
-    "  if (await exists(repoPackageJsonPath) && await exists(join(repoRoot, 'audit-code.mjs'))) {",
-    '    try {',
-    "      const packageJson = JSON.parse(await readFile(repoPackageJsonPath, 'utf8'));",
-    "      if (packageJson?.name === 'auditor-lambda') {",
-    "        await log(`launching repo-root candidate: ${join(repoRoot, 'audit-code.mjs')}`);",
-    "        return await spawnForward(process.execPath, [join(repoRoot, 'audit-code.mjs'), ...sharedArgs]);",
-    '      }',
-    '    } catch {',
-    '      // fall through to the next candidate',
-    '    }',
-    '  }',
-    '',
-    '  if (globalPackageEntrypoint && await exists(globalPackageEntrypoint)) {',
-    "    await log(`launching global candidate: ${globalPackageEntrypoint}`);",
-    '    return await spawnForward(process.execPath, [globalPackageEntrypoint, ...sharedArgs]);',
-    '  }',
-    '',
-    '  if (await exists(localBin)) {',
-    "    await log(`launching local bin candidate: ${localBin}`);",
-    '    return await spawnForward(localBin, sharedArgs);',
-    '  }',
-    '',
-    "  const pathCandidate = process.platform === 'win32' ? 'audit-code.cmd' : 'audit-code';",
-    "  await log(`trying PATH candidate: ${pathCandidate}`);",
-    '  let exitCode = await spawnForward(pathCandidate, sharedArgs).catch(() => null);',
-    "  if (typeof exitCode === 'number') {",
-    '    return exitCode;',
-    '  }',
-    '',
-    "  exitCode = await spawnForward('npx', ['--no-install', 'audit-code', ...sharedArgs]).catch(() => null);",
-    "  if (typeof exitCode === 'number') {",
-    '    return exitCode;',
-    '  }',
-    '',
-    "  await log('ERROR: no candidate found');",
-    '  throw new Error(',
-    "    'Unable to locate an audit-code executable. Install auditor-lambda globally or as a local dependency.',",
-    '  );',
-    '}',
-    '',
-    "log(`run-mcp-server.mjs started: node=${process.execPath} cwd=${repoRoot} globalPkg=${globalPackageRoot}`).catch(() => {});",
-    'const code = await tryCandidates().catch(async (err) => {',
-    "  await log(`FATAL: ${err.message}`);",
-    '  process.stderr.write(err.message + "\\n");',
-    '  return 1;',
-    '});',
-    'process.exitCode = code;',
-    '',
-  ].join('\n');
-}
-
 function objectValue(value) {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value
@@ -284,7 +176,6 @@ function mergeOpenCodeGlobalConfig(existing) {
   const parsed = existing ? JSON.parse(existing) : {};
   const auditPermission = renderOpenCodePermissionConfig();
   const existingAuditor = objectValue(objectValue(parsed.agent).auditor);
-  const pkgEntrypoint = replaceBackslashes(join(pkgRoot, 'audit-code.mjs'));
   return {
     ...parsed,
     command: {
@@ -296,15 +187,6 @@ function mergeOpenCodeGlobalConfig(existing) {
         description: 'Autonomous local loop code auditing',
         agent: 'auditor',
         subtask: false,
-      },
-    },
-    mcp: {
-      ...objectValue(parsed.mcp),
-      auditor: {
-        type: 'local',
-        command: ['node', pkgEntrypoint, 'mcp'],
-        enabled: true,
-        timeout: 10000,
       },
     },
     permission: {
@@ -332,33 +214,6 @@ function mergeOpenCodeGlobalConfig(existing) {
 
 function claudePluginExternalDir() {
   return join(homedir(), '.claude', 'plugins', 'marketplaces', 'claude-plugins-official', 'external_plugins', 'audit-code');
-}
-
-function claudeDesktopConfigPath() {
-  if (process.platform === 'win32') {
-    return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json');
-  }
-  if (process.platform === 'darwin') {
-    return join(homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
-  }
-  return join(homedir(), '.config', 'Claude', 'claude_desktop_config.json');
-}
-
-function mergeClaudeDesktopConfig(existing, globalMcpLauncherPath) {
-  const parsed = existing ? JSON.parse(existing) : {};
-  const mcpServers = parsed.mcpServers && typeof parsed.mcpServers === 'object' && !Array.isArray(parsed.mcpServers)
-    ? parsed.mcpServers
-    : {};
-  return {
-    ...parsed,
-    mcpServers: {
-      ...mcpServers,
-      auditor: {
-        command: 'node',
-        args: [replaceBackslashes(globalMcpLauncherPath)],
-      },
-    },
-  };
 }
 
 function installMergedJson(path, buildMerged) {
@@ -427,17 +282,6 @@ for (const install of installs) {
     console.warn(`    ${install.path}`);
     failed++;
   }
-}
-
-// Install global MCP launcher for OpenCode (and other hosts that support global config)
-const globalMcpLauncherPath = join(homedir(), '.audit-code', 'run-mcp-server.mjs');
-try {
-  const action = writeGeneratedFile(globalMcpLauncherPath, Buffer.from(renderGlobalMcpLauncher(pkgRoot)));
-  console.log(`audit-code: ${action} global MCP launcher at ${globalMcpLauncherPath}`);
-  succeeded++;
-} catch (err) {
-  console.warn(`audit-code: could not install global MCP launcher (${err.message})`);
-  failed++;
 }
 
 // Install OpenCode global command and MCP via merged config
@@ -512,24 +356,6 @@ try {
 } catch (err) {
   console.warn(`audit-code: could not install Claude Desktop plugin (${err.message})`);
   console.warn(`  Plugin directory: ${claudePluginDir}`);
-  failed++;
-}
-
-// Register auditor MCP server with Claude Desktop so /audit-code appears in its slash-command menu
-const claudeDesktopConfig = claudeDesktopConfigPath();
-try {
-  const action = installMergedJson(claudeDesktopConfig, (existing) =>
-    mergeClaudeDesktopConfig(existing, globalMcpLauncherPath),
-  );
-  console.log(`audit-code: ${action} Claude Desktop MCP server entry in ${claudeDesktopConfig}`);
-  console.log(`audit-code: restart Claude Desktop for /audit-code to appear`);
-  console.log(`audit-code: to target a specific repo, set AUDIT_CODE_REPO_ROOT in Claude Desktop's MCP env settings`);
-  succeeded++;
-} catch (err) {
-  console.warn(`audit-code: could not update Claude Desktop config (${err.message})`);
-  console.warn(`  To register manually, add "mcpServers.auditor" to:`);
-  console.warn(`    ${claudeDesktopConfig}`);
-  console.warn(`  with command "node" and args ["${replaceBackslashes(globalMcpLauncherPath)}"]`);
   failed++;
 }
 

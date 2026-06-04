@@ -13,6 +13,38 @@ const packageRoot = resolve(moduleDir, "..", "..");
 const auditResultSchemaPath = join(packageRoot, "schemas", "audit_result.schema.json");
 const auditResultsSchemaPath = join(packageRoot, "schemas", "audit_results.schema.json");
 const findingSchemaPath = join(packageRoot, "schemas", "finding.schema.json");
+
+/**
+ * Schema files copied into a dispatch run's `task-results/` directory so packet
+ * workers can optionally self-validate before submit. `audit_result.schema.json`
+ * `$ref`s the other two by relative filename, so all three must sit side-by-side
+ * for a validator to resolve them. Exported so merge-and-ingest can recognize
+ * them as legitimate (not stray) files in `task-results/`.
+ */
+export const PACKET_SCHEMA_FILENAMES = [
+  "audit_result.schema.json",
+  "finding.schema.json",
+  "audit_task.schema.json",
+] as const;
+
+/**
+ * Copy {@link PACKET_SCHEMA_FILENAMES} into `targetDir` under their canonical
+ * filenames, making the AuditResult schema reachable from a dispatch run's
+ * `task-results/` directory.
+ */
+export async function writePacketSchemaFiles(
+  targetDir: string,
+  pkgRoot: string,
+): Promise<void> {
+  await mkdir(targetDir, { recursive: true });
+  for (const name of PACKET_SCHEMA_FILENAMES) {
+    await writeFile(
+      join(targetDir, name),
+      await readFile(join(pkgRoot, "schemas", name), "utf8"),
+      "utf8",
+    );
+  }
+}
 const CURRENT_TASK_FILENAME = "current-task.json";
 const CURRENT_PROMPT_FILENAME = "current-prompt.md";
 const CURRENT_TASKS_FILENAME = "current-tasks.json";
