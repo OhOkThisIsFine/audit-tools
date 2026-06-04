@@ -1,5 +1,4 @@
 import { Command } from "commander";
-import { runRemediatorMcpServer } from "./mcp/server.js";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -61,26 +60,6 @@ program
   .name("remediate-code")
   .description("Autonomous remediation orchestrator")
   .version(pkgVersion);
-
-program
-  .command("mcp")
-  .description("Deprecated compatibility MCP bridge for next-step")
-  .option("--root <path>", "Repository root", ".")
-  .option(
-    "--artifacts-dir <path>",
-    "Artifacts directory",
-    ".remediation-artifacts",
-  )
-  .action(async (options) => {
-    console.error(
-      "remediate-code: `mcp` is deprecated; use `remediate-code next-step` as the canonical loop. " +
-        "The MCP bridge remains as a compatibility adapter for IDEs.",
-    );
-    await runRemediatorMcpServer(
-      resolve(options.root),
-      resolveArtifactsDirOption(options.root, options.artifactsDir),
-    );
-  });
 
 program
   .command("run")

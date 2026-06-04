@@ -16,6 +16,12 @@ import {
 import { addFileLineCountHints } from "./lineIndex.js";
 import { isCanonicalResultFilename, getArtifactsDir, getFlag } from "./args.js";
 import { buildWorkerResult } from "./workerResult.js";
+import { PACKET_SCHEMA_FILENAMES } from "../io/runArtifacts.js";
+
+// Schema pointer files prepare-dispatch copies into task-results/ for optional
+// worker self-validation. They are expected, not stray — skip them when
+// scanning for spurious files.
+const PACKET_SCHEMA_FILENAME_SET = new Set<string>(PACKET_SCHEMA_FILENAMES);
 
 export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   const runId = getFlag(argv, "--run-id");
@@ -80,6 +86,10 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
 
   const fallbackByTaskId = new Map<string, unknown>();
   for (const filename of files) {
+    // Schema pointer files (audit_result/finding/audit_task .schema.json) are
+    // copied into task-results/ by prepare-dispatch for optional worker
+    // self-validation; they are expected, not stray.
+    if (PACKET_SCHEMA_FILENAME_SET.has(filename)) continue;
     const filePath = resolve(join(taskResultsDir, filename));
     if (expectedPaths.has(filePath)) continue;
 

@@ -33,16 +33,17 @@ test("every host in INSTALL_HOST_ORDER has a complete descriptor with verify", (
   }
 });
 
-test("descriptor table covers exactly codex, claude-desktop, opencode, vscode, and antigravity", () => {
+test("descriptor table covers exactly codex, opencode, vscode, and antigravity", () => {
   const definedHosts = Object.keys(INSTALL_HOST_DEFINITIONS).sort();
   const expectedHosts = [
     "antigravity",
-    "claude-desktop",
     "codex",
     "opencode",
     "vscode",
   ];
   assert.deepEqual(definedHosts, expectedHosts);
+  // The MCP surface (claude-desktop host) was removed; it must not reappear.
+  assert.equal(INSTALL_HOST_DEFINITIONS["claude-desktop"], undefined);
 });
 
 test("getInstallHostKeys returns single key for known hosts", () => {
@@ -87,7 +88,8 @@ test("install profile skips descriptors whose profile predicate is false", () =>
   const openProfile = getInstallProfile("opencode");
   assert.equal(openProfile.writeVSCode, false);
   assert.equal(openProfile.writeAntigravity, false);
-  assert.equal(openProfile.writeClaudeDesktop, false);
+  // The MCP surface was removed, so there is no writeClaudeDesktop profile flag.
+  assert.equal("writeClaudeDesktop" in openProfile, false);
   // but does set writeOpenCode and writeAgents
   assert.equal(openProfile.writeOpenCode, true);
   assert.equal(openProfile.writeAgents, true);

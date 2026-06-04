@@ -22,7 +22,9 @@ dispatch them. The conversation orchestrator owns dispatch and ingestion control
 it should not perform broad review itself when subagents are available.
 Entering `/audit-code` is explicit user authorization to fan out those review
 subagents; do not require a separate delegation request before parallel
-dispatch.
+dispatch — unless `confirmation_recommended` is true (agent_count exceeds
+`sessionConfig.dispatch.confirm_threshold`, default 10), in which case pause for
+user confirmation.
 
 If the host cannot delegate to subagents, the conversation orchestrator may
 complete exactly one assigned review task, ingest it through the provided backend
@@ -35,6 +37,20 @@ the orchestrator does not need to infer the first task from a broad batch prompt
 
 Subagent fan-out belongs to the host agent runtime rather than to repo-local
 backend provider settings.
+
+### Scope confirmation
+
+The loader emits a scope summary after the intake step (the first `next-step`):
+the resolved repo root, the auditable file count, whether git is available, and
+any mis-scope smells. It echoes `Auditing <root>, <N> files, git: yes/no` so the
+operator can see exactly what is about to be audited. When a mis-scope smell is
+set — the resolved root has no `.git` but an ancestor does, or the root is a
+workspace member of a parent monorepo — the loader pauses and requires explicit
+confirmation before continuing. Expect the workflow to pause on the first step
+when targeting a workspace subdirectory or a non-git root whose ancestor is a
+repo; in the normal case the echo is informational and the run proceeds without
+interruption. Resolution behaviour is unchanged — only the visibility and the
+confirm gate are added.
 
 When dispatch-plan entries include provider-neutral complexity and
 `model_hint.tier` metadata, a capable host may map those tiers to its own

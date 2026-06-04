@@ -101,7 +101,7 @@ export async function runTriagePhase(
         `\nFound ${blockedItems.length} blocked items. Wrote triage_batch.json.`,
       );
       console.error(
-        `Please provide resolutions via MCP tool submit_triage, or write triage_resolution.json and run again.`,
+        `Please write triage_resolution.json and run again to continue.`,
       );
       return { ...state, status: "waiting_for_triage" };
     }

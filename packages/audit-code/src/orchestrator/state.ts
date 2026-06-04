@@ -148,10 +148,19 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
   const completedTaskIds = new Set(
     (bundle.audit_results ?? []).map((result) => result.task_id),
   );
+  // Tasks deferred by a budget cap (FINDING-013) will never have results, so
+  // they must be excluded from the completion check — otherwise the obligation
+  // loops forever under a budget. Absent active_dispatch => empty set => the
+  // logic is unchanged (all tasks must be complete).
+  const deferredTaskIds = new Set<string>(
+    bundle.active_dispatch?.deferred_task_ids ?? [],
+  );
   const hasPendingAuditTasks =
     bundle.audit_tasks?.some(
       (task) =>
-        task.status !== "complete" && !completedTaskIds.has(task.task_id),
+        task.status !== "complete" &&
+        !completedTaskIds.has(task.task_id) &&
+        !deferredTaskIds.has(task.task_id),
     ) ?? false;
 
   if (hasPendingAuditTasks) {

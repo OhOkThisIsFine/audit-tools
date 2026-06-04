@@ -43,9 +43,9 @@ Host-specific files may include:
 
 - Codex: managed `AGENTS.md` fallback guidance
 - Claude Desktop: project template, remote MCP connector, local MCP bundle
-- OpenCode: `opencode.json` with auditor MCP server and permission wiring; the `/audit-code` command is global npm-installed state
+- OpenCode: `opencode.json` with auditor agent and permission wiring; the `/audit-code` command is global npm-installed state
 - VS Code/Copilot: prompt, custom agent, instructions, and `.vscode/mcp.json`
-- Antigravity: planning-mode and MCP-oriented guidance
+- Antigravity: planning-mode guidance
 
 Use `.audit-code/install/GETTING-STARTED.md` as the repo-local handoff after
 bootstrap.
@@ -61,18 +61,17 @@ repo-local `AGENTS.md` fallback guidance. The installed skill includes
 `agents/openai.yaml` metadata so Codex can keep the slash-list display aligned
 with the canonical `/audit-code` spelling.
 
-Claude Desktop is treated as an MCP-first host. Use the generated project
+Claude Desktop is treated as a bundle-install host. Use the generated project
 template and local bundle artifacts when installing the integration.
 
 OpenCode uses the global command seeded by `npm install -g auditor-lambda`.
 The generated project `opencode.json` should not define `command["audit-code"]`;
-it only wires the auditor MCP server and project permissions. VS Code uses
+it only wires the auditor agent and project permissions. VS Code uses
 repo-local prompt and MCP configuration files.
 
 Antigravity should be treated as a workflow-and-artifacts host until it has a
-stable project-local config surface. Use generated planning-mode guidance,
-MCP tools/resources, or the backend fallback from an Antigravity-managed
-terminal when needed.
+stable project-local config surface. Use generated planning-mode guidance
+or the backend fallback from an Antigravity-managed terminal when needed.
 
 Manual prompt-import hosts can use:
 
@@ -110,7 +109,6 @@ audit-code --external-analyzer-results /path/to/external_analyzer_results.json
 audit-code explain-task <task_id>
 audit-code validate
 audit-code cleanup
-audit-code mcp
 ```
 
 `audit-code next-step` is the backend-rendered step engine used by the

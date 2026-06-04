@@ -80,9 +80,11 @@ const NON_PENDING_OBLIGATION_STATES = new Set<ObligationState>([
 const INTERACTIVE_PROVIDER_OPTIONS: readonly ProviderName[] = [
   "auto",
   "claude-code",
+  "codex",
   "opencode",
   "subprocess-template",
   "vscode-task",
+  "antigravity",
 ];
 
 function quoteShellPath(filePath: string): string {

@@ -62,6 +62,8 @@ export function renderDispatchReviewPrompt(params: {
   dispatchQuotaPath: string | null;
   hostCanRestrictSubagentTools: boolean;
   hostCanSelectSubagentModel: boolean;
+  phase?: "canary" | "fan_out";
+  canaryPacketId?: string | null;
 }): string {
   const mergeCommand = mergeAndIngestCommand(
     params.artifactsDir,
@@ -101,10 +103,21 @@ export function renderDispatchReviewPrompt(params: {
         "Launch one subagent for each entry in the plan.",
       ];
 
+  const canaryLines =
+    params.phase === "canary"
+      ? [
+          "",
+          "This is a CANARY round: the plan contains only the single top-priority packet. " +
+            "Dispatch it, run merge-and-ingest, then run next-step — the remaining packets fan out " +
+            "on the following step once this packet's result is accepted.",
+        ]
+      : [];
+
   return [
     "# audit-code dispatch review",
     "",
     ...dispatchDataLines,
+    ...canaryLines,
     "",
     "Pass each `entry.prompt_path` literally to its subagent; do not load packet prompt files into this orchestrator context.",
     "",

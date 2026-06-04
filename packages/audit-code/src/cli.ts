@@ -67,7 +67,6 @@ import type {
   SessionConfig,
 } from "@audit-tools/shared";
 import type { ExternalAnalyzerResults } from "./types/externalAnalyzer.js";
-import { runAuditCodeMcpServer } from "./mcp/server.js";
 import {
   scheduleWave,
   buildProviderModelKey,
@@ -782,10 +781,6 @@ async function cmdCleanup(argv: string[]): Promise<void> {
   );
 }
 
-async function cmdMcp(argv: string[]): Promise<void> {
-  await runAuditCodeMcpServer(argv.slice(3));
-}
-
 async function cmdQuota(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
   const sessionConfig = await loadSessionConfig(artifactsDir).catch(() => ({} as SessionConfig));
@@ -971,9 +966,6 @@ async function main(argv: string[]): Promise<void> {
     case "cleanup":
       await cmdCleanup(argv);
       return;
-    case "mcp":
-      await cmdMcp(argv);
-      return;
     case "prepare-dispatch":
       await cmdPrepareDispatch(argv);
       return;
@@ -998,7 +990,7 @@ async function main(argv: string[]): Promise<void> {
     default:
       console.error(`Unknown command: ${command}`);
       console.error(
-        "Available commands: sample-run, advance-audit, next-step, run-to-completion, worker-run, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, cleanup, mcp, prepare-dispatch, merge-and-ingest, submit-packet, validate-result, quota, status, dispatch-status",
+        "Available commands: sample-run, advance-audit, next-step, run-to-completion, worker-run, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, cleanup, prepare-dispatch, merge-and-ingest, submit-packet, validate-result, quota, status, dispatch-status",
       );
       process.exitCode = 1;
   }

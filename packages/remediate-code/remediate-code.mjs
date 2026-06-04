@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Thin wrapper: locates the built dist and delegates to it.
-// Supports: run, mcp, install, ensure, validate
+// Supports: run, install, ensure, validate
 
 import { fileURLToPath } from "url";
 import { pathToFileURL } from "url";

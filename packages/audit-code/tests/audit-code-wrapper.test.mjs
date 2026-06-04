@@ -151,7 +151,6 @@ function assertOpenCodeAuditPermissions(config) {
   assert.equal(config.permission?.bash?.["*audit-code.mjs* synthesize*"], "deny");
   assert.equal(config.permission?.bash?.["*node* *auditor-lambda*dist*index.js* worker-run*"], "allow");
   assert.equal(config.permission?.bash?.["Select-String *"], undefined);
-  assert.equal(config.permission?.bash?.["node* .audit-code/install/run-mcp-server.mjs*"], "allow");
   assert.equal(config.agent?.auditor?.permission?.read, "allow");
   assert.equal(config.agent?.auditor?.permission?.glob, "allow");
   assert.equal(config.agent?.auditor?.permission?.grep, "allow");
@@ -193,6 +192,20 @@ async function withTempRepo(fn) {
         "}",
         "",
       ].join("\n"),
+    );
+    // These end-to-end tests submit every planned packet in a single round and
+    // assert all tasks are accepted. The single-worker canary (default on) would
+    // hold back all but the top packet on first contact, so pin canary off to
+    // exercise the deterministic single-round dispatch these fixtures expect.
+    // (Canary phase behavior is covered by dispatch-features.test.mjs.)
+    await mkdir(join(root, ".audit-artifacts"), { recursive: true });
+    await writeFile(
+      join(root, ".audit-artifacts", "session-config.json"),
+      JSON.stringify(
+        { provider: "local-subprocess", dispatch: { canary: false } },
+        null,
+        2,
+      ) + "\n",
     );
     return await fn(root);
   } finally {
@@ -271,17 +284,14 @@ function repoLocalHostInstallPaths(root) {
     legacyInstalledPromptPath: join(root, ".audit-code", "install", "audit-code.prompt.md"),
     installGuidePath: join(root, ".audit-code", "install", "GETTING-STARTED.md"),
     installManifestPath: join(root, ".audit-code", "install", "manifest.json"),
-    mcpLauncherPath: join(root, ".audit-code", "install", "run-mcp-server.mjs"),
     vscodePromptPath: join(root, ".github", "prompts", "audit-code.prompt.md"),
     vscodeAgentPath: join(root, ".github", "agents", "auditor.agent.md"),
-    vscodeMcpPath: join(root, ".vscode", "mcp.json"),
     opencodeConfigPath: join(root, "opencode.json"),
     legacyOpenCodeCommandPath: join(root, ".opencode", "commands", "audit-code.md"),
     legacyCodexSkillPath: join(root, ".codex", "skills", "audit-code", "SKILL.md"),
     legacyCodexPromptPath: join(root, ".codex", "skills", "audit-code", "audit-code.prompt.md"),
     agentsPath: join(root, "AGENTS.md"),
     copilotInstructionsPath: join(root, ".github", "copilot-instructions.md"),
-    claudeDesktopDxtPath: join(root, ".audit-code", "install", "claude-desktop", "auditor-lambda.dxt"),
     antigravityPlanningGuidePath: join(root, ".audit-code", "install", "antigravity", "PLANNING-MODE.md"),
     geminiCommandPath: join(root, ".gemini", "commands", "audit-code.toml"),
     antigravitySkillPath: join(root, ".agent", "skills", "audit-code", "SKILL.md"),
@@ -310,7 +320,8 @@ function assertSharedHostInstallResponse(parsed, root, paths) {
   assert.equal(parsed.installed_prompt_path, paths.installedPromptPath);
   assert.equal(parsed.install_guide_path, paths.installGuidePath);
   assert.equal(parsed.install_manifest_path, paths.installManifestPath);
-  assert.equal(parsed.mcp_server_launcher_path, paths.mcpLauncherPath);
+  // The MCP surface was removed: install no longer emits an MCP server launcher.
+  assert.equal(parsed.mcp_server_launcher_path, undefined);
   assert.equal(parsed.slash_command_surfaces.vscode_prompt, paths.vscodePromptPath);
   assert.equal(parsed.slash_command_surfaces.opencode_config, paths.opencodeConfigPath);
   assert.equal(parsed.instruction_surfaces.agents, paths.agentsPath);
@@ -318,10 +329,10 @@ function assertSharedHostInstallResponse(parsed, root, paths) {
     parsed.instruction_surfaces.copilot_instructions,
     paths.copilotInstructionsPath,
   );
-  assert.equal(parsed.host_guidance.length, 5);
+  assert.equal(parsed.host_guidance.length, 4);
   assert.deepEqual(
     parsed.host_guidance.map((entry) => entry.host),
-    ["codex", "claude-desktop", "opencode", "vscode", "antigravity"],
+    ["codex", "opencode", "vscode", "antigravity"],
   );
   assert.equal(parsed.unsupported_hosts.length, 0);
 }
@@ -946,7 +957,6 @@ test("audit-code wrapper prints help text", async () => {
   assert.ok(stdout.includes("ensure lazily bootstraps repo-local"));
   assert.ok(stdout.includes("install bootstraps /audit-code"));
   assert.ok(stdout.includes("next-step advances deterministic audit state"));
-  assert.ok(stdout.includes("mcp starts the local stdio MCP server"));
   assert.ok(stdout.includes("install-host --host copilot"));
 });
 
@@ -999,7 +1009,7 @@ test("audit-code ensure lazily bootstraps and refreshes repo-local host assets",
       await readFile(installManifestPath, "utf8"),
     );
     assert.equal(installManifest.contract_version, "audit-code-install/v1alpha1");
-    assert.equal(installManifest.hosts.length, 5);
+    assert.equal(installManifest.hosts.length, 4);
 
     const skipped = JSON.parse(
       (await runWrapper(["ensure"], { cwd: root })).stdout,
@@ -1017,7 +1027,7 @@ test("audit-code ensure lazily bootstraps and refreshes repo-local host assets",
     assert.equal(refreshed.status, "ok");
     assert.equal(refreshed.action, "installed");
     assert.equal(refreshed.reason, "stale_installed_prompt");
-    assert.equal(refreshed.host_count, 5);
+    assert.equal(refreshed.host_count, 4);
 
     const sourcePrompt = await readFile(
       join(repoRoot, "skills", "audit-code", "audit-code.prompt.md"),
@@ -1085,7 +1095,8 @@ const repoLocalHostCases = [
       );
       assert.match(await readFile(paths.vscodePromptPath, "utf8"), /\/audit-code/);
       assert.match(await readFile(paths.vscodeAgentPath, "utf8"), /# Auditor Agent/);
-      assert.match(await readFile(paths.vscodeMcpPath, "utf8"), /run-mcp-server\.mjs/);
+      // The MCP surface was removed: install no longer writes .vscode/mcp.json.
+      await assert.rejects(() => stat(join(root, ".vscode", "mcp.json")));
       assert.match(await readFile(paths.installGuidePath, "utf8"), /## VS Code/);
     },
   },
@@ -1112,38 +1123,6 @@ const repoLocalHostCases = [
       );
       assertOpenCodeAuditPermissions(opencodeConfig);
       assert.match(await readFile(paths.installGuidePath, "utf8"), /## OpenCode/);
-    },
-  },
-  {
-    name: "Claude Desktop",
-    host: "claude-desktop",
-    async assertHost(root, parsed, paths) {
-      assert.equal(
-        hostGuidance(parsed, "claude-desktop").primary_path,
-        paths.claudeDesktopDxtPath,
-      );
-      const dxtInfo = await stat(paths.claudeDesktopDxtPath);
-      assert.equal(dxtInfo.isFile(), true);
-      assert.ok(dxtInfo.size > 0);
-      // The bundle must ship the top-level dispatch/ data dir: dist/cli/dispatch.js
-      // reads dispatch/lens-definitions.json from the package root at runtime, so a
-      // bundle missing it ENOENTs on the first dispatch step.
-      const bundleDispatchDefs = join(
-        root,
-        ".audit-code",
-        "install",
-        "claude-desktop",
-        "bundle",
-        "dispatch",
-        "lens-definitions.json",
-      );
-      const dispatchInfo = await stat(bundleDispatchDefs);
-      assert.equal(dispatchInfo.isFile(), true);
-      assert.ok(dispatchInfo.size > 0);
-      assert.match(
-        await readFile(paths.installGuidePath, "utf8"),
-        /## Claude Desktop/,
-      );
     },
   },
   {
@@ -1195,9 +1174,13 @@ test("repo-local host install writes shared manifest and cleanup behavior", asyn
         .replace(/\r\n/g, "\n"),
       skillContent.replace(/\r\n/g, "\n"),
     );
-    assert.match(
-      await readFile(paths.mcpLauncherPath, "utf8"),
-      /Unable to locate an audit-code executable/,
+    // The MCP surface was removed: install must not write the MCP server
+    // launcher or the Claude Desktop bundle.
+    await assert.rejects(() =>
+      stat(join(root, ".audit-code", "install", "run-mcp-server.mjs")),
+    );
+    await assert.rejects(() =>
+      stat(join(root, ".audit-code", "install", "claude-desktop")),
     );
     await assert.rejects(() => stat(paths.legacyInstalledPromptPath));
     await assert.rejects(() => stat(paths.legacyOpenCodeCommandPath));
@@ -1212,14 +1195,14 @@ test("repo-local host install writes shared manifest and cleanup behavior", asyn
       installManifest.source_skill_path,
       join(repoRoot, "skills", "audit-code", "SKILL.md"),
     );
-    assert.equal(installManifest.hosts.length, 5);
+    assert.equal(installManifest.hosts.length, 4);
     assert.deepEqual(
       installManifest.hosts.map((entry) => entry.host),
       parsed.host_guidance.map((entry) => entry.host),
     );
     assert.match(
       await readFile(paths.installGuidePath, "utf8"),
-      /refresh every generated host surface from the shared prompt, skill, and MCP launcher assets together/,
+      /refresh every generated host surface from the shared prompt and skill assets together/,
     );
   });
 });
@@ -1234,7 +1217,7 @@ test("verify-install summarizes repo-local host integration status", async () =>
 
     assert.equal(verifiedInstall.status, "ok");
     assert.equal(verifiedInstall.issue_count, 0);
-    assert.equal(verifiedInstall.hosts.length, 5);
+    assert.equal(verifiedInstall.hosts.length, 4);
     assert.deepEqual(
       verifiedInstall.hosts.map((entry) => entry.host),
       parsed.host_guidance.map((entry) => entry.host),
@@ -1389,13 +1372,15 @@ test("audit-code installer merges existing host config instead of clobbering it"
     assert.equal(opencodeConfig.agent.auditor.permission.bash["git log*"], "allow");
     assert.equal(opencodeConfig.agent.auditor.permission.edit["docs/notes.md"], "allow");
 
+    // The MCP surface was removed: install no longer touches .vscode/mcp.json,
+    // so a pre-existing file is left untouched and no auditor server is injected.
     const vscodeConfig = JSON.parse(
       await readFile(join(root, ".vscode", "mcp.json"), "utf8"),
     );
     assert.deepEqual(vscodeConfig.servers.existing.args, [
       "existing-server.mjs",
     ]);
-    assert.equal(vscodeConfig.servers.auditor.command, "node");
+    assert.equal(vscodeConfig.servers.auditor, undefined);
     assert.deepEqual(vscodeConfig.inputs, []);
   });
 });

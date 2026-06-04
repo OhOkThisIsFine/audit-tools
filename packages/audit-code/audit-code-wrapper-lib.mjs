@@ -22,10 +22,7 @@ const INSTALL_GUIDE_FILENAME = 'GETTING-STARTED.md';
 const INSTALL_MANIFEST_FILENAME = 'manifest.json';
 const DEFAULT_INSTALL_HOST = 'all';
 const INSTALLED_PROMPT_FILENAME = 'audit-code.import.md';
-const MCP_LAUNCHER_FILENAME = 'run-mcp-server.mjs';
 const packageVersion = JSON.parse(await readFile(packageJsonPath, 'utf8')).version;
-const MCP_PROTOCOL_VERSION = '2025-06-18';
-const INSTALL_VERIFY_TIMEOUT_MS = 10_000;
 
 function hasFlag(argv, name) {
   return argv.includes(name);
@@ -318,7 +315,7 @@ function printHelp({ usageName, preferredEntrypoint }) {
     '- prompt-path prints the absolute path to the canonical /audit-code prompt asset',
     '- ensure lazily bootstraps repo-local /audit-code assets when they are missing or stale',
     '- install bootstraps /audit-code into supported repo-local host surfaces',
-    '- verify-install smoke-tests the generated host assets and repo-local MCP launchers after install',
+    '- verify-install smoke-tests the generated host assets after install',
     '- mcp starts the local stdio MCP server for repo-local IDE integrations',
     '- install-host --host copilot keeps the narrower Copilot-focused install path available',
     '- next-step advances deterministic audit state and writes .audit-artifacts/steps/current-step.json plus current-prompt.md',
@@ -661,29 +658,6 @@ function renderVSCodeAgentFile() {
   ].join('\n');
 }
 
-function renderCodexMcpSetupGuide(root) {
-  return [
-    '# Codex MCP setup',
-    '',
-    'Codex shares MCP configuration between the app, CLI, and IDE extension. Register a local stdio MCP server named `auditor` that launches the repo-local wrapper below.',
-    '',
-    'Recommended command:',
-    `- command: \`node\``,
-    `- args: \`${toRepoRelativePath(root, join(root, '.audit-code', 'install', MCP_LAUNCHER_FILENAME))}\``,
-    '',
-    'Equivalent config shape:',
-    '',
-    '```toml',
-    '[mcp_servers.auditor]',
-    'command = "node"',
-    `args = ["${replaceBackslashes(toRepoRelativePath(root, join(root, '.audit-code', 'install', MCP_LAUNCHER_FILENAME)))}"]`,
-    '```',
-    '',
-    'Prefer `audit-code next-step` directly. Use the registered `auditor` MCP tools only when shell access is unavailable; they return the same one-step contract.',
-    '',
-  ].join('\n');
-}
-
 function renderCodexAutomationRecipe() {
   return [
     '# Codex re-audit automation recipe',
@@ -692,7 +666,7 @@ function renderCodexAutomationRecipe() {
     '',
     '- Prompt: Re-run the autonomous audit workflow for this repository with `audit-code next-step`, summarize only new or regressed findings, and stop once the deterministic report is current.',
     '- Cadence: daily on active branches or before release cut-offs',
-    '- Inputs: repository root; the installed `auditor` MCP server is optional compatibility plumbing',
+    '- Inputs: repository root',
     '',
     'Use this recipe as a starting point for a Codex automation once the local workflow is stable in your environment.',
     '',
@@ -739,8 +713,6 @@ const OPENCODE_AUDIT_BASH_PERMISSION = {
   '*audit-code.mjs* worker-run*': 'allow',
   '*audit-code.mjs* validate*': 'allow',
   '*node* *auditor-lambda*dist*index.js* worker-run*': 'allow',
-  'node* .audit-code/install/run-mcp-server.mjs*': 'allow',
-  'node* ./.audit-code/install/run-mcp-server.mjs*': 'allow',
   'git status*': 'allow',
   'git diff*': 'allow',
   'grep *': 'allow',
@@ -782,18 +754,6 @@ function renderOpenCodeProjectConfig(_root) {
           question: 'allow',
           task: 'allow',
         },
-      },
-    },
-  };
-}
-
-function renderVSCodeMcpConfig() {
-  return {
-    servers: {
-      auditor: {
-        type: 'stdio',
-        command: 'node',
-        args: ['${workspaceFolder}/.audit-code/install/run-mcp-server.mjs'],
       },
     },
   };
@@ -910,7 +870,6 @@ function assertOpenCodeAuditPermissionConfig(permissionConfig, label) {
     '*audit-code.mjs* merge-and-ingest*',
     '*audit-code.mjs* worker-run*',
     '*node* *auditor-lambda*dist*index.js* worker-run*',
-    'node* .audit-code/install/run-mcp-server.mjs*',
   ]) {
     if (bash[pattern] !== 'allow') {
       throw new Error(`OpenCode ${label}.bash must allow ${pattern}. Run "audit-code install --host opencode".`);
@@ -969,58 +928,6 @@ function buildMergedOpenCodeProjectConfig(existing, root) {
   };
 }
 
-function buildMergedVSCodeMcpConfig(existing) {
-  const generated = renderVSCodeMcpConfig();
-  return {
-    ...existing,
-    servers: {
-      ...objectValue(existing.servers),
-      auditor: generated.servers.auditor,
-    },
-  };
-}
-
-function renderClaudeDesktopProjectTemplate() {
-  return [
-    '# Claude Desktop project template',
-    '',
-    'Suggested project instructions:',
-    '',
-    '- Treat `/audit-code` as the canonical autonomous audit workflow for this repository.',
-    '- Prefer `audit-code next-step`; use the installed auditor MCP tools only as a compatibility adapter over the same step contract.',
-    '- Read the operator handoff and artifact resources before asking for more context.',
-    '- Present the final deterministic audit report as work blocks first.',
-    '',
-    'Suggested project knowledge uploads:',
-    '',
-    '- `.audit-code/install/audit-code.import.md`',
-    '- `.audit-code/install/GETTING-STARTED.md`',
-    '- `docs/operator-guide.md` when you want host-specific operator context',
-    '',
-    'Starter prompt:',
-    '',
-    '> Start `/audit-code` for this repository using `audit-code next-step`. Continue until the audit is complete or blocked for operator input, and summarize the current handoff status before you stop.',
-    '',
-  ].join('\n');
-}
-
-function renderClaudeDesktopRemoteConnectorTemplate() {
-  return JSON.stringify(
-    {
-      name: 'auditor-lambda',
-      transport: 'remote-mcp',
-      url: 'https://example.com/auditor-lambda/mcp',
-      notes: [
-        'Replace the URL with your hosted auditor MCP endpoint.',
-        'Expose the same tool names as the local bundle: start_audit, get_status, continue_audit, explain_task, validate_artifacts, import_results, import_runtime_updates.',
-        'Use OAuth or host-level auth when deploying this connector for Team or Enterprise rollouts.',
-      ],
-    },
-    null,
-    2,
-  ) + '\n';
-}
-
 function renderAntigravityPlanningGuide(root) {
   return [
     '# Antigravity planning-mode guide',
@@ -1029,12 +936,11 @@ function renderAntigravityPlanningGuide(root) {
     '',
     '1. Open Antigravity in Planning mode.',
     '2. Load the repo-local prompt asset or the AGENTS instructions before starting the audit conversation.',
-    '3. Ask Antigravity to use `audit-code next-step` directly. The installed auditor MCP server is available only as compatibility plumbing when direct shell access is unavailable.',
+    '3. Ask Antigravity to use `audit-code next-step` directly.',
     '4. Review Antigravity artifacts before accepting major code changes or imported evidence.',
     '',
     'Recommended repo-local paths:',
     `- prompt asset: \`${toRepoRelativePath(root, join(root, '.audit-code', 'install', INSTALLED_PROMPT_FILENAME))}\``,
-    `- MCP launcher: \`${toRepoRelativePath(root, join(root, '.audit-code', 'install', MCP_LAUNCHER_FILENAME))}\``,
     '',
     'Artifact round-tripping policy:',
     '',
@@ -1059,388 +965,17 @@ function renderGeminiCommandToml(promptBody) {
   ].join('\n');
 }
 
-function renderSharedMcpLauncher(sourcePackageRoot) {
-  return [
-    "import { access, readFile } from 'node:fs/promises';",
-    "import { constants } from 'node:fs';",
-    "import { spawn } from 'node:child_process';",
-    "import { dirname, join, resolve } from 'node:path';",
-    "import { fileURLToPath } from 'node:url';",
-    '',
-    'const scriptDir = dirname(fileURLToPath(import.meta.url));',
-    "const repoRoot = resolve(scriptDir, '..', '..');",
-    "const artifactsDir = join(repoRoot, '.audit-artifacts');",
-    '// Absolute path to the auditor-lambda package that generated this launcher.',
-    '// Intentionally machine-specific: it is a load-bearing fallback candidate',
-    '// (tried after a repo-local dependency) that lets the launcher find the',
-    '// backend entrypoint when the target repo has no local auditor-lambda dep.',
-    '// This file is regenerated per-install by `audit-code ensure`/`install` and',
-    '// is gitignored, so the path is always re-derived for the current machine;',
-    '// if it ever goes stale the launcher degrades gracefully to PATH/npx below.',
-    `const sourcePackageRoot = ${JSON.stringify(sourcePackageRoot)};`,
-    '',
-    'async function exists(path) {',
-    '  try {',
-    '    await access(path, constants.F_OK);',
-    '    return true;',
-    '  } catch {',
-    '    return false;',
-    '  }',
-    '}',
-    '',
-    'function spawnForward(command, args) {',
-    '  return new Promise((resolvePromise, rejectPromise) => {',
-    '    const child = spawn(command, args, {',
-    '      cwd: repoRoot,',
-    '      env: process.env,',
-    "      stdio: ['inherit', 'inherit', 'inherit'],",
-    '    });',
-    "    child.on('error', rejectPromise);",
-    "    child.on('exit', (code) => resolvePromise(code ?? 1));",
-    '  });',
-    '}',
-    '',
-    'async function tryCandidates() {',
-    "  const localPackageEntrypoint = join(repoRoot, 'node_modules', 'auditor-lambda', 'audit-code.mjs');",
-    "  const localBin = process.platform === 'win32'",
-    "    ? join(repoRoot, 'node_modules', '.bin', 'audit-code.cmd')",
-    "    : join(repoRoot, 'node_modules', '.bin', 'audit-code');",
-    "  const repoPackageJsonPath = join(repoRoot, 'package.json');",
-    "  const sourcePackageEntrypoint = sourcePackageRoot",
-    "    ? join(sourcePackageRoot, 'audit-code.mjs')",
-    "    : null;",
-    "  const sourcePackageJsonPath = sourcePackageRoot",
-    "    ? join(sourcePackageRoot, 'package.json')",
-    "    : null;",
-    '  const sharedArgs = [\'mcp\', \'--root\', repoRoot, \'--artifacts-dir\', artifactsDir];',
-    '',
-    '  if (await exists(localPackageEntrypoint)) {',
-    '    return await spawnForward(process.execPath, [localPackageEntrypoint, ...sharedArgs]);',
-    '  }',
-    '',
-    '  if (await exists(repoPackageJsonPath) && await exists(join(repoRoot, \'audit-code.mjs\'))) {',
-    '    try {',
-    "      const packageJson = JSON.parse(await readFile(repoPackageJsonPath, 'utf8'));",
-    "      if (packageJson?.name === 'auditor-lambda') {",
-    "        return await spawnForward(process.execPath, [join(repoRoot, 'audit-code.mjs'), ...sharedArgs]);",
-    '      }',
-    '    } catch {',
-    '      // fall through to the next candidate',
-    '    }',
-    '  }',
-    '',
-    '  if (sourcePackageEntrypoint && sourcePackageJsonPath && await exists(sourcePackageEntrypoint) && await exists(sourcePackageJsonPath)) {',
-    '    try {',
-    "      const packageJson = JSON.parse(await readFile(sourcePackageJsonPath, 'utf8'));",
-    "      if (packageJson?.name === 'auditor-lambda') {",
-    '        return await spawnForward(process.execPath, [sourcePackageEntrypoint, ...sharedArgs]);',
-    '      }',
-    '    } catch {',
-    '      // fall through to the next candidate',
-    '    }',
-    '  }',
-    '',
-    '  if (await exists(localBin)) {',
-    '    return await spawnForward(localBin, sharedArgs);',
-    '  }',
-    '',
-    "  const pathCandidate = process.platform === 'win32' ? 'audit-code.cmd' : 'audit-code';",
-    '  let exitCode = await spawnForward(pathCandidate, sharedArgs).catch(() => null);',
-    '  if (typeof exitCode === \'number\') {',
-    '    return exitCode;',
-    '  }',
-    '',
-    "  exitCode = await spawnForward('npx', ['--no-install', 'audit-code', ...sharedArgs]).catch(() => null);",
-    "  if (typeof exitCode === 'number') {",
-    '    return exitCode;',
-    '  }',
-    '',
-    '  throw new Error(',
-    "    'Unable to locate an audit-code executable. Install auditor-lambda as a dependency or make the audit-code binary available on PATH.',",
-    '  );',
-    '}',
-    '',
-    'const code = await tryCandidates();',
-    'process.exitCode = code;',
-    '',
-  ].join('\n');
-}
-
-function createCrc32Table() {
-  const table = new Uint32Array(256);
-  for (let index = 0; index < 256; index += 1) {
-    let value = index;
-    for (let bit = 0; bit < 8; bit += 1) {
-      value = (value & 1) !== 0 ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1);
-    }
-    table[index] = value >>> 0;
-  }
-  return table;
-}
-
-const CRC32_TABLE = createCrc32Table();
-
-function crc32(buffer) {
-  let crc = 0xffffffff;
-  for (const byte of buffer) {
-    crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-async function listFilesRecursive(root) {
-  const files = [];
-  const entries = await readdir(root, { withFileTypes: true });
-  for (const entry of entries) {
-    const absolutePath = join(root, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await listFilesRecursive(absolutePath)));
-      continue;
-    }
-    if (entry.isFile()) {
-      files.push(absolutePath);
-    }
-  }
-  return files.sort((a, b) => a.localeCompare(b));
-}
-
-async function createStoredZipBuffer(sourceDir) {
-  const absoluteFiles = await listFilesRecursive(sourceDir);
-  const localParts = [];
-  const centralParts = [];
-  let offset = 0;
-
-  for (const absolutePath of absoluteFiles) {
-    const relativePath = replaceBackslashes(relative(sourceDir, absolutePath));
-    const fileName = Buffer.from(relativePath, 'utf8');
-    const content = await readFile(absolutePath);
-    const checksum = crc32(content);
-
-    const localHeader = Buffer.alloc(30);
-    localHeader.writeUInt32LE(0x04034b50, 0);
-    localHeader.writeUInt16LE(20, 4);
-    localHeader.writeUInt16LE(0, 6);
-    localHeader.writeUInt16LE(0, 8);
-    localHeader.writeUInt16LE(0, 10);
-    localHeader.writeUInt16LE(0, 12);
-    localHeader.writeUInt32LE(checksum, 14);
-    localHeader.writeUInt32LE(content.length, 18);
-    localHeader.writeUInt32LE(content.length, 22);
-    localHeader.writeUInt16LE(fileName.length, 26);
-    localHeader.writeUInt16LE(0, 28);
-
-    localParts.push(localHeader, fileName, content);
-
-    const centralHeader = Buffer.alloc(46);
-    centralHeader.writeUInt32LE(0x02014b50, 0);
-    centralHeader.writeUInt16LE(20, 4);
-    centralHeader.writeUInt16LE(20, 6);
-    centralHeader.writeUInt16LE(0, 8);
-    centralHeader.writeUInt16LE(0, 10);
-    centralHeader.writeUInt16LE(0, 12);
-    centralHeader.writeUInt16LE(0, 14);
-    centralHeader.writeUInt32LE(checksum, 16);
-    centralHeader.writeUInt32LE(content.length, 20);
-    centralHeader.writeUInt32LE(content.length, 24);
-    centralHeader.writeUInt16LE(fileName.length, 28);
-    centralHeader.writeUInt16LE(0, 30);
-    centralHeader.writeUInt16LE(0, 32);
-    centralHeader.writeUInt16LE(0, 34);
-    centralHeader.writeUInt16LE(0, 36);
-    centralHeader.writeUInt32LE(0, 38);
-    centralHeader.writeUInt32LE(offset, 42);
-
-    centralParts.push(centralHeader, fileName);
-    offset += localHeader.length + fileName.length + content.length;
-  }
-
-  const centralDirectory = Buffer.concat(centralParts);
-  const endOfCentralDirectory = Buffer.alloc(22);
-  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0);
-  endOfCentralDirectory.writeUInt16LE(0, 4);
-  endOfCentralDirectory.writeUInt16LE(0, 6);
-  endOfCentralDirectory.writeUInt16LE(absoluteFiles.length, 8);
-  endOfCentralDirectory.writeUInt16LE(absoluteFiles.length, 10);
-  endOfCentralDirectory.writeUInt32LE(centralDirectory.length, 12);
-  endOfCentralDirectory.writeUInt32LE(offset, 16);
-  endOfCentralDirectory.writeUInt16LE(0, 20);
-
-  return Buffer.concat([...localParts, centralDirectory, endOfCentralDirectory]);
-}
-
-// Copy the auditor's dist + schemas + skills + wrapper entrypoints (and, best
-// effort, the resolved @audit-tools/shared dist) into the Claude Desktop bundle
-// tree. Returns whether the bundle directory already existed (for the
-// created/updated result marker).
-async function copyClaudeDesktopBundleFiles(bundleRoot, serverRoot) {
-  const bundleExisted = await fileExists(bundleRoot);
-  await mkdir(serverRoot, { recursive: true });
-  await cp(distEntry.replace(/dist[\\/]index\.js$/, 'dist'), join(bundleRoot, 'dist'), { recursive: true, force: true });
-  await cp(join(repoRoot, 'schemas'), join(bundleRoot, 'schemas'), { recursive: true, force: true });
-  // dist/cli/dispatch.js reads dispatch/lens-definitions.json from the package
-  // root at runtime, so the bundle must ship the top-level dispatch/ data dir
-  // (lens-definitions.json + the standalone validate/merge helpers) the same way
-  // the npm `files` array does. Omitting it ENOENTs the first dispatch step.
-  await cp(join(repoRoot, 'dispatch'), join(bundleRoot, 'dispatch'), { recursive: true, force: true });
-  await cp(join(repoRoot, 'skills', 'audit-code'), join(bundleRoot, 'skills', 'audit-code'), { recursive: true, force: true });
-  await writeFile(join(bundleRoot, 'audit-code.mjs'), await readFile(join(repoRoot, 'audit-code.mjs')));
-  await writeFile(join(bundleRoot, 'audit-code-wrapper-lib.mjs'), await readFile(join(repoRoot, 'audit-code-wrapper-lib.mjs')));
-  await writeFile(join(bundleRoot, 'package.json'), await readFile(join(repoRoot, 'package.json')));
-
-  try {
-    const req = createRequire(join(repoRoot, 'package.json'));
-    const sharedEntry = req.resolve('@audit-tools/shared');
-    let sharedRoot = dirname(sharedEntry);
-    while (sharedRoot !== dirname(sharedRoot) && !(await fileExists(join(sharedRoot, 'package.json')))) {
-      sharedRoot = dirname(sharedRoot);
-    }
-    const bundleSharedRoot = join(bundleRoot, 'node_modules', '@audit-tools', 'shared');
-    await mkdir(bundleSharedRoot, { recursive: true });
-    await cp(join(sharedRoot, 'dist'), join(bundleSharedRoot, 'dist'), { recursive: true, force: true });
-    await writeFile(join(bundleSharedRoot, 'package.json'), await readFile(join(sharedRoot, 'package.json')));
-  } catch {
-    // @audit-tools/shared not resolvable — bundle will use runtime resolution
-  }
-
-  return { bundleExisted };
-}
-
-// Source for the bundle's server/index.js shim: it spawns the bundled
-// audit-code.mjs in MCP mode against the user-configured repo root.
-function renderClaudeDesktopServerEntry() {
-  return [
-    "import { spawn } from 'node:child_process';",
-    "import { dirname, join } from 'node:path';",
-    "import { fileURLToPath } from 'node:url';",
-    '',
-    'const serverDir = dirname(fileURLToPath(import.meta.url));',
-    "const bundleRoot = join(serverDir, '..');",
-    "const repoRoot = process.env.AUDIT_CODE_REPO_ROOT;",
-    "const artifactsDir = process.env.AUDIT_CODE_ARTIFACTS_DIR || (repoRoot ? join(repoRoot, '.audit-artifacts') : undefined);",
-    '',
-    'if (!repoRoot) {',
-    "  console.error('AUDIT_CODE_REPO_ROOT must be configured before launching the auditor MCP bundle.');",
-    '  process.exit(1);',
-    '}',
-    '',
-    "const child = spawn(process.execPath, [join(bundleRoot, 'audit-code.mjs'), 'mcp', '--root', repoRoot, '--artifacts-dir', artifactsDir], {",
-    "  cwd: repoRoot,",
-    '  env: process.env,',
-    "  stdio: ['inherit', 'inherit', 'inherit'],",
-    '});',
-    '',
-    "child.on('exit', (code) => {",
-    '  process.exitCode = code ?? 1;',
-    '});',
-    '',
-  ].join('\n');
-}
-
-// The DXT/MCPB manifest.json describing the bundled node MCP server and its
-// Claude Desktop user-config inputs.
-function buildClaudeDesktopManifest() {
-  return {
-    manifest_version: '0.3',
-    name: 'auditor-lambda',
-    display_name: 'Auditor Lambda',
-    version: packageVersion,
-    description: 'Compatibility MCP bundle for the /audit-code autonomous audit workflow.',
-    long_description:
-      'Runs a local compatibility MCP adapter whose start and continue tools return the same audit-code next-step contract as the direct CLI loop.',
-    author: {
-      name: 'auditor-lambda',
-      url: 'https://github.com/OhOkThisIsFine/auditor-lambda',
-    },
-    repository: {
-      type: 'git',
-      url: 'https://github.com/OhOkThisIsFine/auditor-lambda.git',
-    },
-    documentation: 'https://github.com/OhOkThisIsFine/auditor-lambda/tree/main/docs',
-    support: 'https://github.com/OhOkThisIsFine/auditor-lambda/issues',
-    license: 'MIT',
-    compatibility: {
-      claude_desktop: '>=1.0.0',
-      platforms: ['darwin', 'win32', 'linux'],
-      runtimes: {
-        node: '>=20.0.0',
-      },
-    },
-    tools_generated: true,
-    prompts_generated: true,
-    server: {
-      type: 'node',
-      entry_point: 'server/index.js',
-      mcp_config: {
-        command: 'node',
-        args: ['${__dirname}/server/index.js'],
-        env: {
-          AUDIT_CODE_REPO_ROOT: '${user_config.repo_root}',
-          AUDIT_CODE_ARTIFACTS_DIR: '${user_config.artifacts_dir}',
-        },
-      },
-    },
-    user_config: {
-      repo_root: {
-        type: 'directory',
-        title: 'Repository Root',
-        description: 'Repository to audit with auditor-lambda.',
-        required: true,
-      },
-      artifacts_dir: {
-        type: 'directory',
-        title: 'Artifacts Directory',
-        description: 'Optional override for the audit artifacts directory.',
-        required: false,
-      },
-    },
-  };
-}
-
-// Orchestrates the Claude Desktop bundle: copy files, write the server shim and
-// manifest, then zip into the .dxt / .mcpb archives. Pushes each generated file
-// into `results`.
-async function buildClaudeDesktopBundle(root, results) {
-  const bundleRoot = join(root, '.audit-code', 'install', 'claude-desktop', 'bundle');
-  const serverRoot = join(bundleRoot, 'server');
-  const manifestPath = join(bundleRoot, 'manifest.json');
-  const serverEntrypointPath = join(serverRoot, 'index.js');
-  const dxtPath = join(root, '.audit-code', 'install', 'claude-desktop', 'auditor-lambda.dxt');
-  const mcpbPath = join(root, '.audit-code', 'install', 'claude-desktop', 'auditor-lambda.mcpb');
-
-  const { bundleExisted } = await copyClaudeDesktopBundleFiles(bundleRoot, serverRoot);
-  results.push({ path: bundleRoot, mode: bundleExisted ? 'updated' : 'created' });
-
-  results.push(
-    await writeGeneratedMarkdown(serverEntrypointPath, renderClaudeDesktopServerEntry()),
-  );
-  results.push(await writeGeneratedJson(manifestPath, buildClaudeDesktopManifest()));
-
-  const archive = await createStoredZipBuffer(bundleRoot);
-  results.push(await writeGeneratedBinary(dxtPath, archive));
-  results.push(await writeGeneratedBinary(mcpbPath, archive));
-
-  return {
-    bundleRoot,
-    manifestPath,
-    dxtPath,
-    mcpbPath,
-    serverEntrypointPath,
-  };
-}
-
 const INSTALL_PROFILE_FLAGS = [
   'writeVSCode',
   'writeCopilotInstructions',
   'writeOpenCode',
   'writeCodex',
-  'writeClaudeDesktop',
   'writeAntigravity',
   'writeAgents',
 ];
 
 const INSTALL_HOST_ORDER = [
   'codex',
-  'claude-desktop',
   'opencode',
   'vscode',
   'antigravity',
@@ -1457,7 +992,6 @@ const INSTALL_HOST_DEFINITIONS = {
     primary_path_key: 'agentsInstructionsPath',
     supporting_path_keys: [
       'installedPromptPath',
-      'mcpLauncherPath',
     ],
     steps: [
       'Open this repository in Codex.',
@@ -1480,119 +1014,16 @@ const INSTALL_HOST_DEFINITIONS = {
       });
     },
   },
-  'claude-desktop': {
-    host: 'claude-desktop',
-    label: 'Claude Desktop',
-    support_level: 'supported',
-    setup_kind: 'local-mcp-bundle',
-    summary:
-      'Install the generated local MCP compatibility bundle in Claude Desktop, then use the project template and prompt asset as supporting context.',
-    primary_path_key: 'claudeDesktopDxtPath',
-    supporting_path_keys: [
-      'claudeDesktopMcpbPath',
-      'claudeDesktopProjectTemplatePath',
-      'claudeDesktopRemoteConnectorPath',
-      'installedPromptPath',
-    ],
-    steps: [
-      'Open Claude Desktop Settings and install the generated `.dxt` bundle.',
-      'Configure the repository root when prompted so the bundle can launch the local auditor MCP adapter.',
-      'Use the project template and prompt asset to kick off `/audit-code` in conversation.',
-    ],
-    profile: {
-      writeClaudeDesktop: true,
-    },
-    async verify({ checks, root, assetPaths, collectVerifyCheck: collect }) {
-      const bundleManifestPath = join(
-        root,
-        '.audit-code',
-        'install',
-        'claude-desktop',
-        'bundle',
-        'manifest.json',
-      );
-      const bundleServerPath = join(
-        root,
-        '.audit-code',
-        'install',
-        'claude-desktop',
-        'bundle',
-        'server',
-        'index.js',
-      );
-
-      await collect(checks, 'claude_bundle_manifest', async () => {
-        const manifest = await readJson(bundleManifestPath, 'Claude Desktop bundle manifest');
-        if (manifest?.server?.entry_point !== 'server/index.js') {
-          throw new Error(`Claude Desktop bundle manifest has an unexpected entry_point: ${manifest?.server?.entry_point ?? 'missing'}.`);
-        }
-        return {
-          summary: 'Claude Desktop bundle manifest parsed successfully.',
-          path: bundleManifestPath,
-        };
-      });
-      await collect(checks, 'claude_connector_template', async () => {
-        const connector = await readJson(
-          assetPaths.claudeDesktopRemoteConnectorPath,
-          'Claude Desktop remote connector template',
-        );
-        if (connector?.transport !== 'remote-mcp') {
-          throw new Error(`Claude Desktop remote connector transport must be "remote-mcp", got ${connector?.transport ?? 'missing'}.`);
-        }
-        return {
-          summary: 'Claude Desktop remote connector template parsed successfully.',
-          path: assetPaths.claudeDesktopRemoteConnectorPath,
-        };
-      });
-      await collect(checks, 'claude_dxt_archive', async () => ({
-        summary: 'Claude Desktop .dxt bundle is present.',
-        path: assetPaths.claudeDesktopDxtPath,
-        size_bytes: await verifyZipFile(
-          assetPaths.claudeDesktopDxtPath,
-          'Claude Desktop .dxt bundle',
-        ),
-      }));
-      await collect(checks, 'claude_mcpb_archive', async () => ({
-        summary: 'Claude Desktop .mcpb bundle is present.',
-        path: assetPaths.claudeDesktopMcpbPath,
-        size_bytes: await verifyZipFile(
-          assetPaths.claudeDesktopMcpbPath,
-          'Claude Desktop .mcpb bundle',
-        ),
-      }));
-      await collect(checks, 'claude_bundle_mcp', async () => {
-        const probe = await probeMcpServer({
-          label: 'Claude Desktop bundle server',
-          command: process.execPath,
-          args: [bundleServerPath],
-          cwd: root,
-          env: {
-            AUDIT_CODE_REPO_ROOT: root,
-            AUDIT_CODE_ARTIFACTS_DIR: join(root, '.audit-artifacts'),
-          },
-        });
-        const toolNames = (probe.tools?.tools ?? []).map((tool) => tool.name);
-        if (!toolNames.includes('start_audit')) {
-          throw new Error('Claude Desktop bundle server did not expose the start_audit tool.');
-        }
-        return {
-          summary: 'Claude Desktop bundle completed an MCP handshake.',
-          tool_count: toolNames.length,
-        };
-      });
-    },
-  },
   opencode: {
     host: 'opencode',
     label: 'OpenCode',
     support_level: 'supported',
-    setup_kind: 'global-command+project-mcp',
+    setup_kind: 'global-command+project-permissions',
     summary:
-      'Use the global OpenCode `/audit-code` command installed by npm plus generated project permissions; MCP is compatibility-only.',
+      'Use the global OpenCode `/audit-code` command installed by npm plus generated project permissions.',
     primary_path_key: 'opencodeConfigPath',
     supporting_path_keys: [
       'agentsInstructionsPath',
-      'mcpLauncherPath',
     ],
     steps: [
       'Open this repository in OpenCode.',
@@ -1625,19 +1056,17 @@ const INSTALL_HOST_DEFINITIONS = {
     host: 'vscode',
     label: 'VS Code',
     support_level: 'supported',
-    setup_kind: 'prompt+agent+mcp',
+    setup_kind: 'prompt+agent',
     summary:
-      'Use the generated prompt file and custom agent for next-step-first VS Code integration; workspace MCP is compatibility-only.',
+      'Use the generated prompt file and custom agent for next-step-first VS Code integration.',
     primary_path_key: 'vscodePromptPath',
     supporting_path_keys: [
       'vscodeAgentPath',
-      'vscodeMcpConfigPath',
       'copilotInstructionsPath',
     ],
     steps: [
       'Open this repository in VS Code with Copilot.',
       'Invoke `/audit-code` from the generated prompt or chat so the workflow calls `audit-code next-step` directly.',
-      'Use the workspace MCP adapter only when direct shell access is unavailable.',
     ],
     profile: {
       writeVSCode: true,
@@ -1661,42 +1090,27 @@ const INSTALL_HOST_DEFINITIONS = {
           path: assetPaths.vscodePromptPath,
         };
       });
-      await collect(checks, 'vscode_mcp_config', async () => {
-        const config = await readJson(assetPaths.vscodeMcpConfigPath, 'VS Code MCP config');
-        const args = config?.servers?.auditor?.args;
-        if (config?.servers?.auditor?.command !== 'node') {
-          throw new Error(`VS Code MCP config must use node as the command, got ${config?.servers?.auditor?.command ?? 'missing'}.`);
-        }
-        if (!Array.isArray(args) || args[0] !== '${workspaceFolder}/.audit-code/install/run-mcp-server.mjs') {
-          throw new Error(`VS Code MCP config must point at \${workspaceFolder}/.audit-code/install/${MCP_LAUNCHER_FILENAME}.`);
-        }
-        return {
-          summary: 'VS Code MCP config parsed successfully.',
-          path: assetPaths.vscodeMcpConfigPath,
-        };
-      });
     },
   },
   antigravity: {
     host: 'antigravity',
     label: 'Antigravity',
     support_level: 'supported',
-    setup_kind: 'agent-skill+gemini-command+planning-guide+mcp-ready',
+    setup_kind: 'agent-skill+gemini-command+planning-guide',
     summary:
-      'Uses the project-scoped .agent/skills/audit-code/SKILL.md skill, the .gemini/commands/audit-code.toml slash command, the planning guide, and AGENTS instructions. The shared MCP launcher is compatibility-only.',
+      'Uses the project-scoped .agent/skills/audit-code/SKILL.md skill, the .gemini/commands/audit-code.toml slash command, the planning guide, and AGENTS instructions.',
     primary_path_key: 'antigravitySkillPath',
     supporting_path_keys: [
       'geminiCommandPath',
       'antigravityPlanningGuidePath',
       'agentsInstructionsPath',
-      'mcpLauncherPath',
       'installedPromptPath',
     ],
     steps: [
       'Open this repository in Antigravity.',
       'The audit-code skill is automatically discovered from .agent/skills/audit-code/SKILL.md.',
       'The /audit-code slash command is also available from .gemini/commands/audit-code.toml.',
-      'Use `audit-code next-step` directly; use the shared auditor MCP launcher only when direct shell access is unavailable.',
+      'Use `audit-code next-step` directly.',
     ],
     profile: {
       writeAntigravity: true,
@@ -1715,11 +1129,11 @@ const INSTALL_HOST_DEFINITIONS = {
       });
       await collect(checks, 'antigravity_guide', async () => {
         const content = await readFile(assetPaths.antigravityPlanningGuidePath, 'utf8');
-        if (!content.includes(MCP_LAUNCHER_FILENAME) || !content.includes(INSTALLED_PROMPT_FILENAME)) {
-          throw new Error(`Antigravity guide must reference both ${MCP_LAUNCHER_FILENAME} and ${INSTALLED_PROMPT_FILENAME}.`);
+        if (!content.includes(INSTALLED_PROMPT_FILENAME)) {
+          throw new Error(`Antigravity guide must reference ${INSTALLED_PROMPT_FILENAME}.`);
         }
         return {
-          summary: 'Antigravity planning guide references the repo-local prompt asset and MCP launcher.',
+          summary: 'Antigravity planning guide references the repo-local prompt asset.',
           path: assetPaths.antigravityPlanningGuidePath,
         };
       });
@@ -1809,7 +1223,6 @@ function renderInstallGuide({
   installedPromptPath,
   installedSkillPath,
   installManifestPath,
-  mcpLauncherPath,
   hostGuidance,
 }) {
   const lines = [
@@ -1821,7 +1234,6 @@ function renderInstallGuide({
     `- prompt asset: \`${toRepoRelativePath(root, installedPromptPath)}\``,
     `- skill asset: \`${toRepoRelativePath(root, installedSkillPath)}\``,
     `- host manifest: \`${toRepoRelativePath(root, installManifestPath)}\``,
-    `- shared MCP launcher: \`${toRepoRelativePath(root, mcpLauncherPath)}\``,
     '',
     'Host-specific quick starts:',
   ];
@@ -1854,7 +1266,7 @@ function renderInstallGuide({
   lines.push('', 'Backend fallback:');
   lines.push('- from the repository root, run `audit-code` only when you intentionally need the repo-local backend wrapper');
   lines.push('- run `audit-code verify-install` after bootstrap when you want to smoke-test the generated launchers and host configs');
-  lines.push('- rerun `audit-code install` to refresh every generated host surface from the shared prompt, skill, and MCP launcher assets together');
+  lines.push('- rerun `audit-code install` to refresh every generated host surface from the shared prompt and skill assets together');
 
   if (host !== 'all') {
     lines.push('');
@@ -1875,207 +1287,6 @@ async function assertDirectoryExists(path, description) {
 
   if (!stats.isDirectory()) {
     throw new Error(`${description} is not a directory: ${path}`);
-  }
-}
-
-function encodeMcpMessage(payload) {
-  const body = Buffer.from(JSON.stringify(payload), 'utf8');
-  return Buffer.concat([
-    Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, 'utf8'),
-    body,
-  ]);
-}
-
-function createInstallMcpClient(command, args, options = {}) {
-  const child = spawn(command, args, {
-    cwd: options.cwd,
-    env: { ...process.env, ...(options.env ?? {}) },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  let buffer = Buffer.alloc(0);
-  let stderr = '';
-  let exitError = null;
-  const pending = new Map();
-
-  function failPending(error) {
-    for (const { reject } of pending.values()) {
-      reject(error);
-    }
-    pending.clear();
-  }
-
-  child.stdout.on('data', (chunk) => {
-    buffer = Buffer.concat([buffer, chunk]);
-
-    while (true) {
-      const separator = buffer.indexOf('\r\n\r\n');
-      if (separator < 0) {
-        return;
-      }
-
-      const headerBlock = buffer.slice(0, separator).toString('utf8');
-      const contentLengthHeader = headerBlock
-        .split('\r\n')
-        .find((header) => header.toLowerCase().startsWith('content-length:'));
-      if (!contentLengthHeader) {
-        return;
-      }
-
-      const contentLength = Number(contentLengthHeader.split(':')[1]?.trim());
-      const frameLength = separator + 4 + contentLength;
-      if (buffer.length < frameLength) {
-        return;
-      }
-
-      const payload = JSON.parse(
-        buffer.slice(separator + 4, frameLength).toString('utf8'),
-      );
-      buffer = buffer.slice(frameLength);
-
-      if (pending.has(payload.id)) {
-        const { resolve, reject } = pending.get(payload.id);
-        pending.delete(payload.id);
-        if (payload.error) {
-          reject(
-            new Error(payload.error.message ?? JSON.stringify(payload.error)),
-          );
-          continue;
-        }
-        resolve(payload.result);
-      }
-    }
-  });
-
-  child.stderr.on('data', (chunk) => {
-    stderr += String(chunk);
-  });
-
-  child.on('error', (error) => {
-    exitError = error;
-    failPending(error);
-  });
-
-  child.on('exit', (code, signal) => {
-    if (exitError) {
-      return;
-    }
-    exitError = new Error(
-      `MCP process exited early with code ${code ?? 'null'}${signal ? ` and signal ${signal}` : ''}.${stderr.trim().length > 0 ? ` ${stderr.trim()}` : ''}`,
-    );
-    failPending(exitError);
-  });
-
-  function request(id, method, params = {}) {
-    return new Promise((resolve, reject) => {
-      if (exitError) {
-        reject(exitError);
-        return;
-      }
-      pending.set(id, { resolve, reject });
-      child.stdin.write(
-        encodeMcpMessage({
-          jsonrpc: '2.0',
-          id,
-          method,
-          params,
-        }),
-      );
-    });
-  }
-
-  function notify(method, params = {}) {
-    if (exitError) {
-      return;
-    }
-    child.stdin.write(
-      encodeMcpMessage({
-        jsonrpc: '2.0',
-        method,
-        params,
-      }),
-    );
-  }
-
-  async function close() {
-    if (!exitError) {
-      await request('shutdown', 'shutdown');
-      notify('exit');
-      child.stdin.end();
-    }
-
-    if (child.exitCode !== null || child.signalCode !== null) {
-      return;
-    }
-
-    await new Promise((resolvePromise) => {
-      child.on('exit', () => resolvePromise());
-    });
-  }
-
-  return {
-    request,
-    notify,
-    close,
-    readStderr() {
-      return stderr.trim();
-    },
-  };
-}
-
-async function probeMcpServer(params) {
-  const client = createInstallMcpClient(params.command, params.args, {
-    cwd: params.cwd,
-    env: params.env,
-  });
-
-  let timerId;
-  const timeout = new Promise((_, reject) => {
-    timerId = setTimeout(() => {
-      reject(
-        new Error(
-          `${params.label} did not complete an MCP handshake within ${INSTALL_VERIFY_TIMEOUT_MS}ms.`,
-        ),
-      );
-    }, INSTALL_VERIFY_TIMEOUT_MS);
-  });
-
-  try {
-    const result = await Promise.race([
-      (async () => {
-        const initialize = await client.request('init', 'initialize', {
-          protocolVersion: MCP_PROTOCOL_VERSION,
-          capabilities: {},
-          clientInfo: {
-            name: 'audit-code-verify-install',
-            version: packageVersion,
-          },
-        });
-        client.notify('notifications/initialized');
-        const tools = await client.request('tools', 'tools/list');
-        const resources = await client.request('resources', 'resources/list');
-        await client.close();
-        return {
-          initialize,
-          tools,
-          resources,
-          stderr: client.readStderr(),
-        };
-      })(),
-      timeout,
-    ]);
-    clearTimeout(timerId);
-    return result;
-  } catch (error) {
-    clearTimeout(timerId);
-    const stderr = client.readStderr();
-    try {
-      await client.close();
-    } catch {
-      // already failed or exited
-    }
-    const suffix = stderr.length > 0 ? ` ${stderr}` : '';
-    throw new Error(`${error instanceof Error ? error.message : String(error)}${suffix}`);
   }
 }
 
@@ -2243,39 +1454,6 @@ async function verifyInstalledBootstrap(argv) {
     }
     return {
       summary: 'No legacy local /audit-code command or skill surfaces were found.',
-    };
-  });
-
-  await collectVerifyCheck(generalChecks, 'shared_launcher_file', async () => {
-    const launcher = await readFile(assetPaths.mcpLauncherPath, 'utf8');
-    if (!launcher.includes('Unable to locate an audit-code executable')) {
-      throw new Error(`Shared MCP launcher is missing the executable resolution fallback message: ${assetPaths.mcpLauncherPath}`);
-    }
-    if (!launcher.includes('sourcePackageRoot')) {
-      throw new Error(`Shared MCP launcher is missing the package-source fallback hint: ${assetPaths.mcpLauncherPath}`);
-    }
-    return {
-      summary: 'Shared MCP launcher is present and includes resolver fallbacks.',
-      path: assetPaths.mcpLauncherPath,
-    };
-  });
-
-  await collectVerifyCheck(generalChecks, 'shared_launcher_mcp', async () => {
-    const probe = await probeMcpServer({
-      label: 'Shared MCP launcher',
-      command: process.execPath,
-      args: [assetPaths.mcpLauncherPath],
-      cwd: root,
-    });
-    const toolNames = (probe.tools?.tools ?? []).map((tool) => tool.name);
-    if (!toolNames.includes('start_audit')) {
-      throw new Error('Shared MCP launcher did not expose the start_audit tool.');
-    }
-    return {
-      summary: 'Shared MCP launcher completed an MCP handshake.',
-      server_name: probe.initialize?.serverInfo?.name ?? null,
-      tool_count: toolNames.length,
-      resource_count: (probe.resources?.resources ?? []).length,
     };
   });
 
@@ -2473,16 +1651,6 @@ async function detectBootstrapRefreshReason(root, host) {
     }
   }
 
-  const launcherPath =
-    assetPaths.mcpLauncherPath ?? installManifest.mcp_server_launcher_path;
-  const launcher = launcherPath ? await readTextIfExists(launcherPath) : null;
-  if (launcher === null) {
-    return 'missing_mcp_launcher';
-  }
-  if (!launcher.includes('Unable to locate an audit-code executable')) {
-    return 'stale_mcp_launcher';
-  }
-
   return null;
 }
 
@@ -2506,7 +1674,6 @@ async function ensureBootstrap(argv) {
       host: installed.host,
       repo_root: installed.repo_root,
       install_manifest_path: installed.install_manifest_path,
-      mcp_server_launcher_path: installed.mcp_server_launcher_path,
       host_count: installed.host_guidance.length,
       file_count: installed.files.length,
     };
@@ -2542,13 +1709,11 @@ function buildInstallAssetPaths(root, profile) {
   const installedSkillPath = join(root, '.audit-code', 'install', 'SKILL.md');
   const installGuidePath = join(root, '.audit-code', 'install', INSTALL_GUIDE_FILENAME);
   const installManifestPath = join(root, '.audit-code', 'install', INSTALL_MANIFEST_FILENAME);
-  const mcpLauncherPath = join(root, '.audit-code', 'install', MCP_LAUNCHER_FILENAME);
   return {
     installedPromptPath,
     installedSkillPath,
     installGuidePath,
     installManifestPath,
-    mcpLauncherPath,
     agentsInstructionsPath: profile.writeAgents ? join(root, 'AGENTS.md') : null,
     copilotInstructionsPath: profile.writeCopilotInstructions
       ? join(root, '.github', 'copilot-instructions.md')
@@ -2559,23 +1724,8 @@ function buildInstallAssetPaths(root, profile) {
     codexPromptPath: profile.writeCodex
       ? join(root, '.codex', 'skills', 'audit-code', 'audit-code.prompt.md')
       : null,
-    codexMcpSetupPath: profile.writeCodex
-      ? join(root, '.audit-code', 'install', 'codex', 'MCP-SETUP.md')
-      : null,
     codexAutomationRecipePath: profile.writeCodex
       ? join(root, '.audit-code', 'install', 'codex', 'RE-AUDIT-AUTOMATION.md')
-      : null,
-    claudeDesktopProjectTemplatePath: profile.writeClaudeDesktop
-      ? join(root, '.audit-code', 'install', 'claude-desktop', 'PROJECT-TEMPLATE.md')
-      : null,
-    claudeDesktopRemoteConnectorPath: profile.writeClaudeDesktop
-      ? join(root, '.audit-code', 'install', 'claude-desktop', 'remote-mcp-connector.json')
-      : null,
-    claudeDesktopDxtPath: profile.writeClaudeDesktop
-      ? join(root, '.audit-code', 'install', 'claude-desktop', 'auditor-lambda.dxt')
-      : null,
-    claudeDesktopMcpbPath: profile.writeClaudeDesktop
-      ? join(root, '.audit-code', 'install', 'claude-desktop', 'auditor-lambda.mcpb')
       : null,
     opencodeConfigPath: profile.writeOpenCode
       ? join(root, 'opencode.json')
@@ -2585,9 +1735,6 @@ function buildInstallAssetPaths(root, profile) {
       : null,
     vscodeAgentPath: profile.writeVSCode
       ? join(root, '.github', 'agents', 'auditor.agent.md')
-      : null,
-    vscodeMcpConfigPath: profile.writeVSCode
-      ? join(root, '.vscode', 'mcp.json')
       : null,
     antigravityPlanningGuidePath: profile.writeAntigravity
       ? join(root, '.audit-code', 'install', 'antigravity', 'PLANNING-MODE.md')
@@ -2601,7 +1748,7 @@ function buildInstallAssetPaths(root, profile) {
   };
 }
 
-// Always-written core assets (installed prompt + skill, shared MCP launcher,
+// Always-written core assets (installed prompt + skill,
 // AGENTS/copilot compatibility directive blocks) plus legacy-surface cleanup.
 async function writeCoreInstallAssets(root, assetPaths, promptSource, skillSource) {
   const results = [];
@@ -2611,9 +1758,6 @@ async function writeCoreInstallAssets(root, assetPaths, promptSource, skillSourc
   }
   results.push(await writeGeneratedMarkdown(assetPaths.installedPromptPath, promptSource));
   results.push(await writeGeneratedMarkdown(assetPaths.installedSkillPath, skillSource));
-  results.push(
-    await writeGeneratedMarkdown(assetPaths.mcpLauncherPath, renderSharedMcpLauncher(repoRoot)),
-  );
 
   const compatibilityBlockTargets = [
     assetPaths.agentsInstructionsPath,
@@ -2634,35 +1778,12 @@ async function writeCoreInstallAssets(root, assetPaths, promptSource, skillSourc
   return results;
 }
 
-async function writeCodexAssets(assetPaths, promptSource, skillSource, root) {
+async function writeCodexAssets(assetPaths, promptSource, skillSource) {
   return [
     await writeGeneratedMarkdown(assetPaths.codexSkillPath, skillSource),
     await writeGeneratedMarkdown(assetPaths.codexPromptPath, promptSource),
-    await writeGeneratedMarkdown(assetPaths.codexMcpSetupPath, renderCodexMcpSetupGuide(root)),
     await writeGeneratedMarkdown(assetPaths.codexAutomationRecipePath, renderCodexAutomationRecipe()),
   ];
-}
-
-// Builds the Claude Desktop DXT/MCPB bundle (mutating assetPaths with the
-// produced bundle paths) and writes the project template + remote connector.
-async function writeClaudeDesktopAssets(assetPaths, root) {
-  const results = [];
-  const claudeDesktopBundle = await buildClaudeDesktopBundle(root, results);
-  assetPaths.claudeDesktopDxtPath = claudeDesktopBundle.dxtPath;
-  assetPaths.claudeDesktopMcpbPath = claudeDesktopBundle.mcpbPath;
-  results.push(
-    await writeGeneratedMarkdown(
-      assetPaths.claudeDesktopProjectTemplatePath,
-      renderClaudeDesktopProjectTemplate(),
-    ),
-  );
-  results.push(
-    await writeGeneratedJson(
-      assetPaths.claudeDesktopRemoteConnectorPath,
-      JSON.parse(renderClaudeDesktopRemoteConnectorTemplate()),
-    ),
-  );
-  return results;
 }
 
 async function writeOpenCodeAssets(assetPaths, root) {
@@ -2689,11 +1810,6 @@ async function writeVSCodeAssets(assetPaths, promptBody) {
       ),
     ),
     await writeGeneratedMarkdown(assetPaths.vscodeAgentPath, renderVSCodeAgentFile()),
-    await writeMergedGeneratedJson(
-      assetPaths.vscodeMcpConfigPath,
-      'VS Code MCP config',
-      buildMergedVSCodeMcpConfig,
-    ),
   ];
 }
 
@@ -2722,17 +1838,13 @@ async function installBootstrap(argv, options = {}) {
     installedSkillPath,
     installGuidePath,
     installManifestPath,
-    mcpLauncherPath,
   } = assetPaths;
 
   const results = [];
   results.push(...await writeCoreInstallAssets(root, assetPaths, promptSource, skillSource));
 
   if (profile.writeCodex) {
-    results.push(...await writeCodexAssets(assetPaths, promptSource, skillSource, root));
-  }
-  if (profile.writeClaudeDesktop) {
-    results.push(...await writeClaudeDesktopAssets(assetPaths, root));
+    results.push(...await writeCodexAssets(assetPaths, promptSource, skillSource));
   }
   if (profile.writeOpenCode) {
     results.push(...await writeOpenCodeAssets(assetPaths, root));
@@ -2758,7 +1870,6 @@ async function installBootstrap(argv, options = {}) {
     installed_skill_path: installedSkillPath,
     install_guide_path: installGuidePath,
     install_manifest_path: installManifestPath,
-    mcp_server_launcher_path: mcpLauncherPath,
     source_prompt_path: resolve(promptAssetPath),
     source_skill_path: resolve(skillAssetPath),
     asset_paths: assetPaths,
@@ -2774,7 +1885,6 @@ async function installBootstrap(argv, options = {}) {
         installedPromptPath,
         installedSkillPath,
         installManifestPath,
-        mcpLauncherPath,
         hostGuidance,
       }),
     ),
@@ -2796,7 +1906,6 @@ async function installBootstrap(argv, options = {}) {
     installed_skill_path: installedSkillPath,
     install_guide_path: installGuidePath,
     install_manifest_path: installManifestPath,
-    mcp_server_launcher_path: mcpLauncherPath,
     source_prompt_path: resolve(promptAssetPath),
     source_skill_path: resolve(skillAssetPath),
     files: results,
@@ -2810,22 +1919,12 @@ async function installBootstrap(argv, options = {}) {
       agents: assetPaths.agentsInstructionsPath,
       copilot_instructions: assetPaths.copilotInstructionsPath,
     },
-    mcp_surfaces: {
-      vscode_workspace: assetPaths.vscodeMcpConfigPath,
-      opencode_project: assetPaths.opencodeConfigPath,
-      codex_setup: assetPaths.codexMcpSetupPath,
-      shared_launcher: mcpLauncherPath,
-      claude_desktop_dxt: assetPaths.claudeDesktopDxtPath,
-      claude_desktop_mcpb: assetPaths.claudeDesktopMcpbPath,
-      antigravity_planning_guide: assetPaths.antigravityPlanningGuidePath,
-    },
     host_guidance: hostGuidance,
     unsupported_hosts: [],
     next_steps: [
       'Open the repository in your preferred host and follow the matching host_guidance entry.',
-      `Open ${installGuidePath} for repo-local quick-start steps for Codex, Claude Desktop, OpenCode, VS Code, and Antigravity.`,
-      'Run `audit-code verify-install` from the repository root to smoke-test the generated launchers and host configs.',
-      'Use the shared MCP launcher as the source of truth for local stdio MCP registration across hosts.',
+      `Open ${installGuidePath} for repo-local quick-start steps for Codex, OpenCode, VS Code, and Antigravity.`,
+      'Run `audit-code verify-install` from the repository root to smoke-test the generated host configs.',
     ],
   };
 

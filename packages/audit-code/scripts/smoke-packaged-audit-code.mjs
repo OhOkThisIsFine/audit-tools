@@ -27,7 +27,6 @@ const requiredPackagedPaths = [
   "README.md",
   "dist/index.js",
   "dist/cli.js",
-  "dist/mcp/server.js",
   "dispatch/lens-definitions.json",
   "schemas/audit-code-v1alpha1.schema.json",
   "skills/audit-code/SKILL.md",
@@ -306,98 +305,6 @@ function runCommand(command, args, options = {}) {
       })));
     });
   });
-}
-
-function encodeMessage(payload) {
-  const body = Buffer.from(JSON.stringify(payload), "utf8");
-  return Buffer.concat([
-    Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, "utf8"),
-    body,
-  ]);
-}
-
-function createMcpClient(command, args, options = {}) {
-  const resolved = resolveSpawn(command, args);
-  const child = spawn(resolved.command, resolved.args, {
-    cwd: options.cwd ?? repoRoot,
-    env: options.env ?? process.env,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-
-  let buffer = Buffer.alloc(0);
-  const pending = new Map();
-
-  child.stdout.on("data", (chunk) => {
-    buffer = Buffer.concat([buffer, chunk]);
-
-    while (true) {
-      const separator = buffer.indexOf("\r\n\r\n");
-      if (separator < 0) {
-        return;
-      }
-      const headerBlock = buffer.slice(0, separator).toString("utf8");
-      const contentLengthHeader = headerBlock
-        .split("\r\n")
-        .find((header) => header.toLowerCase().startsWith("content-length:"));
-      if (!contentLengthHeader) {
-        return;
-      }
-      const contentLength = Number(contentLengthHeader.split(":")[1]?.trim());
-      const frameLength = separator + 4 + contentLength;
-      if (buffer.length < frameLength) {
-        return;
-      }
-
-      const payload = JSON.parse(
-        buffer.slice(separator + 4, frameLength).toString("utf8"),
-      );
-      buffer = buffer.slice(frameLength);
-
-      if (pending.has(payload.id)) {
-        pending.get(payload.id)(payload);
-        pending.delete(payload.id);
-      }
-    }
-  });
-
-  function request(id, method, params = {}) {
-    return new Promise((resolve, reject) => {
-      pending.set(id, (payload) => {
-        if (payload.error) {
-          reject(new Error(payload.error.message));
-          return;
-        }
-        resolve(payload.result);
-      });
-      child.stdin.write(
-        encodeMessage({
-          jsonrpc: "2.0",
-          id,
-          method,
-          params,
-        }),
-      );
-    });
-  }
-
-  function notify(method, params = {}) {
-    child.stdin.write(
-      encodeMessage({
-        jsonrpc: "2.0",
-        method,
-        params,
-      }),
-    );
-  }
-
-  async function close() {
-    await request("shutdown", "shutdown");
-    notify("exit");
-    child.stdin.end();
-    await new Promise((resolve) => child.on("exit", resolve));
-  }
-
-  return { request, notify, close };
 }
 
 // `npm publish --dry-run` can leak dry-run flags, registry overrides, and auth
@@ -901,40 +808,6 @@ async function main() {
       assert.equal(verifiedInstall.issue_count, 0);
       assert.equal(verifiedInstall.hosts.length, 5);
       process.stderr.write(`[smoke:packaged] elapsed: verify generated host assets — ${Date.now() - stepStart}ms\n`);
-
-      stepStart = Date.now();
-      step("packaged mcp initialize");
-      const mcpClient = createMcpClient(
-        auditCodeCommand,
-        ["mcp", "--root", root, "--artifacts-dir", join(root, ".audit-artifacts")],
-        { cwd: root },
-      );
-      try {
-        const initialize = await mcpClient.request("init", "initialize", {
-          protocolVersion: "2025-06-18",
-          capabilities: {},
-          clientInfo: {
-            name: "packaged-smoke",
-            version: "1.0.0",
-          },
-        });
-        assert.equal(initialize.protocolVersion, "2025-06-18");
-        assert.equal(initialize.serverInfo.name, "audit-code");
-        mcpClient.notify("notifications/initialized");
-        const tools = await mcpClient.request("tools", "tools/list");
-        assert.ok(
-          tools.tools.some((tool) => tool.name === "start_audit"),
-          "expected start_audit tool in packaged MCP server",
-        );
-        const status = await mcpClient.request("status", "tools/call", {
-          name: "get_status",
-          arguments: {},
-        });
-        assert.equal(status.structuredContent.audit_state.status, "not_started");
-      } finally {
-        await mcpClient.close();
-      }
-      process.stderr.write(`[smoke:packaged] elapsed: packaged mcp initialize — ${Date.now() - stepStart}ms\n`);
 
       stepStart = Date.now();
       step("first run (expect blocked)");

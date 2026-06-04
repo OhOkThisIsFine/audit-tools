@@ -55,7 +55,7 @@ That bootstraps repo-local supporting surfaces for the hosts we can automate tod
 
 - Codex `AGENTS.md` fallback guidance for the global skill surface
 - Claude Desktop local MCP bundle artifacts and project template guidance
-- OpenCode `opencode.json` with auditor MCP server and permission wiring; the `/audit-code` command stays in the global npm-installed OpenCode config
+- OpenCode `opencode.json` with auditor agent and permission wiring; the `/audit-code` command stays in the global npm-installed OpenCode config
 - VS Code prompt, custom agent, Copilot instructions, and `.vscode/mcp.json`
 - Antigravity planning-mode guidance plus the shared repo-local MCP launcher
 
@@ -138,8 +138,7 @@ audit-code next-step
 
 This writes `.audit-artifacts/steps/current-step.json` and
 `.audit-artifacts/steps/current-prompt.md`; hosts should follow only the
-returned step prompt. MCP tools are compatibility adapters over this same
-`next-step` contract rather than a separate orchestration path.
+returned step prompt.
 
 For an operator-side artifact consistency check:
 
@@ -172,12 +171,6 @@ audit-code cleanup --force     # delete even if state is unknown
 
 Refuses to delete if the audit state is `active` or `blocked` (resumable).
 Pass `--force` when `audit_state.json` is missing (crashed run).
-
-For a local stdio MCP server entrypoint:
-
-```bash
-audit-code mcp
-```
 
 The backend wrapper response schema is `schemas/audit-code-v1alpha1.schema.json`.
 

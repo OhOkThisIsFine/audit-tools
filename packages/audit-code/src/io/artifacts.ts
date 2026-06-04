@@ -25,6 +25,7 @@ import type { DesignAssessment } from "../types/designAssessment.js";
 import type { AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { ToolingManifest } from "../types/toolingManifest.js";
+import type { ActiveDispatchState } from "../cli/dispatch.js";
 import {
   isFileMissingError,
   readOptionalJsonFile,
@@ -79,8 +80,15 @@ type ArtifactPayloadMap = {
 /**
  * Audit artifacts accumulate phase-by-phase as the orchestrator advances.
  * Missing keys mean the corresponding artifact has not been produced yet.
+ *
+ * `active_dispatch` is loaded specially (like `tooling_manifest`): it lives at
+ * the artifacts root rather than as a standard pruned artifact, and carries the
+ * in-flight dispatch phase plus any budget-deferred task ids the completion
+ * obligation must exclude.
  */
-export type ArtifactBundle = Partial<ArtifactPayloadMap>;
+export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
+  active_dispatch?: ActiveDispatchState;
+};
 export type ArtifactBundleKey = keyof ArtifactPayloadMap;
 type ArtifactPhase =
   | "intake"
@@ -221,6 +229,16 @@ export async function loadArtifactBundle(
   }
 
   bundle.tooling_manifest = await buildToolingManifest();
+
+  // active-dispatch.json is written by prepare-dispatch at the artifacts root
+  // (not a standard ARTIFACT_DEFINITIONS entry). Load it so the completion
+  // obligation can exclude budget-deferred tasks. Absent on a fresh run.
+  const activeDispatch = await readOptionalJsonFile<ActiveDispatchState>(
+    join(root, "active-dispatch.json"),
+  );
+  if (activeDispatch !== undefined) {
+    bundle.active_dispatch = activeDispatch;
+  }
 
   return bundle;
 }

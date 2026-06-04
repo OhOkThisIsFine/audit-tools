@@ -3,8 +3,10 @@ export const PROVIDER_NAMES = [
   "local-subprocess",
   "subprocess-template",
   "claude-code",
+  "codex",
   "opencode",
   "vscode-task",
+  "antigravity",
 ] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export type ResolvedProviderName = Exclude<ProviderName, "auto">;
@@ -29,7 +31,29 @@ export interface OpenCodeConfig {
   extra_args?: string[];
 }
 
+/**
+ * Codex CLI backend config. Codex is a headless CLI (like claude-code), so it is
+ * driven by a binary + flags rather than a command template. `prompt_flag` is the
+ * non-interactive prompt-delivery flag (see CodexProvider; the default is a
+ * TODO(verify) assumption until confirmed against the real Codex CLI).
+ */
+export interface CodexConfig {
+  command?: string;
+  extra_args?: string[];
+  prompt_flag?: string;
+}
+
 export interface VSCodeTaskConfig {
+  command_template: string[];
+  env?: Record<string, string>;
+}
+
+/**
+ * Antigravity backend config. Antigravity is an agentic IDE with no headless
+ * invocation, so it is driven by an operator-configured command/task template —
+ * the same shape as vscode_task.
+ */
+export interface AntigravityConfig {
   command_template: string[];
   env?: Record<string, string>;
 }
@@ -37,8 +61,10 @@ export interface VSCodeTaskConfig {
 export const PROVIDER_SECTION_KEYS = {
   "subprocess-template": "subprocess_template",
   "claude-code": "claude_code",
+  codex: "codex",
   opencode: "opencode",
   "vscode-task": "vscode_task",
+  antigravity: "antigravity",
 } as const;
 
 export interface BlockQuotaConfig {
@@ -89,6 +115,29 @@ export interface SynthesisConfig {
   narrative?: boolean;
 }
 
+export interface DispatchConfig {
+  /**
+   * Dispatch only the top-priority packet on first contact (phase "canary"),
+   * then fan out the remaining packets once the canary produces an accepted
+   * result. No-op when a run has <=1 packet. Defaults to true (on).
+   */
+  canary?: boolean;
+  /**
+   * When `agent_count` (packets dispatched this run, after canary/budget
+   * filtering) exceeds this value the loader should pause and ask the user to
+   * confirm before fan-out. Defaults to 10.
+   */
+  confirm_threshold?: number;
+  /**
+   * Hard cap on the number of review packets dispatched in a single run.
+   * Packets are already priority-ordered (high -> medium -> low) by
+   * `prepareDispatchArtifacts`; when `max_packets` is set, only the first K
+   * packets are emitted and the remainder are recorded as DEFERRED.
+   * Default: all packets (no cap).
+   */
+  max_packets?: number;
+}
+
 export interface GraphConfig {
   /**
    * Phase 4B: run the optional, bounded edge-reasoning pass that rewrites the
@@ -124,6 +173,16 @@ export const ANALYZER_SETTINGS = [
 ] as const;
 export type AnalyzerSetting = (typeof ANALYZER_SETTINGS)[number];
 
+export interface DesignReviewConfig {
+  /**
+   * Maximum number of highest-risk units to include in the focused reading list
+   * rendered into the design-review prompt. The reviewer is asked to prioritise
+   * these units but may follow any thread that demands more context.
+   * Defaults to a value that scales with repo size (see renderDesignReviewPrompt).
+   */
+  max_units?: number;
+}
+
 export interface SessionConfig {
   provider?: ProviderName;
   timeout_ms?: number;
@@ -131,8 +190,10 @@ export interface SessionConfig {
   host_can_dispatch_subagents?: boolean;
   subprocess_template?: SubprocessTemplateConfig;
   claude_code?: ClaudeCodeConfig;
+  codex?: CodexConfig;
   opencode?: OpenCodeConfig;
   vscode_task?: VSCodeTaskConfig;
+  antigravity?: AntigravityConfig;
   agent_task_batch_size?: number;
   parallel_workers?: number;
   block_quota?: BlockQuotaConfig;
@@ -144,4 +205,8 @@ export interface SessionConfig {
   analyzers?: Record<string, AnalyzerSetting>;
   /** Optional graph-enrichment tuning (Phase 4B edge reasoning). */
   graph?: GraphConfig;
+  /** Dispatch fan-out controls (canary, confirmation threshold, packet budget). */
+  dispatch?: DispatchConfig;
+  /** Optional design-review tuning (focused reading list budget). */
+  design_review?: DesignReviewConfig;
 }

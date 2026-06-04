@@ -21,8 +21,12 @@ export interface AuditScopeBudget {
 }
 
 export interface AuditScopeManifest {
-  /** `full` audits every auditable file; `delta` scopes to a changed neighbourhood. */
-  mode: "full" | "delta";
+  /**
+   * `full` audits every auditable file; `delta` scopes to a changed
+   * neighbourhood; `budget` dispatches only the top-K review packets under a
+   * `max_packets` cap and defers the rest.
+   */
+  mode: "full" | "delta" | "budget";
   /** Git ref/SHA the delta was measured against; `null` in full mode. */
   since: string | null;
   /**
@@ -42,4 +46,14 @@ export interface AuditScopeManifest {
    * requested `--since` could not be honoured and the run fell back to full.
    */
   dropped_note?: string;
+  /**
+   * When `mode === 'budget'`: the number of review packets that were NOT
+   * dispatched due to the `max_packets` cap. Present only in budget mode.
+   */
+  deferred_packet_count?: number;
+  /**
+   * When `mode === 'budget'`: the task_ids skipped due to the budget cap.
+   * Present only in budget mode.
+   */
+  deferred_task_ids?: string[];
 }

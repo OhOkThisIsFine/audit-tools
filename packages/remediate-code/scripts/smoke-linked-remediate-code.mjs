@@ -53,12 +53,6 @@ check("--help mentions run command", () => {
   if (!out.includes("run")) throw new Error('missing "run" in help output');
 });
 
-check("--help mentions mcp command", () => {
-  const r = run("--help");
-  const out = r.stdout + r.stderr;
-  if (!out.includes("mcp")) throw new Error('missing "mcp" in help output');
-});
-
 check("--help mentions install command", () => {
   const r = run("--help");
   const out = r.stdout + r.stderr;

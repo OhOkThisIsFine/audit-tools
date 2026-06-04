@@ -104,7 +104,7 @@ export async function runOrchestrator(
     ) {
       await store.saveState(state);
       console.log(
-        `Remediation paused: ${state.status}. Waiting for user input via MCP.`,
+        `Remediation paused: ${state.status}. Waiting for user input (write the resolution file and run again).`,
       );
       return;
     }

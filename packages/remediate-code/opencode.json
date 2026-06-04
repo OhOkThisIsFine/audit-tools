@@ -58,8 +58,6 @@
       "*audit-code.mjs* worker-run*": "allow",
       "*audit-code.mjs* validate*": "allow",
       "*node* *auditor-lambda*dist*index.js* worker-run*": "allow",
-      "node* .audit-code/install/run-mcp-server.mjs*": "allow",
-      "node* ./.audit-code/install/run-mcp-server.mjs*": "allow",
       "git status*": "allow",
       "git diff*": "allow",
       "grep *": "allow",
@@ -152,8 +150,6 @@
           "*audit-code.mjs* worker-run*": "allow",
           "*audit-code.mjs* validate*": "allow",
           "*node* *auditor-lambda*dist*index.js* worker-run*": "allow",
-          "node* .audit-code/install/run-mcp-server.mjs*": "allow",
-          "node* ./.audit-code/install/run-mcp-server.mjs*": "allow",
           "git status*": "allow",
           "git diff*": "allow",
           "grep *": "allow",
@@ -165,6 +161,5 @@
         "task": "allow"
       }
     }
-  },
-  "mcp": {}
+  }
 }
