@@ -314,6 +314,7 @@ export type {
   DispatchCapacity,
   ComputeDispatchCapacityInput,
 } from "./quota/capacity.js";
+export { DO_NOT_TOKEN_WRAP_NOTE } from "./prompts.js";
 export { LearnedQuotaSource } from "./quota/learnedQuotaSource.js";
 export { CompositeQuotaSource } from "./quota/compositeQuotaSource.js";
 export type { ErrorParser } from "./quota/errorParsers/index.js";

@@ -216,8 +216,6 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
     );
   }
 
-  await writeJsonFile(auditResultsPath, passing);
-
   const findingCount = passing.reduce(
     (sum, result) => sum + result.findings.length,
     0,
@@ -225,6 +223,12 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
 
   let result: Awaited<ReturnType<typeof runAuditStep>> | null = null;
   if (passing.length > 0) {
+    // Write the transient results file only when there is something to ingest.
+    // Writing [] unconditionally would, on a stray re-invocation where every
+    // accepted task was already pruned from the pending set (passing=0,
+    // notDispatched>0), truncate a prior run-results.json — the same data loss
+    // the failing>0 guard above prevents but a notDispatched-only merge bypasses.
+    await writeJsonFile(auditResultsPath, passing);
     result = await runAuditStep({
       root: workerTask.repo_root,
       artifactsDir,

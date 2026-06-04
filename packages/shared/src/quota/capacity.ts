@@ -117,6 +117,18 @@ export function computeDispatchCapacity(
   if (input.pools.length === 0) {
     throw new Error("computeDispatchCapacity requires at least one capacity pool.");
   }
+  if (input.pools.length > 1) {
+    // The shape is multi-pool-ready, but real multi-pool dispatch needs to
+    // PARTITION pendingItemTokens across pools — not hand the full layout to each
+    // and sum the result, which would over-allocate capacity and double-count
+    // tokens. Until that allocation exists, fail fast so no caller ships the
+    // wrong sum. Remove this guard together with the partitioning logic when a
+    // second backend is wired in.
+    throw new Error(
+      `computeDispatchCapacity received ${input.pools.length} pools, but multi-pool ` +
+        `dispatch is not implemented yet (pendingItemTokens must be partitioned across pools first).`,
+    );
+  }
 
   const allocations: PoolDispatchAllocation[] = input.pools.map((pool) => {
     const schedule = scheduleWave({
