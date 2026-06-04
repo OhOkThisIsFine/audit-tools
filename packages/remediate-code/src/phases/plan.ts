@@ -474,6 +474,183 @@ function deriveFallbackBlocks(
   };
 }
 
+export interface CoverageLedgerEntry {
+  finding_id: string;
+  title?: string;
+  disposition: "planned" | "folded_into" | "dropped_no_evidence";
+  block_id?: string;
+  folded_into?: string;
+  rationale?: string;
+}
+
+export interface CoverageLedger {
+  contract_version: "remediate-code-coverage/v1alpha1";
+  plan_id: string;
+  source_finding_count: number;
+  planned_count: number;
+  folded_count: number;
+  dropped_count: number;
+  entries: CoverageLedgerEntry[];
+}
+
+/**
+ * Account for every finding the plan received: each is marked `planned` (kept and
+ * mapped to a block), `folded_into` (merged into a survivor by cross-lens dedup), or
+ * `dropped_no_evidence` (excluded for carrying no evidence). The three dispositions
+ * are mutually exclusive and cover the whole source set, so nothing is lost silently.
+ */
+export function buildCoverageLedger(params: {
+  planId: string;
+  sourceFindings: Finding[];
+  droppedNoEvidence: string[];
+  mergeMap: Map<string, string>;
+  items: Record<string, RemediationItemState>;
+}): CoverageLedger {
+  const dropped = new Set(params.droppedNoEvidence);
+  const entries: CoverageLedgerEntry[] = params.sourceFindings.map((f) => {
+    if (dropped.has(f.id)) {
+      return {
+        finding_id: f.id,
+        title: f.title,
+        disposition: "dropped_no_evidence",
+        rationale: "Finding carried no evidence and was excluded from the plan.",
+      };
+    }
+    const survivor = params.mergeMap.get(f.id);
+    if (survivor) {
+      return {
+        finding_id: f.id,
+        title: f.title,
+        disposition: "folded_into",
+        folded_into: survivor,
+      };
+    }
+    return {
+      finding_id: f.id,
+      title: f.title,
+      disposition: "planned",
+      block_id: params.items[f.id]?.block_id,
+    };
+  });
+  const count = (d: CoverageLedgerEntry["disposition"]): number =>
+    entries.filter((e) => e.disposition === d).length;
+  return {
+    contract_version: "remediate-code-coverage/v1alpha1",
+    plan_id: params.planId,
+    source_finding_count: params.sourceFindings.length,
+    planned_count: count("planned"),
+    folded_count: count("folded_into"),
+    dropped_count: count("dropped_no_evidence"),
+    entries,
+  };
+}
+
+/**
+ * Merge any blocks whose findings touch a shared file, UNLESS an explicit
+ * dependency already serializes them (ordered blocks never run in parallel, so a
+ * shared file between them is safe). This keeps a finding whose fix-set spans
+ * blocks inside a single block and guarantees no two parallel blocks ever write
+ * the same file — the documented "several blocks all editing the same file"
+ * clobber. Pure; preserves the auditor's structure when nothing overlaps.
+ */
+export function mergeBlocksSharingFiles(
+  blocks: RemediationBlock[],
+  findings: Finding[],
+): RemediationBlock[] {
+  if (blocks.length < 2) return blocks;
+  const findingMap = new Map(findings.map((f) => [f.id, f]));
+  const byId = new Map(blocks.map((b) => [b.block_id, b]));
+
+  const fileSet = (b: RemediationBlock): Set<string> => {
+    const files = new Set<string>();
+    for (const id of b.items) {
+      for (const af of findingMap.get(id)?.affected_files ?? []) files.add(af.path);
+    }
+    return files;
+  };
+
+  const reaches = (from: string, to: string): boolean => {
+    const seen = new Set<string>();
+    const stack = [...(byId.get(from)?.dependencies ?? [])];
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      if (cur === to) return true;
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      stack.push(...(byId.get(cur)?.dependencies ?? []));
+    }
+    return false;
+  };
+  const ordered = (a: string, b: string): boolean =>
+    reaches(a, b) || reaches(b, a);
+
+  const parent = blocks.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  const union = (i: number, j: number): void => {
+    const ri = find(i);
+    const rj = find(j);
+    if (ri !== rj) parent[ri] = rj;
+  };
+
+  const fileSets = blocks.map(fileSet);
+  for (let i = 0; i < blocks.length; i++) {
+    for (let j = i + 1; j < blocks.length; j++) {
+      if (find(i) === find(j)) continue;
+      const shareFile = [...fileSets[i]].some((p) => fileSets[j].has(p));
+      if (shareFile && !ordered(blocks[i].block_id, blocks[j].block_id)) {
+        union(i, j);
+      }
+    }
+  }
+
+  const groups = new Map<number, number[]>();
+  for (let i = 0; i < blocks.length; i++) {
+    const r = find(i);
+    const g = groups.get(r);
+    if (g) g.push(i);
+    else groups.set(r, [i]);
+  }
+  if (groups.size === blocks.length) return blocks; // nothing overlapped
+
+  const idRemap = new Map<string, string>();
+  const groupList = [...groups.values()];
+  for (const idxs of groupList) {
+    const ids = idxs.map((i) => blocks[i].block_id).sort();
+    const mergedId = ids[0];
+    for (const id of ids) idRemap.set(id, mergedId);
+  }
+
+  return groupList.map((idxs) => {
+    const groupBlocks = idxs.map((i) => blocks[i]);
+    const mergedId = idRemap.get(groupBlocks[0].block_id)!;
+    const items = [...new Set(groupBlocks.flatMap((b) => b.items))];
+    const deps = new Set<string>();
+    for (const b of groupBlocks) {
+      for (const d of b.dependencies ?? []) {
+        const remapped = idRemap.get(d) ?? d;
+        if (remapped !== mergedId) deps.add(remapped);
+      }
+    }
+    // A singleton group is unchanged except for dependency remapping — preserve
+    // its original parallel_safe rather than recomputing (and possibly flipping)
+    // it from deps. Only genuinely merged groups derive parallel_safe afresh.
+    const parallel_safe =
+      idxs.length === 1 ? groupBlocks[0].parallel_safe : deps.size === 0;
+    return {
+      block_id: mergedId,
+      items,
+      parallel_safe,
+      ...(deps.size > 0 ? { dependencies: [...deps] } : {}),
+    };
+  });
+}
+
 export async function runPlanPhase(
   state: RemediationState,
   options: OrchestratorOptions,
@@ -517,6 +694,11 @@ export async function runPlanPhase(
     throw new Error("Missing valid input for Plan phase.");
   }
 
+  // Coverage accounting: snapshot the findings the plan received before any
+  // reduction, so the ledger below can mark every source finding as
+  // planned / folded / dropped — never silently lost.
+  const sourceFindings = [...findings];
+
   // Robustness: a finding with empty evidence fails the plan validator and would
   // abort the entire run. Skip such malformed findings (and prune them from
   // blocks) with a warning instead of crashing — findings are advisory, so one
@@ -549,6 +731,12 @@ export async function runPlanPhase(
     blocks = fallback.blocks;
     blockStrategy = fallback.blockStrategy;
   }
+
+  // Coupled fixes must not be split across parallel blocks: merge any blocks
+  // whose findings touch a shared file (unless a dependency already serializes
+  // them), so a finding whose fix-set spans blocks lands in one block and
+  // parallel workers never clobber the same file.
+  blocks = mergeBlocksSharingFiles(blocks, findings);
 
   // Split blocks that would exceed the implementation agent's context budget,
   // keeping file-overlapping findings together (logical cohesion first).
@@ -598,6 +786,26 @@ export async function runPlanPhase(
       block_id: block ? block.block_id : "UNKNOWN",
     };
   }
+
+  // Coverage ledger: make every source finding's disposition auditable, so a
+  // large source set consolidated into fewer items is recorded rather than lost.
+  const coverage = buildCoverageLedger({
+    planId: plan.plan_id,
+    sourceFindings,
+    droppedNoEvidence: findingsWithoutEvidence,
+    mergeMap: dedup.mergeMap,
+    items,
+  });
+  // Write the coverage ledger to the repo ROOT (alongside remediation-report.*)
+  // so it survives the close phase's cleanup of .remediation-artifacts/ and stays
+  // auditable after the run completes.
+  await writeJsonFile(
+    join(options.root, "remediation-coverage.json"),
+    coverage,
+  );
+  console.log(
+    `Plan coverage: ${coverage.planned_count} planned, ${coverage.folded_count} folded, ${coverage.dropped_count} dropped (of ${coverage.source_finding_count} source finding(s)). See remediation-coverage.json.`,
+  );
 
   const planIssues = validateRemediationPlan(plan);
   if (planIssues.length > 0) {

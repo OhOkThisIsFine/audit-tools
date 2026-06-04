@@ -183,3 +183,5 @@ A living log of how to resolve recurring forks, so agents don't re-ask settled q
 ## Known friction & deferred fixes
 
 Tracked in [`docs/backlog.md`](docs/backlog.md) — known friction (agent/dev-experience traps), deferred product fixes, and features to add later. Add an entry when you defer a fix; remove it once shipped.
+
+**Log friction the moment you hit it.** If you trip over something while working — a non-obvious trap, a tool that misbehaves, a missing affordance, a shell/environment quirk, even something minor like reaching for `grep` where it isn't available — append a one-line entry to [`docs/backlog.md`](docs/backlog.md) under *Known friction* before moving on. Do it in the moment, even mid-task; don't wait to be asked and don't rely on remembering later. A 30-second note now is a fix a future session can pick up.
