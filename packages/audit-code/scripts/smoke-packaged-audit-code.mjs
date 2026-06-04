@@ -543,7 +543,7 @@ async function main() {
       );
       assert.equal(ensured.status, "ok");
       assert.equal(ensured.action, "installed");
-      assert.equal(ensured.host_count, 5);
+      assert.equal(ensured.host_count, 4);
 
       const ensuredAgain = JSON.parse(
         (
@@ -623,12 +623,6 @@ async function main() {
         "install",
         "manifest.json",
       );
-      const mcpLauncherPath = join(
-        root,
-        ".audit-code",
-        "install",
-        "run-mcp-server.mjs",
-      );
       const vscodePromptPath = join(
         root,
         ".github",
@@ -641,7 +635,6 @@ async function main() {
         "agents",
         "auditor.agent.md",
       );
-      const vscodeMcpPath = join(root, ".vscode", "mcp.json");
       const opencodeConfigPath = join(root, "opencode.json");
       const legacyCodexSkillPath = join(
         root,
@@ -666,13 +659,6 @@ async function main() {
         "openai.yaml",
       );
       const agentsPath = join(root, "AGENTS.md");
-      const claudeDesktopDxtPath = join(
-        root,
-        ".audit-code",
-        "install",
-        "claude-desktop",
-        "auditor-lambda.dxt",
-      );
       const antigravityPlanningGuidePath = join(
         root,
         ".audit-code",
@@ -700,7 +686,8 @@ async function main() {
       assert.equal(installedHost.installed_prompt_path, installedPromptPath);
       assert.equal(installedHost.install_guide_path, installGuidePath);
       assert.equal(installedHost.install_manifest_path, installManifestPath);
-      assert.equal(installedHost.mcp_server_launcher_path, mcpLauncherPath);
+      // The MCP surface was removed: install no longer emits an MCP server launcher.
+      assert.equal(installedHost.mcp_server_launcher_path, undefined);
       assert.equal(installedHost.slash_command_surfaces.vscode_prompt, vscodePromptPath);
       assert.equal(
         installedHost.slash_command_surfaces.opencode_config,
@@ -711,7 +698,11 @@ async function main() {
         installedHost.instruction_surfaces.copilot_instructions,
         join(root, ".github", "copilot-instructions.md"),
       );
-      assert.equal(installedHost.host_guidance.length, 5);
+      assert.equal(installedHost.host_guidance.length, 4);
+      assert.deepEqual(
+        installedHost.host_guidance.map((entry) => entry.host),
+        ["codex", "opencode", "vscode", "antigravity"],
+      );
       assert.equal(
         findHostGuidance(installedHost, "codex").primary_path,
         agentsPath,
@@ -723,10 +714,6 @@ async function main() {
       assert.equal(
         findHostGuidance(installedHost, "opencode").primary_path,
         opencodeConfigPath,
-      );
-      assert.equal(
-        findHostGuidance(installedHost, "claude-desktop").primary_path,
-        claudeDesktopDxtPath,
       );
       assert.equal(
         findHostGuidance(installedHost, "antigravity").primary_path,
@@ -753,21 +740,17 @@ async function main() {
       );
       assert.match(
         await readFile(installGuidePath, "utf8"),
-        /## Claude Desktop/,
-      );
-      assert.match(
-        await readFile(installGuidePath, "utf8"),
         /## Antigravity/,
+      );
+      assert.doesNotMatch(
+        await readFile(installGuidePath, "utf8"),
+        /## Claude Desktop/,
       );
       assert.match(
         await readFile(vscodePromptPath, "utf8"),
         /^---\nname: audit-code\ndescription: Autonomous local loop code auditing\nagent: auditor/m,
       );
       assert.match(await readFile(vscodeAgentPath, "utf8"), /# Auditor Agent/);
-      assert.match(
-        await readFile(vscodeMcpPath, "utf8"),
-        /run-mcp-server\.mjs/,
-      );
       const opencodeConfig = JSON.parse(await readFile(opencodeConfigPath, "utf8"));
       assert.equal(opencodeConfig.command?.["audit-code"], undefined, "project opencode.json must not define the global /audit-code command");
       assert.equal(opencodeConfig.mcp?.auditor, undefined, "project opencode.json must not define mcp.auditor (global config owns it)");
@@ -776,16 +759,17 @@ async function main() {
       await assert.rejects(() => stat(legacyCodexPromptPath));
       await assert.rejects(() => stat(legacyCodexOpenAiAgentPath));
       assert.match(await readFile(agentsPath, "utf8"), /When the user enters `\/audit-code`/);
-      assert.match(
-        await readFile(mcpLauncherPath, "utf8"),
-        /Unable to locate an audit-code executable/,
+      // The MCP surface was removed: install must not write the MCP server launcher
+      // or the Claude Desktop bundle.
+      await assert.rejects(() =>
+        stat(join(root, ".audit-code", "install", "run-mcp-server.mjs")),
       );
-      const dxtInfo = await stat(claudeDesktopDxtPath);
-      assert.equal(dxtInfo.isFile(), true);
-      assert.ok(dxtInfo.size > 0);
+      await assert.rejects(() =>
+        stat(join(root, ".audit-code", "install", "claude-desktop")),
+      );
       assert.equal(installedHost.unsupported_hosts.length, 0);
       assert.equal(installManifest.contract_version, "audit-code-install/v1alpha1");
-      assert.equal(installManifest.hosts.length, 5);
+      assert.equal(installManifest.hosts.length, 4);
       process.stderr.write(`[smoke:packaged] elapsed: install — ${Date.now() - stepStart}ms\n`);
 
       stepStart = Date.now();
@@ -806,7 +790,7 @@ async function main() {
       );
       assert.equal(verifiedInstall.status, "ok");
       assert.equal(verifiedInstall.issue_count, 0);
-      assert.equal(verifiedInstall.hosts.length, 5);
+      assert.equal(verifiedInstall.hosts.length, 4);
       process.stderr.write(`[smoke:packaged] elapsed: verify generated host assets — ${Date.now() - stepStart}ms\n`);
 
       stepStart = Date.now();
@@ -906,7 +890,7 @@ async function main() {
     });
 
     success(
-      `Validated tarball ${tarballFilename}, packaged install bootstrap surfaces, packaged MCP startup, and the blocked/completed/rerun audit flow. Total elapsed: ${Math.round((Date.now() - smokeStart) / 1000)}s.`,
+      `Validated tarball ${tarballFilename}, packaged install bootstrap surfaces, and the blocked/completed/rerun audit flow. Total elapsed: ${Math.round((Date.now() - smokeStart) / 1000)}s.`,
     );
   } finally {
     if (tarballPath) {
