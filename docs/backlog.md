@@ -55,6 +55,24 @@ anti-rot rule as CLAUDE.md's *"docs capture durable concepts, not current state"
   JSDoc contract. Revisit only if a provider gains a real proactive rate-limit endpoint
   (ties into "Adaptive, multi-agent quota-aware dispatch" below).
 
+### remediate-code: the structured `audit-findings.json` fast-path skips intake entirely
+
+Surfaced dogfooding this repo's own 488-finding self-audit (2026-06-04). Default input
+discovery now **prefers `audit-findings.json` over `audit-report.md`** (fixed:
+`defaultInputCandidates` + single best-pick in `resolveInputPaths`, regression test in
+`next-step.test.ts`) — the JSON is the source of truth on both sides, so feeding it takes the
+lossless structured hand-off instead of a lossy LLM re-extraction from the markdown render.
+
+**Still open:** for structured input, `resolveIntakeStep` calls `runPlanPhase` directly
+(`intakeResolver.ts:105-120`) and **bypasses the whole intake summary/brief/clarification flow**.
+A clean "remediate everything" hand-off is fine, but a large contract gives the operator no
+scope dialog — no "high-severity only?", no theme/package filter, no chance to exclude scratch
+units — it always plans *every* finding. Consider a lightweight scope gate on the structured
+path too (e.g. selectable `work_blocks`, or a severity/theme/package filter before planning).
+Compounding: the structured path also inherits the auditor's non-unique-id flaw (audit-code
+**T-004**) for `work_blocks.finding_ids` → finding mapping (`plan.ts:105`), so a clean dogfood
+remediation of this repo is still blocked until synthesis emits unique, content-addressable ids.
+
 ### audit-code: fold pending `requeue_tasks` into the dispatch planner
 
 The `audit_tasks_completed` no-progress loop (surfaced dogfooding a long multi-session
