@@ -69,9 +69,30 @@ A clean "remediate everything" hand-off is fine, but a large contract gives the 
 scope dialog — no "high-severity only?", no theme/package filter, no chance to exclude scratch
 units — it always plans *every* finding. Consider a lightweight scope gate on the structured
 path too (e.g. selectable `work_blocks`, or a severity/theme/package filter before planning).
-Compounding: the structured path also inherits the auditor's non-unique-id flaw (audit-code
-**T-004**) for `work_blocks.finding_ids` → finding mapping (`plan.ts:105`), so a clean dogfood
-remediation of this repo is still blocked until synthesis emits unique, content-addressable ids.
+Compounding (now resolved): the structured path also inherited the auditor's non-unique-id flaw
+(audit-code **T-004**) for `work_blocks.finding_ids` → finding mapping (`plan.ts:105`); **fixed in
+audit-code 0.10.3** — synthesis re-keys findings with globally-unique content-derived ids
+(`reporting/findingIdentity.ts`), so the structured path now round-trips cleanly.
+
+### remediate-code: fileIntegrity chokes on a finding whose affected_files is a directory
+
+Surfaced re-running the remediation on the self-audit (2026-06-04). A finding's `affected_files`
+entry can be a directory path (e.g. `packages/audit-code/schemas/`), and `checkFileIntegrity`
+tries to hash it as a file → non-fatal `[remediate-code] fileIntegrity: I/O error hashing …:
+EISDIR`. Planning continues but the integrity hash is silently absent for that item. Skip (or
+recurse into) directory paths in the integrity hasher, or normalize/reject directory
+`affected_files` at plan intake.
+
+### audit-code: no way to re-synthesize a clean audit-findings.json after promotion
+
+Surfaced fixing T-004 (2026-06-04). Synthesis promotes `audit-findings.json` to the repo root and
+prunes the intermediate `.audit-artifacts/` inputs (`audit_results.jsonl`, `unit_manifest`, …), so
+a later fix to the synthesis boundary (e.g. unique finding ids) cannot regenerate the existing
+contract without a full re-audit — the raw per-packet results are gone. Worked around with a
+one-off re-key script (`assignStableFindingIds` + `buildWorkBlocks` over the promoted findings).
+Consider an `audit-code resynthesize` command that re-runs the deterministic synthesis tail
+(re-key → re-block → re-render) over an existing `audit-findings.json`, or retain the minimal
+inputs needed to re-synthesize.
 
 ### audit-code: fold pending `requeue_tasks` into the dispatch planner
 
