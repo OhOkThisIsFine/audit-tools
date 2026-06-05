@@ -338,6 +338,37 @@ describe("decideNextStep", () => {
     expect(summary.goals).toContain("Fix only the critical bugs.");
   });
 
+  it("prefers the structured audit-findings.json contract over the markdown render for default input", async () => {
+    // Regression: with no --input, default discovery must pick the canonical
+    // machine contract (lossless structured hand-off), not its human-facing
+    // audit-report.md render sitting beside it (which forces a lossy LLM
+    // re-extraction from prose). The JSON is the source of truth on both sides.
+    const contract = await readFile(AUDITOR_CONTRACT_FIXTURE, "utf8");
+    await writeFile(join(REPO_DIR, "audit-findings.json"), contract, "utf8");
+    await writeFile(
+      join(REPO_DIR, "audit-report.md"),
+      "# Audit Report\n\n## Findings\n\n### DECOY-001 — must never be extracted\n",
+      "utf8",
+    );
+
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+    const state = JSON.parse(
+      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
+    );
+
+    // Structured fast-path consumed the JSON contract (fixture finding ids),
+    // proving the markdown decoy was ignored rather than LLM-extracted.
+    expect(step.step_kind).toBe("dispatch_document");
+    expect(state.plan.findings.map((finding: { id: string }) => finding.id)).toEqual([
+      "AUD-001",
+      "AUD-002",
+      "AUD-003",
+    ]);
+  });
+
   it("ambiguous intake summary asks for clarification before extraction", async () => {
     const inputPath = join(REPO_DIR, "feedback.md");
     const intakeDir = join(ARTIFACTS_DIR, "intake");
