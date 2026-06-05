@@ -39,6 +39,10 @@ anti-rot rule as CLAUDE.md's *"docs capture durable concepts, not current state"
   `npm run check -w packages/<pkg>` fails with *No workspaces found* (the path
   doubles). Use a subshell `(cd … && …)` in Bash, or pass absolute paths and
   `Set-Location` the repo root explicitly, rather than relying on per-tool CWD.
+- **PowerShell block output cannot be piped inline after a `foreach` statement.**
+  A shape like `foreach (...) { ... } | ConvertTo-Json` throws "An empty pipe
+  element is not allowed"; assign the loop output first (`$out = foreach (...) {
+  ... }`) and pipe `$out`.
 
 ## Deferred fixes (product bugs)
 
@@ -50,6 +54,34 @@ anti-rot rule as CLAUDE.md's *"docs capture durable concepts, not current state"
   stubs change nothing at runtime; the only durable value would be the `types.ts`
   JSDoc contract. Revisit only if a provider gains a real proactive rate-limit endpoint
   (ties into "Adaptive, multi-agent quota-aware dispatch" below).
+
+### audit-code: fold pending `requeue_tasks` into the dispatch planner
+
+The `audit_tasks_completed` no-progress loop (surfaced dogfooding a long multi-session
+fan-out, 2026-06-04) was **fixed**: selective-deepening answers were being stranded
+behind a stale, run-id-scoped `merge-complete.json` — once an early round wrote the
+marker, every later deepening round for the same run-id short-circuited to an
+idempotent replay, so the valid on-disk `deepening_*` results never ingested and
+`audit_tasks_completed` stayed blocked forever. `merge-and-ingest` now (a) recovers an
+un-dispatched pending task's answer from its on-disk result file (matched by
+`task_id`) even when the dispatch manifest is empty, and (b) treats the completion
+marker as **stale** when a pending task has an on-disk answer — re-processing instead
+of replaying. Regression test: *"merge-and-ingest self-heals a stale completion
+marker…"* in `audit-code-wrapper.test.mjs`. The "loops instead of halting" symptom is
+resolved at the root (no premature marker stranding), so a separate repeat-detector is
+unnecessary.
+
+**Still open — requeue tasks are never dispatchable.** `requeue_tasks.json`
+mandatory-coverage gaps (`status: pending`) appear **0×** in `review_packets.json` and
+are never folded into `buildPendingAuditTasks` (`dispatch.ts`), so files like
+`dispatch.ts`, `envelope.ts`, `lineIndex.ts` and the critical-flow test files are never
+re-audited. Folding `bundle.requeue_tasks` into the pending set is loop-safe (requeue
+never gates `audit_tasks_completed`, and a dispatched task is excluded the next round via
+`completedTaskIds`) **but needs care**: requeue tasks carry no `file_line_counts`, and
+the first-contact generation path in `prepareDispatchArtifacts` writes pending tasks
+without `addFileLineCountHints` — so the fold-in must also hint line counts or packet
+`total_lines` / result validation will be wrong. Deserves its own focused change + an
+end-to-end dispatch validation.
 
 ## Features to add later
 

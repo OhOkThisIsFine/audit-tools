@@ -1,4 +1,5 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isFileMissingError, readJsonFile, writeJsonFile } from "@audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
@@ -14,7 +15,7 @@ import {
   buildPendingAuditTasks,
 } from "./dispatch.js";
 import { addFileLineCountHints } from "./lineIndex.js";
-import { isCanonicalResultFilename, getArtifactsDir, getFlag } from "./args.js";
+import { isCanonicalResultFilename, taskResultPath, getArtifactsDir, getFlag } from "./args.js";
 import { buildWorkerResult } from "./workerResult.js";
 import { PACKET_SCHEMA_FILENAMES } from "../io/runArtifacts.js";
 
@@ -48,10 +49,34 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
     if (!isFileMissingError(e)) throw e;
   }
   if (priorSummary) {
-    console.log(
-      JSON.stringify({ ...priorSummary, idempotent_replay: true }, null, 2),
+    // A completion marker can go stale. Selective deepening appends new pending
+    // tasks to the SAME run-id, and — in the no-progress-loop bug — their answers
+    // already sit on disk under canonical per-task names while the marker says the
+    // run is done. If any pending task has a recoverable on-disk result, the marker
+    // no longer reflects reality: discard it and re-process so those answers ingest
+    // instead of replaying a no-op forever. A genuinely terminal run (no pending
+    // tasks, or pending tasks not yet answered — e.g. a new round handled under a
+    // different run-id) still replays cleanly.
+    let pendingWithResults = 0;
+    try {
+      const pending = await readJsonFile<AuditTask[]>(tasksPath);
+      for (const task of pending) {
+        if (existsSync(taskResultPath(taskResultsDir, task.task_id))) {
+          pendingWithResults++;
+        }
+      }
+    } catch { /* no pending-tasks file — treat as terminal and replay */ }
+    if (pendingWithResults === 0) {
+      console.log(
+        JSON.stringify({ ...priorSummary, idempotent_replay: true }, null, 2),
+      );
+      return;
+    }
+    process.stderr.write(
+      `[merge-and-ingest] completion marker for ${runId} is stale: ` +
+        `${pendingWithResults} pending task(s) have un-ingested on-disk results; re-processing.\n`,
     );
-    return;
+    await rm(mergeCompletePath, { force: true });
   }
 
   const workerTask = await readJsonFile<WorkerTask>(taskPath);
@@ -136,35 +161,48 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
 
   for (const task of allTasks) {
     const entry = entryByTaskId.get(task.task_id);
-    if (!entry) {
-      // No result-map entry => this pending task was not dispatched this round.
-      // Leave it pending for the next dispatch; it is not a failure.
-      notDispatched.push(task.task_id);
-      continue;
-    }
-    const filePath = entry.result_path;
     let obj: unknown;
-    try {
-      obj = JSON.parse(await readFile(filePath, "utf8"));
-    } catch (e) {
-      if (isFileMissingError(e)) {
-        const fallback = fallbackByTaskId.get(task.task_id);
-        if (fallback) {
-          process.stderr.write(
-            `[merge-and-ingest] Recovered result for '${task.task_id}' from unexpected file (matched by task_id)\n`,
-          );
-          obj = fallback;
+    if (entry) {
+      const filePath = entry.result_path;
+      try {
+        obj = JSON.parse(await readFile(filePath, "utf8"));
+      } catch (e) {
+        if (isFileMissingError(e)) {
+          const fallback = fallbackByTaskId.get(task.task_id);
+          if (fallback) {
+            process.stderr.write(
+              `[merge-and-ingest] Recovered result for '${task.task_id}' from unexpected file (matched by task_id)\n`,
+            );
+            obj = fallback;
+          } else {
+            failing.push({
+              task_id: task.task_id,
+              errors: ["Missing audit result for assigned task."],
+            });
+            continue;
+          }
         } else {
-          failing.push({
-            task_id: task.task_id,
-            errors: ["Missing audit result for assigned task."],
-          });
+          failing.push({ task_id: task.task_id, errors: [`Invalid JSON: ${(e as Error).message}`] });
           continue;
         }
-      } else {
-        failing.push({ task_id: task.task_id, errors: [`Invalid JSON: ${(e as Error).message}`] });
+      }
+    } else {
+      // No result-map entry => this pending task was not dispatched this round.
+      // But its answer may already exist on disk under a canonical per-task name
+      // (e.g. a selective-deepening task answered in a prior round whose dispatch
+      // manifest was later regenerated empty — the no-progress loop this guards
+      // against). Recover it by task_id so it ingests instead of looping forever
+      // as "pending"; only when no such file exists is the task genuinely held
+      // back for the next dispatch (not a failure).
+      const fallback = fallbackByTaskId.get(task.task_id);
+      if (!fallback) {
+        notDispatched.push(task.task_id);
         continue;
       }
+      process.stderr.write(
+        `[merge-and-ingest] Recovered un-dispatched task '${task.task_id}' from on-disk result file (matched by task_id)\n`,
+      );
+      obj = fallback;
     }
     const record = obj && typeof obj === "object" && !Array.isArray(obj)
       ? obj as Record<string, unknown>
@@ -322,6 +360,12 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   // failures stay replayable for retry, and a canary (notDispatched > 0) must NOT
   // be marked complete or the fan-out merge on the same run-id would short-circuit
   // to an idempotent replay and silently drop the fan-out results.
+  //
+  // Selective deepening appends new pending tasks to the SAME run-id; this marker
+  // can therefore go stale once those tasks are later dispatched and answered. The
+  // replay guard at the top detects that (a pending task with an on-disk result)
+  // and re-processes, so a premature marker self-heals instead of stranding the
+  // deepening answers behind an idempotent replay (the no-progress loop).
   if (failing.length === 0 && notDispatched.length === 0) {
     await writeJsonFile(mergeCompletePath, summaryPayload);
   }
