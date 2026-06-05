@@ -633,6 +633,96 @@ test("merge-and-ingest is idempotent on re-run and never truncates results", asy
   });
 });
 
+test("merge-and-ingest self-heals a stale completion marker by re-ingesting a stranded on-disk result", async () => {
+  await withTempRepo(async (root) => {
+    const fileExists = async (p) => {
+      try {
+        await stat(p);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const { stdout } = await runWrapper([], { cwd: root });
+    const parsed = JSON.parse(stdout);
+    const runId = parsed.handoff.active_review_run?.run_id;
+    const artifactsDir = parsed.handoff.artifacts_dir;
+    const runDir = join(artifactsDir, "runs", runId);
+    const pendingPath = join(runDir, "pending-audit-tasks.json");
+    const resultMapPath = join(runDir, "dispatch-result-map.json");
+    const markerPath = join(runDir, "merge-complete.json");
+
+    await runWrapper(
+      ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      { cwd: root },
+    );
+    const tasks = JSON.parse(await readFile(pendingPath, "utf8"));
+    const taskById = new Map(tasks.map((task) => [task.task_id, task]));
+    const plan = JSON.parse(
+      await readFile(join(runDir, "dispatch-plan.json"), "utf8"),
+    );
+    const resultMap = JSON.parse(await readFile(resultMapPath, "utf8"));
+    for (const packet of plan) {
+      const packetResults = resultMap.entries
+        .filter((item) => item.packet_id === packet.packet_id)
+        .map((entry) => validAuditResultForTask(taskById.get(entry.task_id)));
+      await runWrapper(
+        ["submit-packet", "--run-id", runId, "--packet-id", packet.packet_id, "--artifacts-dir", artifactsDir],
+        { cwd: root, input: JSON.stringify(packetResults) },
+      );
+    }
+    const first = JSON.parse(
+      (await runWrapper(
+        ["merge-and-ingest", "--run-id", runId, "--artifacts-dir", artifactsDir],
+        { cwd: root },
+      )).stdout,
+    );
+    assert.equal(first.status, "completed");
+    assert.ok(
+      await fileExists(markerPath),
+      "a fully-merged round writes the completion marker",
+    );
+
+    // Reproduce the no-progress-loop precondition: selective deepening re-derives
+    // follow-up tasks onto the SAME run-id, so an already-answered task is
+    // re-listed as pending while its result file is still on disk, and a 0-packet
+    // re-plan blanks the dispatch result map. Without the stale-marker guard the
+    // next merge replays idempotently and strands that answer forever.
+    const victim = tasks[0];
+    const victimEntry = resultMap.entries.find((e) => e.task_id === victim.task_id);
+    assert.ok(victimEntry, "victim task was dispatched in round 1");
+    assert.ok(
+      await fileExists(victimEntry.result_path),
+      "victim's answer is on disk",
+    );
+    await writeFile(pendingPath, JSON.stringify([victim], null, 2));
+    await writeFile(
+      resultMapPath,
+      JSON.stringify({ ...resultMap, entries: [] }, null, 2),
+    );
+    assert.ok(
+      await fileExists(markerPath),
+      "the completion marker persists into the stuck state",
+    );
+
+    const reheal = JSON.parse(
+      (await runWrapper(
+        ["merge-and-ingest", "--run-id", runId, "--artifacts-dir", artifactsDir],
+        { cwd: root },
+      )).stdout,
+    );
+    assert.notEqual(
+      reheal.idempotent_replay,
+      true,
+      "a stale completion marker must re-process, not replay",
+    );
+    assert.ok(
+      reheal.accepted_count >= 1,
+      "the stranded on-disk result is recovered by task_id and ingested",
+    );
+  });
+});
+
 test("canary then fan-out: merge graduates the canary and never reports held-back tasks as failures", async () => {
   await withTempRepo(async (root) => {
     const { stdout } = await runWrapper([], { cwd: root });
