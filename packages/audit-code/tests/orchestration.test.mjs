@@ -426,9 +426,11 @@ test("advanceAudit renders a final audit report after synthesis", async () => {
     assert.equal(synthesis.selected_executor, "synthesis_executor");
     assert.equal(synthesis.selected_obligation, "forced:synthesis_executor");
     assert.match(synthesis.updated_bundle.audit_report, /# Audit Report/);
+    // Findings are re-keyed to content-derived ids at synthesis, so match the
+    // (stable) title in the rendered section header rather than a packet id.
     assert.match(
       synthesis.updated_bundle.audit_report,
-      /finding-auth-1 .* Auth path lacks structured rejection telemetry/,
+      /### \S+ — Auth path lacks structured rejection telemetry/,
     );
     assert.equal(
       findObligation(synthesis.audit_state, "synthesis_current")?.state,
@@ -656,10 +658,12 @@ test("buildAuditReportModel keeps location-distinct findings separate while merg
   );
 
   const distinctFinding = report.findings[1];
-  assert.equal(distinctFinding.id, "finding-session-distinct");
+  // The location-distinct finding stays separate (re-keyed to its own unique id,
+  // not fused with the merged auth-path finding).
+  assert.ok(distinctFinding.id && distinctFinding.id !== mergedFinding.id);
   assert.equal(distinctFinding.affected_files[0].path, "src/lib/session.ts");
 
   const markdown = renderAuditReportMarkdown(report);
-  assert.match(markdown, /### finding-auth-low .* Missing audit trail/);
-  assert.match(markdown, /### finding-session-distinct .* Missing audit trail/);
+  assert.ok(markdown.includes(`### ${mergedFinding.id} — Missing audit trail`));
+  assert.ok(markdown.includes(`### ${distinctFinding.id} — Missing audit trail`));
 });

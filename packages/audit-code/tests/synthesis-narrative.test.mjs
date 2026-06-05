@@ -60,14 +60,27 @@ function syntheticResults() {
   ];
 }
 
-function syntheticNarrative() {
+// Findings are re-keyed to content-derived ids at synthesis, so a realistic
+// narrative references the *synthesized* ids (looked up by title), as the
+// narrative LLM would after reading the report — not the worker-packet ids.
+function idOf(report, title) {
+  const found = report.findings.find((f) => f.title === title);
+  assert.ok(found, `no synthesized finding titled ${title}`);
+  return found.id;
+}
+
+function syntheticNarrative(report) {
   return {
     themes: [
       {
         theme_id: "T-1",
         title: "Inputs trusted without validation",
         root_cause: "Boundaries accept input without validating it first.",
-        finding_ids: ["F-1", "F-2", "F-DOES-NOT-EXIST"],
+        finding_ids: [
+          idOf(report, "Token check is weak"),
+          idOf(report, "Missing error handling"),
+          "F-DOES-NOT-EXIST",
+        ],
         suggested_fix_pattern: "Validate and normalize at every trust boundary.",
       },
     ],
@@ -107,11 +120,15 @@ test("deterministic report renders without narrative sections", () => {
 });
 
 test("applyNarrative tags findings, drops unknown ids, and round-trips theme_id", () => {
-  const enriched = applyNarrative(baseReport(), syntheticNarrative());
+  const report = baseReport();
+  const enriched = applyNarrative(report, syntheticNarrative(report));
+
+  const tokenId = idOf(report, "Token check is weak");
+  const parseId = idOf(report, "Missing error handling");
 
   assert.equal(enriched.themes.length, 1);
   // Unknown finding id is dropped; real ones are retained.
-  assert.deepEqual(enriched.themes[0].finding_ids, ["F-1", "F-2"]);
+  assert.deepEqual(enriched.themes[0].finding_ids, [tokenId, parseId]);
   assert.equal(enriched.executive_summary, "Two related input-trust weaknesses were found.");
   assert.deepEqual(enriched.top_risks, [
     "Auth bypass via weak token",
@@ -119,15 +136,16 @@ test("applyNarrative tags findings, drops unknown ids, and round-trips theme_id"
   ]);
 
   const byId = Object.fromEntries(enriched.findings.map((f) => [f.id, f]));
-  assert.equal(byId["F-1"].theme_id, "T-1");
-  assert.equal(byId["F-2"].theme_id, "T-1");
+  assert.equal(byId[tokenId].theme_id, "T-1");
+  assert.equal(byId[parseId].theme_id, "T-1");
 
   // The enriched canonical contract still validates.
   assertMatchesJsonSchema(auditFindingsSchema, enriched, "auditFindingsEnriched");
 });
 
 test("narrative-enriched report renders themes, summary, top risks (JSON↔markdown parity)", () => {
-  const enriched = applyNarrative(baseReport(), syntheticNarrative());
+  const report = baseReport();
+  const enriched = applyNarrative(report, syntheticNarrative(report));
   const markdown = renderAuditReportMarkdown(enriched);
 
   assert.match(markdown, /## Executive Summary/);
@@ -172,7 +190,7 @@ test("runSynthesisNarrativeExecutor applies a provider narrative", () => {
   const results = syntheticResults();
   const synth = runSynthesisExecutor({ audit_results: results }, results).updated;
 
-  const run = runSynthesisNarrativeExecutor(synth, syntheticNarrative());
+  const run = runSynthesisNarrativeExecutor(synth, syntheticNarrative(synth.audit_findings));
   assert.ok(run.artifacts_written.includes("audit-findings.json"));
   assert.ok(run.artifacts_written.includes("audit-report.md"));
   assert.ok(run.artifacts_written.includes("synthesis-narrative.json"));
@@ -190,12 +208,13 @@ test("advanceAudit forced synthesis_narrative_executor applies and records the n
 
   const advanced = await advanceAudit(synth, {
     preferredExecutor: "synthesis_narrative_executor",
-    narrativeResults: syntheticNarrative(),
+    narrativeResults: syntheticNarrative(synth.audit_findings),
   });
 
   assert.equal(advanced.selected_executor, "synthesis_narrative_executor");
   assert.equal(advanced.updated_bundle.synthesis_narrative.status, "applied");
   assert.equal(advanced.updated_bundle.audit_findings.themes.length, 1);
-  const f1 = advanced.updated_bundle.audit_findings.findings.find((f) => f.id === "F-1");
+  const tokenId = idOf(synth.audit_findings, "Token check is weak");
+  const f1 = advanced.updated_bundle.audit_findings.findings.find((f) => f.id === tokenId);
   assert.equal(f1.theme_id, "T-1");
 });

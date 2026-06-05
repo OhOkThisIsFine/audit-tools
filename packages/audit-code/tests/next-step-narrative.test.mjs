@@ -170,9 +170,20 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
     assert.match(narrativeResultsPath, /synthesis-narrative\.json$/);
     const prompt = await readFile(paused.prompt_path, "utf8");
     assert.match(prompt, /Synthesis narrative/i);
-    assert.match(prompt, /finding-auth-1/);
 
-    // Host supplies the narrative.
+    // Findings are re-keyed to content-derived ids at synthesis, so discover the
+    // synthesized id and reference it the way the narrative LLM would (the
+    // worker-packet id "finding-auth-1" no longer exists post-synthesis).
+    const synthesized = JSON.parse(
+      await readFile(join(artifactsDir, "audit-findings.json"), "utf8"),
+    );
+    const authFinding = synthesized.findings.find(
+      (f) => f.title === "Auth path lacks structured rejection telemetry",
+    );
+    assert.ok(authFinding, "synthesized findings must include the auth finding");
+    assert.match(prompt, new RegExp(authFinding.id));
+
+    // Host supplies the narrative referencing the synthesized id.
     await writeFile(
       narrativeResultsPath,
       JSON.stringify(
@@ -182,7 +193,7 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
               theme_id: "T-1",
               title: "Authentication observability gaps",
               root_cause: "Auth failures are not recorded with structured context.",
-              finding_ids: ["finding-auth-1"],
+              finding_ids: [authFinding.id],
               suggested_fix_pattern: "Emit structured rejection telemetry at the auth boundary.",
             },
           ],
@@ -205,7 +216,7 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
     );
     assert.equal(findings.themes.length, 1);
     assert.equal(findings.themes[0].theme_id, "T-1");
-    const tagged = findings.findings.find((f) => f.id === "finding-auth-1");
+    const tagged = findings.findings.find((f) => f.id === authFinding.id);
     assert.equal(tagged.theme_id, "T-1");
     assert.equal(findings.executive_summary, "A single auth-observability theme was identified.");
 

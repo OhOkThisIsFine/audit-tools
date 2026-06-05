@@ -50,7 +50,8 @@
           "path": { "type": "string" },
           "line_start": { "type": "integer", "minimum": 1 },
           "line_end": { "type": "integer", "minimum": 1 },
-          "symbol": { "type": "string" }
+          "symbol": { "type": "string" },
+          "hash_at_plan_time": { "type": "string" }
         },
         "additionalProperties": false
       }
