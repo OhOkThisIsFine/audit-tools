@@ -83,6 +83,31 @@ without `addFileLineCountHints` — so the fold-in must also hint line counts or
 `total_lines` / result validation will be wrong. Deserves its own focused change + an
 end-to-end dispatch validation.
 
+### audit-code: confine auditor subagents to their assigned result paths
+
+Review subagents must only emit results through `submit-packet` (which writes the
+backend-assigned per-task result file under the run dir). In practice they scatter
+stray files across the workspace: ad-hoc `packet-<n>-result.json` and
+`audit_result*.json` at the repo root, files literally named `escaped` / `inside` /
+`quote`, and — worst — mangled-name junk like `C:Codeaudit-tools…json` produced when a
+subagent runs `node … > C:\…\file.json` in **bash** and the backslash path collapses
+into a filename written to the repo root (the "Bash mangles Windows paths" trap, hit in
+the wild during the 2026-06-04 dogfood run). `merge-and-ingest` already ignores these as
+*spurious*, so they don't corrupt audit state, but they pollute the repo (had to be
+`git clean`ed out of the untracked set after the run) and a mangled absolute write could
+in principle clobber a real path.
+
+The dispatch plan already carries a per-packet `access.write_paths` for exactly this,
+but it is **advisory** — this host "did not report a callable restriction facility", so
+nothing enforces it. Fixes: (a) make the packet-prompt submit instruction unambiguous
+that the *only* permitted write is via `submit-packet`, with no scratch/temp files; (b)
+where the host supports per-subagent file-access restriction, pre-approve only the
+packet's `write_paths` and deny the rest; and (c) have workers pipe results to
+`submit-packet` over stdin (or write to a relative temp path inside the run dir) instead
+of constructing absolute shell-redirect paths — which is what manufactures the
+mangled-name junk on Windows bash. **Principle: an auditor should never be able to write
+a random file to a random location.**
+
 ## Features to add later
 
 - **User-selected lenses.** Let the operator choose which audit lenses run instead
