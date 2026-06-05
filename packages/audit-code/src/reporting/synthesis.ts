@@ -14,6 +14,7 @@ import { AUDITOR_REPORT_MARKER } from "@audit-tools/shared";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import { buildWorkBlocks, type WorkBlock } from "./workBlocks.js";
 import { mergeFindings } from "./mergeFindings.js";
+import { assignStableFindingIds } from "./findingIdentity.js";
 
 /** Contract version stamped onto the canonical `audit-findings.json`. */
 export const AUDIT_FINDINGS_CONTRACT_VERSION = "audit-tools/audit-findings/v1";
@@ -117,11 +118,17 @@ export function buildAuditReportModel(params: {
   externalAnalyzerResults?: ExternalAnalyzerResults;
   designAssessment?: DesignAssessment;
 }): AuditReportModel {
-  const findings = mergeFindings(
-    params.results,
-    params.runtimeValidationReport,
-    params.externalAnalyzerResults,
-    params.designAssessment,
+  // Re-key the finalized findings with globally-unique, content-derived ids
+  // before anything addresses them by id. buildWorkBlocks keys its union-find on
+  // finding.id, so the locally-scoped, collision-prone ids worker packets emit
+  // must be replaced here or unrelated findings fuse into one block.
+  const findings = assignStableFindingIds(
+    mergeFindings(
+      params.results,
+      params.runtimeValidationReport,
+      params.externalAnalyzerResults,
+      params.designAssessment,
+    ),
   );
   const workBlocks = buildWorkBlocks({
     findings,
