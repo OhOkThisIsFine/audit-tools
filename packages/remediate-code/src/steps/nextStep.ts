@@ -104,7 +104,15 @@ function stateRunId(state: RemediationState | null): string {
 }
 
 function defaultInputCandidates(root: string): string[] {
+  // Prefer the canonical machine contract (audit-findings.json) over its
+  // human-facing render (audit-report.md). The JSON is the source of truth on
+  // both sides of the audit -> remediate pipeline, and feeding it triggers the
+  // lossless structured hand-off in the plan phase instead of a lossy LLM
+  // re-extraction from the markdown render that sits beside it.
   return [
+    join(root, "audit-findings.json"),
+    join(root, ".audit-artifacts", "audit-findings.json"),
+    join(root, ".remediation-artifacts", "audit-findings.json"),
     join(root, "audit-report.md"),
     join(root, ".audit-artifacts", "audit-report.md"),
     join(root, ".remediation-artifacts", "audit-report.md"),
@@ -139,9 +147,15 @@ function resolveInputPaths(
   }
 
   const checked = defaultInputCandidates(root);
+  // Default discovery probes the same logical artifact (the audit output) in
+  // several canonical locations and two formats. Select the single
+  // highest-priority match — never feed both the structured contract and its
+  // markdown render — so a lone .json input takes the lossless structured
+  // fast-path instead of being demoted to multi-source LLM extraction.
+  const best = checked.find((candidate) => existsSync(candidate));
   return {
     supplied: false,
-    existing: checked.filter((candidate) => existsSync(candidate)),
+    existing: best ? [best] : [],
     missing: [],
     checked,
   };
