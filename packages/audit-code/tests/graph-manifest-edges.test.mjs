@@ -305,6 +305,12 @@ test("yamlPaths submodule: extractYamlPathReferenceEdges is exported", () => {
   assert.equal(typeof yamlPathEdges, "function");
 });
 
+// graphManifestEdges/index.ts aggregates every submodule extractor. Import it
+// here — ahead of the first test that uses it — so node:test's concurrent
+// scheduling can never run a consuming test before this top-level await
+// resolves (which would hit the const's temporal dead zone).
+const allFromIndex = await import("../src/extractors/graphManifestEdges/index.ts");
+
 test("graphManifestEdges/index.ts: extractWorkspacePackageEdges returns correct edges for pnpm-workspace.yaml", () => {
   const content = "packages:\n  - packages/*\n";
   const lookup = new Map([
@@ -397,8 +403,7 @@ test("maven submodule: extractMavenModuleEdges strips XML comments before parsin
   assert.equal(edges[0].to, "child-a/pom.xml");
 });
 
-// graphManifestEdges/index.ts public API is unchanged
-const allFromIndex = await import("../src/extractors/graphManifestEdges/index.ts");
+// graphManifestEdges/index.ts public API is unchanged (allFromIndex imported above)
 
 test("graphManifestEdges index: extractPackageEntrypointEdges is re-exported", () => {
   assert.equal(typeof allFromIndex.extractPackageEntrypointEdges, "function");
