@@ -1,8 +1,7 @@
 export const OPENCODE_AUDIT_EDIT_PERMISSION = {
   '*': 'ask',
   '.audit-code/**': 'allow',
-  '.audit-artifacts/**': 'allow',
-  'audit-report.md': 'allow',
+  '.audit-tools/**': 'allow',
 };
 
 export const OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION = { '*': 'allow' };
@@ -176,7 +175,7 @@ export function assertOpenCodeAuditPermissionConfig(permissionConfig, label) {
   if (!edit || typeof edit !== 'object' || Array.isArray(edit)) {
     throw new Error(`OpenCode ${label}.edit must allow audit-owned file paths. Run "audit-code install --host opencode".`);
   }
-  for (const pattern of ['.audit-code/**', '.audit-artifacts/**', 'audit-report.md']) {
+  for (const pattern of ['.audit-code/**', '.audit-tools/**']) {
     if (edit[pattern] !== 'allow') {
       throw new Error(`OpenCode ${label}.edit must allow ${pattern}. Run "audit-code install --host opencode".`);
     }

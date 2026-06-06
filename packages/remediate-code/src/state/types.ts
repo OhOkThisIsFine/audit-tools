@@ -106,6 +106,25 @@ export interface TriageBatch {
   }[];
 }
 
+export interface CoverageLedgerEntry {
+  finding_id: string;
+  title?: string;
+  disposition: "planned" | "folded_into" | "dropped_no_evidence";
+  block_id?: string;
+  folded_into?: string;
+  rationale?: string;
+}
+
+export interface CoverageLedger {
+  contract_version: "remediate-code-coverage/v1alpha1";
+  plan_id: string;
+  source_finding_count: number;
+  planned_count: number;
+  folded_count: number;
+  dropped_count: number;
+  entries: CoverageLedgerEntry[];
+}
+
 export interface RemediationItemState {
   finding_id: string;
   status:

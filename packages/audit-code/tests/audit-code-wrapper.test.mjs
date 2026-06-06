@@ -175,8 +175,7 @@ function assertOpenCodeAuditPermissions(config) {
   assert.equal(config.permission?.grep, "allow");
   assert.equal(typeof config.permission?.external_directory, "object");
   assert.equal(config.permission?.edit?.[".audit-code/**"], "allow");
-  assert.equal(config.permission?.edit?.[".audit-artifacts/**"], "allow");
-  assert.equal(config.permission?.edit?.["audit-report.md"], "allow");
+  assert.equal(config.permission?.edit?.[".audit-tools/**"], "allow");
   assert.equal(config.permission?.bash?.["audit-code"], "allow");
   assert.equal(config.permission?.bash?.["audit-code ensure*"], "allow");
   assert.equal(config.permission?.bash?.["audit-code next-step*"], "allow");
@@ -195,7 +194,7 @@ function assertOpenCodeAuditPermissions(config) {
   assert.equal(config.agent?.auditor?.permission?.glob, "allow");
   assert.equal(config.agent?.auditor?.permission?.grep, "allow");
   assert.equal(typeof config.agent?.auditor?.permission?.external_directory, "object");
-  assert.equal(config.agent?.auditor?.permission?.edit?.[".audit-artifacts/**"], "allow");
+  assert.equal(config.agent?.auditor?.permission?.edit?.[".audit-tools/**"], "allow");
   assert.equal(config.agent?.auditor?.permission?.bash?.["audit-code next-step*"], "allow");
   assert.equal(config.agent?.auditor?.permission?.bash?.["*audit-code.mjs* merge-and-ingest*"], "allow");
   assert.equal(config.agent?.auditor?.permission?.bash?.["audit-code synthesize*"], "deny");
@@ -239,9 +238,9 @@ async function withTempRepo(fn, { canary = false } = {}) {
     // by default to exercise the deterministic single-round dispatch those
     // fixtures expect. Pass { canary: true } to drive the real canary -> fan-out
     // cycle. (Canary unit behavior also lives in dispatch-features.test.mjs.)
-    await mkdir(join(root, ".audit-artifacts"), { recursive: true });
+    await mkdir(join(root, ".audit-tools/audit"), { recursive: true });
     await writeFile(
-      join(root, ".audit-artifacts", "session-config.json"),
+      join(root, ".audit-tools/audit", "session-config.json"),
       JSON.stringify(
         canary
           ? { provider: "local-subprocess" }
@@ -406,7 +405,7 @@ function assertSharedHostInstallResponse(parsed, root, paths) {
 
 test("audit-code wrapper supports bounded single-step mode", async () => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     const { stdout } = await runWrapper(["--single-step"], { cwd: root });
     const parsed = JSON.parse(stdout);
 
@@ -426,7 +425,7 @@ test("audit-code wrapper can explain a resolved task id", async () => {
   await withTempRepo(async (root) => {
     await runWrapper([], { cwd: root });
     const tasks = JSON.parse(
-      await readFile(join(root, ".audit-artifacts", "audit_tasks.json"), "utf8"),
+      await readFile(join(root, ".audit-tools/audit", "audit_tasks.json"), "utf8"),
     );
     const taskId = tasks[0].task_id;
 
@@ -497,7 +496,7 @@ test("audit-code wrapper reaches a terminal blocked handoff from repo root with 
     // round-trip.
     const currentStep = JSON.parse(
       await readFile(
-        join(root, ".audit-artifacts", "steps", "current-step.json"),
+        join(root, ".audit-tools/audit", "steps", "current-step.json"),
         "utf8",
       ),
     );
@@ -507,7 +506,7 @@ test("audit-code wrapper reaches a terminal blocked handoff from repo root with 
     );
     assert.equal(currentStep.run_id, parsed.handoff.active_review_run.run_id);
     const allAuditTasks = JSON.parse(
-      await readFile(join(root, ".audit-artifacts", "audit_tasks.json"), "utf8"),
+      await readFile(join(root, ".audit-tools/audit", "audit_tasks.json"), "utf8"),
     );
     const pendingRunTasks = JSON.parse(
       await readFile(
@@ -1636,7 +1635,7 @@ test("OpenCode permission helpers are importable from the dedicated module", () 
     glob: "allow",
     grep: "allow",
     external_directory: { "*": "allow" },
-    edit: { ".audit-code/**": "allow", ".audit-artifacts/**": "allow", "audit-report.md": "allow" },
+    edit: { ".audit-code/**": "allow", ".audit-tools/**": "allow" },
     bash: {
       // Missing required allow/deny rules entirely
       "*": "allow",

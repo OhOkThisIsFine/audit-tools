@@ -99,7 +99,7 @@ async function makeFakeResult(artDir, bundle) {
 
 test("checkFinalizationCycle returns undefined while loop is still progressing", async () => {
   await withTempDir(async (dir) => {
-    const artDir = join(dir, ".audit-artifacts");
+    const artDir = join(dir, ".audit-tools/audit");
     await writeMinimalArtifacts(artDir);
     const bundle = await loadArtifactBundle(artDir);
     const state = deriveAuditState(bundle);
@@ -126,7 +126,7 @@ test("checkFinalizationCycle returns undefined while loop is still progressing",
 
 test("checkFinalizationCycle fires and writes deterministic-progress.json with cycle_detected when tolerance breached", async () => {
   await withTempDir(async (dir) => {
-    const artDir = join(dir, ".audit-artifacts");
+    const artDir = join(dir, ".audit-tools/audit");
     await writeMinimalArtifacts(artDir);
     const bundle = await loadArtifactBundle(artDir);
     const state = deriveAuditState(bundle);
@@ -182,7 +182,7 @@ test("checkFinalizationCycle fires and writes deterministic-progress.json with c
 
 test("checkFinalizationCycle routes to blocked when no report is present", async () => {
   await withTempDir(async (dir) => {
-    const artDir = join(dir, ".audit-artifacts");
+    const artDir = join(dir, ".audit-tools/audit");
     await writeMinimalArtifacts(artDir);
     const bundle = await loadArtifactBundle(artDir);
     const state = deriveAuditState(bundle);
@@ -214,7 +214,7 @@ test("checkFinalizationCycle routes to blocked when no report is present", async
 
 test("checkFinalizationCycle routes to complete when audit_report is present in bundle", async () => {
   await withTempDir(async (dir) => {
-    const artDir = join(dir, ".audit-artifacts");
+    const artDir = join(dir, ".audit-tools/audit");
     await writeMinimalArtifacts(artDir, {
       audit_report: "# Audit Report\n\n## Work blocks\n\n- Done\n",
     });
@@ -257,7 +257,7 @@ test("next-step CLI routes to present_report when audit is complete and report e
   await withTempDir(async (dir) => {
     const root = join(dir, "repo");
     await mkdir(root, { recursive: true });
-    const artDir = join(root, ".audit-artifacts");
+    const artDir = join(root, ".audit-tools/audit");
     await mkdir(artDir, { recursive: true });
     await writeFile(
       join(artDir, "audit_state.json"),
@@ -280,7 +280,7 @@ test("next-step CLI routes to present_report when audit is complete and report e
 
 test("deterministic-progress.json written by checkFinalizationCycle has required fields", async () => {
   await withTempDir(async (dir) => {
-    const artDir = join(dir, ".audit-artifacts");
+    const artDir = join(dir, ".audit-tools/audit");
     await writeMinimalArtifacts(artDir);
     const bundle = await loadArtifactBundle(artDir);
     const state = deriveAuditState(bundle);

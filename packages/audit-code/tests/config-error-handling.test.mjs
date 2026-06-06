@@ -66,7 +66,7 @@ async function withTempRepo(fn) {
 
 test("audit-code fails loudly on malformed session-config.json", async () => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(join(artifactsDir, "session-config.json"), "{not-json\n");
 
@@ -86,7 +86,7 @@ test("audit-code fails loudly on malformed session-config.json", async () => {
 
 test("audit-code fails loudly on invalid session-config fields", async () => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "session-config.json"),
@@ -110,7 +110,7 @@ test("audit-code fails loudly on invalid session-config fields", async () => {
 
 test("validate fails loudly on corrupted artifact json", async () => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(join(artifactsDir, "repo_manifest.json"), "{not-json\n");
 

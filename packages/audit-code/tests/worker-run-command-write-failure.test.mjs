@@ -30,7 +30,7 @@ test("cmdWorkerRun writes a failed WorkerResult when the result write throws a n
       contract_version: "audit-code-worker/v1alpha1",
       run_id: "run-write-fail-001",
       repo_root: dir,
-      artifacts_dir: join(dir, ".audit-artifacts"),
+      artifacts_dir: join(dir, ".audit-tools/audit"),
       obligation_id: "audit_tasks_completed",
       preferred_executor: "local-subprocess",
       result_path: resultPath,

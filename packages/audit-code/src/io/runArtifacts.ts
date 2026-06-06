@@ -257,7 +257,7 @@ export async function writeDispatchBatchFiles(
       "# audit-code parallel dispatch",
       "",
       `This batch launched ${runs.length} deferred review run(s).`,
-      "Each run keeps its own task.json, prompt.md, result.json, and status.json under .audit-artifacts/runs/<run_id>/.",
+      "Each run keeps its own task.json, prompt.md, result.json, and status.json under .audit-tools/audit/runs/<run_id>/.",
       "Use current-tasks.json for the combined task list. The per-run files below are operational references for launched workers; do not read per-run prompt or schema files unless debugging a failed dispatch.",
       "",
       "Runs:",

@@ -1,5 +1,5 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   isFileMissingError,
   readJsonFile,
@@ -154,14 +154,13 @@ export async function buildTerminalStep(
   }
   const promoted = await promoteFinalAuditReport({
     artifactsDir: params.artifactsDir,
-    repoRoot: params.root,
   });
   return {
     kind: "complete",
     state,
     bundle,
     finalReportPath: promoted.promoted
-      ? join(params.root, AUDIT_REPORT_FILENAME)
+      ? join(dirname(params.artifactsDir), AUDIT_REPORT_FILENAME)
       : join(params.artifactsDir, AUDIT_REPORT_FILENAME),
   };
 }
@@ -475,7 +474,6 @@ async function runDeterministicForNextStep(params: NextStepParams): Promise<
       });
       const promoted = await promoteFinalAuditReport({
         artifactsDir: params.artifactsDir,
-        repoRoot: params.root,
       });
       return {
         kind: "complete",

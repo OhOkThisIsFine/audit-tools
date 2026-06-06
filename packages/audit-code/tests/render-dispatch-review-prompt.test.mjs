@@ -5,9 +5,9 @@ import { renderDispatchReviewPrompt } from "../src/cli/prompts.ts";
 function makeRun(overrides = {}) {
   return {
     run_id: "run-test-1",
-    task_path: "/repo/.audit-artifacts/tasks.json",
-    prompt_path: "/repo/.audit-artifacts/prompt.md",
-    audit_results_path: "/repo/.audit-artifacts/results.jsonl",
+    task_path: "/repo/.audit-tools/audit/tasks.json",
+    prompt_path: "/repo/.audit-tools/audit/prompt.md",
+    audit_results_path: "/repo/.audit-tools/audit/results.jsonl",
     worker_command: ["audit-code", "merge-and-ingest"],
     ...overrides,
   };
@@ -16,10 +16,10 @@ function makeRun(overrides = {}) {
 function makeParams(overrides = {}) {
   return {
     root: "/repo",
-    artifactsDir: "/repo/.audit-artifacts",
+    artifactsDir: "/repo/.audit-tools/audit",
     activeReviewRun: makeRun(),
-    dispatchPlanPath: "/repo/.audit-artifacts/dispatch-plan.json",
-    dispatchQuotaPath: "/repo/.audit-artifacts/dispatch-quota.json",
+    dispatchPlanPath: "/repo/.audit-tools/audit/dispatch-plan.json",
+    dispatchQuotaPath: "/repo/.audit-tools/audit/dispatch-quota.json",
     hostCanRestrictSubagentTools: true,
     hostCanSelectSubagentModel: true,
     ...overrides,
@@ -72,7 +72,7 @@ test("hostCanRestrictSubagentTools:false — no-restriction-facility line is inc
 
 test("dispatchQuotaPath non-null — quota lines are included", () => {
   const result = renderDispatchReviewPrompt(
-    makeParams({ dispatchQuotaPath: "/repo/.audit-artifacts/dispatch-quota.json" }),
+    makeParams({ dispatchQuotaPath: "/repo/.audit-tools/audit/dispatch-quota.json" }),
   );
   assert.ok(result.includes("Dispatch quota:"), "expected 'Dispatch quota:' to be present");
   assert.ok(result.includes("wave_size"), "expected 'wave_size' to be present");

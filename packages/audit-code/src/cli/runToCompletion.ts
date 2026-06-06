@@ -1086,7 +1086,7 @@ async function handleNoExecutor(params: {
     providerName,
   });
   if (state.status === "complete") {
-    await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
+    await promoteFinalAuditReport({ artifactsDir });
   }
 }
 
@@ -1374,7 +1374,7 @@ async function handleMaxRunsReached(params: {
     providerName,
   });
   if (reportRendered) {
-    await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
+    await promoteFinalAuditReport({ artifactsDir });
   }
 }
 

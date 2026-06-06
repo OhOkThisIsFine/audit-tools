@@ -39,7 +39,7 @@ async function withTempRepo(fn) {
 
 test("next-step emits present_report for a complete audit", async () => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "audit_state.json"),
@@ -63,7 +63,7 @@ test("next-step emits present_report for a complete audit", async () => {
     assert.equal(step.step_kind, "present_report");
     assert.equal(step.status, "complete");
     assert.match(step.artifact_paths.final_report, /audit-report\.md$/);
-    assert.equal((await stat(join(root, "audit-report.md"))).isFile(), true);
+    assert.equal((await stat(join(root, ".audit-tools", "audit-report.md"))).isFile(), true);
     assert.match(await readFile(step.prompt_path, "utf8"), /present report/i);
   });
 });
@@ -95,7 +95,7 @@ const ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS = new Set([
 const MAX_STRUCTURE_PHASE_PAUSES = 6;
 
 async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrapperOpts = {}) {
-  const incomingDir = join(root, ".audit-artifacts", "incoming");
+  const incomingDir = join(root, ".audit-tools/audit", "incoming");
   for (let i = 0; i < MAX_STRUCTURE_PHASE_PAUSES; i++) {
     const step = JSON.parse(
       (await runWrapper(wrapperArgs, { cwd: root, ...wrapperOpts })).stdout,
@@ -159,7 +159,7 @@ test("next-step proposes an analyzer install, then proceeds after a skip decisio
     assert.match(prompt, /ephemeral/);
 
     // Host declines the install.
-    await mkdir(join(root, ".audit-artifacts", "incoming"), { recursive: true });
+    await mkdir(join(root, ".audit-tools/audit", "incoming"), { recursive: true });
     await writeFile(
       proposed.artifact_paths.analyzer_decisions,
       JSON.stringify({ typescript: "skip" }, null, 2) + "\n",
@@ -172,7 +172,7 @@ test("next-step proposes an analyzer install, then proceeds after a skip decisio
 
     // The decision is persisted durably to session config.
     const config = JSON.parse(
-      await readFile(join(root, ".audit-artifacts", "session-config.json"), "utf8"),
+      await readFile(join(root, ".audit-tools/audit", "session-config.json"), "utf8"),
     );
     assert.equal(config.analyzers.typescript, "skip");
   });
@@ -182,7 +182,7 @@ test("next-step defaults to dispatch_review when host dispatch capability is not
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(root);
     const currentStep = JSON.parse(
-      await readFile(join(root, ".audit-artifacts", "steps", "current-step.json"), "utf8"),
+      await readFile(join(root, ".audit-tools/audit", "steps", "current-step.json"), "utf8"),
     );
     const prompt = await readFile(step.prompt_path, "utf8");
 
@@ -196,7 +196,7 @@ test("next-step defaults to dispatch_review when host dispatch capability is not
 
 test("next-step reads host_can_dispatch_subagents from session-config", async () => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "session-config.json"),
@@ -263,7 +263,7 @@ test("next-step false emits single_task_fallback and does not prepare dispatch",
       /single-task fallback/i,
     );
     await assert.rejects(() =>
-      stat(join(root, ".audit-artifacts", "runs", step.run_id, "dispatch-plan.json")),
+      stat(join(root, ".audit-tools/audit", "runs", step.run_id, "dispatch-plan.json")),
     );
   });
 });

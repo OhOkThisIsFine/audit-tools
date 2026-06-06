@@ -13,24 +13,24 @@ test("renderWorkerPrompt uses argv JSON for agent tasks and falls back to the de
   contract_version: "audit-code-worker/v1alpha1",
   run_id: "run-1",
   repo_root: "/repo",
-  artifacts_dir: "/repo/.audit-artifacts",
+  artifacts_dir: "/repo/.audit-tools/audit",
   obligation_id: "audit_tasks_completed",
   preferred_executor: "agent",
-  result_path: "/repo/.audit-artifacts/runs/run-1/result.json",
+  result_path: "/repo/.audit-tools/audit/runs/run-1/result.json",
   worker_command: [
     "node",
     "/repo/bin/worker.js",
     "--task",
     "/tmp/task with spaces.json",
   ],
-  audit_results_path: "/repo/.audit-artifacts/runs/run-1/run-results.json",
+  audit_results_path: "/repo/.audit-tools/audit/runs/run-1/run-results.json",
   timeout_ms: 1800000,
   max_retries: 0,
   });
 
   assert.match(
   prompt,
-  /Read: \/repo\/\.audit-artifacts\/audit_tasks\.json/,
+  /Read: \/repo\/\.audit-tools\/audit\/audit_tasks\.json/,
   );
   assert.doesNotMatch(prompt, /\.schema\.json/);
   assert.match(prompt, /review only the tasks listed/i);
@@ -51,20 +51,20 @@ test("renderWorkerPrompt suppresses worker_command execution when the task uses 
   contract_version: "audit-code-worker/v1alpha1",
   run_id: "run-2",
   repo_root: "/repo",
-  artifacts_dir: "/repo/.audit-artifacts",
+  artifacts_dir: "/repo/.audit-tools/audit",
   obligation_id: "audit_tasks_completed",
   preferred_executor: "agent",
-  result_path: "/repo/.audit-artifacts/runs/run-2/result.json",
+  result_path: "/repo/.audit-tools/audit/runs/run-2/result.json",
   worker_command: ["node", "/repo/audit-code.mjs", "worker-run"],
-  audit_results_path: "/repo/.audit-artifacts/runs/run-2/run-results.json",
+  audit_results_path: "/repo/.audit-tools/audit/runs/run-2/run-results.json",
   pending_audit_tasks_path:
-  "/repo/.audit-artifacts/runs/run-2/pending-audit-tasks.json",
+  "/repo/.audit-tools/audit/runs/run-2/pending-audit-tasks.json",
   worker_command_mode: "deferred",
   });
 
   assert.match(
   prompt,
-  /Read: \/repo\/\.audit-artifacts\/runs\/run-2\/pending-audit-tasks\.json/,
+  /Read: \/repo\/\.audit-tools\/audit\/runs\/run-2\/pending-audit-tasks\.json/,
   );
   assert.match(prompt, /Deferred mode: write results, do not execute worker_command\./i);
   assert.doesNotMatch(prompt, /Then execute worker_command/i);
@@ -75,12 +75,12 @@ test("renderWorkerPrompt renders a ## File access section when the task includes
     contract_version: "audit-code-worker/v1alpha1",
     run_id: "run-access",
     repo_root: "/repo",
-    artifacts_dir: "/repo/.audit-artifacts",
+    artifacts_dir: "/repo/.audit-tools/audit",
     obligation_id: "audit_tasks_completed",
     preferred_executor: "agent",
-    result_path: "/repo/.audit-artifacts/runs/run-access/result.json",
+    result_path: "/repo/.audit-tools/audit/runs/run-access/result.json",
     worker_command: ["node", "/repo/bin/worker.js"],
-    audit_results_path: "/repo/.audit-artifacts/runs/run-access/run-results.json",
+    audit_results_path: "/repo/.audit-tools/audit/runs/run-access/run-results.json",
     access: {
       read_paths: ["/repo/src/foo.ts", "/repo/src/bar.ts"],
       write_paths: ["/repo/out/result.json"],
@@ -102,12 +102,12 @@ test("renderWorkerPrompt omits the ## File access section when no access propert
     contract_version: "audit-code-worker/v1alpha1",
     run_id: "run-no-access",
     repo_root: "/repo",
-    artifacts_dir: "/repo/.audit-artifacts",
+    artifacts_dir: "/repo/.audit-tools/audit",
     obligation_id: "audit_tasks_completed",
     preferred_executor: "agent",
-    result_path: "/repo/.audit-artifacts/runs/run-no-access/result.json",
+    result_path: "/repo/.audit-tools/audit/runs/run-no-access/result.json",
     worker_command: ["node", "/repo/bin/worker.js"],
-    audit_results_path: "/repo/.audit-artifacts/runs/run-no-access/run-results.json",
+    audit_results_path: "/repo/.audit-tools/audit/runs/run-no-access/run-results.json",
   });
 
   assert.doesNotMatch(prompt, /## File access/i, "section heading is absent when access is not provided");
@@ -127,16 +127,16 @@ test("renderWorkerPrompt renders bounded executor prompts from argv data instead
   contract_version: "audit-code-worker/v1alpha1",
   run_id: "run-3",
   repo_root: "/repo",
-  artifacts_dir: "/repo/.audit-artifacts",
+  artifacts_dir: "/repo/.audit-tools/audit",
   obligation_id: "planning",
   preferred_executor: "planning_executor",
-  result_path: "/repo/.audit-artifacts/runs/run-3/result.json",
+  result_path: "/repo/.audit-tools/audit/runs/run-3/result.json",
   worker_command: [
     "node",
     "/repo/audit-code.mjs",
     "worker-run",
     "--task",
-    "/repo/.audit-artifacts/runs/run-3/task.json",
+    "/repo/.audit-tools/audit/runs/run-3/task.json",
   ],
   timeout_ms: 60000,
   });
@@ -147,10 +147,10 @@ test("renderWorkerPrompt renders bounded executor prompts from argv data instead
   );
   assert.match(
   prompt,
-  /Command: \["node","\/repo\/audit-code\.mjs","worker-run","--task","\/repo\/\.audit-artifacts\/runs\/run-3\/task\.json"\]/,
+  /Command: \["node","\/repo\/audit-code\.mjs","worker-run","--task","\/repo\/\.audit-tools\/audit\/runs\/run-3\/task\.json"\]/,
   );
   assert.match(
   prompt,
-  /Write result to: \/repo\/\.audit-artifacts\/runs\/run-3\/result\.json/,
+  /Write result to: \/repo\/\.audit-tools\/audit\/runs\/run-3\/result\.json/,
   );
 });

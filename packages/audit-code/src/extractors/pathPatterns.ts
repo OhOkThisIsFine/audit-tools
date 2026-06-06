@@ -234,7 +234,7 @@ export function isGeneratedTestArtifactPath(normalized: string): boolean {
 }
 
 export function isAuditArtifactPath(normalized: string): boolean {
-  return hasSegment(normalized, ".audit-artifacts");
+  return hasSegment(normalized, ".audit-tools");
 }
 
 export function isTestPath(normalized: string): boolean {

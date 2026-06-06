@@ -19,8 +19,10 @@ const testDir = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(testDir, ".test-plan-artifacts");
 const FIXTURE = join(testDir, "fixtures", "audit-findings-simple.json");
 
+const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
+
 const baseState = { status: "pending" as const };
-const baseOptions = { root: TEST_DIR, artifactsDir: TEST_DIR };
+const baseOptions = { root: TEST_DIR, artifactsDir: ARTIFACTS_DIR };
 
 interface FindingOpts {
   severity?: string;
@@ -100,7 +102,7 @@ async function rmWithRetry(path: string, retries = 20): Promise<void> {
 describe("runPlanPhase — audit-findings.json consume path", () => {
   beforeEach(async () => {
     await rmWithRetry(TEST_DIR);
-    await mkdir(TEST_DIR, { recursive: true });
+    await mkdir(ARTIFACTS_DIR, { recursive: true });
   }, 60_000);
 
   afterEach(async () => {
@@ -195,7 +197,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
     await runPlanPhase(baseState, { ...baseOptions, input: FIXTURE });
 
     const planJson = JSON.parse(
-      await readFile(join(TEST_DIR, "remediation_plan.json"), "utf8"),
+      await readFile(join(ARTIFACTS_DIR, "remediation_plan.json"), "utf8"),
     );
     const errors = validateRemediationPlan(planJson).filter(
       (i) => i.severity === "error",
@@ -423,11 +425,10 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
     expect(whole.plan!.blocks.length).toBe(1);
   });
 
-  it("emits remediation-coverage.json accounting for every source finding", async () => {
+  it("plan_coverage accounts for every source finding", async () => {
     const state = await runPlanPhase(baseState, { ...baseOptions, input: FIXTURE });
-    const coverage = JSON.parse(
-      await readFile(join(TEST_DIR, "remediation-coverage.json"), "utf8"),
-    );
+    const coverage = state.plan_coverage!;
+    expect(coverage).toBeDefined();
     expect(coverage.source_finding_count).toBe(2);
     expect(coverage.planned_count).toBe(2);
     expect(coverage.dropped_count).toBe(0);
@@ -833,7 +834,9 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
     await writeFile(reportPath, JSON.stringify(report), "utf8");
 
     const state = baseState;
-    const options = { root: PIPELINE_TEST_DIR, artifactsDir: PIPELINE_TEST_DIR, input: reportPath };
+    const pipelineArtifactsDir = join(PIPELINE_TEST_DIR, ".audit-tools", "remediation");
+    await mkdir(pipelineArtifactsDir, { recursive: true });
+    const options = { root: PIPELINE_TEST_DIR, artifactsDir: pipelineArtifactsDir, input: reportPath };
     const result = await runPlanPhase(state as any, options as any);
 
     // runPlanPhase must still merge file-sharing blocks.

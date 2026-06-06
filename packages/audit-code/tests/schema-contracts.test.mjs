@@ -1198,7 +1198,7 @@ test("step_contract schema validates progress with all StepProgress fields (ARC-
     allowed_commands: ["audit-code"],
     stop_condition: "Call audit-code next-step when done.",
     repo_root: "/repo",
-    artifacts_dir: ".audit-artifacts",
+    artifacts_dir: ".audit-tools/audit",
     artifact_paths: {},
   };
 

@@ -1,5 +1,5 @@
 import { cp, rm, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type {
   AuditResult,
   AuditTask,
@@ -292,14 +292,14 @@ export async function cleanupIntermediateArtifacts(
 
 export async function promoteFinalAuditReport(params: {
   artifactsDir: string;
-  repoRoot: string;
 }, options: {
   copy?: typeof cp;
   remove?: typeof rm;
   warn?: (message: string) => void;
 } = {}): Promise<{ promoted: boolean; cleaned: boolean; warning?: string }> {
+  const outputDir = dirname(params.artifactsDir);
   const source = join(params.artifactsDir, AUDIT_REPORT_FILENAME);
-  const destination = join(params.repoRoot, AUDIT_REPORT_FILENAME);
+  const destination = join(outputDir, AUDIT_REPORT_FILENAME);
   const copy = options.copy ?? cp;
   const remove = options.remove ?? rm;
   const warn = options.warn ?? ((message) => process.stderr.write(`${message}\n`));
@@ -317,14 +317,14 @@ export async function promoteFinalAuditReport(params: {
   try {
     await copy(
       join(params.artifactsDir, "audit-findings.json"),
-      join(params.repoRoot, "audit-findings.json"),
+      join(outputDir, "audit-findings.json"),
       { force: true },
     );
   } catch (error) {
     // audit-findings.json is optional output; absence must not fail promotion.
     // Log so operators can distinguish a partial promotion from a clean one.
     warn(
-      `audit-code: could not promote audit-findings.json to ${join(params.repoRoot, "audit-findings.json")}: ` +
+      `audit-code: could not promote audit-findings.json to ${join(outputDir, "audit-findings.json")}: ` +
         (error instanceof Error ? error.message : String(error)),
     );
   }

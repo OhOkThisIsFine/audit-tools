@@ -12,7 +12,7 @@ import type { RemediationState } from "../src/state/store.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-next-step");
 const REPO_DIR = join(TEST_DIR, "repo");
-const ARTIFACTS_DIR = join(REPO_DIR, ".remediation-artifacts");
+const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 const WRAPPER = join(__dirname, "..", "remediate-code.mjs");
 const AUDIT_FIXTURE = join(__dirname, "fixtures", "audit-findings-simple.json");
 const AUDITOR_CONTRACT_FIXTURE = join(
@@ -82,7 +82,8 @@ afterEach(async () => {
 describe("decideNextStep", () => {
   it("complete run emits present_report", async () => {
     await saveState({ status: "complete" });
-    await writeFile(join(REPO_DIR, "remediation-report.md"), "# Report\n", "utf8");
+    await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
+    await writeFile(join(REPO_DIR, ".audit-tools", "remediation-report.md"), "# Report\n", "utf8");
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -114,7 +115,8 @@ describe("decideNextStep", () => {
   it("stale remediation-report.md does not complete a fresh --input run", async () => {
     // A leftover report must NOT short-circuit a run that has fresh intent: with
     // a new --input, planning proceeds instead of declaring the prior run done.
-    await writeFile(join(REPO_DIR, "remediation-report.md"), "# Stale prior run\n", "utf8");
+    await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
+    await writeFile(join(REPO_DIR, ".audit-tools", "remediation-report.md"), "# Stale prior run\n", "utf8");
     const inputPath = join(REPO_DIR, "new-brief.md");
     await writeFile(inputPath, "# A new brief\n", "utf8");
 
@@ -124,9 +126,10 @@ describe("decideNextStep", () => {
   });
 
   it("re-presents the report on a bare re-invocation after a completed+cleaned run", async () => {
-    // close deletes .remediation-artifacts/ (state.json), leaving only the root
-    // report. A bare next-step with no fresh intent should re-present it.
-    await writeFile(join(REPO_DIR, "remediation-report.md"), "# Done\n", "utf8");
+    // close deletes .audit-tools/remediation/ (state.json), leaving only the report
+    // inside .audit-tools/. A bare next-step with no fresh intent should re-present it.
+    await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
+    await writeFile(join(REPO_DIR, ".audit-tools", "remediation-report.md"), "# Done\n", "utf8");
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -305,7 +308,7 @@ describe("decideNextStep", () => {
     // candidate exists, the resolver re-derives the source manifest every call.
     // An identical candidate set must not discard the persisted summary/brief and
     // re-emit synthesize_intake forever.
-    const auditDir = join(REPO_DIR, ".audit-artifacts");
+    const auditDir = join(REPO_DIR, ".audit-tools/audit");
     const reportPath = join(auditDir, "audit-report.md");
     const intakeDir = join(ARTIFACTS_DIR, "intake");
     await mkdir(auditDir, { recursive: true });
@@ -611,7 +614,7 @@ describe("decideNextStep", () => {
 
     expect(step.step_kind).toBe("present_report");
     expect(step.status).toBe("complete");
-    expect(existsSync(join(REPO_DIR, "remediation-report.md"))).toBe(true);
+    expect(existsSync(join(REPO_DIR, ".audit-tools", "remediation-report.md"))).toBe(true);
   });
 
   it("CLI next-step writes parseable JSON to stdout even when planning logs", () => {
@@ -769,23 +772,25 @@ describe("decideNextStep", () => {
 
     // Should not dispatch — all items are terminal so the run folds straight
     // through closing to completion (which deletes the artifact dir, so the
-    // durable evidence is the report at the repo root).
+    // durable evidence is the report in .audit-tools/).
     expect(["present_report", "run_close_action", "no_closing_actions"]).toContain(step.step_kind);
 
     // Both pending items were marked deemed_inappropriate before closing; the
-    // completed run records them in the report's "inappropriate" bucket with the
-    // declined rationale.
+    // completed run records them in outcomes with the declined rationale.
     const report = JSON.parse(
-      await readFile(join(REPO_DIR, "remediation-report.json"), "utf8"),
+      await readFile(join(REPO_DIR, ".audit-tools", "remediation-outcomes.json"), "utf8"),
     );
-    const inappropriate = report.inappropriate as Array<{
+    const outcomes = report.outcomes as Array<{
       finding_id: string;
-      rationale: string;
+      outcome: string;
+      reason?: string;
     }>;
-    const f1 = inappropriate.find((e) => e.finding_id === "F-001");
-    const f2 = inappropriate.find((e) => e.finding_id === "F-002");
-    expect(f1?.rationale).toMatch(/declined by the user/i);
-    expect(f2?.rationale).toMatch(/declined by the user/i);
+    const f1 = outcomes.find((e) => e.finding_id === "F-001");
+    const f2 = outcomes.find((e) => e.finding_id === "F-002");
+    expect(f1?.outcome).toBe("inappropriate");
+    expect(f2?.outcome).toBe("inappropriate");
+    expect(f1?.reason).toMatch(/declined by the user/i);
+    expect(f2?.reason).toMatch(/declined by the user/i);
   });
 
   it("buildImplementDispatchStep: terminal items are not mutated when ack is declined", async () => {
@@ -823,16 +828,13 @@ describe("decideNextStep", () => {
     await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
 
     // The run completes (deleting the artifact dir), so assert on the durable
-    // report at the repo root rather than the now-removed state.json.
+    // report in .audit-tools/ rather than the now-removed state.json.
     const report = JSON.parse(
-      await readFile(join(REPO_DIR, "remediation-report.json"), "utf8"),
+      await readFile(join(REPO_DIR, ".audit-tools", "remediation-outcomes.json"), "utf8"),
     );
-    const resolvedIds = (report.resolved as Array<{ finding_id: string }>).map(
-      (e) => e.finding_id,
-    );
-    const inappropriateIds = (
-      report.inappropriate as Array<{ finding_id: string }>
-    ).map((e) => e.finding_id);
+    const outcomes = report.outcomes as Array<{ finding_id: string; outcome: string }>;
+    const resolvedIds = outcomes.filter((e) => e.outcome === "resolved").map((e) => e.finding_id);
+    const inappropriateIds = outcomes.filter((e) => e.outcome === "inappropriate").map((e) => e.finding_id);
     // Already-resolved item must not be touched — it stays in the resolved bucket
     // and never appears as deemed_inappropriate.
     expect(resolvedIds).toContain("F-001");

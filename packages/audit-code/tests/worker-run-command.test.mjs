@@ -29,7 +29,7 @@ function buildTask(overrides = {}) {
     contract_version: "audit-code-worker/v1alpha1",
     run_id: "run-test-001",
     repo_root: overrides.repo_root ?? "/tmp/repo",
-    artifacts_dir: overrides.artifacts_dir ?? "/tmp/repo/.audit-artifacts",
+    artifacts_dir: overrides.artifacts_dir ?? "/tmp/repo/.audit-tools/audit",
     obligation_id: "audit_tasks_completed",
     preferred_executor: overrides.preferred_executor ?? "agent",
     result_path: overrides.result_path ?? "/tmp/result.json",
@@ -64,7 +64,7 @@ test("cmdWorkerRun writes a failed WorkerResult when audit_results_path looks li
       audit_results_path: "--some-flag",
       result_path: resultPath,
       repo_root: dir,
-      artifacts_dir: join(dir, ".audit-artifacts"),
+      artifacts_dir: join(dir, ".audit-tools/audit"),
     });
 
     const taskPath = join(dir, "task.json");
@@ -154,7 +154,7 @@ test("single-pass partition: empty array → both buckets are empty", () => {
 test("cmdWorkerRun writes a failed WorkerResult when agent mode yields zero matched results", async () => {
   const { dir, cleanup } = await makeTempDir();
   try {
-    const artifactsDir = join(dir, ".audit-artifacts");
+    const artifactsDir = join(dir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     const resultPath = join(dir, "result.json");
 
@@ -237,7 +237,7 @@ test("cmdWorkerRun re-throws when writeJsonFile fails for the final result write
       preferred_executor: "local-subprocess",
       result_path: resultPath,
       repo_root: dir,
-      artifacts_dir: join(dir, ".audit-artifacts"),
+      artifacts_dir: join(dir, ".audit-tools/audit"),
     });
 
     const taskPath = join(dir, "task.json");

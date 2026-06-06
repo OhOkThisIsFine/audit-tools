@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { StateStore, type RemediationState } from "../state/store.js";
 import type {
   ClarificationRequest,
@@ -103,7 +103,7 @@ function resolveRoot(root?: string): string {
 }
 
 function resolveArtifactsDir(root: string, artifactsDir?: string): string {
-  return resolve(artifactsDir ?? join(root, ".remediation-artifacts"));
+  return resolve(artifactsDir ?? join(root, ".audit-tools", "remediation"));
 }
 
 function stateRunId(state: RemediationState | null): string {
@@ -117,12 +117,12 @@ function defaultInputCandidates(root: string): string[] {
   // lossless structured hand-off in the plan phase instead of a lossy LLM
   // re-extraction from the markdown render that sits beside it.
   return [
+    join(root, ".audit-tools", "audit-findings.json"),
+    join(root, ".audit-tools", "audit", "audit-findings.json"),
     join(root, "audit-findings.json"),
-    join(root, ".audit-artifacts", "audit-findings.json"),
-    join(root, ".remediation-artifacts", "audit-findings.json"),
+    join(root, ".audit-tools", "audit-report.md"),
+    join(root, ".audit-tools", "audit", "audit-report.md"),
     join(root, "audit-report.md"),
-    join(root, ".audit-artifacts", "audit-report.md"),
-    join(root, ".remediation-artifacts", "audit-report.md"),
   ];
 }
 
@@ -315,7 +315,7 @@ async function presentReportStep(
   artifactsDir: string,
   state: RemediationState | null,
 ): Promise<RemediationStep> {
-  const reportPath = join(root, "remediation-report.md");
+  const reportPath = join(dirname(artifactsDir), "remediation-report.md");
   return writeCurrentStep({
     stepKind: "present_report",
     status: "complete",
@@ -1034,8 +1034,8 @@ Choose one explicitly and report the choice to the user:
 
 1. **Resume the existing run** — re-run WITHOUT \`--input\`: \`${loaderCommand("next-step")}\`
 2. **Start fresh from the new input** — first move aside or delete the existing
-   \`${artifactsDir}\` directory (and the stale repo-root \`remediation-report.md\` /
-   \`remediation-report.json\`, which would otherwise be overwritten on completion),
+   \`${artifactsDir}\` directory (and the stale \`remediation-report.md\` /
+   \`remediation-report.json\` in \`.audit-tools/\`, which would otherwise be overwritten on completion),
    then re-run \`${loaderCommand("next-step --input <path>")}\`.
 
 Stop after presenting this choice. Do not advance the run until the user decides.
@@ -1331,7 +1331,7 @@ async function decideNextStepInner(
   if (
     state == null &&
     !inputResolution.supplied &&
-    existsSync(join(root, "remediation-report.md"))
+    existsSync(join(dirname(artifactsDir), "remediation-report.md"))
   ) {
     const ip = intakePaths(artifactsDir);
     const freshIntent =
@@ -1344,11 +1344,11 @@ async function decideNextStepInner(
   // A leftover remediation-report.md while a fresh run IS being started will be
   // overwritten at close — warn rather than treating it as "done".
   if (
-    existsSync(join(root, "remediation-report.md")) &&
+    existsSync(join(dirname(artifactsDir), "remediation-report.md")) &&
     state?.status !== "complete"
   ) {
     process.stderr.write(
-      "[remediate-code] A previous remediation-report.md exists at the repo root; it will be overwritten when this run completes.\n",
+      "[remediate-code] A previous remediation-report.md exists in .audit-tools/; it will be overwritten when this run completes.\n",
     );
   }
 

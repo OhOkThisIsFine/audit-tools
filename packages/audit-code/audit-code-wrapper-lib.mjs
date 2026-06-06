@@ -123,7 +123,7 @@ function printHelp({ usageName, preferredEntrypoint }) {
     '- verify-install smoke-tests the generated host assets after install',
     '- mcp starts the local stdio MCP server for repo-local IDE integrations',
     '- install-host --host copilot keeps the narrower Copilot-focused install path available',
-    '- next-step advances deterministic audit state and writes .audit-artifacts/steps/current-step.json plus current-prompt.md',
+    '- next-step advances deterministic audit state and writes .audit-tools/audit/steps/current-step.json plus current-prompt.md',
     '- validate checks the current artifact bundle plus session-config/provider readiness and exits non-zero when issues exist',
     '- validate-results --results FILE validates AuditResult payloads against the active task manifest without ingesting them',
     '- explain-task <task_id> prints the resolved file coverage and current status for a task id',
@@ -141,7 +141,7 @@ function printHelp({ usageName, preferredEntrypoint }) {
     '',
     'Defaults:',
     '- --root .',
-    '- --artifacts-dir <root>/.audit-artifacts',
+    '- --artifacts-dir <root>/.audit-tools/audit',
     '',
     'Completion signals:',
     '- done: audit_state.status is complete',
@@ -166,7 +166,7 @@ async function printPromptPath() {
 async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } = {}) {
   const commandArgs = [...argv];
   const rootValue = resolve(getFlag(commandArgs, '--root') ?? '.');
-  const artifactsDir = resolve(getFlag(commandArgs, '--artifacts-dir') ?? join(rootValue, '.audit-artifacts'));
+  const artifactsDir = resolve(getFlag(commandArgs, '--artifacts-dir') ?? join(rootValue, '.audit-tools', 'audit'));
 
   setDefaultFlag(commandArgs, '--root', rootValue);
   setDefaultFlag(commandArgs, '--artifacts-dir', artifactsDir);
@@ -184,7 +184,7 @@ async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } 
 async function runDistCommandInline(commandName, argv) {
   const commandArgs = [...argv];
   const rootValue = resolve(getFlag(commandArgs, '--root') ?? '.');
-  const artifactsDir = resolve(getFlag(commandArgs, '--artifacts-dir') ?? join(rootValue, '.audit-artifacts'));
+  const artifactsDir = resolve(getFlag(commandArgs, '--artifacts-dir') ?? join(rootValue, '.audit-tools', 'audit'));
 
   setDefaultFlag(commandArgs, '--root', rootValue);
   setDefaultFlag(commandArgs, '--artifacts-dir', artifactsDir);
@@ -305,7 +305,7 @@ export async function runAuditCodeWrapper({
     wrapperArgs.push('--single-step');
   }
   const rootValue = resolve(getFlag(wrapperArgs, '--root') ?? '.');
-  const artifactsDir = resolve(getFlag(wrapperArgs, '--artifacts-dir') ?? join(rootValue, '.audit-artifacts'));
+  const artifactsDir = resolve(getFlag(wrapperArgs, '--artifacts-dir') ?? join(rootValue, '.audit-tools', 'audit'));
 
   setDefaultFlag(wrapperArgs, '--root', rootValue);
   setDefaultFlag(wrapperArgs, '--artifacts-dir', artifactsDir);

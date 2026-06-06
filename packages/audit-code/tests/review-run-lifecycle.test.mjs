@@ -18,7 +18,7 @@ const {
 
 async function withTempArtifacts(fn) {
   const tempDir = await mkdtemp(join(tmpdir(), "review-run-lifecycle-"));
-  const artifactsDir = join(tempDir, ".audit-artifacts");
+  const artifactsDir = join(tempDir, ".audit-tools/audit");
   const root = join(tempDir, "repo");
   await mkdir(artifactsDir, { recursive: true });
   await mkdir(root, { recursive: true });

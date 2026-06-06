@@ -19,7 +19,7 @@ async function runValidate(root) {
     "--root",
     root,
     "--artifacts-dir",
-    join(root, ".audit-artifacts"),
+    join(root, ".audit-tools/audit"),
   ];
   return captureConsole(() => runCli(argv));
 }
@@ -52,7 +52,7 @@ async function withTempRepo(fn) {
 
 test("audit-code validate exits non-zero when validation issues exist", async () => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
 
     await writeFile(
@@ -187,7 +187,7 @@ test("audit-code validate exits non-zero when validation issues exist", async ()
 
 test("audit-code validate exits zero when no validation issues exist", async () => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
 
     await writeFile(
@@ -216,7 +216,7 @@ test("audit-code validate exits zero when no validation issues exist", async () 
 
 test("audit-code validate exits non-zero when session-config has provider issues", async () => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
 
     await writeFile(
@@ -264,7 +264,7 @@ test("audit-code validate exits non-zero when session-config has provider issues
 
 test("audit-code validate rejects review packets missing listed file line counts", async () => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
 
     await writeFile(

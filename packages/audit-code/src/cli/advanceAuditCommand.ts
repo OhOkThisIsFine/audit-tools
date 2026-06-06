@@ -55,7 +55,7 @@ export async function cmdAdvanceAudit(argv: string[]): Promise<void> {
       providerName,
     });
     if (result.audit_state.status === "complete") {
-      await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
+      await promoteFinalAuditReport({ artifactsDir });
     }
     return;
   }
@@ -92,6 +92,6 @@ export async function cmdAdvanceAudit(argv: string[]): Promise<void> {
     providerName,
   });
   if (result.audit_state.status === "complete") {
-    await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
+    await promoteFinalAuditReport({ artifactsDir });
   }
 }

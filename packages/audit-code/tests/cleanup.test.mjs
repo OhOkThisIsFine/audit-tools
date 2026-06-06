@@ -26,7 +26,7 @@ async function dirExists(dirPath) {
 
 test("cleanupStaleArtifactsDir preserves artifacts directory when status is active", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "audit_state.json"),
@@ -41,7 +41,7 @@ test("cleanupStaleArtifactsDir preserves artifacts directory when status is acti
 
 test("cleanupStaleArtifactsDir preserves artifacts directory when status is blocked", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "audit_state.json"),
@@ -56,7 +56,7 @@ test("cleanupStaleArtifactsDir preserves artifacts directory when status is bloc
 
 test("cleanupStaleArtifactsDir re-throws on malformed audit_state.json", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(join(artifactsDir, "audit_state.json"), "not json");
 
@@ -71,7 +71,7 @@ test("cleanupStaleArtifactsDir re-throws on malformed audit_state.json", async (
 
 test("cleanupStaleArtifactsDir returns silently when audit_state.json is absent", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     // No audit_state.json written
 
@@ -86,7 +86,7 @@ test("cleanupStaleArtifactsDir returns silently when audit_state.json is absent"
 
 test("cleanupStaleArtifactsDir removes artifacts directory when status is complete", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "audit_state.json"),
@@ -101,7 +101,7 @@ test("cleanupStaleArtifactsDir removes artifacts directory when status is comple
 
 test("cleanupStaleArtifactsDir removes artifacts directory when status is not_started", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "audit_state.json"),
@@ -118,7 +118,7 @@ test("cleanupStaleArtifactsDir removes artifacts directory when status is not_st
 
 test("cleanupStaleArtifactsDir: deletes when status is complete (no options)", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "audit_state.json"),
@@ -135,7 +135,7 @@ test("cleanupStaleArtifactsDir: deletes when status is complete (no options)", a
 
 test("cleanupStaleArtifactsDir: deletes when status is not_started (no options)", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "audit_state.json"),
@@ -152,7 +152,7 @@ test("cleanupStaleArtifactsDir: deletes when status is not_started (no options)"
 
 test("cleanupStaleArtifactsDir: skips deletion when status is active and force is false", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "audit_state.json"),
@@ -172,7 +172,7 @@ test("cleanupStaleArtifactsDir: skips deletion when status is active and force i
 
 test("cleanupStaleArtifactsDir: deletes when status is active and force is true", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "audit_state.json"),
@@ -189,7 +189,7 @@ test("cleanupStaleArtifactsDir: deletes when status is active and force is true"
 
 test("cleanupStaleArtifactsDir: dry-run skips rm but returns dry-run action", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "audit_state.json"),
@@ -206,7 +206,7 @@ test("cleanupStaleArtifactsDir: dry-run skips rm but returns dry-run action", as
 
 test("cleanupStaleArtifactsDir: skips silently when audit_state.json is missing (no options)", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     // No audit_state.json written
 
@@ -220,7 +220,7 @@ test("cleanupStaleArtifactsDir: skips silently when audit_state.json is missing 
 
 test("cleanupStaleArtifactsDir: force=true deletes even when state file is missing", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     // No audit_state.json written
 

@@ -148,7 +148,7 @@ test("run-to-completion starts intake for manifestless source repositories", asy
       "--root",
       root,
       "--artifacts-dir",
-      join(root, ".audit-artifacts"),
+      join(root, ".audit-tools/audit"),
       "--max-runs",
       "1",
     ]);
@@ -177,7 +177,7 @@ test("run-to-completion blocks empty or documentation-only repositories after in
       "--root",
       root,
       "--artifacts-dir",
-      join(root, ".audit-artifacts"),
+      join(root, ".audit-tools/audit"),
       "--max-runs",
       "1",
     ]);

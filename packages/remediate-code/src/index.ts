@@ -54,7 +54,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".remediation-artifacts",
+    ".audit-tools/remediation",
   )
   .option("--input <path>", "Path to audit report or finding list")
   .option(
@@ -98,7 +98,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".remediation-artifacts",
+    ".audit-tools/remediation",
   )
   .option("--input <path>", "Path to audit report or feedback document")
   .option(
@@ -139,7 +139,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".remediation-artifacts",
+    ".audit-tools/remediation",
   )
   .action(async (options) => {
     const plan = await withBackendLogsOnStderr(() =>
@@ -162,7 +162,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".remediation-artifacts",
+    ".audit-tools/remediation",
   )
   .action(async (options) => {
     const state = await mergeDocumentResults(
@@ -183,7 +183,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".remediation-artifacts",
+    ".audit-tools/remediation",
   )
   .action(async (options) => {
     const plan = await withBackendLogsOnStderr(() =>
@@ -206,7 +206,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".remediation-artifacts",
+    ".audit-tools/remediation",
   )
   .action(async (options) => {
     const state = await mergeImplementResults(
@@ -243,7 +243,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".remediation-artifacts",
+    ".audit-tools/remediation",
   )
   .action(async (options) => {
     const result = await validateArtifacts(
@@ -289,8 +289,8 @@ async function withBackendLogsOnStderr<T>(fn: () => Promise<T>): Promise<T> {
 function resolveArtifactsDirOption(root: string, artifactsDir: string): string {
   const resolvedRoot = resolve(root);
   return resolve(
-    artifactsDir === ".remediation-artifacts"
-      ? join(resolvedRoot, ".remediation-artifacts")
+    artifactsDir === ".audit-tools/remediation"
+      ? join(resolvedRoot, ".audit-tools", "remediation")
       : artifactsDir,
   );
 }

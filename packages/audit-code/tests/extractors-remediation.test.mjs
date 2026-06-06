@@ -456,8 +456,8 @@ test("buildFileDisposition stays stable for Windows-style absolute paths and ove
 
 test("buildFileDisposition excludes generated install and test artifacts before they reach planning", () => {
   const repoManifest = makeRepoManifest([
-    ".audit-artifacts/dispatch/current-task.json",
-    ".audit-artifacts/dispatch/audit-result.schema.json",
+    ".audit-tools/audit/dispatch/current-task.json",
+    ".audit-tools/audit/dispatch/audit-result.schema.json",
     ".audit-code/install/run-mcp-server.mjs",
     ".audit-code/install/manifest.json",
     ".audit-code/install/claude-desktop/bundle/server/index.js",
@@ -468,13 +468,13 @@ test("buildFileDisposition excludes generated install and test artifacts before 
   const disposition = buildFileDisposition(repoManifest);
 
   assert.equal(
-    getDispositionItem(disposition, ".audit-artifacts/dispatch/current-task.json")?.status,
+    getDispositionItem(disposition, ".audit-tools/audit/dispatch/current-task.json")?.status,
     "generated",
   );
   assert.equal(
     getDispositionItem(
       disposition,
-      ".audit-artifacts/dispatch/audit-result.schema.json",
+      ".audit-tools/audit/dispatch/audit-result.schema.json",
     )?.status,
     "generated",
   );
@@ -1897,13 +1897,14 @@ test("buildGraphBundle yaml-path-reference-link does not match non-config paths 
 
 test("isAuditArtifactPath matches only the exact segment", () => {
   const positives = [
-    ".audit-artifacts/file.json",
-    "project/.audit-artifacts/runs/x.json",
+    ".audit-tools/audit/file.json",
+    "project/.audit-tools/audit/runs/x.json",
+    ".audit-tools/remediation/state.json",
+    "src/.audit-tools/anything.json",
   ];
   const negatives = [
-    ".audit-artifacts-backup/file.json",
-    ".audit-artifacts-v2/file.json",
-    "src/.audit-artifacts-custom/x.ts",
+    ".audit-toolset/file.json",
+    "my-audit-tools/file.json",
     "src/main.ts",
   ];
 

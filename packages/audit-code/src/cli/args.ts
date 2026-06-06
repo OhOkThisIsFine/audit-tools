@@ -10,7 +10,7 @@ export type UiMode = "visible" | "headless";
 
 export const DIRECT_CLI_DEFAULTS = {
   rootDir: ".",
-  artifactsDir: ".artifacts",
+  artifactsDir: ".audit-tools/audit",
   maxRuns: 1000,
   agentBatchSize: 6,
   parallelWorkers: 1,

@@ -2,9 +2,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 .tmp/
-.audit-artifacts/
+.audit-tools/
 .audit-code/
-.remediation-artifacts/
 # Ignore local Claude state, but track the shared web SessionStart hook + its
 # registration (settings.local.json and caches stay local).
 .claude/*
@@ -16,7 +15,7 @@ dist/
 .vscode/
 .codex/
 
-# Generated audit/remediation outputs
+# Generated audit/remediation outputs (legacy root locations)
 /audit-report.md
 /audit-findings.json
 /meta-audit-log.md
@@ -43,3 +42,5 @@ dist/
 /packages/audit-code/audit-report.md
 /packages/audit-code/audit-findings.json
 /packages/audit-code/Codeauditor-lambda.audit-artifacts/
+/packages/audit-code/.audit-tools/
+/packages/remediate-code/.audit-tools/
