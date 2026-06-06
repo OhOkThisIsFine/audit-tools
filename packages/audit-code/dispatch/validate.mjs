@@ -1,4 +1,4 @@
-import { validateAuditResults } from "../src/validation/auditResults.ts";
+import { validateAuditResults } from "../dist/validation/auditResults.js";
 
 /**
  * @param {object} resultObj  — parsed JSON from a task-results file
