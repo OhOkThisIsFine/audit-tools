@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { isFileMissingError } from "@audit-tools/shared";
+import { isFileMissingError, withFsRetry } from "@audit-tools/shared";
 import {
   RemediationPlan,
   RemediationItemState,
@@ -200,7 +200,7 @@ export class StateStore {
 
     try {
       await this.fileOps.writeFile(temp, JSON.stringify(state, null, 2), "utf8");
-      await this.fileOps.rename(temp, path);
+      await withFsRetry(() => this.fileOps.rename(temp, path));
     } finally {
       await lockHandle.close().catch((error) => {
         console.warn(`Failed to close state lock ${lockPath(this.artifactsDir)}:`, error);

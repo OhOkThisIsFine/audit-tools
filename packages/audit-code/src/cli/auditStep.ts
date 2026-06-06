@@ -1,6 +1,6 @@
 import { rename } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { readJsonFile, RunLogger } from "@audit-tools/shared";
+import { readJsonFile, RunLogger, withFsRetry } from "@audit-tools/shared";
 import {
   loadArtifactBundle,
   writeCoreArtifacts,
@@ -34,7 +34,7 @@ async function maybeArchiveLegacyPendingResults(
     `worker_results_submitted_${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
   );
   try {
-    await rename(auditResultsPath, archivedPath);
+    await withFsRetry(() => rename(auditResultsPath, archivedPath));
     return archivedPath;
   } catch (error) {
     process.stderr.write(

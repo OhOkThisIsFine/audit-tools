@@ -159,6 +159,8 @@ export { RunLogger } from "./observability/runLog.js";
 // IO
 export {
   isFileMissingError,
+  isTransientFsError,
+  withFsRetry,
   readJsonFile,
   writeJsonFile,
   appendNdjsonFile,

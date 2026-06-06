@@ -6,7 +6,7 @@ import {
   type RunLedger,
   type RunLedgerEntry,
 } from "@audit-tools/shared";
-import { isFileMissingError, readJsonFile, writeJsonFile, withFileLock } from "@audit-tools/shared";
+import { isFileMissingError, readJsonFile, writeJsonFile, withFileLock, withFsRetry } from "@audit-tools/shared";
 
 const RUN_LEDGER_FILENAME = "run-ledger.json";
 const RUN_LEDGER_LOCK_FILENAME = "run-ledger.lock";
@@ -152,7 +152,7 @@ export async function appendRunLedgerEntry(
     const ledger = await loadRunLedger(artifactsDir);
     ledger.runs.push(entry);
     await writeJsonFile(tempPath, ledger);
-    await rename(tempPath, path);
+    await withFsRetry(() => rename(tempPath, path));
     await rm(tempPath, { force: true }).catch(() => undefined);
   });
 }
