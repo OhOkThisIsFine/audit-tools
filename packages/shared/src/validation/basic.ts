@@ -37,6 +37,16 @@ export function pushValidationIssue(
   issues.push(createValidationIssue(path, message, severity));
 }
 
+/**
+ * Prepends `prefix` to the `path` of each issue.
+ *
+ * Idempotency guard: if an issue's path is already equal to `prefix` or already
+ * starts with `${prefix}.`, it is passed through unchanged. This makes the
+ * function safe to call on a mix of already-prefixed and unprefixed issues without
+ * producing double-prefixed paths.
+ *
+ * Empty paths become `prefix` with no separator.
+ */
 export function prefixValidationIssues(
   prefix: string,
   issues: ValidationIssue[],

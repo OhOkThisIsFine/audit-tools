@@ -15,6 +15,20 @@ export interface ProjectCommands {
 }
 
 // npm script names, in preference order, for each command role.
+//
+// Ordering is significant: pickScript() returns the FIRST match, so entries
+// earlier in the list win over later ones.
+//
+// E2E_SCRIPT_NAMES — generic/framework-neutral names appear first so that a
+// project using a standard naming convention (e.g. "test:e2e") is discovered
+// before a framework-specific alias. Framework-specific runner names
+// ("cypress:run", "playwright", "playwright:test") come last because they are
+// only present when a project has opted into that particular runner.
+// When adding a new entry: generic or widely-adopted names go before
+// framework-specific or rarely-used ones.
+//
+// LINT_SCRIPT_NAMES — "lint" (standard) precedes "lint:check" (less common).
+// The same placement rule applies: well-known names first, variants last.
 const E2E_SCRIPT_NAMES = [
   "e2e",
   "test:e2e",

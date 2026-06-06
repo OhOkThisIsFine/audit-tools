@@ -738,6 +738,80 @@ test("runtime validation updates append disagreement follow-ups to the next revi
   assert.match(run.progress_summary, /selective deepening task/i);
 });
 
+test("selectLensVerificationFiles truncates file list to MAX_LENS_VERIFICATION_FILES and emits stderr when sources exceed the limit", () => {
+  // Build 13 security tasks each covering a distinct file so that
+  // selectLensVerificationFiles sees 13 candidates and truncates to 12.
+  const filePaths = Array.from({ length: 13 }, (_, i) => `src/module-${i}/index.ts`);
+
+  const sourceTasks = filePaths.map((filePath, i) => ({
+    task_id: `mod-${i}:security`,
+    unit_id: `mod-${i}`,
+    pass_id: `pass:security`,
+    lens: "security",
+    file_paths: [filePath],
+    file_line_counts: { [filePath]: 40 },
+    rationale: `Audit module ${i}`,
+    // Tag the first task with external_analyzer_signal so the steward trigger fires
+    tags: i === 0 ? ["external_analyzer_signal"] : [],
+    priority: "medium",
+    status: "complete",
+  }));
+
+  const results = sourceTasks.map((task) => ({
+    task_id: task.task_id,
+    unit_id: task.unit_id,
+    pass_id: task.pass_id,
+    lens: task.lens,
+    file_coverage: task.file_paths.map((path) => ({ path, total_lines: 40 })),
+    findings: [],
+    // Do NOT set requires_followup: false — that would mark all as closed-clean
+  }));
+
+  // Capture stderr output during buildSelectiveDeepeningTasks
+  const stderrLines = [];
+  const originalWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk, ...args) => {
+    stderrLines.push(typeof chunk === "string" ? chunk : chunk.toString());
+    return originalWrite(chunk, ...args);
+  };
+
+  let tasks;
+  try {
+    tasks = buildSelectiveDeepeningTasks({
+      existingTasks: sourceTasks,
+      results,
+    });
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+
+  const steward = tasks.find((task) => task.tags.includes("lens_verification"));
+  assert.ok(steward, "expected a lens steward task to be created");
+  assert.equal(
+    steward.file_paths.length,
+    12,
+    "steward file_paths should be capped at MAX_LENS_VERIFICATION_FILES (12), not 13",
+  );
+
+  // The truncation trace is a structured JSON log line (see lensVerification.ts
+  // and the dedicated observability-signals test), not a human-readable string.
+  const truncationLog = stderrLines
+    .map((line) => {
+      try {
+        return JSON.parse(line.trim());
+      } catch {
+        return null;
+      }
+    })
+    .find((obj) => obj && obj.event === "truncated_verification_file_list");
+  assert.ok(
+    truncationLog,
+    `expected a truncated_verification_file_list log line but got: ${JSON.stringify(stderrLines)}`,
+  );
+  assert.equal(truncationLog.kept, 12, "kept should be MAX_LENS_VERIFICATION_FILES (12)");
+  assert.equal(truncationLog.total, 13, "total should reflect the 13 candidate files");
+});
+
 test("buildFlowCoverage tolerates malformed flow paths and concerns", () => {
   const coverage = buildFlowCoverage(
     {
@@ -767,7 +841,9 @@ test("buildFlowCoverage tolerates malformed flow paths and concerns", () => {
 
   assert.deepEqual(coverage.flows[0].paths, []);
   assert.deepEqual(coverage.flows[0].required_lenses, []);
-  assert.equal(coverage.flows[0].status, "pending");
+  // null concerns → no required lenses → vacuously complete (required.every(...)
+  // over an empty set is true), matching the "no concerns" vacuous-truth case.
+  assert.equal(coverage.flows[0].status, "complete");
 });
 
 test("buildFlowRequeueTasks skips unsupported flow lenses instead of throwing", () => {
@@ -862,6 +938,158 @@ test("buildFlowRequeueTasks ignores malformed analyzer entries but still priorit
   assert.ok(tasks[0].tags.includes("external_analyzer_signal"));
 });
 
+test("buildFlowCoverage: flow with no concerns gets status complete (vacuous truth)", () => {
+  const coverage = buildFlowCoverage(
+    {
+      flows: [
+        {
+          id: "empty-concerns-flow",
+          name: "Empty Concerns Flow",
+          paths: ["src/api/auth.ts"],
+          entrypoints: [],
+          concerns: [],
+        },
+      ],
+    },
+    {
+      files: [
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: [],
+          completed_lenses: [],
+        },
+      ],
+    },
+  );
+
+  assert.equal(coverage.flows[0].status, "complete");
+  assert.deepEqual(coverage.flows[0].required_lenses, []);
+});
+
+test("buildFlowCoverage: flow with only unknown concerns gets status complete (required is empty after filter)", () => {
+  const coverage = buildFlowCoverage(
+    {
+      flows: [
+        {
+          id: "unknown-lens-flow",
+          name: "Unknown Lens Flow",
+          paths: ["src/api/auth.ts"],
+          entrypoints: [],
+          concerns: ["unknown_lens", "not_a_real_concern"],
+        },
+      ],
+    },
+    {
+      files: [
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: [],
+          completed_lenses: [],
+        },
+      ],
+    },
+  );
+
+  assert.equal(coverage.flows[0].status, "complete");
+  assert.deepEqual(coverage.flows[0].required_lenses, []);
+});
+
+test("buildFlowCoverage: flow with one required lens that is covered returns complete", () => {
+  const coverage = buildFlowCoverage(
+    {
+      flows: [
+        {
+          id: "single-covered-flow",
+          name: "Single Covered Flow",
+          paths: ["src/api/auth.ts"],
+          entrypoints: [],
+          concerns: ["security"],
+        },
+      ],
+    },
+    {
+      files: [
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "complete",
+          required_lenses: ["security"],
+          completed_lenses: ["security"],
+        },
+      ],
+    },
+  );
+
+  assert.equal(coverage.flows[0].status, "complete");
+});
+
+test("buildFlowCoverage: flow with required lenses where some but not all are covered returns partial", () => {
+  const coverage = buildFlowCoverage(
+    {
+      flows: [
+        {
+          id: "partial-flow",
+          name: "Partial Flow",
+          paths: ["src/api/auth.ts"],
+          entrypoints: [],
+          concerns: ["security", "reliability"],
+        },
+      ],
+    },
+    {
+      files: [
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "partial",
+          required_lenses: ["security", "reliability"],
+          completed_lenses: ["security"],
+        },
+      ],
+    },
+  );
+
+  assert.equal(coverage.flows[0].status, "partial");
+});
+
+test("buildFlowCoverage: flow with required lenses where none are covered returns pending", () => {
+  const coverage = buildFlowCoverage(
+    {
+      flows: [
+        {
+          id: "pending-flow",
+          name: "Pending Flow",
+          paths: ["src/api/auth.ts"],
+          entrypoints: [],
+          concerns: ["security"],
+        },
+      ],
+    },
+    {
+      files: [
+        {
+          path: "src/api/auth.ts",
+          unit_ids: ["src-api-auth"],
+          classification_status: "classified",
+          audit_status: "pending",
+          required_lenses: ["security"],
+          completed_lenses: [],
+        },
+      ],
+    },
+  );
+
+  assert.equal(coverage.flows[0].status, "pending");
+});
+
 test("buildRequeueTasks ignores malformed analyzer entries but still prioritizes real signals", () => {
   const tasks = buildRequeueTasks(
     {
@@ -885,6 +1113,506 @@ test("buildRequeueTasks ignores malformed analyzer entries but still prioritizes
   assert.equal(tasks.length, 1);
   assert.equal(tasks[0].priority, "high");
   assert.ok(tasks[0].tags.includes("external_analyzer_signal"));
+});
+
+test("lens steward trigger large_lens_surface when 3 or more source results", () => {
+  // 3 security tasks/results, each covering 1 file with <700 lines
+  // sources.length >= 3 triggers large_lens_surface
+  const tasks = [
+    {
+      task_id: "src-api-auth:security",
+      unit_id: "src-api-auth",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/api/auth.ts"],
+      file_line_counts: { "src/api/auth.ts": 40 },
+      rationale: "Audit auth",
+      priority: "high",
+      status: "complete",
+    },
+    {
+      task_id: "src-lib-session:security",
+      unit_id: "src-lib-session",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/lib/session.ts"],
+      file_line_counts: { "src/lib/session.ts": 30 },
+      rationale: "Audit session",
+      priority: "medium",
+      status: "complete",
+    },
+    {
+      task_id: "src-lib-token:security",
+      unit_id: "src-lib-token",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/lib/token.ts"],
+      file_line_counts: { "src/lib/token.ts": 25 },
+      rationale: "Audit token",
+      priority: "medium",
+      status: "complete",
+    },
+  ];
+  const results = tasks.map((task) => ({
+    task_id: task.task_id,
+    unit_id: task.unit_id,
+    pass_id: task.pass_id,
+    lens: task.lens,
+    file_coverage: task.file_paths.map((path) => ({
+      path,
+      total_lines: task.file_line_counts[path],
+    })),
+    findings: [
+      {
+        id: `${task.task_id}-f1`,
+        title: "Issue",
+        category: "auth",
+        severity: "low",
+        confidence: "high",
+        lens: "security",
+        summary: "Minor issue.",
+        affected_files: [{ path: task.file_paths[0] }],
+        evidence: [],
+      },
+    ],
+  }));
+
+  const deepeningTasks = buildSelectiveDeepeningTasks({
+    existingTasks: tasks,
+    results,
+  });
+
+  const steward = deepeningTasks.find((task) =>
+    task.tags.includes("lens_verification"),
+  );
+  assert.ok(steward, "should produce a lens steward task");
+  assert.ok(steward.tags.includes("trigger:large_lens_surface"));
+  assert.ok(!steward.tags.includes("trigger:many_no_finding_results"));
+});
+
+test("lens steward trigger large_lens_surface when 4 or more unique files across sources", () => {
+  // 2 tasks each covering 2 distinct files = 4 unique files total
+  // filePaths.length >= 4 triggers large_lens_surface
+  const tasks = [
+    {
+      task_id: "src-api:security",
+      unit_id: "src-api",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/api/auth.ts", "src/api/token.ts"],
+      file_line_counts: { "src/api/auth.ts": 40, "src/api/token.ts": 30 },
+      rationale: "Audit api",
+      priority: "high",
+      status: "complete",
+    },
+    {
+      task_id: "src-lib:security",
+      unit_id: "src-lib",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/lib/session.ts", "src/lib/crypto.ts"],
+      file_line_counts: { "src/lib/session.ts": 25, "src/lib/crypto.ts": 20 },
+      rationale: "Audit lib",
+      priority: "medium",
+      status: "complete",
+    },
+  ];
+  const results = tasks.map((task) => ({
+    task_id: task.task_id,
+    unit_id: task.unit_id,
+    pass_id: task.pass_id,
+    lens: task.lens,
+    file_coverage: task.file_paths.map((path) => ({
+      path,
+      total_lines: task.file_line_counts[path],
+    })),
+    findings: [
+      {
+        id: `${task.task_id}-f1`,
+        title: "Issue",
+        category: "auth",
+        severity: "low",
+        confidence: "high",
+        lens: "security",
+        summary: "Minor issue.",
+        affected_files: [{ path: task.file_paths[0] }],
+        evidence: [],
+      },
+    ],
+  }));
+
+  const deepeningTasks = buildSelectiveDeepeningTasks({
+    existingTasks: tasks,
+    results,
+  });
+
+  const steward = deepeningTasks.find((task) =>
+    task.tags.includes("lens_verification"),
+  );
+  assert.ok(steward, "should produce a lens steward task");
+  assert.ok(steward.tags.includes("trigger:large_lens_surface"));
+});
+
+test("lens steward trigger large_file_reviewed when a source task has large_file tag", () => {
+  // 2 security tasks where one task has tags: ['large_file']
+  const tasks = [
+    {
+      task_id: "src-api-auth:security",
+      unit_id: "src-api-auth",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/api/auth.ts"],
+      file_line_counts: { "src/api/auth.ts": 40 },
+      rationale: "Audit auth",
+      priority: "high",
+      tags: ["large_file"],
+      status: "complete",
+    },
+    {
+      task_id: "src-lib-session:security",
+      unit_id: "src-lib-session",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/lib/session.ts"],
+      file_line_counts: { "src/lib/session.ts": 30 },
+      rationale: "Audit session",
+      priority: "medium",
+      status: "complete",
+    },
+  ];
+  const results = tasks.map((task) => ({
+    task_id: task.task_id,
+    unit_id: task.unit_id,
+    pass_id: task.pass_id,
+    lens: task.lens,
+    file_coverage: task.file_paths.map((path) => ({
+      path,
+      total_lines: task.file_line_counts[path],
+    })),
+    findings: [
+      {
+        id: `${task.task_id}-f1`,
+        title: "Issue",
+        category: "auth",
+        severity: "low",
+        confidence: "high",
+        lens: "security",
+        summary: "Minor issue.",
+        affected_files: [{ path: task.file_paths[0] }],
+        evidence: [],
+      },
+    ],
+  }));
+
+  const deepeningTasks = buildSelectiveDeepeningTasks({
+    existingTasks: tasks,
+    results,
+  });
+
+  const steward = deepeningTasks.find((task) =>
+    task.tags.includes("lens_verification"),
+  );
+  assert.ok(steward, "should produce a lens steward task");
+  assert.ok(steward.tags.includes("trigger:large_file_reviewed"));
+});
+
+test("lens steward trigger unresolved_external_signal when external path has no matching finding", () => {
+  // 2 security results covering src/api/auth.ts; externalAnalyzerResults lists src/api/auth.ts;
+  // but result findings affected_files use a different path — so src/api/auth.ts remains unresolved.
+  const tasks = [
+    {
+      task_id: "src-api-auth:security",
+      unit_id: "src-api-auth",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/api/auth.ts"],
+      file_line_counts: { "src/api/auth.ts": 40 },
+      rationale: "Audit auth",
+      priority: "high",
+      status: "complete",
+    },
+    {
+      task_id: "src-lib-session:security",
+      unit_id: "src-lib-session",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/lib/session.ts"],
+      file_line_counts: { "src/lib/session.ts": 30 },
+      rationale: "Audit session",
+      priority: "medium",
+      status: "complete",
+    },
+  ];
+  const results = tasks.map((task) => ({
+    task_id: task.task_id,
+    unit_id: task.unit_id,
+    pass_id: task.pass_id,
+    lens: task.lens,
+    file_coverage: task.file_paths.map((path) => ({
+      path,
+      total_lines: task.file_line_counts[path],
+    })),
+    findings: [
+      {
+        id: `${task.task_id}-f1`,
+        title: "Other issue",
+        category: "auth",
+        severity: "low",
+        confidence: "high",
+        lens: "security",
+        summary: "Found something elsewhere.",
+        // Intentionally NOT src/api/auth.ts — so that path remains unresolved
+        affected_files: [{ path: "src/lib/utils.ts" }],
+        evidence: [],
+      },
+    ],
+  }));
+
+  const deepeningTasks = buildSelectiveDeepeningTasks({
+    existingTasks: tasks,
+    results,
+    externalAnalyzerResults: {
+      tool: "semgrep",
+      generated_at: "2026-04-30T00:00:00Z",
+      results: [
+        {
+          id: "semgrep-1",
+          path: "src/api/auth.ts",
+          line: 12,
+          category: "security",
+          severity: "high",
+          summary: "Potential injection.",
+        },
+      ],
+    },
+  });
+
+  const steward = deepeningTasks.find((task) =>
+    task.tags.includes("lens_verification"),
+  );
+  assert.ok(steward, "should produce a lens steward task");
+  assert.ok(steward.tags.includes("trigger:unresolved_external_signal"));
+  assert.ok(steward.tags.includes("trigger:external_analyzer_signal"));
+});
+
+test("lens steward trigger critical_flow when a source task has critical_flow tag", () => {
+  // 2 security tasks where one has tags: ['critical_flow']
+  const tasks = [
+    {
+      task_id: "src-api-auth:security",
+      unit_id: "src-api-auth",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/api/auth.ts"],
+      file_line_counts: { "src/api/auth.ts": 40 },
+      rationale: "Audit auth",
+      priority: "high",
+      tags: ["critical_flow"],
+      status: "complete",
+    },
+    {
+      task_id: "src-lib-session:security",
+      unit_id: "src-lib-session",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/lib/session.ts"],
+      file_line_counts: { "src/lib/session.ts": 30 },
+      rationale: "Audit session",
+      priority: "medium",
+      status: "complete",
+    },
+  ];
+  const results = tasks.map((task) => ({
+    task_id: task.task_id,
+    unit_id: task.unit_id,
+    pass_id: task.pass_id,
+    lens: task.lens,
+    file_coverage: task.file_paths.map((path) => ({
+      path,
+      total_lines: task.file_line_counts[path],
+    })),
+    findings: [
+      {
+        id: `${task.task_id}-f1`,
+        title: "Issue",
+        category: "auth",
+        severity: "low",
+        confidence: "high",
+        lens: "security",
+        summary: "Minor issue.",
+        affected_files: [{ path: task.file_paths[0] }],
+        evidence: [],
+      },
+    ],
+  }));
+
+  const deepeningTasks = buildSelectiveDeepeningTasks({
+    existingTasks: tasks,
+    results,
+  });
+
+  const steward = deepeningTasks.find((task) =>
+    task.tags.includes("lens_verification"),
+  );
+  assert.ok(steward, "should produce a lens steward task");
+  assert.ok(steward.tags.includes("trigger:critical_flow"));
+});
+
+test("lensVerificationTriggers totalLines uses path-owner map: large_lens_surface fires when totalLines >= 2000", () => {
+  // Two tasks covering the same file (shared path). Only the first owner's
+  // line count should be used for that path — matching the previous find-based
+  // semantics.  2 distinct tasks × 1 shared file means sources.length < 3 and
+  // filePaths.length < 4, so the only way large_lens_surface fires is via
+  // totalLines >= 2000.
+  const tasks = [
+    {
+      task_id: "src-api-handler:security",
+      unit_id: "src-api-handler",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/api/handler.ts"],
+      file_line_counts: { "src/api/handler.ts": 1800 },
+      rationale: "Audit handler",
+      priority: "high",
+      status: "complete",
+    },
+    {
+      task_id: "src-api-handler-extra:security",
+      unit_id: "src-api-handler-extra",
+      pass_id: "pass:security",
+      lens: "security",
+      // Same file path — second owner. Its 9999-line claim must NOT be added
+      // (first-owner semantics: only the first source's count is used).
+      file_paths: ["src/api/handler.ts"],
+      file_line_counts: { "src/api/handler.ts": 9999 },
+      rationale: "Extra audit handler",
+      priority: "medium",
+      status: "complete",
+    },
+    {
+      task_id: "src-api-router:security",
+      unit_id: "src-api-router",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/api/router.ts"],
+      file_line_counts: { "src/api/router.ts": 250 },
+      rationale: "Audit router",
+      priority: "medium",
+      status: "complete",
+    },
+  ];
+  const results = tasks.map((task) => ({
+    task_id: task.task_id,
+    unit_id: task.unit_id,
+    pass_id: task.pass_id,
+    lens: task.lens,
+    file_coverage: task.file_paths.map((path) => ({
+      path,
+      total_lines: task.file_line_counts[path],
+    })),
+    findings: [
+      {
+        id: `${task.task_id}-f1`,
+        title: "Issue",
+        category: "auth",
+        severity: "low",
+        confidence: "high",
+        lens: "security",
+        summary: "Minor issue.",
+        affected_files: [{ path: task.file_paths[0] }],
+        evidence: [],
+      },
+    ],
+  }));
+
+  const deepeningTasks = buildSelectiveDeepeningTasks({
+    existingTasks: tasks,
+    results,
+  });
+
+  const steward = deepeningTasks.find((task) =>
+    task.tags.includes("lens_verification"),
+  );
+  assert.ok(steward, "should produce a lens steward task");
+  // large_lens_surface fires: handler.ts (1800) + router.ts (250) = 2050 >= 2000
+  assert.ok(
+    steward.tags.includes("trigger:large_lens_surface"),
+    "large_lens_surface should fire when totalLines >= 2000",
+  );
+});
+
+test("lensVerificationTriggers totalLines: first-owner semantics — second source's lines for shared path are not double-counted", () => {
+  // sources.length < 3, filePaths.length < 4, so large_lens_surface can only be
+  // driven by totalLines here. The shared file has 1200 lines in source-1 and
+  // 1200 in source-2. If double-counted it would be 2400 (fires); first-owner
+  // gives 1200 + 700 = 1900 (does not fire). An external_analyzer_signal tag on
+  // source-1 supplies an independent trigger so the steward is still built (the
+  // surface triggers alone would not), letting us assert large_lens_surface is
+  // absent — which proves the first-owner (non-double-counted) line total.
+  const tasks = [
+    {
+      task_id: "src-big-a:security",
+      unit_id: "src-big-a",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/big.ts"],
+      file_line_counts: { "src/big.ts": 1200 },
+      rationale: "Audit big A",
+      priority: "medium",
+      status: "complete",
+      tags: ["external_analyzer_signal"],
+    },
+    {
+      task_id: "src-big-b:security",
+      unit_id: "src-big-b",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/big.ts", "src/other.ts"],
+      file_line_counts: { "src/big.ts": 1200, "src/other.ts": 700 },
+      rationale: "Audit big B",
+      priority: "medium",
+      status: "complete",
+    },
+  ];
+  const results = tasks.map((task) => ({
+    task_id: task.task_id,
+    unit_id: task.unit_id,
+    pass_id: task.pass_id,
+    lens: task.lens,
+    file_coverage: task.file_paths.map((path) => ({
+      path,
+      total_lines: task.file_line_counts[path],
+    })),
+    findings: [
+      {
+        id: `${task.task_id}-f1`,
+        title: "Issue",
+        category: "auth",
+        severity: "low",
+        confidence: "high",
+        lens: "security",
+        summary: "Minor issue.",
+        affected_files: [{ path: task.file_paths[0] }],
+        evidence: [],
+      },
+    ],
+  }));
+
+  const deepeningTasks = buildSelectiveDeepeningTasks({
+    existingTasks: tasks,
+    results,
+  });
+
+  const steward = deepeningTasks.find((task) =>
+    task.tags.includes("lens_verification"),
+  );
+  assert.ok(steward, "should produce a lens steward task (sources.length=2)");
+  // With first-owner semantics: src/big.ts=1200 (owned by src-big-a) +
+  // src/other.ts=700 = 1900 < 2000 → large_lens_surface must NOT fire.
+  assert.ok(
+    !steward.tags.includes("trigger:large_lens_surface"),
+    "large_lens_surface must NOT fire when first-owner totalLines < 2000",
+  );
 });
 
 test("buildExternalSignalTasks skips malformed analyzer results and keeps valid ones", () => {
@@ -922,4 +1650,184 @@ test("buildExternalSignalTasks skips malformed analyzer results and keeps valid 
   assert.equal(tasks.length, 1);
   assert.equal(tasks[0].task_id, "analyzer:semgrep:security:src/api/auth.ts:valid");
   assert.equal(tasks[0].priority, "high");
+});
+
+test("conflictGroups suppresses group when both severitySpread and confidenceSpread are below 2", () => {
+  // severity: medium/medium → spread = 0; confidence: high/medium → spread = 1
+  // Both spreads < 2 → combined-spread guard triggers → no conflict task emitted
+  const baseTask = {
+    unit_id: "src-api-auth",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    file_line_counts: { "src/api/auth.ts": 40 },
+    rationale: "Audit auth",
+    priority: "medium",
+    status: "complete",
+  };
+  const taskA = { ...baseTask, task_id: "src-api-auth:security:a" };
+  const taskB = { ...baseTask, task_id: "src-api-auth:security:b" };
+  const makeFinding = (id, severity, confidence) => ({
+    id,
+    title: "Token validation",
+    category: "auth",
+    severity,
+    confidence,
+    lens: "security",
+    summary: "Token validation issue.",
+    affected_files: [{ path: "src/api/auth.ts", line_start: 12 }],
+    evidence: ["src/api/auth.ts:12 - token check"],
+  });
+  const results = [
+    {
+      task_id: taskA.task_id,
+      unit_id: taskA.unit_id,
+      pass_id: taskA.pass_id,
+      lens: taskA.lens,
+      file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
+      findings: [makeFinding("SEC-001", "medium", "high")],
+    },
+    {
+      task_id: taskB.task_id,
+      unit_id: taskB.unit_id,
+      pass_id: taskB.pass_id,
+      lens: taskB.lens,
+      file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
+      findings: [makeFinding("SEC-002", "medium", "medium")],
+    },
+  ];
+
+  const tasks = buildSelectiveDeepeningTasks({
+    existingTasks: [taskA, taskB],
+    results,
+  });
+
+  const conflictTasks = tasks.filter((task) =>
+    task.tags.includes("trigger:conflicting_output"),
+  );
+  assert.equal(
+    conflictTasks.length,
+    0,
+    `expected no conflict tasks when both spreads < 2, got: ${JSON.stringify(conflictTasks.map((t) => t.task_id))}`,
+  );
+});
+
+test("conflictGroups keeps group when severitySpread >= 2 even if confidenceSpread < 2", () => {
+  // severity: high(4) vs low(2) → spread = 2; confidence: high/high → spread = 0
+  // severitySpread >= 2 → NOT (severitySpread < 2 && confidenceSpread < 2) → group kept
+  const baseTask = {
+    unit_id: "src-api-auth",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    file_line_counts: { "src/api/auth.ts": 40 },
+    rationale: "Audit auth",
+    priority: "medium",
+    status: "complete",
+  };
+  const taskA = { ...baseTask, task_id: "src-api-auth:security:c" };
+  const taskB = { ...baseTask, task_id: "src-api-auth:security:d" };
+  const makeFinding = (id, severity, confidence) => ({
+    id,
+    title: "Token validation",
+    category: "auth",
+    severity,
+    confidence,
+    lens: "security",
+    summary: "Token validation issue.",
+    affected_files: [{ path: "src/api/auth.ts", line_start: 12 }],
+    evidence: ["src/api/auth.ts:12 - token check"],
+  });
+  const results = [
+    {
+      task_id: taskA.task_id,
+      unit_id: taskA.unit_id,
+      pass_id: taskA.pass_id,
+      lens: taskA.lens,
+      file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
+      findings: [makeFinding("SEC-003", "high", "high")],
+    },
+    {
+      task_id: taskB.task_id,
+      unit_id: taskB.unit_id,
+      pass_id: taskB.pass_id,
+      lens: taskB.lens,
+      file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
+      findings: [makeFinding("SEC-004", "low", "high")],
+    },
+  ];
+
+  const tasks = buildSelectiveDeepeningTasks({
+    existingTasks: [taskA, taskB],
+    results,
+  });
+
+  const conflict = tasks.find((task) =>
+    task.tags.includes("trigger:conflicting_output"),
+  );
+  assert.ok(
+    conflict,
+    "expected a conflict task when severitySpread >= 2, even if confidenceSpread < 2",
+  );
+  assert.match(conflict.task_id, /^deepening:conflict:/);
+});
+
+test("conflictGroups keeps group when confidenceSpread >= 2 even if severitySpread < 2", () => {
+  // severity: medium/medium → spread = 0; confidence: high(3) vs low(1) → spread = 2
+  // confidenceSpread >= 2 → NOT (severitySpread < 2 && confidenceSpread < 2) → group kept
+  const baseTask = {
+    unit_id: "src-api-auth",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    file_line_counts: { "src/api/auth.ts": 40 },
+    rationale: "Audit auth",
+    priority: "medium",
+    status: "complete",
+  };
+  const taskA = { ...baseTask, task_id: "src-api-auth:security:e" };
+  const taskB = { ...baseTask, task_id: "src-api-auth:security:f" };
+  const makeFinding = (id, severity, confidence) => ({
+    id,
+    title: "Token validation",
+    category: "auth",
+    severity,
+    confidence,
+    lens: "security",
+    summary: "Token validation issue.",
+    affected_files: [{ path: "src/api/auth.ts", line_start: 12 }],
+    evidence: ["src/api/auth.ts:12 - token check"],
+  });
+  const results = [
+    {
+      task_id: taskA.task_id,
+      unit_id: taskA.unit_id,
+      pass_id: taskA.pass_id,
+      lens: taskA.lens,
+      file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
+      findings: [makeFinding("SEC-005", "medium", "high")],
+    },
+    {
+      task_id: taskB.task_id,
+      unit_id: taskB.unit_id,
+      pass_id: taskB.pass_id,
+      lens: taskB.lens,
+      file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
+      findings: [makeFinding("SEC-006", "medium", "low")],
+    },
+  ];
+
+  const tasks = buildSelectiveDeepeningTasks({
+    existingTasks: [taskA, taskB],
+    results,
+  });
+
+  const conflict = tasks.find((task) =>
+    task.tags.includes("trigger:conflicting_output"),
+  );
+  assert.ok(
+    conflict,
+    "expected a conflict task when confidenceSpread >= 2, even if severitySpread < 2",
+  );
+  assert.match(conflict.task_id, /^deepening:conflict:/);
 });

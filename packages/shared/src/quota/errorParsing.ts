@@ -24,6 +24,8 @@ const USAGE_LIMIT_PATTERNS = [
   /\b(?:session|usage) limit reached\b/i,
 ];
 
+const ALL_RATE_LIMIT_PATTERNS = [...RATE_LIMIT_PATTERNS, ...USAGE_LIMIT_PATTERNS];
+
 function tryParseJson(text: string): Record<string, unknown> | null {
   const jsonStart = text.indexOf("{");
   if (jsonStart === -1) return null;
@@ -108,7 +110,7 @@ export function detectRateLimitError(
   const jsonResult = detectFromJson(text);
   if (jsonResult) return jsonResult;
 
-  for (const pattern of [...RATE_LIMIT_PATTERNS, ...USAGE_LIMIT_PATTERNS]) {
+  for (const pattern of ALL_RATE_LIMIT_PATTERNS) {
     const match = pattern.exec(text);
     if (match) {
       return {
@@ -127,7 +129,8 @@ const DEFAULT_COOLDOWN_MS = 60_000;
 export function computeCooldownUntil(
   retryAfterMs: number | null,
   defaultMs: number = DEFAULT_COOLDOWN_MS,
+  now: number = Date.now(),
 ): string {
   const ms = retryAfterMs != null && retryAfterMs > 0 ? retryAfterMs : defaultMs;
-  return new Date(Date.now() + ms).toISOString();
+  return new Date(now + ms).toISOString();
 }

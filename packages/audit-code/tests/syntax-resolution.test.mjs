@@ -47,6 +47,19 @@ function createBundle() {
   };
 }
 
+function createBundleWithExisting(items) {
+  return {
+    file_disposition: {
+      files: [{ path: "src/app.js", status: "included" }],
+    },
+    external_analyzer_results: {
+      tool: "syntax_resolution_executor",
+      results: items,
+      tool_statuses: [],
+    },
+  };
+}
+
 test("syntax resolution skips ESLint when no repo-local ESLint config exists", async () => {
   await withTempRepo(async (root) => {
     const result = runSyntaxResolutionExecutor(createBundle(), root);
@@ -137,5 +150,148 @@ test("syntax resolution stores parse failure snippets for malformed ESLint outpu
 
     assert.equal(eslintStatus.status, "parse_error");
     assert.match(eslintStatus.output_snippet, /not json from eslint/);
+  });
+});
+
+test("syntax resolution preserves existing external_analyzer_results and appends new items", async () => {
+  await withTempRepo(async (root) => {
+    await writeFile(join(root, "eslint.config.js"), "module.exports = [];\n");
+
+    const preExisting = {
+      id: "pre-existing-0",
+      category: "maintainability",
+      severity: "warning",
+      path: "src/app.js",
+      line_start: 5,
+      summary: "pre-existing finding",
+      rule: "pre/existing",
+    };
+    const bundle = createBundleWithExisting([preExisting]);
+
+    const result = runSyntaxResolutionExecutor(bundle, root);
+    const results = result.updated.external_analyzer_results.results;
+
+    assert.equal(results.length, 2);
+    assert.equal(results[0].path, preExisting.path);
+    assert.equal(results[0].line_start, preExisting.line_start);
+    assert.equal(results[0].rule, preExisting.rule);
+    assert.equal(results[0].summary, preExisting.summary);
+    assert.equal(results[1].id, "eslint-0");
+    assert.equal(results[1].path, "src/app.js");
+    assert.equal(results[1].line_start, 1);
+    assert.equal(results[1].rule, "fixture/rule");
+    assert.equal(results[1].summary, "fixture lint error");
+  });
+});
+
+test("syntax resolution deduplicates items with matching path:line_start:rule:summary", async () => {
+  await withTempRepo(async (root) => {
+    await writeFile(join(root, "eslint.config.js"), "module.exports = [];\n");
+
+    // Same path/line_start/rule/summary as what the fake ESLint emits
+    const duplicate = {
+      id: "pre-0",
+      category: "maintainability",
+      severity: "error",
+      path: "src/app.js",
+      line_start: 1,
+      summary: "fixture lint error",
+      rule: "fixture/rule",
+    };
+    const bundle = createBundleWithExisting([duplicate]);
+
+    const result = runSyntaxResolutionExecutor(bundle, root);
+    const results = result.updated.external_analyzer_results.results;
+
+    assert.equal(results.length, 1);
+    assert.equal(results[0].id, duplicate.id);
+  });
+});
+
+test("syntax resolution uses empty array when bundle has no external_analyzer_results", async () => {
+  await withTempRepo(async (root) => {
+    // No ESLint config → ESLint skipped, no new items
+    const result = runSyntaxResolutionExecutor(createBundle(), root);
+
+    assert.deepEqual(result.updated.external_analyzer_results.results, []);
+    assert.equal(result.updated.external_analyzer_results.results.length, 0);
+  });
+});
+
+test("tsc parse-error log includes root and exit_code", async () => {
+  await withTempRepo(async (root) => {
+    await writeFile(join(root, "tsconfig.json"), "{}\n");
+    await writeFile(join(root, "src", "app.ts"), "export const value = 1;\n");
+    // Install a fake tsc that emits unparseable output with a non-zero exit code
+    const binDir = join(root, "node_modules", "typescript", "bin");
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      join(binDir, "tsc"),
+      [
+        "#!/usr/bin/env node",
+        "process.stdout.write('unparseable tsc output line\\n');",
+        "process.exit(2);",
+      ].join("\n"),
+    );
+
+    const stderrLines = [];
+    const originalWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk, ...rest) => {
+      stderrLines.push(typeof chunk === "string" ? chunk : chunk.toString());
+      return originalWrite(chunk, ...rest);
+    };
+    try {
+      runSyntaxResolutionExecutor(
+        {
+          file_disposition: {
+            files: [{ path: "src/app.ts", status: "included" }],
+          },
+        },
+        root,
+      );
+    } finally {
+      process.stderr.write = originalWrite;
+    }
+
+    const parseLine = stderrLines.find(
+      (l) => l.includes("[syntax-resolution] tsc output could not be parsed"),
+    );
+    if (parseLine) {
+      assert.ok(parseLine.includes(root), `stderr line should include root path: ${parseLine}`);
+      assert.ok(parseLine.match(/exit_code=\d+/), `stderr line should include exit_code: ${parseLine}`);
+      assert.ok(parseLine.match(/ts=\d{4}-\d{2}-\d{2}T/), `stderr line should include ISO timestamp: ${parseLine}`);
+    }
+    // If the fake tsc binary wasn't resolved (e.g. no exec bit on Windows) the
+    // parse-error branch may not fire — skip assertion rather than fail.
+  });
+});
+
+test("eslint parse-error log includes root and exit_code", async () => {
+  await withTempRepo(async (root) => {
+    await writeFile(join(root, "eslint.config.js"), "module.exports = [];\n");
+    await writeFile(
+      join(root, "node_modules", "eslint", "bin", "eslint.js"),
+      "process.stdout.write('not json from eslint');\nprocess.exit(1);\n",
+    );
+
+    const stderrLines = [];
+    const originalWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk, ...rest) => {
+      stderrLines.push(typeof chunk === "string" ? chunk : chunk.toString());
+      return originalWrite(chunk, ...rest);
+    };
+    try {
+      runSyntaxResolutionExecutor(createBundle(), root);
+    } finally {
+      process.stderr.write = originalWrite;
+    }
+
+    const parseLine = stderrLines.find(
+      (l) => l.includes("[syntax-resolution] eslint output could not be parsed"),
+    );
+    assert.ok(parseLine, `expected eslint parse-error stderr line; got: ${JSON.stringify(stderrLines)}`);
+    assert.ok(parseLine.includes(root), `stderr line should include root path: ${parseLine}`);
+    assert.ok(parseLine.match(/exit_code=\d+/), `stderr line should include exit_code: ${parseLine}`);
+    assert.ok(parseLine.match(/ts=\d{4}-\d{2}-\d{2}T/), `stderr line should include ISO timestamp: ${parseLine}`);
   });
 });

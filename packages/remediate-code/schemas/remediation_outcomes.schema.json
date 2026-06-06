@@ -8,6 +8,9 @@
   "properties": {
     "contract_version": { "const": "remediate-code-outcomes/v1alpha1" },
     "total": { "type": "integer", "minimum": 0 },
+    "started_at": { "type": "string" },
+    "completed_at": { "type": "string" },
+    "duration_ms": { "type": "number", "minimum": 0 },
     "by_outcome": {
       "type": "object",
       "required": [
@@ -75,7 +78,11 @@
           ]
         },
         "rework_count": { "type": "integer", "minimum": 0 },
-        "closing_status": { "type": "string" }
+        "closing_status": { "type": "string" },
+        "closing_status_reason": { "type": "string" },
+        "started_at": { "type": "string" },
+        "completed_at": { "type": "string" },
+        "duration_ms": { "type": "number", "minimum": 0 }
       },
       "additionalProperties": false
     }

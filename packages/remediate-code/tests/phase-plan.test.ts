@@ -4,10 +4,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   runPlanPhase,
+  applyPlanPipeline,
   mergeBlocksSharingFiles,
   buildCoverageLedger,
+  splitBlocksByContextBudget,
+  ESTIMATED_BLOCK_BASE_TOKENS,
+  ESTIMATED_FINDING_OVERHEAD_TOKENS,
 } from "../src/phases/plan.js";
 import { validateRemediationPlan } from "../src/validation/remediationState.js";
+import { checkAffectedFileIntegrity } from "../src/utils/fileIntegrity.js";
 
 // Derive the directory in ESM (no implicit `__dirname` under NodeNext/ESM).
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -320,7 +325,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
     expect(state.plan!.blocks[0].items).toEqual(["F-201", "F-202"]);
   });
 
-  it("records git_cocommit strategy when test_graph falls back without grouping", async () => {
+  it("falls through to file_overlap when git co-commit yields only singleton blocks", async () => {
     const reportPath = await writeReport("git-no-group.json", [
       mkFinding("F-301", "First isolated finding", {
         lens: "tests",
@@ -334,6 +339,9 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
       }),
     ]);
 
+    // runCommand returns empty stdout → no shared commits → each finding gets its
+    // own singleton block → gitBlocks.some(b => b.items.length > 1) is false →
+    // execution falls through to the file_overlap path.
     const state = await runPlanPhase(
       baseState,
       { ...baseOptions, input: reportPath },
@@ -343,8 +351,21 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
       },
     );
 
-    expect(state.plan!.block_strategy).toBe("git_cocommit");
+    expect(state.plan!.block_strategy).toBe("file_overlap");
     expect(state.plan!.blocks).toHaveLength(2);
+    expect(state.plan!.blocks.every((b) => b.items.length === 1)).toBe(true);
+  });
+
+  it("deriveFallbackBlocks returns empty blocks array for empty findings input", async () => {
+    const reportPath = await writeReport("empty-findings.json", []);
+
+    const state = await runPlanPhase(
+      baseState,
+      { ...baseOptions, input: reportPath },
+      { enumerateTestFiles: () => [] },
+    );
+
+    expect(state.plan!.blocks).toHaveLength(0);
   });
 
   it("splits a block by byte-based context budget (Phase 2 size_bytes)", async () => {
@@ -484,6 +505,145 @@ describe("mergeBlocksSharingFiles", () => {
   });
 });
 
+// ── MNT-6b371840: splitBlocksByContextBudget rewrites dependent block dependencies after a split ──
+
+describe("splitBlocksByContextBudget — dependency remap after split", () => {
+  // Tiny budget: base+overhead only, so any non-empty file forces a split across groups.
+  // We use in-memory findings with no actual files (size=0 bytes → 0 extra tokens),
+  // so we set the budget to just above one group's overhead to trigger splits easily.
+  const perGroupTokens = ESTIMATED_BLOCK_BASE_TOKENS + ESTIMATED_FINDING_OVERHEAD_TOKENS;
+  const tightBudget = perGroupTokens + 1; // fits exactly one finding group
+
+  function finding(id: string, file: string) {
+    return {
+      id,
+      title: id,
+      category: "correctness",
+      severity: "low" as const,
+      confidence: "high" as const,
+      lens: "correctness" as const,
+      summary: `summary ${id}`,
+      affected_files: [{ path: file }],
+      evidence: ["Evidence."],
+    };
+  }
+
+  it("rewrites B's dependencies from A to [A-01, A-02] when A is split", () => {
+    // A has 2 findings on separate files → forced into 2 sub-blocks.
+    // B depends on A; after the split B should depend on [A-01, A-02].
+    const findings = [
+      finding("FA1", "file-a1.ts"),
+      finding("FA2", "file-a2.ts"),
+      finding("FB1", "file-b1.ts"),
+    ];
+    const blocks = [
+      { block_id: "A", items: ["FA1", "FA2"], parallel_safe: true },
+      { block_id: "B", items: ["FB1"], parallel_safe: false, dependencies: ["A"] },
+    ];
+    // root is not used for file-size stats when files are absent (returns 0 bytes)
+    const result = splitBlocksByContextBudget(blocks as any, findings as any, "/tmp", tightBudget);
+
+    // A must be split into A-01 and A-02
+    const subA = result.filter((b) => b.block_id.startsWith("A-"));
+    expect(subA).toHaveLength(2);
+    expect(subA.map((b) => b.block_id).sort()).toEqual(["A-01", "A-02"]);
+
+    // B must have its dependencies expanded to the two sub-block IDs
+    const blockB = result.find((b) => b.block_id === "B");
+    expect(blockB).toBeDefined();
+    expect(blockB!.dependencies!.sort()).toEqual(["A-01", "A-02"]);
+  });
+
+  it("leaves B's dependencies unchanged when A fits within budget (no split)", () => {
+    const findings = [
+      finding("FA1", "file-a1.ts"),
+      finding("FB1", "file-b1.ts"),
+    ];
+    const blocks = [
+      { block_id: "A", items: ["FA1"], parallel_safe: true },
+      { block_id: "B", items: ["FB1"], parallel_safe: false, dependencies: ["A"] },
+    ];
+    // Budget is large enough that A's single finding never splits
+    const result = splitBlocksByContextBudget(blocks as any, findings as any, "/tmp", 1_000_000);
+
+    const blockA = result.find((b) => b.block_id === "A");
+    expect(blockA).toBeDefined();
+    const blockB = result.find((b) => b.block_id === "B");
+    expect(blockB!.dependencies).toEqual(["A"]);
+  });
+
+  it("leaves C's dependency on B unchanged when only A splits (B did not split)", () => {
+    const findings = [
+      finding("FA1", "file-a1.ts"),
+      finding("FA2", "file-a2.ts"),
+      finding("FB1", "file-b1.ts"),
+      finding("FC1", "file-c1.ts"),
+    ];
+    const blocks = [
+      { block_id: "A", items: ["FA1", "FA2"], parallel_safe: true },
+      { block_id: "B", items: ["FB1"], parallel_safe: false, dependencies: ["A"] },
+      { block_id: "C", items: ["FC1"], parallel_safe: false, dependencies: ["B"] },
+    ];
+    const result = splitBlocksByContextBudget(blocks as any, findings as any, "/tmp", tightBudget);
+
+    // A was split; B was not
+    const blockC = result.find((b) => b.block_id === "C");
+    expect(blockC!.dependencies).toEqual(["B"]);
+  });
+
+  it("expands dependencies in B's sub-blocks when both A and B split", () => {
+    // A: FA1, FA2 (2 separate files → 2 sub-blocks under tight budget)
+    // B: FB1, FB2 (2 separate files → 2 sub-blocks under tight budget), depends on A
+    const findings = [
+      finding("FA1", "fa1.ts"),
+      finding("FA2", "fa2.ts"),
+      finding("FB1", "fb1.ts"),
+      finding("FB2", "fb2.ts"),
+    ];
+    const blocks = [
+      { block_id: "A", items: ["FA1", "FA2"], parallel_safe: true },
+      { block_id: "B", items: ["FB1", "FB2"], parallel_safe: false, dependencies: ["A"] },
+    ];
+    const result = splitBlocksByContextBudget(blocks as any, findings as any, "/tmp", tightBudget);
+
+    const subB = result.filter((b) => b.block_id.startsWith("B-"));
+    expect(subB).toHaveLength(2);
+    for (const b of subB) {
+      // Each B sub-block should reference both A sub-block IDs
+      expect(b.dependencies!.sort()).toEqual(["A-01", "A-02"]);
+    }
+  });
+
+  it("carries the split block's own dependencies unchanged onto sub-blocks", () => {
+    // Prereq → A → B (B splits). B's sub-blocks should still carry A as their
+    // prerequisite, and Prereq should not be affected at all by the remap.
+    const findings = [
+      finding("FP1", "pre1.ts"),
+      finding("FA1", "a1.ts"),
+      finding("FB1", "b1.ts"),
+      finding("FB2", "b2.ts"),
+    ];
+    const blocks = [
+      { block_id: "Prereq", items: ["FP1"], parallel_safe: true },
+      { block_id: "A", items: ["FA1"], parallel_safe: false, dependencies: ["Prereq"] },
+      { block_id: "B", items: ["FB1", "FB2"], parallel_safe: false, dependencies: ["A"] },
+    ];
+    const result = splitBlocksByContextBudget(blocks as any, findings as any, "/tmp", tightBudget);
+
+    // A did not split (single finding); B did split into B-01 and B-02
+    const blockA = result.find((b) => b.block_id === "A");
+    expect(blockA).toBeDefined();
+    expect(blockA!.dependencies).toEqual(["Prereq"]);
+
+    const subB = result.filter((b) => b.block_id.startsWith("B-"));
+    expect(subB).toHaveLength(2);
+    // B's sub-blocks inherit B's original dependency on A (not affected by any remap)
+    for (const b of subB) {
+      expect(b.dependencies).toEqual(["A"]);
+    }
+  });
+});
+
 describe("buildCoverageLedger", () => {
   it("classifies planned, folded, and dropped findings", () => {
     const sourceFindings = [
@@ -511,5 +671,182 @@ describe("buildCoverageLedger", () => {
     expect(byId.B.folded_into).toBe("A");
     expect(byId.C.disposition).toBe("dropped_no_evidence");
     expect(byId.C.rationale).toBeTruthy();
+  });
+});
+
+// ── MNT-1905694f: applyPlanPipeline ──────────────────────────────────────────
+
+describe("applyPlanPipeline (MNT-1905694f)", () => {
+  const PIPELINE_TEST_DIR = join(testDir, ".test-plan-pipeline");
+
+  beforeEach(async () => {
+    await rm(PIPELINE_TEST_DIR, { recursive: true, force: true });
+    await mkdir(PIPELINE_TEST_DIR, { recursive: true });
+    // Several cases write source files under src/ (e.g. src/big.ts); writeFile
+    // does not create parent dirs, so ensure src/ exists up front.
+    await mkdir(join(PIPELINE_TEST_DIR, "src"), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(PIPELINE_TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("normalizeExtractedPlan path: merges blocks that share a file (MNT-1905694f)", async () => {
+    // Two findings that both touch shared.ts but are in separate blocks.
+    const sharedFile = "src/shared.ts";
+    const fA = mkFinding("F-A", "Finding A", { files: [sharedFile], evidence: ["evidence A"] });
+    const fB = mkFinding("F-B", "Finding B", { files: [sharedFile], evidence: ["evidence B"] });
+
+    const inputPlan = {
+      plan_id: "PLAN-test",
+      findings: [fA, fB] as any[],
+      blocks: [
+        { block_id: "B-001", items: ["F-A"], parallel_safe: true, dependencies: [] },
+        { block_id: "B-002", items: ["F-B"], parallel_safe: true, dependencies: [] },
+      ],
+      project_type: "unknown",
+      candidate_closing_actions: ["none"] as any,
+    };
+
+    const result = await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
+
+    // The two separate blocks should be merged into one because they share a file.
+    expect(result.blocks).toHaveLength(1);
+    const merged = result.blocks[0];
+    expect(merged.items).toContain("F-A");
+    expect(merged.items).toContain("F-B");
+  });
+
+  it("normalizeExtractedPlan path: dependency-ordered file-sharing blocks stay separate and non-parallel-safe", async () => {
+    const sharedFile = "src/shared.ts";
+    const fA = mkFinding("F-A", "Finding A", { files: [sharedFile], evidence: ["e"] });
+    const fB = mkFinding("F-B", "Finding B", { files: [sharedFile], evidence: ["e"] });
+
+    // B-002 depends on B-001. Even though both touch shared.ts, the existing
+    // dependency already serializes them, so mergeBlocksSharingFiles must NOT
+    // fuse them (the `!ordered` guard): the dependency edge prevents the parallel
+    // file-clobber the merge exists to avoid. The dependent block stays
+    // non-parallel-safe.
+    const inputPlan = {
+      plan_id: "PLAN-test",
+      findings: [fA, fB] as any[],
+      blocks: [
+        { block_id: "B-001", items: ["F-A"], parallel_safe: true, dependencies: [] },
+        { block_id: "B-002", items: ["F-B"], parallel_safe: false, dependencies: ["B-001"] },
+      ],
+      project_type: "unknown",
+      candidate_closing_actions: ["none"] as any,
+    };
+
+    const result = await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
+
+    // Already dependency-ordered → not merged; both blocks survive.
+    expect(result.blocks).toHaveLength(2);
+    const dependent = result.blocks.find((b) => b.block_id === "B-002");
+    expect(dependent?.parallel_safe).toBe(false);
+    expect(dependent?.dependencies).toContain("B-001");
+  });
+
+  it("normalizeExtractedPlan path: splitBlocksByContextBudget splits an oversized block (MNT-1905694f)", async () => {
+    // Two large files, one per finding. The findings must touch DIFFERENT files
+    // so groupFindingsByFileOverlap puts them in separate file-overlap groups —
+    // the splitter only divides a block at group boundaries, never within a group
+    // of findings that share a file (those must stay together to avoid clobbering).
+    const bigFileA = "src/big-a.ts";
+    const bigFileB = "src/big-b.ts";
+    const bigContent = "x".repeat(200_000); // ~200 KB each → well over any tiny budget
+    await writeFile(join(PIPELINE_TEST_DIR, bigFileA), bigContent, "utf8");
+    await writeFile(join(PIPELINE_TEST_DIR, bigFileB), bigContent, "utf8");
+
+    // Write a small session-config.json to force a tiny context budget.
+    const sessionConfig = {
+      block_quota: { context_tokens: 100, reserved_output_tokens: 10 },
+    };
+    await writeFile(
+      join(PIPELINE_TEST_DIR, "session-config.json"),
+      JSON.stringify(sessionConfig),
+      "utf8",
+    );
+
+    // Build a block with two independent findings pointing at the two big files.
+    const fA = mkFinding("F-A", "Finding A", { files: [bigFileA], evidence: ["e"] });
+    const fB = mkFinding("F-B", "Finding B", { files: [bigFileB], evidence: ["e"] });
+
+    const inputPlan = {
+      plan_id: "PLAN-test",
+      findings: [fA, fB] as any[],
+      blocks: [
+        { block_id: "B-001", items: ["F-A", "F-B"], parallel_safe: true, dependencies: [] },
+      ],
+      project_type: "unknown",
+      candidate_closing_actions: ["none"] as any,
+    };
+
+    const result = await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
+
+    // With an absurdly tiny budget, the single block must be split into multiple.
+    expect(result.blocks.length).toBeGreaterThan(1);
+    // Sub-blocks should follow the '<original>-NN' suffix pattern.
+    for (const block of result.blocks) {
+      expect(block.block_id).toMatch(/^B-001-\d+$/);
+    }
+  });
+
+  it("normalizeExtractedPlan path: snapshotAffectedFileHashes records baseline so integrity is clean (MNT-1905694f)", async () => {
+    const trackedFile = "src/tracked.ts";
+    await writeFile(join(PIPELINE_TEST_DIR, trackedFile), "original content", "utf8");
+
+    const f = mkFinding("F-1", "Finding 1", { files: [trackedFile], evidence: ["e"] });
+    const inputPlan = {
+      plan_id: "PLAN-test",
+      findings: [f] as any[],
+      blocks: [
+        { block_id: "B-001", items: ["F-1"], parallel_safe: true, dependencies: [] },
+      ],
+      project_type: "unknown",
+      candidate_closing_actions: ["none"] as any,
+    };
+
+    await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
+
+    // After applyPlanPipeline, the file snapshot should exist and the integrity
+    // check should report clean (the file has not been modified since the snapshot).
+    const integrity = await checkAffectedFileIntegrity(PIPELINE_TEST_DIR, [f] as any);
+    expect(integrity.is_clean).toBe(true);
+  });
+
+  it("runPlanPhase regression: still applies full pipeline after refactor (MNT-1905694f)", async () => {
+    // Write a minimal audit-findings report with two findings that share a file.
+    const sharedFile = "src/shared.ts";
+    await writeFile(join(PIPELINE_TEST_DIR, sharedFile), "// shared", "utf8");
+
+    const fA = mkFinding("F-A", "Alpha", { files: [sharedFile], evidence: ["e"] });
+    const fB = mkFinding("F-B", "Beta",  { files: [sharedFile], evidence: ["e"] });
+    const report = makeReport([fA, fB], [
+      { id: "W-A", finding_ids: ["F-A"], unit_ids: [], owned_files: [sharedFile], max_severity: "low", rationale: "r", depends_on: [] },
+      { id: "W-B", finding_ids: ["F-B"], unit_ids: [], owned_files: [sharedFile], max_severity: "low", rationale: "r", depends_on: [] },
+    ]);
+    // Write the report into PIPELINE_TEST_DIR (the run root), not the shared
+    // writeReport helper's TEST_DIR — that directory isn't created by this
+    // describe's beforeEach, so writing there would ENOENT.
+    const reportPath = join(PIPELINE_TEST_DIR, "report-regression.json");
+    await writeFile(reportPath, JSON.stringify(report), "utf8");
+
+    const state = baseState;
+    const options = { root: PIPELINE_TEST_DIR, artifactsDir: PIPELINE_TEST_DIR, input: reportPath };
+    const result = await runPlanPhase(state as any, options as any);
+
+    // runPlanPhase must still merge file-sharing blocks.
+    expect(result.plan).toBeDefined();
+    expect(result.plan!.blocks).toHaveLength(1);
+    expect(result.plan!.blocks[0].items).toContain("F-A");
+    expect(result.plan!.blocks[0].items).toContain("F-B");
+
+    // And the file-hash snapshot must have been taken.
+    const integrity = await checkAffectedFileIntegrity(
+      PIPELINE_TEST_DIR,
+      result.plan!.findings as any,
+    );
+    expect(integrity.is_clean).toBe(true);
   });
 });

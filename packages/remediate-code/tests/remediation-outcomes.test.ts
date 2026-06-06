@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildRemediationOutcomesReport } from "../src/phases/close.js";
-import type { RemediationState } from "../src/state/store.js";
+import {
+  buildRemediationOutcomesReport,
+  type ClosingResult,
+} from "../src/phases/close.js";
+import { makeState as makeBaseState } from "./test-helpers.js";
 
 function finding(id: string, lens: string, files: string[]) {
   return {
@@ -15,8 +18,8 @@ function finding(id: string, lens: string, files: string[]) {
   };
 }
 
-function makeState(): RemediationState {
-  return {
+function makeState() {
+  return makeBaseState({
     status: "closing",
     plan: {
       plan_id: "PLAN-1",
@@ -36,12 +39,25 @@ function makeState(): RemediationState {
       "F-3": { finding_id: "F-3", status: "deemed_inappropriate", block_id: "B" },
       "F-4": { finding_id: "F-4", status: "blocked", block_id: "B" },
     },
-  } as unknown as RemediationState;
+  });
+}
+
+function closingResult(overrides: Partial<ClosingResult> = {}): ClosingResult {
+  return {
+    contract_version: "remediate-code-closing-result/v1alpha1",
+    action: "commit",
+    status: "success",
+    commands: [],
+    ...overrides,
+  };
 }
 
 describe("buildRemediationOutcomesReport", () => {
   it("captures one outcome per finding with lens, file_exts, and rework_count", () => {
-    const report = buildRemediationOutcomesReport(makeState(), "success");
+    const report = buildRemediationOutcomesReport(
+      makeState(),
+      closingResult(),
+    );
 
     expect(report.total).toBe(4);
     expect(report.contract_version).toBe("remediate-code-outcomes/v1alpha1");
@@ -67,7 +83,10 @@ describe("buildRemediationOutcomesReport", () => {
   });
 
   it("aggregates by outcome and by lens", () => {
-    const report = buildRemediationOutcomesReport(makeState(), "success");
+    const report = buildRemediationOutcomesReport(
+      makeState(),
+      closingResult(),
+    );
 
     expect(report.by_outcome.resolved).toBe(1);
     expect(report.by_outcome.verified_no_change).toBe(1);
@@ -81,5 +100,94 @@ describe("buildRemediationOutcomesReport", () => {
     });
     expect(report.by_lens.performance).toEqual({ inappropriate: 1 });
     expect(report.by_lens.tests).toEqual({ blocked: 1 });
+  });
+
+  it("sets closing_status_reason for skipped close", () => {
+    const report = buildRemediationOutcomesReport(
+      makeState(),
+      closingResult({ action: "none", status: "skipped" }),
+    );
+
+    expect(report.outcomes).toHaveLength(4);
+    for (const outcome of report.outcomes) {
+      expect(outcome.closing_status).toBe("skipped");
+      expect(outcome.closing_status_reason).toBe(
+        "closing action is 'none' — no commit/push/publish configured",
+      );
+    }
+  });
+
+  it("omits closing_status_reason for successful close", () => {
+    const report = buildRemediationOutcomesReport(
+      makeState(),
+      closingResult({ action: "commit", status: "success" }),
+    );
+
+    for (const outcome of report.outcomes) {
+      expect(outcome.closing_status).toBe("success");
+      expect(outcome.closing_status_reason).toBeUndefined();
+      expect(outcome).not.toHaveProperty("closing_status_reason");
+    }
+  });
+
+  it("sets closing_status_reason for failed close", () => {
+    const report = buildRemediationOutcomesReport(
+      makeState(),
+      closingResult({ action: "publish", status: "failed" }),
+    );
+
+    for (const outcome of report.outcomes) {
+      expect(outcome.closing_status).toBe("failed");
+      expect(outcome.closing_status_reason).toBe(
+        "closing action 'publish' failed",
+      );
+    }
+  });
+
+  it("includes item timing and aggregate duration fields when timestamps exist", () => {
+    const state = makeState();
+    state.items!["F-1"].started_at = "2026-06-05T12:00:00.000Z";
+    state.items!["F-1"].completed_at = "2026-06-05T12:00:05.000Z";
+    state.items!["F-2"].started_at = "2026-06-05T12:00:02.000Z";
+    state.items!["F-2"].completed_at = "2026-06-05T12:00:10.000Z";
+    state.items!["F-3"].started_at = "2026-06-05T12:00:03.000Z";
+    state.items!["F-3"].completed_at = "2026-06-05T12:00:04.000Z";
+    state.items!["F-4"].started_at = "2026-06-05T12:00:01.000Z";
+    state.items!["F-4"].completed_at = "2026-06-05T12:00:07.000Z";
+
+    const report = buildRemediationOutcomesReport(
+      state,
+      closingResult(),
+    );
+
+    const f1 = report.outcomes.find((o) => o.finding_id === "F-1")!;
+    expect(f1.started_at).toBe("2026-06-05T12:00:00.000Z");
+    expect(f1.completed_at).toBe("2026-06-05T12:00:05.000Z");
+    expect(f1.duration_ms).toBe(5000);
+
+    for (const outcome of report.outcomes) {
+      expect(outcome.started_at).toEqual(expect.any(String));
+      expect(outcome.completed_at).toEqual(expect.any(String));
+      expect(outcome.duration_ms).toEqual(expect.any(Number));
+    }
+    expect(report.started_at).toBe("2026-06-05T12:00:00.000Z");
+    expect(report.completed_at).toBe("2026-06-05T12:00:10.000Z");
+    expect(report.duration_ms).toBe(10000);
+  });
+
+  it("omits timing fields and aggregate timing when timestamps are absent", () => {
+    const report = buildRemediationOutcomesReport(
+      makeState(),
+      closingResult(),
+    );
+
+    expect(report.started_at).toBeUndefined();
+    expect(report.completed_at).toBeUndefined();
+    expect(report.duration_ms).toBeUndefined();
+    for (const outcome of report.outcomes) {
+      expect(outcome).not.toHaveProperty("started_at");
+      expect(outcome).not.toHaveProperty("completed_at");
+      expect(outcome).not.toHaveProperty("duration_ms");
+    }
   });
 });

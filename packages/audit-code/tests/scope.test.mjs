@@ -206,6 +206,33 @@ test("computeAuditScope: changed files outside the auditable set drop out", () =
   assert.match(scope.dropped_note ?? "", /No auditable files changed/);
 });
 
+test("computeAuditScope: two-hop expansion succeeds when accumulated confidence stays above the floor", () => {
+  // 0.8 edges: one hop (0.8) > 0.5, two hops (0.64) > 0.5, three hops (0.512) > 0.5,
+  // four hops (0.41) < 0.5 — so src/e.ts (four hops) must be excluded.
+  const included = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts"];
+  const scope = computeAuditScope({
+    since: "main",
+    changed: ["src/a.ts"],
+    includedFiles: included,
+    graphBundle: bundleWithEdges([
+      { from: "src/a.ts", to: "src/b.ts", confidence: 0.8 },
+      { from: "src/b.ts", to: "src/c.ts", confidence: 0.8 },
+      { from: "src/c.ts", to: "src/d.ts", confidence: 0.8 },
+      { from: "src/d.ts", to: "src/e.ts", confidence: 0.8 },
+    ]),
+  });
+  assert.equal(scope.mode, "delta");
+  assert.deepEqual(scope.seed_files, ["src/a.ts"]);
+  // One hop (0.8) clears 0.5 floor.
+  assert.ok(scope.expanded_files.includes("src/b.ts"), "src/b.ts should be in expanded_files (1 hop, 0.8)");
+  // Two hops (0.64) still clears 0.5 floor — the key assertion.
+  assert.ok(scope.expanded_files.includes("src/c.ts"), "src/c.ts should be in expanded_files (2 hops, 0.64)");
+  // Three hops (0.512) clears 0.5 floor.
+  assert.ok(scope.expanded_files.includes("src/d.ts"), "src/d.ts should be in expanded_files (3 hops, 0.512)");
+  // Four hops (0.41) drops below 0.5 floor — BFS stops here.
+  assert.ok(!scope.expanded_files.includes("src/e.ts"), "src/e.ts should NOT be in expanded_files (4 hops, 0.41 < 0.5)");
+});
+
 test("resolveAuditScope: no --since → full audit", () => {
   const scope = resolveAuditScope({ root: ".", bundle: {} });
   assert.equal(scope.mode, "full");

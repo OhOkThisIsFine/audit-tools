@@ -45,8 +45,14 @@ export interface FileAnchorSummary {
 const GRAPH_EDGE_BUCKETS = ["imports", "calls", "references"] as const;
 
 const MAX_ANCHORS = 160;
+// Keywords that signal elevated-risk or review-worthy lines, grouped by concern:
+// auth/access:              auth, password, permission, role, secret, token
+// injection/execution:      deserialize, eval, exec, query, spawn, sql
+// crypto:                   decrypt, encrypt
+// concurrency/reliability:  cache, lock, race, retry, timeout, transaction
+// debt markers:             FIXME, TODO
 const KEYWORD_PATTERN =
-  /\b(auth|token|password|secret|permission|role|sql|query|exec|spawn|eval|deserialize|encrypt|decrypt|cache|retry|timeout|transaction|lock|race|TODO|FIXME)\b/i;
+  /\b(auth|password|permission|role|secret|token|deserialize|eval|exec|query|spawn|sql|decrypt|encrypt|cache|lock|race|retry|timeout|transaction|FIXME|TODO)\b/i;
 const SYMBOL_PATTERNS: Array<{ kind: FileAnchorKind; pattern: RegExp; label: string }> = [
   {
     kind: "import",
@@ -177,6 +183,47 @@ function collectGraphEdges(graphBundle: GraphBundle | undefined, path: string): 
   );
 }
 
+function scanSymbol(
+  line: string,
+  lineNumber: number,
+  anchors: FileAnchor[],
+  seen: Set<string>,
+): string | null {
+  for (const { kind, pattern, label } of SYMBOL_PATTERNS) {
+    const match = line.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const name = match.slice(1).find((value) => value && value.trim().length > 0) ?? label;
+    addAnchor(anchors, seen, {
+      kind,
+      name: truncate(name, 80),
+      line: lineNumber,
+      detail: truncate(`${label}: ${line}`, 180),
+    });
+    return kind;
+  }
+  return null;
+}
+
+function scanKeyword(
+  line: string,
+  lineNumber: number,
+  anchors: FileAnchor[],
+  seen: Set<string>,
+): boolean {
+  if (!KEYWORD_PATTERN.test(line)) {
+    return false;
+  }
+  addAnchor(anchors, seen, {
+    kind: "keyword",
+    name: truncate(line.match(KEYWORD_PATTERN)?.[1] ?? "keyword", 80),
+    line: lineNumber,
+    detail: truncate(line, 180),
+  });
+  return true;
+}
+
 export function buildFileAnchorSummary(params: {
   path: string;
   content: string;
@@ -210,35 +257,10 @@ export function buildFileAnchorSummary(params: {
 
   lines.forEach((line, index) => {
     const lineNumber = index + 1;
-    for (const { kind, pattern, label } of SYMBOL_PATTERNS) {
-      const match = line.match(pattern);
-      if (!match) {
-        continue;
-      }
-      const name = match.slice(1).find((value) => value && value.trim().length > 0) ?? label;
-      if (kind === "route") {
-        routeCount += 1;
-      } else if (kind === "symbol") {
-        symbolCount += 1;
-      }
-      addAnchor(anchors, seen, {
-        kind,
-        name: truncate(name, 80),
-        line: lineNumber,
-        detail: truncate(`${label}: ${line}`, 180),
-      });
-      break;
-    }
-
-    if (KEYWORD_PATTERN.test(line)) {
-      keywordCount += 1;
-      addAnchor(anchors, seen, {
-        kind: "keyword",
-        name: truncate(line.match(KEYWORD_PATTERN)?.[1] ?? "keyword", 80),
-        line: lineNumber,
-        detail: truncate(line, 180),
-      });
-    }
+    const symbolKind = scanSymbol(line, lineNumber, anchors, seen);
+    if (symbolKind === "route") routeCount += 1;
+    else if (symbolKind === "symbol") symbolCount += 1;
+    if (scanKeyword(line, lineNumber, anchors, seen)) keywordCount += 1;
   });
 
   const graphEdges = collectGraphEdges(params.graphBundle, path);

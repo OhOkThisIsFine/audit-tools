@@ -9,7 +9,6 @@ import { spawn } from "node:child_process";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
 const wrapperPath = join(repoRoot, "audit-code.mjs");
-const distPath = join(repoRoot, "dist", "index.js");
 
 function runNode(entryPath, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -116,7 +115,7 @@ test("validate fails loudly on corrupted artifact json", async () => {
     await writeFile(join(artifactsDir, "repo_manifest.json"), "{not-json\n");
 
     const result = await runNode(
-      distPath,
+      wrapperPath,
       ["validate", "--artifacts-dir", artifactsDir],
       { cwd: root },
     );

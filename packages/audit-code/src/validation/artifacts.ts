@@ -4,6 +4,8 @@ import {
   pushValidationIssue,
   requireKeys,
 } from "@audit-tools/shared";
+import type { AuditUnit } from "../types.js";
+import type { RuntimeValidationTask } from "../types/runtimeValidation.js";
 
 function pushIssue(
   issues: ValidationIssue[],
@@ -172,11 +174,7 @@ export function validateArtifactBundle(
   const fileDispositionEntries = asArray<{ path: string; status: string }>(
     bundle.file_disposition?.files,
   );
-  const unitManifestUnits = asArray<{
-    unit_id: string;
-    files: string[];
-    required_lenses: string[];
-  }>(bundle.unit_manifest?.units);
+  const unitManifestUnits = asArray<Pick<AuditUnit, 'unit_id' | 'files' | 'required_lenses'>>(bundle.unit_manifest?.units);
   const criticalFlows = asArray<{
     id: string;
     paths: string[];
@@ -192,10 +190,7 @@ export function validateArtifactBundle(
   const surfaceEntries = asArray<{ id: string; entrypoint: string }>(
     bundle.surface_manifest?.surfaces,
   );
-  const runtimeValidationTasks = asArray<{
-    id: string;
-    target_paths: string[];
-  }>(bundle.runtime_validation_tasks?.tasks);
+  const runtimeValidationTasks = asArray<Pick<RuntimeValidationTask, 'id' | 'target_paths'>>(bundle.runtime_validation_tasks?.tasks);
   const runtimeValidationResults = asArray<{ task_id: string }>(
     bundle.runtime_validation_report?.results,
   );
@@ -532,6 +527,12 @@ export function validateArtifactBundle(
         );
       }
     }
+  }
+
+  if (issues.length > 0) {
+    process.stderr.write(
+      `[artifact-bundle validation] ${issues.length} issue(s)\n`,
+    );
   }
 
   return issues;

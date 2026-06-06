@@ -52,32 +52,37 @@ async function maybeHashFile(
   return createHash("sha256").update(content).digest("hex");
 }
 
+interface WalkContext {
+  root: string;
+  ignores: string[];
+  hashFiles: boolean;
+  maxFileSizeBytes: number;
+}
+
 async function walk(
-  root: string,
+  ctx: WalkContext,
   current: string,
-  ignores: string[],
-  hashFiles: boolean,
-  maxFileSizeBytes: number,
   results: Array<{ path: string; size_bytes: number; hash?: string }>,
 ): Promise<void> {
-  const entries = await readdir(current, { withFileTypes: true });
+  let entries;
+  try {
+    entries = await readdir(current, { withFileTypes: true });
+  } catch (err) {
+    console.warn(
+      `[fsIntake] skipping unreadable directory: ${current} (${(err as Error).message})`,
+    );
+    return;
+  }
 
   for (const entry of entries) {
     const absolutePath = join(current, entry.name);
-    const relativePath = normalizePath(relative(root, absolutePath));
-    if (!relativePath || shouldIgnore(relativePath, ignores)) {
+    const relativePath = normalizePath(relative(ctx.root, absolutePath));
+    if (!relativePath || shouldIgnore(relativePath, ctx.ignores)) {
       continue;
     }
 
     if (entry.isDirectory()) {
-      await walk(
-        root,
-        absolutePath,
-        ignores,
-        hashFiles,
-        maxFileSizeBytes,
-        results,
-      );
+      await walk(ctx, absolutePath, results);
       continue;
     }
 
@@ -85,11 +90,24 @@ async function walk(
       continue;
     }
 
-    const info = await stat(absolutePath);
-    const hash =
-      info.size <= maxFileSizeBytes
-        ? await maybeHashFile(absolutePath, hashFiles)
-        : undefined;
+    let info;
+    try {
+      info = await stat(absolutePath);
+    } catch (err) {
+      console.warn(
+        `[fsIntake] skipping unreadable file: ${relativePath} (${(err as Error).message})`,
+      );
+      continue;
+    }
+
+    let hash: string | undefined;
+    if (info.size <= ctx.maxFileSizeBytes) {
+      hash = await maybeHashFile(absolutePath, ctx.hashFiles);
+    } else {
+      console.warn(
+        `[fsIntake] skipping oversized file: ${relativePath} (${info.size} bytes > ${ctx.maxFileSizeBytes} limit)`,
+      );
+    }
     results.push({
       path: relativePath,
       size_bytes: info.size,
@@ -105,13 +123,12 @@ export async function buildRepoManifestFromFs(
   const ignore = [...DEFAULT_IGNORES, ...(options.ignore ?? [])];
   const files: Array<{ path: string; size_bytes: number; hash?: string }> = [];
 
-  await walk(
+  const ctx: WalkContext = {
     root,
-    root,
-    ignore,
-    options.hash_files ?? false,
-    options.max_file_size_bytes ?? 1024 * 1024,
-    files,
-  );
+    ignores: ignore,
+    hashFiles: options.hash_files ?? false,
+    maxFileSizeBytes: options.max_file_size_bytes ?? 1024 * 1024,
+  };
+  await walk(ctx, root, files);
   return buildRepoManifest(root.split(/[\\/]/).pop() ?? "repo", files);
 }

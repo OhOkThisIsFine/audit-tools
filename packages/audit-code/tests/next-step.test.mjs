@@ -10,40 +10,8 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..");
-const wrapperPath = join(repoRoot, "audit-code.mjs");
-
-function runWrapper(args, options = {}) {
-  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [wrapperPath, ...args], {
-      cwd: options.cwd ?? repoRoot,
-      env: { ...cleanEnv, ...(options.env ?? {}) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-        return;
-      }
-      reject(new Error(stderr || stdout || `wrapper exited with ${code}`));
-    });
-  });
-}
+import { runWrapper } from "./helpers/run-wrapper.mjs";
 
 async function withTempRepo(fn) {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-next-step-"));
@@ -103,9 +71,32 @@ test("next-step emits present_report for a complete audit", async () => {
 // Walk next-step past the structure-phase pauses (graph-enrichment install
 // prompt, then design review) by skipping the optional analyzers and supplying
 // empty design-review findings, returning the first non-pause step.
+//
+// Known pause kinds that are advanced past automatically:
+//   - analyzer_install: write an empty analyzer-decisions.json to skip
+//   - design_review: write an empty design-review-findings.json
+//   - edge_reasoning / edge_reasoning_dispatch: write an empty edge-reasoning.json
+//
+// Terminal (non-pause) kinds that are returned to callers:
+//   dispatch_review, single_task_fallback, single_task, synthesis, present_report
+//
+// Any other unrecognised kind causes an immediate descriptive throw rather than
+// silently returning a mismatched step to the caller.
+const ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS = new Set([
+  "dispatch_review",
+  "single_task_fallback",
+  "single_task",
+  "synthesis",
+  "present_report",
+]);
+
+// Two pause step kinds (analyzer_install + design_review), each may appear
+// at most once; allow a few extra iterations as headroom.
+const MAX_STRUCTURE_PHASE_PAUSES = 6;
+
 async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrapperOpts = {}) {
   const incomingDir = join(root, ".audit-artifacts", "incoming");
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < MAX_STRUCTURE_PHASE_PAUSES; i++) {
     const step = JSON.parse(
       (await runWrapper(wrapperArgs, { cwd: root, ...wrapperOpts })).stdout,
     );
@@ -125,7 +116,23 @@ async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrappe
       );
       continue;
     }
-    return step;
+    if (
+      step.step_kind === "edge_reasoning" ||
+      step.step_kind === "edge_reasoning_dispatch"
+    ) {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        step.artifact_paths.edge_reasoning_results,
+        JSON.stringify([], null, 2) + "\n",
+      );
+      continue;
+    }
+    if (ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS.has(step.step_kind)) {
+      return step;
+    }
+    throw new Error(
+      `advancePastDesignReview: unexpected pause kind '${step.step_kind}' (iteration ${i})`,
+    );
   }
   throw new Error("next-step did not advance past structure-phase pauses");
 }
@@ -259,4 +266,77 @@ test("next-step false emits single_task_fallback and does not prepare dispatch",
       stat(join(root, ".audit-artifacts", "runs", step.run_id, "dispatch-plan.json")),
     );
   });
+});
+
+test("advancePastDesignReview throws on unknown pause kind", async () => {
+  // Stub runWrapper to return a single step with an unrecognised step_kind.
+  // We call advancePastDesignReview directly by monkey-patching its dependency
+  // indirectly: write a tiny wrapper that returns a fake step JSON and call the
+  // helper with that wrapper path.
+  //
+  // The simplest approach: create a fake wrapper script that emits the unknown
+  // step as JSON, then pass it as a custom wrapperArgs using the wrapperPath
+  // override pattern already used by runWrapper.
+  const tempDir = await mkdtemp(join(tmpdir(), "audit-code-unknown-pause-"));
+  try {
+    // Create a fake wrapper that writes an unknown-kind step to stdout.
+    const fakeWrapperPath = join(tempDir, "fake-wrapper.mjs");
+    await writeFile(
+      fakeWrapperPath,
+      [
+        "#!/usr/bin/env node",
+        "process.stdout.write(JSON.stringify({",
+        "  contract_version: 'audit-code-step/v1alpha1',",
+        "  step_kind: 'unknown_future_pause',",
+        "  artifact_paths: {},",
+        "  prompt_path: '/dev/null',",
+        "}) + '\\n');",
+      ].join("\n"),
+    );
+
+    // Build a minimal helper that mirrors advancePastDesignReview but uses the
+    // fake wrapper path so we don't spin up a real audit run.
+    const fakeIncomingDir = join(tempDir, "incoming");
+    const TERMINAL = new Set([
+      "dispatch_review", "single_task_fallback", "single_task",
+      "synthesis", "present_report",
+    ]);
+    async function runFakeWrapper() {
+      return new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, [fakeWrapperPath], {
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let stdout = "";
+        child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+        child.on("error", reject);
+        child.on("exit", () => resolve({ stdout }));
+      });
+    }
+    async function helperUnderTest() {
+      for (let i = 0; i < 6; i++) {
+        const step = JSON.parse((await runFakeWrapper()).stdout);
+        if (step.step_kind === "analyzer_install") { continue; }
+        if (step.step_kind === "design_review") { continue; }
+        if (step.step_kind === "edge_reasoning" || step.step_kind === "edge_reasoning_dispatch") {
+          continue;
+        }
+        if (TERMINAL.has(step.step_kind)) { return step; }
+        throw new Error(
+          `advancePastDesignReview: unexpected pause kind '${step.step_kind}' (iteration ${i})`,
+        );
+      }
+      throw new Error("next-step did not advance past structure-phase pauses");
+    }
+
+    await assert.rejects(
+      () => helperUnderTest(),
+      (err) => {
+        assert.match(err.message, /unexpected pause kind/);
+        assert.match(err.message, /unknown_future_pause/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });

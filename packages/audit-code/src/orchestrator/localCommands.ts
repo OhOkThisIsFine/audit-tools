@@ -28,6 +28,10 @@ function toSpawnTuple(candidate: LocalCommandCandidate): {
   return { command: resolved[0], args: resolved.slice(1) };
 }
 
+export function __resolveFromPathForTests(command: string): string | null {
+  return resolveFromPath(command);
+}
+
 function resolveFromPath(command: string): string | null {
   if (command.trim().length === 0) {
     return null;
@@ -55,25 +59,16 @@ function resolveFromPath(command: string): string | null {
           .map((ext) => (ext.startsWith(".") ? ext : `.${ext}`))
       : [""];
 
-  for (const dir of pathEntries) {
-    const directPath = join(dir, command);
-    if (process.platform === "win32" && extname(command).length === 0) {
-      for (const ext of extensions) {
-        const candidatePath = join(dir, `${command}${ext}`);
-        if (existsSync(candidatePath)) {
-          return candidatePath;
-        }
-      }
-      if (existsSync(directPath)) {
-        return directPath;
-      }
-      continue;
-    }
+  // On Win32 without an extension: probe PATHEXT extensions first, then the
+  // bare name (empty-string suffix). On Win32 with an extension, or non-Win32:
+  // use only the bare name (extensions is already [''] on non-Win32).
+  const effectiveExtensions =
+    process.platform === "win32" && extname(command).length === 0
+      ? [...extensions, ""]
+      : [""];
 
-    if (existsSync(directPath)) {
-      return directPath;
-    }
-    for (const ext of extensions) {
+  for (const dir of pathEntries) {
+    for (const ext of effectiveExtensions) {
       const candidatePath = join(dir, `${command}${ext}`);
       if (existsSync(candidatePath)) {
         return candidatePath;

@@ -12,6 +12,7 @@ const packageVersion = JSON.parse(
 
 let passed = 0;
 let failed = 0;
+const smokeStart = Date.now();
 
 function check(label, fn) {
   try {
@@ -74,5 +75,5 @@ check("--help mentions validate command", () => {
     throw new Error('missing "validate" in help output');
 });
 
-console.log(`\n${passed} passed, ${failed} failed`);
+console.log(`\n${passed} passed, ${failed} failed (${Date.now() - smokeStart}ms total)`);
 if (failed > 0) process.exit(1);

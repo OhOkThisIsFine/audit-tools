@@ -10,9 +10,7 @@ import type {
 } from "../types/sessionConfig.js";
 import { LocalSubprocessProvider } from "./localSubprocessProvider.js";
 import { SubprocessTemplateProvider } from "./subprocessTemplateProvider.js";
-import { VSCodeTaskProvider } from "./vscodeTaskProvider.js";
 import { CodexProvider } from "./codexProvider.js";
-import { AntigravityProvider } from "./antigravityProvider.js";
 
 function hasEntries(values: string[] | undefined): boolean {
   return (values?.length ?? 0) > 0;
@@ -108,48 +106,92 @@ function getAutoProviderContext(
   };
 }
 
+interface ProviderPriorityRule {
+  name: ResolvedProviderName;
+  comment: string;
+  predicate: (ctx: AutoProviderContext) => boolean;
+}
+
+/**
+ * Ranked priority table for auto-provider resolution. Each entry specifies a
+ * provider name, a human-readable rationale, and a predicate over the context
+ * snapshot. `chooseAutoProvider` returns the first matching entry's name.
+ * To add a new provider, insert one rule object at the correct rank.
+ */
+const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
+  {
+    name: "opencode",
+    comment: "Running inside an opencode session: use it directly.",
+    predicate: (ctx) => ctx.insideOpenCode,
+  },
+  {
+    name: "codex",
+    comment:
+      "Running inside a codex session: use it directly (codexAvailable is forced " +
+      "false by the self-spawn guard, so the config/tie-break rungs below would " +
+      "not reach it — but a host already inside codex can drive it in-session).",
+    predicate: (ctx) => ctx.insideCodex,
+  },
+  {
+    name: "vscode-task",
+    comment:
+      "Note: when inside a Claude Code session (CLAUDECODE set) `claudeAvailable` " +
+      "is forced false, so we never resolve to claude-code — a fresh `claude` " +
+      "subprocess cannot be spawned from within one. Such runs fall through to " +
+      "local-subprocess (manual dispatch), matching ClaudeCodeProvider's guard.",
+    predicate: (ctx) => ctx.inVSCode && ctx.hasVSCodeTaskTemplate,
+  },
+  {
+    name: "antigravity",
+    comment:
+      "Antigravity is IDE-bound and needs an operator-configured template, exactly " +
+      "like vscode-task. Only resolve to it when both the IDE marker and a template " +
+      "are present.",
+    predicate: (ctx) => ctx.inAntigravity && ctx.hasAntigravityTemplate,
+  },
+  {
+    name: "subprocess-template",
+    comment: "Explicit subprocess template configured: use it.",
+    predicate: (ctx) => ctx.hasSubprocessTemplate,
+  },
+  {
+    name: "claude-code",
+    comment: "Config-gated: operator explicitly configured claude-code and it is available.",
+    predicate: (ctx) => ctx.hasClaudeCodeConfig && ctx.claudeAvailable,
+  },
+  {
+    name: "opencode",
+    comment: "Config-gated: operator explicitly configured opencode and it is available.",
+    predicate: (ctx) => ctx.hasOpenCodeConfig && ctx.opencodeAvailable,
+  },
+  {
+    name: "codex",
+    comment: "Config-gated: operator explicitly configured codex and it is available.",
+    predicate: (ctx) => ctx.hasCodexConfig && ctx.codexAvailable,
+  },
+  {
+    name: "claude-code",
+    comment: "Tie-break: claude is available but opencode is not — prefer claude-code.",
+    predicate: (ctx) => ctx.claudeAvailable && !ctx.opencodeAvailable,
+  },
+  {
+    name: "opencode",
+    comment: "Tie-break: opencode is available but claude is not — prefer opencode.",
+    predicate: (ctx) => ctx.opencodeAvailable && !ctx.claudeAvailable,
+  },
+  {
+    name: "codex",
+    comment:
+      "Last resort: codex is only auto-selected when no claude/opencode is available, " +
+      "to avoid surprising existing setups that rely on those.",
+    predicate: (ctx) =>
+      ctx.codexAvailable && !ctx.claudeAvailable && !ctx.opencodeAvailable,
+  },
+];
+
 function chooseAutoProvider(context: AutoProviderContext): ResolvedProviderName {
-  // Running inside an opencode session: use it directly.
-  if (context.insideOpenCode) return "opencode";
-  // Running inside a codex session: use it directly (codexAvailable is forced
-  // false by the self-spawn guard, so the config/tie-break rungs below would
-  // not reach it — but a host already inside codex can drive it in-session).
-  if (context.insideCodex) return "codex";
-  // Note: when inside a Claude Code session (CLAUDECODE set) `claudeAvailable`
-  // is forced false, so we never resolve to claude-code — a fresh `claude`
-  // subprocess cannot be spawned from within one. Such runs fall through to
-  // local-subprocess (manual dispatch), matching ClaudeCodeProvider's guard.
-  if (context.inVSCode && context.hasVSCodeTaskTemplate) return "vscode-task";
-  // Antigravity is IDE-bound and needs an operator-configured template, exactly
-  // like vscode-task. Only resolve to it when both the IDE marker and a template
-  // are present.
-  if (context.inAntigravity && context.hasAntigravityTemplate) {
-    return "antigravity";
-  }
-  if (context.hasSubprocessTemplate) return "subprocess-template";
-  if (context.hasClaudeCodeConfig && context.claudeAvailable) {
-    return "claude-code";
-  }
-  if (context.hasOpenCodeConfig && context.opencodeAvailable) {
-    return "opencode";
-  }
-  if (context.hasCodexConfig && context.codexAvailable) {
-    return "codex";
-  }
-  if (context.claudeAvailable && !context.opencodeAvailable) {
-    return "claude-code";
-  }
-  if (context.opencodeAvailable && !context.claudeAvailable) {
-    return "opencode";
-  }
-  // Codex is only auto-selected as a last resort when no claude/opencode is
-  // available, to avoid surprising existing setups that rely on those.
-  if (
-    context.codexAvailable &&
-    !context.claudeAvailable &&
-    !context.opencodeAvailable
-  ) {
-    return "codex";
+  for (const rule of PROVIDER_PRIORITY_RULES) {
+    if (rule.predicate(context)) return rule.name;
   }
   return "local-subprocess";
 }
@@ -268,15 +310,21 @@ export function createFreshSessionProvider(
           "vscode-task provider requires session-config.json with vscode_task.command_template.",
         );
       }
-      return new VSCodeTaskProvider(sessionConfig.vscode_task, undefined, opentoken);
+      return new SubprocessTemplateProvider(
+        sessionConfig.vscode_task,
+        "vscode-task",
+        undefined,
+        opentoken,
+      );
     case "antigravity":
       if (!sessionConfig.antigravity?.command_template?.length) {
         throw new Error(
           "antigravity provider requires session-config.json with antigravity.command_template — Antigravity is an agentic IDE, not a headless CLI, so it must be driven via a configured command/task template.",
         );
       }
-      return new AntigravityProvider(
+      return new SubprocessTemplateProvider(
         sessionConfig.antigravity,
+        "antigravity",
         undefined,
         opentoken,
       );

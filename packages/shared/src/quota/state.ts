@@ -126,7 +126,7 @@ export function computeRampUpConcurrency(
   if (
     bucket &&
     bucket.success_weight >= RAMP_UP_MIN_SUCCESSES &&
-    bucket.failure_weight === 0
+    bucket.failure_weight < MIN_EVIDENCE_WEIGHT
   ) {
     return maxSafe + 1;
   }
@@ -137,8 +137,8 @@ function blankEntry(): QuotaStateEntry {
   return { updated_at: new Date().toISOString(), buckets: {}, cooldown_until: null, last_429_at: null };
 }
 
-const BASE_COOLDOWN_MS = 60_000;
-const MAX_COOLDOWN_MS = 15 * 60_000;
+export const BASE_COOLDOWN_MS = 60_000;
+export const MAX_COOLDOWN_MS = 15 * 60_000;
 
 export function computeBackoffCooldownMs(consecutive429Count: number): number {
   const ms = BASE_COOLDOWN_MS * Math.pow(2, Math.max(0, consecutive429Count - 1));
@@ -168,6 +168,7 @@ async function recordWaveOutcomeUnsafe(
 
   if (outcome.outcome === "success") {
     entry.consecutive_429_count = 0;
+    entry.cooldown_until = null;
     for (let n = 1; n <= outcome.concurrency; n++) {
       const bucket = entry.buckets[String(n)] ?? { success_weight: 0, failure_weight: 0 };
       bucket.success_weight += 1.0;

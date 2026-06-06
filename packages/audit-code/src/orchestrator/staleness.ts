@@ -3,7 +3,7 @@ import { getArtifactValue } from "../io/artifacts.js";
 import { ARTIFACT_DEPENDENTS_MAP } from "./dependencyMap.js";
 import { present } from "./artifactMetadata.js";
 import {
-  buildReverseDependencyMap,
+  buildArtifactDependenciesMap,
   hashArtifactValue,
   stableStringify,
 } from "./artifactFreshness.js";
@@ -17,7 +17,7 @@ function computeContentHash(
   return hashArtifactValue(artifactName, value);
 }
 
-const REVERSE_DEPENDENCY_MAP = buildReverseDependencyMap();
+const ARTIFACT_DEPENDENCIES_MAP = buildArtifactDependenciesMap();
 
 export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
   const stale = new Set<string>();
@@ -26,7 +26,7 @@ export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
   if (metadata) {
     for (const [artifactName, entry] of Object.entries(metadata.artifacts)) {
       if (!present(bundle, artifactName)) continue;
-      const expectedDependencies = [...(REVERSE_DEPENDENCY_MAP[artifactName] ?? [])]
+      const expectedDependencies = [...(ARTIFACT_DEPENDENCIES_MAP[artifactName] ?? [])]
         .filter((dependencyName) => dependencyName !== "artifact_metadata.json")
         .sort();
       const recordedDependencies = Object.keys(entry.dependency_revisions).sort();

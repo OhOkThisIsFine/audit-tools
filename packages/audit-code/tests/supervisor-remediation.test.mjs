@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const { buildAuditCodeHandoff, writeAuditCodeHandoffArtifacts } = await import(
@@ -10,18 +9,11 @@ const { buildAuditCodeHandoff, writeAuditCodeHandoffArtifacts } = await import(
 const { appendRunLedgerEntry, loadRunLedger } = await import(
   "../src/supervisor/runLedger.ts"
 );
-const { getSessionConfigPath, loadSessionConfig } = await import(
+const { getSessionConfigPath, loadSessionConfig, persistAnalyzerSettings } = await import(
   "../src/supervisor/sessionConfig.ts"
 );
 
-async function withTempDir(prefix, fn) {
-  const dir = await mkdtemp(join(tmpdir(), prefix));
-  try {
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
 function buildRunLedgerEntry(runId) {
   return {
@@ -181,6 +173,57 @@ test("writeAuditCodeHandoffArtifacts wraps filesystem failures with handoff cont
   });
 });
 
+// OBS-3063e7e9: writeAuditCodeHandoffArtifacts should preserve the original error as cause
+test("writeAuditCodeHandoffArtifacts preserves original error as cause when write fails", async () => {
+  await withTempDir("audit-code-handoff-cause-", async (artifactsDir) => {
+    // Block mkdir by placing a regular file at the incoming_dir path so that
+    // mkdir(incomingPath, { recursive: true }) fails with ENOTDIR or EEXIST.
+    const incomingPath = join(artifactsDir, "incoming");
+    await writeFile(incomingPath, "occupied", "utf8");
+
+    let caughtError;
+    try {
+      await writeAuditCodeHandoffArtifacts({
+        status: "blocked",
+        repo_root: "repo-root",
+        artifacts_dir: artifactsDir,
+        provider: null,
+        summary: "manual review required",
+        pending_obligations: [],
+        suggested_inputs: [],
+        suggested_commands: [],
+        interactive_provider_hint: null,
+        artifact_paths: {
+          incoming_dir: incomingPath,
+          operator_handoff_json: join(artifactsDir, "operator-handoff.json"),
+          operator_handoff_markdown: join(artifactsDir, "operator-handoff.md"),
+          session_config: join(artifactsDir, "session-config.json"),
+          run_ledger: join(artifactsDir, "run-ledger.json"),
+          current_task: join(artifactsDir, "dispatch", "current-task.json"),
+          current_prompt: join(artifactsDir, "dispatch", "current-prompt.md"),
+          current_tasks: join(artifactsDir, "dispatch", "current-tasks.json"),
+          audit_tasks: null,
+          runtime_validation_tasks: null,
+        },
+      });
+    } catch (err) {
+      caughtError = err;
+    }
+
+    assert.ok(caughtError instanceof Error, "should throw an Error");
+    assert.match(caughtError.message, /Failed to write operator handoff artifacts:/);
+    assert.ok(
+      caughtError.cause instanceof Error,
+      "thrown error should have a .cause that is the original Error",
+    );
+    // The original error's code (ENOTDIR / EEXIST) should be accessible via cause
+    assert.ok(
+      typeof (caughtError.cause).code === "string",
+      "cause should carry the original error code",
+    );
+  });
+});
+
 test("buildAuditCodeHandoff points active review runs at next-step", () => {
   const artifactsDir = join("tmp", "audit artifacts");
   const handoff = buildAuditCodeHandoff({
@@ -295,6 +338,111 @@ test("writeAuditCodeHandoffArtifacts prepares the batch-results inbox alongside 
     assert.match(
       await readFile(join(artifactsDir, "operator-handoff.md"), "utf8"),
       /audit-code --batch-results/i,
+    );
+  });
+});
+
+// ── persistAnalyzerSettings ──────────────────────────────────────────────────
+
+test("persistAnalyzerSettings writes DEFAULT_SESSION_CONFIG + settings when no config file exists", async () => {
+  await withTempDir("audit-code-persist-analyzer-new-", async (artifactsDir) => {
+    const result = await persistAnalyzerSettings(artifactsDir, { semgrep: "permanent" });
+
+    assert.equal(result.provider, "local-subprocess");
+    assert.deepEqual(result.analyzers, { semgrep: "permanent" });
+
+    const persisted = JSON.parse(
+      await readFile(getSessionConfigPath(artifactsDir), "utf8"),
+    );
+    assert.deepEqual(persisted, result);
+  });
+});
+
+test("persistAnalyzerSettings merges settings into an existing valid config, preserving all prior fields", async () => {
+  await withTempDir("audit-code-persist-analyzer-merge-", async (artifactsDir) => {
+    const configPath = getSessionConfigPath(artifactsDir);
+    await writeFile(
+      configPath,
+      JSON.stringify({ provider: "codex", analyzers: { eslint: "ephemeral" } }, null, 2) + "\n",
+      "utf8",
+    );
+
+    const result = await persistAnalyzerSettings(artifactsDir, { semgrep: "permanent" });
+
+    assert.equal(result.provider, "codex");
+    assert.equal(result.analyzers?.eslint, "ephemeral");
+    assert.equal(result.analyzers?.semgrep, "permanent");
+
+    const persisted = JSON.parse(
+      await readFile(configPath, "utf8"),
+    );
+    assert.deepEqual(persisted, result);
+  });
+});
+
+test("persistAnalyzerSettings falls back to DEFAULT_SESSION_CONFIG when persisted value is not a record", async () => {
+  await withTempDir("audit-code-persist-analyzer-nonrecord-", async (artifactsDir) => {
+    const configPath = getSessionConfigPath(artifactsDir);
+    await writeFile(configPath, JSON.stringify([1, 2, 3], null, 2) + "\n", "utf8");
+
+    const result = await persistAnalyzerSettings(artifactsDir, { eslint: "skip" });
+
+    assert.equal(result.provider, "local-subprocess");
+    assert.deepEqual(result.analyzers, { eslint: "skip" });
+
+    const persisted = JSON.parse(await readFile(configPath, "utf8"));
+    assert.equal(Array.isArray(persisted), false);
+    assert.deepEqual(persisted, result);
+  });
+});
+
+test("persistAnalyzerSettings merges into existing analyzers map without clobbering unrelated keys", async () => {
+  await withTempDir("audit-code-persist-analyzer-partial-", async (artifactsDir) => {
+    const configPath = getSessionConfigPath(artifactsDir);
+    await writeFile(
+      configPath,
+      JSON.stringify(
+        { provider: "claude-code", analyzers: { eslint: "ephemeral", semgrep: "skip" } },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+
+    const result = await persistAnalyzerSettings(artifactsDir, { semgrep: "permanent", npm_audit: "ephemeral" });
+
+    assert.equal(result.analyzers?.eslint, "ephemeral");
+    assert.equal(result.analyzers?.semgrep, "permanent");
+    assert.equal(result.analyzers?.npm_audit, "ephemeral");
+
+    const persisted = JSON.parse(await readFile(configPath, "utf8"));
+    assert.deepEqual(persisted, result);
+  });
+});
+
+test("persistAnalyzerSettings throws a validation error naming the config path when the merged result is invalid", async () => {
+  await withTempDir("audit-code-persist-analyzer-invalid-", async (artifactsDir) => {
+    const configPath = getSessionConfigPath(artifactsDir);
+    await writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          provider: "subprocess-template",
+          subprocess_template: { command_template: [] },
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+
+    await assert.rejects(
+      () => persistAnalyzerSettings(artifactsDir, { eslint: "ephemeral" }),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /Invalid .*session-config\.json:/i);
+        return true;
+      },
     );
   });
 });

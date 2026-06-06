@@ -35,6 +35,24 @@ function settingFor(
   return analyzers?.[id] ?? "auto";
 }
 
+function makeEntry(
+  analyzer: LanguageAnalyzer,
+  setting: AnalyzerSetting,
+  supportedCount: number,
+  resolution: AnalyzerPlanEntry["resolution"],
+  path?: string,
+): AnalyzerPlanEntry {
+  const entry: AnalyzerPlanEntry = {
+    id: analyzer.id,
+    dependency: analyzer.dependency,
+    setting,
+    resolution,
+    supportedCount,
+  };
+  if (path !== undefined) entry.path = path;
+  return entry;
+}
+
 /**
  * Deterministically resolve, without installing anything, how each registered
  * analyzer would run for this repo. The conversation-first CLI uses this to
@@ -61,52 +79,21 @@ export function resolveAnalyzerPlan(
     ).length;
 
     if (supportedCount === 0) {
-      return {
-        id: analyzer.id,
-        dependency: analyzer.dependency,
-        setting,
-        resolution: "not_applicable" as const,
-        supportedCount,
-      };
+      return makeEntry(analyzer, setting, supportedCount, "not_applicable");
     }
     if (setting === "skip") {
-      return {
-        id: analyzer.id,
-        dependency: analyzer.dependency,
-        setting,
-        resolution: "skip" as const,
-        supportedCount,
-      };
+      return makeEntry(analyzer, setting, supportedCount, "skip");
     }
     if (!analyzer.dependency) {
       // No dependency required: always available.
-      return {
-        id: analyzer.id,
-        dependency: analyzer.dependency,
-        setting,
-        resolution: "repo" as const,
-        supportedCount,
-      };
+      return makeEntry(analyzer, setting, supportedCount, "repo");
     }
 
     const resolved = resolveAnalyzerDep(analyzer.dependency, root, depOptions);
     if (resolved.via === "repo" || resolved.via === "cache") {
-      return {
-        id: analyzer.id,
-        dependency: analyzer.dependency,
-        setting,
-        resolution: resolved.via,
-        path: resolved.path,
-        supportedCount,
-      };
+      return makeEntry(analyzer, setting, supportedCount, resolved.via, resolved.path);
     }
-    return {
-      id: analyzer.id,
-      dependency: analyzer.dependency,
-      setting,
-      resolution: "absent" as const,
-      supportedCount,
-    };
+    return makeEntry(analyzer, setting, supportedCount, "absent");
   });
 }
 

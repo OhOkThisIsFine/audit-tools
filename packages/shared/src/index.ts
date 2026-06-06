@@ -220,9 +220,7 @@ export {
   LocalSubprocessProvider,
   MISSING_WORKER_COMMAND_MESSAGE,
 } from "./providers/localSubprocessProvider.js";
-export { VSCodeTaskProvider } from "./providers/vscodeTaskProvider.js";
 export { CodexProvider } from "./providers/codexProvider.js";
-export { AntigravityProvider } from "./providers/antigravityProvider.js";
 
 // Provider auto-resolution + factory (single source of truth for both orchestrators)
 export type {
@@ -275,6 +273,8 @@ export {
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
   computeRampUpConcurrency,
+  BASE_COOLDOWN_MS,
+  MAX_COOLDOWN_MS,
 } from "./quota/state.js";
 export {
   detectRateLimitError,
@@ -316,6 +316,10 @@ export type {
 } from "./quota/capacity.js";
 export { DO_NOT_TOKEN_WRAP_NOTE } from "./prompts.js";
 export { LearnedQuotaSource } from "./quota/learnedQuotaSource.js";
+
+// Parsing utilities
+export type { QuoteChar, StringAwareScannerOptions } from "./parsing/stringAwareScanner.js";
+export { scanStringAware } from "./parsing/stringAwareScanner.js";
 export { CompositeQuotaSource } from "./quota/compositeQuotaSource.js";
 export type { ErrorParser } from "./quota/errorParsers/index.js";
 export {

@@ -54,7 +54,6 @@ export function buildFlowCoverage(
 
     const completed_lenses = [...completed];
     const status: FlowCoverageStatus =
-      required.length > 0 &&
       required.every((lens) => completed_lenses.includes(lens))
         ? "complete"
         : completed_lenses.length > 0

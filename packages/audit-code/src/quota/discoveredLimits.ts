@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { getQuotaStatePath } from "@audit-tools/shared";
 
 export interface DiscoveredRateLimits {
@@ -23,7 +23,7 @@ export interface DiscoveredLimitsCache {
 }
 
 function getCachePath(): string {
-  return getQuotaStatePath().replace(/quota-state\.json$/, "discovered-limits.json");
+  return join(dirname(getQuotaStatePath()), "discovered-limits.json");
 }
 
 export async function readDiscoveredLimitsCache(): Promise<DiscoveredLimitsCache> {
@@ -41,7 +41,7 @@ export async function readDiscoveredLimitsCache(): Promise<DiscoveredLimitsCache
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       process.stderr.write(
-        `[quota] ignoring unreadable discovered-limits cache: ${
+        `[quota] ignoring unreadable discovered-limits cache (${getCachePath()}): ${
           error instanceof Error ? error.message : String(error)
         }\n`,
       );

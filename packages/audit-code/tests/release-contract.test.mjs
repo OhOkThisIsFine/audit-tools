@@ -6,9 +6,18 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
+// CI workflows live at the monorepo root (.github/workflows/) — GitHub Actions
+// only runs workflows there, never in per-package subdirectories.
+const monorepoRoot = join(repoRoot, "..", "..");
 
 async function readText(relativePath) {
   return await readFile(join(repoRoot, relativePath), "utf8");
+}
+
+async function readWorkflow(name) {
+  return normalizeLineEndings(
+    await readFile(join(monorepoRoot, ".github", "workflows", name), "utf8"),
+  );
 }
 
 function normalizeLineEndings(value) {
@@ -24,9 +33,7 @@ function collectWorkflowUses(workflow) {
 
 test("publish contract uses public access and GitHub OIDC trusted publishing", async () => {
   const packageJson = JSON.parse(await readText("package.json"));
-  const workflow = normalizeLineEndings(
-    await readText(".github/workflows/publish-package.yml"),
-  );
+  const workflow = await readWorkflow("publish-package.yml");
 
   assert.equal(packageJson.publishConfig?.access, "public");
   assert.equal(
@@ -54,9 +61,9 @@ test("publish contract uses public access and GitHub OIDC trusted publishing", a
     "node scripts/release-and-publish.mjs major",
   );
   assert.match(workflow, /id-token: write/);
-  assert.match(workflow, /npm install -g npm@\^11\.5\.1/);
+  assert.match(workflow, /npm install -g npm@11\.5\.1 --ignore-scripts/);
   assert.match(workflow, /npm pack --dry-run/);
-  assert.match(workflow, /Registry propagation is still pending/);
+  assert.match(workflow, /Registry propagation succeeded after/);
   assert.match(workflow, /for attempt in \{1\.\.24\}/);
   assert.match(workflow, /publish_tag/);
   assert.match(workflow, /publish-npm-logs/);
@@ -116,18 +123,14 @@ test("one-command release helper wires the trusted publishing path", async () =>
 });
 
 test("primary CI workflows validate the lockfile, preserve diagnostics, and make tested Node lines visible", async () => {
-  const ci = normalizeLineEndings(await readText(".github/workflows/ci.yml"));
-  const testSuite = normalizeLineEndings(
-    await readText(".github/workflows/test-suite.yml"),
-  );
-  const product = normalizeLineEndings(
-    await readText(".github/workflows/product-e2e.yml"),
-  );
-  const packaged = normalizeLineEndings(
-    await readText(".github/workflows/packaged-entrypoint.yml"),
-  );
+  // Per-package CI workflows were consolidated to the monorepo root: ci.yml
+  // (lockfile + diagnostics) and audit-code-test-suite.yml (the Node-matrix
+  // orchestration suite that absorbed the former test-suite/product-e2e/
+  // packaged-entrypoint coverage).
+  const ci = await readWorkflow("ci.yml");
+  const testSuite = await readWorkflow("audit-code-test-suite.yml");
 
-  for (const workflow of [ci, testSuite, product, packaged]) {
+  for (const workflow of [ci, testSuite]) {
     assert.match(workflow, /Validate package-lock\.json/);
     assert.match(
       workflow,
@@ -137,20 +140,16 @@ test("primary CI workflows validate the lockfile, preserve diagnostics, and make
   }
 
   assert.match(ci, /CI_NODE_VERSION: "22\.14\.0"/);
-  assert.match(product, /CI_NODE_VERSION: "22\.14\.0"/);
-  assert.match(packaged, /CI_NODE_VERSION: "22\.14\.0"/);
 
   assert.match(testSuite, /name: Orchestration tests \(Node \$\{\{ matrix\.node-version \}\}\)/);
   assert.match(testSuite, /fail-fast: false/);
   assert.ok(testSuite.includes('- "20.19.2"'));
   assert.ok(testSuite.includes('- "22.14.0"'));
-  assert.match(testSuite, /test-suite-npm-logs-node-\$\{\{ matrix\.node-version \}\}/);
+  assert.match(testSuite, /audit-code-test-suite-npm-logs-node-\$\{\{ matrix\.node-version \}\}/);
 });
 
 test("test-suite workflow pins external GitHub Actions to commit SHAs", async () => {
-  const testSuite = normalizeLineEndings(
-    await readText(".github/workflows/test-suite.yml"),
-  );
+  const testSuite = await readWorkflow("audit-code-test-suite.yml");
   const usesValues = collectWorkflowUses(testSuite);
   const externalActions = usesValues.filter((uses) => !uses.startsWith("./"));
 
@@ -187,8 +186,8 @@ test("linked and packaged smoke contracts preserve operator diagnostics and isol
   );
   const packagingDoc = await readText("docs/release.md");
 
-  assert.match(packagedScript, /const liveCommandOutput = verbose \|\| process\.env\.CI === "true";/);
-  assert.match(linkedScript, /const liveCommandOutput = verbose \|\| process\.env\.CI === "true";/);
+  assert.match(packagedScript, /const liveCommandOutput = true;/);
+  assert.match(linkedScript, /const liveCommandOutput = true;/);
   assert.match(packagedScript, /function createIsolatedNpmEnv/);
   assert.match(packagedScript, /normalizedKey === "node_auth_token"/);
   assert.match(packagedScript, /normalizedKey === "npm_token"/);

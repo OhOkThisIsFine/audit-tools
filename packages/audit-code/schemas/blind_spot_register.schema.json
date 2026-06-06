@@ -35,7 +35,7 @@
           },
           "suggested_lenses": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": { "$ref": "lens.schema.json" }
           },
           "suggested_runtime_checks": {
             "type": "array",

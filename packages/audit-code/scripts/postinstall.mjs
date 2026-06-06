@@ -36,6 +36,8 @@ function writeGeneratedFile(path, content) {
   return action;
 }
 
+const OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION = { '*': 'allow' };
+
 const OPENCODE_AUDIT_EDIT_PERMISSION = {
   '*': 'ask',
   '.audit-code/**': 'allow',
@@ -143,7 +145,7 @@ function mergeOpenCodePermissionConfig(existingPermission, generatedPermission) 
     external_directory: mergeOpenCodePermissionRule(
       existingPermission.external_directory,
       generatedPermission.external_directory,
-      generatedPermission.external_directory,
+      OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION,
     ),
     edit: mergeOpenCodePermissionRule(
       existingPermission.edit,

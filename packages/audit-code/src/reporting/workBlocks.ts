@@ -4,24 +4,10 @@ import type {
   GraphBundle,
   WorkBlock,
 } from "@audit-tools/shared";
+import { severityRank } from "./findingRanks.js";
 
 // WorkBlock is the canonical report-block contract owned by @audit-tools/shared.
 export type { WorkBlock } from "@audit-tools/shared";
-
-function severityRank(severity: Finding["severity"]): number {
-  switch (severity) {
-    case "critical":
-      return 5;
-    case "high":
-      return 4;
-    case "medium":
-      return 3;
-    case "low":
-      return 2;
-    case "info":
-      return 1;
-  }
-}
 
 function buildFileUnitMap(unitManifest?: UnitManifest): Map<string, string> {
   const map = new Map<string, string>();

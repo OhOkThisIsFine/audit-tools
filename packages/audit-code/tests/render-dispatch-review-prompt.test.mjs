@@ -1,0 +1,113 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { renderDispatchReviewPrompt } from "../src/cli/prompts.ts";
+
+function makeRun(overrides = {}) {
+  return {
+    run_id: "run-test-1",
+    task_path: "/repo/.audit-artifacts/tasks.json",
+    prompt_path: "/repo/.audit-artifacts/prompt.md",
+    audit_results_path: "/repo/.audit-artifacts/results.jsonl",
+    worker_command: ["audit-code", "merge-and-ingest"],
+    ...overrides,
+  };
+}
+
+function makeParams(overrides = {}) {
+  return {
+    root: "/repo",
+    artifactsDir: "/repo/.audit-artifacts",
+    activeReviewRun: makeRun(),
+    dispatchPlanPath: "/repo/.audit-artifacts/dispatch-plan.json",
+    dispatchQuotaPath: "/repo/.audit-artifacts/dispatch-quota.json",
+    hostCanRestrictSubagentTools: true,
+    hostCanSelectSubagentModel: true,
+    ...overrides,
+  };
+}
+
+test("hostCanSelectSubagentModel:true — model-hint line is included", () => {
+  const result = renderDispatchReviewPrompt(
+    makeParams({ hostCanSelectSubagentModel: true }),
+  );
+  assert.ok(
+    result.includes("map `entry.model_hint.tier`"),
+    "expected model-hint line to be present",
+  );
+});
+
+test("hostCanSelectSubagentModel:false — model-hint line is omitted", () => {
+  const result = renderDispatchReviewPrompt(
+    makeParams({ hostCanSelectSubagentModel: false }),
+  );
+  assert.ok(
+    !result.includes("map `entry.model_hint.tier`"),
+    "expected model-hint line to be absent",
+  );
+});
+
+test("hostCanRestrictSubagentTools:true — restrict-tools line is included", () => {
+  const result = renderDispatchReviewPrompt(
+    makeParams({ hostCanRestrictSubagentTools: true }),
+  );
+  assert.ok(
+    result.includes("Restrict review subagents"),
+    "expected restrict-tools line to be present",
+  );
+});
+
+test("hostCanRestrictSubagentTools:false — no-restriction-facility line is included", () => {
+  const result = renderDispatchReviewPrompt(
+    makeParams({ hostCanRestrictSubagentTools: false }),
+  );
+  assert.ok(
+    result.includes("did not report a callable restriction facility"),
+    "expected no-restriction-facility line to be present",
+  );
+  assert.ok(
+    !result.includes("Restrict review subagents"),
+    "expected restrict-tools line to be absent",
+  );
+});
+
+test("dispatchQuotaPath non-null — quota lines are included", () => {
+  const result = renderDispatchReviewPrompt(
+    makeParams({ dispatchQuotaPath: "/repo/.audit-artifacts/dispatch-quota.json" }),
+  );
+  assert.ok(result.includes("Dispatch quota:"), "expected 'Dispatch quota:' to be present");
+  assert.ok(result.includes("wave_size"), "expected 'wave_size' to be present");
+  assert.ok(result.includes("cooldown_until"), "expected 'cooldown_until' to be present");
+});
+
+test("dispatchQuotaPath null — quota lines are absent, simple plan instructions present", () => {
+  const result = renderDispatchReviewPrompt(
+    makeParams({ dispatchQuotaPath: null }),
+  );
+  assert.ok(
+    !result.includes("Dispatch quota:"),
+    "expected 'Dispatch quota:' to be absent",
+  );
+  assert.ok(
+    result.includes("Launch one subagent for each entry"),
+    "expected simple launch instruction to be present",
+  );
+});
+
+test("phase:canary — canary-round line is included", () => {
+  const result = renderDispatchReviewPrompt(
+    makeParams({ phase: "canary" }),
+  );
+  assert.ok(result.includes("CANARY round"), "expected 'CANARY round' to be present");
+});
+
+test("phase:fan_out — canary-round line is absent", () => {
+  const result = renderDispatchReviewPrompt(
+    makeParams({ phase: "fan_out" }),
+  );
+  assert.ok(!result.includes("CANARY round"), "expected 'CANARY round' to be absent");
+});
+
+test("phase omitted (undefined) — canary-round line is absent", () => {
+  const result = renderDispatchReviewPrompt(makeParams());
+  assert.ok(!result.includes("CANARY round"), "expected 'CANARY round' to be absent");
+});

@@ -377,7 +377,7 @@ function estimateGroupTokens(
   );
 }
 
-function splitBlocksByContextBudget(
+export function splitBlocksByContextBudget(
   blocks: RemediationBlock[],
   findings: Finding[],
   root: string,
@@ -397,6 +397,9 @@ function splitBlocksByContextBudget(
   }
 
   const result: RemediationBlock[] = [];
+  // Maps an original block_id to the sub-block IDs it was expanded into.
+  // Used in the second pass to rewrite dependency references in other blocks.
+  const splitRemap = new Map<string, string[]>();
 
   for (const block of blocks) {
     const fileGroups = groupFindingsByFileOverlap(block.items, findings);
@@ -421,14 +424,32 @@ function splitBlocksByContextBudget(
     if (subBlocks.length === 1) {
       result.push(block);
     } else {
+      const subBlockIds = subBlocks.map(
+        (_, i) => `${block.block_id}-${String(i + 1).padStart(2, "0")}`,
+      );
+      splitRemap.set(block.block_id, subBlockIds);
       for (let i = 0; i < subBlocks.length; i++) {
         result.push({
-          block_id: `${block.block_id}-${String(i + 1).padStart(2, "0")}`,
+          block_id: subBlockIds[i]!,
           items: subBlocks[i],
           parallel_safe: block.parallel_safe,
           dependencies: block.dependencies,
         });
       }
+    }
+  }
+
+  // Second pass: rewrite dependency references in result blocks so that a block
+  // depending on a split block now depends on ALL the resulting sub-blocks.
+  if (splitRemap.size > 0) {
+    for (const block of result) {
+      if (!block.dependencies || block.dependencies.length === 0) continue;
+      const rewritten = [
+        ...new Set(
+          block.dependencies.flatMap((dep) => splitRemap.get(dep) ?? [dep]),
+        ),
+      ];
+      block.dependencies = rewritten;
     }
   }
 
@@ -460,7 +481,7 @@ function deriveFallbackBlocks(
     deps.runCommand ?? runCommand,
   );
   const gitBlocks = deriveBlocksFromGitCocommit(findings, fileCommits);
-  if (gitBlocks.length > 0) {
+  if (gitBlocks.some((b) => b.items.length > 1)) {
     return { blocks: gitBlocks, blockStrategy: "git_cocommit" };
   }
 
@@ -651,6 +672,40 @@ export function mergeBlocksSharingFiles(
   });
 }
 
+/**
+ * Applies the three post-dedup pipeline steps that every plan must go through
+ * before being handed off to the implement phase:
+ *
+ *   1. mergeBlocksSharingFiles  — prevents parallel workers clobbering the same file
+ *   2. splitBlocksByContextBudget — keeps each block within the agent context window
+ *   3. snapshotAffectedFileHashes — records baseline hashes for integrity checks
+ *
+ * Extracted so that both runPlanPhase (fast-path JSON reports) and
+ * handlePendingExtractedPlan (LLM-extracted plans) run identical post-dedup
+ * logic and the two paths cannot drift apart.
+ */
+export async function applyPlanPipeline(
+  plan: RemediationPlan,
+  options: { root: string; artifactsDir?: string },
+): Promise<RemediationPlan> {
+  let { blocks, findings } = plan;
+
+  // Merge blocks whose findings touch a shared file.
+  blocks = mergeBlocksSharingFiles(blocks, findings);
+
+  // Split blocks that would exceed the implementation agent's context budget.
+  const sessionConfig = await readOptionalJsonFile<SessionConfig>(
+    join(options.root, "session-config.json"),
+  );
+  const contextBudget = resolveContextBudgetFromConfig(sessionConfig ?? null);
+  blocks = splitBlocksByContextBudget(blocks, findings, options.root, contextBudget);
+
+  // Record baseline file hashes for the integrity check that runs before dispatch.
+  snapshotAffectedFileHashes(options.root, findings);
+
+  return { ...plan, blocks };
+}
+
 export async function runPlanPhase(
   state: RemediationState,
   options: OrchestratorOptions,
@@ -732,19 +787,22 @@ export async function runPlanPhase(
     blockStrategy = fallback.blockStrategy;
   }
 
-  // Coupled fixes must not be split across parallel blocks: merge any blocks
-  // whose findings touch a shared file (unless a dependency already serializes
-  // them), so a finding whose fix-set spans blocks lands in one block and
-  // parallel workers never clobber the same file.
-  blocks = mergeBlocksSharingFiles(blocks, findings);
-
-  // Split blocks that would exceed the implementation agent's context budget,
-  // keeping file-overlapping findings together (logical cohesion first).
-  const sessionConfig = await readOptionalJsonFile<SessionConfig>(
-    join(options.root, "session-config.json"),
-  );
-  const contextBudget = resolveContextBudgetFromConfig(sessionConfig ?? null);
-  blocks = splitBlocksByContextBudget(blocks, findings, options.root, contextBudget);
+  // Apply the shared post-dedup pipeline (file-overlap merge, context-budget
+  // split, and baseline file-hash snapshot). Extracted into applyPlanPipeline
+  // so the LLM-extracted-plan path runs the exact same logic.
+  ({
+    blocks,
+    findings,
+  } = await applyPlanPipeline(
+    {
+      plan_id: "",
+      findings,
+      blocks,
+      project_type: "unknown",
+      candidate_closing_actions: ["none"],
+    },
+    options,
+  ));
 
   // Project command discovery (shared; now also covers Go and Python). The
   // RemediationPlan stores commands as strings, so argv arrays are joined.
@@ -762,8 +820,6 @@ export async function runPlanPhase(
   ) {
     projectType = "python";
   }
-
-  snapshotAffectedFileHashes(options.root, findings);
 
   const plan: RemediationPlan = {
     plan_id: "PLAN-" + (deps.now?.() ?? Date.now()),

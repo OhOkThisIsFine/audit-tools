@@ -202,6 +202,8 @@ export async function runRuntimeValidationExecutor(
   const existing = bundle.runtime_validation_report ?? { results: [] };
   const byTaskId = new Map(existing.results.map((result) => [result.task_id, result]));
   const byCommand = new Map<string, Awaited<ReturnType<typeof runCommand>>>();
+  let uniqueCommandsRun = 0;
+  let deduplicatedHits = 0;
 
   for (const task of bundle.runtime_validation_tasks.tasks) {
     const prior = byTaskId.get(task.id);
@@ -225,6 +227,11 @@ export async function runRuntimeValidationExecutor(
     }
 
     const signature = task.command.join("\0");
+    if (byCommand.has(signature)) {
+      deduplicatedHits++;
+    } else {
+      uniqueCommandsRun++;
+    }
     const outcome =
       byCommand.get(signature) ?? (await runCommand(task.command, root, { opentoken: options.opentoken }));
     byCommand.set(signature, outcome);
@@ -258,7 +265,7 @@ export async function runRuntimeValidationExecutor(
       ...selectiveDeepening.artifacts,
     ],
     progress_summary:
-      `Executed deterministic runtime validation for ${bundle.runtime_validation_tasks.tasks.length} task(s).` +
+      `Executed deterministic runtime validation for ${bundle.runtime_validation_tasks.tasks.length} task(s) (${uniqueCommandsRun} unique command(s) run, ${deduplicatedHits} served from deduplication cache).` +
       selectiveDeepening.summarySuffix,
   };
 }

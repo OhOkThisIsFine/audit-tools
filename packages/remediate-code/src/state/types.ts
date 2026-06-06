@@ -95,7 +95,7 @@ export interface TestSpec {
 export interface VerificationResult {
   finding_id: string;
   passed: boolean;
-  reason?: string;
+  reason?: string[];
 }
 
 export interface TriageBatch {
@@ -126,4 +126,8 @@ export interface RemediationItemState {
   failure_reason?: string;
   /** Times this item was sent back for rework via triage (Phase 7B outcomes). */
   rework_count?: number;
+  /** ISO-8601 timestamp when this item first left pending. */
+  started_at?: string;
+  /** ISO-8601 timestamp when this item most recently reached a terminal status. */
+  completed_at?: string;
 }

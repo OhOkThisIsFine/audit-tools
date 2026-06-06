@@ -89,6 +89,9 @@
         "bash": {
           "*": "ask",
           "remediate-code run*": "deny",
+          "*dist*index.js* run*": "deny",
+          "*remediate-code.mjs* run*": "deny",
+          "remediate-code": "allow",
           "remediate-code ensure*": "allow",
           "remediate-code next-step*": "allow",
           "remediate-code prepare-document-dispatch*": "allow",
@@ -96,8 +99,19 @@
           "remediate-code prepare-implement-dispatch*": "allow",
           "remediate-code merge-implement-results*": "allow",
           "remediate-code validate-artifacts*": "allow",
+          "*remediate-code.mjs": "allow",
+          "*remediate-code.mjs* ensure*": "allow",
+          "*remediate-code.mjs* next-step*": "allow",
+          "*remediate-code.mjs* prepare-document-dispatch*": "allow",
+          "*remediate-code.mjs* merge-document-results*": "allow",
+          "*remediate-code.mjs* prepare-implement-dispatch*": "allow",
+          "*remediate-code.mjs* merge-implement-results*": "allow",
+          "*remediate-code.mjs* validate-artifacts*": "allow",
           "git status*": "allow",
-          "git diff*": "allow"
+          "git diff*": "allow",
+          "grep *": "allow",
+          "Select-String *": "allow",
+          "rm *": "deny"
         },
         "question": "allow"
       }

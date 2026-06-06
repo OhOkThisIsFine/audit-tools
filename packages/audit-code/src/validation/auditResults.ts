@@ -847,7 +847,8 @@ export function validateAuditResults(
         if (!isRecord(affected) || !isNonEmptyString(affected.path)) {
           continue;
         }
-        if (!declaredAssignedCoveragePaths.has(affected.path)) {
+        const affectedPathNorm = normalizeCoveragePath(affected.path as string);
+        if (!declaredAssignedCoveragePaths.has(affectedPathNorm)) {
           pushIssue(issues, {
             result_index: i,
             task_id: taskId,
@@ -864,7 +865,7 @@ export function validateAuditResults(
         const end = Number.isInteger(affected.line_end)
           ? Number(affected.line_end)
           : start;
-        if (!coversAffectedSpan(normalizedFileCoverage, affected.path, start, end)) {
+        if (!coversAffectedSpan(normalizedFileCoverage, affectedPathNorm, start, end)) {
           pushIssue(issues, {
             result_index: i,
             task_id: taskId,
@@ -885,6 +886,14 @@ export function validateAuditResults(
       taskId,
       i,
       issues,
+    );
+  }
+
+  if (issues.length > 0) {
+    const errors = issues.filter((i) => i.severity === "error").length;
+    const warnings = issues.filter((i) => i.severity === "warning").length;
+    process.stderr.write(
+      `[audit-results validation] ${errors} error(s), ${warnings} warning(s) across ${results.length} result(s)\n`,
     );
   }
 

@@ -107,8 +107,8 @@ async function analyze(
         context.pathLookup,
         edges,
       );
-    } catch {
-      // Degrade to the floor for this file.
+    } catch (e) {
+      process.stderr.write(`[audit-code] css-analyzer: parse failed for '${file}': ${(e as Error).message ?? String(e)}\n`);
     }
   }
   return { edges };

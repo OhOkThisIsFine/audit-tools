@@ -9,6 +9,15 @@ import {
 } from "@audit-tools/shared";
 import type { ProviderRateLimits, SessionConfig, DispatchModelHint } from "@audit-tools/shared";
 import { buildQuotaSource } from "@audit-tools/shared/quota/compositeQuotaSource";
+import type {
+  ActiveDispatchState,
+  DispatchResultMapEntry,
+  DispatchResultMap,
+} from "../types/activeDispatch.js";
+import {
+  DISPATCH_RESULT_MAP_FILENAME,
+  ACTIVE_DISPATCH_FILENAME,
+} from "../types/activeDispatch.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { writePacketSchemaFiles } from "../io/runArtifacts.js";
@@ -57,40 +66,15 @@ export interface DispatchComplexity {
   large_file_mode: boolean;
 }
 
-export const DISPATCH_RESULT_MAP_FILENAME = "dispatch-result-map.json";
-export const ACTIVE_DISPATCH_FILENAME = "active-dispatch.json";
-
-export interface ActiveDispatchState {
-  run_id: string;
-  created_at: string;
-  /** Emitted packets only (after canary/budget filtering). */
-  packet_count: number;
-  /** Tasks remaining this round (not-yet-done), not just emitted-packet tasks. */
-  task_count: number;
-  status: "active" | "merged";
-  /** "canary" on first contact when only the top packet was emitted; "fan_out" otherwise. */
-  phase: "canary" | "fan_out";
-  /** packet_id of the emitted canary packet when phase==="canary", else null. */
-  canary_packet_id: string | null;
-  /** Total packets that would have been emitted before a budget cap (present only when capped). */
-  budget_packet_count?: number;
-  /** packet_ids NOT emitted due to the budget cap. */
-  deferred_packet_ids?: string[];
-  /** task_ids NOT emitted due to the budget cap. */
-  deferred_task_ids?: string[];
-}
-
-export interface DispatchResultMapEntry {
-  packet_id: string;
-  task_id: string;
-  result_path: string;
-}
-
-export interface DispatchResultMap {
-  contract_version: "audit-code-dispatch-results/v1alpha1";
-  run_id: string;
-  entries: DispatchResultMapEntry[];
-}
+export type {
+  ActiveDispatchState,
+  DispatchResultMapEntry,
+  DispatchResultMap,
+} from "../types/activeDispatch.js";
+export {
+  DISPATCH_RESULT_MAP_FILENAME,
+  ACTIVE_DISPATCH_FILENAME,
+} from "../types/activeDispatch.js";
 
 export const DEFAULT_DISPATCH_CONFIRM_THRESHOLD = 10;
 
@@ -395,6 +379,340 @@ export function buildPendingAuditTasks(bundle: ArtifactBundle) {
   });
 }
 
+interface FilterPacketsResult {
+  emitPackets: ReturnType<typeof buildReviewPackets>;
+  deferredPackets: ReturnType<typeof buildReviewPackets>;
+  phase: "canary" | "fan_out";
+  canaryPacketId: string | null;
+  doCanary: boolean;
+  /** Total packets after canary filtering, before the budget cap (needed by active-dispatch state). */
+  postCanaryCount: number;
+}
+
+/**
+ * Encapsulates the canary and budget-cap filtering logic.
+ * Returns the subset of packets to emit this round plus deferred packets and
+ * phase metadata.
+ */
+export function filterPackets(
+  packets: ReturnType<typeof buildReviewPackets>,
+  priorDispatchThisRun: boolean,
+  sessionConfig: SessionConfig,
+): FilterPacketsResult {
+  const firstContact = !priorDispatchThisRun;
+  const canaryEnabled = sessionConfig.dispatch?.canary !== false; // default on
+  const doCanary = firstContact && canaryEnabled && packets.length > 1;
+  const canaryPacketId = doCanary ? packets[0]!.packet_id : null;
+  const phase: "canary" | "fan_out" = doCanary ? "canary" : "fan_out";
+  const postCanaryPackets = doCanary ? packets.slice(0, 1) : packets;
+
+  const maxPackets = sessionConfig.dispatch?.max_packets;
+  const budgetCapped =
+    typeof maxPackets === "number" &&
+    maxPackets >= 0 &&
+    maxPackets < postCanaryPackets.length;
+  const emitPackets = budgetCapped
+    ? postCanaryPackets.slice(0, maxPackets)
+    : postCanaryPackets;
+  const deferredPackets = budgetCapped
+    ? postCanaryPackets.slice(maxPackets)
+    : [];
+
+  return { emitPackets, deferredPackets, phase, canaryPacketId, doCanary, postCanaryCount: postCanaryPackets.length };
+}
+
+/**
+ * Encapsulates large-file anchor extraction for a single packet.
+ * Appends to the provided warnings array on unavailability or failure.
+ */
+async function extractPacketAnchor(params: {
+  packet: ReturnType<typeof buildReviewPackets>[number];
+  reviewRoot: string | undefined;
+  bundle: Awaited<ReturnType<typeof loadArtifactBundle>>;
+  taskResultsDir: string;
+  warnings: Array<{ code: string; message: string }>;
+}): Promise<{ anchorPath: string | null; anchorSummary: FileAnchorSummary | null }> {
+  const { packet, reviewRoot, bundle, taskResultsDir, warnings } = params;
+  if (!reviewRoot) {
+    warnings.push({
+      code: "large_file_anchor_unavailable",
+      message: `large single-file packet ${packet.packet_id} has no repo root available for anchor extraction`,
+    });
+    return { anchorPath: null, anchorSummary: null };
+  }
+  try {
+    const filePath = packet.file_paths[0]!;
+    const totalLines = packet.file_line_counts[filePath] ?? packet.total_lines;
+    const content = await readFile(withinRoot(reviewRoot, filePath), "utf8");
+    const anchorSummary = buildFileAnchorSummary({
+      path: filePath,
+      content,
+      totalLines,
+      graphBundle: bundle.graph_bundle,
+      externalAnalyzerResults: bundle.external_analyzer_results,
+    });
+    const anchorPath = join(taskResultsDir, artifactNameForId(packet.packet_id, "anchors.json"));
+    await writeJsonFile(anchorPath, anchorSummary);
+    return { anchorPath, anchorSummary };
+  } catch (error) {
+    warnings.push({
+      code: "large_file_anchor_failed",
+      message:
+        `large single-file packet ${packet.packet_id} could not be anchored mechanically: ` +
+        (error instanceof Error ? error.message : String(error)),
+    });
+    return { anchorPath: null, anchorSummary: null };
+  }
+}
+
+/**
+ * Extracts the per-task flatMap that builds task section lines.
+ */
+export function buildTaskSections(
+  packetTasks: AuditTask[],
+  lensDefs: Record<string, { description: string; do_not_report: string }>,
+  lineIndex: Record<string, number>,
+): string[] {
+  return packetTasks.flatMap((task) => {
+    const lensDef = lensDefs[task.lens];
+    const inputLines = task.inputs
+      ? Object.entries(task.inputs)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, value]) => `input.${key}: ${value}`)
+      : [];
+    const isLensVerification = task.tags?.includes("lens_verification") ?? false;
+    const coverageTemplate = task.file_paths.map((path) => ({
+      path,
+      total_lines: task.file_line_counts?.[path] ?? lineIndex[path] ?? 0,
+    }));
+    return [
+      `### ${task.task_id}`,
+      `unit_id: ${task.unit_id}`,
+      `pass_id: ${task.pass_id}`,
+      `lens: ${task.lens}`,
+      ...(task.tags?.length ? [`tags: ${task.tags.join(", ")}`] : []),
+      ...inputLines,
+      `rationale: ${task.rationale}`,
+      "",
+      `Lens guidance: ${lensDef?.description ?? task.lens}`,
+      `Do NOT report: ${lensDef?.do_not_report ?? "N/A"}`,
+      ...(isLensVerification
+        ? [
+            "",
+            "Lens verification mode: review the prior result summary in the rationale and use only targeted source checks.",
+            "Do not redo every packet and do not write direct findings for this task.",
+            "Return findings: [] plus verification metadata. Include followup_tasks only for bounded, specific re-review packets.",
+          ]
+        : []),
+      "",
+      "file_coverage (copy exactly into your AuditResult for this task):",
+      "```json",
+      JSON.stringify(coverageTemplate),
+      "```",
+      "",
+    ];
+  });
+}
+
+/**
+ * Wraps the 75-line array-join block and returns the assembled prompt string.
+ */
+export function buildPacketPrompt(params: {
+  packet: ReturnType<typeof buildReviewPackets>[number];
+  packetTasks: AuditTask[];
+  fileList: string;
+  largeFileSection: string[];
+  taskSections: string[];
+  submitCommand: string;
+}): string {
+  const { packet, fileList, largeFileSection, taskSections, submitCommand } = params;
+  const largeFileMode = isIsolatedLargeFilePacket(packet);
+  return [
+    "You are a code auditor. Review this packet once, then submit exactly one result per listed task.",
+    "",
+    "## Packet",
+    `packet_id: ${packet.packet_id}`,
+    `task_count: ${packet.task_ids.length}`,
+    `lenses: ${packet.lenses.join(", ")}`,
+    `estimated_tokens: ${packet.estimated_tokens}`,
+    "",
+    "## Files to read",
+    largeFileMode
+      ? "Use targeted Read/Grep calls. Paths are repo-relative from the current working directory."
+      : "Use your Read tool. Paths are repo-relative from the current working directory.",
+    "Use host Read and Grep tools for source inspection. Do not use shell search commands.",
+    fileList,
+    "",
+    ...renderPacketGraphContext(packet),
+    ...largeFileSection,
+    "## Tasks",
+    ...taskSections,
+    "## Output",
+    "Do not write files directly. Do not use a Write tool, create temp files, edit source files,",
+    "remediate findings, run unrelated audits, or write any result file yourself (e.g.",
+    "packet-*-result.json / audit_result_*.json) — the submit-packet command below is the only",
+    "way to record results, and it writes them inside the artifacts directory for you.",
+    "Produce one JSON array containing exactly one AuditResult object for each listed task.",
+    "",
+    "Schema file (resolve relative to this prompt's directory): audit_result.schema.json",
+    "  $refs resolved from the same directory: finding.schema.json, audit_task.schema.json",
+    "You MAY validate your JSON array against the schema before calling submit-packet. This is optional;",
+    "  the submit command performs the authoritative validation and will report any errors.",
+    "",
+    "Required AuditResult fields:",
+    "  task_id       copy from the task metadata",
+    "  unit_id       copy from the task metadata",
+    "  pass_id       copy from the task metadata",
+    "  lens          copy from the task metadata",
+    "  file_coverage [{path, total_lines}] - copy the exact template from each task section above. You MUST include total_lines. Do not omit or zero it out, as this will cause fatal validation errors.",
+    "  findings      [] or array of finding objects",
+    "",
+    "Lens verification tasks:",
+    "  tasks tagged lens_verification must use findings: [] and include verification:",
+    "  {verified: boolean, needs_followup: boolean, concerns?: string[],",
+    "   coverage_concerns?: string[], confidence_concerns?: string[],",
+    "   followup_tasks?: AuditTask[]}.",
+    "  Follow-up AuditTask suggestions must stay bounded to files in this packet and use the same lens.",
+    "",
+    "Each finding object:",
+    "  id            unique ID, e.g. \"COR-001\"",
+    "  title         short title",
+    "  category      specific finding category, such as missing-validation or command-execution",
+    "  severity      critical|high|medium|low|info",
+    "  confidence    high|medium|low",
+    "  lens          must match the task lens exactly",
+    "  summary       1-2 sentence description",
+    "  affected_files  [{path, line_start?, line_end?, symbol?}] - objects, not strings; min 1 entry",
+    "  evidence     [\"path/to/file.ts:42 - description of what you see there\"] - min 1 entry",
+    "",
+    "Constraints:",
+    "1. line_end must not exceed the file's actual line count.",
+    "2. affected_files entries are objects with a path key, not plain strings.",
+    "3. Only reference files from the packet unless a finding genuinely crosses a boundary.",
+    "4. findings: [] is correct when you find nothing genuine.",
+    "",
+    "## Submit",
+    "Pipe the JSON array on stdin to this command:",
+    `  ${submitCommand}`,
+    "  (If using Windows PowerShell, you MUST use `Get-Content <file> | & <command>` instead of the `<` operator.)",
+    "",
+    "The command validates and writes the packet-owned result files. Exit 0 means accepted.",
+    "Non-zero: read the errors, fix the JSON, and run the same submit command again. Retry up to 3 times.",
+    "",
+    "## Final response",
+    `After the submit command succeeds, reply exactly: valid: ${packet.packet_id}, findings=<total finding count>`,
+  ].join("\n");
+}
+
+/**
+ * Encapsulates host-model resolution, quota state lookup, provider-limits query,
+ * capacity computation, and writing the dispatch-quota artifact.
+ */
+async function computeDispatchQuota(params: {
+  runId: string;
+  artifactsDir: string;
+  runDir: string;
+  sessionConfig: SessionConfig;
+  perPacketTokens: number[];
+  hostModel: string | null | undefined;
+  queryLimits: ((model: string | null) => Promise<ProviderRateLimits | null>) | undefined;
+  hostActiveSubagentLimit: number | null | undefined;
+}): Promise<{
+  dispatchQuota: DispatchQuota;
+  dispatchQuotaPath: string;
+  waveSchedule: ReturnType<typeof computeDispatchCapacity>["primary"]["schedule"];
+  dispatchCapacity: ReturnType<typeof computeDispatchCapacity>;
+}> {
+  const { runId, runDir, sessionConfig, perPacketTokens, queryLimits, hostActiveSubagentLimit } = params;
+  const quotaProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
+  const hostModel = resolveHostModel({
+    providerName: quotaProviderName,
+    sessionConfig,
+    explicitModel: params.hostModel,
+    envVar: "AUDIT_CODE_HOST_MODEL",
+  });
+  const quotaProviderKey = buildProviderModelKey(quotaProviderName, hostModel);
+  const quotaState = await readQuotaState().catch((): { version: 2; entries: Record<string, never> } => ({ version: 2, entries: {} }));
+  const quotaStateEntry = quotaState.entries[quotaProviderKey] ?? null;
+  const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
+    explicitLimit: hostActiveSubagentLimit,
+    sessionConfig,
+  });
+  const providerLimits: DiscoveredRateLimits | null =
+    await queryLimits?.(hostModel)
+      .then((r) => r ? { ...r, source: "provider_query" } : null)
+      .catch(() => null)
+    ?? null;
+  const dispatchCachedLimits = await lookupDiscoveredLimits(quotaProviderKey).catch(() => null);
+  const discoveredLimits = mergeDiscoveredLimits(providerLimits, dispatchCachedLimits);
+  const halfLifeHours =
+    sessionConfig.quota?.empirical_half_life_hours ??
+    DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
+  const quotaSource = buildQuotaSource({ halfLifeHours });
+  const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(quotaProviderKey).catch(() => null);
+  const hostPool: CapacityPool = {
+    id: quotaProviderKey,
+    providerName: quotaProviderName,
+    hostModel,
+    hostConcurrencyLimit,
+    quotaStateEntry,
+    discoveredLimits,
+    quotaSourceSnapshot,
+  };
+  const dispatchCapacity = computeDispatchCapacity({
+    pools: [hostPool],
+    sessionConfig,
+    pendingItemTokens: perPacketTokens,
+  });
+  const waveSchedule = dispatchCapacity.primary.schedule;
+  const dispatchQuota: DispatchQuota = {
+    contract_version: "audit-code-dispatch-quota/v1alpha2",
+    run_id: runId,
+    model: hostModel,
+    resolved_limits: waveSchedule.resolved_limits,
+    confidence: waveSchedule.confidence,
+    source: waveSchedule.source,
+    host_concurrency_limit: waveSchedule.host_concurrency_limit,
+    wave_size: dispatchCapacity.total_slots,
+    estimated_wave_tokens: dispatchCapacity.estimated_wave_tokens,
+    cooldown_until: dispatchCapacity.cooldown_until,
+    quota_source_snapshot: waveSchedule.quota_source_snapshot ?? null,
+    backoff_state: null,
+  };
+  const dispatchQuotaPath = join(runDir, "dispatch-quota.json");
+  await writeJsonFile(dispatchQuotaPath, dispatchQuota);
+  return { dispatchQuota, dispatchQuotaPath, waveSchedule, dispatchCapacity };
+}
+
+/**
+ * Extracts the context-budget warning loop.
+ * Returns warnings for packets whose estimated token count exceeds the context budget.
+ * When confidence is 'low', returns an empty array (limits are unreliable).
+ */
+export function collectOversizedWarnings(
+  plan: Array<{ packet_id: string; complexity: DispatchComplexity }>,
+  waveSchedule: { confidence: string; resolved_limits: { context_tokens: number; output_tokens: number } },
+): Array<{ code: string; message: string }> {
+  if (waveSchedule.confidence === "low") {
+    return [];
+  }
+  const contextBudget =
+    waveSchedule.resolved_limits.context_tokens - waveSchedule.resolved_limits.output_tokens;
+  const warnings: Array<{ code: string; message: string }> = [];
+  for (const p of plan) {
+    if (p.complexity.estimated_tokens > contextBudget) {
+      warnings.push({
+        code: "oversized_packet",
+        message:
+          `Packet ${p.packet_id} estimated tokens (${p.complexity.estimated_tokens}) exceed ` +
+          `context budget (${contextBudget}). This packet may fail at dispatch. ` +
+          `Set quota.default_context_tokens or quota.models in session-config.json to override.`,
+      });
+    }
+  }
+  return warnings;
+}
+
 export async function prepareDispatchArtifacts(params: {
   packageRoot: string;
   runId: string;
@@ -510,29 +828,12 @@ export async function prepareDispatchArtifacts(params: {
   // still-pending tasks have no result files, priorResultTaskIds stayed empty, and
   // the canary re-fired every cycle (1 packet forever, never reaching fan-out).
   const priorDispatchThisRun = priorActiveDispatch?.run_id === runId;
-  const firstContact = !priorDispatchThisRun;
-  const canaryEnabled = sessionConfig.dispatch?.canary !== false; // default on
-  const doCanary = firstContact && canaryEnabled && packets.length > 1;
-  const canaryPacketId = doCanary ? packets[0]!.packet_id : null;
-  const phase: "canary" | "fan_out" = doCanary ? "canary" : "fan_out";
-  const postCanaryPackets = doCanary ? packets.slice(0, 1) : packets;
-
-  // FINDING-013: top-K coverage budget. Cap the (already priority-ordered)
-  // packets at max_packets; the remainder are recorded as DEFERRED and excluded
-  // from the completion check so the run can finish honestly under budget.
-  // Budget defaults OFF (no cap) so default behavior is unchanged. Canary takes
-  // precedence: a canary round only emits 1 packet regardless of the budget.
-  const maxPackets = sessionConfig.dispatch?.max_packets;
-  const budgetCapped =
-    typeof maxPackets === "number" &&
-    maxPackets >= 0 &&
-    maxPackets < postCanaryPackets.length;
-  const emitPackets = budgetCapped
-    ? postCanaryPackets.slice(0, maxPackets)
-    : postCanaryPackets;
-  const deferredPackets = budgetCapped
-    ? postCanaryPackets.slice(maxPackets)
-    : [];
+  // FINDING-013: top-K coverage budget. Budget defaults OFF (no cap) so default
+  // behavior is unchanged. Canary takes precedence: a canary round only emits 1
+  // packet regardless of the budget.
+  const { emitPackets, deferredPackets, phase, canaryPacketId, doCanary, postCanaryCount } =
+    filterPackets(packets, priorDispatchThisRun, sessionConfig);
+  const budgetCapped = deferredPackets.length > 0;
 
   const plan: Array<{
     packet_id: string;
@@ -588,38 +889,9 @@ export async function prepareDispatchArtifacts(params: {
       const lines = packet.file_line_counts[path] ?? 0;
       return `- ${path} (${lines} lines)`;
     }).join("\n");
-    let anchorPath: string | null = null;
-    let anchorSummary: FileAnchorSummary | null = null;
-    if (largeFileMode) {
-      const filePath = packet.file_paths[0]!;
-      if (!reviewRoot) {
-        warnings.push({
-          code: "large_file_anchor_unavailable",
-          message: `large single-file packet ${packet.packet_id} has no repo root available for anchor extraction`,
-        });
-      } else {
-        try {
-          const totalLines = packet.file_line_counts[filePath] ?? packet.total_lines;
-          const content = await readFile(withinRoot(reviewRoot, filePath), "utf8");
-          anchorSummary = buildFileAnchorSummary({
-            path: filePath,
-            content,
-            totalLines,
-            graphBundle: bundle.graph_bundle,
-            externalAnalyzerResults: bundle.external_analyzer_results,
-          });
-          anchorPath = join(taskResultsDir, artifactNameForId(packet.packet_id, "anchors.json"));
-          await writeJsonFile(anchorPath, anchorSummary);
-        } catch (error) {
-          warnings.push({
-            code: "large_file_anchor_failed",
-            message:
-              `large single-file packet ${packet.packet_id} could not be anchored mechanically: ` +
-              (error instanceof Error ? error.message : String(error)),
-          });
-        }
-      }
-    }
+    const { anchorPath, anchorSummary } = largeFileMode
+      ? await extractPacketAnchor({ packet, reviewRoot, bundle, taskResultsDir, warnings })
+      : { anchorPath: null, anchorSummary: null };
     const largeFileSection =
       anchorSummary && anchorPath
         ? renderAnchorPreview(anchorSummary, anchorPath)
@@ -632,45 +904,7 @@ export async function prepareDispatchArtifacts(params: {
               "",
             ]
           : [];
-    const taskSections = packetTasks.flatMap((task) => {
-      const lensDef = lensDefs[task.lens];
-      const inputLines = task.inputs
-        ? Object.entries(task.inputs)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([key, value]) => `input.${key}: ${value}`)
-        : [];
-      const isLensVerification = task.tags?.includes("lens_verification") ?? false;
-      const coverageTemplate = task.file_paths.map((path) => ({
-        path,
-        total_lines: task.file_line_counts?.[path] ?? lineIndex[path] ?? 0,
-      }));
-      return [
-        `### ${task.task_id}`,
-        `unit_id: ${task.unit_id}`,
-        `pass_id: ${task.pass_id}`,
-        `lens: ${task.lens}`,
-        ...(task.tags?.length ? [`tags: ${task.tags.join(", ")}`] : []),
-        ...inputLines,
-        `rationale: ${task.rationale}`,
-        "",
-        `Lens guidance: ${lensDef?.description ?? task.lens}`,
-        `Do NOT report: ${lensDef?.do_not_report ?? "N/A"}`,
-        ...(isLensVerification
-          ? [
-              "",
-              "Lens verification mode: review the prior result summary in the rationale and use only targeted source checks.",
-              "Do not redo every packet and do not write direct findings for this task.",
-              "Return findings: [] plus verification metadata. Include followup_tasks only for bounded, specific re-review packets.",
-            ]
-          : []),
-        "",
-        "file_coverage (copy exactly into your AuditResult for this task):",
-        "```json",
-        JSON.stringify(coverageTemplate),
-        "```",
-        "",
-      ];
-    });
+    const taskSections = buildTaskSections(packetTasks, lensDefs, lineIndex);
     const submitCommand =
       `node packages/audit-code/audit-code.mjs submit-packet ` +
       `--run-id-b64 ${toBase64Url(runId)} ` +
@@ -685,82 +919,7 @@ export async function prepareDispatchArtifacts(params: {
       });
     }
 
-    const prompt = [
-      "You are a code auditor. Review this packet once, then submit exactly one result per listed task.",
-      "",
-      "## Packet",
-      `packet_id: ${packet.packet_id}`,
-      `task_count: ${packet.task_ids.length}`,
-      `lenses: ${packet.lenses.join(", ")}`,
-      `estimated_tokens: ${packet.estimated_tokens}`,
-      "",
-      "## Files to read",
-      largeFileMode
-        ? "Use targeted Read/Grep calls. Paths are repo-relative from the current working directory."
-        : "Use your Read tool. Paths are repo-relative from the current working directory.",
-      "Use host Read and Grep tools for source inspection. Do not use shell search commands.",
-      fileList,
-      "",
-      ...renderPacketGraphContext(packet),
-      ...largeFileSection,
-      "## Tasks",
-      ...taskSections,
-      "## Output",
-      "Do not write files directly. Do not use a Write tool, create temp files, edit source files,",
-      "remediate findings, run unrelated audits, or write any result file yourself (e.g.",
-      "packet-*-result.json / audit_result_*.json) — the submit-packet command below is the only",
-      "way to record results, and it writes them inside the artifacts directory for you.",
-      "Produce one JSON array containing exactly one AuditResult object for each listed task.",
-      "",
-      "Schema file (resolve relative to this prompt's directory): audit_result.schema.json",
-      "  $refs resolved from the same directory: finding.schema.json, audit_task.schema.json",
-      "You MAY validate your JSON array against the schema before calling submit-packet. This is optional;",
-      "  the submit command performs the authoritative validation and will report any errors.",
-      "",
-      "Required AuditResult fields:",
-      "  task_id       copy from the task metadata",
-      "  unit_id       copy from the task metadata",
-      "  pass_id       copy from the task metadata",
-      "  lens          copy from the task metadata",
-      "  file_coverage [{path, total_lines}] - copy the exact template from each task section above. You MUST include total_lines. Do not omit or zero it out, as this will cause fatal validation errors.",
-      "  findings      [] or array of finding objects",
-      "",
-      "Lens verification tasks:",
-      "  tasks tagged lens_verification must use findings: [] and include verification:",
-      "  {verified: boolean, needs_followup: boolean, concerns?: string[],",
-      "   coverage_concerns?: string[], confidence_concerns?: string[],",
-      "   followup_tasks?: AuditTask[]}.",
-      "  Follow-up AuditTask suggestions must stay bounded to files in this packet and use the same lens.",
-      "",
-      "Each finding object:",
-      "  id            unique ID, e.g. \"COR-001\"",
-      "  title         short title",
-      "  category      specific finding category, such as missing-validation or command-execution",
-      "  severity      critical|high|medium|low|info",
-      "  confidence    high|medium|low",
-      "  lens          must match the task lens exactly",
-      "  summary       1-2 sentence description",
-      "  affected_files  [{path, line_start?, line_end?, symbol?}] - objects, not strings; min 1 entry",
-      "  evidence     [\"path/to/file.ts:42 - description of what you see there\"] - min 1 entry",
-      "",
-      "Constraints:",
-      "1. line_end must not exceed the file's actual line count.",
-      "2. affected_files entries are objects with a path key, not plain strings.",
-      "3. Only reference files from the packet unless a finding genuinely crosses a boundary.",
-      "4. findings: [] is correct when you find nothing genuine.",
-      "",
-      "## Submit",
-      "Pipe the JSON array on stdin to this command:",
-      `  ${submitCommand}`,
-      "  (If using Windows PowerShell, you MUST use `Get-Content <file> | & <command>` instead of the `<` operator.)",
-      "",
-      "The command validates and writes the packet-owned result files. Exit 0 means accepted.",
-      "Non-zero: read the errors, fix the JSON, and run the same submit command again. Retry up to 3 times.",
-      "",
-      "## Final response",
-      `After the submit command succeeds, reply exactly: valid: ${packet.packet_id}, findings=<total finding count>`,
-    ].join("\n");
-
+    const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection, taskSections, submitCommand });
     await writeFile(promptPath, prompt, "utf8");
     plan.push({
       packet_id: packet.packet_id,
@@ -781,89 +940,27 @@ export async function prepareDispatchArtifacts(params: {
   } satisfies DispatchResultMap);
 
   const perPacketTokens = plan.map((p) => p.complexity.estimated_tokens);
-  const quotaProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
-  // Resolve the host model (explicit/CLI override → block_quota.host_model → env
-  // → per-provider default) so per-model quota detection engages with realistic
-  // limits instead of the conservative unknown-model floor. params.hostModel
-  // carries any caller/CLI override.
-  const hostModel = resolveHostModel({
-    providerName: quotaProviderName,
-    sessionConfig,
-    explicitModel: params.hostModel,
-    envVar: "AUDIT_CODE_HOST_MODEL",
-  });
-  const quotaProviderKey = buildProviderModelKey(quotaProviderName, hostModel);
-  const quotaState = await readQuotaState().catch((): { version: 2; entries: Record<string, never> } => ({ version: 2, entries: {} }));
-  const quotaStateEntry = quotaState.entries[quotaProviderKey] ?? null;
-  const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
-    explicitLimit: params.hostActiveSubagentLimit,
-    sessionConfig,
-  });
-  const providerLimits: DiscoveredRateLimits | null =
-    await params.queryLimits?.(hostModel)
-      .then((r) => r ? { ...r, source: "provider_query" } : null)
-      .catch(() => null)
-    ?? null;
-  const dispatchCachedLimits = await lookupDiscoveredLimits(quotaProviderKey).catch(() => null);
-  const discoveredLimits = mergeDiscoveredLimits(providerLimits, dispatchCachedLimits);
-  const halfLifeHours =
-    sessionConfig.quota?.empirical_half_life_hours ??
-    DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
-  const quotaSource = buildQuotaSource({ halfLifeHours });
-  const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(quotaProviderKey).catch(() => null);
   // Size the dispatch just-in-time against the full pending layout (one token
   // estimate per emitted packet) and the host pool's current limits, rather than
   // a preset wave size. `parallel_workers` is no longer the ambition — it is
   // folded into hostConcurrencyLimit as a ceiling (resolveHostActiveSubagentLimit).
   // Today there is a single pool (the conversation host's subagents); a
   // heterogeneous provider pool slots in here without changing the call.
-  const hostPool: CapacityPool = {
-    id: quotaProviderKey,
-    providerName: quotaProviderName,
-    hostModel,
-    hostConcurrencyLimit,
-    quotaStateEntry,
-    discoveredLimits,
-    quotaSourceSnapshot,
-  };
-  const dispatchCapacity = computeDispatchCapacity({
-    pools: [hostPool],
+  // Resolve the host model (explicit/CLI override → block_quota.host_model → env
+  // → per-provider default) so per-model quota detection engages with realistic
+  // limits instead of the conservative unknown-model floor.
+  const { dispatchQuotaPath, waveSchedule, dispatchCapacity } = await computeDispatchQuota({
+    runId,
+    artifactsDir,
+    runDir,
     sessionConfig,
-    pendingItemTokens: perPacketTokens,
+    perPacketTokens,
+    hostModel: params.hostModel,
+    queryLimits: params.queryLimits,
+    hostActiveSubagentLimit: params.hostActiveSubagentLimit,
   });
-  const waveSchedule = dispatchCapacity.primary.schedule;
-  const dispatchQuota: DispatchQuota = {
-    contract_version: "audit-code-dispatch-quota/v1alpha2",
-    run_id: runId,
-    model: hostModel,
-    resolved_limits: waveSchedule.resolved_limits,
-    confidence: waveSchedule.confidence,
-    source: waveSchedule.source,
-    host_concurrency_limit: waveSchedule.host_concurrency_limit,
-    wave_size: dispatchCapacity.total_slots,
-    estimated_wave_tokens: dispatchCapacity.estimated_wave_tokens,
-    cooldown_until: dispatchCapacity.cooldown_until,
-    quota_source_snapshot: waveSchedule.quota_source_snapshot ?? null,
-    backoff_state: null,
-  };
-  const dispatchQuotaPath = join(runDir, "dispatch-quota.json");
-  await writeJsonFile(dispatchQuotaPath, dispatchQuota);
 
-  if (waveSchedule.confidence !== "low") {
-    const contextBudget =
-      waveSchedule.resolved_limits.context_tokens - waveSchedule.resolved_limits.output_tokens;
-    for (const p of plan) {
-      if (p.complexity.estimated_tokens > contextBudget) {
-        warnings.push({
-          code: "oversized_packet",
-          message:
-            `Packet ${p.packet_id} estimated tokens (${p.complexity.estimated_tokens}) exceed ` +
-            `context budget (${contextBudget}). This packet may fail at dispatch. ` +
-            `Set quota.default_context_tokens or quota.models in session-config.json to override.`,
-        });
-      }
-    }
-  }
+  warnings.push(...collectOversizedWarnings(plan, waveSchedule));
 
   // FINDING-011: when advancing past a canary, warn if it never produced an
   // accepted result. submit-packet writes the per-task result file ONLY after
@@ -906,7 +1003,7 @@ export async function prepareDispatchArtifacts(params: {
     canary_packet_id: canaryPacketId,
     ...(budgetCapped
       ? {
-          budget_packet_count: postCanaryPackets.length,
+          budget_packet_count: postCanaryCount,
           deferred_packet_ids: deferredPacketIds,
           deferred_task_ids: deferredTaskIds,
         }

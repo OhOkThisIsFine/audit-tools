@@ -56,29 +56,18 @@ test("single pool, no host ceiling: a parallel agent host fans out instead of se
   assert.ok(capacity.total_slots > 1, `expected parallel dispatch, got ${capacity.total_slots}`);
 });
 
-test("multi-pool dispatch is not implemented yet — computeDispatchCapacity fails fast on >1 pool", () => {
-  // The shape is multi-pool-ready (CapacityPool[], per-pool allocations), but
-  // until pendingItemTokens is partitioned across pools the naive per-pool sum
-  // would over-allocate capacity and double-count tokens, so >1 pool is rejected
-  // rather than returned silently wrong.
-  assert.throws(
-    () =>
-      computeDispatchCapacity({
-        pools: [
-          hostPool("host-a", { hostConcurrencyLimit: hostLimit(4) }),
-          hostPool("host-b", { hostConcurrencyLimit: hostLimit(3) }),
-        ],
-        sessionConfig: {},
-        pendingItemTokens: new Array(12).fill(1000),
-      }),
-    /multi-pool dispatch is not implemented/,
-  );
+test("computeDispatchCapacity accepts exactly one pool and returns total_slots >= 1 with one pool allocation", () => {
+  // pools is a single-element tuple [CapacityPool] — the single-pool constraint is
+  // now statically enforced at compile time rather than by a runtime guard.
+  const capacity = computeDispatchCapacity({
+    pools: [hostPool("host", { hostConcurrencyLimit: hostLimit(3) })],
+    sessionConfig: {},
+    pendingItemTokens: new Array(5).fill(10000),
+  });
+  assert.ok(capacity.total_slots >= 1, `expected total_slots >= 1, got ${capacity.total_slots}`);
+  assert.equal(capacity.pools.length, 1);
 });
 
-test("empty pools is a programming error", () => {
-  assert.throws(
-    () =>
-      computeDispatchCapacity({ pools: [], sessionConfig: {}, pendingItemTokens: [1] }),
-    /at least one capacity pool/,
-  );
-});
+// NOTE: passing `pools: []` or `pools: [pool1, pool2]` to ComputeDispatchCapacityInput is a
+// TypeScript compile-time error (the type is `[CapacityPool]`, a single-element tuple).
+// No runtime guard is needed — TypeScript rejects zero or multiple pools before the code runs.

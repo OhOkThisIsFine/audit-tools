@@ -55,7 +55,7 @@ export function hashArtifactValue(
     .digest("hex");
 }
 
-export function buildReverseDependencyMap(): Record<string, string[]> {
+export function buildArtifactDependenciesMap(): Record<string, string[]> {
   const reverse: Record<string, string[]> = {};
   for (const [upstream, downstreamList] of Object.entries(
     ARTIFACT_DEPENDENTS_MAP,

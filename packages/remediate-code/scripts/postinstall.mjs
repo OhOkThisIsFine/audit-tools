@@ -5,6 +5,7 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 
 const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const packageVersion = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).version ?? '0.0.0';
 const promptSourceFile = join(
   pkgRoot,
   "skills",
@@ -98,11 +99,12 @@ function objectValue(value) {
 
 function mergeOpenCodePermissionRule(existingRule, generatedRule, managedRules) {
   const existing = objectValue(existingRule);
+  const { "*": _drop, ...managedWithoutWildcard } = managedRules;
   return {
     "*": existing["*"] ?? generatedRule["*"] ?? "ask",
     ...generatedRule,
     ...existing,
-    ...managedRules,
+    ...managedWithoutWildcard,
   };
 }
 
@@ -284,7 +286,7 @@ try {
     antigravityPluginJsonPath,
     Buffer.from(
       JSON.stringify(
-        { name: "remediate-code", version: "1.0.0" },
+        { name: "remediate-code", version: packageVersion },
         null,
         2,
       ) + "\n",

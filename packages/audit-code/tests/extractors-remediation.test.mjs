@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { importSourceModule } from "./helpers/sourceImport.mjs";
 
@@ -18,6 +17,7 @@ const { buildUnitManifest } = await importSourceModule("src/orchestrator/unitBui
 const {
   EXTRACTOR_HEURISTIC_NOTE,
   isAsyncTaskPath,
+  isAuditArtifactPath,
   isBackgroundSurfacePath,
   isBillingPath,
   isConcurrencyPath,
@@ -38,14 +38,7 @@ const { loadIgnoreFile } = await importSourceModule("src/extractors/ignore.ts");
 const { buildRiskRegister } = await importSourceModule("src/extractors/risk.ts");
 const { buildRepoManifestFromFs } = await importSourceModule("src/extractors/fsIntake.ts");
 
-async function withTempDir(prefix, fn) {
-  const dir = await mkdtemp(join(tmpdir(), prefix));
-  try {
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
 function makeRepoManifest(paths) {
   return buildRepoManifest(
@@ -240,7 +233,7 @@ test("isTestPath matches test tokens without substring false positives", () => {
   }
 });
 
-test("path predicates match keyword tokens and camelCase boundaries without substring false positives", () => {
+test("isInterfacePath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "interface",
     isInterfacePath,
@@ -255,6 +248,9 @@ test("path predicates match keyword tokens and camelCase boundaries without subs
       "src/handlerish.ts",
     ],
   );
+});
+
+test("isDataLayerPath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "data layer",
     isDataLayerPath,
@@ -269,6 +265,9 @@ test("path predicates match keyword tokens and camelCase boundaries without subs
       "src/migrationist.ts",
     ],
   );
+});
+
+test("isSecuritySensitivePath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "security",
     isSecuritySensitivePath,
@@ -283,6 +282,9 @@ test("path predicates match keyword tokens and camelCase boundaries without subs
       "src/permissionless.ts",
     ],
   );
+});
+
+test("isConcurrencyPath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "concurrency",
     isConcurrencyPath,
@@ -297,18 +299,27 @@ test("path predicates match keyword tokens and camelCase boundaries without subs
       "src/workerish.ts",
     ],
   );
+});
+
+test("isScriptPath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "script",
     isScriptPath,
     ["scripts/release.ts", "src/buildScript.ts"],
     ["src/typescript/parser.ts", "src/scriptorium.ts"],
   );
+});
+
+test("isDeploymentConfigPath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "deployment",
     isDeploymentConfigPath,
     [".github/workflows/ci.yml", "infra/k8s/deploy.ts", "docker-compose.yml"],
     ["src/redeploy.ts", "src/workflower.ts"],
   );
+});
+
+test("isGeneratedPath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "generated",
     isGeneratedPath,
@@ -324,6 +335,9 @@ test("path predicates match keyword tokens and camelCase boundaries without subs
       "src/autogenerator.ts",
     ],
   );
+});
+
+test("isSurfacePath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "surface",
     isSurfacePath,
@@ -339,30 +353,45 @@ test("path predicates match keyword tokens and camelCase boundaries without subs
       "src/controllerish.ts",
     ],
   );
+});
+
+test("isBackgroundSurfacePath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "background surface",
     isBackgroundSurfacePath,
     ["src/EmailJob.ts", "src/workers/email.ts"],
     ["src/jobber.ts", "src/workflow.ts"],
   );
+});
+
+test("isNetworkSurfacePath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "network surface",
     isNetworkSurfacePath,
     ["src/routes/auth.ts", "src/api/auth.ts", "src/UserController.ts"],
     ["src/routerless.ts", "src/controllerish.ts"],
   );
+});
+
+test("isBillingPath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "billing",
     isBillingPath,
     ["src/billing/invoice.ts", "src/paymentLedger.ts"],
     ["src/ledgerdemain.ts", "src/subscriptionless.ts"],
   );
+});
+
+test("isIdentityPath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "identity",
     isIdentityPath,
     ["src/users/profile.ts", "src/auth/session.ts"],
     ["src/userland/parser.ts", "src/author.ts"],
   );
+});
+
+test("isAsyncTaskPath matches keyword tokens without substring false positives", () => {
   assertPredicateCases(
     "async task",
     isAsyncTaskPath,
@@ -428,7 +457,7 @@ test("buildFileDisposition stays stable for Windows-style absolute paths and ove
 test("buildFileDisposition excludes generated install and test artifacts before they reach planning", () => {
   const repoManifest = makeRepoManifest([
     ".audit-artifacts/dispatch/current-task.json",
-    ".audit-artifacts-fresh/dispatch/audit-result.schema.json",
+    ".audit-artifacts/dispatch/audit-result.schema.json",
     ".audit-code/install/run-mcp-server.mjs",
     ".audit-code/install/manifest.json",
     ".audit-code/install/claude-desktop/bundle/server/index.js",
@@ -445,7 +474,7 @@ test("buildFileDisposition excludes generated install and test artifacts before 
   assert.equal(
     getDispositionItem(
       disposition,
-      ".audit-artifacts-fresh/dispatch/audit-result.schema.json",
+      ".audit-artifacts/dispatch/audit-result.schema.json",
     )?.status,
     "generated",
   );
@@ -646,7 +675,8 @@ test("buildCriticalFlowManifest links normalized related paths and dedupes dupli
   assert.equal(flowManifest.fallback_required, false);
 });
 
-test("buildGraphBundle and buildSurfaceManifest understand Chrome extension manifests and HTML resources", () => {
+// Shared fixture for the three Chrome-extension tests below.
+function makeChromeExtensionFixture() {
   const repoManifest = makeRepoManifest([
     "manifest.json",
     "service/main.js",
@@ -657,33 +687,37 @@ test("buildGraphBundle and buildSurfaceManifest understand Chrome extension mani
     "download_worker/main.js",
     "bitmaps/logo-128.png",
   ]);
+  const fileContents = {
+    "manifest.json": JSON.stringify({
+      manifest_version: 3,
+      permissions: ["tabs", "downloads", "scripting"],
+      host_permissions: ["<all_urls>"],
+      background: { service_worker: "service/main.js" },
+      content_scripts: [
+        {
+          matches: ["<all_urls>"],
+          js: ["content/content-script.js"],
+          css: ["content/sidebar.css"],
+        },
+      ],
+      side_panel: { default_path: "/content/sidebar.html" },
+      web_accessible_resources: [
+        { resources: ["download_worker/main.js", "bitmaps/logo-128.png"] },
+      ],
+    }),
+    "content/sidebar.html": [
+      "<!doctype html>",
+      "<script type=\"module\" src=\"panel.js\"></script>",
+      "<link rel=\"stylesheet\" href=\"sidebar.css\">",
+    ].join("\n"),
+  };
+  return { repoManifest, fileContents };
+}
+
+test("buildGraphBundle understands Chrome extension manifests and HTML resources", () => {
+  const { repoManifest, fileContents } = makeChromeExtensionFixture();
   const disposition = buildFileDisposition(repoManifest);
-  const graph = buildGraphBundle(repoManifest, disposition, {
-    fileContents: {
-      "manifest.json": JSON.stringify({
-        manifest_version: 3,
-        permissions: ["tabs", "downloads", "scripting"],
-        host_permissions: ["<all_urls>"],
-        background: { service_worker: "service/main.js" },
-        content_scripts: [
-          {
-            matches: ["<all_urls>"],
-            js: ["content/content-script.js"],
-            css: ["content/sidebar.css"],
-          },
-        ],
-        side_panel: { default_path: "/content/sidebar.html" },
-        web_accessible_resources: [
-          { resources: ["download_worker/main.js", "bitmaps/logo-128.png"] },
-        ],
-      }),
-      "content/sidebar.html": [
-        "<!doctype html>",
-        "<script type=\"module\" src=\"panel.js\"></script>",
-        "<link rel=\"stylesheet\" href=\"sidebar.css\">",
-      ].join("\n"),
-    },
-  });
+  const graph = buildGraphBundle(repoManifest, disposition, { fileContents });
 
   const references = graph.graphs.references.map((edge) => [
     edge.from,
@@ -726,6 +760,12 @@ test("buildGraphBundle and buildSurfaceManifest understand Chrome extension mani
     references.some(([, to]) => to === "bitmaps/logo-128.png"),
     false,
   );
+});
+
+test("buildSurfaceManifest understands Chrome extension manifests and HTML resources", () => {
+  const { repoManifest, fileContents } = makeChromeExtensionFixture();
+  const disposition = buildFileDisposition(repoManifest);
+  const graph = buildGraphBundle(repoManifest, disposition, { fileContents });
 
   const surfaces = buildSurfaceManifest(repoManifest, disposition, {
     graphBundle: graph,
@@ -743,6 +783,11 @@ test("buildGraphBundle and buildSurfaceManifest understand Chrome extension mani
       ["background", "service/main.js", "local"],
     ],
   );
+});
+
+test("buildUnitManifest understands Chrome extension manifests", () => {
+  const { repoManifest } = makeChromeExtensionFixture();
+  const disposition = buildFileDisposition(repoManifest);
 
   const unitManifest = buildUnitManifest(repoManifest, disposition);
   const serviceUnit = unitManifest.units.find((unit) =>
@@ -1848,4 +1893,24 @@ test("buildGraphBundle yaml-path-reference-link does not match non-config paths 
     (edge) => edge.kind === "yaml-path-reference-link",
   );
   assert.equal(yamlEdges.length, 0, "absolute URLs should not produce edges");
+});
+
+test("isAuditArtifactPath matches only the exact segment", () => {
+  const positives = [
+    ".audit-artifacts/file.json",
+    "project/.audit-artifacts/runs/x.json",
+  ];
+  const negatives = [
+    ".audit-artifacts-backup/file.json",
+    ".audit-artifacts-v2/file.json",
+    "src/.audit-artifacts-custom/x.ts",
+    "src/main.ts",
+  ];
+
+  for (const path of positives) {
+    assert.equal(isAuditArtifactPath(normalizeExtractorPath(path)), true, path);
+  }
+  for (const path of negatives) {
+    assert.equal(isAuditArtifactPath(normalizeExtractorPath(path)), false, path);
+  }
 });

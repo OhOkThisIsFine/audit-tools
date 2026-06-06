@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateStore, type RemediationState } from "../src/state/store.js";
-import { validateArtifacts } from "../src/validation/artifacts.js";
+import { validateArtifacts, validateImplementWorkerResult } from "../src/validation/artifacts.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-artifact-validation");
@@ -125,5 +125,152 @@ describe("validateArtifacts", () => {
     expect(result.status).toBe("error");
     expect(result.issues.join("\n")).toMatch(/Stale worker result/);
     expect(result.issues.join("\n")).toContain(stalePath);
+  });
+});
+
+describe("validateCurrentStep (ValidationIssue[] return style)", () => {
+  it("returns issues when required string fields are missing", async () => {
+    // Access via validateArtifacts integration: write a malformed current-step.json
+    await saveState();
+    await writeJson(join(ARTIFACTS_DIR, "steps", "current-step.json"), {
+      // missing contract_version, step_kind, status, etc.
+      not_a_step: true,
+    });
+
+    const result = await validateArtifacts(ARTIFACTS_DIR, REPO_DIR);
+
+    expect(result.status).toBe("error");
+    expect(result.issues.join("\n")).toMatch(/contract_version|step_kind|status/i);
+  });
+
+  it("does not report issues for a well-formed current-step object", async () => {
+    const { REMEDIATION_STEP_CONTRACT_VERSION } = await import("../src/steps/types.js");
+    await saveState();
+    const promptPath = join(ARTIFACTS_DIR, "steps", "current-prompt.md");
+    await mkdir(join(ARTIFACTS_DIR, "steps"), { recursive: true });
+    await writeFile(promptPath, "# prompt\n", "utf8");
+    await writeJson(join(ARTIFACTS_DIR, "steps", "current-step.json"), {
+      contract_version: REMEDIATION_STEP_CONTRACT_VERSION,
+      step_kind: "implement",
+      status: "ready",
+      prompt_path: promptPath,
+      run_id: "run-1",
+      repo_root: REPO_DIR,
+      artifacts_dir: ARTIFACTS_DIR,
+      stop_condition: "done",
+      allowed_commands: ["npm test"],
+      artifact_paths: {},
+    });
+
+    const result = await validateArtifacts(ARTIFACTS_DIR, REPO_DIR);
+
+    // current-step issues shouldn't appear in the output
+    const stepIssues = result.issues.filter((i) => i.includes("current-step.json"));
+    expect(stepIssues).toHaveLength(0);
+  });
+});
+
+describe("validateImplementWorkerResult (exported, ValidationIssue[] return style)", () => {
+  it("is exported from artifacts.ts and importable", () => {
+    expect(typeof validateImplementWorkerResult).toBe("function");
+  });
+
+  it("returns issues when item_results array is missing", () => {
+    const issues = validateImplementWorkerResult(
+      { contract_version: "remediate-code-worker-result/v1alpha1", phase: "implement" },
+      "test-path",
+    );
+    const errorIssues = issues.filter((i) => i.severity === "error");
+    expect(errorIssues.length).toBeGreaterThan(0);
+    expect(errorIssues.map((i) => i.message).join(" ")).toMatch(/item_results/i);
+  });
+
+  it("returns issues when phase is not implement", () => {
+    const issues = validateImplementWorkerResult(
+      {
+        contract_version: "remediate-code-worker-result/v1alpha1",
+        phase: "document",
+        item_results: [],
+      },
+      "test-path",
+    );
+    const errorIssues = issues.filter((i) => i.severity === "error");
+    expect(errorIssues.map((i) => i.message).join(" ")).toMatch(/phase/i);
+  });
+
+  it("returns empty issues for a well-formed implement worker result", async () => {
+    const { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } = await import("../src/steps/types.js");
+    const issues = validateImplementWorkerResult(
+      {
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [{ finding_id: "F-001", status: "resolved", evidence: ["done"] }],
+      },
+      "test-path",
+    );
+    const errorIssues = issues.filter((i) => i.severity === "error");
+    expect(errorIssues).toHaveLength(0);
+  });
+});
+
+describe("validateDispatchPlan (ValidationIssue[] return style)", () => {
+  it("reports issues when contract_version is wrong", async () => {
+    await saveState();
+    const runDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
+    await mkdir(runDir, { recursive: true });
+    await writeJson(join(runDir, "dispatch-plan.json"), {
+      contract_version: "wrong-version",
+      phase: "implement",
+      run_id: "PLAN-1",
+      repo_root: REPO_DIR,
+      artifacts_dir: ARTIFACTS_DIR,
+      items: [],
+    });
+
+    const result = await validateArtifacts(ARTIFACTS_DIR, REPO_DIR);
+
+    expect(result.issues.join("\n")).toMatch(/contract_version/i);
+  });
+
+  it("reports issues when items array is missing", async () => {
+    const { REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION } = await import("../src/steps/types.js");
+    await saveState();
+    const runDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
+    await mkdir(runDir, { recursive: true });
+    await writeJson(join(runDir, "dispatch-plan.json"), {
+      contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+      phase: "implement",
+      run_id: "PLAN-1",
+      repo_root: REPO_DIR,
+      artifacts_dir: ARTIFACTS_DIR,
+      // items deliberately omitted
+    });
+
+    const result = await validateArtifacts(ARTIFACTS_DIR, REPO_DIR);
+
+    expect(result.issues.join("\n")).toMatch(/items/i);
+  });
+
+  it("does not report plan-level issues for a valid dispatch plan with no items", async () => {
+    const { REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION } = await import("../src/steps/types.js");
+    await saveState();
+    const runDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
+    await mkdir(runDir, { recursive: true });
+    await writeJson(join(runDir, "dispatch-plan.json"), {
+      contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+      phase: "implement",
+      run_id: "PLAN-1",
+      repo_root: REPO_DIR,
+      artifacts_dir: ARTIFACTS_DIR,
+      items: [],
+    });
+
+    const result = await validateArtifacts(ARTIFACTS_DIR, REPO_DIR);
+
+    // no contract_version / items / phase issues expected
+    const planErrors = result.issues.filter(
+      (i) => i.includes("contract_version") || i.includes(".items must") || i.includes(".phase must"),
+    );
+    expect(planErrors).toHaveLength(0);
   });
 });

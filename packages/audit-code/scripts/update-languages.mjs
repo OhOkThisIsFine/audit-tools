@@ -70,7 +70,7 @@ function readPriorExtensionCount() {
   }
 }
 
-function updateFile(map, conflictCount) {
+function updateFile(map, conflictCount, t0) {
   const startMarker = "// --- AUTO-GENERATED LANGUAGE MAP START ---";
   const endMarker = "// --- AUTO-GENERATED LANGUAGE MAP END ---";
   const mapString = JSON.stringify(map, null, 2);
@@ -87,13 +87,15 @@ function updateFile(map, conflictCount) {
 
   fs.writeFileSync(LANGUAGE_MAP_FILE, content, "utf-8");
 
+  const elapsedMs = Date.now() - t0;
   const newCount = Object.keys(map).length;
   const added = Math.max(0, newCount - priorCount);
   const removed = Math.max(0, priorCount - newCount);
   console.log(
-    `Updated ${LANGUAGE_MAP_FILE}: ${newCount} extensions (was ${priorCount}) — +${added} added, -${removed} removed, ${conflictCount} conflicts resolved.`,
+    `Updated ${LANGUAGE_MAP_FILE}: ${newCount} extensions (was ${priorCount}) — +${added} added, -${removed} removed, ${conflictCount} conflicts resolved. (${elapsedMs}ms)`,
   );
 }
 
+const t0 = Date.now();
 const { map, conflictCount } = generateLanguageMap();
-updateFile(map, conflictCount);
+updateFile(map, conflictCount, t0);

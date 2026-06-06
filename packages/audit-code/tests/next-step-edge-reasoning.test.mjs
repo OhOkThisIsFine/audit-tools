@@ -1,14 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
-
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..");
-const wrapperPath = join(repoRoot, "audit-code.mjs");
+import { join } from "node:path";
+import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { writeFixtureRepo } from "./helpers/fixture.mjs";
 
 const { advanceAudit } = await import("../src/orchestrator/advance.ts");
 const { writeCoreArtifacts } = await import("../src/io/artifacts.ts");
@@ -32,57 +28,6 @@ function edgeIdentity(edge) {
     confidence: edge.confidence ?? null,
     direction: edge.direction ?? null,
   });
-}
-
-function runWrapper(args, options = {}) {
-  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [wrapperPath, ...args], {
-      cwd: options.cwd ?? repoRoot,
-      env: { ...cleanEnv, ...(options.env ?? {}) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => (stdout += String(chunk)));
-    child.stderr.on("data", (chunk) => (stderr += String(chunk)));
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) resolve({ stdout, stderr });
-      else reject(new Error(stderr || stdout || `wrapper exited with ${code}`));
-    });
-  });
-}
-
-async function writeFixtureRepo(root) {
-  await mkdir(join(root, "src", "api"), { recursive: true });
-  await mkdir(join(root, "src", "lib"), { recursive: true });
-  await writeFile(
-    join(root, "package.json"),
-    JSON.stringify({ name: "edge-reasoning-fixture", version: "0.0.0" }, null, 2) + "\n",
-  );
-  await writeFile(
-    join(root, "src", "api", "auth.ts"),
-    [
-      "export function authenticate(token: string): boolean {",
-      "  return token.trim().length > 0;",
-      "}",
-      "",
-    ].join("\n"),
-  );
-  await writeFile(
-    join(root, "src", "lib", "session.ts"),
-    [
-      "export interface Session {",
-      "  id: string;",
-      "}",
-      "",
-      "export function createSession(id: string): Session {",
-      "  return { id };",
-      "}",
-      "",
-    ].join("\n"),
-  );
 }
 
 /** Drive the deterministic pipeline in-process through structure, leaving

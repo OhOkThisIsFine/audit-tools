@@ -56,7 +56,10 @@ async function readPackageVersion(): Promise<string | null> {
       version?: unknown;
     };
     return typeof packageJson.version === "string" ? packageJson.version : null;
-  } catch {
+  } catch (error) {
+    process.stderr.write(
+      `[audit-code] readPackageVersion: failed to read/parse ${packageJsonPath}: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
     return null;
   }
 }

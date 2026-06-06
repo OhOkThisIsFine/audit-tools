@@ -1,6 +1,7 @@
 .artifacts/
 .audit-artifacts/
 .codex/
+opencode.json
 .audit-code-build.lock
 node_modules/
 coverage/

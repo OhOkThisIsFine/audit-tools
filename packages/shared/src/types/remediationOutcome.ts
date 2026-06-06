@@ -22,6 +22,14 @@ export interface RemediationOutcome {
   rework_count: number;
   /** The run's closing-action status (e.g. "success", "failed"). */
   closing_status: string;
+  /** Human-readable explanation for non-success closing statuses. */
+  closing_status_reason?: string;
+  /** ISO-8601 timestamp when work on this item first left pending. */
+  started_at?: string;
+  /** ISO-8601 timestamp when the item reached its terminal status. */
+  completed_at?: string;
+  /** Milliseconds between completed_at and started_at when both are present. */
+  duration_ms?: number;
 }
 
 export interface RemediationOutcomesReport {
@@ -29,5 +37,11 @@ export interface RemediationOutcomesReport {
   total: number;
   by_outcome: Record<RemediationOutcomeStatus, number>;
   by_lens: Record<string, Partial<Record<RemediationOutcomeStatus, number>>>;
+  /** Earliest item started_at across all outcomes. */
+  started_at?: string;
+  /** Latest item completed_at across all outcomes. */
+  completed_at?: string;
+  /** Milliseconds between aggregate completed_at and started_at. */
+  duration_ms?: number;
   outcomes: RemediationOutcome[];
 }

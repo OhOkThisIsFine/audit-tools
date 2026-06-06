@@ -12,7 +12,7 @@
       "type": "string",
       "enum": ["pending", "written", "failing", "passing"]
     },
-    "assertions": { "type": "array", "items": { "type": "string" } }
+    "assertions": { "type": "array", "minItems": 1, "items": { "type": "string" } }
   },
   "additionalProperties": false
 }

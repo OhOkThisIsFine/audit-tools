@@ -1,10 +1,14 @@
 import type { Lens } from "../types.js";
 import type { CriticalFlowManifest } from "@audit-tools/shared";
 
-const DEFAULT_FLOW_LENS_PRIORITY: Lens[] = [
+const FLOW_REVIEW_LENSES: Lens[] = [
   "security",
   "reliability",
   "correctness",
+  "data_integrity",
+  "operability",
+  "performance",
+  "observability",
 ];
 
 export interface FlowReviewBlock {
@@ -18,8 +22,8 @@ function lensPathKey(lens: Lens, path: string): string {
 }
 
 function flowLensPriority(lens: Lens): number {
-  const index = DEFAULT_FLOW_LENS_PRIORITY.indexOf(lens);
-  return index >= 0 ? index : DEFAULT_FLOW_LENS_PRIORITY.length;
+  const index = FLOW_REVIEW_LENSES.indexOf(lens);
+  return index >= 0 ? index : FLOW_REVIEW_LENSES.length;
 }
 
 export function claimFlowReviewBlocks(
@@ -35,7 +39,7 @@ export function claimFlowReviewBlocks(
     );
     const desiredLenses = flow.concerns
       .filter((concern): concern is Lens =>
-        DEFAULT_FLOW_LENS_PRIORITY.includes(concern as Lens),
+        FLOW_REVIEW_LENSES.includes(concern as Lens),
       )
       .sort((a, b) => flowLensPriority(a) - flowLensPriority(b));
 

@@ -10,8 +10,14 @@ import {
   validateRemediationPlan,
   validateTriageResolution,
 } from "./remediationState.js";
-import { formatValidationIssues, isRecord } from "@audit-tools/shared";
 import {
+  type ValidationIssue,
+  formatValidationIssues,
+  isRecord,
+  pushValidationIssue,
+} from "@audit-tools/shared";
+import {
+  REMEDIATION_CLOSING_RESULT_CONTRACT_VERSION,
   REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
   REMEDIATION_STEP_CONTRACT_VERSION,
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
@@ -54,20 +60,21 @@ async function collectFiles(dir: string): Promise<string[]> {
 function validateStringArray(
   value: unknown,
   label: string,
-  issues: string[],
+  issues: ValidationIssue[],
 ): void {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    issues.push(`${label} must be an array of strings.`);
+    pushValidationIssue(issues, label, `${label} must be an array of strings.`);
   }
 }
 
-function validateCurrentStep(value: unknown, path: string, issues: string[]): void {
+function validateCurrentStep(value: unknown, path: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
   if (!isRecord(value)) {
-    issues.push(`${path} must be an object.`);
-    return;
+    pushValidationIssue(issues, path, `${path} must be an object.`);
+    return issues;
   }
   if (value.contract_version !== REMEDIATION_STEP_CONTRACT_VERSION) {
-    issues.push(`${path} has unsupported contract_version.`);
+    pushValidationIssue(issues, `${path}.contract_version`, `${path} has unsupported contract_version.`);
   }
   for (const key of [
     "step_kind",
@@ -79,130 +86,133 @@ function validateCurrentStep(value: unknown, path: string, issues: string[]): vo
     "stop_condition",
   ]) {
     if (typeof value[key] !== "string") {
-      issues.push(`${path}.${key} must be a string.`);
+      pushValidationIssue(issues, `${path}.${key}`, `${path}.${key} must be a string.`);
     }
   }
   validateStringArray(value.allowed_commands, `${path}.allowed_commands`, issues);
   if (!isRecord(value.artifact_paths)) {
-    issues.push(`${path}.artifact_paths must be an object.`);
+    pushValidationIssue(issues, `${path}.artifact_paths`, `${path}.artifact_paths must be an object.`);
   }
   if (typeof value.prompt_path === "string" && !existsSync(value.prompt_path)) {
-    issues.push(`${path}.prompt_path points to a missing file: ${value.prompt_path}.`);
+    pushValidationIssue(issues, `${path}.prompt_path`, `${path}.prompt_path points to a missing file: ${value.prompt_path}.`);
   }
+  return issues;
 }
 
 function validateDispatchPlan(
   value: unknown,
   path: string,
-  issues: string[],
-): { phase?: "document" | "implement"; resultPaths: string[] } {
+): { issues: ValidationIssue[]; phase?: "document" | "implement"; resultPaths: string[] } {
+  const issues: ValidationIssue[] = [];
   const resultPaths: string[] = [];
   if (!isRecord(value)) {
-    issues.push(`${path} must be an object.`);
-    return { resultPaths };
+    pushValidationIssue(issues, path, `${path} must be an object.`);
+    return { issues, resultPaths };
   }
   if (value.contract_version !== REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION) {
-    issues.push(`${path} has unsupported contract_version.`);
+    pushValidationIssue(issues, `${path}.contract_version`, `${path} has unsupported contract_version.`);
   }
   const phase =
     value.phase === "document" || value.phase === "implement"
       ? value.phase
       : undefined;
   if (!phase) {
-    issues.push(`${path}.phase must be document or implement.`);
+    pushValidationIssue(issues, `${path}.phase`, `${path}.phase must be document or implement.`);
   }
   for (const key of ["run_id", "repo_root", "artifacts_dir"]) {
     if (typeof value[key] !== "string") {
-      issues.push(`${path}.${key} must be a string.`);
+      pushValidationIssue(issues, `${path}.${key}`, `${path}.${key} must be a string.`);
     }
   }
   if (!Array.isArray(value.items)) {
-    issues.push(`${path}.items must be an array.`);
-    return { phase, resultPaths };
+    pushValidationIssue(issues, `${path}.items`, `${path}.items must be an array.`);
+    return { issues, phase, resultPaths };
   }
   for (const [index, item] of value.items.entries()) {
     const itemPath = `${path}.items[${index}]`;
     if (!isRecord(item)) {
-      issues.push(`${itemPath} must be an object.`);
+      pushValidationIssue(issues, itemPath, `${itemPath} must be an object.`);
       continue;
     }
     for (const key of ["task_id", "prompt_path", "result_path"]) {
       if (typeof item[key] !== "string") {
-        issues.push(`${itemPath}.${key} must be a string.`);
+        pushValidationIssue(issues, `${itemPath}.${key}`, `${itemPath}.${key} must be a string.`);
       }
     }
     if (phase === "document" && typeof item.finding_id !== "string") {
-      issues.push(`${itemPath}.finding_id must be a string for document dispatch.`);
+      pushValidationIssue(issues, `${itemPath}.finding_id`, `${itemPath}.finding_id must be a string for document dispatch.`);
     }
     if (phase === "implement" && typeof item.block_id !== "string") {
-      issues.push(`${itemPath}.block_id must be a string for implement dispatch.`);
+      pushValidationIssue(issues, `${itemPath}.block_id`, `${itemPath}.block_id must be a string for implement dispatch.`);
     }
     if (typeof item.prompt_path === "string" && !existsSync(item.prompt_path)) {
-      issues.push(`${itemPath}.prompt_path points to a missing file: ${item.prompt_path}.`);
+      pushValidationIssue(issues, `${itemPath}.prompt_path`, `${itemPath}.prompt_path points to a missing file: ${item.prompt_path}.`);
     }
     if (typeof item.result_path === "string") {
       resultPaths.push(item.result_path);
     }
   }
-  return { phase, resultPaths };
+  return { issues, phase, resultPaths };
 }
 
-function validateImplementWorkerResult(
+export function validateImplementWorkerResult(
   value: unknown,
   path: string,
-  issues: string[],
-): void {
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
   if (!isRecord(value)) {
-    issues.push(`${path} implement worker result must be an object.`);
-    return;
+    pushValidationIssue(issues, path, `${path} implement worker result must be an object.`);
+    return issues;
   }
   if (value.contract_version !== REMEDIATION_WORKER_RESULT_CONTRACT_VERSION) {
-    issues.push(`${path} implement worker result has unsupported contract_version.`);
+    pushValidationIssue(issues, `${path}.contract_version`, `${path} implement worker result has unsupported contract_version.`);
   }
   if (value.phase !== "implement") {
-    issues.push(`${path} implement worker result phase must be implement.`);
+    pushValidationIssue(issues, `${path}.phase`, `${path} implement worker result phase must be implement.`);
   }
   if (!Array.isArray(value.item_results)) {
-    issues.push(`${path} implement worker result item_results must be an array.`);
-    return;
+    pushValidationIssue(issues, `${path}.item_results`, `${path} implement worker result item_results must be an array.`);
+    return issues;
   }
   for (const [index, result] of value.item_results.entries()) {
     const resultPath = `${path}.item_results[${index}]`;
     if (!isRecord(result)) {
-      issues.push(`${resultPath} must be an object.`);
+      pushValidationIssue(issues, resultPath, `${resultPath} must be an object.`);
       continue;
     }
     if (typeof result.finding_id !== "string") {
-      issues.push(`${resultPath}.finding_id must be a string.`);
+      pushValidationIssue(issues, `${resultPath}.finding_id`, `${resultPath}.finding_id must be a string.`);
     }
     if (result.status !== "resolved" && result.status !== "blocked") {
-      issues.push(`${resultPath}.status must be resolved or blocked.`);
+      pushValidationIssue(issues, `${resultPath}.status`, `${resultPath}.status must be resolved or blocked.`);
     }
   }
+  return issues;
 }
 
-function validateClosingResult(value: unknown, path: string, issues: string[]): void {
+function validateClosingResult(value: unknown, path: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
   if (!isRecord(value)) {
-    issues.push(`${path} must be an object.`);
-    return;
+    pushValidationIssue(issues, path, `${path} must be an object.`);
+    return issues;
   }
-  if (value.contract_version !== "remediate-code-closing-result/v1alpha1") {
-    issues.push(`${path}.contract_version is unsupported.`);
+  if (value.contract_version !== REMEDIATION_CLOSING_RESULT_CONTRACT_VERSION) {
+    pushValidationIssue(issues, `${path}.contract_version`, `${path}.contract_version is unsupported.`);
   }
   if (typeof value.action !== "string") {
-    issues.push(`${path}.action must be a string.`);
+    pushValidationIssue(issues, `${path}.action`, `${path}.action must be a string.`);
   }
   if (!["success", "failed", "skipped"].includes(String(value.status))) {
-    issues.push(`${path}.status must be success, failed, or skipped.`);
+    pushValidationIssue(issues, `${path}.status`, `${path}.status must be success, failed, or skipped.`);
   }
   if (!Array.isArray(value.commands)) {
-    issues.push(`${path}.commands must be an array.`);
-    return;
+    pushValidationIssue(issues, `${path}.commands`, `${path}.commands must be an array.`);
+    return issues;
   }
   for (const [index, command] of value.commands.entries()) {
     const commandPath = `${path}.commands[${index}]`;
     if (!isRecord(command)) {
-      issues.push(`${commandPath} must be an object.`);
+      pushValidationIssue(issues, commandPath, `${commandPath} must be an object.`);
       continue;
     }
     validateStringArray(command.command, `${commandPath}.command`, issues);
@@ -210,34 +220,40 @@ function validateClosingResult(value: unknown, path: string, issues: string[]): 
       command.exit_code !== null &&
       (typeof command.exit_code !== "number" || !Number.isInteger(command.exit_code))
     ) {
-      issues.push(`${commandPath}.exit_code must be an integer or null.`);
+      pushValidationIssue(issues, `${commandPath}.exit_code`, `${commandPath}.exit_code must be an integer or null.`);
     }
   }
+  return issues;
 }
 
-function validateReportJson(value: unknown, path: string, issues: string[]): void {
+function validateReportJson(value: unknown, path: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
   if (!isRecord(value)) {
-    issues.push(`${path} must be an object.`);
-    return;
+    pushValidationIssue(issues, path, `${path} must be an object.`);
+    return issues;
   }
   for (const key of ["resolved", "inappropriate", "ignored"]) {
     if (!Array.isArray(value[key])) {
-      issues.push(`${path}.${key} must be an array.`);
+      pushValidationIssue(issues, `${path}.${key}`, `${path}.${key} must be an array.`);
     }
   }
   if (value.verified_no_change !== undefined && !Array.isArray(value.verified_no_change)) {
-    issues.push(`${path}.verified_no_change must be an array when present.`);
+    pushValidationIssue(issues, `${path}.verified_no_change`, `${path}.verified_no_change must be an array when present.`);
+  }
+  if (value.blocked !== undefined && !Array.isArray(value.blocked)) {
+    pushValidationIssue(issues, `${path}.blocked`, `${path}.blocked must be an array when present.`);
   }
   if (!isRecord(value.combined_test_result)) {
-    issues.push(`${path}.combined_test_result must be an object.`);
+    pushValidationIssue(issues, `${path}.combined_test_result`, `${path}.combined_test_result must be an object.`);
   } else if (typeof value.combined_test_result.passed !== "boolean") {
-    issues.push(`${path}.combined_test_result.passed must be a boolean.`);
+    pushValidationIssue(issues, `${path}.combined_test_result.passed`, `${path}.combined_test_result.passed must be a boolean.`);
   }
   if (!isRecord(value.closing_result)) {
-    issues.push(`${path}.closing_result must be an object.`);
+    pushValidationIssue(issues, `${path}.closing_result`, `${path}.closing_result must be an object.`);
   } else if (typeof value.closing_result.status !== "string") {
-    issues.push(`${path}.closing_result.status must be a string.`);
+    pushValidationIssue(issues, `${path}.closing_result.status`, `${path}.closing_result.status must be a string.`);
   }
+  return issues;
 }
 
 async function validateDispatchArtifacts(
@@ -253,11 +269,11 @@ async function validateDispatchArtifacts(
   for (const dispatchPlanPath of dispatchPlanPaths) {
     const plan = await readJsonForValidation(dispatchPlanPath, issues);
     if (!plan) continue;
-    const { phase, resultPaths } = validateDispatchPlan(
-      plan,
-      dispatchPlanPath,
-      issues,
-    );
+    const { issues: planIssues, phase, resultPaths } = validateDispatchPlan(plan, dispatchPlanPath);
+    const errorPlanIssues = planIssues.filter((issue) => issue.severity === "error");
+    if (errorPlanIssues.length > 0) {
+      issues.push(formatValidationIssues(errorPlanIssues));
+    }
     if (!phase) continue;
     for (const resultPath of resultPaths) {
       referencedResults.set(resultPath, phase);
@@ -272,7 +288,12 @@ async function validateDispatchArtifacts(
           issues.push(formatValidationIssues(resultIssues));
         }
       } else {
-        validateImplementWorkerResult(result, resultPath, issues);
+        const implIssues = validateImplementWorkerResult(result, resultPath).filter(
+          (issue) => issue.severity === "error",
+        );
+        if (implIssues.length > 0) {
+          issues.push(formatValidationIssues(implIssues));
+        }
       }
     }
   }
@@ -390,7 +411,12 @@ export async function validateArtifacts(
     issues,
   );
   if (currentStep) {
-    validateCurrentStep(currentStep, "current-step.json", issues);
+    const stepIssues = validateCurrentStep(currentStep, "current-step.json").filter(
+      (issue) => issue.severity === "error",
+    );
+    if (stepIssues.length > 0) {
+      issues.push(formatValidationIssues(stepIssues));
+    }
   }
 
   await validateDispatchArtifacts(artifactsDir, issues);
@@ -398,13 +424,23 @@ export async function validateArtifacts(
   const closingResultPath = join(artifactsDir, "remediation-closing-result.json");
   const closingResult = await readJsonForValidation(closingResultPath, issues);
   if (closingResult) {
-    validateClosingResult(closingResult, "remediation-closing-result.json", issues);
+    const closingIssues = validateClosingResult(closingResult, "remediation-closing-result.json").filter(
+      (issue) => issue.severity === "error",
+    );
+    if (closingIssues.length > 0) {
+      issues.push(formatValidationIssues(closingIssues));
+    }
   }
 
   const jsonReportPath = join(root, "remediation-report.json");
   const reportJson = await readJsonForValidation(jsonReportPath, issues);
   if (reportJson) {
-    validateReportJson(reportJson, "remediation-report.json", issues);
+    const reportIssues = validateReportJson(reportJson, "remediation-report.json").filter(
+      (issue) => issue.severity === "error",
+    );
+    if (reportIssues.length > 0) {
+      issues.push(formatValidationIssues(reportIssues));
+    }
   }
 
   return {

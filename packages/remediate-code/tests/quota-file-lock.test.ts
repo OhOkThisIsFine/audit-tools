@@ -10,6 +10,14 @@ import {
   FileLockTimeoutError,
 } from "@audit-tools/shared";
 
+const STALE_LOCK_MS = 30_000;
+
+async function makeStaleLockFile(lockPath: string, overshootMs = 5_000): Promise<void> {
+  await writeFile(lockPath, "", { flag: "wx" });
+  const staleTime = new Date(Date.now() - (STALE_LOCK_MS + overshootMs));
+  await utimes(lockPath, staleTime, staleTime);
+}
+
 const TEST_LOCK = join(tmpdir(), `test-lock-${process.pid}-${randomUUID()}.lock`);
 
 afterEach(async () => {
@@ -22,10 +30,12 @@ afterEach(async () => {
 
 describe("acquireLock / releaseLock", () => {
   it("acquires and releases a lock", async () => {
-    await acquireLock(TEST_LOCK);
+    const token = await acquireLock(TEST_LOCK);
+    expect(typeof token).toBe("string");
+    expect(token.length).toBeGreaterThan(0);
     const info = await stat(TEST_LOCK);
     expect(info.isFile()).toBe(true);
-    await releaseLock(TEST_LOCK);
+    await releaseLock(TEST_LOCK, token);
     await expect(stat(TEST_LOCK)).rejects.toThrow();
   });
 
@@ -36,8 +46,8 @@ describe("acquireLock / releaseLock", () => {
   });
 
   it("releaseLock is idempotent", async () => {
-    await releaseLock(TEST_LOCK);
-    await releaseLock(TEST_LOCK);
+    await releaseLock(TEST_LOCK, "any-token");
+    await releaseLock(TEST_LOCK, "any-token");
   });
 });
 
@@ -122,20 +132,16 @@ describe("DR-008 — fileLock stale-lock recovery", () => {
   it("stale lock (mtime > 30s ago) is cleaned up and subsequent acquire succeeds", async () => {
     const lockPath = join(tmpdir(), `dr008-stale-${randomUUID()}.lock`);
     // Create a lock file then backdate its mtime past the stale threshold
-    await writeFile(lockPath, "", { flag: "wx" });
-    const staleTime = new Date(Date.now() - 35_000);
-    await utimes(lockPath, staleTime, staleTime);
+    await makeStaleLockFile(lockPath);
 
     // acquireLock should detect stale lock, remove it, and succeed
-    await expect(acquireLock(lockPath, 3_000)).resolves.not.toThrow();
-    await releaseLock(lockPath);
+    const token = await acquireLock(lockPath, 3_000);
+    await releaseLock(lockPath, token);
   });
 
   it("concurrent callers racing on a stale lock: exactly one acquires without error", async () => {
     const lockPath = join(tmpdir(), `dr008-stale-race-${randomUUID()}.lock`);
-    await writeFile(lockPath, "", { flag: "wx" });
-    const staleTime = new Date(Date.now() - 35_000);
-    await utimes(lockPath, staleTime, staleTime);
+    await makeStaleLockFile(lockPath);
 
     // Launch 4 concurrent acquirers — only one removes the stale file; all others
     // retry, but all should ultimately succeed (serialized) without throwing.
@@ -149,21 +155,20 @@ describe("DR-008 — fileLock stale-lock recovery", () => {
 describe("DR-008 — fileLock crash-during-write (orphaned lock) survival", () => {
   it("orphaned lock file left past STALE_LOCK_MS does not permanently block callers", async () => {
     const lockPath = join(tmpdir(), `dr008-orphan-${randomUUID()}.lock`);
-    // Simulate a crash: create the lock file without ever releasing it
-    await writeFile(lockPath, "", { flag: "wx" });
-    // Advance mtime past the 30-second stale threshold
-    const staleTime = new Date(Date.now() - 31_000);
-    await utimes(lockPath, staleTime, staleTime);
+    // Simulate a crash: create the lock file without ever releasing it,
+    // with a minimal 1_000ms overshoot past STALE_LOCK_MS (intentionally
+    // distinct: this test covers the minimal-margin crash-survivor case).
+    await makeStaleLockFile(lockPath, 1_000);
 
     // A subsequent acquireLock should recover and succeed
-    await expect(acquireLock(lockPath, 3_000)).resolves.not.toThrow();
-    await releaseLock(lockPath);
+    const token = await acquireLock(lockPath, 3_000);
+    await releaseLock(lockPath, token);
   });
 
   it("releaseLock on an already-absent lock file (ENOENT) does not throw", async () => {
     const missingPath = join(tmpdir(), `dr008-enoent-${randomUUID()}.lock`);
     // File was never created; releaseLock must be idempotent
-    await expect(releaseLock(missingPath)).resolves.not.toThrow();
+    await expect(releaseLock(missingPath, "any-token")).resolves.not.toThrow();
   });
 });
 

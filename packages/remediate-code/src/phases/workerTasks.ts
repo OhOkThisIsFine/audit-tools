@@ -12,6 +12,7 @@ export interface CreateRemediationWorkerTaskInput {
   resultPath: string;
   timeoutMs?: number;
   maxRetries?: number;
+  workerCommand?: string[];
 }
 
 export function createRemediationWorkerTask({
@@ -22,6 +23,7 @@ export function createRemediationWorkerTask({
   resultPath,
   timeoutMs = DEFAULT_WORKER_TIMEOUT_MS,
   maxRetries,
+  workerCommand,
 }: CreateRemediationWorkerTaskInput): WorkerTask {
   return {
     contract_version: "remediation-worker/v1alpha1",
@@ -33,6 +35,7 @@ export function createRemediationWorkerTask({
     result_path: resultPath,
     timeout_ms: timeoutMs,
     ...(maxRetries === undefined ? {} : { max_retries: maxRetries }),
+    ...(workerCommand === undefined ? {} : { worker_command: workerCommand }),
   };
 }
 

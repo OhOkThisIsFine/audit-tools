@@ -131,6 +131,45 @@ describe("deduplicateCrossLensFindings", () => {
     expect(mergeMap.size).toBe(0);
   });
 
+  it("fully-tied duplicates (equal severity AND equal confidence) always keep the first-seen finding", () => {
+    // When both severity and confidence are identical, keepA = (aSev > bSev || (aSev === bSev && aConf >= bConf))
+    // evaluates to true because aConf >= bConf holds when they are equal. The inner loop iterates
+    // j > i, so A is always the first finding encountered — i.e., selection is stable by input order.
+    const a = () =>
+      makeFinding({
+        id: "A-001",
+        title: "Missing validation",
+        lens: "security",
+        severity: "medium",
+        confidence: "medium",
+        affected_files: [{ path: "src/foo.ts" }],
+      });
+    const b = () =>
+      makeFinding({
+        id: "B-001",
+        title: "Missing validation",
+        lens: "correctness",
+        severity: "medium",
+        confidence: "medium",
+        affected_files: [{ path: "src/foo.ts" }],
+      });
+
+    const forward = deduplicateCrossLensFindings([a(), b()]);
+    const reverse = deduplicateCrossLensFindings([b(), a()]);
+
+    // Both passes collapse to a single surviving finding.
+    expect(forward.findings).toHaveLength(1);
+    expect(reverse.findings).toHaveLength(1);
+
+    // Forward pass: A was at index 0, so A is kept and B is absorbed.
+    expect(forward.findings[0].id).toBe("A-001");
+    expect(forward.mergeMap.get("B-001")).toBe("A-001");
+
+    // Reverse pass: B was at index 0, so B is kept and A is absorbed.
+    expect(reverse.findings[0].id).toBe("B-001");
+    expect(reverse.mergeMap.get("A-001")).toBe("B-001");
+  });
+
   it("equal-severity duplicates pick a deterministic survivor regardless of input order", () => {
     // Same title+file, EQUAL severity — the existing tests only cover the
     // higher-severity survivor. With severity tied, confidence breaks the tie

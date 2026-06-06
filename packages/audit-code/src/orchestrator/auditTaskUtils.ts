@@ -1,17 +1,13 @@
 import type { AuditTask, Lens } from "../types.js";
+import { LENS_REGISTRY } from "../types.js";
 
-export const LENS_ORDER: Lens[] = [
-  "security",
-  "correctness",
-  "reliability",
-  "data_integrity",
-  "performance",
-  "operability",
-  "config_deployment",
-  "observability",
-  "maintainability",
-  "tests",
-];
+/** Lens ordering for task prioritization, derived from {@link LENS_REGISTRY}
+ * (sorted ascending by `order_weight`). Deriving this from the registry ensures
+ * every lens — including `architecture`, which was previously absent from the
+ * hardcoded array — is automatically included when added to the registry. */
+export const LENS_ORDER: Lens[] = [...LENS_REGISTRY]
+  .sort((a, b) => a.order_weight - b.order_weight)
+  .map((d) => d.id);
 
 export function priorityRank(priority: AuditTask["priority"]): number {
   switch (priority) {

@@ -37,7 +37,7 @@
       "enum": ["ready", "blocked", "complete"]
     },
     "prompt_path": { "type": "string" },
-    "run_id": { "type": ["string", "null"] },
+    "run_id": { "type": ["string", "null"], "description": "Identifies the active dispatch run. Null when no dispatch run is in progress (e.g., blocked, present_report, intake, synthesis, and other non-dispatch step kinds)." },
     "progress": {
       "type": "object",
       "required": ["summary"],
@@ -46,7 +46,13 @@
         "pending_packets": { "type": "integer" },
         "pending_tasks": { "type": "integer" },
         "completed_tasks": { "type": "integer" },
-        "wave_size": { "type": "integer" }
+        "wave_size": { "type": "integer" },
+        "phase": { "type": "string", "enum": ["canary", "fan_out"] },
+        "canary_packet_id": { "type": ["string", "null"] },
+        "agent_count": { "type": "integer" },
+        "wave_count": { "type": "integer" },
+        "confirmation_recommended": { "type": "boolean" },
+        "dispatch_summary": { "type": "string" }
       },
       "additionalProperties": false
     },

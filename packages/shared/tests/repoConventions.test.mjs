@@ -88,3 +88,47 @@ test("returns an empty object and empty block for a bare directory", async () =>
     assert.equal(formatRepoConventions(conventions), "");
   });
 });
+
+test("detectStyleFromSnippet: more single-quotes resolves to quote_style single", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "x" }));
+    await mkdir(join(dir, "src"), { recursive: true });
+    // More single-quotes: const x = 'hi'; // it's
+    await writeFile(join(dir, "src", "index.ts"), "const x = 'hi'; // it's\n");
+    const conventions = detectRepoConventions(dir);
+    assert.equal(conventions.quote_style, "single");
+  });
+});
+
+test("detectStyleFromSnippet: more double-quotes resolves to quote_style double", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "x" }));
+    await mkdir(join(dir, "src"), { recursive: true });
+    // More double-quotes: const x = "hi"; // say "hello"
+    await writeFile(join(dir, "src", "index.ts"), 'const x = "hi"; // say "hello"\n');
+    const conventions = detectRepoConventions(dir);
+    assert.equal(conventions.quote_style, "double");
+  });
+});
+
+test("detectStyleFromSnippet: equal quote counts tiebreaks to single", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "x" }));
+    await mkdir(join(dir, "src"), { recursive: true });
+    // One single, one double — equal counts → tiebreak to single
+    await writeFile(join(dir, "src", "index.ts"), "const a = 'x'; const b = \"y\";\n");
+    const conventions = detectRepoConventions(dir);
+    assert.equal(conventions.quote_style, "single");
+  });
+});
+
+test("detectStyleFromSnippet: no quote characters leaves quote_style undefined", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "x" }));
+    await mkdir(join(dir, "src"), { recursive: true });
+    // No quotes at all
+    await writeFile(join(dir, "src", "index.ts"), "const x = 1 + 2;\n");
+    const conventions = detectRepoConventions(dir);
+    assert.equal(conventions.quote_style, undefined);
+  });
+});

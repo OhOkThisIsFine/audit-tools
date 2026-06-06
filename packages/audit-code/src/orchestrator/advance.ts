@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditState } from "../types/auditState.js";
 import type { AuditResult } from "../types.js";
@@ -106,11 +107,16 @@ function formatExecutorFailure(
   );
 }
 
+function createCorrelationId(): string {
+  return randomUUID().replace(/-/g, "").slice(0, 8);
+}
+
 export async function advanceAudit(
   bundle: ArtifactBundle,
   options: AdvanceAuditOptions = {},
 ): Promise<AdvanceAuditResult> {
   const log = options.runLogger ?? RunLogger.disabled();
+  const correlationId = createCorrelationId();
   const decision = decideNextStep(bundle);
   const forcedExecutor = options.preferredExecutor ?? null;
   const selectedExecutor = forcedExecutor ?? decision.selected_executor;
@@ -121,6 +127,7 @@ export async function advanceAudit(
   log.event({
     phase: "advance",
     kind: "obligation",
+    correlationId,
     obligation: selectedObligation ?? undefined,
     note: decision.reason,
   });
@@ -150,6 +157,7 @@ export async function advanceAudit(
   log.event({
     phase: "advance",
     kind: "executor_start",
+    correlationId,
     obligation: selectedObligation ?? undefined,
     note: selectedExecutor,
   });
@@ -161,6 +169,7 @@ export async function advanceAudit(
         break;
       }
       case "structure_executor":
+        // root is intentionally optional: present → buildGraphBundleFromFs, absent → manifest-only buildGraphBundle
         run = await runStructureExecutor(bundle, options.root);
         break;
       case "graph_enrichment_executor":
@@ -242,7 +251,32 @@ export async function advanceAudit(
         run = runSyntaxResolutionExecutor(bundle, root);
         break;
       }
+      // `agent` is a host-delegation executor: its review tasks are dispatched
+      // to the active LLM agent (or a worker) and ingested via
+      // result_ingestion_executor — advanceAudit cannot complete them
+      // deterministically. Callers (next-step / run-to-completion) route it
+      // through host delegation before reaching here; if it is dispatched into
+      // advanceAudit directly it falls through to the default branch, which
+      // returns a no-progress "selected but not yet dispatched" handoff rather
+      // than throwing. An explicit case keeps the registry⇄switch invariant
+      // (executor-registry-sync) honest about agent being handled here.
+      case "agent":
       default: {
+        log.event({
+          phase: "advance",
+          kind: "error",
+          correlationId,
+          obligation: selectedObligation ?? undefined,
+          note: `Unrecognized executor: ${selectedExecutor}`,
+        });
+        log.event({
+          phase: "advance",
+          kind: "executor_end",
+          correlationId,
+          obligation: selectedObligation ?? undefined,
+          note: selectedExecutor,
+          duration_ms: Date.now() - executorStartedAt,
+        });
         const state = deriveAuditState(bundle);
         state.last_executor = selectedExecutor;
         state.last_obligation = selectedObligation ?? undefined;
@@ -265,6 +299,7 @@ export async function advanceAudit(
   log.event({
     phase: "advance",
     kind: "executor_end",
+    correlationId,
     obligation: selectedObligation ?? undefined,
     note: selectedExecutor,
     duration_ms: Date.now() - executorStartedAt,
@@ -273,6 +308,7 @@ export async function advanceAudit(
     log.event({
       phase: "advance",
       kind: "scope",
+      correlationId,
       obligation: selectedObligation ?? undefined,
       note:
         plannedScope.mode === "delta"
@@ -284,6 +320,7 @@ export async function advanceAudit(
     log.event({
       phase: "advance",
       kind: "artifact_write",
+      correlationId,
       obligation: selectedObligation ?? undefined,
       artifact,
     });

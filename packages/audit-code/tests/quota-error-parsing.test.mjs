@@ -140,31 +140,39 @@ test("handles JSON preceded by log text", () => {
 
 // ── computeCooldownUntil ────────────────────────────────────────────────────
 
+const FIXED_NOW = 1_000_000_000_000;
+
 test("computeCooldownUntil uses retryAfterMs when provided", () => {
-  const before = Date.now();
-  const result = computeCooldownUntil(5000);
-  const parsed = new Date(result).getTime();
-  assert.ok(parsed >= before + 4900);
-  assert.ok(parsed <= before + 5200);
+  const result = computeCooldownUntil(5000, undefined, FIXED_NOW);
+  assert.equal(result, new Date(FIXED_NOW + 5000).toISOString());
 });
 
 test("computeCooldownUntil uses default 60s when retryAfterMs is null", () => {
-  const before = Date.now();
-  const result = computeCooldownUntil(null);
-  const parsed = new Date(result).getTime();
-  assert.ok(parsed >= before + 59_000);
-  assert.ok(parsed <= before + 61_000);
+  const result = computeCooldownUntil(null, undefined, FIXED_NOW);
+  assert.equal(result, new Date(FIXED_NOW + 60_000).toISOString());
 });
 
 test("computeCooldownUntil uses custom default when provided", () => {
-  const before = Date.now();
-  const result = computeCooldownUntil(null, 120_000);
-  const parsed = new Date(result).getTime();
-  assert.ok(parsed >= before + 119_000);
-  assert.ok(parsed <= before + 121_000);
+  const result = computeCooldownUntil(null, 120_000, FIXED_NOW);
+  assert.equal(result, new Date(FIXED_NOW + 120_000).toISOString());
 });
 
 test("computeCooldownUntil returns valid ISO string", () => {
-  const result = computeCooldownUntil(1000);
+  const result = computeCooldownUntil(1000, undefined, FIXED_NOW);
   assert.ok(!Number.isNaN(new Date(result).getTime()));
+});
+
+test("computeCooldownUntil uses injected now for deterministic timestamp", () => {
+  assert.equal(
+    computeCooldownUntil(5000, undefined, FIXED_NOW),
+    new Date(1_000_000_005_000).toISOString(),
+  );
+  assert.equal(
+    computeCooldownUntil(null, 60_000, FIXED_NOW),
+    new Date(1_000_000_060_000).toISOString(),
+  );
+  assert.equal(
+    computeCooldownUntil(null, 10_000, FIXED_NOW),
+    new Date(1_000_000_010_000).toISOString(),
+  );
 });

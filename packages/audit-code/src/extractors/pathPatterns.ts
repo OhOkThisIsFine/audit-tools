@@ -234,9 +234,7 @@ export function isGeneratedTestArtifactPath(normalized: string): boolean {
 }
 
 export function isAuditArtifactPath(normalized: string): boolean {
-  return splitSegments(normalized).some((segment) =>
-    segment.startsWith(".audit-artifacts"),
-  );
+  return hasSegment(normalized, ".audit-artifacts");
 }
 
 export function isTestPath(normalized: string): boolean {
@@ -311,23 +309,11 @@ export function isSurfacePath(normalized: string): boolean {
 }
 
 export function isBackgroundSurfacePath(normalized: string): boolean {
-  return hasToken(normalized, ["worker", "workers", "job", "jobs"]);
+  return hasToken(normalized, CONCURRENCY_KEYWORDS);
 }
 
 export function isNetworkSurfacePath(normalized: string): boolean {
-  return (
-    hasSegment(normalized, "api") ||
-    hasToken(normalized, [
-      "route",
-      "routes",
-      "controller",
-      "controllers",
-      "handler",
-      "handlers",
-      "endpoint",
-      "endpoints",
-    ])
-  );
+  return hasSegment(normalized, "api") || hasToken(normalized, INTERFACE_KEYWORDS);
 }
 
 export function isBillingPath(normalized: string): boolean {

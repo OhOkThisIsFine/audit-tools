@@ -87,7 +87,7 @@ jobs:
         working-directory: .
         run: |
           set -euo pipefail
-          npm install -g npm@11.5.1
+          npm install -g npm@11.5.1 --ignore-scripts
       - name: Install monorepo dependencies
         timeout-minutes: 10
         shell: bash
@@ -161,7 +161,48 @@ jobs:
         run: |
           set -euo pipefail
           trap 'echo "::error::npm publish failed. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."' ERR
-          npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+          BACKOFF_SECONDS=(5 15)
+          for attempt in 1 2 3; do
+            if output=$(npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}" 2>&1); then
+              echo "$output"
+              echo "Publish succeeded on attempt ${attempt}."
+              {
+                echo "### Publish outcome"
+                echo "- status: published"
+                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "$output"
+            if echo "$output" | grep -qiE '(forbidden|cannot publish over|E403|you do not have permission)'; then
+              echo "::error::npm publish failed with a permanent error (attempt ${attempt}). Not retrying."
+              {
+                echo "### Publish outcome"
+                echo "- status: failed"
+                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+                echo "- attempts: ${attempt}"
+                echo "- reason: permanent npm publish error"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              SLEEP="${BACKOFF_SECONDS[$(( attempt - 1 ))]}"
+              echo "::warning::npm publish failed on attempt ${attempt} (transient). Retrying in ${SLEEP}s..."
+              sleep "$SLEEP"
+            fi
+          done
+          echo "::error::npm publish failed after 3 attempts. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."
+          {
+            echo "### Publish outcome"
+            echo "- status: failed"
+            echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+            echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+            echo "- attempts: 3"
+            echo "- reason: exhausted npm publish retries"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
       - name: Dry run publish (no upload)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}
         timeout-minutes: 10
@@ -169,9 +210,15 @@ jobs:
         run: |
           set -euo pipefail
           npm publish --dry-run --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+          {
+            echo "### Publish outcome"
+            echo "- status: dry-run (no upload)"
+            echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+            echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Verify published package is installable
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
-        timeout-minutes: 5
+        timeout-minutes: 8
         shell: bash
         run: |
           set -euo pipefail
@@ -180,18 +227,32 @@ jobs:
           PUBLISH_TAG="${{ steps.publish_meta.outputs.publish_tag }}"
           echo "Verifying ${PACKAGE_NAME}@${PACKAGE_VERSION} (tag: ${PUBLISH_TAG})..."
           START_TIME=$(date +%s)
-          for attempt in {1..24}; do
+          for attempt in {1..12}; do
             if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version; then
               ELAPSED=$(( $(date +%s) - START_TIME ))
               echo "Registry propagation succeeded after ${attempt} attempt(s) (${ELAPSED}s)."
+              {
+                echo "### Registry propagation"
+                echo "- status: verified"
+                echo "- attempts: ${attempt}"
+                echo "- elapsed: ${ELAPSED}s"
+              } >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             ELAPSED=$(( $(date +%s) - START_TIME ))
-            if [[ "$attempt" -lt 24 ]]; then
+            if [[ "$attempt" -lt 12 ]]; then
               echo "Pending after attempt ${attempt} (${ELAPSED}s); retrying in 10s..."
               sleep 10
             fi
           done
+          ELAPSED=$(( $(date +%s) - START_TIME ))
+          echo "Registry propagation failed after ${attempt} attempt(s) (${ELAPSED}s elapsed). ${PACKAGE_NAME}@${PACKAGE_VERSION} not visible on registry."
+          {
+            echo "### Registry propagation"
+            echo "- status: failed"
+            echo "- attempts: ${attempt}"
+            echo "- elapsed: ${ELAPSED}s"
+          } >> "$GITHUB_STEP_SUMMARY"
           exit 1
       - name: Upload npm debug logs
         if: ${{ failure() }}
@@ -254,7 +315,7 @@ jobs:
         working-directory: .
         run: |
           set -euo pipefail
-          npm install -g npm@11.5.1
+          npm install -g npm@11.5.1 --ignore-scripts
       - name: Install monorepo dependencies
         timeout-minutes: 10
         shell: bash
@@ -328,7 +389,48 @@ jobs:
         run: |
           set -euo pipefail
           trap 'echo "::error::npm publish failed. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."' ERR
-          npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+          BACKOFF_SECONDS=(5 15)
+          for attempt in 1 2 3; do
+            if output=$(npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}" 2>&1); then
+              echo "$output"
+              echo "Publish succeeded on attempt ${attempt}."
+              {
+                echo "### Publish outcome"
+                echo "- status: published"
+                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "$output"
+            if echo "$output" | grep -qiE '(forbidden|cannot publish over|E403|you do not have permission)'; then
+              echo "::error::npm publish failed with a permanent error (attempt ${attempt}). Not retrying."
+              {
+                echo "### Publish outcome"
+                echo "- status: failed"
+                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+                echo "- attempts: ${attempt}"
+                echo "- reason: permanent npm publish error"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              SLEEP="${BACKOFF_SECONDS[$(( attempt - 1 ))]}"
+              echo "::warning::npm publish failed on attempt ${attempt} (transient). Retrying in ${SLEEP}s..."
+              sleep "$SLEEP"
+            fi
+          done
+          echo "::error::npm publish failed after 3 attempts. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."
+          {
+            echo "### Publish outcome"
+            echo "- status: failed"
+            echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+            echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+            echo "- attempts: 3"
+            echo "- reason: exhausted npm publish retries"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
       - name: Dry run publish (no upload)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}
         timeout-minutes: 10
@@ -336,9 +438,15 @@ jobs:
         run: |
           set -euo pipefail
           npm publish --dry-run --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+          {
+            echo "### Publish outcome"
+            echo "- status: dry-run (no upload)"
+            echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+            echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Verify published package is installable
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
-        timeout-minutes: 5
+        timeout-minutes: 8
         shell: bash
         run: |
           set -euo pipefail
@@ -351,6 +459,12 @@ jobs:
             if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version; then
               ELAPSED=$(( $(date +%s) - START_TIME ))
               echo "Registry propagation succeeded after ${attempt} attempt(s) (${ELAPSED}s)."
+              {
+                echo "### Registry propagation"
+                echo "- status: verified"
+                echo "- attempts: ${attempt}"
+                echo "- elapsed: ${ELAPSED}s"
+              } >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             ELAPSED=$(( $(date +%s) - START_TIME ))
@@ -359,6 +473,14 @@ jobs:
               sleep 10
             fi
           done
+          ELAPSED=$(( $(date +%s) - START_TIME ))
+          echo "Registry propagation failed after ${attempt} attempt(s) (${ELAPSED}s elapsed). ${PACKAGE_NAME}@${PACKAGE_VERSION} not visible on registry."
+          {
+            echo "### Registry propagation"
+            echo "- status: failed"
+            echo "- attempts: ${attempt}"
+            echo "- elapsed: ${ELAPSED}s"
+          } >> "$GITHUB_STEP_SUMMARY"
           exit 1
       - name: Upload npm debug logs
         if: ${{ failure() }}
@@ -413,6 +535,7 @@ jobs:
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.RELEASE_NODE_VERSION }}
+          cache: npm
           registry-url: https://registry.npmjs.org
       - name: Upgrade npm for trusted publishing
         timeout-minutes: 5
@@ -420,7 +543,7 @@ jobs:
         working-directory: .
         run: |
           set -euo pipefail
-          npm install -g npm@11.5.1
+          npm install -g npm@11.5.1 --ignore-scripts
       - name: Install monorepo dependencies
         timeout-minutes: 10
         shell: bash
@@ -486,7 +609,48 @@ jobs:
         run: |
           set -euo pipefail
           trap 'echo "::error::npm publish failed. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."' ERR
-          npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+          BACKOFF_SECONDS=(5 15)
+          for attempt in 1 2 3; do
+            if output=$(npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}" 2>&1); then
+              echo "$output"
+              echo "Publish succeeded on attempt ${attempt}."
+              {
+                echo "### Publish outcome"
+                echo "- status: published"
+                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "$output"
+            if echo "$output" | grep -qiE '(forbidden|cannot publish over|E403|you do not have permission)'; then
+              echo "::error::npm publish failed with a permanent error (attempt ${attempt}). Not retrying."
+              {
+                echo "### Publish outcome"
+                echo "- status: failed"
+                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+                echo "- attempts: ${attempt}"
+                echo "- reason: permanent npm publish error"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              SLEEP="${BACKOFF_SECONDS[$(( attempt - 1 ))]}"
+              echo "::warning::npm publish failed on attempt ${attempt} (transient). Retrying in ${SLEEP}s..."
+              sleep "$SLEEP"
+            fi
+          done
+          echo "::error::npm publish failed after 3 attempts. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."
+          {
+            echo "### Publish outcome"
+            echo "- status: failed"
+            echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+            echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+            echo "- attempts: 3"
+            echo "- reason: exhausted npm publish retries"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
       - name: Dry run publish (no upload)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}
         timeout-minutes: 10
@@ -494,9 +658,15 @@ jobs:
         run: |
           set -euo pipefail
           npm publish --dry-run --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+          {
+            echo "### Publish outcome"
+            echo "- status: dry-run (no upload)"
+            echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
+            echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Verify published package is installable
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
-        timeout-minutes: 5
+        timeout-minutes: 8
         shell: bash
         run: |
           set -euo pipefail
@@ -509,6 +679,12 @@ jobs:
             if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version; then
               ELAPSED=$(( $(date +%s) - START_TIME ))
               echo "Registry propagation succeeded after ${attempt} attempt(s) (${ELAPSED}s)."
+              {
+                echo "### Registry propagation"
+                echo "- status: verified"
+                echo "- attempts: ${attempt}"
+                echo "- elapsed: ${ELAPSED}s"
+              } >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             ELAPSED=$(( $(date +%s) - START_TIME ))
@@ -517,6 +693,14 @@ jobs:
               sleep 10
             fi
           done
+          ELAPSED=$(( $(date +%s) - START_TIME ))
+          echo "Registry propagation failed after ${attempt} attempt(s) (${ELAPSED}s elapsed). ${PACKAGE_NAME}@${PACKAGE_VERSION} not visible on registry."
+          {
+            echo "### Registry propagation"
+            echo "- status: failed"
+            echo "- attempts: ${attempt}"
+            echo "- elapsed: ${ELAPSED}s"
+          } >> "$GITHUB_STEP_SUMMARY"
           exit 1
       - name: Upload npm debug logs
         if: ${{ failure() }}

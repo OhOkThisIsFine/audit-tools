@@ -51,6 +51,8 @@ class SpawnRunController {
   private closeSignal: NodeJS.Signals | null = null;
   private logsEnded = false;
   private stdoutLineBuf = "";
+  private resolve!: (result: LaunchFreshSessionResult) => void;
+  private reject!: (error: Error) => void;
 
   constructor(
     private readonly command: string,
@@ -60,11 +62,17 @@ class SpawnRunController {
     private readonly spawnProcess: typeof spawn,
     openWriteStream: typeof createWriteStream,
     private readonly killGraceMs: number,
-    private readonly resolve: (result: LaunchFreshSessionResult) => void,
-    private readonly reject: (error: Error) => void,
   ) {
     this.stdoutLog = openWriteStream(input.stdoutPath, { flags: "a" });
     this.stderrLog = openWriteStream(input.stderrPath, { flags: "a" });
+  }
+
+  run(): Promise<LaunchFreshSessionResult> {
+    return new Promise<LaunchFreshSessionResult>((resolve, reject) => {
+      this.resolve = resolve;
+      this.reject = reject;
+      this.start();
+    });
   }
 
   private clearTimers(): void {
@@ -154,16 +162,19 @@ class SpawnRunController {
     if (this.input.uiMode === "visible") {
       process.stderr.write(message);
     }
-    // Structured heartbeat telemetry is emitted on EVERY heartbeat, regardless
-    // of whether a progress consumer is attached, so a long-running provider
-    // always leaves a machine-parseable liveness trace on stderr (OBS-101).
-    process.stderr.write(
+    // Structured heartbeat telemetry is routed through the run log file so it
+    // is correlated, machine-parseable, and durable. It is also echoed to
+    // process.stderr when uiMode === 'visible' for console visibility.
+    const structuredHeartbeat =
       JSON.stringify({
         type: "provider_heartbeat",
         runId: this.input.runId,
         elapsedMs,
-      }) + "\n",
-    );
+      }) + "\n";
+    this.writeLog(this.stderrLog, structuredHeartbeat);
+    if (this.input.uiMode === "visible") {
+      process.stderr.write(structuredHeartbeat);
+    }
     // The onProgress callback stays consumer-gated: only fire it when wired.
     if (this.input.onProgress) {
       this.input.onProgress({
@@ -305,18 +316,14 @@ export async function spawnLoggedCommand(
     resolvedArgs = wrapped.args;
   }
 
-  return await new Promise<LaunchFreshSessionResult>((resolve, reject) => {
-    const controller = new SpawnRunController(
-      resolvedCommand,
-      resolvedArgs,
-      input,
-      env,
-      spawnProcess,
-      openWriteStream,
-      killGraceMs,
-      resolve,
-      reject,
-    );
-    controller.start();
-  });
+  const controller = new SpawnRunController(
+    resolvedCommand,
+    resolvedArgs,
+    input,
+    env,
+    spawnProcess,
+    openWriteStream,
+    killGraceMs,
+  );
+  return controller.run();
 }

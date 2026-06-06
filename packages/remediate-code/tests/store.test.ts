@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { StateStore, RemediationState } from "../src/state/store.js";
 import { rm, mkdir, writeFile, utimes, readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -52,7 +52,10 @@ describe("StateStore", () => {
       "complete",
       "pending",
     ];
-    await Promise.all(statuses.map((status) => store.saveState({ status })));
+    const results = await Promise.allSettled(
+      statuses.map((status) => store.saveState({ status })),
+    );
+    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
 
     // Final state must be one of the valid statuses — no corruption, no crash
     const loaded = await store.loadState();
@@ -69,6 +72,30 @@ describe("StateStore", () => {
     await expect(store.saveState({ status: "pending" })).rejects.toThrow(
       /Timed out waiting to write/,
     );
+  }, 15_000);
+
+  it("logs lock retry attempts with the configured correlation id", async () => {
+    const lockPath = join(TEST_DIR, "state.lock");
+    await writeFile(lockPath, String(process.pid), "utf8");
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+
+    try {
+      const store = new StateStore(TEST_DIR, {}, "trace-1234");
+      await expect(store.saveState({ status: "pending" })).rejects.toThrow(
+        /Timed out waiting to write/,
+      );
+
+      expect(debug).toHaveBeenCalled();
+      const events = debug.mock.calls.map(([line]) => JSON.parse(String(line)));
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          tag: "remediate_state_lock_retry",
+          correlationId: "trace-1234",
+        }),
+      );
+    } finally {
+      debug.mockRestore();
+    }
   }, 15_000);
 
   it("reclaims a stale lock file from a crashed process", async () => {

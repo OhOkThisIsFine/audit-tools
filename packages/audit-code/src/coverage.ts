@@ -5,6 +5,10 @@ import type {
   Lens,
 } from "./types.js";
 
+function buildFileIndex(matrix: CoverageMatrix): Map<string, CoverageFileRecord> {
+  return new Map(matrix.files.map((f) => [f.path, f]));
+}
+
 export function createCoverageMatrix(paths: string[]): CoverageMatrix {
   return {
     files: paths.map((path) => ({
@@ -23,7 +27,7 @@ export function markExcludedPath(
   path: string,
   classificationStatus: string,
 ): void {
-  const record = matrix.files.find((file) => file.path === path);
+  const record = buildFileIndex(matrix).get(path);
   if (!record) return;
 
   record.classification_status = classificationStatus;
@@ -39,7 +43,7 @@ export function applyUnitCoverage(
   unitId: string,
   requiredLenses: Lens[],
 ): void {
-  const record = matrix.files.find((file) => file.path === path);
+  const record = buildFileIndex(matrix).get(path);
   if (!record || record.audit_status === "excluded") return;
 
   if (!record.unit_ids.includes(unitId)) {
@@ -56,8 +60,9 @@ export function applyFileCoverage(
   matrix: CoverageMatrix,
   fileCoverage: FileCoverageRecord[],
 ): void {
+  const index = buildFileIndex(matrix);
   for (const coverage of fileCoverage) {
-    const record = matrix.files.find((file) => file.path === coverage.path);
+    const record = index.get(coverage.path);
     if (!record || record.audit_status === "excluded") continue;
 
     if (

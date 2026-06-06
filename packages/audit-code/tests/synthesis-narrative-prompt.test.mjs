@@ -1,0 +1,195 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+const { renderSynthesisNarrativePrompt } = await import(
+  "../src/reporting/synthesisNarrativePrompt.ts"
+);
+
+// MAX_RENDERED_FINDINGS is 120 (internal constant in synthesisNarrativePrompt.ts).
+const MAX_RENDERED_FINDINGS = 120;
+
+function makeFinding(i, overrides = {}) {
+  return {
+    id: `F-${String(i).padStart(4, "0")}`,
+    title: `Finding title ${i}`,
+    severity: "medium",
+    confidence: "high",
+    lens: "correctness",
+    summary: `Summary of finding ${i}.`,
+    affected_files: [{ path: `src/file${i}.ts`, line_start: i }],
+    evidence: [],
+    category: "test",
+    ...overrides,
+  };
+}
+
+function makeReport(findings, workBlockCount = 1) {
+  return {
+    contract_version: "audit-findings/v1alpha1",
+    generated_at: "2026-01-01T00:00:00.000Z",
+    summary: {
+      finding_count: findings.length,
+      work_block_count: workBlockCount,
+    },
+    findings,
+    work_blocks: [],
+  };
+}
+
+// ── Normal path (findings under MAX_RENDERED_FINDINGS) ──────────────────────
+
+test("renderSynthesisNarrativePrompt renders header and finding summaries for a small report", () => {
+  const findings = [
+    makeFinding(1, {
+      id: "TST-0001",
+      title: "Weak token check",
+      summary: "Token boundary is weak.",
+      affected_files: [{ path: "src/auth.ts", line_start: 10 }],
+      lens: "security",
+      severity: "high",
+    }),
+  ];
+  const report = makeReport(findings, 2);
+  const prompt = renderSynthesisNarrativePrompt(report);
+
+  assert.match(prompt, /# Synthesis narrative/, "prompt contains header");
+  assert.match(prompt, /- Findings: 1/, "prompt shows finding count");
+  assert.match(prompt, /- Work blocks: 2/, "prompt shows work block count");
+  assert.match(prompt, /## Findings/, "prompt contains findings section header");
+  // The finding summary line must include id, severity, lens, title, and summary.
+  assert.match(prompt, /TST-0001/, "prompt includes finding id");
+  assert.match(prompt, /high/, "prompt includes severity");
+  assert.match(prompt, /security/, "prompt includes lens");
+  assert.match(prompt, /Weak token check/, "prompt includes title");
+  assert.match(prompt, /Token boundary is weak\./, "prompt includes summary");
+  assert.match(prompt, /src\/auth\.ts/, "prompt includes affected file path");
+  assert.doesNotMatch(prompt, /more findings/, "no overflow note for small report");
+});
+
+// ── Overflow path ────────────────────────────────────────────────────────────
+
+test("renderSynthesisNarrativePrompt includes overflow note when findings exceed MAX_RENDERED_FINDINGS (120)", () => {
+  const TOTAL = MAX_RENDERED_FINDINGS + 15; // 135
+  const findings = Array.from({ length: TOTAL }, (_, i) => makeFinding(i + 1));
+  const report = makeReport(findings);
+  const prompt = renderSynthesisNarrativePrompt(report);
+
+  const overflowNote = `... and ${TOTAL - MAX_RENDERED_FINDINGS} more findings (see audit-findings.json).`;
+  assert.ok(prompt.includes(overflowNote), `overflow note present: "${overflowNote}"`);
+
+  // Count rendered finding lines (lines starting with "- F-")
+  const findingLines = prompt.split("\n").filter((l) => /^- F-/.test(l));
+  assert.equal(findingLines.length, MAX_RENDERED_FINDINGS, "exactly 120 finding lines rendered");
+
+  // The 121st finding's title should not appear in the prompt.
+  assert.doesNotMatch(prompt, new RegExp(`Finding title ${MAX_RENDERED_FINDINGS + 1}`),
+    "121st finding title is not rendered");
+});
+
+// ── Empty findings ───────────────────────────────────────────────────────────
+
+test("renderSynthesisNarrativePrompt renders sentinel line when findings array is empty", () => {
+  const report = makeReport([]);
+  const prompt = renderSynthesisNarrativePrompt(report);
+
+  assert.match(prompt, /\(no findings were recorded\)/, "sentinel line present");
+  assert.doesNotMatch(prompt, /more findings/, "no overflow note when findings empty");
+});
+
+// ── console.warn on truncation (OBS-32acf269) ────────────────────────────────
+
+/** Capture and restore console.warn for a synchronous body. */
+function withCapturedWarnSync(fn) {
+  const original = console.warn;
+  const calls = [];
+  console.warn = (...args) => calls.push(args.map(String).join(" "));
+  try {
+    const result = fn();
+    return { result, warnCalls: calls };
+  } finally {
+    console.warn = original;
+  }
+}
+
+test("renderSynthesisNarrativePrompt emits console.warn when findings exceed MAX_RENDERED_FINDINGS", () => {
+  const TOTAL = MAX_RENDERED_FINDINGS + 1; // 121
+  const findings = Array.from({ length: TOTAL }, (_, i) => makeFinding(i + 1));
+  const report = makeReport(findings);
+
+  const { warnCalls } = withCapturedWarnSync(() =>
+    renderSynthesisNarrativePrompt(report),
+  );
+
+  assert.equal(warnCalls.length, 1, "console.warn called exactly once");
+  assert.match(warnCalls[0], /synthesisNarrative: truncated/, "warn message mentions truncation");
+  assert.ok(
+    warnCalls[0].includes(String(MAX_RENDERED_FINDINGS)),
+    `warn includes the cap (${MAX_RENDERED_FINDINGS})`,
+  );
+  assert.ok(
+    warnCalls[0].includes(String(TOTAL)),
+    `warn includes the total count (${TOTAL})`,
+  );
+});
+
+test("renderSynthesisNarrativePrompt does NOT emit console.warn for exactly MAX_RENDERED_FINDINGS findings", () => {
+  const findings = Array.from({ length: MAX_RENDERED_FINDINGS }, (_, i) =>
+    makeFinding(i + 1),
+  );
+  const report = makeReport(findings);
+
+  const { warnCalls } = withCapturedWarnSync(() =>
+    renderSynthesisNarrativePrompt(report),
+  );
+
+  assert.equal(warnCalls.length, 0, "no console.warn when at exactly the cap");
+});
+
+test("renderSynthesisNarrativePrompt does NOT emit console.warn for fewer than MAX_RENDERED_FINDINGS findings", () => {
+  const findings = Array.from({ length: 5 }, (_, i) => makeFinding(i + 1));
+  const report = makeReport(findings);
+
+  const { warnCalls } = withCapturedWarnSync(() =>
+    renderSynthesisNarrativePrompt(report),
+  );
+
+  assert.equal(warnCalls.length, 0, "no console.warn for small finding list");
+});
+
+test("renderSynthesisNarrativePrompt still contains overflow note when console.warn fires", () => {
+  const TOTAL = MAX_RENDERED_FINDINGS + 10; // 130
+  const findings = Array.from({ length: TOTAL }, (_, i) => makeFinding(i + 1));
+  const report = makeReport(findings);
+
+  let prompt;
+  withCapturedWarnSync(() => {
+    prompt = renderSynthesisNarrativePrompt(report);
+  });
+
+  const overflowNote = `... and ${TOTAL - MAX_RENDERED_FINDINGS} more findings (see audit-findings.json).`;
+  assert.ok(prompt.includes(overflowNote), "overflow note still present in returned prompt");
+});
+
+// ── summarizeFinding truncation ───────────────────────────────────────────────
+
+test("summarizeFinding truncates affected_files to 4 paths", () => {
+  const finding = makeFinding(99, {
+    affected_files: [
+      { path: "src/a.ts", line_start: 1 },
+      { path: "src/b.ts", line_start: 2 },
+      { path: "src/c.ts", line_start: 3 },
+      { path: "src/d.ts", line_start: 4 },
+      { path: "src/e.ts", line_start: 5 },
+      { path: "src/f.ts", line_start: 6 },
+    ],
+  });
+  const report = makeReport([finding]);
+  const prompt = renderSynthesisNarrativePrompt(report);
+
+  assert.match(prompt, /src\/a\.ts/, "first file appears");
+  assert.match(prompt, /src\/b\.ts/, "second file appears");
+  assert.match(prompt, /src\/c\.ts/, "third file appears");
+  assert.match(prompt, /src\/d\.ts/, "fourth file appears");
+  assert.doesNotMatch(prompt, /src\/e\.ts/, "fifth file does not appear (truncated)");
+  assert.doesNotMatch(prompt, /src\/f\.ts/, "sixth file does not appear (truncated)");
+});

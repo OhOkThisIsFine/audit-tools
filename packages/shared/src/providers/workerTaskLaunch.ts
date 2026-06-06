@@ -6,13 +6,16 @@ export interface WorkerTaskTimeout {
 }
 
 /**
- * Minimal worker-task shape the shared provider classes need: a `worker_command`
- * argv plus an optional per-task `timeout_ms`. Both orchestrators' richer
- * `WorkerTask` types structurally satisfy this, so the shared providers depend on
- * this narrow interface rather than importing either package's full task type.
+ * Minimal worker-task shape the shared provider classes need: an optional
+ * `worker_command` argv plus an optional per-task `timeout_ms`. Both
+ * orchestrators' richer `WorkerTask` types structurally satisfy this, so the
+ * shared providers depend on this narrow interface rather than importing either
+ * package's full task type. `worker_command` is optional because remediation
+ * tasks dispatch through a provider template and omit it; consumers that require
+ * it (e.g. LocalSubprocessProvider) guard for its absence explicitly.
  */
 export interface WorkerTaskWithCommand extends WorkerTaskTimeout {
-  worker_command: string[];
+  worker_command?: string[];
 }
 
 /**

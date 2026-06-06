@@ -109,17 +109,20 @@ export function resolveAnalyzerDep(
 ): ResolvedAnalyzerDep {
   const { name, version } = parseAnalyzerSpec(pkg);
 
-  const repoPackageDir = join(repoRoot, "node_modules", ...name.split("/"));
+  const repoPackageDir = packageDirIn(repoRoot, name);
   if (isInstalledPackage(repoPackageDir)) {
+    console.error("[analyzerDeps] resolved %s via repo: %s", pkg, repoPackageDir);
     return { via: "repo", path: repoPackageDir };
   }
 
   const cacheRoot = options.cacheRoot ?? analyzerCacheRoot();
   const cached = findInCache(name, version, cacheRoot);
   if (cached) {
+    console.error("[analyzerDeps] resolved %s via cache: %s", pkg, cached);
     return { via: "cache", path: cached };
   }
 
+  console.error("[analyzerDeps] %s not found in repo or cache (absent)", pkg);
   return { via: "absent" };
 }
 
@@ -162,11 +165,18 @@ export function installToCache(
         "utf8",
       );
     }
+    console.error("[analyzerDeps] installing %s into cache: %s", pkgAtVersion, installDir);
     const result = run(
       ["npm", "install", pkgAtVersion, "--no-audit", "--no-fund", "--save-exact"],
       installDir,
     );
     if (result.status !== 0) {
+      console.error(
+        "[analyzerDeps] npm install %s failed (exit %d): %s",
+        pkgAtVersion,
+        result.status,
+        result.stderr.trim() || "(no stderr)",
+      );
       return {
         ok: false,
         error: result.stderr.trim() || `npm install exited with ${result.status}`,
@@ -174,10 +184,21 @@ export function installToCache(
     }
     const packageDir = packageDirIn(installDir, name);
     if (!isInstalledPackage(packageDir)) {
+      console.error(
+        "[analyzerDeps] npm install %s exited 0 but package directory is absent: %s",
+        pkgAtVersion,
+        packageDir,
+      );
       return { ok: false, error: "package not present after install" };
     }
+    console.error("[analyzerDeps] installed %s -> %s", pkgAtVersion, packageDir);
     return { ok: true, path: packageDir };
   } catch (error) {
+    console.error(
+      "[analyzerDeps] installToCache threw for %s: %s",
+      pkgAtVersion,
+      error instanceof Error ? error.message : String(error),
+    );
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }

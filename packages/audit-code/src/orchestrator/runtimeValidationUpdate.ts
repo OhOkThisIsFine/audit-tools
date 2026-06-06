@@ -21,9 +21,11 @@ export function updateRuntimeValidationReport(
 ): RuntimeValidationReport {
   const validTaskIds = new Set(tasks.tasks.map((task) => task.id));
   const merged = new Map<string, RuntimeValidationResult>();
+  const staleIds = new Set<string>();
 
   for (const result of existing.results) {
     if (!validTaskIds.has(result.task_id)) {
+      staleIds.add(result.task_id);
       continue;
     }
     merged.set(result.task_id, normalizeResult(result));
@@ -31,6 +33,7 @@ export function updateRuntimeValidationReport(
 
   for (const update of updates.results) {
     if (!validTaskIds.has(update.task_id)) {
+      staleIds.add(update.task_id);
       continue;
     }
 
@@ -49,6 +52,14 @@ export function updateRuntimeValidationReport(
       ],
       notes: [...new Set([...(prior.notes ?? []), ...(update.notes ?? [])])],
     });
+  }
+
+  if (staleIds.size > 0) {
+    console.warn(
+      "[runtimeValidationUpdate] Dropped %d stale result(s) not in task manifest: %s",
+      staleIds.size,
+      [...staleIds].join(", "),
+    );
   }
 
   for (const task of tasks.tasks) {

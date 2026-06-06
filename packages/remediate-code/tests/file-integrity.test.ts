@@ -147,6 +147,91 @@ describe("hashFile / hashFileSync on a missing path", () => {
   });
 });
 
+describe("reportHashIoError structured JSON stderr (OBS-05407856)", () => {
+  beforeEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(TEST_DIR, { recursive: true });
+  });
+  afterEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("emits a structured JSON line to stderr for non-ENOENT errors (EACCES via EISDIR)", async () => {
+    // Use a directory path so readFile throws a non-ENOENT error (EISDIR).
+    const rel = "dir-as-file";
+    await mkdir(join(TEST_DIR, rel), { recursive: true });
+    const findings = [mkFinding(rel)];
+    findings[0].affected_files[0].hash_at_plan_time = "deadbeef";
+
+    const written: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    const spy = (chunk: unknown, ...args: unknown[]): boolean => {
+      written.push(String(chunk));
+      return original(chunk, ...(args as Parameters<typeof original>));
+    };
+    process.stderr.write = spy as typeof process.stderr.write;
+    try {
+      await checkAffectedFileIntegrity(TEST_DIR, findings);
+    } finally {
+      process.stderr.write = original;
+    }
+
+    expect(written.length).toBeGreaterThan(0);
+    const parsed = JSON.parse(written[0]);
+    expect(parsed.level).toBe("warn");
+    expect(parsed.event).toBe("file_integrity_io_error");
+    // code is EISDIR or similar non-ENOENT
+    expect(parsed.code).not.toBeNull();
+    expect(parsed.code).not.toBe("ENOENT");
+  });
+
+  it("the emitted JSON includes a ts field that is a valid ISO 8601 timestamp string", async () => {
+    const rel = "dir-for-ts-check";
+    await mkdir(join(TEST_DIR, rel), { recursive: true });
+    const findings = [mkFinding(rel)];
+    findings[0].affected_files[0].hash_at_plan_time = "deadbeef";
+
+    const written: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    const spy = (chunk: unknown, ...args: unknown[]): boolean => {
+      written.push(String(chunk));
+      return original(chunk, ...(args as Parameters<typeof original>));
+    };
+    process.stderr.write = spy as typeof process.stderr.write;
+    try {
+      await checkAffectedFileIntegrity(TEST_DIR, findings);
+    } finally {
+      process.stderr.write = original;
+    }
+
+    expect(written.length).toBeGreaterThan(0);
+    const parsed = JSON.parse(written[0]);
+    expect(typeof parsed.ts).toBe("string");
+    expect(isNaN(Date.parse(parsed.ts))).toBe(false);
+  });
+
+  it("does NOT call process.stderr.write when the error code is ENOENT", async () => {
+    // hashFile on a path that does not exist returns undefined silently (ENOENT guard).
+    const missing = join(TEST_DIR, "not-here.ts");
+    const written: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    const spy = (chunk: unknown, ...args: unknown[]): boolean => {
+      written.push(String(chunk));
+      return original(chunk, ...(args as Parameters<typeof original>));
+    };
+    process.stderr.write = spy as typeof process.stderr.write;
+    try {
+      await hashFile(missing);
+    } finally {
+      process.stderr.write = original;
+    }
+
+    // Nothing should have been written (existsSync guard returns early before readFile)
+    const ioLines = written.filter((l) => l.includes("file_integrity_io_error"));
+    expect(ioLines.length).toBe(0);
+  });
+});
+
 describe("checkAffectedFileIntegrity missing-file classification (P2-OBSERVABILITY contract)", () => {
   beforeEach(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });

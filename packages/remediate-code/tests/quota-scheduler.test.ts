@@ -8,6 +8,10 @@ import {
   computeRampUpConcurrency,
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
+  DEFAULT_AGENT_HOST_CONCURRENCY,
+  DEFAULT_SAFETY_MARGIN,
+  BASE_COOLDOWN_MS,
+  MAX_COOLDOWN_MS,
 } from "@audit-tools/shared";
 
 const baseConfig: SessionConfig = {
@@ -69,7 +73,7 @@ describe("scheduleWave (quota module)", () => {
       hostModel: "test/model",
       requestedConcurrency: 20,
     });
-    expect(result.wave_size).toBeLessThanOrEqual(4);
+    expect(result.wave_size).toBeLessThanOrEqual(Math.floor(5 * DEFAULT_SAFETY_MARGIN));
   });
 
   it("respects cooldown — forces wave_size=1", () => {
@@ -218,7 +222,7 @@ describe("scheduleWave (quota module)", () => {
       hostModel: null,
       requestedConcurrency: 10,
     });
-    expect(agentHost.wave_size).toBe(8);
+    expect(agentHost.wave_size).toBe(DEFAULT_AGENT_HOST_CONCURRENCY);
 
     // A genuinely unknown (non-agent-host) provider stays conservative at 1.
     const unknown = scheduleWave({
@@ -309,11 +313,13 @@ describe("computeRampUpConcurrency", () => {
     expect(computeRampUpConcurrency(entry, 24)).toBe(3);
   });
 
-  it("does not ramp up with failures present", () => {
+  it("does not ramp up when the top bucket carries meaningful failure evidence", () => {
     const entry = makeEntry({
       buckets: {
         "1": { success_weight: 5, failure_weight: 0 },
-        "2": { success_weight: 5, failure_weight: 0.1 },
+        // failure_weight >= MIN_EVIDENCE_WEIGHT (0.5) counts as real evidence, so
+        // bucket 2 stays maxSafe (5 > 1.0) but ramp-up to 3 is suppressed.
+        "2": { success_weight: 5, failure_weight: 1.0 },
       },
     });
     expect(computeRampUpConcurrency(entry, 24)).toBe(2);
@@ -331,7 +337,7 @@ describe("computeRampUpConcurrency", () => {
 
 describe("computeBackoffCooldownMs", () => {
   it("returns 60s for first 429", () => {
-    expect(computeBackoffCooldownMs(1)).toBe(60_000);
+    expect(computeBackoffCooldownMs(1)).toBe(BASE_COOLDOWN_MS);
   });
 
   it("doubles for each consecutive 429", () => {
@@ -340,7 +346,7 @@ describe("computeBackoffCooldownMs", () => {
   });
 
   it("caps at 15 minutes", () => {
-    expect(computeBackoffCooldownMs(10)).toBe(15 * 60_000);
+    expect(computeBackoffCooldownMs(10)).toBe(MAX_COOLDOWN_MS);
   });
 });
 

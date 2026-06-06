@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { resolveExecArgv, quoteForCmd, shellQuote, platformCommand } = await import(
+const { resolveExecArgv, quoteForCmd, shellQuote, platformCommand, runTracked } = await import(
   "../src/tooling/exec.ts"
 );
 
@@ -68,4 +68,28 @@ test("resolveExecArgv applies opentoken wrapping per platform", () => {
 
 test("resolveExecArgv tolerates an empty argv", () => {
   assert.deepEqual(resolveExecArgv([]), []);
+});
+
+// ── runTracked result fields ──────────────────────────────────────────────────
+
+test("runTracked result includes cwd when option is provided", () => {
+  const result = runTracked(["node", "--version"], { cwd: process.cwd() });
+  assert.equal(result.cwd, process.cwd());
+});
+
+test("runTracked result has cwd undefined when no cwd option is passed", () => {
+  const result = runTracked(["node", "--version"]);
+  assert.equal(result.cwd, undefined);
+});
+
+test("runTracked result includes duration_ms as a non-negative number", () => {
+  const result = runTracked(["node", "--version"]);
+  assert.equal(typeof result.duration_ms, "number");
+  assert.ok(result.duration_ms >= 0);
+});
+
+test("runTracked empty-argv early-return path includes duration_ms of 0", () => {
+  const result = runTracked([]);
+  assert.equal(result.duration_ms, 0);
+  assert.equal(result.cwd, undefined);
 });

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertMatchesJsonSchema } from "./helpers/jsonSchemaAssert.mjs";
+import { assertMatchesJsonSchema as assertMatchesJsonSchemaRaw } from "./helpers/jsonSchemaAssert.mjs";
 import { buildUnitManifest } from "../src/orchestrator/unitBuilder.ts";
 import { buildRiskRegister } from "../src/extractors/risk.ts";
 import { buildSurfaceManifest } from "../src/extractors/surfaces.ts";
@@ -20,9 +20,37 @@ async function loadSchema(name) {
   );
 }
 
-test("jsonSchemaAssert resolves external refs and enforces bounded keywords", async () => {
+// Published schemas cross-reference sibling files (e.g. the shared
+// lens.schema.json enum, pulled in via {"$ref":"lens.schema.json"}). The
+// validator resolves external refs through a registry, so load every schema
+// file once and inject it into all assertions below. Individual callers can
+// still add or override registry entries.
+async function loadAllSchemas() {
+  const { readdir } = await import("node:fs/promises");
+  const schemasDir = join(repoRoot, "schemas");
+  const files = (await readdir(schemasDir)).filter((f) =>
+    f.endsWith(".schema.json"),
+  );
+  const registry = {};
+  for (const file of files) {
+    registry[file] = JSON.parse(
+      await readFile(join(schemasDir, file), "utf8"),
+    );
+  }
+  return registry;
+}
+
+const SCHEMA_REGISTRY = await loadAllSchemas();
+
+function assertMatchesJsonSchema(schema, value, rootName, options = {}) {
+  return assertMatchesJsonSchemaRaw(schema, value, rootName, {
+    ...options,
+    schemaRegistry: { ...SCHEMA_REGISTRY, ...(options.schemaRegistry ?? {}) },
+  });
+}
+
+test("jsonSchemaAssert rejects invalid enum via $ref resolution", async () => {
   const auditResultSchema = await loadSchema("audit_result.schema.json");
-  const auditResultsSchema = await loadSchema("audit_results.schema.json");
   const findingSchema = await loadSchema("finding.schema.json");
   const auditTaskSchema = await loadSchema("audit_task.schema.json");
 
@@ -60,6 +88,12 @@ test("jsonSchemaAssert resolves external refs and enforces bounded keywords", as
       ),
     /auditResult\.findings\[0\]\.lens must be one of/i,
   );
+});
+
+test("jsonSchemaAssert accepts empty findings array", async () => {
+  const auditResultSchema = await loadSchema("audit_result.schema.json");
+  const findingSchema = await loadSchema("finding.schema.json");
+  const auditTaskSchema = await loadSchema("audit_task.schema.json");
 
   assert.doesNotThrow(() =>
     assertMatchesJsonSchema(
@@ -81,6 +115,12 @@ test("jsonSchemaAssert resolves external refs and enforces bounded keywords", as
       },
     ),
   );
+});
+
+test("jsonSchemaAssert accepts result with verification shape", async () => {
+  const auditResultSchema = await loadSchema("audit_result.schema.json");
+  const findingSchema = await loadSchema("finding.schema.json");
+  const auditTaskSchema = await loadSchema("audit_task.schema.json");
 
   assert.doesNotThrow(() =>
     assertMatchesJsonSchema(
@@ -121,6 +161,12 @@ test("jsonSchemaAssert resolves external refs and enforces bounded keywords", as
       },
     ),
   );
+});
+
+test("jsonSchemaAssert accepts finding with category more specific than lens", async () => {
+  const auditResultSchema = await loadSchema("audit_result.schema.json");
+  const findingSchema = await loadSchema("finding.schema.json");
+  const auditTaskSchema = await loadSchema("audit_task.schema.json");
 
   assert.doesNotThrow(() =>
     assertMatchesJsonSchema(
@@ -154,6 +200,13 @@ test("jsonSchemaAssert resolves external refs and enforces bounded keywords", as
       },
     ),
   );
+});
+
+test("jsonSchemaAssert enforces array type for auditResults and rejects plain object", async () => {
+  const auditResultSchema = await loadSchema("audit_result.schema.json");
+  const auditResultsSchema = await loadSchema("audit_results.schema.json");
+  const findingSchema = await loadSchema("finding.schema.json");
+  const auditTaskSchema = await loadSchema("audit_task.schema.json");
 
   assert.doesNotThrow(() =>
     assertMatchesJsonSchema(
@@ -202,7 +255,9 @@ test("jsonSchemaAssert resolves external refs and enforces bounded keywords", as
       ),
     /auditResults must be of type array/i,
   );
+});
 
+test("jsonSchemaAssert enforces strict property constraints (pattern, bounds, additionalProperties)", () => {
   const strictSchema = {
     $id: "strict-test.schema.json",
     type: "object",
@@ -247,10 +302,12 @@ test("jsonSchemaAssert resolves external refs and enforces bounded keywords", as
         count: 3,
         tags: [],
         extras: { note: 7 },
-    }),
+      }),
     /must match pattern|must be <= 2|must have at least 1 item|must be of type string/i,
   );
+});
 
+test("jsonSchemaAssert validates allOf and oneOf combinators", () => {
   const combinatorSchema = {
     type: "object",
     required: ["mode"],
@@ -1122,4 +1179,239 @@ test("audit task schema rejects nonpositive line range bounds", async () => {
       new RegExp(`auditTask\\.line_ranges\\[0\\]\\.${field} must be >= 1`, "i"),
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// ARC-ebbd5420: step_contract schema progress sub-object must accept all
+// StepProgress fields that the TypeScript interface defines.
+// ---------------------------------------------------------------------------
+
+test("step_contract schema validates progress with all StepProgress fields (ARC-ebbd5420)", async () => {
+  const stepContractSchema = await loadSchema("step_contract.schema.json");
+
+  const baseStep = {
+    contract_version: "audit-code-step/v1alpha1",
+    step_kind: "dispatch_review",
+    prompt_path: "steps/current-prompt.md",
+    status: "ready",
+    run_id: "run-1",
+    allowed_commands: ["audit-code"],
+    stop_condition: "Call audit-code next-step when done.",
+    repo_root: "/repo",
+    artifacts_dir: ".audit-artifacts",
+    artifact_paths: {},
+  };
+
+  assert.doesNotThrow(
+    () =>
+      assertMatchesJsonSchema(
+        stepContractSchema,
+        {
+          ...baseStep,
+          progress: {
+            summary: "Dispatching canary packet",
+            phase: "canary",
+            canary_packet_id: "pkt-001",
+          },
+        },
+        "stepCanary",
+      ),
+    "progress with phase=canary and canary_packet_id should pass schema",
+  );
+
+  assert.doesNotThrow(
+    () =>
+      assertMatchesJsonSchema(
+        stepContractSchema,
+        {
+          ...baseStep,
+          progress: {
+            summary: "Fan-out in progress",
+            phase: "fan_out",
+            agent_count: 8,
+            wave_count: 2,
+            confirmation_recommended: false,
+            dispatch_summary: "8 agents across 2 waves",
+          },
+        },
+        "stepFanOut",
+      ),
+    "progress with phase=fan_out and all fan-out fields should pass schema",
+  );
+
+  assert.doesNotThrow(
+    () =>
+      assertMatchesJsonSchema(
+        stepContractSchema,
+        {
+          ...baseStep,
+          progress: { summary: "Pending" },
+        },
+        "stepMinimalProgress",
+      ),
+    "progress with only the required summary field should pass schema",
+  );
+
+  assert.throws(
+    () =>
+      assertMatchesJsonSchema(
+        stepContractSchema,
+        {
+          ...baseStep,
+          progress: {
+            summary: "Bad progress",
+            unrecognized_field: true,
+          },
+        },
+        "stepBadProgress",
+      ),
+    /unrecognized_field is not allowed by schema/i,
+    "unrecognized progress field should be rejected (additionalProperties: false)",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// DAT-3fb8a01d: blind_spot_register schema must reject invalid lens names in
+// suggested_lenses, accepting only the canonical 11-value set.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// DAT-db770721: lens enum must be defined only once, in lens.schema.json;
+// no other schema file should contain an inline enum array with "correctness".
+// ---------------------------------------------------------------------------
+
+test("lens enum is defined only once across all schemas (DAT-db770721)", async () => {
+  const { readdir } = await import("node:fs/promises");
+  const schemasDir = join(repoRoot, "schemas");
+  const schemaFiles = (await readdir(schemasDir)).filter((f) =>
+    f.endsWith(".schema.json"),
+  );
+
+  const EXPECTED_LENSES = [
+    "correctness",
+    "architecture",
+    "maintainability",
+    "security",
+    "reliability",
+    "performance",
+    "data_integrity",
+    "tests",
+    "operability",
+    "config_deployment",
+    "observability",
+  ];
+
+  // lens.schema.json must exist and hold the canonical 11-value enum
+  const lensSchema = JSON.parse(
+    await readFile(join(schemasDir, "lens.schema.json"), "utf8"),
+  );
+  assert.deepEqual(
+    lensSchema.enum,
+    EXPECTED_LENSES,
+    "lens.schema.json must contain exactly the 11 canonical lens values",
+  );
+
+  // No other schema file may embed an inline enum containing "correctness"
+  function containsInlineLensEnum(obj) {
+    if (typeof obj !== "object" || obj === null) return false;
+    if (
+      Array.isArray(obj.enum) &&
+      obj.enum.includes("correctness")
+    ) {
+      return true;
+    }
+    for (const value of Object.values(obj)) {
+      if (containsInlineLensEnum(value)) return true;
+    }
+    return false;
+  }
+
+  for (const file of schemaFiles) {
+    if (file === "lens.schema.json") continue;
+    const parsed = JSON.parse(
+      await readFile(join(schemasDir, file), "utf8"),
+    );
+    assert.ok(
+      !containsInlineLensEnum(parsed),
+      `${file} must not contain an inline lens enum array — use {"$ref":"lens.schema.json"} instead`,
+    );
+  }
+});
+
+test("blind_spot_register schema rejects invalid lens names in suggested_lenses (DAT-3fb8a01d)", async () => {
+  const blindSpotSchema = await loadSchema("blind_spot_register.schema.json");
+
+  const baseEntry = {
+    id: "bs-1",
+    title: "Unobserved queue flush",
+    kind: "dynamic-behavior",
+    summary: "Queue flush behavior is not observable under static analysis.",
+    evidence: ["No metrics emitted on flush path."],
+  };
+
+  // All 11 canonical lens values pass
+  assert.doesNotThrow(() =>
+    assertMatchesJsonSchema(
+      blindSpotSchema,
+      {
+        items: [
+          {
+            ...baseEntry,
+            suggested_lenses: [
+              "correctness",
+              "architecture",
+              "maintainability",
+              "security",
+              "reliability",
+              "performance",
+              "data_integrity",
+              "tests",
+              "operability",
+              "config_deployment",
+              "observability",
+            ],
+          },
+        ],
+      },
+      "blindSpotRegister",
+    ),
+  );
+
+  // Empty suggested_lenses array passes (field is optional; empty array is valid)
+  assert.doesNotThrow(() =>
+    assertMatchesJsonSchema(
+      blindSpotSchema,
+      {
+        items: [{ ...baseEntry, suggested_lenses: [] }],
+      },
+      "blindSpotRegister",
+    ),
+  );
+
+  // suggested_lenses omitted entirely passes (field is optional)
+  assert.doesNotThrow(() =>
+    assertMatchesJsonSchema(
+      blindSpotSchema,
+      { items: [{ ...baseEntry }] },
+      "blindSpotRegister",
+    ),
+  );
+
+  // Unrecognized lens name fails
+  assert.throws(
+    () =>
+      assertMatchesJsonSchema(
+        blindSpotSchema,
+        {
+          items: [
+            {
+              ...baseEntry,
+              suggested_lenses: ["nonexistent_lens"],
+            },
+          ],
+        },
+        "blindSpotRegister",
+      ),
+    /blindSpotRegister\.items\[0\]\.suggested_lenses\[0\] must be one of/i,
+  );
 });

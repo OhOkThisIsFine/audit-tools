@@ -154,3 +154,96 @@ test("provider-assisted bridge writes synthetic results for valid agent tasks", 
     );
   });
 });
+
+async function buildValidTaskFixture(dir) {
+  const repoRoot = join(dir, "repo");
+  await mkdir(repoRoot, { recursive: true });
+  await writeFile(join(repoRoot, "src.ts"), "export const x = 1;\n", "utf8");
+
+  const tasksPath = join(dir, "pending-audit-tasks.json");
+  await writeFile(
+    tasksPath,
+    JSON.stringify(
+      [
+        {
+          task_id: "task-1",
+          unit_id: "unit-1",
+          pass_id: "pass:correctness",
+          lens: "correctness",
+          file_paths: ["src.ts"],
+          rationale: "fixture",
+          priority: "high",
+        },
+      ],
+      null,
+      2,
+    ),
+  );
+
+  const resultPath = join(dir, "result.json");
+  const auditResultsPath = join(dir, "run-results.json");
+  return { repoRoot, tasksPath, resultPath, auditResultsPath };
+}
+
+// ── worker command failure modes (TST-bb375ff3) ────────────────────────────
+
+test("provider-assisted bridge fails clearly when worker command exits non-zero", async () => {
+  await withTempDir(async (dir) => {
+    const { repoRoot, tasksPath, resultPath, auditResultsPath } = await buildValidTaskFixture(dir);
+
+    const taskPath = join(dir, "task.json");
+    await writeFile(
+      taskPath,
+      JSON.stringify(
+        {
+          contract_version: "audit-code-worker/v1alpha1",
+          run_id: "run-1",
+          repo_root: repoRoot,
+          artifacts_dir: dir,
+          obligation_id: "audit_tasks_completed",
+          preferred_executor: "agent",
+          result_path: resultPath,
+          worker_command: [process.execPath, "-e", "process.exit(1)"],
+          audit_results_path: auditResultsPath,
+          pending_audit_tasks_path: tasksPath,
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = await runBridge(taskPath);
+    assert.notEqual(result.code, 0, "bridge should exit non-zero when worker exits with code 1");
+  });
+});
+
+test("provider-assisted bridge fails clearly when worker command cannot be spawned", async () => {
+  await withTempDir(async (dir) => {
+    const { repoRoot, tasksPath, resultPath, auditResultsPath } = await buildValidTaskFixture(dir);
+
+    const taskPath = join(dir, "task.json");
+    await writeFile(
+      taskPath,
+      JSON.stringify(
+        {
+          contract_version: "audit-code-worker/v1alpha1",
+          run_id: "run-1",
+          repo_root: repoRoot,
+          artifacts_dir: dir,
+          obligation_id: "audit_tasks_completed",
+          preferred_executor: "agent",
+          result_path: resultPath,
+          worker_command: ["/nonexistent-executable-path-xyz"],
+          audit_results_path: auditResultsPath,
+          pending_audit_tasks_path: tasksPath,
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = await runBridge(taskPath);
+    assert.notEqual(result.code, 0, "bridge should exit non-zero when worker command cannot be spawned");
+    assert.match(result.stderr, /ENOENT|spawn|failed/i, "stderr should indicate the spawn failure");
+  });
+});

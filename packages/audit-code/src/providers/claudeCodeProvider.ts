@@ -39,7 +39,8 @@ export class ClaudeCodeProvider implements FreshSessionProvider {
         ? ["--dangerously-skip-permissions"]
         : []),
     ];
-    return await this.launchCommand(
+    process.stderr.write(JSON.stringify({ event: "provider_launch", provider: this.name, runId: input.runId, obligationId: input.obligationId, promptPath: input.promptPath, taskPath: input.taskPath }) + "\n");
+    const result = await this.launchCommand(
       command,
       args,
       applyWorkerTaskLaunchSettings(input, task),
@@ -49,5 +50,7 @@ export class ClaudeCodeProvider implements FreshSessionProvider {
         opentokenCommand: this.opentoken.command,
       },
     );
+    process.stderr.write(JSON.stringify({ event: "provider_done", provider: this.name, runId: input.runId, obligationId: input.obligationId, accepted: result.accepted, exitCode: result.exitCode ?? null }) + "\n");
+    return result;
   }
 }

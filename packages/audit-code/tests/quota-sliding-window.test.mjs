@@ -76,6 +76,36 @@ test("handles concurrency greater than task count", async () => {
   assert.equal(results[1].value, 2);
 });
 
+test("fires onComplete callback for a rejected task", async () => {
+  const completed = [];
+  const tasks = [
+    () => Promise.reject(new Error("boom")),
+  ];
+  await runSlidingWindow(tasks, 1, (index, result) => {
+    completed.push({ index, result });
+  });
+  assert.equal(completed.length, 1, "onComplete should fire once for the rejected task");
+  assert.equal(completed[0].index, 0);
+  assert.equal(completed[0].result.status, "rejected");
+  assert.equal(completed[0].result.reason.message, "boom");
+});
+
+test("handles invalid concurrency (zero and negative values)", async () => {
+  // With concurrency=0: Math.min(0, N) = 0, so no initial runners are launched.
+  // The results array is pre-allocated to length N but all entries stay undefined.
+  const tasks = [() => Promise.resolve("x"), () => Promise.resolve("y")];
+
+  const zero = await runSlidingWindow(tasks, 0);
+  assert.equal(zero.results.length, 2, "results array should have length equal to task count");
+  assert.equal(zero.results[0], undefined, "no tasks should execute with concurrency=0");
+  assert.equal(zero.results[1], undefined, "no tasks should execute with concurrency=0");
+
+  const neg = await runSlidingWindow(tasks, -1);
+  assert.equal(neg.results.length, 2, "results array should have length equal to task count");
+  assert.equal(neg.results[0], undefined, "no tasks should execute with concurrency=-1");
+  assert.equal(neg.results[1], undefined, "no tasks should execute with concurrency=-1");
+});
+
 test("sliding window launches new worker as soon as one completes", async () => {
   const timeline = [];
   const tasks = [

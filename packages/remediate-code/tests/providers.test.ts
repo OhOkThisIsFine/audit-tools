@@ -11,7 +11,6 @@ import { ClaudeCodeProvider } from "../src/providers/claudeCodeProvider.js";
 import { OpenCodeProvider } from "../src/providers/opencodeProvider.js";
 import {
   SubprocessTemplateProvider,
-  VSCodeTaskProvider,
   LocalSubprocessProvider,
 } from "@audit-tools/shared";
 import { quoteForCmd } from "../src/utils/commands.js";
@@ -86,6 +85,7 @@ async function withProviderFiles(
     input: LaunchFreshSessionInput;
     prompt: string;
   }) => Promise<void>,
+  workerCommand?: string[],
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "provider-launch-"));
   const prompt = "large prompt body";
@@ -93,21 +93,16 @@ async function withProviderFiles(
     const promptPath = join(dir, "prompt.md");
     const taskPath = join(dir, "task.json");
     await writeFile(promptPath, prompt, "utf8");
-    await writeFile(
-      taskPath,
-      JSON.stringify({
-        contract_version: "remediation-worker/v1alpha1",
-        run_id: "test-run",
-        repo_root: dir,
-        artifacts_dir: dir,
-        obligation_id: "F-001",
-        preferred_executor: "test",
-        result_path: join(dir, "result.json"),
-        worker_command: ["node", "worker.js"],
-        timeout_ms: 1234,
-      }),
-      "utf8",
-    );
+    const task = createRemediationWorkerTask({
+      runId: "test-run",
+      options: { root: dir, artifactsDir: dir },
+      obligationId: "F-001",
+      preferredExecutor: "test",
+      resultPath: join(dir, "result.json"),
+      timeoutMs: 1234,
+      ...(workerCommand !== undefined ? { workerCommand } : {}),
+    });
+    await writeFile(taskPath, JSON.stringify(task), "utf8");
     await fn({
       dir,
       prompt,
@@ -427,47 +422,59 @@ describe("provider launch methods", () => {
     });
   });
 
-  it("SubprocessTemplateProvider quotes embedded placeholders and includes warning context", async () => {
+  it("SubprocessTemplateProvider quotes embedded placeholders and routes unknown placeholder to RunLogger", async () => {
     await withProviderFiles(async ({ input, dir }) => {
+      const { mkdtempSync, readFileSync, rmSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      const { RunLogger } = await import("@audit-tools/shared");
+      const logDir = mkdtempSync(join(tmpdir(), "stp-remediate-test-"));
+      const logPath = join(logDir, "run.log");
+      const logger = new RunLogger(logPath);
+
       const calls: any[] = [];
-      const warnings: string[] = [];
-      const originalWarn = console.warn;
-      console.warn = (message?: unknown) => warnings.push(String(message));
-      try {
-        const provider = new SubprocessTemplateProvider(
-          {
-            command_template: [
-              "sh",
-              "-lc",
-              "tool --root={repoRoot} --missing={unknown}",
-            ],
-          },
-          "custom-template",
-          async (command, args, launchInput) => {
-            calls.push({ command, args, launchInput });
-            return { accepted: true, exitCode: 0 };
-          },
-        );
+      const provider = new SubprocessTemplateProvider(
+        {
+          command_template: [
+            "sh",
+            "-lc",
+            "tool --root={repoRoot} --missing={unknown}",
+          ],
+        },
+        "custom-template",
+        async (command, args, launchInput) => {
+          calls.push({ command, args, launchInput });
+          return { accepted: true, exitCode: 0 };
+        },
+        {},
+        logger,
+      );
 
-        await provider.launch(input);
+      await provider.launch(input);
 
-        expect(calls[0].command).toBe("sh");
-        expect(calls[0].args[1]).toContain(`--root=${expectedShellQuoted(dir)}`);
-        expect(calls[0].launchInput.timeoutMs).toBe(1234);
-        expect(warnings[0]).toContain("provider=custom-template");
-        expect(warnings[0]).toContain("runId=test-run");
-        expect(warnings[0]).toContain("taskPath=");
-      } finally {
-        console.warn = originalWarn;
-      }
+      expect(calls[0].command).toBe("sh");
+      expect(calls[0].args[1]).toContain(`--root=${expectedShellQuoted(dir)}`);
+      expect(calls[0].launchInput.timeoutMs).toBe(1234);
+
+      const lines = readFileSync(logPath, "utf8").trim().split("\n");
+      expect(lines.length).toBe(1);
+      const event = JSON.parse(lines[0]);
+      expect(event.kind).toBe("error");
+      expect(event.provider).toBe("custom-template");
+      expect(event.note).toContain("applyTemplate: unknown placeholder {unknown}");
+      expect(event.note).toContain("runId=test-run");
+      expect(event.note).toContain("taskPath=");
+
+      rmSync(logDir, { recursive: true, force: true });
     });
   });
 
-  it("VSCodeTaskProvider delegates launch through the subprocess template provider", async () => {
+  it("SubprocessTemplateProvider (vscode-task name) delegates launch through the template", async () => {
     await withProviderFiles(async ({ input }) => {
       const calls: any[] = [];
-      const provider = new VSCodeTaskProvider(
+      const provider = new SubprocessTemplateProvider(
         { command_template: ["cmd", "{taskPath}"] },
+        "vscode-task",
         async (command, args, launchInput) => {
           calls.push({ command, args, launchInput });
           return { accepted: true, exitCode: 0 };
@@ -479,6 +486,102 @@ describe("provider launch methods", () => {
       expect(calls[0].command).toBe("cmd");
       expect(calls[0].args).toEqual([input.taskPath]);
       expect(calls[0].launchInput.timeoutMs).toBe(1234);
+    });
+  });
+
+  it("ClaudeCodeProvider passes opentoken config to launchCommand when enabled", async () => {
+    const savedClaudeCode = process.env.CLAUDECODE;
+    delete process.env.CLAUDECODE;
+    try {
+      await withProviderFiles(async ({ input }) => {
+        const calls: any[] = [];
+        const provider = new ClaudeCodeProvider(
+          { command: "claude-test" },
+          async (...args: any[]) => {
+            calls.push(args);
+            return { accepted: true, exitCode: 0 };
+          },
+          { enabled: true, command: "opentoken" },
+        );
+
+        await provider.launch(input);
+
+        expect(calls[0][4]).toMatchObject({
+          opentoken: true,
+          opentokenCommand: "opentoken",
+        });
+      });
+    } finally {
+      if (savedClaudeCode !== undefined) process.env.CLAUDECODE = savedClaudeCode;
+    }
+  });
+
+  it("ClaudeCodeProvider passes empty opentoken defaults to launchCommand", async () => {
+    const savedClaudeCode = process.env.CLAUDECODE;
+    delete process.env.CLAUDECODE;
+    try {
+      await withProviderFiles(async ({ input }) => {
+        const calls: any[] = [];
+        const provider = new ClaudeCodeProvider(
+          { command: "claude-test" },
+          async (...args: any[]) => {
+            calls.push(args);
+            return { accepted: true, exitCode: 0 };
+          },
+          {},
+        );
+
+        await provider.launch(input);
+
+        expect(calls[0][4]).toMatchObject({
+          opentoken: undefined,
+          opentokenCommand: undefined,
+        });
+      });
+    } finally {
+      if (savedClaudeCode !== undefined) process.env.CLAUDECODE = savedClaudeCode;
+    }
+  });
+
+  it("OpenCodeProvider passes opentoken config to launchCommand when enabled", async () => {
+    await withProviderFiles(async ({ input }) => {
+      const calls: any[] = [];
+      const provider = new OpenCodeProvider(
+        { command: "opencode-test" },
+        async (...args: any[]) => {
+          calls.push(args);
+          return { accepted: true, exitCode: 0 };
+        },
+        { enabled: true, command: "opentoken" },
+      );
+
+      await provider.launch(input);
+
+      expect(calls[0][4]).toMatchObject({
+        opentoken: true,
+        opentokenCommand: "opentoken",
+      });
+    });
+  });
+
+  it("OpenCodeProvider passes empty opentoken defaults to launchCommand", async () => {
+    await withProviderFiles(async ({ input }) => {
+      const calls: any[] = [];
+      const provider = new OpenCodeProvider(
+        { command: "opencode-test" },
+        async (...args: any[]) => {
+          calls.push(args);
+          return { accepted: true, exitCode: 0 };
+        },
+        {},
+      );
+
+      await provider.launch(input);
+
+      expect(calls[0][4]).toMatchObject({
+        opentoken: undefined,
+        opentokenCommand: undefined,
+      });
     });
   });
 
@@ -494,9 +597,22 @@ describe("provider launch methods", () => {
 
       await provider.launch(input);
 
+      expect(calls.length).toBe(1);
       expect(calls[0].command).toBe("node");
       expect(calls[0].args).toEqual(["worker.js"]);
       expect(calls[0].launchInput.timeoutMs).toBe(1234);
+    }, ["node", "worker.js"]);
+  });
+
+  it("LocalSubprocessProvider throws MISSING_WORKER_COMMAND_MESSAGE when task has no worker_command", async () => {
+    await withProviderFiles(async ({ input }) => {
+      const provider = new LocalSubprocessProvider(
+        async () => ({ accepted: true, exitCode: 0 }),
+      );
+
+      await expect(provider.launch(input)).rejects.toThrow(
+        /local-subprocess provider requires task\.worker_command/i,
+      );
     });
   });
 });

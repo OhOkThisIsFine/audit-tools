@@ -12,6 +12,7 @@ const TAG_PREFIX = "shared-";
 const allowedBumps = new Set(["patch", "minor", "major"]);
 const bump = process.argv[2] ?? "patch";
 const bumpOnly = process.argv.includes("--bump-only");
+const dryRun = process.argv.includes("--dry-run");
 const pollIntervalMs = 5_000;
 const releaseRunTimeoutMs = 10 * 60 * 1000;
 const registryTimeoutMs = 2 * 60 * 1000;
@@ -138,12 +139,29 @@ function getDefaultBranch() {
 }
 
 function ensureMainBranch() {
-  const branch = run("git", ["branch", "--show-current"], { capture: true }).stdout.trim();
+  const branch = run("git", ["branch", "--show-current"], {
+    capture: true,
+  }).stdout.trim();
   const defaultBranch = getDefaultBranch();
   if (branch !== defaultBranch) {
-    throw new Error(`Release publishing expects the default branch ('${defaultBranch}'), but current branch is '${branch}'.`);
+    throw new Error(
+      `Release publishing expects the default branch ('${defaultBranch}'), but current branch is '${branch}'.`,
+    );
   }
-  return branch;
+  const remoteName = getRemoteName();
+  run("git", ["fetch", remoteName, defaultBranch]);
+  const localHead = run("git", ["rev-parse", "HEAD"], {
+    capture: true,
+  }).stdout.trim();
+  const remoteHead = run("git", ["rev-parse", `${remoteName}/${defaultBranch}`], {
+    capture: true,
+  }).stdout.trim();
+  if (localHead !== remoteHead) {
+    throw new Error(
+      `Release publishing requires ${defaultBranch} to be synced with ${remoteName}/${defaultBranch}. Local ${localHead} != remote ${remoteHead}.`,
+    );
+  }
+  return defaultBranch;
 }
 
 function bumpVersionAndTag(npm) {
@@ -257,7 +275,16 @@ async function main() {
   console.log(`[release] package: ${packageBefore.name}@${packageBefore.version}`);
 
   ensureCleanWorktree();
-  const releaseBranch = bumpOnly ? null : ensureMainBranch();
+  const releaseBranch = ensureMainBranch();
+
+  if (dryRun) {
+    console.log(
+      `[release] dry run: would ${
+        bumpOnly ? 'bump' : 'verify, bump, tag, push, create a GitHub Release, and wait for npm publish'
+      } for ${packageBefore.name}@${packageBefore.version} on ${releaseBranch}.`,
+    );
+    return;
+  }
 
   if (bumpOnly) {
     // Bump the version and commit package.json / package-lock.json locally.
@@ -296,7 +323,29 @@ async function main() {
   run("git", ["push", remoteName, tag]);
 
   console.log(`[release] creating GitHub Release ${tag}`);
-  run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"]);
+  try {
+    run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"]);
+  } catch (err) {
+    console.error(`[release] creating GitHub Release failed: ${err.message}`);
+    console.log(`[release] rolling back remote tag ${tag}...`);
+    try {
+      run("git", ["push", remoteName, `:refs/tags/${tag}`]);
+      console.log(`[release] remote tag ${tag} deleted.`);
+    } catch (rollbackErr) {
+      console.error(
+        `[release] rollback failed — remote tag ${tag} may need manual deletion: ${rollbackErr.message}`,
+      );
+    }
+    try {
+      run("git", ["tag", "-d", tag]);
+      console.log(`[release] local tag ${tag} deleted.`);
+    } catch (rollbackErr) {
+      console.error(
+        `[release] rollback failed — local tag ${tag} may need manual deletion: ${rollbackErr.message}`,
+      );
+    }
+    throw err;
+  }
 
   console.log(`[release] waiting for publish-package release run for ${tag}`);
   const runEntry = await waitForReleaseRun(repoSlug, tag);

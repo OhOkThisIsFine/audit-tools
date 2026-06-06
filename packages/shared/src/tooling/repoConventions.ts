@@ -151,10 +151,11 @@ function detectStyleFromSnippet(snippet: string, conventions: RepoConventions): 
     }
   }
 
-  const single = (snippet.match(/'/g) ?? []).length;
-  const double = (snippet.match(/"/g) ?? []).length;
-  if (single > 0 || double > 0) {
-    conventions.quote_style = single >= double ? "single" : "double";
+  // Raw character counts across the whole snippet (includes comments, JSDoc, HTML attributes).
+  const rawSingleQuoteCount = (snippet.match(/'/g) ?? []).length;
+  const rawDoubleQuoteCount = (snippet.match(/"/g) ?? []).length;
+  if (rawSingleQuoteCount > 0 || rawDoubleQuoteCount > 0) {
+    conventions.quote_style = rawSingleQuoteCount >= rawDoubleQuoteCount ? "single" : "double";
   }
 }
 

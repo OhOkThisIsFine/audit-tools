@@ -155,6 +155,22 @@ function validateCombinerKeywords(schema, value, path, context) {
   }
 }
 
+function validateIfThenKeyword(schema, value, path, context) {
+  if (!schema.if) {
+    return;
+  }
+  const ifError = tryValidateNode(schema.if, value, path, context);
+  if (ifError === null) {
+    if (schema.then) {
+      validateNode(schema.then, value, path, context);
+    }
+  } else {
+    if (schema.else) {
+      validateNode(schema.else, value, path, context);
+    }
+  }
+}
+
 function validateConstKeyword(schema, value, path) {
   if (Object.prototype.hasOwnProperty.call(schema, "const")) {
     assert.deepEqual(
@@ -397,6 +413,7 @@ function validateNumberKeywords(schema, value, path) {
 
 const keywordValidators = [
   validateCombinerKeywords,
+  validateIfThenKeyword,
   validateConstKeyword,
   validateEnumKeyword,
   validateTypeKeyword,

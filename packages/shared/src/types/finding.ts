@@ -75,6 +75,7 @@ export interface AuditFindingsSummary {
   audited_file_count: number;
   excluded_file_count: number;
   runtime_validation_status_breakdown: Record<string, number>;
+  lens_breakdown?: Record<string, number>;
 }
 
 /**

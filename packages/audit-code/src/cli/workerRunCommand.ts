@@ -8,7 +8,30 @@ import { buildLineIndexForPaths } from "./lineIndex.js";
 import { WORKER_RESULT_CONTRACT_VERSION, formatAuditResultValidationError } from "./workerResult.js";
 import { getFlag, looksLikeCliFlag } from "./args.js";
 
-export async function cmdWorkerRun(argv: string[]): Promise<void> {
+/**
+ * Injectable IO + step seam for cmdWorkerRun. Production uses the real
+ * @audit-tools/shared helpers and runAuditStep; tests override individual
+ * members to drive failure paths (e.g. a writeJsonFile that throws on the
+ * first call and succeeds on the fallback) without module-level mocking,
+ * which the project's `node --import tsx/esm --test` runner cannot do.
+ */
+export interface WorkerRunDeps {
+  readJsonFile: typeof readJsonFile;
+  writeJsonFile: typeof writeJsonFile;
+  runAuditStep: typeof runAuditStep;
+}
+
+const defaultWorkerRunDeps: WorkerRunDeps = {
+  readJsonFile,
+  writeJsonFile,
+  runAuditStep,
+};
+
+export async function cmdWorkerRun(
+  argv: string[],
+  deps: WorkerRunDeps = defaultWorkerRunDeps,
+): Promise<void> {
+  const { readJsonFile, writeJsonFile, runAuditStep } = deps;
   const taskPath = getFlag(argv, "--task");
   if (!taskPath) {
     throw new Error("worker-run requires --task <path>");
@@ -50,8 +73,15 @@ export async function cmdWorkerRun(argv: string[]): Promise<void> {
           pendingTasks.flatMap((item) => item.file_paths),
         ),
       });
-      const errors = issues.filter((issue) => issue.severity === "error");
-      const warnings = issues.filter((issue) => issue.severity === "warning");
+      const errors: typeof issues = [];
+      const warnings: typeof issues = [];
+      for (const issue of issues) {
+        if (issue.severity === "error") {
+          errors.push(issue);
+        } else {
+          warnings.push(issue);
+        }
+      }
 
       if (warnings.length > 0) {
         process.stderr.write(
@@ -103,7 +133,30 @@ export async function cmdWorkerRun(argv: string[]): Promise<void> {
     };
   }
 
-  await writeJsonFile(task.result_path, workerResult);
+  try {
+    await writeJsonFile(task.result_path, workerResult);
+  } catch (writeError) {
+    const writeFailedResult: WorkerResult = {
+      contract_version: WORKER_RESULT_CONTRACT_VERSION,
+      run_id: task.run_id,
+      obligation_id: task.obligation_id,
+      status: "failed",
+      progress_made: false,
+      selected_executor: task.preferred_executor,
+      artifacts_written: [],
+      summary: `Worker result could not be persisted to ${task.result_path}: ${writeError instanceof Error ? writeError.message : String(writeError)}`,
+      next_likely_step: task.obligation_id,
+      errors: [writeError instanceof Error ? writeError.message : String(writeError)],
+    };
+    process.stderr.write(
+      `[workerRunCommand] Failed to write result to ${task.result_path}: ${writeError instanceof Error ? writeError.message : String(writeError)}\n`,
+    );
+    // Best-effort second attempt with the degraded result.
+    await writeJsonFile(task.result_path, writeFailedResult);
+    console.log(JSON.stringify(writeFailedResult, null, 2));
+    process.exitCode = 1;
+    return;
+  }
   console.log(JSON.stringify(workerResult, null, 2));
   if (workerResult.status === "failed") {
     process.exitCode = 1;

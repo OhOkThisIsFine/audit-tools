@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   detectHostConcurrencyFromEnv,
   resolveHostConcurrencyLimit,
   scheduleWave,
   buildDispatchQuota,
+  normalizeSlotTokens,
   type WaveScheduleResult,
 } from "../src/steps/waveScheduler.js";
 import {
@@ -296,5 +297,85 @@ describe("scheduleWave — quota-enabled path", () => {
     expect(result.wave_size).toBeGreaterThan(0);
     expect(result.confidence).toBeDefined();
     expect(result.source).toBeDefined();
+  });
+});
+
+describe("normalizeSlotTokens", () => {
+  it("truncates a too-long array to count", () => {
+    expect(normalizeSlotTokens([100, 200, 300], 2)).toEqual([100, 200]);
+  });
+
+  it("zero-pads a too-short array to count", () => {
+    expect(normalizeSlotTokens([100], 3)).toEqual([100, 0, 0]);
+  });
+
+  it("passes through an exactly-matching array unchanged", () => {
+    expect(normalizeSlotTokens([100, 200], 2)).toEqual([100, 200]);
+  });
+
+  it("returns all-zeros when tokens is undefined", () => {
+    expect(normalizeSlotTokens(undefined, 3)).toEqual([0, 0, 0]);
+  });
+
+  it("returns all-zeros when tokens is an empty array", () => {
+    expect(normalizeSlotTokens([], 3)).toEqual([0, 0, 0]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scheduleWave logs to stderr when readQuotaState throws
+// ---------------------------------------------------------------------------
+
+describe("scheduleWave — logs to stderr when readQuotaState throws", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("writes a [waveScheduler] message to stderr and still returns a valid WaveScheduleResult", async () => {
+    // Intercept process.stderr.write to capture output
+    const written: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(
+      (chunk: unknown, ...args: unknown[]): boolean => {
+        written.push(String(chunk));
+        return original(chunk, ...(args as Parameters<typeof original>));
+      },
+    );
+
+    // Force readQuotaState to throw by pointing its state directory at a
+    // path that cannot be read (a directory used as if it were a file).
+    // We use setQuotaStateDir (re-exported from @audit-tools/shared) to aim
+    // the state reader at a path that will fail with a non-ENOENT error.
+    // Simpler: supply an invalid path segment so the JSON.parse will throw
+    // inside readQuotaState — but readQuotaState handles that internally.
+    //
+    // The most reliable approach: mock the shared module's readQuotaState
+    // via vi.spyOn on the quota index re-export, which scheduleWave accesses.
+    // Because ESM live bindings make vi.spyOn on a re-export work in vitest.
+    const quotaModule = await import("../src/quota/index.js");
+    const readQuotaStateSpy = vi
+      .spyOn(quotaModule, "readQuotaState")
+      .mockRejectedValue(new Error("simulated quota state read failure"));
+
+    let result: WaveScheduleResult | undefined;
+    try {
+      result = await scheduleWave({
+        sessionConfig: { quota: { enabled: true } },
+        itemCount: 3,
+        env: {} as any,
+      });
+    } finally {
+      stderrSpy.mockRestore();
+      readQuotaStateSpy.mockRestore();
+    }
+
+    // scheduleWave must not throw — it falls back gracefully
+    expect(result).toBeDefined();
+    expect(result!.wave_size).toBeGreaterThan(0);
+
+    // stderr must have received the diagnostic message
+    const stderrOutput = written.join("");
+    expect(stderrOutput).toContain("[waveScheduler] readQuotaState failed");
+    expect(stderrOutput).toContain("simulated quota state read failure");
   });
 });

@@ -170,6 +170,179 @@ function resolveSymbolToIncluded(
   return undefined;
 }
 
+function recordCallEdge(
+  calls: GraphEdge[],
+  callTargets: Set<string>,
+  fromPath: string,
+  target: string | undefined,
+): void {
+  if (!target || target === fromPath || callTargets.has(target)) return;
+  callTargets.add(target);
+  calls.push(
+    graphEdge({
+      from: fromPath,
+      to: target,
+      kind: "ts-call",
+      confidence: TS_CALL_EDGE_CONFIDENCE,
+      reason: `TypeScript checker resolved a cross-file call into '${target}'.`,
+    }),
+  );
+}
+
+function visitHeritageNode(
+  state: AnalyzeState,
+  references: GraphEdge[],
+  fromPath: string,
+  node: TS.ClassLikeDeclaration | TS.InterfaceDeclaration,
+): void {
+  const ts = state.ts;
+  for (const clause of node.heritageClauses ?? []) {
+    const isExtends = clause.token === ts.SyntaxKind.ExtendsKeyword;
+    for (const typeNode of clause.types) {
+      const target = resolveSymbolToIncluded(
+        state,
+        state.checker.getSymbolAtLocation(typeNode.expression),
+      );
+      if (!target || target === fromPath) continue;
+      references.push(
+        graphEdge({
+          from: fromPath,
+          to: target,
+          kind: isExtends ? "ts-extends" : "ts-implements",
+          confidence: isExtends
+            ? TS_EXTENDS_EDGE_CONFIDENCE
+            : TS_IMPLEMENTS_EDGE_CONFIDENCE,
+          reason: `TypeScript ${isExtends ? "extends" : "implements"} heritage resolves to '${target}'.`,
+        }),
+      );
+    }
+  }
+}
+
+function visitImportDeclaration(
+  state: AnalyzeState,
+  imports: GraphEdge[],
+  fromPath: string,
+  node: TS.ImportDeclaration,
+): void {
+  if (!state.ts.isStringLiteral(node.moduleSpecifier)) return;
+  const target = resolveSpecifierTarget(
+    state,
+    node.moduleSpecifier.text,
+    node.getSourceFile().fileName,
+  );
+  if (target && target !== fromPath) {
+    imports.push(
+      graphEdge({
+        from: fromPath,
+        to: target,
+        kind: "ts-import",
+        confidence: TS_IMPORT_EDGE_CONFIDENCE,
+        reason: `TypeScript resolved import '${node.moduleSpecifier.text}' to '${target}'.`,
+      }),
+    );
+  }
+}
+
+function visitExportDeclaration(
+  state: AnalyzeState,
+  imports: GraphEdge[],
+  fromPath: string,
+  node: TS.ExportDeclaration,
+): void {
+  if (!node.moduleSpecifier || !state.ts.isStringLiteral(node.moduleSpecifier)) return;
+  const target = resolveSpecifierTarget(
+    state,
+    node.moduleSpecifier.text,
+    node.getSourceFile().fileName,
+  );
+  if (target && target !== fromPath) {
+    imports.push(
+      graphEdge({
+        from: fromPath,
+        to: target,
+        kind: "ts-reexport",
+        confidence: TS_REEXPORT_EDGE_CONFIDENCE,
+        reason: `TypeScript resolved re-export '${node.moduleSpecifier.text}' to '${target}'.`,
+      }),
+    );
+  }
+}
+
+function visitImportEqualsDeclaration(
+  state: AnalyzeState,
+  imports: GraphEdge[],
+  fromPath: string,
+  node: TS.ImportEqualsDeclaration,
+): void {
+  const ts = state.ts;
+  if (
+    !ts.isExternalModuleReference(node.moduleReference) ||
+    !ts.isStringLiteral(node.moduleReference.expression)
+  ) {
+    return;
+  }
+  const target = resolveSpecifierTarget(
+    state,
+    node.moduleReference.expression.text,
+    node.getSourceFile().fileName,
+  );
+  if (target && target !== fromPath) {
+    imports.push(
+      graphEdge({
+        from: fromPath,
+        to: target,
+        kind: "ts-import",
+        confidence: TS_IMPORT_EDGE_CONFIDENCE,
+        reason: `TypeScript resolved import-equals to '${target}'.`,
+      }),
+    );
+  }
+}
+
+function visitCallExpression(
+  state: AnalyzeState,
+  imports: GraphEdge[],
+  calls: GraphEdge[],
+  callTargets: Set<string>,
+  fromPath: string,
+  node: TS.CallExpression,
+): void {
+  const ts = state.ts;
+  if (
+    node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+    node.arguments[0] &&
+    ts.isStringLiteral(node.arguments[0])
+  ) {
+    const target = resolveSpecifierTarget(
+      state,
+      node.arguments[0].text,
+      node.getSourceFile().fileName,
+    );
+    if (target && target !== fromPath) {
+      imports.push(
+        graphEdge({
+          from: fromPath,
+          to: target,
+          kind: "ts-import",
+          confidence: TS_IMPORT_EDGE_CONFIDENCE,
+          reason: `TypeScript resolved dynamic import to '${target}'.`,
+        }),
+      );
+    }
+  } else {
+    recordCallEdge(
+      calls,
+      callTargets,
+      fromPath,
+      resolveSymbolToIncluded(
+        state,
+        state.checker.getSymbolAtLocation(node.expression),
+      ),
+    );
+  }
+}
+
 function collectFileEdges(
   state: AnalyzeState,
   sourceFile: TS.SourceFile,
@@ -181,144 +354,22 @@ function collectFileEdges(
   const ts = state.ts;
   const callTargets = new Set<string>();
 
-  const recordCall = (target: string | undefined): void => {
-    if (!target || target === fromPath || callTargets.has(target)) return;
-    callTargets.add(target);
-    calls.push(
-      graphEdge({
-        from: fromPath,
-        to: target,
-        kind: "ts-call",
-        confidence: TS_CALL_EDGE_CONFIDENCE,
-        reason: `TypeScript checker resolved a cross-file call into '${target}'.`,
-      }),
-    );
-  };
-
-  const visitHeritage = (
-    node: TS.ClassLikeDeclaration | TS.InterfaceDeclaration,
-  ): void => {
-    for (const clause of node.heritageClauses ?? []) {
-      const isExtends = clause.token === ts.SyntaxKind.ExtendsKeyword;
-      for (const typeNode of clause.types) {
-        const target = resolveSymbolToIncluded(
-          state,
-          state.checker.getSymbolAtLocation(typeNode.expression),
-        );
-        if (!target || target === fromPath) continue;
-        references.push(
-          graphEdge({
-            from: fromPath,
-            to: target,
-            kind: isExtends ? "ts-extends" : "ts-implements",
-            confidence: isExtends
-              ? TS_EXTENDS_EDGE_CONFIDENCE
-              : TS_IMPLEMENTS_EDGE_CONFIDENCE,
-            reason: `TypeScript ${isExtends ? "extends" : "implements"} heritage resolves to '${target}'.`,
-          }),
-        );
-      }
-    }
-  };
-
   const visit = (node: TS.Node): void => {
-    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-      const target = resolveSpecifierTarget(
-        state,
-        node.moduleSpecifier.text,
-        sourceFile.fileName,
-      );
-      if (target && target !== fromPath) {
-        imports.push(
-          graphEdge({
-            from: fromPath,
-            to: target,
-            kind: "ts-import",
-            confidence: TS_IMPORT_EDGE_CONFIDENCE,
-            reason: `TypeScript resolved import '${node.moduleSpecifier.text}' to '${target}'.`,
-          }),
-        );
-      }
-    } else if (
-      ts.isExportDeclaration(node) &&
-      node.moduleSpecifier &&
-      ts.isStringLiteral(node.moduleSpecifier)
-    ) {
-      const target = resolveSpecifierTarget(
-        state,
-        node.moduleSpecifier.text,
-        sourceFile.fileName,
-      );
-      if (target && target !== fromPath) {
-        imports.push(
-          graphEdge({
-            from: fromPath,
-            to: target,
-            kind: "ts-reexport",
-            confidence: TS_REEXPORT_EDGE_CONFIDENCE,
-            reason: `TypeScript resolved re-export '${node.moduleSpecifier.text}' to '${target}'.`,
-          }),
-        );
-      }
-    } else if (
-      ts.isImportEqualsDeclaration(node) &&
-      ts.isExternalModuleReference(node.moduleReference) &&
-      ts.isStringLiteral(node.moduleReference.expression)
-    ) {
-      const target = resolveSpecifierTarget(
-        state,
-        node.moduleReference.expression.text,
-        sourceFile.fileName,
-      );
-      if (target && target !== fromPath) {
-        imports.push(
-          graphEdge({
-            from: fromPath,
-            to: target,
-            kind: "ts-import",
-            confidence: TS_IMPORT_EDGE_CONFIDENCE,
-            reason: `TypeScript resolved import-equals to '${target}'.`,
-          }),
-        );
-      }
+    if (ts.isImportDeclaration(node)) {
+      visitImportDeclaration(state, imports, fromPath, node);
+    } else if (ts.isExportDeclaration(node)) {
+      visitExportDeclaration(state, imports, fromPath, node);
+    } else if (ts.isImportEqualsDeclaration(node)) {
+      visitImportEqualsDeclaration(state, imports, fromPath, node);
     } else if (ts.isCallExpression(node)) {
-      if (
-        node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-        node.arguments[0] &&
-        ts.isStringLiteral(node.arguments[0])
-      ) {
-        const target = resolveSpecifierTarget(
-          state,
-          node.arguments[0].text,
-          sourceFile.fileName,
-        );
-        if (target && target !== fromPath) {
-          imports.push(
-            graphEdge({
-              from: fromPath,
-              to: target,
-              kind: "ts-import",
-              confidence: TS_IMPORT_EDGE_CONFIDENCE,
-              reason: `TypeScript resolved dynamic import to '${target}'.`,
-            }),
-          );
-        }
-      } else {
-        recordCall(
-          resolveSymbolToIncluded(
-            state,
-            state.checker.getSymbolAtLocation(node.expression),
-          ),
-        );
-      }
+      visitCallExpression(state, imports, calls, callTargets, fromPath, node);
     } else if (
       ts.isClassDeclaration(node) ||
       ts.isClassExpression(node) ||
       ts.isInterfaceDeclaration(node)
     ) {
-      visitHeritage(node);
+      visitHeritageNode(state, references, fromPath, node);
     }
-
     ts.forEachChild(node, visit);
   };
 
@@ -363,7 +414,7 @@ async function analyze(
     return { edges: [...imports, ...references, ...calls] };
   } catch (e) {
     process.stderr.write(
-      `[audit-code] typescript-analyzer: program analysis failed for ${files.length} file(s) under '${context.root}', degrading to regex floor: ${(e as Error).message ?? String(e)}\n`,
+      `[audit-code] typescript-analyzer: program analysis failed for ${files.length} file(s) under '${context.root}' — returning 0 edges (all ${files.length} file(s) edges lost), degrading to regex floor: ${(e as Error).message ?? String(e)}\n`,
     );
     return { edges: [] };
   }

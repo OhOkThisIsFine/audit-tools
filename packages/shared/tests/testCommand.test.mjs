@@ -77,6 +77,22 @@ test("Node package.json without a test script still falls through to Go", async 
   });
 });
 
+test("Node package.json with no scripts key falls through to Go", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({}), "utf8");
+    await writeFile(join(dir, "go.mod"), "module example.com/x\n", "utf8");
+    const cmds = discoverProjectCommands(dir);
+    assert.deepEqual(cmds.test, ["go", "test", "./..."]);
+  });
+});
+
+test("Node package.json with no scripts key and no other project files yields no commands", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({}), "utf8");
+    assert.deepEqual(discoverProjectCommands(dir), {});
+  });
+});
+
 test("empty directory yields no commands", async () => {
   await withTempDir(async (dir) => {
     assert.deepEqual(discoverProjectCommands(dir), {});

@@ -32,6 +32,8 @@ export interface RemediationState {
   items?: Record<string, RemediationItemState>;
   clarifications?: ClarificationRequest[];
   closing_plan?: ClosingPlan;
+  started_at?: string;
+  step_count?: number;
 }
 
 const STATE_FILENAME = "state.json";
@@ -69,7 +71,17 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function removeStaleLockIfNeeded(lock: string): Promise<boolean> {
+function logLockDebug(
+  tag: string,
+  fields: Record<string, string | number | boolean | undefined>,
+): void {
+  console.debug(JSON.stringify({ tag, ...fields }));
+}
+
+async function removeStaleLockIfNeeded(
+  lock: string,
+  correlationId?: string,
+): Promise<boolean> {
   try {
     const lockStat = await stat(lock);
     // Try PID-based liveness check first
@@ -84,6 +96,12 @@ async function removeStaleLockIfNeeded(lock: string): Promise<boolean> {
         } catch {
           // Process is dead — safe to remove
           await rm(lock, { force: true });
+          logLockDebug("remediate_state_lock_stale_removed", {
+            lock,
+            reason: "dead_pid",
+            pid,
+            correlationId,
+          });
           return true;
         }
       }
@@ -92,6 +110,11 @@ async function removeStaleLockIfNeeded(lock: string): Promise<boolean> {
     }
     if (Date.now() - lockStat.mtimeMs <= LOCK_STALE_MS) return false;
     await rm(lock, { force: true });
+    logLockDebug("remediate_state_lock_stale_removed", {
+      lock,
+      reason: "mtime",
+      correlationId,
+    });
     return true;
   } catch (error) {
     if (isFileMissingError(error)) return true;
@@ -101,6 +124,7 @@ async function removeStaleLockIfNeeded(lock: string): Promise<boolean> {
 
 async function acquireLock(
   artifactsDir: string,
+  correlationId?: string,
 ): Promise<Awaited<ReturnType<typeof open>>> {
   const lock = lockPath(artifactsDir);
   await mkdir(artifactsDir, { recursive: true });
@@ -112,9 +136,14 @@ async function acquireLock(
       return handle;
     } catch (error) {
       if (!isFileExistsError(error)) throw error;
-      if (await removeStaleLockIfNeeded(lock)) {
+      if (await removeStaleLockIfNeeded(lock, correlationId)) {
         continue;
       }
+      logLockDebug("remediate_state_lock_retry", {
+        lock,
+        attempt: attempt + 1,
+        correlationId,
+      });
       if (attempt === LOCK_RETRY_LIMIT - 1) {
         throw new Error(
           `Timed out waiting to write ${statePath(artifactsDir)}: lock file ${lock} is held.`,
@@ -143,6 +172,7 @@ export class StateStore {
   constructor(
     private artifactsDir: string,
     fileOps: Partial<StateStoreFileOps> = {},
+    private readonly correlationId?: string,
   ) {
     this.fileOps = { writeFile, rename, rm, ...fileOps };
   }
@@ -164,7 +194,7 @@ export class StateStore {
   }
 
   async saveState(state: RemediationState): Promise<void> {
-    const lockHandle = await acquireLock(this.artifactsDir);
+    const lockHandle = await acquireLock(this.artifactsDir, this.correlationId);
     const path = statePath(this.artifactsDir);
     const temp = tempStatePath(this.artifactsDir);
 

@@ -26,17 +26,11 @@
           },
           "required_lenses": {
             "type": "array",
-            "items": {
-              "type": "string",
-              "enum": ["correctness", "architecture", "maintainability", "security", "reliability", "performance", "data_integrity", "tests", "operability", "config_deployment", "observability"]
-            }
+            "items": { "$ref": "lens.schema.json" }
           },
           "completed_lenses": {
             "type": "array",
-            "items": {
-              "type": "string",
-              "enum": ["correctness", "architecture", "maintainability", "security", "reliability", "performance", "data_integrity", "tests", "operability", "config_deployment", "observability"]
-            }
+            "items": { "$ref": "lens.schema.json" }
           }
         },
         "additionalProperties": false

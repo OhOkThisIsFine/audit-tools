@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildGraphBundle } from "../src/extractors/graph.ts";
 import {
+  extractConventionalRouteEvidence,
   fallbackRouteEdge,
   uniqueSortedRoutes,
 } from "../src/extractors/graphRoutes.ts";
@@ -173,6 +174,10 @@ test("framework route detection is language-gated (no NestJS patterns in Python,
     !routes.some((r) => r.path === "/nope"),
     "NestJS decorators are not detected in .py files",
   );
+  assert.ok(
+    !routes.some((r) => r.path === "/no"),
+    "FastAPI comments in .ts files are not detected as Python routes",
+  );
 });
 
 test("uniqueSortedRoutes dedupes by signature and sorts by path/handler/method", () => {
@@ -208,4 +213,80 @@ test("fallbackRouteEdge returns a GET edge for api/route paths and undefined oth
   assert.equal(routeEdge.handler, "app/dashboard/route.ts");
   // An unrelated path yields no fallback edge.
   assert.equal(fallbackRouteEdge("src/lib/util.ts"), undefined);
+});
+
+// ---- extractConventionalRouteEvidence ----
+
+test("extractConventionalRouteEvidence — App Router: file with exported GET/POST produces one route per method", () => {
+  const file = "src/app/api/health/route.ts";
+  const content = "export async function GET() {}\nexport async function POST() {}";
+  const result = extractConventionalRouteEvidence(file, content);
+  assert.equal(result.length, 2);
+  assert.ok(
+    result.some((r) => r.method === "GET" && r.path === "/api/health" && r.handler === file),
+    "GET /api/health",
+  );
+  assert.ok(
+    result.some((r) => r.method === "POST" && r.path === "/api/health" && r.handler === file),
+    "POST /api/health",
+  );
+});
+
+test("extractConventionalRouteEvidence — App Router: dynamic segment [id] maps to :id", () => {
+  const file = "app/users/[id]/route.ts";
+  const result = extractConventionalRouteEvidence(file, "export function GET() {}");
+  assert.equal(result.length, 1);
+  assert.equal(result[0].method, "GET");
+  assert.equal(result[0].path, "/users/:id");
+  assert.equal(result[0].handler, file);
+});
+
+test("extractConventionalRouteEvidence — App Router: catch-all segment [...slug] maps to :slug*", () => {
+  const file = "app/blog/[...slug]/route.ts";
+  const result = extractConventionalRouteEvidence(file, "export function GET() {}");
+  assert.equal(result.length, 1);
+  assert.equal(result[0].path, "/blog/:slug*");
+});
+
+test("extractConventionalRouteEvidence — App Router: route group (marketing) segment is stripped", () => {
+  const file = "app/(marketing)/about/route.ts";
+  const result = extractConventionalRouteEvidence(file, undefined);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].path, "/about");
+  assert.equal(result[0].handler, file);
+  assert.equal(result[0].method, undefined, "no method on fallback route");
+});
+
+test("extractConventionalRouteEvidence — App Router: no exported HTTP methods produces a single method-less fallback route", () => {
+  const file = "app/settings/route.ts";
+  const result = extractConventionalRouteEvidence(file, "const config = {};");
+  assert.equal(result.length, 1);
+  assert.equal(result[0].path, "/settings");
+  assert.equal(result[0].handler, file);
+  assert.equal(result[0].method, undefined, "no method key on fallback route");
+});
+
+test("extractConventionalRouteEvidence — Pages/API: pages/api/users/[id].ts maps to /api/users/:id", () => {
+  const file = "pages/api/users/[id].ts";
+  const result = extractConventionalRouteEvidence(file, undefined);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].path, "/api/users/:id");
+  assert.equal(result[0].handler, file);
+});
+
+test("extractConventionalRouteEvidence — Pages/API: non-nested api path pages/api/health.ts maps to /api/health", () => {
+  const file = "src/pages/api/health.ts";
+  const result = extractConventionalRouteEvidence(file, undefined);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].path, "/api/health");
+  assert.equal(result[0].handler, file);
+});
+
+test("extractConventionalRouteEvidence — file matching neither convention returns empty array", () => {
+  assert.deepEqual(extractConventionalRouteEvidence("src/lib/utils.ts", undefined), []);
+  // HTTP method exports in a non-route file are ignored
+  assert.deepEqual(
+    extractConventionalRouteEvidence("src/components/Button.tsx", "export function GET() {}"),
+    [],
+  );
 });

@@ -66,6 +66,18 @@ test("postinstall seeds Codex skill metadata with the canonical hyphenated displ
     assert.equal(opencodeConfig.agent?.auditor?.permission?.bash?.["*audit-code.mjs* synthesize*"], "deny");
     assert.match(result.stdout, /Codex skill UI metadata/);
     assert.equal(result.stderr, "");
+
+    // Claude Desktop command file
+    const claudeCommandPath = join(homeDir, ".claude", "commands", "audit-code.md");
+    assert.equal((await stat(claudeCommandPath)).isFile(), true);
+    assert.match(await readFile(claudeCommandPath, "utf8"), /audit-code/);
+
+    // Antigravity (Gemini IDE) plugin files
+    const antigravityPluginDir = join(homeDir, ".gemini", "config", "plugins", "audit-code");
+    const antigravityPluginJsonPath = join(antigravityPluginDir, "plugin.json");
+    const antigravityPluginSkillPath = join(antigravityPluginDir, "skills", "SKILL.md");
+    assert.equal((await stat(antigravityPluginJsonPath)).isFile(), true);
+    assert.equal((await stat(antigravityPluginSkillPath)).isFile(), true);
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }

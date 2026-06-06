@@ -1,119 +1,158 @@
 {
   "contract_version": "audit-tools/audit-findings/v1",
   "summary": {
-    "finding_count": 391,
+    "finding_count": 390,
     "work_block_count": 2,
     "severity_breakdown": {
-      "high": 17,
-      "medium": 125,
-      "low": 234,
+      "medium": 126,
+      "low": 237,
+      "high": 12,
       "info": 15
     },
     "audited_file_count": 394,
     "excluded_file_count": 95,
     "runtime_validation_status_breakdown": {
       "confirmed": 8
+    },
+    "lens_breakdown": {
+      "maintainability": 121,
+      "architecture": 8,
+      "tests": 133,
+      "config_deployment": 7,
+      "observability": 65,
+      "data_integrity": 14,
+      "correctness": 23,
+      "reliability": 5,
+      "operability": 14
     }
   },
   "findings": [
     {
       "id": "MNT-002",
-      "title": "cli.ts is a 1728-line mixed-concern file combining command implementations with re-export surface",
+      "title": "cli.ts dispatcher extraction is mostly complete but the module boundary remains broad",
       "category": "inconsistent-abstractions",
-      "severity": "high",
+      "severity": "medium",
       "confidence": "high",
       "lens": "maintainability",
-      "summary": "cli.ts simultaneously acts as an aggregation/re-export module and as the direct implementation host for several large command functions (cmdWorkerRun ~100 lines, cmdMergeAndIngest ~237 lines, cmdSubmitPacket ~195 lines, cmdStatus ~130 lines), making it difficult to locate, read, or modify any individual command without navigating an unrelated 1700-line file.",
+      "summary": "The largest command implementations have been extracted to dedicated modules under packages/audit-code/src/cli/, and cli.ts is now a thin dispatcher of about 161 lines. The remaining maintainability concern is narrower: cli.ts still combines command registration, a cliTestUtils facade, and imports from the args helper, so the module boundary should stay intentionally small as new commands are added.",
       "affected_files": [
         {
           "path": "packages/audit-code/src/cli.ts",
           "line_start": 1,
-          "line_end": 1728,
-          "symbol": "cmdWorkerRun,cmdSubmitPacket,cmdMergeAndIngest,cmdStatus"
+          "line_end": 161,
+          "symbol": "main / runCli / cliTestUtils"
         }
       ],
       "evidence": [
-        "packages/audit-code/src/cli.ts:91-109 - module-level re-exports from ./cli/args.js alongside direct import of the same symbols at lines 112-134, creating a dual import pattern in a single file",
-        "packages/audit-code/src/cli.ts:371-471 - cmdWorkerRun implemented directly in cli.ts (~100 lines) rather than extracted to cli/workerRun.ts like other commands",
-        "packages/audit-code/src/cli.ts:495-690 - cmdSubmitPacket (~195 lines) and cmdMergeAndIngest lines 692-929 (~237 lines) both implemented inline in this file",
-        "packages/audit-code/src/cli.ts:1626-1708 - main() dispatch table references both extracted modules (cmdNextStep, cmdRunToCompletion) and inline functions (cmdWorkerRun, cmdSubmitPacket, cmdMergeAndIngest) with no consistent pattern",
-        "packages/audit-code/src/cli.ts:165-166 - cmdNextStep and cmdRunToCompletion are imported from extracted cli/ modules, confirming the inconsistency with the remaining inline commands",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
+        "packages/audit-code/src/cli.ts:1-43 - imports command handlers from dedicated packages/audit-code/src/cli/*Command.ts modules instead of defining large handlers inline",
+        "packages/audit-code/src/cli.ts:45-61 - cliTestUtils still exposes args helpers from the dispatcher module",
+        "packages/audit-code/src/cli.ts:64-135 - main() is now a compact switch that delegates to extracted command modules"
       ]
     },
     {
       "id": "MNT-001",
-      "title": "cli.ts is a 1728-line monolithic command dispatcher",
+      "title": "cli.ts is now a thin dispatcher; keep remaining command wiring extracted",
       "category": "excessive-function-length",
-      "severity": "high",
+      "severity": "low",
       "confidence": "high",
       "lens": "maintainability",
-      "summary": "cli.ts contains full implementations of ~20 CLI commands inline, with individual functions like cmdMergeAndIngest (~237 lines, 692-929) and cmdSubmitPacket (~195 lines, 495-690) each embedding complex validation, file I/O, and business logic. The file is effectively a monolith that will require reading the entire file to locate or change any single command.",
+      "summary": "The prior monolithic dispatcher has been substantially remediated: cmdWorkerRun, cmdMergeAndIngest, cmdSubmitPacket, cmdStatus, cmdAdvanceAudit, cmdValidateResult, cmdIngestResults, cmdExplainTask, cmdValidateResults, cmdDispatchStatus, and the smaller command handlers now live in dedicated modules under packages/audit-code/src/cli/. cli.ts is about 161 lines and primarily contains imports, the switch table, and the exported runCli entrypoint.",
       "affected_files": [
         {
           "path": "packages/audit-code/src/cli.ts",
-          "line_start": 692,
-          "line_end": 929,
-          "symbol": "cmdMergeAndIngest"
+          "line_start": 1,
+          "line_end": 161,
+          "symbol": "main"
         },
         {
-          "path": "packages/audit-code/src/cli.ts",
-          "line_start": 495,
-          "line_end": 690,
-          "symbol": "cmdSubmitPacket"
+          "path": "packages/audit-code/src/cli/advanceAuditCommand.ts",
+          "line_start": 1,
+          "line_end": 1,
+          "symbol": "cmdAdvanceAudit"
+        },
+        {
+          "path": "packages/audit-code/src/cli/validateResultCommand.ts",
+          "line_start": 1,
+          "line_end": 1,
+          "symbol": "cmdValidateResult"
+        },
+        {
+          "path": "packages/audit-code/src/cli/ingestResultsCommand.ts",
+          "line_start": 1,
+          "line_end": 1,
+          "symbol": "cmdIngestResults"
+        },
+        {
+          "path": "packages/audit-code/src/cli/explainTaskCommand.ts",
+          "line_start": 1,
+          "line_end": 1,
+          "symbol": "cmdExplainTask"
+        },
+        {
+          "path": "packages/audit-code/src/cli/validateResultsCommand.ts",
+          "line_start": 1,
+          "line_end": 1,
+          "symbol": "cmdValidateResults"
+        },
+        {
+          "path": "packages/audit-code/src/cli/dispatchStatusCommand.ts",
+          "line_start": 1,
+          "line_end": 1,
+          "symbol": "cmdDispatchStatus"
         }
       ],
       "evidence": [
-        "packages/audit-code/src/cli.ts:692 - cmdMergeAndIngest begins; spans to line 929 (~237 lines) with nested task-result iteration, fallback path recovery, validation loops, and retry dispatch writing all inlined",
-        "packages/audit-code/src/cli.ts:495 - cmdSubmitPacket begins; spans to line 690 (~195 lines) covering packet resolution, task validation, duplicate-finding detection, and per-result file writes all inlined",
-        "packages/audit-code/src/cli.ts:1626 - main() switch lists 20+ cases, all delegating to co-located inline functions rather than imported command modules",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
+        "packages/audit-code/src/cli.ts:20-43 - dispatcher imports all command handlers from packages/audit-code/src/cli/ modules",
+        "packages/audit-code/src/cli.ts:64-135 - switch table delegates to imported handlers without inline command bodies",
+        "packages/audit-code/src/cli/advanceAuditCommand.ts and sibling command modules contain the extracted command implementations"
       ]
     },
     {
       "id": "MNT-001",
-      "title": "cmdRunToCompletion is a ~1000-line monolithic function with excessive cognitive complexity",
+      "title": "cmdRunToCompletion coordinator has been decomposed but remains slightly long",
       "category": "excessive-function-length",
-      "severity": "high",
+      "severity": "low",
       "confidence": "high",
       "lens": "maintainability",
-      "summary": "The single exported function cmdRunToCompletion spans lines 106–1115 (approximately 1009 lines) and handles at least seven distinct concerns: wave scheduling, parallel provider launch, result ingestion, quota state tracking, rate-limit header extraction, inline executor dispatch, and state persistence. Each concern is deeply interleaved with the others, making it hard to understand, test, or change any one of them safely.",
+      "summary": "The exported cmdRunToCompletion function is no longer a ~1000-line monolith. Wave recovery, parallel slot construction, parallel result ingestion, quota recording, inline execution, single-worker dispatch, worker-result application, local-subprocess blocking, no-executor handling, parallel-wave dispatch, and max-run handling have been extracted into private helpers in packages/audit-code/src/cli/runToCompletion.ts. The remaining coordinator is about 185 lines, so the issue is narrowed to keeping future orchestration changes inside those phase helpers.",
       "affected_files": [
         {
           "path": "packages/audit-code/src/cli/runToCompletion.ts",
-          "line_start": 106,
-          "line_end": 1115,
+          "line_start": 1381,
+          "line_end": 1565,
           "symbol": "cmdRunToCompletion"
         }
       ],
       "evidence": [
-        "packages/audit-code/src/cli/runToCompletion.ts:106 - function signature; the entire file is this one function",
-        "packages/audit-code/src/cli/runToCompletion.ts:395-766 - parallel-wave block alone is ~370 lines covering slot construction, launch, result ingestion, quota recording, and header extraction",
-        "packages/audit-code/src/cli/runToCompletion.ts:451-457 - WorkerSlot interface declared inline inside the function body, a sign that sub-concerns have not been extracted",
-        "packages/audit-code/src/cli/runToCompletion.ts:671-708 - quota outcome recording and header extraction are inlined immediately after ingestion with no extracted helpers",
-        "packages/audit-code/src/cli/runToCompletion.ts:768-1087 - single-worker path duplicates the overall error/progress/state-persistence structure of lines 580-744 with no shared helper",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
+        "packages/audit-code/src/cli/runToCompletion.ts:89 - recoverInterruptedWave() handles interrupted wave recovery",
+        "packages/audit-code/src/cli/runToCompletion.ts:756 - runSingleWorkerStep() handles the sequential worker path",
+        "packages/audit-code/src/cli/runToCompletion.ts:1095 - runParallelWaveStep() handles parallel provider sessions and wave finalization",
+        "packages/audit-code/src/cli/runToCompletion.ts:591 - applyWorkerResult() centralizes per-run state updates and envelope emission",
+        "packages/audit-code/src/cli/runToCompletion.ts:1381 - cmdRunToCompletion is now a coordinator that selects the next phase and delegates"
       ]
     },
     {
       "id": "MNT-001",
-      "title": "cmdRunToCompletion is excessively long and handles too many concerns",
+      "title": "cmdRunToCompletion phase extraction is mostly complete",
       "category": "excessive-function-length",
-      "severity": "high",
+      "severity": "low",
       "confidence": "high",
       "lens": "maintainability",
-      "summary": "The single function cmdRunToCompletion spans ~1000 lines and conflates wave recovery, parallel/sequential dispatch, result ingestion, quota management, rate-limit header extraction, error handling, and envelope emission. Any change to one concern risks breaking the others and the function is too large to reason about safely.",
+      "summary": "The exported cmdRunToCompletion function is no longer a ~1000-line monolith. Wave recovery, parallel slot construction, parallel result ingestion, quota recording, inline execution, single-worker dispatch, worker-result application, local-subprocess blocking, no-executor handling, parallel-wave dispatch, and max-run handling have been extracted into private helpers in packages/audit-code/src/cli/runToCompletion.ts. The remaining coordinator is about 185 lines, so the issue is narrowed to keeping future orchestration changes inside those phase helpers.",
       "affected_files": [
         {
           "path": "packages/audit-code/src/cli/runToCompletion.ts",
-          "line_start": 106,
-          "line_end": 1115,
+          "line_start": 1381,
+          "line_end": 1565,
           "symbol": "cmdRunToCompletion"
         }
       ],
       "evidence": [
-        "packages/audit-code/src/cli/runToCompletion.ts:106 - function declaration begins; wave recovery at ~163, parallel branch at ~395, sequential inline at ~771, single-agent branch at ~896, exit at 1115 — roughly 1000 lines of mixed concerns in one function",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
+        "packages/audit-code/src/cli/runToCompletion.ts:89 - recoverInterruptedWave() handles interrupted wave recovery",
+        "packages/audit-code/src/cli/runToCompletion.ts:756 - runSingleWorkerStep() handles the sequential worker path",
+        "packages/audit-code/src/cli/runToCompletion.ts:1095 - runParallelWaveStep() handles parallel provider sessions and wave finalization",
+        "packages/audit-code/src/cli/runToCompletion.ts:591 - applyWorkerResult() centralizes per-run state updates and envelope emission",
+        "packages/audit-code/src/cli/runToCompletion.ts:1381 - cmdRunToCompletion is now a coordinator that selects the next phase and delegates"
       ]
     },
     {
@@ -236,29 +275,6 @@
       ]
     },
     {
-      "id": "COR-001",
-      "title": "MCP tool names in opencode template do not match actual server exports",
-      "category": "api-misuse",
-      "severity": "high",
-      "confidence": "high",
-      "lens": "correctness",
-      "summary": "The opencode command template references MCP tools as `auditor_start_audit` and `auditor_continue_audit`, but the MCP server exposes them as `start_audit` and `continue_audit` (without the `auditor_` prefix). Any opencode agent following this template will fail to call the correct tool names at runtime.",
-      "affected_files": [
-        {
-          "path": "packages/audit-code/skills/audit-code/opencode-command-template.txt",
-          "line_start": 6,
-          "line_end": 7
-        }
-      ],
-      "evidence": [
-        "packages/audit-code/skills/audit-code/opencode-command-template.txt:6 - `call auditor_start_audit` — tool name uses auditor_ prefix",
-        "packages/audit-code/skills/audit-code/opencode-command-template.txt:7 - `auditor_continue_audit` — tool name uses auditor_ prefix",
-        "packages/audit-code/src/mcp/server.ts:549 - actual registered tool name is `start_audit` (no prefix)",
-        "packages/audit-code/src/mcp/server.ts:579 - actual registered tool name is `continue_audit` (no prefix)",
-        "runtime:unit:packages-audit-code: confirmed — Deterministic runtime command succeeded: npm test"
-      ]
-    },
-    {
       "id": "TST-001",
       "title": "No unit tests for dispatch.ts exported logic",
       "category": "missing-unit-tests",
@@ -318,7 +334,7 @@
       ]
     },
     {
-      "id": "DR-002",
+      "id": "MNT-010",
       "title": "remediate-code's decideNextStep is a 740-line god-function with embedded prompt markdown",
       "category": "design_simplification",
       "severity": "high",
@@ -576,7 +592,7 @@
       "severity": "medium",
       "confidence": "high",
       "lens": "architecture",
-      "summary": "The deterministic pass reported ~10 import cycles; they cluster into exactly two roots. In audit-code, cli.ts imports its cli/* submodules (args, auditStep, dispatch, nextStepCommand, semanticReviewStep) and they import symbols back from cli.ts and src/index.ts (e.g. cli.ts -> cli/auditStep.ts -> cli/workerResult.ts -> io/runArtifacts.ts -> index.ts -> cli.ts). In remediate-code, orchestrator.ts imports phases/* (close, document, implement, plan, triage, workerTasks) and those phases import the orchestrator back. Both are the same anti-pattern: a hub module and its children mutually import. Recommendation: relocate the shared symbols (types and small helpers the children need) into leaf modules that both the hub and the children depend on, so edges flow one direction. This removes initialization-order fragility, makes the hubs unit-testable, and is a precondition for the decomposition in DR-002.",
+      "summary": "The deterministic pass reported ~10 import cycles; they cluster into exactly two roots. In audit-code, cli.ts imports its cli/* submodules (args, auditStep, dispatch, nextStepCommand, semanticReviewStep) and they import symbols back from cli.ts and src/index.ts (e.g. cli.ts -> cli/auditStep.ts -> cli/workerResult.ts -> io/runArtifacts.ts -> index.ts -> cli.ts). In remediate-code, orchestrator.ts imports phases/* (close, document, implement, plan, triage, workerTasks) and those phases import the orchestrator back. Both are the same anti-pattern: a hub module and its children mutually import. Recommendation: relocate the shared symbols (types and small helpers the children need) into leaf modules that both the hub and the children depend on, so edges flow one direction. This removes initialization-order fragility, makes the hubs unit-testable, and is a precondition for the decomposition in MNT-010.",
       "affected_files": [
         {
           "path": "packages/audit-code/src/cli.ts"
@@ -2197,7 +2213,7 @@
       ]
     },
     {
-      "id": "SHD-001",
+      "id": "TST-008",
       "title": "opentoken wrap path in spawnLoggedCommand is entirely untested",
       "category": "missing-coverage",
       "severity": "medium",
@@ -4150,7 +4166,7 @@
       ]
     },
     {
-      "id": "SHD-004",
+      "id": "TST-011",
       "title": "CompositeQuotaSource.buildQuotaSource factory and error-skipping behavior not tested",
       "category": "missing-coverage",
       "severity": "low",
@@ -5074,7 +5090,7 @@
       ]
     },
     {
-      "id": "SHD-005",
+      "id": "TST-012",
       "title": "git.ts utility functions have no tests in this packet",
       "category": "missing-coverage",
       "severity": "low",
@@ -6473,7 +6489,7 @@
       ]
     },
     {
-      "id": "SHD-003",
+      "id": "TST-010",
       "title": "resolveWorkerTaskTimeoutMs edge cases (0, negative, NaN, Infinity) not tested",
       "category": "missing-negative-edge-case-tests",
       "severity": "low",
@@ -6564,7 +6580,7 @@
       ]
     },
     {
-      "id": "SHD-002",
+      "id": "TST-009",
       "title": "RunLogger non-serializable event path has no test coverage",
       "category": "missing-coverage",
       "severity": "low",
@@ -8987,7 +9003,7 @@
       ]
     },
     {
-      "id": "DR-008",
+      "id": "REL-004",
       "title": "Hand-rolled cross-process file locking and quota math are candidates for maintained libraries or property tests",
       "category": "tool_opportunity",
       "severity": "low",
@@ -9350,7 +9366,7 @@
         "COR-001",
         "DA-002",
         "DR-001",
-        "DR-002",
+        "MNT-010",
         "DR-003",
         "MNT-001",
         "MNT-001",
@@ -9438,7 +9454,7 @@
         "OBS-002",
         "OPR-001",
         "REL-002",
-        "SHD-001",
+        "TST-008",
         "TST-001",
         "TST-001",
         "TST-001",
@@ -9509,7 +9525,7 @@
         "DI-006",
         "DI-007",
         "DI-008",
-        "DR-008",
+        "REL-004",
         "MNT-001",
         "MNT-001",
         "MNT-001",
@@ -9644,10 +9660,10 @@
         "REL-001",
         "REL-002",
         "REL-003",
-        "SHD-002",
-        "SHD-003",
-        "SHD-004",
-        "SHD-005",
+        "TST-009",
+        "TST-010",
+        "TST-011",
+        "TST-012",
         "TST-001",
         "TST-001",
         "TST-001",

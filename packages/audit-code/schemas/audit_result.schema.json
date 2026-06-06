@@ -23,10 +23,7 @@
     "task_id": { "type": "string" },
     "unit_id": { "type": "string" },
     "pass_id": { "type": "string" },
-    "lens": {
-      "type": "string",
-      "enum": ["correctness", "architecture", "maintainability", "security", "reliability", "performance", "data_integrity", "tests", "operability", "config_deployment", "observability"]
-    },
+    "lens": { "$ref": "lens.schema.json" },
     "agent_role": { "type": "string" },
     "file_coverage": {
       "type": "array",
@@ -52,7 +49,7 @@
     "requires_followup": { "type": "boolean" },
     "followup_tasks": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": { "$ref": "#/$defs/AuditTask" }
     },
     "verification": {
       "type": "object",
@@ -78,7 +75,9 @@
         }
       },
       "additionalProperties": false
-    }
+    },
+    "run_id": { "type": "string" },
+    "submitted_at": { "type": "string", "format": "date-time" }
   },
   "additionalProperties": false
 }

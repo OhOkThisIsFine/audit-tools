@@ -100,7 +100,7 @@ function pythonLogicalLines(content: string): string[] {
     const continued = stripped.endsWith("\\");
     const line = continued ? stripped.slice(0, -1).trimEnd() : stripped;
     pending = pending.length > 0 ? `${pending} ${line}` : line;
-    parenDepth += pythonParenDelta(line);
+    parenDepth = Math.max(0, parenDepth + pythonParenDelta(line));
 
     if (!continued && parenDepth <= 0) {
       logicalLines.push(pending.replace(/\s+/g, " ").trim());
@@ -455,40 +455,15 @@ export function extractPythonImportEdges(
     }
 
     const moduleSpecifier = fromImportMatch[1] ?? "";
-    if (!isPythonModuleSpecifier(moduleSpecifier)) {
-      continue;
-    }
-    const importedNames = splitPythonImportList(fromImportMatch[2] ?? "")
-      .map(stripPythonAlias)
-      .filter((name) => name !== "*" && isPythonIdentifier(name));
-    const submoduleTargets = importedNames
-      .map((name) => appendPythonImportedSpecifier(moduleSpecifier, name))
-      .map((specifier) => ({
-        specifier,
-        target: resolvePythonModuleSpecifier(fromPath, specifier, pathLookup),
-      }))
-      .filter((item) => item.target);
-
-    if (submoduleTargets.length > 0) {
-      for (const { specifier, target } of submoduleTargets) {
-        addPythonImportEdge(
-          edges,
-          fromPath,
-          target,
-          "python-from-import",
-          specifier,
-        );
-      }
-      continue;
-    }
-
-    addPythonImportEdge(
-      edges,
+    const rawNames = splitPythonImportList(fromImportMatch[2] ?? "").map(stripPythonAlias);
+    for (const { specifier, target } of resolvePythonFromImportTargets(
       fromPath,
-      resolvePythonModuleSpecifier(fromPath, moduleSpecifier, pathLookup),
-      "python-from-import",
       moduleSpecifier,
-    );
+      rawNames,
+      pathLookup,
+    )) {
+      addPythonImportEdge(edges, fromPath, target, "python-from-import", specifier);
+    }
   }
 
   return edges;

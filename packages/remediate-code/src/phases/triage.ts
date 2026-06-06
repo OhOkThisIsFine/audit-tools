@@ -14,6 +14,17 @@ interface TriageResolution {
   }[];
 }
 
+function markRetry(item: { started_at?: string; completed_at?: string }): void {
+  item.started_at ??= new Date().toISOString();
+  delete item.completed_at;
+}
+
+function markTerminal(item: { started_at?: string; completed_at?: string }): void {
+  const now = new Date().toISOString();
+  item.started_at ??= now;
+  item.completed_at = now;
+}
+
 // Cap on silent auto-retries (when the user approved at preview). Without it, an
 // item that fails deterministically — including one stranded by an unsatisfiable
 // block dependency, which handleDocumenting marks `blocked` — would be retried
@@ -61,10 +72,12 @@ export async function runTriagePhase(
           if (res.action === "retry") {
             // "documented" maps to runImplementPhase in the orchestrator switch
             item.status = "documented";
+            markRetry(item);
             item.rework_count = (item.rework_count ?? 0) + 1;
             requiresRetry = true;
           } else if (res.action === "ignore") {
             item.status = "ignored";
+            markTerminal(item);
             item.failure_reason = res.rationale ?? "User ignored during triage";
           }
         }
@@ -86,6 +99,7 @@ export async function runTriagePhase(
           // routes the run to a human triage prompt instead of looping.
           if ((item.rework_count ?? 0) >= MAX_AUTO_RETRIES) continue;
           item.status = "documented";
+          markRetry(item);
           item.rework_count = (item.rework_count ?? 0) + 1;
           autoRetried = true;
         }

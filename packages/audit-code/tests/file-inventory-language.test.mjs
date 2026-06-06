@@ -25,3 +25,22 @@ test("inferLanguage classifies common docs/config without linguist false positiv
   assert.notEqual(lang["README.md"], "gcc machine description");
   assert.notEqual(lang["config.yml"], "miniyaml");
 });
+
+test("inferLanguage classifies common source languages without misclassification", () => {
+  const manifest = buildRepoManifest("demo", [
+    { path: "src/index.ts", size_bytes: 1 },
+    { path: "src/util.js", size_bytes: 1 },
+    { path: "scripts/run.py", size_bytes: 1 },
+    { path: "cmd/main.go", size_bytes: 1 },
+    { path: "package.json", size_bytes: 1 },
+  ]);
+  const lang = Object.fromEntries(
+    manifest.files.map((f) => [f.path, f.language]),
+  );
+
+  assert.equal(lang["src/index.ts"], "typescript");
+  assert.equal(lang["src/util.js"], "javascript");
+  assert.equal(lang["scripts/run.py"], "python");
+  assert.equal(lang["cmd/main.go"], "go");
+  assert.equal(lang["package.json"], "json");
+});

@@ -91,19 +91,33 @@ interface UncappedWaveSize {
   binding_cap: WaveBindingCap;
 }
 
-function computeUncappedWaveSize(
-  waveSize: number,
-  limits: ResolvedLimits,
-  safetyMargin: number,
-  avgTokens: number,
-  slotsSorted: number[] | null,
-  quotaStateEntry: QuotaStateEntry | null,
-  hostConcurrencyLimit: HostConcurrencyLimit | null,
-  providerName: ResolvedProviderName,
-  quota: QuotaConfig,
-  halfLifeHours: number,
-): UncappedWaveSize {
-  let current = waveSize;
+interface ComputeUncappedWaveSizeInput {
+  waveSize: number;
+  limits: ResolvedLimits;
+  safetyMargin: number;
+  avgTokens: number;
+  slotsSorted: number[] | null;
+  quotaStateEntry: QuotaStateEntry | null;
+  hostConcurrencyLimit: HostConcurrencyLimit | null;
+  providerName: ResolvedProviderName;
+  quota: QuotaConfig;
+  halfLifeHours: number;
+}
+
+function computeUncappedWaveSize(input: ComputeUncappedWaveSizeInput): UncappedWaveSize {
+  const {
+    waveSize: initialSize,
+    limits,
+    safetyMargin,
+    avgTokens,
+    slotsSorted,
+    quotaStateEntry,
+    hostConcurrencyLimit,
+    providerName,
+    quota,
+    halfLifeHours,
+  } = input;
+  let current = initialSize;
   let bindingCap: WaveBindingCap = "none";
 
   // Cap by requests-per-minute
@@ -277,7 +291,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     waveSize = 1;
     bindingCap = "cooldown";
   } else {
-    const uncapped = computeUncappedWaveSize(
+    const uncapped = computeUncappedWaveSize({
       waveSize,
       limits,
       safetyMargin,
@@ -288,7 +302,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
       providerName,
       quota,
       halfLifeHours,
-    );
+    });
     waveSize = uncapped.size;
     bindingCap = uncapped.binding_cap;
   }

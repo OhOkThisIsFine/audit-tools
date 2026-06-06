@@ -14,38 +14,38 @@ function tmpLock() {
 
 test("acquireLock creates lock file and releaseLock removes it", async () => {
   const lockPath = tmpLock();
-  await acquireLock(lockPath);
+  const token = await acquireLock(lockPath);
   const info = await stat(lockPath);
   assert.ok(info.isFile());
-  await releaseLock(lockPath);
+  await releaseLock(lockPath, token);
   await assert.rejects(() => stat(lockPath), { code: "ENOENT" });
 });
 
 test("acquireLock blocks when lock is held", async () => {
   const lockPath = tmpLock();
-  await acquireLock(lockPath);
+  const token = await acquireLock(lockPath);
 
   const start = Date.now();
   // Release after 150ms
   const releaseTimer = setTimeout(async () => {
-    await releaseLock(lockPath);
+    await releaseLock(lockPath, token);
   }, 150);
 
-  await acquireLock(lockPath, 5000);
+  const token2 = await acquireLock(lockPath, 5000);
   clearTimeout(releaseTimer);
   const elapsed = Date.now() - start;
   assert.ok(elapsed >= 100, `expected to wait at least 100ms, waited ${elapsed}ms`);
-  await releaseLock(lockPath);
+  await releaseLock(lockPath, token2);
 });
 
 test("acquireLock times out when lock is never released", async () => {
   const lockPath = tmpLock();
-  await acquireLock(lockPath);
+  const token = await acquireLock(lockPath);
   await assert.rejects(
     () => acquireLock(lockPath, 200),
     (err) => err instanceof FileLockTimeoutError,
   );
-  await releaseLock(lockPath);
+  await releaseLock(lockPath, token);
 });
 
 test("acquireLock cleans up stale lock", async () => {
@@ -56,10 +56,10 @@ test("acquireLock cleans up stale lock", async () => {
   const { utimes } = await import("node:fs/promises");
   await utimes(lockPath, past, past);
 
-  await acquireLock(lockPath, 2000);
+  const token = await acquireLock(lockPath, 2000);
   const info = await stat(lockPath);
   assert.ok(info.mtimeMs > Date.now() - 5000, "lock file should have fresh mtime");
-  await releaseLock(lockPath);
+  await releaseLock(lockPath, token);
 });
 
 test("withFileLock runs function under lock", async () => {
@@ -87,7 +87,7 @@ test("withFileLock releases lock on error", async () => {
 
 test("releaseLock is idempotent", async () => {
   const lockPath = tmpLock();
-  await acquireLock(lockPath);
-  await releaseLock(lockPath);
-  await releaseLock(lockPath); // should not throw
+  const token = await acquireLock(lockPath);
+  await releaseLock(lockPath, token);
+  await releaseLock(lockPath, token); // should not throw
 });

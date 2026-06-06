@@ -4,6 +4,7 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { captureConsole } from "./helpers/captureConsole.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -11,12 +12,6 @@ const distCliUrl = pathToFileURL(join(repoRoot, "dist", "cli.js")).href;
 const { runCli } = await import(distCliUrl);
 
 async function runValidate(root) {
-  const previousExitCode = process.exitCode;
-  const previousConsoleLog = console.log;
-  const previousConsoleError = console.error;
-  let stdout = "";
-  let stderr = "";
-
   const argv = [
     process.execPath,
     join(repoRoot, "dist", "cli.js"),
@@ -26,26 +21,7 @@ async function runValidate(root) {
     "--artifacts-dir",
     join(root, ".audit-artifacts"),
   ];
-  process.exitCode = 0;
-  console.log = (...values) => {
-    stdout += `${values.join(" ")}\n`;
-  };
-  console.error = (...values) => {
-    stderr += `${values.join(" ")}\n`;
-  };
-
-  try {
-    await runCli(argv);
-    return {
-      code: process.exitCode ?? 0,
-      stdout,
-      stderr,
-    };
-  } finally {
-    process.exitCode = previousExitCode;
-    console.log = previousConsoleLog;
-    console.error = previousConsoleError;
-  }
+  return captureConsole(() => runCli(argv));
 }
 
 function parseJsonOutput(result) {
@@ -166,7 +142,11 @@ test("audit-code validate exits non-zero when validation issues exist", async ()
     const parsed = parseJsonOutput(result);
 
     assert.notEqual(result.code, 0);
-    assert.ok(parsed.issue_count >= 4);
+    // The fixture intentionally also seeds src/ghost.ts / ghost-unit in the
+    // coverage matrix without backing repo_manifest / unit_manifest entries,
+    // which yields two further coverage-integrity issues on top of the four
+    // asserted below (6 total).
+    assert.equal(parsed.issue_count, 6);
     assert.ok(
       parsed.issues.some(
         (issue) =>
@@ -191,6 +171,16 @@ test("audit-code validate exits non-zero when validation issues exist", async ()
           issue.path === "unit_manifest:auth-unit" &&
           /unknown file src\/ghost\.ts/i.test(issue.message),
       ),
+    );
+    assert.ok(
+      parsed.issues.some(
+        (issue) =>
+          issue.path === "coverage_matrix:src/api/auth.ts" &&
+          /completed lens tests is not listed in required_lenses/i.test(
+            issue.message,
+          ),
+      ),
+      "expected a completed_lenses superset violation issue for src/api/auth.ts",
     );
   });
 });

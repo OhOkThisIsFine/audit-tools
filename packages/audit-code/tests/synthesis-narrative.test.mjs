@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertMatchesJsonSchema } from "./helpers/jsonSchemaAssert.mjs";
+import { assertMatchesJsonSchema } from "./helpers/auditSchemaRegistry.mjs";
+import { captureConsole } from "./helpers/captureConsole.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -186,6 +187,24 @@ test("runSynthesisNarrativeExecutor omits cleanly without a narrative", () => {
   assert.equal(run.updated.audit_findings.themes, undefined);
 });
 
+test("runSynthesisNarrativeExecutor omits narrative and writes base findings when audit_findings is absent (needsBaseWrite=true)", () => {
+  const results = syntheticResults();
+  // Bundle has audit_results but NO audit_findings → needsBaseWrite is true
+  const bundle = { audit_results: results };
+
+  const run = runSynthesisNarrativeExecutor(bundle, undefined);
+
+  // Both artifacts must be written because needsBaseWrite is true
+  assert.deepEqual(run.artifacts_written, ["audit-findings.json", "synthesis-narrative.json"]);
+  // Findings are built from scratch
+  assert.ok(run.updated.audit_findings);
+  assert.equal(run.updated.audit_findings.summary.finding_count, 2);
+  // No narrative was applied — themes should be absent
+  assert.equal(run.updated.audit_findings.themes, undefined);
+  // Narrative record reflects omitted status
+  assert.equal(run.updated.synthesis_narrative.status, "omitted");
+});
+
 test("runSynthesisNarrativeExecutor applies a provider narrative", () => {
   const results = syntheticResults();
   const synth = runSynthesisExecutor({ audit_results: results }, results).updated;
@@ -217,4 +236,57 @@ test("advanceAudit forced synthesis_narrative_executor applies and records the n
   const tokenId = idOf(synth.audit_findings, "Token check is weak");
   const f1 = advanced.updated_bundle.audit_findings.findings.find((f) => f.id === tokenId);
   assert.equal(f1.theme_id, "T-1");
+});
+
+test("buildAuditReportModel emits a synthesis_complete diagnostic to stderr", async () => {
+  const { stderr } = await captureConsole(() => {
+    buildAuditReportModel({ results: syntheticResults() });
+  });
+
+  const lines = stderr.trim().split("\n").filter((l) => l.trim().length > 0);
+  assert.ok(lines.length > 0, "console.error should have been called at least once");
+
+  let parsed;
+  try {
+    parsed = JSON.parse(lines[0]);
+  } catch {
+    assert.fail(`First console.error argument is not valid JSON: ${lines[0]}`);
+  }
+
+  assert.equal(parsed.tag, "synthesis_complete");
+  assert.equal(typeof parsed.finding_count, "number");
+  assert.equal(typeof parsed.work_block_count, "number");
+  assert.equal(typeof parsed.audited_file_count, "number");
+  assert.equal(typeof parsed.excluded_file_count, "number");
+  assert.equal(typeof parsed.budget_deferred_task_count, "number");
+
+  const model = buildAuditReportModel({ results: syntheticResults() });
+  assert.equal(parsed.finding_count, model.findings.length);
+});
+
+test("buildAuditFindingsReport emits an audit_findings_report_built diagnostic to stderr", async () => {
+  const { AUDIT_FINDINGS_CONTRACT_VERSION: contractVersion } = await import(
+    "../src/reporting/synthesis.ts"
+  );
+
+  const model = buildAuditReportModel({ results: syntheticResults() });
+
+  const { stderr } = await captureConsole(() => {
+    buildAuditFindingsReport(model);
+  });
+
+  const lines = stderr.trim().split("\n").filter((l) => l.trim().length > 0);
+  assert.ok(lines.length > 0, "console.error should have been called at least once");
+
+  let parsed;
+  try {
+    parsed = JSON.parse(lines[0]);
+  } catch {
+    assert.fail(`First console.error argument is not valid JSON: ${lines[0]}`);
+  }
+
+  assert.equal(parsed.tag, "audit_findings_report_built");
+  assert.equal(parsed.contract_version, contractVersion);
+  assert.equal(parsed.finding_count, model.findings.length);
+  assert.equal(typeof parsed.work_block_count, "number");
 });

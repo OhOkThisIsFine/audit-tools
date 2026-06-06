@@ -34,10 +34,11 @@ async function buildSyntheticResults(tasks, root) {
 }
 
 function runWrapper(args, options = {}) {
+  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [wrapperPath, ...args], {
       cwd: options.cwd ?? repoRoot,
-      env: process.env,
+      env: cleanEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -239,7 +240,24 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
 
     assert.ok(presented, "next-step must reach present_report");
     assert.equal(presented.status, "complete");
-    assert.match(presented.artifact_paths.final_report, /audit-report\.md$/);
+    // Completion promotes the canonical report to the repo root.
+    assert.equal(presented.artifact_paths.final_report, join(root, "audit-report.md"));
+    assert.match(
+      await readFile(presented.artifact_paths.final_report, "utf8"),
+      /# Audit Report/,
+    );
+    // The audit working state is cleaned out (promotion removes the artifact
+    // bundle), but next-step still leaves the present_report step scaffolding so
+    // the host can read and follow `prompt_path`. Assert the working artifacts
+    // are gone while the prompt the host must follow remains readable.
+    assert.equal(
+      await access(join(artifactsDir, "audit_tasks.json"))
+        .then(() => true)
+        .catch(() => false),
+      false,
+      "audit working artifacts must be cleaned on completion",
+    );
+    assert.match(await readFile(presented.prompt_path, "utf8"), /present report/i);
   });
 });
 

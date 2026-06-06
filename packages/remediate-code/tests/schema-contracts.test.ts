@@ -1,6 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const SCHEMA_DIR = join(__dirname, "..", "schemas");
 
@@ -24,28 +28,32 @@ const EXPECTED_SCHEMAS = [
 
 describe("JSON schema contracts", () => {
   for (const schemaFile of EXPECTED_SCHEMAS) {
-    it(`${schemaFile} exists and is valid JSON`, async () => {
-      const content = await readFile(join(SCHEMA_DIR, schemaFile), "utf8");
-      expect(() => JSON.parse(content)).not.toThrow();
-    });
+    describe(schemaFile, () => {
+      let content: string;
+      let schema: unknown;
 
-    it(`${schemaFile} declares a JSON Schema draft`, async () => {
-      const schema = JSON.parse(
-        await readFile(join(SCHEMA_DIR, schemaFile), "utf8"),
-      );
-      expect(typeof schema.$schema).toBe("string");
-      expect(schema.$schema).toMatch(/json-schema\.org/);
-    });
+      beforeAll(async () => {
+        content = await readFile(join(SCHEMA_DIR, schemaFile), "utf8");
+        schema = JSON.parse(content);
+      });
 
-    it(`${schemaFile} has a type or $ref at the root`, async () => {
-      const schema = JSON.parse(
-        await readFile(join(SCHEMA_DIR, schemaFile), "utf8"),
-      );
-      const hasType = typeof schema.type === "string";
-      const hasRef = typeof schema.$ref === "string";
-      const hasOneOf = Array.isArray(schema.oneOf);
-      const hasAnyOf = Array.isArray(schema.anyOf);
-      expect(hasType || hasRef || hasOneOf || hasAnyOf).toBe(true);
+      it("exists and is valid JSON", () => {
+        expect(() => JSON.parse(content)).not.toThrow();
+      });
+
+      it("declares a JSON Schema draft", () => {
+        expect(typeof (schema as Record<string, unknown>).$schema).toBe("string");
+        expect((schema as Record<string, unknown>).$schema).toMatch(/json-schema\.org/);
+      });
+
+      it("has a type or $ref at the root", () => {
+        const s = schema as Record<string, unknown>;
+        const hasType = typeof s.type === "string";
+        const hasRef = typeof s.$ref === "string";
+        const hasOneOf = Array.isArray(s.oneOf);
+        const hasAnyOf = Array.isArray(s.anyOf);
+        expect(hasType || hasRef || hasOneOf || hasAnyOf).toBe(true);
+      });
     });
   }
 
@@ -114,6 +122,44 @@ describe("JSON schema field-level consistency", () => {
     expect(schema.properties.closing_result.additionalProperties).toBe(false);
   });
 
+  it("remediation_report schema exposes structured evidence, test metadata, and run observability", async () => {
+    const schema = JSON.parse(
+      await readFile(join(SCHEMA_DIR, "remediation_report.schema.json"), "utf8"),
+    );
+    expect(schema.properties.started_at.type).toEqual(["string", "null"]);
+    expect(schema.properties.ended_at.type).toBe("string");
+    expect(schema.properties.step_count).toMatchObject({
+      type: "integer",
+      minimum: 0,
+    });
+    expect(
+      schema.properties.resolved.items.properties.verification_evidence,
+    ).toMatchObject({
+      type: "array",
+      items: { type: "string" },
+    });
+    expect(
+      schema.properties.verified_no_change.items.properties.verification_evidence,
+    ).toMatchObject({
+      type: "array",
+      items: { type: "string" },
+    });
+    expect(schema.properties.combined_test_result.properties).toMatchObject({
+      suite_name: { type: "string" },
+      duration_ms: { type: "integer", minimum: 0 },
+      failure_summary: { type: "string" },
+    });
+    expect(schema.properties.combined_test_result.properties).not.toHaveProperty(
+      "output",
+    );
+    expect(schema.properties.e2e_result.properties).toMatchObject({
+      suite_name: { type: "string" },
+      duration_ms: { type: "integer", minimum: 0 },
+      failure_summary: { type: "string" },
+    });
+    expect(schema.properties.e2e_result.properties).not.toHaveProperty("output");
+  });
+
   it("remediation_outcomes schema matches the RemediationOutcomesReport contract", async () => {
     const schema = JSON.parse(
       await readFile(
@@ -145,6 +191,17 @@ describe("JSON schema field-level consistency", () => {
       "ignored",
       "blocked",
     ]);
+    expect(outcome.properties).toMatchObject({
+      closing_status_reason: { type: "string" },
+      started_at: { type: "string" },
+      completed_at: { type: "string" },
+      duration_ms: { type: "number", minimum: 0 },
+    });
+    expect(schema.properties).toMatchObject({
+      started_at: { type: "string" },
+      completed_at: { type: "string" },
+      duration_ms: { type: "number", minimum: 0 },
+    });
   });
 
   it("finding schema requires 'lens' field", async () => {
@@ -161,5 +218,15 @@ describe("JSON schema field-level consistency", () => {
     );
     expect(schema.required).toContain("evidence");
     expect(schema.properties.evidence.minItems).toBeGreaterThanOrEqual(1);
+  });
+
+  it("remediation_report schema requires verified_no_change and blocked arrays (DAT-aee05de9)", async () => {
+    const schema = JSON.parse(
+      await readFile(join(SCHEMA_DIR, "remediation_report.schema.json"), "utf8"),
+    );
+    expect(schema.required).toContain("verified_no_change");
+    expect(schema.required).toContain("blocked");
+    expect(schema.properties).toHaveProperty("verified_no_change");
+    expect(schema.properties).toHaveProperty("blocked");
   });
 });

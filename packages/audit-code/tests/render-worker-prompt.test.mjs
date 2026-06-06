@@ -70,6 +70,49 @@ test("renderWorkerPrompt suppresses worker_command execution when the task uses 
   assert.doesNotMatch(prompt, /Then execute worker_command/i);
 });
 
+test("renderWorkerPrompt renders a ## File access section when the task includes an access property", () => {
+  const prompt = renderWorkerPrompt({
+    contract_version: "audit-code-worker/v1alpha1",
+    run_id: "run-access",
+    repo_root: "/repo",
+    artifacts_dir: "/repo/.audit-artifacts",
+    obligation_id: "audit_tasks_completed",
+    preferred_executor: "agent",
+    result_path: "/repo/.audit-artifacts/runs/run-access/result.json",
+    worker_command: ["node", "/repo/bin/worker.js"],
+    audit_results_path: "/repo/.audit-artifacts/runs/run-access/run-results.json",
+    access: {
+      read_paths: ["/repo/src/foo.ts", "/repo/src/bar.ts"],
+      write_paths: ["/repo/out/result.json"],
+    },
+  });
+
+  assert.match(prompt, /## File access/i, "section heading is present");
+  // read_paths render as a single comma-joined "Read:" line.
+  assert.match(
+    prompt,
+    /Read: \/repo\/src\/foo\.ts, \/repo\/src\/bar\.ts/,
+    "both read paths are listed on the Read line",
+  );
+  assert.match(prompt, /Write: \/repo\/out\/result\.json/, "write path is listed");
+});
+
+test("renderWorkerPrompt omits the ## File access section when no access property is supplied", () => {
+  const prompt = renderWorkerPrompt({
+    contract_version: "audit-code-worker/v1alpha1",
+    run_id: "run-no-access",
+    repo_root: "/repo",
+    artifacts_dir: "/repo/.audit-artifacts",
+    obligation_id: "audit_tasks_completed",
+    preferred_executor: "agent",
+    result_path: "/repo/.audit-artifacts/runs/run-no-access/result.json",
+    worker_command: ["node", "/repo/bin/worker.js"],
+    audit_results_path: "/repo/.audit-artifacts/runs/run-no-access/run-results.json",
+  });
+
+  assert.doesNotMatch(prompt, /## File access/i, "section heading is absent when access is not provided");
+});
+
 test("usesDeferredWorkerCommand keys solely on worker_command_mode", () => {
   assert.equal(
     usesDeferredWorkerCommand({ worker_command_mode: "deferred" }),

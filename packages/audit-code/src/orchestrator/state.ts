@@ -195,7 +195,7 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
       runtimeReady
         ? "satisfied"
         : has(bundle.runtime_validation_report)
-          ? "missing"
+          ? "stale"
           : "missing",
       runtimeTasks.length === 0
         ? "No deterministic runtime validation tasks were planned."

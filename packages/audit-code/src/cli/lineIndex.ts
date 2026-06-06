@@ -15,9 +15,8 @@ export async function buildLineIndex(
   repoManifest: RepoManifest,
 ): Promise<Record<string, number>> {
   const entries: Array<readonly [string, number]> = [];
-  const batchSize = LINE_COUNT_BATCH_SIZE;
-  for (let i = 0; i < repoManifest.files.length; i += batchSize) {
-    const batch = repoManifest.files.slice(i, i + batchSize);
+  for (let i = 0; i < repoManifest.files.length; i += LINE_COUNT_BATCH_SIZE) {
+    const batch = repoManifest.files.slice(i, i + LINE_COUNT_BATCH_SIZE);
     const results = await Promise.all(
       batch.map(async (file) => {
         try {
@@ -25,7 +24,10 @@ export async function buildLineIndex(
             file.path,
             await countLines(resolve(root, file.path)),
           ] as const;
-        } catch {
+        } catch (err) {
+          console.warn(
+            `[lineIndex] Failed to count lines for '${file.path}': ${err instanceof Error ? err.message : String(err)}`,
+          );
           return [file.path, 0] as const;
         }
       }),
@@ -40,15 +42,24 @@ export async function buildLineIndexForPaths(
   paths: string[],
 ): Promise<Record<string, number>> {
   const uniquePaths = [...new Set(paths)].sort();
-  const entries = await Promise.all(
-    uniquePaths.map(async (path) => {
-      try {
-        return [path, await countLines(resolve(root, path))] as const;
-      } catch {
-        return [path, 0] as const;
-      }
-    }),
-  );
+  const entries: Array<readonly [string, number]> = [];
+  const batchSize = LINE_COUNT_BATCH_SIZE;
+  for (let i = 0; i < uniquePaths.length; i += batchSize) {
+    const batch = uniquePaths.slice(i, i + batchSize);
+    const results = await Promise.all(
+      batch.map(async (path) => {
+        try {
+          return [path, await countLines(resolve(root, path))] as const;
+        } catch (err) {
+          console.warn(
+            `[lineIndex] Failed to count lines for '${path}': ${err instanceof Error ? err.message : String(err)}`,
+          );
+          return [path, 0] as const;
+        }
+      }),
+    );
+    entries.push(...results);
+  }
   return Object.fromEntries(entries);
 }
 

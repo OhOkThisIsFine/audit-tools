@@ -1,0 +1,109 @@
+name: audit-code-test-suite
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - packages/audit-code/**
+      - packages/shared/**
+      - package-lock.json
+  pull_request:
+    branches:
+      - main
+    paths:
+      - packages/audit-code/**
+      - packages/shared/**
+      - package-lock.json
+
+concurrency:
+  group: audit-code-test-suite-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_LOGLEVEL: notice
+
+jobs:
+  orchestration-tests:
+    name: Orchestration tests (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          - "20.19.2"
+          - "22.14.0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - name: Validate package-lock.json
+        timeout-minutes: 2
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::package-lock.json is missing or malformed. Regenerate it with npm install and commit the updated lockfile before retrying CI."' ERR
+          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('package-lock.json is missing lockfileVersion'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('package-lock.json is missing package name'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
+      - name: Install dependencies
+        timeout-minutes: 10
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm ci failed. Inspect the uploaded audit-code-test-suite npm logs artifact and rerun npm ci locally."' ERR
+          npm ci
+      - name: Build @audit-tools/shared
+        timeout-minutes: 5
+        shell: bash
+        working-directory: packages/shared
+        run: |
+          set -euo pipefail
+          npm run build
+      - name: Type-check
+        timeout-minutes: 10
+        shell: bash
+        working-directory: packages/audit-code
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm run check failed. Review the uploaded audit-code-test-suite npm logs artifact and confirm the TypeScript build is green locally."' ERR
+          npm run check
+      - name: Build
+        timeout-minutes: 10
+        shell: bash
+        working-directory: packages/audit-code
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm run build failed. Review the uploaded audit-code-test-suite npm logs artifact and rerun npm run build locally."' ERR
+          npm run build
+      - name: Run tests
+        timeout-minutes: 15
+        shell: bash
+        working-directory: packages/audit-code
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm test failed. Review the uploaded audit-code-test-suite npm logs artifact and compare the failing Node line shown in this job name."' ERR
+          npm test
+      - name: Upload npm debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: audit-code-test-suite-npm-logs-node-${{ matrix.node-version }}
+          path: |
+            ~/.npm/_logs
+            npm-debug.log*
+          if-no-files-found: ignore
+      - name: Emit troubleshooting guidance
+        if: ${{ failure() }}
+        shell: bash
+        working-directory: .
+        run: |
+          echo "::error::audit-code test-suite workflow failed on Node ${{ matrix.node-version }}. Review the uploaded npm logs artifact and rerun npm ci && npm test -w packages/audit-code locally on the same Node line."

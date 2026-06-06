@@ -30,6 +30,7 @@ import {
   buildPlanningGraphEdges,
   buildPacketGraphContext,
 } from "./reviewPacketGraph.js";
+import { sanitizeSegment } from "./selectiveDeepening/shared.js";
 
 // Re-exported for scope.ts, which imports the canonical path normalizer here.
 export { normalizeGraphPath };
@@ -124,13 +125,6 @@ function buildTaskGroups(tasks: AuditTask[]): Map<string, AuditTask[]> {
 }
 
 
-function sanitizeSegment(value: string): string {
-  const sanitized = value
-    .replace(/[^a-zA-Z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return sanitized.length > 0 ? sanitized : "packet";
-}
-
 function packetIdFor(tasks: AuditTask[], packetIndex: number): string {
   const unit = sanitizeSegment(tasks[0]?.unit_id ?? "review");
   const lenses = sortLenses(tasks.map((task) => task.lens)).join("-");
@@ -162,16 +156,22 @@ function chunkPacketTasks(
 ): AuditTask[][] {
   const chunks: AuditTask[][] = [];
   let current: AuditTask[] = [];
+  const verbose = Boolean(process.env.AUDIT_CODE_VERBOSE);
 
   for (const task of tasks.sort(compareTasksForPacket)) {
+    const taskEstimatedTokens = taskContentTokens(task, options.sizeIndex, options.lineIndex);
     const isolatedLargeFileTask =
       task.file_paths.length === 1 &&
-      taskContentTokens(task, options.sizeIndex, options.lineIndex) >
-        options.targetPacketTokens;
+      taskEstimatedTokens > options.targetPacketTokens;
     if (isolatedLargeFileTask) {
       if (current.length > 0) {
         chunks.push(current);
         current = [];
+      }
+      if (verbose) {
+        process.stderr.write(
+          `[audit-code:packet-planning] isolated large-file chunk: task="${task.task_id}" file="${task.file_paths[0]}" estimatedTokens=${taskEstimatedTokens} targetPacketTokens=${options.targetPacketTokens}\n`,
+        );
       }
       chunks.push([task]);
       continue;
@@ -191,6 +191,11 @@ function chunkPacketTasks(
       current.length > 0 && candidateContentTokens > options.targetPacketTokens;
 
     if (wouldExceedTaskCount || wouldExceedTokens) {
+      if (verbose && wouldExceedTokens) {
+        process.stderr.write(
+          `[audit-code:packet-planning] token-budget split: task="${task.task_id}" file="${task.file_paths[0] ?? ""}" candidateContentTokens=${candidateContentTokens} targetPacketTokens=${options.targetPacketTokens}\n`,
+        );
+      }
       chunks.push(current);
       current = [];
     }

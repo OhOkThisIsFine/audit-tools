@@ -5,24 +5,20 @@ import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RemediationState } from "../src/state/store.js";
+import { makeState as makeBaseState } from "./test-helpers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-triage");
 
 const BASE_OPTIONS = { root: "/tmp", artifactsDir: TEST_DIR };
 
-function makeState(items: Record<string, any>): RemediationState {
-  return {
-    status: "triage",
-    plan: {
-      plan_id: "P1",
-      findings: [],
-      blocks: [],
-      project_type: "unknown",
-      candidate_closing_actions: [],
-    },
-    items,
-  } as any;
+function makeState(items: Record<string, unknown>): RemediationState {
+  return makeBaseState({ status: "triage", items });
+}
+
+function expectIsoTimestamp(value: unknown): void {
+  expect(typeof value).toBe("string");
+  expect(Date.parse(value as string)).not.toBeNaN();
 }
 
 beforeEach(async () => {
@@ -42,6 +38,8 @@ describe("runTriagePhase", () => {
         status: "blocked",
         failure_reason: "test",
         block_id: "B1",
+        started_at: "2026-06-05T12:00:00.000Z",
+        completed_at: "2026-06-05T12:01:00.000Z",
       },
     });
 
@@ -59,12 +57,14 @@ describe("runTriagePhase", () => {
   });
 
   it("applies ignore resolution and returns closing when no retries needed", async () => {
+    const originalStartedAt = "2026-06-05T12:00:00.000Z";
     const state = makeState({
       F1: {
         finding_id: "F1",
         status: "blocked",
         failure_reason: "test",
         block_id: "B1",
+        started_at: originalStartedAt,
       },
     });
 
@@ -81,15 +81,20 @@ describe("runTriagePhase", () => {
     const next = await runTriagePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("closing");
     expect(state.items!.F1.status).toBe("ignored");
+    expect(state.items!.F1.started_at).toBe(originalStartedAt);
+    expectIsoTimestamp(state.items!.F1.completed_at);
   });
 
   it("applies retry resolution and returns documenting", async () => {
+    const originalStartedAt = "2026-06-05T12:00:00.000Z";
     const state = makeState({
       F1: {
         finding_id: "F1",
         status: "blocked",
         failure_reason: "test",
         block_id: "B1",
+        started_at: originalStartedAt,
+        completed_at: "2026-06-05T12:01:00.000Z",
       },
     });
 
@@ -104,6 +109,8 @@ describe("runTriagePhase", () => {
     const next = await runTriagePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("documenting");
     expect(state.items!.F1.status).toBe("documented");
+    expect(state.items!.F1.started_at).toBe(originalStartedAt);
+    expect(state.items!.F1.completed_at).toBeUndefined();
   });
 
   it("returns complete instead of exiting the process on halt", async () => {
@@ -142,6 +149,8 @@ describe("runTriagePhase", () => {
         status: "blocked",
         failure_reason: "test",
         block_id: "B1",
+        started_at: "2026-06-05T12:00:00.000Z",
+        completed_at: "2026-06-05T12:01:00.000Z",
       },
       F2: {
         finding_id: "F2",
@@ -149,6 +158,8 @@ describe("runTriagePhase", () => {
         failure_reason: "test",
         block_id: "B1",
         rework_count: 1,
+        started_at: "2026-06-05T12:02:00.000Z",
+        completed_at: "2026-06-05T12:03:00.000Z",
       },
     });
 
@@ -167,6 +178,33 @@ describe("runTriagePhase", () => {
     // rework_count is incremented (from undefined->1 and from 1->2).
     expect(state.items!.F1.rework_count).toBe(1);
     expect(state.items!.F2.rework_count).toBe(2);
+    expect(state.items!.F1.started_at).toBe("2026-06-05T12:00:00.000Z");
+    expect(state.items!.F2.started_at).toBe("2026-06-05T12:02:00.000Z");
+    expect(state.items!.F1.completed_at).toBeUndefined();
+    expect(state.items!.F2.completed_at).toBeUndefined();
+  });
+
+  it("throws when triage_resolution.json fails validation", async () => {
+    const state = makeState({
+      F1: {
+        finding_id: "F1",
+        status: "blocked",
+        failure_reason: "test",
+        block_id: "B1",
+      },
+    });
+
+    await writeFile(
+      join(TEST_DIR, "triage_resolution.json"),
+      JSON.stringify({
+        items: [{ finding_id: "F1", action: "" }],
+      }),
+      "utf8",
+    );
+
+    await expect(runTriagePhase(state, BASE_OPTIONS)).rejects.toThrow(
+      /Invalid triage_resolution\.json/,
+    );
   });
 
   it("stops auto-retrying an item that has hit the rework cap and routes to human triage", async () => {

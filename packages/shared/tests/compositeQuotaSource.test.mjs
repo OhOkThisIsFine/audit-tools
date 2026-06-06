@@ -1,9 +1,15 @@
-import test from "node:test";
+import test, { mock, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 
 const { CompositeQuotaSource, buildQuotaSource } = await import(
   "../src/quota/compositeQuotaSource.ts"
 );
+const { RunLogger } = await import("../src/observability/runLog.ts");
+
+afterEach(() => mock.restoreAll());
 
 function makeSnapshot(source) {
   return {
@@ -31,20 +37,6 @@ function throwingSource(name) {
       throw new Error(`${name} boom`);
     },
   };
-}
-
-/** Silence (and capture) console.warn for a single async body. */
-async function withSilencedWarn(fn) {
-  const original = console.warn;
-  const calls = [];
-  console.warn = (...args) => {
-    calls.push(args.map(String).join(" "));
-  };
-  try {
-    return await fn(calls);
-  } finally {
-    console.warn = original;
-  }
 }
 
 test("CompositeQuotaSource returns first non-null snapshot", async () => {
@@ -76,44 +68,35 @@ test("CompositeQuotaSource returns first source's snapshot without consulting la
 });
 
 test("CompositeQuotaSource skips a synchronously throwing source and tries the next", async () => {
-  await withSilencedWarn(async (warnings) => {
-    const snap = makeSnapshot("second");
-    const composite = new CompositeQuotaSource([
-      throwingSource("first"),
-      snapshotSource("second", snap),
-    ]);
-    const result = await composite.queryCurrentUsage("provider/model");
-    assert.equal(result, snap);
-    assert.ok(warnings.some((w) => w.includes("first")));
-  });
+  const snap = makeSnapshot("second");
+  const composite = new CompositeQuotaSource([
+    throwingSource("first"),
+    snapshotSource("second", snap),
+  ]);
+  const result = await composite.queryCurrentUsage("provider/model");
+  assert.equal(result, snap);
 });
 
 test("CompositeQuotaSource skips a rejecting source and tries the next", async () => {
-  await withSilencedWarn(async () => {
-    const snap = makeSnapshot("second");
-    const composite = new CompositeQuotaSource([
-      {
-        name: "first",
-        queryCurrentUsage: () => Promise.reject(new Error("rejected")),
-      },
-      snapshotSource("second", snap),
-    ]);
-    const result = await composite.queryCurrentUsage("provider/model");
-    assert.equal(result, snap);
-  });
+  const snap = makeSnapshot("second");
+  const composite = new CompositeQuotaSource([
+    {
+      name: "first",
+      queryCurrentUsage: () => Promise.reject(new Error("rejected")),
+    },
+    snapshotSource("second", snap),
+  ]);
+  const result = await composite.queryCurrentUsage("provider/model");
+  assert.equal(result, snap);
 });
 
-test("CompositeQuotaSource returns null when all sources throw, warning for each", async () => {
-  await withSilencedWarn(async (warnings) => {
-    const composite = new CompositeQuotaSource([
-      throwingSource("first"),
-      throwingSource("second"),
-    ]);
-    const result = await composite.queryCurrentUsage("provider/model");
-    assert.equal(result, null);
-    assert.ok(warnings.some((w) => w.includes("first")));
-    assert.ok(warnings.some((w) => w.includes("second")));
-  });
+test("CompositeQuotaSource returns null when all sources throw", async () => {
+  const composite = new CompositeQuotaSource([
+    throwingSource("first"),
+    throwingSource("second"),
+  ]);
+  const result = await composite.queryCurrentUsage("provider/model");
+  assert.equal(result, null);
 });
 
 test("CompositeQuotaSource returns null when all sources return null", async () => {
@@ -131,15 +114,43 @@ test("buildQuotaSource returns a composite named 'composite'", () => {
 });
 
 test("buildQuotaSource consults additional sources ahead of the learned source", async () => {
-  await withSilencedWarn(async () => {
-    // A throwing custom source first, then a snapshot-returning custom source:
-    // if the composite returns the custom snapshot, the additional sources were
-    // consulted before the trailing LearnedQuotaSource.
-    const snap = makeSnapshot("custom");
-    const source = buildQuotaSource({
-      additionalSources: [throwingSource("custom-throws"), snapshotSource("custom-snap", snap)],
-    });
-    const result = await source.queryCurrentUsage("provider/model-that-has-no-state");
-    assert.equal(result, snap);
+  // A throwing custom source first, then a snapshot-returning custom source:
+  // if the composite returns the custom snapshot, the additional sources were
+  // consulted before the trailing LearnedQuotaSource.
+  const snap = makeSnapshot("custom");
+  const source = buildQuotaSource({
+    additionalSources: [throwingSource("custom-throws"), snapshotSource("custom-snap", snap)],
   });
+  const result = await source.queryCurrentUsage("provider/model-that-has-no-state");
+  assert.equal(result, snap);
+});
+
+test("logs a structured error event via RunLogger when a quota source throws", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "composite-quota-test-"));
+  const logPath = join(dir, "run.log");
+  const logger = new RunLogger(logPath);
+
+  const eventSpy = mock.method(logger, "event");
+  const warnSpy = mock.method(console, "warn", () => {});
+
+  const snap = makeSnapshot("good");
+  const composite = new CompositeQuotaSource(
+    [throwingSource("bad-source"), snapshotSource("good", snap)],
+    logger,
+  );
+  const result = await composite.queryCurrentUsage("provider/model");
+
+  // Skip behaviour preserved: returns the good source's snapshot
+  assert.equal(result, snap);
+
+  // RunLogger.event was called once for the throwing source
+  assert.equal(eventSpy.mock.calls.length, 1);
+  const [evt] = eventSpy.mock.calls[0].arguments;
+  assert.equal(evt.kind, "error");
+  assert.equal(evt.phase, "quota");
+  assert.ok(evt.note.includes("bad-source"), `note should include source name, got: ${evt.note}`);
+  assert.ok(evt.note.includes("bad-source boom"), `note should include error message, got: ${evt.note}`);
+
+  // console.warn is NOT called
+  assert.equal(warnSpy.mock.calls.length, 0);
 });

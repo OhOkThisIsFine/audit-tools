@@ -31,12 +31,50 @@ export interface RunTrackedResult {
   stderr: string;
   /** The argv actually spawned, after platform/opentoken wrapping. */
   argv: string[];
+  /** The cwd passed to runTracked, if any. undefined means the command inherited the process CWD. */
+  cwd?: string;
+  /** Elapsed wall-clock time in milliseconds for the spawned command. */
+  duration_ms: number;
   error?: Error;
 }
 
 const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
 
-/** Quote a single argv token for a `cmd.exe /c "..."` command line. */
+// --- cmd.exe quoting helpers ---
+//
+// There are two distinct contexts in which a token must be quoted for cmd.exe,
+// and the correct quoting strategy differs between them:
+//
+//   • `quoteForCmd`          — for `wrapForWindowsBatch`: each argv token is
+//     embedded into the single-string argument passed to `cmd.exe /d /s /c`.
+//     In this context cmd.exe's own *argv parser* processes the resulting
+//     quoted string, so doubling double-quotes (`"` → `""`) is correct.
+//     Use this when constructing the argv array for `wrapForWindowsBatch`.
+//
+//   • `quoteForOpenTokenCmd` — for `wrapForOpenToken`: tokens are embedded
+//     into a full command-line *string* that `cmd.exe /c` interprets as a
+//     shell command (e.g. `opentoken wrap <argv…>`).  In this context the
+//     cmd.exe *command interpreter* sees metacharacters (`^&|<>%"`) before
+//     any argv parser, so caret-escaping them is the correct strategy.
+//     Use this when building the inline string argument for `wrapForOpenToken`
+//     or any other `cmd.exe /c "<full-command-string>"` invocation.
+//
+// Do NOT mix them up: `quoteForOpenTokenCmd` is not a substitute for
+// `quoteForCmd` in the batch-wrapping path, and vice versa.
+
+/**
+ * Quote a single argv token for embedding into the `cmd.exe /d /s /c "..."`
+ * command line used by `wrapForWindowsBatch`.
+ *
+ * In this context cmd.exe's own argv parser processes the resulting quoted
+ * string, which treats doubled double-quotes as a literal `"` — so the
+ * correct strategy is to wrap the token in double-quotes and replace every
+ * internal `"` with `""`.
+ *
+ * **Do not use this for the opentoken wrap path.**  For that context (where
+ * the entire command is a shell string interpreted by cmd.exe before any argv
+ * parser runs), use `quoteForOpenTokenCmd` instead.
+ */
 export function quoteForCmd(arg: string): string {
   if (arg.length === 0) return '""';
   if (!/[\s"]/u.test(arg)) return arg;
@@ -90,11 +128,21 @@ function wrapForWindowsBatch(
 }
 
 /**
- * Quote a single argv token for embedding in a `cmd.exe /c "<opentoken> wrap
- * …>"` command line on Windows: tokens of safe characters pass through bare,
- * everything else is double-quoted with cmd.exe metacharacters caret-escaped.
- * Canonical owner of this charset — both `spawnLoggedCommand` and the opencode
- * launcher import it instead of carrying their own (previously divergent) copy.
+ * Quote a single argv token for embedding in a full command-line *string*
+ * that `cmd.exe /c` will interpret as a shell command — i.e. the
+ * `opentoken wrap <argv…>` invocation assembled in `wrapForOpenToken`.
+ *
+ * In this context the cmd.exe *command interpreter* sees metacharacters
+ * (`^&|<>%"`) before any argv parser, so the correct strategy is to
+ * caret-escape those characters (e.g. `"` → `^"`, `&` → `^&`).  Safe
+ * single-token characters pass through unquoted.
+ *
+ * Canonical owner of this charset — both `spawnLoggedCommand` and the
+ * opencode launcher import it instead of carrying their own copy.
+ *
+ * **Do not use this as a substitute for `quoteForCmd` in the standard
+ * batch-wrapping path (`wrapForWindowsBatch`).** That path expects argv-parser
+ * quoting (doubled double-quotes), not shell-interpreter caret-escaping.
  */
 export function quoteForOpenTokenCmd(value: string): string {
   if (/^[A-Za-z0-9_./:=@+-]+$/u.test(value)) return value;
@@ -159,6 +207,8 @@ export function runTracked(
       stdout: "",
       stderr: "",
       argv: [],
+      cwd: options.cwd,
+      duration_ms: 0,
       error: new Error("runTracked requires a non-empty argv"),
     };
   }
@@ -166,6 +216,7 @@ export function runTracked(
     opentoken: options.opentoken,
     platform: options.platform,
   });
+  const start = Date.now();
   const result = spawnSync(resolved[0], resolved.slice(1), {
     cwd: options.cwd,
     env: options.env,
@@ -182,6 +233,8 @@ export function runTracked(
     stdout: toText(result.stdout),
     stderr: toText(result.stderr),
     argv: resolved,
+    cwd: options.cwd,
+    duration_ms: Date.now() - start,
     error: result.error,
   };
 }

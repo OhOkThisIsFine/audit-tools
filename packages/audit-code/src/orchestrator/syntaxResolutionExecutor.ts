@@ -58,6 +58,24 @@ function snippet(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
+function commandErrorResult(
+  tool: string,
+  command: ReturnType<typeof runFirstAvailableCommand>,
+  results: ExternalAnalyzerResultItem[],
+): { results: ExternalAnalyzerResultItem[]; status: ExternalAnalyzerToolStatus } {
+  return {
+    results,
+    status: {
+      tool,
+      command: command?.candidate.display,
+      resolved: Boolean(command),
+      status: command?.error ? "spawn_error" : "not_resolved",
+      exit_code: command?.exitCode,
+      error: command?.error?.message,
+    },
+  };
+}
+
 function runTsc(root: string): {
   results: ExternalAnalyzerResultItem[];
   status: ExternalAnalyzerToolStatus;
@@ -73,17 +91,7 @@ function runTsc(root: string): {
     { command: "tsc", args: ["--noEmit"], display: "tsc --noEmit" },
   ]);
   if (!command || command.error) {
-    return {
-      results,
-      status: {
-        tool: "tsc",
-        command: command?.candidate.display,
-        resolved: Boolean(command),
-        status: command?.error ? "spawn_error" : "not_resolved",
-        exit_code: command?.exitCode,
-        error: command?.error?.message,
-      },
-    };
+    return commandErrorResult("tsc", command, results);
   }
 
   const output = [command.stdout, command.stderr].filter(Boolean).join("\n");
@@ -119,7 +127,7 @@ function runTsc(root: string): {
   if (results.length === 0 && output.trim().length > 0) {
     const outputSnippet = snippet(output);
     process.stderr.write(
-      `[syntax-resolution] tsc output could not be parsed: ${outputSnippet}\n`,
+      `[syntax-resolution] tsc output could not be parsed: ${outputSnippet} (root=${root}, exit_code=${command.exitCode}, ts=${new Date().toISOString()})\n`,
     );
     return {
       results,
@@ -176,17 +184,7 @@ function runEslint(root: string): {
     },
   ]);
   if (!command || command.error) {
-    return {
-      results,
-      status: {
-        tool: "eslint",
-        command: command?.candidate.display,
-        resolved: Boolean(command),
-        status: command?.error ? "spawn_error" : "not_resolved",
-        exit_code: command?.exitCode,
-        error: command?.error?.message,
-      },
-    };
+    return commandErrorResult("eslint", command, results);
   }
 
   const output = [command.stdout, command.stderr].filter(Boolean).join("\n").trim();
@@ -223,7 +221,7 @@ function runEslint(root: string): {
   } catch {
     const outputSnippet = snippet(output);
     process.stderr.write(
-      `[syntax-resolution] eslint output could not be parsed: ${outputSnippet}\n`,
+      `[syntax-resolution] eslint output could not be parsed: ${outputSnippet} (root=${root}, exit_code=${command.exitCode}, ts=${new Date().toISOString()})\n`,
     );
     return {
       results,

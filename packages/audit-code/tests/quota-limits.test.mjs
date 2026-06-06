@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { resolveLimits, lookupKnownModel, classifyProvider } = await import(
-  "@audit-tools/shared/quota/limits"
+const { resolveLimits, lookupKnownModel, classifyProvider, resolveHostModel } = await import(
+  "../../shared/src/quota/limits.ts"
 );
 
 test("classifyProvider maps claude-code to hosted", () => {
@@ -124,4 +124,44 @@ test("explicit_config overrides known_metadata even for a known model", () => {
   assert.equal(result.limits.context_tokens, 1_000);
   // known output_tokens not used — falls back to default_context_tokens? No, reserved_output_tokens default
   assert.equal(result.limits.output_tokens, 4_096); // default reserved_output_tokens
+});
+
+test("resolveHostModel returns explicit hostModel argument when provided", () => {
+  const result = resolveHostModel({
+    providerName: "claude-code",
+    sessionConfig: {},
+    explicitModel: "anthropic/claude-sonnet-4-6",
+  });
+  assert.equal(result, "anthropic/claude-sonnet-4-6");
+});
+
+test("resolveHostModel returns null when no argument, no env var, no session config, no provider default", () => {
+  const result = resolveHostModel({
+    providerName: "local-subprocess",
+    sessionConfig: {},
+    env: {},
+    envVar: "AUDIT_CODE_HOST_MODEL",
+  });
+  assert.equal(result, null);
+});
+
+test("resolveHostModel reads from env var when no explicit argument", () => {
+  const result = resolveHostModel({
+    providerName: "local-subprocess",
+    sessionConfig: {},
+    env: { AUDIT_CODE_HOST_MODEL: "anthropic/claude-opus-4-7" },
+    envVar: "AUDIT_CODE_HOST_MODEL",
+  });
+  assert.equal(result, "anthropic/claude-opus-4-7");
+});
+
+test("resolveHostModel explicit argument takes precedence over env var", () => {
+  const result = resolveHostModel({
+    providerName: "local-subprocess",
+    sessionConfig: {},
+    explicitModel: "anthropic/claude-sonnet-4-6",
+    env: { AUDIT_CODE_HOST_MODEL: "anthropic/claude-opus-4-7" },
+    envVar: "AUDIT_CODE_HOST_MODEL",
+  });
+  assert.equal(result, "anthropic/claude-sonnet-4-6");
 });

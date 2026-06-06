@@ -21,7 +21,7 @@ export async function cmdStatus(argv: string[]): Promise<void> {
   }
 
   if (!auditState) {
-    console.error("No audit_state.json found; no active audit in this artifacts directory.");
+    console.log(JSON.stringify({ status: 'no_active_audit', error: 'No audit_state.json found; no active audit in this artifacts directory.' }, null, 2));
     process.exitCode = 1;
     return;
   }
