@@ -93,6 +93,9 @@ export interface ImplementWorkerResult {
   item_results: ImplementWorkerItemResult[];
 }
 
+export const REMEDIATION_CLOSING_RESULT_CONTRACT_VERSION =
+  "remediate-code-closing-result/v1alpha1" as const;
+
 export const REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION =
   "remediate-code-dispatch-quota/v1alpha2" as const;
 

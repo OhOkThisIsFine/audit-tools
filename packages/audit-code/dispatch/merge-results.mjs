@@ -27,8 +27,8 @@ if (existsSync(tasksPath)) {
     for (const task of tasks) {
       taskMap[task.task_id] = task;
     }
-  } catch {
-    // proceed without task context
+  } catch (e) {
+    process.stderr.write(`[warn] Could not read pending-audit-tasks.json; line-count validation will be skipped: ${e.message}\n`);
   }
 }
 
@@ -69,7 +69,9 @@ if (failing.length > 0) {
   writeFileSync(failedTasksPath, JSON.stringify(failing, null, 2));
   process.stderr.write(`${failing.length} task(s) failed validation and were excluded:\n`);
   for (const f of failing) {
-    process.stderr.write(`  ✗ ${f.task_id}: ${f.errors[0]}\n`);
+    for (const err of f.errors) {
+      process.stderr.write(`  ✗ ${f.task_id}: ${err}\n`);
+    }
   }
 }
 

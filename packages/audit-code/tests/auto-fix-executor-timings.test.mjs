@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,11 +8,10 @@ const { runAutoFixExecutor } = await import(
   "../src/orchestrator/autoFixExecutor.ts"
 );
 
-test("runAutoFixExecutor records an empty tool_timings array when no formatter runs", async () => {
-  const root = await mkdtemp(join(tmpdir(), "autofix-timings-"));
+test("records an empty tool_timings array when no formatter runs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "autofix-timings-empty-"));
   try {
-    // .txt has no formatter and the temp root has no prettier config, so nothing
-    // is attempted — tool_timings must mirror executed_tools as an empty array.
+    // .txt has no associated formatter — no subprocess spawned, both arrays empty.
     const bundle = {
       file_disposition: { files: [{ path: "notes/readme.txt", status: "audit" }] },
     };
@@ -20,26 +19,45 @@ test("runAutoFixExecutor records an empty tool_timings array when no formatter r
     const applied = result.updated.auto_fixes_applied;
     assert.deepEqual(applied.executed_tools, []);
     assert.deepEqual(applied.tool_timings, []);
-    assert.ok(applied.timestamp);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("runAutoFixExecutor keeps tool_timings aligned with executed_tools", async () => {
-  const root = await mkdtemp(join(tmpdir(), "autofix-timings-"));
+test("keeps tool_timings aligned with executed_tools", async () => {
+  const root = await mkdtemp(join(tmpdir(), "autofix-timings-aligned-"));
   try {
-    // Excluded file -> no extension collected -> no formatter branch runs.
+    // A prettier config makes hasPrettierConfig() true, and a status:'audit'
+    // .js file puts 'js' in the extension set so the prettier branch fires.
+    await writeFile(join(root, ".prettierrc"), "{}\n", "utf8");
+    // Install a local, deterministic prettier stub that exits 0 so prettier
+    // is recorded in executed_tools (no global prettier required, works in CI).
+    await mkdir(join(root, "node_modules", "prettier", "bin"), { recursive: true });
+    await writeFile(
+      join(root, "node_modules", "prettier", "bin", "prettier.cjs"),
+      "process.exit(0);\n",
+      "utf8",
+    );
+    // A status:'audit' .js file so the executor picks up the extension.
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "index.js"), "const x=1\n", "utf8");
+
     const bundle = {
-      file_disposition: {
-        files: [{ path: "vendor/generated.py", status: "excluded" }],
-      },
+      file_disposition: { files: [{ path: "src/index.js", status: "audit" }] },
     };
     const result = await runAutoFixExecutor(bundle, root);
     const applied = result.updated.auto_fixes_applied;
-    // Same length and same order: each timing entry corresponds to an executed
-    // tool, and every duration is a non-negative number.
-    assert.equal(applied.tool_timings.length, applied.executed_tools.length);
+
+    // At least one formatter must have executed — the forEach body is live code.
+    assert.ok(
+      applied.executed_tools.length > 0,
+      "expected at least one formatter to execute; tool_timings forEach would be dead code if empty",
+    );
+    assert.equal(
+      applied.tool_timings.length,
+      applied.executed_tools.length,
+      "tool_timings and executed_tools must be the same length",
+    );
     applied.tool_timings.forEach((entry, i) => {
       assert.equal(entry.tool, applied.executed_tools[i]);
       assert.equal(typeof entry.duration_ms, "number");

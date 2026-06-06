@@ -42,6 +42,7 @@ export function buildRequeuePayload(
   flowCoverage?: FlowCoverageManifest,
   externalAnalyzerResults?: ExternalAnalyzerResults,
 ) {
+  // Dedupe within each source first — each generator may emit duplicate task_ids independently.
   const fileTasks = dedupeTasks(
     buildRequeueTasks(matrix, externalAnalyzerResults),
   );
@@ -56,6 +57,9 @@ export function buildRequeuePayload(
           ),
         )
       : [];
+  // Two-pass post-merge dedup:
+  //   1. dedupeTasks removes any cross-source task_id collisions (same task emitted by both generators).
+  //   2. dedupeByScope removes tasks that cover the same lens+file_paths scope but carry different task_ids.
   const tasks = dedupeByScope(dedupeTasks([...fileTasks, ...flowTasks]));
 
   return {

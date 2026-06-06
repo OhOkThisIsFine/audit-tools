@@ -27,6 +27,11 @@ export class ClaudeCodeHeaderExtractor implements HeaderExtractor {
     }
 
     // Fall back to scanning the full text for raw header lines
+    if (stderr.trim().length > 0) {
+      process.stderr.write(
+        "[quota] claude-code header extractor: no structured JSON lines with headers/response_headers found in non-empty stderr; falling back to raw-text scan\n",
+      );
+    }
     return extractRateLimitHeaders(stderr);
   }
 }

@@ -46,22 +46,46 @@ export async function runCommand(
     child.stderr.on("data", (chunk) => {
       stderr += String(chunk);
     });
+    let exitCode: number | null = null;
+    let exitSignal: NodeJS.Signals | null = null;
     child.on("error", (error) => {
+      const output = `${stdout}\n${stderr}`.trim();
+      const lines = output.length > 0 ? output.split(/\r?\n/) : [];
+      const truncated = lines.length > 10;
+      const evidence = truncated
+        ? [`[... truncated: showing last 10 of ${lines.length} lines ...]`, ...lines.slice(-10)]
+        : lines;
       resolve({
         status: "inconclusive",
         summary: `Failed to execute ${displayCommand}: ${error.message}`,
-        evidence: [],
+        evidence,
       });
     });
-    child.on("exit", (code) => {
+    child.on("exit", (code, signal) => {
+      exitCode = code;
+      exitSignal = signal;
+    });
+    child.on("close", () => {
       const output = `${stdout}\n${stderr}`.trim();
-      const evidence = output.length > 0 ? output.split(/\r?\n/).slice(-10) : [];
+      const lines = output.length > 0 ? output.split(/\r?\n/) : [];
+      const truncated = lines.length > 10;
+      const evidence = truncated
+        ? [`[... truncated: showing last 10 of ${lines.length} lines ...]`, ...lines.slice(-10)]
+        : lines;
+      const succeeded = exitCode === 0;
+      let summary: string;
+      if (succeeded) {
+        summary = `Deterministic runtime command succeeded: ${displayCommand}`;
+      } else if (exitCode !== null) {
+        summary = `Deterministic runtime command failed with exit code ${exitCode}: ${displayCommand}`;
+      } else if (exitSignal !== null) {
+        summary = `Deterministic runtime command terminated by signal ${exitSignal}: ${displayCommand}`;
+      } else {
+        summary = `Deterministic runtime command exited with unknown status: ${displayCommand}`;
+      }
       resolve({
-        status: code === 0 ? "confirmed" : "not_confirmed",
-        summary:
-          code === 0
-            ? `Deterministic runtime command succeeded: ${displayCommand}`
-            : `Deterministic runtime command failed with exit code ${code}: ${displayCommand}`,
+        status: succeeded ? "confirmed" : "not_confirmed",
+        summary,
         evidence,
       });
     });

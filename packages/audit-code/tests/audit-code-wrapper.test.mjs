@@ -18,6 +18,28 @@ import {
   shouldBuildDistForPaths,
   assertWorkspaceInstalled,
 } from "../audit-code-wrapper-lib.mjs";
+import {
+  shouldBuildDistForPaths as shouldBuildDistForPathsDirect,
+  assertWorkspaceInstalled as assertWorkspaceInstalledDirect,
+} from "../audit-code-wrapper-build.mjs";
+import {
+  INSTALL_HOST_DEFINITIONS,
+  INSTALL_HOST_ORDER,
+  getInstallHostKeys,
+  getInstallProfile,
+  _INSTALL_HOST_ORDER,
+  _INSTALL_HOST_DEFINITIONS,
+  _getInstallHostKeys,
+  _getInstallProfile,
+} from "../audit-code-wrapper-install-hosts.mjs";
+import {
+  mergeOpenCodePermissionConfig,
+  assertOpenCodeAuditPermissionConfig,
+  buildMergedOpenCodeProjectConfig,
+  OPENCODE_AUDIT_BASH_PERMISSION,
+  OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION,
+  renderOpenCodePermissionConfig,
+} from "../audit-code-wrapper-opencode.mjs";
 const { isCanonicalResultFilename } = await import("../src/cli/args.ts");
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -30,53 +52,62 @@ const packageVersion = JSON.parse(
   await readFile(packageJsonPath, "utf8"),
 ).version;
 
-function runWrapper(args, options = {}) {
+function spawnWrapper(args, options = {}) {
   const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [wrapperPath, ...args], {
-      cwd: options.cwd ?? repoRoot,
-      env: cleanEnv,
-      stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-    });
-    if (options.input !== undefined) {
-      child.stdin.end(options.input);
-    }
+  const stdoutRef = { value: "" };
+  const stderrRef = { value: "" };
+  const child = spawn(process.execPath, [wrapperPath, ...args], {
+    cwd: options.cwd ?? repoRoot,
+    env: cleanEnv,
+    stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+  });
+  if (options.input !== undefined) {
+    child.stdin.end(options.input);
+  }
+  child.stdout.on("data", (chunk) => {
+    stdoutRef.value += String(chunk);
+    options.onStdoutChunk?.(stdoutRef.value);
+  });
+  child.stderr.on("data", (chunk) => {
+    stdoutRef; // keep ref in scope; only stderr is updated here
+    stderrRef.value += String(chunk);
+  });
+  child.on("error", (error) => options.onError?.(error));
+  return { child, stdoutRef, stderrRef };
+}
 
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
+function runWrapper(args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const { child, stdoutRef, stderrRef } = spawnWrapper(args, {
+      ...options,
+      onError: reject,
     });
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) {
-        resolve({ stdout, stderr });
+        resolve({ stdout: stdoutRef.value, stderr: stderrRef.value });
         return;
       }
-      reject(new Error(stderr || stdout || `wrapper exited with ${code}`));
+      reject(
+        new Error(
+          stderrRef.value || stdoutRef.value || `wrapper exited with ${code}`,
+        ),
+      );
     });
   });
 }
 
 function runWrapperJsonOutput(args, options = {}) {
-  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [wrapperPath, ...args], {
-      cwd: options.cwd ?? repoRoot,
-      env: cleanEnv,
-      stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-    });
     let settled = false;
-    let stdout = "";
-    let stderr = "";
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       child.kill();
-      reject(new Error(stderr || stdout || "wrapper JSON output timed out"));
+      reject(
+        new Error(
+          stderrRef.value || stdoutRef.value || "wrapper JSON output timed out",
+        ),
+      );
     }, options.timeoutMs ?? 30_000);
 
     function settle(error, value) {
@@ -98,33 +129,42 @@ function runWrapperJsonOutput(args, options = {}) {
       child.kill();
     }
 
-    if (options.input !== undefined) {
-      child.stdin.end(options.input);
-    }
-    child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
-      try {
-        const parsed = JSON.parse(stdout);
-        settle(null, { stdout, stderr, parsed });
-      } catch {
-        // Wait until the wrapper has emitted a complete JSON object.
-      }
+    const { child, stdoutRef, stderrRef } = spawnWrapper(args, {
+      ...options,
+      onStdoutChunk: (accumulated) => {
+        try {
+          const parsed = JSON.parse(accumulated);
+          settle(null, { stdout: accumulated, stderr: stderrRef.value, parsed });
+        } catch {
+          // Wait until the wrapper has emitted a complete JSON object.
+        }
+      },
+      onError: (error) => settle(error),
     });
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on("error", (error) => settle(error));
+
     child.on("exit", (code) => {
       if (settled) return;
       if (code === 0) {
         try {
-          settle(null, { stdout, stderr, parsed: JSON.parse(stdout) });
+          settle(null, {
+            stdout: stdoutRef.value,
+            stderr: stderrRef.value,
+            parsed: JSON.parse(stdoutRef.value),
+          });
         } catch {
-          settle(new Error(stderr || stdout || "wrapper exited without JSON"));
+          settle(
+            new Error(
+              stderrRef.value || stdoutRef.value || "wrapper exited without JSON",
+            ),
+          );
         }
         return;
       }
-      settle(new Error(stderr || stdout || `wrapper exited with ${code}`));
+      settle(
+        new Error(
+          stderrRef.value || stdoutRef.value || `wrapper exited with ${code}`,
+        ),
+      );
     });
   });
 }
@@ -150,7 +190,7 @@ function assertOpenCodeAuditPermissions(config) {
   assert.equal(config.permission?.bash?.["*audit-code.mjs* run-to-completion*"], "deny");
   assert.equal(config.permission?.bash?.["*audit-code.mjs* synthesize*"], "deny");
   assert.equal(config.permission?.bash?.["*node* *auditor-lambda*dist*index.js* worker-run*"], "allow");
-  assert.equal(config.permission?.bash?.["Select-String *"], undefined);
+  assert.equal(config.permission?.bash?.["Select-String *"], "allow");
   assert.equal(config.agent?.auditor?.permission?.read, "allow");
   assert.equal(config.agent?.auditor?.permission?.glob, "allow");
   assert.equal(config.agent?.auditor?.permission?.grep, "allow");
@@ -231,7 +271,7 @@ function validAuditResultForTask(task, overrides = {}) {
   };
 }
 
-async function setupSubmitPacketFixture(root) {
+async function setupDispatchFixture(root) {
   const { stdout } = await runWrapper([], { cwd: root });
   const parsed = JSON.parse(stdout);
   const runId = parsed.handoff.active_review_run?.run_id;
@@ -256,6 +296,30 @@ async function setupSubmitPacketFixture(root) {
   const resultMap = JSON.parse(
     await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
   );
+
+  return { runId, artifactsDir, runDir, tasks, taskById, plan, resultMap };
+}
+
+async function setupMergeFixture(root) {
+  return setupDispatchFixture(root);
+}
+
+async function submitAllPackets(root, runId, artifactsDir, plan, resultMap, taskById) {
+  for (const packet of plan) {
+    const packetResults = resultMap.entries
+      .filter((item) => item.packet_id === packet.packet_id)
+      .map((entry) => validAuditResultForTask(taskById.get(entry.task_id)));
+    await runWrapper(
+      ["submit-packet", "--run-id", runId, "--packet-id", packet.packet_id, "--artifacts-dir", artifactsDir],
+      { cwd: root, input: JSON.stringify(packetResults) },
+    );
+  }
+}
+
+async function setupSubmitPacketFixture(root) {
+  const { runId, artifactsDir, runDir, tasks, taskById, plan, resultMap } =
+    await setupDispatchFixture(root);
+
   const packet = plan.find(
     (candidate) =>
       resultMap.entries.filter((entry) => entry.packet_id === candidate.packet_id)
@@ -483,57 +547,10 @@ test("merge-and-ingest blocks when assigned task results are missing", async () 
 
 test("merge-and-ingest accepts packet task result files as the legacy result array", async () => {
   await withTempRepo(async (root) => {
-    const { stdout } = await runWrapper([], { cwd: root });
-    const parsed = JSON.parse(stdout);
-    const runId = parsed.handoff.active_review_run?.run_id;
-    const artifactsDir = parsed.handoff.artifacts_dir;
+    const { runId, artifactsDir, runDir, tasks, taskById, plan, resultMap } =
+      await setupMergeFixture(root);
 
-    assert.ok(runId);
-    assert.ok(artifactsDir);
-
-    await runWrapper(
-      ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
-      { cwd: root },
-    );
-
-    const runDir = join(artifactsDir, "runs", runId);
-    const tasks = JSON.parse(
-      await readFile(join(runDir, "pending-audit-tasks.json"), "utf8"),
-    );
-    const taskById = new Map(tasks.map((task) => [task.task_id, task]));
-    const plan = JSON.parse(
-      await readFile(join(runDir, "dispatch-plan.json"), "utf8"),
-    );
-
-    const resultMap = JSON.parse(
-      await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
-    );
-
-    for (const packet of plan) {
-      const packetResults = [];
-      for (const entry of resultMap.entries.filter(
-        (item) => item.packet_id === packet.packet_id,
-      )) {
-        const taskId = entry.task_id;
-        const task = taskById.get(taskId);
-        assert.ok(task, `expected task metadata for ${taskId}`);
-        packetResults.push({
-          task_id: task.task_id,
-          unit_id: task.unit_id,
-          pass_id: task.pass_id,
-          lens: task.lens,
-          file_coverage: task.file_paths.map((path) => ({
-            path,
-            total_lines: task.file_line_counts?.[path] ?? 0,
-          })),
-          findings: [],
-        });
-      }
-      await runWrapper(
-        ["submit-packet", "--run-id", runId, "--packet-id", packet.packet_id, "--artifacts-dir", artifactsDir],
-        { cwd: root, input: JSON.stringify(packetResults) },
-      );
-    }
+    await submitAllPackets(root, runId, artifactsDir, plan, resultMap, taskById);
 
     const merge = await runWrapper(
       ["merge-and-ingest", "--run-id", runId, "--artifacts-dir", artifactsDir],
@@ -560,50 +577,10 @@ test("merge-and-ingest accepts packet task result files as the legacy result arr
 
 test("merge-and-ingest is idempotent on re-run and never truncates results", async () => {
   await withTempRepo(async (root) => {
-    const { stdout } = await runWrapper([], { cwd: root });
-    const parsed = JSON.parse(stdout);
-    const runId = parsed.handoff.active_review_run?.run_id;
-    const artifactsDir = parsed.handoff.artifacts_dir;
+    const { runId, artifactsDir, runDir, tasks, taskById, plan, resultMap } =
+      await setupMergeFixture(root);
 
-    await runWrapper(
-      ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
-      { cwd: root },
-    );
-
-    const runDir = join(artifactsDir, "runs", runId);
-    const tasks = JSON.parse(
-      await readFile(join(runDir, "pending-audit-tasks.json"), "utf8"),
-    );
-    const taskById = new Map(tasks.map((task) => [task.task_id, task]));
-    const plan = JSON.parse(
-      await readFile(join(runDir, "dispatch-plan.json"), "utf8"),
-    );
-    const resultMap = JSON.parse(
-      await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
-    );
-
-    for (const packet of plan) {
-      const packetResults = resultMap.entries
-        .filter((item) => item.packet_id === packet.packet_id)
-        .map((entry) => {
-          const task = taskById.get(entry.task_id);
-          return {
-            task_id: task.task_id,
-            unit_id: task.unit_id,
-            pass_id: task.pass_id,
-            lens: task.lens,
-            file_coverage: task.file_paths.map((path) => ({
-              path,
-              total_lines: task.file_line_counts?.[path] ?? 0,
-            })),
-            findings: [],
-          };
-        });
-      await runWrapper(
-        ["submit-packet", "--run-id", runId, "--packet-id", packet.packet_id, "--artifacts-dir", artifactsDir],
-        { cwd: root, input: JSON.stringify(packetResults) },
-      );
-    }
+    await submitAllPackets(root, runId, artifactsDir, plan, resultMap, taskById);
 
     const first = await runWrapper(
       ["merge-and-ingest", "--run-id", runId, "--artifacts-dir", artifactsDir],
@@ -897,55 +874,10 @@ test("submit-packet rejects missing assigned task results", async () => {
 
 test("merge-and-ingest proceeds despite unexpected files in task-results/", async () => {
   await withTempRepo(async (root) => {
-    const { stdout } = await runWrapper([], { cwd: root });
-    const parsed = JSON.parse(stdout);
-    const runId = parsed.handoff.active_review_run?.run_id;
-    const artifactsDir = parsed.handoff.artifacts_dir;
+    const { runId, artifactsDir, runDir, tasks, taskById, plan, resultMap } =
+      await setupMergeFixture(root);
 
-    assert.ok(runId);
-    assert.ok(artifactsDir);
-
-    await runWrapper(
-      ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
-      { cwd: root },
-    );
-
-    const runDir = join(artifactsDir, "runs", runId);
-    const tasks = JSON.parse(
-      await readFile(join(runDir, "pending-audit-tasks.json"), "utf8"),
-    );
-    const taskById = new Map(tasks.map((task) => [task.task_id, task]));
-    const plan = JSON.parse(
-      await readFile(join(runDir, "dispatch-plan.json"), "utf8"),
-    );
-    const resultMap = JSON.parse(
-      await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
-    );
-
-    for (const packet of plan) {
-      const packetResults = [];
-      for (const entry of resultMap.entries.filter(
-        (item) => item.packet_id === packet.packet_id,
-      )) {
-        const task = taskById.get(entry.task_id);
-        assert.ok(task, `expected task metadata for ${entry.task_id}`);
-        packetResults.push({
-          task_id: task.task_id,
-          unit_id: task.unit_id,
-          pass_id: task.pass_id,
-          lens: task.lens,
-          file_coverage: task.file_paths.map((path) => ({
-            path,
-            total_lines: task.file_line_counts?.[path] ?? 0,
-          })),
-          findings: [],
-        });
-      }
-      await runWrapper(
-        ["submit-packet", "--run-id", runId, "--packet-id", packet.packet_id, "--artifacts-dir", artifactsDir],
-        { cwd: root, input: JSON.stringify(packetResults) },
-      );
-    }
+    await submitAllPackets(root, runId, artifactsDir, plan, resultMap, taskById);
 
     // Write a spurious file into task-results/ as a subagent might do
     const taskResultsDir = join(runDir, "task-results");
@@ -1010,27 +942,13 @@ test("merge-and-ingest rejects swapped task result files", async () => {
     );
     const [first, second] = tasks;
 
-    function validResult(task) {
-      return {
-        task_id: task.task_id,
-        unit_id: task.unit_id,
-        pass_id: task.pass_id,
-        lens: task.lens,
-        file_coverage: task.file_paths.map((path) => ({
-          path,
-          total_lines: task.file_line_counts?.[path] ?? 0,
-        })),
-        findings: [],
-      };
-    }
-
     await writeFile(
       entryByTaskId.get(first.task_id).result_path,
-      JSON.stringify(validResult(second), null, 2) + "\n",
+      JSON.stringify(validAuditResultForTask(second), null, 2) + "\n",
     );
     await writeFile(
       entryByTaskId.get(second.task_id).result_path,
-      JSON.stringify(validResult(first), null, 2) + "\n",
+      JSON.stringify(validAuditResultForTask(first), null, 2) + "\n",
     );
 
     await assert.rejects(
@@ -1627,4 +1545,188 @@ test("audit-code wrapper keeps the Copilot-specific installer as a compatibility
     assert.equal(verified.hosts.length, 1);
     assert.equal(verified.hosts[0].host, "vscode");
   });
+});
+
+test("build helpers are isolated from install helpers", async () => {
+  // shouldBuildDistForPaths and assertWorkspaceInstalled are importable directly
+  // from audit-code-wrapper-build.mjs and produce the same results as the
+  // re-exports from audit-code-wrapper-lib.mjs.
+  const tempDir = await mkdtemp(join(tmpdir(), "audit-code-build-isolation-"));
+  try {
+    const sourceDir = join(tempDir, "src");
+    const distDir = join(tempDir, "dist");
+    const tsconfigFile = join(tempDir, "tsconfig.json");
+    const sourceFile = join(sourceDir, "index.ts");
+    const distFile = join(distDir, "index.js");
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(distDir, { recursive: true });
+    await writeFile(sourceFile, "export const value = 1;\n");
+    await writeFile(tsconfigFile, '{"compilerOptions":{"outDir":"dist"}}\n');
+    await writeFile(distFile, "export const value = 1;\n");
+
+    const sourceTime = new Date("2026-04-23T14:00:00.000Z");
+    const distTime = new Date("2026-04-23T14:05:00.000Z");
+    await utimes(sourceDir, sourceTime, sourceTime);
+    await utimes(sourceFile, sourceTime, sourceTime);
+    await utimes(tsconfigFile, sourceTime, sourceTime);
+    await utimes(distDir, distTime, distTime);
+    await utimes(distFile, distTime, distTime);
+
+    // Direct import from build module matches re-export from lib.
+    const resultDirect = await shouldBuildDistForPathsDirect({
+      distEntryPath: distFile,
+      sourceRootPath: sourceDir,
+      tsconfigPath: tsconfigFile,
+    });
+    const resultViaLib = await shouldBuildDistForPaths({
+      distEntryPath: distFile,
+      sourceRootPath: sourceDir,
+      tsconfigPath: tsconfigFile,
+    });
+    assert.equal(resultDirect, false);
+    assert.equal(resultDirect, resultViaLib);
+
+    // assertWorkspaceInstalled direct import behaves identically to the lib re-export.
+    const checkoutRoot = join(tempDir, "checkout");
+    assert.throws(
+      () => assertWorkspaceInstalledDirect({ checkoutRoot, sharedManifestPath: null }),
+      /Dependencies are not installed/,
+    );
+    assert.throws(
+      () => assertWorkspaceInstalled({ checkoutRoot, sharedManifestPath: null }),
+      /Dependencies are not installed/,
+    );
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+
+  // INSTALL_HOST_DEFINITIONS, INSTALL_HOST_ORDER, getInstallHostKeys,
+  // getInstallProfile are importable directly from install-hosts and match the
+  // underscore-aliased re-exports from wrapper-lib.
+  assert.deepEqual(INSTALL_HOST_ORDER, _INSTALL_HOST_ORDER);
+  assert.deepEqual(INSTALL_HOST_DEFINITIONS, _INSTALL_HOST_DEFINITIONS);
+  assert.deepEqual(getInstallHostKeys("all"), _getInstallHostKeys("all"));
+  assert.deepEqual(getInstallProfile("opencode"), _getInstallProfile("opencode"));
+});
+
+test("OpenCode permission helpers are importable from the dedicated module", () => {
+  // mergeOpenCodePermissionConfig with a null existing config returns the
+  // generated config unchanged.
+  const generated = {
+    read: "allow",
+    glob: "allow",
+    grep: "allow",
+    external_directory: { "*": "allow" },
+    edit: { "*": "ask", ".audit-code/**": "allow" },
+    bash: { "*": "allow", "audit-code run-to-completion*": "deny" },
+  };
+  const merged = mergeOpenCodePermissionConfig(null, generated);
+  assert.deepEqual(merged, generated);
+
+  // mergeOpenCodePermissionConfig with an empty existing config preserves
+  // the generated values for read/glob/grep.
+  const mergedFromEmpty = mergeOpenCodePermissionConfig({}, generated);
+  assert.equal(mergedFromEmpty.read, "allow");
+  assert.equal(mergedFromEmpty.glob, "allow");
+  assert.equal(mergedFromEmpty.grep, "allow");
+
+  // assertOpenCodeAuditPermissionConfig throws when required bash rules are missing.
+  const badPermission = {
+    read: "allow",
+    glob: "allow",
+    grep: "allow",
+    external_directory: { "*": "allow" },
+    edit: { ".audit-code/**": "allow", ".audit-artifacts/**": "allow", "audit-report.md": "allow" },
+    bash: {
+      // Missing required allow/deny rules entirely
+      "*": "allow",
+    },
+  };
+  assert.throws(
+    () => assertOpenCodeAuditPermissionConfig(badPermission, "permission"),
+    /bash must allow|bash must deny/,
+  );
+
+  // buildMergedOpenCodeProjectConfig produces a config with the required
+  // permission structure even when called with an empty existing config.
+  const built = buildMergedOpenCodeProjectConfig({}, "/tmp/repo");
+  assert.equal(built.permission?.read, "allow");
+  assert.equal(built.permission?.glob, "allow");
+  assert.equal(built.permission?.grep, "allow");
+  assert.equal(built.permission?.external_directory?.["*"], "allow");
+  assert.equal(built.agent?.auditor?.permission?.read, "allow");
+});
+
+test("OPENCODE_AUDIT_BASH_PERMISSION includes Select-String", () => {
+  assert.equal(
+    OPENCODE_AUDIT_BASH_PERMISSION["Select-String *"],
+    "allow",
+    "OPENCODE_AUDIT_BASH_PERMISSION must include 'Select-String *': 'allow' as the source of truth",
+  );
+});
+
+test("renderOpenCodePermissionConfig bash block includes Select-String", () => {
+  const config = renderOpenCodePermissionConfig();
+  assert.equal(
+    config.bash["Select-String *"],
+    "allow",
+    "renderOpenCodePermissionConfig() must return a bash block containing 'Select-String *': 'allow'",
+  );
+});
+
+test("mergeOpenCodePermissionConfig preserves '*': 'allow' on external_directory even when existing config has a more restrictive value", () => {
+  const generated = {
+    read: "allow",
+    glob: "allow",
+    grep: "allow",
+    external_directory: { "*": "allow" },
+    edit: { "*": "ask", ".audit-code/**": "allow" },
+    bash: { "*": "allow", "audit-code run-to-completion*": "deny" },
+  };
+
+  // User had '*': 'ask' on external_directory — managed rule must override to 'allow'
+  const askExisting = { external_directory: { "*": "ask" } };
+  const mergedAsk = mergeOpenCodePermissionConfig(askExisting, generated);
+  assert.equal(mergedAsk.external_directory["*"], "allow",
+    "managed rule must override user '*': 'ask' to 'allow' on external_directory");
+
+  // User had '*': 'deny' on external_directory — managed rule must override to 'allow'
+  const denyExisting = { external_directory: { "*": "deny" } };
+  const mergedDeny = mergeOpenCodePermissionConfig(denyExisting, generated);
+  assert.equal(mergedDeny.external_directory["*"], "allow",
+    "managed rule must override user '*': 'deny' to 'allow' on external_directory");
+
+  // Undefined existing external_directory — managed rule must still produce 'allow'
+  const undefinedExisting = {};
+  const mergedUndefined = mergeOpenCodePermissionConfig(undefinedExisting, generated);
+  assert.equal(mergedUndefined.external_directory["*"], "allow",
+    "managed rule must produce 'allow' even when existing external_directory is undefined");
+});
+
+test("mergeOpenCodePermissionConfig does not let user external_directory override the managed allow rule (parity with edit/bash behavior)", () => {
+  const generated = {
+    read: "allow",
+    glob: "allow",
+    grep: "allow",
+    external_directory: { "*": "allow" },
+    edit: { "*": "ask", ".audit-code/**": "allow" },
+    bash: { "*": "allow", "audit-code run-to-completion*": "deny" },
+  };
+
+  // A user-owned external_directory object with no '*' key still gets '*': 'allow'
+  const noStarExisting = { external_directory: { "some/path/**": "ask" } };
+  const mergedNoStar = mergeOpenCodePermissionConfig(noStarExisting, generated);
+  assert.equal(mergedNoStar.external_directory["*"], "allow",
+    "managed rule must add '*': 'allow' even when existing object has no '*' key");
+
+  // Parity with edit: a user '*': 'deny' on edit is overridden to 'ask' by the managed rule
+  const editDenyExisting = { edit: { "*": "deny" } };
+  const mergedEditDeny = mergeOpenCodePermissionConfig(editDenyExisting, generated);
+  assert.equal(mergedEditDeny.edit["*"], "ask",
+    "managed OPENCODE_AUDIT_EDIT_PERMISSION must override user '*': 'deny' on edit");
+  // Same behavior must hold for external_directory
+  const extDenyExisting = { external_directory: { "*": "deny" } };
+  const mergedExtDeny = mergeOpenCodePermissionConfig(extDenyExisting, generated);
+  assert.equal(mergedExtDeny.external_directory["*"], "allow",
+    "OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION must override user '*': 'deny' on external_directory");
 });

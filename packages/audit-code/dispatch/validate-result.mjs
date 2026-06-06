@@ -40,8 +40,8 @@ if (existsSync(tasksPath)) {
   try {
     const tasks = JSON.parse(readFileSync(tasksPath, "utf8"));
     task = tasks.find(t => t.task_id === taskId) ?? null;
-  } catch {
-    // proceed without task context
+  } catch (e) {
+    process.stderr.write(`[warn] Could not read pending-audit-tasks.json; line-count validation will be skipped: ${e.message}\n`);
   }
 }
 

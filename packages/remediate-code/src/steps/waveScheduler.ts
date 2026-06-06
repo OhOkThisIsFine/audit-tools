@@ -45,6 +45,20 @@ export interface ScheduleWaveInput {
   env?: NodeJS.ProcessEnv;
 }
 
+/**
+ * Normalize a caller-supplied `tokens` array to exactly `count` entries.
+ * - undefined/empty → all-zeros array of length `count`
+ * - too long → truncate to `count`
+ * - too short → zero-pad the tail to `count`
+ * - exact match → return as-is
+ */
+export function normalizeSlotTokens(tokens: number[] | undefined, count: number): number[] {
+  if (!tokens || tokens.length === 0) return new Array(count).fill(0);
+  if (tokens.length > count) return tokens.slice(0, count);
+  if (tokens.length < count) return [...tokens, ...new Array(count - tokens.length).fill(0)];
+  return tokens;
+}
+
 /** Average of the per-slot token estimates (0 when none are supplied). */
 function averageSlotTokens(estimatedSlotTokens?: number[]): number {
   if (!estimatedSlotTokens || estimatedSlotTokens.length === 0) return 0;
@@ -109,8 +123,9 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     const key = buildProviderModelKey(providerName, hostModel);
     const state = await readQuotaState();
     quotaStateEntry = state.entries[key] ?? null;
-  } catch {
+  } catch (err) {
     // Best-effort: proceed without learned state
+    process.stderr.write(`[waveScheduler] readQuotaState failed; falling back to default wave size. ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   // Size dispatch through the shared capacity model (single host pool today;
@@ -127,10 +142,7 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
       },
     ],
     sessionConfig,
-    pendingItemTokens:
-      input.estimatedSlotTokens?.length === input.itemCount
-        ? input.estimatedSlotTokens
-        : new Array(input.itemCount).fill(0),
+    pendingItemTokens: normalizeSlotTokens(input.estimatedSlotTokens, input.itemCount),
   });
 
   return capacity.primary.schedule;

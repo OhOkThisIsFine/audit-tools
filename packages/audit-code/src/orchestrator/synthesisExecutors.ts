@@ -22,6 +22,7 @@ function buildBaseFindingsReport(
       criticalFlows: bundle.critical_flows,
       coverageMatrix: bundle.coverage_matrix,
       runtimeValidationReport: bundle.runtime_validation_report,
+      runtimeValidationTaskManifest: bundle.runtime_validation_tasks,
       externalAnalyzerResults: bundle.external_analyzer_results,
       designAssessment: bundle.design_assessment,
     }),

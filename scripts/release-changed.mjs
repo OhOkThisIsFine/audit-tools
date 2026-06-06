@@ -225,8 +225,9 @@ function changedSince(tag, path) {
 }
 
 ensureCleanWorktree();
+let remoteName, branch;
 if (!dryRun) {
-  const { remoteName, branch } = ensureDefaultBranch();
+  ({ remoteName, branch } = ensureDefaultBranch());
   ensureInSyncWithRemote(remoteName, branch);
 }
 fetchTags();
@@ -309,6 +310,11 @@ for (const pkg of changed) {
 // per-package release script to skip its internal verify:release rather than
 // repeat the slow build + test + packaged-smoke pass.
 const publishEnv = { ...process.env, AUDIT_TOOLS_RELEASE_GATE_VERIFIED: "1" };
+
+// Re-check sync immediately before publishing to close the window between the
+// initial fetch (above) and the actual publish calls. Any concurrent push that
+// arrived during the gate phase will be detected here.
+ensureInSyncWithRemote(remoteName, branch);
 
 for (const pkg of changed) {
   console.log(`Publishing ${pkg.label} with ${bump} bump...`);

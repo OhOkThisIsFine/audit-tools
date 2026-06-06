@@ -58,9 +58,8 @@ If the returned step is a dispatch step, before launching subagents check
 
 After the **first** `next-step` (the intake step) completes, confirm the audit
 scope before proceeding. Read `scope_summary.json` from the `.audit-artifacts/`
-directory (if absent, extract the JSON that follows the `SCOPE_SUMMARY:` marker
-at the start of the step's `progress_summary`). It contains `repo_root`,
-`auditable_file_count`, `git_available`, and `mis_scope_smells`. Then:
+directory. It contains `repo_root`, `auditable_file_count`, `git_available`, and
+`mis_scope_smells`. Then:
 
 - Echo one informational line to the user:
   `Auditing <repo_root>, <auditable_file_count> files, git: <yes|no>`.

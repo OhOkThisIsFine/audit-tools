@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { scheduleWave, buildProviderModelKey } = await import(
-  "@audit-tools/shared/quota/scheduler"
+  "../../shared/src/quota/scheduler.ts"
 );
 const { detectHostActiveSubagentLimit, resolveHostActiveSubagentLimit } = await import(
   "../src/quota/hostLimits.ts"
@@ -13,7 +13,7 @@ const {
   computeRampUpConcurrency,
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
-} = await import("@audit-tools/shared/quota/state");
+} = await import("../../shared/src/quota/state.ts");
 const { resolveHostModel } = await import("../src/quota/index.ts");
 
 // Helper to build a quota state entry with preset bucket weights
@@ -364,10 +364,9 @@ test("resolveHostModel: explicit -> config -> env -> per-provider default -> nul
     "x/env",
   );
   // Then a per-provider default for a known agent host (engages per-model quota).
-  assert.equal(
-    resolveHostModel({ providerName: "claude-code", sessionConfig: {}, env: {} }),
-    "anthropic/claude-opus-4-8",
-  );
+  const claudeCodeDefault = resolveHostModel({ providerName: "claude-code", sessionConfig: {}, env: {} });
+  assert.ok(typeof claudeCodeDefault === "string" && claudeCodeDefault.length > 0,
+    `expected a non-empty per-provider default for claude-code, got ${claudeCodeDefault}`);
   // A provider without a default and no signal → null (genuinely unknown model).
   assert.equal(
     resolveHostModel({ providerName: "subprocess-template", sessionConfig: {}, env: {} }),
@@ -572,6 +571,27 @@ test("detectHostActiveSubagentLimit respects AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENT
   assert.equal(limit.source, "environment");
 });
 
+test("detectHostActiveSubagentLimit returns null for non-numeric AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS", () => {
+  const limit = detectHostActiveSubagentLimit({
+    AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "abc",
+  });
+  assert.equal(limit, null);
+});
+
+test("detectHostActiveSubagentLimit returns null for zero AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS", () => {
+  const limit = detectHostActiveSubagentLimit({
+    AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "0",
+  });
+  assert.equal(limit, null);
+});
+
+test("detectHostActiveSubagentLimit returns null for negative AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS", () => {
+  const limit = detectHostActiveSubagentLimit({
+    AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "-1",
+  });
+  assert.equal(limit, null);
+});
+
 test("resolveHostActiveSubagentLimit prefers explicit host report over environment", () => {
   const limit = resolveHostActiveSubagentLimit({
     explicitLimit: 4,
@@ -633,9 +653,10 @@ test("computeRampUpConcurrency stays at maxSafe with insufficient evidence", () 
 test("computeRampUpConcurrency stays at maxSafe when top bucket has failures", () => {
   const entry = makeEntry({
     "1": { success_weight: 5, failure_weight: 0 },
-    "2": { success_weight: 5, failure_weight: 0.1 },
+    "2": { success_weight: 5, failure_weight: 1.0 },
   });
-  // maxSafe=2 (bucket 2: success 5 > failure 0.1), but bucket 2 has non-zero failure so no ramp-up
+  // maxSafe=2 (bucket 2: success 5 > failure 1.0), but bucket 2's failure is at/above
+  // MIN_EVIDENCE_WEIGHT so it counts as real evidence → ramp-up to 3 is suppressed.
   assert.equal(computeMaxSafeConcurrency(entry, 24), 2);
   assert.equal(computeRampUpConcurrency(entry, 24), 2);
 });

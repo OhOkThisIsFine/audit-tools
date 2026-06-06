@@ -14,7 +14,14 @@ function reportHashIoError(absolutePath: string, err: unknown): void {
   const code = (err as NodeJS.ErrnoException).code;
   if (code === "ENOENT") return;
   process.stderr.write(
-    `[remediate-code] fileIntegrity: I/O error hashing ${absolutePath}: ${code ?? String(err)}\n`,
+    JSON.stringify({
+      level: "warn",
+      event: "file_integrity_io_error",
+      path: absolutePath,
+      code: code ?? null,
+      message: String(err),
+      ts: new Date().toISOString(),
+    }) + "\n",
   );
 }
 

@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ensureGlobalAssets, installRepoAssets, runValidateCommand } from "../src/index.js";
 import { rm, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const PKG_ROOT = dirname(__dirname);
 const TEST_ROOT = join(__dirname, ".test-install-root");
 const TEST_HOME = join(__dirname, ".test-install-home");
 
@@ -48,6 +49,50 @@ describe("global-first install helpers", () => {
     const logs: string[] = [];
     ensureGlobalAssets(true, (m) => logs.push(m), TEST_HOME);
     expect(logs).toHaveLength(0);
+  });
+
+  it("ensureGlobalAssets reads edit permission rules from opencode.json (not hardcoded)", () => {
+    ensureGlobalAssets(true, () => {}, TEST_HOME);
+
+    const globalConfig = JSON.parse(
+      readFileSync(join(TEST_HOME, ".config", "opencode", "opencode.json"), "utf8"),
+    ) as Record<string, unknown>;
+    const sourceOpencode = JSON.parse(
+      readFileSync(join(PKG_ROOT, "opencode.json"), "utf8"),
+    ) as { agent?: { remediator?: { permission?: { edit?: Record<string, string> } } } };
+    const sourceEdit = sourceOpencode.agent?.remediator?.permission?.edit ?? {};
+
+    const agentPermission = (globalConfig.agent as any)?.remediator?.permission ?? {};
+    const generatedEdit: Record<string, string> = agentPermission.edit ?? {};
+
+    // Every key from opencode.json's agent.remediator.permission.edit must appear
+    for (const [pattern, action] of Object.entries(sourceEdit)) {
+      expect(generatedEdit[pattern]).toBe(action);
+    }
+    // The closing-result path from opencode.json must be present
+    expect(generatedEdit["remediation-closing-result.json"]).toBe("allow");
+  });
+
+  it("ensureGlobalAssets reads bash permission rules from opencode.json (not hardcoded)", () => {
+    ensureGlobalAssets(true, () => {}, TEST_HOME);
+
+    const globalConfig = JSON.parse(
+      readFileSync(join(TEST_HOME, ".config", "opencode", "opencode.json"), "utf8"),
+    ) as Record<string, unknown>;
+    const sourceOpencode = JSON.parse(
+      readFileSync(join(PKG_ROOT, "opencode.json"), "utf8"),
+    ) as { agent?: { remediator?: { permission?: { bash?: Record<string, string> } } } };
+    const sourceBash = sourceOpencode.agent?.remediator?.permission?.bash ?? {};
+
+    const agentPermission = (globalConfig.agent as any)?.remediator?.permission ?? {};
+    const generatedBash: Record<string, string> = agentPermission.bash ?? {};
+
+    for (const [pattern, action] of Object.entries(sourceBash)) {
+      expect(generatedBash[pattern]).toBe(action);
+    }
+    // deny rules that should propagate from opencode.json
+    expect(generatedBash["remediate-code run*"]).toBe("deny");
+    expect(generatedBash["*remediate-code.mjs* run*"]).toBe("deny");
   });
 });
 

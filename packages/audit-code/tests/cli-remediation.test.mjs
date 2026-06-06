@@ -3,39 +3,17 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { captureConsole } from "./helpers/captureConsole.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
-const distCliUrl = pathToFileURL(join(repoRoot, "dist", "cli.js")).href;
-const { cliTestUtils, runCli } = await import(distCliUrl);
-const { runFirstAvailableCommand } = await import(
-  pathToFileURL(join(repoRoot, "dist", "orchestrator", "localCommands.js")).href
-);
+const { cliTestUtils, runCli } = await import("../src/cli.ts");
+const { runFirstAvailableCommand } = await import("../src/orchestrator/localCommands.ts");
 
 async function captureRunCli(argv) {
-  const previousExitCode = process.exitCode;
-  const previousConsoleLog = console.log;
-  const previousConsoleError = console.error;
-  let stdout = "";
-  let stderr = "";
-
-  process.exitCode = 0;
-  console.log = (...values) => {
-    stdout += `${values.join(" ")}\n`;
-  };
-  console.error = (...values) => {
-    stderr += `${values.join(" ")}\n`;
-  };
-
-  try {
-    await runCli(argv);
-    return { stdout, stderr, exitCode: process.exitCode ?? 0 };
-  } finally {
-    console.log = previousConsoleLog;
-    console.error = previousConsoleError;
-    process.exitCode = previousExitCode;
-  }
+  const result = await captureConsole(() => runCli(argv));
+  return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code };
 }
 
 test("CLI flag parsing falls back when values are missing or malformed", () => {
@@ -363,27 +341,60 @@ test("warnIfNotGitRepo emits no warning when .git file is present (git worktree)
 });
 
 test("runCli reports unknown commands without throwing", async () => {
-  const previousExitCode = process.exitCode;
-  const previousConsoleError = console.error;
-  let stderr = "";
-
-  process.exitCode = 0;
-  console.error = (...values) => {
-    stderr += `${values.join(" ")}\n`;
-  };
-
-  try {
-    await runCli([
+  const result = await captureConsole(() =>
+    runCli([
       process.execPath,
       join(repoRoot, "dist", "cli.js"),
       "definitely-unknown",
-    ]);
-  } finally {
-    console.error = previousConsoleError;
-  }
+    ]),
+  );
 
-  assert.equal(process.exitCode, 1);
-  assert.match(stderr, /Unknown command: definitely-unknown/);
-  assert.match(stderr, /Available commands:/);
-  process.exitCode = previousExitCode;
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Unknown command: definitely-unknown/);
+  assert.match(result.stderr, /Available commands:/);
+});
+
+test("each extracted command module exports the expected function (ARC-3579b443)", async () => {
+  const { pathToFileURL } = await import("node:url");
+  const { join: pathJoin } = await import("node:path");
+  const distDir = pathJoin(repoRoot, "dist", "cli");
+  const cases = [
+    ["advanceAuditCommand.js", "cmdAdvanceAudit"],
+    ["prepareDispatchCommand.js", "cmdPrepareDispatch"],
+    ["validateResultCommand.js", "cmdValidateResult"],
+    ["importExternalAnalyzerCommand.js", "cmdImportExternalAnalyzer"],
+    ["intakeCommand.js", "cmdIntake"],
+    ["planCommand.js", "cmdPlan"],
+    ["ingestResultsCommand.js", "cmdIngestResults"],
+    ["explainTaskCommand.js", "cmdExplainTask"],
+    ["updateRuntimeValidationCommand.js", "cmdUpdateRuntimeValidation"],
+    ["validateCommand.js", "cmdValidate"],
+    ["validateResultsCommand.js", "cmdValidateResults"],
+    ["requeueCommand.js", "cmdRequeue"],
+    ["synthesizeCommand.js", "cmdSynthesize"],
+    ["cleanupCommand.js", "cmdCleanup"],
+    ["quotaCommand.js", "cmdQuota"],
+    ["dispatchStatusCommand.js", "cmdDispatchStatus"],
+    ["sampleRunCommand.js", "runSample"],
+  ];
+  for (const [file, exportName] of cases) {
+    const mod = await import(pathToFileURL(pathJoin(distDir, file)).href);
+    assert.equal(
+      typeof mod[exportName],
+      "function",
+      `${file} must export ${exportName} as a function`,
+    );
+  }
+});
+
+test("cli.ts main dispatcher sets exitCode=1 for unknown command without throwing (ARC-3579b443)", async () => {
+  const result = await captureConsole(() =>
+    runCli([
+      process.execPath,
+      join(repoRoot, "dist", "cli.js"),
+      "arc-3579b443-unknown-command",
+    ]),
+  );
+  assert.equal(result.code, 1, "unknown command must set exitCode=1");
+  assert.match(result.stderr, /Unknown command: arc-3579b443-unknown-command/);
 });

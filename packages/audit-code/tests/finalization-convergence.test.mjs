@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const { advanceAudit } = await import("../src/orchestrator/advance.ts");
@@ -21,14 +20,7 @@ const LINE_INDEX = {
   "package.json": 5,
 };
 
-async function withTempDir(fn) {
-  const dir = await mkdtemp(join(tmpdir(), "a1-conv-"));
-  try {
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
 async function writeFixture(root) {
   await mkdir(join(root, "src", "api"), { recursive: true });
@@ -80,7 +72,7 @@ function resultsForPending(bundle) {
 // synthesis (a planning re-run rewrites runtime_validation_report.json and
 // re-stales synthesis — the oscillation engine).
 test("finalization converges through the real persist/reload loop without oscillating", async () => {
-  await withTempDir(async (root) => {
+  await withTempDir("audit-code-finalization-", async (root) => {
     await writeFixture(root);
     const artDir = join(root, ".audit-artifacts");
     await mkdir(artDir, { recursive: true });
@@ -157,7 +149,7 @@ test("finalization converges through the real persist/reload loop without oscill
 // Fix: writeCoreArtifacts must remove files for artifacts an executor cleared to
 // `undefined` when pruning, or they reload as stale "present" artifacts.
 test("writeCoreArtifacts prunes cleared artifacts only when asked", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir("audit-code-finalization-", async (dir) => {
     const repoManifest = { repository: { name: "t" }, generated_at: "t", files: [] };
     await writeCoreArtifacts(dir, {
       repo_manifest: repoManifest,

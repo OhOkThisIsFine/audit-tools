@@ -419,6 +419,156 @@ async function recordWaveQuota(params: {
   }
 }
 
+async function applyWorkerResult(params: {
+  root: string;
+  artifactsDir: string;
+  runId: string;
+  obligationId: string | null;
+  providerName: string;
+  preferredExecutor: string;
+  workerResult: WorkerResult;
+  paths: RunPaths;
+  startedAt: string;
+  anyProgress: boolean;
+  artifactsWritten: Set<string>;
+  pendingBatchAuditResults: string[];
+  pendingAuditResultsPath: string | undefined;
+  pendingRuntimeUpdatesPath: string | undefined;
+  pendingExternalAnalyzerPath: string | undefined;
+  auditResultsPath: string | undefined;
+  runtimeUpdatesPath: string | undefined;
+  externalAnalyzerPath: string | undefined;
+  decision: { selected_obligation: string | null };
+}): Promise<{
+  done: boolean;
+  lastResult: WorkerResult;
+  anyProgress: boolean;
+  artifactsWritten: Set<string>;
+  pendingBatchAuditResults: string[];
+  pendingAuditResultsPath: string | undefined;
+  pendingRuntimeUpdatesPath: string | undefined;
+  pendingExternalAnalyzerPath: string | undefined;
+}> {
+  const {
+    root,
+    artifactsDir,
+    runId,
+    obligationId,
+    providerName,
+    preferredExecutor,
+    workerResult,
+    paths,
+    startedAt,
+    auditResultsPath,
+    runtimeUpdatesPath,
+    externalAnalyzerPath,
+    decision,
+    pendingBatchAuditResults,
+  } = params;
+  let anyProgress = params.anyProgress;
+  let pendingAuditResultsPath = params.pendingAuditResultsPath;
+  let pendingRuntimeUpdatesPath = params.pendingRuntimeUpdatesPath;
+  let pendingExternalAnalyzerPath = params.pendingExternalAnalyzerPath;
+  const artifactsWritten = params.artifactsWritten;
+
+  await appendRunLedgerEntry(artifactsDir, {
+    run_id: runId,
+    provider: providerName,
+    obligation_id: obligationId,
+    selected_executor: workerResult.selected_executor,
+    status: workerResult.status,
+    started_at: startedAt,
+    ended_at: new Date().toISOString(),
+    result_path: paths.resultPath,
+  });
+
+  const lastResult = workerResult;
+  if (workerResult.progress_made) {
+    anyProgress = true;
+  }
+  for (const artifact of workerResult.artifacts_written) {
+    artifactsWritten.add(artifact);
+  }
+  artifactsWritten.add("run-ledger.json");
+
+  if (externalAnalyzerPath) pendingExternalAnalyzerPath = undefined;
+  if (
+    auditResultsPath &&
+    pendingBatchAuditResults[0] === auditResultsPath &&
+    preferredExecutor === "result_ingestion_executor" &&
+    workerResult.status !== "failed" &&
+    workerResult.status !== "blocked"
+  ) {
+    pendingBatchAuditResults.shift();
+  }
+  if (auditResultsPath) pendingAuditResultsPath = undefined;
+  if (runtimeUpdatesPath) pendingRuntimeUpdatesPath = undefined;
+
+  if (
+    workerResult.status === "failed" ||
+    workerResult.status === "blocked" ||
+    workerResult.status === "no_progress"
+  ) {
+    const bundleAfter = await loadArtifactBundle(artifactsDir);
+    const shouldBlock =
+      workerResult.status === "failed" || workerResult.status === "blocked";
+    const state = shouldBlock
+      ? buildBlockedAuditState({
+          state: bundleAfter.audit_state ?? deriveAuditState(bundleAfter),
+          obligationId: workerResult.obligation_id,
+          executor: workerResult.selected_executor,
+          blocker: buildWorkerFailureBlocker(workerResult),
+        })
+      : (bundleAfter.audit_state ?? deriveAuditState(bundleAfter));
+    if (shouldBlock) {
+      await writeCoreArtifacts(artifactsDir, {
+        ...bundleAfter,
+        audit_state: state,
+      });
+    }
+    await emitEnvelope({
+      root,
+      artifactsDir,
+      bundle: shouldBlock
+        ? { ...bundleAfter, audit_state: state }
+        : bundleAfter,
+      audit_state: state,
+      selected_obligation: workerResult.obligation_id,
+      selected_executor: workerResult.selected_executor,
+      progress_made: anyProgress,
+      artifacts_written: Array.from(
+        shouldBlock
+          ? new Set([...artifactsWritten, "audit_state.json"])
+          : artifactsWritten,
+      ),
+      progress_summary: buildWorkerFailureBlocker(workerResult),
+      next_likely_step: shouldBlock ? null : workerResult.next_likely_step,
+      providerName,
+    });
+    return {
+      done: true,
+      lastResult,
+      anyProgress,
+      artifactsWritten,
+      pendingBatchAuditResults,
+      pendingAuditResultsPath,
+      pendingRuntimeUpdatesPath,
+      pendingExternalAnalyzerPath,
+    };
+  }
+
+  return {
+    done: false,
+    lastResult,
+    anyProgress,
+    artifactsWritten,
+    pendingBatchAuditResults,
+    pendingAuditResultsPath,
+    pendingRuntimeUpdatesPath,
+    pendingExternalAnalyzerPath,
+  };
+}
+
 async function runInlineStep(params: {
   root: string;
   artifactsDir: string;
@@ -514,102 +664,27 @@ async function runInlineStep(params: {
   }
 
   await persistWorkerRunArtifacts(paths, workerResult, "inline");
-  await appendRunLedgerEntry(artifactsDir, {
-    run_id: runId,
-    provider: providerName,
-    obligation_id: obligationId,
-    selected_executor: workerResult.selected_executor,
-    status: workerResult.status,
-    started_at: startedAt,
-    ended_at: new Date().toISOString(),
-    result_path: paths.resultPath,
-  });
-
-  const lastResult = workerResult;
-  if (workerResult.progress_made) {
-    anyProgress = true;
-  }
-  for (const artifact of workerResult.artifacts_written) {
-    artifactsWritten.add(artifact);
-  }
-  artifactsWritten.add("run-ledger.json");
-
-  if (externalAnalyzerPath) pendingExternalAnalyzerPath = undefined;
-  if (
-    auditResultsPath &&
-    pendingBatchAuditResults[0] === auditResultsPath &&
-    preferredExecutor === "result_ingestion_executor" &&
-    workerResult.status !== "failed" &&
-    workerResult.status !== "blocked"
-  ) {
-    pendingBatchAuditResults.shift();
-  }
-  if (auditResultsPath) pendingAuditResultsPath = undefined;
-  if (runtimeUpdatesPath) pendingRuntimeUpdatesPath = undefined;
-
-  if (
-    workerResult.status === "failed" ||
-    workerResult.status === "blocked" ||
-    workerResult.status === "no_progress"
-  ) {
-    const bundleAfter = await loadArtifactBundle(artifactsDir);
-    const shouldBlock =
-      workerResult.status === "failed" || workerResult.status === "blocked";
-    const state = shouldBlock
-      ? buildBlockedAuditState({
-          state: bundleAfter.audit_state ?? deriveAuditState(bundleAfter),
-          obligationId: workerResult.obligation_id,
-          executor: workerResult.selected_executor,
-          blocker: buildWorkerFailureBlocker(workerResult),
-        })
-      : bundleAfter.audit_state ?? deriveAuditState(bundleAfter);
-    if (shouldBlock) {
-      await writeCoreArtifacts(artifactsDir, {
-        ...bundleAfter,
-        audit_state: state,
-      });
-    }
-    await emitEnvelope({
-      root,
-      artifactsDir,
-      bundle: shouldBlock
-        ? { ...bundleAfter, audit_state: state }
-        : bundleAfter,
-      audit_state: state,
-      selected_obligation: workerResult.obligation_id,
-      selected_executor: workerResult.selected_executor,
-      progress_made: anyProgress,
-      artifacts_written: Array.from(
-        shouldBlock
-          ? new Set([...artifactsWritten, "audit_state.json"])
-          : artifactsWritten,
-      ),
-      progress_summary: buildWorkerFailureBlocker(workerResult),
-      next_likely_step: shouldBlock ? null : workerResult.next_likely_step,
-      providerName,
-    });
-    return {
-      done: true,
-      lastResult,
-      anyProgress,
-      artifactsWritten,
-      pendingBatchAuditResults,
-      pendingAuditResultsPath,
-      pendingRuntimeUpdatesPath,
-      pendingExternalAnalyzerPath,
-    };
-  }
-
-  return {
-    done: false,
-    lastResult,
+  return applyWorkerResult({
+    root,
+    artifactsDir,
+    runId,
+    obligationId,
+    providerName,
+    preferredExecutor,
+    workerResult,
+    paths,
+    startedAt,
     anyProgress,
     artifactsWritten,
     pendingBatchAuditResults,
     pendingAuditResultsPath,
     pendingRuntimeUpdatesPath,
     pendingExternalAnalyzerPath,
-  };
+    auditResultsPath,
+    runtimeUpdatesPath,
+    externalAnalyzerPath,
+    decision,
+  });
 }
 
 async function runSingleWorkerStep(params: {
@@ -783,102 +858,524 @@ async function runSingleWorkerStep(params: {
     await persistWorkerRunArtifacts(paths, workerResult, "provider-launch");
   }
 
-  await appendRunLedgerEntry(artifactsDir, {
-    run_id: runId,
-    provider: provider.name,
-    obligation_id: obligationId,
-    selected_executor: workerResult.selected_executor,
-    status: workerResult.status,
-    started_at: startedAt,
-    ended_at: new Date().toISOString(),
-    result_path: paths.resultPath,
-  });
-
-  const lastResult = workerResult;
-  if (workerResult.progress_made) {
-    anyProgress = true;
-  }
-  for (const artifact of workerResult.artifacts_written) {
-    artifactsWritten.add(artifact);
-  }
-  artifactsWritten.add("run-ledger.json");
-
-  if (externalAnalyzerPath) pendingExternalAnalyzerPath = undefined;
-  if (
-    auditResultsPath &&
-    pendingBatchAuditResults[0] === auditResultsPath &&
-    preferredExecutor === "result_ingestion_executor" &&
-    workerResult.status !== "failed" &&
-    workerResult.status !== "blocked"
-  ) {
-    pendingBatchAuditResults.shift();
-  }
-  if (providerAuditResultsPath) pendingAuditResultsPath = undefined;
-  if (runtimeUpdatesPath) pendingRuntimeUpdatesPath = undefined;
-
-  if (
-    workerResult.status === "failed" ||
-    workerResult.status === "blocked" ||
-    workerResult.status === "no_progress"
-  ) {
-    const bundleAfter = await loadArtifactBundle(artifactsDir);
-    const shouldBlock =
-      workerResult.status === "failed" || workerResult.status === "blocked";
-    const state = shouldBlock
-      ? buildBlockedAuditState({
-          state: deriveAuditState(bundleAfter),
-          obligationId: workerResult.obligation_id,
-          executor: workerResult.selected_executor,
-          blocker: buildWorkerFailureBlocker(workerResult),
-        })
-      : deriveAuditState(bundleAfter);
-    if (shouldBlock) {
-      await writeCoreArtifacts(artifactsDir, {
-        ...bundleAfter,
-        audit_state: state,
-      });
-    }
-    await emitEnvelope({
-      root,
-      artifactsDir,
-      bundle: shouldBlock
-        ? { ...bundleAfter, audit_state: state }
-        : bundleAfter,
-      audit_state: state,
-      selected_obligation: workerResult.obligation_id,
-      selected_executor: workerResult.selected_executor,
-      progress_made: anyProgress,
-      artifacts_written: Array.from(
-        shouldBlock
-          ? new Set([...artifactsWritten, "audit_state.json"])
-          : artifactsWritten,
-      ),
-      progress_summary: buildWorkerFailureBlocker(workerResult),
-      next_likely_step: shouldBlock ? null : workerResult.next_likely_step,
-      providerName: provider.name,
-    });
-    return {
-      done: true,
-      lastResult,
-      anyProgress,
-      artifactsWritten,
-      pendingBatchAuditResults,
-      pendingAuditResultsPath,
-      pendingRuntimeUpdatesPath,
-      pendingExternalAnalyzerPath,
-    };
-  }
-
-  return {
-    done: false,
-    lastResult,
+  return applyWorkerResult({
+    root,
+    artifactsDir,
+    runId,
+    obligationId,
+    providerName: provider.name,
+    preferredExecutor,
+    workerResult,
+    paths,
+    startedAt,
     anyProgress,
     artifactsWritten,
     pendingBatchAuditResults,
     pendingAuditResultsPath,
     pendingRuntimeUpdatesPath,
     pendingExternalAnalyzerPath,
+    auditResultsPath: providerAuditResultsPath,
+    runtimeUpdatesPath,
+    externalAnalyzerPath,
+    decision,
+  });
+}
+
+async function handleLocalSubprocessBlock(params: {
+  root: string;
+  artifactsDir: string;
+  selfCliPath: string;
+  bundle: Awaited<ReturnType<typeof loadArtifactBundle>>;
+  argv: string[];
+  obligationId: string | null;
+  preferredExecutor: string | null;
+  provider: ReturnType<typeof createFreshSessionProvider>;
+  sessionConfig: SessionConfig;
+  timeoutMs: number;
+  runCount: number;
+  anyProgress: boolean;
+  artifactsWritten: Set<string>;
+}): Promise<boolean> {
+  const {
+    root,
+    artifactsDir,
+    selfCliPath,
+    bundle,
+    argv,
+    obligationId,
+    preferredExecutor,
+    provider,
+    sessionConfig,
+    timeoutMs,
+    runCount,
+    anyProgress,
+    artifactsWritten,
+  } = params;
+  if (preferredExecutor !== "agent" || provider.name !== LOCAL_SUBPROCESS_PROVIDER_NAME) {
+    return false;
+  }
+  const blocker = buildManualReviewBlocker(provider.name);
+  const blockedState = buildBlockedAuditState({
+    state: bundle.audit_state ?? deriveAuditState(bundle),
+    obligationId,
+    executor: preferredExecutor,
+    blocker,
+  });
+  await writeCoreArtifacts(artifactsDir, {
+    ...bundle,
+    audit_state: blockedState,
+  });
+
+  const blockRunId = buildRunId(obligationId, runCount + 1);
+  const blockPaths = getRunPaths(artifactsDir, blockRunId);
+  const blockPendingTasks = await addFileLineCountHints(
+    root,
+    buildPendingAuditTasks(bundle),
+  );
+  const blockPendingTasksPath = join(blockPaths.runDir, "pending-audit-tasks.json");
+  const blockAuditResultsPath = join(blockPaths.runDir, "run-results.json");
+  const blockReadPaths = new Set<string>();
+  for (const pt of blockPendingTasks) {
+    for (const fp of pt.file_paths) blockReadPaths.add(fp);
+  }
+  const blockTask: WorkerTask = {
+    contract_version: "audit-code-worker/v1alpha1",
+    run_id: blockRunId,
+    repo_root: root,
+    artifacts_dir: artifactsDir,
+    obligation_id: obligationId,
+    preferred_executor: preferredExecutor,
+    result_path: blockPaths.resultPath,
+    worker_command: [
+      process.execPath,
+      selfCliPath,
+      "worker-run",
+      "--task",
+      blockPaths.taskPath,
+    ],
+    audit_results_path: blockAuditResultsPath,
+    pending_audit_tasks_path: blockPendingTasksPath,
+    timeout_ms: timeoutMs,
+    max_retries: 0,
+    access: {
+      read_paths: [...blockReadPaths],
+      write_paths: [blockAuditResultsPath, blockPaths.resultPath],
+    },
   };
+  const blockPrompt = renderWorkerPrompt(blockTask);
+  await writeWorkerTaskFiles(
+    blockTask,
+    blockPrompt,
+    blockPaths,
+    artifactsDir,
+    blockPendingTasks,
+  );
+  await writeJsonFile(blockPendingTasksPath, blockPendingTasks);
+
+  const reviewRun: ActiveReviewRun = {
+    run_id: blockRunId,
+    task_path: blockPaths.taskPath,
+    prompt_path: blockPaths.promptPath,
+    pending_audit_tasks_path: blockPendingTasksPath,
+    audit_results_path: blockAuditResultsPath,
+    worker_command: blockTask.worker_command,
+  };
+  // Render the actionable dispatch / single-task step here instead of
+  // leaving the host to issue next-step as a second command. Capability is
+  // resolved from flags/config/env with a sane default, so nothing is
+  // required from the host to make progress. If rendering fails we still
+  // emit the hand-off below — run-to-completion is never worse than before,
+  // and next-step will re-render and surface the error loudly.
+  try {
+    await renderSemanticReviewStep({
+      root,
+      artifactsDir,
+      activeReviewRun: reviewRun,
+      hostCanDispatch: resolveHostDispatchCapability({
+        explicit: getOptionalBooleanFlag(
+          argv,
+          "--host-can-dispatch-subagents",
+        ),
+        sessionConfig,
+      }),
+      hostMaxActiveSubagents: getHostMaxActiveSubagents(argv),
+      hostCanRestrictSubagentTools:
+        getOptionalBooleanFlag(
+          argv,
+          "--host-can-restrict-subagent-tools",
+        ) ?? false,
+      hostCanSelectSubagentModel:
+        getOptionalBooleanFlag(
+          argv,
+          "--host-can-select-subagent-model",
+        ) ?? false,
+    });
+  } catch (stepError) {
+    process.stderr.write(
+      `[audit-code] Could not pre-render the review step; the operator hand-off points to next-step instead. ${
+        stepError instanceof Error ? stepError.message : String(stepError)
+      }\n`,
+    );
+  }
+
+  await emitEnvelope({
+    root,
+    artifactsDir,
+    bundle: {
+      ...bundle,
+      audit_state: blockedState,
+    },
+    audit_state: blockedState,
+    selected_obligation: obligationId,
+    selected_executor: preferredExecutor,
+    progress_made: anyProgress,
+    artifacts_written: Array.from(
+      new Set([...artifactsWritten, "audit_state.json"]),
+    ),
+    progress_summary: blocker,
+    next_likely_step: null,
+    providerName: provider.name,
+    activeReviewRun: reviewRun,
+  });
+  return true;
+}
+
+async function handleNoExecutor(params: {
+  root: string;
+  artifactsDir: string;
+  bundle: Awaited<ReturnType<typeof loadArtifactBundle>>;
+  decision: ReturnType<typeof decideNextStep>;
+  lastResult: WorkerResult | null;
+  anyProgress: boolean;
+  artifactsWritten: Set<string>;
+  runCount: number;
+  providerName: string;
+}): Promise<void> {
+  const {
+    root,
+    artifactsDir,
+    bundle,
+    decision,
+    lastResult,
+    anyProgress,
+    artifactsWritten,
+    runCount,
+    providerName,
+  } = params;
+  const state = decision.state;
+  await clearDispatchFiles(artifactsDir);
+  await emitEnvelope({
+    root,
+    artifactsDir,
+    bundle,
+    audit_state: state,
+    selected_obligation: anyProgress
+      ? (lastResult?.obligation_id ?? null)
+      : null,
+    selected_executor: anyProgress
+      ? (lastResult?.selected_executor ?? null)
+      : null,
+    progress_made: anyProgress,
+    artifacts_written: Array.from(artifactsWritten),
+    progress_summary:
+      anyProgress && state.status === "complete"
+        ? `Completed audit in ${runCount} fresh worker runs.`
+        : decision.reason,
+    next_likely_step:
+      state.status === "complete" ? null : decision.selected_obligation,
+    providerName,
+  });
+  if (state.status === "complete") {
+    await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
+  }
+}
+
+async function runParallelWaveStep(params: {
+  root: string;
+  artifactsDir: string;
+  selfCliPath: string;
+  bundle: Awaited<ReturnType<typeof loadArtifactBundle>>;
+  argv: string[];
+  sessionConfig: SessionConfig;
+  provider: ReturnType<typeof createFreshSessionProvider>;
+  hostModel: string | null | undefined;
+  obligationId: string | null;
+  parallelWorkers: number;
+  agentBatchSize: number;
+  runCount: number;
+  timeoutMs: number;
+  uiMode: UiMode;
+  anyProgress: boolean;
+  artifactsWritten: Set<string>;
+}): Promise<{ done: boolean; runCount: number; anyProgress: boolean; artifactsWritten: Set<string> }> {
+  const {
+    root,
+    artifactsDir,
+    selfCliPath,
+    bundle,
+    argv,
+    sessionConfig,
+    provider,
+    hostModel,
+    obligationId,
+    parallelWorkers,
+    agentBatchSize,
+    timeoutMs,
+    uiMode,
+  } = params;
+  let runCount = params.runCount;
+  let anyProgress = params.anyProgress;
+  const artifactsWritten = params.artifactsWritten;
+
+  const quotaState = await readQuotaState();
+  const normalizedHostModel = hostModel ?? null;
+  const providerModelKey = buildProviderModelKey(provider.name, normalizedHostModel);
+  const quotaStateEntry = quotaState.entries[providerModelKey] ?? null;
+  const allCandidateTasks = buildPendingAuditTasks(bundle);
+  const candidateGroups = chunkArray(
+    allCandidateTasks.slice(0, parallelWorkers * agentBatchSize),
+    agentBatchSize,
+  );
+  const candidateSizeIndex = sizeIndexFromManifest(bundle.repo_manifest);
+  const slotTokenEstimates = candidateGroups.map((g) =>
+    estimateTaskGroupTokens(g, candidateSizeIndex),
+  );
+
+  const providerLimits: DiscoveredRateLimits | null =
+    await provider.queryLimits?.(normalizedHostModel)
+      .then((r) => r ? { ...r, source: "provider_query" } : null)
+      .catch(() => null)
+    ?? null;
+  const cachedLimits = await lookupDiscoveredLimits(providerModelKey).catch(() => null);
+  const discoveredLimits = mergeDiscoveredLimits(providerLimits, cachedLimits);
+
+  const halfLifeHours = sessionConfig.quota?.empirical_half_life_hours ?? 24;
+  const quotaSource = buildQuotaSource({ halfLifeHours });
+  const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(providerModelKey).catch(() => null);
+
+  const hostConcurrencyLimit = resolveHostActiveSubagentLimit({ sessionConfig });
+
+  const waveSchedule = scheduleWave({
+    providerName: resolveFreshSessionProviderName(getExplicitProvider(argv), sessionConfig),
+    sessionConfig,
+    hostModel: normalizedHostModel,
+    requestedConcurrency: parallelWorkers,
+    estimatedSlotTokens: slotTokenEstimates,
+    quotaStateEntry,
+    hostConcurrencyLimit,
+    quotaSourceSnapshot,
+    discoveredLimits,
+  });
+  const waveSize = waveSchedule.wave_size;
+
+  if (waveSchedule.cooldown_until) {
+    const waitMs = new Date(waveSchedule.cooldown_until).getTime() - Date.now();
+    if (waitMs > 0) {
+      const cappedWait = Math.min(waitMs, 120_000);
+      process.stderr.write(
+        `[quota] Cooldown active — waiting ${Math.ceil(cappedWait / 1000)}s before next wave.\n`,
+      );
+      await new Promise<void>((r) => setTimeout(r, cappedWait));
+    }
+  }
+
+  const taskGroups = candidateGroups.slice(0, waveSize);
+
+  const { slots: workerSlots, runCountAfter } = await buildParallelWaveSlots({
+    root,
+    artifactsDir,
+    selfCliPath,
+    taskGroups,
+    obligationId,
+    runCountStart: runCount,
+    timeoutMs,
+  });
+  runCount = runCountAfter;
+
+  const parallelStartedAt = new Date().toISOString();
+
+  await writeWaveManifest(artifactsDir, {
+    obligation_id: obligationId ?? "unknown",
+    started_at: parallelStartedAt,
+    pid: process.pid,
+    slots: workerSlots.map(buildWaveSlotEntry),
+  });
+
+  const { results: launchResults } = await runSlidingWindow(
+    workerSlots.map((slot) => () =>
+      provider.launch({
+        repoRoot: root,
+        runId: slot.runId,
+        obligationId,
+        promptPath: slot.paths.promptPath,
+        taskPath: slot.paths.taskPath,
+        resultPath: slot.paths.resultPath,
+        stdoutPath: slot.paths.stdoutPath,
+        stderrPath: slot.paths.stderrPath,
+        uiMode,
+        timeoutMs,
+      }),
+    ),
+    waveSize,
+  );
+  const launchErrorsByRunId = new Map<string, string>();
+  for (let index = 0; index < launchResults.length; index++) {
+    const outcome = launchResults[index];
+    if (outcome?.status === "rejected") {
+      launchErrorsByRunId.set(
+        workerSlots[index].runId,
+        outcome.reason instanceof Error
+          ? outcome.reason.message
+          : String(outcome.reason),
+      );
+    } else if (outcome?.status === "fulfilled") {
+      const launchExitSummary = summarizeLaunchExit(outcome.value);
+      if (launchExitSummary) {
+        launchErrorsByRunId.set(workerSlots[index].runId, launchExitSummary);
+      }
+    }
+  }
+
+  const ingestion = await ingestParallelWaveResults({
+    root,
+    artifactsDir,
+    workerSlots,
+    launchErrorsByRunId,
+    obligationId,
+    parallelStartedAt,
+    providerName: provider.name,
+    anyProgress,
+    artifactsWritten,
+  });
+  const batchProgress = ingestion.batchProgress;
+  const batchErrors = ingestion.batchErrors;
+  anyProgress = ingestion.anyProgress;
+
+  await recordWaveQuota({
+    providerModelKey,
+    providerName: provider.name,
+    workerSlots,
+    slotTokenEstimates,
+    batchErrors,
+    halfLifeHours: sessionConfig.quota?.empirical_half_life_hours ?? 24,
+  });
+
+  await removeWaveManifest(artifactsDir);
+
+  if (batchErrors.length > 0) {
+    const bundleAfter = await loadArtifactBundle(artifactsDir);
+    const blockedState = buildBlockedAuditState({
+      state: bundleAfter.audit_state ?? deriveAuditState(bundleAfter),
+      obligationId,
+      executor: "agent",
+      blocker:
+        `Parallel worker batch failed for ${batchErrors.length} run(s). ` +
+        batchErrors.slice(0, 3).join(" | "),
+    });
+    await writeCoreArtifacts(artifactsDir, {
+      ...bundleAfter,
+      audit_state: blockedState,
+    });
+    await emitEnvelope({
+      root,
+      artifactsDir,
+      bundle: { ...bundleAfter, audit_state: blockedState },
+      audit_state: blockedState,
+      selected_obligation: obligationId,
+      selected_executor: "agent",
+      progress_made: anyProgress,
+      artifacts_written: Array.from(
+        new Set([...ingestion.artifactsWritten, "audit_state.json"]),
+      ),
+      progress_summary:
+        `Parallel worker batch failed for ${batchErrors.length} run(s).\n` +
+        batchErrors.join("\n"),
+      next_likely_step: null,
+      providerName: provider.name,
+    });
+    return { done: true, runCount, anyProgress, artifactsWritten: ingestion.artifactsWritten };
+  }
+
+  if (!batchProgress) {
+    const bundleAfter = await loadArtifactBundle(artifactsDir);
+    const state = bundleAfter.audit_state ?? deriveAuditState(bundleAfter);
+    await emitEnvelope({
+      root,
+      artifactsDir,
+      bundle: bundleAfter,
+      audit_state: state,
+      selected_obligation: obligationId,
+      selected_executor: "agent",
+      progress_made: anyProgress,
+      artifacts_written: Array.from(ingestion.artifactsWritten),
+      progress_summary: "Parallel worker batch made no progress.",
+      next_likely_step: obligationId,
+      providerName: provider.name,
+    });
+    return { done: true, runCount, anyProgress, artifactsWritten: ingestion.artifactsWritten };
+  }
+
+  return { done: false, runCount, anyProgress, artifactsWritten: ingestion.artifactsWritten };
+}
+
+async function handleMaxRunsReached(params: {
+  root: string;
+  artifactsDir: string;
+  lastResult: WorkerResult | null;
+  anyProgress: boolean;
+  artifactsWritten: Set<string>;
+  maxRuns: number;
+  providerName: string;
+}): Promise<void> {
+  const {
+    root,
+    artifactsDir,
+    lastResult,
+    anyProgress,
+    artifactsWritten,
+    maxRuns,
+    providerName,
+  } = params;
+  const bundle = await loadArtifactBundle(artifactsDir);
+  const decision = decideNextStep(bundle);
+  const state = decision.state;
+  // A rendered report is the deliverable: if synthesis already produced one (or
+  // the state is formally complete), finish the run on it instead of stranding
+  // it in the artifacts dir behind a bare "max run limit" non-completion. This
+  // mirrors next-step's terminalStep so both loops present a completed audit the
+  // same way, even when finalization churned (runtime_validation <-> synthesis
+  // ping-pong, or filesystem-retry revision churn) up to the backstop. With no
+  // report yet, the run limit is a genuine non-terminal stop.
+  const reportRendered =
+    state.status === "complete" || Boolean(bundle.audit_report);
+  if (reportRendered) {
+    await clearDispatchFiles(artifactsDir);
+  }
+  const terminalState =
+    reportRendered && state.status !== "complete"
+      ? { ...state, status: "complete" as const }
+      : state;
+  await emitEnvelope({
+    root,
+    artifactsDir,
+    bundle,
+    audit_state: terminalState,
+    selected_obligation:
+      lastResult?.obligation_id ?? decision.selected_obligation,
+    selected_executor:
+      lastResult?.selected_executor ?? decision.selected_executor,
+    progress_made: anyProgress,
+    artifacts_written: Array.from(artifactsWritten),
+    progress_summary:
+      reportRendered && state.status !== "complete"
+        ? `Audit report already rendered; completing the run after reaching the max run limit (${maxRuns}) during finalization.`
+        : `Reached max run limit (${maxRuns}) before terminal state.`,
+    next_likely_step: reportRendered ? null : decision.selected_obligation,
+    providerName,
+  });
+  if (reportRendered) {
+    await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
+  }
 }
 
 export async function cmdRunToCompletion(argv: string[]): Promise<void> {
@@ -995,353 +1492,61 @@ const explicitProvider = getExplicitProvider(argv);
       runtimeUpdatesPath = pendingRuntimeUpdatesPath;
     }
 
-    if (preferredExecutor === "agent" && provider.name === LOCAL_SUBPROCESS_PROVIDER_NAME) {
-      const blocker = buildManualReviewBlocker(provider.name);
-      const blockedState = buildBlockedAuditState({
-        state: decision.state,
-        obligationId,
-        executor: preferredExecutor,
-        blocker,
-      });
-      await writeCoreArtifacts(artifactsDir, {
-        ...bundle,
-        audit_state: blockedState,
-      });
-
-      const blockRunId = buildRunId(obligationId, runCount + 1);
-      const blockPaths = getRunPaths(artifactsDir, blockRunId);
-      const blockPendingTasks = await addFileLineCountHints(
-        root,
-        buildPendingAuditTasks(bundle),
-      );
-      const blockPendingTasksPath = join(blockPaths.runDir, "pending-audit-tasks.json");
-      const blockAuditResultsPath = join(blockPaths.runDir, "run-results.json");
-      const blockReadPaths = new Set<string>();
-      for (const pt of blockPendingTasks) {
-        for (const fp of pt.file_paths) blockReadPaths.add(fp);
-      }
-      const blockTask: WorkerTask = {
-        contract_version: "audit-code-worker/v1alpha1",
-        run_id: blockRunId,
-        repo_root: root,
-        artifacts_dir: artifactsDir,
-        obligation_id: obligationId,
-        preferred_executor: preferredExecutor,
-        result_path: blockPaths.resultPath,
-        worker_command: [
-          process.execPath,
-          selfCliPath,
-          "worker-run",
-          "--task",
-          blockPaths.taskPath,
-        ],
-        audit_results_path: blockAuditResultsPath,
-        pending_audit_tasks_path: blockPendingTasksPath,
-        timeout_ms: timeoutMs,
-        max_retries: 0,
-        access: {
-          read_paths: [...blockReadPaths],
-          write_paths: [blockAuditResultsPath, blockPaths.resultPath],
-        },
-      };
-      const blockPrompt = renderWorkerPrompt(blockTask);
-      await writeWorkerTaskFiles(
-        blockTask,
-        blockPrompt,
-        blockPaths,
-        artifactsDir,
-        blockPendingTasks,
-      );
-      await writeJsonFile(blockPendingTasksPath, blockPendingTasks);
-
-      const reviewRun: ActiveReviewRun = {
-        run_id: blockRunId,
-        task_path: blockPaths.taskPath,
-        prompt_path: blockPaths.promptPath,
-        pending_audit_tasks_path: blockPendingTasksPath,
-        audit_results_path: blockAuditResultsPath,
-        worker_command: blockTask.worker_command,
-      };
-      // Render the actionable dispatch / single-task step here instead of
-      // leaving the host to issue next-step as a second command. Capability is
-      // resolved from flags/config/env with a sane default, so nothing is
-      // required from the host to make progress. If rendering fails we still
-      // emit the hand-off below — run-to-completion is never worse than before,
-      // and next-step will re-render and surface the error loudly.
-      try {
-        await renderSemanticReviewStep({
-          root,
-          artifactsDir,
-          activeReviewRun: reviewRun,
-          hostCanDispatch: resolveHostDispatchCapability({
-            explicit: getOptionalBooleanFlag(
-              argv,
-              "--host-can-dispatch-subagents",
-            ),
-            sessionConfig,
-          }),
-          hostMaxActiveSubagents: getHostMaxActiveSubagents(argv),
-          hostCanRestrictSubagentTools:
-            getOptionalBooleanFlag(
-              argv,
-              "--host-can-restrict-subagent-tools",
-            ) ?? false,
-          hostCanSelectSubagentModel:
-            getOptionalBooleanFlag(
-              argv,
-              "--host-can-select-subagent-model",
-            ) ?? false,
-        });
-      } catch (stepError) {
-        process.stderr.write(
-          `[audit-code] Could not pre-render the review step; the operator hand-off points to next-step instead. ${
-            stepError instanceof Error ? stepError.message : String(stepError)
-          }\n`,
-        );
-      }
-
-      await emitEnvelope({
-        root,
-        artifactsDir,
-        bundle: {
-          ...bundle,
-          audit_state: blockedState,
-        },
-        audit_state: blockedState,
-        selected_obligation: obligationId,
-        selected_executor: preferredExecutor,
-        progress_made: anyProgress,
-        artifacts_written: Array.from(
-          new Set([...artifactsWritten, "audit_state.json"]),
-        ),
-        progress_summary: blocker,
-        next_likely_step: null,
-        providerName: provider.name,
-        activeReviewRun: reviewRun,
-      });
-      return;
-    }
+    if (await handleLocalSubprocessBlock({
+      root,
+      artifactsDir,
+      selfCliPath,
+      bundle,
+      argv,
+      obligationId,
+      preferredExecutor,
+      provider,
+      sessionConfig,
+      timeoutMs,
+      runCount,
+      anyProgress,
+      artifactsWritten,
+    })) return;
 
     if (!preferredExecutor) {
-      const state = decision.state;
-      await clearDispatchFiles(artifactsDir);
-      await emitEnvelope({
+      await handleNoExecutor({
         root,
         artifactsDir,
         bundle,
-        audit_state: state,
-        selected_obligation: anyProgress
-          ? (lastResult?.obligation_id ?? null)
-          : null,
-        selected_executor: anyProgress
-          ? (lastResult?.selected_executor ?? null)
-          : null,
-        progress_made: anyProgress,
-        artifacts_written: Array.from(artifactsWritten),
-        progress_summary:
-          anyProgress && state.status === "complete"
-            ? `Completed audit in ${runCount} fresh worker runs.`
-            : decision.reason,
-        next_likely_step:
-          state.status === "complete" ? null : decision.selected_obligation,
+        decision,
+        lastResult,
+        anyProgress,
+        artifactsWritten,
+        runCount,
         providerName: provider.name,
       });
-      if (state.status === "complete") {
-        await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
-      }
       return;
     }
 
     if (preferredExecutor === "agent" && parallelWorkers > 1) {
-      const quotaState = await readQuotaState();
-      const providerModelKey = buildProviderModelKey(provider.name, hostModel);
-      const quotaStateEntry = quotaState.entries[providerModelKey] ?? null;
-      const allCandidateTasks = buildPendingAuditTasks(bundle);
-      const candidateGroups = chunkArray(
-        allCandidateTasks.slice(0, parallelWorkers * agentBatchSize),
-        agentBatchSize,
-      );
-      const candidateSizeIndex = sizeIndexFromManifest(bundle.repo_manifest);
-      const slotTokenEstimates = candidateGroups.map((g) =>
-        estimateTaskGroupTokens(g, candidateSizeIndex),
-      );
-
-      const providerLimits: DiscoveredRateLimits | null =
-        await provider.queryLimits?.(hostModel)
-          .then((r) => r ? { ...r, source: "provider_query" } : null)
-          .catch(() => null)
-        ?? null;
-      const cachedLimits = await lookupDiscoveredLimits(providerModelKey).catch(() => null);
-      const discoveredLimits = mergeDiscoveredLimits(providerLimits, cachedLimits);
-
-      const halfLifeHours = sessionConfig.quota?.empirical_half_life_hours ?? 24;
-      const quotaSource = buildQuotaSource({ halfLifeHours });
-      const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(providerModelKey).catch(() => null);
-
-      const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
-        sessionConfig,
-      });
-
-      const waveSchedule = scheduleWave({
-        providerName: resolveFreshSessionProviderName(getExplicitProvider(argv), sessionConfig),
-        sessionConfig,
-        hostModel,
-        requestedConcurrency: parallelWorkers,
-        estimatedSlotTokens: slotTokenEstimates,
-        quotaStateEntry,
-        hostConcurrencyLimit,
-        quotaSourceSnapshot,
-        discoveredLimits,
-      });
-      const waveSize = waveSchedule.wave_size;
-
-      if (waveSchedule.cooldown_until) {
-        const waitMs = new Date(waveSchedule.cooldown_until).getTime() - Date.now();
-        if (waitMs > 0) {
-          const cappedWait = Math.min(waitMs, 120_000);
-          process.stderr.write(
-            `[quota] Cooldown active — waiting ${Math.ceil(cappedWait / 1000)}s before next wave.\n`,
-          );
-          await new Promise<void>((r) => setTimeout(r, cappedWait));
-        }
-      }
-
-      const taskGroups = candidateGroups.slice(0, waveSize);
-
-      const { slots: workerSlots, runCountAfter } = await buildParallelWaveSlots({
+      const waveResult = await runParallelWaveStep({
         root,
         artifactsDir,
         selfCliPath,
-        taskGroups,
+        bundle,
+        argv,
+        sessionConfig,
+        provider,
+        hostModel,
         obligationId,
-        runCountStart: runCount,
+        parallelWorkers,
+        agentBatchSize,
+        runCount,
         timeoutMs,
-      });
-      runCount = runCountAfter;
-
-      const parallelStartedAt = new Date().toISOString();
-
-      await writeWaveManifest(artifactsDir, {
-        obligation_id: obligationId ?? "unknown",
-        started_at: parallelStartedAt,
-        pid: process.pid,
-        slots: workerSlots.map(buildWaveSlotEntry),
-      });
-
-      const { results: launchResults } = await runSlidingWindow(
-        workerSlots.map((slot) => () =>
-          provider.launch({
-            repoRoot: root,
-            runId: slot.runId,
-            obligationId,
-            promptPath: slot.paths.promptPath,
-            taskPath: slot.paths.taskPath,
-            resultPath: slot.paths.resultPath,
-            stdoutPath: slot.paths.stdoutPath,
-            stderrPath: slot.paths.stderrPath,
-            uiMode,
-            timeoutMs,
-          }),
-        ),
-        waveSize,
-      );
-      const launchErrorsByRunId = new Map<string, string>();
-      for (let index = 0; index < launchResults.length; index++) {
-        const outcome = launchResults[index];
-        if (outcome?.status === "rejected") {
-          launchErrorsByRunId.set(
-            workerSlots[index].runId,
-            outcome.reason instanceof Error
-              ? outcome.reason.message
-              : String(outcome.reason),
-          );
-        } else if (outcome?.status === "fulfilled") {
-          const launchExitSummary = summarizeLaunchExit(outcome.value);
-          if (launchExitSummary) {
-            launchErrorsByRunId.set(workerSlots[index].runId, launchExitSummary);
-          }
-        }
-      }
-
-      const ingestion = await ingestParallelWaveResults({
-        root,
-        artifactsDir,
-        workerSlots,
-        launchErrorsByRunId,
-        obligationId,
-        parallelStartedAt,
-        providerName: provider.name,
+        uiMode,
         anyProgress,
         artifactsWritten,
       });
-      const batchProgress = ingestion.batchProgress;
-      const batchErrors = ingestion.batchErrors;
-      anyProgress = ingestion.anyProgress;
-
-      await recordWaveQuota({
-        providerModelKey,
-        providerName: provider.name,
-        workerSlots,
-        slotTokenEstimates,
-        batchErrors,
-        halfLifeHours: sessionConfig.quota?.empirical_half_life_hours ?? 24,
-      });
-
-      await removeWaveManifest(artifactsDir);
-
-      if (batchErrors.length > 0) {
-        const bundleAfter = await loadArtifactBundle(artifactsDir);
-        const blockedState = buildBlockedAuditState({
-          state: bundleAfter.audit_state ?? deriveAuditState(bundleAfter),
-          obligationId,
-          executor: "agent",
-          blocker:
-            `Parallel worker batch failed for ${batchErrors.length} run(s). ` +
-            batchErrors.slice(0, 3).join(" | "),
-        });
-        await writeCoreArtifacts(artifactsDir, {
-          ...bundleAfter,
-          audit_state: blockedState,
-        });
-        await emitEnvelope({
-          root,
-          artifactsDir,
-          bundle: { ...bundleAfter, audit_state: blockedState },
-          audit_state: blockedState,
-          selected_obligation: obligationId,
-          selected_executor: "agent",
-          progress_made: anyProgress,
-          artifacts_written: Array.from(
-            new Set([...artifactsWritten, "audit_state.json"]),
-          ),
-          progress_summary:
-            `Parallel worker batch failed for ${batchErrors.length} run(s).\n` +
-            batchErrors.join("\n"),
-          next_likely_step: null,
-          providerName: provider.name,
-        });
-        return;
-      }
-
-      if (!batchProgress) {
-        const bundleAfter = await loadArtifactBundle(artifactsDir);
-        const state = bundleAfter.audit_state ?? deriveAuditState(bundleAfter);
-        await emitEnvelope({
-          root,
-          artifactsDir,
-          bundle: bundleAfter,
-          audit_state: state,
-          selected_obligation: obligationId,
-          selected_executor: "agent",
-          progress_made: anyProgress,
-          artifacts_written: Array.from(artifactsWritten),
-          progress_summary: "Parallel worker batch made no progress.",
-          next_likely_step: obligationId,
-          providerName: provider.name,
-        });
-        return;
-      }
-
+      runCount = waveResult.runCount;
+      anyProgress = waveResult.anyProgress;
+      artifactsWritten.clear();
+      for (const a of waveResult.artifactsWritten) artifactsWritten.add(a);
+      if (waveResult.done) return;
       continue;
     }
 
@@ -1412,44 +1617,13 @@ const explicitProvider = getExplicitProvider(argv);
     if (single.done) return;
   }
 
-  const bundle = await loadArtifactBundle(artifactsDir);
-  const decision = decideNextStep(bundle);
-  const state = decision.state;
-  // A rendered report is the deliverable: if synthesis already produced one (or
-  // the state is formally complete), finish the run on it instead of stranding
-  // it in the artifacts dir behind a bare "max run limit" non-completion. This
-  // mirrors next-step's terminalStep so both loops present a completed audit the
-  // same way, even when finalization churned (runtime_validation <-> synthesis
-  // ping-pong, or filesystem-retry revision churn) up to the backstop. With no
-  // report yet, the run limit is a genuine non-terminal stop.
-  const reportRendered =
-    state.status === "complete" || Boolean(bundle.audit_report);
-  if (reportRendered) {
-    await clearDispatchFiles(artifactsDir);
-  }
-  const terminalState =
-    reportRendered && state.status !== "complete"
-      ? { ...state, status: "complete" as const }
-      : state;
-  await emitEnvelope({
+  await handleMaxRunsReached({
     root,
     artifactsDir,
-    bundle,
-    audit_state: terminalState,
-    selected_obligation:
-      lastResult?.obligation_id ?? decision.selected_obligation,
-    selected_executor:
-      lastResult?.selected_executor ?? decision.selected_executor,
-    progress_made: anyProgress,
-    artifacts_written: Array.from(artifactsWritten),
-    progress_summary:
-      reportRendered && state.status !== "complete"
-        ? `Audit report already rendered; completing the run after reaching the max run limit (${maxRuns}) during finalization.`
-        : `Reached max run limit (${maxRuns}) before terminal state.`,
-    next_likely_step: reportRendered ? null : decision.selected_obligation,
+    lastResult,
+    anyProgress,
+    artifactsWritten,
+    maxRuns,
     providerName: provider.name,
   });
-  if (reportRendered) {
-    await promoteFinalAuditReport({ artifactsDir, repoRoot: root });
-  }
 }

@@ -165,6 +165,65 @@ test("ensureSemanticReviewRun new-run branch writes an agent task and returns a 
   });
 });
 
+test("ensureSemanticReviewRun new-run: access.read_paths is non-empty and contains all pending task file paths", async () => {
+  await withTempArtifacts(async ({ artifactsDir, root }) => {
+    const pendingAuditTasks = [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass-1",
+        lens: "correctness",
+        file_paths: ["src/index.ts", "src/utils.ts"],
+        file_line_counts: { "src/index.ts": 50, "src/utils.ts": 30 },
+        rationale: "fixture task 1",
+      },
+      {
+        task_id: "task-2",
+        unit_id: "unit-2",
+        pass_id: "pass-2",
+        lens: "security",
+        file_paths: ["src/auth.ts"],
+        file_line_counts: { "src/auth.ts": 80 },
+        rationale: "fixture task 2",
+      },
+    ];
+
+    // No current-task.json present → the function creates a new review run.
+    await ensureSemanticReviewRun({
+      root,
+      artifactsDir,
+      bundle: {
+        audit_state: minimalState("active"),
+        audit_tasks: pendingAuditTasks,
+      },
+      state: minimalState("active"),
+      obligationId: "audit_tasks_completed",
+      selfCliPath: join(repoRoot, "dist", "index.js"),
+      timeoutMs: 60_000,
+    });
+
+    const currentTask = JSON.parse(
+      await readFile(
+        join(artifactsDir, "dispatch", "current-task.json"),
+        "utf8",
+      ),
+    );
+
+    // access.read_paths must be populated
+    assert.ok(Array.isArray(currentTask.access?.read_paths), "access.read_paths is an Array");
+    assert.ok(currentTask.access.read_paths.length > 0, "access.read_paths is non-empty");
+
+    // Every file_paths entry from the pending tasks must appear in read_paths
+    const expectedPaths = pendingAuditTasks.flatMap((t) => t.file_paths);
+    for (const expectedPath of expectedPaths) {
+      assert.ok(
+        currentTask.access.read_paths.includes(expectedPath),
+        `access.read_paths contains expected path: ${expectedPath}`,
+      );
+    }
+  });
+});
+
 test("ensureSemanticReviewRun existing-run branch reuses the run without creating a new runId", async () => {
   await withTempArtifacts(async ({ artifactsDir, root }) => {
     const seeded = agentTask(artifactsDir, root, "SEEDED-RUN");

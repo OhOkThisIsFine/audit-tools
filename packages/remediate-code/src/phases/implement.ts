@@ -90,8 +90,9 @@ async function runStepWithProvider(
     }));
     return true;
   } catch (err) {
+    const exitCode = (err as any)?.exitCode ?? (err as any)?.code ?? "unknown";
     console.error(
-      `Step ${stepName} failed for ${findingId}: ${err}\n  stdout: ${stdoutPath}\n  stderr: ${stderrPath}`,
+      `[implement] event=step_failed finding_id=${findingId} step=${stepName} stdout=${stdoutPath} stderr=${stderrPath} error=${err}`,
     );
     return false;
   }
@@ -164,7 +165,7 @@ export async function executeBlock(
       continue;
     }
 
-    console.log(`Implementing item ${findingId}...`);
+    console.log(`[implement] event=item_start finding_id=${findingId} block_id=${block.block_id}`);
 
     // --- Write Tests step ---
     const skipTests = itemSpec.not_applicable_steps.find(
@@ -279,8 +280,7 @@ export async function executeBlock(
           if (!verRes.passed) verifySuccess = false;
         } catch (e) {
           console.error(
-            `Failed to read verification result for ${findingId}:`,
-            e,
+            `[implement] event=verify_result_read_failed finding_id=${findingId} path=${resultPath} error=${e}`,
           );
           verifySuccess = false;
         }
@@ -443,8 +443,7 @@ async function runBlockInWorktree(
 
   if (worktreeRes.status !== 0) {
     console.warn(
-      `Failed to create worktree for block ${block.block_id} — will run sequentially. ` +
-        `${describeGitFailure(worktreeRes)}`,
+      `[implement] event=worktree_create_failed block_id=${block.block_id} mode=sequential detail=${describeGitFailure(worktreeRes)}`,
     );
     return { ok: false };
   }
@@ -493,8 +492,7 @@ async function runBlockInWorktree(
       // silently lost. Fall back to sequential execution and clean up so the
       // leftover worktree/branch doesn't block a retry.
       console.warn(
-        `Failed to commit block ${block.block_id} in worktree — will run sequentially. ` +
-          `${describeGitFailure(commitRes)}`,
+        `[implement] event=worktree_commit_failed block_id=${block.block_id} mode=sequential detail=${describeGitFailure(commitRes)}`,
       );
       runCommand("git", ["worktree", "remove", blockRoot, "--force"], {
         cwd: options.root,
@@ -546,7 +544,7 @@ function mergeWorktreeBlock(
     if (testsPassed) rebaseAndTestSuccess = true;
   } else {
     console.warn(
-      `Failed to rebase worktree block ${block.block_id}: ${describeGitFailure(rebaseRes)}`,
+      `[implement] event=worktree_rebase_failed block_id=${block.block_id} detail=${describeGitFailure(rebaseRes)}`,
     );
   }
 
@@ -558,7 +556,7 @@ function mergeWorktreeBlock(
     runCommand("git", ["merge", blockBranch], { cwd: options.root });
   } else {
     console.log(
-      `Block ${block.block_id} failed rebase or test, falling back to sequential execution.`,
+      `[implement] event=worktree_merge_skipped block_id=${block.block_id} reason=rebase_or_test_failed mode=sequential`,
     );
   }
 
@@ -574,7 +572,7 @@ export async function runImplementPhase(
   state: RemediationState,
   options: OrchestratorOptions,
 ): Promise<RemediationState> {
-  console.log("Running Implement Phase...");
+  console.log(`[implement] event=phase_start root=${options.root}`);
 
   if (!state.plan || !state.items) {
     throw new Error(

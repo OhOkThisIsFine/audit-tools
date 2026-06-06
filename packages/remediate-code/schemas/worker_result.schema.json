@@ -5,18 +5,22 @@
   "oneOf": [
     {
       "type": "object",
-      "required": ["type", "item_spec"],
+      "required": ["type", "contract_version", "phase", "item_spec"],
       "properties": {
         "type": { "const": "item_spec" },
+        "contract_version": { "const": "remediate-code-worker-result/v1alpha1" },
+        "phase": { "const": "document" },
         "item_spec": { "$ref": "item_spec.schema.json" }
       },
       "additionalProperties": false
     },
     {
       "type": "object",
-      "required": ["type", "clarifications"],
+      "required": ["type", "contract_version", "phase", "clarifications"],
       "properties": {
         "type": { "const": "clarification_request" },
+        "contract_version": { "const": "remediate-code-worker-result/v1alpha1" },
+        "phase": { "const": "document" },
         "clarifications": {
           "type": "array",
           "minItems": 1,

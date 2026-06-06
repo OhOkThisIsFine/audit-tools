@@ -122,8 +122,8 @@ async function analyze(
         context.pathLookup,
         edges,
       );
-    } catch {
-      // A parse failure on one file degrades to the floor for that file.
+    } catch (e) {
+      process.stderr.write(`[audit-code] python-analyzer: parse failed for '${file}': ${(e as Error).message ?? String(e)}\n`);
     }
   }
   return { edges };

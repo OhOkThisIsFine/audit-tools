@@ -53,6 +53,40 @@ function makeState(): RemediationState {
   };
 }
 
+function makeStateWithFinding(id: string): RemediationState {
+  return {
+    status: "planning",
+    plan: {
+      plan_id: "P1",
+      findings: [
+        {
+          id,
+          title: "Finding",
+          category: "correctness",
+          severity: "high",
+          confidence: "high",
+          lens: "correctness",
+          summary: "Summary",
+          affected_files: [{ path: "src/a.ts" }],
+          evidence: ["evidence"],
+        },
+      ],
+      blocks: [{ block_id: "B1", items: [id], parallel_safe: true }],
+      project_type: "unknown",
+      candidate_closing_actions: ["none"],
+    },
+    items: {
+      [id]: { finding_id: id, status: "pending", block_id: "B1" },
+    },
+    closing_plan: { action: "none" },
+  };
+}
+
+function expectIsoTimestamp(value: unknown): void {
+  expect(typeof value).toBe("string");
+  expect(Date.parse(value as string)).not.toBeNaN();
+}
+
 describe("runDocumentPhase clarification resolutions", () => {
   it("applies finding-id keyed object resolutions from clarification_resolution.json", async () => {
     const state = makeState();
@@ -72,5 +106,45 @@ describe("runDocumentPhase clarification resolutions", () => {
     expect(next.status).toBe("documenting");
     expect(next.items!.F1.status).toBe("deemed_inappropriate");
     expect(next.items!.F1.failure_reason).toBe("Out of scope");
+    expectIsoTimestamp(next.items!.F1.started_at);
+    expectIsoTimestamp(next.items!.F1.completed_at);
+  });
+
+  it("normalizeClarificationResolutions: resolutions wrapper array", async () => {
+    const state = makeStateWithFinding("F-1");
+    await writeFile(
+      join(TEST_DIR, "clarification_resolution.json"),
+      JSON.stringify({
+        resolutions: [
+          { finding_id: "F-1", action: "deemed_inappropriate", rationale: "not relevant" },
+        ],
+      }),
+      "utf8",
+    );
+
+    const next = await runDocumentPhase(state, BASE_OPTIONS);
+
+    expect(next.status).toBe("documenting");
+    expect(next.items!["F-1"].status).toBe("deemed_inappropriate");
+    expect(next.items!["F-1"].failure_reason).toBe("not relevant");
+  });
+
+  it("normalizeClarificationResolutions: items wrapper array", async () => {
+    const state = makeStateWithFinding("F-2");
+    await writeFile(
+      join(TEST_DIR, "clarification_resolution.json"),
+      JSON.stringify({
+        items: [
+          { finding_id: "F-2", action: "deemed_inappropriate", rationale: "out of scope" },
+        ],
+      }),
+      "utf8",
+    );
+
+    const next = await runDocumentPhase(state, BASE_OPTIONS);
+
+    expect(next.status).toBe("documenting");
+    expect(next.items!["F-2"].status).toBe("deemed_inappropriate");
+    expect(next.items!["F-2"].failure_reason).toBe("out of scope");
   });
 });

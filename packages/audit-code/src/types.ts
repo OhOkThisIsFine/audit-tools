@@ -13,23 +13,43 @@ export type Lens =
   | "config_deployment"
   | "observability";
 
-/** Canonical list of every valid {@link Lens}. Single source of truth — import
- * {@link isLens} / `ALL_LENSES` instead of hand-copying lens lists into local
- * guards, which drift (a copy omitting "observability" caused it to be wrongly
- * rejected in flow requeue). */
-export const ALL_LENSES: readonly Lens[] = [
-  "correctness",
-  "architecture",
-  "maintainability",
-  "security",
-  "reliability",
-  "performance",
-  "data_integrity",
-  "tests",
-  "operability",
-  "config_deployment",
-  "observability",
+/** Single authoritative record for one audit lens. `order_weight` governs task
+ * priority ordering — lower values sort earlier (higher urgency). */
+export interface LensDefinition {
+  id: Lens;
+  display_name: string;
+  /** Lower = higher priority in task ordering. */
+  order_weight: number;
+  default_enabled: boolean;
+}
+
+/** Single source of truth for all lens metadata. Adding or renaming a lens
+ * requires a single edit here; `ALL_LENSES`, `ENABLED_LENSES`, and
+ * `LENS_ORDER` (in auditTaskUtils) are all derived from this registry. */
+export const LENS_REGISTRY: readonly LensDefinition[] = [
+  { id: "security",           display_name: "Security",           order_weight: 10, default_enabled: true },
+  { id: "correctness",        display_name: "Correctness",        order_weight: 20, default_enabled: true },
+  { id: "reliability",        display_name: "Reliability",        order_weight: 30, default_enabled: true },
+  { id: "data_integrity",     display_name: "Data Integrity",     order_weight: 40, default_enabled: true },
+  { id: "performance",        display_name: "Performance",        order_weight: 50, default_enabled: true },
+  { id: "architecture",       display_name: "Architecture",       order_weight: 60, default_enabled: true },
+  { id: "operability",        display_name: "Operability",        order_weight: 70, default_enabled: true },
+  { id: "config_deployment",  display_name: "Config & Deployment",order_weight: 80, default_enabled: true },
+  { id: "observability",      display_name: "Observability",      order_weight: 90, default_enabled: true },
+  { id: "maintainability",    display_name: "Maintainability",    order_weight: 100, default_enabled: true },
+  { id: "tests",              display_name: "Tests",              order_weight: 110, default_enabled: true },
 ];
+
+/** Canonical list of every valid {@link Lens}. Derived from {@link LENS_REGISTRY}
+ * — import {@link isLens} / `ALL_LENSES` instead of hand-copying lens lists into
+ * local guards, which drift (a copy omitting "observability" caused it to be
+ * wrongly rejected in flow requeue). */
+export const ALL_LENSES: readonly Lens[] = LENS_REGISTRY.map((d) => d.id);
+
+/** Lenses enabled by default (all entries in the registry with default_enabled true). */
+export const ENABLED_LENSES: readonly Lens[] = LENS_REGISTRY
+  .filter((d) => d.default_enabled)
+  .map((d) => d.id);
 
 export function isLens(value: unknown): value is Lens {
   return (
@@ -145,4 +165,6 @@ export interface AuditResult {
   requires_followup?: boolean;
   followup_tasks?: string[];
   verification?: AuditVerification;
+  run_id?: string;
+  submitted_at?: string;
 }

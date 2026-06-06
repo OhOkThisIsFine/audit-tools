@@ -2,139 +2,25 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
-
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..");
-const wrapperPath = join(repoRoot, "audit-code.mjs");
+import { join } from "node:path";
+import { runWrapper } from "./helpers/run-wrapper.mjs";
+import {
+  writeFixtureRepo,
+  buildSyntheticResults,
+  advanceFixtureToPlanning,
+} from "./helpers/fixture.mjs";
 
 const { advanceAudit } = await import("../src/orchestrator/advance.ts");
 const { writeCoreArtifacts } = await import("../src/io/artifacts.ts");
-
-const FIXTURE_LINE_INDEX = {
-  "src/api/auth.ts": 4,
-  "src/lib/session.ts": 8,
-  "infra/deploy.yml": 5,
-  "package.json": 4,
-};
-
-function runWrapper(args, options = {}) {
-  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [wrapperPath, ...args], {
-      cwd: options.cwd ?? repoRoot,
-      env: { ...cleanEnv, ...(options.env ?? {}) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => (stdout += String(chunk)));
-    child.stderr.on("data", (chunk) => (stderr += String(chunk)));
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) resolve({ stdout, stderr });
-      else reject(new Error(stderr || stdout || `wrapper exited with ${code}`));
-    });
-  });
-}
-
-async function writeFixtureRepo(root) {
-  await mkdir(join(root, "src", "api"), { recursive: true });
-  await mkdir(join(root, "src", "lib"), { recursive: true });
-  await mkdir(join(root, "infra"), { recursive: true });
-  await writeFile(
-    join(root, "package.json"),
-    JSON.stringify({ name: "fixture-app", version: "0.0.0" }, null, 2) + "\n",
-  );
-  await writeFile(
-    join(root, "src", "api", "auth.ts"),
-    [
-      "export function authenticate(token: string): boolean {",
-      "  return token.trim().length > 0;",
-      "}",
-      "",
-    ].join("\n"),
-  );
-  await writeFile(
-    join(root, "src", "lib", "session.ts"),
-    [
-      "export interface Session {",
-      "  id: string;",
-      "}",
-      "",
-      "export function createSession(id: string): Session {",
-      "  return { id };",
-      "}",
-      "",
-    ].join("\n"),
-  );
-  await writeFile(
-    join(root, "infra", "deploy.yml"),
-    ["name: deploy", "on: [push]", "jobs:", "  release:", "    runs-on: ubuntu-latest", ""].join("\n"),
-  );
-}
-
-function buildSyntheticResults(tasks) {
-  return tasks.map((task, index) => ({
-    task_id: task.task_id,
-    unit_id: task.unit_id,
-    pass_id: task.pass_id,
-    lens: task.lens,
-    agent_role: "fixture-reviewer",
-    file_coverage: task.file_paths.map((path) => ({
-      path,
-      total_lines: FIXTURE_LINE_INDEX[path],
-    })),
-    findings:
-      index === 0
-        ? [
-            {
-              id: "finding-auth-1",
-              title: "Auth path lacks structured rejection telemetry",
-              category: "security",
-              severity: "medium",
-              confidence: "medium",
-              lens: task.lens,
-              summary: "Authentication failures are not recorded with enough context.",
-              affected_files: [{ path: task.file_paths[0], line_start: 1, line_end: 3 }],
-              evidence: [`${task.file_paths[0]}:1 - no structured failure event`],
-            },
-          ]
-        : [],
-    notes: ["fixture ingestion"],
-    requires_followup: false,
-  }));
-}
 
 /** Drive the deterministic pipeline in-process up to (and including) synthesis,
  * leaving synthesis_narrative_current as the only outstanding obligation, and
  * persist the resulting bundle so the next-step CLI resumes from that state. */
 async function persistSynthesisReadyState(root, artifactsDir) {
-  const intake = await advanceAudit({}, { root });
-  const prepared = {
-    ...intake.updated_bundle,
-    auto_fixes_applied: { executed_tools: [], timestamp: "2026-04-22T00:00:00Z" },
-    external_analyzer_results: { tool: "syntax_resolution_executor", results: [] },
-    syntax_resolution_status: {
-      tool: "syntax_resolution_executor",
-      completed_at: "2026-04-22T00:00:00Z",
-    },
-  };
-  const structure = await advanceAudit(prepared);
-  // Graph enrichment runs between structure and design assessment; with no root
-  // it writes an "omitted" marker and leaves the regex-floor graph unchanged.
-  const enrichment = await advanceAudit(structure.updated_bundle);
-  const designAssessment = await advanceAudit(enrichment.updated_bundle);
-  const designReview = await advanceAudit(designAssessment.updated_bundle);
-  const planning = await advanceAudit(designReview.updated_bundle, {
-    root,
-    lineIndex: FIXTURE_LINE_INDEX,
-  });
+  const { planning, lineIndex } = await advanceFixtureToPlanning(root);
   const ingest = await advanceAudit(planning.updated_bundle, {
     preferredExecutor: "result_ingestion_executor",
-    auditResults: buildSyntheticResults(planning.updated_bundle.audit_tasks),
+    auditResults: buildSyntheticResults(planning.updated_bundle.audit_tasks, lineIndex),
   });
   const synthesis = await advanceAudit(ingest.updated_bundle, {
     preferredExecutor: "synthesis_executor",

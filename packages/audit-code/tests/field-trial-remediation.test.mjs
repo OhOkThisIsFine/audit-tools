@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { importSourceModule } from "./helpers/sourceImport.mjs";
@@ -620,36 +620,38 @@ test("buildChunkedAuditTasks splits an oversized file into its own large_file ta
   assert.equal(tasks.length, 2);
 });
 
-test("planning excludes trivial audit files instead of auto-completing them", () => {
-  const tasks = buildChunkedAuditTasks(
+function makeTrivialFiles(authLenses = ["security", "correctness"]) {
+  return [
     {
-      files: [
-        {
-          path: ".gitignore",
-          unit_ids: ["repo-root"],
-          classification_status: "classified",
-          audit_status: "pending",
-          required_lenses: ["correctness"],
-          completed_lenses: [],
-        },
-        {
-          path: "pkg/__init__.py",
-          unit_ids: ["pkg"],
-          classification_status: "classified",
-          audit_status: "pending",
-          required_lenses: ["correctness"],
-          completed_lenses: [],
-        },
-        {
-          path: "src/api/auth.ts",
-          unit_ids: ["src-api-auth"],
-          classification_status: "classified",
-          audit_status: "pending",
-          required_lenses: ["security", "correctness"],
-          completed_lenses: [],
-        },
-      ],
+      path: ".gitignore",
+      unit_ids: ["repo-root"],
+      classification_status: "classified",
+      audit_status: "pending",
+      required_lenses: ["correctness"],
+      completed_lenses: [],
     },
+    {
+      path: "pkg/__init__.py",
+      unit_ids: ["pkg"],
+      classification_status: "classified",
+      audit_status: "pending",
+      required_lenses: ["correctness"],
+      completed_lenses: [],
+    },
+    {
+      path: "src/api/auth.ts",
+      unit_ids: ["src-api-auth"],
+      classification_status: "classified",
+      audit_status: "pending",
+      required_lenses: authLenses,
+      completed_lenses: [],
+    },
+  ];
+}
+
+test("buildChunkedAuditTasks excludes trivial audit files from tasks", () => {
+  const tasks = buildChunkedAuditTasks(
+    { files: makeTrivialFiles() },
     {
       ".gitignore": 2,
       "pkg/__init__.py": 1,
@@ -659,35 +661,10 @@ test("planning excludes trivial audit files instead of auto-completing them", ()
 
   assert.equal(tasks.length, 2);
   assert.ok(tasks.every((task) => task.file_paths.includes("src/api/auth.ts")));
+});
 
-  const coverage = {
-    files: [
-      {
-        path: ".gitignore",
-        unit_ids: ["repo-root"],
-        classification_status: "classified",
-        audit_status: "pending",
-        required_lenses: ["correctness"],
-        completed_lenses: [],
-      },
-      {
-        path: "pkg/__init__.py",
-        unit_ids: ["pkg"],
-        classification_status: "classified",
-        audit_status: "pending",
-        required_lenses: ["correctness"],
-        completed_lenses: [],
-      },
-      {
-        path: "src/api/auth.ts",
-        unit_ids: ["src-api-auth"],
-        classification_status: "classified",
-        audit_status: "pending",
-        required_lenses: ["security"],
-        completed_lenses: [],
-      },
-    ],
-  };
+test("autoCompleteTrivialCoverage marks trivial files as excluded", () => {
+  const coverage = { files: makeTrivialFiles(["security"]) };
 
   const skipped = autoCompleteTrivialCoverage(coverage, {
     ".gitignore": 2,
@@ -711,6 +688,75 @@ test("loadSessionConfig writes a default repo-local session config when missing"
       await readFile(join(artifactsDir, "session-config.json"), "utf8"),
     );
     assert.equal(persisted.provider, "local-subprocess");
+  } finally {
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+});
+
+test("loadSessionConfig reads and returns a pre-existing config with a non-default provider", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+  try {
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      JSON.stringify({ provider: "claude-code" }),
+      "utf8",
+    );
+    const config = await loadSessionConfig(artifactsDir);
+    assert.equal(config.provider, "claude-code");
+    // File must not have been overwritten to a default value.
+    const persisted = JSON.parse(
+      await readFile(join(artifactsDir, "session-config.json"), "utf8"),
+    );
+    assert.equal(persisted.provider, "claude-code");
+  } finally {
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+});
+
+test("loadSessionConfig merges a partial config with defaults", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+  try {
+    // Only provider is set; all other SessionConfig fields are absent.
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      JSON.stringify({ provider: "codex" }),
+      "utf8",
+    );
+    const config = await loadSessionConfig(artifactsDir);
+    assert.equal(config.provider, "codex");
+    // The returned object must be a plain object (not null, not a string).
+    assert.equal(typeof config, "object");
+    assert.ok(config !== null);
+  } finally {
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+});
+
+test("loadSessionConfig handles malformed JSON in the config file", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
+  try {
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      "{not json}",
+      "utf8",
+    );
+    // loadSessionConfig must throw — it must not silently swallow a parse error.
+    await assert.rejects(
+      loadSessionConfig(artifactsDir),
+      (err) => {
+        assert.ok(
+          err instanceof Error,
+          "expected an Error to be thrown for malformed JSON",
+        );
+        // The io layer wraps JSON.parse errors with the path in the message.
+        assert.ok(
+          err.message.toLowerCase().includes("json") ||
+            err.message.includes("session-config.json"),
+          `expected error message to reference JSON or the config file, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
   } finally {
     await rm(artifactsDir, { recursive: true, force: true });
   }

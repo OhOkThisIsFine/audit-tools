@@ -27,10 +27,7 @@
           "required_lenses": {
             "type": "array",
             "minItems": 1,
-            "items": {
-              "type": "string",
-              "enum": ["correctness", "architecture", "maintainability", "security", "reliability", "performance", "data_integrity", "tests", "operability", "config_deployment", "observability"]
-            }
+            "items": { "$ref": "lens.schema.json" }
           },
           "critical_flows": {
             "type": "array",

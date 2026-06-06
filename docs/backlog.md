@@ -6,6 +6,18 @@ anti-rot rule as CLAUDE.md's *"docs capture durable concepts, not current state"
 
 ## Known friction (agent / dev experience)
 
+- **`t.mock.module` is unusable in audit-code tests.** audit-code runs tests via
+  `node --import tsx/esm --test`; `t.mock.module` needs
+  `--experimental-test-module-mocks` and conflicts with the tsx/esm loader, so it
+  throws `t.mock.module is not a function`. Use a dependency-injection seam instead
+  (e.g. `cmdWorkerRun(argv, deps)` in `src/cli/workerRunCommand.ts`) rather than
+  module-graph mocking.
+- **Remediation block scopes can omit companion contract files.** A block adding
+  `lens_breakdown` to the generated audit findings summary had write access for
+  the shared type and synthesis code but not `packages/audit-code/schemas/`, even
+  though `audit_findings.schema.json` has `additionalProperties:false` on
+  `summary`. Implementation workers need schema files included whenever a public
+  artifact contract changes.
 - **Backslash escaping / arg serialization.** Inline `node -e "…\\…"` (regexes,
   Windows paths) gets mangled by shell backslash handling — write a small script
   file instead of inlining. Separately, the Workflow tool's `args` can arrive as a
@@ -43,6 +55,10 @@ anti-rot rule as CLAUDE.md's *"docs capture durable concepts, not current state"
   A shape like `foreach (...) { ... } | ConvertTo-Json` throws "An empty pipe
   element is not allowed"; assign the loop output first (`$out = foreach (...) {
   ... }`) and pipe `$out`.
+- **Dirty remediation test files can mask block verification.** In shared
+  worktrees, broad focused runs may fail on pre-existing edited tests unrelated to
+  the block; record the broad failure and run the new/changed tests by name so
+  worker evidence stays attributable.
 
 ## Deferred fixes (product bugs)
 
@@ -82,6 +98,37 @@ tries to hash it as a file → non-fatal `[remediate-code] fileIntegrity: I/O er
 EISDIR`. Planning continues but the integrity hash is silently absent for that item. Skip (or
 recurse into) directory paths in the integrity hasher, or normalize/reject directory
 `affected_files` at plan intake.
+
+### remediate-code: implement dispatch produces an unworkable mega-block on hub-heavy codebases
+
+Surfaced driving the self-audit remediation to the implement phase (2026-06-05). `buildWorkBlocks`'
+file-based union-find collapsed **448 of 468** actionable audit-code findings into a single
+`block-1` (594 write-paths, a **1.1 MB** implement prompt) because a handful of hub files
+(`cli.ts`, `plan.ts`, `index.ts`, `io/artifacts.ts`) transitively connect otherwise-independent
+findings. The implement phase dispatches one worker per block (to serialize edits to shared files),
+so block-1 becomes an impossible single-worker task — far past any model's practical apply budget.
+The real write-conflict graph is sparse: most findings touch disjoint files and could run in
+parallel; only the hub-file cluster needs serializing. Options: (a) cap block size and split a
+large block into serialized sub-waves keyed on the *actual* per-file conflict components (parallel
+across disjoint components, serial within one); (b) budget the implement prompt and page findings;
+(c) treat hub files as a dedicated serial lane and parallelize the rest. Until then, a monorepo
+self-audit can plan but not cleanly implement.
+
+### remediate-code: redesign implementation preview for clarity and rigidity
+
+Standardize the formatting across providers and IDEs by outputting a deterministic format based on
+tiers. Rename tiers. Rather than specifically prompting user to approve/deny tier 3 items only,
+simply ask user to identify any findings to ignore. Allow for conversational feedback from the user.
+Include a pros/cons section for each finding so the user can make an informed decision.
+
+### remediate-code: ask for user approval for intake object(s)
+
+Even if a perfectly-structured and non-stale audit report exists, give the user an opportunity to
+specify a different or additional items to remediate. Look for the canonical audit document created
+by auditor-lambda, but also look through any docs/ or similar folders for other potential candidate
+inputs. Propose any files found to the user with a short description of what they contain, so the
+user can decide whether to use any or many of them. The user can also at this time provide 
+conversational direction as to other issues to remediate.
 
 ### audit-code: no way to re-synthesize a clean audit-findings.json after promotion
 
@@ -150,7 +197,8 @@ a random file to a random location.**
 ## Features to add later
 
 - **User-selected lenses.** Let the operator choose which audit lenses run instead
-  of always running the full set.
+  of always running the full set. Consider having a base set of lenses that always run,
+  so that the obligations of multiple-lenses-per-item can still be satisfied.
 - **Heterogeneous multi-agent dispatch — capacity-pool foundation shipped 2026-06-04.**
   `computeDispatchCapacity({ pools, pendingItemTokens })` in `@audit-tools/shared`
   sizes dispatch JIT and sums concurrent slots across `CapacityPool`s; both
@@ -158,3 +206,14 @@ a random file to a random location.**
   heterogeneous fleet: per-packet provider assignment + partitioning `pendingItemTokens`
   across pools, host-model detection (`hostModel` is usually null), and building a real
   second pool (an IDE model or another CLI provider). See memory `quota-dispatch-vision`.
+- **Choice of depth of Design Review step**
+  Allow user to decide whether to do a shallow or deep design review. Shallow might mean
+  having a single large-context agent do that review, and deep might mean using multiple
+  parallel agents to come up with their own ideas, then to synthesize those independent
+  perspectives, as in the https://github.com/uditakhourii/adhd project.
+- **Limit unnecessary conversation outputs**
+  Currently, many agents emit multiple steps describing their discovery of project
+  principles: "I'm the orchestrator for...", "I should perform one bounded step...".
+  Where possible, condense steps to eliminate round trips, and perform actions
+  via the mechanical backend, only giving the orchestrator and subagents what they
+  need.

@@ -25,7 +25,7 @@ import type { DesignAssessment } from "../types/designAssessment.js";
 import type { AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { ToolingManifest } from "../types/toolingManifest.js";
-import type { ActiveDispatchState } from "../cli/dispatch.js";
+import type { ActiveDispatchState } from "../types/activeDispatch.js";
 import {
   isFileMissingError,
   readOptionalJsonFile,
@@ -320,8 +320,13 @@ export async function promoteFinalAuditReport(params: {
       join(params.repoRoot, "audit-findings.json"),
       { force: true },
     );
-  } catch {
+  } catch (error) {
     // audit-findings.json is optional output; absence must not fail promotion.
+    // Log so operators can distinguish a partial promotion from a clean one.
+    warn(
+      `audit-code: could not promote audit-findings.json to ${join(params.repoRoot, "audit-findings.json")}: ` +
+        (error instanceof Error ? error.message : String(error)),
+    );
   }
   try {
     await remove(params.artifactsDir, { recursive: true, force: true });

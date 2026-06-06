@@ -93,6 +93,78 @@ interface RunResolution {
   note?: string;
 }
 
+type SingleAnalyzerResult =
+  | { ok: true; edges: GraphEdge[]; routes: RouteEdge[]; resolution: AnalyzerResolution }
+  | { ok: false; note: string; resolution: AnalyzerResolution };
+
+/**
+ * Run one analyzer: resolve its dependency, invoke analyze(), and return a
+ * discriminated result. Early-exit guards (not_applicable / skip / absent-root)
+ * are handled by the caller; this helper starts from a confirmed runnable state.
+ */
+async function runSingleAnalyzer(
+  analyzer: LanguageAnalyzer,
+  root: string,
+  setting: AnalyzerSetting,
+  bundle: ArtifactBundle,
+  pathLookup: Map<string, string>,
+  includedFiles: string[],
+  disposition: ArtifactBundle["file_disposition"],
+  cacheRoot?: string,
+): Promise<SingleAnalyzerResult> {
+  const run = resolveForRun(analyzer, root, setting, cacheRoot);
+  if (run.resolution === "absent") {
+    return { ok: false, note: run.note ?? "Dependency absent.", resolution: "absent" };
+  }
+  try {
+    const output = await analyzer.analyze(includedFiles.filter((f) => analyzer.supports(f)), {
+      root,
+      repoManifest: bundle.repo_manifest!,
+      disposition,
+      includedFiles,
+      pathLookup,
+      dependencyPath: run.path,
+    });
+    return {
+      ok: true,
+      edges: output.edges ?? [],
+      routes: output.routes ?? [],
+      resolution: run.resolution,
+    };
+  } catch (error) {
+    const note =
+      error instanceof Error
+        ? `Analyzer failed [${error.name}]: ${error.message}${error.stack ? ` — stack: ${error.stack.split("\n").slice(0, 4).join(" | ")}` : ""}`
+        : `Analyzer failed: ${String(error)}.`;
+    return { ok: false, note, resolution: run.resolution };
+  }
+}
+
+/**
+ * Assemble the enriched GraphBundle from the regex floor plus per-bucket
+ * analyzer edges and merged route edges.
+ */
+function buildEnrichedGraph(
+  floor: GraphBundle,
+  bucketEdges: { imports: GraphEdge[]; calls: GraphEdge[]; references: GraphEdge[] },
+  routeEdges: RouteEdge[],
+  analyzersUsed: string[],
+): GraphBundle {
+  return {
+    ...floor,
+    graphs: {
+      ...floor.graphs,
+      imports: mergeAnalyzerEdges(floor.graphs.imports ?? [], bucketEdges.imports),
+      calls: mergeAnalyzerEdges(floor.graphs.calls ?? [], bucketEdges.calls),
+      references: mergeAnalyzerEdges(floor.graphs.references ?? [], bucketEdges.references),
+      ...(routeEdges.length > 0
+        ? { routes: mergeRoutes(floor.graphs.routes ?? [], routeEdges) }
+        : {}),
+    },
+    analyzers_used: [...new Set(analyzersUsed)].sort(),
+  };
+}
+
 /**
  * Resolve a dependency for actual execution (may install for ephemeral/permanent).
  * `auto`/`repo` with an absent dependency falls back to the regex floor.
@@ -161,9 +233,7 @@ export async function runGraphEnrichmentExecutor(
 
   for (const analyzer of registry) {
     const setting = settingFor(options.analyzers, analyzer.id);
-    const supportedFiles = includedFiles.filter((file) =>
-      analyzer.supports(file),
-    );
+    const supportedFiles = includedFiles.filter((file) => analyzer.supports(file));
 
     if (supportedFiles.length === 0) {
       entries.push({ id: analyzer.id, resolution: "not_applicable", setting, edges_added: 0, routes_added: 0 });
@@ -178,40 +248,17 @@ export async function runGraphEnrichmentExecutor(
       continue;
     }
 
-    const run = resolveForRun(analyzer, root, setting, options.cacheRoot);
-    if (run.resolution === "absent") {
-      entries.push({ id: analyzer.id, resolution: "absent", setting, edges_added: 0, routes_added: 0, note: run.note });
+    const result = await runSingleAnalyzer(analyzer, root, setting, bundle, pathLookup, includedFiles, disposition, options.cacheRoot);
+    if (!result.ok) {
+      const entry: AnalyzerCapabilityEntry = { id: analyzer.id, resolution: result.resolution, setting, edges_added: 0, routes_added: 0, note: result.note };
+      entries.push(entry);
+      if (entry.note?.startsWith("Analyzer failed")) {
+        console.warn(`[graph-enrichment] Analyzer '${analyzer.id}' failed: ${entry.note}`);
+      }
       continue;
     }
 
-    let edges: GraphEdge[] = [];
-    let routes: RouteEdge[] = [];
-    try {
-      const output = await analyzer.analyze(supportedFiles, {
-        root,
-        repoManifest: bundle.repo_manifest,
-        disposition,
-        includedFiles,
-        pathLookup,
-        dependencyPath: run.path,
-      });
-      edges = output.edges ?? [];
-      routes = output.routes ?? [];
-    } catch (error) {
-      entries.push({
-        id: analyzer.id,
-        resolution: run.resolution,
-        setting,
-        edges_added: 0,
-        routes_added: 0,
-        note:
-          error instanceof Error
-            ? `Analyzer failed [${error.name}]: ${error.message}${error.stack ? ` — stack: ${error.stack.split("\n").slice(0, 4).join(" | ")}` : ""}`
-            : `Analyzer failed: ${String(error)}.`,
-      });
-      continue;
-    }
-
+    const { edges, routes, resolution } = result;
     for (const edge of edges) {
       bucketEdges[bucketForKind(edge.kind)].push(edge);
     }
@@ -219,7 +266,7 @@ export async function runGraphEnrichmentExecutor(
     if (edges.length + routes.length > 0) {
       analyzersUsed.push(analyzer.id);
     }
-    entries.push({ id: analyzer.id, resolution: run.resolution, setting, edges_added: edges.length, routes_added: routes.length });
+    entries.push({ id: analyzer.id, resolution, setting, edges_added: edges.length, routes_added: routes.length });
   }
 
   const applied = analyzersUsed.length > 0;
@@ -233,25 +280,7 @@ export async function runGraphEnrichmentExecutor(
   // reasons of low-confidence edges on whichever graph stands — the floor's
   // heuristic edges exist regardless of analyzers.
   const graphBundle: GraphBundle = applied
-    ? {
-        ...floor,
-        graphs: {
-          ...floor.graphs,
-          imports: mergeAnalyzerEdges(
-            floor.graphs.imports ?? [],
-            bucketEdges.imports,
-          ),
-          calls: mergeAnalyzerEdges(floor.graphs.calls ?? [], bucketEdges.calls),
-          references: mergeAnalyzerEdges(
-            floor.graphs.references ?? [],
-            bucketEdges.references,
-          ),
-          ...(routeEdges.length > 0
-            ? { routes: mergeRoutes(floor.graphs.routes ?? [], routeEdges) }
-            : {}),
-        },
-        analyzers_used: [...new Set(analyzersUsed)].sort(),
-      }
+    ? buildEnrichedGraph(floor, bucketEdges, routeEdges, analyzersUsed)
     : floor;
 
   let reasoned: EdgeReasoningSummary = { rewritten: 0, candidates: 0 };
@@ -266,11 +295,16 @@ export async function runGraphEnrichmentExecutor(
       : "";
 
   if (!graphChanged) {
+    const failedEntries = entries.filter((e) => e.note?.startsWith("Analyzer failed"));
+    const failureSuffix =
+      failedEntries.length > 0
+        ? `; ${failedEntries.length} analyzer(s) failed: ${failedEntries.map((e) => e.id).join(", ")} (see analyzer_capability.json)`
+        : "";
     return {
       updated: { ...bundle, analyzer_capability: record },
       artifacts_written: ["analyzer_capability.json"],
       progress_summary:
-        "Graph enrichment omitted; deterministic regex graph retained.",
+        `Graph enrichment omitted; deterministic regex graph retained.${failureSuffix}`,
     };
   }
 

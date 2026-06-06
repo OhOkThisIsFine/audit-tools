@@ -107,9 +107,12 @@ export async function writeCurrentStep(params: {
     repo_root: params.repoRoot,
     artifacts_dir: params.artifactsDir,
     artifact_paths: {
+      // Caller-supplied paths are merged first so the canonical, computed
+      // step/prompt locations always win — a caller (or step config) must not be
+      // able to repoint the host at a different current-step.json / -prompt.md.
+      ...params.artifactPaths,
       current_step: stepPath,
       current_prompt: promptPath,
-      ...params.artifactPaths,
     },
     ...(params.access ? { access: params.access } : {}),
   };

@@ -1,23 +1,45 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, rename, rm } from "node:fs/promises";
+import { open, mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   RUN_LEDGER_STATUSES,
   type RunLedger,
   type RunLedgerEntry,
 } from "@audit-tools/shared";
-import { isFileMissingError, readJsonFile, writeJsonFile } from "@audit-tools/shared";
+import { isFileMissingError, readJsonFile, writeJsonFile, withFileLock } from "@audit-tools/shared";
 
 const RUN_LEDGER_FILENAME = "run-ledger.json";
 const RUN_LEDGER_LOCK_FILENAME = "run-ledger.lock";
-const LOCK_RETRY_DELAY_MS = 20;
-const LOCK_RETRY_LIMIT = 100;
 const VALID_RUN_LEDGER_STATUSES = new Set<RunLedgerEntry["status"]>(
   RUN_LEDGER_STATUSES,
 );
 
 function ledgerPath(artifactsDir: string): string {
   return join(artifactsDir, RUN_LEDGER_FILENAME);
+}
+
+/**
+ * Wrap withFileLock for the run ledger, emitting a stderr message on the first
+ * contention event so operators can observe prolonged lock waits before the
+ * full timeout expires.
+ */
+async function withLedgerLock<T>(lockPath: string, fn: () => Promise<T>): Promise<T> {
+  // Probe for an immediate lock acquisition; if the lock file already exists,
+  // log contention before delegating to withFileLock for the full retry loop.
+  try {
+    const fd = await open(lockPath, "wx");
+    await fd.close();
+    // Lock acquired on the first attempt — no contention; release and let
+    // withFileLock manage the full acquire + release lifecycle.
+    await rm(lockPath, { force: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      process.stderr.write(
+        `[audit-code] runLedger: lock contention detected on ${lockPath}, waiting...\n`,
+      );
+    }
+  }
+  return withFileLock(lockPath, fn);
 }
 
 function ledgerLockPath(artifactsDir: string): string {
@@ -33,15 +55,6 @@ function buildTempLedgerPath(artifactsDir: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isFileExistsError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "EEXIST"
-  );
 }
 
 function assertRunLedgerEntry(
@@ -69,7 +82,7 @@ function assertRunLedgerEntry(
     }
     if (typeof entry !== "string" || entry.trim().length === 0) {
       throw new Error(
-        `Invalid run ledger in ${fieldPath}.${field}: expected a string or null.`,
+        `Invalid run ledger in ${fieldPath}.${field}: expected a non-empty string or null.`,
       );
     }
     return entry;
@@ -114,33 +127,6 @@ function parseRunLedger(value: unknown, path: string): RunLedger {
   };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function acquireLedgerLock(artifactsDir: string) {
-  const lockPath = ledgerLockPath(artifactsDir);
-  await mkdir(artifactsDir, { recursive: true });
-
-  for (let attempt = 0; attempt < LOCK_RETRY_LIMIT; attempt += 1) {
-    try {
-      return await open(lockPath, "wx");
-    } catch (error) {
-      if (!isFileExistsError(error)) {
-        throw error;
-      }
-      if (attempt === LOCK_RETRY_LIMIT - 1) {
-        throw new Error(
-          `Timed out waiting to update ${ledgerPath(artifactsDir)} because ${lockPath} is locked.`,
-        );
-      }
-      await sleep(LOCK_RETRY_DELAY_MS);
-    }
-  }
-
-  throw new Error(`Failed to acquire lock for ${ledgerPath(artifactsDir)}.`);
-}
-
 export async function loadRunLedger(artifactsDir: string): Promise<RunLedger> {
   const path = ledgerPath(artifactsDir);
   try {
@@ -158,18 +144,15 @@ export async function appendRunLedgerEntry(
   artifactsDir: string,
   entry: RunLedgerEntry,
 ): Promise<void> {
-  const lockHandle = await acquireLedgerLock(artifactsDir);
   const path = ledgerPath(artifactsDir);
+  const lockPath = ledgerLockPath(artifactsDir);
   const tempPath = buildTempLedgerPath(artifactsDir);
-
-  try {
+  await mkdir(artifactsDir, { recursive: true });
+  await withLedgerLock(lockPath, async () => {
     const ledger = await loadRunLedger(artifactsDir);
     ledger.runs.push(entry);
     await writeJsonFile(tempPath, ledger);
     await rename(tempPath, path);
-  } finally {
-    await lockHandle.close();
-    await rm(ledgerLockPath(artifactsDir), { force: true });
     await rm(tempPath, { force: true }).catch(() => undefined);
-  }
+  });
 }

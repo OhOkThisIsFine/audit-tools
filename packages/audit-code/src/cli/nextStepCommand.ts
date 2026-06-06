@@ -23,6 +23,7 @@ import type { Finding } from "../types.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
 import { computeArtifactStateSignature } from "../orchestrator/artifactMetadata.js";
 import { decideNextStep } from "../orchestrator/nextStep.js";
+import { isHostDelegationExecutor } from "../orchestrator/executors.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
 import {
@@ -76,7 +77,31 @@ import {
   warnIfNotGitRepo,
 } from "./args.js";
 
-async function runDeterministicForNextStep(params: {
+// ── Incoming-artifact helper ──────────────────────────────────────────────────
+
+/**
+ * Read a JSON file from the `incoming/` subdirectory of `artifactsDir`.
+ * Returns `{ value, path }` when the file exists and parses successfully.
+ * Returns `undefined` when the file is absent (ENOENT-family errors).
+ * Re-throws all other IO errors unchanged.
+ */
+export async function tryConsumeIncoming<T>(
+  artifactsDir: string,
+  filename: string,
+): Promise<{ value: T; path: string } | undefined> {
+  const filePath = join(artifactsDir, "incoming", filename);
+  try {
+    const value = await readJsonFile<T>(filePath);
+    return { value, path: filePath };
+  } catch (error) {
+    if (isFileMissingError(error)) return undefined;
+    throw error;
+  }
+}
+
+// ── Parameters type shared across all nextStep helpers ──────────────────────
+
+type NextStepParams = {
   root: string;
   artifactsDir: string;
   selfCliPath: string;
@@ -87,110 +112,352 @@ async function runDeterministicForNextStep(params: {
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
   since?: string;
-}): Promise<
-  | {
-      kind: "semantic_review";
-      state: AuditState;
-      bundle: ArtifactBundle;
-      activeReviewRun: ActiveReviewRun;
+};
+
+type TerminalStepResult =
+  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
+  | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string };
+
+// ── Extracted helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Build the terminal step for a deterministic loop that has stopped advancing
+ * (hit the run backstop or the finalization cycle guard). A rendered report is
+ * the deliverable: if synthesis already produced one — or the state is formally
+ * complete — present it instead of reporting the stopped loop as a bare
+ * "blocked" failure. A completed audit must never surface as blocked just
+ * because finalization kept churning (e.g. a runtime_validation <-> synthesis
+ * ping-pong, or revision churn from filesystem retries) after the report was
+ * written. With no report yet, the stop is a genuine block.
+ */
+export async function buildTerminalStep(
+  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+  blockedReason: string,
+): Promise<TerminalStepResult> {
+  const reportRendered =
+    state.status === "complete" || Boolean(bundle.audit_report);
+  await writeHandoffOnly({
+    root: params.root,
+    artifactsDir: params.artifactsDir,
+    bundle,
+    audit_state: state,
+    progress_summary:
+      reportRendered && state.status !== "complete"
+        ? `Audit report already rendered; ending run. ${blockedReason}`
+        : blockedReason,
+    providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+  });
+  if (!reportRendered) {
+    return { kind: "blocked", state, bundle, reason: blockedReason };
+  }
+  const promoted = await promoteFinalAuditReport({
+    artifactsDir: params.artifactsDir,
+    repoRoot: params.root,
+  });
+  return {
+    kind: "complete",
+    state,
+    bundle,
+    finalReportPath: promoted.promoted
+      ? join(params.root, AUDIT_REPORT_FILENAME)
+      : join(params.artifactsDir, AUDIT_REPORT_FILENAME),
+  };
+}
+
+type GraphEnrichmentBranchResult =
+  | { action: "continue" }
+  | { action: "return"; result: { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] } }
+  | { action: "return"; result: { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] } }
+  | { action: "fallthrough" };
+
+/**
+ * Handle the `graph_enrichment_executor` incoming-artifact polling block.
+ * Checks for pending analyzer install decisions and edge-reasoning results.
+ * Returns an action object:
+ *   - `continue`    → caller should `continue` the for-loop (already consumed an artifact).
+ *   - `return`      → caller should return the embedded result to cmdNextStep.
+ *   - `fallthrough` → no incoming artifacts; fall through to the deterministic executor.
+ */
+export async function handleGraphEnrichmentBranch(
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since" | "opentoken">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+  analyzersRef: { value: Record<string, AnalyzerSetting> | undefined },
+): Promise<GraphEnrichmentBranchResult> {
+  const includedFiles = bundle.repo_manifest
+    ? [
+        ...new Set(
+          buildPathLookup(
+            bundle.repo_manifest,
+            buildDispositionMap(bundle.file_disposition),
+          ).values(),
+        ),
+      ]
+    : [];
+  const plan = resolveAnalyzerPlan(params.root, analyzersRef.value, includedFiles);
+  const unresolved = plan.filter(needsInstallDecision);
+  if (unresolved.length > 0) {
+    const incoming = await tryConsumeIncoming<Record<string, unknown>>(
+      params.artifactsDir,
+      "analyzer-decisions.json",
+    );
+    if (incoming && typeof incoming.value === "object") {
+      const settings: Record<string, AnalyzerSetting> = {};
+      for (const [id, value] of Object.entries(incoming.value)) {
+        if (
+          value === "ephemeral" ||
+          value === "permanent" ||
+          value === "skip" ||
+          value === "repo" ||
+          value === "auto"
+        ) {
+          settings[id] = value;
+        }
+      }
+      if (Object.keys(settings).length > 0) {
+        const merged = await persistAnalyzerSettings(
+          params.artifactsDir,
+          settings,
+        );
+        analyzersRef.value = merged.analyzers;
+      }
+      await unlink(incoming.path).catch(() => {});
+      return { action: "continue" };
     }
-  | {
-      kind: "design_review";
-      state: AuditState;
-      bundle: ArtifactBundle;
+    return { action: "return", result: { kind: "analyzer_install", state, bundle, unresolved } };
+  }
+
+  // Phase 4B — optional edge-reasoning producing turn. Once analyzer installs
+  // are resolved, if the flag is on and the floor carries low-confidence
+  // (< 0.65) edges, emit one bounded host turn (subagent dispatch or a single
+  // host step) to produce reason rewrites, then re-run. The enrichment
+  // executor applies the host-supplied rewrites in the SAME advanceAudit call
+  // that merges analyzer edges and writes analyzer_capability, so graph_bundle
+  // and its marker stay revision-consistent (no staleness loop). Flag off or
+  // no candidates → fall through and run the executor with no rewrites.
+  if (params.graphLlmEdgeReasoning === true && bundle.graph_bundle) {
+    const candidates = collectLowConfidenceEdges(bundle.graph_bundle);
+    if (candidates.length > 0) {
+      const edgeReasoningIncoming = await tryConsumeIncoming<EdgeReasoningResults>(
+        params.artifactsDir,
+        "edge-reasoning.json",
+      );
+      if (edgeReasoningIncoming) {
+        await runAuditStep({
+          root: params.root,
+          artifactsDir: params.artifactsDir,
+          analyzers: analyzersRef.value,
+          graphLlmEdgeReasoning: true,
+          edgeReasoningResultsPath: edgeReasoningIncoming.path,
+          since: params.since,
+          opentoken: params.opentoken,
+        });
+        await unlink(edgeReasoningIncoming.path).catch(() => {});
+        return { action: "continue" };
+      }
+      return { action: "return", result: { kind: "edge_reasoning", state, bundle, candidates } };
     }
-  | {
-      kind: "analyzer_install";
-      state: AuditState;
-      bundle: ArtifactBundle;
-      unresolved: AnalyzerPlanEntry[];
+  }
+  // No undecided installs (and no pending edge reasoning): fall through to run
+  // the executor below (it installs for ephemeral/permanent, uses repo/cache,
+  // skips the rest).
+  return { action: "fallthrough" };
+}
+
+type BranchActionResult =
+  | { action: "continue" }
+  | { action: "return"; result: { kind: "design_review"; state: AuditState; bundle: ArtifactBundle } };
+
+/**
+ * Handle the `design_review` incoming-artifact polling block.
+ * Returns `continue` if an incoming findings file was consumed, or `return`
+ * with a design_review kind when the host turn is still needed.
+ */
+export async function handleDesignReviewBranch(
+  params: Pick<NextStepParams, "artifactsDir">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+): Promise<BranchActionResult> {
+  const findingsIncoming = await tryConsumeIncoming<Finding[]>(
+    params.artifactsDir,
+    "design-review-findings.json",
+  );
+  if (findingsIncoming && Array.isArray(findingsIncoming.value)) {
+    const existing = bundle.design_assessment;
+    if (existing) {
+      existing.review_findings = findingsIncoming.value;
+      existing.reviewed = true;
+      await writeJsonFile(
+        join(params.artifactsDir, "design_assessment.json"),
+        existing,
+      );
+      await unlink(findingsIncoming.path).catch(() => {});
+      return { action: "continue" };
     }
-  | {
-      kind: "edge_reasoning";
-      state: AuditState;
-      bundle: ArtifactBundle;
-      candidates: GraphEdge[];
-    }
-  | {
-      kind: "synthesis_narrative";
-      state: AuditState;
-      bundle: ArtifactBundle;
-    }
-  | {
-      kind: "complete";
-      state: AuditState;
-      bundle: ArtifactBundle;
-      finalReportPath: string;
-    }
-  | {
-      kind: "blocked";
-      state: AuditState;
-      bundle: ArtifactBundle;
-      reason: string;
-    }
+  }
+  return { action: "return", result: { kind: "design_review", state, bundle } };
+}
+
+type SynthesisNarrativeBranchResult =
+  | { action: "continue" }
+  | { action: "return"; result: { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle } };
+
+/**
+ * Handle the `synthesis_narrative_executor` incoming-artifact polling block.
+ * Returns `continue` if an incoming narrative file was consumed, or `return`
+ * with a synthesis_narrative kind when the host turn is still needed (and
+ * narrative is enabled), or `continue` when narrative is disabled (so the
+ * deterministic omit runs below).
+ */
+export async function handleSynthesisNarrativeBranch(
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "narrativeEnabled" | "opentoken">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+): Promise<SynthesisNarrativeBranchResult> {
+  const narrativeIncoming = await tryConsumeIncoming<SynthesisNarrative>(
+    params.artifactsDir,
+    "synthesis-narrative.json",
+  );
+  if (narrativeIncoming) {
+    await runAuditStep({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      preferredExecutor: "synthesis_narrative_executor",
+      narrativeResultsPath: narrativeIncoming.path,
+      opentoken: params.opentoken,
+    });
+    await unlink(narrativeIncoming.path).catch(() => {});
+    return { action: "continue" };
+  }
+  if (params.narrativeEnabled) {
+    return { action: "return", result: { kind: "synthesis_narrative", state, bundle } };
+  }
+  // Narrative disabled: fall through so the deterministic omit runs below.
+  return { action: "continue" };
+}
+
+/**
+ * Execute one deterministic audit step and record its progress. Throws (with
+ * cause) if the executor fails, preserving the existing throw-with-cause pattern.
+ */
+export async function executeAndRecord(
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since" | "opentoken" | "maxRuns">,
+  analyzers: Record<string, AnalyzerSetting> | undefined,
+  decision: ReturnType<typeof decideNextStep>,
+  index: number,
+  lastSummary: string,
+): Promise<AdvanceAuditResult> {
+  try {
+    const result = await runAuditStep({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      analyzers,
+      graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
+      since: params.since,
+      opentoken: params.opentoken,
+    });
+    await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
+      iteration: index + 1,
+      max_runs: params.maxRuns,
+      last_executor: result.selected_executor,
+      last_obligation: decision.selected_obligation,
+      progress_made: result.progress_made,
+      summary: result.progress_summary,
+      timestamp: new Date().toISOString(),
+    });
+    return result;
+  } catch (error) {
+    const current = await loadArtifactBundle(params.artifactsDir);
+    const currentState = deriveAuditState(current);
+    currentState.last_executor = decision.selected_executor ?? undefined;
+    currentState.last_obligation = decision.selected_obligation ?? undefined;
+    await writeCoreArtifacts(params.artifactsDir, { ...current, audit_state: currentState });
+    await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
+      iteration: index + 1,
+      max_runs: params.maxRuns,
+      last_executor: decision.selected_executor,
+      last_obligation: decision.selected_obligation,
+      prior_summary: lastSummary || null,
+      error: error instanceof Error ? error.message : String(error),
+      timestamp: new Date().toISOString(),
+    });
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Deterministic executor ${decision.selected_executor} failed on obligation ${decision.selected_obligation} (iteration ${index + 1}/${params.maxRuns}, prior progress: ${lastSummary || "none"}): ${detail}`,
+      { cause: error instanceof Error ? error : undefined },
+    );
+  }
+}
+
+/**
+ * Check for a finalization cycle: when iterations outrun distinct artifact
+ * states by FINALIZATION_CYCLE_TOLERANCE, the deterministic executors are
+ * revisiting states rather than progressing. Returns a terminal-step result
+ * when a cycle is detected, or undefined when the run is still progressing.
+ */
+export async function checkFinalizationCycle(ctx: {
+  index: number;
+  obligationTrail: string[];
+  seenStateSignatures: Set<string>;
+  tolerance: number;
+  params: Pick<NextStepParams, "artifactsDir" | "maxRuns" | "root">;
+  bundle: ArtifactBundle;
+  state: AuditState;
+  result: AdvanceAuditResult;
+  selectedObligation: string | null | undefined;
+}): Promise<TerminalStepResult | undefined> {
+  ctx.obligationTrail.push(ctx.selectedObligation ?? "unknown");
+  ctx.seenStateSignatures.add(computeArtifactStateSignature(ctx.result.updated_bundle));
+  if (ctx.index + 1 - ctx.seenStateSignatures.size < ctx.tolerance) {
+    return undefined;
+  }
+  const cycle = Array.from(
+    new Set(ctx.obligationTrail.slice(-ctx.tolerance)),
+  );
+  await writeJsonFile(
+    join(ctx.params.artifactsDir, "steps", "deterministic-progress.json"),
+    {
+      iteration: ctx.index + 1,
+      max_runs: ctx.params.maxRuns,
+      cycle_detected: true,
+      cycling_obligations: cycle,
+      summary:
+        "Finalization kept revisiting prior artifact states without net " +
+        `progress; stopping. Cycling obligations: ${cycle.join(" -> ")}.`,
+      timestamp: new Date().toISOString(),
+    },
+  );
+  return buildTerminalStep(
+    ctx.params,
+    ctx.result.updated_bundle,
+    ctx.result.audit_state,
+    "Finalization is not converging: deterministic executors kept revisiting " +
+      `prior artifact states (${cycle.join(" -> ")}). Review whether these ` +
+      "obligations are erroneously invalidating each other.",
+  );
+}
+
+// ── Coordinator ───────────────────────────────────────────────────────────────
+
+async function runDeterministicForNextStep(params: NextStepParams): Promise<
+  | { kind: "semantic_review"; state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun }
+  | { kind: "design_review"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
+  | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
+  | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
+  | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string }
 > {
   let lastSummary = "";
-  let analyzers = params.analyzers;
-  // Finalization thrashing guard. A converging run produces a (mostly) new
-  // artifact state each iteration, so the iteration count tracks the number of
-  // distinct states closely (a few idempotent passes are normal). When
-  // iterations outrun distinct states by this tolerance, deterministic executors
-  // are revisiting states (a staleness ping-pong, e.g. runtime_validation <->
-  // synthesis) rather than progressing — stop instead of spinning to maxRuns.
+  const analyzersRef: { value: Record<string, AnalyzerSetting> | undefined } = {
+    value: params.analyzers,
+  };
+  // Finalization thrashing guard — see checkFinalizationCycle for details.
   const FINALIZATION_CYCLE_TOLERANCE = 16;
   const seenStateSignatures = new Set<string>();
   const obligationTrail: string[] = [];
-
-  // Build the terminal step for a deterministic loop that has stopped advancing
-  // (hit the run backstop or the finalization cycle guard). A rendered report is
-  // the deliverable: if synthesis already produced one — or the state is formally
-  // complete — present it instead of reporting the stopped loop as a bare
-  // "blocked" failure. A completed audit must never surface as blocked just
-  // because finalization kept churning (e.g. a runtime_validation <-> synthesis
-  // ping-pong, or revision churn from filesystem retries) after the report was
-  // written. With no report yet, the stop is a genuine block.
-  async function terminalStep(
-    bundle: ArtifactBundle,
-    state: AuditState,
-    blockedReason: string,
-  ): Promise<
-    | {
-        kind: "complete";
-        state: AuditState;
-        bundle: ArtifactBundle;
-        finalReportPath: string;
-      }
-    | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string }
-  > {
-    const reportRendered =
-      state.status === "complete" || Boolean(bundle.audit_report);
-    await writeHandoffOnly({
-      root: params.root,
-      artifactsDir: params.artifactsDir,
-      bundle,
-      audit_state: state,
-      progress_summary:
-        reportRendered && state.status !== "complete"
-          ? `Audit report already rendered; ending run. ${blockedReason}`
-          : blockedReason,
-      providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
-    });
-    if (!reportRendered) {
-      return { kind: "blocked", state, bundle, reason: blockedReason };
-    }
-    const promoted = await promoteFinalAuditReport({
-      artifactsDir: params.artifactsDir,
-      repoRoot: params.root,
-    });
-    return {
-      kind: "complete",
-      state,
-      bundle,
-      finalReportPath: promoted.promoted
-        ? join(params.root, AUDIT_REPORT_FILENAME)
-        : join(params.artifactsDir, AUDIT_REPORT_FILENAME),
-    };
-  }
 
   for (let index = 0; index < params.maxRuns; index++) {
     const bundle = await loadArtifactBundle(params.artifactsDir);
@@ -243,172 +510,27 @@ async function runDeterministicForNextStep(params: {
     }
 
     if (decision.selected_executor === "graph_enrichment_executor") {
-      const includedFiles = bundle.repo_manifest
-        ? [
-            ...new Set(
-              buildPathLookup(
-                bundle.repo_manifest,
-                buildDispositionMap(bundle.file_disposition),
-              ).values(),
-            ),
-          ]
-        : [];
-      const plan = resolveAnalyzerPlan(params.root, analyzers, includedFiles);
-      const unresolved = plan.filter(needsInstallDecision);
-      if (unresolved.length > 0) {
-        const decisionsPath = join(
-          params.artifactsDir,
-          "incoming",
-          "analyzer-decisions.json",
-        );
-        let decisions: Record<string, unknown> | undefined;
-        try {
-          decisions = await readJsonFile<Record<string, unknown>>(decisionsPath);
-        } catch (error) {
-          if (!isFileMissingError(error)) throw error;
-        }
-        if (decisions && typeof decisions === "object") {
-          const settings: Record<string, AnalyzerSetting> = {};
-          for (const [id, value] of Object.entries(decisions)) {
-            if (
-              value === "ephemeral" ||
-              value === "permanent" ||
-              value === "skip" ||
-              value === "repo" ||
-              value === "auto"
-            ) {
-              settings[id] = value;
-            }
-          }
-          if (Object.keys(settings).length > 0) {
-            const merged = await persistAnalyzerSettings(
-              params.artifactsDir,
-              settings,
-            );
-            analyzers = merged.analyzers;
-          }
-          await unlink(decisionsPath).catch(() => {});
-          continue;
-        }
-        return {
-          kind: "analyzer_install",
-          state,
-          bundle,
-          unresolved,
-        };
-      }
-
-      // Phase 4B — optional edge-reasoning producing turn. Once analyzer installs
-      // are resolved, if the flag is on and the floor carries low-confidence
-      // (< 0.65) edges, emit one bounded host turn (subagent dispatch or a single
-      // host step) to produce reason rewrites, then re-run. The enrichment
-      // executor applies the host-supplied rewrites in the SAME advanceAudit call
-      // that merges analyzer edges and writes analyzer_capability, so graph_bundle
-      // and its marker stay revision-consistent (no staleness loop). Flag off or
-      // no candidates → fall through and run the executor with no rewrites.
-      if (params.graphLlmEdgeReasoning === true && bundle.graph_bundle) {
-        const candidates = collectLowConfidenceEdges(bundle.graph_bundle);
-        if (candidates.length > 0) {
-          const edgeReasoningResultsPath = join(
-            params.artifactsDir,
-            "incoming",
-            "edge-reasoning.json",
-          );
-          let edgeReasoningResults: EdgeReasoningResults | undefined;
-          try {
-            edgeReasoningResults = await readJsonFile<EdgeReasoningResults>(
-              edgeReasoningResultsPath,
-            );
-          } catch (error) {
-            if (!isFileMissingError(error)) throw error;
-          }
-          if (edgeReasoningResults) {
-            await runAuditStep({
-              root: params.root,
-              artifactsDir: params.artifactsDir,
-              analyzers,
-              graphLlmEdgeReasoning: true,
-              edgeReasoningResultsPath,
-              since: params.since,
-              opentoken: params.opentoken,
-            });
-            await unlink(edgeReasoningResultsPath).catch(() => {});
-            continue;
-          }
-          return { kind: "edge_reasoning", state, bundle, candidates };
-        }
-      }
-      // No undecided installs (and no pending edge reasoning): fall through to run
-      // the executor below (it installs for ephemeral/permanent, uses repo/cache,
-      // skips the rest).
+      const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef);
+      if (branch.action === "continue") continue;
+      if (branch.action === "return") return branch.result;
+      // fallthrough: run the executor below
     }
 
+    // Host-delegation executors (design_review, agent) exit the deterministic
+    // loop entirely — they pause the pipeline and hand control to the LLM agent.
     if (decision.selected_executor === "design_review") {
-      const findingsPath = join(
-        params.artifactsDir,
-        "incoming",
-        "design-review-findings.json",
-      );
-      let reviewFindings: Finding[] | undefined;
-      try {
-        reviewFindings = await readJsonFile<Finding[]>(findingsPath);
-      } catch (error) {
-        if (!isFileMissingError(error)) throw error;
-      }
-      if (reviewFindings && Array.isArray(reviewFindings)) {
-        const existing = bundle.design_assessment;
-        if (existing) {
-          existing.review_findings = reviewFindings;
-          existing.reviewed = true;
-          await writeJsonFile(
-            join(params.artifactsDir, "design_assessment.json"),
-            existing,
-          );
-          await unlink(findingsPath).catch(() => {});
-          continue;
-        }
-      }
-      return {
-        kind: "design_review",
-        state,
-        bundle,
-      };
+      const branch = await handleDesignReviewBranch(params, bundle, state);
+      if (branch.action === "continue") continue;
+      return branch.result;
     }
 
     if (decision.selected_executor === "synthesis_narrative_executor") {
-      const narrativePath = join(
-        params.artifactsDir,
-        "incoming",
-        "synthesis-narrative.json",
-      );
-      let narrativeResults: SynthesisNarrative | undefined;
-      try {
-        narrativeResults = await readJsonFile<SynthesisNarrative>(narrativePath);
-      } catch (error) {
-        if (!isFileMissingError(error)) throw error;
-      }
-      if (narrativeResults) {
-        await runAuditStep({
-          root: params.root,
-          artifactsDir: params.artifactsDir,
-          preferredExecutor: "synthesis_narrative_executor",
-          narrativeResultsPath: narrativePath,
-          opentoken: params.opentoken,
-        });
-        await unlink(narrativePath).catch(() => {});
-        continue;
-      }
-      if (params.narrativeEnabled) {
-        return {
-          kind: "synthesis_narrative",
-          state,
-          bundle,
-        };
-      }
-      // Narrative disabled: fall through so the deterministic omit runs below.
+      const branch = await handleSynthesisNarrativeBranch(params, bundle, state);
+      if (branch.action === "continue") continue;
+      return branch.result;
     }
 
-    if (decision.selected_executor === "agent") {
+    if (isHostDelegationExecutor(decision.selected_executor ?? "")) {
       return {
         kind: "semantic_review",
         ...(await ensureSemanticReviewRun({
@@ -440,48 +562,9 @@ async function runDeterministicForNextStep(params: {
       };
     }
 
-    let result: AdvanceAuditResult;
-    try {
-      result = await runAuditStep({
-        root: params.root,
-        artifactsDir: params.artifactsDir,
-        analyzers,
-        graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
-        since: params.since,
-        opentoken: params.opentoken,
-      });
-    } catch (error) {
-      const current = await loadArtifactBundle(params.artifactsDir);
-      const currentState = deriveAuditState(current);
-      currentState.last_executor = decision.selected_executor ?? undefined;
-      currentState.last_obligation = decision.selected_obligation ?? undefined;
-      await writeCoreArtifacts(params.artifactsDir, { ...current, audit_state: currentState });
-      await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
-        iteration: index + 1,
-        max_runs: params.maxRuns,
-        last_executor: decision.selected_executor,
-        last_obligation: decision.selected_obligation,
-        prior_summary: lastSummary || null,
-        error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
-      });
-      const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `Deterministic executor ${decision.selected_executor} failed on obligation ${decision.selected_obligation} (iteration ${index + 1}/${params.maxRuns}, prior progress: ${lastSummary || "none"}): ${detail}`,
-        { cause: error instanceof Error ? error : undefined },
-      );
-    }
+    const result = await executeAndRecord(params, analyzersRef.value, decision, index, lastSummary);
     lastSummary = result.progress_summary;
-    await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
-      iteration: index + 1,
-      max_runs: params.maxRuns,
-      last_executor: result.selected_executor,
-      last_obligation: decision.selected_obligation,
-      progress_made: result.progress_made,
-      summary: result.progress_summary,
-      timestamp: new Date().toISOString(),
-    });
-    if (result.selected_executor !== "agent") {
+    if (!isHostDelegationExecutor(result.selected_executor ?? "")) {
       await clearDispatchFiles(params.artifactsDir);
     }
     if (!result.progress_made) {
@@ -498,38 +581,24 @@ async function runDeterministicForNextStep(params: {
     // thrashing (no net progress) rather than converging. The canonical outputs
     // are already rendered, so stop and surface the cycling obligations instead
     // of spinning to maxRuns and crashing.
-    obligationTrail.push(decision.selected_obligation ?? "unknown");
-    seenStateSignatures.add(computeArtifactStateSignature(result.updated_bundle));
-    if (index + 1 - seenStateSignatures.size >= FINALIZATION_CYCLE_TOLERANCE) {
-      const cycle = Array.from(
-        new Set(obligationTrail.slice(-FINALIZATION_CYCLE_TOLERANCE)),
-      );
-      await writeJsonFile(
-        join(params.artifactsDir, "steps", "deterministic-progress.json"),
-        {
-          iteration: index + 1,
-          max_runs: params.maxRuns,
-          cycle_detected: true,
-          cycling_obligations: cycle,
-          summary:
-            "Finalization kept revisiting prior artifact states without net " +
-            `progress; stopping. Cycling obligations: ${cycle.join(" -> ")}.`,
-          timestamp: new Date().toISOString(),
-        },
-      );
-      return await terminalStep(
-        result.updated_bundle,
-        result.audit_state,
-        "Finalization is not converging: deterministic executors kept revisiting " +
-          `prior artifact states (${cycle.join(" -> ")}). Review whether these ` +
-          "obligations are erroneously invalidating each other.",
-      );
-    }
+    const cycleResult = await checkFinalizationCycle({
+      index,
+      obligationTrail,
+      seenStateSignatures,
+      tolerance: FINALIZATION_CYCLE_TOLERANCE,
+      params,
+      bundle,
+      state,
+      result,
+      selectedObligation: decision.selected_obligation,
+    });
+    if (cycleResult !== undefined) return cycleResult;
   }
 
   const bundle = await loadArtifactBundle(params.artifactsDir);
   const state = deriveAuditState(bundle);
-  return await terminalStep(
+  return buildTerminalStep(
+    params,
     bundle,
     state,
     `Reached max run limit (${params.maxRuns}) before a review, report, or blocker step was ready.`,

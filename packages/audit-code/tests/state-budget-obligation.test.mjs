@@ -95,3 +95,163 @@ await test("FINDING-013: all non-deferred tasks complete → satisfied even with
   };
   assert.equal(obligationState(bundle, "audit_tasks_completed"), "satisfied");
 });
+
+// ── COR-61819bae: runtime_validation_current obligation distinguishes stale vs missing ─
+
+await test("runtime_validation_current: stale when report exists but tasks incomplete (pending result)", () => {
+  const bundle = {
+    runtime_validation_tasks: {
+      tasks: [
+        {
+          id: "rv-task-1",
+          kind: "unit-risk-check",
+          target_paths: ["src/a.ts"],
+          reason: "high risk",
+          priority: "high",
+        },
+      ],
+    },
+    runtime_validation_report: {
+      results: [
+        {
+          task_id: "rv-task-1",
+          status: "pending",
+          summary: "pending",
+        },
+      ],
+    },
+  };
+  assert.equal(
+    obligationState(bundle, "runtime_validation_current"),
+    "stale",
+    "should be stale when report exists but task result is pending",
+  );
+});
+
+await test("runtime_validation_current: missing when no report at all", () => {
+  const bundle = {
+    runtime_validation_tasks: {
+      tasks: [
+        {
+          id: "rv-task-1",
+          kind: "unit-risk-check",
+          target_paths: ["src/a.ts"],
+          reason: "high risk",
+          priority: "high",
+        },
+      ],
+    },
+    // no runtime_validation_report
+  };
+  assert.equal(
+    obligationState(bundle, "runtime_validation_current"),
+    "missing",
+    "should be missing when no runtime_validation_report exists",
+  );
+});
+
+// ── Additional obligation coverage ────────────────────────────────────────────
+
+await test("repo_manifest: satisfied when bundle contains repo_manifest", () => {
+  assert.equal(obligationState({ repo_manifest: { files: [] } }, "repo_manifest"), "satisfied");
+});
+
+await test("repo_manifest: missing when bundle lacks repo_manifest", () => {
+  assert.equal(obligationState({}, "repo_manifest"), "missing");
+});
+
+await test("file_disposition: satisfied when bundle contains file_disposition", () => {
+  assert.equal(
+    obligationState({ repo_manifest: { files: [] }, file_disposition: {} }, "file_disposition"),
+    "satisfied",
+  );
+});
+
+await test("file_disposition: missing when bundle lacks file_disposition but has repo_manifest", () => {
+  assert.equal(
+    obligationState({ repo_manifest: { files: [] } }, "file_disposition"),
+    "missing",
+  );
+});
+
+await test("planning_artifacts: satisfied when the full planning artifact set is present and fresh", () => {
+  // planning_artifacts requires the whole planning bundle (coverage_matrix,
+  // flow_coverage, runtime_validation_tasks, audit_tasks, requeue_tasks), not
+  // audit_tasks alone — the planning_executor emits all of them together. The
+  // obligation is also staleness-gated: a planning artifact whose upstream is
+  // absent is reported "stale", so the upstream chain must be present too.
+  const bundle = {
+    tooling_manifest: { tools: [] },
+    repo_manifest: { files: [] },
+    file_disposition: { included: [] },
+    unit_manifest: { units: [] },
+    surface_manifest: { surfaces: [] },
+    critical_flows: { flows: [] },
+    risk_register: { risks: [] },
+    external_analyzer_results: { results: [] },
+    scope: { mode: "full" },
+    audit_results: [],
+    coverage_matrix: { units: [] },
+    flow_coverage: { flows: [] },
+    runtime_validation_tasks: { tasks: [] },
+    audit_tasks: [task("x")],
+    requeue_tasks: [],
+  };
+  assert.equal(obligationState(bundle, "planning_artifacts"), "satisfied");
+});
+
+await test("planning_artifacts: missing when only audit_tasks is present", () => {
+  // audit_tasks alone is insufficient — the rest of the planning set is absent.
+  assert.equal(obligationState({ audit_tasks: [task("x")] }, "planning_artifacts"), "missing");
+});
+
+await test("planning_artifacts: missing when bundle lacks audit_tasks", () => {
+  assert.equal(obligationState({}, "planning_artifacts"), "missing");
+});
+
+await test("audit_results_ingested: satisfied when all tasks have results and no active dispatch", () => {
+  assert.equal(
+    obligationState(
+      { audit_tasks: ["a", "b"].map(task), audit_results: ["a", "b"].map(result) },
+      "audit_results_ingested",
+    ),
+    "satisfied",
+  );
+});
+
+await test("audit_results_ingested: missing when audit_tasks are present but audit_results is absent", () => {
+  assert.equal(
+    obligationState({ audit_tasks: ["a", "b"].map(task) }, "audit_results_ingested"),
+    "missing",
+  );
+});
+
+await test("runtime_validation_current: satisfied when task has non-pending result", () => {
+  const bundle = {
+    runtime_validation_tasks: {
+      tasks: [
+        {
+          id: "rv-task-1",
+          kind: "unit-risk-check",
+          target_paths: ["src/a.ts"],
+          reason: "high risk",
+          priority: "high",
+        },
+      ],
+    },
+    runtime_validation_report: {
+      results: [
+        {
+          task_id: "rv-task-1",
+          status: "confirmed",
+          summary: "confirmed",
+        },
+      ],
+    },
+  };
+  assert.equal(
+    obligationState(bundle, "runtime_validation_current"),
+    "satisfied",
+    "should be satisfied when task has a non-pending result",
+  );
+});

@@ -49,9 +49,12 @@ export async function checkFileIntegrity(
       if (code === "ENOENT") {
         missing.push(record.path);
       } else {
-        console.warn(
-          `fileIntegrity: I/O error on ${record.path}: ${code ?? String(err)}`,
-        );
+        console.warn('fileIntegrity: I/O error', {
+          root,
+          scope_size: files.length,
+          file: record.path,
+          code: code ?? String(err),
+        });
         ioErrors.push(record.path);
       }
     }

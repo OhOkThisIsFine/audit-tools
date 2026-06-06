@@ -20,6 +20,17 @@ import {
   uniqueSorted,
 } from "./shared.js";
 
+/** Score boost for files touched by a critical-flow task — highest semantic signal. */
+const SCORE_CRITICAL_FLOW = 6;
+/** Score boost for files flagged by an external analyzer tool — treated equally to critical-flow signal. */
+const SCORE_EXTERNAL_ANALYZER_SIGNAL = 6;
+/** Score boost for files from a large-file task — moderately elevated scrutiny. */
+const SCORE_LARGE_FILE = 4;
+/** Score boost for a high-risk task whose result was suspiciously clean — warrants re-examination. */
+const SCORE_HIGH_RISK_CLEAN = 5;
+/** Score boost for files directly matched by an external-analyzer path set — strongest single boost, above tag signals. */
+const SCORE_EXTERNAL_ANALYZER_PATH_MATCH = 8;
+
 export interface LensVerificationSource {
   result: AuditResult;
   task?: AuditTask;
@@ -64,14 +75,15 @@ function lensVerificationTriggers(params: {
   const highRiskCleanResults = params.sources.filter((source) =>
     isHighRiskCleanResult(source.result, source.task),
   );
+  const pathOwnerMap = new Map<string, LensVerificationSource>();
+  for (const source of params.sources) {
+    for (const path of resultFiles(source)) {
+      if (!pathOwnerMap.has(path)) pathOwnerMap.set(path, source);
+    }
+  }
   const totalLines = filePaths.reduce((sum, path) => {
-    const owner = params.sources.find((source) => resultFiles(source).includes(path));
-    return (
-      sum +
-      (owner
-        ? lineCountForPath(path, owner.task, owner.result)
-        : 0)
-    );
+    const owner = pathOwnerMap.get(path);
+    return sum + (owner ? lineCountForPath(path, owner.task, owner.result) : 0);
   }, 0);
 
   const triggers: string[] = [];
@@ -198,6 +210,7 @@ function shouldBuildLensVerificationTask(params: {
 function selectLensVerificationFiles(
   sources: LensVerificationSource[],
   externalAnalyzerPaths: Set<string>,
+  lens: Lens,
 ): string[] {
   const scores = new Map<string, { score: number; lines: number }>();
   function add(path: string, score: number, lines: number): void {
@@ -212,10 +225,10 @@ function selectLensVerificationFiles(
     const highRiskClean = isHighRiskCleanResult(source.result, source.task);
     for (const path of resultFiles(source)) {
       add(path, priorityScore, lineCountForPath(path, source.task, source.result));
-      if (source.task?.tags?.includes("critical_flow")) add(path, 6, 0);
-      if (source.task?.tags?.includes("external_analyzer_signal")) add(path, 6, 0);
-      if (source.task?.tags?.includes("large_file")) add(path, 4, 0);
-      if (highRiskClean) add(path, 5, 0);
+      if (source.task?.tags?.includes("critical_flow")) add(path, SCORE_CRITICAL_FLOW, 0);
+      if (source.task?.tags?.includes("external_analyzer_signal")) add(path, SCORE_EXTERNAL_ANALYZER_SIGNAL, 0);
+      if (source.task?.tags?.includes("large_file")) add(path, SCORE_LARGE_FILE, 0);
+      if (highRiskClean) add(path, SCORE_HIGH_RISK_CLEAN, 0);
     }
     for (const finding of source.result.findings) {
       for (const file of finding.affected_files) {
@@ -226,7 +239,7 @@ function selectLensVerificationFiles(
 
   for (const path of externalAnalyzerPaths) {
     if (scores.has(path)) {
-      add(path, 8, 0);
+      add(path, SCORE_EXTERNAL_ANALYZER_PATH_MATCH, 0);
     }
   }
 
@@ -238,11 +251,16 @@ function selectLensVerificationFiles(
     return a[0].localeCompare(b[0]);
   });
   if (ranked.length > MAX_LENS_VERIFICATION_FILES) {
-    // No RunLogger in scope here: emit the established structured-stderr signal
-    // so the silent task-budget truncation leaves a trace.
     process.stderr.write(
-      `[audit-code] selectiveDeepening: truncated verification-file list to ` +
-        `${MAX_LENS_VERIFICATION_FILES} of ${ranked.length}\n`,
+      JSON.stringify({
+        level: "warn",
+        source: "audit-code:selectiveDeepening",
+        event: "truncated_verification_file_list",
+        lens,
+        kept: MAX_LENS_VERIFICATION_FILES,
+        total: ranked.length,
+        ts: new Date().toISOString(),
+      }) + "\n",
     );
   }
   return ranked.slice(0, MAX_LENS_VERIFICATION_FILES).map(([path]) => path);
@@ -280,6 +298,7 @@ function buildLensVerificationTask(params: {
   const selectedPaths = selectLensVerificationFiles(
     params.sources,
     params.externalAnalyzerPaths,
+    params.lens,
   );
   const allPaths = uniqueSorted(params.sources.flatMap(resultFiles));
   const omittedPathCount = Math.max(0, allPaths.length - selectedPaths.length);
@@ -288,8 +307,15 @@ function buildLensVerificationTask(params: {
   );
   if (params.sources.length > MAX_LENS_VERIFICATION_RESULT_SUMMARIES) {
     process.stderr.write(
-      `[audit-code] selectiveDeepening: truncated result-summary list to ` +
-        `${MAX_LENS_VERIFICATION_RESULT_SUMMARIES} of ${params.sources.length}\n`,
+      JSON.stringify({
+        level: "warn",
+        source: "audit-code:selectiveDeepening",
+        event: "truncated_result_summary_list",
+        lens: params.lens,
+        kept: MAX_LENS_VERIFICATION_RESULT_SUMMARIES,
+        total: params.sources.length,
+        ts: new Date().toISOString(),
+      }) + "\n",
     );
   }
   const summaries = params.sources

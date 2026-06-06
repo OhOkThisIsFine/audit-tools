@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rename } from "node:fs/promises";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { StateStore, type RemediationState } from "../state/store.js";
@@ -25,6 +25,7 @@ import {
   validateDocumentResponse,
   validateItemSpec,
 } from "../validation/remediationState.js";
+import { validateImplementWorkerResult } from "../validation/artifacts.js";
 import {
   REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
@@ -39,7 +40,7 @@ import {
   specIndicatesNoChange,
   dependenciesSatisfied,
   isTerminalStatus,
-} from "./nextStep.js";
+} from "./stepUtils.js";
 import { scheduleWave, buildDispatchQuota } from "./waveScheduler.js";
 import { ESTIMATED_FINDING_OVERHEAD_TOKENS, ESTIMATED_BLOCK_BASE_TOKENS } from "../phases/plan.js";
 import { resnapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
@@ -47,6 +48,17 @@ import { resnapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 export interface DispatchOptions {
   root: string;
   artifactsDir: string;
+}
+
+function markStarted(item: { started_at?: string; completed_at?: string }): void {
+  item.started_at ??= new Date().toISOString();
+  delete item.completed_at;
+}
+
+function markTerminal(item: { started_at?: string; completed_at?: string }): void {
+  const now = new Date().toISOString();
+  item.started_at ??= now;
+  item.completed_at = now;
 }
 
 async function tryLoadExistingDocumentResult(resultPath: string): Promise<boolean> {
@@ -60,15 +72,41 @@ async function tryLoadExistingDocumentResult(resultPath: string): Promise<boolea
   }
 }
 
-async function tryLoadExistingImplementResult(resultPath: string): Promise<boolean> {
-  if (!existsSync(resultPath)) return false;
+async function tryLoadExistingImplementResult(
+  resultPath: string,
+): Promise<ImplementWorkerResult | undefined> {
+  if (!existsSync(resultPath)) return undefined;
   try {
     const result = await readJsonFile<unknown>(resultPath);
-    validateImplementWorkerResult(result);
-    return true;
+    assertImplementWorkerResult(result, resultPath);
+    return result;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+function documentedFindingIdsForBlock(
+  block: RemediationBlock,
+  state: RemediationState,
+): string[] {
+  return block.items.filter((findingId) => {
+    const item = state.items?.[findingId];
+    return item?.status === "documented" && Boolean(item.item_spec);
+  });
+}
+
+function implementResultCoversFindings(
+  result: ImplementWorkerResult,
+  findingIds: string[],
+): boolean {
+  const resultIds = new Set(result.item_results.map((item) => item.finding_id));
+  return findingIds.every((findingId) => resultIds.has(findingId));
+}
+
+async function archiveIncompleteImplementResult(resultPath: string): Promise<void> {
+  if (!existsSync(resultPath)) return;
+  const archivedPath = `${resultPath}.stale-${Date.now()}`;
+  await rename(resultPath, archivedPath);
 }
 
 function runDir(artifactsDir: string, runId: string, phase: string): string {
@@ -657,8 +695,10 @@ export async function mergeDocumentResults(
     }
     if (!existsSync(item.result_path)) {
       console.warn(`Missing document worker result: ${item.result_path} — marking ${item.finding_id} blocked.`);
-      state.items[item.finding_id].status = "blocked";
-      state.items[item.finding_id].failure_reason = `Document worker did not produce a result file: ${item.result_path}`;
+      const stateItem = state.items[item.finding_id];
+      stateItem.status = "blocked";
+      markTerminal(stateItem);
+      stateItem.failure_reason = `Document worker did not produce a result file: ${item.result_path}`;
       continue;
     }
 
@@ -667,8 +707,10 @@ export async function mergeDocumentResults(
     const errors = issues.filter((issue) => issue.severity === "error");
     if (errors.length > 0) {
       console.warn(`Invalid document result for ${item.finding_id} — marking blocked.`);
-      state.items[item.finding_id].status = "blocked";
-      state.items[item.finding_id].failure_reason =
+      const stateItem = state.items[item.finding_id];
+      stateItem.status = "blocked";
+      markTerminal(stateItem);
+      stateItem.failure_reason =
         `Invalid document result:\n${formatValidationIssues(errors)}`;
       continue;
     }
@@ -680,12 +722,16 @@ export async function mergeDocumentResults(
       );
       if (specIssues.length > 0) {
         console.warn(`Invalid item spec for ${item.finding_id} — marking blocked.`);
-        state.items[item.finding_id].status = "blocked";
-        state.items[item.finding_id].failure_reason = formatValidationIssues(specIssues);
+        const stateItem = state.items[item.finding_id];
+        stateItem.status = "blocked";
+        markTerminal(stateItem);
+        stateItem.failure_reason = formatValidationIssues(specIssues);
         continue;
       }
-      state.items[item.finding_id].item_spec = spec;
-      state.items[item.finding_id].status = "documented";
+      const stateItem = state.items[item.finding_id];
+      stateItem.item_spec = spec;
+      stateItem.status = "documented";
+      markStarted(stateItem);
       await writeJsonFile(
         join(options.artifactsDir, `item_spec_${item.finding_id}.json`),
         spec,
@@ -808,10 +854,19 @@ export async function prepareImplementDispatch(
     }
 
     // Reconcile an already-produced result regardless of wave packing.
-    if (await tryLoadExistingImplementResult(item.result_path)) {
-      console.log(`Reusing existing implement result for block ${block.block_id}`);
-      reconciledCount++;
-      continue;
+    const documentedFindingIds = documentedFindingIdsForBlock(block, state);
+    const existingResult = await tryLoadExistingImplementResult(item.result_path);
+    if (existingResult) {
+      if (implementResultCoversFindings(existingResult, documentedFindingIds)) {
+        console.log(`Reusing existing implement result for block ${block.block_id}`);
+        reconciledCount++;
+        continue;
+      }
+      process.stderr.write(
+        `[remediate-code] dispatch: existing implement result for block ${block.block_id} ` +
+          `does not cover ${documentedFindingIds.length} still-documented item(s); re-dispatching\n`,
+      );
+      await archiveIncompleteImplementResult(item.result_path);
     }
 
     const writePaths = (item.access?.write_paths ?? []).filter(
@@ -872,29 +927,10 @@ export async function prepareImplementDispatch(
   return plan;
 }
 
-function validateImplementWorkerResult(value: unknown): asserts value is ImplementWorkerResult {
-  if (!isRecord(value)) {
-    throw new Error("Implement worker result must be an object.");
-  }
-  if (value.contract_version !== REMEDIATION_WORKER_RESULT_CONTRACT_VERSION) {
-    throw new Error("Implement worker result has an unsupported contract_version.");
-  }
-  if (value.phase !== "implement") {
-    throw new Error("Implement worker result phase must be implement.");
-  }
-  if (!Array.isArray(value.item_results)) {
-    throw new Error("Implement worker result item_results must be an array.");
-  }
-  for (const [index, result] of value.item_results.entries()) {
-    if (!isRecord(result)) {
-      throw new Error(`item_results[${index}] must be an object.`);
-    }
-    if (typeof result.finding_id !== "string") {
-      throw new Error(`item_results[${index}].finding_id must be a string.`);
-    }
-    if (result.status !== "resolved" && result.status !== "blocked") {
-      throw new Error(`item_results[${index}].status must be resolved or blocked.`);
-    }
+function assertImplementWorkerResult(value: unknown, path: string): asserts value is ImplementWorkerResult {
+  const issues = validateImplementWorkerResult(value, path).filter((i) => i.severity === "error");
+  if (issues.length > 0) {
+    throw new Error(formatValidationIssues(issues));
   }
 }
 
@@ -936,7 +972,12 @@ export async function mergeImplementResults(
     }
 
     const item = buildImplementDispatchItem(block, state, dir);
-    if (!(await tryLoadExistingImplementResult(item.result_path))) {
+    const existingResult = await tryLoadExistingImplementResult(item.result_path);
+    const documentedFindingIds = documentedFindingIdsForBlock(block, state);
+    if (
+      !existingResult ||
+      !implementResultCoversFindings(existingResult, documentedFindingIds)
+    ) {
       continue;
     }
 
@@ -956,13 +997,14 @@ export async function mergeImplementResults(
         // actually awaiting this worker's result.
         if (!stateItem || isTerminalStatus(stateItem.status)) continue;
         stateItem.status = "blocked";
+        markTerminal(stateItem);
         stateItem.failure_reason =
           `Implementation worker did not produce a result file: ${item.result_path}`;
       }
       continue;
     }
     const result = await readJsonFile<unknown>(item.result_path);
-    validateImplementWorkerResult(result);
+    assertImplementWorkerResult(result, item.result_path);
     for (const itemResult of result.item_results) {
       const stateItem = state.items[itemResult.finding_id];
       if (!stateItem) {
@@ -977,6 +1019,7 @@ export async function mergeImplementResults(
         const spec = stateItem.item_spec;
         const isNoChange = specIndicatesNoChange(spec);
         stateItem.status = isNoChange ? "resolved_no_change" : "resolved";
+        markTerminal(stateItem);
         stateItem.last_successful_step = "Verify Code Against Documentation";
         if (itemResult.evidence?.length) {
           await writeJsonFile(
@@ -987,12 +1030,13 @@ export async function mergeImplementResults(
             {
               finding_id: itemResult.finding_id,
               passed: true,
-              reason: itemResult.evidence.join("\n"),
+              reason: itemResult.evidence,
             },
           );
         }
       } else {
         stateItem.status = "blocked";
+        markTerminal(stateItem);
         stateItem.failure_reason =
           itemResult.failure_reason ?? "Implementation worker blocked.";
       }

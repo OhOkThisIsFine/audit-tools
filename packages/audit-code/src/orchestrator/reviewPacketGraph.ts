@@ -262,27 +262,64 @@ export function unionFindFromGroups(
   const uf = new UnionFind(groups.keys());
   const fileToGroupKeys = buildFileToGroupKeys(groups);
   const degreeIndex = buildGraphDegreeIndex(graphEdges);
+  const verbose = Boolean(process.env.AUDIT_CODE_VERBOSE);
 
   for (const keys of fileToGroupKeys.values()) {
     const [first, ...rest] = [...keys].sort((a, b) => a.localeCompare(b));
     if (!first) continue;
     for (const key of rest) {
-      uf.union(first, key);
+      if (verbose) {
+        const rootBefore = uf.find(key);
+        const rootFirst = uf.find(first);
+        uf.union(first, key);
+        if (rootFirst !== rootBefore) {
+          process.stderr.write(
+            `[audit-code:packet-planning] shared-file merge: "${first}" + "${key}" (roots "${rootFirst}" + "${rootBefore}" → "${uf.find(first)}")\n`,
+          );
+        }
+      } else {
+        uf.union(first, key);
+      }
     }
   }
 
   for (const edge of graphEdges) {
-    if (!isPacketExpansionEdge(edge, degreeIndex)) {
-      continue;
-    }
     const fromGroups = fileToGroupKeys.get(normalizeGraphPath(edge.from));
     const toGroups = fileToGroupKeys.get(normalizeGraphPath(edge.to));
+    if (!isPacketExpansionEdge(edge, degreeIndex)) {
+      if (verbose && fromGroups && toGroups) {
+        // Edge has group mappings but was filtered — check if it was the
+        // high fan-degree guard specifically.
+        const fromFanOut = degreeIndex.fanOut.get(normalizeGraphPath(edge.from)) ?? 0;
+        const toFanIn = degreeIndex.fanIn.get(normalizeGraphPath(edge.to)) ?? 0;
+        const highFanEdge =
+          fromFanOut > HIGH_FAN_DEGREE_THRESHOLD ||
+          toFanIn > HIGH_FAN_DEGREE_THRESHOLD;
+        if (highFanEdge) {
+          process.stderr.write(
+            `[audit-code:packet-planning] edge skip (high-fan-degree): "${edge.from}" → "${edge.to}" (fanOut=${fromFanOut}, fanIn=${toFanIn})\n`,
+          );
+        }
+      }
+      continue;
+    }
     if (!fromGroups || !toGroups) {
       continue;
     }
     for (const fromKey of fromGroups) {
       for (const toKey of toGroups) {
-        uf.union(fromKey, toKey);
+        if (verbose) {
+          const rootFrom = uf.find(fromKey);
+          const rootTo = uf.find(toKey);
+          uf.union(fromKey, toKey);
+          if (rootFrom !== rootTo) {
+            process.stderr.write(
+              `[audit-code:packet-planning] edge-driven merge: "${fromKey}" + "${toKey}" via edge "${edge.from}" → "${edge.to}" (kind=${edge.kind ?? "unknown"})\n`,
+            );
+          }
+        } else {
+          uf.union(fromKey, toKey);
+        }
       }
     }
   }
@@ -825,45 +862,21 @@ export function buildPlanningGraphEdges(
   sizeIndex?: Record<string, number>,
   targetPacketTokens = DEFAULT_TARGET_PACKET_TOKENS,
 ): GraphEdge[] {
-  const bridgeEdges = buildEntrypointFlowBridgeEdges(
-    groups,
-    graphEdges,
-    graphBundle,
-  );
-  const graphWithBridges =
-    bridgeEdges.length > 0 ? [...graphEdges, ...bridgeEdges] : graphEdges;
-  const subsystemEdges = buildSubsystemClusterEdges(
-    groups,
-    graphWithBridges,
-    lineIndex,
-    sizeIndex,
-    targetPacketTokens,
-  );
-  const graphWithSubsystems =
-    subsystemEdges.length > 0
-      ? [...graphWithBridges, ...subsystemEdges]
-      : graphWithBridges;
-  const packageOwnershipEdges = buildPackageOwnershipClusterEdges(
-    groups,
-    graphWithSubsystems,
-    lineIndex,
-    sizeIndex,
-    targetPacketTokens,
-  );
-  const graphWithPackageOwnership =
-    packageOwnershipEdges.length > 0
-      ? [...graphWithSubsystems, ...packageOwnershipEdges]
-      : graphWithSubsystems;
-  const moduleOwnershipEdges = buildModuleOwnershipClusterEdges(
-    groups,
-    graphWithPackageOwnership,
-    lineIndex,
-    sizeIndex,
-    targetPacketTokens,
-  );
-  return moduleOwnershipEdges.length > 0
-    ? [...graphWithPackageOwnership, ...moduleOwnershipEdges]
-    : graphWithPackageOwnership;
+  let edges = graphEdges;
+
+  const bridgeEdges = buildEntrypointFlowBridgeEdges(groups, edges, graphBundle);
+  if (bridgeEdges.length > 0) edges = [...edges, ...bridgeEdges];
+
+  const subsystemEdges = buildSubsystemClusterEdges(groups, edges, lineIndex, sizeIndex, targetPacketTokens);
+  if (subsystemEdges.length > 0) edges = [...edges, ...subsystemEdges];
+
+  const packageOwnershipEdges = buildPackageOwnershipClusterEdges(groups, edges, lineIndex, sizeIndex, targetPacketTokens);
+  if (packageOwnershipEdges.length > 0) edges = [...edges, ...packageOwnershipEdges];
+
+  const moduleOwnershipEdges = buildModuleOwnershipClusterEdges(groups, edges, lineIndex, sizeIndex, targetPacketTokens);
+  if (moduleOwnershipEdges.length > 0) edges = [...edges, ...moduleOwnershipEdges];
+
+  return edges;
 }
 
 function compareGraphEdges(a: GraphEdge, b: GraphEdge): number {

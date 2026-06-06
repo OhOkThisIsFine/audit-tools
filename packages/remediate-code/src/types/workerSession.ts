@@ -24,6 +24,12 @@ export interface WorkerTask {
    * Recommended maximum: 5. Omit to use the provider default (typically 0 = no retries).
    */
   max_retries?: number;
+  /**
+   * Command and arguments for the LocalSubprocessProvider to launch directly.
+   * When present, LocalSubprocessProvider uses worker_command[0] as the executable
+   * and worker_command.slice(1) as its arguments instead of throwing.
+   */
+  worker_command?: string[];
 }
 
 // Timeout resolution now lives in `@audit-tools/shared` so both orchestrators

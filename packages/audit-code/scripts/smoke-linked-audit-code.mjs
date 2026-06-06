@@ -14,7 +14,7 @@ const packageVersion = JSON.parse(
   await readFile(packageJsonPath, "utf8"),
 ).version;
 const verbose = process.env.AUDIT_CODE_VERBOSE === "1";
-const liveCommandOutput = verbose || process.env.CI === "true";
+const liveCommandOutput = true;
 
 async function countLines(root, path) {
   const content = await readFile(join(root, path), "utf8");
@@ -340,11 +340,6 @@ async function main() {
   const smokeStart = Date.now();
   let stepStart = Date.now();
   step("npm link");
-  if (liveCommandOutput) {
-    detail(
-      "Streaming child command output because AUDIT_CODE_VERBOSE=1 or CI=true is set.",
-    );
-  }
   await runCommand(platformCommand("npm"), ["link"], {
     cwd: repoRoot,
     liveOutput: liveCommandOutput,

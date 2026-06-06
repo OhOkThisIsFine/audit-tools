@@ -148,6 +148,113 @@ test("runGraphEnrichmentExecutor records not_applicable when no in-scope files a
   assert.equal(entry.resolution, "not_applicable");
 });
 
+// Tests for the extracted runSingleAnalyzer / buildEnrichedGraph helpers —
+// exercised through the public runGraphEnrichmentExecutor API.
+
+test("runSingleAnalyzer (via executor): returns ok:false with note when dependency is absent", async () => {
+  const cacheRoot = await mkdtemp(join(tmpdir(), "absent-cache-"));
+  const root = await mkdtemp(join(tmpdir(), "absent-root-"));
+  try {
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "export const a = 1;\n");
+
+    const result = await runGraphEnrichmentExecutor(tsBundle(), {
+      root,
+      registry: [typescriptAnalyzer],
+      cacheRoot,
+      analyzers: { typescript: "auto" },
+    });
+
+    const entry = result.updated.analyzer_capability.analyzers.find((a) => a.id === "typescript");
+    assert.equal(entry.resolution, "absent", "absent dep → ok:false with resolution absent");
+    assert.equal(entry.edges_added, 0, "no edges added for absent dep");
+    // analyze() should not have contributed any edge
+    assert.equal(result.updated.analyzer_capability.status, "omitted");
+  } finally {
+    await rm(cacheRoot, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runSingleAnalyzer (via executor): returns ok:false with structured note when analyze() throws", async () => {
+  const throwingAnalyzer = {
+    id: "throwing",
+    supports: (file) => file.endsWith(".ts"),
+    analyze: () => { throw new TypeError("Deliberate test failure"); },
+  };
+
+  const result = await runGraphEnrichmentExecutor(tsBundle(), {
+    root: "/virtual/root",
+    registry: [throwingAnalyzer],
+  });
+
+  const entry = result.updated.analyzer_capability.analyzers.find((a) => a.id === "throwing");
+  assert.ok(entry.note, "note should be populated on analyzer error");
+  assert.ok(entry.note.includes("TypeError"), "note should include error name");
+  assert.ok(entry.note.includes("Deliberate test failure"), "note should include error message");
+  assert.equal(entry.edges_added, 0);
+});
+
+test("buildEnrichedGraph (via executor): merges edges into correct buckets and deduplicates routes", async () => {
+  const routeAnalyzer = {
+    id: "route-emit",
+    supports: () => true,
+    analyze: () => ({
+      edges: [
+        { from: "src/a.ts", to: "src/b.ts", kind: "ts-import", confidence: 0.99, direction: "directed" },
+        { from: "src/a.ts", to: "src/b.ts", kind: "ts-call", confidence: 0.95, direction: "directed" },
+      ],
+      routes: [
+        { method: "GET", path: "/foo", handler: "src/a.ts" },
+        { method: "GET", path: "/foo", handler: "src/a.ts" }, // duplicate — should deduplicate
+      ],
+    }),
+  };
+
+  const result = await runGraphEnrichmentExecutor(tsBundle(), {
+    root: "/virtual/root",
+    registry: [routeAnalyzer],
+  });
+
+  const gb = result.updated.graph_bundle;
+  assert.ok(gb.graphs.imports.some((e) => e.kind === "ts-import"), "ts-import edges in imports bucket");
+  assert.ok(gb.graphs.calls.some((e) => e.kind === "ts-call"), "ts-call edges in calls bucket");
+  const routes = gb.graphs.routes;
+  assert.ok(Array.isArray(routes), "routes should be an array");
+  const fooRoutes = routes.filter((r) => r.path === "/foo" && r.method === "GET");
+  assert.equal(fooRoutes.length, 1, "duplicate routes are deduplicated");
+  assert.deepEqual(gb.analyzers_used, ["route-emit"]);
+});
+
+test("runGraphEnrichmentExecutor loop: not_applicable analyzers record capability entry and skip analyze()", async () => {
+  let analyzeCalled = false;
+  const neverSupportedAnalyzer = {
+    id: "never-supported",
+    supports: () => false,
+    analyze: () => { analyzeCalled = true; return { edges: [] }; },
+  };
+
+  const bundle = {
+    repo_manifest: {
+      files: [{ path: "src/a.ts", size_bytes: 10, language: "typescript", excluded: false }],
+    },
+    file_disposition: { files: [] },
+    graph_bundle: floorGraph(),
+  };
+  const floorJson = JSON.stringify(bundle.graph_bundle);
+
+  const result = await runGraphEnrichmentExecutor(bundle, {
+    root: "/virtual/root",
+    registry: [neverSupportedAnalyzer],
+  });
+
+  const entry = result.updated.analyzer_capability.analyzers.find((a) => a.id === "never-supported");
+  assert.equal(entry.resolution, "not_applicable");
+  assert.equal(analyzeCalled, false, "analyze() must not be called for not_applicable analyzers");
+  // Graph bundle must be byte-identical to the floor
+  assert.equal(JSON.stringify(result.updated.graph_bundle), floorJson);
+});
+
 test("resolveAnalyzerPlan flags an auto+absent analyzer with in-scope files for an install decision", async () => {
   const cacheRoot = await mkdtemp(join(tmpdir(), "analyzer-cache-"));
   const root = await mkdtemp(join(tmpdir(), "analyzer-root-"));

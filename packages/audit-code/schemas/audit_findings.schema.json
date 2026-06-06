@@ -24,6 +24,10 @@
           "type": "object",
           "additionalProperties": { "type": "integer", "minimum": 0 }
         },
+        "lens_breakdown": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
         "audited_file_count": { "type": "integer", "minimum": 0 },
         "excluded_file_count": { "type": "integer", "minimum": 0 },
         "budget_deferred_task_count": { "type": "integer", "minimum": 0 },
@@ -58,7 +62,7 @@
             "enum": ["critical", "high", "medium", "low", "info"]
           },
           "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
-          "lens": { "type": "string", "enum": ["correctness", "architecture", "maintainability", "security", "reliability", "performance", "data_integrity", "tests", "operability", "config_deployment", "observability"] },
+          "lens": { "$ref": "lens.schema.json" },
           "summary": { "type": "string" },
           "affected_files": {
             "type": "array",

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { setQuotaStateDir, readQuotaState, recordWaveOutcome } = await import(
+const { setQuotaStateDir, readQuotaState, recordWaveOutcome, applyDecayToEntry, computeRampUpConcurrency } = await import(
   "../src/quota/state.ts"
 );
 
@@ -77,4 +77,144 @@ test("success increments buckets 1..concurrency and persists across a reload", a
     const reread = await readQuotaState();
     assert.deepEqual(reread.entries[KEY].buckets, buckets);
   });
+});
+
+test("recordWaveOutcome success clears cooldown_until", async () => {
+  await withTempStateDir(async () => {
+    // Case 1: cooldown_until is set from a prior 429 — a success clears it.
+    await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "rate_limited" }, 24);
+    {
+      const stateAfter429 = await readQuotaState();
+      assert.ok(
+        stateAfter429.entries[KEY].cooldown_until !== null,
+        "cooldown_until should be set after a rate_limited outcome",
+      );
+    }
+
+    await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "success" }, 24);
+    {
+      const stateAfterSuccess = await readQuotaState();
+      const entry = stateAfterSuccess.entries[KEY];
+      assert.equal(
+        entry.cooldown_until,
+        null,
+        "cooldown_until must be null after a success outcome",
+      );
+      // consecutive_429_count must also be cleared.
+      assert.equal(entry.consecutive_429_count, 0);
+    }
+  });
+
+  await withTempStateDir(async () => {
+    // Case 2: no prior 429 — success keeps cooldown_until null (no regression).
+    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "success" }, 24);
+    const state = await readQuotaState();
+    assert.equal(
+      state.entries[KEY].cooldown_until,
+      null,
+      "cooldown_until should remain null when no prior cooldown existed",
+    );
+  });
+});
+
+test("applyDecayToEntry returns the same entry reference when elapsed time is below 0.001 hours", () => {
+  const entry = {
+    updated_at: new Date().toISOString(),
+    buckets: { "1": { success_weight: 2.0, failure_weight: 1.0 } },
+    cooldown_until: null,
+    last_429_at: null,
+    consecutive_429_count: 0,
+  };
+  const result = applyDecayToEntry(entry, 24);
+  // The early-exit guard (elapsedHours < 0.001) must return the exact same reference.
+  assert.strictEqual(result, entry, "should return the identical object reference when elapsed < 0.001h");
+  // No bucket mutation.
+  assert.equal(entry.buckets["1"].success_weight, 2.0);
+  assert.equal(entry.buckets["1"].failure_weight, 1.0);
+});
+
+test("applyDecayToEntry decays all bucket weights to near-zero after many half-lives", () => {
+  const entry = {
+    updated_at: new Date(Date.now() - 720 * 3600000).toISOString(), // 30 half-lives ago
+    buckets: { "1": { success_weight: 0.001, failure_weight: 0.001 } },
+    cooldown_until: null,
+    last_429_at: null,
+    consecutive_429_count: 0,
+  };
+  const result = applyDecayToEntry(entry, 24);
+  assert.ok(
+    result.buckets["1"].success_weight < 1e-6,
+    `success_weight should be near-zero after 30 half-lives, got ${result.buckets["1"].success_weight}`,
+  );
+  assert.ok(
+    result.buckets["1"].failure_weight < 1e-6,
+    `failure_weight should be near-zero after 30 half-lives, got ${result.buckets["1"].failure_weight}`,
+  );
+});
+
+test("applyDecayToEntry halves weights after exactly one half-life and preserves other fields", () => {
+  const entry = {
+    updated_at: new Date(Date.now() - 24 * 3600000).toISOString(), // 24 hours ago = 1 half-life
+    buckets: { "1": { success_weight: 4.0, failure_weight: 2.0 } },
+    cooldown_until: null,
+    last_429_at: null,
+    consecutive_429_count: 0,
+  };
+  const result = applyDecayToEntry(entry, 24);
+  // Must be a new object, not the same reference.
+  assert.notStrictEqual(result, entry, "should return a new object after decay");
+  // Weights halved (within 1% tolerance to account for sub-millisecond clock drift).
+  assert.ok(
+    Math.abs(result.buckets["1"].success_weight - 2.0) < 0.01,
+    `success_weight should be ~2.0 after one half-life, got ${result.buckets["1"].success_weight}`,
+  );
+  assert.ok(
+    Math.abs(result.buckets["1"].failure_weight - 1.0) < 0.01,
+    `failure_weight should be ~1.0 after one half-life, got ${result.buckets["1"].failure_weight}`,
+  );
+  // Other fields preserved.
+  assert.equal(result.updated_at, entry.updated_at, "updated_at should be preserved");
+  assert.equal(result.cooldown_until, null, "cooldown_until should be preserved");
+  // Original not mutated.
+  assert.equal(entry.buckets["1"].success_weight, 4.0, "original success_weight must not be mutated");
+});
+
+// Helper: build a minimal QuotaStateEntry with a single bucket at level N.
+function makeEntryWithBucket(n, success_weight, failure_weight) {
+  return {
+    updated_at: new Date().toISOString(),
+    buckets: { [String(n)]: { success_weight, failure_weight } },
+    cooldown_until: null,
+    last_429_at: null,
+    consecutive_429_count: 0,
+  };
+}
+
+test("computeRampUpConcurrency: allows ramp-up when failure_weight has decayed below MIN_EVIDENCE_WEIGHT", () => {
+  // RAMP_UP_MIN_SUCCESSES = 2; MIN_EVIDENCE_WEIGHT = 0.5
+  // failure_weight = 0.1 (below threshold) → ramp-up permitted: returns N+1
+  const entry = makeEntryWithBucket(1, 3.0, 0.1);
+  const result = computeRampUpConcurrency(entry, 24);
+  assert.equal(result, 2, "failure_weight 0.1 < MIN_EVIDENCE_WEIGHT should permit ramp-up to N+1");
+});
+
+test("computeRampUpConcurrency: suppresses ramp-up when failure_weight equals MIN_EVIDENCE_WEIGHT", () => {
+  // failure_weight exactly 0.5 (at threshold boundary) → ramp-up suppressed: returns N
+  const entry = makeEntryWithBucket(1, 3.0, 0.5);
+  const result = computeRampUpConcurrency(entry, 24);
+  assert.equal(result, 1, "failure_weight === MIN_EVIDENCE_WEIGHT should suppress ramp-up");
+});
+
+test("computeRampUpConcurrency: suppresses ramp-up when failure_weight exceeds MIN_EVIDENCE_WEIGHT", () => {
+  // failure_weight = 1.0 (above threshold) → ramp-up suppressed: returns N
+  const entry = makeEntryWithBucket(1, 3.0, 1.0);
+  const result = computeRampUpConcurrency(entry, 24);
+  assert.equal(result, 1, "failure_weight > MIN_EVIDENCE_WEIGHT should suppress ramp-up");
+});
+
+test("computeRampUpConcurrency: allows ramp-up when failure_weight is exactly zero (no failures ever)", () => {
+  // failure_weight = 0 (never any failures) → ramp-up permitted: returns N+1
+  const entry = makeEntryWithBucket(1, 3.0, 0);
+  const result = computeRampUpConcurrency(entry, 24);
+  assert.equal(result, 2, "failure_weight === 0 should permit ramp-up to N+1");
 });

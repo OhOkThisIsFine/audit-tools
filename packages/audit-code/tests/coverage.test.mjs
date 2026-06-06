@@ -101,6 +101,60 @@ test("applyFileCoverage marks complete only when all required lenses completed, 
   assert.equal(excluded.audit_status, "excluded");
 });
 
+test("applyFileCoverage uses Map lookup — correctly matches all 500 covered files in a 1000-file matrix", () => {
+  // Build a matrix with 1000 files; the last 500 will be covered.
+  const paths = Array.from({ length: 1000 }, (_, i) => `file-${i}.ts`);
+  const matrix = createCoverageMatrix(paths);
+  for (const path of paths) {
+    applyUnitCoverage(matrix, path, "u1", ["correctness"]);
+  }
+
+  // Cover only the last 500 paths (indices 500–999).
+  const fileCoverage = paths.slice(500).map((path) => ({
+    path,
+    total_lines: 10,
+    pass_id: `p:${path}`,
+    lens: "correctness",
+  }));
+
+  applyFileCoverage(matrix, fileCoverage);
+
+  // The last 500 files should be complete; the first 500 should remain partial/pending.
+  for (let i = 0; i < 500; i++) {
+    assert.notEqual(
+      matrix.files[i].audit_status,
+      "complete",
+      `file-${i}.ts should not be complete`,
+    );
+  }
+  for (let i = 500; i < 1000; i++) {
+    assert.equal(
+      matrix.files[i].audit_status,
+      "complete",
+      `file-${i}.ts should be complete`,
+    );
+  }
+});
+
+test("markExcludedPath and applyUnitCoverage find records correctly via index and are no-ops for unknown paths", () => {
+  const matrix = createCoverageMatrix(["a.ts", "b.ts", "c.ts"]);
+
+  // markExcludedPath mutates exactly the target record.
+  markExcludedPath(matrix, "b.ts", "excluded_vendor");
+  assert.equal(matrix.files[0].audit_status, "pending", "a.ts must not be mutated");
+  assert.equal(matrix.files[1].audit_status, "excluded", "b.ts must be excluded");
+  assert.equal(matrix.files[2].audit_status, "pending", "c.ts must not be mutated");
+
+  // applyUnitCoverage mutates exactly the target record.
+  applyUnitCoverage(matrix, "a.ts", "unit-a", ["correctness"]);
+  assert.deepEqual(matrix.files[0].unit_ids, ["unit-a"]);
+  assert.deepEqual(matrix.files[2].unit_ids, [], "c.ts must not be mutated");
+
+  // Both are no-ops for a path not present in the matrix.
+  assert.doesNotThrow(() => markExcludedPath(matrix, "missing.ts", "x"));
+  assert.doesNotThrow(() => applyUnitCoverage(matrix, "missing.ts", "unit-x", ["correctness"]));
+});
+
 test("findUncoveredFiles and buildRequeueTargets report only outstanding work", () => {
   const matrix = createCoverageMatrix([
     "complete.ts",

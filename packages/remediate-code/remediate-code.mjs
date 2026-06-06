@@ -29,8 +29,11 @@ function newestMtimeMs(path) {
 }
 
 function shouldBuildDist() {
-  if (!existsSync(sourceRoot) || !existsSync(tsconfigPath)) {
+  if (!existsSync(sourceRoot)) {
     return false;
+  }
+  if (!existsSync(tsconfigPath)) {
+    return !existsSync(distEntry);
   }
   if (!existsSync(distEntry)) {
     return true;

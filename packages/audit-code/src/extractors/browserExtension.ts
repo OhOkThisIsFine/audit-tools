@@ -370,8 +370,11 @@ export function extractHtmlResourceEdges(
 }
 
 export function hasBrowserExtensionManifestFile(repoManifest: RepoManifest): boolean {
-  return repoManifest.files.some(
-    (file) => normalizeGraphPath(file.path).toLowerCase() === "manifest.json",
+  // Detect a `manifest.json` anywhere in the tree (root or a subdirectory),
+  // using the same basename match as isBrowserExtensionManifestPath so the
+  // repo-level gate and the per-file classifier agree.
+  return repoManifest.files.some((file) =>
+    isBrowserExtensionManifestPath(file.path),
   );
 }
 

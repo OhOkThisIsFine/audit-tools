@@ -2,6 +2,7 @@ import type { AuditResult, Finding } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
+import { severityRank, confidenceRank } from "./findingRanks.js";
 
 function normalizeText(value: string | undefined): string {
   return (value ?? "").trim().toLowerCase();
@@ -52,32 +53,6 @@ function findingKey(finding: Finding): string {
     String(finding.affected_files[0]?.line_start ?? ""),
     String(finding.affected_files[0]?.line_end ?? ""),
   ].join("|");
-}
-
-function severityRank(severity: Finding["severity"]): number {
-  switch (severity) {
-    case "critical":
-      return 5;
-    case "high":
-      return 4;
-    case "medium":
-      return 3;
-    case "low":
-      return 2;
-    case "info":
-      return 1;
-  }
-}
-
-function confidenceRank(confidence: Finding["confidence"]): number {
-  switch (confidence) {
-    case "high":
-      return 3;
-    case "medium":
-      return 2;
-    case "low":
-      return 1;
-  }
 }
 
 function runtimeSummary(report?: RuntimeValidationReport): string[] {

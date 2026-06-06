@@ -93,12 +93,8 @@ function quoteShellPath(filePath: string): string {
   return `"${filePath.replace(/"/g, '\\"')}"`;
 }
 
-function quoteShellArg(value: string): string {
-  return quoteShellPath(value);
-}
-
 function renderShellCommand(argv: string[]): string {
-  return argv.map((item) => quoteShellArg(item)).join(" ");
+  return argv.map((item) => quoteShellPath(item)).join(" ");
 }
 
 function buildPendingObligations(state: AuditState): string[] {
@@ -436,7 +432,11 @@ export async function writeAuditCodeHandoffArtifacts(
       "utf8",
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to write operator handoff artifacts: ${message}`);
+    throw new Error(
+      `Failed to write operator handoff artifacts: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { cause: error },
+    );
   }
 }

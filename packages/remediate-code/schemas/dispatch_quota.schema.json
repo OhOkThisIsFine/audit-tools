@@ -76,7 +76,8 @@
             "tokens_remaining": { "oneOf": [{ "type": "number" }, { "type": "null" }] },
             "captured_at": { "type": "string" },
             "source": { "type": "string" }
-          }
+          },
+          "additionalProperties": false
         }
       ]
     },

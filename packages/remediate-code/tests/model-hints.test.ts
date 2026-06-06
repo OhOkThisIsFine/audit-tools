@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
-import type { Finding, RemediationBlock } from "../src/state/types.js";
-import type { RemediationState } from "../src/state/store.js";
+import type { Finding } from "@audit-tools/shared";
+import type { RemediationBlock } from "../src/state/types.js";
 import {
   buildDocumentModelHint,
   buildImplementModelHint,
 } from "../src/steps/dispatch.js";
+import { makeState as makeBaseState } from "./test-helpers.js";
 
 function makeFinding(overrides: Partial<Finding> & { id: string }): Finding {
   return {
@@ -20,12 +21,11 @@ function makeFinding(overrides: Partial<Finding> & { id: string }): Finding {
   };
 }
 
-function makeState(
+function buildItems(
   findings: Finding[],
-  blocks: RemediationBlock[],
   itemSpecs?: Record<string, { tier: string }>,
-): RemediationState {
-  const items: Record<string, any> = {};
+): Record<string, unknown> {
+  const items: Record<string, unknown> = {};
   for (const f of findings) {
     items[f.id] = {
       status: "pending",
@@ -39,7 +39,15 @@ function makeState(
         : undefined,
     };
   }
-  return {
+  return items;
+}
+
+function makeState(
+  findings: Finding[],
+  blocks: RemediationBlock[],
+  itemSpecs?: Record<string, { tier: string }>,
+) {
+  return makeBaseState({
     plan: {
       plan_id: "test-plan",
       findings,
@@ -47,8 +55,8 @@ function makeState(
       project_type: "node",
       candidate_closing_actions: [],
     },
-    items,
-  } as unknown as RemediationState;
+    items: buildItems(findings, itemSpecs),
+  });
 }
 
 describe("buildDocumentModelHint", () => {

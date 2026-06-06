@@ -9,6 +9,9 @@ const { normalizeNpmAuditJson } = await import(
   "../src/adapters/npmAudit.ts"
 );
 const { normalizeSemgrepJson } = await import("../src/adapters/semgrep.ts");
+const { normalizeGenericExternalResults } = await import(
+  "../src/adapters/normalizeExternal.ts"
+);
 
 test("normalizeCoverageSummary keeps only below-threshold files and preserves severity boundaries", () => {
   const normalized = normalizeCoverageSummary([
@@ -150,13 +153,55 @@ test("normalizeNpmAuditJson preserves 0-based ids and fills unknown vulnerabilit
       },
       {
         id: "npm-audit-1",
-        severity: "unknown",
+        severity: "low",
         path: "package-lock.json",
         summary:
-          "Package minimist has a unknown severity vulnerability in range unknown.",
+          "Package minimist has a low severity vulnerability in range unknown.",
         rule: "minimist",
       },
     ],
+  );
+});
+
+const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
+
+test("normalizeNpmAuditJson maps 'moderate' severity to 'medium'", () => {
+  const normalized = normalizeNpmAuditJson({
+    vulnerabilities: {
+      "test-pkg": { severity: "moderate", range: ">=1.0.0" },
+    },
+  });
+  assert.equal(normalized.results[0].severity, "medium");
+  assert.ok(
+    VALID_SEVERITIES.has(normalized.results[0].severity),
+    "normalized severity must be a valid schema enum member",
+  );
+});
+
+test("normalizeNpmAuditJson passes through valid schema severities unchanged", () => {
+  for (const sev of ["critical", "high", "medium", "low", "info"]) {
+    const normalized = normalizeNpmAuditJson({
+      vulnerabilities: { pkg: { severity: sev } },
+    });
+    assert.equal(normalized.results[0].severity, sev, `${sev} should map to ${sev}`);
+  }
+});
+
+test("normalizeNpmAuditJson defaults unknown/missing severities to a valid schema value", () => {
+  const withUndefined = normalizeNpmAuditJson({
+    vulnerabilities: { pkg: {} },
+  });
+  assert.ok(
+    VALID_SEVERITIES.has(withUndefined.results[0].severity),
+    `undefined severity produced '${withUndefined.results[0].severity}', not in enum`,
+  );
+
+  const withBogus = normalizeNpmAuditJson({
+    vulnerabilities: { pkg: { severity: "bogus" } },
+  });
+  assert.ok(
+    VALID_SEVERITIES.has(withBogus.results[0].severity),
+    `'bogus' severity produced '${withBogus.results[0].severity}', not in enum`,
   );
 });
 
@@ -208,14 +253,14 @@ test("normalizeSemgrepJson drops incomplete results and defaults missing categor
       {
         id: "sg.maintainability",
         category: "maintainability",
-        severity: "WARNING",
+        severity: "medium",
         path: "src/auth.ts",
         summary: "Prefer a shared helper here.",
       },
       {
         id: "sg.default-category",
         category: "security",
-        severity: "unknown",
+        severity: "info",
         path: "src/session.ts",
         summary: "Analyzer found a noteworthy session path.",
       },
@@ -223,4 +268,164 @@ test("normalizeSemgrepJson drops incomplete results and defaults missing categor
   );
   assert.equal(normalized.results[0].line_start, 4);
   assert.equal(normalized.results[0].line_end, 8);
+});
+
+test("normalizeSemgrepJson maps uppercase semgrep severities to lowercase schema values (COR-cffe3d7b)", () => {
+  const cases = [
+    { input: "WARNING",  expected: "medium" },
+    { input: "ERROR",    expected: "high" },
+    { input: "INFO",     expected: "info" },
+    { input: "CRITICAL", expected: "critical" },
+  ];
+  for (const { input, expected } of cases) {
+    const normalized = normalizeSemgrepJson({
+      results: [
+        {
+          check_id: "sg.test",
+          path: "src/foo.ts",
+          extra: { severity: input, message: "test finding" },
+        },
+      ],
+    });
+    assert.equal(
+      normalized.results[0]?.severity,
+      expected,
+      `severity '${input}' should map to '${expected}'`,
+    );
+  }
+});
+
+test("normalizeSemgrepJson maps mixed-case semgrep severity to lowercase schema value (COR-cffe3d7b)", () => {
+  const normalized = normalizeSemgrepJson({
+    results: [
+      {
+        check_id: "sg.test",
+        path: "src/foo.ts",
+        extra: { severity: "Warning", message: "mixed-case test" },
+      },
+    ],
+  });
+  assert.equal(
+    normalized.results[0]?.severity,
+    "medium",
+    "mixed-case 'Warning' should map to 'medium'",
+  );
+});
+
+test("normalizeSemgrepJson produces undefined/fallback severity for missing or unknown severity (COR-cffe3d7b)", () => {
+  const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
+
+  // Missing severity — normalizeGenericExternalResults should supply a fallback
+  const withMissing = normalizeSemgrepJson({
+    results: [
+      {
+        check_id: "sg.test",
+        path: "src/foo.ts",
+        extra: { message: "no severity" },
+      },
+    ],
+  });
+  assert.ok(
+    VALID_SEVERITIES.has(withMissing.results[0]?.severity),
+    `missing severity produced '${withMissing.results[0]?.severity}', not in schema enum`,
+  );
+
+  // Unknown severity string — normalizeGenericExternalResults applies its fallback
+  const withUnknown = normalizeSemgrepJson({
+    results: [
+      {
+        check_id: "sg.test",
+        path: "src/foo.ts",
+        extra: { severity: "BOGUS", message: "unknown severity" },
+      },
+    ],
+  });
+  assert.ok(
+    VALID_SEVERITIES.has(withUnknown.results[0]?.severity),
+    `unknown severity produced '${withUnknown.results[0]?.severity}', not in schema enum`,
+  );
+});
+
+test("normalizeGenericExternalResults maps absent severity to 'info' (COR-0a17639f)", () => {
+  const result = normalizeGenericExternalResults("my-tool", [
+    { path: "src/a.ts", summary: "finding with no severity" },
+  ]);
+  assert.equal(result.results.length, 1);
+  assert.equal(result.results[0].severity, "info");
+  const severityEnum = ["critical", "high", "medium", "low", "info"];
+  assert.ok(
+    severityEnum.includes(result.results[0].severity),
+    `severity '${result.results[0].severity}' must be a member of the schema enum`,
+  );
+});
+
+test("normalizeCoverageSummary respects COVERAGE_THRESHOLD_LOW: files at or above 80% are excluded", () => {
+  const atThreshold = normalizeCoverageSummary([{ path: "src/ok.ts", lines_pct: 80 }]);
+  assert.deepEqual(atThreshold.results, [], "lines_pct === 80 must not be flagged");
+
+  const belowThreshold = normalizeCoverageSummary([{ path: "src/low.ts", lines_pct: 79 }]);
+  assert.equal(belowThreshold.results.length, 1, "lines_pct === 79 must be flagged");
+  assert.equal(belowThreshold.results[0].path, "src/low.ts");
+});
+
+test("normalizeCoverageSummary assigns severity correctly around COVERAGE_SEVERITY_HIGH", () => {
+  const high = normalizeCoverageSummary([{ path: "src/high.ts", lines_pct: 49 }]);
+  assert.equal(high.results[0].severity, "high", "lines_pct === 49 should be high");
+
+  const mediumAtBoundary = normalizeCoverageSummary([{ path: "src/med50.ts", lines_pct: 50 }]);
+  assert.equal(mediumAtBoundary.results[0].severity, "medium", "lines_pct === 50 should be medium");
+
+  const mediumBeforeThreshold = normalizeCoverageSummary([{ path: "src/med79.ts", lines_pct: 79 }]);
+  assert.equal(mediumBeforeThreshold.results[0].severity, "medium", "lines_pct === 79 should be medium");
+});
+
+test("normalizeCoverageSummary pins the lines_pct=50 boundary to medium and lines_pct=49.9 to high", () => {
+  const normalized = normalizeCoverageSummary([
+    { path: "src/boundary-high.ts", lines_pct: 49.9 },
+    { path: "src/boundary-medium.ts", lines_pct: 50 },
+  ]);
+
+  assert.equal(normalized.results.length, 2, "both files below 80% threshold must be flagged");
+
+  const highEntry = normalized.results.find((r) => r.path === "src/boundary-high.ts");
+  const mediumEntry = normalized.results.find((r) => r.path === "src/boundary-medium.ts");
+
+  assert.ok(highEntry, "src/boundary-high.ts must be present in results");
+  assert.ok(mediumEntry, "src/boundary-medium.ts must be present in results");
+
+  assert.equal(
+    highEntry.severity,
+    "high",
+    "lines_pct=49.9 is strictly below 50 so severity must be 'high'",
+  );
+  assert.equal(
+    mediumEntry.severity,
+    "medium",
+    "lines_pct=50 is not strictly below 50 so severity must be 'medium'",
+  );
+});
+
+test("normalizeGenericExternalResults maps native severity aliases onto schema enum (COR-0a17639f)", () => {
+  const cases = [
+    { input: "WARNING",    expected: "medium" },
+    { input: "ERROR",      expected: "high" },
+    { input: "moderate",   expected: "medium" },
+    { input: "note",       expected: "info" },
+    { input: "critical",   expected: "critical" },
+    { input: "low",        expected: "low" },
+    { input: "foobar",     expected: "info" },
+    { input: "high",       expected: "high" },
+    { input: "info",       expected: "info" },
+    { input: "hint",       expected: "info" },
+  ];
+  for (const { input, expected } of cases) {
+    const result = normalizeGenericExternalResults("test-tool", [
+      { path: "src/x.ts", summary: "test finding", severity: input },
+    ]);
+    assert.equal(
+      result.results[0].severity,
+      expected,
+      `severity '${input}' should map to '${expected}'`,
+    );
+  }
 });

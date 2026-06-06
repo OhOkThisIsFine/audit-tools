@@ -3,44 +3,23 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { captureConsole } from "./helpers/captureConsole.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
-const distCliUrl = pathToFileURL(join(repoRoot, "dist", "cli.js")).href;
-const { runCli } = await import(distCliUrl);
+const { runCli } = await import("../src/cli.ts");
 
 async function runStatus(artifactsDir) {
-  const previousExitCode = process.exitCode;
-  const previousConsoleLog = console.log;
-  const previousConsoleError = console.error;
-  let stdout = "";
-  let stderr = "";
-
   const argv = [
     process.execPath,
-    join(repoRoot, "dist", "cli.js"),
+    join(repoRoot, "src", "cli.ts"),
     "status",
     "--artifacts-dir",
     artifactsDir,
   ];
-
-  process.exitCode = 0;
-  console.log = (...values) => {
-    stdout += `${values.join(" ")}\n`;
-  };
-  console.error = (...values) => {
-    stderr += `${values.join(" ")}\n`;
-  };
-
-  try {
-    await runCli(argv);
-    return { stdout, stderr, exitCode: process.exitCode ?? 0 };
-  } finally {
-    process.exitCode = previousExitCode;
-    console.log = previousConsoleLog;
-    console.error = previousConsoleError;
-  }
+  const result = await captureConsole(() => runCli(argv));
+  return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code };
 }
 
 async function withTempDir(fn) {
@@ -205,6 +184,33 @@ test("cmdStatus exits cleanly with a clear message when no audit_state.json exis
     // Should produce a human-readable message, not throw
     const combined = result.stdout + result.stderr;
     assert.match(combined, /no active audit|audit_state/i, "Should include explanatory message");
+  });
+});
+
+test("cmdStatus outputs structured JSON with status no_active_audit when audit_state.json is missing", async () => {
+  await withTempDir(async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-artifacts");
+    await mkdir(artifactsDir, { recursive: true });
+    // No audit_state.json written
+
+    const result = await runStatus(artifactsDir);
+
+    assert.equal(result.exitCode, 1, "process.exitCode should be 1 on no-active-audit path");
+
+    // stdout should be valid JSON
+    let parsed;
+    try {
+      parsed = JSON.parse(result.stdout);
+    } catch {
+      assert.fail(`stdout is not valid JSON on no-active-audit path: ${result.stdout}`);
+    }
+
+    assert.equal(parsed.status, "no_active_audit");
+    assert.equal(typeof parsed.error, "string");
+    assert.ok(parsed.error.length > 0, "error field should be a non-empty string");
+
+    // Nothing written to stderr on this path
+    assert.equal(result.stderr.trim(), "", "nothing should be written to stderr on no-active-audit path");
   });
 });
 

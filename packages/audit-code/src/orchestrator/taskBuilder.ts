@@ -232,6 +232,10 @@ function addTaskBlock(
   }
 }
 
+function withSignalTag(baseTags: string[], hasExternalSignal: boolean): string[] {
+  return hasExternalSignal ? [...baseTags, "external_analyzer_signal"] : baseTags;
+}
+
 function buildCoverageIndex(
   coverageMatrix: CoverageMatrix,
 ): Map<string, CoverageMatrix["files"][number]> {
@@ -342,9 +346,7 @@ export function buildChunkedAuditTasks(
       lens: block.lens,
       filePaths: block.file_paths,
       priority: taskPriority(hasExternalSignal, block.lens, true),
-      tags: hasExternalSignal
-        ? ["critical_flow", `critical_flow:${block.flow_id}`, "external_analyzer_signal"]
-        : ["critical_flow", `critical_flow:${block.flow_id}`],
+      tags: withSignalTag(["critical_flow", `critical_flow:${block.flow_id}`], hasExternalSignal),
       rationale: (filePaths, splitKind) =>
         splitKind === "large_file"
           ? `Audit ${filePaths[0]} (large file from critical flow ${block.flow_id}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`
@@ -400,7 +402,7 @@ export function buildChunkedAuditTasks(
       lens: block.lens,
       filePaths: block.filePaths,
       priority: taskPriority(hasExternalSignal, block.lens),
-      tags: hasExternalSignal ? ["external_analyzer_signal"] : [],
+      tags: withSignalTag([], hasExternalSignal),
       rationale: (filePaths, splitKind) =>
         splitKind === "large_file"
           ? `Audit ${filePaths[0]} (large file split from ${block.unitId}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`

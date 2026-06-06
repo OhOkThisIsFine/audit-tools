@@ -33,7 +33,8 @@ export interface RunLogEvent {
   tokens_est?: number;
   duration_ms?: number;
   note?: string;
-  [key: string]: unknown;
+  /** Run- or request-scoped token for correlating log events across a single invocation. */
+  correlationId?: string;
 }
 
 export interface RunLoggerOptions {

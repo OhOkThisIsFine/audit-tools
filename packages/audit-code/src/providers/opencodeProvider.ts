@@ -25,7 +25,8 @@ export class OpenCodeProvider implements FreshSessionProvider {
     // On Windows the `opencode` launcher is a `.cmd` shim that `spawn` cannot
     // run without a shell; resolve it through cmd.exe (no-op on other OSes).
     const { command, args } = resolveOpenCodeSpawnCommand(baseCommand, baseArgs);
-    return await spawnLoggedCommand(
+    process.stderr.write(JSON.stringify({ event: "provider_launch", provider: this.name, runId: input.runId, obligationId: input.obligationId, promptPath: input.promptPath, taskPath: input.taskPath }) + "\n");
+    const result = await spawnLoggedCommand(
       command,
       args,
       applyWorkerTaskLaunchSettings(input, task),
@@ -35,5 +36,7 @@ export class OpenCodeProvider implements FreshSessionProvider {
         opentokenCommand: this.opentoken.command,
       },
     );
+    process.stderr.write(JSON.stringify({ event: "provider_done", provider: this.name, runId: input.runId, obligationId: input.obligationId, accepted: result.accepted, exitCode: result.exitCode ?? null }) + "\n");
+    return result;
   }
 }

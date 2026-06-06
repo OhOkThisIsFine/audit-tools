@@ -11,7 +11,7 @@ import type {
   RemediationPlan,
 } from "../state/types.js";
 import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, type SessionConfig } from "@audit-tools/shared";
-import { runPlanPhase } from "../phases/plan.js";
+import { runPlanPhase, applyPlanPipeline } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
 import { validateRemediationPlan } from "../validation/remediationState.js";
@@ -24,6 +24,13 @@ import {
 } from "./dispatch.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
+import {
+  dependenciesSatisfied,
+  isTerminalStatus,
+  specIndicatesNoChange,
+  classifyFindingRisk,
+  type FindingRiskTier,
+} from "./stepUtils.js";
 import {
   deduplicateCrossLensFindings,
   fixupBlocksAfterDedup,
@@ -165,48 +172,17 @@ function formatAllowed(command: string): string {
   return `- \`${command}\``;
 }
 
-export type FindingRiskTier = "safe" | "substantive" | "context_dependent";
-
-export interface FindingClassification {
-  tier: FindingRiskTier;
-  /** One-line explanation of why the rule matched, shown to the reviewing LLM. */
-  reason: string;
-}
-
-export function classifyFindingRisk(finding: Finding, spec: ItemSpec): FindingClassification {
-  const lens = finding.lens.toLowerCase();
-  const change = spec.concrete_change.toLowerCase();
-
-  // Context-dependent: low confidence, breaking/compat/removal signals.
-  const lensIsBreaking = /\b(compat|api[-_]?break|interface|breaking|deprecat|remov)\b/.test(lens);
-  const changeIsDestructive =
-    /\b(removes?|deletes?|disables?|no longer|replaces?.*incompatible|breaks?)\b/.test(change);
-
-  if (finding.confidence === "low") {
-    return { tier: "context_dependent", reason: "confidence is low" };
-  }
-  if (lensIsBreaking) {
-    return { tier: "context_dependent", reason: `lens "${finding.lens}" signals a breaking/compat concern` };
-  }
-  if (changeIsDestructive) {
-    return { tier: "context_dependent", reason: "concrete_change contains a removal or disabling verb" };
-  }
-
-  // Safe: style / formatting / cosmetic / low-severity config with high confidence.
-  const lensIsSafe = /\b(style|format|lint|typo|whitespace|cosmetic|config)\b/.test(lens);
-  const lowRisk =
-    (finding.severity === "low" || finding.severity === "info") &&
-    finding.confidence === "high";
-
-  if (lensIsSafe) {
-    return { tier: "safe", reason: `lens "${finding.lens}" is a style/format/config lens` };
-  }
-  if (lowRisk) {
-    return { tier: "safe", reason: `severity=${finding.severity} + confidence=high indicates minimal risk` };
-  }
-
-  return { tier: "substantive", reason: `lens "${finding.lens}", severity=${finding.severity} — no safe/breaking signal matched` };
-}
+export type {
+  FindingRiskTier,
+  FindingClassification,
+} from "./stepUtils.js";
+export {
+  NO_CHANGE_RE,
+  isTerminalStatus,
+  dependenciesSatisfied,
+  specIndicatesNoChange,
+  classifyFindingRisk,
+} from "./stepUtils.js";
 
 function documentableFindings(state: RemediationState): Finding[] {
   if (!state.plan || !state.items) return [];
@@ -227,59 +203,9 @@ function implementableBlocks(state: RemediationState): RemediationBlock[] {
   );
 }
 
-const TERMINAL_STATUSES = ["resolved", "resolved_no_change", "ignored", "deemed_inappropriate"];
-
-/** Whether an item status is terminal — no further implement work, and a worker result must never resurrect it. */
-export function isTerminalStatus(status: string): boolean {
-  return TERMINAL_STATUSES.includes(status);
-}
-
-/**
- * A block is ready to implement only once every dependency block is fully
- * resolved (all of its items terminal). Host-dispatched workers edit the main
- * tree, so a dependent dispatched before its prerequisite would build on stale
- * code — dependency-ordered blocks must land in separate waves. A `blocked`
- * dependency item is NOT terminal here, so a failed prerequisite correctly
- * leaves its dependents un-ready (they are marked blocked downstream).
- */
-export function dependenciesSatisfied(
-  block: RemediationBlock,
-  state: RemediationState,
-): boolean {
-  for (const depId of block.dependencies ?? []) {
-    const depBlock = state.plan?.blocks.find((b) => b.block_id === depId);
-    if (!depBlock) continue; // unknown dependency: don't wait on it forever
-    for (const findingId of depBlock.items) {
-      const status = state.items?.[findingId]?.status;
-      if (!status || !TERMINAL_STATUSES.includes(status)) return false;
-    }
-  }
-  return true;
-}
-
-export const NO_CHANGE_RE = /\b(already correct|no.?op|no change|nothing to (change|do|fix)|code is correct)\b/i;
-
-/**
- * Decide whether an item spec represents a no-op (no source changes planned).
- *
- * The structured `no_change` flag is authoritative when the worker set it
- * explicitly: an explicit `false` must win even when `concrete_change` happens
- * to mention a no-change phrase about a sub-part (e.g. "no change is required in
- * constants.ts" inside a finding that does change other files). The heuristic
- * regex over the free-text spec is only a fallback for when `no_change` is
- * unspecified.
- */
-export function specIndicatesNoChange(
-  spec: { no_change?: boolean; concrete_change?: string } | undefined,
-): boolean {
-  if (spec?.no_change === true) return true;
-  if (spec?.no_change === false) return false;
-  return NO_CHANGE_RE.test(spec?.concrete_change ?? "");
-}
-
 function resolvedOrTerminalItems(state: RemediationState): RemediationItemState[] {
   return Object.values(state.items ?? {}).filter((item) =>
-    TERMINAL_STATUSES.includes(item.status),
+    isTerminalStatus(item.status),
   );
 }
 
@@ -854,6 +780,18 @@ Then run:
     const skipIds = Array.isArray(previewAck?.skip)
       ? previewAck.skip.filter((id): id is string => typeof id === "string")
       : [];
+    if (previewAck?.status === "declined") {
+      let changed = false;
+      for (const it of Object.values(state.items ?? {})) {
+        if (!["resolved", "blocked", "deemed_inappropriate"].includes(it.status)) {
+          it.status = "deemed_inappropriate";
+          it.failure_reason = "Implementation declined by the user at the preview step.";
+          changed = true;
+        }
+      }
+      if (changed) await new StateStore(artifactsDir).saveState(state);
+      return { continueWithState: state };
+    }
     if (skipIds.length > 0) {
       let changed = false;
       for (const id of skipIds) {
@@ -990,16 +928,15 @@ async function handleComplete(
 }
 
 async function handlePendingExtractedPlan(
+  root: string,
   artifactsDir: string,
   existing: RemediationState,
   extractedPlan: unknown,
 ): Promise<RemediationState | null> {
   try {
-    return await saveStateForPlan(
-      artifactsDir,
-      existing,
-      normalizeExtractedPlan(extractedPlan),
-    );
+    const normalized = normalizeExtractedPlan(extractedPlan);
+    const pipelined = await applyPlanPipeline(normalized, { root, artifactsDir });
+    return await saveStateForPlan(artifactsDir, existing, pipelined);
   } catch (error) {
     const paths = intakePaths(artifactsDir);
     try {
@@ -1365,6 +1302,16 @@ async function decideNextStepInner(
     kind: "state",
     obligation: state?.status ?? "pending",
   });
+  let countedStateStep = false;
+  const countStateStep = async (): Promise<void> => {
+    if (!state || countedStateStep) return;
+    if (!state.started_at) {
+      state.started_at = new Date().toISOString();
+    }
+    state.step_count = (state.step_count ?? 0) + 1;
+    countedStateStep = true;
+    await store.saveState(state);
+  };
 
   const inputResolution = resolveInputPaths(root, options.input);
 
@@ -1372,6 +1319,7 @@ async function decideNextStepInner(
   // silently resume the old plan (nor silently complete on a stale report).
   // Require the caller to choose resume-vs-restart explicitly.
   if (inputResolution.supplied && state != null && state.status !== "pending") {
+    await countStateStep();
     return handleInputConflict(root, artifactsDir, state, inputResolution);
   }
 
@@ -1406,6 +1354,7 @@ async function decideNextStepInner(
 
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
     if (state?.status === "complete") {
+      await countStateStep();
       return handleComplete(root, artifactsDir, state);
     }
 
@@ -1413,6 +1362,7 @@ async function decideNextStepInner(
       const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
       if (extractedPlan) {
         state = await handlePendingExtractedPlan(
+          root,
           artifactsDir,
           { status: "pending" },
           extractedPlan,
@@ -1429,6 +1379,8 @@ async function decideNextStepInner(
     if (!state) {
       return handleNoState(root, artifactsDir);
     }
+
+    await countStateStep();
 
     if (state.status === "waiting_for_clarification") {
       return handleWaitingForClarification(root, artifactsDir, state);

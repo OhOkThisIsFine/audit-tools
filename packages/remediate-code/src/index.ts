@@ -19,40 +19,14 @@ const { version: pkgVersion } = JSON.parse(
   readFileSync(join(pkgRoot, "package.json"), "utf8"),
 ) as { version: string };
 
-const OPENCODE_REMEDIATE_EDIT_PERMISSION = {
-  "*": "ask",
-  ".remediation-artifacts/**": "allow",
-  "remediation-report.md": "allow",
-  "remediation-report.json": "allow",
-};
-
-const OPENCODE_REMEDIATE_BASH_PERMISSION = {
-  "*": "ask",
-  "remediate-code run*": "deny",
-  "*dist*index.js* run*": "deny",
-  "*remediate-code.mjs* run*": "deny",
-  "remediate-code": "allow",
-  "remediate-code ensure*": "allow",
-  "remediate-code next-step*": "allow",
-  "remediate-code prepare-document-dispatch*": "allow",
-  "remediate-code merge-document-results*": "allow",
-  "remediate-code prepare-implement-dispatch*": "allow",
-  "remediate-code merge-implement-results*": "allow",
-  "remediate-code validate-artifacts*": "allow",
-  "*remediate-code.mjs": "allow",
-  "*remediate-code.mjs* ensure*": "allow",
-  "*remediate-code.mjs* next-step*": "allow",
-  "*remediate-code.mjs* prepare-document-dispatch*": "allow",
-  "*remediate-code.mjs* merge-document-results*": "allow",
-  "*remediate-code.mjs* prepare-implement-dispatch*": "allow",
-  "*remediate-code.mjs* merge-implement-results*": "allow",
-  "*remediate-code.mjs* validate-artifacts*": "allow",
-  "git status*": "allow",
-  "git diff*": "allow",
-  "grep *": "allow",
-  "Select-String *": "allow",
-  "rm *": "deny",
-};
+const _opencodeJson = JSON.parse(
+  readFileSync(join(pkgRoot, "opencode.json"), "utf8"),
+) as { agent?: { remediator?: { permission?: { edit?: Record<string, string>; bash?: Record<string, string> } } } };
+const _remediatorPermission = _opencodeJson.agent?.remediator?.permission ?? {};
+const OPENCODE_REMEDIATE_EDIT_PERMISSION: Record<string, string> =
+  _remediatorPermission.edit ?? {};
+const OPENCODE_REMEDIATE_BASH_PERMISSION: Record<string, string> =
+  _remediatorPermission.bash ?? {};
 
 const program = new Command();
 
@@ -156,12 +130,14 @@ program
     ".remediation-artifacts",
   )
   .action(async (options) => {
-    const plan = await prepareDocumentDispatch(
-      {
-        root: resolve(options.root),
-        artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
-      },
-      options.runId,
+    const plan = await withBackendLogsOnStderr(() =>
+      prepareDocumentDispatch(
+        {
+          root: resolve(options.root),
+          artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
+        },
+        options.runId,
+      ),
     );
     console.log(JSON.stringify(plan, null, 2));
   });
@@ -198,12 +174,14 @@ program
     ".remediation-artifacts",
   )
   .action(async (options) => {
-    const plan = await prepareImplementDispatch(
-      {
-        root: resolve(options.root),
-        artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
-      },
-      options.runId,
+    const plan = await withBackendLogsOnStderr(() =>
+      prepareImplementDispatch(
+        {
+          root: resolve(options.root),
+          artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
+        },
+        options.runId,
+      ),
     );
     console.log(JSON.stringify(plan, null, 2));
   });

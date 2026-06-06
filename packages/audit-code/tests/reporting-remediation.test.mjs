@@ -344,3 +344,107 @@ test("cross-lens dedup merges evidence from absorbed finding", () => {
   assert.ok(merged[0].evidence.includes("ev-sec"));
   assert.ok(merged[0].evidence.includes("ev-cor"));
 });
+
+// ── designAssessment branch ────────────────────────────────────────────────
+
+test("mergeFindings includes designAssessment.findings in output", () => {
+  const designFinding = makeFinding({
+    id: "DA-001",
+    title: "Architectural coupling violation",
+    severity: "high",
+    lens: "architecture",
+  });
+  const merged = mergeFindings(
+    [],
+    undefined,
+    undefined,
+    { generated_at: "2026-01-01T00:00:00Z", findings: [designFinding] },
+  );
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].title, "Architectural coupling violation");
+  assert.equal(merged[0].severity, "high");
+  assert.equal(merged[0].lens, "architecture");
+});
+
+test("mergeFindings includes designAssessment.review_findings in output", () => {
+  const designFinding = makeFinding({
+    id: "DA-001",
+    title: "Design finding A",
+    severity: "medium",
+    lens: "architecture",
+  });
+  const reviewFinding = makeFinding({
+    id: "DA-002",
+    title: "Design review finding B",
+    category: "Coupling",
+    severity: "low",
+    lens: "architecture",
+    affected_files: [{ path: "src/bar.ts", line_start: 5, line_end: 15 }],
+  });
+  const merged = mergeFindings(
+    [],
+    undefined,
+    undefined,
+    {
+      generated_at: "2026-01-01T00:00:00Z",
+      findings: [designFinding],
+      review_findings: [reviewFinding],
+    },
+  );
+  assert.equal(merged.length, 2);
+  const titles = merged.map((f) => f.title);
+  assert.ok(titles.includes("Design finding A"));
+  assert.ok(titles.includes("Design review finding B"));
+});
+
+test("mergeFindings merges an AuditResult finding into a matching designAssessment finding", () => {
+  // The designAssessment finding and the AuditResult finding share the same
+  // findingKey (lens|category|title|primaryPath|line_start|line_end), so
+  // mergeFindings should update the existing entry rather than add a duplicate.
+  const sharedProps = {
+    title: "Unchecked null dereference",
+    category: "General",
+    lens: "correctness",
+    affected_files: [{ path: "src/foo.ts", line_start: 1, line_end: 10 }],
+  };
+  const designFinding = makeFinding({
+    id: "DA-001",
+    ...sharedProps,
+    severity: "medium",
+    confidence: "medium",
+    evidence: ["design-ev"],
+  });
+  const auditResultFinding = makeFinding({
+    id: "AR-001",
+    ...sharedProps,
+    severity: "high",
+    confidence: "high",
+    evidence: ["audit-ev"],
+  });
+  const merged = mergeFindings(
+    [
+      {
+        task_id: "t-2",
+        unit_id: "u-1",
+        pass_id: "pass:correctness",
+        lens: "correctness",
+        file_coverage: [{ path: "src/foo.ts", total_lines: 100 }],
+        findings: [auditResultFinding],
+      },
+    ],
+    undefined,
+    undefined,
+    { generated_at: "2026-01-01T00:00:00Z", findings: [designFinding] },
+  );
+  assert.equal(merged.length, 1, "no duplicate — AuditResult finding merged into design finding");
+  assert.equal(merged[0].severity, "high", "higher severity from AuditResult is preserved");
+  assert.equal(merged[0].confidence, "high", "higher confidence from AuditResult is preserved");
+  assert.ok(
+    merged[0].evidence.includes("design-ev"),
+    "design-assessment evidence is retained",
+  );
+  assert.ok(
+    merged[0].evidence.includes("audit-ev"),
+    "AuditResult evidence is unioned in",
+  );
+});

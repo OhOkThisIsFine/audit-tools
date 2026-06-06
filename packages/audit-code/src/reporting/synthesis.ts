@@ -11,7 +11,10 @@ import type {
   SynthesisNarrative,
 } from "@audit-tools/shared";
 import { AUDITOR_REPORT_MARKER } from "@audit-tools/shared";
-import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
+import type {
+  RuntimeValidationReport,
+  RuntimeValidationTaskManifest,
+} from "../types/runtimeValidation.js";
 import { buildWorkBlocks, type WorkBlock } from "./workBlocks.js";
 import { mergeFindings } from "./mergeFindings.js";
 import { assignStableFindingIds } from "./findingIdentity.js";
@@ -40,6 +43,7 @@ export interface AuditReportSummary {
   finding_count: number;
   work_block_count: number;
   severity_breakdown: Record<string, number>;
+  lens_breakdown?: Record<string, number>;
   audited_file_count: number;
   excluded_file_count: number;
   runtime_validation_status_breakdown: Record<string, number>;
@@ -78,10 +82,22 @@ function severityBreakdown(findings: Finding[]): Record<string, number> {
   return countBy(findings, (finding) => finding.severity);
 }
 
+function lensBreakdown(findings: Finding[]): Record<string, number> {
+  return countBy(findings, (finding) => finding.lens);
+}
+
 function runtimeStatusBreakdown(
   report?: RuntimeValidationReport,
+  taskManifest?: RuntimeValidationTaskManifest,
 ): Record<string, number> {
-  return countBy(report?.results ?? [], (result) => result.status);
+  const breakdown = countBy(report?.results ?? [], (result) => result.status);
+  const resultTaskIds = new Set((report?.results ?? []).map((result) => result.task_id));
+  for (const task of taskManifest?.tasks ?? []) {
+    if (!resultTaskIds.has(task.id)) {
+      breakdown.pending = (breakdown.pending ?? 0) + 1;
+    }
+  }
+  return breakdown;
 }
 
 function coverageSummary(coverage?: CoverageMatrix): {
@@ -108,6 +124,14 @@ function formatSeverityList(summary: Record<string, number>): string {
   return parts.length > 0 ? parts.join(", ") : "none";
 }
 
+function formatCountList(summary: Record<string, number>): string {
+  const parts = Object.entries(summary)
+    .filter(([, count]) => count > 0)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, count]) => `${key}: ${count}`);
+  return parts.length > 0 ? parts.join(", ") : "none";
+}
+
 export function buildAuditReportModel(params: {
   results: AuditResult[];
   unitManifest?: UnitManifest;
@@ -115,6 +139,7 @@ export function buildAuditReportModel(params: {
   criticalFlows?: CriticalFlowManifest;
   coverageMatrix?: CoverageMatrix;
   runtimeValidationReport?: RuntimeValidationReport;
+  runtimeValidationTaskManifest?: RuntimeValidationTaskManifest;
   externalAnalyzerResults?: ExternalAnalyzerResults;
   designAssessment?: DesignAssessment;
 }): AuditReportModel {
@@ -137,21 +162,25 @@ export function buildAuditReportModel(params: {
     criticalFlows: params.criticalFlows,
   });
   const coverage = coverageSummary(params.coverageMatrix);
-  return {
+  const model: AuditReportModel = {
     summary: {
       finding_count: findings.length,
       work_block_count: workBlocks.length,
       severity_breakdown: severityBreakdown(findings),
+      lens_breakdown: lensBreakdown(findings),
       audited_file_count: coverage.audited_file_count,
       excluded_file_count: coverage.excluded_file_count,
       budget_deferred_task_count: coverage.budget_deferred_task_count,
       runtime_validation_status_breakdown: runtimeStatusBreakdown(
         params.runtimeValidationReport,
+        params.runtimeValidationTaskManifest,
       ),
     },
     findings,
     work_blocks: workBlocks,
   };
+  console.error(JSON.stringify({ tag: 'synthesis_complete', finding_count: findings.length, work_block_count: workBlocks.length, severity_breakdown: severityBreakdown(findings), audited_file_count: coverage.audited_file_count, excluded_file_count: coverage.excluded_file_count, budget_deferred_task_count: coverage.budget_deferred_task_count }));
+  return model;
 }
 
 /**
@@ -162,12 +191,14 @@ export function buildAuditReportModel(params: {
 export function buildAuditFindingsReport(
   model: AuditReportModel,
 ): AuditFindingsReport {
-  return {
+  const report: AuditFindingsReport = {
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
     summary: { ...model.summary },
     findings: model.findings,
     work_blocks: model.work_blocks,
   };
+  console.error(JSON.stringify({ tag: 'audit_findings_report_built', contract_version: AUDIT_FINDINGS_CONTRACT_VERSION, finding_count: model.findings.length, work_block_count: model.work_blocks.length }));
+  return report;
 }
 
 /**
@@ -243,6 +274,9 @@ export function renderAuditReportMarkdown(
     `- Findings: ${report.summary.finding_count}`,
     `- Work blocks: ${report.summary.work_block_count}`,
     `- Severity breakdown: ${formatSeverityList(report.summary.severity_breakdown)}`,
+    ...(report.summary.lens_breakdown && Object.keys(report.summary.lens_breakdown).length > 0
+      ? [`- Lens breakdown: ${formatCountList(report.summary.lens_breakdown)}`]
+      : []),
     `- Fully audited files: ${report.summary.audited_file_count}`,
     `- Excluded non-auditable files: ${report.summary.excluded_file_count}`,
     ...((report.summary.budget_deferred_task_count ?? 0) > 0

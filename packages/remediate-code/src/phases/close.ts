@@ -34,14 +34,43 @@ const OUTCOME_KEYS: RemediationOutcomeStatus[] = [
  * landed, rework count, closing status). Surface only: the auditor does not
  * consume this automatically.
  */
+function closingStatusReason(closingResult: ClosingResult): string | undefined {
+  if (closingResult.status === "skipped" && closingResult.action === "none") {
+    return "closing action is 'none' — no commit/push/publish configured";
+  }
+  if (closingResult.status === "failed") {
+    return `closing action '${closingResult.action}' failed`;
+  }
+  return undefined;
+}
+
+function parseTimestamp(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function durationBetweenMs(
+  startedAt: string | undefined,
+  completedAt: string | undefined,
+): number | undefined {
+  const started = parseTimestamp(startedAt);
+  const completed = parseTimestamp(completedAt);
+  if (started === undefined || completed === undefined || completed < started) {
+    return undefined;
+  }
+  return completed - started;
+}
+
 export function buildRemediationOutcomesReport(
   state: RemediationState,
-  closingStatus: string,
+  closingResult: ClosingResult,
 ): RemediationOutcomesReport {
   const findingsById = new Map(
     (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
   );
   const outcomes: RemediationOutcome[] = [];
+  const closeReason = closingStatusReason(closingResult);
   for (const item of Object.values(state.items ?? {})) {
     const outcome = OUTCOME_BY_STATUS[item.status];
     if (!outcome) continue; // skip non-terminal items (should not occur at close)
@@ -53,13 +82,18 @@ export function buildRemediationOutcomesReport(
           .filter((ext) => ext.length > 0),
       ),
     ].sort();
+    const durationMs = durationBetweenMs(item.started_at, item.completed_at);
     outcomes.push({
       finding_id: item.finding_id,
       lens: finding?.lens ?? "unknown",
       file_exts: fileExts,
       outcome,
       rework_count: item.rework_count ?? 0,
-      closing_status: closingStatus,
+      closing_status: closingResult.status,
+      ...(closeReason ? { closing_status_reason: closeReason } : {}),
+      ...(item.started_at ? { started_at: item.started_at } : {}),
+      ...(item.completed_at ? { completed_at: item.completed_at } : {}),
+      ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
     });
   }
   outcomes.sort((a, b) => a.finding_id.localeCompare(b.finding_id));
@@ -77,23 +111,63 @@ export function buildRemediationOutcomesReport(
     lensBucket[entry.outcome] = (lensBucket[entry.outcome] ?? 0) + 1;
   }
 
+  const startedEntries = outcomes
+    .map((outcome) => ({
+      value: outcome.started_at,
+      timestamp: parseTimestamp(outcome.started_at),
+    }))
+    .filter(
+      (entry): entry is { value: string; timestamp: number } =>
+        entry.value !== undefined && entry.timestamp !== undefined,
+    );
+  const completedEntries = outcomes
+    .map((outcome) => ({
+      value: outcome.completed_at,
+      timestamp: parseTimestamp(outcome.completed_at),
+    }))
+    .filter(
+      (entry): entry is { value: string; timestamp: number } =>
+        entry.value !== undefined && entry.timestamp !== undefined,
+    );
+  const aggregateStarted = startedEntries.reduce<
+    { value: string; timestamp: number } | undefined
+  >(
+    (earliest, entry) =>
+      !earliest || entry.timestamp < earliest.timestamp ? entry : earliest,
+    undefined,
+  );
+  const aggregateCompleted = completedEntries.reduce<
+    { value: string; timestamp: number } | undefined
+  >(
+    (latest, entry) =>
+      !latest || entry.timestamp > latest.timestamp ? entry : latest,
+    undefined,
+  );
+  const aggregateDuration =
+    aggregateStarted && aggregateCompleted
+      ? durationBetweenMs(aggregateStarted.value, aggregateCompleted.value)
+      : undefined;
+
   return {
     contract_version: "remediate-code-outcomes/v1alpha1",
     total: outcomes.length,
     by_outcome: byOutcome,
     by_lens: byLens,
+    ...(aggregateStarted ? { started_at: aggregateStarted.value } : {}),
+    ...(aggregateCompleted ? { completed_at: aggregateCompleted.value } : {}),
+    ...(aggregateDuration !== undefined ? { duration_ms: aggregateDuration } : {}),
     outcomes,
   };
 }
 
-interface ClosingCommandResult {
+export interface ClosingCommandResult {
   command: string[];
   exit_code: number | null;
   stdout?: string;
   stderr?: string;
 }
 
-interface ClosingResult {
+export interface ClosingResult {
   contract_version: "remediate-code-closing-result/v1alpha1";
   action: ClosingAction;
   status: "success" | "failed" | "skipped";
@@ -136,6 +210,9 @@ function isSuccess(result: ClosingCommandResult): boolean {
 
 const STAGING_EXCLUDE_PATTERNS = [
   /^\.remediation-artifacts\//,
+  // remediate-code runs in repos that also hold the auditor's output; never
+  // stage either tool's artifact directory.
+  /^\.audit-artifacts\//,
   /^\.env($|\.)/,
 ];
 
@@ -166,26 +243,27 @@ function executeClosingAction(
     return isSuccess(result);
   };
 
-  const stageAndCommit = (): boolean => {
+  if (action === "commit" || action === "push" || action === "open-pr") {
     const files = collectStagingFiles(options.root);
+    // Nothing to stage → vacuous success: no commit, push, or PR is attempted,
+    // so `commands` stays empty and the status is success.
     if (files.length === 0) {
       console.warn("No modified files to stage — skipping commit.");
-      return false;
+      return {
+        contract_version: "remediate-code-closing-result/v1alpha1",
+        action,
+        status: "success",
+        commands: [],
+      };
     }
-    return (
+    const committed =
       run("git", ["add", "--", ...files]) &&
-      run("git", ["commit", "-m", "Auto-remediation complete"])
-    );
-  };
-
-  if (action === "commit") {
-    stageAndCommit();
-  } else if (action === "push") {
-    stageAndCommit() && run("git", ["push"]);
-  } else if (action === "open-pr") {
-    stageAndCommit() &&
-      run("git", ["push"]) &&
-      run("gh", ["pr", "create", "--fill"]);
+      run("git", ["commit", "-m", "Auto-remediation complete"]);
+    if (committed && action === "push") {
+      run("git", ["push"]);
+    } else if (committed && action === "open-pr") {
+      run("git", ["push"]) && run("gh", ["pr", "create", "--fill"]);
+    }
   } else if (action === "publish") {
     run("npm", ["publish"]);
   } else if (action === "tag") {
@@ -197,13 +275,15 @@ function executeClosingAction(
   return {
     contract_version: "remediate-code-closing-result/v1alpha1",
     action,
-    status: commands.length > 0 && commands.every(isSuccess) ? "success" : "failed",
+    status: commands.every(isSuccess) ? "success" : "failed",
     commands,
   };
 }
 
 interface CombinedTestResult {
   passed: boolean;
+  duration_ms: number;
+  suite_name?: string;
   /** Tail of combined stdout/stderr captured on failure (empty on pass). */
   output: string;
 }
@@ -219,21 +299,26 @@ function runCombinedTestSuite(
 ): CombinedTestResult {
   console.log("Running full test suite on combined post-remediation state...");
   if (!state.plan?.test_command) {
-    return { passed: true, output: "" };
+    return { passed: true, duration_ms: 0, output: "" };
   }
+  const suiteName = Array.isArray(state.plan.test_command)
+    ? state.plan.test_command.join(" ")
+    : state.plan.test_command;
+  const startedAt = Date.now();
   const result = runShellCommand(state.plan.test_command, {
     cwd: options.root,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  const durationMs = Date.now() - startedAt;
   if (result.status === 0) {
-    return { passed: true, output: "" };
+    return { passed: true, suite_name: suiteName, duration_ms: durationMs, output: "" };
   }
   const output = (
     (result.stdout?.toString() ?? "") + (result.stderr?.toString() ?? "")
   )
     .trim()
     .slice(-FAILURE_OUTPUT_TAIL_CHARS);
-  return { passed: false, output };
+  return { passed: false, suite_name: suiteName, duration_ms: durationMs, output };
 }
 
 /**
@@ -249,6 +334,7 @@ function blockResolvedItemsOnCombinedFailure(
   for (const item of Object.values(state.items ?? {})) {
     if (item.status === "resolved" || item.status === "resolved_no_change") {
       item.status = "blocked";
+      item.completed_at = new Date().toISOString();
       item.failure_reason = `Combined test suite failed after remediation (likely a cross-block interaction issue).${testOutput ? `\n\nTest output:\n${testOutput}` : ""}`;
       anyBlocked = true;
     }
@@ -294,7 +380,7 @@ function runE2eTests(
 interface ResolvedReportEntry {
   finding_id: string;
   summary: string;
-  verification_evidence?: string;
+  verification_evidence?: string[];
 }
 interface RationaleReportEntry {
   finding_id: string;
@@ -305,6 +391,7 @@ interface ReportEntries {
   verifiedNoChange: ResolvedReportEntry[];
   inappropriate: RationaleReportEntry[];
   ignored: RationaleReportEntry[];
+  blocked: RationaleReportEntry[];
 }
 
 /**
@@ -321,12 +408,13 @@ function collectReportEntries(
     verifiedNoChange: [],
     inappropriate: [],
     ignored: [],
+    blocked: [],
   };
   for (const item of Object.values(state.items ?? {})) {
     if (item.status === "resolved" || item.status === "resolved_no_change") {
       const finding = state.plan?.findings.find((f) => f.id === item.finding_id);
       const title = finding?.title ?? "Unknown";
-      let verificationEvidence: string | undefined;
+      let verificationEvidence: string[] | undefined;
 
       const verificationResultPath = join(
         options.artifactsDir,
@@ -335,7 +423,9 @@ function collectReportEntries(
       if (existsSync(verificationResultPath)) {
         try {
           const verRes = JSON.parse(readFileSync(verificationResultPath, "utf8"));
-          if (verRes.reason) verificationEvidence = verRes.reason;
+          if (Array.isArray(verRes.reason) && verRes.reason.length > 0) {
+            verificationEvidence = verRes.reason;
+          }
         } catch (error) {
           console.warn(
             `Failed to parse verification result ${verificationResultPath}.`,
@@ -364,6 +454,11 @@ function collectReportEntries(
         finding_id: item.finding_id,
         rationale: item.failure_reason ?? "Ignored by user",
       });
+    } else if (item.status === "blocked") {
+      entries.blocked.push({
+        finding_id: item.finding_id,
+        rationale: item.failure_reason ?? "Blocked",
+      });
     }
   }
   return entries;
@@ -379,6 +474,7 @@ function buildRemediationReportMarkdown(
   closingResult: ClosingResult,
   e2ePassed: boolean | undefined,
   outcomesReport: RemediationOutcomesReport,
+  combinedTest: CombinedTestResult,
 ): string {
   let reportContent = `# Remediation Report\n\n`;
 
@@ -388,8 +484,11 @@ function buildRemediationReportMarkdown(
   } else {
     for (const entry of entries.resolved) {
       reportContent += `- **${entry.finding_id}**: ${entry.summary}\n`;
-      if (entry.verification_evidence)
-        reportContent += `  - *Verification*: ${entry.verification_evidence}\n`;
+      if (entry.verification_evidence) {
+        for (const check of entry.verification_evidence) {
+          reportContent += `  - *Verification*: ${check}\n`;
+        }
+      }
     }
   }
 
@@ -397,8 +496,11 @@ function buildRemediationReportMarkdown(
     reportContent += `\n## Verified Already Correct (no changes made)\n\n`;
     for (const entry of entries.verifiedNoChange) {
       reportContent += `- **${entry.finding_id}**: ${entry.summary}\n`;
-      if (entry.verification_evidence)
-        reportContent += `  - *Verification*: ${entry.verification_evidence}\n`;
+      if (entry.verification_evidence) {
+        for (const check of entry.verification_evidence) {
+          reportContent += `  - *Verification*: ${check}\n`;
+        }
+      }
     }
   }
 
@@ -435,6 +537,11 @@ function buildRemediationReportMarkdown(
       );
       reportContent += `- ${lens}: ${parts.join(", ")}\n`;
     }
+  }
+
+  if (!combinedTest.passed) {
+    reportContent += `\n## Combined Test Suite Failure\n\nThe full test suite failed after remediation. No items with a resolved status were available to re-block, so the run completed, but the following failure was recorded:\n\n`;
+    if (combinedTest.output) reportContent += `\`\`\`\n${combinedTest.output}\n\`\`\`\n`;
   }
 
   return reportContent;
@@ -522,6 +629,9 @@ export async function runClosePhase(
     if (blockResolvedItemsOnCombinedFailure(state, combinedTest.output)) {
       return { ...state, status: "triage" };
     }
+    console.warn(
+      "Combined test suite failed but no resolved items to re-block — completing with test failure recorded in report.",
+    );
   }
 
   // 2. Run end-to-end tests on the fully merged post-remediation state.
@@ -542,7 +652,7 @@ export async function runClosePhase(
   // Phase 7B: capture per-finding outcomes (surface only).
   const outcomesReport = buildRemediationOutcomesReport(
     state,
-    closingResult.status,
+    closingResult,
   );
   // One run-log line per outcome, plus a summary line for the artifact write.
   for (const outcome of outcomesReport.outcomes) {
@@ -560,14 +670,25 @@ export async function runClosePhase(
     closingResult,
     e2ePassed,
     outcomesReport,
+    combinedTest,
   );
+  const endedAt = new Date().toISOString();
 
   const jsonReport = {
+    started_at: state.started_at ?? null,
+    ended_at: endedAt,
+    step_count: state.step_count ?? 0,
     resolved: entries.resolved,
     verified_no_change: entries.verifiedNoChange,
     inappropriate: entries.inappropriate,
     ignored: entries.ignored,
-    combined_test_result: { passed: combinedTest.passed },
+    blocked: entries.blocked,
+    combined_test_result: {
+      passed: combinedTest.passed,
+      ...(combinedTest.suite_name ? { suite_name: combinedTest.suite_name } : {}),
+      duration_ms: combinedTest.duration_ms,
+      ...(combinedTest.output ? { failure_summary: combinedTest.output } : {}),
+    },
     ...(e2ePassed !== undefined ? { e2e_result: { passed: e2ePassed } } : {}),
     closing_result: {
       action: state.closing_plan.action,

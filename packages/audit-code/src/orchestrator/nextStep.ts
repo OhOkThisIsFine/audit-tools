@@ -72,6 +72,8 @@ export function decideNextStep(bundle: ArtifactBundle): NextStepDecision {
     state,
     selected_obligation: next.id,
     selected_executor: executor?.id ?? null,
-    reason: `Selected highest-priority actionable obligation ${next.id}.`,
+    reason: executor
+      ? `Selected highest-priority actionable obligation ${next.id}.`
+      : `No executor found for obligation ${next.id}; EXECUTOR_REGISTRY has no entry for this obligation ID. This is a configuration gap — the obligation was selected but cannot be dispatched.`,
   };
 }

@@ -6,12 +6,12 @@ import type {
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
 import {
-  buildReverseDependencyMap,
+  buildArtifactDependenciesMap,
   hashArtifactValue,
   stableStringify,
 } from "./artifactFreshness.js";
 
-const REVERSE_DEPENDENCY_MAP = buildReverseDependencyMap();
+const ARTIFACT_DEPENDENCIES_MAP = buildArtifactDependenciesMap();
 
 function computeDependencyFirstOrder(
   artifactNames: Iterable<string>,
@@ -26,7 +26,7 @@ function computeDependencyFirstOrder(
     if (temporary.has(artifactName)) return;
     temporary.add(artifactName);
 
-    const dependencies = (REVERSE_DEPENDENCY_MAP[artifactName] ?? [])
+    const dependencies = (ARTIFACT_DEPENDENCIES_MAP[artifactName] ?? [])
       .filter((dependencyName) => target.has(dependencyName))
       .sort();
     for (const dependencyName of dependencies) {
@@ -71,7 +71,7 @@ export function computeArtifactMetadata(
 ): ArtifactMetadataManifest {
   const artifacts: Record<string, ArtifactMetadataEntry> = {};
   const updated = new Set(updatedArtifacts);
-  const presentArtifacts = Object.keys(REVERSE_DEPENDENCY_MAP).filter(
+  const presentArtifacts = Object.keys(ARTIFACT_DEPENDENCIES_MAP).filter(
     (artifactName) =>
       artifactName !== "artifact_metadata.json" &&
       present(bundle, artifactName),
@@ -91,7 +91,7 @@ export function computeArtifactMetadata(
 
     const contentHash = hashArtifactValue(artifactName, value);
     const dependencyRevisions = Object.fromEntries(
-      (REVERSE_DEPENDENCY_MAP[artifactName] ?? [])
+      (ARTIFACT_DEPENDENCIES_MAP[artifactName] ?? [])
         .filter((dependencyName) => dependencyName !== "artifact_metadata.json")
         .sort()
         .map((dependencyName) => [

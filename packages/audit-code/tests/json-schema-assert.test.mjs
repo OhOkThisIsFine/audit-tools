@@ -172,12 +172,37 @@ test("jsonSchemaAssert preserves refs, combiners, const, and enum behavior after
     );
   });
 
-  await t.test("preserves not combiner behavior — not keyword absent means no restriction", () => {
-    const schema = { type: "string" };
-    assert.doesNotThrow(() =>
-      assertMatchesJsonSchema(schema, "anything", "val"),
-    );
-  });
+  await t.test(
+    "silently ignores not keyword — helper does not implement not, so value matching the not-schema still passes",
+    () => {
+      // The helper does not implement the `not` keyword — it is silently ignored.
+      // A value that should be rejected by `not: { type: 'string' }` still passes.
+      assert.doesNotThrow(
+        () => assertMatchesJsonSchema({ not: { type: "string" } }, "a string value", "val"),
+        "not constraint is silently ignored by the helper",
+      );
+      // Combining `not` with another keyword: the `not` portion is still silently ignored.
+      assert.doesNotThrow(
+        () =>
+          assertMatchesJsonSchema(
+            { type: "string", not: { minLength: 3 } },
+            "hi",
+            "val",
+          ),
+        "not constraint on minLength is silently ignored",
+      );
+    },
+  );
+
+  await t.test(
+    "schema without not keyword validates normally (baseline — not keyword absence imposes no restriction)",
+    () => {
+      const schema = { type: "string" };
+      assert.doesNotThrow(() =>
+        assertMatchesJsonSchema(schema, "anything", "val"),
+      );
+    },
+  );
 
   await t.test("preserves const acceptance behavior", () => {
     const schema = { const: "fixed-value" };
@@ -261,6 +286,27 @@ test("jsonSchemaAssert rejects invalid date-time strings", async (t) => {
       /ts must match date-time format/,
     );
   });
+
+  await t.test("rejects a malformed timestamp-like value with invalid month (13)", () => {
+    assert.throws(
+      () => assertMatchesJsonSchema(schema, "2024-13-01T10:30:00Z", "ts"),
+      /ts must match date-time format/,
+    );
+  });
+
+  await t.test("rejects a non-existent calendar date (Feb 30)", () => {
+    assert.throws(
+      () => assertMatchesJsonSchema(schema, "2024-02-30T10:30:00Z", "ts"),
+      /ts must match date-time format/,
+    );
+  });
+
+  await t.test("rejects a non-existent calendar date (Apr 31)", () => {
+    assert.throws(
+      () => assertMatchesJsonSchema(schema, "2024-04-31T10:30:00Z", "ts"),
+      /ts must match date-time format/,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -340,6 +386,151 @@ test("dispatch quota schema enforces cooldown_until date-time format through hel
     const quota = { ...baseQuota, cooldown_until: null };
     assert.doesNotThrow(() =>
       assertMatchesJsonSchema(schema, quota, "quota"),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DAT-3a3fe3af: if/then/else keyword support in jsonSchemaAssert
+// ---------------------------------------------------------------------------
+
+const IF_THEN_SCHEMA = {
+  type: "object",
+  required: ["action"],
+  properties: {
+    action: { type: "string" },
+    custom_command: { type: "string" },
+    standard_arg: { type: "string" },
+  },
+  if: {
+    properties: { action: { const: "custom" } },
+    required: ["action"],
+  },
+  then: { required: ["custom_command"] },
+};
+
+const IF_THEN_ELSE_SCHEMA = {
+  ...IF_THEN_SCHEMA,
+  else: { required: ["standard_arg"] },
+};
+
+test("jsonSchemaAssert if/then: enforces then-branch when if condition is satisfied", async (t) => {
+  await t.test("throws when action=custom but custom_command is absent", () => {
+    assert.throws(
+      () => assertMatchesJsonSchema(IF_THEN_SCHEMA, { action: "custom" }, "obj"),
+      /obj\.custom_command is required/,
+    );
+  });
+
+  await t.test("does not throw when action=custom and custom_command is present", () => {
+    assert.doesNotThrow(() =>
+      assertMatchesJsonSchema(
+        IF_THEN_SCHEMA,
+        { action: "custom", custom_command: "my-cmd" },
+        "obj",
+      ),
+    );
+  });
+});
+
+test("jsonSchemaAssert if/then: skips then-branch when if condition is not satisfied", async (t) => {
+  await t.test("does not throw when action=run even though custom_command is absent", () => {
+    assert.doesNotThrow(() =>
+      assertMatchesJsonSchema(IF_THEN_SCHEMA, { action: "run" }, "obj"),
+    );
+  });
+});
+
+test("jsonSchemaAssert if/then/else: enforces else-branch when if condition is not satisfied", async (t) => {
+  await t.test("throws when action=run but standard_arg is absent", () => {
+    assert.throws(
+      () => assertMatchesJsonSchema(IF_THEN_ELSE_SCHEMA, { action: "run" }, "obj"),
+      /obj\.standard_arg is required/,
+    );
+  });
+
+  await t.test("does not throw when action=run and standard_arg is present", () => {
+    assert.doesNotThrow(() =>
+      assertMatchesJsonSchema(
+        IF_THEN_ELSE_SCHEMA,
+        { action: "run", standard_arg: "myarg" },
+        "obj",
+      ),
+    );
+  });
+});
+
+test("jsonSchemaAssert if with no then and no else: no assertion for any value", async (t) => {
+  const schema = {
+    type: "object",
+    properties: { action: { type: "string" } },
+    if: { properties: { action: { const: "custom" } }, required: ["action"] },
+  };
+
+  await t.test("does not throw when if condition is satisfied", () => {
+    assert.doesNotThrow(() =>
+      assertMatchesJsonSchema(schema, { action: "custom" }, "obj"),
+    );
+  });
+
+  await t.test("does not throw when if condition is not satisfied", () => {
+    assert.doesNotThrow(() =>
+      assertMatchesJsonSchema(schema, { action: "other" }, "obj"),
+    );
+  });
+});
+
+test("jsonSchemaAssert closing_plan if/then: custom_command required when action=custom", async (t) => {
+  // Mirrors remediate-code's closing_plan.schema.json if/then contract, but with
+  // the closing_action enum inlined. The real schema resolves the action enum via
+  // `$ref: "shared.schema.json#/$defs/closing_action"`, a sibling of the schema
+  // inside remediate-code; that cross-package reference is not resolvable from
+  // audit-code's assertMatchesJsonSchema registry, so we inline the contract under
+  // test here rather than load the file across packages.
+  const closingPlanSchema = {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    required: ["action"],
+    properties: {
+      action: {
+        type: "string",
+        enum: ["commit", "push", "open-pr", "publish", "tag", "none", "custom"],
+      },
+      custom_command: {
+        type: "array",
+        items: { type: "string" },
+      },
+    },
+    if: {
+      properties: { action: { const: "custom" } },
+    },
+    then: {
+      required: ["custom_command"],
+    },
+    additionalProperties: false,
+  };
+
+  await t.test("throws for { action: 'custom' } — custom_command is missing", () => {
+    assert.throws(
+      () =>
+        assertMatchesJsonSchema(closingPlanSchema, { action: "custom" }, "plan"),
+      /plan\.custom_command is required/,
+    );
+  });
+
+  await t.test("does not throw for { action: 'custom', custom_command: [...] }", () => {
+    assert.doesNotThrow(() =>
+      assertMatchesJsonSchema(
+        closingPlanSchema,
+        { action: "custom", custom_command: ["my-cmd"] },
+        "plan",
+      ),
+    );
+  });
+
+  await t.test("does not throw for non-custom action without custom_command", () => {
+    assert.doesNotThrow(() =>
+      assertMatchesJsonSchema(closingPlanSchema, { action: "commit" }, "plan"),
     );
   });
 });

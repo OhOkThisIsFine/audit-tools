@@ -42,7 +42,8 @@ test("disabled logger writes nothing", async () => {
 
     const sink = RunLogger.disabled();
     assert.equal(sink.isEnabled, false);
-    sink.event({ kind: "noop" }); // must not throw
+    // @ts-expect-error — "noop" is not a RunLogEventKind; disabled logger must still not throw
+    sink.event({ kind: "noop" });
   });
 });
 
@@ -78,12 +79,42 @@ test("injectable now clock is used in the non-serializable fallback path", async
   });
 });
 
+test("RunLogEvent compile-time type constraints", async () => {
+  // This test documents the closed-vocabulary shape of RunLogEvent.
+  // All assertions are purely structural (no runtime assertion library needed):
+  // the @ts-expect-error lines confirm tsc rejects unknown/invalid fields, while
+  // the well-typed literal below confirms valid fields compile without error.
+
+  /** @type {import("../src/observability/runLog.ts").RunLogEvent} */
+  const validEvent = {
+    kind: "executor_end",
+    phase: "advance",
+    obligation: "repo_manifest",
+    artifact: "repo_manifest.json",
+    provider: "claude-code",
+    tokens_est: 100,
+    duration_ms: 42,
+    note: "done",
+  };
+  // Ensure the valid event is used (prevents unused-variable lint noise).
+  assert.equal(typeof validEvent.kind, "string");
+
+  // @ts-expect-error — unknown field (misspelled "durtion_ms") must be a compile-time error
+  const _bad1 = /** @type {import("../src/observability/runLog.ts").RunLogEvent} */ ({ kind: "executor_end", durtion_ms: 5 });
+  void _bad1;
+
+  // @ts-expect-error — "noop" is not in RunLogEventKind
+  const _bad2 = /** @type {import("../src/observability/runLog.ts").RunLogEvent} */ ({ kind: "noop" });
+  void _bad2;
+});
+
 test("a BigInt payload triggers the unserializable_event fallback marker", async () => {
   await withTempDir(async (dir) => {
     const path = join(dir, "run.log.jsonl");
     const logger = new RunLogger(path, { now: () => 0 });
     // JSON.stringify throws on BigInt, exercising the same catch as the circular
     // case but via a different unserializable value.
+    // @ts-expect-error — BigInt is not assignable to number; the logger must handle it gracefully
     logger.event({ kind: "outcome", tokens_est: 5n });
 
     const line = (await readFile(path, "utf8")).trim();

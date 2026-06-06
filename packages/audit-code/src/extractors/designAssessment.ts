@@ -23,6 +23,35 @@ function allEdges(graphBundle: GraphBundle): GraphEdge[] {
   return edges;
 }
 
+function dfsVisit(
+  node: string,
+  path: string[],
+  adjacency: Map<string, Set<string>>,
+  visited: Set<string>,
+  stack: Set<string>,
+  cycles: string[][],
+): void {
+  if (stack.has(node)) {
+    const cycleStart = path.indexOf(node);
+    if (cycleStart >= 0) {
+      cycles.push(path.slice(cycleStart));
+    }
+    return;
+  }
+  if (visited.has(node)) return;
+
+  visited.add(node);
+  stack.add(node);
+  path.push(node);
+
+  for (const neighbor of adjacency.get(node) ?? []) {
+    dfsVisit(neighbor, path, adjacency, visited, stack, cycles);
+  }
+
+  path.pop();
+  stack.delete(node);
+}
+
 function detectCycles(edges: GraphEdge[]): string[][] {
   const adjacency = new Map<string, Set<string>>();
   for (const edge of edges) {
@@ -34,30 +63,8 @@ function detectCycles(edges: GraphEdge[]): string[][] {
   const visited = new Set<string>();
   const stack = new Set<string>();
 
-  function dfs(node: string, path: string[]): void {
-    if (stack.has(node)) {
-      const cycleStart = path.indexOf(node);
-      if (cycleStart >= 0) {
-        cycles.push(path.slice(cycleStart));
-      }
-      return;
-    }
-    if (visited.has(node)) return;
-
-    visited.add(node);
-    stack.add(node);
-    path.push(node);
-
-    for (const neighbor of adjacency.get(node) ?? []) {
-      dfs(neighbor, path);
-    }
-
-    path.pop();
-    stack.delete(node);
-  }
-
   for (const node of adjacency.keys()) {
-    dfs(node, []);
+    dfsVisit(node, [], adjacency, visited, stack, cycles);
   }
   return cycles;
 }
@@ -233,7 +240,7 @@ function detectUnitSprawl(
 
   const fileCounts = unitManifest.units.map((u) => u.files.length);
   const totalFiles = fileCounts.reduce((a, b) => a + b, 0);
-  const maxFiles = Math.max(...fileCounts);
+  const maxFiles = fileCounts.reduce((max, n) => n > max ? n : max, 0);
 
   const findings: Finding[] = [];
 

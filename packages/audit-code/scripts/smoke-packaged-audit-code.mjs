@@ -34,7 +34,7 @@ const requiredPackagedPaths = [
   "skills/audit-code/audit-code.prompt.md",
 ];
 const verbose = process.env.AUDIT_CODE_VERBOSE === "1";
-const liveCommandOutput = verbose || process.env.CI === "true";
+const liveCommandOutput = true;
 
 async function countLines(root, path) {
   const content = await readFile(join(root, path), "utf8");
@@ -431,11 +431,6 @@ async function main() {
 
     stepStart = Date.now();
     step("npm pack @audit-tools/shared");
-    if (liveCommandOutput) {
-      detail(
-        "Streaming child npm output because AUDIT_CODE_VERBOSE=1 or CI=true is set.",
-      );
-    }
     detail(
       "Isolating inherited npm_config_* overrides and publish credentials so nested npm publish --dry-run does not suppress tarball generation.",
     );

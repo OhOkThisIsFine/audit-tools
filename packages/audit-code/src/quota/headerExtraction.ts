@@ -43,7 +43,7 @@ function parseResetValue(value: string): string | null {
 
 function parseNumericValue(value: string): number | null {
   const n = parseInt(value, 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 export function extractRateLimitHeaders(text: string): ExtractedRateLimits | null {
@@ -83,6 +83,11 @@ export function extractRateLimitHeaders(text: string): ExtractedRateLimits | nul
     if (jsonResult) return jsonResult;
   }
 
+  if (!found && text.trim().length > 0) {
+    process.stderr.write(
+      "[quota] header extraction: no rate-limit data found in non-empty stderr text (possible provider format change)\n",
+    );
+  }
   return found ? result : null;
 }
 
@@ -124,7 +129,7 @@ function extractFromHeaderObject(headers: Record<string, unknown>): ExtractedRat
       const val = headers[key] ?? headers[key.toLowerCase()];
       if (val != null) {
         const n = typeof val === "number" ? val : parseInt(String(val), 10);
-        if (Number.isFinite(n) && n > 0) return n;
+        if (Number.isFinite(n) && n >= 0) return n;
       }
     }
     return null;

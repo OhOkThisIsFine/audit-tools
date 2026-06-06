@@ -11,7 +11,7 @@
     "release:changed:minor:publish": "node scripts/release-changed.mjs --bump=minor",
     "release:changed:major:publish": "node scripts/release-changed.mjs --bump=major",
     "release:changed:dry-run": "node scripts/release-changed.mjs --dry-run",
-    "submit": "node \"C:\\Users\\ethan\\AppData\\Roaming\\npm\\node_modules\\auditor-lambda\\audit-code.mjs\" submit-packet"
+    "submit": "audit-code submit-packet"
   },
   "engines": {
     "node": ">=20"

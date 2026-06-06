@@ -27,6 +27,16 @@ export const PACKET_SCHEMA_FILENAMES = [
   "audit_task.schema.json",
 ] as const;
 
+async function copySchemaFiles(
+  targetDir: string,
+  entries: Array<{ srcPath: string; name: string }>,
+): Promise<void> {
+  await mkdir(targetDir, { recursive: true });
+  for (const entry of entries) {
+    await writeFile(join(targetDir, entry.name), await readFile(entry.srcPath, "utf8"), "utf8");
+  }
+}
+
 /**
  * Copy {@link PACKET_SCHEMA_FILENAMES} into `targetDir` under their canonical
  * filenames, making the AuditResult schema reachable from a dispatch run's
@@ -36,14 +46,7 @@ export async function writePacketSchemaFiles(
   targetDir: string,
   pkgRoot: string,
 ): Promise<void> {
-  await mkdir(targetDir, { recursive: true });
-  for (const name of PACKET_SCHEMA_FILENAMES) {
-    await writeFile(
-      join(targetDir, name),
-      await readFile(join(pkgRoot, "schemas", name), "utf8"),
-      "utf8",
-    );
-  }
+  await copySchemaFiles(targetDir, PACKET_SCHEMA_FILENAMES.map(name => ({ srcPath: join(pkgRoot, "schemas", name), name })));
 }
 const CURRENT_TASK_FILENAME = "current-task.json";
 const CURRENT_PROMPT_FILENAME = "current-prompt.md";
@@ -115,22 +118,11 @@ async function writeDispatchSchemaFiles(artifactsDir: string): Promise<void> {
   // Ensure the dispatch dir exists: this is now written before the pointer
   // files (which formerly created it), and parallel-slot dispatch may reach
   // here before the canonical dispatch has run.
-  await mkdir(dispatchDir, { recursive: true });
-  await writeFile(
-    join(dispatchDir, CURRENT_SCHEMA_FILENAME),
-    await readFile(auditResultSchemaPath, "utf8"),
-    "utf8",
-  );
-  await writeFile(
-    join(dispatchDir, CURRENT_RESULTS_SCHEMA_FILENAME),
-    await readFile(auditResultsSchemaPath, "utf8"),
-    "utf8",
-  );
-  await writeFile(
-    join(dispatchDir, CURRENT_FINDING_SCHEMA_FILENAME),
-    await readFile(findingSchemaPath, "utf8"),
-    "utf8",
-  );
+  await copySchemaFiles(dispatchDir, [
+    { srcPath: auditResultSchemaPath,  name: CURRENT_SCHEMA_FILENAME },
+    { srcPath: auditResultsSchemaPath, name: CURRENT_RESULTS_SCHEMA_FILENAME },
+    { srcPath: findingSchemaPath,      name: CURRENT_FINDING_SCHEMA_FILENAME },
+  ]);
 }
 
 function renderSingleTaskFallbackPrompt(task: WorkerTask, auditTask: AuditTask): string {
@@ -199,94 +191,117 @@ export async function writeWorkerTaskFiles(
   artifactsDir: string,
   currentTasks?: AuditTask[],
   options: { updateDispatch?: boolean } = {},
+  log?: { event: (name: string, data: Record<string, unknown>) => void },
 ): Promise<void> {
-  await mkdir(paths.runDir, { recursive: true });
-  await writeJsonFile(paths.taskPath, task);
-  await writeFile(paths.promptPath, prompt, "utf8");
-  await writeJsonFile(paths.statusPath, {
-    run_id: task.run_id,
-    status: "dispatched",
-  });
+  try {
+    await mkdir(paths.runDir, { recursive: true });
+    await writeJsonFile(paths.taskPath, task);
+    await writeFile(paths.promptPath, prompt, "utf8");
+    await writeJsonFile(paths.statusPath, {
+      run_id: task.run_id,
+      status: "dispatched",
+    });
 
-  // The result schema files are always required by the worker, regardless of
-  // whether this run owns the shared "current dispatch" pointer files.
-  await writeDispatchSchemaFiles(artifactsDir);
+    // The result schema files are always required by the worker, regardless of
+    // whether this run owns the shared "current dispatch" pointer files.
+    await writeDispatchSchemaFiles(artifactsDir);
 
-  // Parallel-slot dispatch passes updateDispatch:false so each slot does NOT
-  // clobber the shared current-task / current-prompt / current-tasks pointers
-  // (only the single canonical dispatch should own them). The default path
-  // (updateDispatch unset/true) refreshes those pointers and the single-task
-  // fallback.
-  const updateDispatch = options.updateDispatch !== false;
-  if (!updateDispatch) {
-    return;
+    // Parallel-slot dispatch passes updateDispatch:false so each slot does NOT
+    // clobber the shared current-task / current-prompt / current-tasks pointers
+    // (only the single canonical dispatch should own them). The default path
+    // (updateDispatch unset/true) refreshes those pointers and the single-task
+    // fallback.
+    const updateDispatch = options.updateDispatch !== false;
+    if (!updateDispatch) {
+      return;
+    }
+    await writeJsonFile(
+      join(artifactsDir, "dispatch", CURRENT_TASK_FILENAME),
+      task,
+    );
+    await writeFile(
+      join(artifactsDir, "dispatch", CURRENT_PROMPT_FILENAME),
+      prompt,
+      "utf8",
+    );
+    await writeJsonFile(
+      join(artifactsDir, "dispatch", CURRENT_TASKS_FILENAME),
+      currentTasks ?? [],
+    );
+    await writeSingleTaskFallbackFiles(artifactsDir, task, currentTasks);
+  } catch (err) {
+    log?.event("dispatch_io_error", {
+      run_id: task.run_id ?? null,
+      function: "writeWorkerTaskFiles",
+      error: String(err),
+    });
+    throw err;
   }
-  await writeJsonFile(
-    join(artifactsDir, "dispatch", CURRENT_TASK_FILENAME),
-    task,
-  );
-  await writeFile(
-    join(artifactsDir, "dispatch", CURRENT_PROMPT_FILENAME),
-    prompt,
-    "utf8",
-  );
-  await writeJsonFile(
-    join(artifactsDir, "dispatch", CURRENT_TASKS_FILENAME),
-    currentTasks ?? [],
-  );
-  await writeSingleTaskFallbackFiles(artifactsDir, task, currentTasks);
 }
 
 export async function writeDispatchBatchFiles(
   artifactsDir: string,
   runs: DispatchBatchRun[],
   currentTasks: AuditTask[],
+  log?: { event: (name: string, data: Record<string, unknown>) => void },
 ): Promise<void> {
-  const summary = {
-    contract_version: "audit-code-dispatch/v1alpha1",
-    mode: "parallel-batch",
-    run_count: runs.length,
-    current_tasks_path: join(artifactsDir, "dispatch", CURRENT_TASKS_FILENAME),
-    runs,
-  };
-  const promptLines = [
-    "# audit-code parallel dispatch",
-    "",
-    `This batch launched ${runs.length} deferred review run(s).`,
-    "Each run keeps its own task.json, prompt.md, result.json, and status.json under .audit-artifacts/runs/<run_id>/.",
-    "Use current-tasks.json for the combined task list. The per-run files below are operational references for launched workers; do not read per-run prompt or schema files unless debugging a failed dispatch.",
-    "",
-    "Runs:",
-    ...runs.flatMap((run) => [
-      `- ${run.run_id}`,
-      `  task: ${run.task_path}`,
-      `  prompt (worker-owned; do not read during normal orchestration): ${run.prompt_path}`,
-      `  result: ${run.result_path}`,
-      `  status: ${run.status_path}`,
-      ...(run.audit_results_path
-        ? [`  audit results: ${run.audit_results_path}`]
-        : []),
-      ...(run.pending_audit_tasks_path
-        ? [`  pending tasks: ${run.pending_audit_tasks_path}`]
-        : []),
-    ]),
-    "",
-  ];
+  try {
+    const summary = {
+      contract_version: "audit-code-dispatch/v1alpha1",
+      mode: "parallel-batch",
+      run_count: runs.length,
+      current_tasks_path: join(artifactsDir, "dispatch", CURRENT_TASKS_FILENAME),
+      runs,
+    };
+    const promptLines = [
+      "# audit-code parallel dispatch",
+      "",
+      `This batch launched ${runs.length} deferred review run(s).`,
+      "Each run keeps its own task.json, prompt.md, result.json, and status.json under .audit-artifacts/runs/<run_id>/.",
+      "Use current-tasks.json for the combined task list. The per-run files below are operational references for launched workers; do not read per-run prompt or schema files unless debugging a failed dispatch.",
+      "",
+      "Runs:",
+      ...runs.flatMap((run) => [
+        `- ${run.run_id}`,
+        `  task: ${run.task_path}`,
+        `  prompt (worker-owned; do not read during normal orchestration): ${run.prompt_path}`,
+        `  result: ${run.result_path}`,
+        `  status: ${run.status_path}`,
+        ...(run.audit_results_path
+          ? [`  audit results: ${run.audit_results_path}`]
+          : []),
+        ...(run.pending_audit_tasks_path
+          ? [`  pending tasks: ${run.pending_audit_tasks_path}`]
+          : []),
+      ]),
+      "",
+    ];
 
-  await writeJsonFile(join(artifactsDir, "dispatch", CURRENT_TASK_FILENAME), summary);
-  await writeFile(
-    join(artifactsDir, "dispatch", CURRENT_PROMPT_FILENAME),
-    promptLines.join("\n"),
-    "utf8",
-  );
-  await writeJsonFile(
-    join(artifactsDir, "dispatch", CURRENT_TASKS_FILENAME),
-    currentTasks,
-  );
-  await writeDispatchSchemaFiles(artifactsDir);
+    await writeJsonFile(join(artifactsDir, "dispatch", CURRENT_TASK_FILENAME), summary);
+    await writeFile(
+      join(artifactsDir, "dispatch", CURRENT_PROMPT_FILENAME),
+      promptLines.join("\n"),
+      "utf8",
+    );
+    await writeJsonFile(
+      join(artifactsDir, "dispatch", CURRENT_TASKS_FILENAME),
+      currentTasks,
+    );
+    await writeDispatchSchemaFiles(artifactsDir);
+  } catch (err) {
+    log?.event("dispatch_io_error", {
+      run_id: "batch",
+      function: "writeDispatchBatchFiles",
+      error: String(err),
+    });
+    throw err;
+  }
 }
 
-export async function clearDispatchFiles(artifactsDir: string): Promise<void> {
+export async function clearDispatchFiles(
+  artifactsDir: string,
+  log?: { event: (name: string, data: Record<string, unknown>) => void },
+): Promise<void> {
   const targets = [
     CURRENT_TASK_FILENAME,
     CURRENT_PROMPT_FILENAME,
@@ -297,7 +312,16 @@ export async function clearDispatchFiles(artifactsDir: string): Promise<void> {
     CURRENT_RESULTS_SCHEMA_FILENAME,
     CURRENT_FINDING_SCHEMA_FILENAME,
   ];
-  for (const name of targets) {
-    await rm(join(artifactsDir, "dispatch", name), { force: true });
+  try {
+    for (const name of targets) {
+      await rm(join(artifactsDir, "dispatch", name), { force: true });
+    }
+  } catch (err) {
+    log?.event("dispatch_io_error", {
+      run_id: "clear",
+      function: "clearDispatchFiles",
+      error: String(err),
+    });
+    throw err;
   }
 }

@@ -10,19 +10,21 @@ const {
 const { CodexProvider } = await import(
   "@audit-tools/shared/providers/codexProvider"
 );
-const { AntigravityProvider } = await import(
-  "@audit-tools/shared/providers/antigravityProvider"
+const { SubprocessTemplateProvider } = await import(
+  "@audit-tools/shared/providers/subprocessTemplateProvider"
 );
 
-// Minimal deps for the factory. Codex/antigravity never touch these injected
-// claude-code/opencode constructors, so failing stubs prove they are unused.
+// Minimal deps for the factory. Codex/antigravity never touch the claude-code /
+// opencode options; a dummy activeSessionMessage satisfies the type.
 const deps = {
   orchestratorName: "test",
-  createClaudeCodeProvider: () => {
-    throw new Error("createClaudeCodeProvider should not be called");
+  claudeCodeOptions: {
+    promptDelivery: "flag",
+    skipPermissionsDefault: false,
+    activeSessionMessage: "test-session-message",
   },
-  createOpenCodeProvider: () => {
-    throw new Error("createOpenCodeProvider should not be called");
+  openCodeOptions: {
+    promptDelivery: "arg",
   },
 };
 
@@ -94,14 +96,14 @@ test("codex construction succeeds with an absent codex config", () => {
   assert.ok(provider instanceof CodexProvider);
 });
 
-test("createFreshSessionProvider constructs an AntigravityProvider", () => {
+test("createFreshSessionProvider constructs a SubprocessTemplateProvider for antigravity", () => {
   const provider = createFreshSessionProvider(
     "antigravity",
     { antigravity: { command_template: ["ag", "--run"] } },
     deps,
   );
   assert.equal(provider.name, "antigravity");
-  assert.ok(provider instanceof AntigravityProvider);
+  assert.ok(provider instanceof SubprocessTemplateProvider);
 });
 
 test("antigravity throws when no command template is configured", () => {
@@ -158,4 +160,226 @@ test("configured claude takes precedence over configured codex", () => {
     { env: {}, commandExists: allCommands },
   );
   assert.equal(resolved, "claude-code");
+});
+
+// Minimal deps that satisfies FreshSessionProviderDeps for the auto path.
+// The auto path resolves to local-subprocess or another non-claude/opencode
+// provider in most test environments, so these branches are never called.
+const autoDeps = {
+  orchestratorName: "test",
+  createClaudeCodeProvider: () => {
+    throw new Error("unexpected: createClaudeCodeProvider called in auto test");
+  },
+  createOpenCodeProvider: () => {
+    throw new Error("unexpected: createOpenCodeProvider called in auto test");
+  },
+};
+
+test("createFreshSessionProvider auto path writes a structured stderr diagnostic", () => {
+  const captured = [];
+  const originalWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk, ...rest) => {
+    captured.push(typeof chunk === "string" ? chunk : String(chunk));
+    return true;
+  };
+  try {
+    createFreshSessionProvider(undefined, {}, autoDeps);
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+  assert.equal(captured.length, 1, "exactly one stderr write expected");
+  const line = captured[0];
+  assert.ok(line.startsWith("[shared] providers:"), `line should start with '[shared] providers:': ${line}`);
+  assert.ok(line.includes("test"), `line should contain orchestratorName 'test': ${line}`);
+  assert.ok(line.includes("auto-resolved provider"), `line should contain 'auto-resolved provider': ${line}`);
+  assert.ok(/auto-resolved provider '\w[\w-]*'/.test(line), `line should contain provider name in single quotes: ${line}`);
+  assert.ok(
+    line.includes("fallback: none") || line.includes("no capable agent provider detected"),
+    `line should contain either 'fallback: none' or 'no capable agent provider detected': ${line}`,
+  );
+  assert.ok(line.endsWith("\n"), `line should end with newline: ${JSON.stringify(line)}`);
+});
+
+test("createFreshSessionProvider with an explicit provider name does NOT write a stderr diagnostic", () => {
+  const captured = [];
+  const originalWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk, ...rest) => {
+    captured.push(typeof chunk === "string" ? chunk : String(chunk));
+    return true;
+  };
+  try {
+    createFreshSessionProvider("codex", {}, autoDeps);
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+  assert.deepEqual(captured, [], "no stderr output expected for an explicitly named provider");
+});
+
+// ── chooseAutoProvider: explicit priority table ───────────────────────────────
+
+test("chooseAutoProvider: insideOpenCode wins over all other signals", () => {
+  // All signals true — opencode (in-session) must still win.
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    {
+      claude_code: { command: "claude" },
+      opencode: { command: "opencode" },
+      codex: { command: "codex" },
+      vscode_task: { command_template: ["vscode-task"] },
+      antigravity: { command_template: ["ag"] },
+      subprocess_template: { command_template: ["sub"] },
+    },
+    {
+      env: {
+        OPENCODE: "1",
+        CODEX: "1",
+        TERM_PROGRAM: "vscode",
+        ANTIGRAVITY: "1",
+      },
+      commandExists: allCommands,
+    },
+  );
+  assert.equal(resolved, "opencode");
+});
+
+test("chooseAutoProvider: insideCodex wins when insideOpenCode is false", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    {},
+    { env: { CODEX: "1" }, commandExists: allCommands },
+  );
+  assert.equal(resolved, "codex");
+});
+
+test("chooseAutoProvider: vscode-task fires when in VSCode with a template and no in-session signals", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    { vscode_task: { command_template: ["vscode-task"] } },
+    { env: { TERM_PROGRAM: "vscode" }, commandExists: noCommands },
+  );
+  assert.equal(resolved, "vscode-task");
+});
+
+test("chooseAutoProvider: antigravity fires when in Antigravity with a template", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    { antigravity: { command_template: ["ag", "--run"] } },
+    { env: { ANTIGRAVITY: "1" }, commandExists: noCommands },
+  );
+  assert.equal(resolved, "antigravity");
+});
+
+test("chooseAutoProvider: subprocess-template fires with no IDE or in-session signals", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    { subprocess_template: { command_template: ["my-sub"] } },
+    { env: {}, commandExists: noCommands },
+  );
+  assert.equal(resolved, "subprocess-template");
+});
+
+// ── config-gated rungs take precedence over tie-breaks ────────────────────────
+
+test("chooseAutoProvider: config-gated claude-code fires even when opencode is also available", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    { claude_code: { command: "claude" } },
+    { env: {}, commandExists: allCommands },
+  );
+  assert.equal(resolved, "claude-code");
+});
+
+test("chooseAutoProvider: config-gated opencode fires when explicitly configured and available", () => {
+  // No in-session signals; no claude config; opencode config + both available.
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    { opencode: { command: "opencode" } },
+    { env: {}, commandExists: allCommands },
+  );
+  assert.equal(resolved, "opencode");
+});
+
+test("chooseAutoProvider: config-gated codex fires when configured and only codex available", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    { codex: { command: "codex" } },
+    {
+      env: {},
+      commandExists: (cmd) => cmd === "codex",
+    },
+  );
+  assert.equal(resolved, "codex");
+});
+
+// ── availability tie-breaks with no explicit config ───────────────────────────
+
+test("chooseAutoProvider: tie-break resolves claude-code when only claude is available", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    {},
+    {
+      env: {},
+      commandExists: (cmd) => cmd === "claude",
+    },
+  );
+  assert.equal(resolved, "claude-code");
+});
+
+test("chooseAutoProvider: tie-break resolves opencode when only opencode is available", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    {},
+    {
+      env: {},
+      commandExists: (cmd) => cmd === "opencode",
+    },
+  );
+  assert.equal(resolved, "opencode");
+});
+
+test("chooseAutoProvider: last-resort resolves codex when only codex is available", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    {},
+    {
+      env: {},
+      commandExists: (cmd) => cmd === "codex",
+    },
+  );
+  assert.equal(resolved, "codex");
+});
+
+test("chooseAutoProvider: falls back to local-subprocess when nothing is available and no config", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    {},
+    { env: {}, commandExists: noCommands },
+  );
+  assert.equal(resolved, "local-subprocess");
+});
+
+// ── self-spawn guards ─────────────────────────────────────────────────────────
+
+test("chooseAutoProvider: insideClaudeCode forces claudeAvailable=false, falls to local-subprocess with no other provider", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    {},
+    {
+      // CLAUDECODE set, claude on PATH — claudeAvailable must be forced false.
+      env: { CLAUDECODE: "1" },
+      commandExists: (cmd) => cmd === "claude",
+    },
+  );
+  assert.notEqual(resolved, "claude-code");
+  assert.equal(resolved, "local-subprocess");
+});
+
+test("chooseAutoProvider: insideCodex in-session rung fires before codexAvailable self-spawn guard", () => {
+  // CODEX=1 → insideCodex fires (rung 2) before any availability check.
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    {},
+    { env: { CODEX: "1" }, commandExists: noCommands },
+  );
+  assert.equal(resolved, "codex");
 });

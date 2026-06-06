@@ -5,10 +5,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Lockstep guard: the obligation priority chain documented in CLAUDE.md must
-// stay byte-for-byte in step with the `PRIORITY` array compiled into the
-// orchestrator. We import the *built dist* export (not the .ts source) so this
-// proves the doc matches the code that actually ships.
-import { PRIORITY } from "../../audit-code/dist/orchestrator/nextStep.js";
+// stay byte-for-byte in step with the `PRIORITY` array in the orchestrator.
+// Importing from source (not dist) ensures the test guards un-rebuilt changes.
+import { PRIORITY } from "../src/orchestrator/nextStep.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // tests/ -> audit-code/ -> packages/ -> repo root

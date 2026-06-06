@@ -1,5 +1,23 @@
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 
+type SeverityEnum = "critical" | "high" | "medium" | "low" | "info";
+
+function normalizeExternalSeverity(value: string | undefined): SeverityEnum {
+  switch (value?.toLowerCase()) {
+    case "critical": return "critical";
+    case "error":
+    case "high": return "high";
+    case "warning":
+    case "moderate":
+    case "medium": return "medium";
+    case "low": return "low";
+    case "info":
+    case "note":
+    case "hint": return "info";
+    default: return "info";
+  }
+}
+
 export function normalizeGenericExternalResults(
   tool: string,
   items: Array<{
@@ -27,7 +45,7 @@ export function normalizeGenericExternalResults(
     results: valid.map((item, index) => ({
       id: item.id ?? `${tool}-${index + 1}`,
       category: item.category ?? "unknown",
-      severity: item.severity ?? "unknown",
+      severity: normalizeExternalSeverity(item.severity),
       path: item.path as string,
       line_start: item.line_start,
       line_end: item.line_end,

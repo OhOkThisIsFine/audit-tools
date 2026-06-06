@@ -23,7 +23,7 @@ import {
   isGoWorkspaceManifestPath,
   isMavenPomPath,
   isPyprojectPath,
-} from "./graphManifestEdges.js";
+} from "./graphManifestEdges/index.js";
 import {
   graphEdge,
   graphLookupKey,
@@ -437,11 +437,12 @@ export async function buildGraphBundleFromFs(
  * its top-two-segment module root, suggesting shared module ownership.
  */
 function extractHeuristicContainerEdges(filePath: string): GraphEdge[] {
-  const parts = filePath.split("/");
+  const normalizedPath = normalizeGraphPath(filePath);
+  const parts = normalizedPath.split("/");
   if (parts.length <= 2) return [];
   return [
     graphEdge({
-      from: filePath,
+      from: normalizedPath,
       to: `${parts[0]}/${parts[1]}`,
       kind: EDGE_KIND.heuristicContainer,
       direction: "undirected",
@@ -491,6 +492,7 @@ interface GraphEdgeAccumulator {
   calls: GraphEdge[];
   references: GraphEdge[];
   routes: RouteEdge[];
+  heuristics: GraphEdge[];
 }
 
 /**
@@ -570,6 +572,7 @@ interface BuiltGraphs {
   calls: GraphEdge[];
   references: GraphEdge[];
   routes: RouteEdge[];
+  heuristics: GraphEdge[];
 }
 
 /**
@@ -583,9 +586,15 @@ function logGraphExtractionMetric(graphs: BuiltGraphs): void {
     graphs.imports.length +
     graphs.calls.length +
     graphs.references.length +
-    graphs.routes.length;
+    graphs.routes.length +
+    graphs.heuristics.length;
   const nodes = new Set<string>();
-  for (const edge of [...graphs.imports, ...graphs.calls, ...graphs.references]) {
+  for (const edge of [
+    ...graphs.imports,
+    ...graphs.calls,
+    ...graphs.references,
+    ...graphs.heuristics,
+  ]) {
     nodes.add(edge.from);
     nodes.add(edge.to);
   }
@@ -598,6 +607,7 @@ function logGraphExtractionMetric(graphs: BuiltGraphs): void {
     graphs.calls,
     graphs.references,
     graphs.routes,
+    graphs.heuristics,
   ].filter((edges) => edges.length > 0).length;
   process.stderr.write(
     `[audit-code] graph: built bundle — ${nodes.size} nodes, ${edgeCount} edges across ${graphTypeCount} graph type(s)\n`,
@@ -614,6 +624,7 @@ export function buildGraphBundle(
     calls: [],
     references: [],
     routes: [],
+    heuristics: [],
   };
   const dispositionMap = buildDispositionMap(disposition);
   const pathLookup = buildPathLookup(repoManifest, dispositionMap);
@@ -624,8 +635,8 @@ export function buildGraphBundle(
       continue;
     }
 
-    acc.imports.push(...extractHeuristicContainerEdges(file.path));
-    acc.imports.push(
+    acc.heuristics.push(...extractHeuristicContainerEdges(file.path));
+    acc.heuristics.push(
       ...extractHeuristicAuthSessionEdges(file.path, repoManifest, dispositionMap),
     );
 
@@ -664,6 +675,7 @@ export function buildGraphBundle(
     calls: uniqueSortedEdges(acc.calls),
     references: uniqueSortedEdges(acc.references),
     routes: uniqueSortedRoutes(acc.routes),
+    heuristics: uniqueSortedEdges(acc.heuristics),
   };
 
   logGraphExtractionMetric(graphs);

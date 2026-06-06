@@ -32,6 +32,17 @@ interface ClarificationResolution {
   rationale?: string;
 }
 
+function markStarted(item: { started_at?: string; completed_at?: string }): void {
+  item.started_at ??= new Date().toISOString();
+  delete item.completed_at;
+}
+
+function markTerminal(item: { started_at?: string; completed_at?: string }): void {
+  const now = new Date().toISOString();
+  item.started_at ??= now;
+  item.completed_at = now;
+}
+
 /**
  * Render the per-finding documentation worker prompt. Pulled out of
  * `runDocumentPhase` so the prompt's logic (which finding fields to surface),
@@ -179,6 +190,7 @@ export async function runDocumentPhase(
         state.items[res.finding_id]
       ) {
         state.items[res.finding_id].status = "deemed_inappropriate";
+        markTerminal(state.items[res.finding_id]);
         state.items[res.finding_id].failure_reason = res.rationale;
       } else if (res.action === "clarified" && state.items[res.finding_id]) {
         resolutionsMap.set(res.finding_id, res);
@@ -288,6 +300,7 @@ export async function runDocumentPhase(
       } else if (docResult.type === "item_spec" && docResult.item_spec) {
         item.item_spec = docResult.item_spec;
         item.status = "documented";
+        markStarted(item);
         await writeJsonFile(
           join(options.artifactsDir, `item_spec_${finding.id}.json`),
           docResult.item_spec,
@@ -301,6 +314,7 @@ export async function runDocumentPhase(
         e,
       );
       item.status = "blocked";
+      markTerminal(item);
       item.failure_reason =
         "LLM failed to generate a valid item specification or clarification.";
     }
@@ -312,6 +326,7 @@ export async function runDocumentPhase(
   for (const item of Object.values(state.items)) {
     if (item.status === "pending") {
       item.status = "blocked";
+      markTerminal(item);
       item.failure_reason = "Item was not processed during the document phase.";
     }
   }

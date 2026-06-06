@@ -7,10 +7,15 @@
     "resolved",
     "inappropriate",
     "ignored",
+    "verified_no_change",
+    "blocked",
     "combined_test_result",
     "closing_result"
   ],
   "properties": {
+    "started_at": { "type": ["string", "null"], "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" },
+    "step_count": { "type": "integer", "minimum": 0 },
     "resolved": {
       "type": "array",
       "items": {
@@ -19,7 +24,10 @@
         "properties": {
           "finding_id": { "type": "string" },
           "summary": { "type": "string" },
-          "verification_evidence": { "type": "string" }
+          "verification_evidence": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
         },
         "additionalProperties": false
       }
@@ -56,7 +64,10 @@
         "properties": {
           "finding_id": { "type": "string" },
           "summary": { "type": "string" },
-          "verification_evidence": { "type": "string" }
+          "verification_evidence": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
         },
         "additionalProperties": false
       }
@@ -78,7 +89,9 @@
       "required": ["passed"],
       "properties": {
         "passed": { "type": "boolean" },
-        "output": { "type": "string" }
+        "suite_name": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "failure_summary": { "type": "string" }
       },
       "additionalProperties": false
     },
@@ -87,7 +100,9 @@
       "required": ["passed"],
       "properties": {
         "passed": { "type": "boolean" },
-        "output": { "type": "string" }
+        "suite_name": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "failure_summary": { "type": "string" }
       },
       "additionalProperties": false
     },

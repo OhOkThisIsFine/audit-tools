@@ -82,27 +82,32 @@ describe("detectRateLimitError", () => {
 });
 
 describe("computeCooldownUntil", () => {
+  const FIXED_NOW = 1_000_000_000_000;
+
   it("uses retryAfterMs when provided", () => {
-    const before = Date.now();
-    const result = computeCooldownUntil(5000);
-    const timestamp = new Date(result).getTime();
-    expect(timestamp).toBeGreaterThanOrEqual(before + 4900);
-    expect(timestamp).toBeLessThanOrEqual(before + 5200);
+    const result = computeCooldownUntil(5000, undefined, FIXED_NOW);
+    expect(result).toBe(new Date(FIXED_NOW + 5000).toISOString());
   });
 
   it("falls back to default when retryAfterMs is null", () => {
-    const before = Date.now();
-    const result = computeCooldownUntil(null);
-    const timestamp = new Date(result).getTime();
-    expect(timestamp).toBeGreaterThanOrEqual(before + 59_000);
-    expect(timestamp).toBeLessThanOrEqual(before + 61_000);
+    const result = computeCooldownUntil(null, undefined, FIXED_NOW);
+    expect(result).toBe(new Date(FIXED_NOW + 60_000).toISOString());
   });
 
   it("uses custom default", () => {
-    const before = Date.now();
-    const result = computeCooldownUntil(null, 10_000);
-    const timestamp = new Date(result).getTime();
-    expect(timestamp).toBeGreaterThanOrEqual(before + 9_000);
-    expect(timestamp).toBeLessThanOrEqual(before + 11_000);
+    const result = computeCooldownUntil(null, 10_000, FIXED_NOW);
+    expect(result).toBe(new Date(FIXED_NOW + 10_000).toISOString());
+  });
+
+  it("uses injected now for deterministic timestamp", () => {
+    expect(computeCooldownUntil(5000, undefined, FIXED_NOW)).toBe(
+      new Date(1_000_000_005_000).toISOString(),
+    );
+    expect(computeCooldownUntil(null, 60_000, FIXED_NOW)).toBe(
+      new Date(1_000_000_060_000).toISOString(),
+    );
+    expect(computeCooldownUntil(null, 10_000, FIXED_NOW)).toBe(
+      new Date(1_000_000_010_000).toISOString(),
+    );
   });
 });

@@ -46,9 +46,10 @@ export function buildHighRiskCleanFollowupTask(params: {
   task?: AuditTask;
   lineIndex?: Record<string, number>;
 }): AuditTask {
+  const taskFilePaths = params.task?.file_paths;
   const paths = uniqueSorted(
-    (params.task?.file_paths.length ?? 0) > 0
-      ? (params.task?.file_paths ?? [])
+    taskFilePaths && taskFilePaths.length > 0
+      ? taskFilePaths
       : params.result.file_coverage.map((coverage) => coverage.path),
   );
 

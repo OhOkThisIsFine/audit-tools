@@ -10,11 +10,6 @@ import { buildRepoManifestFromFs } from "../extractors/fsIntake.js";
 import { loadIgnoreFile } from "../extractors/ignore.js";
 import type { ExecutorRunResult, ScopeSummary } from "./executorResult.js";
 
-/** Prefix used to carry the scope summary inside `progress_summary` for hosts
- *  that read the step's progress text rather than the `scope_summary.json`
- *  artifact. The loader extracts everything after this marker as JSON. */
-export const SCOPE_SUMMARY_PREFIX = "SCOPE_SUMMARY:";
-
 interface PackageJsonShape {
   name?: unknown;
   workspaces?: unknown;
@@ -53,16 +48,32 @@ export function detectMisScopeSmells(root: string): string[] {
   }
 
   // (b) Workspace member of a parent monorepo.
+  // Walk up ancestor directories (up to 3 levels) looking for a package.json
+  // that declares a `workspaces` field. This handles standard nested monorepo
+  // layouts like `monorepo-root/packages/my-pkg` where the direct parent
+  // (`packages/`) has no package.json of its own. Stop early if a .git
+  // boundary is found (we already checked that case under heuristic (a)).
   const rootPkg = readPackageJson(root);
   if (rootPkg && rootPkg.name !== undefined) {
-    const parent = dirname(root);
-    if (parent && parent !== root) {
-      const parentPkg = readPackageJson(parent);
-      if (parentPkg && parentPkg.workspaces !== undefined) {
+    let current = dirname(root);
+    let previous = root;
+    let levelsChecked = 0;
+    const maxLevels = 3;
+    while (current && current !== previous && levelsChecked < maxLevels) {
+      const ancestorPkg = readPackageJson(current);
+      if (ancestorPkg && ancestorPkg.workspaces !== undefined) {
         smells.push(
-          `root appears to be a workspace member of a parent monorepo at '${parent}' — consider auditing from the monorepo root instead`,
+          `root appears to be a workspace member of a parent monorepo at '${current}' — consider auditing from the monorepo root instead`,
         );
+        break;
       }
+      // Stop at a .git boundary — the repo root won't be a workspaces ancestor.
+      if (existsSync(join(current, ".git"))) {
+        break;
+      }
+      previous = current;
+      current = dirname(current);
+      levelsChecked++;
     }
   }
 
@@ -115,16 +126,14 @@ export async function runIntakeExecutor(
   const artifactsWritten = ["repo_manifest.json", "file_disposition.json"];
 
   // Persist the scope summary alongside the other intake artifacts when we know
-  // where the artifacts directory is. The typed `scope_summary` field and the
-  // progress_summary marker below carry the same data for hosts that don't read
-  // the file directly.
+  // where the artifacts directory is. Hosts read scope_summary.json directly;
+  // the typed `scope_summary` field on ExecutorRunResult is the in-process channel.
   if (artifactsDir) {
     await writeJsonFile(join(artifactsDir, "scope_summary.json"), scopeSummary);
     artifactsWritten.push("scope_summary.json");
   }
 
   const progressSummary =
-    `${SCOPE_SUMMARY_PREFIX}${JSON.stringify(scopeSummary)}\n` +
     `Created intake artifacts for ${repoManifest.files.length} files ` +
     `(${auditableCount} auditable). Scope: ${root}, git: ${scopeSummary.git_available ? "yes" : "no"}` +
     (scopeSummary.mis_scope_smells.length > 0

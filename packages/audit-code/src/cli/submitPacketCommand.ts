@@ -11,6 +11,15 @@ import {
 } from "./dispatch.js";
 import { fromBase64Url, getArtifactsDir, getFlag, readStdinText } from "./args.js";
 
+function findingKey(f: { lens?: string; category?: string; title?: string; affected_files?: Array<{ path: string }> }): string {
+  return [
+    (f.lens ?? "").trim().toLowerCase(),
+    (f.category ?? "").trim().toLowerCase(),
+    (f.title ?? "").trim().toLowerCase(),
+    f.affected_files?.[0]?.path ?? "",
+  ].join("|");
+}
+
 export async function cmdSubmitPacket(argv: string[]): Promise<void> {
   const runId = resolveRunScopedArg(argv, "--run-id", "--run-id-b64");
   const packetId = resolveRunScopedArg(argv, "--packet-id", "--packet-id-b64");
@@ -147,13 +156,7 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
       const existing = JSON.parse(await readFile(other.result_path, "utf8")) as AuditResult;
       if (existing?.findings) {
         for (const f of existing.findings) {
-          const key = [
-            (f.lens ?? "").trim().toLowerCase(),
-            (f.category ?? "").trim().toLowerCase(),
-            (f.title ?? "").trim().toLowerCase(),
-            f.affected_files?.[0]?.path ?? "",
-          ].join("|");
-          existingFindingKeys.add(key);
+          existingFindingKeys.add(findingKey(f));
         }
       }
     } catch { /* file doesn't exist yet or invalid — skip */ }
@@ -161,13 +164,7 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
   let dupCount = 0;
   for (const result of payload as AuditResult[]) {
     for (const f of result.findings ?? []) {
-      const key = [
-        (f.lens ?? "").trim().toLowerCase(),
-        (f.category ?? "").trim().toLowerCase(),
-        (f.title ?? "").trim().toLowerCase(),
-        f.affected_files?.[0]?.path ?? "",
-      ].join("|");
-      if (existingFindingKeys.has(key)) {
+      if (existingFindingKeys.has(findingKey(f))) {
         dupCount++;
       }
     }
@@ -179,6 +176,7 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
   }
 
   const entryByTaskId = entriesByTaskId(packetEntries);
+  const submittedAt = new Date().toISOString();
   for (const result of payload as AuditResult[]) {
     const entry = entryByTaskId.get(result.task_id);
     if (!entry) {
@@ -186,7 +184,11 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
         `Internal error: no result path for accepted task '${result.task_id}'.`,
       );
     }
-    await writeJsonFile(entry.result_path, result);
+    await writeJsonFile(entry.result_path, {
+      ...result,
+      run_id: runId,
+      submitted_at: submittedAt,
+    });
   }
 
   const findingCount = (payload as AuditResult[]).reduce(

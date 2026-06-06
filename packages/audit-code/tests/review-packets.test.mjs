@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { captureConsole } from "./helpers/captureConsole.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -16,9 +17,7 @@ const {
 const { buildChunkedAuditTasks } = await import(
   "../src/orchestrator/taskBuilder.ts"
 );
-const { runCli } = await import(
-  pathToFileURL(join(repoRoot, "dist", "cli.js")).href
-);
+const { runCli } = await import("../src/cli.ts");
 
 function makeTask(task_id, lens, overrides = {}) {
   return {
@@ -1021,13 +1020,8 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
       ),
     );
 
-    const previousConsoleLog = console.log;
-    let stdout = "";
-    console.log = (...values) => {
-      stdout += `${values.join(" ")}\n`;
-    };
-    try {
-      await runCli([
+    const captured = await captureConsole(() =>
+      runCli([
         process.execPath,
         join(repoRoot, "dist", "cli.js"),
         "prepare-dispatch",
@@ -1035,12 +1029,10 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
         runId,
         "--artifacts-dir",
         artifactsDir,
-      ]);
-    } finally {
-      console.log = previousConsoleLog;
-    }
+      ]),
+    );
 
-    const summary = JSON.parse(stdout);
+    const summary = JSON.parse(captured.stdout);
     assert.equal(summary.run_id, runId);
     assert.equal(summary.packet_count, 1);
     assert.equal(summary.task_count, 2);
@@ -1130,10 +1122,8 @@ test("prepare-dispatch marks tiny low-risk packets for small model routing", asy
       ),
     );
 
-    const previousConsoleLog = console.log;
-    console.log = () => {};
-    try {
-      await runCli([
+    await captureConsole(() =>
+      runCli([
         process.execPath,
         join(repoRoot, "dist", "cli.js"),
         "prepare-dispatch",
@@ -1141,10 +1131,8 @@ test("prepare-dispatch marks tiny low-risk packets for small model routing", asy
         runId,
         "--artifacts-dir",
         artifactsDir,
-      ]);
-    } finally {
-      console.log = previousConsoleLog;
-    }
+      ]),
+    );
 
     const plan = JSON.parse(
       await readFile(join(runDir, "dispatch-plan.json"), "utf8"),
@@ -1175,10 +1163,8 @@ test("prepare-dispatch keeps colliding sanitized task ids on distinct result pat
       ),
     );
 
-    const previousConsoleLog = console.log;
-    console.log = () => {};
-    try {
-      await runCli([
+    await captureConsole(() =>
+      runCli([
         process.execPath,
         join(repoRoot, "dist", "cli.js"),
         "prepare-dispatch",
@@ -1186,10 +1172,8 @@ test("prepare-dispatch keeps colliding sanitized task ids on distinct result pat
         runId,
         "--artifacts-dir",
         artifactsDir,
-      ]);
-    } finally {
-      console.log = previousConsoleLog;
-    }
+      ]),
+    );
 
     const resultMap = JSON.parse(
       await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
@@ -1253,13 +1237,8 @@ test("large single-file packets stay isolated and get mechanical anchors", async
       "utf8",
     );
 
-    const previousConsoleLog = console.log;
-    let stdout = "";
-    console.log = (...values) => {
-      stdout += `${values.join(" ")}\n`;
-    };
-    try {
-      await runCli([
+    const captured = await captureConsole(() =>
+      runCli([
         process.execPath,
         join(repoRoot, "dist", "cli.js"),
         "prepare-dispatch",
@@ -1267,12 +1246,10 @@ test("large single-file packets stay isolated and get mechanical anchors", async
         runId,
         "--artifacts-dir",
         artifactsDir,
-      ]);
-    } finally {
-      console.log = previousConsoleLog;
-    }
+      ]),
+    );
 
-    const summary = JSON.parse(stdout);
+    const summary = JSON.parse(captured.stdout);
     assert.equal(summary.warning_count, 0);
     const plan = JSON.parse(
       await readFile(join(runDir, "dispatch-plan.json"), "utf8"),

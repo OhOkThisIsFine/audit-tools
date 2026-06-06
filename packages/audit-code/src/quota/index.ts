@@ -97,8 +97,11 @@ export type { HeaderExtractor } from "./headerExtractors/index.js";
 export { GenericHeaderExtractor, ClaudeCodeHeaderExtractor, getHeaderExtractorForProvider } from "./headerExtractors/index.js";
 
 // Auditor-only type (not in shared)
+export const DISPATCH_QUOTA_V1ALPHA1 = "audit-code-dispatch-quota/v1alpha1" as const;
+export const DISPATCH_QUOTA_V1ALPHA2 = "audit-code-dispatch-quota/v1alpha2" as const;
+
 export interface DispatchQuota {
-  contract_version: "audit-code-dispatch-quota/v1alpha1" | "audit-code-dispatch-quota/v1alpha2";
+  contract_version: typeof DISPATCH_QUOTA_V1ALPHA1 | typeof DISPATCH_QUOTA_V1ALPHA2;
   run_id: string;
   model: string | null;
   resolved_limits: _ResolvedLimits;

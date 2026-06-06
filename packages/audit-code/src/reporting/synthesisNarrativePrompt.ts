@@ -27,6 +27,12 @@ export function renderSynthesisNarrativePrompt(
       ? [`  ... and ${findings.length - MAX_RENDERED_FINDINGS} more findings (see audit-findings.json).`]
       : [];
 
+  if (findings.length > MAX_RENDERED_FINDINGS) {
+    console.warn(
+      `[audit-code] synthesisNarrative: truncated findings list to ${MAX_RENDERED_FINDINGS} of ${findings.length} total — remaining findings omitted from narrative prompt (see audit-findings.json)`
+    );
+  }
+
   return [
     "# Synthesis narrative",
     "",
