@@ -40,7 +40,12 @@ export async function acquireLock(
       await writeFile(lockPath, token, { flag: "wx" });
       return token;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      const code = (err as NodeJS.ErrnoException).code;
+      // EEXIST means the lock is already held → wait and retry. On Windows a
+      // concurrent create/delete race on the same lock file can surface as
+      // EPERM/EACCES instead of EEXIST; treat those as transient contention and
+      // retry as well, rather than failing the whole acquisition.
+      if (code !== "EEXIST" && code !== "EPERM" && code !== "EACCES") throw err;
     }
 
     const now = Date.now();
