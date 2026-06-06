@@ -18,7 +18,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-dispatch-conventions");
 const REPO_DIR = join(TEST_DIR, "repo");
-const ARTIFACTS_DIR = join(REPO_DIR, ".remediation-artifacts");
+const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 
 const CONVENTIONS_MARKER = "REPOSITORY CONVENTIONS (match the surrounding code):";
 

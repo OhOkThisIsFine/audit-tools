@@ -465,8 +465,8 @@ async function runBlockInWorktree(
       "add",
       "-A",
       "--",
-      ":(exclude).remediation-artifacts/",
-      ":(exclude).remediation-artifacts",
+      ":(exclude).audit-tools/",
+      ":(exclude).audit-tools",
     ],
     { cwd: blockRoot },
   );

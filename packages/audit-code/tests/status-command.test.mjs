@@ -33,7 +33,7 @@ async function withTempDir(fn) {
 
 test("cmdStatus emits valid JSON with audit_state fields when audit_state.json is present", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
 
     const auditState = {
@@ -76,7 +76,7 @@ test("cmdStatus emits valid JSON with audit_state fields when audit_state.json i
 
 test("cmdStatus includes recent run ledger entries", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
 
     await writeFile(
@@ -139,7 +139,7 @@ test("cmdStatus includes recent run ledger entries", async () => {
 
 test("cmdStatus includes pending task counts from the most recent run directory", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     const runId = "20260101T000000000Z_audit_tasks_001";
     const runDir = join(artifactsDir, "runs", runId);
     await mkdir(runDir, { recursive: true });
@@ -173,7 +173,7 @@ test("cmdStatus includes pending task counts from the most recent run directory"
 
 test("cmdStatus exits cleanly with a clear message when no audit_state.json exists", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     // No audit_state.json written
 
@@ -189,7 +189,7 @@ test("cmdStatus exits cleanly with a clear message when no audit_state.json exis
 
 test("cmdStatus outputs structured JSON with status no_active_audit when audit_state.json is missing", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     // No audit_state.json written
 
@@ -216,7 +216,7 @@ test("cmdStatus outputs structured JSON with status no_active_audit when audit_s
 
 test("cmdStatus surfaces blockers when audit status is blocked", async () => {
   await withTempDir(async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
 
     const auditState = {

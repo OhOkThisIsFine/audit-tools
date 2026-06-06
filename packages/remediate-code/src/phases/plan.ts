@@ -5,6 +5,8 @@ import {
   Finding,
   RemediationBlock,
   RemediationItemState,
+  CoverageLedger,
+  CoverageLedgerEntry,
 } from "../state/types.js";
 import { writeFile, readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -495,25 +497,6 @@ function deriveFallbackBlocks(
   };
 }
 
-export interface CoverageLedgerEntry {
-  finding_id: string;
-  title?: string;
-  disposition: "planned" | "folded_into" | "dropped_no_evidence";
-  block_id?: string;
-  folded_into?: string;
-  rationale?: string;
-}
-
-export interface CoverageLedger {
-  contract_version: "remediate-code-coverage/v1alpha1";
-  plan_id: string;
-  source_finding_count: number;
-  planned_count: number;
-  folded_count: number;
-  dropped_count: number;
-  entries: CoverageLedgerEntry[];
-}
-
 /**
  * Account for every finding the plan received: each is marked `planned` (kept and
  * mapped to a block), `folded_into` (merged into a survivor by cross-lens dedup), or
@@ -852,15 +835,8 @@ export async function runPlanPhase(
     mergeMap: dedup.mergeMap,
     items,
   });
-  // Write the coverage ledger to the repo ROOT (alongside remediation-report.*)
-  // so it survives the close phase's cleanup of .remediation-artifacts/ and stays
-  // auditable after the run completes.
-  await writeJsonFile(
-    join(options.root, "remediation-coverage.json"),
-    coverage,
-  );
   console.log(
-    `Plan coverage: ${coverage.planned_count} planned, ${coverage.folded_count} folded, ${coverage.dropped_count} dropped (of ${coverage.source_finding_count} source finding(s)). See remediation-coverage.json.`,
+    `Plan coverage: ${coverage.planned_count} planned, ${coverage.folded_count} folded, ${coverage.dropped_count} dropped (of ${coverage.source_finding_count} source finding(s)).`,
   );
 
   const planIssues = validateRemediationPlan(plan);
@@ -882,7 +858,7 @@ export async function runPlanPhase(
     plan,
   );
 
-  return { ...state, status: "planning", plan, items };
+  return { ...state, status: "planning", plan, items, plan_coverage: coverage };
 }
 
 async function extractFindingsWithProvider(

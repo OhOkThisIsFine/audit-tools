@@ -23,7 +23,7 @@ starting point:
 - If the argument is an existing path, pass it to the backend with
   `--input`.
 - If the argument is conversational feedback, write it verbatim to
-  `.remediation-artifacts/intake/conversation-start.md`, then let the backend
+  `.audit-tools/remediation/intake/conversation-start.md`, then let the backend
   continue from that artifact.
 
 For Claude-style command expansion, the raw user arguments are:

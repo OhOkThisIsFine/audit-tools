@@ -226,7 +226,7 @@ test("promoteFinalAuditReport warns when audit-findings.json copy fails (OBS-24e
 
 test("run artifact helpers produce parseable run ids and clean only dispatch files", async () => {
   await withTempDir("audit-code-run-artifacts-", async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     const fixedNow = new Date("2026-04-22T15:16:17.089Z");
     const runId = buildRunId(" flow:auth/entry ", 7, fixedNow);
     const paths = getRunPaths(artifactsDir, runId);
@@ -347,7 +347,7 @@ test("run artifact helpers produce parseable run ids and clean only dispatch fil
 
 test("clearDispatchFiles is a no-op when the dispatch directory does not exist", async () => {
   await withTempDir("audit-code-clear-dispatch-missing-", async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
 
     await mkdir(artifactsDir, { recursive: true });
     assert.equal(
@@ -373,7 +373,7 @@ test("clearDispatchFiles is a no-op when the dispatch directory does not exist",
 
 test("parallel dispatch helper preserves the whole worker batch in shared dispatch artifacts", async () => {
   await withTempDir("audit-code-run-dispatch-batch-", async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-artifacts");
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
     await ensureSupervisorDirs(artifactsDir);
 
     await writeDispatchBatchFiles(

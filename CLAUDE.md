@@ -15,7 +15,7 @@ They form a pipeline: audit → report → remediate. Each is published independ
 
 The aim is a pair of autonomous orchestrators that take a codebase from *understanding* to *verified improvement* with minimal human babysitting — trustworthy because the machine parts are deterministic and the LLM parts are bounded and attributable. A handful of concepts tie the whole system together; when a decision is unclear, reason from these:
 
-- **One pipeline, two halves.** audit-code produces a findings contract; remediate-code consumes it and applies fixes. `audit-findings.json` is the seam between them — the machine contract — and `audit-report.md` is only a human-facing render of it. The JSON is the source of truth on both sides.
+- **One pipeline, two halves.** audit-code produces a findings contract; remediate-code consumes it and applies fixes. Each half emits two output files: a machine contract (JSON) and a human render (markdown). `audit-findings.json` / `audit-report.md` are the audit outputs; `remediation-outcomes.json` / `remediation-report.md` are the remediation outputs. The JSON files are the source of truth; the markdown files are human-facing renders.
 - **Obligation-driven, one bounded step per invocation.** Neither tool "runs to completion" internally. Each `next-step` derives state from artifacts, picks the highest-priority unsatisfied obligation, does one bounded unit of work, persists, and returns. This is what makes runs resumable, parallelizable, and failure-isolated — and it's the shared shape both orchestrators implement.
 - **Deterministic by default; LLM only for judgment.** Anything a deterministic extractor or validator can do, it should. The LLM is reserved for semantic review, synthesis, ambiguity resolution, and explicit low-confidence fallbacks — always bounded and recorded.
 - **Artifacts are continuity; the dependency DAG is truth.** Durable state lives in artifacts, and staleness propagates along an explicit dependency map — never ad-hoc freshness checks.
@@ -91,7 +91,7 @@ Obligation-driven audit orchestrator: each invocation **executes the highest-pri
 ### Orchestration loop
 
 The core loop lives in `src/orchestrator/advance.ts` (`advanceAudit`). Each invocation:
-1. Loads the artifact bundle from `.audit-artifacts/`.
+1. Loads the artifact bundle from `.audit-tools/audit/`.
 2. Calls `decideNextStep` (`src/orchestrator/nextStep.ts`), which derives audit state and picks the highest-priority unsatisfied obligation.
 3. Dispatches to exactly one executor (intake → disposition → structure → planning → agent review → ingestion → runtime validation → synthesis).
 4. Persists updated artifacts and returns a structured execution summary.
@@ -100,11 +100,11 @@ The priority chain in `nextStep.ts`: `repo_manifest` → `file_disposition` → 
 
 ### Artifact system
 
-Artifacts under `.audit-artifacts/` are the continuity layer: `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `coverage_matrix.json`, `audit_tasks.json`, `review_packets.json`, `audit_results.jsonl`, `runtime_validation_report.json`, `audit-findings.json` (canonical machine contract), `synthesis-narrative.json` (narrative marker). Staleness is tracked via an explicit dependency DAG (`spec/dependency-map.md`, implemented in `src/orchestrator/staleness.ts` and `src/orchestrator/artifactMetadata.ts`).
+Artifacts under `.audit-tools/audit/` are the continuity layer: `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `coverage_matrix.json`, `audit_tasks.json`, `review_packets.json`, `audit_results.jsonl`, `runtime_validation_report.json`, `audit-findings.json` (canonical machine contract), `synthesis-narrative.json` (narrative marker). Staleness is tracked via an explicit dependency DAG (`spec/dependency-map.md`, implemented in `src/orchestrator/staleness.ts` and `src/orchestrator/artifactMetadata.ts`).
 
 ### Entrypoint, providers, schemas, lenses
 
-- **Entrypoint:** the wrapper `audit-code.mjs` → `audit-code-wrapper-lib.mjs` is the CLI surface. The conversation-first flow uses `audit-code next-step`, which writes `steps/current-step.json` and `steps/current-prompt.md`; the host agent reads and follows only the returned step prompt.
+- **Entrypoint:** the wrapper `audit-code.mjs` → `audit-code-wrapper-lib.mjs` is the CLI surface. The conversation-first flow uses `audit-code next-step`, which writes `.audit-tools/audit/steps/current-step.json` and `current-prompt.md`; the host agent reads and follows only the returned step prompt.
 - **Providers** (`src/providers/`) dispatch LLM worker tasks to different backends: `claude-code`, `codex`, `opencode`, `subprocess-template`, `vscode-task`, `antigravity`, or `local-subprocess` (manual fallback). `codex` is a headless CLI auto-detected like `claude-code`; `antigravity` is an agentic-IDE backend routed through a configured command/task template (like `vscode-task`). Auto-resolution in `src/providers/index.ts` detects the active environment; providers implement the `FreshSessionProvider` interface from `@audit-tools/shared`.
 - **Schemas** (`schemas/`) define all public artifact shapes. The `AuditResult` contract (`schemas/audit_result.schema.json`) is the worker submission format — `task_id`, `unit_id`, `pass_id`, and `lens` must match the assigned task; `file_coverage[].total_lines` must match actual line counts.
 - **Lenses** organize audit work: `correctness`, `architecture`, `maintainability`, `security`, `reliability`, `performance`, `data_integrity`, `tests`, `operability`, `config_deployment`, `observability`. Each audit task covers one unit under one lens.
@@ -140,17 +140,21 @@ Each phase in `src/phases/`:
 
 - **Dispatch & wave scheduling:** document/implement work is dispatched to sub-agents in parallel waves. `src/steps/dispatch.ts` (`prepareDocumentDispatch`/`mergeDocumentResults`/`prepareImplementDispatch`/`mergeImplementResults`) and `src/steps/waveScheduler.ts` (concurrency limiting). Providers in `src/providers/` mirror audit-code's backend set.
 - **State persistence:** `src/state/store.ts` holds the file-backed `RemediationState` with pessimistic file locking (20ms initial backoff, 250ms max, 20 retries, 30s stale-lock cleanup).
-- **Core types:** `src/state/types.ts` defines `Finding`, `RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `RemediationItemState`, `TestSpec`, `VerificationResult`. `src/dedup/crossLensDedup.ts` deduplicates findings across audit lenses; `src/intake.ts` orchestrates source manifest, summary, and clarification resolution.
+- **Core types:** `src/state/types.ts` defines `Finding`, `RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `RemediationItemState`, `TestSpec`, `VerificationResult`, `CoverageLedger`. `src/dedup/crossLensDedup.ts` deduplicates findings across audit lenses; `src/intake.ts` orchestrates source manifest, summary, and clarification resolution.
 
 ### Artifact layout
 
 ```
-.remediation-artifacts/
-  state.json    # state machine        intake/   # source manifest, summary, clarifications
-  state.lock    # pessimistic lock      steps/    # current-step.json, current-prompt.md
+.audit-tools/
+  audit/               # audit-code working artifacts (audit-tools/audit/)
+  remediation/         # remediate-code working artifacts
+    state.json    # state machine        intake/   # source manifest, summary, clarifications
+    state.lock    # pessimistic lock      steps/    # current-step.json, current-prompt.md
+  audit-report.md              # promoted on audit completion (human render)
+  audit-findings.json          # promoted on audit completion (machine contract)
+  remediation-report.md        # written on remediation completion (human render)
+  remediation-outcomes.json    # written on remediation completion (machine contract)
 ```
-
-Final outputs at repo root: `remediation-report.md`, `remediation-report.json`, `remediation-closing-result.json`.
 
 ## Release & publish
 

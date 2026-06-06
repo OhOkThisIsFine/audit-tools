@@ -1,6 +1,6 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
-import { extname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { writeTextFile, writeJsonFile, stagedAndUntracked } from "@audit-tools/shared";
 import type {
@@ -12,6 +12,7 @@ import type {
 import { runCommand, runShellCommand } from "../utils/commands.js";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import type { ClosingAction } from "../state/closingActions.js";
+import type { CoverageLedger } from "../state/types.js";
 
 const OUTCOME_BY_STATUS: Record<string, RemediationOutcomeStatus> = {
   resolved: "resolved",
@@ -83,6 +84,7 @@ export function buildRemediationOutcomesReport(
       ),
     ].sort();
     const durationMs = durationBetweenMs(item.started_at, item.completed_at);
+    const isNonResolved = outcome !== "resolved" && outcome !== "verified_no_change";
     outcomes.push({
       finding_id: item.finding_id,
       lens: finding?.lens ?? "unknown",
@@ -91,6 +93,7 @@ export function buildRemediationOutcomesReport(
       rework_count: item.rework_count ?? 0,
       closing_status: closingResult.status,
       ...(closeReason ? { closing_status_reason: closeReason } : {}),
+      ...(isNonResolved && item.failure_reason ? { reason: item.failure_reason } : {}),
       ...(item.started_at ? { started_at: item.started_at } : {}),
       ...(item.completed_at ? { completed_at: item.completed_at } : {}),
       ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
@@ -209,10 +212,7 @@ function isSuccess(result: ClosingCommandResult): boolean {
 }
 
 const STAGING_EXCLUDE_PATTERNS = [
-  /^\.remediation-artifacts\//,
-  // remediate-code runs in repos that also hold the auditor's output; never
-  // stage either tool's artifact directory.
-  /^\.audit-artifacts\//,
+  /^\.audit-tools\//,
   /^\.env($|\.)/,
 ];
 
@@ -664,6 +664,7 @@ export async function runClosePhase(
     });
   }
 
+  const endedAt = new Date().toISOString();
   const reportContent = buildRemediationReportMarkdown(
     state,
     entries,
@@ -672,17 +673,29 @@ export async function runClosePhase(
     outcomesReport,
     combinedTest,
   );
-  const endedAt = new Date().toISOString();
 
-  const jsonReport = {
-    started_at: state.started_at ?? null,
+  const outcomesFile: RemediationOutcomesReport & {
+    started_at?: string;
+    ended_at: string;
+    step_count: number;
+    combined_test_result: {
+      passed: boolean;
+      suite_name?: string;
+      duration_ms: number;
+      failure_summary?: string;
+    };
+    e2e_result?: { passed: boolean };
+    closing_result: {
+      action: ClosingAction;
+      status: string;
+      commands: ClosingCommandResult[];
+    };
+    plan_coverage?: CoverageLedger;
+  } = {
+    ...outcomesReport,
+    ...(state.started_at ? { started_at: state.started_at } : {}),
     ended_at: endedAt,
     step_count: state.step_count ?? 0,
-    resolved: entries.resolved,
-    verified_no_change: entries.verifiedNoChange,
-    inappropriate: entries.inappropriate,
-    ignored: entries.ignored,
-    blocked: entries.blocked,
     combined_test_result: {
       passed: combinedTest.passed,
       ...(combinedTest.suite_name ? { suite_name: combinedTest.suite_name } : {}),
@@ -695,15 +708,13 @@ export async function runClosePhase(
       status: closingResult.status,
       commands: closingResult.commands,
     },
+    ...(state.plan_coverage ? { plan_coverage: state.plan_coverage } : {}),
   };
 
+  const outputDir = dirname(options.artifactsDir);
   await Promise.all([
-    writeTextFile(join(options.root, "remediation-report.md"), reportContent),
-    writeJsonFile(join(options.root, "remediation-report.json"), jsonReport),
-    writeJsonFile(
-      join(options.root, "remediation-outcomes.json"),
-      outcomesReport,
-    ),
+    writeTextFile(join(outputDir, "remediation-report.md"), reportContent),
+    writeJsonFile(join(outputDir, "remediation-outcomes.json"), outcomesFile),
   ]);
   runLogger?.event({
     phase: "close",

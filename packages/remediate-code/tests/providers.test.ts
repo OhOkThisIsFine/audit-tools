@@ -306,10 +306,10 @@ describe("createRemediationWorkerTask", () => {
   it("does not include worker_command field", () => {
     const task = createRemediationWorkerTask({
       runId: "RUN-1",
-      options: { root: "/repo", artifactsDir: "/repo/.remediation-artifacts" },
+      options: { root: "/repo", artifactsDir: "/repo/.audit-tools/remediation" },
       obligationId: "F-001",
       preferredExecutor: "local-subprocess",
-      resultPath: "/repo/.remediation-artifacts/result.json",
+      resultPath: "/repo/.audit-tools/remediation/result.json",
     });
 
     expect(Object.prototype.hasOwnProperty.call(task, "worker_command")).toBe(false);

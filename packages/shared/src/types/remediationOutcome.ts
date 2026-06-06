@@ -24,6 +24,12 @@ export interface RemediationOutcome {
   closing_status: string;
   /** Human-readable explanation for non-success closing statuses. */
   closing_status_reason?: string;
+  /**
+   * For non-resolved outcomes: the failure or rationale text (e.g. why a
+   * finding was deemed inappropriate, ignored, or blocked). Absent for
+   * `resolved` and `verified_no_change` outcomes.
+   */
+  reason?: string;
   /** ISO-8601 timestamp when work on this item first left pending. */
   started_at?: string;
   /** ISO-8601 timestamp when the item reached its terminal status. */

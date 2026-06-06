@@ -41,7 +41,7 @@ describe("global-first install helpers", () => {
     installRepoAssets(TEST_ROOT, false, (m) => logs.push(m), TEST_HOME);
 
     expect(existsSync(join(TEST_ROOT, "AGENTS.md"))).toBe(false);
-    expect(existsSync(join(TEST_ROOT, ".remediation-artifacts", ".gitkeep"))).toBe(false);
+    expect(existsSync(join(TEST_ROOT, ".audit-tools/remediation", ".gitkeep"))).toBe(false);
     expect(logs.some((line) => line.includes("repo-local install is deprecated"))).toBe(true);
   });
 

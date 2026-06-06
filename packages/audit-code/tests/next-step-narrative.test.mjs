@@ -33,7 +33,7 @@ async function persistSynthesisReadyState(root, artifactsDir) {
 test("next-step pauses for the synthesis narrative, then completes after it is provided", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-narrative-"));
   const root = join(tempDir, "repo");
-  const artifactsDir = join(root, ".audit-artifacts");
+  const artifactsDir = join(root, ".audit-tools/audit");
   try {
     await writeFixtureRepo(root);
     await persistSynthesisReadyState(root, artifactsDir);
@@ -98,7 +98,7 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
 
     // The canonical contract was promoted to the repo root with the narrative.
     const findings = JSON.parse(
-      await readFile(join(root, "audit-findings.json"), "utf8"),
+      await readFile(join(root, ".audit-tools", "audit-findings.json"), "utf8"),
     );
     assert.equal(findings.themes.length, 1);
     assert.equal(findings.themes[0].theme_id, "T-1");
@@ -106,7 +106,7 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
     assert.equal(tagged.theme_id, "T-1");
     assert.equal(findings.executive_summary, "A single auth-observability theme was identified.");
 
-    const report = await readFile(join(root, "audit-report.md"), "utf8");
+    const report = await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8");
     assert.match(report, /## Themes/);
     assert.match(report, /### T-1 — Authentication observability gaps/);
   } finally {
@@ -117,7 +117,7 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
 test("next-step omits the narrative when synthesis.narrative is disabled", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-narrative-off-"));
   const root = join(tempDir, "repo");
-  const artifactsDir = join(root, ".audit-artifacts");
+  const artifactsDir = join(root, ".audit-tools/audit");
   try {
     await writeFixtureRepo(root);
     await persistSynthesisReadyState(root, artifactsDir);
@@ -139,10 +139,10 @@ test("next-step omits the narrative when synthesis.narrative is disabled", async
     assert.equal(done.status, "complete");
 
     const findings = JSON.parse(
-      await readFile(join(root, "audit-findings.json"), "utf8"),
+      await readFile(join(root, ".audit-tools", "audit-findings.json"), "utf8"),
     );
     assert.equal(findings.themes, undefined);
-    const report = await readFile(join(root, "audit-report.md"), "utf8");
+    const report = await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8");
     assert.doesNotMatch(report, /## Themes/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });

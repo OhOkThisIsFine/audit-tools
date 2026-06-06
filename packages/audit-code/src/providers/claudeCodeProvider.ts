@@ -4,7 +4,7 @@ import { readJsonFile, spawnLoggedCommand, applyWorkerTaskLaunchSettings } from 
 
 export const ACTIVE_CLAUDE_CODE_SESSION_MESSAGE =
   "claude-code provider cannot be used inside an active Claude Code session. " +
-  'Set provider to "local-subprocess" in .audit-artifacts/session-config.json, ' +
+  'Set provider to "local-subprocess" in .audit-tools/audit/session-config.json, ' +
   "then run /audit-code conversationally and follow the dispatch prompts manually.";
 
 export class ClaudeCodeProvider implements FreshSessionProvider {

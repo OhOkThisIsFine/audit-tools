@@ -8,7 +8,7 @@ import { validateArtifacts, validateImplementWorkerResult } from "../src/validat
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-artifact-validation");
 const REPO_DIR = join(TEST_DIR, "repo");
-const ARTIFACTS_DIR = join(REPO_DIR, ".remediation-artifacts");
+const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 
 const plan = {
   plan_id: "PLAN-1",

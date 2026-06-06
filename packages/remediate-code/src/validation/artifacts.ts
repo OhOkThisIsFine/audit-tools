@@ -226,36 +226,6 @@ function validateClosingResult(value: unknown, path: string): ValidationIssue[] 
   return issues;
 }
 
-function validateReportJson(value: unknown, path: string): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  for (const key of ["resolved", "inappropriate", "ignored"]) {
-    if (!Array.isArray(value[key])) {
-      pushValidationIssue(issues, `${path}.${key}`, `${path}.${key} must be an array.`);
-    }
-  }
-  if (value.verified_no_change !== undefined && !Array.isArray(value.verified_no_change)) {
-    pushValidationIssue(issues, `${path}.verified_no_change`, `${path}.verified_no_change must be an array when present.`);
-  }
-  if (value.blocked !== undefined && !Array.isArray(value.blocked)) {
-    pushValidationIssue(issues, `${path}.blocked`, `${path}.blocked must be an array when present.`);
-  }
-  if (!isRecord(value.combined_test_result)) {
-    pushValidationIssue(issues, `${path}.combined_test_result`, `${path}.combined_test_result must be an object.`);
-  } else if (typeof value.combined_test_result.passed !== "boolean") {
-    pushValidationIssue(issues, `${path}.combined_test_result.passed`, `${path}.combined_test_result.passed must be a boolean.`);
-  }
-  if (!isRecord(value.closing_result)) {
-    pushValidationIssue(issues, `${path}.closing_result`, `${path}.closing_result must be an object.`);
-  } else if (typeof value.closing_result.status !== "string") {
-    pushValidationIssue(issues, `${path}.closing_result.status`, `${path}.closing_result.status must be a string.`);
-  }
-  return issues;
-}
-
 async function validateDispatchArtifacts(
   artifactsDir: string,
   issues: string[],
@@ -429,17 +399,6 @@ export async function validateArtifacts(
     );
     if (closingIssues.length > 0) {
       issues.push(formatValidationIssues(closingIssues));
-    }
-  }
-
-  const jsonReportPath = join(root, "remediation-report.json");
-  const reportJson = await readJsonForValidation(jsonReportPath, issues);
-  if (reportJson) {
-    const reportIssues = validateReportJson(reportJson, "remediation-report.json").filter(
-      (issue) => issue.severity === "error",
-    );
-    if (reportIssues.length > 0) {
-      issues.push(formatValidationIssues(reportIssues));
     }
   }
 

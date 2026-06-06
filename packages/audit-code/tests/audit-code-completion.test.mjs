@@ -123,7 +123,7 @@ test("audit-code wrapper reaches a blocked handoff by default and leaves only au
     assert.equal(blocked.selected_executor, "agent");
 
     const tasks = JSON.parse(
-      await readFile(join(root, ".audit-artifacts", "audit_tasks.json"), "utf8"),
+      await readFile(join(root, ".audit-tools/audit", "audit_tasks.json"), "utf8"),
     );
     const resultsPath = join(root, "audit_results.json");
     await writeFile(
@@ -137,11 +137,11 @@ test("audit-code wrapper reaches a blocked handoff by default and leaves only au
     assertMatchesJsonSchema(responseSchema, completed, "auditCodeResponse:completed");
     assert.equal(completed.audit_state.status, "complete");
 
-    const auditReport = await readFile(join(root, "audit-report.md"), "utf8");
+    const auditReport = await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8");
     assert.match(auditReport, /# Audit Report/);
 
     await assert.rejects(
-      () => access(join(root, ".audit-artifacts")),
+      () => access(join(root, ".audit-tools/audit")),
       /ENOENT/i,
     );
   });
@@ -153,7 +153,7 @@ test("run-to-completion completes on a rendered report even when finalization ov
     assert.equal(blocked.audit_state.status, "blocked");
 
     const tasks = JSON.parse(
-      await readFile(join(root, ".audit-artifacts", "audit_tasks.json"), "utf8"),
+      await readFile(join(root, ".audit-tools/audit", "audit_tasks.json"), "utf8"),
     );
     const resultsPath = join(root, "audit_results.json");
     await writeFile(
@@ -175,11 +175,11 @@ test("run-to-completion completes on a rendered report even when finalization ov
     );
     assert.equal(completed.audit_state.status, "complete");
     assert.match(
-      await readFile(join(root, "audit-report.md"), "utf8"),
+      await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8"),
       /# Audit Report/,
     );
     await assert.rejects(
-      () => access(join(root, ".audit-artifacts")),
+      () => access(join(root, ".audit-tools/audit")),
       /ENOENT/i,
     );
   });
@@ -190,7 +190,7 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
     const blocked = JSON.parse((await runWrapper([], { cwd: root })).stdout);
     assert.equal(blocked.audit_state.status, "blocked");
 
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     const tasks = JSON.parse(
       await readFile(join(artifactsDir, "audit_tasks.json"), "utf8"),
     );
@@ -240,8 +240,8 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
 
     assert.ok(presented, "next-step must reach present_report");
     assert.equal(presented.status, "complete");
-    // Completion promotes the canonical report to the repo root.
-    assert.equal(presented.artifact_paths.final_report, join(root, "audit-report.md"));
+    // Completion promotes the canonical report to .audit-tools/ (parent of the artifacts dir).
+    assert.equal(presented.artifact_paths.final_report, join(root, ".audit-tools", "audit-report.md"));
     assert.match(
       await readFile(presented.artifact_paths.final_report, "utf8"),
       /# Audit Report/,
@@ -267,7 +267,7 @@ test("audit-code wrapper can ingest a directory of batch result files and still 
     assert.equal(blocked.audit_state.status, "blocked");
 
     const tasks = JSON.parse(
-      await readFile(join(root, ".audit-artifacts", "audit_tasks.json"), "utf8"),
+      await readFile(join(root, ".audit-tools/audit", "audit_tasks.json"), "utf8"),
     );
     const allResults = await buildSyntheticResults(tasks, root);
     const batchDir = join(root, "audit-results-batch");
@@ -287,7 +287,7 @@ test("audit-code wrapper can ingest a directory of batch result files and still 
     assertMatchesJsonSchema(responseSchema, completed, "auditCodeResponse:batchCompleted");
     assert.equal(completed.audit_state.status, "complete");
     assert.match(
-      await readFile(join(root, "audit-report.md"), "utf8"),
+      await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8"),
       /## Work Blocks/,
     );
   });
@@ -299,7 +299,7 @@ test("audit-code wrapper promotes the final report when completion lands on max-
     assert.equal(blocked.audit_state.status, "blocked");
 
     const tasks = JSON.parse(
-      await readFile(join(root, ".audit-artifacts", "audit_tasks.json"), "utf8"),
+      await readFile(join(root, ".audit-tools/audit", "audit_tasks.json"), "utf8"),
     );
     const resultsPath = join(root, "audit_results.json");
     await writeFile(
@@ -319,12 +319,12 @@ test("audit-code wrapper promotes the final report when completion lands on max-
     );
     assert.equal(completed.audit_state.status, "complete");
     assert.match(
-      await readFile(join(root, "audit-report.md"), "utf8"),
+      await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8"),
       /# Audit Report/,
     );
 
     await assert.rejects(
-      () => access(join(root, ".audit-artifacts")),
+      () => access(join(root, ".audit-tools/audit")),
       /ENOENT/i,
     );
   });

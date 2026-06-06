@@ -19,7 +19,7 @@ const DEFAULT_IGNORES = [
   ".next",
   ".turbo",
   ".artifacts",
-  ".audit-artifacts",
+  ".audit-tools",
   ".audit-code/install",
   ".agent",
   ".claude",

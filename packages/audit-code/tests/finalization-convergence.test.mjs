@@ -74,7 +74,7 @@ function resultsForPending(bundle) {
 test("finalization converges through the real persist/reload loop without oscillating", async () => {
   await withTempDir("audit-code-finalization-", async (root) => {
     await writeFixture(root);
-    const artDir = join(root, ".audit-artifacts");
+    const artDir = join(root, ".audit-tools/audit");
     await mkdir(artDir, { recursive: true });
 
     const trail = [];

@@ -15,6 +15,7 @@ import {
   RemediationItemState,
   ClarificationRequest,
   ClosingPlan,
+  CoverageLedger,
 } from "./types.js";
 
 export interface RemediationState {
@@ -34,6 +35,7 @@ export interface RemediationState {
   closing_plan?: ClosingPlan;
   started_at?: string;
   step_count?: number;
+  plan_coverage?: CoverageLedger;
 }
 
 const STATE_FILENAME = "state.json";

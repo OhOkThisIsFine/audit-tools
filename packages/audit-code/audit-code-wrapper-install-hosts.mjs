@@ -720,7 +720,7 @@ export async function installBootstrap(argv, options = {}) {
   );
   results.push(await writeGeneratedJson(installManifestPath, installManifest));
 
-  const sessionConfigPath = join(root, '.audit-artifacts', 'session-config.json');
+  const sessionConfigPath = join(root, '.audit-tools', 'audit', 'session-config.json');
   if (!(await fileExists(sessionConfigPath))) {
     const defaultConfig = { provider: 'local-subprocess' };
     await mkdir(dirname(sessionConfigPath), { recursive: true });

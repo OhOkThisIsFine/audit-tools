@@ -155,7 +155,7 @@ export function buildDocumentModelHint(finding: Finding): DispatchModelHint {
 const TEST_FILE_RE = /\.(test|spec)\.[cm]?[jt]sx?$/;
 const WALK_SKIP_DIRS = new Set([
   "node_modules", ".git", "dist", "build", "coverage", "out",
-  ".next", ".turbo", ".audit-artifacts", ".remediation-artifacts",
+  ".next", ".turbo", ".audit-tools",
 ]);
 
 /** Bounded recursive scan for test files under `root` (skips vendor/build dirs). */

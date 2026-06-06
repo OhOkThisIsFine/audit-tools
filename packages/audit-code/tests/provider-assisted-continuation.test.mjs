@@ -108,7 +108,7 @@ async function withTempRepo(fn) {
 
 test("audit-code can continue through provider-assisted review in a single invocation", async (t) => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "session-config.json"),
@@ -142,7 +142,7 @@ test("audit-code can continue through provider-assisted review in a single invoc
 
 test("provider-assisted review persists per-run worker results even when parallel workers are configured", async (t) => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-artifacts");
+    const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(
       join(artifactsDir, "session-config.json"),
