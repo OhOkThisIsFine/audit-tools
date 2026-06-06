@@ -41,8 +41,7 @@ const OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION = { '*': 'allow' };
 const OPENCODE_AUDIT_EDIT_PERMISSION = {
   '*': 'ask',
   '.audit-code/**': 'allow',
-  '.audit-artifacts/**': 'allow',
-  'audit-report.md': 'allow',
+  '.audit-tools/**': 'allow',
 };
 
 const OPENCODE_AUDIT_BASH_PERMISSION = {

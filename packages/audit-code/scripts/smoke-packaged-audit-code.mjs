@@ -796,7 +796,7 @@ async function main() {
             cwd: root,
             label: "audit-code (initial run)",
             failureHint:
-              "Inspect .audit-artifacts/operator-handoff.* and rerun with AUDIT_CODE_VERBOSE=1 if the packaged wrapper blocks earlier than expected.",
+              "Inspect .audit-tools/audit/operator-handoff.* and rerun with AUDIT_CODE_VERBOSE=1 if the packaged wrapper blocks earlier than expected.",
           })
         ).stdout,
       );
@@ -816,7 +816,7 @@ async function main() {
       process.stderr.write(`[smoke:packaged] elapsed: first run (expect blocked) — ${Date.now() - stepStart}ms\n`);
 
       const tasks = JSON.parse(
-        await readFile(join(root, ".audit-artifacts", "audit_tasks.json"), "utf8"),
+        await readFile(join(root, ".audit-tools", "audit", "audit_tasks.json"), "utf8"),
       );
       const resultsPath = join(root, "audit_results.json");
       await writeFile(
@@ -839,7 +839,7 @@ async function main() {
               cwd: root,
               label: "audit-code --results <synthetic-results>",
               failureHint:
-                "Inspect the generated audit_results.json file and .audit-artifacts contents if ingestion or synthesis fails unexpectedly.",
+                "Inspect the generated audit_results.json file and .audit-tools/audit contents if ingestion or synthesis fails unexpectedly.",
             },
           )
         ).stdout,
@@ -854,7 +854,7 @@ async function main() {
       assert.equal(completed.next_likely_step, null);
       assert.equal(completed.handoff.status, "complete");
       assert.equal(
-        await readFile(join(root, "audit-report.md"), "utf8").then((content) => /# Audit Report/.test(content)),
+        await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8").then((content) => /# Audit Report/.test(content)),
         true,
       );
       process.stderr.write(`[smoke:packaged] elapsed: ingest results (expect completed) — ${Date.now() - stepStart}ms\n`);
@@ -867,7 +867,7 @@ async function main() {
             cwd: root,
             label: "audit-code (rerun after completion)",
             failureHint:
-              "A rerun should start a fresh blocked audit. Inspect the retained audit-report.md and regenerated .audit-artifacts state if behavior diverges.",
+              "A rerun should start a fresh blocked audit. Inspect the retained .audit-tools/audit-report.md and regenerated .audit-tools/audit state if behavior diverges.",
           })
         ).stdout,
       );
