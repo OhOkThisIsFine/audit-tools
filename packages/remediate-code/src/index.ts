@@ -19,9 +19,21 @@ const { version: pkgVersion } = JSON.parse(
   readFileSync(join(pkgRoot, "package.json"), "utf8"),
 ) as { version: string };
 
-const _opencodeJson = JSON.parse(
-  readFileSync(join(pkgRoot, "opencode.json"), "utf8"),
-) as { agent?: { remediator?: { permission?: { edit?: Record<string, string>; bash?: Record<string, string> } } } };
+// opencode.json is optional package data (shipped with the package). Read it
+// best-effort so a missing/unshipped config can never crash the CLI on startup —
+// default to no extra permissions instead.
+let _opencodeJson: {
+  agent?: {
+    remediator?: {
+      permission?: { edit?: Record<string, string>; bash?: Record<string, string> };
+    };
+  };
+} = {};
+try {
+  _opencodeJson = JSON.parse(readFileSync(join(pkgRoot, "opencode.json"), "utf8"));
+} catch {
+  // No opencode config available — proceed with empty permissions.
+}
 const _remediatorPermission = _opencodeJson.agent?.remediator?.permission ?? {};
 const OPENCODE_REMEDIATE_EDIT_PERMISSION: Record<string, string> =
   _remediatorPermission.edit ?? {};
