@@ -13,6 +13,7 @@ import {
   readOptionalJsonFile,
   writeJsonFile,
   writeTextFile,
+  withFsRetry,
   formatValidationIssues,
   isRecord,
   detectRepoConventions,
@@ -106,7 +107,7 @@ function implementResultCoversFindings(
 async function archiveIncompleteImplementResult(resultPath: string): Promise<void> {
   if (!existsSync(resultPath)) return;
   const archivedPath = `${resultPath}.stale-${Date.now()}`;
-  await rename(resultPath, archivedPath);
+  await withFsRetry(() => rename(resultPath, archivedPath));
 }
 
 function runDir(artifactsDir: string, runId: string, phase: string): string {
