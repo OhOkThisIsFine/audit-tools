@@ -1,0 +1,27 @@
+{
+  "contract_version": "remediate-code-outcomes/v1alpha1",
+  "total": 1,
+  "by_outcome": {
+    "resolved": 1,
+    "verified_no_change": 0,
+    "inappropriate": 0,
+    "ignored": 0,
+    "blocked": 0
+  },
+  "by_lens": {
+    "unknown": {
+      "resolved": 1
+    }
+  },
+  "outcomes": [
+    {
+      "finding_id": "F1",
+      "lens": "unknown",
+      "file_exts": [],
+      "outcome": "resolved",
+      "rework_count": 0,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured"
+    }
+  ]
+}
