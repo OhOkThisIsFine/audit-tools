@@ -80,15 +80,15 @@ test("applyTemplate Shell-suffix bypass: keys ending in Shell are not shellQuote
   const task = buildTask(["node", "/path with spaces/worker.js"]);
   // In a multi-token entry the workerCommandShell substitution should be raw
   const result = applyTemplate("run {workerCommandShell} --done", input, task, CTX);
-  // The raw workerCommandShell contains the inner-quoted argv but is not
-  // itself wrapped in an additional shell-quote layer.
-  assert.ok(result.startsWith("run "), "prefix preserved");
-  assert.ok(result.endsWith(" --done"), "suffix preserved");
-  // The portion between should not have a leading/trailing ' or " that wraps everything.
-  const middle = result.slice("run ".length, result.length - " --done".length);
-  assert.ok(middle.length > 0);
-  // middle must NOT be a single-quoted string of the whole thing
-  assert.ok(!(middle.startsWith("'") && middle.endsWith("'")), "workerCommandShell is not outer-quoted");
+  // The Shell-suffix bypass means {workerCommandShell} substitutes the
+  // pre-assembled shell string RAW — identical to its sole-token rendering and
+  // never wrapped in an additional shell-quote layer. Comparing the two
+  // renderings keeps this platform-agnostic (POSIX single-quote vs win32
+  // double-quote escaping both round-trip the same way; a leading/trailing
+  // quote on the value itself is not "outer" quoting).
+  const raw = applyTemplate("{workerCommandShell}", input, task, CTX);
+  assert.ok(raw.length > 0);
+  assert.equal(result, `run ${raw} --done`, "workerCommandShell is substituted raw, not re-quoted");
 });
 
 // ── Unknown placeholder: routes to RunLogger, not console.warn ───────────────
