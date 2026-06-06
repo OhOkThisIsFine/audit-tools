@@ -1,0 +1,22 @@
+{
+  "contract_version": "remediate-code-coverage/v1alpha1",
+  "plan_id": "PLAN-1780759044916",
+  "source_finding_count": 2,
+  "planned_count": 2,
+  "folded_count": 0,
+  "dropped_count": 0,
+  "entries": [
+    {
+      "finding_id": "F-A",
+      "title": "Alpha",
+      "disposition": "planned",
+      "block_id": "W-A"
+    },
+    {
+      "finding_id": "F-B",
+      "title": "Beta",
+      "disposition": "planned",
+      "block_id": "W-A"
+    }
+  ]
+}
