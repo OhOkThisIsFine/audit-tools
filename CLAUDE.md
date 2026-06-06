@@ -18,6 +18,7 @@ The aim is a pair of autonomous orchestrators that take a codebase from *underst
 - **One pipeline, two halves.** audit-code produces a findings contract; remediate-code consumes it and applies fixes. Each half emits two output files: a machine contract (JSON) and a human render (markdown). `audit-findings.json` / `audit-report.md` are the audit outputs; `remediation-outcomes.json` / `remediation-report.md` are the remediation outputs. The JSON files are the source of truth; the markdown files are human-facing renders.
 - **Obligation-driven, one bounded step per invocation.** Neither tool "runs to completion" internally. Each `next-step` derives state from artifacts, picks the highest-priority unsatisfied obligation, does one bounded unit of work, persists, and returns. This is what makes runs resumable, parallelizable, and failure-isolated — and it's the shared shape both orchestrators implement.
 - **Deterministic by default; LLM only for judgment.** Anything a deterministic extractor or validator can do, it should. The LLM is reserved for semantic review, synthesis, ambiguity resolution, and explicit low-confidence fallbacks — always bounded and recorded.
+- **Right-sized context for agents.** Give each LLM agent everything it needs to satisfy its bounded obligation, and no more. Deterministic artifacts should pre-digest scope, contracts, file lists, evidence, and constraints so prompts stay focused, attributable, and token-efficient.
 - **Artifacts are continuity; the dependency DAG is truth.** Durable state lives in artifacts, and staleness propagates along an explicit dependency map — never ad-hoc freshness checks.
 - **Language-neutral by contract.** The graph and artifact shapes are language-agnostic. New language support enriches those shared contracts; it must not fork the planning logic per ecosystem.
 - **Conversation-first.** The product is the slash workflow inside a host conversation; the CLI surface is backend/fallback, not the intended mental model.
@@ -183,6 +184,8 @@ A living log of how to resolve recurring forks, so agents don't re-ask settled q
 - **Docs capture durable concepts, not current state.** This project moves fast; prefer timeless conceptual docs (and this log) over status / roadmap / file-state notes that rot. If a doc would only record "where things are now," don't write it.
 - **A needed manual flag is a bug signal.** If a task seems to require `--root`, a provider, or a model flag, fix auto-resolution rather than document the flag.
 - **Resolve toward the durable contract.** LLM-vs-deterministic → deterministic; any graph/language question → the language-neutral contract (see Conventions).
+- **Budget context before asking an LLM.** When dispatching agents or rendering prompts, prefer small, obligation-specific packets over broad repo/report dumps; expand context only when the task genuinely needs it.
+- **Split design assessment into two named modes.** When assessing design, use **contract assessment** for invariants / boundaries / obligations and **conceptual design critique** for philosophy / alternatives / better directions — the bare phrase "design assessment" is too ambiguous.
 
 ## Known friction & deferred fixes
 
