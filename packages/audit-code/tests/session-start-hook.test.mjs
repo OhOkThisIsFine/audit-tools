@@ -5,9 +5,12 @@ import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
-// Resolve the hook path relative to the repo root (two levels up from tests/).
+// Resolve the hook path relative to the repo root (three levels up from
+// tests/). The canonical hook is the tracked `.claude/hooks/session-start.sh`
+// (kept via the `!.claude/hooks/session-start.sh` negation in .gitignore); the
+// `.codex/` mirror is host-local and gitignored, so it is absent in CI.
 const HOOK_PATH = new URL(
-  "../../../.codex/hooks/session-start.sh",
+  "../../../.claude/hooks/session-start.sh",
   import.meta.url,
 ).pathname.replace(/^\/([A-Za-z]:)/, "$1"); // strip leading slash on Windows paths
 
