@@ -10,7 +10,7 @@
   "files": [
     "dist/**",
     "audit-code.mjs",
-    "audit-code-wrapper-lib.mjs",
+    "audit-code-wrapper-*.mjs",
     "dispatch/**",
     "schemas/**",
     "skills/audit-code/**",
