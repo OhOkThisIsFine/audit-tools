@@ -60,10 +60,17 @@ rather than "where the code is today."
   A shape like `foreach (...) { ... } | ConvertTo-Json` throws "An empty pipe
   element is not allowed"; assign the loop output first (`$out = foreach (...) {
   ... }`) and pipe `$out`.
+- **PowerShell `-Filter` is not a regex.** Patterns like
+  `document-FINDING-00[1-6].result.json` can match nothing even when files exist;
+  use `Where-Object { $_.Name -match '...' }` for numbered result checks.
 - **Dirty remediation test files can mask block verification.** In shared
   worktrees, broad focused runs may fail on pre-existing edited tests unrelated to
   the block; record the broad failure and run the new/changed tests by name so
   worker evidence stays attributable.
+- **Completed remediation runs before state preservation are hard to retry.** If
+  close deleted `.audit-tools/remediation/state.json`, the final report/outcomes
+  may not contain enough item-spec or block context to reopen ignored findings
+  deterministically.
 
 ## Deferred fixes (product bugs)
 
@@ -647,12 +654,12 @@ multiple perspectives are still satisfied.
 
 ### Heterogeneous multi-agent dispatch
 
-Build on `computeDispatchCapacity({ pools, pendingItemTokens })` in
-`@audit-tools/shared`, which sizes dispatch just in time and sums concurrent slots
-across `CapacityPool`s. Remaining work toward a heterogeneous fleet:
-per-packet provider assignment, partitioning `pendingItemTokens` across pools,
-host-model detection, and building a real second pool such as an IDE model or
-another CLI provider.
+`computeDispatchCapacity({ pools, pendingItemTokens })` in `@audit-tools/shared`
+now sizes dispatch just in time, partitions pending token estimates across
+`CapacityPool`s, and sums concurrent slots with per-pool quota summaries.
+Remaining work toward a heterogeneous fleet: per-packet provider assignment,
+host-model detection for additional pools, and building a real second pool such
+as an IDE model or another CLI provider.
 
 ### Right-size LLM context and limit unnecessary conversation output
 

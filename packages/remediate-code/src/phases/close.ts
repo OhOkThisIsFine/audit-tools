@@ -8,11 +8,16 @@ import type {
   RemediationOutcomeStatus,
   RemediationOutcomesReport,
   RunLogger,
+  VerificationReport,
+  FindingVerificationTrace,
+  VerificationTraceEntry,
 } from "@audit-tools/shared";
+import { CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION } from "@audit-tools/shared";
 import { runCommand, runShellCommand } from "../utils/commands.js";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import type { ClosingAction } from "../state/closingActions.js";
-import type { CoverageLedger } from "../state/types.js";
+import type { CoverageLedger, ItemSpec } from "../state/types.js";
+import { rationaleAsksForRetry } from "../steps/stepUtils.js";
 
 const OUTCOME_BY_STATUS: Record<string, RemediationOutcomeStatus> = {
   resolved: "resolved",
@@ -609,6 +614,159 @@ async function cleanupTempBranchesAndArtifacts(
   }
 }
 
+/**
+ * Build a VerificationReport from the post-remediation state. One
+ * FindingVerificationTrace per terminal finding, with trace entries for:
+ *   - combined test suite result (task kind)
+ *   - each item's verification evidence from result files (file kind)
+ *   - closing action outcome (command kind)
+ *
+ * Overall status is "passed" when combined tests passed and all resolved
+ * items have at least one passing trace. "failed" otherwise.
+ */
+function buildVerificationReport(
+  state: RemediationState,
+  options: OrchestratorOptions,
+  closingResult: ClosingResult,
+  combinedTest: CombinedTestResult,
+): VerificationReport {
+  const findings: FindingVerificationTrace[] = [];
+  const findingsById = new Map(
+    (state.plan?.findings ?? []).map((f) => [f.id, f]),
+  );
+
+  for (const item of Object.values(state.items ?? {})) {
+    const finding = findingsById.get(item.finding_id);
+    const traces: VerificationTraceEntry[] = [];
+    const itemPassed =
+      (item.status === "resolved" || item.status === "resolved_no_change") &&
+      combinedTest.passed;
+
+    // Combined test suite trace.
+    const suiteLabel = combinedTest.suite_name ?? "combined test suite";
+    traces.push({
+      trace_id: `${item.finding_id}:combined-tests`,
+      kind: "task",
+      label: suiteLabel,
+      evidence: combinedTest.passed
+        ? [`${suiteLabel} passed`]
+        : [`${suiteLabel} failed`, ...(combinedTest.output ? [combinedTest.output.slice(-500)] : [])],
+      status: combinedTest.passed ? "passed" : "failed",
+    });
+
+    const contractGoalId =
+      finding?.contract_goal_id ?? (state.plan as { goal_id?: string } | undefined)?.goal_id;
+    if (contractGoalId) {
+      traces.push({
+        trace_id: `${item.finding_id}:contract-goal`,
+        kind: "requirement",
+        label: "contract-pipeline goal",
+        evidence: [`goal_id=${contractGoalId}`],
+        status: itemPassed ? "passed" : "failed",
+      });
+    }
+
+    if (finding?.contract_obligation_ids?.length) {
+      traces.push({
+        trace_id: `${item.finding_id}:contract-obligations`,
+        kind: "requirement",
+        label: "contract-pipeline obligations satisfied by task",
+        evidence: finding.contract_obligation_ids,
+        status: itemPassed ? "passed" : "failed",
+      });
+    }
+
+    if (finding?.verification_obligation_ids?.length) {
+      traces.push({
+        trace_id: `${item.finding_id}:verification-obligations`,
+        kind: "invariant",
+        label: "contract-pipeline verification obligations",
+        evidence: finding.verification_obligation_ids,
+        status: itemPassed ? "passed" : "failed",
+      });
+    }
+
+    for (const [index, command] of (finding?.targeted_commands ?? []).entries()) {
+      traces.push({
+        trace_id: `${item.finding_id}:targeted-command-${index + 1}`,
+        kind: "command",
+        label: "implementation DAG targeted command",
+        evidence: [`planned command: ${command}`],
+        status: itemPassed ? "passed" : "failed",
+      });
+    }
+
+    // Verification result file evidence (verify_code_against_documentation).
+    const verificationResultPath = join(
+      options.artifactsDir,
+      `result_${item.finding_id}_verify_code_against_documentation.json`,
+    );
+    if (existsSync(verificationResultPath)) {
+      try {
+        const verRes = JSON.parse(readFileSync(verificationResultPath, "utf8"));
+        const evidence: string[] = Array.isArray(verRes.reason) ? verRes.reason : [];
+        traces.push({
+          trace_id: `${item.finding_id}:verify-doc`,
+          kind: "file",
+          label: `verify_code_against_documentation for ${item.finding_id}`,
+          evidence,
+          status: evidence.length > 0 ? "passed" : "failed",
+        });
+      } catch {
+        // Non-fatal: evidence file malformed
+      }
+    }
+
+    // Closing action trace (one per finding so the report is self-contained).
+    if (closingResult.action !== "none") {
+      traces.push({
+        trace_id: `${item.finding_id}:closing`,
+        kind: "command",
+        label: `closing action: ${closingResult.action}`,
+        evidence: [`status=${closingResult.status}`],
+        status: closingResult.status === "failed" ? "failed" : "passed",
+      });
+    }
+
+    findings.push({
+      finding_id: item.finding_id,
+      traces,
+      overall_status: itemPassed ? "passed" : "failed",
+    });
+  }
+
+  // Sort by finding_id for determinism.
+  findings.sort((a, b) => a.finding_id.localeCompare(b.finding_id));
+
+  const overallPassed =
+    combinedTest.passed && findings.every((f) => f.overall_status === "passed");
+
+  // Derive goal_id from the plan if available.
+  const goalId = (state.plan as { goal_id?: string } | undefined)?.goal_id;
+
+  return {
+    contract_version: CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION,
+    ...(goalId ? { goal_id: goalId } : {}),
+    findings,
+    overall_status: overallPassed ? "passed" : "failed",
+    created_at: new Date().toISOString(),
+  };
+}
+
+function reblockRetryableIgnoredItems(state: RemediationState): boolean {
+  let changed = false;
+  for (const item of Object.values(state.items ?? {})) {
+    if (item.status !== "ignored" || !rationaleAsksForRetry(item.failure_reason)) {
+      continue;
+    }
+    item.status = "blocked";
+    delete item.completed_at;
+    item.failure_reason = `Retry requested from ignored/deferred rationale: ${item.failure_reason}`;
+    changed = true;
+  }
+  return changed;
+}
+
 export async function runClosePhase(
   state: RemediationState,
   options: OrchestratorOptions,
@@ -620,6 +778,11 @@ export async function runClosePhase(
     throw new Error(
       "Cannot run close phase: missing plan, items, or closing_plan from state.",
     );
+  }
+
+  if (reblockRetryableIgnoredItems(state)) {
+    console.log("Retryable ignored items found during close. Transitioning back to triage.");
+    return { ...state, status: "triage" };
   }
 
   // 1. Run the full test suite; on failure re-block resolved items and triage.
@@ -712,9 +875,17 @@ export async function runClosePhase(
   };
 
   const outputDir = dirname(options.artifactsDir);
+
+  // 5. Write verification_report.json for the contract pipeline closing phase.
+  const verificationReport = buildVerificationReport(state, options, closingResult, combinedTest);
+  const verificationReportPath = join(outputDir, "verification_report.json");
+  const completeState: RemediationState = { ...state, status: "complete" };
+
   await Promise.all([
     writeTextFile(join(outputDir, "remediation-report.md"), reportContent),
     writeJsonFile(join(outputDir, "remediation-outcomes.json"), outcomesFile),
+    writeJsonFile(verificationReportPath, verificationReport),
+    writeJsonFile(join(outputDir, "remediation-state.complete.json"), completeState),
   ]);
   runLogger?.event({
     phase: "close",
@@ -723,10 +894,23 @@ export async function runClosePhase(
     artifact: "remediation-outcomes.json",
     note: `${outcomesReport.total} outcome(s)`,
   });
+  runLogger?.event({
+    phase: "close",
+    kind: "artifact_write",
+    obligation: "closing",
+    artifact: "verification_report.json",
+    note: `overall_status=${verificationReport.overall_status}, findings=${verificationReport.findings.length}`,
+  });
+  runLogger?.event({
+    phase: "close",
+    kind: "artifact_write",
+    obligation: "closing",
+    artifact: "remediation-state.complete.json",
+    note: "complete remediation state preserved for retry/recovery",
+  });
   console.log("Remediation report generated.");
 
-  // 5. Clean up temporary branches and artifact directory.
-  const completeState: RemediationState = { ...state, status: "complete" };
+  // 6. Clean up temporary branches and artifact directory.
   await cleanupTempBranchesAndArtifacts(options, completeState, runLogger);
 
   return completeState;

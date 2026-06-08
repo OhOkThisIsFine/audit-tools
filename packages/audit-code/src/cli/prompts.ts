@@ -1,4 +1,4 @@
-import { DO_NOT_TOKEN_WRAP_NOTE } from "@audit-tools/shared";
+import { DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE } from "@audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import { renderCommand } from "./args.js";
@@ -120,7 +120,7 @@ export function renderDispatchReviewPrompt(params: {
     ...dispatchDataLines,
     ...canaryLines,
     "",
-    "Pass each `entry.prompt_path` literally to its subagent; do not load packet prompt files into this orchestrator context.",
+    DISPATCH_PROMPT_HANDOFF_NOTE,
     "",
     "Subagent prompt shape:",
     "",
@@ -131,7 +131,7 @@ export function renderDispatchReviewPrompt(params: {
     "",
     "Each subagent must submit its packet through the submit command printed in its packet prompt and stop after successful submission.",
     "",
-    "**File access pre-approval:** Each dispatch plan entry includes an `access` object with `read_paths` and `write_paths`. If your host supports per-subagent file access restrictions, pre-approve those paths before launching each subagent. Workers should not access files outside their declared paths.",
+    "**File access pre-approval:** Each dispatch plan entry includes an `access` object with `read_paths`, `write_paths`, and `forbidden_patterns`. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` and `entry.access.write_paths` for each subagent. Do not grant broad workspace or task-results directory write access. Workers should not access files outside their declared paths.",
     "",
     "**After all waves complete:**",
     "",
@@ -216,10 +216,11 @@ export function renderEdgeReasoningDispatchPrompt(params: {
     "optional pass: it only rewrites the `reason` string of those edges — it never",
     "adds, removes, re-targets, or re-weights an edge.",
     "",
-    "Dispatch exactly ONE subagent (via the `task` tool or equivalent). Hand it this",
-    "prompt file path; do not load the file into this orchestrator context:",
+    "Dispatch exactly ONE subagent (via the `task` tool or equivalent).",
     "",
-    `  ${params.promptPath}`,
+    DISPATCH_PROMPT_HANDOFF_NOTE,
+    "",
+    `  Prompt path: ${params.promptPath}`,
     "",
     "Subagent prompt shape:",
     "",

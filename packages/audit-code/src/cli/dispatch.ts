@@ -39,6 +39,7 @@ import {
   resolveHostActiveSubagentLimit,
   lookupDiscoveredLimits,
   mergeDiscoveredLimits,
+  summarizeDispatchCapacityPools,
 } from "../quota/index.js";
 import type { CapacityPool, DiscoveredRateLimits, DispatchQuota } from "../quota/index.js";
 import {
@@ -524,11 +525,14 @@ export function buildPacketPrompt(params: {
   largeFileSection: string[];
   taskSections: string[];
   submitCommand: string;
+  repoRoot?: string;
 }): string {
-  const { packet, fileList, largeFileSection, taskSections, submitCommand } = params;
+  const { packet, fileList, largeFileSection, taskSections, submitCommand, repoRoot } = params;
   const largeFileMode = isIsolatedLargeFilePacket(packet);
   return [
     "You are a code auditor. Review this packet once, then submit exactly one result per listed task.",
+    repoRoot ? `Repository root: ${repoRoot}` : "Repository root: use the root from the step contract.",
+    "Set the shell/tool workdir to the repository root when running backend commands.",
     "",
     "## Packet",
     `packet_id: ${packet.packet_id}`,
@@ -538,8 +542,8 @@ export function buildPacketPrompt(params: {
     "",
     "## Files to read",
     largeFileMode
-      ? "Use targeted Read/Grep calls. Paths are repo-relative from the current working directory."
-      : "Use your Read tool. Paths are repo-relative from the current working directory.",
+      ? "Use targeted Read/Grep calls. Paths are repo-relative to the repository root above."
+      : "Use your Read tool. Paths are repo-relative to the repository root above.",
     "Use host Read and Grep tools for source inspection. Do not use shell search commands.",
     fileList,
     "",
@@ -553,6 +557,8 @@ export function buildPacketPrompt(params: {
     "packet-*-result.json / audit_result_*.json) — the submit-packet command below is the only",
     "way to record results, and it writes them inside the artifacts directory for you.",
     "Produce one JSON array containing exactly one AuditResult object for each listed task.",
+    "Windows PowerShell: do not pipe an inline foreach statement directly into ConvertTo-Json.",
+    "Assign the foreach output to a variable first, then pipe that variable to ConvertTo-Json.",
     "",
     "Schema file (resolve relative to this prompt's directory): audit_result.schema.json",
     "  $refs resolved from the same directory: finding.schema.json, audit_task.schema.json",
@@ -676,6 +682,8 @@ async function computeDispatchQuota(params: {
     wave_size: dispatchCapacity.total_slots,
     estimated_wave_tokens: dispatchCapacity.estimated_wave_tokens,
     cooldown_until: dispatchCapacity.cooldown_until,
+    binding_cap: dispatchCapacity.binding_cap,
+    capacity_pools: summarizeDispatchCapacityPools(dispatchCapacity),
     quota_source_snapshot: waveSchedule.quota_source_snapshot ?? null,
     backoff_state: null,
   };
@@ -841,6 +849,7 @@ export async function prepareDispatchArtifacts(params: {
     prompt_path: string;
     complexity: DispatchComplexity;
     model_hint: DispatchModelHint;
+    access: { read_paths: string[]; write_paths: string[]; forbidden_patterns: string[] };
   }> = [];
   const resultMapEntries: DispatchResultMapEntry[] = [];
   for (const task of tasks) {
@@ -919,8 +928,11 @@ export async function prepareDispatchArtifacts(params: {
       });
     }
 
-    const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection, taskSections, submitCommand });
+    const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection, taskSections, submitCommand, repoRoot: reviewRoot });
     await writeFile(promptPath, prompt, "utf8");
+    const packetWritePaths = packetTasks
+      .map((task) => resultPathByTaskId.get(task.task_id))
+      .filter((p): p is string => p !== undefined);
     plan.push({
       packet_id: packet.packet_id,
       description:
@@ -929,6 +941,16 @@ export async function prepareDispatchArtifacts(params: {
       prompt_path: promptPath,
       complexity,
       model_hint: buildDispatchModelHint(complexity),
+      access: {
+        read_paths: [
+          promptPath,
+          ...(reviewRoot
+            ? packet.file_paths.map((p) => join(reviewRoot, p))
+            : packet.file_paths),
+        ],
+        write_paths: packetWritePaths,
+        forbidden_patterns: ["packet-*-result.json", "audit_result_*.json"],
+      },
     });
   }
 

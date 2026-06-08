@@ -285,3 +285,171 @@ describe("basic validation helpers", () => {
     expect(issues.some((i) => i.message.includes("b"))).toBe(true);
   });
 });
+
+import {
+  validateGoalSpec,
+  validateContextBundle,
+  validateDesignSpec,
+  validateConceptualDesignCritique,
+  validateObligationLedger,
+  validateContractAssessmentReport,
+  validateCounterexample,
+  validateJudgeReport,
+  validateImplementationDAG,
+  validateVerificationReport,
+} from "../src/validation/contractPipeline.js";
+import {
+  CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
+  CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
+  CONTRACT_PIPELINE_DESIGN_SPEC_VERSION,
+  CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
+  CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
+  CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
+  CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
+  CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
+  CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+  CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION,
+} from "@audit-tools/shared";
+
+describe("contract pipeline validators", () => {
+  describe("validateGoalSpec", () => {
+    const valid = {
+      contract_version: CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
+      goal_id: "G-001",
+      objective: "Improve test coverage.",
+      non_goals: [],
+      success_criteria: ["All tests pass."],
+      source_type: "conversation",
+      created_at: new Date().toISOString(),
+    };
+
+    it("accepts a well-formed GoalSpec", () => {
+      expect(validateGoalSpec(valid).filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects missing required fields", () => {
+      const issues = validateGoalSpec({});
+      expect(issues.some((i) => i.message.includes("contract_version"))).toBe(true);
+    });
+
+    it("rejects unsupported contract_version", () => {
+      const issues = validateGoalSpec({ ...valid, contract_version: "wrong/v999" });
+      expect(issues.some((i) => i.path.includes("contract_version"))).toBe(true);
+    });
+
+    it("rejects invalid source_type", () => {
+      const issues = validateGoalSpec({ ...valid, source_type: "invalid" });
+      expect(issues.some((i) => i.path.includes("source_type"))).toBe(true);
+    });
+  });
+
+  describe("validateImplementationDAG", () => {
+    const validNode = {
+      id: "T-001",
+      title: "Write tests",
+      description: "Add unit tests.",
+      satisfies_obligations: [],
+      depends_on: [],
+      verification_obligation_ids: [],
+      targeted_commands: [],
+      status: "pending",
+    };
+
+    const valid = {
+      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+      goal_id: "G-001",
+      nodes: [validNode],
+      edges: [],
+      created_at: new Date().toISOString(),
+    };
+
+    it("accepts a well-formed ImplementationDAG", () => {
+      expect(validateImplementationDAG(valid).filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects malformed nodes", () => {
+      const issues = validateImplementationDAG({ ...valid, nodes: [{ id: 123 }] });
+      expect(issues.some((i) => i.message.includes("title"))).toBe(true);
+    });
+
+    it("rejects malformed edges", () => {
+      const issues = validateImplementationDAG({
+        ...valid,
+        edges: [{ from: "T-001", to: "T-002", kind: "invalid_kind" }],
+      });
+      expect(issues.some((i) => i.path.includes("kind"))).toBe(true);
+    });
+
+    it("rejects invalid node status", () => {
+      const issues = validateImplementationDAG({
+        ...valid,
+        nodes: [{ ...validNode, status: "flying" }],
+      });
+      expect(issues.some((i) => i.path.includes("status"))).toBe(true);
+    });
+  });
+
+  describe("validateJudgeReport", () => {
+    const valid = {
+      contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
+      goal_id: "G-001",
+      verdict: "approved",
+      findings: [],
+      required_repairs: [],
+      created_at: new Date().toISOString(),
+    };
+
+    it("accepts well-formed JudgeReport", () => {
+      expect(validateJudgeReport(valid).filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects invalid verdict", () => {
+      const issues = validateJudgeReport({ ...valid, verdict: "maybe" });
+      expect(issues.some((i) => i.path.includes("verdict"))).toBe(true);
+    });
+  });
+
+  describe("validateVerificationReport", () => {
+    const valid = {
+      contract_version: CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION,
+      findings: [],
+      overall_status: "passed",
+      created_at: new Date().toISOString(),
+    };
+
+    it("accepts well-formed VerificationReport", () => {
+      expect(validateVerificationReport(valid).filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects invalid overall_status", () => {
+      const issues = validateVerificationReport({ ...valid, overall_status: "unknown" });
+      expect(issues.some((i) => i.path.includes("overall_status"))).toBe(true);
+    });
+
+    it("rejects missing traces array on finding", () => {
+      const issues = validateVerificationReport({
+        ...valid,
+        findings: [{ finding_id: "F-001", traces: "not-array", overall_status: "passed" }],
+      });
+      expect(issues.some((i) => i.message.includes("traces"))).toBe(true);
+    });
+
+    it("rejects trace without evidence", () => {
+      const issues = validateVerificationReport({
+        ...valid,
+        findings: [{
+          finding_id: "F-001",
+          traces: [{
+            trace_id: "T1",
+            kind: "requirement",
+            label: "req",
+            evidence: "not-array",
+            status: "passed",
+          }],
+          overall_status: "passed",
+        }],
+      });
+      expect(issues.some((i) => i.message.includes("evidence"))).toBe(true);
+    });
+  });
+});

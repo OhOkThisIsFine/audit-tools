@@ -643,6 +643,67 @@ describe("splitBlocksByContextBudget — dependency remap after split", () => {
       expect(b.dependencies).toEqual(["A"]);
     }
   });
+
+  it("splits an oversized hub-file overlap group into deterministic sub-blocks", () => {
+    const findings = Array.from({ length: 5 }, (_, index) => {
+      const id = `FH${index + 1}`;
+      return finding(id, `src/leaf-${index + 1}.ts`);
+    });
+    for (const f of findings) {
+      f.affected_files.unshift({ path: "src/hub.ts" });
+    }
+    const blocks = [
+      {
+        block_id: "Hub",
+        items: findings.map((f) => f.id),
+        parallel_safe: true,
+      },
+    ];
+
+    const result = splitBlocksByContextBudget(
+      blocks as any,
+      findings as any,
+      "/tmp",
+      tightBudget,
+    );
+
+    expect(result.length).toBeGreaterThan(1);
+    expect(result.map((b) => b.block_id)).toEqual([
+      "Hub-01",
+      "Hub-02",
+      "Hub-03",
+      "Hub-04",
+      "Hub-05",
+    ]);
+    expect(result.flatMap((b) => b.items).sort()).toEqual(
+      findings.map((f) => f.id).sort(),
+    );
+  });
+
+  it("keeps small same-file conflict groups together when they fit", () => {
+    const findings = [
+      finding("FS1", "src/shared-small.ts"),
+      finding("FS2", "src/shared-small.ts"),
+    ];
+    const blocks = [
+      {
+        block_id: "Small",
+        items: ["FS1", "FS2"],
+        parallel_safe: true,
+      },
+    ];
+
+    const result = splitBlocksByContextBudget(
+      blocks as any,
+      findings as any,
+      "/tmp",
+      ESTIMATED_BLOCK_BASE_TOKENS + 2 * ESTIMATED_FINDING_OVERHEAD_TOKENS + 1,
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].block_id).toBe("Small");
+    expect(result[0].items).toEqual(["FS1", "FS2"]);
+  });
 });
 
 describe("buildCoverageLedger", () => {
@@ -816,6 +877,105 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
     expect(integrity.is_clean).toBe(true);
   });
 
+  it("appends public schema companions for shared finding contract changes before snapshotting", async () => {
+    const contractFile = "packages/shared/src/types/finding.ts";
+    const schemaFile = "packages/audit-code/schemas/audit_findings.schema.json";
+    const localFile = "src/consumer.ts";
+    for (const file of [contractFile, schemaFile, localFile]) {
+      await mkdir(dirname(join(PIPELINE_TEST_DIR, file)), { recursive: true });
+      await writeFile(join(PIPELINE_TEST_DIR, file), `// ${file}`, "utf8");
+    }
+
+    const finding = mkFinding("F-CONTRACT", "Contract change", {
+      files: [contractFile, localFile],
+      evidence: ["e"],
+    });
+    const inputPlan = {
+      plan_id: "PLAN-test",
+      findings: [finding] as any[],
+      blocks: [
+        { block_id: "B-001", items: ["F-CONTRACT"], parallel_safe: true, dependencies: [] },
+      ],
+      project_type: "unknown",
+      candidate_closing_actions: ["none"] as any,
+    };
+
+    await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
+
+    expect(finding.affected_files.map((file) => file.path)).toEqual([
+      contractFile,
+      localFile,
+      schemaFile,
+    ]);
+    expect(
+      finding.affected_files.find((file) => file.path === schemaFile)?.hash_at_plan_time,
+    ).toBeTruthy();
+  });
+
+  it("uses appended schema companions before block-overlap merging", async () => {
+    const contractFile = "packages/shared/src/types/finding.ts";
+    const schemaFile = "packages/audit-code/schemas/audit_findings.schema.json";
+    for (const file of [contractFile, schemaFile]) {
+      await mkdir(dirname(join(PIPELINE_TEST_DIR, file)), { recursive: true });
+      await writeFile(join(PIPELINE_TEST_DIR, file), `// ${file}`, "utf8");
+    }
+
+    const contractFinding = mkFinding("F-CONTRACT", "Contract change", {
+      files: [contractFile],
+      evidence: ["e"],
+    });
+    const schemaFinding = mkFinding("F-SCHEMA", "Schema change", {
+      files: [schemaFile],
+      evidence: ["e"],
+    });
+    const inputPlan = {
+      plan_id: "PLAN-test",
+      findings: [contractFinding, schemaFinding] as any[],
+      blocks: [
+        { block_id: "B-001", items: ["F-CONTRACT"], parallel_safe: true, dependencies: [] },
+        { block_id: "B-002", items: ["F-SCHEMA"], parallel_safe: true, dependencies: [] },
+      ],
+      project_type: "unknown",
+      candidate_closing_actions: ["none"] as any,
+    };
+
+    const result = await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].items).toContain("F-CONTRACT");
+    expect(result.blocks[0].items).toContain("F-SCHEMA");
+  });
+
+  it("leaves unrelated affected files unchanged and does not duplicate existing schema paths", async () => {
+    const schemaFile = "packages/audit-code/schemas/audit_findings.schema.json";
+    const unrelatedFile = "src/unrelated.ts";
+    for (const file of [schemaFile, unrelatedFile]) {
+      await mkdir(dirname(join(PIPELINE_TEST_DIR, file)), { recursive: true });
+      await writeFile(join(PIPELINE_TEST_DIR, file), `// ${file}`, "utf8");
+    }
+
+    const finding = mkFinding("F-UNRELATED", "Unrelated change", {
+      files: [unrelatedFile, schemaFile],
+      evidence: ["e"],
+    });
+    const inputPlan = {
+      plan_id: "PLAN-test",
+      findings: [finding] as any[],
+      blocks: [
+        { block_id: "B-001", items: ["F-UNRELATED"], parallel_safe: true, dependencies: [] },
+      ],
+      project_type: "unknown",
+      candidate_closing_actions: ["none"] as any,
+    };
+
+    await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
+
+    expect(finding.affected_files.map((file) => file.path)).toEqual([
+      unrelatedFile,
+      schemaFile,
+    ]);
+  });
+
   it("runPlanPhase regression: still applies full pipeline after refactor (MNT-1905694f)", async () => {
     // Write a minimal audit-findings report with two findings that share a file.
     const sharedFile = "src/shared.ts";
@@ -851,5 +1011,122 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
       result.plan!.findings as any,
     );
     expect(integrity.is_clean).toBe(true);
+  });
+});
+
+// ── FINDING-014: directory path exclusion from overlap grouping ───────────────
+
+describe("splitBlocksByContextBudget — directory path exclusion (FINDING-014)", () => {
+  const DIR_TEST_DIR = join(testDir, ".test-plan-dir-exclusion");
+
+  beforeEach(async () => {
+    await rm(DIR_TEST_DIR, { recursive: true, force: true });
+    await mkdir(DIR_TEST_DIR, { recursive: true });
+  }, 30_000);
+
+  afterEach(async () => {
+    await rm(DIR_TEST_DIR, { recursive: true, force: true });
+  }, 30_000);
+
+  it("does not lock all findings into one block when they share only a directory path", async () => {
+    // Reproduce the mega-block bug: many findings reference a broad directory path;
+    // without directory exclusion from union-find, all land in one group whose
+    // estimate fits the budget → no split → 1 indivisible mega-block.
+    await mkdir(join(DIR_TEST_DIR, "src"), { recursive: true });
+
+    const findings = Array.from({ length: 22 }, (_, i) =>
+      mkFinding(`FD${i + 1}`, `Finding ${i + 1}`, { files: ["src"], evidence: ["e"] }),
+    );
+    const blocks = [{ block_id: "B-001", items: findings.map((f) => f.id), parallel_safe: true }];
+    // Budget = 20,000: without directory exclusion, 22 × 600 + 900 = 14,100 < 20,000 → 1 block.
+    // With directory exclusion from union-find, 22 independent groups × 1,500 tokens → 2 blocks.
+    const result = splitBlocksByContextBudget(blocks as any, findings as any, DIR_TEST_DIR, 20_000);
+
+    expect(result.length).toBeGreaterThan(1);
+    expect(result.flatMap((b) => b.items).sort()).toEqual(findings.map((f) => f.id).sort());
+  });
+
+  it("keeps findings sharing a concrete file grouped when they fit within budget", async () => {
+    await mkdir(join(DIR_TEST_DIR, "src"), { recursive: true });
+    await writeFile(join(DIR_TEST_DIR, "src", "shared.ts"), "// small", "utf8");
+
+    const findings = [
+      mkFinding("FA", "A", { files: ["src/shared.ts"], evidence: ["e"] }),
+      mkFinding("FB", "B", { files: ["src/shared.ts"], evidence: ["e"] }),
+    ];
+    const blocks = [{ block_id: "B-001", items: ["FA", "FB"], parallel_safe: true }];
+
+    const result = splitBlocksByContextBudget(blocks as any, findings as any, DIR_TEST_DIR, 1_000_000);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].items.sort()).toEqual(["FA", "FB"].sort());
+  });
+
+  it("uses directory walk to produce accurate byte estimates for directory paths", async () => {
+    // walkDirBytes must return real content size, not stat().size which is ~0 on
+    // Windows and 4096 on Linux — both far below the actual content bytes.
+    const srcDir = join(DIR_TEST_DIR, "src");
+    await mkdir(srcDir, { recursive: true });
+    const fileContent = "x".repeat(5_000);
+    for (let i = 0; i < 6; i++) {
+      await writeFile(join(srcDir, `module-${i}.ts`), fileContent, "utf8");
+    }
+    // 6 findings, each referencing only the directory (no unique file).
+    const findings = Array.from({ length: 6 }, (_, i) =>
+      mkFinding(`FD${i + 1}`, `Finding ${i + 1}`, { files: ["src"], evidence: ["e"] }),
+    );
+    const blocks = [{ block_id: "B-001", items: findings.map((f) => f.id), parallel_safe: true }];
+    // Each finding group: base(900) + walkDirBytes(~30 000 bytes)/4(~7 500) + overhead(600) = ~9 000.
+    // Budget = 10 000: one fits (9 000 ≤ 10 000), two do not (18 000 > 10 000) → 6 blocks.
+    const result = splitBlocksByContextBudget(blocks as any, findings as any, DIR_TEST_DIR, 10_000);
+
+    expect(result.length).toBe(6);
+    expect(result.flatMap((b) => b.items).sort()).toEqual(findings.map((f) => f.id).sort());
+  });
+});
+
+describe("runPlanPhase — content-driven structured-audit report parsing", () => {
+  beforeEach(async () => {
+    await rmWithRetry(TEST_DIR);
+    await mkdir(ARTIFACTS_DIR, { recursive: true });
+  }, 60_000);
+
+  afterEach(async () => {
+    await rmWithRetry(TEST_DIR);
+  }, 60_000);
+
+  it("parses audit-findings report regardless of file extension (content-driven, not extension-driven)", async () => {
+    const txtPath = join(TEST_DIR, "findings-report.txt");
+    const content = makeReport([
+      mkFinding("F-TXT-1", "Text extension finding", { files: ["src/a.ts"] }),
+    ], [
+      mkBlock("B-TXT-1", ["F-TXT-1"]),
+    ]);
+    await writeFile(txtPath, JSON.stringify(content), "utf8");
+
+    const state = await runPlanPhase(baseState, {
+      ...baseOptions,
+      input: txtPath,
+    });
+
+    expect(state.plan).toBeDefined();
+    expect(state.plan!.findings).toHaveLength(1);
+    expect(state.plan!.findings[0].id).toBe("F-TXT-1");
+    expect(state.plan!.findings[0].title).toBe("Text extension finding");
+    const issues = validateRemediationPlan(state.plan!);
+    const errors = issues.filter((i) => i.severity === "error");
+    expect(errors).toHaveLength(0);
+  });
+
+  it("non-audit JSON file falls through to the LLM extractor path, not the structured-audit path", async () => {
+    const jsonPath = join(TEST_DIR, "not-findings.json");
+    await writeFile(jsonPath, JSON.stringify({ hello: "world" }), "utf8");
+
+    await expect(
+      runPlanPhase(baseState, {
+        ...baseOptions,
+        input: jsonPath,
+      }),
+    ).rejects.toThrow();
   });
 });

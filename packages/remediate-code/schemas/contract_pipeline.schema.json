@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contract_pipeline.schema.json",
+  "title": "Contract Pipeline Artifacts",
+  "description": "JSON Schema for the seven contract-pipeline artifact types used by remediate-code.",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "GoalSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "goal_id", "objective", "non_goals", "success_criteria", "source_type", "created_at"],
+      "properties": {
+        "contract_version": {
+          "type": "string",
+          "const": "remediate-code-contract-pipeline/goal-spec/v1alpha1"
+        },
+        "goal_id": { "type": "string" },
+        "objective": { "type": "string" },
+        "non_goals": { "type": "array", "items": { "type": "string" } },
+        "success_criteria": { "type": "array", "items": { "type": "string" } },
+        "source_type": {
+          "type": "string",
+          "enum": ["conversation", "document", "structured_audit", "mixed"]
+        },
+        "created_at": { "type": "string" }
+      }
+    },
+    "ContextBundleEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind", "relevance_reason"],
+      "properties": {
+        "path": { "type": "string" },
+        "kind": { "type": "string", "enum": ["source", "test", "config", "doc"] },
+        "relevance_reason": { "type": "string" }
+      }
+    },
+    "ContextBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "goal_id", "entries", "context_summary", "created_at"],
+      "properties": {
+        "contract_version": {
+          "type": "string",
+          "const": "remediate-code-contract-pipeline/context-bundle/v1alpha1"
+        },
+        "goal_id": { "type": "string" },
+        "entries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ContextBundleEntry" }
+        },
+        "context_summary": { "type": "string" },
+        "created_at": { "type": "string" }
+      }
+    },
+    "DesignSpecInvariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description"],
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "DesignSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "goal_id", "design_narrative", "invariants", "affected_paths", "created_at"],
+      "properties": {
+        "contract_version": {
+          "type": "string",
+          "const": "remediate-code-contract-pipeline/design-spec/v1alpha1"
+        },
+        "goal_id": { "type": "string" },
+        "design_narrative": { "type": "string" },
+        "invariants": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/DesignSpecInvariant" }
+        },
+        "affected_paths": { "type": "array", "items": { "type": "string" } },
+        "created_at": { "type": "string" }
+      }
+    },
+    "DesignCritiqueItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "description", "severity"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string", "enum": ["concern", "alternative", "suggestion"] },
+        "description": { "type": "string" },
+        "severity": { "type": "string", "enum": ["blocking", "advisory"] }
+      }
+    },
+    "ConceptualDesignCritique": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "goal_id", "items", "verdict", "created_at"],
+      "properties": {
+        "contract_version": {
+          "type": "string",
+          "const": "remediate-code-contract-pipeline/conceptual-design-critique/v1alpha1"
+        },
+        "goal_id": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/DesignCritiqueItem" }
+        },
+        "verdict": {
+          "type": "string",
+          "enum": ["approved", "approved_with_concerns", "rejected"]
+        },
+        "created_at": { "type": "string" }
+      }
+    },
+    "ObligationEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "kind", "depends_on", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "kind": { "type": "string", "enum": ["invariant", "behavioral", "structural", "test"] },
+        "depends_on": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["pending", "satisfied", "failed"] }
+      }
+    },
+    "ObligationLedger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "goal_id", "obligations", "created_at"],
+      "properties": {
+        "contract_version": {
+          "type": "string",
+          "const": "remediate-code-contract-pipeline/obligation-ledger/v1alpha1"
+        },
+        "goal_id": { "type": "string" },
+        "obligations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ObligationEntry" }
+        },
+        "created_at": { "type": "string" }
+      }
+    },
+    "ContractAssessmentFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["obligation_id", "status", "evidence", "rationale"],
+      "properties": {
+        "obligation_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["satisfied", "violated", "uncertain"] },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "rationale": { "type": "string" }
+      }
+    },
+    "ContractAssessmentReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "goal_id", "findings", "verdict", "created_at"],
+      "properties": {
+        "contract_version": {
+          "type": "string",
+          "const": "remediate-code-contract-pipeline/contract-assessment-report/v1alpha1"
+        },
+        "goal_id": { "type": "string" },
+        "findings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ContractAssessmentFinding" }
+        },
+        "verdict": { "type": "string", "enum": ["passed", "failed", "partial"] },
+        "created_at": { "type": "string" }
+      }
+    },
+    "Counterexample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "goal_id", "claim", "reproduction_steps", "expected", "actual", "violated_obligation_ids", "created_at"],
+      "properties": {
+        "contract_version": {
+          "type": "string",
+          "const": "remediate-code-contract-pipeline/counterexample/v1alpha1"
+        },
+        "goal_id": { "type": "string" },
+        "claim": { "type": "string" },
+        "reproduction_steps": { "type": "array", "items": { "type": "string" } },
+        "expected": { "type": "string" },
+        "actual": { "type": "string" },
+        "violated_obligation_ids": { "type": "array", "items": { "type": "string" } },
+        "created_at": { "type": "string" }
+      }
+    },
+    "JudgeReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "goal_id", "verdict", "findings", "required_repairs", "created_at"],
+      "properties": {
+        "contract_version": {
+          "type": "string",
+          "const": "remediate-code-contract-pipeline/judge-report/v1alpha1"
+        },
+        "goal_id": { "type": "string" },
+        "verdict": { "type": "string", "enum": ["approved", "rejected", "needs_repair"] },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "description", "severity", "related_obligation_ids"],
+            "properties": {
+              "id": { "type": "string" },
+              "description": { "type": "string" },
+              "severity": { "type": "string", "enum": ["blocking", "advisory"] },
+              "related_obligation_ids": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "required_repairs": { "type": "array", "items": { "type": "string" } },
+        "created_at": { "type": "string" }
+      }
+    },
+    "ImplementationDAGNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "description", "satisfies_obligations", "depends_on", "verification_obligation_ids", "targeted_commands", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "satisfies_obligations": { "type": "array", "items": { "type": "string" } },
+        "depends_on": { "type": "array", "items": { "type": "string" } },
+        "verification_obligation_ids": { "type": "array", "items": { "type": "string" } },
+        "targeted_commands": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["pending", "in_progress", "resolved", "blocked"] }
+      }
+    },
+    "ImplementationDAGEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "kind"],
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "kind": { "type": "string", "enum": ["dependency", "verification"] }
+      }
+    },
+    "ImplementationDAG": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "goal_id", "nodes", "edges", "created_at"],
+      "properties": {
+        "contract_version": {
+          "type": "string",
+          "const": "remediate-code-contract-pipeline/implementation-dag/v1alpha1"
+        },
+        "goal_id": { "type": "string" },
+        "nodes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ImplementationDAGNode" }
+        },
+        "edges": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ImplementationDAGEdge" }
+        },
+        "created_at": { "type": "string" }
+      }
+    },
+    "VerificationTraceEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_id", "kind", "label", "evidence", "status"],
+      "properties": {
+        "trace_id": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": ["requirement", "invariant", "counterexample", "task", "file", "command"]
+        },
+        "label": { "type": "string" },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["passed", "failed"] }
+      }
+    },
+    "FindingVerificationTrace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_id", "traces", "overall_status"],
+      "properties": {
+        "finding_id": { "type": "string" },
+        "traces": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/VerificationTraceEntry" }
+        },
+        "overall_status": { "type": "string", "enum": ["passed", "failed"] }
+      }
+    },
+    "VerificationReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "findings", "overall_status", "created_at"],
+      "properties": {
+        "contract_version": {
+          "type": "string",
+          "const": "remediate-code-verification-report/v1alpha1"
+        },
+        "goal_id": { "type": "string" },
+        "findings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FindingVerificationTrace" }
+        },
+        "overall_status": { "type": "string", "enum": ["passed", "failed"] },
+        "created_at": { "type": "string" }
+      }
+    }
+  }
+}

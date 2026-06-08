@@ -95,6 +95,49 @@ export function shellQuote(
   return "'" + arg.replace(/'/g, "'\\''") + "'";
 }
 
+function isPromptPathToken(value: string): boolean {
+  return (
+    /^[A-Za-z]:\\/u.test(value) ||
+    /^\\\\[^\\]+\\[^\\]+/u.test(value) ||
+    /^\.{1,2}\\/u.test(value) ||
+    (value.includes("\\") && /(?:^|\\)[^\\]+\.[A-Za-z0-9][A-Za-z0-9_-]*$/u.test(value))
+  );
+}
+
+export function toPromptPathToken(value: string): string {
+  return isPromptPathToken(value) ? value.replace(/\\/g, "/") : value;
+}
+
+export function quotePromptCommandArg(value: string): string {
+  return /[\s"]/u.test(value)
+    ? `"${value.replace(/"/g, '\\"')}"`
+    : value;
+}
+
+export function renderPromptCommand(argv: readonly string[]): string {
+  return argv.map((item) => quotePromptCommandArg(toPromptPathToken(item))).join(" ");
+}
+
+export function coerceJsonObjectArg<T extends Record<string, unknown>>(
+  value: T | string | undefined,
+  label: string,
+): T {
+  if (value === undefined) return {} as T;
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new TypeError(`${label} must be an object or JSON object string: ${message}`);
+    }
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError(`${label} must be an object or JSON object string.`);
+  }
+  return parsed as T;
+}
+
 /**
  * On Windows, package-manager shims (`npm`/`npx`/`pnpm`/`yarn`) are `.cmd`
  * batch files that `spawn` cannot launch without a shell. Map them to their

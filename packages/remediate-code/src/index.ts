@@ -69,6 +69,10 @@ program
     "--finalize-closing",
     "Finalize a closing remediation state from a generated close_run step",
   )
+  .option(
+    "--force-replan",
+    "Rebuild the remediation plan from the existing intake artifacts",
+  )
   .action(async (options) => {
     console.error(
       "remediate-code: `run` is deprecated; use `remediate-code next-step`. " +
@@ -86,6 +90,7 @@ program
           ? parseInt(options.hostMaxConcurrent, 10) || undefined
           : undefined,
         finalizeClosing: options.finalizeClosing === true,
+        forceReplan: options.forceReplan === true,
       }),
     );
     console.log(JSON.stringify(step, null, 2));
@@ -113,6 +118,10 @@ program
     "--finalize-closing",
     "Finalize a closing remediation state from a generated close_run step",
   )
+  .option(
+    "--force-replan",
+    "Rebuild the remediation plan from the existing intake artifacts",
+  )
   .action(async (options) => {
     const step = await withBackendLogsOnStderr(() =>
       decideNextStep({
@@ -126,6 +135,7 @@ program
           ? parseInt(options.hostMaxConcurrent, 10) || undefined
           : undefined,
         finalizeClosing: options.finalizeClosing === true,
+        forceReplan: options.forceReplan === true,
       }),
     );
     console.log(JSON.stringify(step, null, 2));

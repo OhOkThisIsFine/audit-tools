@@ -255,6 +255,21 @@ async function withTempRepo(fn, { canary = false } = {}) {
   }
 }
 
+test("legacy wrapper fixtures pin canary off by default", async () => {
+  await withTempRepo(async (root) => {
+    const config = JSON.parse(
+      await readFile(join(root, ".audit-tools/audit", "session-config.json"), "utf8"),
+    );
+
+    assert.equal(config.provider, "local-subprocess");
+    assert.deepEqual(
+      config.dispatch,
+      { canary: false },
+      "legacy single-round wrapper fixtures must opt out of default-on canary dispatch",
+    );
+  });
+});
+
 function validAuditResultForTask(task, overrides = {}) {
   return {
     task_id: task.task_id,

@@ -109,10 +109,43 @@ test("buildPacketPrompt — assembles expected prompt sections", () => {
 
   assert.ok(typeof prompt === "string");
   assert.match(prompt, /packet_id: abc/);
+  assert.match(prompt, /Repository root:/);
+  assert.match(prompt, /Set the shell\/tool workdir to the repository root/i);
   assert.match(prompt, /submit-packet/);
   assert.ok(prompt.includes(fileList));
   assert.ok(prompt.includes("### task-abc"));
+  assert.match(prompt, /do not pipe an inline foreach statement directly into ConvertTo-Json/i);
+  assert.match(prompt, /Assign the foreach output to a variable first/i);
+  assert.doesNotMatch(prompt, /current working directory/);
   assert.match(prompt, /valid: abc, findings=/);
+});
+
+test("FINDING-018: buildPacketPrompt — forbids ad-hoc result files and routes submission through submit-packet", () => {
+  const packet = makePacket("abc");
+  const packetTasks = [makeAuditTask("abc")];
+  const fileList = "- src/abc.ts (100 lines)";
+  const taskSections = ["### task-abc"];
+  const submitCommand = "node packages/audit-code/audit-code.mjs submit-packet --run-id-b64 xxx";
+
+  const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection: [], taskSections, submitCommand });
+
+  assert.match(prompt, /Do not write files directly/i, "prompt must forbid ad-hoc file writes");
+  assert.ok(
+    prompt.includes("packet-*-result.json") && prompt.includes("audit_result_*.json"),
+    "prompt must name common stray result filename patterns",
+  );
+  assert.ok(
+    prompt.includes("the submit-packet command below is the only"),
+    "prompt must name submit-packet as the only submission path",
+  );
+  assert.ok(
+    prompt.includes("way to record results"),
+    "prompt must state submit-packet is the only way to record results",
+  );
+  assert.ok(
+    prompt.includes("it writes them inside the artifacts directory"),
+    "prompt must state submit-packet writes packet-owned result files",
+  );
 });
 
 // ── buildTaskSections ─────────────────────────────────────────────────────────

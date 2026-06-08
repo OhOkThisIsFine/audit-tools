@@ -509,6 +509,31 @@ describe("host-dispatch backlog fixes — dependencies, skip, access", () => {
     expect(b1.access!.write_paths).toContain("src/a.ts");
   });
 
+  it("does not serialize blocks that only share affected read context", async () => {
+    const state = makeDocumentingState();
+    state.plan!.findings[0].affected_files = [
+      { path: "src/hub.ts" },
+      { path: "src/a.ts" },
+    ];
+    state.plan!.findings[1].affected_files = [
+      { path: "src/hub.ts" },
+      { path: "src/b.ts" },
+    ];
+    state.items!["F-001"].item_spec!.touched_files = ["src/a.ts"];
+    state.items!["F-002"].item_spec!.touched_files = ["src/b.ts"];
+    await saveState(state);
+
+    const plan = await prepareImplementDispatch(opts(), "RUN-1");
+    expect(plan.items.map((i) => i.block_id).sort()).toEqual(["B-001", "B-002"]);
+
+    const b1 = plan.items.find((i) => i.block_id === "B-001")!;
+    const b2 = plan.items.find((i) => i.block_id === "B-002")!;
+    expect(b1.access!.read_paths).toContain("src/hub.ts");
+    expect(b2.access!.read_paths).toContain("src/hub.ts");
+    expect(b1.access!.write_paths).not.toContain("src/hub.ts");
+    expect(b2.access!.write_paths).not.toContain("src/hub.ts");
+  });
+
   it("defers a dependent block until its dependency resolves (separate waves)", async () => {
     const state = makeDocumentingState();
     state.plan!.blocks[1].dependencies = ["B-001"];
@@ -667,6 +692,75 @@ describe("host-dispatch backlog fixes — dependencies, skip, access", () => {
 // console.log to console.error during execution. These tests simulate that
 // wrapper and verify the stdio contract.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// FINDING-021: per-item reconciliation messages must not be emitted to
+// console.log. Only the aggregate count summary is emitted (and the CLI
+// action wraps the whole call with withBackendLogsOnStderr anyway).
+// ---------------------------------------------------------------------------
+
+describe("FINDING-021: no per-item reconciliation console.log messages", () => {
+  it("prepareDocumentDispatch does not log per-item reuse messages", async () => {
+    const state = makePlanningState();
+    await saveState(state);
+
+    const runId = "PLAN-no-per-item-doc";
+    const resultDir = join(ARTIFACTS_DIR, "runs", runId, "document");
+    await mkdir(resultDir, { recursive: true });
+
+    await writeFile(
+      join(resultDir, "document-F-001.result.json"),
+      JSON.stringify({
+        type: "item_spec",
+        item_spec: { finding_id: "F-001", concrete_change: "fix", tests_to_write: [], not_applicable_steps: [] },
+      }),
+    );
+
+    const logMessages: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...args) => {
+      logMessages.push(args.map(String).join(" "));
+    });
+    try {
+      await prepareDocumentDispatch({ root: REPO_DIR, artifactsDir: ARTIFACTS_DIR }, runId);
+      for (const msg of logMessages) {
+        expect(msg).not.toMatch(/Reusing existing document result for/);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("prepareImplementDispatch does not log per-item reuse messages", async () => {
+    const state = makeDocumentingState();
+    await saveState(state);
+
+    const runId = "PLAN-no-per-item-impl";
+    const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
+    await mkdir(resultDir, { recursive: true });
+
+    await writeFile(
+      join(resultDir, "implement-B-001.result.json"),
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [{ finding_id: "F-001", status: "resolved", evidence: ["done"] }],
+      }),
+    );
+
+    const logMessages: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...args) => {
+      logMessages.push(args.map(String).join(" "));
+    });
+    try {
+      await prepareImplementDispatch({ root: REPO_DIR, artifactsDir: ARTIFACTS_DIR }, runId);
+      for (const msg of logMessages) {
+        expect(msg).not.toMatch(/Reusing existing implement result for/);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
 
 describe("prepare-document-dispatch stdout cleanliness (OBS-1903cdd6)", () => {
   /** withBackendLogsOnStderr: redirect console.log → console.error during fn(). */

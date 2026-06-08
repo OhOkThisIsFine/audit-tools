@@ -2,12 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DISPATCH_PROMPT_HANDOFF_NOTE } from "@audit-tools/shared";
 import { StateStore } from "../src/state/store.js";
 import type { RemediationState } from "../src/state/store.js";
 import {
   prepareDocumentDispatch,
   prepareImplementDispatch,
 } from "../src/steps/dispatch.js";
+import { decideNextStep } from "../src/steps/nextStep.js";
 
 // Phase 7A regression: the canonical next-step wave path must inject the
 // "match the surrounding code" house-style block into both the document and
@@ -39,6 +41,10 @@ function makePlanningState(): RemediationState {
           affected_files: [{ path: "src/a.ts" }],
           evidence: ["no validation"],
           theme_id: "THEME-1",
+          contract_goal_id: "G1",
+          contract_obligation_ids: ["O-1"],
+          verification_obligation_ids: ["VO-1"],
+          targeted_commands: ["npm test -- auth"],
         },
         {
           id: "F-002",
@@ -91,6 +97,14 @@ function makeDocumentingState(): RemediationState {
   return state;
 }
 
+async function acknowledgeImplementationPreview(): Promise<void> {
+  await writeFile(
+    join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
+    JSON.stringify({ status: "confirmed", ignored_findings: [] }),
+    "utf8",
+  );
+}
+
 async function saveState(state: RemediationState): Promise<void> {
   await new StateStore(ARTIFACTS_DIR).saveState(state);
 }
@@ -135,11 +149,22 @@ describe("dispatch prompts carry Phase 7A house style + theme hints", () => {
     // Conventions appear in every document prompt.
     expect(themed).toContain(CONVENTIONS_MARKER);
     expect(plain).toContain(CONVENTIONS_MARKER);
+    // Repository root is normalized to forward slashes in host-facing prompts (FINDING-004).
+    expect(themed).toContain(`Repository root: ${REPO_DIR.replace(/\\/g, "/")}`);
+    expect(themed).toMatch(/Set the shell\/tool workdir to the repository root/i);
+    expect(themed).toMatch(/do not pipe an inline foreach statement directly into ConvertTo-Json/i);
+    expect(themed).toMatch(/Assign the foreach output to a variable first/i);
 
     // The themed finding gets its synthesis fix pattern; the other does not.
     expect(themed).toContain("SYNTHESIS THEME (THEME-1");
     expect(themed).toContain("Add a zod schema at each boundary.");
+    expect(themed).toContain("Contract Pipeline Traceability");
+    expect(themed).toContain("Contract goal: G1");
+    expect(themed).toContain("Satisfies obligations: O-1");
+    expect(themed).toContain("Verification obligations: VO-1");
+    expect(themed).toContain("Targeted commands: npm test -- auth");
     expect(plain).not.toContain("SYNTHESIS THEME");
+    expect(plain).not.toContain("Contract Pipeline Traceability");
   });
 
   it("implement prompts include repo conventions", async () => {
@@ -153,5 +178,61 @@ describe("dispatch prompts carry Phase 7A house style + theme hints", () => {
     const implDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
     const prompt = await readFile(join(implDir, "implement-B-001.md"), "utf8");
     expect(prompt).toContain(CONVENTIONS_MARKER);
+    // Repository root is normalized to forward slashes in host-facing prompts (FINDING-004).
+    expect(prompt).toContain(`Repository root: ${REPO_DIR.replace(/\\/g, "/")}`);
+    expect(prompt).toMatch(/Set the shell\/tool workdir to the repository root/i);
+    expect(prompt).toContain("Contract goal: G1");
+    expect(prompt).toContain("Satisfies obligations: O-1");
+    expect(prompt).toContain("Verification obligations: VO-1");
+    expect(prompt).toContain("Targeted commands: npm test -- auth");
+  });
+
+  it("implement prompts include attributable verification and PowerShell JSON guidance", async () => {
+    await saveState(makeDocumentingState());
+
+    await prepareImplementDispatch(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      "PLAN-1",
+    );
+
+    const implDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
+    const prompt = await readFile(join(implDir, "implement-B-001.md"), "utf8");
+    expect(prompt).toMatch(/Run changed or newly created tests by name when possible/i);
+    expect(prompt).toMatch(/record the focused\s+command and result/i);
+    expect(prompt).toMatch(/broad or full-suite\s+command fails in a dirty worktree/i);
+    expect(prompt).toMatch(/focused test for this block fails/i);
+    expect(prompt).toMatch(/If targeted commands are listed under an item/i);
+    expect(prompt).toMatch(/include each command and result in that item's evidence/i);
+    expect(prompt).toMatch(/do not pipe an inline foreach statement directly into ConvertTo-Json/i);
+    expect(prompt).toMatch(/Assign the foreach output to a variable first/i);
+  });
+});
+
+describe("dispatch step prompts carry DISPATCH_PROMPT_HANDOFF_NOTE", () => {
+  it("dispatch_document step prompt includes DISPATCH_PROMPT_HANDOFF_NOTE", async () => {
+    await saveState(makePlanningState());
+
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+
+    expect(step.step_kind).toBe("dispatch_document");
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toContain(DISPATCH_PROMPT_HANDOFF_NOTE);
+  });
+
+  it("dispatch_implement step prompt includes DISPATCH_PROMPT_HANDOFF_NOTE", async () => {
+    await saveState(makeDocumentingState());
+    await acknowledgeImplementationPreview();
+
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+
+    expect(step.step_kind).toBe("dispatch_implement");
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toContain(DISPATCH_PROMPT_HANDOFF_NOTE);
   });
 });

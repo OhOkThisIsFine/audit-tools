@@ -60,10 +60,34 @@ test("renderSynthesisNarrativePrompt renders header and finding summaries for a 
   assert.match(prompt, /TST-0001/, "prompt includes finding id");
   assert.match(prompt, /high/, "prompt includes severity");
   assert.match(prompt, /security/, "prompt includes lens");
+  assert.match(prompt, /high\/security\/test/, "prompt includes category");
   assert.match(prompt, /Weak token check/, "prompt includes title");
   assert.match(prompt, /Token boundary is weak\./, "prompt includes summary");
   assert.match(prompt, /src\/auth\.ts/, "prompt includes affected file path");
   assert.doesNotMatch(prompt, /more findings/, "no overflow note for small report");
+});
+
+test("renderSynthesisNarrativePrompt preserves contract-assessment distinctions", () => {
+  const report = makeReport([
+    makeFinding(1, {
+      id: "DR-001",
+      category: "inferred_contract_gap",
+      lens: "architecture",
+      title: "Implicit tenancy contract is unenforced",
+    }),
+    makeFinding(2, {
+      id: "DR-002",
+      category: "design_simplification",
+      lens: "architecture",
+      title: "Configuration layers can collapse",
+    }),
+  ]);
+  const prompt = renderSynthesisNarrativePrompt(report);
+
+  assert.match(prompt, /DR-001 \[medium\/architecture\/inferred_contract_gap\]/);
+  assert.match(prompt, /DR-002 \[medium\/architecture\/design_simplification\]/);
+  assert.match(prompt, /contract assessment findings from conceptual design critique findings/);
+  assert.match(prompt, /Do not re-audit the code, change severities, or invent new findings/);
 });
 
 // ── Overflow path ────────────────────────────────────────────────────────────

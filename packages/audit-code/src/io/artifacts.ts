@@ -9,7 +9,7 @@ import type {
 } from "../types.js";
 import type { AuditState } from "../types/auditState.js";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
-import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, GraphBundle, RiskRegister, SurfaceManifest } from "@audit-tools/shared";
+import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, GraphBundle, RiskRegister, SurfaceManifest, IntentCheckpoint } from "@audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
@@ -42,6 +42,7 @@ type ArtifactPayloadMap = {
   repo_manifest: RepoManifest;
   file_disposition: FileDisposition;
   auto_fixes_applied: unknown;
+  intent_checkpoint: IntentCheckpoint;
 
   // --- Phase 2: Structural analysis ---
   unit_manifest: UnitManifest;
@@ -155,6 +156,7 @@ export const ARTIFACT_DEFINITIONS = {
   repo_manifest: jsonArtifact("repo_manifest.json", "intake"),
   file_disposition: jsonArtifact("file_disposition.json", "intake"),
   auto_fixes_applied: jsonArtifact("auto_fixes_applied.json", "intake"),
+  intent_checkpoint: jsonArtifact("intent_checkpoint.json", "intake"),
   unit_manifest: jsonArtifact("unit_manifest.json", "analysis"),
   graph_bundle: jsonArtifact("graph_bundle.json", "analysis"),
   surface_manifest: jsonArtifact("surface_manifest.json", "analysis"),

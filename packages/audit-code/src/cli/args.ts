@@ -3,7 +3,12 @@ import { readdir } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { basename, join, resolve } from "node:path";
-import type { SessionConfig } from "@audit-tools/shared";
+import {
+  renderPromptCommand,
+  toPromptPathToken,
+  quotePromptCommandArg,
+  type SessionConfig,
+} from "@audit-tools/shared";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 
 export type UiMode = "visible" | "headless";
@@ -101,9 +106,7 @@ export function artifactNameForId(value: string, extension: string): string {
   return `${safeArtifactStem(value)}_${digestId(value)}.${extension}`;
 }
 
-export function quoteCommandArg(value: string): string {
-  return /[\s"]/u.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
-}
+export const quoteCommandArg = quotePromptCommandArg;
 
 /**
  * Normalize a generated command token to POSIX path separators. These command
@@ -115,12 +118,10 @@ export function quoteCommandArg(value: string): string {
  * are touched, and no non-path argument in this CLI contains one, so this is a
  * targeted normalization rather than a blanket rewrite.
  */
-export function toPosixCommandToken(value: string): string {
-  return value.includes("\\") ? value.replace(/\\/g, "/") : value;
-}
+export const toPosixCommandToken = toPromptPathToken;
 
 export function renderCommand(argv: string[]): string {
-  return argv.map((item) => quoteCommandArg(toPosixCommandToken(item))).join(" ");
+  return renderPromptCommand(argv);
 }
 
 export function summarizeLaunchExit(result: {

@@ -1,13 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { decideNextStep, resolveHostDispatchCapability } from "../src/steps/nextStep.js";
+import { loaderCommand } from "../src/steps/prompts.js";
 import { StateStore } from "../src/state/store.js";
 import type { RemediationState } from "../src/state/store.js";
+import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../src/steps/types.js";
+import { writeContractArtifact } from "../src/contractPipeline/artifactStore.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-next-step");
@@ -70,9 +73,186 @@ async function saveState(state: RemediationState): Promise<void> {
   await new StateStore(ARTIFACTS_DIR).saveState(state);
 }
 
-beforeEach(async () => {
+function makeDocumentingState(
+  overrides: Partial<RemediationState> = {},
+): RemediationState {
+  return makePlanningState({
+    status: "documenting",
+    items: {
+      "F-001": {
+        finding_id: "F-001",
+        status: "documented",
+        block_id: "B-001",
+        item_spec: {
+          finding_id: "F-001",
+          concrete_change: "fix a",
+          no_change: false,
+          touched_files: ["src/a.ts"],
+          tests_to_write: [],
+          not_applicable_steps: [],
+        },
+      },
+      "F-002": {
+        finding_id: "F-002",
+        status: "documented",
+        block_id: "B-002",
+        item_spec: {
+          finding_id: "F-002",
+          concrete_change: "fix b",
+          no_change: false,
+          touched_files: ["src/b.ts"],
+          tests_to_write: [],
+          not_applicable_steps: [],
+        },
+      },
+    },
+    ...overrides,
+  });
+}
+
+async function resetTestRepo(): Promise<void> {
   await rm(TEST_DIR, { recursive: true, force: true });
   await mkdir(ARTIFACTS_DIR, { recursive: true });
+}
+
+async function acknowledgeImplementationPreview(): Promise<void> {
+  await writeFile(
+    join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
+    JSON.stringify({ status: "confirmed", ignored_findings: [] }),
+    "utf8",
+  );
+}
+
+async function writeIntentCheckpoint(): Promise<void> {
+  await writeFile(
+    join(ARTIFACTS_DIR, "intent_checkpoint.json"),
+    JSON.stringify({
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: new Date().toISOString(),
+      scope_summary: "Test scope",
+      intent_summary: "Test intent",
+      confirmed_by: "host",
+    }),
+    "utf8",
+  );
+}
+
+async function writeReadyStructuredAuditIntake(inputPath: string): Promise<void> {
+  const intakeDir = join(ARTIFACTS_DIR, "intake");
+  await mkdir(intakeDir, { recursive: true });
+  await writeFile(
+    join(intakeDir, "source-manifest.json"),
+    JSON.stringify({
+      schema_version: "remediate-code-intake-source-manifest/v1alpha1",
+      created_from: "input",
+      sources: [
+        {
+          type: "structured_audit",
+          path: inputPath,
+          label: "audit-findings",
+        },
+      ],
+    }),
+    "utf8",
+  );
+  await writeFile(
+    join(intakeDir, "intake-summary.json"),
+    JSON.stringify({
+      schema_version: "remediate-code-intake-summary/v1alpha1",
+      ready: true,
+      source_type: "structured_audit",
+      goals: ["Remediate the structured audit findings."],
+      non_goals: [],
+      constraints: [],
+      affected_files: [],
+      open_questions: [],
+    }),
+    "utf8",
+  );
+  await writeFile(
+    join(intakeDir, "remediation-brief.md"),
+    "# Structured intake\n",
+    "utf8",
+  );
+  await writeIntentCheckpoint();
+}
+
+async function writeCompleteContractPipelineDag(): Promise<void> {
+  const created_at = "2026-01-01T00:00:00.000Z";
+  await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", {
+    contract_version: "remediate-code-contract-pipeline/goal-spec/v1alpha1",
+    goal_id: "G1",
+    objective: "Clean up the auth flow.",
+    non_goals: [],
+    success_criteria: ["Auth flow cleanup is implemented."],
+    source_type: "documents",
+    created_at,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", {
+    contract_version: "remediate-code-contract-pipeline/context-bundle/v1alpha1",
+    goal_id: "G1",
+    entries: [],
+    context_summary: "Auth flow context.",
+    created_at,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "design_spec", {
+    contract_version: "remediate-code-contract-pipeline/design-spec/v1alpha1",
+    goal_id: "G1",
+    design_narrative: "Update auth flow behavior.",
+    invariants: [],
+    affected_paths: ["src/auth.ts"],
+    created_at,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "conceptual_design_critique", {
+    contract_version: "remediate-code-contract-pipeline/conceptual-design-critique/v1alpha1",
+    goal_id: "G1",
+    items: [],
+    verdict: "approved",
+    created_at,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
+    contract_version: "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
+    goal_id: "G1",
+    obligations: [
+      {
+        id: "O-1",
+        description: "Auth flow cleanup is implemented.",
+        kind: "behavioral",
+        depends_on: [],
+        status: "pending",
+      },
+    ],
+    created_at,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "contract_assessment_report", {
+    contract_version: "remediate-code-contract-pipeline/contract-assessment-report/v1alpha1",
+    goal_id: "G1",
+    findings: [],
+    verdict: "passed",
+    created_at,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
+    contract_version: "remediate-code-contract-pipeline/implementation-dag/v1alpha1",
+    goal_id: "G1",
+    nodes: [
+      {
+        id: "CP-001",
+        title: "Update auth flow",
+        description: "Implement the auth flow cleanup.",
+        satisfies_obligations: ["O-1"],
+        depends_on: [],
+        verification_obligation_ids: ["O-1"],
+        targeted_commands: ["npm test"],
+        status: "pending",
+      },
+    ],
+    edges: [],
+    created_at,
+  });
+}
+
+beforeEach(async () => {
+  await resetTestRepo();
 });
 
 afterEach(async () => {
@@ -92,6 +272,37 @@ describe("decideNextStep", () => {
     expect(step.status).toBe("complete");
     expect(step.artifact_paths.final_report).toMatch(/remediation-report\.md$/);
     expect(await readFile(step.prompt_path, "utf8")).toMatch(/Present Remediation Report/);
+  });
+
+  it("accepts options supplied as a JSON string", async () => {
+    await saveState({ status: "complete" });
+    await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
+    await writeFile(join(REPO_DIR, ".audit-tools", "remediation-report.md"), "# Report\n", "utf8");
+
+    const step = await decideNextStep(JSON.stringify({ root: REPO_DIR }));
+
+    expect(step.step_kind).toBe("present_report");
+    // prompt_path is normalized to forward slashes (FINDING-004), so compare
+    // with the slash-normalized artifacts dir.
+    expect(step.prompt_path).toContain(ARTIFACTS_DIR.replace(/\\/g, "/"));
+  });
+
+  it("rejects malformed JSON string and array options", async () => {
+    await expect(decideNextStep("{bad")).rejects.toThrow(
+      /decideNextStep options must be an object or JSON object string/i,
+    );
+    await expect(decideNextStep("[]")).rejects.toThrow(
+      /decideNextStep options must be an object or JSON object string/i,
+    );
+  });
+
+  it("loaderCommand renders argv tokens through the shared prompt command renderer", () => {
+    expect(loaderCommand("next-step --force-replan")).toBe(
+      "remediate-code next-step --force-replan",
+    );
+    expect(loaderCommand(["next-step", "--input", "C:\\Path With Spaces\\report.md"])).toBe(
+      'remediate-code next-step --input "C:/Path With Spaces/report.md"',
+    );
   });
 
   it("records started_at and increments step_count once per next-step invocation", async () => {
@@ -126,8 +337,8 @@ describe("decideNextStep", () => {
   });
 
   it("re-presents the report on a bare re-invocation after a completed+cleaned run", async () => {
-    // close deletes .audit-tools/remediation/ (state.json), leaving only the report
-    // inside .audit-tools/. A bare next-step with no fresh intent should re-present it.
+    // close deletes .audit-tools/remediation/state.json but leaves durable root
+    // outputs. A bare next-step with no fresh intent should re-present the report.
     await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
     await writeFile(join(REPO_DIR, ".audit-tools", "remediation-report.md"), "# Done\n", "utf8");
 
@@ -260,7 +471,7 @@ describe("decideNextStep", () => {
     expect(await readFile(step.prompt_path, "utf8")).toMatch(/Synthesize Remediation Intake/);
   });
 
-  it("ready intake summary advances to bounded finding extraction", async () => {
+  it("ready document intake advances to one bounded contract-pipeline step", async () => {
     const inputPath = join(REPO_DIR, "feedback.md");
     const intakeDir = join(ARTIFACTS_DIR, "intake");
     await mkdir(intakeDir, { recursive: true });
@@ -293,14 +504,131 @@ describe("decideNextStep", () => {
       "# Remediation Brief\n\nClean up the auth flow.\n",
       "utf8",
     );
+    await writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });
     const prompt = await readFile(step.prompt_path, "utf8");
 
-    expect(step.step_kind).toBe("extract_findings");
-    expect(step.artifact_paths.extracted_plan).toMatch(/extracted-plan\.json$/);
-    expect(prompt).toMatch(/Extract Findings From Intake Brief/);
-    expect(prompt).toMatch(/"category": "User Goal"/);
+    expect(step.step_kind).toBe("contract_pipeline");
+    expect(step.artifact_paths.output).toMatch(/goal_spec\.json$/);
+    expect(prompt).toMatch(/Goal Normalization/);
+    expect(prompt).toMatch(/Stop after writing the output file/i);
+    expect(prompt).not.toMatch(/Extract Findings From Intake Brief/);
+  });
+
+  it("contract pipeline resumes at the next missing artifact only", async () => {
+    const inputPath = join(REPO_DIR, "feedback.md");
+    const intakeDir = join(ARTIFACTS_DIR, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    await writeFile(inputPath, "# Notes\n\nPlease clean up the auth flow.\n", "utf8");
+    await writeFile(
+      join(intakeDir, "source-manifest.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-source-manifest/v1alpha1",
+        created_from: "input",
+        sources: [{ type: "document", path: inputPath }],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(intakeDir, "intake-summary.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-summary/v1alpha1",
+        ready: true,
+        source_type: "documents",
+        goals: ["Clean up the auth flow."],
+        non_goals: [],
+        constraints: [],
+        affected_files: [{ path: "src/auth.ts" }],
+        open_questions: [],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(intakeDir, "remediation-brief.md"),
+      "# Remediation Brief\n\nClean up the auth flow.\n",
+      "utf8",
+    );
+    await writeIntentCheckpoint();
+    await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", {
+      contract_version: "remediate-code-contract-pipeline/goal-spec/v1alpha1",
+      goal_id: "G1",
+      objective: "Clean up the auth flow.",
+      non_goals: [],
+      success_criteria: ["Auth flow cleanup is implemented."],
+      source_type: "documents",
+      created_at: "2026-01-01T00:00:00.000Z",
+    });
+
+    const step = await decideNextStep({ root: REPO_DIR });
+    const prompt = await readFile(step.prompt_path, "utf8");
+
+    expect(step.step_kind).toBe("contract_pipeline");
+    expect(step.artifact_paths.output).toMatch(/context_bundle\.json$/);
+    expect(prompt).toMatch(/Context Collection/);
+    expect(prompt).not.toMatch(/Design\n/);
+    expect(existsSync(join(ARTIFACTS_DIR, "extracted-plan.json"))).toBe(false);
+  });
+
+  it("completed implementation DAG promotes into the normal document dispatch flow", async () => {
+    const inputPath = join(REPO_DIR, "feedback.md");
+    const intakeDir = join(ARTIFACTS_DIR, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    await writeFile(inputPath, "# Notes\n\nPlease clean up the auth flow.\n", "utf8");
+    await writeFile(
+      join(intakeDir, "source-manifest.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-source-manifest/v1alpha1",
+        created_from: "input",
+        sources: [{ type: "document", path: inputPath }],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(intakeDir, "intake-summary.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-summary/v1alpha1",
+        ready: true,
+        source_type: "documents",
+        goals: ["Clean up the auth flow."],
+        non_goals: [],
+        constraints: [],
+        affected_files: [{ path: "src/auth.ts" }],
+        open_questions: [],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(intakeDir, "remediation-brief.md"),
+      "# Remediation Brief\n\nClean up the auth flow.\n",
+      "utf8",
+    );
+    await writeIntentCheckpoint();
+    await writeCompleteContractPipelineDag();
+
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+    const state = JSON.parse(
+      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
+    );
+    const dispatchPlan = JSON.parse(
+      await readFile(step.artifact_paths.dispatch_plan, "utf8"),
+    );
+    const documentPrompt = await readFile(dispatchPlan.items[0].prompt_path, "utf8");
+
+    expect(step.step_kind).toBe("dispatch_document");
+    expect(state.plan.goal_id).toBe("G1");
+    expect(state.plan.source).toBe("contract_pipeline");
+    expect(state.plan.findings.map((finding: { id: string }) => finding.id)).toEqual(["CP-001"]);
+    expect(state.plan.findings[0].contract_obligation_ids).toEqual(["O-1"]);
+    expect(state.plan.findings[0].verification_obligation_ids).toEqual(["O-1"]);
+    expect(state.plan.findings[0].targeted_commands).toEqual(["npm test"]);
+    expect(documentPrompt).toContain("Contract Pipeline Traceability");
+    expect(documentPrompt).toContain("Satisfies obligations: O-1");
+    expect(documentPrompt).toContain("Targeted commands: npm test");
+    expect(existsSync(join(ARTIFACTS_DIR, "extracted-plan.json"))).toBe(true);
   });
 
   it("ready intake survives a default-candidate manifest re-derivation instead of looping", async () => {
@@ -342,14 +670,15 @@ describe("decideNextStep", () => {
       "# Remediation Brief\n\nCritical bugs only.\n",
       "utf8",
     );
+    await writeIntentCheckpoint();
 
     // Run twice to prove it is not a one-shot escape: a stable candidate set must
     // keep advancing rather than oscillating back into synthesis.
     const first = await decideNextStep({ root: REPO_DIR });
-    expect(first.step_kind).toBe("extract_findings");
+    expect(first.step_kind).toBe("contract_pipeline");
 
     const second = await decideNextStep({ root: REPO_DIR });
-    expect(second.step_kind).toBe("extract_findings");
+    expect(second.step_kind).toBe("contract_pipeline");
 
     // The persisted summary must remain intact (scope preserved, not reset).
     const summary = JSON.parse(
@@ -372,6 +701,34 @@ describe("decideNextStep", () => {
       "utf8",
     );
 
+    const first = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+    expect(first.step_kind).toBe("synthesize_intake");
+    const intakeDir = join(ARTIFACTS_DIR, "intake");
+    const manifest = JSON.parse(
+      await readFile(join(intakeDir, "source-manifest.json"), "utf8"),
+    );
+    expect(manifest.sources[0].type).toBe("structured_audit");
+
+    await writeFile(
+      join(intakeDir, "intake-summary.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-summary/v1alpha1",
+        ready: true,
+        source_type: "structured_audit",
+        goals: ["Remediate the structured audit findings."],
+        non_goals: [],
+        constraints: [],
+        affected_files: [],
+        open_questions: [],
+      }),
+      "utf8",
+    );
+    await writeFile(join(intakeDir, "remediation-brief.md"), "# Structured intake\n", "utf8");
+    await writeIntentCheckpoint();
+
     const step = await decideNextStep({
       root: REPO_DIR,
       hostCanDispatchSubagents: true,
@@ -380,8 +737,9 @@ describe("decideNextStep", () => {
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
 
-    // Structured fast-path consumed the JSON contract (fixture finding ids),
-    // proving the markdown decoy was ignored rather than LLM-extracted.
+    // After intake, deterministic planning consumed the JSON contract (fixture
+    // finding ids), proving the markdown decoy was ignored rather than
+    // LLM-extracted.
     expect(step.step_kind).toBe("dispatch_document");
     expect(state.plan.findings.map((finding: { id: string }) => finding.id)).toEqual([
       "AUD-001",
@@ -426,6 +784,7 @@ describe("decideNextStep", () => {
       "utf8",
     );
     await writeFile(join(intakeDir, "remediation-brief.md"), "# Draft\n", "utf8");
+    await writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });
     const prompt = await readFile(step.prompt_path, "utf8");
@@ -435,6 +794,15 @@ describe("decideNextStep", () => {
   });
 
   it("uses auditor-rendered output as next-step input and prepares bounded dispatch", async () => {
+    const first = await decideNextStep({
+      root: REPO_DIR,
+      input: AUDITOR_CONTRACT_FIXTURE,
+      hostCanDispatchSubagents: true,
+    });
+    expect(first.step_kind).toBe("synthesize_intake");
+
+    await writeReadyStructuredAuditIntake(AUDITOR_CONTRACT_FIXTURE);
+
     const step = await decideNextStep({
       root: REPO_DIR,
       input: AUDITOR_CONTRACT_FIXTURE,
@@ -549,10 +917,16 @@ describe("decideNextStep", () => {
       "utf8",
     );
 
-    const step = await decideNextStep({
+    let step = await decideNextStep({
       root: REPO_DIR,
       hostCanDispatchSubagents: false,
     });
+    if (step.step_kind === "state_transition") {
+      step = await decideNextStep({
+        root: REPO_DIR,
+        hostCanDispatchSubagents: false,
+      });
+    }
     const state = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
@@ -581,6 +955,56 @@ describe("decideNextStep", () => {
     expect(step.step_kind).toBe("dispatch_document");
   });
 
+  it("document phase dispatch sweep defaults to parallel and only explicit false uses fallback", async () => {
+    const cases = [
+      {
+        options: { root: REPO_DIR },
+        sessionConfig: null,
+        stepKind: "dispatch_document",
+        itemCount: 2,
+      },
+      {
+        options: { root: REPO_DIR, hostCanDispatchSubagents: true },
+        sessionConfig: null,
+        stepKind: "dispatch_document",
+        itemCount: 2,
+      },
+      {
+        options: { root: REPO_DIR },
+        sessionConfig: { host_can_dispatch_subagents: true },
+        stepKind: "dispatch_document",
+        itemCount: 2,
+      },
+      {
+        options: { root: REPO_DIR, hostCanDispatchSubagents: false },
+        sessionConfig: null,
+        stepKind: "document_single_item",
+        itemCount: 1,
+      },
+    ];
+
+    for (const scenario of cases) {
+      await resetTestRepo();
+      await saveState(makePlanningState());
+      if (scenario.sessionConfig) {
+        await writeFile(
+          join(REPO_DIR, "session-config.json"),
+          JSON.stringify(scenario.sessionConfig),
+          "utf8",
+        );
+      }
+
+      const step = await decideNextStep(scenario.options);
+      const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
+
+      expect(step.step_kind).toBe(scenario.stepKind);
+      expect(plan.items).toHaveLength(scenario.itemCount);
+      if (scenario.stepKind === "document_single_item") {
+        expect(existsSync(step.artifact_paths.single_task_prompt)).toBe(true);
+      }
+    }
+  });
+
   it("closing state runs close inline and returns present_report", async () => {
     await saveState(
       makePlanningState({
@@ -592,8 +1016,11 @@ describe("decideNextStep", () => {
       }),
     );
 
-    const step = await decideNextStep({ root: REPO_DIR });
-    expect(step.step_kind).toBe("present_report");
+    const step1 = await decideNextStep({ root: REPO_DIR });
+    expect(step1.step_kind).toBe("state_transition");
+
+    const step2 = await decideNextStep({ root: REPO_DIR });
+    expect(step2.step_kind).toBe("present_report");
   });
 
   it("finalize-closing runs close and returns present_report", async () => {
@@ -607,17 +1034,25 @@ describe("decideNextStep", () => {
       }),
     );
 
-    const step = await decideNextStep({
+    const step1 = await decideNextStep({
+      root: REPO_DIR,
+      finalizeClosing: true,
+    });
+    expect(step1.step_kind).toBe("state_transition");
+
+    const step2 = await decideNextStep({
       root: REPO_DIR,
       finalizeClosing: true,
     });
 
-    expect(step.step_kind).toBe("present_report");
-    expect(step.status).toBe("complete");
+    expect(step2.step_kind).toBe("present_report");
+    expect(step2.status).toBe("complete");
     expect(existsSync(join(REPO_DIR, ".audit-tools", "remediation-report.md"))).toBe(true);
   });
 
-  it("CLI next-step writes parseable JSON to stdout even when planning logs", () => {
+  it("CLI next-step writes parseable JSON to stdout even when planning logs", async () => {
+    await writeReadyStructuredAuditIntake(AUDIT_FIXTURE);
+
     const result = spawnSync(
       process.execPath,
       [WRAPPER, "next-step", "--root", REPO_DIR, "--input", AUDIT_FIXTURE],
@@ -636,7 +1071,9 @@ describe("decideNextStep", () => {
     expect(result.stderr).toMatch(/Running Plan Phase/);
   });
 
-  it("CLI run is a deprecated parseable next-step alias", () => {
+  it("CLI run is a deprecated parseable next-step alias", async () => {
+    await writeReadyStructuredAuditIntake(AUDIT_FIXTURE);
+
     const result = spawnSync(
       process.execPath,
       [WRAPPER, "run", "--root", REPO_DIR, "--input", AUDIT_FIXTURE],
@@ -654,6 +1091,99 @@ describe("decideNextStep", () => {
     expect(result.stdout.trimStart().startsWith("{")).toBe(true);
     expect(result.stderr).toMatch(/`run` is deprecated/);
     expect(result.stderr).toMatch(/Running Plan Phase/);
+  });
+
+  it("CLI next-step accepts the backend-rendered --force-replan flag", () => {
+    const result = spawnSync(
+      process.execPath,
+      [WRAPPER, "next-step", "--root", REPO_DIR, "--force-replan"],
+      {
+        cwd: REPO_DIR,
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(() => JSON.parse(result.stdout)).not.toThrow();
+    expect(JSON.parse(result.stdout).contract_version).toBe(
+      "remediate-code-step/v1alpha1",
+    );
+  });
+
+  it("force replan refreshes baselines and preserves unchanged documented item specs", async () => {
+    await mkdir(join(REPO_DIR, "src"), { recursive: true });
+    await writeFile(join(REPO_DIR, "src", "a.ts"), "export const a = 1;\n", "utf8");
+    await writeFile(join(REPO_DIR, "src", "b.ts"), "export const b = 1;\n", "utf8");
+
+    const documentingState: RemediationState = makePlanningState({
+      status: "documenting",
+      plan: {
+        ...makePlanningState().plan!,
+        findings: makePlanningState().plan!.findings.map((finding) => ({
+          ...finding,
+          affected_files: finding.affected_files.map((file) => ({
+            ...file,
+            hash_at_plan_time: "stale-plan-time-hash",
+          })),
+        })),
+      },
+      items: {
+        "F-001": {
+          finding_id: "F-001",
+          status: "documented",
+          block_id: "B-001",
+          item_spec: {
+            finding_id: "F-001",
+            concrete_change: "fix a",
+            no_change: false,
+            touched_files: ["src/a.ts"],
+            tests_to_write: [],
+            not_applicable_steps: [],
+          },
+        },
+        "F-002": {
+          finding_id: "F-002",
+          status: "documented",
+          block_id: "B-002",
+          item_spec: {
+            finding_id: "F-002",
+            concrete_change: "fix b",
+            no_change: false,
+            touched_files: ["src/b.ts"],
+            tests_to_write: [],
+            not_applicable_steps: [],
+          },
+        },
+      },
+    });
+    await saveState(documentingState);
+    await writeFile(
+      join(ARTIFACTS_DIR, "extracted-plan.json"),
+      JSON.stringify(makePlanningState().plan),
+      "utf8",
+    );
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
+      JSON.stringify({ status: "confirmed", skip: [] }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+      forceReplan: true,
+    });
+
+    expect(step.step_kind).toBe("dispatch_implement");
+    const savedState = JSON.parse(
+      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
+    );
+    expect(savedState.status).toBe("documenting");
+    expect(savedState.items["F-001"].status).toBe("documented");
+    expect(savedState.items["F-001"].item_spec.concrete_change).toBe("fix a");
+    expect(
+      savedState.plan.findings[0].affected_files[0].hash_at_plan_time,
+    ).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("planning state with no documentable findings falls through to handleUnhandledState", async () => {
@@ -717,12 +1247,98 @@ describe("decideNextStep", () => {
       "utf8",
     );
 
-    const step = await decideNextStep({ root: REPO_DIR });
-    const prompt = await readFile(step.prompt_path, "utf8");
+    const step1 = await decideNextStep({ root: REPO_DIR });
+    expect(step1.step_kind).toBe("state_transition");
 
-    expect(step.step_kind).toBe("collect_triage");
-    expect(step.status).toBe("blocked");
+    const step2 = await decideNextStep({ root: REPO_DIR });
+    const prompt = await readFile(step2.prompt_path, "utf8");
+
+    expect(step2.step_kind).toBe("collect_triage");
+    expect(step2.status).toBe("blocked");
     expect(prompt).toMatch(/triage/i);
+    expect(prompt).toContain("Use `retry` for blocked, deferred, retry-later, or prerequisite-dependent work.");
+  });
+
+  it("waiting_for_triage consumes an existing triage_resolution before re-prompting", async () => {
+    await saveState(
+      makePlanningState({
+        status: "waiting_for_triage",
+        items: {
+          "F-001": {
+            finding_id: "F-001",
+            status: "blocked",
+            block_id: "B-001",
+            failure_reason: "needs another implementation pass",
+            item_spec: {
+              finding_id: "F-001",
+              concrete_change: "fix a",
+              no_change: false,
+              touched_files: ["src/a.ts"],
+              tests_to_write: [],
+              not_applicable_steps: [],
+            },
+          },
+          "F-002": {
+            finding_id: "F-002",
+            status: "resolved",
+            block_id: "B-002",
+          },
+        },
+      }),
+    );
+    await writeFile(
+      join(ARTIFACTS_DIR, "triage_resolution.json"),
+      JSON.stringify({
+        items: [
+          {
+            finding_id: "F-001",
+            action: "retry",
+            rationale: "retry requested",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
+      JSON.stringify({ status: "confirmed", ignored_findings: [] }),
+      "utf8",
+    );
+    const implementDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
+    const staleResultPath = join(implementDir, "implement-B-001.result.json");
+    await mkdir(implementDir, { recursive: true });
+    await writeFile(
+      staleResultPath,
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [
+          {
+            finding_id: "F-001",
+            status: "blocked",
+            failure_reason: "previous attempt failed",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    while (step.step_kind === "state_transition") {
+      step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    }
+
+    expect(step.step_kind).toBe("dispatch_implement");
+    expect(existsSync(join(ARTIFACTS_DIR, "triage_resolution.json"))).toBe(false);
+    expect(existsSync(staleResultPath)).toBe(false);
+    const implementFiles = await readdir(implementDir);
+    expect(implementFiles.some((name) => name.startsWith("implement-B-001.result.json.stale-"))).toBe(true);
+    expect(implementFiles.some((name) => name.startsWith("implement-B-001.md"))).toBe(true);
+    const savedState = JSON.parse(
+      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
+    );
+    expect(savedState.items["F-001"].status).toBe("documented");
+    expect(savedState.items["F-001"].rework_count).toBe(1);
   });
 });
 
@@ -768,7 +1384,10 @@ describe("decideNextStep", () => {
       "utf8",
     );
 
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    while (step.step_kind === "state_transition") {
+      step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    }
 
     // Should not dispatch — all items are terminal so the run folds straight
     // through closing to completion (which deletes the artifact dir, so the
@@ -825,10 +1444,13 @@ describe("decideNextStep", () => {
       "utf8",
     );
 
-    await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    while (step.step_kind === "state_transition") {
+      step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    }
 
     // The run completes (deleting the artifact dir), so assert on the durable
-    // report in .audit-tools/ rather than the now-removed state.json.
+    // outcomes in .audit-tools/ rather than the now-removed state.json.
     const report = JSON.parse(
       await readFile(join(REPO_DIR, ".audit-tools", "remediation-outcomes.json"), "utf8"),
     );
@@ -898,6 +1520,234 @@ describe("decideNextStep", () => {
     );
     expect(savedState.items["F-001"].status).toBe("documented");
     expect(savedState.items["F-002"].status).toBe("documented");
+  });
+
+  it("emits classify_impl_risks before implementation preview when reviewed risks are missing", async () => {
+    const documentingState: RemediationState = makePlanningState({
+      status: "documenting",
+      items: {
+        "F-001": {
+          finding_id: "F-001",
+          status: "documented",
+          block_id: "B-001",
+          item_spec: {
+            finding_id: "F-001",
+            concrete_change: "fix a",
+            no_change: false,
+            touched_files: ["src/a.ts"],
+            tests_to_write: [],
+            not_applicable_steps: [],
+          },
+        },
+      },
+    });
+    await saveState(documentingState);
+
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    const prompt = await readFile(step.prompt_path, "utf8");
+
+    expect(step.step_kind).toBe("classify_impl_risks");
+    expect(step.artifact_paths.reviewed).toMatch(/impl_risk_reviewed\.json$/);
+    expect(prompt).toMatch(/impl_risk_reviewed\.json/);
+    expect(prompt).not.toMatch(/remove.*risk-review hop/i);
+  });
+
+  it("renders preview decision labels with reviewed reasons, pros and cons, and excludes no-change choices", async () => {
+    const documentingState: RemediationState = makePlanningState({
+      status: "documenting",
+      items: {
+        "F-001": {
+          finding_id: "F-001",
+          status: "documented",
+          block_id: "B-001",
+          item_spec: {
+            finding_id: "F-001",
+            concrete_change: "fix a",
+            no_change: false,
+            touched_files: ["src/a.ts"],
+            tests_to_write: [{ name: "a.test", assertions: ["asserts a"] }],
+            not_applicable_steps: [],
+          },
+        },
+        "F-002": {
+          finding_id: "F-002",
+          status: "documented",
+          block_id: "B-002",
+          item_spec: {
+            finding_id: "F-002",
+            concrete_change: "already correct after prior change",
+            no_change: true,
+            touched_files: [],
+            tests_to_write: [],
+            not_applicable_steps: [],
+          },
+        },
+      },
+    });
+    await saveState(documentingState);
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_risk_preliminary.json"),
+      JSON.stringify({
+        schema_version: "impl-risk-preliminary/v1",
+        findings: [
+          {
+            finding_id: "F-001",
+            title: "First",
+            summary: "Fix first.",
+            affected_files: ["src/a.ts"],
+            concrete_change: "fix a",
+            no_change: false,
+            tests_to_write: [{ name: "a.test", assertions: ["asserts a"] }],
+            preliminary_tier: "safe",
+            preliminary_reason: "low blast radius",
+          },
+          {
+            finding_id: "F-002",
+            title: "Second",
+            summary: "Already correct.",
+            affected_files: ["src/b.ts"],
+            concrete_change: "already correct after prior change",
+            no_change: true,
+            tests_to_write: [],
+            preliminary_tier: "context_dependent",
+            preliminary_reason: "no-op",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_risk_reviewed.json"),
+      JSON.stringify({
+        schema_version: "impl-risk-reviewed/v1",
+        findings: [
+          { finding_id: "F-001", tier: "safe", reason: "reviewed safe reason" },
+          { finding_id: "F-002", tier: "context_dependent", reason: "reviewed no-op reason" },
+        ],
+      }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    const prompt = await readFile(step.prompt_path, "utf8");
+
+    expect(step.step_kind).toBe("preview_implement");
+    expect(prompt).toContain("Straightforward");
+    expect(prompt).toContain("Reviewed Reason");
+    expect(prompt).toContain("Pros");
+    expect(prompt).toContain("Cons");
+    expect(prompt).toContain("reviewed safe reason");
+    expect(prompt).toContain("Already Correct (no changes planned)");
+    expect(prompt).toContain("ignored_findings");
+    expect(prompt).not.toContain("Tier 1");
+    expect(prompt).not.toContain("Tier 2");
+    expect(prompt).not.toContain("Tier 3");
+    expect(prompt).toContain("`F-001` (Straightforward): First");
+    expect(prompt).not.toContain("`F-002` (Operator Context): Second");
+  });
+
+  it("confirmed preview ack with ignored_findings marks only named items ignored and dispatches the rest", async () => {
+    const documentingState: RemediationState = makePlanningState({
+      status: "documenting",
+      items: {
+        "F-001": {
+          finding_id: "F-001",
+          status: "documented",
+          block_id: "B-001",
+          item_spec: {
+            finding_id: "F-001",
+            concrete_change: "fix a",
+            no_change: false,
+            touched_files: ["src/a.ts"],
+            tests_to_write: [],
+            not_applicable_steps: [],
+          },
+        },
+        "F-002": {
+          finding_id: "F-002",
+          status: "documented",
+          block_id: "B-002",
+          item_spec: {
+            finding_id: "F-002",
+            concrete_change: "fix b",
+            no_change: false,
+            touched_files: ["src/b.ts"],
+            tests_to_write: [],
+            not_applicable_steps: [],
+          },
+        },
+      },
+    });
+    await saveState(documentingState);
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
+      JSON.stringify({ status: "confirmed", ignored_findings: ["F-002"] }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    const savedState = JSON.parse(
+      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
+    );
+    const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
+
+    expect(step.step_kind).toBe("dispatch_implement");
+    expect(savedState.items["F-002"].status).toBe("ignored");
+    expect(savedState.items["F-002"].failure_reason).toMatch(/implementation preview/i);
+    expect(savedState.items["F-001"].status).toBe("documented");
+    expect(plan.items.map((item: { block_id: string }) => item.block_id)).toContain("B-001");
+    expect(plan.items.map((item: { block_id: string }) => item.block_id)).not.toContain("B-002");
+  });
+
+  it("implement phase dispatch sweep defaults to parallel after preview acknowledgment", async () => {
+    const cases = [
+      {
+        options: { root: REPO_DIR },
+        sessionConfig: null,
+        stepKind: "dispatch_implement",
+        itemCount: 2,
+      },
+      {
+        options: { root: REPO_DIR, hostCanDispatchSubagents: true },
+        sessionConfig: null,
+        stepKind: "dispatch_implement",
+        itemCount: 2,
+      },
+      {
+        options: { root: REPO_DIR },
+        sessionConfig: { host_can_dispatch_subagents: true },
+        stepKind: "dispatch_implement",
+        itemCount: 2,
+      },
+      {
+        options: { root: REPO_DIR, hostCanDispatchSubagents: false },
+        sessionConfig: null,
+        stepKind: "implement_single_item",
+        itemCount: 1,
+      },
+    ];
+
+    for (const scenario of cases) {
+      await resetTestRepo();
+      await saveState(makeDocumentingState());
+      await acknowledgeImplementationPreview();
+      if (scenario.sessionConfig) {
+        await writeFile(
+          join(REPO_DIR, "session-config.json"),
+          JSON.stringify(scenario.sessionConfig),
+          "utf8",
+        );
+      }
+
+      const step = await decideNextStep(scenario.options);
+      const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
+
+      expect(step.step_kind).toBe(scenario.stepKind);
+      expect(plan.items).toHaveLength(scenario.itemCount);
+      if (scenario.stepKind === "implement_single_item") {
+        expect(existsSync(step.artifact_paths.single_task_prompt)).toBe(true);
+      }
+    }
   });
 
   it("host cannot dispatch agents emits implement_single_item", async () => {
@@ -1006,7 +1856,10 @@ describe("decideNextStep", () => {
       "utf8",
     );
 
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false });
+    let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false });
+    if (step.step_kind === "state_transition") {
+      step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false });
+    }
     const savedState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
@@ -1016,6 +1869,170 @@ describe("decideNextStep", () => {
     // The next step targets B-002 (the second pending block)
     expect(step.step_kind).toBe("implement_single_item");
     expect(step.artifact_paths.result).toMatch(/implement-B-002\.result\.json$/);
+  });
+
+  it("decideNextStep never loops internally — one step per call: handleDocumenting would return continueWithState", async () => {
+    const documentingState = makePlanningState({
+      status: "documenting",
+      items: {
+        "F-001": { finding_id: "F-001", status: "documented", block_id: "B-001" },
+        "F-002": { finding_id: "F-002", status: "documented", block_id: "B-002" },
+      },
+    });
+    await saveState(documentingState);
+
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step).toBeDefined();
+    expect(step.step_kind).toBe("state_transition");
+    expect(step.status).toBe("ready");
+  });
+
+  it("decideNextStep never loops internally — one step per call: handleImplementing completes instantly", async () => {
+    const implementingState = makePlanningState({
+      status: "implementing",
+      items: {
+        "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
+        "F-002": { finding_id: "F-002", status: "resolved", block_id: "B-002" },
+      },
+    });
+    await saveState(implementingState);
+
+    const step1 = await decideNextStep({ root: REPO_DIR });
+    expect(step1.step_kind).toBe("state_transition");
+
+    const step2 = await decideNextStep({ root: REPO_DIR });
+    expect(step2.step_kind).toBe("state_transition");
+
+    const step3 = await decideNextStep({ root: REPO_DIR });
+    expect(step3.step_kind).toBe("present_report");
+  });
+
+  it("decideNextStep never loops internally — one step per call: handleAllTerminalTransition", async () => {
+    const state = makePlanningState({
+      status: "planning",
+      items: {
+        "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
+        "F-002": { finding_id: "F-002", status: "resolved", block_id: "B-002" },
+      },
+    });
+    await saveState(state);
+
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("state_transition");
+    
+    const savedState = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"));
+    expect(savedState.status).toBe("closing");
+  });
+
+  it("decideNextStep never loops internally — one step per call: handleClosing returns continueWithState", async () => {
+    const state = makePlanningState({
+      status: "closing",
+      items: {
+        "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
+        "F-002": { finding_id: "F-002", status: "resolved", block_id: "B-002" },
+      },
+    });
+    await saveState(state);
+
+    const step1 = await decideNextStep({ root: REPO_DIR });
+    expect(step1.step_kind).toBe("state_transition");
+
+    const step2 = await decideNextStep({ root: REPO_DIR });
+    expect(step2.step_kind).toBe("present_report");
+  });
+
+  it("MAX_ITERATIONS no longer exists as a symbol or loop construct", async () => {
+    const filePath = join(__dirname, "../src/steps/nextStep.ts");
+    const content = await readFile(filePath, "utf8");
+    expect(content).not.toContain("MAX_ITERATIONS");
+    expect(content).not.toContain("for (let iteration = 0;");
+  });
+
+  it("step_count is incremented by exactly 1 per decideNextStep call", async () => {
+    const state = makePlanningState({
+      status: "closing",
+      step_count: 5,
+      items: {
+        "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
+        "F-002": { finding_id: "F-002", status: "resolved", block_id: "B-002" },
+      },
+    });
+    await saveState(state);
+
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("state_transition");
+
+    const completeStatePath = join(REPO_DIR, ".audit-tools", "remediation-state.complete.json");
+    const completedState = JSON.parse(await readFile(completeStatePath, "utf8"));
+    expect(completedState.step_count).toBe(6);
+  });
+
+  it("state_transition step conforms to host instructions and is persisted", async () => {
+    const state = makePlanningState({
+      status: "closing",
+      items: {
+        "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
+        "F-002": { finding_id: "F-002", status: "resolved", block_id: "B-002" },
+      },
+    });
+    await saveState(state);
+
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("state_transition");
+    expect(step.status).toBe("ready");
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toContain("remediate-code next-step");
+
+    const persistedStep = JSON.parse(
+      await readFile(join(ARTIFACTS_DIR, "steps", "current-step.json"), "utf8")
+    );
+    expect(persistedStep.step_kind).toBe("state_transition");
+    expect(persistedStep.status).toBe("ready");
+    const persistedPrompt = await readFile(persistedStep.prompt_path, "utf8");
+    expect(persistedPrompt).toContain("remediate-code next-step");
+  });
+
+  it("emits confirm_intent step when intent_checkpoint.json is absent", async () => {
+    const intakeDir = join(ARTIFACTS_DIR, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    await writeFile(
+      join(intakeDir, "intake-summary.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-summary/v1alpha1",
+        ready: true,
+        source_type: "documents",
+        goals: ["Clean up the auth flow."],
+        non_goals: [],
+        constraints: [],
+        affected_files: [{ path: "src/auth.ts" }],
+        open_questions: [],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(intakeDir, "remediation-brief.md"),
+      "# Remediation Brief\n\nClean up the auth flow.\n",
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("confirm_intent");
+    expect(step.status).toBe("ready");
+
+    await writeFile(
+      join(ARTIFACTS_DIR, "intent_checkpoint.json"),
+      JSON.stringify({
+        schema_version: "intent-checkpoint/v1",
+        confirmed_at: new Date().toISOString(),
+        scope_summary: "Test scope",
+        intent_summary: "Test intent",
+        confirmed_by: "host",
+      }),
+      "utf8",
+    );
+
+    const nextStep = await decideNextStep({ root: REPO_DIR });
+    expect(nextStep.step_kind).not.toBe("confirm_intent");
   });
 
 describe("resolveHostDispatchCapability", () => {

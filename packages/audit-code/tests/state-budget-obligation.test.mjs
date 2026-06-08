@@ -189,6 +189,13 @@ await test("planning_artifacts: satisfied when the full planning artifact set is
     critical_flows: { flows: [] },
     risk_register: { risks: [] },
     external_analyzer_results: { results: [] },
+    intent_checkpoint: {
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: "2026-06-08T04:34:00Z",
+      scope_summary: "Test scope",
+      intent_summary: "Test intent",
+      confirmed_by: "host",
+    },
     scope: { mode: "full" },
     audit_results: [],
     coverage_matrix: { units: [] },

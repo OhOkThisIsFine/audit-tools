@@ -18,6 +18,7 @@ import {
   isRecord,
   detectRepoConventions,
   formatRepoConventions,
+  toPromptPathToken,
   type FindingTheme,
   type SessionConfig,
 } from "@audit-tools/shared";
@@ -238,33 +239,63 @@ export function collectReferencingTests(
   return result;
 }
 
-/**
- * The files an implement worker may touch for a finding: the pre-document
- * affected_files PLUS any files the document phase declared in the item_spec's
- * `touched_files` (the document worker can correct or extend the file set when
- * the real fix lives elsewhere). Deduped.
- */
-function itemFiles(finding: Finding, spec?: ItemSpec): string[] {
-  const files = finding.affected_files.map((f) => f.path);
-  if (spec?.touched_files) files.push(...spec.touched_files);
-  return [...new Set(files)];
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths)];
 }
 
 /**
- * Repo-relative paths every finding in a block touches, deduped — recomputed
- * from the documented item_spec (not the frozen pre-document finding) so a fix
- * the document phase relocated is inside the implementer's declared write set.
+ * The files an implement worker should receive as context for a finding:
+ * pre-document affected_files PLUS any files the document phase declared in the
+ * item_spec's `touched_files`.
  */
-function blockAffectedFiles(
+function itemReadFiles(finding: Finding, spec?: ItemSpec): string[] {
+  const files = finding.affected_files.map((f) => f.path);
+  if (spec?.touched_files) files.push(...spec.touched_files);
+  return uniquePaths(files);
+}
+
+/**
+ * The files an implement worker is expected to write. The documented
+ * `touched_files` set is authoritative when present; affected_files are only a
+ * fallback for older or incomplete document results.
+ */
+function itemWriteFiles(finding: Finding, spec?: ItemSpec): string[] {
+  if (Array.isArray(spec?.touched_files)) {
+    return uniquePaths(spec.touched_files);
+  }
+  return uniquePaths(finding.affected_files.map((f) => f.path));
+}
+
+/**
+ * Repo-relative paths every finding in a block needs for context, deduped.
+ */
+function blockReadFiles(
   block: RemediationBlock,
   state: RemediationState,
 ): string[] {
   const files = block.items.flatMap((findingId) => {
     const finding = state.plan?.findings.find((f) => f.id === findingId);
     if (!finding) return [];
-    return itemFiles(finding, state.items?.[findingId]?.item_spec);
+    return itemReadFiles(finding, state.items?.[findingId]?.item_spec);
   });
-  return [...new Set(files)];
+  return uniquePaths(files);
+}
+
+/**
+ * Repo-relative paths every finding in a block may write, deduped. This is kept
+ * narrower than read context so a broad affected hub file does not serialize
+ * blocks whose documented write sets are actually disjoint.
+ */
+function blockWriteFiles(
+  block: RemediationBlock,
+  state: RemediationState,
+): string[] {
+  const files = block.items.flatMap((findingId) => {
+    const finding = state.plan?.findings.find((f) => f.id === findingId);
+    if (!finding) return [];
+    return itemWriteFiles(finding, state.items?.[findingId]?.item_spec);
+  });
+  return uniquePaths(files);
 }
 
 /**
@@ -278,7 +309,8 @@ function buildImplementDispatchItem(
   dir: string,
 ): DispatchPlanItem {
   const taskId = `implement-${block.block_id}`;
-  const blockFiles = blockAffectedFiles(block, state);
+  const readFiles = blockReadFiles(block, state);
+  const writeFiles = blockWriteFiles(block, state);
   const resultPath = join(dir, `${taskId}.result.json`);
   return {
     task_id: taskId,
@@ -287,8 +319,8 @@ function buildImplementDispatchItem(
     result_path: resultPath,
     model_hint: buildImplementModelHint(block, state),
     access: {
-      read_paths: blockFiles,
-      write_paths: [...blockFiles, resultPath],
+      read_paths: readFiles,
+      write_paths: [...writeFiles, resultPath],
     },
   };
 }
@@ -381,16 +413,51 @@ function themeHint(
   return `\nSYNTHESIS THEME (${theme.theme_id} — ${theme.title}):\nRoot cause: ${theme.root_cause}\nSuggested fix pattern: ${theme.suggested_fix_pattern}\nApply this shared pattern where it fits this finding.\n`;
 }
 
+function contractPipelineTraceLines(finding: Finding): string[] {
+  const lines: string[] = [];
+  if (finding.contract_goal_id) {
+    lines.push(`Contract goal: ${finding.contract_goal_id}`);
+  }
+  if (finding.contract_obligation_ids?.length) {
+    lines.push(`Satisfies obligations: ${finding.contract_obligation_ids.join(", ")}`);
+  }
+  if (finding.verification_obligation_ids?.length) {
+    lines.push(`Verification obligations: ${finding.verification_obligation_ids.join(", ")}`);
+  }
+  if (finding.targeted_commands?.length) {
+    lines.push(`Targeted commands: ${finding.targeted_commands.join(" | ")}`);
+  }
+  return lines;
+}
+
+function contractPipelineTraceSection(finding: Finding): string {
+  const lines = contractPipelineTraceLines(finding);
+  if (lines.length === 0) return "";
+  return `\n## Contract Pipeline Traceability\n\n${lines.map((line) => `- ${line}`).join("\n")}\n`;
+}
+
+function contractPipelineTraceBullets(finding: Finding): string {
+  const lines = contractPipelineTraceLines(finding);
+  return lines.length > 0 ? `${lines.map((line) => `- ${line}`).join("\n")}\n` : "";
+}
+
 function findingPrompt(
   finding: Finding,
   resultPath: string,
   conventions: string,
   themeHintText: string,
+  repoRoot: string,
 ): string {
+  // Normalize paths to forward slashes so bash-like shells on Windows do not
+  // treat backslashes as escape characters when the host copies these paths.
+  const rootDisplay = toPromptPathToken(repoRoot);
+  const resultDisplay = toPromptPathToken(resultPath);
   return `
 # Document Remediation Item
 
 You are documenting one remediation item. Use only the finding context below.
+Repository root: ${rootDisplay}
+Set the shell/tool workdir to the repository root when running any command; do not rely on cwd state from prior shell calls.
 
 ## Finding
 
@@ -405,12 +472,13 @@ You are documenting one remediation item. Use only the finding context below.
 ## Evidence
 
 ${(finding.evidence ?? []).map((item) => `- ${item}`).join("\n")}
+${contractPipelineTraceSection(finding)}
 ${themeHintText}${conventions ? `\n${conventions}\n` : ""}
 ## Output
 
 Write JSON to exactly:
 
-\`${resultPath}\`
+\`${resultDisplay}\`
 
 Use one of these shapes:
 
@@ -462,10 +530,13 @@ required \`rationale\` string explaining why it does not apply. Example:
 }
 \`\`\`
 
+Windows PowerShell: do not pipe an inline foreach statement directly into ConvertTo-Json.
+Assign the foreach output to a variable first, then pipe that variable to ConvertTo-Json.
+
 ## File access
 
 Read: ${finding.affected_files.map((f) => f.path).join(", ")}
-Write: ${resultPath}
+Write: ${resultDisplay}
 Do not read or write files outside these paths.
 `;
 }
@@ -475,6 +546,7 @@ function implementPrompt(
   state: RemediationState,
   resultPath: string,
   conventions: string,
+  repoRoot: string,
 ): string {
   const items = block.items.flatMap((findingId) => {
     const item = state.items?.[findingId];
@@ -486,6 +558,11 @@ function implementPrompt(
     return [{ finding, spec: item.item_spec }];
   });
 
+  // Normalize to forward slashes for host-facing prompt text; bash-like shells
+  // on Windows treat backslashes as escape characters.
+  const rootDisplay = toPromptPathToken(repoRoot);
+  const resultDisplay = toPromptPathToken(resultPath);
+
   return `
 # Implement Remediation Block
 
@@ -494,6 +571,8 @@ findings in this prompt, and you MAY create new files (e.g. a test file or an
 extracted module) within the SAME package as those files when a finding's change
 calls for it. Do not edit unrelated files in other packages, and do not change
 remediation state files directly.
+Repository root: ${rootDisplay}
+Set the shell/tool workdir to the repository root when running commands; do not rely on cwd state from prior shell calls.
 
 ## Block
 
@@ -507,21 +586,35 @@ ${items
     ({ finding, spec }) => `
 ### ${finding.id} - ${finding.title}
 
-- Files: ${itemFiles(finding, spec).join(", ")}
+- Files: ${itemReadFiles(finding, spec).join(", ")}
 - Summary: ${finding.summary}
 - Concrete change: ${spec.concrete_change}
 - Tests to write: ${spec.tests_to_write
       .map((test) => `${test.name}: ${test.assertions.join("; ")}`)
       .join(" | ")}
+${contractPipelineTraceBullets(finding)}
 `,
   )
   .join("\n")}
 ${conventions ? `\n${conventions}\n` : ""}
+## Verification
+
+Run changed or newly created tests by name when possible, and record the focused
+command and result in the affected item's evidence. If a broad or full-suite
+command fails in a dirty worktree and appears unrelated or pre-existing, record
+that broad failure separately instead of using it as the only verdict for this
+block. If a focused test for this block fails, the affected item remains blocked.
+If targeted commands are listed under an item, run them when applicable and
+include each command and result in that item's evidence.
+
+Windows PowerShell: do not pipe an inline foreach statement directly into ConvertTo-Json.
+Assign the foreach output to a variable first, then pipe that variable to ConvertTo-Json.
+
 ## Output
 
 After editing and verifying the block, write JSON to exactly:
 
-\`${resultPath}\`
+\`${resultDisplay}\`
 
 \`\`\`json
 {
@@ -542,14 +635,15 @@ For an item you cannot safely finish, set \`status\` to \`blocked\` and include
 
 ## File access
 
-Read and write: ${[...new Set(items.flatMap(({ finding, spec }) => itemFiles(finding, spec)))].join(", ")}
+Read: ${uniquePaths(items.flatMap(({ finding, spec }) => itemReadFiles(finding, spec))).join(", ")}
+Write: ${uniquePaths(items.flatMap(({ finding, spec }) => itemWriteFiles(finding, spec))).join(", ")}
 You may also create new files within the same package as those files (e.g. tests
 or extracted modules) when a finding requires it.
 If your change renames, moves, or removes a symbol, also update the existing test
 files that reference it — fixing tests for a changed surface is part of this
 block, not a later cleanup. Test files that reference these files are included in
 your write access.
-Write result: ${resultPath}
+Write result: ${resultDisplay}
 Do not modify unrelated files outside these paths or files in other packages.
 `;
 }
@@ -603,7 +697,6 @@ export async function prepareDocumentDispatch(
     const item = buildDocumentDispatchItem(finding, dir);
 
     if (await tryLoadExistingDocumentResult(item.result_path)) {
-      console.log(`Reusing existing document result for ${finding.id}`);
       reconciledCount++;
       continue;
     }
@@ -615,6 +708,7 @@ export async function prepareDocumentDispatch(
         item.result_path,
         conventions,
         themeHint(finding, state.plan.themes),
+        options.root,
       ),
     );
     items.push(item);
@@ -627,8 +721,10 @@ export async function prepareDocumentDispatch(
     contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
     phase: "document",
     run_id: runId,
-    repo_root: options.root,
-    artifacts_dir: options.artifactsDir,
+    // Normalize to forward slashes so hosts running bash-like shells on Windows
+    // receive paths that survive shell expansion (backslash is an escape char).
+    repo_root: toPromptPathToken(options.root),
+    artifacts_dir: toPromptPathToken(options.artifactsDir),
     items,
   };
 
@@ -843,7 +939,7 @@ export async function prepareImplementDispatch(
     // (otherwise their breakage is orphaned for a separate central mop-up).
     const referencingTests = collectReferencingTests(
       testIndex,
-      blockAffectedFiles(block, state),
+      blockReadFiles(block, state),
     );
     if (referencingTests.length > 0 && item.access) {
       item.access.read_paths = [
@@ -859,7 +955,6 @@ export async function prepareImplementDispatch(
     const existingResult = await tryLoadExistingImplementResult(item.result_path);
     if (existingResult) {
       if (implementResultCoversFindings(existingResult, documentedFindingIds)) {
-        console.log(`Reusing existing implement result for block ${block.block_id}`);
         reconciledCount++;
         continue;
       }
@@ -881,7 +976,7 @@ export async function prepareImplementDispatch(
 
     await writeTextFile(
       item.prompt_path,
-      implementPrompt(block, state, item.result_path, conventions),
+      implementPrompt(block, state, item.result_path, conventions, options.root),
     );
     items.push(item);
   }
@@ -906,8 +1001,10 @@ export async function prepareImplementDispatch(
     contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
     phase: "implement",
     run_id: runId,
-    repo_root: options.root,
-    artifacts_dir: options.artifactsDir,
+    // Normalize to forward slashes so hosts running bash-like shells on Windows
+    // receive paths that survive shell expansion (backslash is an escape char).
+    repo_root: toPromptPathToken(options.root),
+    artifacts_dir: toPromptPathToken(options.artifactsDir),
     items,
   };
   await writeJsonFile(dispatchPlanPath(options.artifactsDir, runId, "implement"), plan);

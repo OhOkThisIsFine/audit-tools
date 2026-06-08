@@ -167,9 +167,38 @@ export function runResultIngestionExecutor(
     selectiveDeepening.bundle.flow_coverage,
     selectiveDeepening.bundle.external_analyzer_results,
   );
+  // Fold pending requeue tasks into the dispatch task list so mandatory
+  // coverage gaps produce actual dispatch packets. Enrich with line-count
+  // hints and dedupe against existing tasks by task_id.
+  const deepenedTasks = selectiveDeepening.bundle.audit_tasks ?? [];
+  const lineIndex = lineIndexFromTasks(deepenedTasks);
+  const sizeIndex = sizeIndexFromManifest(selectiveDeepening.bundle.repo_manifest);
+  const existingTaskIds = new Set(deepenedTasks.map((t) => t.task_id));
+  const pendingRequeueTasks = requeuePayload.tasks
+    .filter((t) => t.status === "pending")
+    .filter((t) => !existingTaskIds.has(t.task_id))
+    .map((t) => ({
+      ...t,
+      file_line_counts: Object.fromEntries(
+        t.file_paths
+          .filter((p) => lineIndex[p] != null)
+          .map((p) => [p, lineIndex[p]]),
+      ),
+    }));
+  const allDispatchTasks = [...deepenedTasks, ...pendingRequeueTasks];
   const finalBundle: ArtifactBundle = {
     ...selectiveDeepening.bundle,
     requeue_tasks: requeuePayload.tasks,
+    audit_plan_metrics: buildAuditPlanMetrics(allDispatchTasks, {
+      graphBundle: selectiveDeepening.bundle.graph_bundle,
+      lineIndex,
+      sizeIndex,
+    }),
+    review_packets: buildReviewPackets(allDispatchTasks, {
+      graphBundle: selectiveDeepening.bundle.graph_bundle,
+      lineIndex,
+      sizeIndex,
+    }),
   };
 
   return {
@@ -181,7 +210,8 @@ export function runResultIngestionExecutor(
       ...(runtimeValidationReport ? ["runtime_validation_report.json"] : []),
       "audit_results.jsonl",
       "audit_tasks.json",
-      ...selectiveDeepening.artifacts,
+      "audit_plan_metrics.json",
+      "review_packets.json",
       "requeue_tasks.json",
     ],
     progress_summary:

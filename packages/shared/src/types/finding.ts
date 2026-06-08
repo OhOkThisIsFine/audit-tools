@@ -35,6 +35,14 @@ export interface Finding {
   related_findings?: string[];
   /** Synthesis theme this finding belongs to (Phase 6). */
   theme_id?: string;
+  /** Contract-pipeline goal this generated remediation finding belongs to. */
+  contract_goal_id?: string;
+  /** Contract-pipeline obligation IDs this finding/task is intended to satisfy. */
+  contract_obligation_ids?: string[];
+  /** Contract-pipeline verification obligation IDs this task must prove. */
+  verification_obligation_ids?: string[];
+  /** Commands recommended by the implementation DAG for focused verification. */
+  targeted_commands?: string[];
 }
 
 /** Report-level grouping of findings into parallelizable units of work. */

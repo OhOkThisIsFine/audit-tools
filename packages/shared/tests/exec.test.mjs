@@ -1,9 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { resolveExecArgv, quoteForCmd, shellQuote, platformCommand, runTracked } = await import(
-  "../src/tooling/exec.ts"
-);
+const {
+  resolveExecArgv,
+  quoteForCmd,
+  shellQuote,
+  platformCommand,
+  runTracked,
+  renderPromptCommand,
+  toPromptPathToken,
+  coerceJsonObjectArg,
+} = await import("../src/tooling/exec.ts");
 
 test("platformCommand maps package-manager shims to .cmd on win32 only", () => {
   assert.equal(platformCommand("npm", "win32"), "npm.cmd");
@@ -28,6 +35,43 @@ test("shellQuote uses cmd.exe quoting on win32 and POSIX quoting elsewhere", () 
   assert.equal(shellQuote('a"b', "win32"), '"a""b"');
   assert.equal(shellQuote("a b", "linux"), "'a b'");
   assert.equal(shellQuote("it's", "linux"), "'it'\\''s'");
+});
+
+test("renderPromptCommand normalizes only path-like Windows command tokens", () => {
+  assert.equal(
+    renderPromptCommand(["node", "C:\\Code\\audit-tools\\packages\\audit-code\\audit-code.mjs"]),
+    "node C:/Code/audit-tools/packages/audit-code/audit-code.mjs",
+  );
+  assert.equal(
+    renderPromptCommand(["node", "packages\\audit-code\\audit-code.mjs"]),
+    "node packages/audit-code/audit-code.mjs",
+  );
+  assert.equal(
+    renderPromptCommand(["node", "C:\\Path With Spaces\\tool.mjs", "--flag", 'a"b']),
+    'node "C:/Path With Spaces/tool.mjs" --flag "a\\"b"',
+  );
+  assert.equal(toPromptPathToken(String.raw`^\d+\w+$`), String.raw`^\d+\w+$`);
+  assert.equal(
+    renderPromptCommand(["node", String.raw`if (x) console.log("\n")`]),
+    String.raw`node "if (x) console.log(\"\n\")"`,
+  );
+});
+
+test("coerceJsonObjectArg accepts object or JSON object string and rejects arrays", () => {
+  assert.deepEqual(coerceJsonObjectArg({ root: "C:/repo" }, "options"), {
+    root: "C:/repo",
+  });
+  assert.deepEqual(coerceJsonObjectArg('{"root":"C:/repo"}', "options"), {
+    root: "C:/repo",
+  });
+  assert.throws(
+    () => coerceJsonObjectArg("[1,2]", "options"),
+    /options must be an object or JSON object string/i,
+  );
+  assert.throws(
+    () => coerceJsonObjectArg("{bad", "options"),
+    /options must be an object or JSON object string/i,
+  );
 });
 
 test("resolveExecArgv wraps batch shims through cmd.exe on win32", () => {

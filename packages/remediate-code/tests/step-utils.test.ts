@@ -7,6 +7,7 @@ import {
   specIndicatesNoChange,
   classifyFindingRisk,
   dependenciesSatisfied,
+  rationaleAsksForRetry,
 } from "../src/steps/stepUtils.js";
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
@@ -101,6 +102,20 @@ describe("stepUtils exports are stable after extraction", () => {
 
     it("returns false for undefined spec", () => {
       expect(specIndicatesNoChange(undefined)).toBe(false);
+    });
+  });
+
+  describe("rationaleAsksForRetry", () => {
+    it("returns true for deferred retry-later rationale", () => {
+      expect(
+        rationaleAsksForRetry(
+          "Deferred - retry in a dedicated pass after the prerequisite lands.",
+        ),
+      ).toBe(true);
+    });
+
+    it("returns false for explicit do-not-remediate rationale", () => {
+      expect(rationaleAsksForRetry("User said this is out of scope.")).toBe(false);
     });
   });
 

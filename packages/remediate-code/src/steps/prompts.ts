@@ -3,6 +3,7 @@ import type {
   RemediationItemState,
 } from "../state/types.js";
 import type { RemediationState } from "../state/store.js";
+import { renderPromptCommand } from "@audit-tools/shared";
 import {
   INTAKE_CLARIFICATION_SCHEMA_VERSION,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
@@ -13,8 +14,11 @@ import {
   type IntakeSummary,
 } from "../intake.js";
 
-export function loaderCommand(command: string): string {
-  return `remediate-code ${command}`;
+export function loaderCommand(command: string | string[]): string {
+  const args = Array.isArray(command)
+    ? command
+    : command.trim().split(/\s+/u).filter(Boolean);
+  return renderPromptCommand(["remediate-code", ...args]);
 }
 
 function blockedItems(state: RemediationState): RemediationItemState[] {
@@ -67,6 +71,9 @@ export function triagePrompt(state: RemediationState, resolutionPath: string): s
 # Resolve Remediation Triage
 
 Ask the user for one decision per blocked item: \`retry\`, \`ignore\`, or \`halt\`.
+Use \`retry\` for blocked, deferred, retry-later, or prerequisite-dependent work.
+Use \`ignore\` only when the user explicitly says the finding should not be
+remediated.
 
 ${blocked
   .map((item) => {
@@ -228,7 +235,8 @@ success criteria are clear enough that implementation choices will not depend
 on another user decision. If any blocking ambiguity remains, set \`ready\` to
 \`false\` and list the questions.
 
-Use \`source_type\` of \`documents\`, \`conversation\`, or \`mixed\`.
+Use \`source_type\` of \`structured_audit\`, \`documents\`, \`conversation\`,
+or \`mixed\`.
 
 Also write a Markdown launch brief to exactly:
 

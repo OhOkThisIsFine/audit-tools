@@ -12,6 +12,8 @@
   ],
   "properties": {
     "plan_id": { "type": "string" },
+    "goal_id": { "type": "string" },
+    "source": { "type": "string" },
     "findings": {
       "type": "array",
       "items": { "$ref": "finding.schema.json" }

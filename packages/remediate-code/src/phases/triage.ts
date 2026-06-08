@@ -3,8 +3,10 @@ import { OrchestratorOptions } from "../types/options.js";
 import { TriageBatch } from "../state/types.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues } from "@audit-tools/shared";
+import { rename } from "node:fs/promises";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, withFsRetry } from "@audit-tools/shared";
 import { validateTriageResolution } from "../validation/remediationState.js";
+import { rationaleAsksForRetry } from "../steps/stepUtils.js";
 
 interface TriageResolution {
   items: {
@@ -31,6 +33,51 @@ function markTerminal(item: { started_at?: string; completed_at?: string }): voi
 // forever (documenting→implement→triage→documenting). After the cap, fall through
 // to a real triage prompt so the user decides (ignore/halt).
 const MAX_AUTO_RETRIES = 2;
+
+function retryBlockedItem(
+  item: { status: string; started_at?: string; completed_at?: string; rework_count?: number },
+): void {
+  // "documented" maps to runImplementPhase in the orchestrator switch.
+  item.status = "documented";
+  markRetry(item);
+  item.rework_count = (item.rework_count ?? 0) + 1;
+}
+
+async function archiveIfPresent(path: string, suffix: "consumed" | "stale"): Promise<void> {
+  if (!existsSync(path)) return;
+  await withFsRetry(() => rename(path, `${path}.${suffix}-${Date.now()}`));
+}
+
+async function archiveImplementResultsForRetries(
+  state: RemediationState,
+  options: OrchestratorOptions,
+  findingIds: Set<string>,
+): Promise<void> {
+  const runId = state.plan?.plan_id;
+  if (!runId || findingIds.size === 0) return;
+
+  const blockIds = new Set<string>();
+  for (const findingId of findingIds) {
+    const item = state.items?.[findingId];
+    const blockId =
+      item?.block_id ??
+      state.plan?.blocks.find((block) => block.items.includes(findingId))?.block_id;
+    if (blockId) blockIds.add(blockId);
+  }
+
+  for (const blockId of blockIds) {
+    await archiveIfPresent(
+      join(
+        options.artifactsDir,
+        "runs",
+        runId,
+        "implement",
+        `implement-${blockId}.result.json`,
+      ),
+      "stale",
+    );
+  }
+}
 
 export async function runTriagePhase(
   state: RemediationState,
@@ -60,20 +107,20 @@ export async function runTriagePhase(
       }
       console.log("Found triage_resolution.json. Processing resolutions...");
       let requiresRetry = false;
+      const retryFindingIds = new Set<string>();
 
       for (const res of resolution.items) {
         if (res.action === "halt") {
+          await archiveIfPresent(resolutionPath, "consumed");
           console.log("Halt requested during triage. Marking run complete.");
           return { ...state, status: "complete" };
         }
 
         const item = state.items[res.finding_id];
         if (item && item.status === "blocked") {
-          if (res.action === "retry") {
-            // "documented" maps to runImplementPhase in the orchestrator switch
-            item.status = "documented";
-            markRetry(item);
-            item.rework_count = (item.rework_count ?? 0) + 1;
+          if (res.action === "retry" || rationaleAsksForRetry(res.rationale)) {
+            retryBlockedItem(item);
+            retryFindingIds.add(res.finding_id);
             requiresRetry = true;
           } else if (res.action === "ignore") {
             item.status = "ignored";
@@ -83,13 +130,15 @@ export async function runTriagePhase(
         }
       }
 
+      await archiveIfPresent(resolutionPath, "consumed");
       if (requiresRetry) {
+        await archiveImplementResultsForRetries(state, options, retryFindingIds);
         return { ...state, status: "documenting" };
       }
     } else {
       // If the user approved findings in the preview, auto-retry those rather
-      // than asking the model to triage them. Only items that were NOT skipped
-      // (i.e., not deemed_inappropriate) at preview time are auto-retried.
+      // than asking the model to triage them. Preview-ignored items are terminal,
+      // so only still-blocked implementation attempts are considered here.
       const previewAckPath = join(options.artifactsDir, "impl_preview_acknowledged.json");
       if (existsSync(previewAckPath)) {
         let autoRetried = false;
@@ -98,9 +147,7 @@ export async function runTriagePhase(
           // number of times — it leaves it `blocked` so the fall-through below
           // routes the run to a human triage prompt instead of looping.
           if ((item.rework_count ?? 0) >= MAX_AUTO_RETRIES) continue;
-          item.status = "documented";
-          markRetry(item);
-          item.rework_count = (item.rework_count ?? 0) + 1;
+          retryBlockedItem(item);
           autoRetried = true;
         }
         if (autoRetried) {

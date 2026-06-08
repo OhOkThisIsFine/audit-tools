@@ -8,6 +8,7 @@ import { decideNextStep, findObligation } from "./nextStep.js";
 import { deriveAuditState } from "./state.js";
 import { computeArtifactMetadata } from "./artifactMetadata.js";
 import { runIntakeExecutor } from "./intakeExecutors.js";
+import { runIntentCheckpointExecutor } from "./intentCheckpointExecutor.js";
 import {
   runStructureExecutor,
   runDesignAssessmentExecutor,
@@ -166,6 +167,11 @@ export async function advanceAudit(
       case "intake_executor": {
         const root = requireRoot(options.root, "intake_executor");
         run = await runIntakeExecutor(bundle, root);
+        break;
+      }
+      case "intent_checkpoint_executor": {
+        const root = requireRoot(options.root, "intent_checkpoint_executor");
+        run = await runIntentCheckpointExecutor(bundle, root, options.since);
         break;
       }
       case "structure_executor":

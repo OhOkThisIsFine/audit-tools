@@ -81,22 +81,40 @@ export async function runPlanningExecutor(
     ...task,
     status: task.status ?? ("pending" as const),
   }));
-  const reviewPackets = buildReviewPackets(taggedAuditTasks, {
-    graphBundle: bundle.graph_bundle,
-    lineIndex,
-    sizeIndex: resolvedSizeIndex,
-  });
-  const auditPlanMetrics = buildAuditPlanMetrics(taggedAuditTasks, {
-    graphBundle: bundle.graph_bundle,
-    lineIndex,
-    sizeIndex: resolvedSizeIndex,
-  });
   const requeuePayload = buildRequeuePayload(
     coverage,
     bundle.critical_flows,
     flowCoverage,
     externalAnalyzerResults,
   );
+  // Fold pending requeue tasks into the dispatch task list so mandatory coverage
+  // gaps produce actual dispatch packets. Enrich with line-count hints from the
+  // index and dedupe against existing audit tasks by task_id so each task
+  // appears exactly once in the merged list.
+  const existingTaskIds = new Set(taggedAuditTasks.map((t) => t.task_id));
+  const pendingRequeueTasks = requeuePayload.tasks
+    .filter((t) => t.status === "pending")
+    .filter((t) => !existingTaskIds.has(t.task_id))
+    .map((t) => ({
+      ...t,
+      file_line_counts: Object.fromEntries(
+        t.file_paths
+          .filter((p) => lineIndex[p] != null)
+          .map((p) => [p, lineIndex[p]]),
+      ),
+    }));
+  const allDispatchTasks = [...taggedAuditTasks, ...pendingRequeueTasks];
+
+  const reviewPackets = buildReviewPackets(allDispatchTasks, {
+    graphBundle: bundle.graph_bundle,
+    lineIndex,
+    sizeIndex: resolvedSizeIndex,
+  });
+  const auditPlanMetrics = buildAuditPlanMetrics(allDispatchTasks, {
+    graphBundle: bundle.graph_bundle,
+    lineIndex,
+    sizeIndex: resolvedSizeIndex,
+  });
 
   const scopeSummary =
     resolvedScope.mode === "delta"

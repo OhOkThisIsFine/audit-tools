@@ -339,6 +339,7 @@ export function renderAuditReportMarkdown(
       lines.push(`- Severity: ${finding.severity}`);
       lines.push(`- Confidence: ${finding.confidence}`);
       lines.push(`- Lens: ${finding.lens}`);
+      lines.push(`- Category: ${finding.category}`);
       if (finding.theme_id) {
         lines.push(`- Theme: ${finding.theme_id}`);
       }
@@ -379,4 +380,29 @@ export function renderAuditReportMarkdown(
   }
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * Re-derive the summary fields that can be computed from the existing findings
+ * and work_blocks, bump the contract_version to the current constant, and leave
+ * upstream-derived fields that cannot be reconstructed (audited/excluded counts,
+ * runtime validation breakdown) untouched.
+ *
+ * Safe to call on already-promoted `audit-findings.json` files without access to
+ * the pruned `.audit-tools/audit` working-bundle intermediates.
+ */
+export function normalizeExistingFindingsReport(
+  report: AuditFindingsReport,
+): AuditFindingsReport {
+  return {
+    ...report,
+    contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
+    summary: {
+      ...report.summary,
+      finding_count: report.findings.length,
+      work_block_count: report.work_blocks.length,
+      severity_breakdown: severityBreakdown(report.findings as Finding[]),
+      lens_breakdown: lensBreakdown(report.findings as Finding[]),
+    },
+  };
 }

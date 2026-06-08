@@ -50,6 +50,13 @@ After close, the durable outputs are written at the repo root:
 - `remediation-report.json`
 - `remediation-closing-result.json`
 
+## Development From Source
+
+The global `npm install -g remediator-lambda` path is for users. For repository
+development in a fresh clone or git worktree, run `npm install` at the repo root
+before build, check, test, or package-scoped workflows so workspace links point
+at the current `@audit-tools/shared` sources instead of stale compiled output.
+
 ## CLI
 
 | Command | Description |
@@ -108,4 +115,3 @@ The default closing action is `none`. Actions such as `commit`, `push`,
 output in `remediation-closing-result.json`; reports only claim success after
 the command succeeds. Closing is advanced by a generated `next-step` finalization
 command, not the broad compatibility `run` loop.
-

@@ -8,6 +8,13 @@ export const ARTIFACT_DEPENDENTS_MAP: Record<string, string[]> = {
   "tooling_manifest.json": [
     "repo_manifest.json",
   ],
+  "intent_checkpoint.json": [
+    "coverage_matrix.json",
+    "audit_tasks.json",
+    "audit_plan_metrics.json",
+    "review_packets.json",
+    "requeue_tasks.json",
+  ],
   "repo_manifest.json": [
     "file_disposition.json",
     "unit_manifest.json",

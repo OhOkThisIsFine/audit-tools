@@ -26,6 +26,7 @@ export {
   GenericErrorParser,
   ClaudeCodeErrorParser,
   getErrorParserForProvider,
+  summarizeDispatchCapacityPools,
 } from "@audit-tools/shared";
 
 export type {
@@ -48,6 +49,8 @@ export type {
   QuotaSource,
   QuotaUsageSnapshot,
   ErrorParser,
+  WaveBindingCap,
+  DispatchCapacityPoolSummary,
 } from "@audit-tools/shared";
 
 // Wave scheduler now lives in @audit-tools/shared (single source of truth for

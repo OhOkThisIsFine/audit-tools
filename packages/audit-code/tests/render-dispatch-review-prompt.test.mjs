@@ -111,3 +111,19 @@ test("phase omitted (undefined) — canary-round line is absent", () => {
   const result = renderDispatchReviewPrompt(makeParams());
   assert.ok(!result.includes("CANARY round"), "expected 'CANARY round' to be absent");
 });
+
+test("FINDING-018: access pre-approval instruction references entry.access read and write paths", () => {
+  const result = renderDispatchReviewPrompt(makeParams({ hostCanRestrictSubagentTools: true }));
+  assert.ok(
+    result.includes("entry.access.read_paths") && result.includes("entry.access.write_paths"),
+    "expected pre-approval instruction to reference entry.access read_paths and write_paths",
+  );
+});
+
+test("FINDING-018: access pre-approval warns not to grant broad workspace write access", () => {
+  const result = renderDispatchReviewPrompt(makeParams({ hostCanRestrictSubagentTools: true }));
+  assert.ok(
+    result.includes("Do not grant broad workspace"),
+    "expected warning against broad workspace write access",
+  );
+});

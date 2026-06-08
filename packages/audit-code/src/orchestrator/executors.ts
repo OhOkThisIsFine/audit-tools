@@ -24,6 +24,13 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
       "Create intake artifacts for repository discovery and disposition.",
   },
   {
+    id: "intent_checkpoint_executor",
+    kind: "deterministic",
+    obligation_ids: ["intent_checkpoint_current"],
+    description:
+      "Write intent_checkpoint.json with confirmed scope and intent.",
+  },
+  {
     id: "structure_executor",
     kind: "deterministic",
     obligation_ids: ["structure_artifacts"],

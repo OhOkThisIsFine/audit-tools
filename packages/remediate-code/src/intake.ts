@@ -14,7 +14,7 @@ export const INTAKE_SUMMARY_SCHEMA_VERSION =
 export const INTAKE_CLARIFICATION_SCHEMA_VERSION =
   "remediate-code-intake-clarifications/v1alpha1" as const;
 
-export type IntakeSourceType = "document" | "conversation";
+export type IntakeSourceType = "document" | "conversation" | "structured_audit";
 
 export interface IntakeSource {
   type: IntakeSourceType;
@@ -79,6 +79,23 @@ export function buildDocumentSourceManifest(
       path,
       label: `input-${String(index + 1).padStart(2, "0")}`,
     })),
+  };
+}
+
+export function buildStructuredAuditSourceManifest(
+  path: string,
+  createdFrom: IntakeSourceManifest["created_from"],
+): IntakeSourceManifest {
+  return {
+    schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+    created_from: createdFrom,
+    sources: [
+      {
+        type: "structured_audit",
+        path,
+        label: "audit-findings",
+      },
+    ],
   };
 }
 

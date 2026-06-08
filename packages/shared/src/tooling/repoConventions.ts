@@ -183,7 +183,10 @@ export function detectRepoConventions(root: string): RepoConventions {
 }
 
 /** Render a prompt block from detected conventions, or "" if nothing detected. */
-export function formatRepoConventions(conventions: RepoConventions): string {
+export function formatRepoConventions(
+  conventions: RepoConventions,
+  options?: { includeSnippet?: boolean },
+): string {
   const lines: string[] = [];
   if (conventions.formatter) lines.push(`- Formatter: ${conventions.formatter}`);
   if (conventions.linter) lines.push(`- Linter: ${conventions.linter}`);
@@ -202,7 +205,7 @@ export function formatRepoConventions(conventions: RepoConventions): string {
 
   let block = "REPOSITORY CONVENTIONS (match the surrounding code):\n";
   if (lines.length > 0) block += `${lines.join("\n")}\n`;
-  if (conventions.sample_snippet) {
+  if (conventions.sample_snippet && options?.includeSnippet) {
     block += `\nRepresentative house-style snippet:\n\`\`\`\n${conventions.sample_snippet}\n\`\`\`\n`;
   }
   return block.trim();

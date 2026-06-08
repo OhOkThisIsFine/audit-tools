@@ -77,3 +77,27 @@ test("buildAuditTasks validates options before generating tasks", () => {
     /options\.pass_prefix must be a string/i,
   );
 });
+
+test("buildAuditTasks accepts options supplied as a JSON string", () => {
+  const tasks = buildAuditTasks(
+    createUnitManifest(),
+    '{"pass_prefix":"json","limit_lenses":["correctness"]}',
+  );
+
+  assert.deepEqual(
+    tasks.map((task) => task.task_id),
+    ["src-auth:correctness"],
+  );
+  assert.equal(tasks[0].pass_id, "json:correctness");
+});
+
+test("buildAuditTasks rejects malformed JSON string and array options", () => {
+  assert.throws(
+    () => buildAuditTasks(createUnitManifest(), "{bad"),
+    /buildAuditTasks options must be an object or JSON object string/i,
+  );
+  assert.throws(
+    () => buildAuditTasks(createUnitManifest(), "[]"),
+    /buildAuditTasks options must be an object or JSON object string/i,
+  );
+});
