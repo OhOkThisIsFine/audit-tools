@@ -40,6 +40,7 @@ export type {
   AuditFindingsSummary,
   AuditFindingsReport,
 } from "./types/finding.js";
+export type { IntentCheckpoint } from "./types/intentCheckpoint.js";
 export type {
   RemediationOutcomeStatus,
   RemediationOutcome,
@@ -119,6 +120,10 @@ export {
   resolveExecArgv,
   quoteForCmd,
   shellQuote,
+  renderPromptCommand,
+  toPromptPathToken,
+  quotePromptCommandArg,
+  coerceJsonObjectArg,
   platformCommand,
   quoteForOpenTokenCmd,
   wrapForOpenToken,
@@ -244,6 +249,7 @@ export type {
   ConcurrencyBucket,
   QuotaStateEntry,
   QuotaState,
+  WaveBindingCap,
   WaveSchedule,
   BackoffState,
   ObservedWaveOutcome,
@@ -309,14 +315,53 @@ export type {
   ScheduleWaveOptions,
   DiscoveredRateLimitsInput,
 } from "./quota/scheduler.js";
-export { computeDispatchCapacity } from "./quota/capacity.js";
+export {
+  computeDispatchCapacity,
+  summarizeDispatchCapacityPools,
+} from "./quota/capacity.js";
 export type {
   CapacityPool,
   PoolDispatchAllocation,
+  DispatchCapacityPoolSummary,
   DispatchCapacity,
   ComputeDispatchCapacityInput,
 } from "./quota/capacity.js";
-export { DO_NOT_TOKEN_WRAP_NOTE } from "./prompts.js";
+export { DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE } from "./prompts.js";
+
+// Contract-pipeline artifact types (shared across both orchestrators)
+export type {
+  GoalSpec,
+  ContextBundle,
+  ContextBundleEntry,
+  DesignSpec,
+  DesignSpecInvariant,
+  ConceptualDesignCritique,
+  DesignCritiqueItem,
+  ObligationLedger,
+  ObligationEntry,
+  ContractAssessmentReport,
+  ContractAssessmentFinding,
+  Counterexample,
+  JudgeReport,
+  ImplementationDAG,
+  ImplementationDAGNode,
+  ImplementationDAGEdge,
+  VerificationReport,
+  VerificationTraceEntry,
+  FindingVerificationTrace,
+} from "./types/contractPipeline.js";
+export {
+  CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
+  CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
+  CONTRACT_PIPELINE_DESIGN_SPEC_VERSION,
+  CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
+  CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
+  CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
+  CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
+  CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
+  CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+  CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION,
+} from "./types/contractPipeline.js";
 export { LearnedQuotaSource } from "./quota/learnedQuotaSource.js";
 
 // Parsing utilities

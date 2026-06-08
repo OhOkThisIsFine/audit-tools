@@ -49,6 +49,11 @@ async function runStepWithProvider(
   );
 
   let fullPrompt = promptContent;
+  fullPrompt +=
+    `\n\nRepository root: ${options.root}\n` +
+    "Set the shell/tool workdir to the repository root when running commands; do not rely on cwd state from prior shell calls.\n" +
+    "Windows PowerShell: do not pipe an inline foreach statement directly into ConvertTo-Json.\n" +
+    "Assign the foreach output to a variable first, then pipe that variable to ConvertTo-Json.";
   if (writeResultInstruction) {
     fullPrompt += `\n\nYour task JSON is at: ${taskPath}\nWrite your result JSON to exactly this path: ${resultPath}\nUse the Write tool to create or overwrite that file.\nDo not write to any other path.`;
   } else {

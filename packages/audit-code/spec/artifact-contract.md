@@ -104,6 +104,22 @@ Producer: external analyzer adapters
 Consumers: future risk/synthesis/planning enrichers
 Stale if: imported analyzer data changes
 
+### `design_assessment.json`
+
+Producer: deterministic design assessment executor and optional design review worker
+Consumers: synthesis and planning context
+Stale if: repository structure, dependency graph, surfaces, or critical flows change
+
+The optional design-review portion may include observational contract assessment.
+That mode infers existing contracts from the repository artifacts and inspected
+code: invariants, trust boundaries, preconditions, postconditions, data
+lifecycle obligations, and critical-flow guarantees. It should attack those
+inferred contracts with concrete counterexamples and report evidenced gaps using
+categories such as `inferred_contract_gap`, `trust_boundary_gap`,
+`invariant_counterexample`, and `critical_invariant_coverage_gap`. It must not
+invent a new contract DSL, create a remediation plan, edit source code, or turn
+audit-code into an implementation pipeline.
+
 ### `merged_findings.json`
 
 Producer: synthesis executor

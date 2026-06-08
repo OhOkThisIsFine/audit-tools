@@ -85,6 +85,43 @@ describe("runTriagePhase", () => {
     expectIsoTimestamp(state.items!.F1.completed_at);
   });
 
+  it("treats deferred ignore rationales as retry intent", async () => {
+    const originalStartedAt = "2026-06-05T12:00:00.000Z";
+    const state = makeState({
+      F1: {
+        finding_id: "F1",
+        status: "blocked",
+        failure_reason: "provider failed",
+        block_id: "B1",
+        rework_count: 2,
+        started_at: originalStartedAt,
+        completed_at: "2026-06-05T12:01:00.000Z",
+      },
+    });
+
+    await writeFile(
+      join(TEST_DIR, "triage_resolution.json"),
+      JSON.stringify({
+        items: [
+          {
+            finding_id: "F1",
+            action: "ignore",
+            rationale:
+              "Deferred - should be retried in a dedicated pass after the prerequisite lands.",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const next = await runTriagePhase(state, BASE_OPTIONS);
+    expect(next.status).toBe("documenting");
+    expect(state.items!.F1.status).toBe("documented");
+    expect(state.items!.F1.rework_count).toBe(3);
+    expect(state.items!.F1.started_at).toBe(originalStartedAt);
+    expect(state.items!.F1.completed_at).toBeUndefined();
+  });
+
   it("applies retry resolution and returns documenting", async () => {
     const originalStartedAt = "2026-06-05T12:00:00.000Z";
     const state = makeState({

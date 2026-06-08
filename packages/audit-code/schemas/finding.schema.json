@@ -59,7 +59,20 @@
       "minItems": 1,
       "items": { "type": "string" }
     },
-    "theme_id": { "type": "string" }
+    "theme_id": { "type": "string" },
+    "contract_goal_id": { "type": "string" },
+    "contract_obligation_ids": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "verification_obligation_ids": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "targeted_commands": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
   },
   "additionalProperties": false
 }

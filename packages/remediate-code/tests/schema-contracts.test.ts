@@ -12,6 +12,8 @@ const EXPECTED_SCHEMAS = [
   "clarification_request.schema.json",
   "closing_result.schema.json",
   "closing_plan.schema.json",
+  "contract_pipeline.schema.json",
+  "dispatch_quota.schema.json",
   "dispatch_plan.schema.json",
   "finding.schema.json",
   "item_spec.schema.json",
@@ -65,6 +67,57 @@ describe("JSON schema contracts", () => {
   });
 });
 
+describe("contract_pipeline schema", () => {
+  const EXPECTED_ARTIFACT_DEFS = [
+    "GoalSpec",
+    "ContextBundle",
+    "DesignSpec",
+    "ConceptualDesignCritique",
+    "ObligationLedger",
+    "ContractAssessmentReport",
+    "Counterexample",
+    "JudgeReport",
+    "ImplementationDAG",
+    "VerificationReport",
+  ];
+
+  let schema: Record<string, unknown>;
+
+  beforeAll(async () => {
+    const content = await readFile(join(SCHEMA_DIR, "contract_pipeline.schema.json"), "utf8");
+    schema = JSON.parse(content) as Record<string, unknown>;
+  });
+
+  it("declares draft 2020-12 JSON Schema metadata", () => {
+    expect(typeof schema.$schema).toBe("string");
+    expect(schema.$schema).toContain("json-schema.org");
+    expect(schema.$schema).toContain("2020-12");
+  });
+
+  it("defines all core artifact types", () => {
+    const defs = schema.$defs as Record<string, unknown>;
+    for (const defName of EXPECTED_ARTIFACT_DEFS) {
+      expect(defs).toHaveProperty(defName);
+    }
+  });
+
+  it("each artifact definition requires a stable contract_version", () => {
+    const defs = schema.$defs as Record<string, Record<string, unknown>>;
+    for (const defName of EXPECTED_ARTIFACT_DEFS) {
+      const def = defs[defName] as Record<string, unknown>;
+      expect(Array.isArray(def.required) && (def.required as string[]).includes("contract_version")).toBe(true);
+    }
+  });
+
+  it("each artifact definition rejects unknown properties", () => {
+    const defs = schema.$defs as Record<string, Record<string, unknown>>;
+    for (const defName of EXPECTED_ARTIFACT_DEFS) {
+      const def = defs[defName] as Record<string, unknown>;
+      expect(def.additionalProperties).toBe(false);
+    }
+  });
+});
+
 describe("JSON schema field-level consistency", () => {
   it("verification_result uses 'passed' (not 'conforms')", async () => {
     const schema = JSON.parse(
@@ -102,6 +155,18 @@ describe("JSON schema field-level consistency", () => {
       await readFile(join(SCHEMA_DIR, "remediation_plan.schema.json"), "utf8"),
     );
     expect(schema.properties).toHaveProperty("e2e_command");
+  });
+
+  it("dispatch_quota schema exposes multi-pool capacity metadata", async () => {
+    const schema = JSON.parse(
+      await readFile(join(SCHEMA_DIR, "dispatch_quota.schema.json"), "utf8"),
+    );
+    expect(schema.properties).toHaveProperty("binding_cap");
+    expect(schema.properties).toHaveProperty("capacity_pools");
+    expect(schema.properties.source.enum).toContain("provider_default");
+    expect(schema.properties.capacity_pools.items.properties).toHaveProperty(
+      "resolved_limits",
+    );
   });
 
   it("test_spec schema requires assertions", async () => {

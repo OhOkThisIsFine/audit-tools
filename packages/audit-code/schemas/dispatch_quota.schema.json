@@ -56,7 +56,7 @@
     },
     "source": {
       "type": "string",
-      "enum": ["explicit_config", "cli_flags", "known_metadata", "learned", "default"],
+      "enum": ["explicit_config", "cli_flags", "known_metadata", "provider_default", "learned", "default"],
       "description": "Where the resolved limits came from."
     },
     "host_concurrency_limit": {
@@ -75,7 +75,7 @@
         },
         "source": {
           "type": "string",
-          "enum": ["cli_flags", "session_config", "environment"]
+          "enum": ["cli_flags", "host_reported", "session_config", "environment"]
         },
         "description": {
           "type": "string",
@@ -97,6 +97,90 @@
       "type": ["string", "null"],
       "format": "date-time",
       "description": "If non-null, the host should wait until this timestamp before launching the next wave."
+    },
+    "binding_cap": {
+      "type": "string",
+      "enum": ["rpm", "tpm", "learned", "fallback", "first_contact", "cooldown", "host_concurrency", "none"],
+      "description": "The most constraining cap across capacity pools."
+    },
+    "capacity_pools": {
+      "type": "array",
+      "description": "Per-pool allocation summaries when dispatch capacity was computed across one or more pools.",
+      "items": {
+        "type": "object",
+        "required": [
+          "pool_id",
+          "slots",
+          "model",
+          "confidence",
+          "source",
+          "resolved_limits",
+          "host_concurrency_limit",
+          "cooldown_until",
+          "estimated_wave_tokens",
+          "binding_cap"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "pool_id": { "type": "string", "minLength": 1 },
+          "slots": { "type": "integer", "minimum": 1 },
+          "model": { "type": ["string", "null"] },
+          "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+          "source": {
+            "type": "string",
+            "enum": ["explicit_config", "cli_flags", "known_metadata", "provider_default", "learned", "default"]
+          },
+          "resolved_limits": {
+            "type": "object",
+            "required": [
+              "context_tokens",
+              "output_tokens",
+              "requests_per_minute",
+              "input_tokens_per_minute",
+              "output_tokens_per_minute"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "context_tokens": { "type": "integer", "minimum": 1 },
+              "output_tokens": { "type": "integer", "minimum": 1 },
+              "requests_per_minute": { "type": ["integer", "null"], "minimum": 1 },
+              "input_tokens_per_minute": { "type": ["integer", "null"], "minimum": 1 },
+              "output_tokens_per_minute": { "type": ["integer", "null"], "minimum": 1 }
+            }
+          },
+          "host_concurrency_limit": {
+            "type": ["object", "null"],
+            "required": ["active_subagents", "source", "description"],
+            "additionalProperties": false,
+            "properties": {
+              "active_subagents": { "type": "integer", "minimum": 1 },
+              "source": {
+                "type": "string",
+                "enum": ["cli_flags", "host_reported", "session_config", "environment"]
+              },
+              "description": { "type": "string", "minLength": 1 }
+            }
+          },
+          "cooldown_until": { "type": ["string", "null"], "format": "date-time" },
+          "estimated_wave_tokens": { "type": "integer", "minimum": 0 },
+          "binding_cap": {
+            "type": "string",
+            "enum": ["rpm", "tpm", "learned", "fallback", "first_contact", "cooldown", "host_concurrency", "none"]
+          },
+          "quota_source_snapshot": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "remaining_pct": { "type": ["number", "null"] },
+              "reset_at": { "type": ["string", "null"], "format": "date-time" },
+              "requests_remaining": { "type": ["integer", "null"] },
+              "tokens_remaining": { "type": ["integer", "null"] },
+              "captured_at": { "type": "string", "format": "date-time" },
+              "source": { "type": "string" }
+            }
+          }
+        }
+      }
     },
     "quota_source_snapshot": {
       "type": ["object", "null"],

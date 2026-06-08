@@ -1,5 +1,6 @@
 import type { AuditTask, Lens, UnitManifest } from "./types.js";
 import { isLens } from "./types.js";
+import { coerceJsonObjectArg } from "@audit-tools/shared";
 
 const DEFAULT_LENS_ORDER: Lens[] = [
   "correctness",
@@ -61,13 +62,14 @@ function assertUnitManifest(
   });
 }
 
-function normalizedOptions(options: unknown): {
+function normalizedOptions(rawOptions: unknown): {
   passPrefix: string;
   allowed: Set<Lens>;
 } {
-  if (!isRecord(options)) {
-    throw new TypeError("buildAuditTasks options must be an object.");
-  }
+  const options = coerceJsonObjectArg<Record<string, unknown>>(
+    rawOptions as Record<string, unknown> | string | undefined,
+    "buildAuditTasks options",
+  );
 
   if (options.pass_prefix !== undefined && typeof options.pass_prefix !== "string") {
     throw new TypeError("buildAuditTasks options.pass_prefix must be a string.");
@@ -84,7 +86,7 @@ function normalizedOptions(options: unknown): {
 
 export function buildAuditTasks(
   unitManifest: UnitManifest,
-  options: TaskBuildOptions = {},
+  options: TaskBuildOptions | string = {},
 ): AuditTask[] {
   assertUnitManifest(unitManifest);
   const { allowed, passPrefix } = normalizedOptions(options);

@@ -8,6 +8,7 @@ import type { RemediationStep } from "./types.js";
 import {
   buildConversationSourceManifest,
   buildDocumentSourceManifest,
+  buildStructuredAuditSourceManifest,
   intakePaths,
   isIntakeReady,
   readIntakeArtifacts,
@@ -97,6 +98,7 @@ export async function resolveIntakeStep(params: {
     (inputResolution.supplied || !manifest)
   ) {
     const singleInput = inputResolution.existing[0];
+    let nextManifest: IntakeSourceManifest | undefined;
     const shouldTryAuditFastPath =
       inputResolution.existing.length === 1 &&
       singleInput.toLowerCase().endsWith(".json") &&
@@ -111,19 +113,21 @@ export async function resolveIntakeStep(params: {
         parsed = undefined;
       }
       if (isAuditFindingsReport(parsed)) {
-        const state = await runPlanPhase(
-          { status: "pending" },
-          { root, artifactsDir, input: singleInput },
+        nextManifest = buildStructuredAuditSourceManifest(
+          singleInput,
+          inputResolution.supplied ? "input" : "default_candidates",
         );
-        await store.saveState(state);
-        return { kind: "state", state };
       }
     }
 
-    manifest = buildDocumentSourceManifest(
-      inputResolution.existing,
-      inputResolution.supplied ? "input" : "default_candidates",
-    );
+    if (!nextManifest) {
+      nextManifest = buildDocumentSourceManifest(
+        inputResolution.existing,
+        inputResolution.supplied ? "input" : "default_candidates",
+      );
+    }
+
+    manifest = nextManifest;
     await writeJsonFile(paths.sourceManifest, manifest);
     if (!sourceManifestsEquivalent(previousManifest, manifest)) {
       manifestRefreshed = true;
@@ -248,6 +252,18 @@ export async function resolveIntakeStep(params: {
         },
       }),
     };
+  }
+
+  const structuredAuditSource = sourceResolution.resolved.find(
+    (source) => source.type === "structured_audit",
+  );
+  if (structuredAuditSource) {
+    const state = await runPlanPhase(
+      { status: "pending" },
+      { root, artifactsDir, input: structuredAuditSource.path },
+    );
+    await store.saveState(state);
+    return { kind: "state", state };
   }
 
   return {

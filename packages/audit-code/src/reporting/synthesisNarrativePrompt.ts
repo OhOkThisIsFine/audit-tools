@@ -7,7 +7,7 @@ function summarizeFinding(finding: AuditFindingsReport["findings"][number]): str
     .map((file) => file.path)
     .slice(0, 4)
     .join(", ");
-  return `- ${finding.id} [${finding.severity}/${finding.lens}] ${finding.title} — ${finding.summary}${
+  return `- ${finding.id} [${finding.severity}/${finding.lens}/${finding.category}] ${finding.title} — ${finding.summary}${
     files ? ` (files: ${files})` : ""
   }`;
 }
@@ -39,6 +39,8 @@ export function renderSynthesisNarrativePrompt(
     "The deterministic audit is complete. Your job is to add an interpretive narrative on top of the finalized findings — group them into a small number of root-cause themes, write a short executive summary, and list the top risks.",
     "",
     "Do not re-audit the code, change severities, or invent new findings. Use only the findings below; reference them by their exact `id`.",
+    "",
+    "When categories distinguish observational contract assessment findings from conceptual design critique findings, keep that distinction visible in themes and top risks instead of flattening them into one architecture bucket.",
     "",
     "## Summary",
     "",

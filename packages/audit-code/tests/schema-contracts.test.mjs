@@ -594,6 +594,76 @@ test("dispatch quota schema enforces cooldown_until date-time format through hel
   );
 });
 
+test("dispatch quota schema accepts multi-pool capacity summaries", async () => {
+  const dispatchQuotaSchema = await loadSchema("dispatch_quota.schema.json");
+  const dispatchQuota = {
+    contract_version: "audit-code-dispatch-quota/v1alpha2",
+    run_id: "PLAN-1",
+    model: "primary-model",
+    resolved_limits: {
+      context_tokens: 128000,
+      output_tokens: 8192,
+      requests_per_minute: null,
+      input_tokens_per_minute: null,
+      output_tokens_per_minute: null,
+    },
+    confidence: "medium",
+    source: "provider_default",
+    host_concurrency_limit: null,
+    wave_size: 5,
+    estimated_wave_tokens: 5000,
+    cooldown_until: null,
+    binding_cap: "host_concurrency",
+    capacity_pools: [
+      {
+        pool_id: "claude-code/*",
+        slots: 2,
+        model: null,
+        confidence: "medium",
+        source: "provider_default",
+        resolved_limits: {
+          context_tokens: 128000,
+          output_tokens: 8192,
+          requests_per_minute: null,
+          input_tokens_per_minute: null,
+          output_tokens_per_minute: null,
+        },
+        host_concurrency_limit: {
+          active_subagents: 2,
+          source: "host_reported",
+          description: "test host limit",
+        },
+        cooldown_until: null,
+        estimated_wave_tokens: 2000,
+        binding_cap: "host_concurrency",
+        quota_source_snapshot: null,
+      },
+      {
+        pool_id: "codex/o4-mini",
+        slots: 3,
+        model: "o4-mini",
+        confidence: "high",
+        source: "explicit_config",
+        resolved_limits: {
+          context_tokens: 200000,
+          output_tokens: 8192,
+          requests_per_minute: 100,
+          input_tokens_per_minute: 1000000,
+          output_tokens_per_minute: null,
+        },
+        host_concurrency_limit: null,
+        cooldown_until: null,
+        estimated_wave_tokens: 3000,
+        binding_cap: "none",
+      },
+    ],
+  };
+
+  assert.doesNotThrow(() =>
+    assertMatchesJsonSchema(dispatchQuotaSchema, dispatchQuota, "dispatchQuota"),
+  );
+});
+
 test("repo_manifest schema enforces date-time format on generated_at", async () => {
   const repoManifestSchema = await loadSchema("repo_manifest.schema.json");
 

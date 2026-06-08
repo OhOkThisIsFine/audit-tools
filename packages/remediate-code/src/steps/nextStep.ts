@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, type SessionConfig } from "@audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, type SessionConfig } from "@audit-tools/shared";
 import { runPlanPhase, applyPlanPipeline } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
@@ -37,6 +37,10 @@ import {
 } from "../dedup/crossLensDedup.js";
 import { checkAffectedFileIntegrity } from "../utils/fileIntegrity.js";
 import { resolveIntakeStep } from "./intakeResolver.js";
+import {
+  buildNextContractPipelineStep,
+  shouldEnterContractPipeline,
+} from "./contractPipeline.js";
 import {
   INTAKE_CLARIFICATION_SCHEMA_VERSION,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
@@ -69,6 +73,7 @@ export interface NextStepOptions {
   hostCanDispatchSubagents?: boolean;
   hostMaxConcurrent?: number;
   finalizeClosing?: boolean;
+  forceReplan?: boolean;
   sessionConfig?: SessionConfig | null;
 }
 
@@ -252,6 +257,8 @@ function normalizeExtractedPlan(value: unknown): RemediationPlan {
   const plan: RemediationPlan = {
     plan_id:
       typeof value.plan_id === "string" ? value.plan_id : randomRunId("PLAN"),
+    ...(typeof value.goal_id === "string" ? { goal_id: value.goal_id } : {}),
+    ...(typeof value.source === "string" ? { source: value.source } : {}),
     findings: dedup.findings,
     blocks: dedupBlocks,
     project_type:
@@ -310,6 +317,119 @@ async function saveStateForPlan(
   return state;
 }
 
+function stripPlanTimeHashes(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripPlanTimeHashes(entry));
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const stripped: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
+    if (key === "hash_at_plan_time") continue;
+    stripped[key] = stripPlanTimeHashes(value[key]);
+  }
+  return stripped;
+}
+
+function findingCarryForwardKey(finding: Finding): string {
+  return JSON.stringify(stripPlanTimeHashes(finding));
+}
+
+function blockIdsByFinding(plan: RemediationPlan): Map<string, string> {
+  const byFinding = new Map<string, string>();
+  for (const block of plan.blocks) {
+    for (const id of block.items) {
+      byFinding.set(id, block.block_id);
+    }
+  }
+  return byFinding;
+}
+
+function carryForwardMatchingItems(
+  previous: RemediationState,
+  replanned: RemediationState,
+): RemediationState {
+  if (!previous.plan || !previous.items || !replanned.plan || !replanned.items) {
+    return replanned;
+  }
+
+  const previousFindings = new Map(
+    previous.plan.findings.map((finding) => [finding.id, finding]),
+  );
+  const replannedBlockIds = blockIdsByFinding(replanned.plan);
+  const items = { ...replanned.items };
+  let carried = false;
+
+  for (const finding of replanned.plan.findings) {
+    const previousFinding = previousFindings.get(finding.id);
+    const previousItem = previous.items[finding.id];
+    if (!previousFinding || !previousItem || previousItem.status === "pending") {
+      continue;
+    }
+    if (findingCarryForwardKey(previousFinding) !== findingCarryForwardKey(finding)) {
+      continue;
+    }
+
+    items[finding.id] = {
+      ...previousItem,
+      block_id: replannedBlockIds.get(finding.id) ?? previousItem.block_id,
+    };
+    carried = true;
+  }
+
+  if (!carried) {
+    return replanned;
+  }
+
+  const hasPending = replanned.plan.findings.some(
+    (finding) => items[finding.id]?.status === "pending",
+  );
+  const hasDocumented = replanned.plan.findings.some((finding) => {
+    const item = items[finding.id];
+    return item?.status === "documented" && Boolean(item.item_spec);
+  });
+
+  return {
+    ...replanned,
+    items,
+    status: hasPending ? "planning" : hasDocumented ? "documenting" : replanned.status,
+  };
+}
+
+async function forceReplanFromExistingIntake(
+  root: string,
+  artifactsDir: string,
+  previous: RemediationState,
+  store: StateStore,
+): Promise<RemediationState | null> {
+  const pendingState: RemediationState = {
+    status: "pending",
+    started_at: previous.started_at,
+    step_count: previous.step_count,
+  };
+  const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
+  if (!extractedPlan) {
+    await store.saveState(pendingState);
+    return null;
+  }
+
+  const replanned = await handlePendingExtractedPlan(
+    root,
+    artifactsDir,
+    pendingState,
+    extractedPlan,
+  );
+  if (!replanned) {
+    return null;
+  }
+
+  const carried = carryForwardMatchingItems(previous, replanned);
+  await store.saveState(carried);
+  return carried;
+}
+
 async function presentReportStep(
   root: string,
   artifactsDir: string,
@@ -337,14 +457,29 @@ Stop after presenting the summary.
   });
 }
 
-const MAX_ITERATIONS = 10;
+async function stateTransitionStep(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState | null,
+): Promise<RemediationStep> {
+  const nextCommand = loaderCommand("next-step");
+  return writeCurrentStep({
+    stepKind: "state_transition",
+    status: "ready",
+    runId: stateRunId(state),
+    repoRoot: root,
+    artifactsDir,
+    prompt: `
+# State Transition
 
-/**
- * Public entrypoint: wraps the decision loop with structured run-log events so
- * each bounded next-step invocation records the state it acted on and the step
- * it produced. The logger is no-op when `observability.run_log` is disabled.
- */
-type DispatchOutcome = RemediationStep | { continueWithState: RemediationState };
+The remediation run has completed an internal state transition. Please run:
+
+\`${nextCommand}\`
+`,
+    allowedCommands: [nextCommand],
+    stopCondition: "Stop and re-run next-step.",
+  });
+}
 
 async function buildDocumentDispatchStep(ctx: {
   root: string;
@@ -352,7 +487,7 @@ async function buildDocumentDispatchStep(ctx: {
   state: RemediationState;
   options: NextStepOptions;
   pendingFindings: Finding[];
-}): Promise<DispatchOutcome> {
+}): Promise<RemediationStep> {
   const { root, artifactsDir, state, options, pendingFindings } = ctx;
     if (state.plan) {
       const integrity = await checkAffectedFileIntegrity(root, state.plan.findings);
@@ -413,7 +548,8 @@ async function buildDocumentDispatchStep(ctx: {
     if (!canDispatch) {
       const item = dispatchPlan.items[0];
       if (!item) {
-        return { continueWithState: await mergeDocumentResults({ root, artifactsDir }, runId) };
+        const mergedState = await mergeDocumentResults({ root, artifactsDir }, runId);
+        return stateTransitionStep(root, artifactsDir, mergedState);
       }
       return writeCurrentStep({
         stepKind: "document_single_item",
@@ -469,6 +605,8 @@ If your provider has rate limits, pace launches accordingly.
 For each item in \`items\`, dispatch one subagent with that item's
 \`prompt_path\`. Each subagent must write only its assigned \`result_path\`.
 
+${DISPATCH_PROMPT_HANDOFF_NOTE}
+
 After all results exist:
 
 ${DO_NOT_TOKEN_WRAP_NOTE}
@@ -493,12 +631,59 @@ type ReviewedEntry = { finding_id: string; tier: string; reason: string };
 type PrelimEntry = {
   finding_id: string;
   title: string;
+  severity?: string;
+  confidence?: string;
+  lens?: string;
+  summary?: string;
+  evidence?: string[];
   concrete_change: string;
   no_change?: boolean;
   affected_files: string[];
+  tests_to_write?: { name: string; assertions: string[] }[];
   preliminary_tier: string;
   preliminary_reason: string;
 };
+
+const PREVIEW_TIER_LABELS: Record<string, string> = {
+  safe: "Straightforward",
+  substantive: "Substantive",
+  context_dependent: "Operator Context",
+};
+
+function previewTierLabel(tier: string): string {
+  return PREVIEW_TIER_LABELS[tier] ?? tier;
+}
+
+function markdownCell(value: string): string {
+  return value.replaceAll("|", "\\|").replace(/\s+/g, " ").trim() || "-";
+}
+
+function previewPros(prelim: PrelimEntry | undefined): string {
+  if (!prelim) return "-";
+  const pros = [
+    prelim.summary ? `Addresses: ${prelim.summary}` : undefined,
+    prelim.tests_to_write && prelim.tests_to_write.length > 0
+      ? `Planned tests: ${prelim.tests_to_write.map((test) => test.name).join(", ")}`
+      : undefined,
+  ].filter((entry): entry is string => Boolean(entry));
+  return pros.length > 0 ? pros.join("; ") : "Implements the documented remediation change.";
+}
+
+function previewCons(
+  prelim: PrelimEntry | undefined,
+  reviewed: ReviewedEntry,
+): string {
+  const cons = [
+    reviewed.reason ? `Reviewed risk: ${reviewed.reason}` : undefined,
+    prelim?.affected_files && prelim.affected_files.length > 0
+      ? `Touches ${prelim.affected_files.length} file(s): ${prelim.affected_files.join(", ")}`
+      : undefined,
+    prelim?.tests_to_write && prelim.tests_to_write.length === 0
+      ? "No additional tests listed in the item spec."
+      : undefined,
+  ].filter((entry): entry is string => Boolean(entry));
+  return cons.length > 0 ? cons.join("; ") : "No specific downside recorded beyond normal implementation risk.";
+}
 
 function isNoOpFinding(
   prelimMap: Map<string, PrelimEntry>,
@@ -511,22 +696,30 @@ function renderTierSection(
   reviewedMap: Map<string, ReviewedEntry>,
   prelimMap: Map<string, PrelimEntry>,
   tier: string,
-  label: string,
 ): string {
   const matches = [...reviewedMap.values()].filter(
     (e) => e.tier === tier && !isNoOpFinding(prelimMap, e.finding_id),
   );
   if (matches.length === 0) return "";
-  const header = "| ID | Title | Planned Change | Files |";
-  const sep = "|---|---|---|---|";
+  const header = "| ID | Decision Label | Title | Planned Change | Files | Reviewed Reason | Pros | Cons |";
+  const sep = "|---|---|---|---|---|---|---|---|";
   const rows = matches.map((reviewed) => {
     const prelim = prelimMap.get(reviewed.finding_id);
-    const files = (prelim?.affected_files.join(", ") ?? "—").replaceAll("|", "\\|");
-    const change = (prelim?.concrete_change ?? "—").replaceAll("|", "\\|");
-    const title = (prelim?.title ?? "—").replaceAll("|", "\\|");
-    return `| ${reviewed.finding_id} | ${title} | ${change} | ${files} |`;
+    const files = prelim?.affected_files.join(", ") ?? "-";
+    const change = prelim?.concrete_change ?? "-";
+    const title = prelim?.title ?? "-";
+    return [
+      reviewed.finding_id,
+      previewTierLabel(reviewed.tier),
+      title,
+      change,
+      files,
+      reviewed.reason,
+      previewPros(prelim),
+      previewCons(prelim, reviewed),
+    ].map(markdownCell).join(" | ");
   });
-  return `## ${label}\n\n${header}\n${sep}\n${rows.join("\n")}`;
+  return `## ${previewTierLabel(tier)}\n\n${header}\n${sep}\n${rows.map((row) => `| ${row} |`).join("\n")}`;
 }
 
 function renderNoOpSection(
@@ -544,13 +737,33 @@ function renderNoOpSection(
   return `## Already Correct (no changes planned)\n\n${rows.join("\n")}`;
 }
 
+function previewIgnoreChoices(
+  reviewedMap: Map<string, ReviewedEntry>,
+  prelimMap: Map<string, PrelimEntry>,
+): string {
+  const choices = [...reviewedMap.values()]
+    .filter((entry) => !isNoOpFinding(prelimMap, entry.finding_id))
+    .map((entry) => {
+      const prelim = prelimMap.get(entry.finding_id);
+      const title = prelim?.title ?? "(untitled)";
+      return `- \`${entry.finding_id}\` (${previewTierLabel(entry.tier)}): ${title}`;
+    });
+  return choices.length > 0 ? choices.join("\n") : "- None";
+}
+
+function previewAckIds(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string")
+    : [];
+}
+
 async function buildImplementDispatchStep(ctx: {
   root: string;
   artifactsDir: string;
   state: RemediationState;
   options: NextStepOptions;
   implementBlocks: RemediationBlock[];
-}): Promise<DispatchOutcome> {
+}): Promise<RemediationStep> {
   const { root, artifactsDir, state, options, implementBlocks } = ctx;
     const preliminaryPath = join(artifactsDir, "impl_risk_preliminary.json");
     const reviewedPath = join(artifactsDir, "impl_risk_reviewed.json");
@@ -713,13 +926,14 @@ Include every \`finding_id\` from the input. Then run:
       }
 
       const sections = [
-        renderTierSection(reviewedMap, prelimMap, "safe", "Tier 1 — Unambiguously Good"),
-        renderTierSection(reviewedMap, prelimMap, "substantive", "Tier 2 — Substantive"),
-        renderTierSection(reviewedMap, prelimMap, "context_dependent", "Tier 3 — Context-Dependent"),
+        renderTierSection(reviewedMap, prelimMap, "safe"),
+        renderTierSection(reviewedMap, prelimMap, "substantive"),
+        renderTierSection(reviewedMap, prelimMap, "context_dependent"),
         renderNoOpSection(reviewedMap, prelimMap),
       ]
         .filter(Boolean)
         .join("\n\n");
+      const ignoreChoices = previewIgnoreChoices(reviewedMap, prelimMap);
 
       return writeCurrentStep({
         stepKind: "preview_implement",
@@ -732,29 +946,40 @@ Include every \`finding_id\` from the input. Then run:
 
 Show the tables below to the user exactly as written — every row, every column.
 Do not summarise, abbreviate, or list only IDs. The user needs the title and
-planned-change columns to make an informed decision.
+planned-change, reviewed-reason, Pros, and Cons columns to make an informed
+decision.
 
 ${sections}
 
 ---
 
-After showing the full tables, ask the user to choose one of:
+The LLM-assisted \`classify_impl_risks\` review has already written
+\`impl_risk_reviewed.json\`; use those reviewed classifications as the source of
+truth for this preview.
 
-1. **Approve everything** — proceed with all changes as listed.
-2. **Skip specific Tier 3 findings** — name the IDs to exclude (they will be
-   marked \`deemed_inappropriate\` and never implemented).
-3. **Decline entirely** — stop without making any source changes.
+Ask the user to list any findings they want to ignore. They may ignore any
+implementable finding below; an empty list means "implement everything."
+Already-correct findings are excluded from this choice.
 
-If the user approves (all or in part), write the ack to exactly:
+## Ignore Choices
+
+${ignoreChoices}
+
+If the user confirms the preview, write the ack to exactly:
 
 \`${previewAckPath}\`
 
 \`\`\`json
-{ "status": "confirmed", "skip": ["FINDING-ID-TO-EXCLUDE"] }
+{ "status": "confirmed", "ignored_findings": ["FINDING-ID-TO-IGNORE"] }
 \`\`\`
 
-Use an empty \`skip\` array (\`[]\`) when the user approves everything; otherwise
-list the exact finding IDs they chose to skip.
+Use an empty \`ignored_findings\` array (\`[]\`) when the user approves
+everything; otherwise list the exact finding IDs they chose to ignore. If the
+user explicitly declines all implementation work, write:
+
+\`\`\`json
+{ "status": "declined", "ignored_findings": [] }
+\`\`\`
 
 Then run:
 
@@ -771,34 +996,55 @@ Then run:
       });
     }
 
-    // The preview ack may approve only part of the plan: honor the skip list by
-    // marking those findings deemed_inappropriate so they are excluded from the
-    // implement dispatch (and cannot be resurrected by a worker result).
-    const previewAck = await readOptionalJsonFile<{ status?: string; skip?: unknown }>(
+    // The preview ack may approve only part of the plan: honor ignored findings
+    // by marking them terminal before dispatch so workers cannot resurrect them.
+    const previewAck = await readOptionalJsonFile<{
+      status?: string;
+      ignored_findings?: unknown;
+      skip?: unknown;
+    }>(
       previewAckPath,
     );
-    const skipIds = Array.isArray(previewAck?.skip)
-      ? previewAck.skip.filter((id): id is string => typeof id === "string")
-      : [];
+    const ignoredIds = [
+      ...previewAckIds(previewAck?.ignored_findings),
+      // Legacy ack compatibility: older generated prompts used `skip`.
+      ...previewAckIds(previewAck?.skip),
+    ];
+    const ackPrelimFile =
+      ignoredIds.length > 0
+        ? await readOptionalJsonFile<{ findings: PrelimEntry[] }>(preliminaryPath)
+        : null;
+    const ignoreableIds = new Set(
+      (ackPrelimFile?.findings ?? [])
+        .filter((entry) => !specIndicatesNoChange(entry))
+        .map((entry) => entry.finding_id),
+    );
     if (previewAck?.status === "declined") {
       let changed = false;
       for (const it of Object.values(state.items ?? {})) {
-        if (!["resolved", "blocked", "deemed_inappropriate"].includes(it.status)) {
+        if (!isTerminalStatus(it.status)) {
           it.status = "deemed_inappropriate";
           it.failure_reason = "Implementation declined by the user at the preview step.";
+          it.started_at ??= new Date().toISOString();
+          it.completed_at = new Date().toISOString();
           changed = true;
         }
       }
       if (changed) await new StateStore(artifactsDir).saveState(state);
-      return { continueWithState: state };
+      return stateTransitionStep(root, artifactsDir, state);
     }
-    if (skipIds.length > 0) {
+    if (ignoredIds.length > 0) {
       let changed = false;
-      for (const id of skipIds) {
+      for (const id of ignoredIds) {
         const it = state.items?.[id];
-        if (it && it.status !== "deemed_inappropriate") {
-          it.status = "deemed_inappropriate";
-          it.failure_reason = "Skipped by the user at the implementation preview.";
+        const isAllowedIgnore =
+          ignoreableIds.size === 0 || ignoreableIds.has(id);
+        if (it && it.status === "documented" && isAllowedIgnore) {
+          const now = new Date().toISOString();
+          it.status = "ignored";
+          it.failure_reason = "Ignored by the user at the implementation preview.";
+          it.started_at ??= now;
+          it.completed_at = now;
           changed = true;
         }
       }
@@ -829,9 +1075,8 @@ Then run:
     // finding excluded) — fold straight to merge rather than dispatching a wave
     // of zero workers.
     if (dispatchPlan.items.length === 0) {
-      return {
-        continueWithState: await mergeImplementResults({ root, artifactsDir }, runId),
-      };
+      const mergedState = await mergeImplementResults({ root, artifactsDir }, runId);
+      return stateTransitionStep(root, artifactsDir, mergedState);
     }
     const planPath = join(artifactsDir, "runs", runId, "implement", "dispatch-plan.json");
     const mergeCommand = loaderCommand(`merge-implement-results --run-id ${runId}`);
@@ -840,7 +1085,8 @@ Then run:
     if (!canDispatchImpl) {
       const item = dispatchPlan.items[0];
       if (!item) {
-        return { continueWithState: await mergeImplementResults({ root, artifactsDir }, runId) };
+        const mergedState = await mergeImplementResults({ root, artifactsDir }, runId);
+        return stateTransitionStep(root, artifactsDir, mergedState);
       }
       return writeCurrentStep({
         stepKind: "implement_single_item",
@@ -897,6 +1143,8 @@ For each item in \`items\`, dispatch one subagent with that item's
 \`prompt_path\`. Each subagent may edit source files needed for that bounded
 block and must write only its assigned \`result_path\`.
 
+${DISPATCH_PROMPT_HANDOFF_NOTE}
+
 After all results exist:
 
 ${DO_NOT_TOKEN_WRAP_NOTE}
@@ -950,6 +1198,56 @@ async function handlePendingExtractedPlan(
   }
 }
 
+async function handleReadyIntakeContractPipeline(
+  root: string,
+  artifactsDir: string,
+): Promise<RemediationStep | RemediationState | null> {
+  const intake = await readIntakeArtifacts(artifactsDir);
+  if (!intake.summary || !isIntakeReady(intake.summary)) {
+    return null;
+  }
+
+  const pipeline = shouldEnterContractPipeline(
+    artifactsDir,
+    intake.summary.source_type,
+  );
+  if (!pipeline.shouldHandleContractPipeline) {
+    return null;
+  }
+
+  const paths = intakePaths(artifactsDir);
+  const sourcePaths = new Set<string>();
+  if (existsSync(paths.brief)) {
+    sourcePaths.add(paths.brief);
+  }
+  if (intake.manifest) {
+    for (const source of resolveManifestSources(root, intake.manifest).resolved) {
+      sourcePaths.add(source.path);
+    }
+  }
+
+  const step = await buildNextContractPipelineStep({
+    root,
+    artifactsDir,
+    runId: randomRunId("CONTRACT"),
+    sourcePaths: [...sourcePaths],
+  });
+  if (step) {
+    return step;
+  }
+
+  const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
+  if (!extractedPlan) {
+    return null;
+  }
+  return handlePendingExtractedPlan(
+    root,
+    artifactsDir,
+    { status: "pending" },
+    extractedPlan,
+  );
+}
+
 async function handlePendingIntake(
   root: string,
   artifactsDir: string,
@@ -970,7 +1268,18 @@ async function handlePendingIntake(
     collectIntakeClarificationsPrompt,
     extractFindingsPrompt,
   });
-  if (intakeResult.kind === "step") return intakeResult.step;
+  if (intakeResult.kind === "step") {
+    if (intakeResult.step.step_kind === "extract_findings") {
+      const contractPipelineOutcome = await handleReadyIntakeContractPipeline(
+        root,
+        artifactsDir,
+      );
+      if (contractPipelineOutcome) {
+        return contractPipelineOutcome;
+      }
+    }
+    return intakeResult.step;
+  }
   return intakeResult.state;
 }
 
@@ -1109,7 +1418,7 @@ async function handlePlanning(
   artifactsDir: string,
   state: RemediationState,
   options: NextStepOptions,
-): Promise<DispatchOutcome> {
+): Promise<RemediationStep> {
   const pendingFindings = documentableFindings(state);
   return buildDocumentDispatchStep({ root, artifactsDir, state, options, pendingFindings });
 }
@@ -1120,7 +1429,7 @@ async function handleDocumenting(
   state: RemediationState,
   options: NextStepOptions,
   store: StateStore,
-): Promise<DispatchOutcome> {
+): Promise<RemediationStep> {
   const implementBlocks = implementableBlocks(state);
   if (implementBlocks.length > 0) {
     if (state.plan) {
@@ -1171,7 +1480,7 @@ async function handleDocumenting(
   }
   state.status = "implementing";
   await store.saveState(state);
-  return { continueWithState: state };
+  return stateTransitionStep(root, artifactsDir, state);
 }
 
 async function handleImplementing(
@@ -1180,22 +1489,24 @@ async function handleImplementing(
   state: RemediationState,
   runLogger: RunLogger,
   store: StateStore,
-): Promise<DispatchOutcome> {
+): Promise<RemediationStep> {
   const triageStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
   const triaged = await runTriagePhase(state, { root, artifactsDir });
   runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "triage", duration_ms: Date.now() - triageStart });
   await store.saveState(triaged);
-  return { continueWithState: triaged };
+  return stateTransitionStep(root, artifactsDir, triaged);
 }
 
 async function handleAllTerminalTransition(
+  root: string,
+  artifactsDir: string,
   state: RemediationState,
   store: StateStore,
-): Promise<DispatchOutcome> {
+): Promise<RemediationStep> {
   state.status = "closing";
   await store.saveState(state);
-  return { continueWithState: state };
+  return stateTransitionStep(root, artifactsDir, state);
 }
 
 async function handleClosing(
@@ -1204,7 +1515,7 @@ async function handleClosing(
   state: RemediationState,
   runLogger: RunLogger,
   store: StateStore,
-): Promise<DispatchOutcome> {
+): Promise<RemediationStep> {
   const closeStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "close" });
   const closed = await runClosePhase(state, { root, artifactsDir }, runLogger);
@@ -1212,7 +1523,7 @@ async function handleClosing(
   if (closed.status !== "complete") {
     await store.saveState(closed);
   }
-  return { continueWithState: closed };
+  return stateTransitionStep(root, artifactsDir, closed);
 }
 
 async function handleUnhandledState(
@@ -1254,12 +1565,16 @@ Report this diagnostic to the user and stop. Do not attempt to advance the run.
 }
 
 export async function decideNextStep(
-  options: NextStepOptions = {},
+  options: NextStepOptions | string = {},
 ): Promise<RemediationStep> {
-  const root = resolveRoot(options.root);
-  const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
+  const normalizedOptions = coerceJsonObjectArg<Record<string, unknown>>(
+    options as Record<string, unknown> | string | undefined,
+    "decideNextStep options",
+  ) as NextStepOptions;
+  const root = resolveRoot(normalizedOptions.root);
+  const artifactsDir = resolveArtifactsDir(root, normalizedOptions.artifactsDir);
   const sessionConfig =
-    options.sessionConfig ??
+    normalizedOptions.sessionConfig ??
     (await readOptionalJsonFile<SessionConfig>(
       join(root, "session-config.json"),
     ));
@@ -1268,7 +1583,7 @@ export async function decideNextStep(
   });
   const startedAt = Date.now();
   try {
-    const step = await decideNextStepInner(options, runLogger);
+    const step = await decideNextStepInner(normalizedOptions, runLogger);
     runLogger.event({
       phase: "next-step",
       kind: "step",
@@ -1286,6 +1601,51 @@ export async function decideNextStep(
     });
     throw error;
   }
+}
+
+async function buildConfirmIntentStep(ctx: {
+  root: string;
+  artifactsDir: string;
+  state: RemediationState | null;
+}): Promise<RemediationStep> {
+  const { root, artifactsDir, state } = ctx;
+  const runId = stateRunId(state);
+  const nextCommand = loaderCommand("next-step");
+
+  return writeCurrentStep({
+    stepKind: "confirm_intent",
+    status: "ready",
+    runId,
+    repoRoot: root,
+    artifactsDir,
+    prompt: `
+# Confirm Remediation Scope and Intent
+
+Please review the intake summary at \`.audit-tools/remediation/intake/intake-summary.json\`.
+
+Confirm or refine the remediation scope and intent by writing a valid \`intent_checkpoint.json\` artifact under \`.audit-tools/remediation/\`.
+
+The JSON must follow this structure:
+\`\`\`json
+{
+  "schema_version": "intent-checkpoint/v1",
+  "confirmed_at": "ISO-8601-timestamp",
+  "scope_summary": "Description of the confirmed files and directories in scope",
+  "intent_summary": "Description of the goal (e.g. full-remediation or delta)",
+  "confirmed_by": "host"
+}
+\`\`\`
+
+Once the file is written, run:
+
+\`${nextCommand}\`
+`,
+    allowedCommands: [nextCommand],
+    stopCondition: "Stop after writing intent_checkpoint.json and running next-step.",
+    artifactPaths: {
+      intent_checkpoint: join(artifactsDir, "intent_checkpoint.json"),
+    },
+  });
 }
 
 async function decideNextStepInner(
@@ -1313,7 +1673,18 @@ async function decideNextStepInner(
     await store.saveState(state);
   };
 
+  const ip = intakePaths(artifactsDir);
+  if (existsSync(ip.summary) && !existsSync(join(artifactsDir, "intent_checkpoint.json"))) {
+    await countStateStep();
+    return buildConfirmIntentStep({ root, artifactsDir, state });
+  }
+
   const inputResolution = resolveInputPaths(root, options.input);
+
+  if (options.forceReplan && state != null) {
+    await countStateStep();
+    state = await forceReplanFromExistingIntake(root, artifactsDir, state, store);
+  }
 
   // A new --input against a run that already advanced past intake must not
   // silently resume the old plan (nor silently complete on a stale report).
@@ -1324,8 +1695,8 @@ async function decideNextStepInner(
   }
 
   // A finished run deletes .remediation-artifacts/ at close (state.json included),
-  // leaving only the root report. On a bare re-invocation with NO fresh-run intent
-  // (no --input, no conversation brief, no extracted plan), re-present that report
+  // leaving durable root outputs. On a bare re-invocation with NO fresh-run intent
+  // (no --input, no conversation brief, no extracted plan), re-present the report
   // instead of asking for a new starting point. Any fresh intent falls through and
   // starts a new run, ignoring the stale report.
   if (
@@ -1352,95 +1723,68 @@ async function decideNextStepInner(
     );
   }
 
-  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-    if (state?.status === "complete") {
-      await countStateStep();
-      return handleComplete(root, artifactsDir, state);
-    }
-
-    if (!state) {
-      const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
-      if (extractedPlan) {
-        state = await handlePendingExtractedPlan(
-          root,
-          artifactsDir,
-          { status: "pending" },
-          extractedPlan,
-        );
-      }
-    }
-
-    if (!state) {
-      const intakeOutcome = await handlePendingIntake(root, artifactsDir, options, store);
-      if (intakeOutcome && "step_kind" in intakeOutcome) return intakeOutcome;
-      state = intakeOutcome;
-    }
-
-    if (!state) {
-      return handleNoState(root, artifactsDir);
-    }
-
+  if (state?.status === "complete") {
     await countStateStep();
-
-    if (state.status === "waiting_for_clarification") {
-      return handleWaitingForClarification(root, artifactsDir, state);
-    }
-
-    if (state.status === "waiting_for_triage") {
-      return handleWaitingForTriage(root, artifactsDir, state);
-    }
-
-    if (state.status === "planning" && documentableFindings(state).length > 0) {
-      const outcome = await handlePlanning(root, artifactsDir, state, options);
-      if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
-      return outcome;
-    }
-
-    if (state.status === "documenting") {
-      const outcome = await handleDocumenting(root, artifactsDir, state, options, store);
-      if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
-      return outcome;
-    }
-
-    if (state.status === "implementing" || state.status === "triage") {
-      const outcome = await handleImplementing(root, artifactsDir, state, runLogger, store);
-      if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
-      return outcome;
-    }
-
-    if (allItemsTerminal(state) && state.status !== "closing") {
-      const outcome = await handleAllTerminalTransition(state, store);
-      if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
-      return outcome;
-    }
-
-    if (state.status === "closing") {
-      const outcome = await handleClosing(root, artifactsDir, state, runLogger, store);
-      if ("continueWithState" in outcome) { state = outcome.continueWithState; continue; }
-      return outcome;
-    }
-
-    return handleUnhandledState(root, artifactsDir, state);
+    return handleComplete(root, artifactsDir, state);
   }
 
-  return writeCurrentStep({
-    stepKind: "unhandled_state",
-    status: "blocked",
-    runId: stateRunId(state),
-    repoRoot: root,
-    artifactsDir,
-    prompt: `
-# State transition loop exhausted
+  if (!state) {
+    const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
+    if (extractedPlan) {
+      state = await handlePendingExtractedPlan(
+        root,
+        artifactsDir,
+        { status: "pending" },
+        extractedPlan,
+      );
+    }
+  }
 
-The remediation workflow cycled through ${MAX_ITERATIONS} internal transitions without
-reaching a step that can be returned to the host.
+  if (!state) {
+    const intakeOutcome = await handlePendingIntake(root, artifactsDir, options, store);
+    if (intakeOutcome && "step_kind" in intakeOutcome) return intakeOutcome;
+    state = intakeOutcome;
+  }
 
-- **Last state status**: \`${state?.status ?? "null"}\`
-- **State file**: \`${join(artifactsDir, "state.json")}\`
+  if (!state) {
+    return handleNoState(root, artifactsDir);
+  }
 
-Report this diagnostic to the user and stop. Do not attempt to advance the run.
-`,
-    allowedCommands: [],
-    stopCondition: "Stop after reporting the diagnostic to the user.",
-  });
+  await countStateStep();
+
+  if (state.status === "waiting_for_clarification") {
+    return handleWaitingForClarification(root, artifactsDir, state);
+  }
+
+  if (state.status === "waiting_for_triage") {
+    const resolutionPath = join(artifactsDir, "triage_resolution.json");
+    if (existsSync(resolutionPath)) {
+      state.status = "triage";
+      await store.saveState(state);
+      return stateTransitionStep(root, artifactsDir, state);
+    }
+    return handleWaitingForTriage(root, artifactsDir, state);
+  }
+
+  if (state.status === "planning" && documentableFindings(state).length > 0) {
+    return handlePlanning(root, artifactsDir, state, options);
+  }
+
+  if (state.status === "documenting") {
+    return handleDocumenting(root, artifactsDir, state, options, store);
+  }
+
+  if (state.status === "implementing" || state.status === "triage") {
+    return handleImplementing(root, artifactsDir, state, runLogger, store);
+  }
+
+  if (allItemsTerminal(state) && state.status !== "closing") {
+    return handleAllTerminalTransition(root, artifactsDir, state, store);
+  }
+
+  if (state.status === "closing") {
+    return handleClosing(root, artifactsDir, state, runLogger, store);
+  }
+
+  return handleUnhandledState(root, artifactsDir, state);
 }

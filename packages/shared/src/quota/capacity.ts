@@ -11,10 +11,8 @@ import { scheduleWave, type DiscoveredRateLimitsInput } from "./scheduler.js";
 /**
  * A dispatch capacity pool: one backend (a provider + host model) that runs
  * review/worker subagents in parallel, each in its own fresh session with its
- * own context window. Today every dispatch has exactly one pool — the
- * conversation host's own subagents — but this shape is the extension point for
- * heterogeneous dispatch: when a second backend becomes available (a different
- * IDE model, another CLI provider) it is simply another pool, and
+ * own context window. The conversation host's own subagents are one pool; a
+ * different IDE model, another CLI provider, or another host lane is another.
  * {@link computeDispatchCapacity} allocates the pending work across all of them.
  * A pool carries everything {@link scheduleWave} needs to size that one backend,
  * so per-pool limits never have to be threaded separately at the call site.
@@ -47,6 +45,21 @@ export interface PoolDispatchAllocation {
   schedule: WaveSchedule;
 }
 
+/** Compact, serializable view of one pool allocation for dispatch-quota files. */
+export interface DispatchCapacityPoolSummary {
+  pool_id: string;
+  slots: number;
+  model: string | null;
+  confidence: WaveSchedule["confidence"];
+  source: WaveSchedule["source"];
+  resolved_limits: WaveSchedule["resolved_limits"];
+  host_concurrency_limit: HostConcurrencyLimit | null;
+  cooldown_until: string | null;
+  estimated_wave_tokens: number;
+  binding_cap: WaveBindingCap;
+  quota_source_snapshot?: QuotaUsageSnapshot | null;
+}
+
 /**
  * The just-in-time dispatch capacity: how many pending items can be dispatched
  * concurrently right now, across all available pools, given each pool's current
@@ -76,8 +89,8 @@ export interface DispatchCapacity {
 }
 
 export interface ComputeDispatchCapacityInput {
-  /** The single dispatch pool for this invocation. Extend to a union or overload when multi-pool dispatch is implemented. */
-  pools: [CapacityPool];
+  /** Non-empty set of dispatch pools available to this invocation. */
+  pools: CapacityPool[];
   sessionConfig: SessionConfig;
   /**
    * Projected per-item input-token cost for the pending work — one entry per
@@ -104,35 +117,70 @@ const CAP_PRIORITY: Record<WaveBindingCap, number> = {
 /**
  * Compute just-in-time dispatch capacity across the available pools.
  *
- * Single-pool today: the one pool is offered the entire pending layout as its
- * ambition, and {@link scheduleWave} reduces that to what the pool's host
- * concurrency, RPM, TPM, learned, and real-time quota limits allow. Multi-pool is
- * the natural extension — partition `pendingItemTokens` across pools (by cost or
- * affinity), schedule each pool against its slice, and sum the slots — without
- * changing any call site, because they all already speak in pools and item costs.
+ * The pending layout is partitioned across pools in caller order, with each pool
+ * receiving the largest remaining item estimates that fit in its current wave.
+ * Each pool is then scheduled independently, so host concurrency, RPM, TPM,
+ * learned limits, cooldowns, and real-time quota snapshots remain per-backend.
+ * The result sums the per-pool slots without ever exceeding the pending item
+ * count for non-empty work.
  */
 export function computeDispatchCapacity(
   input: ComputeDispatchCapacityInput,
 ): DispatchCapacity {
-  const allocations: PoolDispatchAllocation[] = input.pools.map((pool) => {
-    const schedule = scheduleWave({
-      providerName: pool.providerName,
-      sessionConfig: input.sessionConfig,
-      hostModel: pool.hostModel,
-      // The ambition is the full pending layout, not a fixed `parallel_workers`
-      // config; scheduleWave reduces it to this pool's real capacity.
-      requestedConcurrency: Math.max(1, input.pendingItemTokens.length),
-      estimatedSlotTokens: input.pendingItemTokens,
-      quotaStateEntry: pool.quotaStateEntry ?? null,
-      hostConcurrencyLimit: pool.hostConcurrencyLimit,
-      discoveredLimits: pool.discoveredLimits ?? null,
-      quotaSourceSnapshot: pool.quotaSourceSnapshot ?? null,
-    });
-    return { pool_id: pool.id, slots: schedule.wave_size, schedule };
-  });
+  if (input.pools.length === 0) {
+    throw new TypeError("computeDispatchCapacity requires at least one capacity pool.");
+  }
+
+  const pendingTokens = [...input.pendingItemTokens]
+    .map((n) => Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0)
+    .sort((a, b) => b - a);
+
+  const allocations: PoolDispatchAllocation[] = [];
+  if (pendingTokens.length === 0) {
+    allocations.push(schedulePool(input.pools[0]!, input.sessionConfig, []));
+  } else {
+    let cursor = 0;
+    for (const pool of input.pools) {
+      if (cursor >= pendingTokens.length) break;
+
+      const remaining = pendingTokens.slice(cursor);
+      const exploratory = schedulePool(pool, input.sessionConfig, remaining);
+      let assignedCount = Math.max(
+        1,
+        Math.min(exploratory.slots, remaining.length),
+      );
+      let assignedTokens = remaining.slice(0, assignedCount);
+      let allocation = schedulePool(pool, input.sessionConfig, assignedTokens);
+
+      // Scheduling the exact high-cost slice can be more restrictive than the
+      // exploratory pass over all remaining work. Trim until the allocation and
+      // assigned slice agree, leaving the excess items for later pools/waves.
+      while (assignedTokens.length > 1 && allocation.slots < assignedTokens.length) {
+        assignedCount = allocation.slots;
+        assignedTokens = assignedTokens.slice(0, assignedCount);
+        allocation = schedulePool(pool, input.sessionConfig, assignedTokens);
+      }
+
+      if (
+        (allocation.schedule.binding_cap ?? "none") === "none" &&
+        (exploratory.schedule.binding_cap ?? "none") !== "none"
+      ) {
+        allocation = {
+          ...allocation,
+          schedule: {
+            ...allocation.schedule,
+            binding_cap: exploratory.schedule.binding_cap,
+          },
+        };
+      }
+
+      allocations.push(allocation);
+      cursor += allocation.slots;
+    }
+  }
 
   const total = allocations.reduce((sum, a) => sum + a.slots, 0);
-  const primary = allocations[0]!;
+  const primary = choosePrimaryAllocation(allocations);
   const bindingCap = allocations.reduce<WaveBindingCap>((worst, a) => {
     const cap = a.schedule.binding_cap ?? "none";
     return CAP_PRIORITY[cap] > CAP_PRIORITY[worst] ? cap : worst;
@@ -155,4 +203,63 @@ export function computeDispatchCapacity(
     cooldown_until: cooldownUntil,
     estimated_wave_tokens: estimatedWaveTokens,
   };
+}
+
+function schedulePool(
+  pool: CapacityPool,
+  sessionConfig: SessionConfig,
+  itemTokens: number[],
+): PoolDispatchAllocation {
+  const schedule = scheduleWave({
+    providerName: pool.providerName,
+    sessionConfig,
+    hostModel: pool.hostModel,
+    requestedConcurrency: Math.max(1, itemTokens.length),
+    estimatedSlotTokens: itemTokens,
+    quotaStateEntry: pool.quotaStateEntry ?? null,
+    hostConcurrencyLimit: pool.hostConcurrencyLimit,
+    discoveredLimits: pool.discoveredLimits ?? null,
+    quotaSourceSnapshot: pool.quotaSourceSnapshot ?? null,
+  });
+  return {
+    pool_id: pool.id,
+    slots: itemTokens.length > 0
+      ? Math.min(schedule.wave_size, itemTokens.length)
+      : schedule.wave_size,
+    schedule,
+  };
+}
+
+function choosePrimaryAllocation(
+  allocations: PoolDispatchAllocation[],
+): PoolDispatchAllocation {
+  return allocations.reduce((best, candidate) => {
+    if (candidate.slots !== best.slots) {
+      return candidate.slots > best.slots ? candidate : best;
+    }
+    const candidateContext = candidate.schedule.resolved_limits.context_tokens;
+    const bestContext = best.schedule.resolved_limits.context_tokens;
+    if (candidateContext !== bestContext) {
+      return candidateContext > bestContext ? candidate : best;
+    }
+    return candidate.pool_id < best.pool_id ? candidate : best;
+  }, allocations[0]!);
+}
+
+export function summarizeDispatchCapacityPools(
+  capacity: DispatchCapacity,
+): DispatchCapacityPoolSummary[] {
+  return capacity.pools.map((allocation) => ({
+    pool_id: allocation.pool_id,
+    slots: allocation.slots,
+    model: allocation.schedule.model,
+    confidence: allocation.schedule.confidence,
+    source: allocation.schedule.source,
+    resolved_limits: allocation.schedule.resolved_limits,
+    host_concurrency_limit: allocation.schedule.host_concurrency_limit,
+    cooldown_until: allocation.schedule.cooldown_until,
+    estimated_wave_tokens: allocation.schedule.estimated_wave_tokens,
+    binding_cap: allocation.schedule.binding_cap ?? "none",
+    quota_source_snapshot: allocation.schedule.quota_source_snapshot ?? null,
+  }));
 }

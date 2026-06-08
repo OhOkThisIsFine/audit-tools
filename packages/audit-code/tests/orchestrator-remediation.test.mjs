@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { mkdtemp, rm } from "node:fs/promises";
 
 const { advanceAudit } = await import("../src/orchestrator/advance.ts");
 const {
@@ -1830,4 +1831,201 @@ test("conflictGroups keeps group when confidenceSpread >= 2 even if severitySpre
     "expected a conflict task when confidenceSpread >= 2, even if severitySpread < 2",
   );
   assert.match(conflict.task_id, /^deepening:conflict:/);
+});
+
+// ── requeue folding ────────────────────────────────────────────────────────
+
+const { runPlanningExecutor } = await import(
+  "../src/orchestrator/planningExecutors.ts"
+);
+
+test("planning executor folds pending requeue tasks into review_packets", async () => {
+  const tmpRoot = await mkdtemp(join(tmpdir(), "planning-requeue-"));
+  try {
+    const bundle = {
+      repo_manifest: {
+        repository: { name: "test-repo" },
+        generated_at: "2026-01-01T00:00:00Z",
+        files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: 100 }],
+      },
+      file_disposition: { files: [] },
+      unit_manifest: {
+        units: [
+          {
+            unit_id: "src-api-auth",
+            name: "Auth",
+            files: ["src/api/auth.ts"],
+            required_lenses: ["security"],
+          },
+        ],
+      },
+      surface_manifest: { surfaces: [] },
+      critical_flows: { flows: [] },
+      risk_register: { items: [] },
+    };
+
+    const lineIndex = { "src/api/auth.ts": 50 };
+    const result = await runPlanningExecutor(bundle, tmpRoot, lineIndex);
+
+    // review_packets must be present and non-empty
+    assert.ok(Array.isArray(result.updated.review_packets));
+    assert.ok(
+      result.updated.review_packets.length > 0,
+      "expected at least one review packet",
+    );
+
+    // The requeue payload is built before folding; any pending requeue task
+    // file paths must appear in review_packets
+    const packetFilePaths = new Set(
+      result.updated.review_packets.flatMap((p) => p.file_paths),
+    );
+    for (const requeueTask of (result.updated.requeue_tasks ?? []).filter(
+      (t) => t.status === "pending",
+    )) {
+      for (const path of requeueTask.file_paths) {
+        assert.ok(
+          packetFilePaths.has(path),
+          `requeue task path "${path}" must appear in at least one review packet`,
+        );
+      }
+    }
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("ingestion executor folds pending requeue tasks for uncovered files into review_packets", () => {
+  // Scenario: auth.ts is ingested (coverage complete), utils.ts has no task
+  // and remains uncovered → buildRequeuePayload generates a pending task for
+  // it → that task must appear in review_packets.
+  const authTask = {
+    task_id: "src-api-auth:security",
+    unit_id: "src-api-auth",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    file_line_counts: { "src/api/auth.ts": 30 },
+    rationale: "Audit auth",
+    priority: "high",
+    status: "pending",
+  };
+  const result = {
+    task_id: authTask.task_id,
+    unit_id: authTask.unit_id,
+    pass_id: authTask.pass_id,
+    lens: authTask.lens,
+    file_coverage: [{ path: "src/api/auth.ts", total_lines: 30 }],
+    findings: [],
+  };
+
+  const run = runResultIngestionExecutor(
+    {
+      coverage_matrix: {
+        files: [
+          {
+            path: "src/api/auth.ts",
+            unit_ids: ["src-api-auth"],
+            classification_status: "classified",
+            audit_status: "pending",
+            required_lenses: ["security"],
+            completed_lenses: [],
+          },
+          {
+            path: "src/lib/utils.ts",
+            unit_ids: ["src-lib-utils"],
+            classification_status: "classified",
+            audit_status: "pending",
+            required_lenses: ["security"],
+            completed_lenses: [],
+          },
+        ],
+      },
+      audit_tasks: [authTask],
+    },
+    [result],
+  );
+
+  // utils.ts has no planned task and is still uncovered → requeue task exists
+  const requeueTask = run.updated.requeue_tasks?.find(
+    (t) => t.task_id === "requeue:security:src/lib/utils.ts",
+  );
+  assert.ok(requeueTask, "expected a pending requeue task for src/lib/utils.ts");
+  assert.equal(requeueTask.status, "pending");
+
+  // The requeue task must appear in a review packet so dispatch actually covers it
+  const packetFilePaths = new Set(
+    (run.updated.review_packets ?? []).flatMap((p) => p.file_paths),
+  );
+  assert.ok(
+    packetFilePaths.has("src/lib/utils.ts"),
+    "src/lib/utils.ts from requeue task must appear in review_packets",
+  );
+  assert.ok(run.artifacts_written.includes("review_packets.json"));
+});
+
+test("ingestion executor deduplicates requeue tasks already present in audit_tasks", () => {
+  // Scenario: utils.ts is already tracked as a "complete" task in audit_tasks.
+  // After ingestion, buildRequeuePayload still generates a pending requeue task
+  // for it (coverage is still marked pending), but the dedup guard must prevent
+  // it from being added a second time via the requeue folding path.
+  const authTask = {
+    task_id: "src-api-auth:security",
+    unit_id: "src-api-auth",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    file_line_counts: { "src/api/auth.ts": 30 },
+    rationale: "Audit auth",
+    priority: "high",
+    status: "complete",
+  };
+  const utilsRequeueTask = {
+    task_id: "requeue:security:src/lib/utils.ts",
+    unit_id: "requeue:src/lib/utils.ts",
+    pass_id: "requeue:security",
+    lens: "security",
+    file_paths: ["src/lib/utils.ts"],
+    file_line_counts: {},
+    rationale: "Already tracked",
+    priority: "medium",
+    tags: [],
+    status: "complete",
+  };
+
+  const run = runResultIngestionExecutor(
+    {
+      coverage_matrix: {
+        files: [
+          {
+            path: "src/api/auth.ts",
+            unit_ids: ["src-api-auth"],
+            classification_status: "classified",
+            audit_status: "complete",
+            required_lenses: ["security"],
+            completed_lenses: ["security"],
+          },
+          {
+            path: "src/lib/utils.ts",
+            unit_ids: ["src-lib-utils"],
+            classification_status: "classified",
+            audit_status: "pending",
+            required_lenses: ["security"],
+            completed_lenses: [],
+          },
+        ],
+      },
+      audit_tasks: [authTask, utilsRequeueTask],
+    },
+    [],
+  );
+
+  // review_packets must contain at most one entry for utils.ts (no duplicate packet)
+  const utilsPackets = (run.updated.review_packets ?? []).filter((p) =>
+    p.file_paths.includes("src/lib/utils.ts"),
+  );
+  const utilsTaskIds = utilsPackets.flatMap((p) => p.task_ids);
+  const duplicates = utilsTaskIds.filter(
+    (id) => utilsTaskIds.indexOf(id) !== utilsTaskIds.lastIndexOf(id),
+  );
+  assert.deepEqual(duplicates, [], "requeue task must not appear twice in review_packets");
 });

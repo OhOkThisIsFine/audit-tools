@@ -32,16 +32,21 @@ function summarizeGraph(bundle: ArtifactBundle): string {
   return `Dependency graph: ${counts.join(", ")}.`;
 }
 
-function summarizeFlows(bundle: ArtifactBundle): string {
+function summarizeFlows(bundle: ArtifactBundle, max = 15): string {
   const flows = bundle.critical_flows?.flows ?? [];
   if (flows.length === 0) return "No critical flows identified.";
 
-  const lines = flows.map(
+  const shown = flows.slice(0, max);
+  const lines = shown.map(
     (flow) =>
       `- ${flow.name}: ${flow.paths.length} files, concerns: ${flow.concerns.join(", ") || "none"}`,
   );
 
-  return [`${flows.length} critical flows:`, ...lines].join("\n");
+  return [
+    `${flows.length} critical flows:`,
+    ...lines,
+    ...(flows.length > max ? [`  ... and ${flows.length - max} more`] : []),
+  ].join("\n");
 }
 
 function summarizeRisk(bundle: ArtifactBundle): string {
@@ -104,16 +109,21 @@ function buildPrioritizedReadingList(
   ].join("\n");
 }
 
-function summarizeSurfaces(bundle: ArtifactBundle): string {
+function summarizeSurfaces(bundle: ArtifactBundle, max = 20): string {
   const surfaces = bundle.surface_manifest?.surfaces ?? [];
   if (surfaces.length === 0) return "No externally reachable surfaces identified.";
 
-  const lines = surfaces.map(
+  const shown = surfaces.slice(0, max);
+  const lines = shown.map(
     (surface) =>
       `- ${surface.id} (${surface.kind}): ${surface.entrypoint}${surface.methods?.length ? ` [${surface.methods.join(", ")}]` : ""}`,
   );
 
-  return [`${surfaces.length} surfaces:`, ...lines].join("\n");
+  return [
+    `${surfaces.length} surfaces:`,
+    ...lines,
+    ...(surfaces.length > max ? [`  ... and ${surfaces.length - max} more`] : []),
+  ].join("\n");
 }
 
 function summarizeFiles(bundle: ArtifactBundle): string {
@@ -134,11 +144,12 @@ function summarizeFiles(bundle: ArtifactBundle): string {
   return `${files.length} files (${langSummary}).`;
 }
 
-function formatDeterministicFindings(findings: Finding[]): string {
+function formatDeterministicFindings(findings: Finding[], max = 20): string {
   if (findings.length === 0)
     return "No structural issues detected by deterministic analysis.";
 
-  const lines = findings.map(
+  const shown = findings.slice(0, max);
+  const lines = shown.map(
     (finding) =>
       `- [${finding.severity}] ${finding.title}: ${finding.summary}`,
   );
@@ -146,6 +157,7 @@ function formatDeterministicFindings(findings: Finding[]): string {
   return [
     `${findings.length} structural findings from deterministic analysis:`,
     ...lines,
+    ...(findings.length > max ? [`  ... and ${findings.length - max} more`] : []),
   ].join("\n");
 }
 
@@ -167,7 +179,7 @@ export function renderDesignReviewPrompt(
   return [
     "# Project design review",
     "",
-    "You are reviewing the overall design of this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide qualitative, big-picture design observations that static analysis cannot produce.",
+    "You are reviewing the overall design of this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide qualitative observations in two distinct modes: contract assessment for inferred or existing project contracts, and conceptual design critique for broader architecture ideas that static analysis cannot produce.",
     "",
     "## Project context",
     "",
@@ -209,6 +221,15 @@ export function renderDesignReviewPrompt(
     "",
     prioritizedReadingList,
     "",
+    "### Contract assessment",
+    "",
+    "- Infer existing contracts from the repository artifacts and code you inspect: invariants, trust boundaries, preconditions, postconditions, data lifecycle obligations, and critical-flow guarantees.",
+    "- Attack those inferred contracts with concrete counterexamples. Report evidenced gaps where the code appears to rely on an invariant or boundary that is missing, unenforced, unclear, or uncovered for a critical flow.",
+    "- Use contract-assessment categories such as inferred_contract_gap, trust_boundary_gap, invariant_counterexample, and critical_invariant_coverage_gap when those best describe the finding.",
+    "- Stay observational: do not invent a new contract DSL, write a remediation plan, remediate code, or turn the audit into an implementation pipeline.",
+    "",
+    "### Conceptual design critique",
+    "",
     "- **Tool and library opportunities**: third-party tools, libraries, or frameworks that would improve the project. Concrete suggestions with rationale, not generic advice.",
     "- **Architecture pattern improvements**: structural changes that would improve extensibility, testability, or maintainability. Consider whether the current abstractions match the problem domain.",
     "- **Design simplification**: areas where the design is over-engineered or where simpler alternatives would work. Conversely, areas that are under-designed for their importance.",
@@ -223,7 +244,7 @@ export function renderDesignReviewPrompt(
     "{",
     '  "id": "DR-001",',
     '  "title": "short descriptive title",',
-    '  "category": "one of: tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability",',
+    '  "category": "one of: inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap, tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability",',
     '  "severity": "one of: critical, high, medium, low, info",',
     '  "confidence": "one of: high, medium, low",',
     '  "lens": "architecture",',

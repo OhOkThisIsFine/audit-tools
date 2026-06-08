@@ -5,6 +5,7 @@ import type {
   QuotaStateEntry,
   BackoffState,
   ResolvedProviderName,
+  DispatchCapacityPoolSummary,
 } from "@audit-tools/shared";
 import type {
   DispatchPhase,
@@ -18,6 +19,7 @@ import {
   buildProviderModelKey,
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
+  summarizeDispatchCapacityPools,
 } from "../quota/index.js";
 
 export type { HostConcurrencyLimit } from "@audit-tools/shared";
@@ -70,6 +72,7 @@ export interface WaveScheduleResult extends WaveSchedule {
   wave_size: number;
   estimated_wave_tokens: number;
   host_concurrency_limit: HostConcurrencyLimit | null;
+  capacity_pools?: DispatchCapacityPoolSummary[];
 }
 
 export function resolveHostConcurrencyLimit(options: {
@@ -100,7 +103,7 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     const cap = hostLimit?.active_subagents ?? DEFAULT_WAVE_SIZE;
     const waveSize = Math.max(1, Math.min(cap, input.itemCount));
     const avgTokens = averageSlotTokens(input.estimatedSlotTokens);
-    return {
+    const schedule: WaveScheduleResult = {
       wave_size: waveSize,
       estimated_wave_tokens: waveSize * avgTokens,
       cooldown_until: null,
@@ -115,6 +118,11 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
       },
       host_concurrency_limit: hostLimit,
       model: hostModel,
+      binding_cap: hostLimit && waveSize < input.itemCount ? "host_concurrency" : "none",
+    };
+    return {
+      ...schedule,
+      capacity_pools: [capacityPoolSummary(buildProviderModelKey(providerName, hostModel), waveSize, schedule)],
     };
   }
 
@@ -145,7 +153,30 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     pendingItemTokens: normalizeSlotTokens(input.estimatedSlotTokens, input.itemCount),
   });
 
-  return capacity.primary.schedule;
+  return {
+    ...capacity.primary.schedule,
+    capacity_pools: summarizeDispatchCapacityPools(capacity),
+  };
+}
+
+function capacityPoolSummary(
+  poolId: string,
+  slots: number,
+  schedule: WaveSchedule,
+): DispatchCapacityPoolSummary {
+  return {
+    pool_id: poolId,
+    slots,
+    model: schedule.model,
+    confidence: schedule.confidence,
+    source: schedule.source,
+    resolved_limits: schedule.resolved_limits,
+    host_concurrency_limit: schedule.host_concurrency_limit,
+    cooldown_until: schedule.cooldown_until,
+    estimated_wave_tokens: schedule.estimated_wave_tokens,
+    binding_cap: schedule.binding_cap ?? "none",
+    quota_source_snapshot: schedule.quota_source_snapshot ?? null,
+  };
 }
 
 export function buildDispatchQuota(
@@ -176,6 +207,8 @@ export function buildDispatchQuota(
     source: schedule.source,
     resolved_limits: schedule.resolved_limits,
     cooldown_until: schedule.cooldown_until,
+    binding_cap: schedule.binding_cap ?? "none",
+    capacity_pools: schedule.capacity_pools,
     quota_source_snapshot: schedule.quota_source_snapshot ?? null,
     backoff_state: backoffState,
   };

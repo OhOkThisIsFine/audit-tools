@@ -58,11 +58,14 @@ function buildDocumentPrompt(params: {
   repoConventions: string;
   taskPath: string;
   resultPath: string;
+  repoRoot: string;
 }): string {
-  const { finding, extraContext, themeHint, repoConventions, taskPath, resultPath } =
+  const { finding, extraContext, themeHint, repoConventions, taskPath, resultPath, repoRoot } =
     params;
   return `
 You are the Remediation Assistant. Your task is to analyze the following finding and produce an item_spec.json detailing how you will fix it.
+Repository root: ${repoRoot}
+Set the shell/tool workdir to the repository root when running any command; do not rely on cwd state from prior shell calls.
 
 Finding ID: ${finding.id}
 Title: ${finding.title}
@@ -83,6 +86,9 @@ Output format must be exactly:
   "item_spec": { ... schema ... },
   "clarifications": [ { "finding_id": "...", "category": "...", "description": "..." } ]
 }
+
+Windows PowerShell: do not pipe an inline foreach statement directly into ConvertTo-Json.
+Assign the foreach output to a variable first, then pipe that variable to ConvertTo-Json.
 
 Your task JSON is at: ${taskPath}
 Write your result JSON to exactly this path: ${resultPath}
@@ -248,6 +254,7 @@ export async function runDocumentPhase(
       repoConventions,
       taskPath,
       resultPath,
+      repoRoot: options.root,
     });
     await writeFile(promptPath, promptContent, "utf8");
 

@@ -246,6 +246,50 @@ test("buildAuditReportModel forwards external analyzer context into merged findi
   );
 });
 
+test("renderAuditReportMarkdown includes finding categories", () => {
+  const report = {
+    summary: {
+      finding_count: 2,
+      work_block_count: 0,
+      severity_breakdown: { medium: 2 },
+      lens_breakdown: { architecture: 2 },
+      audited_file_count: 1,
+      excluded_file_count: 0,
+      runtime_validation_status_breakdown: {},
+    },
+    work_blocks: [],
+    findings: [
+      {
+        id: "DR-001",
+        title: "Implicit tenant boundary is unenforced",
+        category: "inferred_contract_gap",
+        severity: "medium",
+        confidence: "high",
+        lens: "architecture",
+        summary: "The code assumes a tenant boundary without enforcing it.",
+        affected_files: [{ path: "src/tenant.ts", line_start: 12 }],
+        evidence: ["design-review"],
+      },
+      {
+        id: "DR-002",
+        title: "Trust boundary is unclear",
+        category: "trust_boundary_gap",
+        severity: "medium",
+        confidence: "medium",
+        lens: "architecture",
+        summary: "External input crosses into internal state without a named boundary.",
+        affected_files: [{ path: "src/input.ts", line_start: 7 }],
+        evidence: ["design-review"],
+      },
+    ],
+  };
+
+  const markdown = renderAuditReportMarkdown(report);
+
+  assert.match(markdown, /- Category: inferred_contract_gap/);
+  assert.match(markdown, /- Category: trust_boundary_gap/);
+});
+
 // ── Cross-lens dedup ────────────────────────────────────────────────────────
 
 function makeFinding(overrides) {

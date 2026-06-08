@@ -8,10 +8,12 @@ export const REMEDIATION_WORKER_RESULT_CONTRACT_VERSION =
   "remediate-code-worker-result/v1alpha1" as const;
 
 export type RemediationStepKind =
+  | "confirm_intent"
   | "locate_input"
   | "collect_starting_point"
   | "synthesize_intake"
   | "collect_intake_clarifications"
+  | "contract_pipeline"
   | "extract_findings"
   | "dispatch_document"
   | "document_single_item"
@@ -24,7 +26,8 @@ export type RemediationStepKind =
   | "close_run"
   | "present_report"
   | "input_conflict"
-  | "unhandled_state";
+  | "unhandled_state"
+  | "state_transition";
 
 import type { StepStatus, DispatchModelHint } from "@audit-tools/shared";
 
@@ -105,6 +108,8 @@ export type {
   LimitConfidence,
   ResolvedLimits,
   BackoffState,
+  WaveBindingCap,
+  DispatchCapacityPoolSummary,
 } from "@audit-tools/shared";
 export type { QuotaUsageSnapshot } from "@audit-tools/shared";
 
@@ -115,6 +120,8 @@ import type {
   ResolvedLimits,
   BackoffState,
   QuotaUsageSnapshot,
+  WaveBindingCap,
+  DispatchCapacityPoolSummary,
 } from "@audit-tools/shared";
 
 export interface RemediationDispatchQuota {
@@ -131,6 +138,8 @@ export interface RemediationDispatchQuota {
   source: LimitSource;
   resolved_limits: ResolvedLimits;
   cooldown_until: string | null;
+  binding_cap?: WaveBindingCap;
+  capacity_pools?: DispatchCapacityPoolSummary[];
   quota_source_snapshot?: QuotaUsageSnapshot | null;
   backoff_state?: BackoffState | null;
 }

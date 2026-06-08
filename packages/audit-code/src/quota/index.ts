@@ -5,6 +5,8 @@ import type {
   HostConcurrencyLimit as _HostConcurrencyLimit,
   QuotaUsageSnapshot as _QuotaUsageSnapshot,
   BackoffState as _BackoffState,
+  WaveBindingCap as _WaveBindingCap,
+  DispatchCapacityPoolSummary as _DispatchCapacityPoolSummary,
 } from "@audit-tools/shared";
 
 // Re-exported from @audit-tools/shared
@@ -35,6 +37,7 @@ export {
   GenericErrorParser,
   ClaudeCodeErrorParser,
   getErrorParserForProvider,
+  summarizeDispatchCapacityPools,
 } from "@audit-tools/shared";
 
 export type {
@@ -57,6 +60,8 @@ export type {
   QuotaSource,
   QuotaUsageSnapshot,
   ErrorParser,
+  WaveBindingCap,
+  DispatchCapacityPoolSummary,
 } from "@audit-tools/shared";
 
 // Wave scheduler now lives in @audit-tools/shared (single source of truth for
@@ -111,6 +116,8 @@ export interface DispatchQuota {
   wave_size: number;
   estimated_wave_tokens: number;
   cooldown_until: string | null;
+  binding_cap?: _WaveBindingCap;
+  capacity_pools?: _DispatchCapacityPoolSummary[];
   quota_source_snapshot?: _QuotaUsageSnapshot | null;
   backoff_state?: _BackoffState | null;
 }

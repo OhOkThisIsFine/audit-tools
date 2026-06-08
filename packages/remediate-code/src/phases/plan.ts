@@ -11,7 +11,7 @@ import {
 import { writeFile, readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import type { AuditFindingsReport, FindingTheme } from "@audit-tools/shared";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
   readOptionalJsonFile,
@@ -37,6 +37,13 @@ import {
   createLaunchInputForTask,
   createRemediationWorkerTask,
 } from "./workerTasks.js";
+
+const PUBLIC_CONTRACT_SCHEMA_COMPANIONS = new Map<string, string[]>([
+  [
+    "packages/shared/src/types/finding.ts",
+    ["packages/audit-code/schemas/audit_findings.schema.json"],
+  ],
+]);
 
 function enumerateTestFiles(root: string): string[] {
   if (!existsSync(join(root, "package.json"))) {
@@ -136,6 +143,26 @@ function tryParseFindingsReport(
   } catch {
     return undefined;
   }
+}
+
+function appendPublicContractSchemaCompanions(findings: Finding[]): Finding[] {
+  for (const finding of findings) {
+    const seen = new Set(finding.affected_files.map((file) => file.path));
+    const companionPaths: string[] = [];
+    for (const affectedFile of finding.affected_files) {
+      for (const companion of PUBLIC_CONTRACT_SCHEMA_COMPANIONS.get(
+        affectedFile.path,
+      ) ?? []) {
+        if (seen.has(companion)) continue;
+        seen.add(companion);
+        companionPaths.push(companion);
+      }
+    }
+    for (const companion of companionPaths) {
+      finding.affected_files.push({ path: companion });
+    }
+  }
+  return findings;
 }
 
 interface PlanPhaseDeps {
@@ -308,18 +335,61 @@ function resolveContextBudgetFromConfig(sessionConfig: SessionConfig | null): nu
   });
 }
 
+const PLAN_WALK_SKIP_DIRS = new Set([
+  "node_modules", ".git", "dist", "build", "coverage", "out", ".audit-tools",
+]);
+
+function walkDirBytes(dir: string, maxFiles = 200): number {
+  let total = 0;
+  let count = 0;
+  const stack = [dir];
+  while (stack.length > 0 && count < maxFiles) {
+    const cur = stack.pop()!;
+    try {
+      for (const entry of readdirSync(cur, { withFileTypes: true })) {
+        if (PLAN_WALK_SKIP_DIRS.has(entry.name)) continue;
+        const full = join(cur, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(full);
+        } else if (entry.isFile()) {
+          count++;
+          try {
+            total += statSync(full).size;
+          } catch {
+            // ignore unreadable files
+          }
+          if (count >= maxFiles) break;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+  return total;
+}
+
+function isDirectoryPath(filePath: string, root: string): boolean {
+  const fullPath = isAbsolute(filePath) ? filePath : join(root, filePath);
+  try {
+    return statSync(fullPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 // Phase 2: size by bytes from a stat (no full-file reads) rather than counting
 // lines, and convert to tokens via the shared estimator.
 function fileSizeBytes(filePath: string, root: string): number {
   const fullPath = isAbsolute(filePath) ? filePath : join(root, filePath);
   try {
-    return statSync(fullPath).size;
+    const st = statSync(fullPath);
+    return st.isDirectory() ? walkDirBytes(fullPath) : st.size;
   } catch {
     return 0;
   }
 }
 
-function groupFindingsByFileOverlap(findingIds: string[], findings: Finding[]): string[][] {
+function groupFindingsByFileOverlap(findingIds: string[], findings: Finding[], repoRoot = "."): string[][] {
   const parent = new Map<string, string>(findingIds.map((id) => [id, id]));
 
   function find(id: string): string {
@@ -337,6 +407,9 @@ function groupFindingsByFileOverlap(findingIds: string[], findings: Finding[]): 
 
   for (const id of findingIds) {
     for (const af of findingMap.get(id)?.affected_files ?? []) {
+      // Directory paths must not drive union-find merges: a broad directory shared
+      // by many findings would otherwise collapse them all into one indivisible block.
+      if (isDirectoryPath(af.path, repoRoot)) continue;
       const list = fileToIds.get(af.path) ?? [];
       list.push(id);
       fileToIds.set(af.path, list);
@@ -353,10 +426,10 @@ function groupFindingsByFileOverlap(findingIds: string[], findings: Finding[]): 
 
   const groups = new Map<string, string[]>();
   for (const id of findingIds) {
-    const root = find(id);
-    const g = groups.get(root) ?? [];
+    const repr = find(id);
+    const g = groups.get(repr) ?? [];
     g.push(id);
-    groups.set(root, g);
+    groups.set(repr, g);
   }
   return [...groups.values()];
 }
@@ -377,6 +450,37 @@ function estimateGroupTokens(
     estimateTokensFromBytes(totalBytes) +
     findingIds.length * ESTIMATED_FINDING_OVERHEAD_TOKENS
   );
+}
+
+function splitOversizedOverlapGroup(
+  group: string[],
+  findings: Finding[],
+  fileByteCounts: Map<string, number>,
+  contextBudget: number,
+): string[][] {
+  if (
+    group.length <= 1 ||
+    estimateGroupTokens(group, findings, fileByteCounts) <= contextBudget
+  ) {
+    return [group];
+  }
+
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  for (const findingId of group) {
+    const candidate = [...current, findingId];
+    if (
+      current.length > 0 &&
+      estimateGroupTokens(candidate, findings, fileByteCounts) > contextBudget
+    ) {
+      chunks.push(current);
+      current = [findingId];
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
 }
 
 export function splitBlocksByContextBudget(
@@ -404,21 +508,29 @@ export function splitBlocksByContextBudget(
   const splitRemap = new Map<string, string[]>();
 
   for (const block of blocks) {
-    const fileGroups = groupFindingsByFileOverlap(block.items, findings);
+    const fileGroups = groupFindingsByFileOverlap(block.items, findings, root);
 
     const subBlocks: string[][] = [];
     let currentItems: string[] = [];
     let currentTokens = 0;
 
-    for (const group of fileGroups) {
-      const groupTokens = estimateGroupTokens(group, findings, fileByteCounts);
-      if (currentItems.length > 0 && currentTokens + groupTokens > contextBudget) {
-        subBlocks.push(currentItems);
-        currentItems = group;
-        currentTokens = groupTokens;
-      } else {
-        currentItems = [...currentItems, ...group];
-        currentTokens += groupTokens;
+    for (const overlapGroup of fileGroups) {
+      const groups = splitOversizedOverlapGroup(
+        overlapGroup,
+        findings,
+        fileByteCounts,
+        contextBudget,
+      );
+      for (const group of groups) {
+        const groupTokens = estimateGroupTokens(group, findings, fileByteCounts);
+        if (currentItems.length > 0 && currentTokens + groupTokens > contextBudget) {
+          subBlocks.push(currentItems);
+          currentItems = group;
+          currentTokens = groupTokens;
+        } else {
+          currentItems = [...currentItems, ...group];
+          currentTokens += groupTokens;
+        }
       }
     }
     if (currentItems.length > 0) subBlocks.push(currentItems);
@@ -560,6 +672,7 @@ export function buildCoverageLedger(params: {
 export function mergeBlocksSharingFiles(
   blocks: RemediationBlock[],
   findings: Finding[],
+  root = ".",
 ): RemediationBlock[] {
   if (blocks.length < 2) return blocks;
   const findingMap = new Map(findings.map((f) => [f.id, f]));
@@ -568,7 +681,9 @@ export function mergeBlocksSharingFiles(
   const fileSet = (b: RemediationBlock): Set<string> => {
     const files = new Set<string>();
     for (const id of b.items) {
-      for (const af of findingMap.get(id)?.affected_files ?? []) files.add(af.path);
+      for (const af of findingMap.get(id)?.affected_files ?? []) {
+        if (!isDirectoryPath(af.path, root)) files.add(af.path);
+      }
     }
     return files;
   };
@@ -673,8 +788,10 @@ export async function applyPlanPipeline(
 ): Promise<RemediationPlan> {
   let { blocks, findings } = plan;
 
+  findings = appendPublicContractSchemaCompanions(findings);
+
   // Merge blocks whose findings touch a shared file.
-  blocks = mergeBlocksSharingFiles(blocks, findings);
+  blocks = mergeBlocksSharingFiles(blocks, findings, options.root);
 
   // Split blocks that would exceed the implementation agent's context budget.
   const sessionConfig = await readOptionalJsonFile<SessionConfig>(
@@ -705,9 +822,7 @@ export async function runPlanPhase(
     // Canonical hand-off: the auditor's audit-findings.json (the machine
     // contract). Parsed directly; any other input is free-form and flows
     // through the LLM extractor.
-    const findingsReport = options.input.endsWith(".json")
-      ? tryParseFindingsReport(content)
-      : undefined;
+    const findingsReport = tryParseFindingsReport(content);
     if (findingsReport) {
       console.log(`Consuming audit-findings report: ${options.input}`);
       const parsed = parseAuditFindingsReport(findingsReport);

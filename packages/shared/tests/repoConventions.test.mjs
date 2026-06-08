@@ -122,6 +122,43 @@ test("detectStyleFromSnippet: equal quote counts tiebreaks to single", async () 
   });
 });
 
+test("formatRepoConventions — omits sample_snippet by default", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "x" }));
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "src", "index.ts"), "export const x = 1;\n");
+
+    const conventions = detectRepoConventions(dir);
+    assert.ok(conventions.sample_snippet, "sample_snippet should be detected");
+
+    const block = formatRepoConventions(conventions);
+    assert.ok(
+      !block.includes("Representative house-style snippet"),
+      "snippet header must not appear without includeSnippet",
+    );
+    assert.ok(!block.includes("```"), "code fence must not appear without includeSnippet");
+  });
+});
+
+test("formatRepoConventions — includes sample_snippet when includeSnippet:true", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "x" }));
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "src", "index.ts"), "export const x = 1;\n");
+
+    const conventions = detectRepoConventions(dir);
+    assert.ok(conventions.sample_snippet, "sample_snippet should be detected");
+
+    const block = formatRepoConventions(conventions, { includeSnippet: true });
+    assert.ok(
+      block.includes("Representative house-style snippet"),
+      "snippet header must appear with includeSnippet:true",
+    );
+    assert.ok(block.includes("```"), "code fence must appear with includeSnippet:true");
+    assert.ok(block.includes("export const x = 1"), "snippet content must be present");
+  });
+});
+
 test("detectStyleFromSnippet: no quote characters leaves quote_style undefined", async () => {
   await withTempDir(async (dir) => {
     await writeFile(join(dir, "package.json"), JSON.stringify({ name: "x" }));

@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { computeDispatchCapacity } = await import("../src/quota/capacity.ts");
+const {
+  computeDispatchCapacity,
+  summarizeDispatchCapacityPools,
+} = await import("../src/quota/capacity.ts");
 
 function hostLimit(n) {
   return { active_subagents: n, source: "cli_flags", description: "test host limit" };
@@ -56,18 +59,66 @@ test("single pool, no host ceiling: a parallel agent host fans out instead of se
   assert.ok(capacity.total_slots > 1, `expected parallel dispatch, got ${capacity.total_slots}`);
 });
 
-test("computeDispatchCapacity accepts exactly one pool and returns total_slots >= 1 with one pool allocation", () => {
-  // pools is a single-element tuple [CapacityPool] — the single-pool constraint is
-  // now statically enforced at compile time rather than by a runtime guard.
+test("multi pool: capacity sums independent host pool slots", () => {
   const capacity = computeDispatchCapacity({
-    pools: [hostPool("host", { hostConcurrencyLimit: hostLimit(3) })],
+    pools: [
+      hostPool("cli", { hostConcurrencyLimit: hostLimit(2) }),
+      hostPool("ide", { hostConcurrencyLimit: hostLimit(3) }),
+    ],
     sessionConfig: {},
-    pendingItemTokens: new Array(5).fill(10000),
+    pendingItemTokens: [900, 800, 700, 600, 500, 400],
   });
-  assert.ok(capacity.total_slots >= 1, `expected total_slots >= 1, got ${capacity.total_slots}`);
-  assert.equal(capacity.pools.length, 1);
+  assert.equal(capacity.total_slots, 5);
+  assert.equal(capacity.binding_cap, "host_concurrency");
+  assert.deepEqual(capacity.pools.map((p) => [p.pool_id, p.slots]), [
+    ["cli", 2],
+    ["ide", 3],
+  ]);
+  assert.equal(capacity.estimated_wave_tokens, 900 + 800 + 700 + 600 + 500);
+  assert.equal(capacity.primary.pool_id, "ide");
 });
 
-// NOTE: passing `pools: []` or `pools: [pool1, pool2]` to ComputeDispatchCapacityInput is a
-// TypeScript compile-time error (the type is `[CapacityPool]`, a single-element tuple).
-// No runtime guard is needed — TypeScript rejects zero or multiple pools before the code runs.
+test("multi pool: total slots never exceed pending item count", () => {
+  const capacity = computeDispatchCapacity({
+    pools: [
+      hostPool("cli", { hostConcurrencyLimit: hostLimit(8) }),
+      hostPool("ide", { hostConcurrencyLimit: hostLimit(8) }),
+    ],
+    sessionConfig: {},
+    pendingItemTokens: [1000, 1000],
+  });
+  assert.equal(capacity.total_slots, 2);
+  assert.equal(
+    capacity.pools.reduce((sum, pool) => sum + pool.slots, 0),
+    2,
+  );
+});
+
+test("multi pool: summary exposes serializable per-pool quota metadata", () => {
+  const capacity = computeDispatchCapacity({
+    pools: [
+      hostPool("cli", { hostConcurrencyLimit: hostLimit(1) }),
+      hostPool("ide", { hostConcurrencyLimit: hostLimit(2) }),
+    ],
+    sessionConfig: {},
+    pendingItemTokens: [3000, 2000, 1000],
+  });
+  const summaries = summarizeDispatchCapacityPools(capacity);
+  assert.deepEqual(summaries.map((s) => [s.pool_id, s.slots]), [
+    ["cli", 1],
+    ["ide", 2],
+  ]);
+  assert.equal(summaries[0].binding_cap, "host_concurrency");
+  assert.equal(summaries[0].resolved_limits.context_tokens > 0, true);
+});
+
+test("computeDispatchCapacity rejects an empty pool list", () => {
+  assert.throws(
+    () => computeDispatchCapacity({
+      pools: [],
+      sessionConfig: {},
+      pendingItemTokens: [1000],
+    }),
+    /at least one capacity pool/i,
+  );
+});

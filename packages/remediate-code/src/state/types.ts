@@ -16,6 +16,8 @@ export interface RemediationBlock {
 
 export interface RemediationPlan {
   plan_id: string;
+  goal_id?: string;
+  source?: string;
   findings: Finding[];
   blocks: RemediationBlock[];
   project_type: string;

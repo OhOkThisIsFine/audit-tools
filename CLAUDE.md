@@ -50,11 +50,17 @@ npm run build -w @audit-tools/shared
 npm test -w packages/audit-code
 ```
 
+Run the repo-root `npm install` first in every fresh clone or git worktree before
+build, check, test, release, or package-scoped workflows. If `node_modules` or
+workspace symlinks are missing, dependent packages can report misleading
+`@audit-tools/shared` export or type errors because they may see stale compiled
+`dist/` output instead of the current source.
+
 ### audit-code (run from `packages/audit-code`)
 
 ```bash
 npm test                                                # build + node --test tests/*.test.mjs
-npm run build && node --test tests/next-step.test.mjs   # single test file
+npm run test:single -- tests/next-step.test.mjs         # single test file
 npm run verify:release                                  # check + tests + linked & packaged smoke
 npm run smoke:packaged-audit-code                       # set AUDIT_CODE_VERBOSE=1 for verbose output
 ```
@@ -174,6 +180,13 @@ Trigger this flow with a package's `release:patch` / `:minor` / `:major` scripts
 - **Prefer deterministic execution over LLM inference** when both can satisfy an obligation. Upstream artifacts must be valid before refreshing downstream ones.
 - **Language-neutral graph contract.** Graph edges use `from`, `to`, `kind`, optional `direction`/`confidence`/`reason`. New language analyzers should enrich the shared artifacts, not invent language-specific planning paths.
 - **Windows-aware.** This repo is developed on Windows; package-manager shims (`npm`, `npx`, `pnpm`, `yarn`) run through the command shell so `.cmd` wrappers resolve reliably.
+- **Generated host prompts are cwd-explicit.** Any prompt that asks a host or
+  worker to run backend commands must either render cwd-independent commands or
+  state the exact repository root/workdir the command requires. Prefer setting
+  the shell/tool `workdir` to that root over asking workers to `cd`.
+- **PowerShell JSON generation is statement-safe.** Do not pipe an inline
+  PowerShell `foreach` statement directly into `ConvertTo-Json`; assign the
+  `foreach` output to a variable first, then pipe that variable.
 
 ## Preferences & standing decisions
 

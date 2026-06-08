@@ -75,6 +75,12 @@ describe("runClosePhase", () => {
 
     const { existsSync } = await import("node:fs");
     expect(existsSync(join(OUTPUT_DIR, "remediation-report.md"))).toBe(true);
+    expect(existsSync(join(OUTPUT_DIR, "remediation-state.complete.json"))).toBe(true);
+    const completeState = JSON.parse(
+      await readFile(join(OUTPUT_DIR, "remediation-state.complete.json"), "utf8"),
+    );
+    expect(completeState.status).toBe("complete");
+    expect(completeState.items.F1.status).toBe("resolved");
   });
 
   it("writes run metadata, structured verification evidence, and vacuous combined test details", async () => {
@@ -84,6 +90,8 @@ describe("runClosePhase", () => {
       step_count: 7,
       plan: {
         plan_id: "P1",
+        goal_id: "G1",
+        source: "contract_pipeline",
         findings: [
           {
             id: "F1",
@@ -94,6 +102,11 @@ describe("runClosePhase", () => {
             lens: "correctness",
             summary: "",
             affected_files: [{ path: "src/a.ts" }],
+            evidence: ["contract task evidence"],
+            contract_goal_id: "G1",
+            contract_obligation_ids: ["O-1"],
+            verification_obligation_ids: ["VO-1"],
+            targeted_commands: ["npm test -- auth"],
           },
         ],
         blocks: [],
@@ -138,6 +151,40 @@ describe("runClosePhase", () => {
     expect(markdown).toContain("  - *Verification*: check A");
     expect(markdown).toContain("  - *Verification*: check B");
     expect(markdown).not.toContain("check A\ncheck B");
+
+    const verificationReport = JSON.parse(
+      await readFile(join(OUTPUT_DIR, "verification_report.json"), "utf8"),
+    );
+    expect(verificationReport.goal_id).toBe("G1");
+    const traces = verificationReport.findings[0].traces;
+    expect(traces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          trace_id: "F1:contract-goal",
+          kind: "requirement",
+          evidence: ["goal_id=G1"],
+          status: "passed",
+        }),
+        expect.objectContaining({
+          trace_id: "F1:contract-obligations",
+          kind: "requirement",
+          evidence: ["O-1"],
+          status: "passed",
+        }),
+        expect.objectContaining({
+          trace_id: "F1:verification-obligations",
+          kind: "invariant",
+          evidence: ["VO-1"],
+          status: "passed",
+        }),
+        expect.objectContaining({
+          trace_id: "F1:targeted-command-1",
+          kind: "command",
+          evidence: ["planned command: npm test -- auth"],
+          status: "passed",
+        }),
+      ]),
+    );
   });
 
   it("transitions to triage when test_command fails", async () => {
@@ -158,6 +205,27 @@ describe("runClosePhase", () => {
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("triage");
     expect(state.items!.F1.status).toBe("blocked");
+  });
+
+  it("transitions to triage when ignored items carry retry/deferred rationale", async () => {
+    const state = makeState({
+      items: {
+        F1: {
+          finding_id: "F1",
+          status: "ignored",
+          block_id: "B1",
+          failure_reason:
+            "Deferred - needs its own focused block and should be retried in a dedicated pass.",
+          completed_at: "2026-06-05T12:01:00.000Z",
+        },
+      },
+    });
+
+    const next = await runClosePhase(state, BASE_OPTIONS);
+    expect(next.status).toBe("triage");
+    expect(state.items!.F1.status).toBe("blocked");
+    expect(state.items!.F1.completed_at).toBeUndefined();
+    expect(state.items!.F1.failure_reason).toMatch(/Retry requested/);
   });
 
   it("preserves quoted arguments in test_command", async () => {

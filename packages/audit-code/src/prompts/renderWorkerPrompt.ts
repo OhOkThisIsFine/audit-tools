@@ -31,6 +31,8 @@ export function renderWorkerPrompt(task: WorkerTask): string {
       `${task.artifacts_dir}/audit_tasks.json`;
     const lines = [
       `Audit run: ${task.run_id}`,
+      `Repository root: ${task.repo_root}`,
+      "Set the shell/tool workdir to the repository root before executing worker_command.",
       `Read: ${tasksPath}`,
       "Scope: review only the tasks listed in the Read file. Do not add tasks,",
       "edit source files, remediate findings, run unrelated audits, or write result_path.",
@@ -48,6 +50,8 @@ export function renderWorkerPrompt(task: WorkerTask): string {
       "  and include verification {verified, needs_followup, concerns, coverage_concerns,",
       "  confidence_concerns, followup_tasks}.",
       "Constraint: line_end must not exceed total_lines for that file.",
+      "Windows PowerShell: do not pipe an inline foreach statement directly into ConvertTo-Json.",
+      "Assign the foreach output to a variable first, then pipe that variable to ConvertTo-Json.",
       `Write only the JSON array of AuditResult objects to: ${task.audit_results_path}`,
     ];
 
@@ -71,6 +75,8 @@ export function renderWorkerPrompt(task: WorkerTask): string {
   return [
     `Task: ${task.run_id}`,
     `Executor: ${task.preferred_executor}`,
+    `Repository root: ${task.repo_root}`,
+    "Set the shell/tool workdir to the repository root before executing worker_command.",
     "Execute worker_command from task.json exactly.",
     `Command: ${commandArgv}`,
     "Write result to: " + task.result_path,

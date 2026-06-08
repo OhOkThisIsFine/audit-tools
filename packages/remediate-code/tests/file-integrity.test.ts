@@ -79,18 +79,17 @@ describe("checkAffectedFileIntegrity I/O-error classification (OBS-005)", () => 
     await rm(TEST_DIR, { recursive: true, force: true });
   });
 
-  it("reports an unreadable-but-present file via io_errors, not missing", async () => {
-    // A directory at the affected path exists on disk but cannot be hashed:
-    // readFile throws a non-ENOENT error (EISDIR/EPERM). It must be surfaced in
-    // io_errors, NOT folded into missing.
+  it("reports a directory digest mismatch as changed, not missing or io_errors", async () => {
     const rel = "as-a-dir";
     await mkdir(join(TEST_DIR, rel), { recursive: true });
+    await writeFile(join(TEST_DIR, rel, "nested.ts"), "original", "utf8");
     const findings = [mkFinding(rel)];
     findings[0].affected_files[0].hash_at_plan_time = "deadbeef";
 
     const result = await checkAffectedFileIntegrity(TEST_DIR, findings);
-    expect(result.io_errors).toContain(rel);
+    expect(result.changed).toContain(rel);
     expect(result.missing).not.toContain(rel);
+    expect(result.io_errors).not.toContain(rel);
     expect(result.is_clean).toBe(false);
   });
 
@@ -105,15 +104,19 @@ describe("checkAffectedFileIntegrity I/O-error classification (OBS-005)", () => 
     expect(result.is_clean).toBe(false);
   });
 
-  it("is_clean is false whenever io_errors is non-empty", async () => {
+  it("snapshotAffectedFileHashes records a directory digest and unchanged directories stay clean", async () => {
     const rel = "dir-path";
-    await mkdir(join(TEST_DIR, rel), { recursive: true });
+    await mkdir(join(TEST_DIR, rel, "nested"), { recursive: true });
+    await writeFile(join(TEST_DIR, rel, "nested", "a.ts"), "a", "utf8");
     const findings = [mkFinding(rel)];
-    findings[0].affected_files[0].hash_at_plan_time = "deadbeef";
+    snapshotAffectedFileHashes(TEST_DIR, findings);
+    expect(findings[0].affected_files[0].hash_at_plan_time).toBeTruthy();
 
     const result = await checkAffectedFileIntegrity(TEST_DIR, findings);
-    expect(result.io_errors.length).toBeGreaterThan(0);
-    expect(result.is_clean).toBe(false);
+    expect(result.changed).not.toContain(rel);
+    expect(result.missing).not.toContain(rel);
+    expect(result.io_errors).not.toContain(rel);
+    expect(result.is_clean).toBe(true);
   });
 
   it("a content change is reported as changed, not missing/io_errors", async () => {
@@ -128,6 +131,63 @@ describe("checkAffectedFileIntegrity I/O-error classification (OBS-005)", () => 
     expect(result.missing).not.toContain(rel);
     expect(result.io_errors).not.toContain(rel);
     expect(result.is_clean).toBe(false);
+  });
+});
+
+describe("directory affected_files hashing", () => {
+  beforeEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(TEST_DIR, { recursive: true });
+  });
+  afterEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("detects nested file changes under a directory affected_files path", async () => {
+    const rel = "src";
+    await mkdir(join(TEST_DIR, rel), { recursive: true });
+    await writeFile(join(TEST_DIR, rel, "a.ts"), "a1", "utf8");
+    const findings = [mkFinding(rel)];
+
+    snapshotAffectedFileHashes(TEST_DIR, findings);
+    await writeFile(join(TEST_DIR, rel, "a.ts"), "a2", "utf8");
+
+    const result = await checkAffectedFileIntegrity(TEST_DIR, findings);
+    expect(result.changed).toContain(rel);
+    expect(result.missing).toEqual([]);
+    expect(result.io_errors).toEqual([]);
+  });
+
+  it("detects nested file additions and removals under a directory affected_files path", async () => {
+    const rel = "lib";
+    await mkdir(join(TEST_DIR, rel), { recursive: true });
+    await writeFile(join(TEST_DIR, rel, "a.ts"), "a", "utf8");
+    const findings = [mkFinding(rel)];
+
+    snapshotAffectedFileHashes(TEST_DIR, findings);
+    await writeFile(join(TEST_DIR, rel, "b.ts"), "b", "utf8");
+    expect((await checkAffectedFileIntegrity(TEST_DIR, findings)).changed).toContain(rel);
+
+    resnapshotAffectedFileHashes(TEST_DIR, findings);
+    await rm(join(TEST_DIR, rel, "a.ts"), { force: true });
+    const removed = await checkAffectedFileIntegrity(TEST_DIR, findings);
+    expect(removed.changed).toContain(rel);
+    expect(removed.missing).toEqual([]);
+    expect(removed.io_errors).toEqual([]);
+  });
+
+  it("resnapshotAffectedFileHashes re-baselines directory affected_files paths", async () => {
+    const rel = "pkg";
+    await mkdir(join(TEST_DIR, rel), { recursive: true });
+    await writeFile(join(TEST_DIR, rel, "index.ts"), "v1", "utf8");
+    const findings = [mkFinding(rel)];
+
+    snapshotAffectedFileHashes(TEST_DIR, findings);
+    await writeFile(join(TEST_DIR, rel, "index.ts"), "v2", "utf8");
+    expect((await checkAffectedFileIntegrity(TEST_DIR, findings)).is_clean).toBe(false);
+
+    resnapshotAffectedFileHashes(TEST_DIR, findings);
+    expect((await checkAffectedFileIntegrity(TEST_DIR, findings)).is_clean).toBe(true);
   });
 });
 
@@ -156,12 +216,10 @@ describe("reportHashIoError structured JSON stderr (OBS-05407856)", () => {
     await rm(TEST_DIR, { recursive: true, force: true });
   });
 
-  it("emits a structured JSON line to stderr for non-ENOENT errors (EACCES via EISDIR)", async () => {
+  it("emits a structured JSON line to stderr for direct hashFile non-ENOENT errors (EACCES via EISDIR)", async () => {
     // Use a directory path so readFile throws a non-ENOENT error (EISDIR).
     const rel = "dir-as-file";
     await mkdir(join(TEST_DIR, rel), { recursive: true });
-    const findings = [mkFinding(rel)];
-    findings[0].affected_files[0].hash_at_plan_time = "deadbeef";
 
     const written: string[] = [];
     const original = process.stderr.write.bind(process.stderr);
@@ -171,7 +229,7 @@ describe("reportHashIoError structured JSON stderr (OBS-05407856)", () => {
     };
     process.stderr.write = spy as typeof process.stderr.write;
     try {
-      await checkAffectedFileIntegrity(TEST_DIR, findings);
+      await hashFile(join(TEST_DIR, rel));
     } finally {
       process.stderr.write = original;
     }
@@ -188,8 +246,6 @@ describe("reportHashIoError structured JSON stderr (OBS-05407856)", () => {
   it("the emitted JSON includes a ts field that is a valid ISO 8601 timestamp string", async () => {
     const rel = "dir-for-ts-check";
     await mkdir(join(TEST_DIR, rel), { recursive: true });
-    const findings = [mkFinding(rel)];
-    findings[0].affected_files[0].hash_at_plan_time = "deadbeef";
 
     const written: string[] = [];
     const original = process.stderr.write.bind(process.stderr);
@@ -199,7 +255,7 @@ describe("reportHashIoError structured JSON stderr (OBS-05407856)", () => {
     };
     process.stderr.write = spy as typeof process.stderr.write;
     try {
-      await checkAffectedFileIntegrity(TEST_DIR, findings);
+      await hashFile(join(TEST_DIR, rel));
     } finally {
       process.stderr.write = original;
     }

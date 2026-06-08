@@ -212,10 +212,15 @@ Optional backend config:
 
 ```bash
 npm install
+npm run test:single -- tests/next-step.test.mjs
 npm run verify:release
 npm run release:patch
 npm run release:patch:publish
 ```
+
+When developing from a fresh clone or git worktree, run repo-root `npm install`
+before package checks. Missing workspace links can look like stale
+`@audit-tools/shared` export or type errors.
 
 For GitHub Actions publication and npm Trusted Publishing setup, see `docs/release.md`.
 

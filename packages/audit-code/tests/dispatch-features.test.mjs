@@ -426,3 +426,74 @@ await test("FINDING-013: budget defaults OFF — all packets emitted when max_pa
   assert.equal(result.budget_capped, false);
   assert.equal(result.packet_count, tasks.length);
 });
+
+// ── FINDING-018: per-packet access metadata ──────────────────────────────────
+
+await test("FINDING-018: dispatch plan entries include access.read_paths with prompt path and source files", async (t) => {
+  const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  await run(artifactsDir, { dispatch: { canary: false } });
+
+  const plan = await readJson(join(runDir, "dispatch-plan.json"));
+  assert.equal(plan.length, 1);
+  const entry = plan[0];
+
+  assert.ok(entry.access, "plan entry should have access object");
+  assert.ok(Array.isArray(entry.access.read_paths), "access.read_paths should be an array");
+  assert.ok(
+    entry.access.read_paths.some((p) => p === entry.prompt_path),
+    "access.read_paths should include the prompt path",
+  );
+  assert.ok(
+    entry.access.read_paths.some((p) => p.includes("only.ts")),
+    "access.read_paths should include the packet's source file path",
+  );
+});
+
+await test("FINDING-018: dispatch plan entries access.write_paths contains only task result paths, not directories", async (t) => {
+  const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  await run(artifactsDir, { dispatch: { canary: false } });
+
+  const plan = await readJson(join(runDir, "dispatch-plan.json"));
+  const entry = plan[0];
+  const taskResultsDir = join(runDir, "task-results");
+
+  assert.ok(Array.isArray(entry.access.write_paths), "access.write_paths should be an array");
+  assert.equal(entry.access.write_paths.length, 1, "should have one write path per task");
+  assert.ok(
+    entry.access.write_paths[0].startsWith(taskResultsDir),
+    "write_path should be inside task-results/",
+  );
+  assert.ok(
+    !entry.access.write_paths.includes(taskResultsDir),
+    "write_paths should not contain the task-results directory itself",
+  );
+  assert.ok(
+    !entry.access.write_paths.includes(runDir),
+    "write_paths should not contain the run directory",
+  );
+  assert.ok(
+    !entry.access.write_paths.includes(artifactsDir),
+    "write_paths should not contain the repo root or artifacts dir",
+  );
+});
+
+await test("FINDING-018: dispatch plan entries include forbidden_patterns for common stray filenames", async (t) => {
+  const { artifactsDir } = await makeArtifactsDir(singlePacketTask());
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  await run(artifactsDir, { dispatch: { canary: false } });
+
+  const plan = await readJson(join(join(artifactsDir, "runs", RUN_ID), "dispatch-plan.json"));
+  const entry = plan[0];
+
+  assert.ok(Array.isArray(entry.access.forbidden_patterns), "access.forbidden_patterns should be an array");
+  assert.ok(
+    entry.access.forbidden_patterns.some((p) => p.includes("packet-") && p.includes("result")),
+    "forbidden_patterns should include a packet-result glob",
+  );
+  assert.ok(
+    entry.access.forbidden_patterns.some((p) => p.includes("audit_result")),
+    "forbidden_patterns should include an audit_result glob",
+  );
+});

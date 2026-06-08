@@ -1048,6 +1048,7 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
     assert.equal(summary.largest_packet.total_lines, 70);
     assert.equal(summary.largest_packet.estimated_tokens > 0, true);
     assert.deepEqual(Object.keys(plan[0]).sort(), [
+      "access",
       "complexity",
       "description",
       "model_hint",

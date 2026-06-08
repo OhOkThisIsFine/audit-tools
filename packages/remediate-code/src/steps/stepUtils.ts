@@ -59,6 +59,13 @@ export function specIndicatesNoChange(
   return NO_CHANGE_RE.test(spec?.concrete_change ?? "");
 }
 
+export function rationaleAsksForRetry(rationale: string | undefined): boolean {
+  if (!rationale) return false;
+  return /\b(deferred?|retry|rerun|requeue|later|dedicated pass|follow-?up|after .*lands?|depends on|blocked)\b/i.test(
+    rationale,
+  );
+}
+
 export function classifyFindingRisk(finding: Finding, spec: ItemSpec): FindingClassification {
   const lens = finding.lens.toLowerCase();
   const change = spec.concrete_change.toLowerCase();

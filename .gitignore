@@ -44,3 +44,4 @@ dist/
 /packages/audit-code/Codeauditor-lambda.audit-artifacts/
 /packages/audit-code/.audit-tools/
 /packages/remediate-code/.audit-tools/
+.remediation-artifacts/

@@ -24,6 +24,7 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --import tsx/esm --test tests/*.test.mjs",
+    "test:single": "npm run build && node --import tsx/esm --test",
     "release:patch": "node scripts/release-and-publish.mjs patch --bump-only",
     "release:minor": "node scripts/release-and-publish.mjs minor --bump-only",
     "release:major": "node scripts/release-and-publish.mjs major --bump-only",

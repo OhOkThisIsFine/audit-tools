@@ -191,6 +191,14 @@ describe("buildDispatchQuota", () => {
     expect(quota.confidence).toBeDefined();
     expect(quota.source).toBeDefined();
     expect(quota.resolved_limits).toBeDefined();
+    expect(quota.binding_cap).toBe("host_concurrency");
+    expect(quota.capacity_pools).toEqual([
+      expect.objectContaining({
+        pool_id: "claude-code/*",
+        slots: 5,
+        binding_cap: "host_concurrency",
+      }),
+    ]);
   });
 
   it("works for implement phase", async () => {
@@ -297,6 +305,12 @@ describe("scheduleWave — quota-enabled path", () => {
     expect(result.wave_size).toBeGreaterThan(0);
     expect(result.confidence).toBeDefined();
     expect(result.source).toBeDefined();
+    expect(result.capacity_pools).toEqual([
+      expect.objectContaining({
+        pool_id: "claude-code/*",
+        slots: result.wave_size,
+      }),
+    ]);
   });
 });
 

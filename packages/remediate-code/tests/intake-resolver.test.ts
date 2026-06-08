@@ -124,7 +124,7 @@ describe("resolveIntakeStep", () => {
     expect(result.step.status).toBe("blocked");
   });
 
-  it("audit-findings JSON fast-path returns state result without writing a manifest", async () => {
+  it("audit-findings JSON routes through intake with a structured_audit manifest", async () => {
     const artifactsDir = join(TEST_DIR, "artifacts-fast-path");
     const intakeDir = join(artifactsDir, "intake");
     await mkdir(intakeDir, { recursive: true });
@@ -157,14 +157,107 @@ describe("resolveIntakeStep", () => {
       ...stubs,
     });
 
-    // Fast-path: returns a state result (not a step)
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("synthesize_intake");
+    expect(result.step.status).toBe("ready");
+
+    const manifestRaw = await readFile(join(intakeDir, "source-manifest.json"), "utf8");
+    const manifest = JSON.parse(manifestRaw) as IntakeSourceManifest;
+    expect(manifest.sources).toEqual([
+      {
+        type: "structured_audit",
+        path: auditFindingsPath,
+        label: "audit-findings",
+      },
+    ]);
+  });
+
+  it("ready structured_audit intake consumes the original JSON deterministically", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-structured-ready");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+
+    const auditFindingsPath = join(TEST_DIR, "audit-findings-ready.json");
+    await writeFile(
+      auditFindingsPath,
+      JSON.stringify({
+        contract_version: "audit-findings/v1alpha1",
+        findings: [
+          {
+            id: "AUD-001",
+            title: "Structured finding",
+            category: "correctness",
+            severity: "medium",
+            confidence: "high",
+            lens: "correctness",
+            summary: "Fix structured issue.",
+            affected_files: [{ path: "src/a.ts" }],
+            evidence: ["evidence"],
+          },
+        ],
+        work_blocks: [
+          {
+            id: "WB-001",
+            finding_ids: ["AUD-001"],
+            depends_on: [],
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(intakeDir, "source-manifest.json"),
+      JSON.stringify({
+        schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+        created_from: "input",
+        sources: [
+          {
+            type: "structured_audit",
+            path: auditFindingsPath,
+            label: "audit-findings",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(intakeDir, "intake-summary.json"),
+      JSON.stringify({
+        schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
+        ready: true,
+        source_type: "structured_audit",
+        goals: ["Remediate the structured audit findings."],
+        non_goals: [],
+        constraints: [],
+        affected_files: [],
+        open_questions: [],
+      }),
+      "utf8",
+    );
+    await writeFile(join(intakeDir, "remediation-brief.md"), "# Structured intake\n", "utf8");
+
+    const store = new StateStore(artifactsDir);
+    const stubs = makeStubs();
+
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false,
+        existing: [],
+        missing: [],
+        checked: [],
+      },
+      store,
+      ...stubs,
+    });
+
     expect(result.kind).toBe("state");
     if (result.kind !== "state") throw new Error("expected state");
-    expect(result.state.status).not.toBe("pending");
-
-    // No source_manifest should have been written to artifactsDir
-    const { existsSync } = await import("node:fs");
-    expect(existsSync(join(intakeDir, "source-manifest.json"))).toBe(false);
+    expect(result.state.status).toBe("planning");
+    expect(result.state.plan?.findings.map((finding) => finding.id)).toEqual(["AUD-001"]);
+    expect(stubs.extractFindingsPrompt).not.toHaveBeenCalled();
   });
 
   it("existing document input builds a document source manifest and returns synthesize_intake step", async () => {

@@ -34,11 +34,15 @@ test("renderWorkerPrompt uses argv JSON for agent tasks and falls back to the de
   );
   assert.doesNotMatch(prompt, /\.schema\.json/);
   assert.match(prompt, /review only the tasks listed/i);
+  assert.match(prompt, /Repository root: \/repo/);
+  assert.match(prompt, /Set the shell\/tool workdir to the repository root/i);
   assert.match(prompt, /Do not add tasks/i);
   assert.match(prompt, /Do not use shell search commands/i);
   assert.match(prompt, /do not[\s\S]*write result_path/i);
   assert.match(prompt, /tasks tagged lens_verification/i);
   assert.match(prompt, /Write only the JSON array of AuditResult objects to:/i);
+  assert.match(prompt, /do not pipe an inline foreach statement directly into ConvertTo-Json/i);
+  assert.match(prompt, /Assign the foreach output to a variable first/i);
   assert.match(prompt, /worker command ingests audit_results_path and writes result_path/i);
   assert.match(
   prompt,
