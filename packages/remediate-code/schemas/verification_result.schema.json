@@ -7,7 +7,7 @@
   "properties": {
     "finding_id": { "type": "string" },
     "passed": { "type": "boolean" },
-    "reason": { "type": "string" }
+    "reason": { "type": "array", "items": { "type": "string" } }
   },
   "additionalProperties": false
 }

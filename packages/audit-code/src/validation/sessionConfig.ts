@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { execFile } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { promisify } from "node:util";
 import {
@@ -14,7 +14,7 @@ import {
   pushValidationIssue,
 } from "@audit-tools/shared";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const VALID_PROVIDERS = new Set<ProviderName>(PROVIDER_NAMES);
 const VALID_UI_MODES = new Set<SessionUiMode>(SESSION_UI_MODES);
@@ -176,7 +176,10 @@ function validateAgentProviderSection(
 async function commandExists(command: string): Promise<boolean> {
   const lookupCommand = process.platform === "win32" ? "where" : "which";
   try {
-    await execAsync(`${lookupCommand} ${command}`);
+    // execFile (no shell) passes `command` as a literal argv entry, so shell
+    // metacharacters in a config-supplied command cannot be interpreted or
+    // executed during environment validation.
+    await execFileAsync(lookupCommand, [command]);
     return true;
   } catch {
     return false;
