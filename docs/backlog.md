@@ -18,6 +18,19 @@ rather than "where the code is today."
 
 ## Known friction (agent / dev experience)
 
+- **Release CI-wait loop floods stdout.** `packages/*/scripts/release-and-publish.mjs`
+  logs every 5s poll attempt while waiting on the CI publish run, so a normal
+  ~9-min release writes ~5,000 lines / 100k+ tokens to the task output — naively
+  `Read`-ing that file overflows context. Tail it (`Get-Content -Tail N`) instead
+  of whole-reading; consider throttling the poll log to status-changes or every
+  Nth attempt.
+- **Global install defers `postinstall` under npm's allow-scripts policy.**
+  `npm install -g auditor-lambda` installs the bin but prints
+  `npm warn allow-scripts … (postinstall: node scripts/postinstall.mjs)` and skips
+  it, so the host-integration deploy (OpenCode config + `/audit-code` skill/prompt)
+  silently doesn't run. Finish with `npm approve-scripts auditor-lambda` or invoke
+  `postinstall.mjs` manually. (This also gates the overbroad-perms deploy flagged
+  by `CFG-4996560e`, so it's not purely a regression.)
 - **`t.mock.module` is unusable in audit-code tests.** audit-code runs tests via
   `node --import tsx/esm --test`; `t.mock.module` needs
   `--experimental-test-module-mocks` and conflicts with the tsx/esm loader, so it
@@ -180,6 +193,26 @@ intent before `runPlanPhase`. (This is the deferred `FINDING-012` from the
   null-returning stubs change nothing at runtime. Revisit only if a provider gains
   a real proactive rate-limit endpoint. This belongs with heterogeneous,
   quota-aware dispatch.
+
+### audit-code: scope postinstall's deployed OpenCode permissions to the auditor agent
+
+- **`CFG-4996560e` (triaged 2026-06-09, confirmed-but-design-sensitive).**
+  `packages/audit-code/scripts/postinstall.mjs` deploys, into the user's **global**
+  OpenCode config, a top-level `permission.bash: {'*':'allow'}` + `external_directory:
+  {'*':'allow'}` (with a denylist). Broad-allow-with-denylist is the project's
+  *intentional* autonomy model (the repo's own `opencode.json` uses it), but applying it
+  at the **global top level** widens permissions for *all* OpenCode usage, not just audit
+  runs. Fix direction: keep the broad perms on the `auditor` agent (the `/audit-code`
+  command runs as `agent: 'auditor'`) and minimize the global top-level default — drop the
+  forced `external_directory: {'*':'allow'}` in `mergeOpenCodeGlobalConfig` and stop
+  seeding `bash['*']='allow'` at top level so it falls back to `ask`. Intricacy: the broad
+  value flows through the shared `mergeOpenCodePermissionRule`/`mergeOpenCodePermissionConfig`
+  helpers (forced `managedRules` + `'*'` defaulting), feeding both scopes from one
+  `renderOpenCodePermissionConfig()`; splitting them needs care. Validate against **real
+  OpenCode** (agent/subtask permission inheritance can't be unit-tested) and update
+  `tests/postinstall-contract.test.mjs`. Deferred from the 2026-06-09 curated-highs pass
+  (the other 4 highs were fixed directly); see
+  `audit/2026-06-09/curated-remediation-set.README.md`.
 
 ## Features to add later
 
