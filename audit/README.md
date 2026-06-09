@@ -4,6 +4,13 @@ A self-audit of this repository, produced by running `/audit-code` on it
 (2026-06-01). **This folder is the deliverable set — start here.** Findings are
 advisory: verify each against current source before acting.
 
+> **⚠ Two self-audits now exist.** This is the **2026-06-01** curated/triaged
+> baseline. A newer **2026-06-09** run (raw, untriaged, **281 findings**) lives in
+> [`2026-06-09/`](2026-06-09/). Substantial remediation has shipped since this
+> June-1 report (later releases plus the 2026-06 remediation pass), so re-verify
+> the "Remaining backlog" below against current source. The **reconciled, current
+> plan** lives in [`docs/backlog.md`](../docs/backlog.md).
+
 ## Deliverables (remediate from these)
 
 - **`audit-report.md`** — the human-facing report: **392 findings**
