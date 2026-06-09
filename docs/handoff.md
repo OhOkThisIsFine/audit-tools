@@ -8,10 +8,10 @@ _Last updated: 2026-06-09._
 
 ## Current state
 
-- **Published:** `@audit-tools/shared@0.10.1` / `auditor-lambda@0.11.2` /
-  `remediator-lambda@0.10.1` are live. The cross-orchestrator scope/intent
-  checkpoint landed in-tree after that (Stages 0/A1/A2/R1/R2 — both suites green);
-  **not yet released.** Check `npm view` / git tags for the latest.
+- **Published:** `@audit-tools/shared@0.11.0` / `auditor-lambda@0.12.0` /
+  `remediator-lambda@0.11.0` are live (released 2026-06-09) — the cross-orchestrator
+  scope/intent checkpoint (Stages 0/A1/A2/R1/R2, both suites green). Check
+  `npm view` / git tags for the latest.
 - **Branches:** work lands on `main` (default). Remote is `audit-tools`
   (`OhOkThisIsFine/audit-tools`); no `origin`.
 - **Self-audit findings:** [`audit/2026-06-09/`](../audit/2026-06-09/) — 281 findings;
