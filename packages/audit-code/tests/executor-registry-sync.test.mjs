@@ -38,9 +38,10 @@ test("every PRIORITY obligation is covered by exactly one EXECUTOR_REGISTRY entr
   }
 });
 
-test("isHostDelegationExecutor returns true for design_review and agent", () => {
+test("isHostDelegationExecutor returns true for design_review, agent, and intent_checkpoint_executor", () => {
   assert.equal(isHostDelegationExecutor("design_review"), true);
   assert.equal(isHostDelegationExecutor("agent"), true);
+  assert.equal(isHostDelegationExecutor("intent_checkpoint_executor"), true);
   assert.equal(isHostDelegationExecutor("intake_executor"), false);
   assert.equal(isHostDelegationExecutor("synthesis_executor"), false);
   assert.equal(isHostDelegationExecutor("planning_executor"), false);
@@ -48,7 +49,11 @@ test("isHostDelegationExecutor returns true for design_review and agent", () => 
 });
 
 test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
-  const hostDelegationIds = new Set(["design_review", "agent"]);
+  const hostDelegationIds = new Set([
+    "design_review",
+    "agent",
+    "intent_checkpoint_executor",
+  ]);
   for (const entry of EXECUTOR_REGISTRY) {
     assert.ok(
       entry.kind === "deterministic" || entry.kind === "host_delegation",
@@ -72,8 +77,8 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
   const hostEntries = EXECUTOR_REGISTRY.filter((e) => e.kind === "host_delegation");
   assert.deepEqual(
     hostEntries.map((e) => e.id).sort(),
-    ["agent", "design_review"],
-    "Exactly 'agent' and 'design_review' should have kind host_delegation",
+    ["agent", "design_review", "intent_checkpoint_executor"],
+    "Exactly 'agent', 'design_review', and 'intent_checkpoint_executor' should have kind host_delegation",
   );
 });
 

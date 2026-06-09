@@ -717,6 +717,7 @@ describe("buildCoverageLedger", () => {
       planId: "PLAN-X",
       sourceFindings: sourceFindings as any,
       droppedNoEvidence: ["C"],
+      droppedByCheckpoint: [],
       mergeMap: new Map([["B", "A"]]),
       items: { A: { finding_id: "A", status: "pending", block_id: "B-001" } },
     });

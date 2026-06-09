@@ -1621,20 +1621,35 @@ async function buildConfirmIntentStep(ctx: {
     prompt: `
 # Confirm Remediation Scope and Intent
 
-Please review the intake summary at \`.audit-tools/remediation/intake/intake-summary.json\`.
+Please review the intake summary at \`.audit-tools/remediation/intake/intake-summary.json\` (and the audit report, if this run consumes one).
 
 Confirm or refine the remediation scope and intent by writing a valid \`intent_checkpoint.json\` artifact under \`.audit-tools/remediation/\`.
 
-The JSON must follow this structure:
+Only \`scope_summary\` and \`intent_summary\` are required; add the optional fields to narrow what gets remediated:
+
 \`\`\`json
 {
   "schema_version": "intent-checkpoint/v1",
-  "confirmed_at": "ISO-8601-timestamp",
-  "scope_summary": "Description of the confirmed files and directories in scope",
-  "intent_summary": "Description of the goal (e.g. full-remediation or delta)",
-  "confirmed_by": "host"
+  "confirmed_at": "<ISO-8601 timestamp>",
+  "confirmed_by": "host",
+  "scope_summary": "<the files/areas in scope>",
+  "intent_summary": "<the goal, e.g. full-remediation / security-only>",
+  "free_form_intent": "<optional: guidance threaded into remediation worker prompts>",
+  "filters": {
+    "severity": ["critical", "high"],
+    "lenses": ["security", "reliability"],
+    "packages": ["<package or path prefix>"],
+    "themes": ["<theme id>"]
+  },
+  "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],
+  "must_not_touch": ["<glob>"]
 }
 \`\`\`
+
+- \`filters\` drop findings that don't match BEFORE planning, so only the work you want is remediated. Valid severities: \`critical\`, \`high\`, \`medium\`, \`low\`, \`info\`. Valid lenses: \`correctness\`, \`architecture\`, \`maintainability\`, \`security\`, \`reliability\`, \`performance\`, \`data_integrity\`, \`tests\`, \`operability\`, \`config_deployment\`, \`observability\`. Draw \`packages\`/\`themes\` from the findings in the audit report.
+- \`excluded_scope\` drops findings whose files match a path or directory prefix; \`must_not_touch\` globs are never written.
+- Skipped findings are listed in the final remediation report under "Skipped by Intent Checkpoint".
+- Leave the optional fields out to remediate everything in the report.
 
 Once the file is written, run:
 

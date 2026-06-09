@@ -36,8 +36,8 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
 
   assert.equal(
     ids.length,
-    14,
-    `Expected 14 obligation ids in the CLAUDE.md chain sentence, found ${ids.length}: ${ids.join(", ")}`,
+    15,
+    `Expected 15 obligation ids in the CLAUDE.md chain sentence, found ${ids.length}: ${ids.join(", ")}`,
   );
 
   // doc == code: same ids, same order.
@@ -50,16 +50,17 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
   // Spot-check the endpoints and the three obligations whose omission this
   // finding fixed, so a regression points at the exact gap.
   assert.equal(PRIORITY[0], "repo_manifest");
-  assert.equal(PRIORITY[13], "synthesis_narrative_current");
+  assert.equal(PRIORITY[14], "synthesis_narrative_current");
 
   assert.ok(PRIORITY.includes("graph_enrichment_current"));
   assert.ok(PRIORITY.includes("design_assessment_current"));
   assert.ok(PRIORITY.includes("design_review_completed"));
 
-  // The three are inserted immediately after `structure_artifacts` (index 4)
-  // and before `planning_artifacts`.
+  // graph/design obligations sit immediately after `structure_artifacts`
+  // (index 4); the intent checkpoint sits after design review, before planning.
   assert.equal(PRIORITY.indexOf("graph_enrichment_current"), 5);
   assert.equal(PRIORITY.indexOf("design_assessment_current"), 6);
   assert.equal(PRIORITY.indexOf("design_review_completed"), 7);
-  assert.equal(PRIORITY.indexOf("planning_artifacts"), 8);
+  assert.equal(PRIORITY.indexOf("intent_checkpoint_current"), 8);
+  assert.equal(PRIORITY.indexOf("planning_artifacts"), 9);
 });

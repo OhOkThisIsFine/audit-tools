@@ -526,14 +526,19 @@ export function buildPacketPrompt(params: {
   taskSections: string[];
   submitCommand: string;
   repoRoot?: string;
+  freeFormIntent?: string;
 }): string {
-  const { packet, fileList, largeFileSection, taskSections, submitCommand, repoRoot } = params;
+  const { packet, fileList, largeFileSection, taskSections, submitCommand, repoRoot, freeFormIntent } = params;
   const largeFileMode = isIsolatedLargeFilePacket(packet);
+  const intentSection = freeFormIntent?.trim()
+    ? ["## Audit intent", freeFormIntent.trim(), ""]
+    : [];
   return [
     "You are a code auditor. Review this packet once, then submit exactly one result per listed task.",
     repoRoot ? `Repository root: ${repoRoot}` : "Repository root: use the root from the step contract.",
     "Set the shell/tool workdir to the repository root when running backend commands.",
     "",
+    ...intentSection,
     "## Packet",
     `packet_id: ${packet.packet_id}`,
     `task_count: ${packet.task_ids.length}`,
@@ -931,7 +936,7 @@ export async function prepareDispatchArtifacts(params: {
       });
     }
 
-    const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection, taskSections, submitCommand, repoRoot: reviewRoot });
+    const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection, taskSections, submitCommand, repoRoot: reviewRoot, freeFormIntent: bundle.intent_checkpoint?.free_form_intent });
     await writeFile(promptPath, prompt, "utf8");
     const packetWritePaths = packetTasks
       .map((task) => resultPathByTaskId.get(task.task_id))

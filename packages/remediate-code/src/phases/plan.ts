@@ -10,7 +10,7 @@ import {
 } from "../state/types.js";
 import { writeFile, readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import type { AuditFindingsReport, FindingTheme } from "@audit-tools/shared";
+import type { AuditFindingsReport, FindingTheme, IntentCheckpoint } from "@audit-tools/shared";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
@@ -28,6 +28,7 @@ import {
   deduplicateCrossLensFindings,
   fixupBlocksAfterDedup,
 } from "../dedup/crossLensDedup.js";
+import { filterFindingsByCheckpoint } from "../intent/checkpointFilter.js";
 import {
   validateRemediationPlan,
   validateFinding,
@@ -619,10 +620,12 @@ export function buildCoverageLedger(params: {
   planId: string;
   sourceFindings: Finding[];
   droppedNoEvidence: string[];
+  droppedByCheckpoint: string[];
   mergeMap: Map<string, string>;
   items: Record<string, RemediationItemState>;
 }): CoverageLedger {
   const dropped = new Set(params.droppedNoEvidence);
+  const byCheckpoint = new Set(params.droppedByCheckpoint);
   const entries: CoverageLedgerEntry[] = params.sourceFindings.map((f) => {
     if (dropped.has(f.id)) {
       return {
@@ -641,6 +644,15 @@ export function buildCoverageLedger(params: {
         folded_into: survivor,
       };
     }
+    if (byCheckpoint.has(f.id)) {
+      return {
+        finding_id: f.id,
+        title: f.title,
+        disposition: "dropped_by_checkpoint",
+        rationale:
+          "Finding excluded by the intent checkpoint (filter or excluded scope).",
+      };
+    }
     return {
       finding_id: f.id,
       title: f.title,
@@ -657,6 +669,7 @@ export function buildCoverageLedger(params: {
     planned_count: count("planned"),
     folded_count: count("folded_into"),
     dropped_count: count("dropped_no_evidence"),
+    checkpoint_dropped_count: count("dropped_by_checkpoint"),
     entries,
   };
 }
@@ -877,6 +890,32 @@ export async function runPlanPhase(
   findings = dedup.findings;
   blocks = fixupBlocksAfterDedup(blocks, dedup.mergeMap);
 
+  // Intent checkpoint: drop findings the host filtered out (by severity / lens /
+  // package / theme) or excluded by path, so only the requested work is planned.
+  // Dropped findings are recorded in the coverage ledger and the final report.
+  let intentCheckpoint: IntentCheckpoint | undefined;
+  try {
+    intentCheckpoint = await readOptionalJsonFile<IntentCheckpoint>(
+      join(options.artifactsDir, "intent_checkpoint.json"),
+    );
+  } catch {
+    console.warn(
+      "Plan: intent_checkpoint.json was unreadable; ignoring checkpoint filters.",
+    );
+  }
+  const { kept: keptFindings, droppedIds: droppedByCheckpoint } =
+    filterFindingsByCheckpoint(findings, intentCheckpoint);
+  if (droppedByCheckpoint.length > 0) {
+    console.warn(
+      `Plan: intent checkpoint dropped ${droppedByCheckpoint.length} finding(s) from remediation.`,
+    );
+    findings = keptFindings;
+    const keptIds = new Set(findings.map((f) => f.id));
+    blocks = blocks
+      .map((b) => ({ ...b, items: (b.items ?? []).filter((id) => keptIds.has(id)) }))
+      .filter((b) => (b.items ?? []).length > 0);
+  }
+
   // Fallback blocks computation if none provided
   let blockStrategy: RemediationPlan["block_strategy"] | undefined;
   if (blocks.length === 0 && findings.length > 0) {
@@ -947,6 +986,7 @@ export async function runPlanPhase(
     planId: plan.plan_id,
     sourceFindings,
     droppedNoEvidence: findingsWithoutEvidence,
+    droppedByCheckpoint,
     mergeMap: dedup.mergeMap,
     items,
   });

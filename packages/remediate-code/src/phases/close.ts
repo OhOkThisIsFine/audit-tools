@@ -523,6 +523,17 @@ function buildRemediationReportMarkdown(
     }
   }
 
+  const skippedByCheckpoint = (state.plan_coverage?.entries ?? []).filter(
+    (e) => e.disposition === "dropped_by_checkpoint",
+  );
+  if (skippedByCheckpoint.length > 0) {
+    reportContent += `\n## Skipped by Intent Checkpoint\n\n`;
+    reportContent += `${skippedByCheckpoint.length} finding(s) were excluded from remediation by the intent checkpoint (severity/lens/package/theme filters or excluded scope):\n`;
+    for (const entry of skippedByCheckpoint) {
+      reportContent += `- **${entry.finding_id}**${entry.title ? `: ${entry.title}` : ""}\n`;
+    }
+  }
+
   reportContent += `\n## Closing Action\n\nAction: ${state.closing_plan!.action}\n`;
   reportContent += `Status: ${closingResult.status}\n`;
   if (e2ePassed !== undefined) {

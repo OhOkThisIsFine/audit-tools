@@ -103,7 +103,7 @@ The core loop lives in `src/orchestrator/advance.ts` (`advanceAudit`). Each invo
 3. Dispatches to exactly one executor (intake → disposition → structure → planning → agent review → ingestion → runtime validation → synthesis).
 4. Persists updated artifacts and returns a structured execution summary.
 
-The priority chain in `nextStep.ts`: `repo_manifest` → `file_disposition` → `auto_fixes_applied` → `syntax_resolved` → `structure_artifacts` → `graph_enrichment_current` → `design_assessment_current` → `design_review_completed` → `planning_artifacts` → `audit_tasks_completed` → `audit_results_ingested` → `runtime_validation_current` → `synthesis_current` → `synthesis_narrative_current`. Synthesis emits the canonical `audit-findings.json` (the machine contract; `audit-report.md` is a render of it); the optional `synthesis_narrative_current` step layers an LLM narrative (themes / executive summary / top risks) onto it and omits cleanly without a provider.
+The priority chain in `nextStep.ts`: `repo_manifest` → `file_disposition` → `auto_fixes_applied` → `syntax_resolved` → `structure_artifacts` → `graph_enrichment_current` → `design_assessment_current` → `design_review_completed` → `intent_checkpoint_current` → `planning_artifacts` → `audit_tasks_completed` → `audit_results_ingested` → `runtime_validation_current` → `synthesis_current` → `synthesis_narrative_current`. Synthesis emits the canonical `audit-findings.json` (the machine contract; `audit-report.md` is a render of it); the optional `synthesis_narrative_current` step layers an LLM narrative (themes / executive summary / top risks) onto it and omits cleanly without a provider.
 
 ### Artifact system
 

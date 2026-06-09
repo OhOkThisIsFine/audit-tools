@@ -120,9 +120,10 @@ export function buildSyntheticResults(tasks, lineIndex) {
  * planning step. Returns `{ planning, lineIndex }` where `lineIndex` is
  * `FIXTURE_LINE_INDEX`.
  *
- * The 7-step sequence (intake → preparedBundle construction → structure →
- * enrichment → designAssessment → designReview → planning) was duplicated
- * verbatim in both orchestration.test.mjs and next-step-narrative.test.mjs.
+ * The 8-step sequence (intake → preparedBundle construction → structure →
+ * enrichment → designAssessment → designReview → intentCheckpoint → planning)
+ * was duplicated verbatim in both orchestration.test.mjs and
+ * next-step-narrative.test.mjs.
  */
 export async function advanceFixtureToPlanning(root) {
   const intake = await advanceAudit({}, { root });
@@ -152,7 +153,14 @@ export async function advanceFixtureToPlanning(root) {
   const designAssessment = await advanceAudit(enrichment.updated_bundle);
   const designReview = await advanceAudit(designAssessment.updated_bundle);
 
-  const planning = await advanceAudit(designReview.updated_bundle, {
+  // The intent checkpoint sits between design review and planning. Headless, it
+  // auto-completes a default full-scope checkpoint; the executor requires a root
+  // for scope resolution.
+  const intentCheckpoint = await advanceAudit(designReview.updated_bundle, {
+    root,
+  });
+
+  const planning = await advanceAudit(intentCheckpoint.updated_bundle, {
     root,
     lineIndex: FIXTURE_LINE_INDEX,
   });

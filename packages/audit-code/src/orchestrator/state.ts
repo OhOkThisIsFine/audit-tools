@@ -121,6 +121,17 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
     ),
   );
 
+  obligations.push(
+    obligation(
+      "intent_checkpoint_current",
+      staleOrSatisfied(
+        staleArtifacts,
+        ["intent_checkpoint.json"],
+        has(bundle.intent_checkpoint),
+      ),
+    ),
+  );
+
   const planningReady =
     has(bundle.coverage_matrix) &&
     has(bundle.flow_coverage) &&

@@ -33,6 +33,7 @@ import {
   type EdgeReasoningResults,
 } from "../orchestrator/edgeReasoning.js";
 import { renderDesignReviewPrompt } from "../orchestrator/designReviewPrompt.js";
+import { computeScopePreDigest } from "../orchestrator/intentCheckpointExecutor.js";
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
 import { buildPathLookup } from "../extractors/graph.js";
 import { buildDispositionMap } from "../extractors/disposition.js";
@@ -56,6 +57,7 @@ import {
 } from "./reviewRun.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
 import { renderSemanticReviewStep } from "./semanticReviewStep.js";
+import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
 import { writeCurrentStep } from "./steps.js";
 import {
   nextStepCommand,
@@ -443,6 +445,7 @@ export async function checkFinalizationCycle(ctx: {
 async function runDeterministicForNextStep(params: NextStepParams): Promise<
   | { kind: "semantic_review"; state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun }
   | { kind: "design_review"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
   | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
   | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
@@ -526,6 +529,14 @@ async function runDeterministicForNextStep(params: NextStepParams): Promise<
       const branch = await handleSynthesisNarrativeBranch(params, bundle, state);
       if (branch.action === "continue") continue;
       return branch.result;
+    }
+
+    // Confirm-intent host step: when the checkpoint is missing, hand control to
+    // the host to confirm scope/intent. The host writes intent_checkpoint.json
+    // (detected by deriveAuditState on re-invocation), so there is no incoming
+    // artifact to consume — emit the step directly.
+    if (decision.selected_executor === "intent_checkpoint_executor") {
+      return { kind: "confirm_intent", state, bundle };
     }
 
     if (isHostDelegationExecutor(decision.selected_executor ?? "")) {
@@ -736,6 +747,35 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         design_review_results: designReviewResultsPath,
       },
       prompt: fullPrompt,
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "confirm_intent") {
+    const intentCheckpointPath = join(artifactsDir, "intent_checkpoint.json");
+    const continueCommand = nextStepCommand(root, artifactsDir);
+    const preDigest = computeScopePreDigest(
+      result.bundle,
+      root,
+      getFlag(argv, "--since"),
+    );
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "confirm_intent",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Write intent_checkpoint.json with the confirmed scope and intent, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        intent_checkpoint: intentCheckpointPath,
+      },
+      prompt: renderConfirmIntentPrompt(preDigest, {
+        intentCheckpointPath,
+        continueCommand,
+      }),
     });
     console.log(JSON.stringify(step, null, 2));
     return;

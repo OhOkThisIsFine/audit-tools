@@ -14,7 +14,7 @@ function buildBaseFindingsReport(
   bundle: ArtifactBundle,
   results: AuditResult[],
 ) {
-  return buildAuditFindingsReport(
+  const report = buildAuditFindingsReport(
     buildAuditReportModel({
       results,
       unitManifest: bundle.unit_manifest,
@@ -27,6 +27,12 @@ function buildBaseFindingsReport(
       designAssessment: bundle.design_assessment,
     }),
   );
+  // Record the host-confirmed exclusions in the machine contract so omissions
+  // are explicit and machine-readable, not just rendered in the markdown.
+  const excludedScope = bundle.intent_checkpoint?.excluded_scope;
+  return excludedScope && excludedScope.length > 0
+    ? { ...report, excluded_scope: excludedScope }
+    : report;
 }
 
 export function runSynthesisExecutor(
@@ -49,7 +55,7 @@ export function runSynthesisExecutor(
     updated: {
       ...bundle,
       audit_findings: findings,
-      audit_report: renderAuditReportMarkdown(findings, { scope: bundle.scope }),
+      audit_report: renderAuditReportMarkdown(findings, { scope: bundle.scope, intent_checkpoint: bundle.intent_checkpoint }),
     },
     artifacts_written: ["audit-findings.json", "audit-report.md"],
     progress_summary: `Rendered deterministic audit report and canonical findings for ${finalResults.length} audit result entries.`,
@@ -111,7 +117,7 @@ export function runSynthesisNarrativeExecutor(
     updated: {
       ...bundle,
       audit_findings: enriched,
-      audit_report: renderAuditReportMarkdown(enriched, { scope: bundle.scope }),
+      audit_report: renderAuditReportMarkdown(enriched, { scope: bundle.scope, intent_checkpoint: bundle.intent_checkpoint }),
       synthesis_narrative: record,
     },
     artifacts_written: [

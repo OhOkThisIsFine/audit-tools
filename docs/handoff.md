@@ -8,9 +8,10 @@ _Last updated: 2026-06-09._
 
 ## Current state
 
-- **Published:** `auditor-lambda@0.11.1` is live. The 2026-06-09 batch (4 curated
-  high fixes + meta-reflections v1) is being released as shared/audit-code/remediate-code
-  patches at the end of this session — check `npm view` / git tags for the latest.
+- **Published:** `@audit-tools/shared@0.10.1` / `auditor-lambda@0.11.2` /
+  `remediator-lambda@0.10.1` are live. The cross-orchestrator scope/intent
+  checkpoint landed in-tree after that (Stages 0/A1/A2/R1/R2 — both suites green);
+  **not yet released.** Check `npm view` / git tags for the latest.
 - **Branches:** work lands on `main` (default). Remote is `audit-tools`
   (`OhOkThisIsFine/audit-tools`); no `origin`.
 - **Self-audit findings:** [`audit/2026-06-09/`](../audit/2026-06-09/) — 281 findings;
@@ -20,13 +21,7 @@ _Last updated: 2026-06-09._
 
 ## Next tasks, in priority order
 
-1. **LLM scope/intent checkpoint** — the highest-signal open item.
-   Spec: [`backlog.md` → Deferred fixes](backlog.md). **Scaffolding already exists:**
-   `intent_checkpoint` is a registered artifact (`intent_checkpoint.json`, intake phase)
-   in `packages/audit-code/src/io/artifacts.ts` — check what's wired before building.
-   Cross-orchestrator; plan before implementing.
-
-2. **Finish meta-audit reflections (v1 shipped this session).** Remaining:
+1. **Finish meta-audit reflections (v1 shipped earlier).** Remaining:
    (a) synthesis disk-load of `agent-feedback.jsonl` into the bundle → pass as
    `renderAuditReportMarkdown` `options.reflections` (touches `io/artifacts.ts` +
    the staleness DAG `orchestrator/dependencyMap.ts` — finalization-sensitive, do
@@ -34,13 +29,29 @@ _Last updated: 2026-06-09._
    `remediation-report.md`. See `backlog.md` → "Make agent meta-audit reflections
    a first-class artifact".
 
+2. **Route remediate's structured fast path through `confirm_intent`.** The
+   scope/intent checkpoint shipped 2026-06-09, but a lone `audit-findings.json`
+   input bypasses the confirm step, so its filters/exclusions don't apply.
+   `runPlanPhase` already honors a checkpoint when present — the work is purely
+   routing (emit `confirm_intent` / write an intake summary so the gate fires).
+   Subsumes `FINDING-012`. See `backlog.md`.
+
 3. **`CFG-4996560e`** (deferred fix) — scope postinstall's deployed OpenCode perms
    to the `auditor` agent vs the global top level. Needs real-OpenCode validation
    (agent/subtask inheritance is not unit-testable). Fix direction in `backlog.md`.
 
 4. **Remaining curated highs / triage** — the deferred (backlog) and
    scope-pollution highs are catalogued in `curated-remediation-set.README.md`;
-   most are low-value or subsumed by task 1.
+   most are low-value.
+
+> **Shipped 2026-06-09 — cross-orchestrator scope/intent checkpoint.** Enriched
+> shared `IntentCheckpoint` + schema; audit-code `confirm_intent` host step
+> (reachable, `host_delegation`, deterministic pre-digest, headless auto-complete)
+> that prunes planning by `excluded_scope`, threads `free_form_intent` into worker
+> prompts, and reports excluded scope; remediate-code enriched confirm prompt +
+> `runPlanPhase` filtering (filters/excluded/must_not_touch) with a coverage-ledger
+> `dropped_by_checkpoint` disposition and a "Skipped by Intent Checkpoint" report
+> section. Both suites green.
 
 ## Gotchas (also in auto-memory)
 

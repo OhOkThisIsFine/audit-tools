@@ -96,6 +96,13 @@ function createDecisionBundle(overrides = {}) {
     risk_register: { entries: [] },
     analyzer_capability: { status: "omitted", analyzers: [] },
     design_assessment: { generated_at: "2026-04-22T00:00:00Z", findings: [], review_findings: [], reviewed: true },
+    intent_checkpoint: {
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: "2026-04-22T00:00:00Z",
+      confirmed_by: "host",
+      scope_summary: "test scope",
+      intent_summary: "full-audit",
+    },
     coverage_matrix: createCoverageMatrix(),
     flow_coverage: { flows: [] },
     runtime_validation_tasks: { tasks: [] },

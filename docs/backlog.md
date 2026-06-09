@@ -31,6 +31,17 @@ rather than "where the code is today."
   silently doesn't run. Finish with `npm approve-scripts auditor-lambda` or invoke
   `postinstall.mjs` manually. (This also gates the overbroad-perms deploy flagged
   by `CFG-4996560e`, so it's not purely a regression.)
+- **`opentoken wrap` CLI is not always installed.** The global instruction is to
+  wrap every terminal command in `opentoken wrap <cmd>`, but the `opentoken`
+  binary isn't on PATH in every environment (absent in both bash and PowerShell on
+  a 2026-06 Windows session). When it's missing, run commands directly and route
+  only genuinely large outputs through the `opentoken_transform` MCP tool —
+  wrapping a 2-line build log is pointless.
+- **`coverage_matrix.schema.json` `classification_status` enum is stale.** The code
+  writes `out_of_scope_delta`, `excluded_trivial`, and (new) `out_of_scope_intent`,
+  none of which are in the schema's `enum`. The schema is documentary (not enforced
+  at runtime against real coverage, or these would already fail), but the drift is a
+  trap — add the missing values or drop the enum.
 - **`t.mock.module` is unusable in audit-code tests.** audit-code runs tests via
   `node --import tsx/esm --test`; `t.mock.module` needs
   `--experimental-test-module-mocks` and conflicts with the tsx/esm loader, so it
@@ -108,8 +119,8 @@ rather than "where the code is today."
   scope checkpoint below. **Partly shipped 2026-06-09:** `disposition.ts` now
   excludes `.tgz`/`.tar`/`.gz` archives, npm `_cacache`/`npm-cache`, nested
   `.audit-artifacts/`, and the pipeline's own `audit-findings.json` /
-  `remediation-outcomes.json` contracts. Remaining: honor `.gitignore` generally,
-  and the LLM scope/intent gate below.
+  `remediation-outcomes.json` contracts. Remaining: honor `.gitignore` generally.
+  **The LLM scope/intent gate shipped 2026-06-09** (see Deferred fixes).
 - **`submit-packet` rejects in-boundary `affected_files`.** `file_coverage`
   validation rejects an `affected_files` entry that crosses a packet boundary even
   when the referenced file is in the task's declared boundary list (e.g. a
@@ -128,45 +139,29 @@ rather than "where the code is today."
 
 ## Deferred fixes (product bugs)
 
-### audit-code + remediate-code: add a lightweight scope and intent checkpoint — *highest-signal open item*
+### audit-code + remediate-code: scope & intent checkpoint — *shipped 2026-06-09*
 
-> **Validated by the June 8–9 self-audit.** With no scope gate, the run spent the
-> bulk of its agents auditing `.audit-artifacts/`, tarballs, npm cache, and its
-> own `audit/` output. A single bounded confirmation would have caught all of it.
-> See "Audit scope is polluted by non-source artifacts" above.
+The lightweight scope/intent checkpoint validated by the June 8–9 self-audit
+shipped across both orchestrators. The enriched `IntentCheckpoint` (shared)
+carries `free_form_intent`, `excluded_scope`, `must_not_touch`, and remediate
+`filters` (severity/lens/package/theme); the design now lives in the code +
+`schemas/intent_checkpoint.schema.json` + the Preferences log, not here.
 
-Both orchestrators should confirm scope before expensive planning or multi-agent
-dispatch. After deterministic intake, each tool should propose the scope it
-intends to operate on, explain suspicious inclusions and exclusions, and let the
-user accept the default or provide compact overrides. The default path should be
-one low-friction confirmation, not an extended interview.
+- **audit-code:** a reachable, conversational `confirm_intent` host step (native
+  `host_delegation` + deterministic scope pre-digest + headless auto-complete
+  fallback). Accepted `excluded_scope` prunes planning before tasks are built,
+  `free_form_intent` is threaded into worker packet prompts, and skipped scope is
+  surfaced in the report ("Excluded / Out-of-Scope") and `audit-findings.json`.
+- **remediate-code:** the confirm step prompt is enriched to the full shape, and
+  `runPlanPhase` filters findings (after cross-lens dedup) by
+  filters/excluded_scope/must_not_touch — drops recorded in the coverage ledger
+  (`dropped_by_checkpoint`) and a "Skipped by Intent Checkpoint" report section.
 
-The checkpoint should combine deterministic checks with bounded LLM judgment over
-the deterministically discovered intake. Deterministic intake can identify
-folders, packages, generated outputs, vendored dependencies, build artifacts,
-existing `.audit-tools` state, candidate input documents, finding severities,
-lenses, and work-block counts. The LLM layer should reason about whether that
-discovered shape looks like the intended product scope: e.g. whether
-`node_modules`, `dist`, vendored code, archived experiments, scratch folders,
-stale audit artifacts, or adjacent packages should be included, excluded, or
-called out for the user's decision.
-
-The prompt should receive a pre-digested scope summary, not a broad repo/report
-dump. For audit-code, the proposal should cover repo/folder boundaries,
-ignored/generated areas, selected lenses, and operator guidance such as "focus on
-API contracts" or "skip tests." For remediate-code, it should cover selected input
-documents/contracts, finding filters by severity/theme/package/lens, files or
-packages that must not be touched, and free-form remediation intent. Persist the
-accepted scope and user intent as a durable artifact, feed it into planning and
-worker prompts, and include skipped scope in the final report so omissions are
-explicit.
-
-This checkpoint also subsumes the separate "ask for user approval for intake
-object(s)" idea: even when a perfectly structured and non-stale
-`audit-findings.json` exists, remediate-code should still propose candidate
-inputs before planning. Prefer the canonical auditor contract when present, but
-also look through `docs/` and similar folders for plausible remediation inputs,
-summarize the candidates, and let the user add conversational direction.
+**Remaining:** the pre-digest *lists* scope dirs + auto-exclusions for the host to
+confirm, but the tool does not itself pre-flag *suspicious* inclusions
+(node_modules/dist/vendored) beyond listing them — the host (an LLM agent) makes
+that call. And remediate's structured fast path still bypasses the `confirm_intent`
+step, so filters don't yet apply to a lone `audit-findings.json` input (see below).
 
 ### remediate-code: structured `audit-findings.json` fast path skips intake
 
@@ -184,6 +179,12 @@ input should stay lossless, but it should still allow selectable work blocks,
 severity/theme/package filters, excluded paths, and conversational remediation
 intent before `runPlanPhase`. (This is the deferred `FINDING-012` from the
 2026-06 remediation pass.)
+
+**Update 2026-06-09:** the checkpoint mechanism now exists and `runPlanPhase`
+already honors a checkpoint when present — the remaining work is purely routing:
+make the structured fast path emit the `confirm_intent` step (e.g. write an intake
+summary so the existing gate fires) so its filters/exclusions apply to a lone
+`audit-findings.json` input.
 
 ### remediate-code host-dispatch gaps
 

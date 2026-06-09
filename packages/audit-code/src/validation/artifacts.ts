@@ -66,6 +66,17 @@ export function validateArtifactBundle(
       ]),
     );
   }
+  if (bundle.intent_checkpoint) {
+    issues.push(
+      ...requireKeys(bundle.intent_checkpoint, "intent_checkpoint", [
+        "schema_version",
+        "confirmed_at",
+        "confirmed_by",
+        "scope_summary",
+        "intent_summary",
+      ]),
+    );
+  }
   if (bundle.graph_bundle) {
     issues.push(
       ...requireKeys(

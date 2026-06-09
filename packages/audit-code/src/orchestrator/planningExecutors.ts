@@ -1,7 +1,11 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import { initializeCoverageFromPlan } from "./planning.js";
-import { applyScopeToCoverage, fullAuditScope } from "./scope.js";
+import {
+  applyIntentExclusionsToCoverage,
+  applyScopeToCoverage,
+  fullAuditScope,
+} from "./scope.js";
 import { buildFlowCoverage } from "./flowCoverage.js";
 import { buildRequeuePayload } from "./requeueCommand.js";
 import {
@@ -59,6 +63,12 @@ export async function runPlanningExecutor(
   // Delta scope: only seed + expanded files stay pending; the rest inherit prior
   // completion or are excluded from this run. Full scope is a no-op.
   applyScopeToCoverage(coverage, resolvedScope, bundle.coverage_matrix);
+  // Layer the host-confirmed intent exclusions on top of disposition + scope so
+  // user-pruned scope pollution never becomes an audit task.
+  const intentExcludedPaths = applyIntentExclusionsToCoverage(
+    coverage,
+    bundle.intent_checkpoint?.excluded_scope,
+  );
   const flowCoverage = buildFlowCoverage(bundle.critical_flows, coverage);
   const runtimeCommand = await discoverRuntimeValidationCommand(root);
   const runtimeValidationTasks = buildRuntimeValidationTasks({
@@ -151,6 +161,9 @@ export async function runPlanningExecutor(
       scopeSummary +
       (skippedTrivialPaths.length > 0
         ? ` Skipped ${skippedTrivialPaths.length} trivial path${skippedTrivialPaths.length === 1 ? "" : "s"} from semantic review.`
+        : "") +
+      (intentExcludedPaths.length > 0
+        ? ` Excluded ${intentExcludedPaths.length} path${intentExcludedPaths.length === 1 ? "" : "s"} per the intent checkpoint.`
         : "") +
       (runtimeCommand
         ? ` Runtime validation will use: ${runtimeCommand.join(" ")}.`

@@ -90,8 +90,8 @@ const ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS = new Set([
   "present_report",
 ]);
 
-// Two pause step kinds (analyzer_install + design_review), each may appear
-// at most once; allow a few extra iterations as headroom.
+// Several pause step kinds (analyzer_install + design_review + confirm_intent,
+// plus optional edge_reasoning), each at most once; allow extra headroom.
 const MAX_STRUCTURE_PHASE_PAUSES = 6;
 
 async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrapperOpts = {}) {
@@ -124,6 +124,23 @@ async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrappe
       await writeFile(
         step.artifact_paths.edge_reasoning_results,
         JSON.stringify([], null, 2) + "\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "confirm_intent") {
+      await writeFile(
+        step.artifact_paths.intent_checkpoint,
+        JSON.stringify(
+          {
+            schema_version: "intent-checkpoint/v1",
+            confirmed_at: "2026-04-22T00:00:00Z",
+            confirmed_by: "host",
+            scope_summary: "test scope",
+            intent_summary: "full-audit",
+          },
+          null,
+          2,
+        ) + "\n",
       );
       continue;
     }
