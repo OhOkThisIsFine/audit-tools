@@ -159,3 +159,27 @@ test("renderWorkerPrompt renders bounded executor prompts from argv data instead
   /Write result to: \/repo\/\.audit-tools\/audit\/runs\/run-3\/result\.json/,
   );
 });
+
+test("renderWorkerPrompt invites an optional agent reflection inline, without referencing a schema file", () => {
+  const prompt = renderWorkerPrompt({
+    contract_version: "audit-code-worker/v1alpha1",
+    run_id: "run-reflect",
+    repo_root: "/repo",
+    artifacts_dir: "/repo/.audit-tools/audit",
+    obligation_id: "audit_tasks_completed",
+    preferred_executor: "agent",
+    result_path: "/repo/.audit-tools/audit/runs/run-reflect/result.json",
+    worker_command: ["node", "/repo/bin/worker.js"],
+    audit_results_path: "/repo/.audit-tools/audit/runs/run-reflect/run-results.json",
+  });
+
+  assert.match(prompt, /agent-feedback\.jsonl/, "points at the feedback artifact");
+  assert.match(prompt, /instruction_clarity/, "describes the reflection shape inline");
+  assert.match(
+    prompt,
+    /never let this delay or replace the audit result/i,
+    "frames the reflection as strictly optional",
+  );
+  // The reflection invitation must not reintroduce a schema-file reference.
+  assert.doesNotMatch(prompt, /\.schema\.json/);
+});

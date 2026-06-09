@@ -18,6 +18,10 @@ import type {
 import { buildWorkBlocks, type WorkBlock } from "./workBlocks.js";
 import { mergeFindings } from "./mergeFindings.js";
 import { assignStableFindingIds } from "./findingIdentity.js";
+import {
+  renderProcessFeedbackSection,
+  type AgentReflection,
+} from "./agentReflections.js";
 
 /** Contract version stamped onto the canonical `audit-findings.json`. */
 export const AUDIT_FINDINGS_CONTRACT_VERSION = "audit-tools/audit-findings/v1";
@@ -252,6 +256,12 @@ export function applyNarrative(
 export interface RenderAuditReportOptions {
   /** Scope manifest for the run; when delta, the report header reports it honestly. */
   scope?: AuditScopeManifest;
+  /**
+   * Opt-in agent meta-audit reflections to surface in a "Process Feedback"
+   * section. Omitted/empty renders nothing. The synthesis disk-load that
+   * populates this from `agent-feedback.jsonl` is wired separately.
+   */
+  reflections?: AgentReflection[];
 }
 
 export function renderAuditReportMarkdown(
@@ -354,6 +364,8 @@ export function renderAuditReportMarkdown(
       lines.push("");
     }
   }
+
+  lines.push(...renderProcessFeedbackSection(options.reflections ?? []));
 
   lines.push("## Scope and Coverage", "");
   const scope = options.scope;
