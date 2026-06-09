@@ -450,7 +450,7 @@ test("buildFileDisposition stays stable for Windows-style absolute paths and ove
   assert.match(lockfile?.reason ?? "", /lockfile/i);
   assert.equal(
     getDispositionItem(disposition, "C:\\repo\\archive.TAR.GZ")?.status,
-    "included",
+    "binary",
   );
 });
 
@@ -531,6 +531,55 @@ test("buildFileDisposition excludes bundled .tmp artifacts (e.g. .tmp/opentoken)
   );
   // Real source outside .tmp is still included.
   assert.equal(getDispositionItem(disposition, "src/index.ts")?.status, "included");
+});
+
+test("buildFileDisposition excludes archives, package caches, nested .audit-artifacts, and pipeline output contracts", () => {
+  const repoManifest = makeRepoManifest([
+    "packages/remediate-code/remediator-lambda-0.3.5.tgz",
+    "release/payload.tar",
+    "release/archive.tar.gz",
+    "packages/audit-code/.audit-artifacts/runs/x/task-results/a.json",
+    "packages/remediate-code/smoke/tmp/run-1/npm-cache/_cacache/content-v2/sha512/aa/bb/cc",
+    "audit/audit-findings.json",
+    "audit/audit-report.md",
+    "src/index.ts",
+  ]);
+  const disposition = buildFileDisposition(repoManifest);
+
+  assert.equal(
+    getDispositionItem(disposition, "packages/remediate-code/remediator-lambda-0.3.5.tgz")?.status,
+    "binary",
+  );
+  assert.equal(getDispositionItem(disposition, "release/payload.tar")?.status, "binary");
+  assert.equal(getDispositionItem(disposition, "release/archive.tar.gz")?.status, "binary");
+  assert.equal(
+    getDispositionItem(disposition, "packages/audit-code/.audit-artifacts/runs/x/task-results/a.json")?.status,
+    "generated",
+  );
+  assert.equal(
+    getDispositionItem(
+      disposition,
+      "packages/remediate-code/smoke/tmp/run-1/npm-cache/_cacache/content-v2/sha512/aa/bb/cc",
+    )?.status,
+    "excluded",
+  );
+  assert.equal(getDispositionItem(disposition, "audit/audit-findings.json")?.status, "generated");
+  // The matching markdown render stays doc_only via isDocPath.
+  assert.equal(getDispositionItem(disposition, "audit/audit-report.md")?.status, "doc_only");
+  // Real source is still audited.
+  assert.equal(getDispositionItem(disposition, "src/index.ts")?.status, "included");
+  // Every non-source artifact above is kept out of audit scope.
+  for (const p of [
+    "packages/remediate-code/remediator-lambda-0.3.5.tgz",
+    "packages/audit-code/.audit-artifacts/runs/x/task-results/a.json",
+    "packages/remediate-code/smoke/tmp/run-1/npm-cache/_cacache/content-v2/sha512/aa/bb/cc",
+    "audit/audit-findings.json",
+  ]) {
+    assert.ok(
+      isAuditExcludedStatus(getDispositionItem(disposition, p)?.status),
+      `${p} should be excluded from audit scope`,
+    );
+  }
 });
 
 test("buildFileDisposition excludes extension binary and source map artifacts", () => {

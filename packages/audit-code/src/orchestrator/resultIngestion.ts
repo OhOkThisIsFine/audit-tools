@@ -52,3 +52,36 @@ export function updateAuditTaskStatuses(
     };
   });
 }
+
+/**
+ * Splits raw (unvalidated) audit results into those whose `task_id` is still in
+ * the active task manifest and those orphaned by a later re-plan (e.g. selective-
+ * deepening tasks pruned in a subsequent round). Orphaned results cannot be
+ * ingested — coverage is keyed by the active task set — and must not abort an
+ * otherwise-valid batch at the ingestion validation gate. Returns the retained
+ * results plus the orphaned task ids so the caller can skip-and-warn, or `null`
+ * when there is nothing to filter (not an array, or no active manifest yet),
+ * signaling the caller to pass the results through unchanged.
+ */
+export function partitionOrphanedAuditResults(
+  results: unknown,
+  activeTaskIds: Set<string>,
+): { retained: unknown[]; orphanedTaskIds: string[] } | null {
+  if (!Array.isArray(results) || activeTaskIds.size === 0) {
+    return null;
+  }
+  const orphanedTaskIds: string[] = [];
+  const retained = results.filter((entry) => {
+    const taskId =
+      entry && typeof entry === "object" && !Array.isArray(entry) &&
+      typeof (entry as { task_id?: unknown }).task_id === "string"
+        ? (entry as { task_id: string }).task_id
+        : undefined;
+    if (taskId !== undefined && !activeTaskIds.has(taskId)) {
+      orphanedTaskIds.push(taskId);
+      return false;
+    }
+    return true;
+  });
+  return { retained, orphanedTaskIds };
+}

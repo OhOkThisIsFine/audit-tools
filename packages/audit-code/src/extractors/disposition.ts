@@ -2,6 +2,7 @@ import type { RepoManifest } from "../types.js";
 import type { FileDisposition, FileDispositionItem, FileDispositionStatus } from "@audit-tools/shared";
 import {
   isNodeModulesOrGit,
+  isPackageManagerCachePath,
   isTmpPath,
   isBuildOutput,
   isVendorPath,
@@ -12,6 +13,7 @@ import {
   isDocPath,
   isGeneratedPath,
   isAuditArtifactPath,
+  isAuditToolOutputArtifact,
   isGeneratedTestArtifactPath,
   isGeneratedInstallArtifactPath,
   isExamplesOrFixturesPath,
@@ -23,6 +25,13 @@ function inferDisposition(path: string): FileDispositionItem {
 
   if (isNodeModulesOrGit(normalized)) {
     return { path, status: "excluded", reason: "node_modules or .git excluded by convention." };
+  }
+  if (isPackageManagerCachePath(normalized)) {
+    return {
+      path,
+      status: "excluded",
+      reason: "Package-manager cache (npm _cacache/npm-cache) excluded by convention.",
+    };
   }
   if (isTmpPath(normalized)) {
     return {
@@ -58,6 +67,13 @@ function inferDisposition(path: string): FileDispositionItem {
       path,
       status: "generated",
       reason: "Generated audit artifact.",
+    };
+  }
+  if (isAuditToolOutputArtifact(normalized)) {
+    return {
+      path,
+      status: "generated",
+      reason: "audit-tools pipeline output (findings/report) — a data deliverable, not source.",
     };
   }
   if (isGeneratedPath(normalized)) {

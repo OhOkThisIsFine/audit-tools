@@ -522,6 +522,11 @@ test("validateAuditResults still produces an error for affected_files path genui
     (i) => i.severity === "error" && /affected_files\[0\]\.path/.test(i.field ?? ""),
   );
   assert.equal(pathErrors.length, 1, `expected exactly one affected_files path error, got: ${JSON.stringify(pathErrors)}`);
+  assert.match(
+    pathErrors[0].message,
+    /assigned files are: src\/foo\.ts/,
+    "error should surface the task's allowed files",
+  );
 });
 
 test("validateSessionConfig rejects compound command strings and environment validation avoids probing them", async () => {

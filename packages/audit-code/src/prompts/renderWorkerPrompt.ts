@@ -52,6 +52,9 @@ export function renderWorkerPrompt(task: WorkerTask): string {
       "Constraint: line_end must not exceed total_lines for that file.",
       "Windows PowerShell: do not pipe an inline foreach statement directly into ConvertTo-Json.",
       "Assign the foreach output to a variable first, then pipe that variable to ConvertTo-Json.",
+      "PowerShell also unwraps single-element arrays: @(@{...}) collapses to one object, so a one-result",
+      "submission serializes as an object (not a 1-element array) and is rejected. Wrap it yourself:",
+      "'[' + (ConvertTo-Json $obj -Depth 12) + ']', or build the array with Write-Output -NoEnumerate.",
       `Write only the JSON array of AuditResult objects to: ${task.audit_results_path}`,
     ];
 
