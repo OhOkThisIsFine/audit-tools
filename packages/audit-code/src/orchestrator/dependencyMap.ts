@@ -148,6 +148,16 @@ export const ARTIFACT_DEPENDENTS_MAP: Record<string, string[]> = {
   "runtime_validation_report.json": [
     "audit-report.md",
   ],
+  // Opt-in worker reflections (appended by workers, read-only to the
+  // orchestrator; parsed into bundle.agent_reflections). Only the markdown
+  // render depends on it — the "Process Feedback" section — NOT
+  // audit-findings.json, whose machine contract carries no reflections.
+  // advanceAudit hashes it fresh every advance (tooling_manifest pattern), so
+  // a reflection appended after synthesis re-stales the report exactly once
+  // and an unchanged file never churns finalization.
+  "agent-feedback.jsonl": [
+    "audit-report.md",
+  ],
   // The canonical machine contract is co-produced with audit-report.md by the
   // synthesis executor. The optional narrative pass tracks its revision: a fresh
   // (re-synthesized) audit-findings.json re-stales the narrative marker so the

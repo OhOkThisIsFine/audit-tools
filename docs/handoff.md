@@ -4,7 +4,7 @@ Living pointer for the next session. Durable detail lives in
 [`backlog.md`](backlog.md); this is the thin "where we are + do these next" layer.
 Cross-session state is also in the `audit-tools-2026-06-state` auto-memory.
 
-_Last updated: 2026-06-09._
+_Last updated: 2026-06-09 (evening)._
 
 ## Current state
 
@@ -12,6 +12,8 @@ _Last updated: 2026-06-09._
   `remediator-lambda@0.11.0` are live (released 2026-06-09) — the cross-orchestrator
   scope/intent checkpoint (Stages 0/A1/A2/R1/R2, both suites green). Check
   `npm view` / git tags for the latest.
+- **Unreleased on `main`:** meta-audit reflections completion (see below) — not
+  yet published; fold into the next release.
 - **Branches:** work lands on `main` (default). Remote is `audit-tools`
   (`OhOkThisIsFine/audit-tools`); no `origin`.
 - **Self-audit findings:** [`audit/2026-06-09/`](../audit/2026-06-09/) — 281 findings;
@@ -21,28 +23,32 @@ _Last updated: 2026-06-09._
 
 ## Next tasks, in priority order
 
-1. **Finish meta-audit reflections (v1 shipped earlier).** Remaining:
-   (a) synthesis disk-load of `agent-feedback.jsonl` into the bundle → pass as
-   `renderAuditReportMarkdown` `options.reflections` (touches `io/artifacts.ts` +
-   the staleness DAG `orchestrator/dependencyMap.ts` — finalization-sensitive, do
-   carefully); (b) remediate-code prompt parity + aggregation into
-   `remediation-report.md`. See `backlog.md` → "Make agent meta-audit reflections
-   a first-class artifact".
-
-2. **Route remediate's structured fast path through `confirm_intent`.** The
+1. **Route remediate's structured fast path through `confirm_intent`.** The
    scope/intent checkpoint shipped 2026-06-09, but a lone `audit-findings.json`
    input bypasses the confirm step, so its filters/exclusions don't apply.
    `runPlanPhase` already honors a checkpoint when present — the work is purely
    routing (emit `confirm_intent` / write an intake summary so the gate fires).
    Subsumes `FINDING-012`. See `backlog.md`.
 
-3. **`CFG-4996560e`** (deferred fix) — scope postinstall's deployed OpenCode perms
+2. **`CFG-4996560e`** (deferred fix) — scope postinstall's deployed OpenCode perms
    to the `auditor` agent vs the global top level. Needs real-OpenCode validation
    (agent/subtask inheritance is not unit-testable). Fix direction in `backlog.md`.
 
-4. **Remaining curated highs / triage** — the deferred (backlog) and
+3. **Remaining curated highs / triage** — the deferred (backlog) and
    scope-pollution highs are catalogued in `curated-remediation-set.README.md`;
    most are low-value.
+
+> **Shipped 2026-06-09 (unreleased) — meta-audit reflections completed.** The
+> parse/aggregate/render module moved to `@audit-tools/shared`
+> (`agentReflections.ts`, `AGENT_FEEDBACK_FILENAME`). audit-code now disk-loads
+> `agent-feedback.jsonl` into `bundle.agent_reflections` (read-only pseudo-artifact
+> — never written/pruned by the orchestrator) with an `agent-feedback.jsonl →
+> audit-report.md` staleness edge, always-rehashed each advance like
+> `tooling_manifest.json` so a mid-run append re-synthesizes exactly once
+> (convergence covered by `tests/agent-feedback-reflections.test.mjs`).
+> remediate-code gained parity: document/implement dispatch prompts carry the
+> opt-in invitation and the close phase aggregates reflections into a "Process
+> Feedback" section of `remediation-report.md`. All three suites green.
 
 > **Shipped 2026-06-09 — cross-orchestrator scope/intent checkpoint.** Enriched
 > shared `IntentCheckpoint` + schema; audit-code `confirm_intent` host step

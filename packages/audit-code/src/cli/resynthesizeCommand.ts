@@ -6,6 +6,11 @@ import {
   normalizeExistingFindingsReport,
   renderAuditReportMarkdown,
 } from "../reporting/synthesis.js";
+import {
+  AGENT_FEEDBACK_FILENAME,
+  parseReflectionsNdjson,
+  readOptionalTextFile,
+} from "@audit-tools/shared";
 import type { AuditFindingsReport } from "@audit-tools/shared";
 
 const AUDIT_TOOLS_DIR = ".audit-tools";
@@ -44,7 +49,15 @@ export async function cmdResynthesize(argv: string[]): Promise<void> {
   }
 
   const normalized = normalizeExistingFindingsReport(report);
-  const markdown = renderAuditReportMarkdown(normalized);
+  // Best-effort: if the working artifacts dir (and its worker-appended
+  // feedback) still exists — e.g. an interrupted run being compiled by hand —
+  // carry the Process Feedback section into the re-rendered report.
+  const feedbackText = await readOptionalTextFile(
+    join(auditToolsDir, "audit", AGENT_FEEDBACK_FILENAME),
+  );
+  const markdown = renderAuditReportMarkdown(normalized, {
+    reflections: feedbackText ? parseReflectionsNdjson(feedbackText) : undefined,
+  });
 
   await mkdir(auditToolsDir, { recursive: true });
 

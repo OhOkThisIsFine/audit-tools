@@ -518,6 +518,40 @@ describe("runClosePhase", () => {
     });
   });
 
+  it("aggregates worker reflections from agent-feedback.jsonl into a Process Feedback section", async () => {
+    await writeFileAsync(
+      join(TEST_DIR, "agent-feedback.jsonl"),
+      JSON.stringify({
+        task_id: "B-001",
+        instruction_clarity: "ambiguous",
+        severity: "medium",
+        tool_friction: ["result path collided across waves"],
+      }) +
+        "\n" +
+        "worker crashed mid-line{\n",
+    );
+    const state = makeState({
+      items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+    });
+
+    const next = await runClosePhase(state, BASE_OPTIONS);
+    expect(next.status).toBe("complete");
+
+    const report = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
+    expect(report).toContain("## Process Feedback");
+    expect(report).toContain("- result path collided across waves");
+    expect(report).toContain("Instruction clarity: ambiguous: 1");
+  });
+
+  it("omits the Process Feedback section when no reflections were appended", async () => {
+    const state = makeState({
+      items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+    });
+    await runClosePhase(state, BASE_OPTIONS);
+    const report = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
+    expect(report).not.toContain("## Process Feedback");
+  });
+
   it("buildRemediationReportMarkdown: combined test failure section only present when passed=false", async () => {
     // Passing test command — no failure section should appear.
     const state = makeState({

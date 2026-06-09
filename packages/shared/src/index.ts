@@ -99,6 +99,20 @@ export {
 // Contracts
 export { AUDITOR_REPORT_MARKER } from "./contracts.js";
 
+// Agent meta-audit reflections (opt-in worker feedback channel, both orchestrators)
+export type {
+  ReflectionClarity,
+  ReflectionSeverity,
+  AgentReflection,
+  ReflectionAggregate,
+} from "./agentReflections.js";
+export {
+  AGENT_FEEDBACK_FILENAME,
+  parseReflectionsNdjson,
+  aggregateReflections,
+  renderProcessFeedbackSection,
+} from "./agentReflections.js";
+
 // Tokens
 export type { ModelTokenLimits } from "./tokens.js";
 export {

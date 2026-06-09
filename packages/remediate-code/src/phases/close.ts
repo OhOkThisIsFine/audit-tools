@@ -2,8 +2,17 @@ import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
 import { dirname, extname, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
-import { writeTextFile, writeJsonFile, stagedAndUntracked } from "@audit-tools/shared";
+import {
+  AGENT_FEEDBACK_FILENAME,
+  parseReflectionsNdjson,
+  readOptionalTextFile,
+  renderProcessFeedbackSection,
+  stagedAndUntracked,
+  writeJsonFile,
+  writeTextFile,
+} from "@audit-tools/shared";
 import type {
+  AgentReflection,
   RemediationOutcome,
   RemediationOutcomeStatus,
   RemediationOutcomesReport,
@@ -480,6 +489,7 @@ function buildRemediationReportMarkdown(
   e2ePassed: boolean | undefined,
   outcomesReport: RemediationOutcomesReport,
   combinedTest: CombinedTestResult,
+  reflections: AgentReflection[] = [],
 ): string {
   let reportContent = `# Remediation Report\n\n`;
 
@@ -558,6 +568,13 @@ function buildRemediationReportMarkdown(
   if (!combinedTest.passed) {
     reportContent += `\n## Combined Test Suite Failure\n\nThe full test suite failed after remediation. No items with a resolved status were available to re-block, so the run completed, but the following failure was recorded:\n\n`;
     if (combinedTest.output) reportContent += `\`\`\`\n${combinedTest.output}\n\`\`\`\n`;
+  }
+
+  // Opt-in worker reflections, aggregated into the same "Process Feedback"
+  // section audit-code renders (parity). Empty → no section.
+  const feedbackLines = renderProcessFeedbackSection(reflections);
+  if (feedbackLines.length > 0) {
+    reportContent += `\n${feedbackLines.join("\n")}`;
   }
 
   return reportContent;
@@ -839,6 +856,12 @@ export async function runClosePhase(
   }
 
   const endedAt = new Date().toISOString();
+  // Workers may have appended opt-in reflections during document/implement
+  // dispatch; parse leniently (malformed lines skipped) and surface them in the
+  // report. Workers own the file — it is read-only here.
+  const feedbackText = await readOptionalTextFile(
+    join(options.artifactsDir, AGENT_FEEDBACK_FILENAME),
+  );
   const reportContent = buildRemediationReportMarkdown(
     state,
     entries,
@@ -846,6 +869,7 @@ export async function runClosePhase(
     e2ePassed,
     outcomesReport,
     combinedTest,
+    feedbackText ? parseReflectionsNdjson(feedbackText) : [],
   );
 
   const outcomesFile: RemediationOutcomesReport & {

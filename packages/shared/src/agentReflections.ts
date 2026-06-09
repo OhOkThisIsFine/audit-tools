@@ -1,9 +1,11 @@
-// Agent meta-audit reflections: a canonical, opt-in feedback channel. Workers may
-// append one reflection per task (NDJSON) to `agent-feedback.jsonl` — schema
-// `schemas/agent_reflection.schema.json`. Synthesis aggregates them into a
-// "Process Feedback" report section so recurring operational friction is visible
-// without hand-reading the JSONL. The channel is best-effort: a malformed line is
-// skipped, never fatal, and never competes with the actual audit obligation.
+// Agent meta-audit reflections: a canonical, opt-in feedback channel shared by
+// both orchestrators. Workers may append one reflection per task/item (NDJSON)
+// to `agent-feedback.jsonl` in the run's artifacts dir — schema
+// `schemas/agent_reflection.schema.json` (published per-package). Each
+// orchestrator aggregates them into a "Process Feedback" section of its final
+// report so recurring operational friction is visible without hand-reading the
+// JSONL. The channel is best-effort: a malformed line is skipped, never fatal,
+// and never competes with the actual audit/remediation obligation.
 
 export type ReflectionClarity =
   | "clear"
@@ -21,6 +23,9 @@ export interface AgentReflection {
   suggestions?: string[];
   severity: ReflectionSeverity;
 }
+
+/** Canonical worker-appended feedback file name, relative to an artifacts dir. */
+export const AGENT_FEEDBACK_FILENAME = "agent-feedback.jsonl";
 
 const CLARITY_VALUES = new Set<ReflectionClarity>([
   "clear",
