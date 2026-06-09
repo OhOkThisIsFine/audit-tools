@@ -448,7 +448,8 @@ function validateVerificationFollowupTask(
           task_id: taskId,
           field: `${label}.file_paths[${index}]`,
           message:
-            `${label}.file_paths[${index}] references '${path}', which is outside the verification task's file_coverage.`,
+            `${label}.file_paths[${index}] references '${path}', which is outside the verification task's file_coverage. ` +
+            `Followup tasks list files in 'file_paths' (array of strings), not 'file_coverage'; allowed: ${[...allowedPaths].join(", ")}.`,
         });
       }
     }
@@ -723,7 +724,9 @@ export function validateAuditResults(
             result_index: i,
             task_id: taskId,
             field: `file_coverage[${j}].path`,
-            message: `file_coverage path '${entry.path}' is not listed in the task file_paths.`,
+            message:
+              `file_coverage path '${entry.path}' is not listed in the task file_paths. ` +
+              `Declare only assigned files; allowed for this task: ${task.file_paths.join(", ")}.`,
           });
         } else if (seenCoveragePaths.has(entryNorm)) {
           pushIssue(issues, {
@@ -854,7 +857,9 @@ export function validateAuditResults(
             task_id: taskId,
             field: `${label}.affected_files[${k}].path`,
             message:
-              `affected_files path '${affected.path}' is not in the declared assigned file_coverage.`,
+              `affected_files path '${affected.path}' is not in the declared assigned file_coverage. ` +
+              `Add it to this result's file_coverage first` +
+              (task ? `; the task's assigned files are: ${task.file_paths.join(", ")}.` : "."),
           });
           continue;
         }

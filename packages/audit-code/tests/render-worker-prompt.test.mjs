@@ -43,6 +43,7 @@ test("renderWorkerPrompt uses argv JSON for agent tasks and falls back to the de
   assert.match(prompt, /Write only the JSON array of AuditResult objects to:/i);
   assert.match(prompt, /do not pipe an inline foreach statement directly into ConvertTo-Json/i);
   assert.match(prompt, /Assign the foreach output to a variable first/i);
+  assert.match(prompt, /unwraps single-element arrays/i);
   assert.match(prompt, /worker command ingests audit_results_path and writes result_path/i);
   assert.match(
   prompt,

@@ -24,6 +24,9 @@ const BINARY_EXTENSIONS = [
   ".otf",
   ".pdf",
   ".zip",
+  ".tgz",
+  ".tar",
+  ".gz",
 ] as const;
 
 const LOCKFILE_NAMES = [
@@ -234,7 +237,38 @@ export function isGeneratedTestArtifactPath(normalized: string): boolean {
 }
 
 export function isAuditArtifactPath(normalized: string): boolean {
-  return hasSegment(normalized, ".audit-tools");
+  return (
+    hasSegment(normalized, ".audit-tools") ||
+    hasSegment(normalized, ".audit-artifacts")
+  );
+}
+
+/**
+ * Package-manager cache stores — npm's content-addressed `_cacache`, a nested
+ * `npm-cache`, or a local `.npm` — are dependency blobs, never the audited
+ * project's source. Smoke-test temp dirs can leave these inside the repo tree.
+ */
+export function isPackageManagerCachePath(normalized: string): boolean {
+  return (
+    hasSegment(normalized, "_cacache") ||
+    hasSegment(normalized, "npm-cache") ||
+    hasSegment(normalized, ".npm")
+  );
+}
+
+const AUDIT_TOOL_OUTPUT_BASENAMES = new Set<string>([
+  "audit-findings.json",
+  "remediation-outcomes.json",
+]);
+
+/**
+ * The pipeline's own canonical machine contracts. When audit-tools audits itself
+ * (or any repo that checked one in) these are data deliverables, not source —
+ * auditing them yields only "this is JSON data" noise. The matching `*-report.md`
+ * renders are already handled as `doc_only` by `isDocPath`.
+ */
+export function isAuditToolOutputArtifact(normalized: string): boolean {
+  return AUDIT_TOOL_OUTPUT_BASENAMES.has(baseName(normalized));
 }
 
 export function isTestPath(normalized: string): boolean {

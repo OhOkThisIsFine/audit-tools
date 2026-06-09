@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { updateAuditTaskStatuses } = await import(
+const { updateAuditTaskStatuses, partitionOrphanedAuditResults } = await import(
   "../src/orchestrator/resultIngestion.ts"
 );
 
@@ -89,4 +89,40 @@ test("updateAuditTaskStatuses — non-matching tasks default status to pending",
 
     assert.equal(updated[0].status, "in_progress");
   });
+});
+
+test("partitionOrphanedAuditResults — drops results whose task_id is not in the active manifest", () => {
+  const active = new Set(["t1", "t2"]);
+  const results = [
+    { task_id: "t1", findings: [] },
+    { task_id: "deepening:steward:abc", findings: [] },
+    { task_id: "t2", findings: [] },
+  ];
+
+  const partition = partitionOrphanedAuditResults(results, active);
+
+  assert.ok(partition);
+  assert.deepEqual(partition.orphanedTaskIds, ["deepening:steward:abc"]);
+  assert.deepEqual(
+    partition.retained.map((r) => r.task_id),
+    ["t1", "t2"],
+  );
+});
+
+test("partitionOrphanedAuditResults — returns null when there is nothing to filter", () => {
+  // No active manifest yet → pass results through unchanged.
+  assert.equal(partitionOrphanedAuditResults([{ task_id: "t1" }], new Set()), null);
+  // Not an array.
+  assert.equal(partitionOrphanedAuditResults(undefined, new Set(["t1"])), null);
+});
+
+test("partitionOrphanedAuditResults — keeps every result when all task_ids are active", () => {
+  const active = new Set(["t1", "t2"]);
+  const results = [{ task_id: "t1" }, { task_id: "t2" }];
+
+  const partition = partitionOrphanedAuditResults(results, active);
+
+  assert.ok(partition);
+  assert.equal(partition.orphanedTaskIds.length, 0);
+  assert.equal(partition.retained.length, 2);
 });

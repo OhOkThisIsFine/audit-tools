@@ -10,6 +10,7 @@ import { deriveAuditState } from "../orchestrator/state.js";
 import { decideNextStep } from "../orchestrator/nextStep.js";
 import type { EdgeReasoningResults } from "../orchestrator/edgeReasoning.js";
 import { sizeIndexFromManifest } from "../orchestrator/reviewPackets.js";
+import { partitionOrphanedAuditResults } from "../orchestrator/resultIngestion.js";
 import {
   validateAuditResults,
   formatAuditResultIssues,
@@ -74,10 +75,28 @@ export async function runAuditStep(options: {
       `Invalid audit results path '${options.auditResultsPath}'. This looks like a CLI flag rather than a file path.`,
     );
   }
-  const auditResults = options.auditResultsPath
+  let auditResults = options.auditResultsPath
     ? await readJsonFile<unknown>(options.auditResultsPath)
     : undefined;
   if (auditResults !== undefined) {
+    // Drop results whose task_id is no longer in the active manifest — e.g.
+    // selective-deepening tasks pruned by a later re-plan, whose orphaned answers
+    // would otherwise abort the whole batch at the validation gate below and
+    // strand every valid result. They cannot be ingested (coverage is keyed by
+    // the active task set), so skip-and-warn instead of throwing; results for
+    // KNOWN tasks with real errors still abort. The filtered array is what flows
+    // to advanceAudit, so orphans are neither validated nor ingested.
+    const partition = partitionOrphanedAuditResults(
+      auditResults,
+      new Set((bundle.audit_tasks ?? []).map((task) => task.task_id)),
+    );
+    if (partition && partition.orphanedTaskIds.length > 0) {
+      process.stderr.write(
+        `audit-results ingestion: skipped ${partition.orphanedTaskIds.length} result(s) whose task_id ` +
+          `is not in the active manifest (orphaned by re-planning): ${partition.orphanedTaskIds.join(", ")}\n`,
+      );
+      auditResults = partition.retained;
+    }
     const issues = validateAuditResults(auditResults, bundle.audit_tasks ?? [], {
       lineIndex,
     });

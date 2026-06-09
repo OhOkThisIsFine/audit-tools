@@ -116,6 +116,7 @@ test("buildPacketPrompt — assembles expected prompt sections", () => {
   assert.ok(prompt.includes("### task-abc"));
   assert.match(prompt, /do not pipe an inline foreach statement directly into ConvertTo-Json/i);
   assert.match(prompt, /Assign the foreach output to a variable first/i);
+  assert.match(prompt, /unwraps single-element arrays/i);
   assert.doesNotMatch(prompt, /current working directory/);
   assert.match(prompt, /valid: abc, findings=/);
 });
