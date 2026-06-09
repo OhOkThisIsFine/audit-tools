@@ -58,6 +58,15 @@ export function renderWorkerPrompt(task: WorkerTask): string {
       `Write only the JSON array of AuditResult objects to: ${task.audit_results_path}`,
     ];
 
+    lines.push(
+      "Optional — never let this delay or replace the audit result: if you hit task",
+      "ambiguity, tool friction, or unclear instructions, you MAY append one JSON",
+      `reflection line to ${task.artifacts_dir}/agent-feedback.jsonl with shape:`,
+      "  {task_id, lens, instruction_clarity (clear|mostly_clear|ambiguous|unclear),",
+      "   ambiguities: [string], tool_friction: [string], suggestions: [string],",
+      "   severity (info|low|medium|high)}. One object per line; never overwrite existing lines.",
+    );
+
     if (usesDeferredWorkerCommand(task)) {
       lines.push("Deferred mode: write results, do not execute worker_command.");
     } else {
