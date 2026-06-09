@@ -192,6 +192,25 @@ Tracks `audit-findings.json` so a re-synthesized (base) findings report
 re-stales the narrative and it regenerates. Satisfies the
 `synthesis_narrative_current` obligation.
 
+### `agent-feedback.jsonl`
+
+Opt-in worker-appended meta-audit reflections (NDJSON; schema
+`agent_reflection.schema.json`). Workers own this file — the orchestrator only
+reads it (parsed leniently into `bundle.agent_reflections`; it is not a
+writable registry entry, so it is never rewritten or pruned). Synthesis renders
+the parsed reflections as the report's "Process Feedback" section.
+
+Only the human render depends on it: `audit-findings.json` (the machine
+contract) carries no reflections. Because no executor writes the file,
+`advanceAudit` treats it as always-updated when computing metadata (the
+`tooling_manifest.json` pattern): a reflection appended after synthesis bumps
+its revision and re-stales the report exactly once; an unchanged file keeps its
+revision, so finalization converges.
+
+Downstream:
+
+- `audit-report.md`
+
 ### `external_analyzer_results.json`
 
 Downstream:

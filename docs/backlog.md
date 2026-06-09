@@ -186,6 +186,16 @@ make the structured fast path emit the `confirm_intent` step (e.g. write an inta
 summary so the existing gate fires) so its filters/exclusions apply to a lone
 `audit-findings.json` input.
 
+### remediate-code: delete the CLI-unreachable in-process document path
+
+`runDocumentPhase` / `buildDocumentPrompt` in `src/phases/document.ts` are only
+referenced by their own test — host dispatch (`prepareDocumentDispatch`) has
+been the sole live document path since 0.6.0, and per-prompt features (house
+style, reflection invitation) now land only in `steps/dispatch.ts`. Per the
+"ideal code over compatibility" preference, delete the dead path (and port its
+clarification-resolution coverage to wherever that logic actually runs) so the
+two prompt builders cannot drift.
+
 ### remediate-code host-dispatch gaps
 
 - **Provider `queryLimits` is deferred because it has near-zero value today.** The
@@ -270,37 +280,12 @@ problems). The 2026-06 synthesis already emits hash-suffixed IDs
 content-addressed ID across passes, enabling reliable dedup, cross-run diffing,
 and honest counts.
 
-### Make agent meta-audit reflections a first-class artifact
+### Make agent meta-audit reflections a first-class artifact — *shipped 2026-06-09*
 
-When auditing or remediating audit-tools itself (a meta-audit), auditors were
-asked ad-hoc to append a reflection on their experience to
-`.audit-tools/audit/agent-feedback.jsonl`. That feedback loop surfaced nearly all
-the friction in this backlog — it should be canonical, not ad-hoc:
-
-**v1 shipped 2026-06-09 (audit-code).** Stable `agent_reflection` schema
-(`packages/audit-code/schemas/agent_reflection.schema.json`), an opt-in inline
-reflection invitation in the audit worker prompt (`renderWorkerPrompt`), and a
-pure aggregate/render (`src/reporting/agentReflections.ts`) wired into
-`renderAuditReportMarkdown` via `options.reflections` (emits a "Process Feedback"
-section). **Remaining:** (1) the synthesis disk-load that reads
-`agent-feedback.jsonl` into the bundle and passes it as `options.reflections` —
-deferred because it touches the artifact registry (`io/artifacts.ts`) and the
-staleness DAG (`orchestrator/dependencyMap.ts`, a finalization-sensitive
-subsystem); do it as a focused change with the dependency edge plus a
-finalization re-check. (2) remediate-code prompt parity (document/implement
-invitation) and aggregation into `remediation-report.md`.
-
-- The packet/worker prompts (and remediate-code document/implement prompts) should
-  explicitly invite a short structured reflection — ambiguities, tool friction,
-  instruction clarity, severity, suggestion — appended to a known feedback
-  artifact with a stable schema, rather than relying on a per-run instruction.
-- Synthesis should aggregate the reflections into a dedicated "process feedback"
-  section of the report (or a sibling artifact), deduped and themed, so recurring
-  pain is visible without hand-reading the JSONL.
-- Keep it opt-in and low-cost so it never competes with the actual audit/remediate
-  obligation; most of the value is in the self-audit case, so it can be gated on a
-  meta-audit flag or simply always-available-but-optional.
-
-Goal: every self-audit run ends with both findings *and* an attributable,
-structured account of how the tool felt to operate — closing by default the loop
-that this cleanup had to run by hand.
+Fully shipped. Workers in both orchestrators are invited (opt-in, best-effort)
+to append `agent_reflection` lines to the run's `agent-feedback.jsonl`; the
+parse/aggregate/render lives in `@audit-tools/shared` (`agentReflections.ts`),
+audit-code loads the file into the bundle with an `agent-feedback.jsonl →
+audit-report.md` staleness edge (always-rehashed like `tooling_manifest.json`;
+see `spec/dependency-map.md`), and remediate-code aggregates it in the close
+phase. Both reports emit a "Process Feedback" section when reflections exist.

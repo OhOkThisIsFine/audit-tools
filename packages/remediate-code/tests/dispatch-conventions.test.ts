@@ -208,6 +208,42 @@ describe("dispatch prompts carry Phase 7A house style + theme hints", () => {
   });
 });
 
+describe("dispatch prompts invite opt-in agent reflections", () => {
+  const FEEDBACK_PATH = `${ARTIFACTS_DIR.replace(/\\/g, "/")}/agent-feedback.jsonl`;
+
+  it("document prompts carry the invitation with finding id, lens, and feedback path", async () => {
+    await saveState(makePlanningState());
+
+    await prepareDocumentDispatch(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      "PLAN-1",
+    );
+
+    const docDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "document");
+    const prompt = await readFile(join(docDir, "document-F-001.md"), "utf8");
+    expect(prompt).toContain("## Optional process feedback");
+    expect(prompt).toContain(FEEDBACK_PATH);
+    expect(prompt).toContain('"task_id": "F-001", "lens": "security"');
+    expect(prompt).toMatch(/Never let this delay or replace the required output/);
+    expect(prompt).toMatch(/One object per line; never overwrite existing lines/);
+  });
+
+  it("implement prompts carry the invitation keyed by block id", async () => {
+    await saveState(makeDocumentingState());
+
+    await prepareImplementDispatch(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      "PLAN-1",
+    );
+
+    const implDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");
+    const prompt = await readFile(join(implDir, "implement-B-001.md"), "utf8");
+    expect(prompt).toContain("## Optional process feedback");
+    expect(prompt).toContain(FEEDBACK_PATH);
+    expect(prompt).toContain('"task_id": "B-001"');
+  });
+});
+
 describe("dispatch step prompts carry DISPATCH_PROMPT_HANDOFF_NOTE", () => {
   it("dispatch_document step prompt includes DISPATCH_PROMPT_HANDOFF_NOTE", async () => {
     await saveState(makePlanningState());

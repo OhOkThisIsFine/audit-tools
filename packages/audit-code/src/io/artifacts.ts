@@ -27,13 +27,16 @@ import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { ToolingManifest } from "../types/toolingManifest.js";
 import type { ActiveDispatchState } from "../types/activeDispatch.js";
 import {
+  AGENT_FEEDBACK_FILENAME,
   isFileMissingError,
+  parseReflectionsNdjson,
   readOptionalJsonFile,
   readOptionalNdjsonFile,
   readOptionalTextFile,
   writeJsonFile,
   writeNdjsonFile,
   writeTextFile,
+  type AgentReflection,
 } from "@audit-tools/shared";
 import { buildToolingManifest } from "./toolingManifest.js";
 
@@ -86,9 +89,17 @@ type ArtifactPayloadMap = {
  * the artifacts root rather than as a standard pruned artifact, and carries the
  * in-flight dispatch phase plus any budget-deferred task ids the completion
  * obligation must exclude.
+ *
+ * `agent_reflections` is the parsed view of the worker-APPENDED
+ * `agent-feedback.jsonl` (opt-in meta-audit feedback). Workers own that file;
+ * the orchestrator only ever reads it, so it is deliberately NOT an
+ * ARTIFACT_DEFINITIONS entry — writeCoreArtifacts must never rewrite it (a
+ * round-trip would drop lines a worker appended after load, and prune would
+ * delete a file the orchestrator does not own).
  */
 export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
   active_dispatch?: ActiveDispatchState;
+  agent_reflections?: AgentReflection[];
 };
 export type ArtifactBundleKey = keyof ArtifactPayloadMap;
 type ArtifactPhase =
@@ -213,6 +224,11 @@ export function getArtifactValue(
   bundle: ArtifactBundle,
   artifactName: string,
 ): unknown {
+  // Worker-appended feedback participates in the staleness DAG (its content
+  // hash re-stales audit-report.md) without being a writable registry entry.
+  if (artifactName === AGENT_FEEDBACK_FILENAME) {
+    return bundle.agent_reflections;
+  }
   const key = ARTIFACT_FILE_TO_BUNDLE_KEY[artifactName];
   return key ? bundle[key] : undefined;
 }
@@ -240,6 +256,17 @@ export async function loadArtifactBundle(
   );
   if (activeDispatch !== undefined) {
     bundle.active_dispatch = activeDispatch;
+  }
+
+  // agent-feedback.jsonl is appended by workers (opt-in reflections), never
+  // written by the orchestrator. Parse leniently: malformed lines are skipped,
+  // a present-but-unusable file is just an empty list. Synthesis surfaces the
+  // parsed reflections as the report's "Process Feedback" section.
+  const feedbackText = await readOptionalTextFile(
+    join(root, AGENT_FEEDBACK_FILENAME),
+  );
+  if (feedbackText !== undefined) {
+    bundle.agent_reflections = parseReflectionsNdjson(feedbackText);
   }
 
   return bundle;

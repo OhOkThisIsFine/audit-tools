@@ -9,6 +9,7 @@ import type {
   RemediationBlock,
 } from "../state/types.js";
 import {
+  AGENT_FEEDBACK_FILENAME,
   readJsonFile,
   readOptionalJsonFile,
   writeJsonFile,
@@ -441,12 +442,39 @@ function contractPipelineTraceBullets(finding: Finding): string {
   return lines.length > 0 ? `${lines.map((line) => `- ${line}`).join("\n")}\n` : "";
 }
 
+/**
+ * Opt-in meta-audit reflection invitation (parity with audit-code's worker
+ * prompt). Rendered after the file-access section because it carves out one
+ * extra append-only path. Schema: schemas/agent_reflection.schema.json;
+ * the close phase aggregates the file into the report's "Process Feedback"
+ * section. Best-effort by design — it must never compete with the obligation.
+ */
+function reflectionInvitation(
+  feedbackDisplay: string,
+  taskId: string,
+  lens?: string,
+): string {
+  return `
+## Optional process feedback
+
+Never let this delay or replace the required output above: if you hit task
+ambiguity, tool friction, or unclear instructions, you MAY append one JSON
+reflection line to \`${feedbackDisplay}\` with shape:
+  {"task_id": "${taskId}"${lens ? `, "lens": "${lens}"` : ""}, "instruction_clarity": "clear|mostly_clear|ambiguous|unclear",
+   "ambiguities": ["..."], "tool_friction": ["..."], "suggestions": ["..."],
+   "severity": "info|low|medium|high"}
+One object per line; never overwrite existing lines. Appending to this file is
+allowed in addition to the file access above.
+`;
+}
+
 function findingPrompt(
   finding: Finding,
   resultPath: string,
   conventions: string,
   themeHintText: string,
   repoRoot: string,
+  feedbackDisplay: string,
 ): string {
   // Normalize paths to forward slashes so bash-like shells on Windows do not
   // treat backslashes as escape characters when the host copies these paths.
@@ -538,7 +566,7 @@ Assign the foreach output to a variable first, then pipe that variable to Conver
 Read: ${finding.affected_files.map((f) => f.path).join(", ")}
 Write: ${resultDisplay}
 Do not read or write files outside these paths.
-`;
+${reflectionInvitation(feedbackDisplay, finding.id, finding.lens)}`;
 }
 
 function implementPrompt(
@@ -547,6 +575,7 @@ function implementPrompt(
   resultPath: string,
   conventions: string,
   repoRoot: string,
+  feedbackDisplay: string,
 ): string {
   const items = block.items.flatMap((findingId) => {
     const item = state.items?.[findingId];
@@ -645,7 +674,7 @@ block, not a later cleanup. Test files that reference these files are included i
 your write access.
 Write result: ${resultDisplay}
 Do not modify unrelated files outside these paths or files in other packages.
-`;
+${reflectionInvitation(feedbackDisplay, block.block_id)}`;
 }
 
 async function loadStateOrThrow(
@@ -709,6 +738,7 @@ export async function prepareDocumentDispatch(
         conventions,
         themeHint(finding, state.plan.themes),
         options.root,
+        toPromptPathToken(join(options.artifactsDir, AGENT_FEEDBACK_FILENAME)),
       ),
     );
     items.push(item);
@@ -976,7 +1006,14 @@ export async function prepareImplementDispatch(
 
     await writeTextFile(
       item.prompt_path,
-      implementPrompt(block, state, item.result_path, conventions, options.root),
+      implementPrompt(
+        block,
+        state,
+        item.result_path,
+        conventions,
+        options.root,
+        toPromptPathToken(join(options.artifactsDir, AGENT_FEEDBACK_FILENAME)),
+      ),
     );
     items.push(item);
   }

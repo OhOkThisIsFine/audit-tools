@@ -30,7 +30,7 @@ import { runSyntaxResolutionExecutor } from "./syntaxResolutionExecutor.js";
 import { runGraphEnrichmentExecutor } from "./graphEnrichmentExecutor.js";
 import { resolveAuditScope } from "./scope.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
-import { RunLogger } from "@audit-tools/shared";
+import { AGENT_FEEDBACK_FILENAME, RunLogger } from "@audit-tools/shared";
 import type { AnalyzerSetting, SynthesisNarrative } from "@audit-tools/shared";
 import type { EdgeReasoningResults } from "./edgeReasoning.js";
 
@@ -332,14 +332,22 @@ export async function advanceAudit(
     });
   }
 
+  // tooling_manifest.json and agent-feedback.jsonl are produced outside the
+  // executor loop (environment probe / worker appends), so no executor ever
+  // lists them in artifacts_written. Treat both as always-updated: their
+  // metadata entries are recomputed from live content each advance — unchanged
+  // content keeps its revision (no churn), changed content bumps it so
+  // dependents re-stale exactly once instead of perpetually mismatching a
+  // carried-forward stale hash.
   const metadata = computeArtifactMetadata(
     run.updated,
     bundle.artifact_metadata,
-    [...run.artifacts_written, "tooling_manifest.json"],
+    [...run.artifacts_written, "tooling_manifest.json", AGENT_FEEDBACK_FILENAME],
   );
   const metadataBundle = {
     ...run.updated,
     tooling_manifest: bundle.tooling_manifest,
+    agent_reflections: bundle.agent_reflections,
     artifact_metadata: metadata,
   };
   const updatedState = deriveAuditState(metadataBundle);

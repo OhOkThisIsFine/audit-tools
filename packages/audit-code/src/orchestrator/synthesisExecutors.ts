@@ -55,7 +55,11 @@ export function runSynthesisExecutor(
     updated: {
       ...bundle,
       audit_findings: findings,
-      audit_report: renderAuditReportMarkdown(findings, { scope: bundle.scope, intent_checkpoint: bundle.intent_checkpoint }),
+      audit_report: renderAuditReportMarkdown(findings, {
+        scope: bundle.scope,
+        intent_checkpoint: bundle.intent_checkpoint,
+        reflections: bundle.agent_reflections,
+      }),
     },
     artifacts_written: ["audit-findings.json", "audit-report.md"],
     progress_summary: `Rendered deterministic audit report and canonical findings for ${finalResults.length} audit result entries.`,
@@ -117,7 +121,11 @@ export function runSynthesisNarrativeExecutor(
     updated: {
       ...bundle,
       audit_findings: enriched,
-      audit_report: renderAuditReportMarkdown(enriched, { scope: bundle.scope, intent_checkpoint: bundle.intent_checkpoint }),
+      audit_report: renderAuditReportMarkdown(enriched, {
+        scope: bundle.scope,
+        intent_checkpoint: bundle.intent_checkpoint,
+        reflections: bundle.agent_reflections,
+      }),
       synthesis_narrative: record,
     },
     artifacts_written: [

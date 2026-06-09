@@ -11,7 +11,11 @@ import type {
   GraphBundle,
   SynthesisNarrative,
 } from "@audit-tools/shared";
-import { AUDITOR_REPORT_MARKER } from "@audit-tools/shared";
+import {
+  AUDITOR_REPORT_MARKER,
+  renderProcessFeedbackSection,
+  type AgentReflection,
+} from "@audit-tools/shared";
 import type {
   RuntimeValidationReport,
   RuntimeValidationTaskManifest,
@@ -19,10 +23,6 @@ import type {
 import { buildWorkBlocks, type WorkBlock } from "./workBlocks.js";
 import { mergeFindings } from "./mergeFindings.js";
 import { assignStableFindingIds } from "./findingIdentity.js";
-import {
-  renderProcessFeedbackSection,
-  type AgentReflection,
-} from "./agentReflections.js";
 
 /** Contract version stamped onto the canonical `audit-findings.json`. */
 export const AUDIT_FINDINGS_CONTRACT_VERSION = "audit-tools/audit-findings/v1";
@@ -259,8 +259,9 @@ export interface RenderAuditReportOptions {
   scope?: AuditScopeManifest;
   /**
    * Opt-in agent meta-audit reflections to surface in a "Process Feedback"
-   * section. Omitted/empty renders nothing. The synthesis disk-load that
-   * populates this from `agent-feedback.jsonl` is wired separately.
+   * section. Omitted/empty renders nothing. Populated from the parsed
+   * `agent-feedback.jsonl` (`bundle.agent_reflections`) by the synthesis
+   * executors.
    */
   reflections?: AgentReflection[];
   /**
