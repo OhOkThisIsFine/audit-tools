@@ -276,6 +276,19 @@ asked ad-hoc to append a reflection on their experience to
 `.audit-tools/audit/agent-feedback.jsonl`. That feedback loop surfaced nearly all
 the friction in this backlog — it should be canonical, not ad-hoc:
 
+**v1 shipped 2026-06-09 (audit-code).** Stable `agent_reflection` schema
+(`packages/audit-code/schemas/agent_reflection.schema.json`), an opt-in inline
+reflection invitation in the audit worker prompt (`renderWorkerPrompt`), and a
+pure aggregate/render (`src/reporting/agentReflections.ts`) wired into
+`renderAuditReportMarkdown` via `options.reflections` (emits a "Process Feedback"
+section). **Remaining:** (1) the synthesis disk-load that reads
+`agent-feedback.jsonl` into the bundle and passes it as `options.reflections` —
+deferred because it touches the artifact registry (`io/artifacts.ts`) and the
+staleness DAG (`orchestrator/dependencyMap.ts`, a finalization-sensitive
+subsystem); do it as a focused change with the dependency edge plus a
+finalization re-check. (2) remediate-code prompt parity (document/implement
+invitation) and aggregation into `remediation-report.md`.
+
 - The packet/worker prompts (and remediate-code document/implement prompts) should
   explicitly invite a short structured reflection — ambiguities, tool friction,
   instruction clarity, severity, suggestion — appended to a known feedback
