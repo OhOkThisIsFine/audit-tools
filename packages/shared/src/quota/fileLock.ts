@@ -17,12 +17,32 @@ function generateOwnerToken(): string {
   return `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-async function isLockStale(lockPath: string): Promise<boolean> {
+// Returns the owner token of a stale lock (older than STALE_LOCK_MS), or null
+// when the lock is fresh or already gone. Returning the token lets stale removal
+// reuse releaseLock's token-checked delete, so a lock concurrently re-created
+// with a different token is never clobbered.
+async function readStaleLockToken(lockPath: string): Promise<string | null> {
   try {
     const info = await stat(lockPath);
-    return Date.now() - info.mtimeMs > STALE_LOCK_MS;
+    if (Date.now() - info.mtimeMs <= STALE_LOCK_MS) return null;
+    return await readFile(lockPath, "utf8");
   } catch {
-    return false;
+    return null;
+  }
+}
+
+// Delete a stale lock only if it still carries the token we observed as stale.
+// If a concurrent acquirer replaced it with a fresh lock (different token) in the
+// gap, leave that alone. Transient unlink failures are swallowed (ENOENT: already
+// gone; EPERM/EACCES: concurrent Windows contention) — the acquire loop retries
+// regardless. Distinct from releaseLock, which re-throws non-ENOENT errors on the
+// normal release path.
+async function removeStaleLock(lockPath: string, staleToken: string): Promise<void> {
+  try {
+    if ((await readFile(lockPath, "utf8")) !== staleToken) return;
+    await unlink(lockPath);
+  } catch {
+    // best-effort stale cleanup
   }
 }
 
@@ -51,14 +71,14 @@ export async function acquireLock(
     const now = Date.now();
     if (now - lastStaleCheckAt >= STALE_CHECK_INTERVAL_MS) {
       lastStaleCheckAt = now;
-      if (await isLockStale(lockPath)) {
-        try {
-          await unlink(lockPath);
-          logger?.event({ kind: "step", note: "stale_lock_removed", lock_path: lockPath } as never);
-          continue;
-        } catch {
-          // Another process may have already cleaned it up
-        }
+      const staleToken = await readStaleLockToken(lockPath);
+      if (staleToken !== null) {
+        // Remove only the exact stale lock we observed; a fresh lock created by
+        // another holder in the gap (different token) is preserved — closing the
+        // TOCTOU where blind stale removal could clobber a newly-acquired lock.
+        await removeStaleLock(lockPath, staleToken);
+        logger?.event({ kind: "step", note: "stale_lock_removed", lock_path: lockPath } as never);
+        continue;
       }
     }
 

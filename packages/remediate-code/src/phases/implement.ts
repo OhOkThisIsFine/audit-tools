@@ -265,7 +265,7 @@ export async function executeBlock(
         item.status as (typeof verifiableStatuses)[number],
       )
     ) {
-      const prompt = `Verify the code against the documentation for finding:\nID: ${findingId}\nSpec: ${JSON.stringify(itemSpec, null, 2)}\n\nWrite a VerificationResult JSON with shape: { "passed": boolean, "notes": string }`;
+      const prompt = `Verify the code against the documentation for finding:\nID: ${findingId}\nSpec: ${JSON.stringify(itemSpec, null, 2)}\n\nWrite a VerificationResult JSON with shape: { "finding_id": string, "passed": boolean, "reason": string[] } where reason lists the evidence supporting the verdict.`;
       let verifySuccess = await runStepWithProvider(
         provider,
         { ...options, root: blockRoot },
