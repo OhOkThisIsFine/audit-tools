@@ -132,15 +132,22 @@ test("audit-code wrapper supports repeated bounded invocations in single-step mo
       (await runWrapper(["--single-step"], { cwd: root })).stdout,
     );
     assert.equal(sixth.selected_executor, "design_review");
-    assert.equal(sixth.next_likely_step, "planning_artifacts");
+    assert.equal(sixth.next_likely_step, "intent_checkpoint_current");
 
+    // Intent checkpoint auto-completes headlessly in single-step mode.
     const seventh = JSON.parse(
       (await runWrapper(["--single-step"], { cwd: root })).stdout,
     );
-    assert.equal(seventh.selected_executor, "planning_executor");
-    assert.ok(Array.isArray(seventh.artifacts_written));
-    assert.ok(seventh.artifacts_written.includes("audit_tasks.json"));
-    assert.ok(seventh.artifacts_written.includes("requeue_tasks.json"));
+    assert.equal(seventh.selected_executor, "intent_checkpoint_executor");
+    assert.equal(seventh.next_likely_step, "planning_artifacts");
+
+    const eighth = JSON.parse(
+      (await runWrapper(["--single-step"], { cwd: root })).stdout,
+    );
+    assert.equal(eighth.selected_executor, "planning_executor");
+    assert.ok(Array.isArray(eighth.artifacts_written));
+    assert.ok(eighth.artifacts_written.includes("audit_tasks.json"));
+    assert.ok(eighth.artifacts_written.includes("requeue_tasks.json"));
   });
 });
 

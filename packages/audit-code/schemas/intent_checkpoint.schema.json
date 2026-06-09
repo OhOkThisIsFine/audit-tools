@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "intent_checkpoint.schema.json",
+  "title": "Intent Checkpoint",
+  "description": "intent_checkpoint.json — the accepted scope and intent for a run, confirmed by the host (or auto-completed headlessly) before planning. Single-sourced across audit-code and remediate-code: audit-code consumes `excluded_scope`/`must_not_touch`/`free_form_intent` to prune planning and thread intent into worker prompts; remediate-code additionally uses `filters` to narrow findings. Sits upstream of the planning artifacts in the staleness DAG.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "confirmed_at",
+    "confirmed_by",
+    "scope_summary",
+    "intent_summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "intent-checkpoint/v1",
+      "description": "Contract version marker."
+    },
+    "confirmed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the scope/intent was confirmed."
+    },
+    "confirmed_by": {
+      "const": "host",
+      "description": "Who confirmed the checkpoint (the host, or the headless harness acting as host)."
+    },
+    "scope_summary": {
+      "type": "string",
+      "description": "Human-readable description of the confirmed scope."
+    },
+    "intent_summary": {
+      "type": "string",
+      "description": "Human-readable description of the goal (e.g. full-audit / delta / security-focused)."
+    },
+    "free_form_intent": {
+      "type": "string",
+      "description": "Free-form intent threaded into worker/dispatch prompts."
+    },
+    "excluded_scope": {
+      "type": "array",
+      "description": "Paths intentionally excluded from the run; pruned from planning and listed in the report.",
+      "items": {
+        "type": "object",
+        "required": ["path", "reason"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path or path prefix to exclude."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the path is excluded."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "must_not_touch": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Path globs that must never be written to."
+    },
+    "filters": {
+      "type": "object",
+      "description": "Remediate-only finding filters; audit-code ignores these.",
+      "properties": {
+        "severity": { "type": "array", "items": { "type": "string" } },
+        "lenses": { "type": "array", "items": { "type": "string" } },
+        "packages": { "type": "array", "items": { "type": "string" } },
+        "themes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

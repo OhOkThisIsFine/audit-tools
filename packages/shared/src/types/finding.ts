@@ -96,6 +96,8 @@ export interface AuditFindingsReport {
   summary: AuditFindingsSummary;
   findings: Finding[];
   work_blocks: WorkBlock[];
+  /** Paths excluded from the audit per the intent checkpoint, with reasons. */
+  excluded_scope?: Array<{ path: string; reason: string }>;
   themes?: FindingTheme[];
   executive_summary?: string;
   top_risks?: string[];

@@ -19,6 +19,7 @@ export const PRIORITY: string[] = [
   "graph_enrichment_current",
   "design_assessment_current",
   "design_review_completed",
+  "intent_checkpoint_current",
   "planning_artifacts",
   "audit_tasks_completed",
   "audit_results_ingested",

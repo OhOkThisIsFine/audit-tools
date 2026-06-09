@@ -1,5 +1,6 @@
 import type { AuditResult, CoverageMatrix, Finding, UnitManifest } from "../types.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
+import type { IntentCheckpoint } from "@audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type {
@@ -262,6 +263,11 @@ export interface RenderAuditReportOptions {
    * populates this from `agent-feedback.jsonl` is wired separately.
    */
   reflections?: AgentReflection[];
+  /**
+   * The accepted intent checkpoint; its `excluded_scope` is surfaced in an
+   * "Excluded / Out-of-Scope" section so omissions are explicit in the report.
+   */
+  intent_checkpoint?: IntentCheckpoint;
 }
 
 export function renderAuditReportMarkdown(
@@ -366,6 +372,19 @@ export function renderAuditReportMarkdown(
   }
 
   lines.push(...renderProcessFeedbackSection(options.reflections ?? []));
+
+  const excludedScope = options.intent_checkpoint?.excluded_scope ?? [];
+  if (excludedScope.length > 0) {
+    lines.push("## Excluded / Out-of-Scope", "");
+    lines.push(
+      `${excludedScope.length} path(s) were excluded from this audit per the intent checkpoint:`,
+      "",
+    );
+    for (const entry of excludedScope) {
+      lines.push(`- \`${entry.path}\` — ${entry.reason}`);
+    }
+    lines.push("");
+  }
 
   lines.push("## Scope and Coverage", "");
   const scope = options.scope;

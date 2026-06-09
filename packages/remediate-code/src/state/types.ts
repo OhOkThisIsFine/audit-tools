@@ -111,7 +111,11 @@ export interface TriageBatch {
 export interface CoverageLedgerEntry {
   finding_id: string;
   title?: string;
-  disposition: "planned" | "folded_into" | "dropped_no_evidence";
+  disposition:
+    | "planned"
+    | "folded_into"
+    | "dropped_no_evidence"
+    | "dropped_by_checkpoint";
   block_id?: string;
   folded_into?: string;
   rationale?: string;
@@ -124,6 +128,8 @@ export interface CoverageLedger {
   planned_count: number;
   folded_count: number;
   dropped_count: number;
+  /** Findings excluded by the intent checkpoint (filters / excluded scope). */
+  checkpoint_dropped_count: number;
   entries: CoverageLedgerEntry[];
 }
 

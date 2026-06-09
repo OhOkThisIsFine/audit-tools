@@ -10,6 +10,7 @@ export type StepKind =
   | "dispatch_review"
   | "single_task_fallback"
   | "design_review"
+  | "confirm_intent"
   | "analyzer_install"
   | "edge_reasoning"
   | "edge_reasoning_dispatch"

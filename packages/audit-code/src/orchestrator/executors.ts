@@ -25,10 +25,10 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   },
   {
     id: "intent_checkpoint_executor",
-    kind: "deterministic",
+    kind: "host_delegation",
     obligation_ids: ["intent_checkpoint_current"],
     description:
-      "Write intent_checkpoint.json with confirmed scope and intent.",
+      "Pause for the host to confirm scope and intent (the confirm_intent step writes intent_checkpoint.json); deterministic auto-complete writes a default full-scope checkpoint when run headless.",
   },
   {
     id: "structure_executor",

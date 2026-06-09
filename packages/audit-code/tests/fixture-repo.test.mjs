@@ -87,6 +87,9 @@ test("committed fixture repo supports external analyzer import and deterministic
       },
     };
 
+    const intentCheckpoint = await advanceAudit(bundle, { root });
+    bundle = intentCheckpoint.updated_bundle;
+
     const planning = await advanceAudit(bundle, {
       root,
       lineIndex: await buildFixtureLineIndex(root),

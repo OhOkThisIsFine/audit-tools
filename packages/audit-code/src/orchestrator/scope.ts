@@ -301,3 +301,40 @@ export function applyScopeToCoverage(
   }
   return coverage;
 }
+
+function pathMatchesExclusion(filePath: string, entryPath: string): boolean {
+  const f = filePath.replace(/\\/g, "/");
+  const p = entryPath.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!p) return false;
+  return f === p || f.startsWith(`${p}/`);
+}
+
+/**
+ * Apply the intent checkpoint's `excluded_scope` to a coverage matrix: any file
+ * whose path matches an exclusion (exact or directory-prefix) is marked excluded
+ * so it never becomes an audit task. The user's exclusions layer on top of the
+ * deterministic disposition — they catch scope pollution the automatic pass
+ * missed. Returns the newly-excluded paths (for the run summary / report); a
+ * checkpoint with no exclusions is a no-op.
+ */
+export function applyIntentExclusionsToCoverage(
+  coverage: CoverageMatrix,
+  excludedScope: Array<{ path: string; reason: string }> | undefined,
+): string[] {
+  if (!excludedScope || excludedScope.length === 0) return [];
+  const excluded: string[] = [];
+  for (const file of coverage.files) {
+    if (file.audit_status === "excluded") continue;
+    if (
+      excludedScope.some((entry) => pathMatchesExclusion(file.path, entry.path))
+    ) {
+      file.required_lenses = [];
+      file.completed_lenses = [];
+      file.unit_ids = [];
+      file.audit_status = "excluded";
+      file.classification_status = "out_of_scope_intent";
+      excluded.push(file.path);
+    }
+  }
+  return excluded;
+}
