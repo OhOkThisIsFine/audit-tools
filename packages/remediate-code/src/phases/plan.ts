@@ -14,6 +14,10 @@ import type { AuditFindingsReport, FindingTheme, IntentCheckpoint } from "@audit
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
+  groundExtractedFindings,
+  type ExtractedFindingGrounding,
+} from "./grounding.js";
+import {
   readOptionalJsonFile,
   writeJsonFile,
   readJsonFile,
@@ -170,6 +174,15 @@ interface PlanPhaseDeps {
   enumerateTestFiles?: (root: string) => string[];
   runCommand?: typeof runCommand;
   now?: () => number;
+  /** Test seam: replaces the provider-backed free-form extraction worker. */
+  extractFindings?: (
+    content: string,
+    options: OrchestratorOptions,
+  ) => Promise<{ findings: Finding[]; blocks: RemediationBlock[] }>;
+  /** Test seam: replaces the provider-backed bounded path-repair worker. */
+  repairExtractedFindingPaths?: (
+    requests: { finding: Finding; phantomPaths: string[] }[],
+  ) => Promise<Map<string, string[]>>;
 }
 
 function createBlockId(counter: number): string {
@@ -612,21 +625,50 @@ function deriveFallbackBlocks(
 
 /**
  * Account for every finding the plan received: each is marked `planned` (kept and
- * mapped to a block), `folded_into` (merged into a survivor by cross-lens dedup), or
- * `dropped_no_evidence` (excluded for carrying no evidence). The three dispositions
- * are mutually exclusive and cover the whole source set, so nothing is lost silently.
+ * mapped to a block), `folded_into` (merged into a survivor by cross-lens dedup),
+ * `dropped_no_evidence` (excluded for carrying no evidence), `dropped_by_checkpoint`,
+ * or `dropped_phantom_paths` (every cited path was phantom, post-repair). The
+ * dispositions are mutually exclusive and cover the whole source set, so nothing
+ * is lost silently. Kept extracted findings additionally carry their grounding
+ * annotations (stripped phantom paths, evidence-grounded flag).
  */
 export function buildCoverageLedger(params: {
   planId: string;
   sourceFindings: Finding[];
   droppedNoEvidence: string[];
   droppedByCheckpoint: string[];
+  /** Findings dropped by the grounding pass, with the phantom paths they cited. */
+  droppedPhantomPaths?: Map<string, string[]>;
+  /** Phantom paths stripped from findings that survived grounding. */
+  phantomPathsRemoved?: Map<string, string[]>;
   mergeMap: Map<string, string>;
   items: Record<string, RemediationItemState>;
 }): CoverageLedger {
   const dropped = new Set(params.droppedNoEvidence);
   const byCheckpoint = new Set(params.droppedByCheckpoint);
+  const groundingAnnotations = (f: Finding): Partial<CoverageLedgerEntry> => {
+    const phantoms = params.phantomPathsRemoved?.get(f.id);
+    return {
+      ...(phantoms && phantoms.length > 0
+        ? { phantom_paths_removed: phantoms }
+        : {}),
+      ...(f.evidence_grounded !== undefined
+        ? { evidence_grounded: f.evidence_grounded }
+        : {}),
+    };
+  };
   const entries: CoverageLedgerEntry[] = params.sourceFindings.map((f) => {
+    const phantomPaths = params.droppedPhantomPaths?.get(f.id);
+    if (phantomPaths) {
+      return {
+        finding_id: f.id,
+        title: f.title,
+        disposition: "dropped_phantom_paths",
+        rationale:
+          "Every cited affected_files path was phantom (does not exist in the repository) and one bounded repair attempt did not produce a real path.",
+        phantom_paths_removed: phantomPaths,
+      };
+    }
     if (dropped.has(f.id)) {
       return {
         finding_id: f.id,
@@ -642,6 +684,7 @@ export function buildCoverageLedger(params: {
         title: f.title,
         disposition: "folded_into",
         folded_into: survivor,
+        ...groundingAnnotations(f),
       };
     }
     if (byCheckpoint.has(f.id)) {
@@ -658,6 +701,7 @@ export function buildCoverageLedger(params: {
       title: f.title,
       disposition: "planned",
       block_id: params.items[f.id]?.block_id,
+      ...groundingAnnotations(f),
     };
   });
   const count = (d: CoverageLedgerEntry["disposition"]): number =>
@@ -670,6 +714,7 @@ export function buildCoverageLedger(params: {
     folded_count: count("folded_into"),
     dropped_count: count("dropped_no_evidence"),
     checkpoint_dropped_count: count("dropped_by_checkpoint"),
+    phantom_dropped_count: count("dropped_phantom_paths"),
     entries,
   };
 }
@@ -829,6 +874,7 @@ export async function runPlanPhase(
   let findings: Finding[] = [];
   let blocks: RemediationBlock[] = [];
   let themes: FindingTheme[] = [];
+  let extractedFromProse = false;
 
   if (options.input && existsSync(options.input)) {
     const content = await readFile(options.input, "utf8");
@@ -844,14 +890,12 @@ export async function runPlanPhase(
       themes = parsed.themes;
     } else {
       console.log(`Extracting findings from input via LLM: ${options.input}`);
-      const extracted = await extractFindingsWithProvider(
-        content,
-        state,
-        options,
-        deps,
-      );
+      const extracted = await (deps.extractFindings
+        ? deps.extractFindings(content, options)
+        : extractFindingsWithProvider(content, state, options, deps));
       findings = extracted.findings;
       blocks = extracted.blocks;
+      extractedFromProse = true;
     }
   } else {
     console.log(
@@ -864,6 +908,44 @@ export async function runPlanPhase(
   // reduction, so the ledger below can mark every source finding as
   // planned / folded / dropped — never silently lost.
   const sourceFindings = [...findings];
+
+  // Deterministic grounding for LLM-extracted findings ONLY: strip phantom
+  // affected_files paths, give all-phantom findings one bounded repair attempt,
+  // drop the unrepaired, and classify evidence as grounded/ungrounded. The
+  // structured audit-findings path above is exempt — auditor paths are already
+  // grounded, and a since-deleted path there is the integrity check's replan
+  // concern, not a reason to drop the finding.
+  let grounding: ExtractedFindingGrounding | undefined;
+  if (extractedFromProse) {
+    grounding = await groundExtractedFindings(findings, {
+      root: options.root,
+      repairZeroPathFindings:
+        deps.repairExtractedFindingPaths ??
+        ((requests) =>
+          repairExtractedFindingPathsWithProvider(requests, options, deps)),
+    });
+    findings = grounding.findings;
+    if (grounding.phantomPathsByFinding.size > 0) {
+      const strippedTotal = [...grounding.phantomPathsByFinding.values()].flat();
+      console.warn(
+        `Plan: grounding stripped ${strippedTotal.length} phantom path(s) across ${grounding.phantomPathsByFinding.size} extracted finding(s): ${strippedTotal.join(", ")}`,
+      );
+    }
+    if (grounding.dropped.length > 0) {
+      console.warn(
+        `Plan: dropped ${grounding.dropped.length} extracted finding(s) with no real cited path after repair: ${grounding.dropped.map((d) => d.finding.id).join(", ")}`,
+      );
+      const keptIds = new Set(findings.map((f) => f.id));
+      blocks = blocks
+        .map((b) => ({ ...b, items: (b.items ?? []).filter((id) => keptIds.has(id)) }))
+        .filter((b) => (b.items ?? []).length > 0);
+    }
+    if (grounding.ungroundedFindingIds.length > 0) {
+      console.warn(
+        `Plan: ${grounding.ungroundedFindingIds.length} extracted finding(s) have no evidence citing a real repo path (downgraded to low confidence): ${grounding.ungroundedFindingIds.join(", ")}`,
+      );
+    }
+  }
 
   // Robustness: a finding with empty evidence fails the plan validator and would
   // abort the entire run. Skip such malformed findings (and prune them from
@@ -987,6 +1069,10 @@ export async function runPlanPhase(
     sourceFindings,
     droppedNoEvidence: findingsWithoutEvidence,
     droppedByCheckpoint,
+    droppedPhantomPaths: new Map(
+      (grounding?.dropped ?? []).map((d) => [d.finding.id, d.phantomPaths]),
+    ),
+    phantomPathsRemoved: grounding?.phantomPathsByFinding,
     mergeMap: dedup.mergeMap,
     items,
   });
@@ -1016,12 +1102,19 @@ export async function runPlanPhase(
   return { ...state, status: "planning", plan, items, plan_coverage: coverage };
 }
 
-async function extractFindingsWithProvider(
-  content: string,
-  _state: RemediationState,
-  options: OrchestratorOptions,
-  deps: PlanPhaseDeps,
-): Promise<{ findings: Finding[]; blocks: RemediationBlock[] }> {
+/**
+ * Launch one bounded plan-phase LLM worker and read its result JSON. Shared by
+ * the free-form extraction pass and the single bounded path-repair pass; the
+ * label keys the per-task artifact files (task/prompt/result/stdout/stderr).
+ */
+async function runPlanWorkerTask<T>(params: {
+  label: string;
+  obligationId: string;
+  buildPrompt: (io: { taskPath: string; resultPath: string }) => string;
+  options: OrchestratorOptions;
+  deps: PlanPhaseDeps;
+}): Promise<T> {
+  const { label, obligationId, buildPrompt, options, deps } = params;
   const sessionConfig =
     (await readOptionalJsonFile<SessionConfig>(
       join(options.root, "session-config.json"),
@@ -1029,13 +1122,59 @@ async function extractFindingsWithProvider(
   const provider = createFreshSessionProvider(undefined, sessionConfig);
   const workerTimeoutMs = sessionConfig.timeout_ms;
 
-  const taskPath = join(options.artifactsDir, `task_plan.json`);
-  const resultPath = join(options.artifactsDir, `result_plan.json`);
+  const taskPath = join(options.artifactsDir, `task_${label}.json`);
+  const resultPath = join(options.artifactsDir, `result_${label}.json`);
+  const promptPath = join(options.artifactsDir, `prompt_${label}.md`);
+  const stdoutPath = join(options.artifactsDir, `stdout_${label}.txt`);
+  const stderrPath = join(options.artifactsDir, `stderr_${label}.txt`);
 
-  const promptPath = join(options.artifactsDir, `prompt_plan.md`);
-  const promptContent = `
+  await writeFile(promptPath, buildPrompt({ taskPath, resultPath }), "utf8");
+
+  const task = createRemediationWorkerTask({
+    runId: "PLAN-" + (deps.now?.() ?? Date.now()),
+    options,
+    obligationId,
+    preferredExecutor: provider.name,
+    resultPath,
+    timeoutMs: workerTimeoutMs,
+  });
+  await writeJsonFile(taskPath, task);
+
+  await provider.launch(
+    createLaunchInputForTask(options, task, {
+      promptPath,
+      taskPath,
+      stdoutPath,
+      stderrPath,
+    }),
+  );
+  return readJsonFile<T>(resultPath);
+}
+
+async function extractFindingsWithProvider(
+  content: string,
+  _state: RemediationState,
+  options: OrchestratorOptions,
+  deps: PlanPhaseDeps,
+): Promise<{ findings: Finding[]; blocks: RemediationBlock[] }> {
+  try {
+    const extracted = await runPlanWorkerTask<{
+      findings: Finding[];
+      blocks: RemediationBlock[];
+    }>({
+      label: "plan",
+      obligationId: "extract-plan",
+      options,
+      deps,
+      buildPrompt: ({ taskPath, resultPath }) =>
+        `
 You are the Remediation Assistant. Your task is to extract findings and work blocks from the provided document.
 Produce a JSON output matching the remediation_plan.schema.json structure (specifically the findings and blocks arrays).
+
+Grounding requirements (a deterministic validator checks every path you cite):
+- Each \`affected_files[].path\` must be a repo-relative path that exists on disk. Verify before citing; never guess paths from prose.
+- If you cannot identify a real file for a finding, emit an empty \`affected_files\` array instead of inventing one — discovery happens later.
+- Each \`evidence\` entry should cite a real \`path:line\` location when one exists (e.g. "src/auth.ts:42 — token is never revoked"). Quote the source document only when no code location applies.
 
 Document Content:
 ${content}
@@ -1044,34 +1183,8 @@ Your task JSON is at: ${taskPath}
 Write your result JSON to exactly this path: ${resultPath}
 Use the Write tool to create or overwrite that file.
 Do not write to any other path.
-    `.trim();
-  await writeFile(promptPath, promptContent, "utf8");
-  const stdoutPath = join(options.artifactsDir, `stdout_plan.txt`);
-  const stderrPath = join(options.artifactsDir, `stderr_plan.txt`);
-
-  const task = createRemediationWorkerTask({
-    runId: "PLAN-" + (deps.now?.() ?? Date.now()),
-    options,
-    obligationId: "extract-plan",
-    preferredExecutor: provider.name,
-    resultPath,
-    timeoutMs: workerTimeoutMs,
-  });
-  await writeJsonFile(taskPath, task);
-
-  try {
-    await provider.launch(
-      createLaunchInputForTask(options, task, {
-        promptPath,
-        taskPath,
-        stdoutPath,
-        stderrPath,
-      }),
-    );
-    const extracted = await readJsonFile<{
-      findings: Finding[];
-      blocks: RemediationBlock[];
-    }>(resultPath);
+    `.trim(),
+    });
     return {
       findings: extracted.findings || [],
       blocks: extracted.blocks || [],
@@ -1080,4 +1193,68 @@ Do not write to any other path.
     console.error("Failed to extract plan via LLM:", e);
     throw new Error("Plan extraction failed.");
   }
+}
+
+/**
+ * The single bounded repair attempt for extracted findings whose cited paths
+ * were all phantom (WS1). Re-prompts the worker with the phantom paths named;
+ * the worker either supplies real repo-relative paths or withdraws the finding.
+ * The caller re-validates every returned path — repair output is untrusted.
+ */
+async function repairExtractedFindingPathsWithProvider(
+  requests: { finding: Finding; phantomPaths: string[] }[],
+  options: OrchestratorOptions,
+  deps: PlanPhaseDeps,
+): Promise<Map<string, string[]>> {
+  const findingSections = requests
+    .map(
+      ({ finding, phantomPaths }) => `
+### ${finding.id} — ${finding.title}
+
+- Summary: ${finding.summary}
+- Evidence: ${(finding.evidence ?? []).join(" | ")}
+- Phantom paths cited (do NOT exist in the repository): ${phantomPaths.join(", ")}`,
+    )
+    .join("\n");
+
+  const repaired = await runPlanWorkerTask<{
+    repairs?: { finding_id: string; affected_files: string[] }[];
+  }>({
+    label: "plan_path_repair",
+    obligationId: "repair-extracted-paths",
+    options,
+    deps,
+    buildPrompt: ({ taskPath, resultPath }) =>
+      `
+You are the Remediation Assistant. Earlier extraction cited file paths that do not exist in the repository. For each finding below, locate the REAL repo-relative path(s) the finding is about (search the repository), or withdraw the finding if it does not apply to this codebase.
+${findingSections}
+
+Rules:
+- Cite only repo-relative paths that exist on disk; verify each one before writing it.
+- To withdraw a finding, return it with an empty \`affected_files\` array (or omit it).
+- Do not edit source files.
+
+Your task JSON is at: ${taskPath}
+Write your result JSON to exactly this path: ${resultPath}
+
+\`\`\`json
+{
+  "repairs": [
+    { "finding_id": "FINDING-001", "affected_files": ["real/path/to/file.ts"] }
+  ]
+}
+\`\`\`
+`.trim(),
+  });
+
+  return new Map(
+    (repaired.repairs ?? [])
+      .filter((entry) => typeof entry?.finding_id === "string")
+      .map((entry) => [
+        entry.finding_id,
+        Array.isArray(entry.affected_files)
+          ? entry.affected_files.filter((p): p is string => typeof p === "string")
+          : [],
+      ]),
+  );
 }

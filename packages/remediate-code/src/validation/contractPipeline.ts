@@ -8,6 +8,7 @@ import {
   isRecord,
   pushValidationIssue,
 } from "@audit-tools/shared";
+import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
   CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
@@ -278,7 +279,7 @@ export function validateContractAssessmentReport(
   return issues;
 }
 
-// ── Counterexample ────────────────────────────────────────────────────────────
+// ── CounterexampleReport ──────────────────────────────────────────────────────
 
 export function validateCounterexample(
   value: unknown,
@@ -297,16 +298,41 @@ export function validateCounterexample(
     );
   }
   requireString(value.goal_id, `${path}.goal_id`, issues);
-  requireString(value.claim, `${path}.claim`, issues);
-  requireStringArray(value.reproduction_steps, `${path}.reproduction_steps`, issues);
-  requireString(value.expected, `${path}.expected`, issues);
-  requireString(value.actual, `${path}.actual`, issues);
-  requireStringArray(value.violated_obligation_ids, `${path}.violated_obligation_ids`, issues);
+  if (!Array.isArray(value.counterexamples)) {
+    pushValidationIssue(issues, `${path}.counterexamples`, `${path}.counterexamples must be an array.`);
+  } else {
+    for (const [i, entry] of value.counterexamples.entries()) {
+      if (!isRecord(entry)) {
+        pushValidationIssue(issues, `${path}.counterexamples[${i}]`, `${path}.counterexamples[${i}] must be an object.`);
+        continue;
+      }
+      requireString(entry.id, `${path}.counterexamples[${i}].id`, issues);
+      requireString(entry.claim, `${path}.counterexamples[${i}].claim`, issues);
+      requireStringArray(entry.reproduction_steps, `${path}.counterexamples[${i}].reproduction_steps`, issues);
+      requireString(entry.expected, `${path}.counterexamples[${i}].expected`, issues);
+      requireString(entry.actual, `${path}.counterexamples[${i}].actual`, issues);
+      requireStringArray(entry.violated_obligation_ids, `${path}.counterexamples[${i}].violated_obligation_ids`, issues);
+    }
+  }
   requireString(value.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
 // ── JudgeReport ───────────────────────────────────────────────────────────────
+
+const COUNTEREXAMPLE_CLASSIFICATIONS = [
+  "accepted",
+  "out_of_scope",
+  "duplicate",
+  "invalid",
+  "residual_risk",
+] as const;
+
+const JUDGE_REPAIR_TARGETS = [
+  "design_spec",
+  "obligation_ledger",
+  "contract_assessment_report",
+] as const;
 
 export function validateJudgeReport(
   value: unknown,
@@ -325,22 +351,37 @@ export function validateJudgeReport(
     );
   }
   requireString(value.goal_id, `${path}.goal_id`, issues);
-  requireOneOf(value.verdict, ["approved", "rejected", "needs_repair"], `${path}.verdict`, issues);
-  if (!Array.isArray(value.findings)) {
-    pushValidationIssue(issues, `${path}.findings`, `${path}.findings must be an array.`);
+  requireOneOf(value.verdict, ["approved", "needs_repair"], `${path}.verdict`, issues);
+  if (!Array.isArray(value.classifications)) {
+    pushValidationIssue(issues, `${path}.classifications`, `${path}.classifications must be an array.`);
   } else {
-    for (const [i, finding] of value.findings.entries()) {
-      if (!isRecord(finding)) {
-        pushValidationIssue(issues, `${path}.findings[${i}]`, `${path}.findings[${i}] must be an object.`);
+    for (const [i, entry] of value.classifications.entries()) {
+      if (!isRecord(entry)) {
+        pushValidationIssue(issues, `${path}.classifications[${i}]`, `${path}.classifications[${i}] must be an object.`);
         continue;
       }
-      requireString(finding.id, `${path}.findings[${i}].id`, issues);
-      requireString(finding.description, `${path}.findings[${i}].description`, issues);
-      requireOneOf(finding.severity, ["blocking", "advisory"], `${path}.findings[${i}].severity`, issues);
-      requireStringArray(finding.related_obligation_ids, `${path}.findings[${i}].related_obligation_ids`, issues);
+      requireString(entry.counterexample_id, `${path}.classifications[${i}].counterexample_id`, issues);
+      requireOneOf(entry.classification, COUNTEREXAMPLE_CLASSIFICATIONS, `${path}.classifications[${i}].classification`, issues);
+      requireString(entry.rationale, `${path}.classifications[${i}].rationale`, issues);
     }
   }
-  requireStringArray(value.required_repairs, `${path}.required_repairs`, issues);
+  if (value.verdict === "needs_repair") {
+    if (!isRecord(value.repair_directive)) {
+      pushValidationIssue(
+        issues,
+        `${path}.repair_directive`,
+        `${path}.repair_directive is required when verdict is "needs_repair".`,
+      );
+    }
+  }
+  if (value.repair_directive !== undefined) {
+    if (!isRecord(value.repair_directive)) {
+      pushValidationIssue(issues, `${path}.repair_directive`, `${path}.repair_directive must be an object.`);
+    } else {
+      requireOneOf(value.repair_directive.target, JUDGE_REPAIR_TARGETS, `${path}.repair_directive.target`, issues);
+      requireString(value.repair_directive.instruction, `${path}.repair_directive.instruction`, issues);
+    }
+  }
   requireString(value.created_at, `${path}.created_at`, issues);
   return issues;
 }
@@ -377,6 +418,9 @@ export function validateImplementationDAG(
       requireString(node.title, `${path}.nodes[${i}].title`, issues);
       requireString(node.description, `${path}.nodes[${i}].description`, issues);
       requireStringArray(node.satisfies_obligations, `${path}.nodes[${i}].satisfies_obligations`, issues);
+      if (node.addresses_counterexamples !== undefined) {
+        requireStringArray(node.addresses_counterexamples, `${path}.nodes[${i}].addresses_counterexamples`, issues);
+      }
       requireStringArray(node.depends_on, `${path}.nodes[${i}].depends_on`, issues);
       requireStringArray(node.verification_obligation_ids, `${path}.nodes[${i}].verification_obligation_ids`, issues);
       requireStringArray(node.targeted_commands, `${path}.nodes[${i}].targeted_commands`, issues);
@@ -450,3 +494,26 @@ export function validateVerificationReport(
   requireString(value.created_at, `${path}.created_at`, issues);
   return issues;
 }
+
+// ── Validator registry ────────────────────────────────────────────────────────
+
+/**
+ * One validator per contract-pipeline artifact payload. Used by the driver's
+ * ingestion pass (worker-written raw payloads are untrusted until validated)
+ * and by the artifacts validation sweep.
+ */
+export const CONTRACT_PIPELINE_VALIDATORS: Record<
+  ContractPipelineArtifactName,
+  (value: unknown, path: string) => ValidationIssue[]
+> = {
+  goal_spec: validateGoalSpec,
+  context_bundle: validateContextBundle,
+  design_spec: validateDesignSpec,
+  conceptual_design_critique: validateConceptualDesignCritique,
+  obligation_ledger: validateObligationLedger,
+  contract_assessment_report: validateContractAssessmentReport,
+  counterexample: validateCounterexample,
+  judge_report: validateJudgeReport,
+  implementation_dag: validateImplementationDAG,
+  verification_report: validateVerificationReport,
+};

@@ -359,6 +359,17 @@ instead of inventing a new one: \`correctness\`, \`architecture\`,
 \`observability\`. Group related findings into blocks by shared files or
 logical cohesion. Do not edit source files.
 
+Grounding requirements (a deterministic validator checks every path you cite;
+phantom paths are stripped and all-phantom findings are dropped):
+
+- Each \`affected_files[].path\` must be a repo-relative path that exists on
+  disk. Verify before citing; never guess a path from prose. If you cannot
+  identify a real file, emit an empty \`affected_files\` array instead —
+  discovery happens during documentation.
+- Each \`evidence\` entry should cite a real \`path:line\` location when one
+  exists (e.g. \`"src/auth.ts:42 — token is never revoked"\`). Findings with no
+  real-path evidence are downgraded to low confidence.
+
 Then run:
 
 \`${loaderCommand("next-step")}\`

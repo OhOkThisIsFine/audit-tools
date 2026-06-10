@@ -389,13 +389,53 @@ describe("contract pipeline validators", () => {
     });
   });
 
+  describe("validateCounterexample", () => {
+    const valid = {
+      contract_version: CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
+      goal_id: "G-001",
+      counterexamples: [
+        {
+          id: "CE-001",
+          claim: "The design dedupes inputs.",
+          reproduction_steps: ["Submit the same input twice."],
+          expected: "One stored row.",
+          actual: "Two stored rows.",
+          violated_obligation_ids: ["O-1"],
+        },
+      ],
+      created_at: new Date().toISOString(),
+    };
+
+    it("accepts a well-formed CounterexampleReport", () => {
+      expect(validateCounterexample(valid).filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("accepts an empty counterexamples array", () => {
+      const issues = validateCounterexample({ ...valid, counterexamples: [] });
+      expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects malformed counterexample entries", () => {
+      const issues = validateCounterexample({
+        ...valid,
+        counterexamples: [{ id: "CE-002" }],
+      });
+      expect(issues.some((i) => i.path.includes("claim"))).toBe(true);
+    });
+  });
+
   describe("validateJudgeReport", () => {
     const valid = {
       contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
       goal_id: "G-001",
       verdict: "approved",
-      findings: [],
-      required_repairs: [],
+      classifications: [
+        {
+          counterexample_id: "CE-001",
+          classification: "invalid",
+          rationale: "Does not falsify the claim.",
+        },
+      ],
       created_at: new Date().toISOString(),
     };
 
@@ -406,6 +446,46 @@ describe("contract pipeline validators", () => {
     it("rejects invalid verdict", () => {
       const issues = validateJudgeReport({ ...valid, verdict: "maybe" });
       expect(issues.some((i) => i.path.includes("verdict"))).toBe(true);
+    });
+
+    it("rejects invalid classification taxonomy values", () => {
+      const issues = validateJudgeReport({
+        ...valid,
+        classifications: [
+          {
+            counterexample_id: "CE-001",
+            classification: "kinda_real",
+            rationale: "?",
+          },
+        ],
+      });
+      expect(issues.some((i) => i.path.includes("classification"))).toBe(true);
+    });
+
+    it("requires repair_directive when verdict is needs_repair", () => {
+      const issues = validateJudgeReport({ ...valid, verdict: "needs_repair" });
+      expect(issues.some((i) => i.path.includes("repair_directive"))).toBe(true);
+    });
+
+    it("accepts needs_repair with a valid repair_directive", () => {
+      const issues = validateJudgeReport({
+        ...valid,
+        verdict: "needs_repair",
+        repair_directive: {
+          target: "design_spec",
+          instruction: "Add a dedup invariant.",
+        },
+      });
+      expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects a repair_directive with an unknown target", () => {
+      const issues = validateJudgeReport({
+        ...valid,
+        verdict: "needs_repair",
+        repair_directive: { target: "goal_spec", instruction: "Rewrite it." },
+      });
+      expect(issues.some((i) => i.path.includes("repair_directive.target"))).toBe(true);
     });
   });
 

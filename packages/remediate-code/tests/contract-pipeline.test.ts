@@ -16,6 +16,8 @@ import {
   CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
   CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
   CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
+  CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
+  CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
 } from "@audit-tools/shared";
 
@@ -26,6 +28,111 @@ const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 async function writeJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(value, null, 2) + "\n", "utf8");
+}
+
+const CREATED_AT = "2026-01-01T00:00:00.000Z";
+
+/** Valid payloads per artifact, used to build prefix chains for phase tests. */
+const CHAIN_PAYLOADS = {
+  goal_spec: {
+    contract_version: CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
+    goal_id: "G1",
+    objective: "Improve.",
+    non_goals: [],
+    success_criteria: ["Improved."],
+    source_type: "conversation",
+    created_at: CREATED_AT,
+  },
+  context_bundle: {
+    contract_version: CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
+    goal_id: "G1",
+    entries: [],
+    context_summary: "ctx",
+    created_at: CREATED_AT,
+  },
+  design_spec: {
+    contract_version: CONTRACT_PIPELINE_DESIGN_SPEC_VERSION,
+    goal_id: "G1",
+    design_narrative: "n",
+    invariants: [],
+    affected_paths: [],
+    created_at: CREATED_AT,
+  },
+  conceptual_design_critique: {
+    contract_version: CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
+    goal_id: "G1",
+    items: [],
+    verdict: "approved",
+    created_at: CREATED_AT,
+  },
+  obligation_ledger: {
+    contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
+    goal_id: "G1",
+    obligations: [
+      { id: "O-1", description: "Behavior holds.", kind: "behavioral", depends_on: [], status: "pending" },
+    ],
+    created_at: CREATED_AT,
+  },
+  contract_assessment_report: {
+    contract_version: CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
+    goal_id: "G1",
+    findings: [],
+    verdict: "passed",
+    created_at: CREATED_AT,
+  },
+  counterexample: {
+    contract_version: CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
+    goal_id: "G1",
+    counterexamples: [],
+    created_at: CREATED_AT,
+  },
+  judge_report: {
+    contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
+    goal_id: "G1",
+    verdict: "approved",
+    classifications: [],
+    created_at: CREATED_AT,
+  },
+  implementation_dag: {
+    contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+    goal_id: "G1",
+    nodes: [
+      {
+        id: "CP-001",
+        title: "Do the work",
+        description: "Implement the change.",
+        satisfies_obligations: ["O-1"],
+        depends_on: [],
+        verification_obligation_ids: [],
+        targeted_commands: [],
+        status: "pending",
+      },
+    ],
+    edges: [],
+    created_at: CREATED_AT,
+  },
+} as const;
+
+const CHAIN_ORDER = [
+  "goal_spec",
+  "context_bundle",
+  "design_spec",
+  "conceptual_design_critique",
+  "obligation_ledger",
+  "contract_assessment_report",
+  "counterexample",
+  "judge_report",
+  "implementation_dag",
+] as const;
+
+/** Write valid envelopes for every artifact up to and including `through`. */
+async function writeChainThrough(
+  through: (typeof CHAIN_ORDER)[number],
+): Promise<void> {
+  for (const name of CHAIN_ORDER) {
+    await writeContractArtifact(ARTIFACTS_DIR, name, CHAIN_PAYLOADS[name]);
+    if (name === through) return;
+  }
 }
 
 beforeEach(async () => {
@@ -138,69 +245,25 @@ describe("nextMissingContractPhase", () => {
     expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBe("obligation_ledger_phase");
   });
 
+  it("returns critic after assessment, judge after counterexample (adversarial gate phases)", async () => {
+    await writeChainThrough("contract_assessment_report");
+    expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBe("critic");
+
+    await writeContractArtifact(ARTIFACTS_DIR, "counterexample", CHAIN_PAYLOADS.counterexample);
+    expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBe("judge");
+
+    await writeContractArtifact(ARTIFACTS_DIR, "judge_report", CHAIN_PAYLOADS.judge_report);
+    expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBe("implementation_planning");
+  });
+
   it("returns null once implementation_dag exists, before closing verification", async () => {
-    await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", {
-      contract_version: CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
-      goal_id: "G1", objective: "Improve.", non_goals: [], success_criteria: [], source_type: "conversation", created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", {
-      contract_version: CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
-      goal_id: "G1", entries: [], context_summary: "ctx", created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "design_spec", {
-      contract_version: CONTRACT_PIPELINE_DESIGN_SPEC_VERSION,
-      goal_id: "G1", design_narrative: "n", invariants: [], affected_paths: [], created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "conceptual_design_critique", {
-      contract_version: CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
-      goal_id: "G1", items: [], verdict: "approved", created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
-      contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
-      goal_id: "G1", obligations: [], created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "contract_assessment_report", {
-      contract_version: CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
-      goal_id: "G1", findings: [], verdict: "passed", created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
-      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
-      goal_id: "G1", nodes: [], edges: [], created_at: new Date().toISOString(),
-    });
+    await writeChainThrough("implementation_dag");
 
     expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBeNull();
   });
 
   it("returns null when all pipeline phases including closing are complete", async () => {
-    // Write all required artifacts including verification_report (closing output).
-    await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", {
-      contract_version: CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
-      goal_id: "G1", objective: "Improve.", non_goals: [], success_criteria: [], source_type: "conversation", created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", {
-      contract_version: CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
-      goal_id: "G1", entries: [], context_summary: "ctx", created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "design_spec", {
-      contract_version: CONTRACT_PIPELINE_DESIGN_SPEC_VERSION,
-      goal_id: "G1", design_narrative: "n", invariants: [], affected_paths: [], created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "conceptual_design_critique", {
-      contract_version: CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
-      goal_id: "G1", items: [], verdict: "approved", created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
-      contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
-      goal_id: "G1", obligations: [], created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "contract_assessment_report", {
-      contract_version: CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
-      goal_id: "G1", findings: [], verdict: "passed", created_at: new Date().toISOString(),
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
-      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
-      goal_id: "G1", nodes: [], edges: [], created_at: new Date().toISOString(),
-    });
+    await writeChainThrough("implementation_dag");
     // closing phase produces verification_report.
     await writeContractArtifact(ARTIFACTS_DIR, "verification_report", {
       contract_version: "remediate-code-verification-report/v1alpha1",

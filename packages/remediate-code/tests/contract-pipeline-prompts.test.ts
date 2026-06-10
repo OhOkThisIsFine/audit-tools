@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 import {
   renderContractPipelinePrompt,
+  renderContractRepairPrompt,
   listContractPipelineRoles,
   CONTRACT_PIPELINE_PHASE_ORDER,
 } from "../src/steps/contractPipelinePrompts.js";
@@ -34,6 +35,8 @@ describe("contract pipeline prompt renderer — all roles", () => {
     "design",
     "critique",
     "assessment",
+    "critic",
+    "judge",
     "implementation_planning",
     "closing",
   ];
@@ -148,6 +151,89 @@ describe("contract pipeline prompt renderer — missing required artifacts", () 
         artifactPaths: ALL_PATHS,
       }),
     ).toThrow(/does_not_exist/);
+  });
+});
+
+describe("adversarial critic and judge roles", () => {
+  it("critic consumes the assessment and produces the counterexample report", () => {
+    const result = renderContractPipelinePrompt({
+      role: "critic",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+    expect(result.outputPath).toBe(ALL_PATHS.counterexample);
+    expect(result.prompt).toMatch(/counterexample/i);
+    expect(result.prompt).toContain(ALL_PATHS.contract_assessment_report);
+  });
+
+  it("judge consumes the counterexample report and emits the classification taxonomy", () => {
+    const result = renderContractPipelinePrompt({
+      role: "judge",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+    expect(result.outputPath).toBe(ALL_PATHS.judge_report);
+    expect(result.prompt).toContain(ALL_PATHS.counterexample);
+    expect(result.prompt).toMatch(/accepted \| out_of_scope \| duplicate \| invalid \| residual_risk/);
+    expect(result.prompt).toMatch(/repair_directive/);
+  });
+
+  it("implementation_planning requires the judge report and states the traceability rule", () => {
+    expect(() =>
+      renderContractPipelinePrompt({
+        role: "implementation_planning",
+        artifactPaths: { ...ALL_PATHS, judge_report: undefined },
+        repoRoot: FAKE_REPO_ROOT,
+      }),
+    ).toThrow(/judge_report/);
+
+    const result = renderContractPipelinePrompt({
+      role: "implementation_planning",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+    expect(result.prompt).toMatch(/addresses_counterexamples/);
+    expect(result.prompt).toMatch(/Traceability is mandatory/);
+  });
+
+  it("phase order runs critic then judge between assessment and implementation planning", () => {
+    const order = CONTRACT_PIPELINE_PHASE_ORDER;
+    expect(order.indexOf("critic")).toBeGreaterThan(order.indexOf("assessment"));
+    expect(order.indexOf("judge")).toBe(order.indexOf("critic") + 1);
+    expect(order.indexOf("implementation_planning")).toBe(order.indexOf("judge") + 1);
+  });
+});
+
+describe("contract repair prompt", () => {
+  it("renders a full-rewrite prompt for each repair target", () => {
+    for (const target of [
+      "design_spec",
+      "obligation_ledger",
+      "contract_assessment_report",
+    ] as const) {
+      const result = renderContractRepairPrompt({
+        target,
+        instruction: "Address the accepted counterexamples.",
+        artifactPaths: ALL_PATHS,
+        repoRoot: FAKE_REPO_ROOT,
+      });
+      expect(result.outputPath).toBe(ALL_PATHS[target]);
+      expect(result.prompt).toContain(`Contract Repair: ${target}`);
+      expect(result.prompt).toContain("Address the accepted counterexamples.");
+      expect(result.prompt).toContain(ALL_PATHS.judge_report);
+      expect(result.prompt).toContain("contract_version");
+      expect(result.prompt).toContain(FAKE_REPO_ROOT);
+    }
+  });
+
+  it("throws when the target artifact path is missing", () => {
+    expect(() =>
+      renderContractRepairPrompt({
+        target: "design_spec",
+        instruction: "Fix.",
+        artifactPaths: { ...ALL_PATHS, design_spec: undefined },
+      }),
+    ).toThrow(/design_spec/);
   });
 });
 

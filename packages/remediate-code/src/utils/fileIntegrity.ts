@@ -113,7 +113,7 @@ async function hashDirectory(root: string, absolutePath: string): Promise<string
   return digest.digest("hex");
 }
 
-function resolveAffectedPath(root: string, affectedPath: string): string {
+export function resolveAffectedPath(root: string, affectedPath: string): string {
   return isAbsolute(affectedPath) ? affectedPath : join(root, affectedPath);
 }
 

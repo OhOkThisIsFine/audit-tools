@@ -115,10 +115,15 @@ export interface CoverageLedgerEntry {
     | "planned"
     | "folded_into"
     | "dropped_no_evidence"
-    | "dropped_by_checkpoint";
+    | "dropped_by_checkpoint"
+    | "dropped_phantom_paths";
   block_id?: string;
   folded_into?: string;
   rationale?: string;
+  /** Phantom (non-existent) cited paths the grounding pass stripped. */
+  phantom_paths_removed?: string[];
+  /** Whether the finding's evidence cites a real repo path (extracted findings only). */
+  evidence_grounded?: boolean;
 }
 
 export interface CoverageLedger {
@@ -130,6 +135,8 @@ export interface CoverageLedger {
   dropped_count: number;
   /** Findings excluded by the intent checkpoint (filters / excluded scope). */
   checkpoint_dropped_count: number;
+  /** Findings dropped because every cited path was phantom (after one repair attempt). */
+  phantom_dropped_count: number;
   entries: CoverageLedgerEntry[];
 }
 
