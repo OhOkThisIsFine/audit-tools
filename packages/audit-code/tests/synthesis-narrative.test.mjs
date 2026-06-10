@@ -4,7 +4,6 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertMatchesJsonSchema } from "./helpers/auditSchemaRegistry.mjs";
-import { captureConsole } from "./helpers/captureConsole.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -236,57 +235,4 @@ test("advanceAudit forced synthesis_narrative_executor applies and records the n
   const tokenId = idOf(synth.audit_findings, "Token check is weak");
   const f1 = advanced.updated_bundle.audit_findings.findings.find((f) => f.id === tokenId);
   assert.equal(f1.theme_id, "T-1");
-});
-
-test("buildAuditReportModel emits a synthesis_complete diagnostic to stderr", async () => {
-  const { stderr } = await captureConsole(() => {
-    buildAuditReportModel({ results: syntheticResults() });
-  });
-
-  const lines = stderr.trim().split("\n").filter((l) => l.trim().length > 0);
-  assert.ok(lines.length > 0, "console.error should have been called at least once");
-
-  let parsed;
-  try {
-    parsed = JSON.parse(lines[0]);
-  } catch {
-    assert.fail(`First console.error argument is not valid JSON: ${lines[0]}`);
-  }
-
-  assert.equal(parsed.tag, "synthesis_complete");
-  assert.equal(typeof parsed.finding_count, "number");
-  assert.equal(typeof parsed.work_block_count, "number");
-  assert.equal(typeof parsed.audited_file_count, "number");
-  assert.equal(typeof parsed.excluded_file_count, "number");
-  assert.equal(typeof parsed.budget_deferred_task_count, "number");
-
-  const model = buildAuditReportModel({ results: syntheticResults() });
-  assert.equal(parsed.finding_count, model.findings.length);
-});
-
-test("buildAuditFindingsReport emits an audit_findings_report_built diagnostic to stderr", async () => {
-  const { AUDIT_FINDINGS_CONTRACT_VERSION: contractVersion } = await import(
-    "../src/reporting/synthesis.ts"
-  );
-
-  const model = buildAuditReportModel({ results: syntheticResults() });
-
-  const { stderr } = await captureConsole(() => {
-    buildAuditFindingsReport(model);
-  });
-
-  const lines = stderr.trim().split("\n").filter((l) => l.trim().length > 0);
-  assert.ok(lines.length > 0, "console.error should have been called at least once");
-
-  let parsed;
-  try {
-    parsed = JSON.parse(lines[0]);
-  } catch {
-    assert.fail(`First console.error argument is not valid JSON: ${lines[0]}`);
-  }
-
-  assert.equal(parsed.tag, "audit_findings_report_built");
-  assert.equal(parsed.contract_version, contractVersion);
-  assert.equal(parsed.finding_count, model.findings.length);
-  assert.equal(typeof parsed.work_block_count, "number");
 });

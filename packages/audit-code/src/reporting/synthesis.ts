@@ -184,7 +184,6 @@ export function buildAuditReportModel(params: {
     findings,
     work_blocks: workBlocks,
   };
-  console.error(JSON.stringify({ tag: 'synthesis_complete', finding_count: findings.length, work_block_count: workBlocks.length, severity_breakdown: severityBreakdown(findings), audited_file_count: coverage.audited_file_count, excluded_file_count: coverage.excluded_file_count, budget_deferred_task_count: coverage.budget_deferred_task_count }));
   return model;
 }
 
@@ -202,7 +201,6 @@ export function buildAuditFindingsReport(
     findings: model.findings,
     work_blocks: model.work_blocks,
   };
-  console.error(JSON.stringify({ tag: 'audit_findings_report_built', contract_version: AUDIT_FINDINGS_CONTRACT_VERSION, finding_count: model.findings.length, work_block_count: model.work_blocks.length }));
   return report;
 }
 
