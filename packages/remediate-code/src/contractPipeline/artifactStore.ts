@@ -1,5 +1,5 @@
 /**
- * Typed read/write helpers for the seven contract-pipeline artifacts.
+ * Typed read/write helpers for the contract-pipeline artifacts.
  * Each artifact is stored as a JSON file under
  * `<artifactsDir>/intake/contract/`. A content hash is included in the
  * stored envelope so downstream artifacts can detect when an upstream
@@ -45,7 +45,15 @@ const DEPENDENCY_MAP: Record<ContractPipelineArtifactName, ContractPipelineArtif
   contract_assessment_report: ["goal_spec", "design_spec", "obligation_ledger"],
   counterexample: ["goal_spec", "design_spec", "obligation_ledger", "contract_assessment_report"],
   judge_report: ["goal_spec", "design_spec", "obligation_ledger", "contract_assessment_report", "counterexample"],
-  implementation_dag: ["goal_spec", "context_bundle", "design_spec", "obligation_ledger", "contract_assessment_report"],
+  implementation_dag: [
+    "goal_spec",
+    "context_bundle",
+    "design_spec",
+    "obligation_ledger",
+    "contract_assessment_report",
+    "counterexample",
+    "judge_report",
+  ],
   verification_report: [
     "goal_spec",
     "context_bundle",
@@ -72,7 +80,7 @@ export function contractPipelineDir(artifactsDir: string): string {
   return join(artifactsDir, "intake", "contract");
 }
 
-function artifactFilePath(
+export function contractArtifactFilePath(
   artifactsDir: string,
   name: ContractPipelineArtifactName,
 ): string {
@@ -112,7 +120,7 @@ export async function writeContractArtifact(
     dependency_hashes,
     payload,
   };
-  await writeJsonFile(artifactFilePath(artifactsDir, name), envelope);
+  await writeJsonFile(contractArtifactFilePath(artifactsDir, name), envelope);
   return envelope;
 }
 
@@ -122,7 +130,7 @@ export async function readContractArtifact(
   name: ContractPipelineArtifactName,
 ): Promise<ContractPipelineArtifactEnvelope | null> {
   const envelope = await readOptionalJsonFile<ContractPipelineArtifactEnvelope>(
-    artifactFilePath(artifactsDir, name),
+    contractArtifactFilePath(artifactsDir, name),
   );
   if (!envelope) return null;
   return envelope;
@@ -206,5 +214,5 @@ export function contractArtifactExists(
   artifactsDir: string,
   name: ContractPipelineArtifactName,
 ): boolean {
-  return existsSync(artifactFilePath(artifactsDir, name));
+  return existsSync(contractArtifactFilePath(artifactsDir, name));
 }

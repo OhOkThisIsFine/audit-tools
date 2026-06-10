@@ -35,6 +35,12 @@ export interface Finding {
   related_findings?: string[];
   /** Synthesis theme this finding belongs to (Phase 6). */
   theme_id?: string;
+  /**
+   * Whether at least one evidence entry cites a real repo path (and valid line)
+   * that exists on disk. Set by the remediator's deterministic grounding pass on
+   * LLM-extracted findings; absent on auditor-produced findings (already grounded).
+   */
+  evidence_grounded?: boolean;
   /** Contract-pipeline goal this generated remediation finding belongs to. */
   contract_goal_id?: string;
   /** Contract-pipeline obligation IDs this finding/task is intended to satisfy. */

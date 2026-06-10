@@ -11,7 +11,9 @@ import type {
   RemediationPlan,
 } from "../state/types.js";
 import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, type SessionConfig } from "@audit-tools/shared";
-import { runPlanPhase, applyPlanPipeline } from "../phases/plan.js";
+import type { CoverageLedger } from "../state/types.js";
+import { runPlanPhase, applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
+import { groundExtractedFindings } from "../phases/grounding.js";
 import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
 import { validateRemediationPlan } from "../validation/remediationState.js";
@@ -220,7 +222,13 @@ function allItemsTerminal(state: RemediationState): boolean {
   return items.length > 0 && resolvedOrTerminalItems(state).length === items.length;
 }
 
-function normalizeExtractedPlan(value: unknown): RemediationPlan {
+function normalizeExtractedPlan(value: unknown): {
+  plan: RemediationPlan;
+  /** Findings as received (post-default, pre-dedup) for coverage accounting. */
+  sourceFindings: Finding[];
+  /** Cross-lens dedup absorbed→survivor map for the coverage ledger. */
+  mergeMap: Map<string, string>;
+} {
   if (!isRecord(value)) {
     throw new Error("extracted-plan.json must be an object.");
   }
@@ -287,13 +295,14 @@ function normalizeExtractedPlan(value: unknown): RemediationPlan {
   if (plan.findings.length === 0) {
     throw new Error("Extracted plan contains zero findings.");
   }
-  return plan;
+  return { plan, sourceFindings: findings, mergeMap: dedup.mergeMap };
 }
 
 async function saveStateForPlan(
   artifactsDir: string,
   existing: RemediationState,
   plan: RemediationPlan,
+  planCoverage?: CoverageLedger,
 ): Promise<RemediationState> {
   const items: Record<string, RemediationItemState> = {};
   for (const finding of plan.findings) {
@@ -312,15 +321,23 @@ async function saveStateForPlan(
     plan,
     items,
     closing_plan: { action: "none" },
+    ...(planCoverage ? { plan_coverage: planCoverage } : {}),
   };
   await new StateStore(artifactsDir).saveState(state);
   await writeJsonFile(join(artifactsDir, "remediation_plan.json"), plan);
   return state;
 }
 
-function stripPlanTimeHashes(value: unknown): unknown {
+// Plan-time bookkeeping recomputed on every plan pass; it must not participate
+// in the carry-forward identity of a finding.
+const PLAN_TIME_BOOKKEEPING_KEYS = new Set([
+  "hash_at_plan_time",
+  "evidence_grounded",
+]);
+
+function stripPlanTimeBookkeeping(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map((entry) => stripPlanTimeHashes(entry));
+    return value.map((entry) => stripPlanTimeBookkeeping(entry));
   }
   if (!isRecord(value)) {
     return value;
@@ -328,14 +345,14 @@ function stripPlanTimeHashes(value: unknown): unknown {
 
   const stripped: Record<string, unknown> = {};
   for (const key of Object.keys(value).sort()) {
-    if (key === "hash_at_plan_time") continue;
-    stripped[key] = stripPlanTimeHashes(value[key]);
+    if (PLAN_TIME_BOOKKEEPING_KEYS.has(key)) continue;
+    stripped[key] = stripPlanTimeBookkeeping(value[key]);
   }
   return stripped;
 }
 
 function findingCarryForwardKey(finding: Finding): string {
-  return JSON.stringify(stripPlanTimeHashes(finding));
+  return JSON.stringify(stripPlanTimeBookkeeping(finding));
 }
 
 function blockIdsByFinding(plan: RemediationPlan): Map<string, string> {
@@ -1183,9 +1200,62 @@ async function handlePendingExtractedPlan(
   extractedPlan: unknown,
 ): Promise<RemediationState | null> {
   try {
-    const normalized = normalizeExtractedPlan(extractedPlan);
-    const pipelined = await applyPlanPipeline(normalized, { root, artifactsDir });
-    return await saveStateForPlan(artifactsDir, existing, pipelined);
+    const { plan, sourceFindings, mergeMap } =
+      normalizeExtractedPlan(extractedPlan);
+
+    // Deterministic grounding for the LLM-extracted plan (this path never sees
+    // structured audit findings): strip phantom affected_files paths, drop
+    // findings whose every cited path was phantom, and classify evidence. No
+    // bounded LLM repair here — the host re-extracts with the corrected prompt
+    // if the whole plan grounds to nothing. Contract-pipeline-promoted plans
+    // are grounded by construction (the traceability gate ties every node to
+    // obligations/accepted counterexamples), so their obligation-reference
+    // evidence is exempt from the path-citation check.
+    const grounding = await groundExtractedFindings(plan.findings, {
+      root,
+      evidenceGrounding: plan.source !== "contract_pipeline",
+    });
+    if (grounding.dropped.length > 0) {
+      process.stderr.write(
+        `[remediate-code] Grounding dropped ${grounding.dropped.length} extracted finding(s) whose cited paths do not exist: ${grounding.dropped.map((d) => `${d.finding.id} (${d.phantomPaths.join(", ")})`).join("; ")}\n`,
+      );
+    }
+    plan.findings = grounding.findings;
+    const keptIds = new Set(plan.findings.map((f) => f.id));
+    plan.blocks = plan.blocks
+      .map((b) => ({ ...b, items: (b.items ?? []).filter((id) => keptIds.has(id)) }))
+      .filter((b) => (b.items ?? []).length > 0);
+    if (plan.findings.length === 0) {
+      throw new Error(
+        "Every extracted finding cited only phantom paths; re-extract with real repo-relative paths.",
+      );
+    }
+
+    const pipelined = await applyPlanPipeline(plan, { root, artifactsDir });
+    const coverage = buildCoverageLedger({
+      planId: pipelined.plan_id,
+      sourceFindings,
+      droppedNoEvidence: [],
+      droppedByCheckpoint: [],
+      droppedPhantomPaths: new Map(
+        grounding.dropped.map((d) => [d.finding.id, d.phantomPaths]),
+      ),
+      phantomPathsRemoved: grounding.phantomPathsByFinding,
+      mergeMap,
+      items: Object.fromEntries(
+        pipelined.findings.map((finding) => [
+          finding.id,
+          {
+            finding_id: finding.id,
+            status: "pending" as const,
+            block_id:
+              pipelined.blocks.find((b) => b.items.includes(finding.id))
+                ?.block_id ?? "UNKNOWN",
+          },
+        ]),
+      ),
+    });
+    return await saveStateForPlan(artifactsDir, existing, pipelined, coverage);
   } catch (error) {
     const paths = intakePaths(artifactsDir);
     try {

@@ -87,6 +87,7 @@
           "systemic": { "type": "boolean" },
           "related_findings": { "type": "array", "minItems": 1, "items": { "type": "string" } },
           "theme_id": { "type": "string" },
+          "evidence_grounded": { "type": "boolean" },
           "contract_goal_id": { "type": "string" },
           "contract_obligation_ids": {
             "type": "array",

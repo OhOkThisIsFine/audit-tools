@@ -75,7 +75,7 @@ describe("contract_pipeline schema", () => {
     "ConceptualDesignCritique",
     "ObligationLedger",
     "ContractAssessmentReport",
-    "Counterexample",
+    "CounterexampleReport",
     "JudgeReport",
     "ImplementationDAG",
     "VerificationReport",

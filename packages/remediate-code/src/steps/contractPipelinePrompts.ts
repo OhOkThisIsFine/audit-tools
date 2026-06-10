@@ -1,5 +1,5 @@
 /**
- * Bounded prompt renderers for each of the seven contract-pipeline roles.
+ * Bounded prompt renderers for each of the contract-pipeline roles.
  * Each renderer accepts only the required artifact paths for its role and
  * fails fast when any required path is missing. Prompts stay path-based and
  * schema-grounded rather than embedding raw artifact content.
@@ -94,9 +94,51 @@ const ROLES: Record<string, ContractPipelineRole> = {
     description:
       "Assess whether the design spec satisfies all invariants and obligations.",
   },
+  critic: {
+    title: "Adversarial Critic (Counterexample Search)",
+    requiredInputKeys: ["goal_spec", "design_spec", "obligation_ledger", "contract_assessment_report"],
+    outputKey: "counterexample",
+    outputSchema: `{
+  "contract_version": "remediate-code-contract-pipeline/counterexample/v1alpha1",
+  "goal_id": "<from goal_spec>",
+  "counterexamples": [{
+    "id": "CE-001",
+    "claim": "<the design/assessment claim being falsified>",
+    "reproduction_steps": ["<concrete step>"],
+    "expected": "<what the design promises>",
+    "actual": "<what actually happens under this counterexample>",
+    "violated_obligation_ids": ["<obligation_id>"]
+  }],
+  "created_at": "<ISO-8601>"
+}`,
+    description:
+      "Adversarially attack the design: produce concrete counterexamples that falsify design invariants, obligations, or assessment claims. Each counterexample must name the claim it falsifies, concrete reproduction steps, and the obligation(s) it violates. Search hard for inputs, orderings, and edge states the design mishandles; an empty counterexamples array is only acceptable when you genuinely cannot falsify anything.",
+  },
+  judge: {
+    title: "Adversarial Judge",
+    requiredInputKeys: ["goal_spec", "design_spec", "obligation_ledger", "contract_assessment_report", "counterexample"],
+    outputKey: "judge_report",
+    outputSchema: `{
+  "contract_version": "remediate-code-contract-pipeline/judge-report/v1alpha1",
+  "goal_id": "<from goal_spec>",
+  "verdict": "approved | needs_repair",
+  "classifications": [{
+    "counterexample_id": "<id from the counterexample report>",
+    "classification": "accepted | out_of_scope | duplicate | invalid | residual_risk",
+    "rationale": "<one-line justification>"
+  }],
+  "repair_directive": {
+    "target": "design_spec | obligation_ledger | contract_assessment_report",
+    "instruction": "<bounded instruction for regenerating the target artifact>"
+  },
+  "created_at": "<ISO-8601>"
+}`,
+    description:
+      "Judge every counterexample from the critic: `accepted` (real flaw the contract must address), `out_of_scope` (outside the goal spec), `duplicate`, `invalid` (does not actually falsify the claim), or `residual_risk` (real but tolerable; recorded, not repaired). Verdict is `approved` only when no accepted counterexample demands a contract repair — then omit `repair_directive`. Otherwise verdict is `needs_repair` and `repair_directive` must name the single artifact whose regeneration addresses the accepted counterexamples.",
+  },
   implementation_planning: {
     title: "Implementation Planning (DAG)",
-    requiredInputKeys: ["goal_spec", "context_bundle", "design_spec", "obligation_ledger", "contract_assessment_report"],
+    requiredInputKeys: ["goal_spec", "context_bundle", "design_spec", "obligation_ledger", "contract_assessment_report", "counterexample", "judge_report"],
     outputKey: "implementation_dag",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/implementation-dag/v1alpha1",
@@ -106,6 +148,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
     "title": "<short title>",
     "description": "<bounded task description>",
     "satisfies_obligations": ["<obligation_id>"],
+    "addresses_counterexamples": ["<accepted counterexample id, when applicable>"],
     "depends_on": ["<task-id>"],
     "verification_obligation_ids": ["<obligation_id>"],
     "targeted_commands": ["<command to verify>"],
@@ -115,7 +158,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
   "created_at": "<ISO-8601>"
 }`,
     description:
-      "Decompose the implementation into a bounded dependency DAG of tasks.",
+      "Decompose the implementation into a bounded dependency DAG of tasks. Traceability is mandatory: every node must list at least one obligation id from the obligation ledger (in satisfies_obligations or verification_obligation_ids) or one judge-accepted counterexample id (in addresses_counterexamples) — untraceable nodes are rejected. Accepted and residual_risk counterexamples from the judge report must be covered by nodes or verification obligations.",
   },
   closing: {
     title: "Contract Pipeline Closing",
@@ -239,9 +282,111 @@ export const CONTRACT_PIPELINE_PHASE_ORDER: string[] = [
   "design",
   "critique",
   "assessment",
+  "critic",
+  "judge",
   "implementation_planning",
   "closing",
 ];
+
+// ── Repair prompt ─────────────────────────────────────────────────────────────
+
+export interface ContractRepairRenderInput {
+  /** The contract artifact the judge ordered regenerated. */
+  target: "design_spec" | "obligation_ledger" | "contract_assessment_report";
+  /** The judge's bounded regeneration instruction. */
+  instruction: string;
+  /** Resolved file paths for all contract-pipeline artifacts. */
+  artifactPaths: Partial<Record<ContractPipelineArtifactName, string>>;
+  /** Repository root path — passed to workers for cwd anchoring. */
+  repoRoot?: string;
+}
+
+/** Schema shape per repair target, sourced from the producing role. */
+const REPAIR_TARGET_SCHEMA: Record<ContractRepairRenderInput["target"], () => string> = {
+  design_spec: () => ROLES.design.outputSchema,
+  // obligation_ledger has no ROLES entry (it renders via the bespoke
+  // obligation-ledger prompt), so its schema shape lives here.
+  obligation_ledger: () => `{
+  "contract_version": "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
+  "goal_id": "<from goal_spec>",
+  "obligations": [{
+    "id": "<obligation-id>",
+    "description": "<concrete obligation>",
+    "kind": "invariant|behavioral|structural|test",
+    "depends_on": [],
+    "status": "pending"
+  }],
+  "created_at": "<ISO-8601>"
+}`,
+  contract_assessment_report: () => ROLES.assessment.outputSchema,
+};
+
+/**
+ * Render the bounded repair step for a failing judge verdict: regenerate the
+ * named contract artifact in full, addressing the accepted counterexamples and
+ * the judge's instruction. The next pipeline invocation re-validates and
+ * re-derives everything downstream via the staleness DAG.
+ */
+export function renderContractRepairPrompt(
+  input: ContractRepairRenderInput,
+): { prompt: string; outputPath: string } {
+  const outputPath = input.artifactPaths[input.target];
+  if (!outputPath) {
+    throw new Error(
+      `Contract repair requires an artifact path for "${input.target}" but it was not provided.`,
+    );
+  }
+  const requiredInputs = [
+    "goal_spec",
+    "design_spec",
+    "obligation_ledger",
+    "contract_assessment_report",
+    "counterexample",
+    "judge_report",
+  ] as ContractPipelineArtifactName[];
+  for (const key of requiredInputs) {
+    if (!input.artifactPaths[key]) {
+      throw new Error(
+        `Contract repair requires artifact path for "${key}" but it was not provided.`,
+      );
+    }
+  }
+
+  const cwdNote = input.repoRoot
+    ? `\n> Set the shell/tool working directory to \`${input.repoRoot}\` before running any commands.\n`
+    : "";
+
+  const prompt = `# Contract Repair: ${input.target}
+
+The adversarial judge rejected the current contract. Regenerate \`${input.target}\` IN FULL so that every judge-accepted counterexample is addressed.
+${cwdNote}
+## Judge Instruction
+
+${input.instruction}
+
+## Required Inputs
+
+${requiredInputs.map((key) => `- \`${input.artifactPaths[key]}\` (${key})`).join("\n")}
+
+## Your Task
+
+Read the inputs above — pay particular attention to the accepted counterexamples in the judge report's classifications. Rewrite the complete, corrected artifact (not a diff) to exactly:
+
+\`${outputPath}\`
+
+The output must conform to this JSON schema shape:
+
+\`\`\`json
+${REPAIR_TARGET_SCHEMA[input.target]()}
+\`\`\`
+
+Downstream artifacts are re-derived automatically after this repair — do not edit any other artifact.
+
+**Stop after writing the output file.** Do not edit source files. Do not advance to the next pipeline step.
+`;
+
+  return { prompt, outputPath };
+}
 
 // Re-export the obligation-ledger role separately since it maps to a phase that
 // exists in the DAG but is triggered from the assessment step internally.

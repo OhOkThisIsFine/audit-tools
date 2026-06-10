@@ -205,40 +205,30 @@ structured-path tests pre-write a checkpoint.
 
 ## Features to add later
 
-### Contract-governed implementation pipeline — *MVP shipped 2026-06; partial*
+### Contract-governed implementation pipeline — *shipped 2026-06*
 
-The artifact contracts, JSON schemas, validators, artifact store + staleness DAG,
-next-step prompt renderers, and the closing verification report are built and
-wired into both tools (shared types in
-`packages/shared/src/types/contractPipeline.ts`; remediate-code
-`src/contractPipeline/`, `src/steps/contractPipeline*.ts`,
-`schemas/contract_pipeline.schema.json`; audit-code contract-assessment posture in
-`designReviewPrompt.ts` and `spec/artifact-contract.md`). Free-form remediation
-enters the pipeline; structured `audit-findings.json` keeps the deterministic
-fast path.
+The full pipeline is built and wired: artifact contracts, JSON schemas,
+validators, artifact store + content-hash staleness DAG, next-step prompt
+renderers, deterministic grounding of LLM-extracted findings (phantom
+`affected_files` stripped with one bounded repair attempt; evidence classified
+grounded/ungrounded by `path:line` citation with ungrounded findings downgraded
+to low confidence — all recorded in the coverage ledger), and the adversarial
+**critic → judge → repair** loop between assessment and implementation planning
+(counterexample search; `accepted` / `out_of_scope` / `duplicate` / `invalid` /
+`residual_risk` classification; judge-directed targeted repair re-deriving
+downstream artifacts via the staleness DAG, capped at 2 iterations; traceability
+gate rejecting any `implementation_dag` node that traces to no obligation or
+accepted counterexample). Worker-written raw payloads are validated and
+enveloped at ingestion; structured `audit-findings.json` keeps the deterministic
+fast path. The closing `VerificationReport` is emitted by the close phase
+(FINDING-027), not as a pre-implementation pipeline phase — by design.
 
-**What remains** (durable design, not yet executed end-to-end). Execution plan:
-[`free-form-quality-build.md`](free-form-quality-build.md) — grounds free-form
-extraction (affected_files + evidence) and wires the dormant critic→judge→repair
-loop.
-
-- The adversarial **critic → judge → repair** loop: generate concrete
-  counterexamples against design claims, classify them (`accepted` /
-  `out_of_scope` / `duplicate` / `invalid` / `residual_risk`), and repair the
-  contract *before* implementation tasks are generated. The artifact types exist;
-  the dispatch + bounded-execution wiring does not.
-- Exercising the full `goal → context → candidate design → conceptual critique →
-  final design → obligations → contract assessment → ImplementationDAG →
-  implement → verify` flow on a real free-form request, with the one-bounded-step
-  contract preserved at each transition and a traceable `VerificationReport` at
-  the end.
-
-Durable principles to keep honoring as the rest lands: treat LLM output as
-untrusted until validated; no implementation task without traceability to a
-requirement, invariant, or accepted counterexample; deterministic validators run
-before LLM critics; conceptual critique may propose better designs but adopted
-changes must be reflected in the contract before implementation; "tests pass" is
-never sufficient proof of completion. Use **contract assessment** (invariants /
+Durable principles to keep honoring: treat LLM output as untrusted until
+validated; no implementation task without traceability to a requirement,
+invariant, or accepted counterexample; deterministic validators run before LLM
+critics; conceptual critique may propose better designs but adopted changes must
+be reflected in the contract before implementation; "tests pass" is never
+sufficient proof of completion. Use **contract assessment** (invariants /
 boundaries / obligations) and **conceptual design critique** (philosophy /
 alternatives) as the two named modes — never the bare phrase "design assessment".
 

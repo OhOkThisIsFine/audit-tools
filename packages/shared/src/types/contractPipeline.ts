@@ -1,9 +1,9 @@
 /**
- * Contract-pipeline artifact contracts. These represent the seven bounded
- * roles of the contract-driven implementation pipeline used by remediate-code
- * for free-form feature/change requests that flow through the full
- * goal→context→design→critique→obligations→assessment→implementation DAG
- * before producing a remediation plan.
+ * Contract-pipeline artifact contracts. These represent the bounded roles of
+ * the contract-driven implementation pipeline used by remediate-code for
+ * free-form feature/change requests that flow through the full
+ * goal→context→design→critique→obligations→assessment→critic→judge→
+ * implementation DAG before producing a remediation plan.
  *
  * Each artifact carries a `contract_version` field that must match the
  * exported constant so callers can detect version skew without reading the
@@ -165,10 +165,10 @@ export interface ContractAssessmentReport {
 
 // ── Counterexample ────────────────────────────────────────────────────────────
 
-/** A concrete example that falsifies a design claim. */
+/** A concrete example produced by the adversarial critic that falsifies a design claim. */
 export interface Counterexample {
-  contract_version: typeof CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION;
-  goal_id: string;
+  /** Stable identifier (referenced by the judge report and implementation DAG). */
+  id: string;
   /** The design claim being falsified. */
   claim: string;
   /** Concrete steps that reproduce the failure. */
@@ -178,27 +178,62 @@ export interface Counterexample {
   actual: string;
   /** Which obligation(s) this counterexample violates. */
   violated_obligation_ids: string[];
-  /** ISO-8601 timestamp when this counterexample was created. */
+}
+
+/** The critic phase's output artifact: all counterexamples found against the design. */
+export interface CounterexampleReport {
+  contract_version: typeof CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION;
+  goal_id: string;
+  /** Empty when the critic found no way to falsify the design. */
+  counterexamples: Counterexample[];
+  /** ISO-8601 timestamp when this report was created. */
   created_at: string;
 }
 
 // ── JudgeReport ───────────────────────────────────────────────────────────────
 
-/** Adversarial judge verdict on the design + assessment. */
+/** Judge classification of one counterexample. */
+export type CounterexampleClassification =
+  | "accepted"
+  | "out_of_scope"
+  | "duplicate"
+  | "invalid"
+  | "residual_risk";
+
+export interface JudgedCounterexample {
+  counterexample_id: string;
+  classification: CounterexampleClassification;
+  rationale: string;
+}
+
+/** Contract artifacts the judge may order regenerated. */
+export type JudgeRepairTarget =
+  | "design_spec"
+  | "obligation_ledger"
+  | "contract_assessment_report";
+
+/** On a failing verdict, the single targeted repair the loop performs next. */
+export interface JudgeRepairDirective {
+  target: JudgeRepairTarget;
+  /** Bounded instruction for the regeneration worker. */
+  instruction: string;
+}
+
+/** Adversarial judge verdict on the critic's counterexamples. */
 export interface JudgeReport {
   contract_version: typeof CONTRACT_PIPELINE_JUDGE_REPORT_VERSION;
   goal_id: string;
-  /** Overall verdict. */
-  verdict: "approved" | "rejected" | "needs_repair";
-  /** Detailed findings from the adversarial review. */
-  findings: {
-    id: string;
-    description: string;
-    severity: "blocking" | "advisory";
-    related_obligation_ids: string[];
-  }[];
-  /** Required repairs before the design may proceed to implementation. */
-  required_repairs: string[];
+  /**
+   * `approved` when no accepted counterexample demands a contract repair
+   * (residual risks may remain, recorded in `classifications`); `needs_repair`
+   * when at least one accepted counterexample requires regenerating a contract
+   * artifact before implementation planning.
+   */
+  verdict: "approved" | "needs_repair";
+  /** One classification per critic counterexample. */
+  classifications: JudgedCounterexample[];
+  /** Required when verdict is `needs_repair`; names the artifact to regenerate. */
+  repair_directive?: JudgeRepairDirective;
   /** ISO-8601 timestamp when this report was created. */
   created_at: string;
 }
@@ -212,6 +247,8 @@ export interface ImplementationDAGNode {
   description: string;
   /** Obligation IDs this task satisfies. */
   satisfies_obligations: string[];
+  /** Accepted counterexample IDs (from the judge report) this task addresses. */
+  addresses_counterexamples?: string[];
   /** Task IDs that must complete before this task starts. */
   depends_on: string[];
   /** Verification obligation IDs that must pass after this task. */

@@ -231,6 +231,19 @@ async function writeCompleteContractPipelineDag(): Promise<void> {
     verdict: "passed",
     created_at,
   });
+  await writeContractArtifact(ARTIFACTS_DIR, "counterexample", {
+    contract_version: "remediate-code-contract-pipeline/counterexample/v1alpha1",
+    goal_id: "G1",
+    counterexamples: [],
+    created_at,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "judge_report", {
+    contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+    goal_id: "G1",
+    verdict: "approved",
+    classifications: [],
+    created_at,
+  });
   await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
     contract_version: "remediate-code-contract-pipeline/implementation-dag/v1alpha1",
     goal_id: "G1",

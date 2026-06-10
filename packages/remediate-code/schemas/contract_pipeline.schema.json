@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "contract_pipeline.schema.json",
   "title": "Contract Pipeline Artifacts",
-  "description": "JSON Schema for the seven contract-pipeline artifact types used by remediate-code.",
+  "description": "JSON Schema for the contract-pipeline artifact types used by remediate-code.",
   "type": "object",
   "additionalProperties": false,
   "$defs": {
@@ -175,48 +175,81 @@
     "Counterexample": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contract_version", "goal_id", "claim", "reproduction_steps", "expected", "actual", "violated_obligation_ids", "created_at"],
+      "required": ["id", "claim", "reproduction_steps", "expected", "actual", "violated_obligation_ids"],
+      "properties": {
+        "id": { "type": "string" },
+        "claim": { "type": "string" },
+        "reproduction_steps": { "type": "array", "items": { "type": "string" } },
+        "expected": { "type": "string" },
+        "actual": { "type": "string" },
+        "violated_obligation_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "CounterexampleReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "goal_id", "counterexamples", "created_at"],
       "properties": {
         "contract_version": {
           "type": "string",
           "const": "remediate-code-contract-pipeline/counterexample/v1alpha1"
         },
         "goal_id": { "type": "string" },
-        "claim": { "type": "string" },
-        "reproduction_steps": { "type": "array", "items": { "type": "string" } },
-        "expected": { "type": "string" },
-        "actual": { "type": "string" },
-        "violated_obligation_ids": { "type": "array", "items": { "type": "string" } },
+        "counterexamples": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Counterexample" }
+        },
         "created_at": { "type": "string" }
+      }
+    },
+    "JudgedCounterexample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["counterexample_id", "classification", "rationale"],
+      "properties": {
+        "counterexample_id": { "type": "string" },
+        "classification": {
+          "type": "string",
+          "enum": ["accepted", "out_of_scope", "duplicate", "invalid", "residual_risk"]
+        },
+        "rationale": { "type": "string" }
+      }
+    },
+    "JudgeRepairDirective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "instruction"],
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": ["design_spec", "obligation_ledger", "contract_assessment_report"]
+        },
+        "instruction": { "type": "string" }
       }
     },
     "JudgeReport": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contract_version", "goal_id", "verdict", "findings", "required_repairs", "created_at"],
+      "required": ["contract_version", "goal_id", "verdict", "classifications", "created_at"],
       "properties": {
         "contract_version": {
           "type": "string",
           "const": "remediate-code-contract-pipeline/judge-report/v1alpha1"
         },
         "goal_id": { "type": "string" },
-        "verdict": { "type": "string", "enum": ["approved", "rejected", "needs_repair"] },
-        "findings": {
+        "verdict": { "type": "string", "enum": ["approved", "needs_repair"] },
+        "classifications": {
           "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["id", "description", "severity", "related_obligation_ids"],
-            "properties": {
-              "id": { "type": "string" },
-              "description": { "type": "string" },
-              "severity": { "type": "string", "enum": ["blocking", "advisory"] },
-              "related_obligation_ids": { "type": "array", "items": { "type": "string" } }
-            }
-          }
+          "items": { "$ref": "#/$defs/JudgedCounterexample" }
         },
-        "required_repairs": { "type": "array", "items": { "type": "string" } },
+        "repair_directive": { "$ref": "#/$defs/JudgeRepairDirective" },
         "created_at": { "type": "string" }
+      },
+      "if": {
+        "properties": { "verdict": { "const": "needs_repair" } }
+      },
+      "then": {
+        "required": ["contract_version", "goal_id", "verdict", "classifications", "repair_directive", "created_at"]
       }
     },
     "ImplementationDAGNode": {
@@ -228,6 +261,7 @@
         "title": { "type": "string" },
         "description": { "type": "string" },
         "satisfies_obligations": { "type": "array", "items": { "type": "string" } },
+        "addresses_counterexamples": { "type": "array", "items": { "type": "string" } },
         "depends_on": { "type": "array", "items": { "type": "string" } },
         "verification_obligation_ids": { "type": "array", "items": { "type": "string" } },
         "targeted_commands": { "type": "array", "items": { "type": "string" } },

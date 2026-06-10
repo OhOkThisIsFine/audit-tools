@@ -23,23 +23,13 @@ import {
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
 } from "../steps/types.js";
 import {
+  CONTRACT_PIPELINE_VALIDATORS,
   validateVerificationReport,
 } from "./contractPipeline.js";
 import {
   CP_ARTIFACT_NAMES,
   contractPipelineDir,
 } from "../contractPipeline/artifactStore.js";
-import {
-  validateGoalSpec,
-  validateContextBundle,
-  validateDesignSpec,
-  validateConceptualDesignCritique,
-  validateObligationLedger,
-  validateContractAssessmentReport,
-  validateCounterexample,
-  validateJudgeReport,
-  validateImplementationDAG,
-} from "./contractPipeline.js";
 
 export interface ArtifactValidationResult {
   status: "ok" | "error";
@@ -422,37 +412,16 @@ export async function validateArtifacts(
 
   // Contract-pipeline artifact validation (optional — only checked when present).
   const cpDir = contractPipelineDir(artifactsDir);
-  const cpValidators: Record<string, (v: unknown, p: string) => ValidationIssue[]> = {
-    goal_spec: validateGoalSpec,
-    context_bundle: validateContextBundle,
-    design_spec: validateDesignSpec,
-    conceptual_design_critique: validateConceptualDesignCritique,
-    obligation_ledger: validateObligationLedger,
-    contract_assessment_report: validateContractAssessmentReport,
-    counterexample: validateCounterexample,
-    judge_report: validateJudgeReport,
-    implementation_dag: validateImplementationDAG,
-  };
   for (const name of CP_ARTIFACT_NAMES) {
     const cpPath = join(cpDir, `${name}.json`);
     const cpRaw = await readJsonForValidation(cpPath, issues);
     if (!cpRaw) continue;
     // The envelope wraps the payload — validate the payload field.
     const payload = isRecord(cpRaw) && "payload" in cpRaw ? cpRaw.payload : cpRaw;
-    if (name === "verification_report") {
-      const vIssues = validateVerificationReport(payload, name).filter(
-        (issue) => issue.severity === "error",
-      );
-      if (vIssues.length > 0) issues.push(formatValidationIssues(vIssues));
-    } else {
-      const validator = cpValidators[name];
-      if (validator) {
-        const vIssues = validator(payload, name).filter(
-          (issue) => issue.severity === "error",
-        );
-        if (vIssues.length > 0) issues.push(formatValidationIssues(vIssues));
-      }
-    }
+    const vIssues = CONTRACT_PIPELINE_VALIDATORS[name](payload, name).filter(
+      (issue) => issue.severity === "error",
+    );
+    if (vIssues.length > 0) issues.push(formatValidationIssues(vIssues));
   }
 
   // Verification report at the root artifacts dir (from FINDING-027).

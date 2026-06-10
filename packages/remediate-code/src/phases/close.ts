@@ -544,6 +544,29 @@ function buildRemediationReportMarkdown(
     }
   }
 
+  const droppedByGrounding = (state.plan_coverage?.entries ?? []).filter(
+    (e) => e.disposition === "dropped_phantom_paths",
+  );
+  if (droppedByGrounding.length > 0) {
+    reportContent += `\n## Dropped by Grounding\n\n`;
+    reportContent += `${droppedByGrounding.length} extracted finding(s) were dropped because every cited path was phantom (does not exist in this repository):\n`;
+    for (const entry of droppedByGrounding) {
+      const phantoms = entry.phantom_paths_removed?.join(", ");
+      reportContent += `- **${entry.finding_id}**${entry.title ? `: ${entry.title}` : ""}${phantoms ? ` (cited: ${phantoms})` : ""}\n`;
+    }
+  }
+
+  const ungroundedEvidence = (state.plan_coverage?.entries ?? []).filter(
+    (e) => e.disposition === "planned" && e.evidence_grounded === false,
+  );
+  if (ungroundedEvidence.length > 0) {
+    reportContent += `\n## Ungrounded Evidence\n\n`;
+    reportContent += `${ungroundedEvidence.length} planned finding(s) carried no evidence citing a real repo path and were downgraded to low confidence:\n`;
+    for (const entry of ungroundedEvidence) {
+      reportContent += `- **${entry.finding_id}**${entry.title ? `: ${entry.title}` : ""}\n`;
+    }
+  }
+
   reportContent += `\n## Closing Action\n\nAction: ${state.closing_plan!.action}\n`;
   reportContent += `Status: ${closingResult.status}\n`;
   if (e2ePassed !== undefined) {
