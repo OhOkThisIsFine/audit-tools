@@ -4,18 +4,17 @@ Living pointer for the next session. Durable detail lives in
 [`backlog.md`](backlog.md); this is the thin "where we are + do these next" layer.
 Cross-session state is also in the `audit-tools-2026-06-state` auto-memory.
 
-_Last updated: 2026-06-09 (end of evening session)._
+_Last updated: 2026-06-09 (clarification-consume fix shipped as remediate 0.11.2)._
 
 ## Current state
 
-- **`main` is pushed and clean at `82c678f`.** Three commits landed after the
-  morning releases and are **publish-pending — Ethan is running the publish
-  workflow himself**. Before assuming versions, check `npm view` / git tags:
-  if no `*-v*` tags exist after `82c678f`, the publish hasn't happened yet.
-  - `41cccb2` — meta-audit reflections completed (touches **all three packages**;
-    shared changed, so shared must publish before the dependents).
-  - `4b2025c` — FINDING-012 regression test + docs (remediate-code only).
-  - `82c678f` — synthesis stderr debug-diagnostics removal (audit-code only).
+- **`main` is pushed and clean at `fdacb96`; everything below is released and
+  globally installed.** The evening commits (`41cccb2` meta-audit reflections /
+  `4b2025c` FINDING-012 / `82c678f` synthesis stderr cleanup) shipped as the
+  patch bump **shared 0.11.1 / audit-code 0.12.1 / remediate 0.11.1**, and the
+  clarification-consume fix (`a3bafbf` + `ae25776`) shipped as **remediate
+  0.11.2**. Both global bins are current (auditor-lambda 0.12.1, remediator-lambda
+  0.11.2).
 - **Published (morning):** `@audit-tools/shared@0.11.0` / `auditor-lambda@0.12.0` /
   `remediator-lambda@0.11.0` — the cross-orchestrator scope/intent checkpoint.
 - **Repo hygiene (done 2026-06-09 evening):** all stale branches, the two leaked
@@ -32,15 +31,11 @@ _Last updated: 2026-06-09 (end of evening session)._
 
 ## Next tasks, in priority order
 
-1. **Confirm the publish landed** (Ethan runs it) — then global-install freshness:
-   the global bins still run the last published versions until then (see the
-   allow-scripts gotcha below).
-
-2. **`CFG-4996560e`** (deferred fix) — scope postinstall's deployed OpenCode perms
+1. **`CFG-4996560e`** (deferred fix) — scope postinstall's deployed OpenCode perms
    to the `auditor` agent vs the global top level. Needs real-OpenCode validation
    (agent/subtask inheritance is not unit-testable). Fix direction in `backlog.md`.
 
-3. **Remaining curated highs / triage** — the deferred (backlog) and
+2. **Remaining curated highs / triage** — the deferred (backlog) and
    scope-pollution highs are catalogued in `curated-remediation-set.README.md`;
    most are low-value.
 
