@@ -160,31 +160,20 @@ carries `free_form_intent`, `excluded_scope`, `must_not_touch`, and remediate
 **Remaining:** the pre-digest *lists* scope dirs + auto-exclusions for the host to
 confirm, but the tool does not itself pre-flag *suspicious* inclusions
 (node_modules/dist/vendored) beyond listing them — the host (an LLM agent) makes
-that call. And remediate's structured fast path still bypasses the `confirm_intent`
-step, so filters don't yet apply to a lone `audit-findings.json` input (see below).
+that call.
 
-### remediate-code: structured `audit-findings.json` fast path skips intake
+### remediate-code: structured `audit-findings.json` fast path skips intake — *resolved 2026-06-09*
 
-Default input discovery prefers `audit-findings.json` over `audit-report.md`,
-which is right because JSON is the source of truth. The remaining problem is that
-structured input calls planning directly and bypasses the intake summary,
-briefing, clarification, and scope gate (`shouldEnterContractPipeline` returns
-false for `structured_audit`; `intakeResolver.ts` routes a lone `.json` straight
-to the lossless fast path). A clean "remediate everything" hand-off is fine for
-small contracts, but a large contract gives the operator no chance to choose
-"high severity only," filter by theme/package/lens, or exclude scratch units.
-
-Resolve this through the shared scope and intent checkpoint above. Structured
-input should stay lossless, but it should still allow selectable work blocks,
-severity/theme/package filters, excluded paths, and conversational remediation
-intent before `runPlanPhase`. (This is the deferred `FINDING-012` from the
-2026-06 remediation pass.)
-
-**Update 2026-06-09:** the checkpoint mechanism now exists and `runPlanPhase`
-already honors a checkpoint when present — the remaining work is purely routing:
-make the structured fast path emit the `confirm_intent` step (e.g. write an intake
-summary so the existing gate fires) so its filters/exclusions apply to a lone
-`audit-findings.json` input.
+Closed by the scope/intent checkpoint (subsumed `FINDING-012`): the
+`confirm_intent` gate sits at the top of `decideNextStepInner` — before any
+source-type branching — so a lone `audit-findings.json` cannot bypass it. The
+structured flow is `synthesize_intake` → `confirm_intent` (summary present, no
+checkpoint) → deterministic `runPlanPhase`, which consumes the JSON contract
+losslessly and applies the checkpoint's filters/excluded_scope/must_not_touch
+(drops recorded as `dropped_by_checkpoint`). Verified end-to-end; regression
+coverage in `tests/next-step.test.ts` ("structured fast path is gated by
+confirm_intent…") — the only test of the no-checkpoint flow, since the other
+structured-path tests pre-write a checkpoint.
 
 ### remediate-code: delete the CLI-unreachable in-process document path
 

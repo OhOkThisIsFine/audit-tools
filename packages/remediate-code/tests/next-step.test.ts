@@ -748,6 +748,85 @@ describe("decideNextStep", () => {
     ]);
   });
 
+  it("structured fast path is gated by confirm_intent and honors checkpoint filters (FINDING-012)", async () => {
+    // Regression: a lone audit-findings.json must NOT bypass the scope/intent
+    // gate. The other structured-path tests pre-write the checkpoint, so this
+    // is the only coverage of the no-checkpoint flow: ready structured intake
+    // without intent_checkpoint.json must emit confirm_intent (not plan), and
+    // the checkpoint's filters must then prune planning while the JSON
+    // contract is still consumed losslessly (no LLM extraction).
+    const contract = await readFile(AUDITOR_CONTRACT_FIXTURE, "utf8");
+    await writeFile(join(REPO_DIR, "audit-findings.json"), contract, "utf8");
+
+    const first = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+    expect(first.step_kind).toBe("synthesize_intake");
+
+    const intakeDir = join(ARTIFACTS_DIR, "intake");
+    await writeFile(
+      join(intakeDir, "intake-summary.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-summary/v1alpha1",
+        ready: true,
+        source_type: "structured_audit",
+        goals: ["Remediate the structured audit findings."],
+        non_goals: [],
+        constraints: [],
+        affected_files: [],
+        open_questions: [],
+      }),
+      "utf8",
+    );
+    await writeFile(join(intakeDir, "remediation-brief.md"), "# Structured intake\n", "utf8");
+
+    const gated = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+    expect(gated.step_kind).toBe("confirm_intent");
+    const gatePrompt = await readFile(gated.prompt_path, "utf8");
+    expect(gatePrompt).toMatch(/intent_checkpoint\.json/);
+
+    await writeFile(
+      join(ARTIFACTS_DIR, "intent_checkpoint.json"),
+      JSON.stringify({
+        schema_version: "intent-checkpoint/v1",
+        confirmed_at: new Date().toISOString(),
+        confirmed_by: "host",
+        scope_summary: "Everything in the report",
+        intent_summary: "High and critical findings only",
+        filters: { severity: ["high", "critical"] },
+      }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+    const state = JSON.parse(
+      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
+    );
+
+    expect(step.step_kind).toBe("dispatch_document");
+    // The fixture has one high finding (AUD-001) and two lower-severity ones —
+    // the checkpoint filter must keep only the high one, recorded as
+    // dropped_by_checkpoint in the coverage ledger.
+    expect(state.plan.findings.map((finding: { id: string }) => finding.id)).toEqual([
+      "AUD-001",
+    ]);
+    const droppedByCheckpoint = (state.plan_coverage?.entries ?? [])
+      .filter(
+        (entry: { disposition: string }) =>
+          entry.disposition === "dropped_by_checkpoint",
+      )
+      .map((entry: { finding_id: string }) => entry.finding_id)
+      .sort();
+    expect(droppedByCheckpoint).toEqual(["AUD-002", "AUD-003"]);
+  });
+
   it("ambiguous intake summary asks for clarification before extraction", async () => {
     const inputPath = join(REPO_DIR, "feedback.md");
     const intakeDir = join(ARTIFACTS_DIR, "intake");

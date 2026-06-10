@@ -23,20 +23,23 @@ _Last updated: 2026-06-09 (evening)._
 
 ## Next tasks, in priority order
 
-1. **Route remediate's structured fast path through `confirm_intent`.** The
-   scope/intent checkpoint shipped 2026-06-09, but a lone `audit-findings.json`
-   input bypasses the confirm step, so its filters/exclusions don't apply.
-   `runPlanPhase` already honors a checkpoint when present — the work is purely
-   routing (emit `confirm_intent` / write an intake summary so the gate fires).
-   Subsumes `FINDING-012`. See `backlog.md`.
-
-2. **`CFG-4996560e`** (deferred fix) — scope postinstall's deployed OpenCode perms
+1. **`CFG-4996560e`** (deferred fix) — scope postinstall's deployed OpenCode perms
    to the `auditor` agent vs the global top level. Needs real-OpenCode validation
    (agent/subtask inheritance is not unit-testable). Fix direction in `backlog.md`.
 
-3. **Remaining curated highs / triage** — the deferred (backlog) and
+2. **Remaining curated highs / triage** — the deferred (backlog) and
    scope-pollution highs are catalogued in `curated-remediation-set.README.md`;
    most are low-value.
+
+> **Verified 2026-06-09 — structured fast path is already gated (FINDING-012
+> closed).** The "route remediate's structured fast path through `confirm_intent`"
+> task turned out to be stale: the gate shipped with the checkpoint feature sits
+> at the top of `decideNextStepInner`, before source-type branching, so a lone
+> `audit-findings.json` already flows `synthesize_intake` → `confirm_intent` →
+> filtered `runPlanPhase` (verified end-to-end; severity filter pruned the
+> fixture findings with `dropped_by_checkpoint` ledger entries). Added the
+> missing no-checkpoint regression test to `tests/next-step.test.ts` and marked
+> the backlog item resolved.
 
 > **Shipped 2026-06-09 (unreleased) — meta-audit reflections completed.** The
 > parse/aggregate/render module moved to `@audit-tools/shared`
