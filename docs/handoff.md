@@ -24,20 +24,16 @@ _Last updated: 2026-06-09 (clarification-consume fix shipped as remediate 0.11.2
   (`OhOkThisIsFine/audit-tools`; no `origin`).
 - **Suites at `82c678f`:** shared 273 pass / audit-code 1610 pass + 1 pre-existing
   skip / remediate-code 725 pass (all with `CLAUDECODE` unset).
-- **Self-audit findings:** [`audit/2026-06-09/`](../audit/2026-06-09/) — 281 findings;
-  the 24 highs are triaged in
-  [`curated-remediation-set.README.md`](../audit/2026-06-09/curated-remediation-set.README.md)
-  (5 curated → 4 fixed, `CFG-4996560e` deferred; 3 false-positives; rest backlog).
+- **Self-audit (June 8–9):** 281 findings; the 24 highs were triaged (5 curated →
+  4 fixed, `CFG-4996560e` deferred; 3 false-positives; rest low-value). The audit
+  deliverables under `audit/` were deleted as stale; `CFG-4996560e`'s fix direction
+  is in `backlog.md`.
 
 ## Next tasks, in priority order
 
 1. **`CFG-4996560e`** (deferred fix) — scope postinstall's deployed OpenCode perms
    to the `auditor` agent vs the global top level. Needs real-OpenCode validation
    (agent/subtask inheritance is not unit-testable). Fix direction in `backlog.md`.
-
-2. **Remaining curated highs / triage** — the deferred (backlog) and
-   scope-pollution highs are catalogued in `curated-remediation-set.README.md`;
-   most are low-value.
 
 ## What shipped this session (2026-06-09 evening, on `main`, publish-pending)
 
