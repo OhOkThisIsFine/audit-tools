@@ -201,8 +201,7 @@ structured-path tests pre-write a checkpoint.
   `renderOpenCodePermissionConfig()`; splitting them needs care. Validate against **real
   OpenCode** (agent/subtask permission inheritance can't be unit-tested) and update
   `tests/postinstall-contract.test.mjs`. Deferred from the 2026-06-09 curated-highs pass
-  (the other 4 highs were fixed directly); see
-  `audit/2026-06-09/curated-remediation-set.README.md`.
+  (the other 4 highs were fixed directly).
 
 ## Features to add later
 
