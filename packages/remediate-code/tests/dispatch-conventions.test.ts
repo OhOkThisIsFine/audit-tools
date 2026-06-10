@@ -14,8 +14,7 @@ import { decideNextStep } from "../src/steps/nextStep.js";
 // Phase 7A regression: the canonical next-step wave path must inject the
 // "match the surrounding code" house-style block into both the document and
 // implement worker prompts, and the synthesis theme hint into the document
-// prompt for findings that carry a theme_id. (The feature originally landed
-// only in the CLI-unreachable in-process `phases/document.ts`.)
+// prompt for findings that carry a theme_id.
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-dispatch-conventions");
