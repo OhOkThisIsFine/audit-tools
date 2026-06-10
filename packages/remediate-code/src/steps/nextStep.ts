@@ -16,6 +16,7 @@ import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
 import { validateRemediationPlan } from "../validation/remediationState.js";
 import {
+  applyClarificationResolution,
   mergeDocumentResults,
   mergeImplementResults,
   prepareDocumentDispatch,
@@ -1768,6 +1769,11 @@ async function decideNextStepInner(
   await countStateStep();
 
   if (state.status === "waiting_for_clarification") {
+    const resolutionPath = join(artifactsDir, "clarification_resolution.json");
+    if (existsSync(resolutionPath)) {
+      const next = await applyClarificationResolution({ root, artifactsDir }, state);
+      return stateTransitionStep(root, artifactsDir, next);
+    }
     return handleWaitingForClarification(root, artifactsDir, state);
   }
 

@@ -44,11 +44,6 @@ _Last updated: 2026-06-09 (end of evening session)._
    scope-pollution highs are catalogued in `curated-remediation-set.README.md`;
    most are low-value.
 
-4. **Small cleanup (backlogged, also offered as a task chip):** delete the
-   CLI-unreachable in-process document path in remediate-code
-   (`phases/document.ts` `runDocumentPhase`/`buildDocumentPrompt` — only its own
-   test references it; the live path is `steps/dispatch.ts`). See `backlog.md`.
-
 ## What shipped this session (2026-06-09 evening, on `main`, publish-pending)
 
 > **Meta-audit reflections completed** (`41cccb2`). The parse/aggregate/render
@@ -75,6 +70,17 @@ _Last updated: 2026-06-09 (end of evening session)._
 > `console.error` JSON lines (`synthesis_complete`, `audit_findings_report_built`)
 > and their two lock-in tests were debug leftovers from `e84d9cb` with no
 > consumers; authored by a parallel Claude session, verified and committed here.
+
+> **Dead in-process document path deleted + clarification consume fixed.** Removed
+> the CLI-unreachable `runDocumentPhase` (`phases/document.ts` + its test); the
+> live path is `prepareDocumentDispatch`. That dead path was also the only code
+> that consumed `clarification_resolution.json`, so the live
+> `waiting_for_clarification` branch looped forever. Added the symmetric consume
+> (`applyClarificationResolution` in `dispatch.ts`) mirroring `waiting_for_triage`:
+> `deemed_inappropriate` findings go terminal; `clarified` findings re-open for
+> re-documentation with the user's rationale threaded into the next dispatch
+> prompt via the new `RemediationItemState.clarification_context`. Regression test
+> in `tests/next-step.test.ts` ("clarification_resolution.json is applied…").
 
 ## Gotchas (also in auto-memory)
 

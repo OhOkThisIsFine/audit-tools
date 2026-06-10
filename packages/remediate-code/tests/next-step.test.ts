@@ -945,6 +945,63 @@ describe("decideNextStep", () => {
     expect(prompt).toMatch(/one batched response/i);
   });
 
+  it("clarification_resolution.json is applied and the run advances", async () => {
+    await saveState({
+      ...makePlanningState(),
+      status: "waiting_for_clarification",
+      clarifications: [
+        { finding_id: "F-001", category: "scope_of_fix", description: "Clarify one." },
+        { finding_id: "F-002", category: "issue_appropriateness", description: "Clarify two." },
+      ],
+    });
+    await writeFile(
+      join(ARTIFACTS_DIR, "clarification_resolution.json"),
+      JSON.stringify([
+        { finding_id: "F-001", action: "clarified", rationale: "Scope is just the auth module." },
+        { finding_id: "F-002", action: "deemed_inappropriate", rationale: "Not a real issue." },
+      ]),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("state_transition");
+
+    const state = JSON.parse(
+      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
+    );
+    // clarified → re-opened for re-documentation with the rationale threaded on.
+    expect(state.items["F-001"]).toMatchObject({
+      status: "pending",
+      clarification_context: "Scope is just the auth module.",
+    });
+    // deemed_inappropriate → terminal, rationale recorded as the failure reason.
+    expect(state.items["F-002"]).toMatchObject({
+      status: "deemed_inappropriate",
+      failure_reason: "Not a real issue.",
+    });
+    expect(state.items["F-002"].completed_at).toBeTruthy();
+    // A finding is pending again → re-plan rather than fall through to documenting.
+    expect(state.status).toBe("planning");
+    // The resolution is consumed (archived), so re-entry cannot re-apply it.
+    expect(existsSync(join(ARTIFACTS_DIR, "clarification_resolution.json"))).toBe(false);
+
+    // The next document dispatch re-documents only F-001, and its worker prompt
+    // now carries the user's clarification answer.
+    const dispatchStep = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+    const dispatchPlan = JSON.parse(
+      await readFile(dispatchStep.artifact_paths.dispatch_plan, "utf8"),
+    );
+    expect(
+      dispatchPlan.items.map((item: { finding_id: string }) => item.finding_id),
+    ).toEqual(["F-001"]);
+    const workerPrompt = await readFile(dispatchPlan.items[0].prompt_path, "utf8");
+    expect(workerPrompt).toContain("Scope is just the auth module.");
+    expect(workerPrompt).toMatch(/Previous clarification/i);
+  });
+
   it("host can dispatch agents emits dispatch_document and prepares artifacts", async () => {
     await saveState(makePlanningState());
 
