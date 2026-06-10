@@ -175,16 +175,6 @@ coverage in `tests/next-step.test.ts` ("structured fast path is gated by
 confirm_intent…") — the only test of the no-checkpoint flow, since the other
 structured-path tests pre-write a checkpoint.
 
-### remediate-code: delete the CLI-unreachable in-process document path
-
-`runDocumentPhase` / `buildDocumentPrompt` in `src/phases/document.ts` are only
-referenced by their own test — host dispatch (`prepareDocumentDispatch`) has
-been the sole live document path since 0.6.0, and per-prompt features (house
-style, reflection invitation) now land only in `steps/dispatch.ts`. Per the
-"ideal code over compatibility" preference, delete the dead path (and port its
-clarification-resolution coverage to wherever that logic actually runs) so the
-two prompt builders cannot drift.
-
 ### remediate-code host-dispatch gaps
 
 - **Provider `queryLimits` is deferred because it has near-zero value today.** The

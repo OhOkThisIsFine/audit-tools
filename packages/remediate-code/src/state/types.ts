@@ -157,4 +157,10 @@ export interface RemediationItemState {
   started_at?: string;
   /** ISO-8601 timestamp when this item most recently reached a terminal status. */
   completed_at?: string;
+  /**
+   * User rationale from a resolved clarification request (action "clarified"),
+   * threaded into the next document-dispatch prompt so re-documentation has the
+   * context the worker was missing. Set by `applyClarificationResolution`.
+   */
+  clarification_context?: string;
 }

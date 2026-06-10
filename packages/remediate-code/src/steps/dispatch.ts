@@ -403,7 +403,6 @@ export function buildImplementModelHint(
 
 // Phase 7A: reuse the auditor's synthesis theme (no new LLM pass) to hand the
 // worker the shared root-cause fix pattern when this finding carries one.
-// Mirrors the wording used in the in-process phase (`phases/document.ts`).
 function themeHint(
   finding: Finding,
   themes: FindingTheme[] | undefined,
@@ -475,11 +474,18 @@ function findingPrompt(
   themeHintText: string,
   repoRoot: string,
   feedbackDisplay: string,
+  clarificationContext: string,
 ): string {
   // Normalize paths to forward slashes so bash-like shells on Windows do not
   // treat backslashes as escape characters when the host copies these paths.
   const rootDisplay = toPromptPathToken(repoRoot);
   const resultDisplay = toPromptPathToken(resultPath);
+  // When this finding is being re-documented after a clarification round, carry
+  // the user's answer so the worker finalizes the item_spec instead of asking
+  // the same question again. Set by applyClarificationResolution on re-open.
+  const clarificationSection = clarificationContext
+    ? `\n## Previous clarification\n\nYou previously requested clarification on this finding. The user responded:\n\n> ${clarificationContext}\n\nUse this answer to finalize the item_spec rather than requesting clarification again.\n`
+    : "";
   return `
 # Document Remediation Item
 
@@ -501,7 +507,7 @@ Set the shell/tool workdir to the repository root when running any command; do n
 
 ${(finding.evidence ?? []).map((item) => `- ${item}`).join("\n")}
 ${contractPipelineTraceSection(finding)}
-${themeHintText}${conventions ? `\n${conventions}\n` : ""}
+${themeHintText}${clarificationSection}${conventions ? `\n${conventions}\n` : ""}
 ## Output
 
 Write JSON to exactly:
@@ -739,6 +745,7 @@ export async function prepareDocumentDispatch(
         themeHint(finding, state.plan.themes),
         options.root,
         toPromptPathToken(join(options.artifactsDir, AGENT_FEEDBACK_FILENAME)),
+        state.items?.[finding.id]?.clarification_context ?? "",
       ),
     );
     items.push(item);
@@ -774,6 +781,138 @@ export async function prepareDocumentDispatch(
   await writeJsonFile(join(dir, "dispatch-quota.json"), quota);
 
   return plan;
+}
+
+interface ClarificationResolution {
+  finding_id: string;
+  action: "clarified" | "deemed_inappropriate";
+  rationale?: string;
+}
+
+/**
+ * Tolerantly normalize the user-authored `clarification_resolution.json`. Accepts
+ * a bare array, `{ resolutions: [...] }`, `{ items: [...] }`, or a finding-id
+ * keyed object; each entry must carry an `action` of "clarified" or
+ * "deemed_inappropriate". Unrecognized entries are dropped. Ported verbatim from
+ * the former in-process document phase, which was the only prior consumer.
+ */
+function normalizeClarificationResolutions(
+  value: unknown,
+): ClarificationResolution[] {
+  if (Array.isArray(value)) {
+    return value.filter(isRecord).flatMap((entry) => {
+      if (
+        typeof entry.finding_id === "string" &&
+        (entry.action === "clarified" ||
+          entry.action === "deemed_inappropriate")
+      ) {
+        return [
+          {
+            finding_id: entry.finding_id,
+            action: entry.action,
+            rationale:
+              typeof entry.rationale === "string" ? entry.rationale : undefined,
+          },
+        ];
+      }
+      return [];
+    });
+  }
+
+  if (!isRecord(value)) return [];
+
+  if (Array.isArray(value.resolutions)) {
+    return normalizeClarificationResolutions(value.resolutions);
+  }
+  if (Array.isArray(value.items)) {
+    return normalizeClarificationResolutions(value.items);
+  }
+
+  return Object.entries(value).flatMap(([findingId, entry]) => {
+    if (!isRecord(entry)) return [];
+    if (entry.action !== "clarified" && entry.action !== "deemed_inappropriate") {
+      return [];
+    }
+    return [
+      {
+        finding_id:
+          typeof entry.finding_id === "string" ? entry.finding_id : findingId,
+        action: entry.action,
+        rationale:
+          typeof entry.rationale === "string" ? entry.rationale : undefined,
+      },
+    ];
+  });
+}
+
+/**
+ * Consume `clarification_resolution.json` — the symmetric counterpart to the
+ * clarification raise in `mergeDocumentResults`, and a mirror of triage.ts's
+ * `triage_resolution.json` consume. `deemed_inappropriate` findings are marked
+ * terminal; `clarified` findings are re-opened (status → pending) for
+ * re-documentation with the user's rationale carried into the next dispatch
+ * prompt via `clarification_context`. The resolution file is archived so a later
+ * clarification round cannot re-apply stale answers. Returns the saved state;
+ * the caller wraps it with a state-transition step (as merge results are).
+ */
+export async function applyClarificationResolution(
+  options: DispatchOptions,
+  state: RemediationState,
+): Promise<RemediationState> {
+  if (!state.plan || !state.items) {
+    throw new Error(
+      "Cannot apply clarification resolution without plan and items.",
+    );
+  }
+
+  const resolutionPath = join(
+    options.artifactsDir,
+    "clarification_resolution.json",
+  );
+  const resolutions = normalizeClarificationResolutions(
+    await readOptionalJsonFile<unknown>(resolutionPath),
+  );
+  if (resolutions.length === 0) {
+    throw new Error(
+      `Invalid ${resolutionPath}: expected an array, { resolutions: [...] }, ` +
+        `{ items: [...] }, or a finding-id-keyed object of ` +
+        `{ finding_id, action: "clarified" | "deemed_inappropriate", rationale? } entries.`,
+    );
+  }
+
+  for (const res of resolutions) {
+    const item = state.items[res.finding_id];
+    if (!item) continue;
+    if (res.action === "deemed_inappropriate") {
+      item.status = "deemed_inappropriate";
+      item.failure_reason = res.rationale;
+      markTerminal(item);
+    } else {
+      // Re-open for re-documentation, carrying the user's answer into the next
+      // document-dispatch prompt (rendered by findingPrompt).
+      item.status = "pending";
+      item.clarification_context = res.rationale;
+    }
+  }
+
+  if (existsSync(resolutionPath)) {
+    await withFsRetry(() =>
+      rename(resolutionPath, `${resolutionPath}.consumed-${Date.now()}`),
+    );
+  }
+
+  // Mirror mergeDocumentResults' transition: any clarified finding is pending
+  // again → re-plan and re-dispatch documentation; if none remain pending (all
+  // deemed inappropriate), advance to documenting.
+  const remainingPending = state.plan.findings.some(
+    (f) => state.items?.[f.id]?.status === "pending",
+  );
+  state.status = remainingPending ? "planning" : "documenting";
+  state.clarifications = [];
+  state.closing_plan ??= { action: "none" };
+
+  await new StateStore(options.artifactsDir).saveState(state);
+  return state;
 }
 
 export async function mergeDocumentResults(
