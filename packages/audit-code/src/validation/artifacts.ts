@@ -5,6 +5,7 @@ import {
   requireKeys,
 } from "@audit-tools/shared";
 import type { AuditUnit } from "../types.js";
+import type { FileDispositionWithVcsIgnore } from "../extractors/disposition.js";
 import type { RuntimeValidationTask } from "../types/runtimeValidation.js";
 
 function pushIssue(
@@ -256,8 +257,24 @@ export function validateArtifactBundle(
     const dispositionPaths = new Set(
       fileDispositionEntries.map((file) => file.path),
     );
+    // Above VCS_IGNORED_PER_FILE_LIMIT the disposition drops per-file entries
+    // for vcs-ignored files and records directory-prefix aggregates instead;
+    // a path covered by an aggregate prefix is accounted for, not missing.
+    const aggregatePrefixes = new Set(
+      asArray<{ prefix: string }>(
+        (bundle.file_disposition as FileDispositionWithVcsIgnore | undefined)
+          ?.vcs_ignore?.aggregates,
+      ).map((aggregate) => aggregate.prefix),
+    );
+    const coveredByAggregate = (path: string): boolean => {
+      if (aggregatePrefixes.size === 0) return false;
+      const posix = path.replace(/\\/g, "/");
+      const slash = posix.indexOf("/");
+      const prefix = slash === -1 ? "." : posix.slice(0, slash);
+      return aggregatePrefixes.has(prefix);
+    };
     for (const path of repoPaths) {
-      if (!dispositionPaths.has(path)) {
+      if (!dispositionPaths.has(path) && !coveredByAggregate(path)) {
         pushIssue(
           issues,
           "file_disposition",

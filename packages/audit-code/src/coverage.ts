@@ -1,4 +1,5 @@
 import type {
+  ClassificationStatus,
   CoverageFileRecord,
   CoverageMatrix,
   FileCoverageRecord,
@@ -25,7 +26,7 @@ export function createCoverageMatrix(paths: string[]): CoverageMatrix {
 export function markExcludedPath(
   matrix: CoverageMatrix,
   path: string,
-  classificationStatus: string,
+  classificationStatus: ClassificationStatus,
 ): void {
   const record = buildFileIndex(matrix).get(path);
   if (!record) return;

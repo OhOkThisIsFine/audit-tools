@@ -148,10 +148,15 @@ export function buildAuditReportModel(params: {
   externalAnalyzerResults?: ExternalAnalyzerResults;
   designAssessment?: DesignAssessment;
 }): AuditReportModel {
-  // Re-key the finalized findings with globally-unique, content-derived ids
-  // before anything addresses them by id. buildWorkBlocks keys its union-find on
-  // finding.id, so the locally-scoped, collision-prone ids worker packets emit
-  // must be replaced here or unrelated findings fuse into one block.
+  // Re-key the finalized findings with globally-unique, content-addressed ids
+  // before anything addresses them by id. mergeFindings emits exactly one
+  // finding per file-independent identity (exact normalized lens|category|
+  // title) across files, units, and passes, and assignStableFindingIds hashes
+  // only stable identity signals — never line numbers, pass ids, or the merged
+  // file list — so the same logical finding keeps one id across passes and
+  // re-syntheses. buildWorkBlocks keys its union-find on finding.id, so the
+  // locally-scoped, collision-prone ids worker packets emit must be replaced
+  // here or unrelated findings fuse into one block.
   const findings = assignStableFindingIds(
     mergeFindings(
       params.results,

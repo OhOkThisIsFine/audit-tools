@@ -105,7 +105,7 @@ export async function runIntakeExecutor(
     ignore,
     hash_files: true,
   });
-  const disposition = buildFileDisposition(repoManifest);
+  const disposition = buildFileDisposition(repoManifest, { root });
   const auditableCount = disposition.files.filter(
     (file) => !isAuditExcludedStatus(file.status),
   ).length;

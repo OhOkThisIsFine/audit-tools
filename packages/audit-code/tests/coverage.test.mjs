@@ -35,17 +35,17 @@ test("markExcludedPath sets excluded status and clears lens/unit arrays", () => 
   // Seed a completed lens so we can confirm it is cleared too.
   matrix.files[0].completed_lenses = ["correctness"];
 
-  markExcludedPath(matrix, "a.ts", "excluded_generated");
+  markExcludedPath(matrix, "a.ts", "generated");
 
   const record = matrix.files[0];
   assert.equal(record.audit_status, "excluded");
-  assert.equal(record.classification_status, "excluded_generated");
+  assert.equal(record.classification_status, "generated");
   assert.deepEqual(record.required_lenses, []);
   assert.deepEqual(record.completed_lenses, []);
   assert.deepEqual(record.unit_ids, []);
 
   // markExcludedPath on an unknown path must be a no-op (no throw).
-  assert.doesNotThrow(() => markExcludedPath(matrix, "missing.ts", "x"));
+  assert.doesNotThrow(() => markExcludedPath(matrix, "missing.ts", "excluded"));
 });
 
 test("applyUnitCoverage adds deduped unit + required lenses and skips excluded files", () => {
@@ -62,7 +62,7 @@ test("applyUnitCoverage adds deduped unit + required lenses and skips excluded f
   assert.equal(record.classification_status, "classified");
 
   // An excluded file is left untouched by applyUnitCoverage.
-  markExcludedPath(matrix, "skip.ts", "excluded_vendor");
+  markExcludedPath(matrix, "skip.ts", "vendor");
   applyUnitCoverage(matrix, "skip.ts", "unit-skip", ["security"]);
   const skip = matrix.files[1];
   assert.equal(skip.audit_status, "excluded");
@@ -75,7 +75,7 @@ test("applyFileCoverage marks complete only when all required lenses completed, 
   applyUnitCoverage(matrix, "full.ts", "u-full", ["correctness", "security"]);
   applyUnitCoverage(matrix, "partial.ts", "u-partial", ["correctness", "security"]);
   applyUnitCoverage(matrix, "excluded.ts", "u-ex", ["correctness"]);
-  markExcludedPath(matrix, "excluded.ts", "excluded_vendor");
+  markExcludedPath(matrix, "excluded.ts", "vendor");
   // Re-add a required lens to the excluded file directly to prove applyFileCoverage
   // never resurrects it (markExcludedPath cleared required_lenses).
   matrix.files[2].required_lenses = ["correctness"];
@@ -140,7 +140,7 @@ test("markExcludedPath and applyUnitCoverage find records correctly via index an
   const matrix = createCoverageMatrix(["a.ts", "b.ts", "c.ts"]);
 
   // markExcludedPath mutates exactly the target record.
-  markExcludedPath(matrix, "b.ts", "excluded_vendor");
+  markExcludedPath(matrix, "b.ts", "vendor");
   assert.equal(matrix.files[0].audit_status, "pending", "a.ts must not be mutated");
   assert.equal(matrix.files[1].audit_status, "excluded", "b.ts must be excluded");
   assert.equal(matrix.files[2].audit_status, "pending", "c.ts must not be mutated");
@@ -151,7 +151,7 @@ test("markExcludedPath and applyUnitCoverage find records correctly via index an
   assert.deepEqual(matrix.files[2].unit_ids, [], "c.ts must not be mutated");
 
   // Both are no-ops for a path not present in the matrix.
-  assert.doesNotThrow(() => markExcludedPath(matrix, "missing.ts", "x"));
+  assert.doesNotThrow(() => markExcludedPath(matrix, "missing.ts", "excluded"));
   assert.doesNotThrow(() => applyUnitCoverage(matrix, "missing.ts", "unit-x", ["correctness"]));
 });
 
@@ -165,7 +165,7 @@ test("findUncoveredFiles and buildRequeueTargets report only outstanding work", 
   applyUnitCoverage(matrix, "complete.ts", "u1", ["correctness"]);
   applyUnitCoverage(matrix, "partial.ts", "u2", ["correctness", "security"]);
   applyUnitCoverage(matrix, "pending.ts", "u3", ["correctness"]);
-  markExcludedPath(matrix, "excluded.ts", "excluded_vendor");
+  markExcludedPath(matrix, "excluded.ts", "vendor");
 
   applyFileCoverage(matrix, [
     { path: "complete.ts", total_lines: 10, pass_id: "p:correctness", lens: "correctness" },

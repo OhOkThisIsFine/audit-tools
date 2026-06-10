@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,13 @@ const {
   resolveAuditScope,
   fullAuditScope,
 } = await import("../src/orchestrator/scope.ts");
+
+const {
+  buildFileDisposition,
+  VCS_IGNORED_REASON,
+  VCS_IGNORED_PER_FILE_LIMIT,
+  VCS_IGNORED_MAX_SHARE,
+} = await import("../src/extractors/disposition.ts");
 
 function git(cwd, ...args) {
   execFileSync("git", args, { cwd, stdio: "pipe" });
@@ -308,6 +315,299 @@ test("resolveAuditScope: real git repo — changed file + graph neighbour, misty
     });
     assert.equal(fallback.mode, "full");
     assert.match(fallback.dropped_note ?? "", /could not be resolved/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Gitignore-aware disposition (batched `git check-ignore --stdin`)
+// ---------------------------------------------------------------------------
+
+function manifest(paths) {
+  return { files: paths.map((path) => ({ path })) };
+}
+
+function countingSpawn() {
+  const calls = [];
+  const spawn = (command, args, options) => {
+    calls.push({ command, args, options });
+    return spawnSync(command, args, options);
+  };
+  return { calls, spawn };
+}
+
+async function makeGitRoot(t, gitignoreContent) {
+  let root;
+  try {
+    root = await mkdtemp(join(tmpdir(), "audit-disposition-"));
+    git(root, "init", "-q");
+  } catch {
+    if (root) await rm(root, { recursive: true, force: true });
+    t.skip("git is not available");
+    return undefined;
+  }
+  if (gitignoreContent !== undefined) {
+    await writeFile(join(root, ".gitignore"), gitignoreContent);
+  }
+  return root;
+}
+
+test("disposition: batched check-ignore classifies ignored files as vcs_ignored (single spawn, slash-normalized)", async (t) => {
+  const root = await makeGitRoot(t, "alpha/\n");
+  if (!root) return;
+  try {
+    const { calls, spawn } = countingSpawn();
+    // alpha\b.ts uses Windows backslash separators on purpose: normalization
+    // to forward slashes must happen before the batch reaches git, and the
+    // ignored-set lookup must still match the original manifest entry.
+    const disposition = buildFileDisposition(
+      manifest(["alpha/a.ts", "alpha\\b.ts", "src/keep.ts"]),
+      { root, spawn },
+    );
+
+    // Exactly one batched spawn with --stdin, never per-file.
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, "git");
+    assert.ok(calls[0].args.includes("check-ignore"));
+    assert.ok(calls[0].args.includes("--stdin"));
+    // Input batch is forward-slash normalized.
+    assert.ok(calls[0].options.input.includes("alpha/b.ts"));
+    assert.ok(!calls[0].options.input.includes("\\"));
+
+    const byPath = new Map(disposition.files.map((f) => [f.path, f]));
+    for (const ignored of ["alpha/a.ts", "alpha\\b.ts"]) {
+      assert.equal(byPath.get(ignored).status, "excluded");
+      assert.equal(byPath.get(ignored).reason, VCS_IGNORED_REASON);
+    }
+    assert.equal(byPath.get("src/keep.ts").status, "included");
+    assert.equal(disposition.vcs_ignore.applied, true);
+    assert.equal(disposition.vcs_ignore.ignored_count, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disposition: check-ignore exit 1 (nothing ignored) is success; targeted exclusions unchanged", async (t) => {
+  const root = await makeGitRoot(t, "does-not-match-anything/\n");
+  if (!root) return;
+  try {
+    const disposition = buildFileDisposition(
+      manifest(["src/a.ts", "dist/bundle.js"]),
+      { root },
+    );
+    const byPath = new Map(disposition.files.map((f) => [f.path, f]));
+    assert.equal(byPath.get("src/a.ts").status, "included");
+    // Existing targeted exclusion still applies unchanged.
+    assert.equal(byPath.get("dist/bundle.js").status, "generated");
+    assert.equal(
+      disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
+      false,
+    );
+    assert.equal(disposition.vcs_ignore.applied, true);
+    assert.equal(disposition.vcs_ignore.ignored_count, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disposition: git absent (spawn ENOENT) falls back cleanly to targeted exclusions", () => {
+  const enoentSpawn = () => ({
+    error: Object.assign(new Error("spawn git ENOENT"), { code: "ENOENT" }),
+    status: null,
+    stdout: "",
+    stderr: "",
+  });
+  // Must not throw.
+  const disposition = buildFileDisposition(
+    manifest(["src/a.ts", "dist/bundle.js"]),
+    { root: tmpdir(), spawn: enoentSpawn },
+  );
+  const byPath = new Map(disposition.files.map((f) => [f.path, f]));
+  assert.equal(byPath.get("src/a.ts").status, "included");
+  assert.equal(byPath.get("dist/bundle.js").status, "generated");
+  assert.equal(
+    disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
+    false,
+  );
+  assert.equal(disposition.vcs_ignore.applied, false);
+  assert.match(disposition.vcs_ignore.skipped_reason, /skipped/);
+  assert.match(disposition.vcs_ignore.skipped_reason, /ENOENT/);
+});
+
+test("disposition: not a git work tree (exit 128) falls back cleanly and records why", async (t) => {
+  let root;
+  try {
+    root = await mkdtemp(join(tmpdir(), "audit-disposition-nogit-"));
+    // Confirm git exists but the directory is not a work tree.
+    const probe = spawnSync("git", ["check-ignore", "--stdin", "-z"], {
+      cwd: root,
+      input: "x\0",
+      encoding: "utf8",
+    });
+    if (probe.error) {
+      t.skip("git is not available");
+      return;
+    }
+    if (probe.status === 0 || probe.status === 1) {
+      t.skip("temp dir is unexpectedly inside a git work tree");
+      return;
+    }
+
+    const disposition = buildFileDisposition(
+      manifest(["src/a.ts", "dist/bundle.js"]),
+      { root },
+    );
+    const byPath = new Map(disposition.files.map((f) => [f.path, f]));
+    assert.equal(byPath.get("src/a.ts").status, "included");
+    assert.equal(byPath.get("dist/bundle.js").status, "generated");
+    assert.equal(
+      disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
+      false,
+    );
+    assert.equal(disposition.vcs_ignore.applied, false);
+    assert.match(disposition.vcs_ignore.skipped_reason, /skipped/);
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disposition: at or below VCS_IGNORED_PER_FILE_LIMIT emits per-file records, no aggregates", async (t) => {
+  const root = await makeGitRoot(t, "alpha/\n");
+  if (!root) return;
+  try {
+    const ignored = Array.from({ length: 5 }, (_, i) => `alpha/f${i}.ts`);
+    const disposition = buildFileDisposition(
+      manifest([...ignored, "src/keep.ts"]),
+      { root },
+    );
+    for (const path of ignored) {
+      const item = disposition.files.find((f) => f.path === path);
+      assert.equal(item.status, "excluded");
+      assert.equal(item.reason, VCS_IGNORED_REASON);
+    }
+    assert.equal(disposition.vcs_ignore.applied, true);
+    assert.equal(disposition.vcs_ignore.aggregates, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disposition: exactly VCS_IGNORED_PER_FILE_LIMIT ignored files is the per-file boundary (no aggregates)", async (t) => {
+  const root = await makeGitRoot(t, "alpha/\n");
+  if (!root) return;
+  try {
+    // Exactly at the named threshold ("at or below"): per-file records must
+    // still be emitted; aggregation only kicks in strictly above the limit.
+    const ignoredTotal = VCS_IGNORED_PER_FILE_LIMIT;
+    // Enough included files to keep the ignored share under the guard.
+    const includedCount =
+      Math.ceil(ignoredTotal / VCS_IGNORED_MAX_SHARE) - ignoredTotal + 5;
+    const paths = [
+      ...Array.from({ length: ignoredTotal }, (_, i) => `alpha/f${i}.ts`),
+      ...Array.from({ length: includedCount }, (_, i) => `src/s${i}.ts`),
+    ];
+
+    const disposition = buildFileDisposition(manifest(paths), { root });
+
+    assert.equal(disposition.vcs_ignore.applied, true);
+    assert.equal(disposition.vcs_ignore.ignored_count, ignoredTotal);
+    assert.equal(disposition.vcs_ignore.aggregates, undefined);
+    const perFile = disposition.files.filter(
+      (f) => f.reason === VCS_IGNORED_REASON,
+    );
+    assert.equal(perFile.length, ignoredTotal);
+    assert.equal(perFile.every((f) => f.status === "excluded"), true);
+    // Non-ignored candidates all remain present and included.
+    assert.equal(
+      disposition.files.filter((f) => f.status === "included").length,
+      includedCount,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disposition: above VCS_IGNORED_PER_FILE_LIMIT aggregates by directory prefix; counts sum to total ignored", async (t) => {
+  const root = await makeGitRoot(t, "alpha/\nbeta/\n");
+  if (!root) return;
+  try {
+    const alphaCount = Math.ceil(VCS_IGNORED_PER_FILE_LIMIT * 0.75);
+    const betaCount = VCS_IGNORED_PER_FILE_LIMIT - alphaCount + 51;
+    const ignoredTotal = alphaCount + betaCount;
+    assert.ok(ignoredTotal > VCS_IGNORED_PER_FILE_LIMIT);
+
+    // Enough included files to keep the ignored share under the guard.
+    const includedCount =
+      Math.ceil(ignoredTotal / VCS_IGNORED_MAX_SHARE) - ignoredTotal + 5;
+    const paths = [
+      ...Array.from({ length: alphaCount }, (_, i) => `alpha/f${i}.ts`),
+      ...Array.from({ length: betaCount }, (_, i) => `beta/g${i}.ts`),
+      ...Array.from({ length: includedCount }, (_, i) => `src/s${i}.ts`),
+    ];
+
+    const disposition = buildFileDisposition(manifest(paths), { root });
+
+    // Bounded: no unbounded per-file vcs_ignored records.
+    assert.equal(
+      disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
+      false,
+    );
+    assert.equal(disposition.files.length, includedCount);
+    assert.equal(disposition.vcs_ignore.applied, true);
+
+    const aggregates = disposition.vcs_ignore.aggregates;
+    assert.deepEqual(aggregates, [
+      { prefix: "alpha", count: alphaCount, reason: VCS_IGNORED_REASON },
+      { prefix: "beta", count: betaCount, reason: VCS_IGNORED_REASON },
+    ]);
+    const sum = aggregates.reduce((acc, a) => acc + a.count, 0);
+    assert.equal(sum, ignoredTotal);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disposition: root-ignored guard skips the rule and records root_ignored", async (t) => {
+  const root = await makeGitRoot(t, "*\n");
+  if (!root) return;
+  try {
+    const disposition = buildFileDisposition(
+      manifest(["src/a.ts", "src/b.ts", "lib/c.ts"]),
+      { root },
+    );
+    assert.equal(
+      disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
+      false,
+    );
+    assert.equal(disposition.files.length, 3);
+    assert.equal(disposition.vcs_ignore.applied, false);
+    assert.equal(disposition.vcs_ignore.guard_branch, "root_ignored");
+    assert.match(disposition.vcs_ignore.skipped_reason, /skipped/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disposition: share guard skips the rule and records share_exceeded", async (t) => {
+  const root = await makeGitRoot(t, "alpha/\n");
+  if (!root) return;
+  try {
+    // 19 of 20 candidates ignored → share 0.95 > VCS_IGNORED_MAX_SHARE (0.9),
+    // but not every candidate, so the share branch (not root_ignored) fires.
+    const paths = [
+      ...Array.from({ length: 19 }, (_, i) => `alpha/f${i}.ts`),
+      "src/keep.ts",
+    ];
+    const disposition = buildFileDisposition(manifest(paths), { root });
+    assert.equal(
+      disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
+      false,
+    );
+    assert.equal(disposition.files.length, 20);
+    assert.equal(disposition.vcs_ignore.applied, false);
+    assert.equal(disposition.vcs_ignore.guard_branch, "share_exceeded");
+    assert.match(disposition.vcs_ignore.skipped_reason, /skipped/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -21,7 +21,8 @@ export async function runStructureExecutor(
 
   const externalAnalyzerResults = bundle.external_analyzer_results;
   const disposition =
-    bundle.file_disposition ?? buildFileDisposition(bundle.repo_manifest);
+    bundle.file_disposition ??
+    buildFileDisposition(bundle.repo_manifest, root ? { root } : {});
   const unitManifest = buildUnitManifest(bundle.repo_manifest, disposition);
   const graphBundle = root
     ? await buildGraphBundleFromFs(bundle.repo_manifest, root, disposition, {

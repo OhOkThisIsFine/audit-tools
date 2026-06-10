@@ -12,7 +12,13 @@ import {
   prepareImplementDispatch,
 } from "./steps/dispatch.js";
 import { validateArtifacts } from "./validation/artifacts.js";
-import { setQuotaStateDir } from "@audit-tools/shared";
+import {
+  setQuotaStateDir,
+  mergeOpenCodeAgentPermissionRule,
+  mergeOpenCodeGlobalPermissionRule,
+  migrateOpenCodeGlobalExternalDirectory,
+  withoutOpenCodeWildcard,
+} from "@audit-tools/shared";
 
 const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const { version: pkgVersion } = JSON.parse(
@@ -361,36 +367,59 @@ function objectValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function mergeOpenCodePermissionRule(
-  existingRule: unknown,
-  generatedRule: Record<string, string>,
-  managedRules: Record<string, string>,
-): Record<string, string> {
-  const existing =
-    existingRule && typeof existingRule === "object" && !Array.isArray(existingRule)
-      ? (existingRule as Record<string, string>)
-      : {};
-  return { "*": existing["*"] ?? generatedRule["*"] ?? "ask", ...generatedRule, ...existing, ...managedRules };
-}
-
-function renderOpenCodePermissionConfig(existing?: unknown): Record<string, unknown> {
+// Remediator agent scope: managed rules win for specific patterns; an
+// existing user wildcard survives (the managed set is passed without "*").
+function renderOpenCodeAgentPermissionConfig(existing?: unknown): Record<string, unknown> {
   const existingPermission = objectValue(existing);
   return {
     ...existingPermission,
     read: "allow",
     glob: "allow",
     grep: "allow",
-    edit: mergeOpenCodePermissionRule(
+    edit: mergeOpenCodeAgentPermissionRule(
       existingPermission.edit,
       OPENCODE_REMEDIATE_EDIT_PERMISSION,
-      OPENCODE_REMEDIATE_EDIT_PERMISSION,
+      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_EDIT_PERMISSION),
     ),
-    bash: mergeOpenCodePermissionRule(
+    bash: mergeOpenCodeAgentPermissionRule(
       existingPermission.bash,
       OPENCODE_REMEDIATE_BASH_PERMISSION,
-      OPENCODE_REMEDIATE_BASH_PERMISSION,
+      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_BASH_PERMISSION),
     ),
   };
+}
+
+// Global top-level scope: never seeds a bash wildcard or
+// external_directory['*']='allow', keeps the denylist hygiene rules, and
+// migrates away previously deployed broad rules whose value exactly matches
+// the historically managed value ('allow'). Non-matching values are untouched.
+function renderOpenCodeGlobalPermissionConfig(existing?: unknown): Record<string, unknown> {
+  const existingPermission = objectValue(existing);
+  const merged: Record<string, unknown> = {
+    ...existingPermission,
+    read: "allow",
+    glob: "allow",
+    grep: "allow",
+    edit: mergeOpenCodeAgentPermissionRule(
+      existingPermission.edit,
+      OPENCODE_REMEDIATE_EDIT_PERMISSION,
+      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_EDIT_PERMISSION),
+    ),
+    bash: mergeOpenCodeGlobalPermissionRule(
+      existingPermission.bash,
+      OPENCODE_REMEDIATE_BASH_PERMISSION,
+      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_BASH_PERMISSION),
+    ),
+  };
+  const externalDirectory = migrateOpenCodeGlobalExternalDirectory(
+    existingPermission.external_directory,
+  );
+  if (externalDirectory === undefined) {
+    delete merged.external_directory;
+  } else {
+    merged.external_directory = externalDirectory;
+  }
+  return merged;
 }
 
 function installOpenCodeGlobalConfig(promptBody: string, homeDir = homedir()): string {
@@ -411,14 +440,14 @@ function installOpenCodeGlobalConfig(promptBody: string, homeDir = homedir()): s
         subtask: false,
       },
     },
-    permission: renderOpenCodePermissionConfig(parsed.permission),
+    permission: renderOpenCodeGlobalPermissionConfig(parsed.permission),
     agent: {
       ...agent,
       remediator: {
         ...existingRemediator,
         description:
           "Bounded remediation orchestration agent for the /remediate-code workflow.",
-        permission: renderOpenCodePermissionConfig(existingRemediator.permission),
+        permission: renderOpenCodeAgentPermissionConfig(existingRemediator.permission),
       },
     },
   };

@@ -87,6 +87,40 @@ test("validateArtifactBundle reports malformed bundle sections and unit invarian
   );
 });
 
+test("validateArtifactBundle treats vcs_ignore aggregate prefixes as disposition coverage", () => {
+  const bundle = {
+    repo_manifest: {
+      files: [
+        { path: "src/app.ts" },
+        { path: "node_modules/dep/index.js" },
+        { path: "node_modules/dep/lib/util.js" },
+        { path: "orphan/missing.ts" },
+      ],
+    },
+    file_disposition: {
+      files: [{ path: "src/app.ts", status: "included" }],
+      vcs_ignore: {
+        applied: true,
+        ignored_count: 2,
+        aggregates: [
+          { prefix: "node_modules", count: 2, reason: "vcs_ignored" },
+        ],
+      },
+    },
+  };
+
+  const issues = validateArtifactBundle(bundle);
+  const missing = issues.filter((issue) =>
+    /missing disposition entry/i.test(issue.message),
+  );
+  // Paths under an aggregate prefix are accounted for; genuinely uncovered
+  // paths are still flagged.
+  assert.deepEqual(
+    missing.map((issue) => issue.message),
+    ["Missing disposition entry for orphan/missing.ts"],
+  );
+});
+
 test("validateArtifactBundle rejects invalid audit task line ranges", () => {
   const baseTask = {
     task_id: "task-1",

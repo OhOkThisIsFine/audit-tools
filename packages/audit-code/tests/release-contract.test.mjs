@@ -122,6 +122,129 @@ test("one-command release helper wires the trusted publishing path", async () =>
   assert.match(helper, /`\$\{packageName\}@\$\{version\}`/);
 });
 
+test("release scripts share an identical pure poll-log throttle helper", async () => {
+  // audit-code keeps the canonical helper in scripts/poll-log-throttle.mjs (a
+  // side-effect-free module unit tests can import — the release script runs
+  // `await main()` at top level); shared and remediate-code inline copies in
+  // their release scripts that must stay byte-identical to the canonical one.
+  const canonicalLabel = "audit-code/scripts/poll-log-throttle.mjs";
+  const canonicalSource = normalizeLineEndings(
+    await readText("scripts/poll-log-throttle.mjs"),
+  );
+  const inlineRelativePaths = [
+    ["shared", "scripts", "release-and-publish.mjs"],
+    ["remediate-code", "scripts", "release-and-publish.mjs"],
+  ];
+  const inlineSources = await Promise.all(
+    inlineRelativePaths.map(async (segments) =>
+      normalizeLineEndings(
+        await readFile(join(monorepoRoot, "packages", ...segments), "utf8"),
+      ),
+    ),
+  );
+  const labels = inlineRelativePaths.map((segments) => segments.join("/"));
+
+  const constantPattern = /const POLL_LOG_EVERY_N_ATTEMPTS = \d+;/;
+  const helperPattern =
+    /function shouldLogPollAttempt\([^)]*\) \{[\s\S]*?\n\}/;
+
+  const canonicalConstant = canonicalSource.match(constantPattern)?.[0];
+  const canonicalHelper = canonicalSource.match(helperPattern)?.[0];
+  assert.ok(
+    canonicalConstant,
+    `${canonicalLabel} should declare POLL_LOG_EVERY_N_ATTEMPTS`,
+  );
+  assert.ok(
+    canonicalHelper,
+    `${canonicalLabel} should define shouldLogPollAttempt`,
+  );
+
+  inlineSources.forEach((source, index) => {
+    const constant = source.match(constantPattern)?.[0];
+    const helper = source.match(helperPattern)?.[0];
+    assert.ok(constant, `${labels[index]} should declare POLL_LOG_EVERY_N_ATTEMPTS`);
+    assert.ok(helper, `${labels[index]} should define shouldLogPollAttempt`);
+    assert.equal(
+      constant,
+      canonicalConstant,
+      `POLL_LOG_EVERY_N_ATTEMPTS must be byte-identical between ${canonicalLabel} and ${labels[index]}`,
+    );
+    assert.equal(
+      helper,
+      canonicalHelper,
+      `shouldLogPollAttempt must be byte-identical between ${canonicalLabel} and ${labels[index]}`,
+    );
+  });
+
+  // audit-code's release script imports the helper instead of redefining it.
+  const auditScript = normalizeLineEndings(
+    await readText("scripts/release-and-publish.mjs"),
+  );
+  assert.match(
+    auditScript,
+    /import \{[^}]*shouldLogPollAttempt[^}]*\} from "\.\/poll-log-throttle\.mjs"/,
+  );
+  assert.doesNotMatch(auditScript, /function shouldLogPollAttempt/);
+  assert.doesNotMatch(auditScript, /const POLL_LOG_EVERY_N_ATTEMPTS =/);
+
+  // The legacy time-modulo throttle must not survive in remediate-code.
+  const remediateSource = inlineSources[1];
+  assert.doesNotMatch(remediateSource, /pollLogIntervalMs/);
+  assert.doesNotMatch(remediateSource, /shouldLogPoll\(/);
+});
+
+test("shouldLogPollAttempt throttle behavior (pure-function table test)", async () => {
+  const source = normalizeLineEndings(
+    await readText("scripts/poll-log-throttle.mjs"),
+  );
+  const constantDeclaration = source.match(
+    /const POLL_LOG_EVERY_N_ATTEMPTS = (\d+);/,
+  );
+  const helperSource = source.match(
+    /function shouldLogPollAttempt\([^)]*\) \{[\s\S]*?\n\}/,
+  )?.[0];
+
+  assert.ok(constantDeclaration, "expected POLL_LOG_EVERY_N_ATTEMPTS declaration");
+  assert.ok(helperSource, "expected shouldLogPollAttempt definition");
+
+  const everyN = Number(constantDeclaration[1]);
+  assert.ok(everyN > 1, "heartbeat cadence should be greater than one attempt");
+
+  // The helper must be pure: no clock reads or I/O inside its source.
+  assert.doesNotMatch(helperSource, /Date\.now/);
+  assert.doesNotMatch(helperSource, /process\./);
+  assert.doesNotMatch(helperSource, /readFile|spawnSync|console\./);
+
+  const shouldLogPollAttempt = new Function(
+    `${constantDeclaration[0]}\n${helperSource}\nreturn shouldLogPollAttempt;`,
+  )();
+
+  // First attempt always logs, regardless of status keys.
+  assert.equal(shouldLogPollAttempt(1, "pending", null), true);
+  assert.equal(shouldLogPollAttempt(1, "queued/pending", "queued/pending"), true);
+
+  // A genuine status/conclusion enum transition always logs.
+  assert.equal(
+    shouldLogPollAttempt(5, "in_progress/pending", "queued/pending"),
+    true,
+  );
+  assert.equal(shouldLogPollAttempt(2, "pending", null), true);
+
+  // Steady state: a non-first, non-transition, non-Nth attempt is silent.
+  assert.equal(shouldLogPollAttempt(5, "pending", "pending"), false);
+  assert.equal(shouldLogPollAttempt(everyN + 1, "pending", "pending"), false);
+
+  // Every-Nth-attempt heartbeat logs even with an unchanged status key.
+  assert.equal(shouldLogPollAttempt(everyN, "pending", "pending"), true);
+  assert.equal(shouldLogPollAttempt(everyN * 2, "pending", "pending"), true);
+
+  // Deterministic for fixed arguments (no hidden clock/state dependence).
+  for (let repeat = 0; repeat < 3; repeat += 1) {
+    assert.equal(shouldLogPollAttempt(5, "pending", "pending"), false);
+    assert.equal(shouldLogPollAttempt(everyN, "pending", "pending"), true);
+  }
+});
+
 test("primary CI workflows validate the lockfile, preserve diagnostics, and make tested Node lines visible", async () => {
   // Per-package CI workflows were consolidated to the monorepo root: ci.yml
   // (lockfile + diagnostics) and audit-code-test-suite.yml (the Node-matrix

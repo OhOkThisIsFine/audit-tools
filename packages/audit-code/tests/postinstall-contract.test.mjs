@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,7 +56,9 @@ test("postinstall seeds Codex skill metadata with the canonical hyphenated displ
     const opencodeConfig = JSON.parse(await readFile(opencodeConfigPath, "utf8"));
     assert.equal(opencodeConfig.permission?.read, "allow");
     assert.equal(opencodeConfig.permission?.grep, "allow");
-    assert.equal(typeof opencodeConfig.permission?.external_directory, "object");
+    // Global scope must not seed broad allows (CFG-4996560e).
+    assert.equal(opencodeConfig.permission?.external_directory, undefined);
+    assert.equal(opencodeConfig.permission?.bash?.["*"], undefined);
     assert.equal(opencodeConfig.permission?.bash?.["audit-code"], "allow");
     assert.equal(opencodeConfig.permission?.bash?.["audit-code next-step*"], "allow");
     assert.equal(opencodeConfig.permission?.bash?.["audit-code run-to-completion*"], "deny");
@@ -78,6 +80,128 @@ test("postinstall seeds Codex skill metadata with the canonical hyphenated displ
     const antigravityPluginSkillPath = join(antigravityPluginDir, "skills", "SKILL.md");
     assert.equal((await stat(antigravityPluginJsonPath)).isFile(), true);
     assert.equal((await stat(antigravityPluginSkillPath)).isFile(), true);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+// NOTE (OBL-013): these tests verify the *deployed config shape* only. Whether
+// agent-scoped allowances (agent.auditor.permission) actually propagate to
+// subtasks spawned inside a live OpenCode install cannot be exercised in unit
+// tests; validating real OpenCode subtask permission inheritance is a manual,
+// user-owned follow-up.
+async function seedOpenCodeConfig(homeDir, config) {
+  const configDir = join(homeDir, ".config", "opencode");
+  await mkdir(configDir, { recursive: true });
+  const configPath = join(configDir, "opencode.json");
+  await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
+  return configPath;
+}
+
+test("postinstall global scope seeds no broad allows on a fresh config (CFG-4996560e)", async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), "audit-code-postinstall-home-"));
+  try {
+    await runPostinstall(homeDir);
+    const configPath = join(homeDir, ".config", "opencode", "opencode.json");
+    const config = JSON.parse(await readFile(configPath, "utf8"));
+
+    // No broad allows at the global top-level scope.
+    assert.equal(config.permission?.bash?.["*"], undefined);
+    assert.equal(config.permission?.external_directory, undefined);
+
+    // Denylist hygiene rules are still present at the top level.
+    assert.equal(config.permission?.bash?.["audit-code run-to-completion*"], "deny");
+    assert.equal(config.permission?.bash?.["audit-code synthesize*"], "deny");
+    assert.equal(config.permission?.bash?.["audit-code cleanup*"], "deny");
+    assert.equal(config.permission?.bash?.["*dist*index.js* run-to-completion*"], "deny");
+    assert.equal(config.permission?.bash?.["rm *"], "deny");
+
+    // Specific allows remain.
+    assert.equal(config.permission?.bash?.["audit-code next-step*"], "allow");
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("postinstall migrates exactly-matching historically managed broad rules out of the global scope", async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), "audit-code-postinstall-home-"));
+  try {
+    await seedOpenCodeConfig(homeDir, {
+      theme: "user-theme",
+      permission: {
+        bash: { "*": "allow", "custom-user-tool *": "deny", "git status": "allow" },
+        external_directory: { "*": "allow" },
+        webfetch: "ask",
+      },
+    });
+    await runPostinstall(homeDir);
+    const configPath = join(homeDir, ".config", "opencode", "opencode.json");
+    const config = JSON.parse(await readFile(configPath, "utf8"));
+
+    // Exactly-matching historically managed broad rules are removed.
+    assert.equal(config.permission?.bash?.["*"], undefined);
+    assert.equal(config.permission?.external_directory, undefined);
+
+    // Unrelated user-authored keys survive the migration unchanged — including
+    // a specific bash key whose value happens to equal the managed broad value
+    // ("allow"): only the broad wildcard is migrated, never specific entries.
+    assert.equal(config.theme, "user-theme");
+    assert.equal(config.permission?.webfetch, "ask");
+    assert.equal(config.permission?.bash?.["custom-user-tool *"], "deny");
+    assert.equal(config.permission?.bash?.["git status"], "allow");
+
+    // Convergence: re-running over the already-migrated config is idempotent —
+    // the broad rules are not re-emitted and the result is byte-identical.
+    const firstRaw = await readFile(configPath, "utf8");
+    await runPostinstall(homeDir);
+    assert.equal(await readFile(configPath, "utf8"), firstRaw);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("postinstall leaves non-matching top-level broad rules untouched", async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), "audit-code-postinstall-home-"));
+  try {
+    await seedOpenCodeConfig(homeDir, {
+      permission: {
+        bash: { "*": "ask" },
+        external_directory: { "*": "deny", "C:/somewhere/**": "allow" },
+      },
+    });
+    await runPostinstall(homeDir);
+    const config = JSON.parse(
+      await readFile(join(homeDir, ".config", "opencode", "opencode.json"), "utf8"),
+    );
+
+    assert.equal(config.permission?.bash?.["*"], "ask");
+    assert.deepEqual(config.permission?.external_directory, {
+      "*": "deny",
+      "C:/somewhere/**": "allow",
+    });
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("postinstall keeps auditor agent broad-allow-with-denylist and is idempotent", async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), "audit-code-postinstall-home-"));
+  try {
+    await runPostinstall(homeDir);
+    const configPath = join(homeDir, ".config", "opencode", "opencode.json");
+    const first = JSON.parse(await readFile(configPath, "utf8"));
+
+    // Agent scope keeps the broad allow plus the denylist.
+    assert.equal(first.agent?.auditor?.permission?.bash?.["*"], "allow");
+    assert.deepEqual(first.agent?.auditor?.permission?.external_directory, { "*": "allow" });
+    assert.equal(first.agent?.auditor?.permission?.bash?.["audit-code run-to-completion*"], "deny");
+    assert.equal(first.agent?.auditor?.permission?.bash?.["rm *"], "deny");
+
+    // Re-running is idempotent for both scopes (no duplicate or mutated rules).
+    await runPostinstall(homeDir);
+    const second = JSON.parse(await readFile(configPath, "utf8"));
+    assert.deepEqual(second.agent?.auditor, first.agent?.auditor);
+    assert.deepEqual(second.permission, first.permission);
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }

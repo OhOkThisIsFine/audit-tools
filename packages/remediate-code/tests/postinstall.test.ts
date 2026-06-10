@@ -118,15 +118,15 @@ describe("scripts/postinstall.mjs", () => {
     expect(config.permission.bash["remediate-code run*"]).toBe("deny");
   });
 
-  it("preserves existing \"*\" wildcard in bash permission when managedRules also contains \"*\" (COR-fc1f12a6)", async () => {
-    // Pre-seed an opencode.json with bash["*"] = "allow" so that the existing
-    // value should win over the hardcoded "ask" in the managed rules.
+  it("preserves a non-managed existing \"*\" wildcard in the global bash permission (COR-fc1f12a6)", async () => {
+    // Pre-seed an opencode.json with a user-authored wildcard that does NOT
+    // match the historically managed broad value ("allow"); it must survive.
     const configDir = join(TEMP_HOME, ".config", "opencode");
     await mkdir(configDir, { recursive: true });
     const configPath = join(configDir, "opencode.json");
     await writeFile(
       configPath,
-      JSON.stringify({ permission: { bash: { "*": "allow" } } }),
+      JSON.stringify({ permission: { bash: { "*": "deny" } } }),
       "utf8",
     );
 
@@ -135,24 +135,47 @@ describe("scripts/postinstall.mjs", () => {
     expect(result.error).toBeUndefined();
 
     const config = JSON.parse(await readFile(configPath, "utf8"));
-    // The user's "allow" must survive — not be overwritten by the managed "ask".
-    expect(config.permission.bash["*"]).toBe("allow");
+    // The user's non-matching wildcard must survive untouched.
+    expect(config.permission.bash["*"]).toBe("deny");
     // Specific managed glob patterns must still be present.
     expect(config.permission.bash["remediate-code next-step*"]).toBe("allow");
     expect(config.permission.bash["remediate-code run*"]).toBe("deny");
   });
 
-  it("falls back to generated-rule \"*\" when existing bash lacks a wildcard (COR-fc1f12a6)", async () => {
-    // No pre-existing opencode.json — existing["*"] is undefined, so the
-    // generated rule's "*": "ask" should be used.
+  it("preserves an existing agent-scope \"*\" wildcard over the managed default (COR-fc1f12a6)", async () => {
+    // The remediator agent scope still lets an existing user wildcard win over
+    // the generated "ask" default.
+    const configDir = join(TEMP_HOME, ".config", "opencode");
+    await mkdir(configDir, { recursive: true });
+    const configPath = join(configDir, "opencode.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        agent: { remediator: { permission: { bash: { "*": "allow" } } } },
+      }),
+      "utf8",
+    );
+
+    const result = runPostinstall();
+    expect(result.status).toBe(0);
+    expect(result.error).toBeUndefined();
+
+    const config = JSON.parse(await readFile(configPath, "utf8"));
+    expect(config.agent.remediator.permission.bash["*"]).toBe("allow");
+    expect(config.agent.remediator.permission.bash["remediate-code run*"]).toBe("deny");
+  });
+
+  it("does not seed a global bash wildcard on a fresh config; agent scope falls back to \"ask\" (COR-fc1f12a6)", async () => {
+    // No pre-existing opencode.json — the global top-level scope never seeds a
+    // wildcard; the remediator agent scope uses the generated "ask" default.
     const result = runPostinstall();
     expect(result.status).toBe(0);
     expect(result.error).toBeUndefined();
 
     const configPath = join(TEMP_HOME, ".config", "opencode", "opencode.json");
     const config = JSON.parse(await readFile(configPath, "utf8"));
-    // Generated default is "ask"; managed rules must NOT override it.
-    expect(config.permission.bash["*"]).toBe("ask");
+    expect(config.permission.bash["*"]).toBeUndefined();
+    expect(config.agent.remediator.permission.bash["*"]).toBe("ask");
   });
 
   it("is idempotent — second run exits 0 and leaves files current", () => {

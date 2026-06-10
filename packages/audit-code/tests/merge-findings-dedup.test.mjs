@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { mergeFindings } = await import("../src/reporting/mergeFindings.ts");
+const { assignStableFindingIds } = await import(
+  "../src/reporting/findingIdentity.ts"
+);
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -20,7 +23,7 @@ function makeFinding(overrides) {
   };
 }
 
-function wrapResult(findings) {
+function wrapResult(findings, overrides = {}) {
   return {
     task_id: "t-1",
     unit_id: "u-1",
@@ -28,8 +31,241 @@ function wrapResult(findings) {
     lens: "correctness",
     file_coverage: [{ path: "src/foo.ts", total_lines: 100 }],
     findings,
+    ...overrides,
   };
 }
+
+// ── identity merge (exact normalized lens|category|title) ───────────────────
+
+test("mergeFindings collapses re-emissions of one identity across files and passes into a single finding", () => {
+  const first = makeFinding({
+    id: "F-A",
+    title: "Config loaded without validation",
+    category: "Validation",
+    lens: "correctness",
+    severity: "medium",
+    confidence: "low",
+    systemic: false,
+    summary: "Config is read raw.",
+    evidence: ["ev-first", "ev-shared"],
+    affected_files: [{ path: "src/zeta.ts", line_start: 4, line_end: 9 }],
+  });
+  const second = makeFinding({
+    id: "F-B",
+    title: "Config loaded without validation",
+    category: "Validation",
+    lens: "correctness",
+    severity: "high",
+    confidence: "medium",
+    systemic: true,
+    summary: "Config is read raw in a second module too.",
+    evidence: ["ev-shared", "ev-second"],
+    affected_files: [{ path: "src/alpha.ts", line_start: 12, line_end: 20 }],
+  });
+
+  const merged = mergeFindings([
+    {
+      task_id: "t-1",
+      unit_id: "u-1",
+      pass_id: "pass:correctness:1",
+      lens: "correctness",
+      file_coverage: [{ path: "src/zeta.ts", total_lines: 100 }],
+      findings: [first],
+    },
+    {
+      task_id: "t-2",
+      unit_id: "u-2",
+      pass_id: "pass:correctness:2",
+      lens: "correctness",
+      file_coverage: [{ path: "src/alpha.ts", total_lines: 100 }],
+      findings: [second],
+    },
+  ]);
+
+  assert.equal(
+    merged.length,
+    1,
+    "re-emissions of one identity across files/units/passes must collapse to 1",
+  );
+  assert.deepEqual(
+    merged[0].affected_files.map((f) => f.path),
+    ["src/alpha.ts", "src/zeta.ts"],
+    "survivor's affected_files is the union of both paths, sorted by path",
+  );
+  assert.deepEqual(
+    [...merged[0].evidence].sort(),
+    ["ev-first", "ev-second", "ev-shared"],
+    "survivor's evidence is the set-union of both findings' evidence",
+  );
+  assert.equal(merged[0].severity, "high", "severity escalates to the max rank");
+  assert.equal(
+    merged[0].confidence,
+    "medium",
+    "confidence escalates to the max rank",
+  );
+  assert.equal(merged[0].systemic, true, "systemic ORs across re-emissions");
+});
+
+test("one problem re-emitted from two files/passes merges to one finding that keeps the canonical stable id of its identity", () => {
+  // The same identity (lens|category|title) reported from two different files
+  // in two different units/passes. src/alpha.ts sorts first, so it stays the
+  // structural anchor before and after the file union grows.
+  const emission = (file, evidence) =>
+    makeFinding({
+      title: "Config loaded without validation",
+      category: "Validation",
+      lens: "correctness",
+      evidence: [evidence],
+      affected_files: [{ path: file, line_start: 1, line_end: 5 }],
+    });
+
+  const merged = mergeFindings([
+    wrapResult([emission("src/alpha.ts", "ev-alpha")], {
+      task_id: "t-1",
+      unit_id: "u-1",
+      pass_id: "pass:correctness:1",
+      file_coverage: [{ path: "src/alpha.ts", total_lines: 100 }],
+    }),
+    wrapResult([emission("src/zeta.ts", "ev-zeta")], {
+      task_id: "t-2",
+      unit_id: "u-2",
+      pass_id: "pass:correctness:2",
+      file_coverage: [{ path: "src/zeta.ts", total_lines: 100 }],
+    }),
+  ]);
+
+  assert.equal(
+    merged.length,
+    1,
+    "the same problem reported from two files/passes must merge to exactly 1 finding",
+  );
+  assert.deepEqual(
+    merged[0].affected_files.map((f) => f.path),
+    ["src/alpha.ts", "src/zeta.ts"],
+    "merged file coverage reflects both source files",
+  );
+  assert.ok(
+    merged[0].evidence.includes("ev-alpha") &&
+      merged[0].evidence.includes("ev-zeta"),
+    "merged evidence reflects both sources",
+  );
+
+  // Re-keying the merged finding yields the same canonical id as a fresh
+  // single-source emission of the identity — merging never moves the id.
+  const [rekeyed] = assignStableFindingIds(merged);
+  const [canonical] = assignStableFindingIds([
+    emission("src/alpha.ts", "ev-alpha"),
+  ]);
+  assert.equal(
+    rekeyed.id,
+    canonical.id,
+    "the merged finding's id must equal the canonical id derived for its identity",
+  );
+});
+
+test("the same title shape in two different units stays two findings with distinct ids", () => {
+  // Identical wording shape — only the unit-specific embedded path differs —
+  // with the same category and lens. Raw titles are not byte-identical, so the
+  // exact-identity merge never collapses them; the fuzzy same-lens dedup groups
+  // by primary path, so distinct units are never compared on mere similarity.
+  const inUnit = (unitId, file) =>
+    makeFinding({
+      unit_id: unitId,
+      title: `Hard-coded timeout in ${file}:30`,
+      category: "ResourceUse",
+      lens: "correctness",
+      affected_files: [{ path: file, line_start: 30, line_end: 30 }],
+    });
+
+  const merged = mergeFindings([
+    wrapResult([inUnit("u-poller", "src/poller.ts")], {
+      task_id: "t-1",
+      unit_id: "u-poller",
+      file_coverage: [{ path: "src/poller.ts", total_lines: 100 }],
+    }),
+    wrapResult([inUnit("u-uploader", "src/uploader.ts")], {
+      task_id: "t-2",
+      unit_id: "u-uploader",
+      file_coverage: [{ path: "src/uploader.ts", total_lines: 100 }],
+    }),
+  ]);
+
+  assert.equal(
+    merged.length,
+    2,
+    "the same title shape in two different units must NOT collapse",
+  );
+  assert.deepEqual(
+    new Set(merged.map((f) => f.unit_id)),
+    new Set(["u-poller", "u-uploader"]),
+    "each surviving finding retains its own unit_id",
+  );
+  const ids = assignStableFindingIds(merged).map((f) => f.id);
+  assert.notEqual(
+    ids[0],
+    ids[1],
+    "the two findings must keep distinct, non-equal ids",
+  );
+});
+
+test("mergeFindings keeps same-title findings with different categories separate (category is part of identity)", () => {
+  const merged = mergeFindings([
+    wrapResult([
+      makeFinding({
+        id: "F-A",
+        title: "Unbounded retry loop",
+        category: "ErrorHandling",
+        lens: "correctness",
+        affected_files: [{ path: "src/poller.ts", line_start: 1, line_end: 5 }],
+      }),
+    ]),
+    wrapResult([
+      makeFinding({
+        id: "F-B",
+        title: "Unbounded retry loop",
+        category: "ResourceUse",
+        lens: "correctness",
+        affected_files: [{ path: "src/uploader.ts", line_start: 1, line_end: 5 }],
+      }),
+    ]),
+  ]);
+  assert.equal(
+    merged.length,
+    2,
+    "identical title with different category on different files must stay 2",
+  );
+});
+
+test("mergeFindings keeps same-title same-category findings with different lenses on different files separate", () => {
+  // Exact-identity merge keys include the lens, so these never share a key;
+  // cross-lens fuzzy dedup still requires filePathOverlap >= 0.5, which two
+  // disjoint file sets cannot reach.
+  const merged = mergeFindings([
+    wrapResult([
+      makeFinding({
+        id: "F-A",
+        title: "Unbounded retry loop",
+        category: "General",
+        lens: "correctness",
+        affected_files: [{ path: "src/poller.ts", line_start: 1, line_end: 5 }],
+      }),
+    ]),
+    wrapResult([
+      makeFinding({
+        id: "F-B",
+        title: "Unbounded retry loop",
+        category: "General",
+        lens: "reliability",
+        affected_files: [{ path: "src/uploader.ts", line_start: 1, line_end: 5 }],
+      }),
+    ]),
+  ]);
+  assert.equal(
+    merged.length,
+    2,
+    "identical title+category across lenses on disjoint files must stay 2",
+  );
+});
 
 // ── same-lens dedup edge cases ────────────────────────────────────────────────
 

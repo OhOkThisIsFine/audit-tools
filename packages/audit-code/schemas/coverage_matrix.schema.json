@@ -18,7 +18,7 @@
           },
           "classification_status": {
             "type": "string",
-            "enum": ["unclassified", "classified", "excluded", "generated", "vendor", "binary", "doc_only"]
+            "enum": ["unclassified", "classified", "excluded", "generated", "vendor", "binary", "doc_only", "out_of_scope_delta", "excluded_trivial", "out_of_scope_intent"]
           },
           "audit_status": {
             "type": "string",
