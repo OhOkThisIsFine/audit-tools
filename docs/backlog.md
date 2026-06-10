@@ -218,7 +218,10 @@ wired into both tools (shared types in
 enters the pipeline; structured `audit-findings.json` keeps the deterministic
 fast path.
 
-**What remains** (durable design, not yet executed end-to-end):
+**What remains** (durable design, not yet executed end-to-end). Execution plan:
+[`free-form-quality-build.md`](free-form-quality-build.md) — grounds free-form
+extraction (affected_files + evidence) and wires the dormant critic→judge→repair
+loop.
 
 - The adversarial **critic → judge → repair** loop: generate concrete
   counterexamples against design claims, classify them (`accepted` /
