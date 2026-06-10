@@ -97,35 +97,87 @@ function objectValue(value) {
     : {};
 }
 
-function mergeOpenCodePermissionRule(existingRule, generatedRule, managedRules) {
-  const existing = objectValue(existingRule);
-  const { "*": _drop, ...managedWithoutWildcard } = managedRules;
-  return {
-    "*": existing["*"] ?? generatedRule["*"] ?? "ask",
-    ...generatedRule,
-    ...existing,
-    ...managedWithoutWildcard,
-  };
+// The scoped OpenCode permission merge helpers are single-sourced in
+// @audit-tools/shared (global top-level scope vs. remediator agent scope).
+// Resolve them best-effort: on a fresh workspace checkout the shared dist may
+// not be built yet, in which case the OpenCode config deployment below is
+// skipped with a warning instead of failing the whole install.
+let sharedOpenCodePermissions = null;
+try {
+  const shared = await import("@audit-tools/shared");
+  if (
+    typeof shared.mergeOpenCodeAgentPermissionRule === "function" &&
+    typeof shared.mergeOpenCodeGlobalPermissionRule === "function" &&
+    typeof shared.migrateOpenCodeGlobalExternalDirectory === "function" &&
+    typeof shared.withoutOpenCodeWildcard === "function"
+  ) {
+    sharedOpenCodePermissions = shared;
+  }
+} catch {
+  // Leave null; the OpenCode deployment step reports the skip.
 }
 
-function renderOpenCodePermissionConfig(existing) {
+// Remediator agent scope: managed rules win for specific patterns; an
+// existing user wildcard survives (the managed set is passed without "*").
+function renderOpenCodeAgentPermissionConfig(existing) {
+  const { mergeOpenCodeAgentPermissionRule, withoutOpenCodeWildcard } =
+    sharedOpenCodePermissions;
   const existingPermission = objectValue(existing);
   return {
     ...existingPermission,
     read: "allow",
     glob: "allow",
     grep: "allow",
-    edit: mergeOpenCodePermissionRule(
+    edit: mergeOpenCodeAgentPermissionRule(
       existingPermission.edit,
       OPENCODE_REMEDIATE_EDIT_PERMISSION,
-      OPENCODE_REMEDIATE_EDIT_PERMISSION,
+      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_EDIT_PERMISSION),
     ),
-    bash: mergeOpenCodePermissionRule(
+    bash: mergeOpenCodeAgentPermissionRule(
       existingPermission.bash,
       OPENCODE_REMEDIATE_BASH_PERMISSION,
-      OPENCODE_REMEDIATE_BASH_PERMISSION,
+      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_BASH_PERMISSION),
     ),
   };
+}
+
+// Global top-level scope: never seeds a bash wildcard or
+// external_directory['*']='allow', keeps the denylist hygiene rules, and
+// migrates away previously deployed broad rules whose value exactly matches
+// the historically managed value ('allow'). Non-matching values are untouched.
+function renderOpenCodeGlobalPermissionConfig(existing) {
+  const {
+    mergeOpenCodeAgentPermissionRule,
+    mergeOpenCodeGlobalPermissionRule,
+    migrateOpenCodeGlobalExternalDirectory,
+    withoutOpenCodeWildcard,
+  } = sharedOpenCodePermissions;
+  const existingPermission = objectValue(existing);
+  const merged = {
+    ...existingPermission,
+    read: "allow",
+    glob: "allow",
+    grep: "allow",
+    edit: mergeOpenCodeAgentPermissionRule(
+      existingPermission.edit,
+      OPENCODE_REMEDIATE_EDIT_PERMISSION,
+      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_EDIT_PERMISSION),
+    ),
+    bash: mergeOpenCodeGlobalPermissionRule(
+      existingPermission.bash,
+      OPENCODE_REMEDIATE_BASH_PERMISSION,
+      withoutOpenCodeWildcard(OPENCODE_REMEDIATE_BASH_PERMISSION),
+    ),
+  };
+  const externalDirectory = migrateOpenCodeGlobalExternalDirectory(
+    existingPermission.external_directory,
+  );
+  if (externalDirectory === undefined) {
+    delete merged.external_directory;
+  } else {
+    merged.external_directory = externalDirectory;
+  }
+  return merged;
 }
 
 function mergeOpenCodeGlobalConfig(existing, promptBody) {
@@ -143,14 +195,14 @@ function mergeOpenCodeGlobalConfig(existing, promptBody) {
         subtask: false,
       },
     },
-    permission: renderOpenCodePermissionConfig(parsed.permission),
+    permission: renderOpenCodeGlobalPermissionConfig(parsed.permission),
     agent: {
       ...agent,
       remediator: {
         ...existingRemediator,
         description:
           "Bounded remediation orchestration agent for the /remediate-code workflow.",
-        permission: renderOpenCodePermissionConfig(existingRemediator.permission),
+        permission: renderOpenCodeAgentPermissionConfig(existingRemediator.permission),
       },
     },
   };
@@ -252,6 +304,11 @@ const opencodeGlobalConfig = join(
   "opencode.json",
 );
 try {
+  if (!sharedOpenCodePermissions) {
+    throw new Error(
+      "@audit-tools/shared is unavailable (build the shared workspace first); skipping OpenCode config deployment",
+    );
+  }
   const action = installMergedJson(opencodeGlobalConfig, (existing) =>
     mergeOpenCodeGlobalConfig(existing, promptBody),
   );

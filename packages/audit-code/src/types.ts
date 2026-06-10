@@ -98,10 +98,33 @@ export interface FileCoverageRecord {
   agent_role?: string;
 }
 
+/** Single source of truth for coverage-matrix classification statuses (mirrors
+ * the LENS_REGISTRY-derives-Lens pattern above). The value set is
+ * {unclassified, classified} plus the audit-excluded subset of
+ * FileDispositionStatus (excluded | generated | vendor | binary | doc_only)
+ * plus the scope/trivial-audit statuses written by scope.ts
+ * (out_of_scope_delta, out_of_scope_intent) and trivialAudit.ts
+ * (excluded_trivial). schemas/coverage_matrix.schema.json must list the same
+ * enum — tests/classification-status-drift.test.mjs enforces set equality. */
+export const CLASSIFICATION_STATUSES = [
+  "unclassified",
+  "classified",
+  "excluded",
+  "generated",
+  "vendor",
+  "binary",
+  "doc_only",
+  "out_of_scope_delta",
+  "excluded_trivial",
+  "out_of_scope_intent",
+] as const;
+
+export type ClassificationStatus = (typeof CLASSIFICATION_STATUSES)[number];
+
 export interface CoverageFileRecord {
   path: string;
   unit_ids: string[];
-  classification_status: string;
+  classification_status: ClassificationStatus;
   audit_status: string;
   required_lenses: Lens[];
   completed_lenses: Lens[];

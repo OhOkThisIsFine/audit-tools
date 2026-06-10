@@ -443,7 +443,7 @@ test("mergeFindings includes designAssessment.review_findings in output", () => 
 
 test("mergeFindings merges an AuditResult finding into a matching designAssessment finding", () => {
   // The designAssessment finding and the AuditResult finding share the same
-  // findingKey (lens|category|title|primaryPath|line_start|line_end), so
+  // file-independent findingKey (normalized lens|category|title), so
   // mergeFindings should update the existing entry rather than add a duplicate.
   const sharedProps = {
     title: "Unchecked null dereference",

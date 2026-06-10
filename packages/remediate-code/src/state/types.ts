@@ -4,7 +4,7 @@ import type { ClosingAction } from "./closingActions.js";
 // The remediator consumes the auditor's `audit-findings.json` directly, so it
 // uses the shared shape verbatim rather than a divergent local copy. Imported
 // (so it is in scope for the types below) and re-exported for existing callers.
-import type { Finding, FindingTheme } from "@audit-tools/shared";
+import type { Finding, FindingTheme, RemediationOutcome } from "@audit-tools/shared";
 export type { Finding };
 
 export interface RemediationBlock {
@@ -124,6 +124,12 @@ export interface CoverageLedgerEntry {
   phantom_paths_removed?: string[];
   /** Whether the finding's evidence cites a real repo path (extracted findings only). */
   evidence_grounded?: boolean;
+  /**
+   * Full original Finding payload (the shared `Finding` type, verbatim). Carried
+   * for never-planned findings so the outcomes contract can record what was
+   * dropped — without it the payload is lost once state.json is deleted at close.
+   */
+  finding?: Finding;
 }
 
 export interface CoverageLedger {
@@ -138,6 +144,80 @@ export interface CoverageLedger {
   /** Findings dropped because every cited path was phantom (after one repair attempt). */
   phantom_dropped_count: number;
   entries: CoverageLedgerEntry[];
+}
+
+/**
+ * Retry-oriented final status of an outcomes item. Coarser than
+ * `RemediationOutcomeStatus`: `fixed` covers resolved / verified-no-change,
+ * `failed` covers blocked and force-closed non-terminal items, `skipped`
+ * covers deemed-inappropriate items, `ignored` covers user-ignored items.
+ */
+export type RemediationOutcomeFinalStatus =
+  | "fixed"
+  | "failed"
+  | "ignored"
+  | "skipped";
+
+/**
+ * Typed subset of `ItemSpec` carried on each outcomes item — the documented
+ * fields a retry needs without re-running the document phase.
+ */
+export interface ItemSpecSummary
+  extends Pick<ItemSpec, "concrete_change" | "no_change" | "touched_files"> {
+  /** Names of the tests the document phase specified (`ItemSpec.tests_to_write[].name`). */
+  tests_to_write: string[];
+}
+
+/**
+ * One fully self-describing entry per finding in `remediation-outcomes.json`.
+ * Extends the shared per-finding outcome so the file is retryable on its own:
+ * close deletes state.json, so every payload a retry needs must be here.
+ *
+ * Runtime invariants (enforced by the close phase, not expressible in TS):
+ * - `reason` is always a non-empty string when `final_status` is `skipped` or
+ *   `ignored`.
+ * - `original_state` is present exactly when the run was force-closed while
+ *   this item was still non-terminal; such items get `final_status: "failed"`
+ *   and a `reason` saying they were force-closed.
+ */
+export interface RemediationOutcomeItem extends RemediationOutcome {
+  /** Full original Finding payload (the shared `Finding` type, verbatim). */
+  finding: Finding;
+  /** Summary of the documented `ItemSpec`; absent when never documented. */
+  item_spec?: ItemSpecSummary;
+  /** Owning block id (`RemediationBlock.block_id`). */
+  block_id: RemediationBlock["block_id"];
+  /** The owning block's dependency block ids (`RemediationBlock.dependencies`). */
+  block_dependencies: string[];
+  /** Retry-oriented final status (see `RemediationOutcomeFinalStatus`). */
+  final_status: RemediationOutcomeFinalStatus;
+  /**
+   * The non-terminal `RemediationItemState["status"]` this item was in when the
+   * run was force-closed. Absent for items that reached a terminal status.
+   */
+  original_state?: RemediationItemState["status"];
+}
+
+/** Why a never-planned finding was dropped before remediation started. */
+export type NeverPlannedDropReason =
+  | "cross_lens_dedup"
+  | "intent_checkpoint"
+  | "no_evidence"
+  | "phantom_paths";
+
+/**
+ * Coverage-ledger entry as written into `remediation-outcomes.json`: the plan's
+ * `CoverageLedgerEntry` enriched with a `drop_reason` discriminator and (for
+ * never-planned findings) the full `Finding` payload instead of a bare id.
+ */
+export interface OutcomeCoverageEntry extends CoverageLedgerEntry {
+  /** Set on never-planned findings (folded / checkpoint- / evidence- / phantom-dropped). */
+  drop_reason?: NeverPlannedDropReason;
+}
+
+/** The outcomes file's coverage-ledger section (enriched entries). */
+export interface OutcomeCoverageLedger extends Omit<CoverageLedger, "entries"> {
+  entries: OutcomeCoverageEntry[];
 }
 
 export interface RemediationItemState {

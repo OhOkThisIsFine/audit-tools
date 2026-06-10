@@ -44,14 +44,22 @@ function primaryPath(finding: Finding): string {
   return finding.affected_files[0]?.path ?? "";
 }
 
+/**
+ * File-independent finding identity. Re-emissions of the same logical finding
+ * (exact normalized lens + category + title) across files, units, and passes
+ * share one key, so the exact-key merge collapses them into a single finding
+ * whose affected_files / evidence are the union of every re-emission.
+ *
+ * Cross-file merging happens ONLY on this exact equality — the fuzzy
+ * (Jaccard-title) dedup passes below stay grouped by primary path, which is
+ * what guarantees that distinct problems in different units never collapse
+ * on mere similarity.
+ */
 function findingKey(finding: Finding): string {
   return [
     normalizeText(finding.lens),
     normalizeText(finding.category),
     normalizeText(finding.title),
-    primaryPath(finding),
-    String(finding.affected_files[0]?.line_start ?? ""),
-    String(finding.affected_files[0]?.line_end ?? ""),
   ].join("|");
 }
 
@@ -244,6 +252,49 @@ function relevantExternalEvidence(
     .map((item) => `external:${results.tool}:${item.path}:${item.summary}`);
 }
 
+/**
+ * Insert a finding into the identity-keyed map, or absorb it into the existing
+ * finding with the same identity: affected_files and evidence are unioned,
+ * severity / confidence escalate to the maximum rank seen, `systemic` ORs,
+ * impact / likelihood backfill, and the longest summary wins.
+ */
+function upsertFinding(merged: Map<string, Finding>, finding: Finding): void {
+  const key = findingKey(finding);
+  const existing = merged.get(key);
+  if (!existing) {
+    merged.set(key, {
+      ...finding,
+      affected_files: [...finding.affected_files],
+      evidence: [...(finding.evidence ?? [])],
+    });
+    return;
+  }
+
+  if (severityRank(finding.severity) > severityRank(existing.severity)) {
+    existing.severity = finding.severity;
+  }
+  if (
+    confidenceRank(finding.confidence) > confidenceRank(existing.confidence)
+  ) {
+    existing.confidence = finding.confidence;
+  }
+  existing.systemic = Boolean(existing.systemic || finding.systemic);
+  existing.impact = existing.impact ?? finding.impact;
+  existing.likelihood = existing.likelihood ?? finding.likelihood;
+  existing.summary =
+    existing.summary.length >= finding.summary.length
+      ? existing.summary
+      : finding.summary;
+
+  mergeAffectedFiles(existing, finding);
+  existing.evidence = [
+    ...new Set([
+      ...(existing.evidence ?? []),
+      ...(finding.evidence ?? []),
+    ]),
+  ];
+}
+
 export function mergeFindings(
   results: AuditResult[],
   runtimeReport?: RuntimeValidationReport,
@@ -257,50 +308,12 @@ export function mergeFindings(
     ...(designAssessment?.review_findings ?? []),
   ];
   for (const finding of allDesignFindings) {
-    const key = findingKey(finding);
-    merged.set(key, {
-      ...finding,
-      affected_files: [...finding.affected_files],
-      evidence: [...(finding.evidence ?? [])],
-    });
+    upsertFinding(merged, finding);
   }
 
   for (const result of results) {
     for (const finding of result.findings) {
-      const key = findingKey(finding);
-      const existing = merged.get(key);
-      if (!existing) {
-        merged.set(key, {
-          ...finding,
-          affected_files: [...finding.affected_files],
-          evidence: [...(finding.evidence ?? [])],
-        });
-        continue;
-      }
-
-      if (severityRank(finding.severity) > severityRank(existing.severity)) {
-        existing.severity = finding.severity;
-      }
-      if (
-        confidenceRank(finding.confidence) > confidenceRank(existing.confidence)
-      ) {
-        existing.confidence = finding.confidence;
-      }
-      existing.systemic = Boolean(existing.systemic || finding.systemic);
-      existing.impact = existing.impact ?? finding.impact;
-      existing.likelihood = existing.likelihood ?? finding.likelihood;
-      existing.summary =
-        existing.summary.length >= finding.summary.length
-          ? existing.summary
-          : finding.summary;
-
-      mergeAffectedFiles(existing, finding);
-      existing.evidence = [
-        ...new Set([
-          ...(existing.evidence ?? []),
-          ...(finding.evidence ?? []),
-        ]),
-      ];
+      upsertFinding(merged, finding);
     }
   }
 

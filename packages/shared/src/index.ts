@@ -99,6 +99,15 @@ export {
 // Contracts
 export { AUDITOR_REPORT_MARKER } from "./contracts.js";
 
+// OpenCode permission deployment helpers (global scope vs. agent scope)
+export {
+  OPENCODE_MANAGED_BROAD_VALUE,
+  withoutOpenCodeWildcard,
+  mergeOpenCodeAgentPermissionRule,
+  mergeOpenCodeGlobalPermissionRule,
+  migrateOpenCodeGlobalExternalDirectory,
+} from "./opencodePermissions.js";
+
 // Agent meta-audit reflections (opt-in worker feedback channel, both orchestrators)
 export type {
   ReflectionClarity,

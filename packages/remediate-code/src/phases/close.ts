@@ -1,10 +1,11 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
-import { dirname, extname, join } from "node:path";
+import { dirname, extname, isAbsolute, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import {
   AGENT_FEEDBACK_FILENAME,
   parseReflectionsNdjson,
+  readOptionalJsonFile,
   readOptionalTextFile,
   renderProcessFeedbackSection,
   stagedAndUntracked,
@@ -25,7 +26,20 @@ import { CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION } from "@audit-tools/shar
 import { runCommand, runShellCommand } from "../utils/commands.js";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import type { ClosingAction } from "../state/closingActions.js";
-import type { CoverageLedger, ItemSpec } from "../state/types.js";
+import type {
+  CoverageLedgerEntry,
+  Finding,
+  ItemSpec,
+  ItemSpecSummary,
+  NeverPlannedDropReason,
+  OutcomeCoverageEntry,
+  OutcomeCoverageLedger,
+  RemediationItemState,
+  RemediationOutcomeFinalStatus,
+  RemediationOutcomeItem,
+} from "../state/types.js";
+import { intakePaths, type IntakeSourceManifest } from "../intake.js";
+import { isAuditFindingsReport } from "./plan.js";
 import { rationaleAsksForRetry } from "../steps/stepUtils.js";
 
 const OUTCOME_BY_STATUS: Record<string, RemediationOutcomeStatus> = {
@@ -43,6 +57,37 @@ const OUTCOME_KEYS: RemediationOutcomeStatus[] = [
   "ignored",
   "blocked",
 ];
+
+/** Retry-oriented final status per outcome (see RemediationOutcomeFinalStatus). */
+const FINAL_STATUS_BY_OUTCOME: Record<
+  RemediationOutcomeStatus,
+  RemediationOutcomeFinalStatus
+> = {
+  resolved: "fixed",
+  verified_no_change: "fixed",
+  inappropriate: "skipped",
+  ignored: "ignored",
+  blocked: "failed",
+};
+
+// Skipped and ignored outcomes must always carry a non-empty reason in the
+// outcomes contract; these defaults cover items whose state lost the rationale.
+const DEFAULT_REASON_BY_OUTCOME: Partial<
+  Record<RemediationOutcomeStatus, string>
+> = {
+  inappropriate: "Deemed inappropriate during remediation.",
+  ignored: "Ignored by user.",
+};
+
+/** Project the documented ItemSpec onto the outcomes contract's summary shape. */
+function summarizeItemSpec(spec: ItemSpec): ItemSpecSummary {
+  return {
+    concrete_change: spec.concrete_change,
+    ...(spec.no_change !== undefined ? { no_change: spec.no_change } : {}),
+    ...(spec.touched_files ? { touched_files: spec.touched_files } : {}),
+    tests_to_write: (spec.tests_to_write ?? []).map((test) => test.name),
+  };
+}
 
 /**
  * Phase 7B — capture one outcome per finding (lens, affected file types, how it
@@ -84,11 +129,21 @@ export function buildRemediationOutcomesReport(
   const findingsById = new Map(
     (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
   );
+  const blocksById = new Map(
+    (state.plan?.blocks ?? []).map((block) => [block.block_id, block]),
+  );
   const outcomes: RemediationOutcome[] = [];
   const closeReason = closingStatusReason(closingResult);
   for (const item of Object.values(state.items ?? {})) {
-    const outcome = OUTCOME_BY_STATUS[item.status];
-    if (!outcome) continue; // skip non-terminal items (should not occur at close)
+    let outcome = OUTCOME_BY_STATUS[item.status];
+    let originalState: RemediationItemState["status"] | undefined;
+    if (!outcome) {
+      // Force-close: the run was closed while this item was still non-terminal.
+      // Record it as failed (never drop it) and preserve the original state so a
+      // retry can see exactly where the item stood.
+      outcome = "blocked";
+      originalState = item.status;
+    }
     const finding = findingsById.get(item.finding_id);
     const fileExts = [
       ...new Set(
@@ -99,7 +154,15 @@ export function buildRemediationOutcomesReport(
     ].sort();
     const durationMs = durationBetweenMs(item.started_at, item.completed_at);
     const isNonResolved = outcome !== "resolved" && outcome !== "verified_no_change";
-    outcomes.push({
+    let reason = isNonResolved ? item.failure_reason : undefined;
+    if (originalState) {
+      reason = `Force-closed while non-terminal (original state '${originalState}').${
+        item.failure_reason ? ` ${item.failure_reason}` : ""
+      }`;
+    } else if (isNonResolved && !reason) {
+      reason = DEFAULT_REASON_BY_OUTCOME[outcome];
+    }
+    const base: RemediationOutcome = {
       finding_id: item.finding_id,
       lens: finding?.lens ?? "unknown",
       file_exts: fileExts,
@@ -107,11 +170,27 @@ export function buildRemediationOutcomesReport(
       rework_count: item.rework_count ?? 0,
       closing_status: closingResult.status,
       ...(closeReason ? { closing_status_reason: closeReason } : {}),
-      ...(isNonResolved && item.failure_reason ? { reason: item.failure_reason } : {}),
+      ...(reason ? { reason } : {}),
       ...(item.started_at ? { started_at: item.started_at } : {}),
       ...(item.completed_at ? { completed_at: item.completed_at } : {}),
       ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
-    });
+    };
+    if (!finding) {
+      // Degenerate (corrupt state): without the plan finding there is no payload
+      // to carry — emit the lean per-finding outcome rather than inventing one.
+      outcomes.push(base);
+      continue;
+    }
+    const enriched: RemediationOutcomeItem = {
+      ...base,
+      finding,
+      ...(item.item_spec ? { item_spec: summarizeItemSpec(item.item_spec) } : {}),
+      block_id: item.block_id,
+      block_dependencies: [...(blocksById.get(item.block_id)?.dependencies ?? [])],
+      final_status: FINAL_STATUS_BY_OUTCOME[outcome],
+      ...(originalState ? { original_state: originalState } : {}),
+    };
+    outcomes.push(enriched);
   }
   outcomes.sort((a, b) => a.finding_id.localeCompare(b.finding_id));
 
@@ -175,6 +254,100 @@ export function buildRemediationOutcomesReport(
     ...(aggregateDuration !== undefined ? { duration_ms: aggregateDuration } : {}),
     outcomes,
   };
+}
+
+/** Drop-reason discriminator per never-planned coverage disposition. */
+const DROP_REASON_BY_DISPOSITION: Partial<
+  Record<CoverageLedgerEntry["disposition"], NeverPlannedDropReason>
+> = {
+  folded_into: "cross_lens_dedup",
+  dropped_by_checkpoint: "intent_checkpoint",
+  dropped_no_evidence: "no_evidence",
+  dropped_phantom_paths: "phantom_paths",
+};
+
+/**
+ * Best-effort recovery of full Finding payloads for never-planned findings:
+ * re-read the run's structured-audit intake source(s) (recorded in
+ * intake/source-manifest.json) and index their findings by id. Never-planned
+ * findings were removed from the plan before state.json was written, so the
+ * intake source is the remaining payload authority for them. Any failure
+ * (missing manifest, moved input, free-form source) degrades to an empty map —
+ * the coverage entry then keeps its id/title without a payload.
+ */
+async function loadStructuredSourceFindingsById(
+  options: OrchestratorOptions,
+): Promise<Map<string, Finding>> {
+  const findingsById = new Map<string, Finding>();
+  let manifest: IntakeSourceManifest | undefined;
+  try {
+    manifest = await readOptionalJsonFile<IntakeSourceManifest>(
+      intakePaths(options.artifactsDir).sourceManifest,
+    );
+  } catch {
+    return findingsById;
+  }
+  for (const source of manifest?.sources ?? []) {
+    if (source.type !== "structured_audit") continue;
+    const sourcePath = isAbsolute(source.path)
+      ? source.path
+      : join(options.root, source.path);
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(sourcePath, "utf8"));
+      if (!isAuditFindingsReport(parsed)) continue;
+      for (const finding of parsed.findings) {
+        if (finding && typeof finding.id === "string" && !findingsById.has(finding.id)) {
+          findingsById.set(finding.id, finding);
+        }
+      }
+    } catch {
+      // Best-effort: an unreadable source just means no payload recovery.
+    }
+  }
+  return findingsById;
+}
+
+/**
+ * Build the outcomes file's coverage-ledger section: the plan's coverage ledger
+ * with every never-planned entry (cross-lens-deduped, checkpoint-dropped,
+ * no-evidence, phantom-paths) enriched with a `drop_reason` discriminator and
+ * its full `Finding` payload. Payloads resolve from, in order: the ledger entry
+ * itself (when the plan recorded one), the live plan findings, and the
+ * structured-audit intake source. Must run BEFORE close deletes state.json /
+ * the artifacts dir — they are the only payload sources.
+ */
+export async function buildOutcomeCoverageLedger(
+  state: RemediationState,
+  options: OrchestratorOptions,
+): Promise<OutcomeCoverageLedger | undefined> {
+  const ledger = state.plan_coverage;
+  if (!ledger) return undefined;
+  const plannedById = new Map(
+    (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
+  );
+  const needsSourcePayloads = ledger.entries.some(
+    (entry) =>
+      DROP_REASON_BY_DISPOSITION[entry.disposition] !== undefined &&
+      !entry.finding &&
+      !plannedById.has(entry.finding_id),
+  );
+  const sourceById = needsSourcePayloads
+    ? await loadStructuredSourceFindingsById(options)
+    : new Map<string, Finding>();
+  const entries: OutcomeCoverageEntry[] = ledger.entries.map((entry) => {
+    const dropReason = DROP_REASON_BY_DISPOSITION[entry.disposition];
+    if (!dropReason) return entry;
+    const finding =
+      entry.finding ??
+      plannedById.get(entry.finding_id) ??
+      sourceById.get(entry.finding_id);
+    return {
+      ...entry,
+      ...(finding ? { finding } : {}),
+      drop_reason: dropReason,
+    };
+  });
+  return { ...ledger, entries };
 }
 
 export interface ClosingCommandResult {
@@ -895,6 +1068,11 @@ export async function runClosePhase(
     feedbackText ? parseReflectionsNdjson(feedbackText) : [],
   );
 
+  // Enrich the coverage ledger with never-planned payloads NOW, from the live
+  // state and intake artifacts — both are deleted at the end of close, so this
+  // must happen strictly before cleanup.
+  const outcomeCoverage = await buildOutcomeCoverageLedger(state, options);
+
   const outcomesFile: RemediationOutcomesReport & {
     started_at?: string;
     ended_at: string;
@@ -911,7 +1089,7 @@ export async function runClosePhase(
       status: string;
       commands: ClosingCommandResult[];
     };
-    plan_coverage?: CoverageLedger;
+    plan_coverage?: OutcomeCoverageLedger;
   } = {
     ...outcomesReport,
     ...(state.started_at ? { started_at: state.started_at } : {}),
@@ -929,7 +1107,7 @@ export async function runClosePhase(
       status: closingResult.status,
       commands: closingResult.commands,
     },
-    ...(state.plan_coverage ? { plan_coverage: state.plan_coverage } : {}),
+    ...(outcomeCoverage ? { plan_coverage: outcomeCoverage } : {}),
   };
 
   const outputDir = dirname(options.artifactsDir);

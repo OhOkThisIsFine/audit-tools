@@ -18,12 +18,19 @@ rather than "where the code is today."
 
 ## Known friction (agent / dev experience)
 
-- **Release CI-wait loop floods stdout.** `packages/*/scripts/release-and-publish.mjs`
-  logs every 5s poll attempt while waiting on the CI publish run, so a normal
-  ~9-min release writes ~5,000 lines / 100k+ tokens to the task output — naively
-  `Read`-ing that file overflows context. Tail it (`Get-Content -Tail N`) instead
-  of whole-reading; consider throttling the poll log to status-changes or every
-  Nth attempt.
+- **Document-phase dispatch prompts render empty Files/Read allowlists.** When a
+  finding has no `affected_files`, the document worker prompt grants an empty
+  Read list even though the finding summary names concrete source files, so
+  workers must either spec blind or read outside their grant (every 2026-06-10
+  contract-run documenter hit this). Fix direction: render files named in the
+  finding summary into both the Files field and the Read allowlist, or grant
+  explicit repo-wide read for documentation tasks.
+- **Sibling-task drift in dispatched prompts.** When one block lands between
+  planning and a dependent block's dispatch (e.g. a function the prompt names was
+  rewritten, an enum grew), the later worker prompt still carries the stale
+  contract; workers reconciled by hand. Fix direction: re-render dependent
+  prompts after a prerequisite block merges, or include the landed surface's
+  current contract in the dispatch note.
 - **Global install defers `postinstall` under npm's allow-scripts policy.**
   `npm install -g auditor-lambda` installs the bin but prints
   `npm warn allow-scripts … (postinstall: node scripts/postinstall.mjs)` and skips
@@ -37,11 +44,6 @@ rather than "where the code is today."
   a 2026-06 Windows session). When it's missing, run commands directly and route
   only genuinely large outputs through the `opentoken_transform` MCP tool —
   wrapping a 2-line build log is pointless.
-- **`coverage_matrix.schema.json` `classification_status` enum is stale.** The code
-  writes `out_of_scope_delta`, `excluded_trivial`, and (new) `out_of_scope_intent`,
-  none of which are in the schema's `enum`. The schema is documentary (not enforced
-  at runtime against real coverage, or these would already fail), but the drift is a
-  trap — add the missing values or drop the enum.
 - **`t.mock.module` is unusable in audit-code tests.** audit-code runs tests via
   `node --import tsx/esm --test`; `t.mock.module` needs
   `--experimental-test-module-mocks` and conflicts with the tsx/esm loader, so it
@@ -99,28 +101,9 @@ rather than "where the code is today."
   string-concat the surrounding `[`/`]`. The packet and worker prompts now carry
   this guidance (bracket-wrap the output, or `Write-Output -NoEnumerate`).
   (Sibling of the `foreach`/`-Filter` PowerShell traps above.)
-- **Completed remediation runs before state preservation are hard to retry.** If
-  close deleted `.audit-tools/remediation/state.json`, the final report/outcomes
-  may not contain enough item-spec or block context to reopen ignored findings
-  deterministically.
 
 ### Friction from the June 8–9 self-audit (auditor feedback)
 
-- **Audit scope is polluted by non-source artifacts.** The dominant friction of
-  the run: the planner scanned and dispatched review packets for prior
-  `.audit-artifacts/` run outputs, `-tmp/opentoken_*.json`, `.tgz` package
-  tarballs, npm `_cacache` blobs, and the `audit/` deliverable folder auditing
-  itself. Auditors repeatedly reported "JSON data artifacts, not code — no
-  findings possible," so most agent effort was spent on data, not code. The tool's
-  own synthesis confirmed it: `COR-281a9b14` (VCS-ignored / temp dirs scanned into
-  the manifest), `MNT-68f7a179` (801 stale entries referencing non-existent
-  `.tmp/opentoken/` paths), `COR-6464fa65` (`bun.lock` misclassified as
-  pending-audit rather than generated). This is the strongest evidence for the
-  scope checkpoint below. **Partly shipped 2026-06-09:** `disposition.ts` now
-  excludes `.tgz`/`.tar`/`.gz` archives, npm `_cacache`/`npm-cache`, nested
-  `.audit-artifacts/`, and the pipeline's own `audit-findings.json` /
-  `remediation-outcomes.json` contracts. Remaining: honor `.gitignore` generally.
-  **The LLM scope/intent gate shipped 2026-06-09** (see Deferred fixes).
 - **`submit-packet` rejects in-boundary `affected_files`.** `file_coverage`
   validation rejects an `affected_files` entry that crosses a packet boundary even
   when the referenced file is in the task's declared boundary list (e.g. a
@@ -138,6 +121,22 @@ rather than "where the code is today."
   noting for any task that must read wide JSON.
 
 ## Deferred fixes (product bugs)
+
+### audit-code: align project-scope OpenCode deploy with the scoped permission helpers
+
+The CFG-4996560e fix (shipped 2026-06-10: global top-level OpenCode config no
+longer seeds `bash['*']='allow'` / `external_directory['*']='allow'`, actively
+migrates old broad rules away, auditor agent scope keeps broad-allow-with-denylist,
+helpers hoisted into `@audit-tools/shared/opencodePermissions`) deliberately left
+one surface untouched: `packages/audit-code/audit-code-wrapper-opencode.mjs`
+holds a third copy of the merge helpers used for the **project-level**
+`opencode.json` written by `audit-code install --host opencode`, and it still
+deploys the broad rules at project scope. Decide whether project scope should
+mirror the agent-scoped model, then align it with the shared helpers. Also still
+pending: **manual validation against real OpenCode** that agent-scoped allowances
+propagate to spawned subtasks (can't be unit-tested; user-owned — revert by
+re-adding the rule or rerunning an older postinstall if audits start hitting
+ask-prompts).
 
 ### audit-code + remediate-code: scope & intent checkpoint — *shipped 2026-06-09*
 
@@ -184,25 +183,6 @@ structured-path tests pre-write a checkpoint.
   a real proactive rate-limit endpoint. This belongs with heterogeneous,
   quota-aware dispatch.
 
-### audit-code: scope postinstall's deployed OpenCode permissions to the auditor agent
-
-- **`CFG-4996560e` (triaged 2026-06-09, confirmed-but-design-sensitive).**
-  `packages/audit-code/scripts/postinstall.mjs` deploys, into the user's **global**
-  OpenCode config, a top-level `permission.bash: {'*':'allow'}` + `external_directory:
-  {'*':'allow'}` (with a denylist). Broad-allow-with-denylist is the project's
-  *intentional* autonomy model (the repo's own `opencode.json` uses it), but applying it
-  at the **global top level** widens permissions for *all* OpenCode usage, not just audit
-  runs. Fix direction: keep the broad perms on the `auditor` agent (the `/audit-code`
-  command runs as `agent: 'auditor'`) and minimize the global top-level default — drop the
-  forced `external_directory: {'*':'allow'}` in `mergeOpenCodeGlobalConfig` and stop
-  seeding `bash['*']='allow'` at top level so it falls back to `ask`. Intricacy: the broad
-  value flows through the shared `mergeOpenCodePermissionRule`/`mergeOpenCodePermissionConfig`
-  helpers (forced `managedRules` + `'*'` defaulting), feeding both scopes from one
-  `renderOpenCodePermissionConfig()`; splitting them needs care. Validate against **real
-  OpenCode** (agent/subtask permission inheritance can't be unit-tested) and update
-  `tests/postinstall-contract.test.mjs`. Deferred from the 2026-06-09 curated-highs pass
-  (the other 4 highs were fixed directly).
-
 ## Features to add later
 
 ### Contract-governed implementation pipeline — *shipped 2026-06*
@@ -240,16 +220,6 @@ sizes dispatch just in time, partitions pending token estimates across
 Remaining (deferred as `FINDING-020` — cross-package): per-packet provider
 assignment, host-model detection for additional pools, and building a real second
 pool such as an IDE model or another CLI provider.
-
-### Stable, content-addressed finding IDs
-
-Finding IDs are re-emitted per file/unit a finding touches and reused across audit
-passes, so counts inflate badly (`MNT-6c66181b`: 26×`MNT-001`, 25×`MNT-002`… in
-the older report; the 392-finding deliverable was really a few dozen distinct
-problems). The 2026-06 synthesis already emits hash-suffixed IDs
-(`COR-11b75f89`), which helps; finish the job so a finding has one stable
-content-addressed ID across passes, enabling reliable dedup, cross-run diffing,
-and honest counts.
 
 ### Make agent meta-audit reflections a first-class artifact — *shipped 2026-06-09*
 

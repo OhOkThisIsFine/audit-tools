@@ -14,6 +14,9 @@ const bump = process.argv[2] ?? "patch";
 const bumpOnly = process.argv.includes("--bump-only");
 const dryRun = process.argv.includes("--dry-run");
 const pollIntervalMs = 5_000;
+// Heartbeat cadence for poll logging: with 5s polls, every 12th attempt is
+// roughly one log line per minute in steady state.
+const POLL_LOG_EVERY_N_ATTEMPTS = 12;
 const releaseRunTimeoutMs = 10 * 60 * 1000;
 const registryTimeoutMs = 2 * 60 * 1000;
 
@@ -54,6 +57,15 @@ function resolveSpawn(command, args) {
 
 function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+// Pure poll-log throttle: log the first attempt, any genuine status transition
+// (normalized status/conclusion enum only), and an every-Nth-attempt heartbeat.
+// Decision depends only on the arguments and POLL_LOG_EVERY_N_ATTEMPTS.
+function shouldLogPollAttempt(attempt, statusKey, lastLoggedStatusKey) {
+  if (attempt === 1) return true;
+  if (statusKey !== lastLoggedStatusKey) return true;
+  return attempt % POLL_LOG_EVERY_N_ATTEMPTS === 0;
 }
 
 function run(command, args, options = {}) {
@@ -183,6 +195,7 @@ async function waitForReleaseRun(repoSlug, tag) {
   const deadline = Date.now() + releaseRunTimeoutMs;
   const startedAt = Date.now();
   let attempt = 0;
+  let lastLoggedStatusKey = null;
   while (Date.now() < deadline) {
     attempt += 1;
     const response = runJson("gh", [
@@ -194,11 +207,19 @@ async function waitForReleaseRun(repoSlug, tag) {
         runEntry?.head_branch === tag || runEntry?.display_title === tag,
     );
     if (match) {
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+      console.log(
+        `[release] publish run for ${tag} found after ${elapsedSec}s (${attempt} ${attempt === 1 ? "attempt" : "attempts"}).`,
+      );
       return match;
     }
-    console.log(
-      `[release] waiting for publish run ${tag}: attempt ${attempt}, elapsed ${Date.now() - startedAt}ms`,
-    );
+    const statusKey = "pending";
+    if (shouldLogPollAttempt(attempt, statusKey, lastLoggedStatusKey)) {
+      console.log(
+        `[release] waiting for publish run ${tag}: attempt ${attempt}, elapsed ${Date.now() - startedAt}ms`,
+      );
+      lastLoggedStatusKey = statusKey;
+    }
     await sleep(pollIntervalMs);
   }
   throw new Error(`Timed out waiting for publish-package release run for ${tag}.`);
@@ -208,6 +229,7 @@ async function waitForRunCompletion(repoSlug, runId) {
   const deadline = Date.now() + releaseRunTimeoutMs;
   const startedAt = Date.now();
   let attempt = 0;
+  let lastLoggedStatusKey = null;
   while (Date.now() < deadline) {
     attempt += 1;
     const runEntry = runJson("gh", ["api", `repos/${repoSlug}/actions/runs/${runId}`]);
@@ -223,9 +245,13 @@ async function waitForRunCompletion(repoSlug, runId) {
       );
       return runEntry;
     }
-    console.log(
-      `[release] publish run ${runEntry.html_url ?? runId}: attempt ${attempt}, elapsed ${Date.now() - startedAt}ms, status ${runEntry.status ?? "unknown"}, conclusion ${runEntry.conclusion ?? "pending"}`,
-    );
+    const statusKey = `${runEntry.status ?? "unknown"}/${runEntry.conclusion ?? "pending"}`;
+    if (shouldLogPollAttempt(attempt, statusKey, lastLoggedStatusKey)) {
+      console.log(
+        `[release] publish run ${runEntry.html_url ?? runId}: attempt ${attempt}, elapsed ${Date.now() - startedAt}ms, status ${runEntry.status ?? "unknown"}, conclusion ${runEntry.conclusion ?? "pending"}`,
+      );
+      lastLoggedStatusKey = statusKey;
+    }
     await sleep(pollIntervalMs);
   }
   throw new Error(`Timed out waiting for publish workflow run ${runId} to complete.`);
@@ -236,6 +262,7 @@ async function waitForRegistryVersion(packageName, version) {
   const startedAt = Date.now();
   let attempt = 0;
   let lastResult = "not checked";
+  let lastLoggedStatusKey = null;
   while (Date.now() < deadline) {
     attempt += 1;
     const resolved = resolveSpawn(commandName("npm"), [
@@ -253,14 +280,22 @@ async function waitForRegistryVersion(packageName, version) {
       },
     );
     if (!result.error && result.status === 0) {
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+      console.log(
+        `[release] ${packageName}@${version} resolved from registry after ${elapsedSec}s (${attempt} ${attempt === 1 ? "attempt" : "attempts"}).`,
+      );
       return result.stdout.trim();
     }
     lastResult = result.error
       ? result.error.message
       : (result.stderr || result.stdout || `exit ${result.status}`).trim();
-    console.log(
-      `[release] waiting for npm registry ${packageName}@${version}: attempt ${attempt}, elapsed ${Date.now() - startedAt}ms, last result: ${lastResult.slice(0, 200)}`,
-    );
+    const statusKey = "pending";
+    if (shouldLogPollAttempt(attempt, statusKey, lastLoggedStatusKey)) {
+      console.log(
+        `[release] waiting for npm registry ${packageName}@${version}: attempt ${attempt}, elapsed ${Date.now() - startedAt}ms, last result: ${lastResult.slice(0, 200)}`,
+      );
+      lastLoggedStatusKey = statusKey;
+    }
     await sleep(pollIntervalMs);
   }
   throw new Error(`Timed out waiting for ${packageName}@${version} to resolve from the npm registry.`);

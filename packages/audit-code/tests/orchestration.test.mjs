@@ -625,7 +625,7 @@ test("decideNextStep reason flags the gap when selected_executor is null", () =>
   // Either branch exercises the relevant code path.
 });
 
-test("buildAuditReportModel keeps location-distinct findings separate while merging exact duplicates", () => {
+test("buildAuditReportModel keeps identity-distinct findings separate while merging re-emissions of one identity across files", () => {
   const report = buildAuditReportModel({
     results: [
       {
@@ -648,8 +648,11 @@ test("buildAuditReportModel keeps location-distinct findings separate while merg
             ],
           },
           {
+            // A genuinely distinct problem: identity (lens|category|title) is
+            // file-independent, so distinctness comes from a different title,
+            // not from living in a different file.
             id: "finding-session-distinct",
-            title: "Missing audit trail",
+            title: "Session writes bypass audit hooks",
             category: "security",
             severity: "low",
             confidence: "medium",
@@ -762,12 +765,16 @@ test("buildAuditReportModel keeps location-distinct findings separate while merg
   );
 
   const distinctFinding = report.findings[1];
-  // The location-distinct finding stays separate (re-keyed to its own unique id,
+  // The identity-distinct finding stays separate (re-keyed to its own unique id,
   // not fused with the merged auth-path finding).
   assert.ok(distinctFinding.id && distinctFinding.id !== mergedFinding.id);
   assert.equal(distinctFinding.affected_files[0].path, "src/lib/session.ts");
 
   const markdown = renderAuditReportMarkdown(report);
   assert.ok(markdown.includes(`### ${mergedFinding.id} — Missing audit trail`));
-  assert.ok(markdown.includes(`### ${distinctFinding.id} — Missing audit trail`));
+  assert.ok(
+    markdown.includes(
+      `### ${distinctFinding.id} — Session writes bypass audit hooks`,
+    ),
+  );
 });
