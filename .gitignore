@@ -11,6 +11,9 @@ dist/
 !.claude/hooks/
 .claude/hooks/*
 !.claude/hooks/session-start.sh
+!.claude/hooks/pre-commit-gate.mjs
+!.claude/hooks/async-typecheck.mjs
+!.claude/skills/
 .opencode/
 .vscode/
 .codex/

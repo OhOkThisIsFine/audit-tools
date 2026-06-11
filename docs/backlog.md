@@ -262,6 +262,30 @@ phase. Both reports emit a "Process Feedback" section when reflections exist.
 
 ### Token savings and model routing
 
-Consider using https://github.com/mr-beaver/tokencost and/or 
-https://github.com/chopratejas/headroom and compare to 
-https://github.com/MrGray17/opentoken and other skills I may not have seen.
+Candidates evaluated 2026-06-11 (config-overhaul session); integration deferred
+until the workflow redesigns land — these belong in the dispatch/quota layer,
+not in host config:
+
+- **headroom** (https://github.com/chopratejas/headroom) — compresses tool
+  outputs / logs / files / JSON / code before they reach the LLM (60–95%
+  claimed), lossless-with-retrieval (originals stored, model gets a fetch-back
+  tool), npm + Python, usable as library / proxy / MCP server. Strongest
+  candidate: compress review-packet evidence and worker outputs in both
+  orchestrators; overlaps and may supersede `opentoken wrap`.
+- **tokencost** (https://github.com/AgentOps-AI/tokencost; JS port
+  https://github.com/backmesh/tokencost) — per-model token counting + USD cost
+  tables for 400+ models. Fit: make `pendingItemTokens` /
+  `computeDispatchCapacity` estimates real in `@audit-tools/shared` quota, and
+  add per-run cost reporting to the ledgers.
+- **opentoken** (https://github.com/MrGray17/opentoken) — already installed as
+  MCP (wrap/transform). Keep for now under the command-class wrap policy
+  (control-plane commands exempt); compare against headroom on packet
+  compression and keep one.
+
+### Nightly autonomous audit→remediate pipeline — capstone, blocked on the redesigns
+
+Decision 2026-06-11: no scheduled autonomy until the audit + remediation
+workflow redesigns land. Then build once, on the new architecture: scheduled
+run (cloud routine or local headless `claude -p`) → audit → auto-remediate
+actionable findings behind green test gates → PR + findings report, escalating
+only ambiguity/low-confidence fixes to Ethan.

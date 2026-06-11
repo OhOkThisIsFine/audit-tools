@@ -1,4 +1,29 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(npm run check)",
+      "Bash(npm run check *)",
+      "Bash(npm run build)",
+      "Bash(npm run build *)",
+      "Bash(npm test)",
+      "Bash(env -u CLAUDECODE npm test*)",
+      "Bash(npm view *)",
+      "Bash(audit-code next-step*)",
+      "Bash(audit-code merge-and-ingest*)",
+      "Bash(remediate-code next-step*)",
+      "Bash(remediate-code merge-document-results*)",
+      "Bash(remediate-code merge-implement-results*)",
+      "Bash(node packages/audit-code/audit-code.mjs *)",
+      "PowerShell(audit-code next-step*)",
+      "PowerShell(remediate-code next-step*)",
+      "PowerShell(remediate-code merge-document-results*)",
+      "PowerShell(remediate-code merge-implement-results*)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Select-String *)",
+      "PowerShell(Test-Path *)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -6,6 +31,33 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-gate.mjs\"",
+            "timeout": 300,
+            "statusMessage": "Pre-commit gate: npm run check"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/async-typecheck.mjs\"",
+            "asyncRewake": true,
+            "timeout": 240,
+            "statusMessage": "Async typecheck (background)"
           }
         ]
       }
