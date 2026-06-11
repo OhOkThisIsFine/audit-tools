@@ -59,7 +59,9 @@ test("runDeterministicForNextStep advances through all deterministic obligations
       maxRuns: 20,
       opentoken: false,
       narrativeEnabled: false,
-      analyzers: undefined,
+      // Skip all analyzers so the test is self-contained and doesn't require
+      // external tools (e.g. tsc) to be on PATH in CI.
+      analyzers: { typescript: "skip", python: "skip", css: "skip", html: "skip", sql: "skip" },
       graphLlmEdgeReasoning: false,
     });
 
