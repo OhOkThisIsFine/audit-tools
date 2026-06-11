@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rm, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import {
   runPlanPhase,
   applyPlanPipeline,
@@ -17,13 +18,9 @@ import { checkAffectedFileIntegrity } from "../src/utils/fileIntegrity.js";
 
 // Derive the directory in ESM (no implicit `__dirname` under NodeNext/ESM).
 const testDir = dirname(fileURLToPath(import.meta.url));
-const TEST_DIR = join(testDir, ".test-plan-artifacts");
 const FIXTURE = join(testDir, "fixtures", "audit-findings-simple.json");
 
-const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
-
 const baseState = { status: "pending" as const };
-const baseOptions = { root: TEST_DIR, artifactsDir: ARTIFACTS_DIR };
 
 interface FindingOpts {
   severity?: string;
@@ -77,11 +74,12 @@ function makeReport(findings: unknown[], workBlocks: unknown[] = []) {
 }
 
 async function writeReport(
+  root: string,
   name: string,
   findings: unknown[],
   workBlocks: unknown[] = [],
 ): Promise<string> {
-  const path = join(TEST_DIR, name);
+  const path = join(root, name);
   await writeFile(path, JSON.stringify(makeReport(findings, workBlocks)), "utf8");
   return path;
 }
@@ -100,19 +98,26 @@ async function rmWithRetry(path: string, retries = 20): Promise<void> {
   }
 }
 
+let currentRoot: string;
+let currentArtifactsDir: string;
+let currentOptions: { root: string; artifactsDir: string };
+
 describe("runPlanPhase — audit-findings.json consume path", () => {
+
   beforeEach(async () => {
-    await rmWithRetry(TEST_DIR);
-    await mkdir(ARTIFACTS_DIR, { recursive: true });
+    currentRoot = join(testDir, `.test-plan-artifacts-${randomUUID()}`);
+    currentArtifactsDir = join(currentRoot, ".audit-tools", "remediation");
+    currentOptions = { root: currentRoot, artifactsDir: currentArtifactsDir };
+    await mkdir(currentArtifactsDir, { recursive: true });
   }, 60_000);
 
   afterEach(async () => {
-    await rmWithRetry(TEST_DIR);
+    await rmWithRetry(currentRoot);
   }, 60_000);
 
   it("produces a valid RemediationPlan from the simple fixture", async () => {
     const state = await runPlanPhase(baseState, {
-      ...baseOptions,
+      ...currentOptions,
       input: FIXTURE,
     });
 
@@ -123,13 +128,13 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
   });
 
   it("skips a finding with empty evidence instead of crashing the plan", async () => {
-    const reportPath = await writeReport("empty-evidence.json", [
+    const reportPath = await writeReport(currentRoot, "empty-evidence.json", [
       mkFinding("F-001", "Has evidence", { files: ["a.ts"] }),
       mkFinding("BAD-001", "No evidence", { files: ["b.ts"], evidence: [] }),
     ]);
 
     const state = await runPlanPhase(baseState, {
-      ...baseOptions,
+      ...currentOptions,
       input: reportPath,
     });
 
@@ -144,7 +149,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
 
   it("consumes both findings from the fixture", async () => {
     const state = await runPlanPhase(baseState, {
-      ...baseOptions,
+      ...currentOptions,
       input: FIXTURE,
     });
 
@@ -156,7 +161,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
 
   it("preserves finding fields verbatim", async () => {
     const state = await runPlanPhase(baseState, {
-      ...baseOptions,
+      ...currentOptions,
       input: FIXTURE,
     });
 
@@ -172,7 +177,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
 
   it("preserves affected files", async () => {
     const state = await runPlanPhase(baseState, {
-      ...baseOptions,
+      ...currentOptions,
       input: FIXTURE,
     });
 
@@ -183,7 +188,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
 
   it("derives blocks from the report work_blocks", async () => {
     const state = await runPlanPhase(baseState, {
-      ...baseOptions,
+      ...currentOptions,
       input: FIXTURE,
     });
 
@@ -195,10 +200,10 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
   });
 
   it("emits remediation_plan.json that passes schema validation", async () => {
-    await runPlanPhase(baseState, { ...baseOptions, input: FIXTURE });
+    await runPlanPhase(baseState, { ...currentOptions, input: FIXTURE });
 
     const planJson = JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "remediation_plan.json"), "utf8"),
+      await readFile(join(currentArtifactsDir, "remediation_plan.json"), "utf8"),
     );
     const errors = validateRemediationPlan(planJson).filter(
       (i) => i.severity === "error",
@@ -208,7 +213,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
 
   it("initialises item states for each finding", async () => {
     const state = await runPlanPhase(baseState, {
-      ...baseOptions,
+      ...currentOptions,
       input: FIXTURE,
     });
 
@@ -224,7 +229,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
   });
 
   it("carries synthesis themes onto the plan", async () => {
-    const reportPath = join(TEST_DIR, "themed.json");
+    const reportPath = join(currentRoot, "themed.json");
     const report = makeReport(
       [mkFinding("F-009", "Themed finding", { files: ["src/x.ts"] })],
       [mkBlock("B-001", ["F-009"])],
@@ -241,7 +246,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
     await writeFile(reportPath, JSON.stringify(report), "utf8");
 
     const state = await runPlanPhase(baseState, {
-      ...baseOptions,
+      ...currentOptions,
       input: reportPath,
     });
     expect(state.plan!.themes).toHaveLength(1);
@@ -251,20 +256,20 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
   it("throws when input path does not exist", async () => {
     await expect(
       runPlanPhase(baseState, {
-        ...baseOptions,
-        input: join(TEST_DIR, "nonexistent.json"),
+        ...currentOptions,
+        input: join(currentRoot, "nonexistent.json"),
       }),
     ).rejects.toThrow();
   });
 
   it("falls back to file_overlap block derivation when the report has no work_blocks", async () => {
-    const reportPath = await writeReport("minimal.json", [
+    const reportPath = await writeReport(currentRoot, "minimal.json", [
       mkFinding("F-003", "Test finding", { files: ["src/foo.ts"] }),
     ]);
 
     const state = await runPlanPhase(
       baseState,
-      { ...baseOptions, input: reportPath },
+      { ...currentOptions, input: reportPath },
       { enumerateTestFiles: () => [] },
     );
 
@@ -274,7 +279,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
   });
 
   it("uses test_graph grouping when test coverage overlaps", async () => {
-    const reportPath = await writeReport("test-graph.json", [
+    const reportPath = await writeReport(currentRoot, "test-graph.json", [
       mkFinding("F-101", "First test finding", {
         lens: "tests",
         confidence: "high",
@@ -289,7 +294,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
 
     const state = await runPlanPhase(
       baseState,
-      { ...baseOptions, input: reportPath },
+      { ...currentOptions, input: reportPath },
       {
         enumerateTestFiles: () => ["tests/shared.ts", "tests/other.ts"],
       },
@@ -301,7 +306,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
   });
 
   it("uses git_cocommit grouping after test_graph produces no useful grouping", async () => {
-    const reportPath = await writeReport("git.json", [
+    const reportPath = await writeReport(currentRoot, "git.json", [
       mkFinding("F-201", "First git finding", {
         lens: "tests",
         confidence: "high",
@@ -316,7 +321,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
 
     const state = await runPlanPhase(
       baseState,
-      { ...baseOptions, input: reportPath },
+      { ...currentOptions, input: reportPath },
       {
         enumerateTestFiles: () => ["tests/a.test.ts", "tests/b.test.ts"],
         runCommand: () => ({ status: 0, stdout: "commit-a\ncommit-b\n" }) as any,
@@ -329,7 +334,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
   });
 
   it("falls through to file_overlap when git co-commit yields only singleton blocks", async () => {
-    const reportPath = await writeReport("git-no-group.json", [
+    const reportPath = await writeReport(currentRoot, "git-no-group.json", [
       mkFinding("F-301", "First isolated finding", {
         lens: "tests",
         confidence: "high",
@@ -347,7 +352,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
     // execution falls through to the file_overlap path.
     const state = await runPlanPhase(
       baseState,
-      { ...baseOptions, input: reportPath },
+      { ...currentOptions, input: reportPath },
       {
         enumerateTestFiles: () => ["tests/one.test.ts", "tests/two.test.ts"],
         runCommand: () => ({ status: 0, stdout: "" }) as any,
@@ -360,11 +365,11 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
   });
 
   it("deriveFallbackBlocks returns empty blocks array for empty findings input", async () => {
-    const reportPath = await writeReport("empty-findings.json", []);
+    const reportPath = await writeReport(currentRoot, "empty-findings.json", []);
 
     const state = await runPlanPhase(
       baseState,
-      { ...baseOptions, input: reportPath },
+      { ...currentOptions, input: reportPath },
       { enumerateTestFiles: () => [] },
     );
 
@@ -374,6 +379,7 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
   it("splits a block by byte-based context budget (Phase 2 size_bytes)", async () => {
     // One work block holding two findings on two separate files.
     const reportPath = await writeReport(
+      currentRoot,
       "byte-split.json",
       [
         mkFinding("F-401", "Module A issue", {
@@ -391,12 +397,12 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
       ],
       [mkBlock("B-001", ["F-401", "F-402"])],
     );
-    await mkdir(join(TEST_DIR, "src"), { recursive: true });
+    await mkdir(join(currentRoot, "src"), { recursive: true });
 
     // Budget fits both groups' base+overhead (~3000 tokens) but not the byte
     // contribution of two ~50KB files (~12500 tokens each).
     await writeFile(
-      join(TEST_DIR, "session-config.json"),
+      join(currentRoot, "session-config.json"),
       JSON.stringify({
         block_quota: { context_tokens: 20000, reserved_output_tokens: 8192 },
       }),
@@ -404,11 +410,11 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
     );
 
     const big = "x".repeat(50_000);
-    await writeFile(join(TEST_DIR, "src", "a.ts"), big, "utf8");
-    await writeFile(join(TEST_DIR, "src", "b.ts"), big, "utf8");
+    await writeFile(join(currentRoot, "src", "a.ts"), big, "utf8");
+    await writeFile(join(currentRoot, "src", "b.ts"), big, "utf8");
 
     const split = await runPlanPhase(baseState, {
-      ...baseOptions,
+      ...currentOptions,
       input: reportPath,
     });
     expect(split.plan!.blocks.length).toBe(2);
@@ -417,17 +423,17 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
 
     // Control: empty files keep the block whole, proving the split was driven
     // by file size, not by a degenerate budget.
-    await writeFile(join(TEST_DIR, "src", "a.ts"), "", "utf8");
-    await writeFile(join(TEST_DIR, "src", "b.ts"), "", "utf8");
+    await writeFile(join(currentRoot, "src", "a.ts"), "", "utf8");
+    await writeFile(join(currentRoot, "src", "b.ts"), "", "utf8");
     const whole = await runPlanPhase(baseState, {
-      ...baseOptions,
+      ...currentOptions,
       input: reportPath,
     });
     expect(whole.plan!.blocks.length).toBe(1);
   });
 
   it("plan_coverage accounts for every source finding", async () => {
-    const state = await runPlanPhase(baseState, { ...baseOptions, input: FIXTURE });
+    const state = await runPlanPhase(baseState, { ...currentOptions, input: FIXTURE });
     const coverage = state.plan_coverage!;
     expect(coverage).toBeDefined();
     expect(coverage.source_finding_count).toBe(2);
@@ -1089,16 +1095,18 @@ describe("splitBlocksByContextBudget — directory path exclusion (FINDING-014)"
 
 describe("runPlanPhase — content-driven structured-audit report parsing", () => {
   beforeEach(async () => {
-    await rmWithRetry(TEST_DIR);
-    await mkdir(ARTIFACTS_DIR, { recursive: true });
+    currentRoot = join(testDir, `.test-plan-artifacts-${randomUUID()}`);
+    currentArtifactsDir = join(currentRoot, ".audit-tools", "remediation");
+    currentOptions = { root: currentRoot, artifactsDir: currentArtifactsDir };
+    await mkdir(currentArtifactsDir, { recursive: true });
   }, 60_000);
 
   afterEach(async () => {
-    await rmWithRetry(TEST_DIR);
+    await rmWithRetry(currentRoot);
   }, 60_000);
 
   it("parses audit-findings report regardless of file extension (content-driven, not extension-driven)", async () => {
-    const txtPath = join(TEST_DIR, "findings-report.txt");
+    const txtPath = join(currentRoot, "findings-report.txt");
     const content = makeReport([
       mkFinding("F-TXT-1", "Text extension finding", { files: ["src/a.ts"] }),
     ], [
@@ -1107,7 +1115,7 @@ describe("runPlanPhase — content-driven structured-audit report parsing", () =
     await writeFile(txtPath, JSON.stringify(content), "utf8");
 
     const state = await runPlanPhase(baseState, {
-      ...baseOptions,
+      ...currentOptions,
       input: txtPath,
     });
 
@@ -1121,12 +1129,12 @@ describe("runPlanPhase — content-driven structured-audit report parsing", () =
   });
 
   it("non-audit JSON file falls through to the LLM extractor path, not the structured-audit path", async () => {
-    const jsonPath = join(TEST_DIR, "not-findings.json");
+    const jsonPath = join(currentRoot, "not-findings.json");
     await writeFile(jsonPath, JSON.stringify({ hello: "world" }), "utf8");
 
     await expect(
       runPlanPhase(baseState, {
-        ...baseOptions,
+        ...currentOptions,
         input: jsonPath,
       }),
     ).rejects.toThrow();
