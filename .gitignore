@@ -45,3 +45,5 @@ dist/
 /packages/audit-code/.audit-tools/
 /packages/remediate-code/.audit-tools/
 .remediation-artifacts/
+.agents/
+skills-lock.json
