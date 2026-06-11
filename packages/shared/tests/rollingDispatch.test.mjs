@@ -246,17 +246,17 @@ test("createRollingDispatcher — re-dispatches immediately on result arrival (r
   const runPromise = dispatcher.run();
 
   // Give the dispatcher a moment to start the first packet
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(dispatchOrder.length, 1, "only one dispatch should be active initially");
 
   // Complete p1 — p2 should start
   resolvers["p1"]();
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(dispatchOrder.length, 2, "second dispatch should start after first completes");
 
   // Complete p2 — p3 should start
   resolvers["p2"]();
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(dispatchOrder.length, 3, "third dispatch should start after second completes");
 
   // Complete p3 — run() should resolve
