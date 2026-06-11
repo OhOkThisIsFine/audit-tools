@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 
 const { PROVIDER_NAMES } = await import("@audit-tools/shared/types/sessionConfig");
 const { classifyProvider } = await import("@audit-tools/shared/quota/limits");
@@ -175,7 +176,18 @@ const autoDeps = {
   },
 };
 
-test("createFreshSessionProvider auto path writes a structured stderr diagnostic", () => {
+// Detect whether opencode is on PATH — if so, auto-resolution will pick it up
+// and call createOpenCodeProvider, which this test intentionally stubs as a
+// throw. Skip rather than fail in those environments.
+function opencodeOnPath() {
+  const r = spawnSync(process.platform === "win32" ? "where" : "which", ["opencode"], {
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  return r.status === 0;
+}
+
+test("createFreshSessionProvider auto path writes a structured stderr diagnostic", { skip: opencodeOnPath() ? "opencode is on PATH in this environment" : false }, () => {
   const captured = [];
   const originalWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = (chunk, ...rest) => {
