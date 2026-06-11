@@ -173,6 +173,8 @@ Each package versions and publishes independently via `.github/workflows/publish
 
 Trigger this flow with a package's `release:patch` / `:minor` / `:major` scripts (bump + commit + tag), or the `:publish` variants (also push + create the GitHub Release + wait for CI publish), run from the package directory.
 
+Prefer the `/ship` skill (`.claude/skills/ship/SKILL.md`) for the full land-and-publish flow — it encodes the trap list (CLAUDECODE unset for gates, CRLF clean-tree guard, allow-scripts postinstall on global reinstall, release-CI-is-the-real-signal) and never parks at the push/publish boundary.
+
 ## Conventions & invariants
 
 - **Conversation-first.** Both tools are driven through their slash workflows (`/audit-code`, `/remediate-code`). Normal usage should not pass manual `--root`, provider, or model-selection flags — auto-resolution handles the environment.
@@ -188,7 +190,7 @@ Trigger this flow with a package's `release:patch` / `:minor` / `:major` scripts
   PowerShell `foreach` statement directly into `ConvertTo-Json`; assign the
   `foreach` output to a variable first, then pipe that variable.
 - **Atomic-replace ordering invariant.** Every destructive change — deleting a fast path, a phase, a scheduler, a cap, or a monolithic pass — ships as a single atomic replace: new mechanism and deletion of the old in the same commit/node. Never add-then-delete across separate commits. A node that lands while either orchestrator is unbuildable or its test suite is red violates this invariant.
-- **Green-at-every-commit gate.** Before pushing any node, run `npm run build -w @audit-tools/shared && npm run build && npm run check` from the repo root and confirm zero errors. Dogfooding note: orchestrator-behavior verification uses each package's local dev wrapper or test harness, never the stale global bin.
+- **Green-at-every-commit gate.** Before pushing any node, run `npm run build -w @audit-tools/shared && npm run build && npm run check` from the repo root and confirm zero errors. Hook-enforced since 2026-06-11: a PreToolUse hook blocks `git commit` until `npm run check` is green, and an async PostToolUse hook typechecks the edited package after TS edits (scripts in `.claude/hooks/`). Dogfooding note: orchestrator-behavior verification uses each package's local dev wrapper or test harness, never the stale global bin.
 
 ## Preferences & standing decisions
 
@@ -202,6 +204,9 @@ A living log of how to resolve recurring forks, so agents don't re-ask settled q
 - **Budget context before asking an LLM.** When dispatching agents or rendering prompts, prefer small, obligation-specific packets over broad repo/report dumps; expand context only when the task genuinely needs it.
 - **Split design assessment into two named modes.** When assessing design, use **contract assessment** for invariants / boundaries / obligations and **conceptual design critique** for philosophy / alternatives / better directions — the bare phrase "design assessment" is too ambiguous.
 - **Caveman mode (full) is active globally.** Communicate using ultra-compressed caveman style (full) across all responses and agents to minimize token consumption.
+- **Caveman mode is deliberate (confirmed 2026-06-11).** Ethan reviewed and kept it; he toggles it off himself when clarity needs it — don't re-flag it as third-party cruft. The directive is hoisted to the global `~/.claude/CLAUDE.md` so it truly applies across projects.
+- **Redesign before scheduled autonomy.** No nightly/cron audit pipelines until the 2026-06-10 workflow redesigns land; then build the scheduled audit→remediate→PR loop once, on the new architecture (see backlog).
+- **Token/context policy lives in the global `~/.claude/CLAUDE.md`.** Delegation (subagents / `llm read`), output discipline (artifacts to files, chunked writes), and the test-flake protocol are global defaults — don't duplicate them here.
 
 ## Known friction & deferred fixes
 
