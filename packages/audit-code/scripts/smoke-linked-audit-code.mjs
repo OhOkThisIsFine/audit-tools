@@ -654,7 +654,7 @@ async function main() {
     assert.equal(blocked.audit_state.status, "blocked");
     assert.equal(blocked.progress_made, true);
     assert.equal(blocked.next_likely_step, null);
-    assert.equal(blocked.selected_executor, "agent");
+    assert.equal(blocked.selected_executor, "rolling_dispatch_executor");
     assert.ok(blocked.artifacts_written.includes("run-ledger.json"));
   assert.equal(blocked.handoff.status, "blocked");
   // Provider could be opencode if available, or local-subprocess as fallback
@@ -716,7 +716,7 @@ async function main() {
       rerun,
       "auditCodeResponse:rerun",
     );
-    assert.equal(rerun.selected_executor, "agent");
+    assert.equal(rerun.selected_executor, "rolling_dispatch_executor");
     assert.equal(rerun.audit_state.status, "blocked");
     assert.equal(rerun.progress_made, true);
     assert.equal(rerun.next_likely_step, null);
