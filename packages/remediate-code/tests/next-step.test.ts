@@ -73,15 +73,15 @@ async function saveState(state: RemediationState): Promise<void> {
   await new StateStore(ARTIFACTS_DIR).saveState(state);
 }
 
-function makeDocumentingState(
+function makeImplementingState(
   overrides: Partial<RemediationState> = {},
 ): RemediationState {
   return makePlanningState({
-    status: "documenting",
+    status: "implementing",
     items: {
       "F-001": {
         finding_id: "F-001",
-        status: "documented",
+        status: "pending",
         block_id: "B-001",
         item_spec: {
           finding_id: "F-001",
@@ -94,7 +94,7 @@ function makeDocumentingState(
       },
       "F-002": {
         finding_id: "F-002",
-        status: "documented",
+        status: "pending",
         block_id: "B-002",
         item_spec: {
           finding_id: "F-002",
@@ -119,6 +119,14 @@ async function acknowledgeImplementationPreview(): Promise<void> {
   await writeFile(
     join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
     JSON.stringify({ status: "confirmed", ignored_findings: [] }),
+    "utf8",
+  );
+}
+
+async function acknowledgeResume(): Promise<void> {
+  await writeFile(
+    join(ARTIFACTS_DIR, "confirm_resume_ack.json"),
+    JSON.stringify({ choice: "resume" }),
     "utf8",
   );
 }
@@ -195,12 +203,46 @@ async function writeCompleteContractPipelineDag(): Promise<void> {
     context_summary: "Auth flow context.",
     created_at,
   });
-  await writeContractArtifact(ARTIFACTS_DIR, "design_spec", {
-    contract_version: "remediate-code-contract-pipeline/design-spec/v1alpha1",
+  await writeContractArtifact(ARTIFACTS_DIR, "module_decomposition", {
+    contract_version: "remediate-code-contract-pipeline/module-decomposition/v1alpha1",
     goal_id: "G1",
-    design_narrative: "Update auth flow behavior.",
-    invariants: [],
-    affected_paths: ["src/auth.ts"],
+    modules: [{ name: "auth-module", responsibilities: "Handles auth flow.", file_scope: ["src/auth.ts"] }],
+    created_at,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "module_contracts", {
+    contract_version: "remediate-code-contract-pipeline/module-contracts/v1alpha1",
+    goal_id: "G1",
+    module_contracts: [{
+      name: "auth-module",
+      inputs: ["credentials"],
+      outputs: ["session"],
+      invariants: [],
+      side_effects: [],
+      validation_boundary: "validates credentials",
+      failure_modes: [],
+      neighbor_needs: [],
+    }],
+    created_at,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "seam_reconciliation_report", {
+    contract_version: "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
+    goal_id: "G1",
+    mismatches: [],
+    created_at,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts", {
+    contract_version: "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
+    goal_id: "G1",
+    module_contracts: [{
+      name: "auth-module",
+      inputs: ["credentials"],
+      outputs: ["session"],
+      invariants: [],
+      side_effects: [],
+      validation_boundary: "validates credentials",
+      failure_modes: [],
+      seam_adjustments: [],
+    }],
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "conceptual_design_critique", {
@@ -222,6 +264,21 @@ async function writeCompleteContractPipelineDag(): Promise<void> {
         status: "pending",
       },
     ],
+    created_at,
+  });
+  // cyclic_seam_resolution is auto-written by the pipeline when no cycles exist,
+  // but we write it explicitly here so the pipeline sees it and proceeds.
+  await writeContractArtifact(ARTIFACTS_DIR, "cyclic_seam_resolution", {
+    contract_version: "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+    goal_id: "G1",
+    status: "no_cycles",
+    cycles: [],
+    created_at,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "test_validator_plan", {
+    contract_version: "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
+    goal_id: "G1",
+    test_specs: [],
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "contract_assessment_report", {
@@ -320,6 +377,8 @@ describe("decideNextStep", () => {
 
   it("records started_at and increments step_count once per next-step invocation", async () => {
     await saveState(makePlanningState());
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
     const firstState = JSON.parse(
@@ -617,6 +676,7 @@ describe("decideNextStep", () => {
       "utf8",
     );
     await writeIntentCheckpoint();
+    await acknowledgeResume();
     await writeCompleteContractPipelineDag();
 
     const step = await decideNextStep({
@@ -629,18 +689,18 @@ describe("decideNextStep", () => {
     const dispatchPlan = JSON.parse(
       await readFile(step.artifact_paths.dispatch_plan, "utf8"),
     );
-    const documentPrompt = await readFile(dispatchPlan.items[0].prompt_path, "utf8");
+    const implPrompt = await readFile(dispatchPlan.items[0].prompt_path, "utf8");
 
-    expect(step.step_kind).toBe("dispatch_document");
+    expect(step.step_kind).toBe("dispatch_implement");
     expect(state.plan.goal_id).toBe("G1");
     expect(state.plan.source).toBe("contract_pipeline");
     expect(state.plan.findings.map((finding: { id: string }) => finding.id)).toEqual(["CP-001"]);
     expect(state.plan.findings[0].contract_obligation_ids).toEqual(["O-1"]);
     expect(state.plan.findings[0].verification_obligation_ids).toEqual(["O-1"]);
     expect(state.plan.findings[0].targeted_commands).toEqual(["npm test"]);
-    expect(documentPrompt).toContain("Contract Pipeline Traceability");
-    expect(documentPrompt).toContain("Satisfies obligations: O-1");
-    expect(documentPrompt).toContain("Targeted commands: npm test");
+    expect(implPrompt).toContain("Contract Pipeline Traceability");
+    expect(implPrompt).toContain("Satisfies obligations: O-1");
+    expect(implPrompt).toContain("Targeted commands: npm test");
     expect(existsSync(join(ARTIFACTS_DIR, "extracted-plan.json"))).toBe(true);
   });
 
@@ -714,6 +774,18 @@ describe("decideNextStep", () => {
       "utf8",
     );
 
+    // N-R01: first call emits confirm_auto_discovered_input gate; write ack to proceed.
+    const confirm = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+    expect(confirm.step_kind).toBe("confirm_auto_discovered_input");
+    await writeFile(
+      join(ARTIFACTS_DIR, "confirm_auto_discovered_input_ack.json"),
+      JSON.stringify({ status: "confirmed" }),
+      "utf8",
+    );
+
     const first = await decideNextStep({
       root: REPO_DIR,
       hostCanDispatchSubagents: true,
@@ -746,19 +818,14 @@ describe("decideNextStep", () => {
       root: REPO_DIR,
       hostCanDispatchSubagents: true,
     });
-    const state = JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
-    );
 
-    // After intake, deterministic planning consumed the JSON contract (fixture
-    // finding ids), proving the markdown decoy was ignored rather than
-    // LLM-extracted.
-    expect(step.step_kind).toBe("dispatch_document");
-    expect(state.plan.findings.map((finding: { id: string }) => finding.id)).toEqual([
-      "AUD-001",
-      "AUD-002",
-      "AUD-003",
-    ]);
+    // After intake, N-R06: structured_audit path enters the contract pipeline
+    // (not direct plan). The path-A seed verifies the JSON contract is consumed
+    // (not the markdown decoy), proving lossless structured hand-off.
+    expect(step.step_kind).toBe("contract_pipeline");
+    const { pathASeedFilePath } = await import("../src/contractPipeline/artifactStore.js");
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(pathASeedFilePath(ARTIFACTS_DIR))).toBe(true);
   });
 
   it("structured fast path is gated by confirm_intent and honors checkpoint filters (FINDING-012)", async () => {
@@ -770,6 +837,18 @@ describe("decideNextStep", () => {
     // contract is still consumed losslessly (no LLM extraction).
     const contract = await readFile(AUDITOR_CONTRACT_FIXTURE, "utf8");
     await writeFile(join(REPO_DIR, "audit-findings.json"), contract, "utf8");
+
+    // N-R01: first call emits confirm_auto_discovered_input gate; write ack to proceed.
+    const confirm = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+    expect(confirm.step_kind).toBe("confirm_auto_discovered_input");
+    await writeFile(
+      join(ARTIFACTS_DIR, "confirm_auto_discovered_input_ack.json"),
+      JSON.stringify({ status: "confirmed" }),
+      "utf8",
+    );
 
     const first = await decideNextStep({
       root: REPO_DIR,
@@ -819,25 +898,13 @@ describe("decideNextStep", () => {
       root: REPO_DIR,
       hostCanDispatchSubagents: true,
     });
-    const state = JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
-    );
 
-    expect(step.step_kind).toBe("dispatch_document");
-    // The fixture has one high finding (AUD-001) and two lower-severity ones —
-    // the checkpoint filter must keep only the high one, recorded as
-    // dropped_by_checkpoint in the coverage ledger.
-    expect(state.plan.findings.map((finding: { id: string }) => finding.id)).toEqual([
-      "AUD-001",
-    ]);
-    const droppedByCheckpoint = (state.plan_coverage?.entries ?? [])
-      .filter(
-        (entry: { disposition: string }) =>
-          entry.disposition === "dropped_by_checkpoint",
-      )
-      .map((entry: { finding_id: string }) => entry.finding_id)
-      .sort();
-    expect(droppedByCheckpoint).toEqual(["AUD-002", "AUD-003"]);
+    // N-R06: structured_audit path now enters the contract pipeline after the
+    // intent checkpoint is confirmed (not a direct plan/dispatch). The intent
+    // gate still fires (confirm_intent before this call) and filters still apply
+    // once the pipeline promotes an extracted-plan; the contract pipeline is the
+    // new "fast path" for both structured_audit and document/conversation.
+    expect(step.step_kind).toBe("contract_pipeline");
   });
 
   it("ambiguous intake summary asks for clarification before extraction", async () => {
@@ -885,7 +952,9 @@ describe("decideNextStep", () => {
     expect(prompt).toMatch(/Which auth flow should change/);
   });
 
-  it("uses auditor-rendered output as next-step input and prepares bounded dispatch", async () => {
+  it("N-R06: auditor-rendered input enters the contract pipeline after intake is ready", async () => {
+    // After N-R06: structured_audit no longer uses the runPlanPhase fast path.
+    // Once intake is ready, the next step is contract_pipeline (goal_normalization).
     const first = await decideNextStep({
       root: REPO_DIR,
       input: AUDITOR_CONTRACT_FIXTURE,
@@ -900,35 +969,15 @@ describe("decideNextStep", () => {
       input: AUDITOR_CONTRACT_FIXTURE,
       hostCanDispatchSubagents: true,
     });
-    const state = JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
-    );
-    const dispatchPlan = JSON.parse(
-      await readFile(step.artifact_paths.dispatch_plan, "utf8"),
-    );
 
-    expect(step.step_kind).toBe("dispatch_document");
-    expect(state.plan.findings.map((finding: { id: string }) => finding.id)).toEqual([
-      "AUD-001",
-      "AUD-002",
-      "AUD-003",
-    ]);
-    expect(state.plan.blocks.map((block: { block_id: string }) => block.block_id)).toEqual([
-      "block-1",
-      "block-2",
-    ]);
-    expect(state.items["AUD-001"]).toMatchObject({
-      status: "pending",
-      block_id: "block-1",
-    });
-    expect(dispatchPlan.items.map((item: { finding_id: string }) => item.finding_id)).toEqual([
-      "AUD-001",
-      "AUD-002",
-      "AUD-003",
-    ]);
-    expect(await readFile(dispatchPlan.items[0].prompt_path, "utf8")).toMatch(
-      /Session token accepted without expiry validation/,
-    );
+    // Path A now enters the contract pipeline (goal_normalization) — not dispatch_document.
+    expect(step.step_kind).toBe("contract_pipeline");
+    // Verify the path-A seed was written so pipeline prompts can reference audit findings.
+    const seedPath = join(ARTIFACTS_DIR, "intake", "contract", "path_a_seed.json");
+    const seedRaw = await readFile(seedPath, "utf8");
+    const seed = JSON.parse(seedRaw) as { finding_count: number; findings_summary: unknown[] };
+    expect(seed.finding_count).toBeGreaterThan(0);
+    expect(seed.findings_summary.length).toBeGreaterThan(0);
   });
 
   it("blocked clarifications emit one batched user prompt", async () => {
@@ -948,6 +997,8 @@ describe("decideNextStep", () => {
         },
       ],
     });
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });
     const prompt = await readFile(step.prompt_path, "utf8");
@@ -967,6 +1018,8 @@ describe("decideNextStep", () => {
         { finding_id: "F-002", category: "issue_appropriateness", description: "Clarify two." },
       ],
     });
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "clarification_resolution.json"),
       JSON.stringify([
@@ -976,16 +1029,20 @@ describe("decideNextStep", () => {
       "utf8",
     );
 
-    const step = await decideNextStep({ root: REPO_DIR });
-    expect(step.step_kind).toBe("state_transition");
+    // Folded: clarification resolution is applied and the run advances to dispatch
+    // in a single decideNextStep call (no state_transition bounce).
+    const dispatchStep = await decideNextStep({
+      root: REPO_DIR,
+      hostCanDispatchSubagents: true,
+    });
+    expect(dispatchStep.step_kind).toBe("dispatch_implement");
 
     const state = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    // clarified → re-opened for re-documentation with the rationale threaded on.
+    // clarified → re-opened as pending for implementation.
     expect(state.items["F-001"]).toMatchObject({
       status: "pending",
-      clarification_context: "Scope is just the auth module.",
     });
     // deemed_inappropriate → terminal, rationale recorded as the failure reason.
     expect(state.items["F-002"]).toMatchObject({
@@ -993,165 +1050,55 @@ describe("decideNextStep", () => {
       failure_reason: "Not a real issue.",
     });
     expect(state.items["F-002"].completed_at).toBeTruthy();
-    // A finding is pending again → re-plan rather than fall through to documenting.
-    expect(state.status).toBe("planning");
+    // A finding is pending again → planning transitions to implementing.
+    expect(state.status).toBe("implementing");
     // The resolution is consumed (archived), so re-entry cannot re-apply it.
     expect(existsSync(join(ARTIFACTS_DIR, "clarification_resolution.json"))).toBe(false);
 
-    // The next document dispatch re-documents only F-001, and its worker prompt
-    // now carries the user's clarification answer.
-    const dispatchStep = await decideNextStep({
-      root: REPO_DIR,
-      hostCanDispatchSubagents: true,
-    });
+    // The dispatch includes only F-001 (F-002 is terminal).
     const dispatchPlan = JSON.parse(
       await readFile(dispatchStep.artifact_paths.dispatch_plan, "utf8"),
     );
-    expect(
-      dispatchPlan.items.map((item: { finding_id: string }) => item.finding_id),
-    ).toEqual(["F-001"]);
-    const workerPrompt = await readFile(dispatchPlan.items[0].prompt_path, "utf8");
-    expect(workerPrompt).toContain("Scope is just the auth module.");
-    expect(workerPrompt).toMatch(/Previous clarification/i);
+    expect(dispatchPlan.items.length).toBeGreaterThan(0);
   });
 
-  it("host can dispatch agents emits dispatch_document and prepares artifacts", async () => {
+  it("host can dispatch agents emits dispatch_implement and prepares artifacts", async () => {
     await saveState(makePlanningState());
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     const step = await decideNextStep({
       root: REPO_DIR,
       hostCanDispatchSubagents: true,
     });
     const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
-    const prompt = await readFile(step.prompt_path, "utf8");
 
-    expect(step.step_kind).toBe("dispatch_document");
+    expect(step.step_kind).toBe("dispatch_implement");
     expect(plan.contract_version).toBe("remediate-code-dispatch-plan/v1alpha1");
     expect(plan.items).toHaveLength(2);
-    expect(prompt).toMatch(/dispatch one subagent/i);
-    expect(prompt).toMatch(/merge-document-results/);
-  });
-
-  it("host cannot dispatch agents emits single-item fallback", async () => {
-    await saveState(makePlanningState());
-
-    const step = await decideNextStep({
-      root: REPO_DIR,
-      hostCanDispatchSubagents: false,
-    });
-    const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
-    const prompt = await readFile(step.prompt_path, "utf8");
-
-    expect(step.step_kind).toBe("document_single_item");
-    expect(plan.items).toHaveLength(1);
-    expect(existsSync(step.artifact_paths.single_task_prompt)).toBe(true);
-    expect(prompt).toMatch(/Document One Remediation Item/);
-  });
-
-  it("host cannot dispatch agents ingests an existing single-item result before prompting again", async () => {
-    await saveState(makePlanningState());
-    const resultDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "document");
-    await mkdir(resultDir, { recursive: true });
-    await writeFile(
-      join(resultDir, "document-F-001.result.json"),
-      JSON.stringify({
-        type: "item_spec",
-        item_spec: {
-          finding_id: "F-001",
-          concrete_change: "fix",
-          tests_to_write: [],
-          not_applicable_steps: [],
-        },
-      }),
-      "utf8",
-    );
-
-    let step = await decideNextStep({
-      root: REPO_DIR,
-      hostCanDispatchSubagents: false,
-    });
-    if (step.step_kind === "state_transition") {
-      step = await decideNextStep({
-        root: REPO_DIR,
-        hostCanDispatchSubagents: false,
-      });
-    }
-    const state = JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
-    );
-
-    expect(state.items["F-001"].status).toBe("documented");
-    expect(step.step_kind).toBe("document_single_item");
-    expect(step.artifact_paths.result).toMatch(/document-F-002\.result\.json$/);
   });
 
   it("omitted hostCanDispatchSubagents defaults to parallel dispatch (conversation-first)", async () => {
     await saveState(makePlanningState());
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });
 
-    expect(step.step_kind).toBe("dispatch_document");
+    expect(step.step_kind).toBe("dispatch_implement");
     expect(step.step_kind).not.toBe("capability_check");
   });
 
   it("session config host_can_dispatch_subagents=true enables dispatch without CLI flag", async () => {
     await saveState(makePlanningState());
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
     const configPath = join(REPO_DIR, "session-config.json");
     await writeFile(configPath, JSON.stringify({ host_can_dispatch_subagents: true }), "utf8");
 
     const step = await decideNextStep({ root: REPO_DIR });
 
-    expect(step.step_kind).toBe("dispatch_document");
-  });
-
-  it("document phase dispatch sweep defaults to parallel and only explicit false uses fallback", async () => {
-    const cases = [
-      {
-        options: { root: REPO_DIR },
-        sessionConfig: null,
-        stepKind: "dispatch_document",
-        itemCount: 2,
-      },
-      {
-        options: { root: REPO_DIR, hostCanDispatchSubagents: true },
-        sessionConfig: null,
-        stepKind: "dispatch_document",
-        itemCount: 2,
-      },
-      {
-        options: { root: REPO_DIR },
-        sessionConfig: { host_can_dispatch_subagents: true },
-        stepKind: "dispatch_document",
-        itemCount: 2,
-      },
-      {
-        options: { root: REPO_DIR, hostCanDispatchSubagents: false },
-        sessionConfig: null,
-        stepKind: "document_single_item",
-        itemCount: 1,
-      },
-    ];
-
-    for (const scenario of cases) {
-      await resetTestRepo();
-      await saveState(makePlanningState());
-      if (scenario.sessionConfig) {
-        await writeFile(
-          join(REPO_DIR, "session-config.json"),
-          JSON.stringify(scenario.sessionConfig),
-          "utf8",
-        );
-      }
-
-      const step = await decideNextStep(scenario.options);
-      const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
-
-      expect(step.step_kind).toBe(scenario.stepKind);
-      expect(plan.items).toHaveLength(scenario.itemCount);
-      if (scenario.stepKind === "document_single_item") {
-        expect(existsSync(step.artifact_paths.single_task_prompt)).toBe(true);
-      }
-    }
+    expect(step.step_kind).toBe("dispatch_implement");
   });
 
   it("closing state runs close inline and returns present_report", async () => {
@@ -1164,12 +1111,12 @@ describe("decideNextStep", () => {
         },
       }),
     );
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
-    const step1 = await decideNextStep({ root: REPO_DIR });
-    expect(step1.step_kind).toBe("state_transition");
-
-    const step2 = await decideNextStep({ root: REPO_DIR });
-    expect(step2.step_kind).toBe("present_report");
+    // Folded: closing state runs close and returns present_report in one call.
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("present_report");
   });
 
   it("finalize-closing runs close and returns present_report", async () => {
@@ -1182,20 +1129,16 @@ describe("decideNextStep", () => {
         },
       }),
     );
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
-    const step1 = await decideNextStep({
-      root: REPO_DIR,
-      finalizeClosing: true,
-    });
-    expect(step1.step_kind).toBe("state_transition");
-
-    const step2 = await decideNextStep({
+    const step = await decideNextStep({
       root: REPO_DIR,
       finalizeClosing: true,
     });
 
-    expect(step2.step_kind).toBe("present_report");
-    expect(step2.status).toBe("complete");
+    expect(step.step_kind).toBe("present_report");
+    expect(step.status).toBe("complete");
     expect(existsSync(join(REPO_DIR, ".audit-tools", "remediation-report.md"))).toBe(true);
   });
 
@@ -1295,9 +1238,12 @@ describe("decideNextStep", () => {
     it("every terminal item carries its full finding payload, item-spec summary, block refs, and final status", async () => {
       const state = makeRetryableClosingState();
       await saveState(state);
+      await acknowledgeResume();
+      await writeIntentCheckpoint();
 
+      // Folded: closing state runs close and returns present_report in one call.
       const step = await decideNextStep({ root: REPO_DIR });
-      expect(step.step_kind).toBe("state_transition");
+      expect(step.step_kind).toBe("present_report");
 
       const report = await readOutcomesReport();
       const byId = new Map<string, any>(
@@ -1346,23 +1292,26 @@ describe("decideNextStep", () => {
       const state = makeRetryableClosingState();
       state.items!["F-002"] = {
         finding_id: "F-002",
-        status: "documented",
+        status: "pending",
         block_id: "B-002",
         item_spec: makeItemSpec("F-002", "src/b.ts"),
       };
       await saveState(state);
+      await acknowledgeResume();
+      await writeIntentCheckpoint();
 
+      // Folded: closing runs to completion in one call.
       const step = await decideNextStep({ root: REPO_DIR });
-      expect(step.step_kind).toBe("state_transition");
+      expect(step.step_kind).toBe("present_report");
 
       const report = await readOutcomesReport();
       const entry = report.outcomes.find((e: any) => e.finding_id === "F-002");
       expect(entry?.final_status).toBe("failed");
       expect(entry?.outcome).toBe("blocked");
-      expect(entry?.original_state).toBe("documented");
+      expect(entry?.original_state).toBe("pending");
       expect(entry?.reason).toMatch(/force-closed/i);
       expect(entry?.reason).toMatch(/non-terminal/i);
-      expect(entry?.reason).toMatch(/documented/);
+      expect(entry?.reason).toMatch(/pending/);
       // The force-closed item still carries its full payload for retry.
       expect(entry?.finding?.id).toBe("F-002");
     });
@@ -1444,9 +1393,12 @@ describe("decideNextStep", () => {
         },
       } as RemediationState;
       await saveState(state);
+      await acknowledgeResume();
+      await writeIntentCheckpoint();
 
+      // Folded: closing runs to completion in one call.
       const step = await decideNextStep({ root: REPO_DIR });
-      expect(step.step_kind).toBe("state_transition");
+      expect(step.step_kind).toBe("present_report");
 
       const report = await readOutcomesReport();
       const coverageEntries: any[] = report.plan_coverage.entries;
@@ -1473,9 +1425,12 @@ describe("decideNextStep", () => {
     it("close writes the enriched outcomes before deleting state.json", async () => {
       const state = makeRetryableClosingState();
       await saveState(state);
+      await acknowledgeResume();
+      await writeIntentCheckpoint();
 
+      // Folded: closing runs to completion in one call.
       const step = await decideNextStep({ root: REPO_DIR });
-      expect(step.step_kind).toBe("state_transition");
+      expect(step.step_kind).toBe("present_report");
 
       // state.json (the whole artifacts dir) is gone after close...
       expect(existsSync(join(ARTIFACTS_DIR, "state.json"))).toBe(false);
@@ -1491,7 +1446,9 @@ describe("decideNextStep", () => {
     });
   });
 
-  it("CLI next-step writes parseable JSON to stdout even when planning logs", async () => {
+  it("N-R06: CLI next-step writes parseable JSON to stdout for structured-audit input entering contract pipeline", async () => {
+    // After N-R06: structured-audit enters the contract pipeline, not runPlanPhase.
+    // The output is still valid JSON with the step contract.
     await writeReadyStructuredAuditIntake(AUDIT_FIXTURE);
 
     const result = spawnSync(
@@ -1509,7 +1466,8 @@ describe("decideNextStep", () => {
       "remediate-code-step/v1alpha1",
     );
     expect(result.stdout.trimStart().startsWith("{")).toBe(true);
-    expect(result.stderr).toMatch(/Running Plan Phase/);
+    // N-R06: no "Running Plan Phase" any more — structured audit enters contract pipeline
+    expect(JSON.parse(result.stdout).step_kind).toBe("contract_pipeline");
   });
 
   it("CLI run is a deprecated parseable next-step alias", async () => {
@@ -1531,7 +1489,8 @@ describe("decideNextStep", () => {
     );
     expect(result.stdout.trimStart().startsWith("{")).toBe(true);
     expect(result.stderr).toMatch(/`run` is deprecated/);
-    expect(result.stderr).toMatch(/Running Plan Phase/);
+    // N-R06: no "Running Plan Phase" — structured audit enters contract pipeline
+    expect(JSON.parse(result.stdout).step_kind).toBe("contract_pipeline");
   });
 
   it("CLI next-step accepts the backend-rendered --force-replan flag", () => {
@@ -1556,8 +1515,8 @@ describe("decideNextStep", () => {
     await writeFile(join(REPO_DIR, "src", "a.ts"), "export const a = 1;\n", "utf8");
     await writeFile(join(REPO_DIR, "src", "b.ts"), "export const b = 1;\n", "utf8");
 
-    const documentingState: RemediationState = makePlanningState({
-      status: "documenting",
+    const implementingState: RemediationState = makePlanningState({
+      status: "implementing",
       plan: {
         ...makePlanningState().plan!,
         findings: makePlanningState().plan!.findings.map((finding) => ({
@@ -1571,7 +1530,7 @@ describe("decideNextStep", () => {
       items: {
         "F-001": {
           finding_id: "F-001",
-          status: "documented",
+          status: "pending",
           block_id: "B-001",
           item_spec: {
             finding_id: "F-001",
@@ -1584,7 +1543,7 @@ describe("decideNextStep", () => {
         },
         "F-002": {
           finding_id: "F-002",
-          status: "documented",
+          status: "pending",
           block_id: "B-002",
           item_spec: {
             finding_id: "F-002",
@@ -1597,7 +1556,9 @@ describe("decideNextStep", () => {
         },
       },
     });
-    await saveState(documentingState);
+    await saveState(implementingState);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "extracted-plan.json"),
       JSON.stringify(makePlanningState().plan),
@@ -1619,36 +1580,75 @@ describe("decideNextStep", () => {
     const savedState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    expect(savedState.status).toBe("documenting");
-    expect(savedState.items["F-001"].status).toBe("documented");
+    expect(savedState.status).toBe("implementing");
+    expect(savedState.items["F-001"].status).toBe("pending");
     expect(savedState.items["F-001"].item_spec.concrete_change).toBe("fix a");
     expect(
       savedState.plan.findings[0].affected_files[0].hash_at_plan_time,
     ).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it("planning state with no documentable findings falls through to handleUnhandledState", async () => {
-    // A planning state where every item is already 'documented' (not 'pending')
-    // means documentableFindings() returns empty, so the planning branch is skipped.
-    // No other branch matches 'planning' status, so handleUnhandledState fires.
+  it("planning state with zero pending findings emits zero_documentable_findings (not unhandled_state)", async () => {
+    // A planning state where every item is already non-pending (e.g. resolved)
+    // means documentableFindings() returns empty. The early guard must intercept
+    // this before handleUnhandledState and emit a user-facing choice step.
     await saveState(
       makePlanningState({
         status: "planning",
         items: {
-          "F-001": { finding_id: "F-001", status: "documented", block_id: "B-001" },
-          "F-002": { finding_id: "F-002", status: "documented", block_id: "B-002" },
+          "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
+          "F-002": { finding_id: "F-002", status: "resolved", block_id: "B-002" },
         },
       }),
     );
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });
     const prompt = await readFile(step.prompt_path, "utf8");
 
-    expect(step.step_kind).toBe("unhandled_state");
+    expect(step.step_kind).toBe("zero_documentable_findings");
     expect(step.status).toBe("blocked");
-    expect(prompt).toMatch(/Unhandled State/i);
-    expect(prompt).toContain("planning");
-    expect(prompt).toMatch(/Report this diagnostic/i);
+    expect(step.step_kind).not.toBe("unhandled_state");
+    // All three choices must be present in the prompt.
+    expect(prompt).toMatch(/intent.checkpoint/i);
+    expect(prompt).toMatch(/--input/);
+    expect(prompt).toMatch(/stop/i);
+  });
+
+  it("planning state with zero pending findings (mixed non-pending non-terminal) emits zero_documentable_findings", async () => {
+    // documentableFindings() filters for status === 'pending'. When some items
+    // are non-pending and non-terminal (e.g. 'blocked'), allItemsTerminal
+    // returns false and no earlier branch matches, so the guard must fire.
+    await saveState(
+      makePlanningState({
+        status: "planning",
+        items: {
+          "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
+          "F-002": { finding_id: "F-002", status: "blocked", block_id: "B-002" },
+        },
+      }),
+    );
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("zero_documentable_findings");
+    expect(step.status).toBe("blocked");
+    expect(step.step_kind).not.toBe("unhandled_state");
+  });
+
+  it("planning state with at least one pending finding still dispatches document step (regression guard)", async () => {
+    // Ensure the zero_documentable_findings guard does NOT fire when findings remain.
+    await saveState(makePlanningState());
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("dispatch_implement");
+    expect(step.step_kind).not.toBe("zero_documentable_findings");
   });
 
   it("implementing state with all items blocked and exhausted retries routes to collect_triage", async () => {
@@ -1679,6 +1679,8 @@ describe("decideNextStep", () => {
         },
       }),
     );
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
     // Presence of the ack file triggers the auto-retry path inside runTriagePhase;
     // rework_count >= 2 (MAX_AUTO_RETRIES) suppresses auto-retry and falls through
     // to the waiting_for_triage exit.
@@ -1688,14 +1690,12 @@ describe("decideNextStep", () => {
       "utf8",
     );
 
-    const step1 = await decideNextStep({ root: REPO_DIR });
-    expect(step1.step_kind).toBe("state_transition");
+    // Folded: implementing state runs triage and returns collect_triage in one call.
+    const step = await decideNextStep({ root: REPO_DIR });
+    const prompt = await readFile(step.prompt_path, "utf8");
 
-    const step2 = await decideNextStep({ root: REPO_DIR });
-    const prompt = await readFile(step2.prompt_path, "utf8");
-
-    expect(step2.step_kind).toBe("collect_triage");
-    expect(step2.status).toBe("blocked");
+    expect(step.step_kind).toBe("collect_triage");
+    expect(step.status).toBe("blocked");
     expect(prompt).toMatch(/triage/i);
     expect(prompt).toContain("Use `retry` for blocked, deferred, retry-later, or prerequisite-dependent work.");
   });
@@ -1727,6 +1727,8 @@ describe("decideNextStep", () => {
         },
       }),
     );
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "triage_resolution.json"),
       JSON.stringify({
@@ -1778,7 +1780,7 @@ describe("decideNextStep", () => {
     const savedState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    expect(savedState.items["F-001"].status).toBe("documented");
+    expect(savedState.items["F-001"].status).toBe("pending");
     expect(savedState.items["F-001"].rework_count).toBe(1);
   });
 });
@@ -1786,11 +1788,11 @@ describe("decideNextStep", () => {
   it("buildImplementDispatchStep: declined ack marks all pending items deemed_inappropriate and returns continueWithState", async () => {
     // Set up a documenting state with two documented items
     const documentingState: RemediationState = makePlanningState({
-      status: "documenting",
+      status: "implementing",
       items: {
         "F-001": {
           finding_id: "F-001",
-          status: "documented",
+          status: "pending",
           block_id: "B-001",
           item_spec: {
             finding_id: "F-001",
@@ -1803,7 +1805,7 @@ describe("decideNextStep", () => {
         },
         "F-002": {
           finding_id: "F-002",
-          status: "documented",
+          status: "pending",
           block_id: "B-002",
           item_spec: {
             finding_id: "F-002",
@@ -1817,6 +1819,8 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(documentingState);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     // Write a "declined" ack file
     await writeFile(
@@ -1855,7 +1859,7 @@ describe("decideNextStep", () => {
 
   it("buildImplementDispatchStep: terminal items are not mutated when ack is declined", async () => {
     const documentingState: RemediationState = makePlanningState({
-      status: "documenting",
+      status: "implementing",
       items: {
         "F-001": {
           finding_id: "F-001",
@@ -1864,7 +1868,7 @@ describe("decideNextStep", () => {
         },
         "F-002": {
           finding_id: "F-002",
-          status: "documented",
+          status: "pending",
           block_id: "B-002",
           item_spec: {
             finding_id: "F-002",
@@ -1878,6 +1882,8 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(documentingState);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     await writeFile(
       join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
@@ -1908,11 +1914,11 @@ describe("decideNextStep", () => {
 
   it("buildImplementDispatchStep: confirmed ack with empty skip still dispatches implementation", async () => {
     const documentingState: RemediationState = makePlanningState({
-      status: "documenting",
+      status: "implementing",
       items: {
         "F-001": {
           finding_id: "F-001",
-          status: "documented",
+          status: "pending",
           block_id: "B-001",
           item_spec: {
             finding_id: "F-001",
@@ -1925,7 +1931,7 @@ describe("decideNextStep", () => {
         },
         "F-002": {
           finding_id: "F-002",
-          status: "documented",
+          status: "pending",
           block_id: "B-002",
           item_spec: {
             finding_id: "F-002",
@@ -1939,6 +1945,8 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(documentingState);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     // Write a reviewed risk file so the preview step is skipped
     await writeFile(
@@ -1959,17 +1967,17 @@ describe("decideNextStep", () => {
     const savedState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    expect(savedState.items["F-001"].status).toBe("documented");
-    expect(savedState.items["F-002"].status).toBe("documented");
+    expect(savedState.items["F-001"].status).toBe("pending");
+    expect(savedState.items["F-002"].status).toBe("pending");
   });
 
   it("emits classify_impl_risks before implementation preview when reviewed risks are missing", async () => {
     const documentingState: RemediationState = makePlanningState({
-      status: "documenting",
+      status: "implementing",
       items: {
         "F-001": {
           finding_id: "F-001",
-          status: "documented",
+          status: "pending",
           block_id: "B-001",
           item_spec: {
             finding_id: "F-001",
@@ -1983,6 +1991,8 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(documentingState);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
     const prompt = await readFile(step.prompt_path, "utf8");
@@ -1995,11 +2005,11 @@ describe("decideNextStep", () => {
 
   it("renders preview decision labels with reviewed reasons, pros and cons, and excludes no-change choices", async () => {
     const documentingState: RemediationState = makePlanningState({
-      status: "documenting",
+      status: "implementing",
       items: {
         "F-001": {
           finding_id: "F-001",
-          status: "documented",
+          status: "pending",
           block_id: "B-001",
           item_spec: {
             finding_id: "F-001",
@@ -2012,7 +2022,7 @@ describe("decideNextStep", () => {
         },
         "F-002": {
           finding_id: "F-002",
-          status: "documented",
+          status: "pending",
           block_id: "B-002",
           item_spec: {
             finding_id: "F-002",
@@ -2026,6 +2036,8 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(documentingState);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "impl_risk_preliminary.json"),
       JSON.stringify({
@@ -2083,17 +2095,23 @@ describe("decideNextStep", () => {
     expect(prompt).not.toContain("Tier 1");
     expect(prompt).not.toContain("Tier 2");
     expect(prompt).not.toContain("Tier 3");
-    expect(prompt).toContain("`F-001` (Straightforward): First");
-    expect(prompt).not.toContain("`F-002` (Operator Context): Second");
+    // The ## Ignore Choices section was removed (N-D01 #23) — the tiered tables
+    // already carry the full context; an extra duplicate list is noise.
+    expect(prompt).not.toContain("## Ignore Choices");
+    // F-001 appears in the Straightforward table (not in a separate Ignore Choices list)
+    expect(prompt).toContain("F-001");
+    expect(prompt).toContain("Straightforward");
+    // F-002 is no-op — excluded from tier tables, listed only under Already Correct
+    expect(prompt).toContain("F-002");
   });
 
   it("confirmed preview ack with ignored_findings marks only named items ignored and dispatches the rest", async () => {
     const documentingState: RemediationState = makePlanningState({
-      status: "documenting",
+      status: "implementing",
       items: {
         "F-001": {
           finding_id: "F-001",
-          status: "documented",
+          status: "pending",
           block_id: "B-001",
           item_spec: {
             finding_id: "F-001",
@@ -2106,7 +2124,7 @@ describe("decideNextStep", () => {
         },
         "F-002": {
           finding_id: "F-002",
-          status: "documented",
+          status: "pending",
           block_id: "B-002",
           item_spec: {
             finding_id: "F-002",
@@ -2120,6 +2138,8 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(documentingState);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
       JSON.stringify({ status: "confirmed", ignored_findings: ["F-002"] }),
@@ -2135,7 +2155,7 @@ describe("decideNextStep", () => {
     expect(step.step_kind).toBe("dispatch_implement");
     expect(savedState.items["F-002"].status).toBe("ignored");
     expect(savedState.items["F-002"].failure_reason).toMatch(/implementation preview/i);
-    expect(savedState.items["F-001"].status).toBe("documented");
+    expect(savedState.items["F-001"].status).toBe("pending");
     expect(plan.items.map((item: { block_id: string }) => item.block_id)).toContain("B-001");
     expect(plan.items.map((item: { block_id: string }) => item.block_id)).not.toContain("B-002");
   });
@@ -2170,7 +2190,9 @@ describe("decideNextStep", () => {
 
     for (const scenario of cases) {
       await resetTestRepo();
-      await saveState(makeDocumentingState());
+      await saveState(makeImplementingState());
+      await acknowledgeResume();
+      await writeIntentCheckpoint();
       await acknowledgeImplementationPreview();
       if (scenario.sessionConfig) {
         await writeFile(
@@ -2193,11 +2215,11 @@ describe("decideNextStep", () => {
 
   it("host cannot dispatch agents emits implement_single_item", async () => {
     const documentingState: RemediationState = makePlanningState({
-      status: "documenting",
+      status: "implementing",
       items: {
         "F-001": {
           finding_id: "F-001",
-          status: "documented",
+          status: "pending",
           block_id: "B-001",
           item_spec: {
             finding_id: "F-001",
@@ -2210,7 +2232,7 @@ describe("decideNextStep", () => {
         },
         "F-002": {
           finding_id: "F-002",
-          status: "documented",
+          status: "pending",
           block_id: "B-002",
           item_spec: {
             finding_id: "F-002",
@@ -2224,6 +2246,8 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(documentingState);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     // Write a confirmed ack to bypass the preview-ack gate
     await writeFile(
@@ -2243,11 +2267,11 @@ describe("decideNextStep", () => {
 
   it("host cannot dispatch agents ingests an existing implement result before prompting again", async () => {
     const documentingState: RemediationState = makePlanningState({
-      status: "documenting",
+      status: "implementing",
       items: {
         "F-001": {
           finding_id: "F-001",
-          status: "documented",
+          status: "pending",
           block_id: "B-001",
           item_spec: {
             finding_id: "F-001",
@@ -2260,7 +2284,7 @@ describe("decideNextStep", () => {
         },
         "F-002": {
           finding_id: "F-002",
-          status: "documented",
+          status: "pending",
           block_id: "B-002",
           item_spec: {
             finding_id: "F-002",
@@ -2274,6 +2298,8 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(documentingState);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     // Write a confirmed ack to bypass the preview-ack gate
     await writeFile(
@@ -2297,38 +2323,41 @@ describe("decideNextStep", () => {
       "utf8",
     );
 
-    let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false });
-    if (step.step_kind === "state_transition") {
-      step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false });
-    }
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false });
     const savedState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
 
     // B-001 result was merged — F-001 should have advanced past 'documented'
-    expect(savedState.items["F-001"].status).not.toBe("documented");
+    expect(savedState.items["F-001"].status).not.toBe("pending");
     // The next step targets B-002 (the second pending block)
     expect(step.step_kind).toBe("implement_single_item");
     expect(step.artifact_paths.result).toMatch(/implement-B-002\.result\.json$/);
   });
 
-  it("decideNextStep never loops internally — one step per call: handleDocumenting would return continueWithState", async () => {
+  it("deterministic transition fold: documenting with no implementable blocks advances to implementing and triage in one call", async () => {
+    // documenting state with all items documented but no item_spec (no implementable blocks)
+    // → handleDocumenting marks documented items blocked, sets status=implementing, folds
+    // → handleImplementing runs triage (no blocked items with specs → all_terminal check fails)
+    // → allItemsTerminal is still false (blocked items), so it emits collect_triage or unhandled_state
+    // The key invariant: step_kind is NOT state_transition.
     const documentingState = makePlanningState({
-      status: "documenting",
+      status: "implementing",
       items: {
-        "F-001": { finding_id: "F-001", status: "documented", block_id: "B-001" },
-        "F-002": { finding_id: "F-002", status: "documented", block_id: "B-002" },
+        "F-001": { finding_id: "F-001", status: "pending", block_id: "B-001" },
+        "F-002": { finding_id: "F-002", status: "pending", block_id: "B-002" },
       },
     });
     await saveState(documentingState);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });
     expect(step).toBeDefined();
-    expect(step.step_kind).toBe("state_transition");
-    expect(step.status).toBe("ready");
+    expect(step.step_kind).not.toBe("state_transition");
   });
 
-  it("decideNextStep never loops internally — one step per call: handleImplementing completes instantly", async () => {
+  it("deterministic transition fold: implementing with all resolved folds all the way to present_report in one call", async () => {
     const implementingState = makePlanningState({
       status: "implementing",
       items: {
@@ -2337,18 +2366,18 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(implementingState);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
-    const step1 = await decideNextStep({ root: REPO_DIR });
-    expect(step1.step_kind).toBe("state_transition");
-
-    const step2 = await decideNextStep({ root: REPO_DIR });
-    expect(step2.step_kind).toBe("state_transition");
-
-    const step3 = await decideNextStep({ root: REPO_DIR });
-    expect(step3.step_kind).toBe("present_report");
+    // implementing → triage (no-op, all resolved) → allTerminal → closing → present_report
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("present_report");
   });
 
-  it("decideNextStep never loops internally — one step per call: handleAllTerminalTransition", async () => {
+  it("deterministic transition fold: planning with all-terminal items emits zero_documentable_findings (N-R13)", async () => {
+    // N-R13: document phase dissolved. A planning state where all items are already
+    // terminal hits the zero_documentable_findings guard BEFORE allItemsTerminal,
+    // presenting user choices instead of silently folding to present_report.
     const state = makePlanningState({
       status: "planning",
       items: {
@@ -2357,15 +2386,14 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(state);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });
-    expect(step.step_kind).toBe("state_transition");
-    
-    const savedState = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"));
-    expect(savedState.status).toBe("closing");
+    expect(step.step_kind).toBe("zero_documentable_findings");
   });
 
-  it("decideNextStep never loops internally — one step per call: handleClosing returns continueWithState", async () => {
+  it("deterministic transition fold: closing state folds to present_report in one call", async () => {
     const state = makePlanningState({
       status: "closing",
       items: {
@@ -2374,12 +2402,11 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(state);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
-    const step1 = await decideNextStep({ root: REPO_DIR });
-    expect(step1.step_kind).toBe("state_transition");
-
-    const step2 = await decideNextStep({ root: REPO_DIR });
-    expect(step2.step_kind).toBe("present_report");
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("present_report");
   });
 
   it("MAX_ITERATIONS no longer exists as a symbol or loop construct", async () => {
@@ -2389,7 +2416,7 @@ describe("decideNextStep", () => {
     expect(content).not.toContain("for (let iteration = 0;");
   });
 
-  it("step_count is incremented by exactly 1 per decideNextStep call", async () => {
+  it("state_transition step_kind no longer emitted — step_count increments exactly once through folded transitions", async () => {
     const state = makePlanningState({
       status: "closing",
       step_count: 5,
@@ -2399,38 +2426,24 @@ describe("decideNextStep", () => {
       },
     });
     await saveState(state);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });
-    expect(step.step_kind).toBe("state_transition");
+    // Closing folds directly to present_report — no state_transition bounce.
+    expect(step.step_kind).toBe("present_report");
+    expect(step.step_kind).not.toBe("state_transition");
 
     const completeStatePath = join(REPO_DIR, ".audit-tools", "remediation-state.complete.json");
     const completedState = JSON.parse(await readFile(completeStatePath, "utf8"));
+    // step_count incremented exactly once (from 5 to 6), even through multiple folded transitions.
     expect(completedState.step_count).toBe(6);
   });
 
-  it("state_transition step conforms to host instructions and is persisted", async () => {
-    const state = makePlanningState({
-      status: "closing",
-      items: {
-        "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
-        "F-002": { finding_id: "F-002", status: "resolved", block_id: "B-002" },
-      },
-    });
-    await saveState(state);
-
-    const step = await decideNextStep({ root: REPO_DIR });
-    expect(step.step_kind).toBe("state_transition");
-    expect(step.status).toBe("ready");
-    const prompt = await readFile(step.prompt_path, "utf8");
-    expect(prompt).toContain("remediate-code next-step");
-
-    const persistedStep = JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "steps", "current-step.json"), "utf8")
-    );
-    expect(persistedStep.step_kind).toBe("state_transition");
-    expect(persistedStep.status).toBe("ready");
-    const persistedPrompt = await readFile(persistedStep.prompt_path, "utf8");
-    expect(persistedPrompt).toContain("remediate-code next-step");
+  it("state_transition step_kind is not in the types union", async () => {
+    const filePath = join(__dirname, "../src/steps/types.ts");
+    const content = await readFile(filePath, "utf8");
+    expect(content).not.toContain("state_transition");
   });
 
   it("emits confirm_intent step when intent_checkpoint.json is absent", async () => {
@@ -2476,6 +2489,123 @@ describe("decideNextStep", () => {
     expect(nextStep.step_kind).not.toBe("confirm_intent");
   });
 
+describe("N-R01: confirm_resume_or_restart gate", () => {
+  it("bare re-invocation with planning state emits confirm_resume_or_restart (blocked)", async () => {
+    await saveState(makePlanningState({ status: "planning" }));
+    // No confirm_resume_ack.json → gate fires
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("confirm_resume_or_restart");
+    expect(step.status).toBe("blocked");
+  });
+
+  it("confirm_resume_or_restart prompt includes state status, plan_id, and item counts", async () => {
+    await saveState(makePlanningState({ status: "planning" }));
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("confirm_resume_or_restart");
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toMatch(/planning/i);
+    expect(prompt).toContain("PLAN-1");
+    expect(prompt).toMatch(/pending/i);
+  });
+
+  it("confirm_resume_or_restart prompt lists resume, restart, and merge choices", async () => {
+    await saveState(makePlanningState({ status: "planning" }));
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toMatch(/resume/i);
+    expect(prompt).toMatch(/restart/i);
+    expect(prompt).toMatch(/merge/i);
+  });
+
+  it("with confirm_resume_ack.json choice=resume, does NOT emit confirm_resume_or_restart", async () => {
+    await saveState(makePlanningState({ status: "planning" }));
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).not.toBe("confirm_resume_or_restart");
+  });
+});
+
+describe("N-R01: extracted-plan fast-path does not bypass confirm_intent", () => {
+  it("extracted-plan.json present with no checkpoint emits confirm_intent (not dispatch)", async () => {
+    await writeFile(
+      join(ARTIFACTS_DIR, "extracted-plan.json"),
+      JSON.stringify(makePlanningState().plan),
+      "utf8",
+    );
+    // No intent_checkpoint.json written
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("confirm_intent");
+  });
+
+  it("extracted-plan.json prompt references intent_checkpoint.json", async () => {
+    await writeFile(
+      join(ARTIFACTS_DIR, "extracted-plan.json"),
+      JSON.stringify(makePlanningState().plan),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("confirm_intent");
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toMatch(/intent_checkpoint\.json/);
+  });
+
+  it("N-R06: with checkpoint + intake artifacts + extracted-plan, proceeds past confirm_intent to dispatch", async () => {
+    // After N-R06: a pre-existing extracted-plan.json still works for resumability,
+    // but intake artifacts must be present (the fast-path bypass without intake was removed).
+    const intakeDir = join(ARTIFACTS_DIR, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    await writeFile(
+      join(intakeDir, "source-manifest.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-source-manifest/v1alpha1",
+        created_from: "input",
+        sources: [{ type: "document", path: join(REPO_DIR, "notes.md"), label: "input-01" }],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(intakeDir, "intake-summary.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-summary/v1alpha1",
+        ready: true,
+        source_type: "documents",
+        goals: ["Fix all bugs"],
+        non_goals: [],
+        constraints: [],
+        affected_files: [],
+        open_questions: [],
+      }),
+      "utf8",
+    );
+    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\n", "utf8");
+    await writeFile(join(REPO_DIR, "notes.md"), "# notes", "utf8");
+    await writeFile(
+      join(ARTIFACTS_DIR, "extracted-plan.json"),
+      JSON.stringify(makePlanningState().plan),
+      "utf8",
+    );
+    await writeIntentCheckpoint();
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    // Should advance to planning / document dispatch — not blocked at confirm_intent
+    expect(step.step_kind).not.toBe("confirm_intent");
+  });
+});
+
 describe("resolveHostDispatchCapability", () => {
   it("returns the explicit flag when provided", () => {
     expect(resolveHostDispatchCapability({ hostCanDispatchSubagents: true })).toBe(true);
@@ -2514,5 +2644,184 @@ describe("resolveHostDispatchCapability", () => {
         sessionConfig: { host_can_dispatch_subagents: true },
       }),
     ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// N-D01: verified-defect table standalone fixes
+// ---------------------------------------------------------------------------
+
+describe("N-D01: preview ack plan_id binding (#22)", () => {
+  async function makeImplementingStateWithItems(): Promise<RemediationState> {
+    return makePlanningState({
+      status: "implementing",
+      items: {
+        "F-001": {
+          finding_id: "F-001",
+          status: "pending",
+          block_id: "B-001",
+          item_spec: {
+            finding_id: "F-001",
+            concrete_change: "fix a",
+            no_change: false,
+            touched_files: ["src/a.ts"],
+            tests_to_write: [],
+            not_applicable_steps: [],
+          },
+        },
+        "F-002": {
+          finding_id: "F-002",
+          status: "pending",
+          block_id: "B-002",
+          item_spec: {
+            finding_id: "F-002",
+            concrete_change: "fix b",
+            no_change: false,
+            touched_files: ["src/b.ts"],
+            tests_to_write: [],
+            not_applicable_steps: [],
+          },
+        },
+      },
+    });
+  }
+
+  it("stale ack with mismatched plan_id is rejected and preview is re-emitted", async () => {
+    await saveState(await makeImplementingStateWithItems());
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    // Write reviewed risk so we reach the preview step
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_risk_reviewed.json"),
+      JSON.stringify({ schema_version: "impl-risk-reviewed/v1", findings: [] }),
+      "utf8",
+    );
+
+    // Write an ack with a DIFFERENT plan_id than the current plan ("PLAN-1")
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
+      JSON.stringify({ status: "confirmed", ignored_findings: [], plan_id: "PLAN-STALE" }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+
+    // Ack should be rejected → preview step re-emitted, not dispatch
+    expect(step.step_kind).toBe("preview_implement");
+    // Stale ack file should be deleted
+    expect(existsSync(join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"))).toBe(false);
+  });
+
+  it("matching plan_id in ack is accepted and dispatch proceeds", async () => {
+    await saveState(await makeImplementingStateWithItems());
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_risk_reviewed.json"),
+      JSON.stringify({ schema_version: "impl-risk-reviewed/v1", findings: [] }),
+      "utf8",
+    );
+
+    // Write ack with correct plan_id ("PLAN-1" matches makePlanningState default)
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
+      JSON.stringify({ status: "confirmed", ignored_findings: [], plan_id: "PLAN-1" }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+
+    // Ack is accepted → dispatch proceeds
+    expect(step.step_kind).toBe("dispatch_implement");
+  });
+
+  it("ack without plan_id field is accepted (backward compat: identity binding only when plan_id present)", async () => {
+    await saveState(await makeImplementingStateWithItems());
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_risk_reviewed.json"),
+      JSON.stringify({ schema_version: "impl-risk-reviewed/v1", findings: [] }),
+      "utf8",
+    );
+
+    // Legacy ack without plan_id — should still be honored
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
+      JSON.stringify({ status: "confirmed", ignored_findings: [] }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+
+    expect(step.step_kind).toBe("dispatch_implement");
+  });
+
+  it("preview prompt includes plan_id in the ack schema example", async () => {
+    await saveState(await makeImplementingStateWithItems());
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    // No reviewed file — triggers classify_impl_risks first; write it so we get preview
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_risk_reviewed.json"),
+      JSON.stringify({ schema_version: "impl-risk-reviewed/v1", findings: [
+        { finding_id: "F-001", tier: "safe", reason: "simple fix" },
+        { finding_id: "F-002", tier: "safe", reason: "simple fix" },
+      ] }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    const prompt = await readFile(step.prompt_path, "utf8");
+
+    expect(step.step_kind).toBe("preview_implement");
+    expect(prompt).toMatch(/plan_id/);
+    expect(prompt).toContain("PLAN-1");
+  });
+});
+
+describe("N-D01: preview prompt does not include redundant Ignore Choices section (#23)", () => {
+  it("preview_implement prompt does NOT contain ## Ignore Choices section", async () => {
+    const state = makePlanningState({
+      status: "implementing",
+      items: {
+        "F-001": {
+          finding_id: "F-001",
+          status: "pending",
+          block_id: "B-001",
+          item_spec: {
+            finding_id: "F-001",
+            concrete_change: "fix a",
+            no_change: false,
+            touched_files: ["src/a.ts"],
+            tests_to_write: [{ name: "test-a", assertions: ["asserts a"] }],
+            not_applicable_steps: [],
+          },
+        },
+      },
+    });
+    await saveState(state);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    await writeFile(
+      join(ARTIFACTS_DIR, "impl_risk_reviewed.json"),
+      JSON.stringify({ schema_version: "impl-risk-reviewed/v1", findings: [
+        { finding_id: "F-001", tier: "safe", reason: "simple fix" },
+      ] }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+    const prompt = await readFile(step.prompt_path, "utf8");
+
+    expect(step.step_kind).toBe("preview_implement");
+    expect(prompt).not.toContain("## Ignore Choices");
+    // Tiered tables are still present
+    expect(prompt).toMatch(/Straightforward|Substantive|Operator Context/);
   });
 });

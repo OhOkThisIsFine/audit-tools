@@ -183,6 +183,17 @@ export interface DesignReviewConfig {
   max_units?: number;
 }
 
+/**
+ * Forward-declared shape for ConfirmedProviderPool so SessionConfig does not
+ * take a hard dependency on the providerConfirmation module (which imports from
+ * this file). The authoritative definition lives in providers/providerConfirmation.ts.
+ */
+export interface ConfirmedProviderPoolRef {
+  providers: unknown[];
+  excluded: string[];
+  addedUndetected: unknown[];
+}
+
 export interface SessionConfig {
   provider?: ProviderName;
   timeout_ms?: number;
@@ -209,4 +220,12 @@ export interface SessionConfig {
   dispatch?: DispatchConfig;
   /** Optional design-review tuning (focused reading list budget). */
   design_review?: DesignReviewConfig;
+  /**
+   * Confirmed provider pool persisted after Gate-0 confirmation. Carries the
+   * operator-validated set of available providers across the audit→remediate
+   * session (INV-S03). Typed as ConfirmedProviderPoolRef here to avoid a
+   * circular import; the full ConfirmedProviderPool type lives in
+   * providers/providerConfirmation.ts.
+   */
+  confirmed_provider_pool?: ConfirmedProviderPoolRef;
 }

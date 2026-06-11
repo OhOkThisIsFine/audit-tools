@@ -20,7 +20,29 @@ import {
   CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
   CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION,
+  CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
 } from "@audit-tools/shared";
+
+// Version constant for cyclic_seam_resolution artifact.
+const CP_CYCLIC_SEAM_RESOLUTION_VERSION =
+  "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1" as const;
+
+const CYCLIC_SEAM_RESOLUTION_STATUSES = [
+  "no_cycles",
+  "resolved",
+  "user_decision_required",
+  "blocked",
+] as const;
+
+// Version constants for seam-negotiation artifacts not yet in @audit-tools/shared.
+const CP_MODULE_DECOMPOSITION_VERSION =
+  "remediate-code-contract-pipeline/module-decomposition/v1alpha1" as const;
+const CP_MODULE_CONTRACTS_VERSION =
+  "remediate-code-contract-pipeline/module-contracts/v1alpha1" as const;
+const CP_SEAM_RECONCILIATION_REPORT_VERSION =
+  "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1" as const;
+const CP_FINALIZED_MODULE_CONTRACTS_VERSION =
+  "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1" as const;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -128,6 +150,176 @@ export function validateContextBundle(
   return issues;
 }
 
+// ── ModuleDecomposition ───────────────────────────────────────────────────────
+
+export function validateModuleDecomposition(
+  value: unknown,
+  path = "module_decomposition",
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    pushValidationIssue(issues, path, `${path} must be an object.`);
+    return issues;
+  }
+  if (value.contract_version !== CP_MODULE_DECOMPOSITION_VERSION) {
+    pushValidationIssue(
+      issues,
+      `${path}.contract_version`,
+      `${path}.contract_version must be "${CP_MODULE_DECOMPOSITION_VERSION}".`,
+    );
+  }
+  requireString(value.goal_id, `${path}.goal_id`, issues);
+  if (!Array.isArray(value.modules)) {
+    pushValidationIssue(issues, `${path}.modules`, `${path}.modules must be an array.`);
+  } else {
+    for (const [i, mod] of value.modules.entries()) {
+      if (!isRecord(mod)) {
+        pushValidationIssue(issues, `${path}.modules[${i}]`, `${path}.modules[${i}] must be an object.`);
+        continue;
+      }
+      requireString(mod.name, `${path}.modules[${i}].name`, issues);
+      requireString(mod.responsibilities, `${path}.modules[${i}].responsibilities`, issues);
+      requireStringArray(mod.file_scope, `${path}.modules[${i}].file_scope`, issues);
+    }
+  }
+  requireString(value.created_at, `${path}.created_at`, issues);
+  return issues;
+}
+
+// ── ModuleContracts ───────────────────────────────────────────────────────────
+
+function validateModuleContractEntry(entry: Record<string, unknown>, path: string, issues: ValidationIssue[]): void {
+  requireString(entry.name, `${path}.name`, issues);
+  requireStringArray(entry.inputs, `${path}.inputs`, issues);
+  requireStringArray(entry.outputs, `${path}.outputs`, issues);
+  requireStringArray(entry.invariants, `${path}.invariants`, issues);
+  requireStringArray(entry.side_effects, `${path}.side_effects`, issues);
+  requireString(entry.validation_boundary, `${path}.validation_boundary`, issues);
+  requireStringArray(entry.failure_modes, `${path}.failure_modes`, issues);
+}
+
+export function validateModuleContracts(
+  value: unknown,
+  path = "module_contracts",
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    pushValidationIssue(issues, path, `${path} must be an object.`);
+    return issues;
+  }
+  if (value.contract_version !== CP_MODULE_CONTRACTS_VERSION) {
+    pushValidationIssue(
+      issues,
+      `${path}.contract_version`,
+      `${path}.contract_version must be "${CP_MODULE_CONTRACTS_VERSION}".`,
+    );
+  }
+  requireString(value.goal_id, `${path}.goal_id`, issues);
+  if (!Array.isArray(value.module_contracts)) {
+    pushValidationIssue(issues, `${path}.module_contracts`, `${path}.module_contracts must be an array.`);
+  } else {
+    for (const [i, mod] of value.module_contracts.entries()) {
+      if (!isRecord(mod)) {
+        pushValidationIssue(issues, `${path}.module_contracts[${i}]`, `${path}.module_contracts[${i}] must be an object.`);
+        continue;
+      }
+      validateModuleContractEntry(mod, `${path}.module_contracts[${i}]`, issues);
+    }
+  }
+  requireString(value.created_at, `${path}.created_at`, issues);
+  return issues;
+}
+
+// ── SeamReconciliationReport ──────────────────────────────────────────────────
+
+export function validateSeamReconciliationReport(
+  value: unknown,
+  path = "seam_reconciliation_report",
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    pushValidationIssue(issues, path, `${path} must be an object.`);
+    return issues;
+  }
+  if (value.contract_version !== CP_SEAM_RECONCILIATION_REPORT_VERSION) {
+    pushValidationIssue(
+      issues,
+      `${path}.contract_version`,
+      `${path}.contract_version must be "${CP_SEAM_RECONCILIATION_REPORT_VERSION}".`,
+    );
+  }
+  requireString(value.goal_id, `${path}.goal_id`, issues);
+  if (!Array.isArray(value.mismatches)) {
+    pushValidationIssue(issues, `${path}.mismatches`, `${path}.mismatches must be an array.`);
+  } else {
+    for (const [i, mismatch] of value.mismatches.entries()) {
+      if (!isRecord(mismatch)) {
+        pushValidationIssue(issues, `${path}.mismatches[${i}]`, `${path}.mismatches[${i}] must be an object.`);
+        continue;
+      }
+      requireString(mismatch.seam_id, `${path}.mismatches[${i}].seam_id`, issues);
+      requireString(mismatch.module_a, `${path}.mismatches[${i}].module_a`, issues);
+      requireString(mismatch.module_b, `${path}.mismatches[${i}].module_b`, issues);
+      requireString(mismatch.description, `${path}.mismatches[${i}].description`, issues);
+      if (!isRecord(mismatch.resolution)) {
+        pushValidationIssue(
+          issues,
+          `${path}.mismatches[${i}].resolution`,
+          `${path}.mismatches[${i}].resolution must be an object (every mismatch requires a resolution decision).`,
+        );
+      } else {
+        requireOneOf(
+          mismatch.resolution.decision,
+          ["A", "B", "both"],
+          `${path}.mismatches[${i}].resolution.decision`,
+          issues,
+        );
+        requireString(
+          mismatch.resolution.agreed_interface,
+          `${path}.mismatches[${i}].resolution.agreed_interface`,
+          issues,
+        );
+      }
+    }
+  }
+  requireString(value.created_at, `${path}.created_at`, issues);
+  return issues;
+}
+
+// ── FinalizedModuleContracts ──────────────────────────────────────────────────
+
+export function validateFinalizedModuleContracts(
+  value: unknown,
+  path = "finalized_module_contracts",
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    pushValidationIssue(issues, path, `${path} must be an object.`);
+    return issues;
+  }
+  if (value.contract_version !== CP_FINALIZED_MODULE_CONTRACTS_VERSION) {
+    pushValidationIssue(
+      issues,
+      `${path}.contract_version`,
+      `${path}.contract_version must be "${CP_FINALIZED_MODULE_CONTRACTS_VERSION}".`,
+    );
+  }
+  requireString(value.goal_id, `${path}.goal_id`, issues);
+  if (!Array.isArray(value.module_contracts)) {
+    pushValidationIssue(issues, `${path}.module_contracts`, `${path}.module_contracts must be an array.`);
+  } else {
+    for (const [i, mod] of value.module_contracts.entries()) {
+      if (!isRecord(mod)) {
+        pushValidationIssue(issues, `${path}.module_contracts[${i}]`, `${path}.module_contracts[${i}] must be an object.`);
+        continue;
+      }
+      validateModuleContractEntry(mod, `${path}.module_contracts[${i}]`, issues);
+    }
+  }
+  requireString(value.created_at, `${path}.created_at`, issues);
+  return issues;
+}
+
 // ── DesignSpec ────────────────────────────────────────────────────────────────
 
 export function validateDesignSpec(
@@ -162,6 +354,193 @@ export function validateDesignSpec(
   }
   requireStringArray(value.affected_paths, `${path}.affected_paths`, issues);
   requireString(value.created_at, `${path}.created_at`, issues);
+  return issues;
+}
+
+// ── DesignSpec structural gates ───────────────────────────────────────────────
+
+/**
+ * Deterministic structural gates run before the adversarial critic phase.
+ * Returns ValidationIssue[] — errors block the pipeline (re-emit design phase),
+ * warnings are advisory (appended to the critic prompt). Circular obligation
+ * dependency detection yields a warning (not an error) routing to N-R21.
+ *
+ * Call this with the design_spec payload and, optionally, the obligation_ledger
+ * payload for the invariant-coverage cross-check.
+ */
+export function validateDesignSpecGates(
+  designSpec: unknown,
+  obligationLedger?: unknown,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(designSpec)) return issues;
+
+  // Gate 1: every module entry must have non-empty inputs and outputs.
+  // Checks both DesignSpec.modules (optional annotation array) and
+  // finalized_module_contracts.module_contracts (used when called with the
+  // finalized design artifact).
+  const moduleEntries: unknown[] = Array.isArray(designSpec.modules)
+    ? (designSpec.modules as unknown[])
+    : Array.isArray(designSpec.module_contracts)
+      ? (designSpec.module_contracts as unknown[])
+      : [];
+  const moduleFieldName = Array.isArray(designSpec.modules)
+    ? "modules"
+    : "module_contracts";
+  for (const [i, mod] of moduleEntries.entries()) {
+    if (!isRecord(mod)) continue;
+    if (!Array.isArray(mod.inputs) || mod.inputs.length === 0) {
+      pushValidationIssue(
+        issues,
+        `${moduleFieldName}[${i}].inputs`,
+        `${moduleFieldName}[${i}].inputs must be a non-empty array — every module must declare its inputs.`,
+      );
+    }
+    if (!Array.isArray(mod.outputs) || mod.outputs.length === 0) {
+      pushValidationIssue(
+        issues,
+        `${moduleFieldName}[${i}].outputs`,
+        `${moduleFieldName}[${i}].outputs must be a non-empty array — every module must declare its outputs.`,
+      );
+    }
+  }
+
+  // Gate 2: every side-effect entry must have a non-empty owner.
+  if (Array.isArray(designSpec.side_effects)) {
+    for (const [i, se] of (designSpec.side_effects as unknown[]).entries()) {
+      if (!isRecord(se)) continue;
+      if (typeof se.owner !== "string" || se.owner.length === 0) {
+        pushValidationIssue(
+          issues,
+          `side_effects[${i}].owner`,
+          `side_effects[${i}].owner must be a non-empty string — every side effect must have an owner.`,
+        );
+      }
+    }
+  }
+
+  // Gate 3: invariant/obligation ledger cross-check.
+  // Every invariant in the design_spec must have at least one obligation in the ledger
+  // with kind === 'invariant' and whose description or id references the invariant's id.
+  if (
+    Array.isArray(designSpec.invariants) &&
+    isRecord(obligationLedger) &&
+    Array.isArray(obligationLedger.obligations)
+  ) {
+    const obligations = obligationLedger.obligations as unknown[];
+    for (const inv of designSpec.invariants as unknown[]) {
+      if (!isRecord(inv) || typeof inv.id !== "string") continue;
+      const invId = inv.id;
+      const covered = obligations.some((obl) => {
+        if (!isRecord(obl)) return false;
+        if (obl.kind !== "invariant") return false;
+        const oblId = typeof obl.id === "string" ? obl.id : "";
+        const oblDesc = typeof obl.description === "string" ? obl.description : "";
+        return oblId.includes(invId) || oblDesc.includes(invId);
+      });
+      if (!covered) {
+        pushValidationIssue(
+          issues,
+          `invariants[${invId}]`,
+          `Invariant "${invId}" has no verification obligation in the obligation ledger — add an obligation with kind "invariant" that references "${invId}".`,
+        );
+      }
+    }
+  }
+
+  // Gate 4: every external_dependency entry must have non-empty failure_semantics.
+  if (Array.isArray(designSpec.external_dependencies)) {
+    for (const [i, dep] of (designSpec.external_dependencies as unknown[]).entries()) {
+      if (!isRecord(dep)) continue;
+      if (typeof dep.failure_semantics !== "string" || dep.failure_semantics.length === 0) {
+        pushValidationIssue(
+          issues,
+          `external_dependencies[${i}].failure_semantics`,
+          `external_dependencies[${i}].failure_semantics must be a non-empty string — every external dependency must declare its failure semantics.`,
+        );
+      }
+    }
+  }
+
+  // Gate 5: every trust_boundary entry must have non-empty untrusted_inputs and validation_ref.
+  if (Array.isArray(designSpec.trust_boundaries)) {
+    for (const [i, tb] of (designSpec.trust_boundaries as unknown[]).entries()) {
+      if (!isRecord(tb)) continue;
+      if (!Array.isArray(tb.untrusted_inputs) || tb.untrusted_inputs.length === 0) {
+        pushValidationIssue(
+          issues,
+          `trust_boundaries[${i}].untrusted_inputs`,
+          `trust_boundaries[${i}].untrusted_inputs must be a non-empty array — every trust boundary must declare its untrusted inputs.`,
+        );
+      }
+      if (typeof tb.validation_ref !== "string" || tb.validation_ref.length === 0) {
+        pushValidationIssue(
+          issues,
+          `trust_boundaries[${i}].validation_ref`,
+          `trust_boundaries[${i}].validation_ref must be a non-empty string — every trust boundary must have a validation reference.`,
+        );
+      }
+    }
+  }
+
+  // Gate 6: circular obligation dependency detection (warning, not error).
+  // Uses Kahn's algorithm (iterative topological sort).
+  if (isRecord(obligationLedger) && Array.isArray(obligationLedger.obligations)) {
+    const obligations = obligationLedger.obligations as unknown[];
+    const ids = new Set<string>();
+    const dependsOnMap = new Map<string, string[]>();
+    for (const obl of obligations) {
+      if (!isRecord(obl) || typeof obl.id !== "string") continue;
+      ids.add(obl.id);
+      dependsOnMap.set(
+        obl.id,
+        Array.isArray(obl.depends_on)
+          ? (obl.depends_on as unknown[]).filter((d): d is string => typeof d === "string")
+          : [],
+      );
+    }
+
+    // Build in-degree count and adjacency list (edge: dependency → dependent).
+    const inDegree = new Map<string, number>();
+    const adjacency = new Map<string, string[]>();
+    for (const id of ids) {
+      inDegree.set(id, 0);
+      adjacency.set(id, []);
+    }
+    for (const [id, deps] of dependsOnMap.entries()) {
+      for (const dep of deps) {
+        if (!ids.has(dep)) continue; // ignore external refs
+        adjacency.get(dep)!.push(id);
+        inDegree.set(id, (inDegree.get(id) ?? 0) + 1);
+      }
+    }
+
+    const queue: string[] = [];
+    for (const [id, deg] of inDegree.entries()) {
+      if (deg === 0) queue.push(id);
+    }
+    let visited = 0;
+    while (queue.length > 0) {
+      const node = queue.shift()!;
+      visited++;
+      for (const next of adjacency.get(node) ?? []) {
+        const newDeg = (inDegree.get(next) ?? 0) - 1;
+        inDegree.set(next, newDeg);
+        if (newDeg === 0) queue.push(next);
+      }
+    }
+
+    if (visited < ids.size) {
+      // Remaining nodes with inDegree > 0 are part of the cycle.
+      const cycleIds = [...ids].filter((id) => (inDegree.get(id) ?? 0) > 0);
+      issues.push({
+        path: "obligation_ledger.obligations",
+        message: `Circular interface-definition dependency detected among obligations: [${cycleIds.join(", ")}]; route to N-R21 for resolution`,
+        severity: "warning",
+      });
+    }
+  }
+
   return issues;
 }
 
@@ -235,6 +614,73 @@ export function validateObligationLedger(
       requireOneOf(obl.kind, ["invariant", "behavioral", "structural", "test"], `${path}.obligations[${i}].kind`, issues);
       requireStringArray(obl.depends_on, `${path}.obligations[${i}].depends_on`, issues);
       requireOneOf(obl.status, ["pending", "satisfied", "failed"], `${path}.obligations[${i}].status`, issues);
+    }
+  }
+  requireString(value.created_at, `${path}.created_at`, issues);
+  return issues;
+}
+
+// ── TestValidatorPlan ─────────────────────────────────────────────────────────
+
+const TEST_SPEC_KINDS = ["unit", "integration", "schema", "invariant", "e2e"] as const;
+
+export function validateTestValidatorPlan(
+  value: unknown,
+  path = "test_validator_plan",
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    pushValidationIssue(issues, path, `${path} must be an object.`);
+    return issues;
+  }
+  if (value.contract_version !== CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION) {
+    pushValidationIssue(
+      issues,
+      `${path}.contract_version`,
+      `${path}.contract_version must be "${CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION}".`,
+    );
+  }
+  requireString(value.goal_id, `${path}.goal_id`, issues);
+  if (!Array.isArray(value.test_specs)) {
+    pushValidationIssue(issues, `${path}.test_specs`, `${path}.test_specs must be an array.`);
+  } else {
+    for (const [i, spec] of value.test_specs.entries()) {
+      if (!isRecord(spec)) {
+        pushValidationIssue(issues, `${path}.test_specs[${i}]`, `${path}.test_specs[${i}] must be an object.`);
+        continue;
+      }
+      requireString(spec.obligation_id, `${path}.test_specs[${i}].obligation_id`, issues);
+      requireString(spec.name, `${path}.test_specs[${i}].name`, issues);
+      requireOneOf(spec.kind, TEST_SPEC_KINDS, `${path}.test_specs[${i}].kind`, issues);
+      if (!Array.isArray(spec.assertions) || spec.assertions.length === 0) {
+        pushValidationIssue(
+          issues,
+          `${path}.test_specs[${i}].assertions`,
+          `${path}.test_specs[${i}].assertions must be a non-empty array of strings.`,
+        );
+      } else {
+        requireStringArray(spec.assertions, `${path}.test_specs[${i}].assertions`, issues);
+      }
+      if (spec.inapplicable_claim !== undefined) {
+        if (!isRecord(spec.inapplicable_claim)) {
+          pushValidationIssue(
+            issues,
+            `${path}.test_specs[${i}].inapplicable_claim`,
+            `${path}.test_specs[${i}].inapplicable_claim must be an object.`,
+          );
+        } else {
+          requireString(
+            spec.inapplicable_claim.obligation_id,
+            `${path}.test_specs[${i}].inapplicable_claim.obligation_id`,
+            issues,
+          );
+          requireString(
+            spec.inapplicable_claim.reason,
+            `${path}.test_specs[${i}].inapplicable_claim.reason`,
+            issues,
+          );
+        }
+      }
     }
   }
   requireString(value.created_at, `${path}.created_at`, issues);
@@ -329,9 +775,11 @@ const COUNTEREXAMPLE_CLASSIFICATIONS = [
 ] as const;
 
 const JUDGE_REPAIR_TARGETS = [
-  "design_spec",
+  "finalized_module_contracts",
   "obligation_ledger",
   "contract_assessment_report",
+  // Legacy alias: pre-redesign judge reports may reference design_spec.
+  "design_spec",
 ] as const;
 
 export function validateJudgeReport(
@@ -425,6 +873,17 @@ export function validateImplementationDAG(
       requireStringArray(node.verification_obligation_ids, `${path}.nodes[${i}].verification_obligation_ids`, issues);
       requireStringArray(node.targeted_commands, `${path}.nodes[${i}].targeted_commands`, issues);
       requireOneOf(node.status, ["pending", "in_progress", "resolved", "blocked"], `${path}.nodes[${i}].status`, issues);
+      if (node.files_likely_touched !== undefined) {
+        requireStringArray(node.files_likely_touched, `${path}.nodes[${i}].files_likely_touched`, issues);
+      }
+      if (node.preconditions !== undefined) {
+        requireStringArray(node.preconditions, `${path}.nodes[${i}].preconditions`, issues);
+      }
+      if (node.expected_changes !== undefined && node.expected_changes !== null) {
+        if (typeof node.expected_changes !== "string") {
+          pushValidationIssue(issues, `${path}.nodes[${i}].expected_changes`, `${path}.nodes[${i}].expected_changes must be a string when present.`);
+        }
+      }
       if (typeof node.id === "string") nodeIds.add(node.id);
     }
   }
@@ -495,6 +954,52 @@ export function validateVerificationReport(
   return issues;
 }
 
+// ── CyclicSeamResolution ──────────────────────────────────────────────────────
+
+export function validateCyclicSeamResolution(
+  value: unknown,
+  path = "cyclic_seam_resolution",
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!isRecord(value)) {
+    pushValidationIssue(issues, path, `${path} must be an object.`);
+    return issues;
+  }
+  if (value.contract_version !== CP_CYCLIC_SEAM_RESOLUTION_VERSION) {
+    pushValidationIssue(
+      issues,
+      `${path}.contract_version`,
+      `${path}.contract_version must be "${CP_CYCLIC_SEAM_RESOLUTION_VERSION}".`,
+    );
+  }
+  requireString(value.goal_id, `${path}.goal_id`, issues);
+  if (!Array.isArray(value.cycles)) {
+    pushValidationIssue(issues, `${path}.cycles`, `${path}.cycles must be an array.`);
+  } else {
+    for (const [i, cycle] of value.cycles.entries()) {
+      if (!isRecord(cycle)) {
+        pushValidationIssue(issues, `${path}.cycles[${i}]`, `${path}.cycles[${i}] must be an object.`);
+        continue;
+      }
+      if (!Array.isArray(cycle.members) || cycle.members.some((m) => typeof m !== "string")) {
+        pushValidationIssue(
+          issues,
+          `${path}.cycles[${i}].members`,
+          `${path}.cycles[${i}].members must be an array of strings.`,
+        );
+      }
+    }
+  }
+  requireOneOf(
+    value.status,
+    CYCLIC_SEAM_RESOLUTION_STATUSES,
+    `${path}.status`,
+    issues,
+  );
+  requireString(value.created_at, `${path}.created_at`, issues);
+  return issues;
+}
+
 // ── Validator registry ────────────────────────────────────────────────────────
 
 /**
@@ -508,9 +1013,14 @@ export const CONTRACT_PIPELINE_VALIDATORS: Record<
 > = {
   goal_spec: validateGoalSpec,
   context_bundle: validateContextBundle,
-  design_spec: validateDesignSpec,
+  module_decomposition: validateModuleDecomposition,
+  module_contracts: validateModuleContracts,
+  seam_reconciliation_report: validateSeamReconciliationReport,
+  finalized_module_contracts: validateFinalizedModuleContracts,
   conceptual_design_critique: validateConceptualDesignCritique,
   obligation_ledger: validateObligationLedger,
+  cyclic_seam_resolution: validateCyclicSeamResolution,
+  test_validator_plan: validateTestValidatorPlan,
   contract_assessment_report: validateContractAssessmentReport,
   counterexample: validateCounterexample,
   judge_report: validateJudgeReport,

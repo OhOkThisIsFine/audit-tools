@@ -171,7 +171,7 @@ test("a reflection appended after synthesis re-synthesizes once and the run stil
       const decision = decideNextStep(bundle);
       if (decision.state.status === "complete") return null;
       const options = { root, lineIndex };
-      if (decision.selected_executor === "agent") {
+      if (decision.selected_executor === "agent" || decision.selected_executor === "rolling_dispatch_executor") {
         const have = new Set((bundle.audit_results ?? []).map((r) => r.task_id));
         options.preferredExecutor = "result_ingestion_executor";
         options.auditResults = (bundle.audit_tasks ?? [])

@@ -90,6 +90,14 @@ export interface AuditFindingsSummary {
   excluded_file_count: number;
   runtime_validation_status_breakdown: Record<string, number>;
   lens_breakdown?: Record<string, number>;
+  /**
+   * Units/tasks stranded by a partial-completion terminal (empty-pool or
+   * livelock guard). Distinct from `budget_deferred_task_count` (planned
+   * deferrals) — these units could not be dispatched because the provider pool
+   * was exhausted before dispatch completed. Present only when a
+   * `partial_completion_terminal` was set on the active-dispatch artifact.
+   */
+  stranded_unit_count?: number;
 }
 
 /**

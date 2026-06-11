@@ -84,8 +84,13 @@ export function buildManualReviewBlocker(providerName: string): string {
     : "Audit blocked: waiting for manual audit results or interactive provider configuration.";
 }
 
+/** Executors that require the LLM host agent to dispatch sub-agents; must NOT be run inline. */
+export function isLlmDispatchExecutor(id: string | null): boolean {
+  return id === "agent" || id === "rolling_dispatch_executor";
+}
+
 export function shouldRunInlineExecutor(selectedExecutor: string | null): boolean {
-  return selectedExecutor !== null && selectedExecutor !== "agent";
+  return selectedExecutor !== null && !isLlmDispatchExecutor(selectedExecutor);
 }
 
 export function buildBlockedAuditState(params: {

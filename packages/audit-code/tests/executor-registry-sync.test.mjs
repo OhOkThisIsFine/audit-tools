@@ -38,21 +38,30 @@ test("every PRIORITY obligation is covered by exactly one EXECUTOR_REGISTRY entr
   }
 });
 
-test("isHostDelegationExecutor returns true for design_review, agent, and intent_checkpoint_executor", () => {
-  assert.equal(isHostDelegationExecutor("design_review"), true);
+test("isHostDelegationExecutor returns true for design_review_contract, design_review_conceptual, agent, intent_checkpoint_executor, provider_confirmation_executor, and synthesis_narrative_executor", () => {
+  assert.equal(isHostDelegationExecutor("design_review_contract"), true);
+  assert.equal(isHostDelegationExecutor("design_review_conceptual"), true);
   assert.equal(isHostDelegationExecutor("agent"), true);
   assert.equal(isHostDelegationExecutor("intent_checkpoint_executor"), true);
+  assert.equal(isHostDelegationExecutor("provider_confirmation_executor"), true);
+  assert.equal(isHostDelegationExecutor("synthesis_narrative_executor"), true);
   assert.equal(isHostDelegationExecutor("intake_executor"), false);
   assert.equal(isHostDelegationExecutor("synthesis_executor"), false);
   assert.equal(isHostDelegationExecutor("planning_executor"), false);
   assert.equal(isHostDelegationExecutor("unknown_executor"), false);
+  // design_review no longer exists in registry
+  assert.equal(isHostDelegationExecutor("design_review"), false);
 });
 
 test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
   const hostDelegationIds = new Set([
-    "design_review",
+    "design_review_contract",
+    "design_review_conceptual",
     "agent",
     "intent_checkpoint_executor",
+    "provider_confirmation_executor",
+    "rolling_dispatch_executor",
+    "synthesis_narrative_executor",
   ]);
   for (const entry of EXECUTOR_REGISTRY) {
     assert.ok(
@@ -73,12 +82,12 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
       );
     }
   }
-  // Verify exactly design_review and agent are host_delegation
+  // Verify exactly these executors are host_delegation
   const hostEntries = EXECUTOR_REGISTRY.filter((e) => e.kind === "host_delegation");
   assert.deepEqual(
     hostEntries.map((e) => e.id).sort(),
-    ["agent", "design_review", "intent_checkpoint_executor"],
-    "Exactly 'agent', 'design_review', and 'intent_checkpoint_executor' should have kind host_delegation",
+    ["agent", "design_review_conceptual", "design_review_contract", "intent_checkpoint_executor", "provider_confirmation_executor", "rolling_dispatch_executor", "synthesis_narrative_executor"],
+    "Exactly 'agent', 'design_review_contract', 'design_review_conceptual', 'intent_checkpoint_executor', 'provider_confirmation_executor', 'rolling_dispatch_executor', and 'synthesis_narrative_executor' should have kind host_delegation",
   );
 });
 

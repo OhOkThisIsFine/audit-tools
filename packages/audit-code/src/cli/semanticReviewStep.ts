@@ -9,6 +9,7 @@ import {
   mergeAndIngestCommand,
   nextStepCommand,
   renderDispatchReviewPrompt,
+  renderRollingDispatchPrompt,
   renderSingleTaskFallbackStepPrompt,
 } from "./prompts.js";
 import { prepareDispatchArtifacts } from "./dispatch.js";
@@ -20,6 +21,9 @@ import { packageRoot } from "./paths.js";
 // than handing the host a second command. Host dispatch capability is resolved
 // by the caller (flag -> session config -> env -> default true) and is never
 // required from the host to make progress.
+//
+// When selectedExecutor is 'rolling_dispatch_executor', uses the rolling
+// dispatch prompt (inline AuditResult[] emit, no submit-packet shell command).
 export async function renderSemanticReviewStep(params: {
   root: string;
   artifactsDir: string;
@@ -28,6 +32,8 @@ export async function renderSemanticReviewStep(params: {
   hostMaxActiveSubagents: number | null;
   hostCanRestrictSubagentTools: boolean;
   hostCanSelectSubagentModel: boolean;
+  /** Which executor selected this step; controls prompt variant. */
+  selectedExecutor?: string | null;
 }): Promise<Awaited<ReturnType<typeof writeCurrentStep>>> {
   const { root, artifactsDir, activeReviewRun } = params;
   if (!params.hostCanDispatch) {
@@ -118,17 +124,29 @@ export async function renderSemanticReviewStep(params: {
       active_review_task: activeReviewRun.task_path,
       pending_audit_tasks: activeReviewRun.pending_audit_tasks_path ?? null,
     },
-    prompt: renderDispatchReviewPrompt({
-      root,
-      artifactsDir,
-      activeReviewRun,
-      dispatchPlanPath: dispatch.dispatch_plan_path,
-      dispatchQuotaPath: dispatch.dispatch_quota_path,
-      hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
-      hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
-      phase: dispatch.phase,
-      canaryPacketId: dispatch.canary_packet_id,
-    }),
+    prompt: params.selectedExecutor === "rolling_dispatch_executor"
+      ? renderRollingDispatchPrompt({
+          root,
+          artifactsDir,
+          runId: activeReviewRun.run_id,
+          dispatchPlanPath: dispatch.dispatch_plan_path,
+          dispatchQuotaPath: dispatch.dispatch_quota_path,
+          hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
+          hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
+          phase: dispatch.phase,
+          canaryPacketId: dispatch.canary_packet_id,
+        })
+      : renderDispatchReviewPrompt({
+          root,
+          artifactsDir,
+          activeReviewRun,
+          dispatchPlanPath: dispatch.dispatch_plan_path,
+          dispatchQuotaPath: dispatch.dispatch_quota_path,
+          hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
+          hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
+          phase: dispatch.phase,
+          canaryPacketId: dispatch.canary_packet_id,
+        }),
     access: {
       read_paths: [
         dispatch.dispatch_plan_path,

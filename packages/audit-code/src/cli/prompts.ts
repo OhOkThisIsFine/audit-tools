@@ -246,6 +246,109 @@ export function renderEdgeReasoningDispatchPrompt(params: {
   ].join("\n");
 }
 
+/**
+ * Host prompt for the rolling dispatch step.
+ * Workers emit AuditResult[] INLINE in their response; the host captures the
+ * payload and writes it to `entry.result_path` on the worker's behalf.
+ * Ingestion is folded into the same logical turn: after all packets complete
+ * the host runs merge-and-ingest once, then next-step.
+ */
+export function renderRollingDispatchPrompt(params: {
+  root: string;
+  artifactsDir: string;
+  runId: string;
+  dispatchPlanPath: string;
+  dispatchQuotaPath: string | null;
+  hostCanRestrictSubagentTools: boolean;
+  hostCanSelectSubagentModel: boolean;
+  phase?: "canary" | "fan_out";
+  canaryPacketId?: string | null;
+}): string {
+  const mergeCommand = mergeAndIngestCommand(params.artifactsDir, params.runId);
+  const continueCommand = nextStepCommand(params.root, params.artifactsDir);
+
+  const modelLine = params.hostCanSelectSubagentModel
+    ? "When launching each subagent, map `entry.model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names."
+    : null;
+  const toolsLine = params.hostCanRestrictSubagentTools
+    ? "Restrict review subagents to read/search tools only — they do not run shell commands. Do not give them source edit/write tools."
+    : "Do not ask the user about per-subagent tool restrictions; this host did not report a callable restriction facility.";
+
+  const dispatchDataLines = params.dispatchQuotaPath
+    ? [
+        "Read these generated files:",
+        "",
+        `  Dispatch plan:  ${params.dispatchPlanPath}`,
+        `  Dispatch quota: ${params.dispatchQuotaPath}`,
+        "",
+        "Use the `wave_size` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before starting the first wave.",
+        "",
+        "For each wave: use the `task` tool (or equivalent subagent dispatch) to launch up to `wave_size` subagents in parallel (one per entry), wait for all to finish, then start the next wave.",
+        "",
+        'If a subagent reports a host session/usage limit instead of emitting its result, run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
+      ]
+    : [
+        "Read this generated dispatch plan:",
+        "",
+        `  ${params.dispatchPlanPath}`,
+        "",
+        "Launch one subagent for each entry in the plan.",
+      ];
+
+  const canaryLines =
+    params.phase === "canary"
+      ? [
+          "",
+          "This is a CANARY round: the plan contains only the single top-priority packet. " +
+            "Dispatch it, capture its inline result, write to result_path, run merge-and-ingest, then run next-step — the remaining packets fan out on the following step.",
+        ]
+      : [];
+
+  return [
+    "# audit-code rolling dispatch",
+    "",
+    ...dispatchDataLines,
+    ...canaryLines,
+    "",
+    DISPATCH_PROMPT_HANDOFF_NOTE,
+    "",
+    "## Inline result capture (no submit-packet command)",
+    "",
+    "Workers emit their AuditResult[] array INLINE in their response text.",
+    "For each subagent that completes:",
+    "1. Extract the JSON array from the response (look for a fenced ```json block or bare JSON array).",
+    "2. Write it to `entry.result_path` from the dispatch plan entry.",
+    "3. Do NOT run submit-packet or any shell command to record results.",
+    "",
+    "Subagent prompt shape:",
+    "",
+    "  Read and follow the audit instructions in: <entry.prompt_path>",
+    "  The result_path is printed in the packet prompt header — the subagent mentions it but does NOT write files.",
+    "",
+    ...(modelLine ? [modelLine] : []),
+    toolsLine,
+    "",
+    "**File access pre-approval:** Each dispatch plan entry includes an `access` object. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` for each subagent (read-only; they do not write files).",
+    "",
+    "**After all waves complete:**",
+    "",
+    DO_NOT_TOKEN_WRAP_NOTE,
+    "",
+    "Run exactly:",
+    "",
+    `  ${mergeCommand}`,
+    "",
+    "If merge-and-ingest fails, stop and report the exact command and error output.",
+    "",
+    "If merge-and-ingest succeeds, run:",
+    "",
+    `  ${continueCommand}`,
+    "",
+    "Read and follow only the new step prompt path returned by that command.",
+    "",
+  ].join("\n");
+}
+
 export function renderPresentReportPrompt(finalReportPath: string): string {
   return [
     "# audit-code present report",

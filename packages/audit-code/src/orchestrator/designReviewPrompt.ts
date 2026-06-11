@@ -165,22 +165,19 @@ export interface DesignReviewOptions {
   max_units?: number;
 }
 
-export function renderDesignReviewPrompt(
+/**
+ * Render the shared structural context block that is identical for both the
+ * contract-review and conceptual-review passes. Placing it first in both
+ * prompts makes it cache-eligible when the same bundle is used for both agents.
+ */
+export function renderSharedStructuralContext(
   bundle: ArtifactBundle,
-  options: DesignReviewOptions = {},
+  maxUnits: number,
 ): string {
   const deterministicFindings = bundle.design_assessment?.findings ?? [];
-
-  const unitCount = bundle.unit_manifest?.units.length ?? 0;
-  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
-  const maxUnits = options.max_units ?? defaultMaxUnits;
   const prioritizedReadingList = buildPrioritizedReadingList(bundle, maxUnits);
 
   return [
-    "# Project design review",
-    "",
-    "You are reviewing the overall design of this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide qualitative observations in two distinct modes: contract assessment for inferred or existing project contracts, and conceptual design critique for broader architecture ideas that static analysis cannot produce.",
-    "",
     "## Project context",
     "",
     `Repository: ${bundle.repo_manifest?.repository?.name ?? "unknown"}`,
@@ -213,13 +210,141 @@ export function renderDesignReviewPrompt(
     "",
     formatDeterministicFindings(deterministicFindings),
     "",
-    "## What to assess",
-    "",
-    `Focus on the ${maxUnits} highest-risk units listed below; you need not read the entire repository, though you may follow any thread that demands more context. Produce findings about:`,
-    "",
     "### Prioritised reading list",
     "",
+    `Focus on the ${maxUnits} highest-risk units listed below; you need not read the entire repository, though you may follow any thread that demands more context.`,
+    "",
     prioritizedReadingList,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Contract-review prompt (adversarial pass).
+ * Infers existing contracts from the codebase and attacks them with counterexamples.
+ * Categories: inferred_contract_gap, trust_boundary_gap, invariant_counterexample,
+ * critical_invariant_coverage_gap.
+ */
+export function renderContractReviewPrompt(
+  bundle: ArtifactBundle,
+  options: DesignReviewOptions = {},
+): string {
+  const unitCount = bundle.unit_manifest?.units.length ?? 0;
+  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
+  const maxUnits = options.max_units ?? defaultMaxUnits;
+
+  return [
+    "# Project contract review (adversarial pass)",
+    "",
+    "You are performing the **contract-assessment** pass on this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to infer existing contracts from the repository and attack them adversarially with concrete counterexamples.",
+    "",
+    renderSharedStructuralContext(bundle, maxUnits),
+    "## Contract assessment instructions",
+    "",
+    "- Infer existing contracts from the repository artifacts and code you inspect: invariants, trust boundaries, preconditions, postconditions, data lifecycle obligations, and critical-flow guarantees.",
+    "- Attack those inferred contracts with concrete counterexamples. Report evidenced gaps where the code appears to rely on an invariant or boundary that is missing, unenforced, unclear, or uncovered for a critical flow.",
+    "- Be adversarial: look for cases where the contract is violated, not just cases where it is satisfied.",
+    "- Stay observational: do not invent a new contract DSL, write a remediation plan, remediate code, or turn the audit into an implementation pipeline.",
+    "",
+    "## Output format",
+    "",
+    "Produce a JSON array of findings. Each finding must conform to:",
+    "",
+    "```json",
+    "{",
+    '  "id": "DR-001",',
+    '  "title": "short descriptive title",',
+    '  "category": "one of: inferred_contract_gap, trust_boundary_gap, invariant_counterexample, critical_invariant_coverage_gap",',
+    '  "severity": "one of: critical, high, medium, low, info",',
+    '  "confidence": "one of: high, medium, low",',
+    '  "lens": "architecture",',
+    '  "summary": "detailed explanation of the observation and the recommended change",',
+    '  "affected_files": [{"path": "relevant/file.ts"}],',
+    '  "systemic": true',
+    "}",
+    "```",
+    "",
+    "Write the JSON array to the contract review results path provided below. Use finding IDs starting with DR-001.",
+    "",
+    "Focus on substantive, actionable observations. Prefer fewer high-quality findings over many surface-level ones.",
+    "",
+  ].join("\n");
+}
+
+/**
+ * Conceptual-design review prompt (generative pass).
+ * Produces broad architectural and design improvement observations.
+ * Categories: tool_opportunity, architecture_pattern, design_simplification,
+ * integration, missing_capability.
+ */
+export function renderConceptualReviewPrompt(
+  bundle: ArtifactBundle,
+  options: DesignReviewOptions = {},
+): string {
+  const unitCount = bundle.unit_manifest?.units.length ?? 0;
+  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
+  const maxUnits = options.max_units ?? defaultMaxUnits;
+
+  return [
+    "# Project conceptual design review (generative pass)",
+    "",
+    "You are performing the **conceptual-design-critique** pass on this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide generative observations about broader architecture ideas that static analysis cannot produce.",
+    "",
+    renderSharedStructuralContext(bundle, maxUnits),
+    "## Conceptual design critique instructions",
+    "",
+    "- **Tool and library opportunities**: third-party tools, libraries, or frameworks that would improve the project. Concrete suggestions with rationale, not generic advice.",
+    "- **Architecture pattern improvements**: structural changes that would improve extensibility, testability, or maintainability. Consider whether the current abstractions match the problem domain.",
+    "- **Design simplification**: areas where the design is over-engineered or where simpler alternatives would work. Conversely, areas that are under-designed for their importance.",
+    "- **Integration and generalization**: opportunities to make the project more portable, composable, or protocol-aligned (e.g., MCP, standard APIs, plugin architectures).",
+    "- **Missing capabilities**: gaps in the design that would become pain points as the project evolves.",
+    "",
+    "## Output format",
+    "",
+    "Produce a JSON array of findings. Each finding must conform to:",
+    "",
+    "```json",
+    "{",
+    '  "id": "DR-001",',
+    '  "title": "short descriptive title",',
+    '  "category": "one of: tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability",',
+    '  "severity": "one of: critical, high, medium, low, info",',
+    '  "confidence": "one of: high, medium, low",',
+    '  "lens": "architecture",',
+    '  "summary": "detailed explanation of the observation and the recommended change",',
+    '  "affected_files": [{"path": "relevant/file.ts"}],',
+    '  "systemic": true',
+    "}",
+    "```",
+    "",
+    "Write the JSON array to the conceptual review results path provided below. Use finding IDs starting with DR-001.",
+    "",
+    "Focus on substantive, actionable observations. Prefer fewer high-quality findings over many surface-level ones.",
+    "",
+  ].join("\n");
+}
+
+/**
+ * Combined fallback prompt for non-dispatch paths: both contract-assessment and
+ * conceptual-design-critique sections in a single agent turn.
+ */
+export function renderDesignReviewPrompt(
+  bundle: ArtifactBundle,
+  options: DesignReviewOptions = {},
+): string {
+  const unitCount = bundle.unit_manifest?.units.length ?? 0;
+  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
+  const maxUnits = options.max_units ?? defaultMaxUnits;
+
+  return [
+    "# Project design review",
+    "",
+    "You are reviewing the overall design of this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide qualitative observations in two distinct modes: contract assessment for inferred or existing project contracts, and conceptual design critique for broader architecture ideas that static analysis cannot produce.",
+    "",
+    renderSharedStructuralContext(bundle, maxUnits),
+    "## What to assess",
+    "",
+    `Focus on the ${maxUnits} highest-risk units listed above; you need not read the entire repository, though you may follow any thread that demands more context. Produce findings about:`,
     "",
     "### Contract assessment",
     "",

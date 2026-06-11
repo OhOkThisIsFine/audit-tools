@@ -1054,6 +1054,7 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
       "model_hint",
       "packet_id",
       "prompt_path",
+      "result_path",
     ]);
     assert.deepEqual(plan[0].complexity, {
       priority: "medium",
@@ -1084,20 +1085,17 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
     const prompt = await readFile(plan[0].prompt_path, "utf8");
     assert.match(prompt, /## Packet graph context/);
     assert.match(prompt, /Quality: cohesion=/);
-    assert.match(prompt, /submit exactly one result per listed task/i);
+    assert.match(prompt, /emit exactly one result per listed task/i);
     assert.match(prompt, /Do not use shell search commands/i);
     assert.match(prompt, /src-auth:security/);
     assert.match(prompt, /src-auth:correctness/);
+    // Inline emit: result_path is embedded in the prompt; no submit-packet command.
+    assert.match(prompt, /result_path:/);
+    assert.doesNotMatch(prompt, /submit-packet/);
+    // Case-insensitive match: old prompt had lowercase "reply", new has "Reply"
     assert.match(
       prompt,
-      new RegExp(
-        `submit-packet --run-id-b64 ${Buffer.from("run-1").toString("base64url")} --packet-id-b64 ${Buffer.from(plan[0].packet_id).toString("base64url")}`,
-      ),
-    );
-    assert.doesNotMatch(prompt, /output_path:/);
-    assert.match(
-      prompt,
-      new RegExp(`reply exactly: valid: ${plan[0].packet_id}, findings=<total finding count>`),
+      new RegExp(`reply exactly: valid: ${plan[0].packet_id}, findings=<total finding count>`, "i"),
     );
   });
 });

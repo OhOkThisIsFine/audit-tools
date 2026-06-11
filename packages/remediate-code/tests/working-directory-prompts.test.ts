@@ -4,14 +4,13 @@
  * relying on leaked cwd state from prior Bash or PowerShell calls.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateStore } from "../src/state/store.js";
 import type { RemediationState } from "../src/state/store.js";
 import {
-  prepareDocumentDispatch,
   prepareImplementDispatch,
 } from "../src/steps/dispatch.js";
 
@@ -20,9 +19,9 @@ const TEST_DIR = join(__dirname, ".test-workdir-prompts");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 
-function makePlanningState(): RemediationState {
+function makeImplementingState(): RemediationState {
   return {
-    status: "planning",
+    status: "implementing",
     plan: {
       plan_id: "PLAN-WD",
       findings: [
@@ -45,25 +44,22 @@ function makePlanningState(): RemediationState {
       candidate_closing_actions: ["none"],
     },
     items: {
-      "F-001": { finding_id: "F-001", status: "pending", block_id: "B-001" },
+      "F-001": {
+        finding_id: "F-001",
+        status: "pending",
+        block_id: "B-001",
+        item_spec: {
+          finding_id: "F-001",
+          concrete_change: "fix it",
+          no_change: false,
+          touched_files: ["src/a.ts"],
+          tests_to_write: [{ name: "test1", assertions: ["passes"] }],
+          not_applicable_steps: [],
+        },
+      },
     },
     closing_plan: { action: "none" },
   } as RemediationState;
-}
-
-function makeDocumentingState(): RemediationState {
-  const state = makePlanningState();
-  state.status = "documenting";
-  state.items!["F-001"].status = "documented";
-  state.items!["F-001"].item_spec = {
-    finding_id: "F-001",
-    concrete_change: "fix it",
-    no_change: false,
-    touched_files: ["src/a.ts"],
-    tests_to_write: [{ name: "test1", assertions: ["passes"] }],
-    not_applicable_steps: [],
-  };
-  return state;
 }
 
 async function saveState(state: RemediationState): Promise<void> {
@@ -79,62 +75,9 @@ afterEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
 });
 
-describe("document worker prompts — workdir explicitness (FINDING-008)", () => {
-  it("includes the repository root in the document worker prompt", async () => {
-    const state = makePlanningState();
-    await saveState(state);
-
-    const plan = await prepareDocumentDispatch(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      "PLAN-WD",
-    );
-
-    expect(plan.items).toHaveLength(1);
-    const { readFileSync } = await import("node:fs");
-    const prompt = readFileSync(plan.items[0].prompt_path, "utf8");
-
-    expect(prompt).toMatch(/Repository root:/i);
-    expect(prompt).toContain(REPO_DIR.replace(/\\/g, "/"));
-  });
-
-  it("tells document workers to set workdir to the repository root", async () => {
-    const state = makePlanningState();
-    await saveState(state);
-
-    const plan = await prepareDocumentDispatch(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      "PLAN-WD",
-    );
-
-    expect(plan.items).toHaveLength(1);
-    const { readFileSync } = await import("node:fs");
-    const prompt = readFileSync(plan.items[0].prompt_path, "utf8");
-
-    // Must explicitly tell the worker to set workdir, NOT rely on cwd state.
-    expect(prompt).toMatch(/workdir|working.?dir/i);
-    expect(prompt).not.toMatch(/current working directory/i);
-  });
-
-  it("document worker prompt does not instruct workers to use `cd`", async () => {
-    const state = makePlanningState();
-    await saveState(state);
-
-    const plan = await prepareDocumentDispatch(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      "PLAN-WD",
-    );
-
-    const { readFileSync } = await import("node:fs");
-    const prompt = readFileSync(plan.items[0].prompt_path, "utf8");
-
-    // Should not suggest `cd` as the way to establish command context.
-    expect(prompt).not.toMatch(/\bcd\s+["'`]?\//);
-  });
-});
-
 describe("implement worker prompts — workdir explicitness (FINDING-008)", () => {
   it("includes the repository root in the implement worker prompt", async () => {
-    const state = makeDocumentingState();
+    const state = makeImplementingState();
     await saveState(state);
 
     const plan = await prepareImplementDispatch(
@@ -151,7 +94,7 @@ describe("implement worker prompts — workdir explicitness (FINDING-008)", () =
   });
 
   it("tells implement workers to set workdir to the repository root", async () => {
-    const state = makeDocumentingState();
+    const state = makeImplementingState();
     await saveState(state);
 
     const plan = await prepareImplementDispatch(
@@ -168,7 +111,7 @@ describe("implement worker prompts — workdir explicitness (FINDING-008)", () =
   });
 
   it("implement worker prompt does not instruct workers to use `cd`", async () => {
-    const state = makeDocumentingState();
+    const state = makeImplementingState();
     await saveState(state);
 
     const plan = await prepareImplementDispatch(
@@ -184,21 +127,8 @@ describe("implement worker prompts — workdir explicitness (FINDING-008)", () =
 });
 
 describe("dispatch plan — slash-safe host-facing paths (FINDING-004 + FINDING-008)", () => {
-  it("dispatch plan repo_root and artifacts_dir use forward slashes", async () => {
-    const state = makePlanningState();
-    await saveState(state);
-
-    const plan = await prepareDocumentDispatch(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      "PLAN-WD",
-    );
-
-    expect(plan.repo_root).not.toContain("\\");
-    expect(plan.artifacts_dir).not.toContain("\\");
-  });
-
   it("implement dispatch plan repo_root and artifacts_dir use forward slashes", async () => {
-    const state = makeDocumentingState();
+    const state = makeImplementingState();
     await saveState(state);
 
     const plan = await prepareImplementDispatch(

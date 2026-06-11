@@ -6,15 +6,13 @@ import { DISPATCH_PROMPT_HANDOFF_NOTE } from "@audit-tools/shared";
 import { StateStore } from "../src/state/store.js";
 import type { RemediationState } from "../src/state/store.js";
 import {
-  prepareDocumentDispatch,
   prepareImplementDispatch,
 } from "../src/steps/dispatch.js";
 import { decideNextStep } from "../src/steps/nextStep.js";
 
-// Phase 7A regression: the canonical next-step wave path must inject the
-// "match the surrounding code" house-style block into both the document and
-// implement worker prompts, and the synthesis theme hint into the document
-// prompt for findings that carry a theme_id.
+// Regression: the canonical next-step wave path must inject the
+// "match the surrounding code" house-style block into implement
+// worker prompts.
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-dispatch-conventions");
@@ -81,11 +79,11 @@ function makePlanningState(): RemediationState {
   } as unknown as RemediationState;
 }
 
-function makeDocumentingState(): RemediationState {
+function makeImplementingState(): RemediationState {
   const state = makePlanningState();
-  state.status = "documenting";
+  state.status = "implementing";
   for (const id of ["F-001", "F-002"]) {
-    state.items![id].status = "documented";
+    state.items![id].status = "pending";
     state.items![id].item_spec = {
       finding_id: id,
       concrete_change: "fix it",
@@ -100,6 +98,28 @@ async function acknowledgeImplementationPreview(): Promise<void> {
   await writeFile(
     join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
     JSON.stringify({ status: "confirmed", ignored_findings: [] }),
+    "utf8",
+  );
+}
+
+async function acknowledgeResume(): Promise<void> {
+  await writeFile(
+    join(ARTIFACTS_DIR, "confirm_resume_ack.json"),
+    JSON.stringify({ choice: "resume" }),
+    "utf8",
+  );
+}
+
+async function writeIntentCheckpoint(): Promise<void> {
+  await writeFile(
+    join(ARTIFACTS_DIR, "intent_checkpoint.json"),
+    JSON.stringify({
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: new Date().toISOString(),
+      scope_summary: "Test scope",
+      intent_summary: "Test intent",
+      confirmed_by: "host",
+    }),
     "utf8",
   );
 }
@@ -132,42 +152,9 @@ afterEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
 });
 
-describe("dispatch prompts carry Phase 7A house style + theme hints", () => {
-  it("document prompts include repo conventions; theme hint only when theme_id is set", async () => {
-    await saveState(makePlanningState());
-
-    await prepareDocumentDispatch(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      "PLAN-1",
-    );
-
-    const docDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "document");
-    const themed = await readFile(join(docDir, "document-F-001.md"), "utf8");
-    const plain = await readFile(join(docDir, "document-F-002.md"), "utf8");
-
-    // Conventions appear in every document prompt.
-    expect(themed).toContain(CONVENTIONS_MARKER);
-    expect(plain).toContain(CONVENTIONS_MARKER);
-    // Repository root is normalized to forward slashes in host-facing prompts (FINDING-004).
-    expect(themed).toContain(`Repository root: ${REPO_DIR.replace(/\\/g, "/")}`);
-    expect(themed).toMatch(/Set the shell\/tool workdir to the repository root/i);
-    expect(themed).toMatch(/do not pipe an inline foreach statement directly into ConvertTo-Json/i);
-    expect(themed).toMatch(/Assign the foreach output to a variable first/i);
-
-    // The themed finding gets its synthesis fix pattern; the other does not.
-    expect(themed).toContain("SYNTHESIS THEME (THEME-1");
-    expect(themed).toContain("Add a zod schema at each boundary.");
-    expect(themed).toContain("Contract Pipeline Traceability");
-    expect(themed).toContain("Contract goal: G1");
-    expect(themed).toContain("Satisfies obligations: O-1");
-    expect(themed).toContain("Verification obligations: VO-1");
-    expect(themed).toContain("Targeted commands: npm test -- auth");
-    expect(plain).not.toContain("SYNTHESIS THEME");
-    expect(plain).not.toContain("Contract Pipeline Traceability");
-  });
-
+describe("dispatch prompts carry house style", () => {
   it("implement prompts include repo conventions", async () => {
-    await saveState(makeDocumentingState());
+    await saveState(makeImplementingState());
 
     await prepareImplementDispatch(
       { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
@@ -187,7 +174,7 @@ describe("dispatch prompts carry Phase 7A house style + theme hints", () => {
   });
 
   it("implement prompts include attributable verification and PowerShell JSON guidance", async () => {
-    await saveState(makeDocumentingState());
+    await saveState(makeImplementingState());
 
     await prepareImplementDispatch(
       { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
@@ -210,25 +197,8 @@ describe("dispatch prompts carry Phase 7A house style + theme hints", () => {
 describe("dispatch prompts invite opt-in agent reflections", () => {
   const FEEDBACK_PATH = `${ARTIFACTS_DIR.replace(/\\/g, "/")}/agent-feedback.jsonl`;
 
-  it("document prompts carry the invitation with finding id, lens, and feedback path", async () => {
-    await saveState(makePlanningState());
-
-    await prepareDocumentDispatch(
-      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
-      "PLAN-1",
-    );
-
-    const docDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "document");
-    const prompt = await readFile(join(docDir, "document-F-001.md"), "utf8");
-    expect(prompt).toContain("## Optional process feedback");
-    expect(prompt).toContain(FEEDBACK_PATH);
-    expect(prompt).toContain('"task_id": "F-001", "lens": "security"');
-    expect(prompt).toMatch(/Never let this delay or replace the required output/);
-    expect(prompt).toMatch(/One object per line; never overwrite existing lines/);
-  });
-
   it("implement prompts carry the invitation keyed by block id", async () => {
-    await saveState(makeDocumentingState());
+    await saveState(makeImplementingState());
 
     await prepareImplementDispatch(
       { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
@@ -244,22 +214,11 @@ describe("dispatch prompts invite opt-in agent reflections", () => {
 });
 
 describe("dispatch step prompts carry DISPATCH_PROMPT_HANDOFF_NOTE", () => {
-  it("dispatch_document step prompt includes DISPATCH_PROMPT_HANDOFF_NOTE", async () => {
-    await saveState(makePlanningState());
-
-    const step = await decideNextStep({
-      root: REPO_DIR,
-      hostCanDispatchSubagents: true,
-    });
-
-    expect(step.step_kind).toBe("dispatch_document");
-    const prompt = await readFile(step.prompt_path, "utf8");
-    expect(prompt).toContain(DISPATCH_PROMPT_HANDOFF_NOTE);
-  });
-
   it("dispatch_implement step prompt includes DISPATCH_PROMPT_HANDOFF_NOTE", async () => {
-    await saveState(makeDocumentingState());
+    await saveState(makeImplementingState());
     await acknowledgeImplementationPreview();
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
 
     const step = await decideNextStep({
       root: REPO_DIR,

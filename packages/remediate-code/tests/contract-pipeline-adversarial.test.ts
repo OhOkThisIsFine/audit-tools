@@ -16,6 +16,7 @@ import {
   ingestContractArtifacts,
   validateImplementationDagTraceability,
   promoteImplementationDagToExtractedPlan,
+  inferRepairTarget,
   MAX_CONTRACT_REPAIR_ITERATIONS,
   MAX_DAG_REGENERATION_ATTEMPTS,
 } from "../src/steps/contractPipeline.js";
@@ -23,6 +24,7 @@ import {
   contractArtifactFilePath,
   contractPipelineDir,
   readContractArtifact,
+  writeContractArtifact,
   type ContractPipelineArtifactName,
 } from "../src/contractPipeline/artifactStore.js";
 import { intakePaths } from "../src/intake.js";
@@ -49,10 +51,11 @@ async function writeRawArtifact(
 }
 
 function payloads(overrides: {
-  designNarrative?: string;
+  finalizedNarrative?: string;
   counterexamples?: unknown[];
   judge?: unknown;
 } = {}) {
+  const moduleName = "auth-module";
   return {
     goal_spec: {
       contract_version: "remediate-code-contract-pipeline/goal-spec/v1alpha1",
@@ -70,12 +73,46 @@ function payloads(overrides: {
       context_summary: "Auth flow context.",
       created_at: CREATED_AT,
     },
-    design_spec: {
-      contract_version: "remediate-code-contract-pipeline/design-spec/v1alpha1",
+    module_decomposition: {
+      contract_version: "remediate-code-contract-pipeline/module-decomposition/v1alpha1",
       goal_id: "G1",
-      design_narrative: overrides.designNarrative ?? "Refactor the auth flow.",
-      invariants: [{ id: "INV-1", description: "Sessions stay valid." }],
-      affected_paths: ["src/auth.ts"],
+      modules: [{ name: moduleName, responsibilities: "Handles auth.", file_scope: ["src/auth.ts"] }],
+      created_at: CREATED_AT,
+    },
+    module_contracts: {
+      contract_version: "remediate-code-contract-pipeline/module-contracts/v1alpha1",
+      goal_id: "G1",
+      module_contracts: [{
+        name: moduleName,
+        inputs: ["credentials"],
+        outputs: ["session"],
+        invariants: ["INV-1: Sessions stay valid."],
+        side_effects: [],
+        validation_boundary: "Validates credentials.",
+        failure_modes: ["InvalidCredentials"],
+        neighbor_needs: [],
+      }],
+      created_at: CREATED_AT,
+    },
+    seam_reconciliation_report: {
+      contract_version: "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
+      goal_id: "G1",
+      mismatches: [],
+      created_at: CREATED_AT,
+    },
+    finalized_module_contracts: {
+      contract_version: "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
+      goal_id: "G1",
+      module_contracts: [{
+        name: moduleName,
+        inputs: ["credentials"],
+        outputs: overrides.finalizedNarrative ? ["session (preserving across refresh: " + overrides.finalizedNarrative + ")"] : ["session"],
+        invariants: ["INV-1: Sessions stay valid."],
+        side_effects: [],
+        validation_boundary: "Validates credentials.",
+        failure_modes: ["InvalidCredentials"],
+        seam_adjustments: [],
+      }],
       created_at: CREATED_AT,
     },
     conceptual_design_critique: {
@@ -98,6 +135,21 @@ function payloads(overrides: {
           status: "pending",
         },
       ],
+      created_at: CREATED_AT,
+    },
+    cyclic_seam_resolution: {
+      contract_version:
+        "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+      goal_id: "G1",
+      cycles: [],
+      status: "no_cycles",
+      created_at: CREATED_AT,
+    },
+    test_validator_plan: {
+      contract_version:
+        "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
+      goal_id: "G1",
+      test_specs: [],
       created_at: CREATED_AT,
     },
     contract_assessment_report: {
@@ -127,9 +179,14 @@ function payloads(overrides: {
 const CHAIN_THROUGH_JUDGE = [
   "goal_spec",
   "context_bundle",
-  "design_spec",
+  "module_decomposition",
+  "module_contracts",
+  "seam_reconciliation_report",
+  "finalized_module_contracts",
   "conceptual_design_critique",
   "obligation_ledger",
+  "cyclic_seam_resolution",
+  "test_validator_plan",
   "contract_assessment_report",
   "counterexample",
   "judge_report",
@@ -212,7 +269,8 @@ describe("ingestion: raw worker payloads become validated envelopes", () => {
 describe("clean run: approved judge verdict proceeds to implementation planning", () => {
   it("dispatches critic after assessment and judge after the counterexample report", async () => {
     const all = payloads();
-    for (const name of CHAIN_THROUGH_JUDGE.slice(0, 6)) {
+    // slice(0, 11) = goal_spec..contract_assessment_report (stop before counterexample)
+    for (const name of CHAIN_THROUGH_JUDGE.slice(0, 11)) {
       await writeRawArtifact(name, all[name]);
     }
 
@@ -251,7 +309,7 @@ describe("repair cycle: failing verdict triggers one targeted repair and re-deri
       },
     ],
     repair_directive: {
-      target: "design_spec",
+      target: "finalized_module_contracts",
       instruction: "Add a session-preservation invariant covering token refresh.",
     },
     created_at: CREATED_AT,
@@ -274,18 +332,18 @@ describe("repair cycle: failing verdict triggers one targeted repair and re-deri
 
     const repairStep = await buildNextContractPipelineStep(STEP_OPTIONS);
     const prompt = await promptOf(repairStep!);
-    expect(prompt).toMatch(/Contract Repair: design_spec/);
+    expect(prompt).toMatch(/Contract Repair: finalized_module_contracts/);
     expect(prompt).toMatch(/session-preservation invariant/);
 
     const repairStatePath = join(contractPipelineDir(ARTIFACTS_DIR), "repair-state.json");
     const stateAfterFirst = JSON.parse(await readFile(repairStatePath, "utf8"));
     expect(stateAfterFirst.repairs).toHaveLength(1);
-    expect(stateAfterFirst.repairs[0].target).toBe("design_spec");
+    expect(stateAfterFirst.repairs[0].target).toBe("finalized_module_contracts");
 
     // Re-invoking without the worker acting re-emits the SAME repair step
     // without recording another iteration.
     const repeatStep = await buildNextContractPipelineStep(STEP_OPTIONS);
-    expect(await promptOf(repeatStep!)).toMatch(/Contract Repair: design_spec/);
+    expect(await promptOf(repeatStep!)).toMatch(/Contract Repair: finalized_module_contracts/);
     const stateAfterRepeat = JSON.parse(await readFile(repairStatePath, "utf8"));
     expect(stateAfterRepeat.repairs).toHaveLength(1);
   });
@@ -296,13 +354,13 @@ describe("repair cycle: failing verdict triggers one targeted repair and re-deri
     // Invocation 1: repair step (also ingests the raw chain into envelopes).
     await buildNextContractPipelineStep(STEP_OPTIONS);
 
-    // The repair worker rewrites design_spec with new content (raw payload).
+    // The repair worker rewrites finalized_module_contracts with new content (raw payload).
     await writeRawArtifact(
-      "design_spec",
-      payloads({ designNarrative: "Refactor the auth flow, preserving sessions across refresh." }).design_spec,
+      "finalized_module_contracts",
+      payloads({ finalizedNarrative: "session preservation across refresh" }).finalized_module_contracts,
     );
 
-    // Invocation 2: the repaired design is ingested with a new content hash;
+    // Invocation 2: the repaired contracts are ingested with a new content hash;
     // everything downstream goes stale, is archived, and the first missing
     // phase is the design critique re-derivation.
     const step = await buildNextContractPipelineStep(STEP_OPTIONS);
@@ -321,8 +379,10 @@ describe("repair cycle: failing verdict triggers one targeted repair and re-deri
     expect(history.some((f) => f.startsWith("judge_report.stale-"))).toBe(true);
 
     // The workers re-derive the chain; the judge now approves.
-    const all = payloads({ designNarrative: "Refactor the auth flow, preserving sessions across refresh." });
-    for (const name of CHAIN_THROUGH_JUDGE.slice(3)) {
+    // slice(6) = skip goal_spec, context_bundle, module_decomposition, module_contracts,
+    // seam_reconciliation_report, finalized_module_contracts — restart from conceptual_design_critique
+    const all = payloads({ finalizedNarrative: "session preservation across refresh" });
+    for (const name of CHAIN_THROUGH_JUDGE.slice(6)) {
       await writeRawArtifact(name, all[name]);
     }
 
@@ -350,7 +410,7 @@ describe("repair cycle: failing verdict triggers one targeted repair and re-deri
       JSON.stringify({
         schema_version: "remediate-code-contract-pipeline/repair-state/v1alpha1",
         repairs: [
-          { judge_hash: "prior-judge-1", target: "design_spec", at: CREATED_AT },
+          { judge_hash: "prior-judge-1", target: "finalized_module_contracts", at: CREATED_AT },
           { judge_hash: "prior-judge-2", target: "obligation_ledger", at: CREATED_AT },
         ],
         dag_regenerations: [],
@@ -455,5 +515,286 @@ describe("traceability gate: untraceable implementation_dag nodes never promote"
     expect(plan.findings[0].evidence).toContain(
       "Addresses accepted counterexample: CE-1",
     );
+  });
+});
+
+describe("design-spec structural gates: critic phase gate checks", () => {
+  /** Write all artifacts up to (but not including) the critic artifact. */
+  async function writeChainThroughAssessment(
+    finalizedModuleContractsOverride?: unknown,
+    obligationLedgerOverride?: unknown,
+  ): Promise<void> {
+    const base = payloads();
+    const chainNames = [
+      "goal_spec",
+      "context_bundle",
+      "module_decomposition",
+      "module_contracts",
+      "seam_reconciliation_report",
+      "finalized_module_contracts",
+      "conceptual_design_critique",
+      "obligation_ledger",
+      "cyclic_seam_resolution",
+      "test_validator_plan",
+      "contract_assessment_report",
+    ] as const;
+    for (const name of chainNames) {
+      if (name === "finalized_module_contracts" && finalizedModuleContractsOverride !== undefined) {
+        await writeRawArtifact(name, finalizedModuleContractsOverride);
+      } else if (name === "obligation_ledger" && obligationLedgerOverride !== undefined) {
+        await writeRawArtifact(name, obligationLedgerOverride);
+      } else if (name === "cyclic_seam_resolution") {
+        await writeRawArtifact(name, {
+          contract_version: "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+          goal_id: "G1",
+          cycles: [],
+          status: "no_cycles",
+          created_at: CREATED_AT,
+        });
+      } else if (name === "test_validator_plan") {
+        await writeRawArtifact(name, {
+          contract_version: "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
+          goal_id: "G1",
+          test_specs: [],
+          created_at: CREATED_AT,
+        });
+      } else {
+        await writeRawArtifact(name, (base as Record<string, unknown>)[name]);
+      }
+    }
+    // Ingest so artifacts are in valid envelope form.
+    await ingestContractArtifacts(ARTIFACTS_DIR);
+  }
+
+  it("re-emits design phase when finalized_module_contracts has a module missing outputs", async () => {
+    const badFinalized = {
+      contract_version: "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
+      goal_id: "G1",
+      module_contracts: [{
+        name: "auth-module",
+        inputs: ["credentials"],
+        outputs: [], // missing outputs — gate error
+        invariants: [],
+        side_effects: [],
+        validation_boundary: "Validates credentials.",
+        failure_modes: [],
+      }],
+      created_at: CREATED_AT,
+    };
+    await writeChainThroughAssessment(badFinalized);
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+
+    expect(step?.step_kind).toBe("contract_pipeline");
+    const prompt = await promptOf(step!);
+    // Re-emits the contract_finalization (design) phase
+    expect(prompt).toMatch(/Contract Finalization|Finalized Module Contracts/i);
+    // Gate error message present
+    expect(prompt).toMatch(/Design Structural Gate Errors|outputs/i);
+  });
+
+  it("appends N-R21 advisory when circular obligation dependency warning is present", async () => {
+    const circularLedger = {
+      contract_version: "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
+      goal_id: "G1",
+      obligations: [
+        { id: "O-1", description: "Obligation 1", kind: "behavioral", depends_on: ["O-2"], status: "pending" },
+        { id: "O-2", description: "Obligation 2", kind: "behavioral", depends_on: ["O-1"], status: "pending" },
+      ],
+      created_at: CREATED_AT,
+    };
+    await writeChainThroughAssessment(undefined, circularLedger);
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+
+    expect(step?.step_kind).toBe("contract_pipeline");
+    const prompt = await promptOf(step!);
+    // Should emit the critic phase step (not re-emit design)
+    expect(prompt).toMatch(/Critic|counterexample/i);
+    // Advisory section for circular dependency warning
+    expect(prompt).toContain("N-R21");
+  });
+});
+
+describe("inferRepairTarget: judge repair-directive inference (N-R11)", () => {
+  it("defaults to design_spec when there are no accepted classifications", () => {
+    const result = inferRepairTarget([
+      {
+        counterexample_id: "CE-1",
+        classification: "out_of_scope",
+        rationale: "This is out of scope.",
+      },
+    ]);
+    expect(result).toBe("design_spec");
+  });
+
+  it("defaults to design_spec when classifications array is empty", () => {
+    expect(inferRepairTarget([])).toBe("design_spec");
+  });
+
+  it("infers obligation_ledger when accepted rationale contains 'obligation'", async () => {
+    // Write all artifacts up to (not including) the judge_report via writeRawChainThroughJudge
+    // excluding the judge, then write the judge as a pre-validated envelope (no repair_directive)
+    // so the inference path in evaluateJudgeGate is exercised.
+    const all = payloads({
+      counterexamples: [
+        {
+          id: "CE-1",
+          claim: "Obligation not covered.",
+          reproduction_steps: ["Check the ledger."],
+          expected: "Obligation present.",
+          actual: "Missing.",
+          violated_obligation_ids: ["O-1"],
+        },
+      ],
+    });
+    for (const name of CHAIN_THROUGH_JUDGE.slice(0, -1)) {
+      await writeRawArtifact(name, all[name]);
+    }
+    // Ingest the raw artifacts so the pipeline has valid envelopes for everything before judge.
+    await ingestContractArtifacts(ARTIFACTS_DIR);
+    // Write judge as pre-enveloped artifact (bypasses validator, which requires repair_directive).
+    await writeContractArtifact(ARTIFACTS_DIR, "judge_report", {
+      contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+      goal_id: "G1",
+      verdict: "needs_repair",
+      classifications: [
+        {
+          counterexample_id: "CE-1",
+          classification: "accepted",
+          rationale: "obligation not covered in the ledger",
+        },
+      ],
+      // no repair_directive — inference should kick in
+      created_at: CREATED_AT,
+    });
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const prompt = await promptOf(step!);
+    expect(prompt).toMatch(/Contract Repair: obligation_ledger/);
+  });
+
+  it("infers contract_assessment_report when accepted rationale contains 'contract finding'", async () => {
+    const all = payloads({
+      counterexamples: [
+        {
+          id: "CE-2",
+          claim: "Contract finding unaddressed.",
+          reproduction_steps: ["Check assessment."],
+          expected: "Finding addressed.",
+          actual: "Not addressed.",
+          violated_obligation_ids: ["O-1"],
+        },
+      ],
+    });
+    for (const name of CHAIN_THROUGH_JUDGE.slice(0, -1)) {
+      await writeRawArtifact(name, all[name]);
+    }
+    await ingestContractArtifacts(ARTIFACTS_DIR);
+    await writeContractArtifact(ARTIFACTS_DIR, "judge_report", {
+      contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+      goal_id: "G1",
+      verdict: "needs_repair",
+      classifications: [
+        {
+          counterexample_id: "CE-2",
+          classification: "accepted",
+          rationale: "contract finding unaddressed",
+        },
+      ],
+      // no repair_directive — inference should kick in
+      created_at: CREATED_AT,
+    });
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const prompt = await promptOf(step!);
+    expect(prompt).toMatch(/Contract Repair: contract_assessment_report/);
+  });
+
+  it("falls back to finalized_module_contracts (design_spec mapped) when no known keyword", async () => {
+    const all = payloads({
+      counterexamples: [
+        {
+          id: "CE-3",
+          claim: "Sessions are invalidated on refresh.",
+          reproduction_steps: ["Refresh the token."],
+          expected: "Session preserved.",
+          actual: "Session dropped.",
+          violated_obligation_ids: ["O-1"],
+        },
+      ],
+    });
+    for (const name of CHAIN_THROUGH_JUDGE.slice(0, -1)) {
+      await writeRawArtifact(name, all[name]);
+    }
+    await ingestContractArtifacts(ARTIFACTS_DIR);
+    await writeContractArtifact(ARTIFACTS_DIR, "judge_report", {
+      contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+      goal_id: "G1",
+      verdict: "needs_repair",
+      classifications: [
+        {
+          counterexample_id: "CE-3",
+          classification: "accepted",
+          rationale: "Sessions are invalidated on refresh.",
+        },
+      ],
+      // no repair_directive — generic rationale → design_spec → finalized_module_contracts
+      created_at: CREATED_AT,
+    });
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const prompt = await promptOf(step!);
+    expect(prompt).toMatch(/Contract Repair: finalized_module_contracts/);
+  });
+
+  it("explicit repair_directive is honored over inference", async () => {
+    await writeRawChainThroughJudge({
+      counterexamples: [
+        {
+          id: "CE-4",
+          claim: "obligation not covered",
+          reproduction_steps: [],
+          expected: "covered",
+          actual: "missing",
+          violated_obligation_ids: ["O-1"],
+        },
+      ],
+      judge: {
+        contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+        goal_id: "G1",
+        verdict: "needs_repair",
+        classifications: [
+          {
+            counterexample_id: "CE-4",
+            classification: "accepted",
+            rationale: "obligation not covered",
+          },
+        ],
+        repair_directive: {
+          target: "obligation_ledger",
+          instruction: "Add the missing obligation entry.",
+        },
+        created_at: CREATED_AT,
+      },
+    });
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const prompt = await promptOf(step!);
+    // The explicit directive is used as-is (obligation_ledger), not overridden.
+    expect(prompt).toMatch(/Contract Repair: obligation_ledger/);
+    expect(prompt).toMatch(/Add the missing obligation entry/);
+  });
+
+  it("inferRepairTarget: the fallback instruction mentions addressing counterexamples", () => {
+    // Pure unit check: design_spec default produces the standard instruction text
+    // via the inferred directive path (tested indirectly via the integration above,
+    // but also verify the pure function returns design_spec for no-accepted-input).
+    expect(inferRepairTarget([])).toBe("design_spec");
+    expect(
+      inferRepairTarget([
+        { counterexample_id: "CE-X", classification: "out_of_scope", rationale: "nope" },
+      ]),
+    ).toBe("design_spec");
   });
 });

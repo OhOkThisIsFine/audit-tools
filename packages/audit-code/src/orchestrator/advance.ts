@@ -7,7 +7,7 @@ import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import { decideNextStep, findObligation } from "./nextStep.js";
 import { deriveAuditState } from "./state.js";
 import { computeArtifactMetadata } from "./artifactMetadata.js";
-import { runIntakeExecutor } from "./intakeExecutors.js";
+import { runIntakeExecutor, runProviderConfirmationAutoComplete } from "./intakeExecutors.js";
 import { runIntentCheckpointAutoComplete } from "./intentCheckpointExecutor.js";
 import {
   runStructureExecutor,
@@ -164,6 +164,10 @@ export async function advanceAudit(
   });
   try {
     switch (selectedExecutor) {
+      case "provider_confirmation_executor": {
+        run = runProviderConfirmationAutoComplete(bundle);
+        break;
+      }
       case "intake_executor": {
         const root = requireRoot(options.root, "intake_executor");
         run = await runIntakeExecutor(bundle, root);
@@ -189,8 +193,15 @@ export async function advanceAudit(
       case "design_assessment_executor":
         run = runDesignAssessmentExecutor(bundle);
         break;
+      case "design_review_contract":
+        run = runDesignReviewAutoComplete(bundle, "contract");
+        break;
+      case "design_review_conceptual":
+        run = runDesignReviewAutoComplete(bundle, "conceptual");
+        break;
       case "design_review":
-        run = runDesignReviewAutoComplete(bundle);
+        // Legacy: auto-complete both passes.
+        run = runDesignReviewAutoComplete(bundle, "both");
         break;
       case "planning_executor": {
         const root = requireRoot(options.root, "planning_executor");
@@ -257,16 +268,17 @@ export async function advanceAudit(
         run = runSyntaxResolutionExecutor(bundle, root);
         break;
       }
-      // `agent` is a host-delegation executor: its review tasks are dispatched
-      // to the active LLM agent (or a worker) and ingested via
-      // result_ingestion_executor — advanceAudit cannot complete them
-      // deterministically. Callers (next-step / run-to-completion) route it
-      // through host delegation before reaching here; if it is dispatched into
-      // advanceAudit directly it falls through to the default branch, which
+      // `agent` and `rolling_dispatch_executor` are host-delegation executors:
+      // the review tasks are dispatched to sub-agents by the host and ingested
+      // via merge-and-ingest + next-step. advanceAudit cannot complete them
+      // deterministically. Callers (next-step / run-to-completion) route them
+      // through host delegation before reaching here; if dispatched into
+      // advanceAudit directly they fall through to the default branch, which
       // returns a no-progress "selected but not yet dispatched" handoff rather
-      // than throwing. An explicit case keeps the registry⇄switch invariant
-      // (executor-registry-sync) honest about agent being handled here.
+      // than throwing. Explicit cases keep the registry⇄switch invariant
+      // (executor-registry-sync) honest.
       case "agent":
+      case "rolling_dispatch_executor":
       default: {
         log.event({
           phase: "advance",

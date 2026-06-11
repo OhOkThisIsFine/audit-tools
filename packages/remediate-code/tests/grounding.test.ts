@@ -308,6 +308,20 @@ describe("runPlanPhase — extracted-input grounding (WS1+WS2)", () => {
   });
 });
 
+async function writeIntentCheckpoint(): Promise<void> {
+  await writeFile(
+    join(ARTIFACTS_DIR, "intent_checkpoint.json"),
+    JSON.stringify({
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: new Date().toISOString(),
+      scope_summary: "Test scope",
+      intent_summary: "Test intent",
+      confirmed_by: "host",
+    }),
+    "utf8",
+  );
+}
+
 describe("decideNextStep — extracted-plan.json grounding (WS1+WS2)", () => {
   it("grounds a pending extracted plan and records coverage on state", async () => {
     await writeFile(
@@ -330,6 +344,7 @@ describe("decideNextStep — extracted-plan.json grounding (WS1+WS2)", () => {
       }),
       "utf8",
     );
+    await writeIntentCheckpoint();
 
     await decideNextStep({ root: TEST_DIR, hostCanDispatchSubagents: true });
 
@@ -370,6 +385,7 @@ describe("decideNextStep — extracted-plan.json grounding (WS1+WS2)", () => {
       }),
       "utf8",
     );
+    await writeIntentCheckpoint();
 
     await decideNextStep({ root: TEST_DIR, hostCanDispatchSubagents: true });
 
@@ -390,6 +406,7 @@ describe("decideNextStep — extracted-plan.json grounding (WS1+WS2)", () => {
       }),
       "utf8",
     );
+    await writeIntentCheckpoint();
 
     await decideNextStep({ root: TEST_DIR, hostCanDispatchSubagents: true });
 

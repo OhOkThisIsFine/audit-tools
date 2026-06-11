@@ -4,14 +4,15 @@ import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveIntakeStep } from "../src/steps/intakeResolver.js";
-import { StateStore } from "../src/state/store.js";
 import {
   intakePaths,
+  intakeSummaryContentErrors,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
   INTAKE_SUMMARY_SCHEMA_VERSION,
   type IntakeSourceManifest,
   type IntakeSummary,
 } from "../src/intake.js";
+import { validateSuppliedInput } from "../src/steps/intakeResolver.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-intake-resolver");
@@ -24,7 +25,6 @@ function makeStubs() {
   );
   const synthesizeIntakePrompt = vi.fn(() => "synthesize intake prompt");
   const collectIntakeClarificationsPrompt = vi.fn(() => "collect clarifications prompt");
-  const extractFindingsPrompt = vi.fn(() => "extract findings prompt");
   const loaderCommand = (cmd: string) => `remediate-code ${cmd}`;
   const randomRunId = (prefix?: string) => `${prefix ?? "RUN"}-test`;
 
@@ -32,7 +32,6 @@ function makeStubs() {
     collectStartingPointPrompt,
     synthesizeIntakePrompt,
     collectIntakeClarificationsPrompt,
-    extractFindingsPrompt,
     loaderCommand,
     randomRunId,
   };
@@ -68,7 +67,6 @@ describe("resolveIntakeStep", () => {
       "utf8",
     );
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     // Act: no input supplied; missing/checked/existing are all empty so the
@@ -82,7 +80,6 @@ describe("resolveIntakeStep", () => {
         missing: [],
         checked: [],
       },
-      store,
       ...stubs,
     });
 
@@ -102,7 +99,6 @@ describe("resolveIntakeStep", () => {
   it("returns collect_starting_point blocked step when supplied input files are all missing", async () => {
     const artifactsDir = join(TEST_DIR, "artifacts-supplied-missing");
     await mkdir(artifactsDir, { recursive: true });
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     const result = await resolveIntakeStep({
@@ -114,7 +110,6 @@ describe("resolveIntakeStep", () => {
         missing: [join(TEST_DIR, "does-not-exist.md")],
         checked: [join(TEST_DIR, "does-not-exist.md")],
       },
-      store,
       ...stubs,
     });
 
@@ -141,7 +136,6 @@ describe("resolveIntakeStep", () => {
       "utf8",
     );
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     const result = await resolveIntakeStep({
@@ -153,7 +147,6 @@ describe("resolveIntakeStep", () => {
         missing: [],
         checked: [auditFindingsPath],
       },
-      store,
       ...stubs,
     });
 
@@ -173,7 +166,10 @@ describe("resolveIntakeStep", () => {
     ]);
   });
 
-  it("ready structured_audit intake consumes the original JSON deterministically", async () => {
+  it("N-R06: ready structured_audit intake returns pipeline_ready (no fast path, no extract_findings)", async () => {
+    // After N-R06: structured_audit no longer calls runPlanPhase directly.
+    // resolveIntakeStep returns { kind: "pipeline_ready" } so the caller routes
+    // through the contract pipeline.
     const artifactsDir = join(TEST_DIR, "artifacts-structured-ready");
     const intakeDir = join(artifactsDir, "intake");
     await mkdir(intakeDir, { recursive: true });
@@ -230,14 +226,13 @@ describe("resolveIntakeStep", () => {
         goals: ["Remediate the structured audit findings."],
         non_goals: [],
         constraints: [],
-        affected_files: [],
+        affected_files: [{ path: "src/a.ts" }],
         open_questions: [],
       }),
       "utf8",
     );
     await writeFile(join(intakeDir, "remediation-brief.md"), "# Structured intake\n", "utf8");
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     const result = await resolveIntakeStep({
@@ -249,15 +244,11 @@ describe("resolveIntakeStep", () => {
         missing: [],
         checked: [],
       },
-      store,
       ...stubs,
     });
 
-    expect(result.kind).toBe("state");
-    if (result.kind !== "state") throw new Error("expected state");
-    expect(result.state.status).toBe("planning");
-    expect(result.state.plan?.findings.map((finding) => finding.id)).toEqual(["AUD-001"]);
-    expect(stubs.extractFindingsPrompt).not.toHaveBeenCalled();
+    // N-R06: pipeline_ready, not state — fast path deleted
+    expect(result.kind).toBe("pipeline_ready");
   });
 
   it("existing document input builds a document source manifest and returns synthesize_intake step", async () => {
@@ -268,7 +259,6 @@ describe("resolveIntakeStep", () => {
     const docPath = join(TEST_DIR, "feedback.md");
     await writeFile(docPath, "# Feedback\nFix bugs.", "utf8");
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     const result = await resolveIntakeStep({
@@ -280,7 +270,6 @@ describe("resolveIntakeStep", () => {
         missing: [],
         checked: [docPath],
       },
-      store,
       ...stubs,
     });
 
@@ -307,7 +296,6 @@ describe("resolveIntakeStep", () => {
       "utf8",
     );
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     const result = await resolveIntakeStep({
@@ -319,7 +307,6 @@ describe("resolveIntakeStep", () => {
         missing: [],
         checked: [],
       },
-      store,
       ...stubs,
     });
 
@@ -336,7 +323,6 @@ describe("resolveIntakeStep", () => {
   it("no manifest and no conversationStart returns collect_starting_point blocked step", async () => {
     const artifactsDir = join(TEST_DIR, "artifacts-no-input");
     await mkdir(artifactsDir, { recursive: true });
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     const result = await resolveIntakeStep({
@@ -348,7 +334,6 @@ describe("resolveIntakeStep", () => {
         missing: [],
         checked: [],
       },
-      store,
       ...stubs,
     });
 
@@ -374,7 +359,6 @@ describe("resolveIntakeStep", () => {
     };
     await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(manifest), "utf8");
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     const result = await resolveIntakeStep({
@@ -386,7 +370,6 @@ describe("resolveIntakeStep", () => {
         missing: [],
         checked: [],
       },
-      store,
       ...stubs,
     });
 
@@ -428,7 +411,6 @@ describe("resolveIntakeStep", () => {
     // Write the brief so only the unready summary + absent clarification triggers the clarifications step
     await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief", "utf8");
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     const result = await resolveIntakeStep({
@@ -440,7 +422,6 @@ describe("resolveIntakeStep", () => {
         missing: [],
         checked: [],
       },
-      store,
       ...stubs,
     });
 
@@ -450,7 +431,9 @@ describe("resolveIntakeStep", () => {
     expect(result.step.status).toBe("blocked");
   });
 
-  it("summary ready returns extract_findings step", async () => {
+  it("N-R06: summary ready for document source returns pipeline_ready (extract_findings deleted)", async () => {
+    // After N-R06: the extract_findings step is removed. resolveIntakeStep now
+    // returns { kind: "pipeline_ready" } for document/conversation sources too.
     const artifactsDir = join(TEST_DIR, "artifacts-ready");
     const intakeDir = join(artifactsDir, "intake");
     await mkdir(intakeDir, { recursive: true });
@@ -472,13 +455,12 @@ describe("resolveIntakeStep", () => {
       goals: ["Fix all bugs"],
       non_goals: [],
       constraints: [],
-      affected_files: [],
+      affected_files: [{ path: "src/main.ts" }],
       open_questions: [],
     };
     await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
     await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\nFix everything.", "utf8");
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     const result = await resolveIntakeStep({
@@ -490,14 +472,10 @@ describe("resolveIntakeStep", () => {
         missing: [],
         checked: [],
       },
-      store,
       ...stubs,
     });
 
-    expect(result.kind).toBe("step");
-    if (result.kind !== "step") throw new Error("expected step");
-    expect(result.step.step_kind).toBe("extract_findings");
-    expect(result.step.status).toBe("ready");
+    expect(result.kind).toBe("pipeline_ready");
   });
 
   it("manifest refresh clears stale summary and brief so synthesize_intake is re-issued", async () => {
@@ -526,13 +504,12 @@ describe("resolveIntakeStep", () => {
       goals: ["Fix A"],
       non_goals: [],
       constraints: [],
-      affected_files: [],
+      affected_files: [{ path: "src/a.ts" }],
       open_questions: [],
     };
     await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
     await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief for A", "utf8");
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     // Supply file B — causes manifest refresh
@@ -545,7 +522,6 @@ describe("resolveIntakeStep", () => {
         missing: [],
         checked: [fileB],
       },
-      store,
       ...stubs,
     });
 
@@ -554,6 +530,140 @@ describe("resolveIntakeStep", () => {
     expect(result.step.step_kind).toBe("synthesize_intake");
     // runId should have INTAKE prefix (from randomRunId("INTAKE"))
     expect(result.step.run_id).toMatch(/^INTAKE/);
+  });
+
+  it("N-R01: auto-discovered candidate emits confirm_auto_discovered_input (blocked)", async () => {
+    // When !supplied && existing.length > 0 && !manifest, emit the confirmation
+    // step rather than silently writing source-manifest.json and proceeding.
+    const artifactsDir = join(TEST_DIR, "artifacts-auto-discover");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+
+    const auditFindingsPath = join(TEST_DIR, "audit-findings-auto.json");
+    await writeFile(
+      auditFindingsPath,
+      JSON.stringify({
+        contract_version: "audit-findings/v1alpha1",
+        findings: [
+          {
+            id: "AF-001",
+            title: "Auto-discovered finding",
+            category: "correctness",
+            severity: "high",
+            confidence: "high",
+            lens: "correctness",
+            summary: "Fix it.",
+            affected_files: [{ path: "src/a.ts" }],
+            evidence: ["evidence"],
+          },
+        ],
+        work_blocks: [],
+      }),
+      "utf8",
+    );
+
+    const stubs = makeStubs();
+
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false,
+        existing: [auditFindingsPath],
+        missing: [],
+        checked: [auditFindingsPath],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("confirm_auto_discovered_input");
+    expect(result.step.status).toBe("blocked");
+  });
+
+  it("N-R01: confirm_auto_discovered_input prompt names the discovered file path", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-auto-discover-prompt");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+
+    const auditFindingsPath = join(TEST_DIR, "audit-findings-prompt.json");
+    await writeFile(
+      auditFindingsPath,
+      JSON.stringify({
+        contract_version: "audit-findings/v1alpha1",
+        findings: [],
+        work_blocks: [],
+      }),
+      "utf8",
+    );
+
+    const stubs = makeStubs();
+
+    // Write the step's current-prompt.md and check it includes the path
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false,
+        existing: [auditFindingsPath],
+        missing: [],
+        checked: [auditFindingsPath],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("confirm_auto_discovered_input");
+    // The prompt written to disk should name the discovered path
+    const prompt = await readFile(result.step.prompt_path, "utf8");
+    expect(prompt).toContain(auditFindingsPath);
+  });
+
+  it("N-R01: with ack confirmed, proceeds past confirm_auto_discovered_input to intake", async () => {
+    // When confirm_auto_discovered_input_ack.json exists with status 'confirmed',
+    // resolveIntakeStep should NOT re-emit the confirmation step — it proceeds.
+    const artifactsDir = join(TEST_DIR, "artifacts-auto-discover-acked");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+
+    const auditFindingsPath = join(TEST_DIR, "audit-findings-acked.json");
+    await writeFile(
+      auditFindingsPath,
+      JSON.stringify({
+        contract_version: "audit-findings/v1alpha1",
+        findings: [],
+        work_blocks: [],
+      }),
+      "utf8",
+    );
+
+    // Write the ack
+    await writeFile(
+      join(artifactsDir, "confirm_auto_discovered_input_ack.json"),
+      JSON.stringify({ status: "confirmed" }),
+      "utf8",
+    );
+
+    const stubs = makeStubs();
+
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false,
+        existing: [auditFindingsPath],
+        missing: [],
+        checked: [auditFindingsPath],
+      },
+      ...stubs,
+    });
+
+    // Should advance past the gate — no longer confirm_auto_discovered_input
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).not.toBe("confirm_auto_discovered_input");
   });
 
   it("discards existing summary and brief when the manifest is refreshed", async () => {
@@ -593,7 +703,7 @@ describe("resolveIntakeStep", () => {
       goals: ["Fix bugs"],
       non_goals: [],
       constraints: [],
-      affected_files: [],
+      affected_files: [{ path: "src/index.ts" }],
       open_questions: [],
     };
     await writeFile(
@@ -605,7 +715,6 @@ describe("resolveIntakeStep", () => {
     // A previously completed brief
     await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\nOld brief.", "utf8");
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
 
     // Act: supply file B as the new input
@@ -618,7 +727,6 @@ describe("resolveIntakeStep", () => {
         missing: [],
         checked: [fileB],
       },
-      store,
       ...stubs,
     });
 
@@ -637,5 +745,244 @@ describe("resolveIntakeStep", () => {
     const persistedManifest = JSON.parse(persistedManifestRaw) as IntakeSourceManifest;
     expect(persistedManifest.sources.map((s) => s.path)).toContain(fileB);
     expect(persistedManifest.sources.map((s) => s.path)).not.toContain(fileA);
+  });
+
+  // N-R02: manifest-time input validation
+  it("N-R02: malformed JSON supplied input returns blocked collect_starting_point step", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-bad-json");
+    await mkdir(artifactsDir, { recursive: true });
+
+    const badJsonPath = join(TEST_DIR, "bad-input.json");
+    await writeFile(badJsonPath, "{ not valid json !!!}", "utf8");
+
+    const stubs = makeStubs();
+
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: true,
+        existing: [badJsonPath],
+        missing: [],
+        checked: [badJsonPath],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("collect_starting_point");
+    expect(result.step.status).toBe("blocked");
+    // collectStartingPointPrompt must have been called with the bad-JSON path in the missing array
+    expect(stubs.collectStartingPointPrompt).toHaveBeenCalledOnce();
+    const [, , missingArg] = stubs.collectStartingPointPrompt.mock.calls[0];
+    expect(missingArg).toContain(badJsonPath);
+  });
+
+  it("N-R02: JSON file with unrecognised schema_version returns blocked collect_starting_point step", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-unknown-schema");
+    await mkdir(artifactsDir, { recursive: true });
+
+    const unknownSchemaPath = join(TEST_DIR, "unknown-schema.json");
+    await writeFile(
+      unknownSchemaPath,
+      JSON.stringify({ schema_version: "unknown/v9", data: "something" }),
+      "utf8",
+    );
+
+    const stubs = makeStubs();
+
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: true,
+        existing: [unknownSchemaPath],
+        missing: [],
+        checked: [unknownSchemaPath],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("collect_starting_point");
+    expect(result.step.status).toBe("blocked");
+  });
+
+  it("N-R02: intake summary with ready:true but empty goals re-issues synthesize_intake step", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-empty-goals");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+
+    const docPath = join(TEST_DIR, "feedback-empty-goals.md");
+    await writeFile(docPath, "# Feedback", "utf8");
+
+    const manifest: IntakeSourceManifest = {
+      schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+      created_from: "input",
+      sources: [{ type: "document", path: docPath, label: "input-01" }],
+    };
+    await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(manifest), "utf8");
+
+    const summary: IntakeSummary = {
+      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
+      ready: true,
+      source_type: "documents",
+      goals: [],
+      non_goals: [],
+      constraints: [],
+      affected_files: [{ path: "src/a.ts" }],
+      open_questions: [],
+    };
+    await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
+    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief", "utf8");
+
+    const stubs = makeStubs();
+
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false,
+        existing: [],
+        missing: [],
+        checked: [],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("synthesize_intake");
+    expect(result.step.status).toBe("ready");
+  });
+
+  it("N-R02: intake summary with ready:true but empty affected_files re-issues synthesize_intake step", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-empty-affected");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+
+    const docPath = join(TEST_DIR, "feedback-empty-affected.md");
+    await writeFile(docPath, "# Feedback", "utf8");
+
+    const manifest: IntakeSourceManifest = {
+      schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+      created_from: "input",
+      sources: [{ type: "document", path: docPath, label: "input-01" }],
+    };
+    await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(manifest), "utf8");
+
+    const summary: IntakeSummary = {
+      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
+      ready: true,
+      source_type: "documents",
+      goals: ["Fix bugs"],
+      non_goals: [],
+      constraints: [],
+      affected_files: [],
+      open_questions: [],
+    };
+    await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
+    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief", "utf8");
+
+    const stubs = makeStubs();
+
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false,
+        existing: [],
+        missing: [],
+        checked: [],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("synthesize_intake");
+    expect(result.step.status).toBe("ready");
+  });
+});
+
+// N-R02: intakeSummaryContentErrors unit tests
+describe("intakeSummaryContentErrors", () => {
+  it("returns empty array for a valid ready summary", () => {
+    const summary: IntakeSummary = {
+      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
+      ready: true,
+      source_type: "documents",
+      goals: ["Fix bugs"],
+      non_goals: [],
+      constraints: [],
+      affected_files: [{ path: "src/a.ts" }],
+      open_questions: [],
+    };
+    expect(intakeSummaryContentErrors(summary)).toEqual([]);
+  });
+
+  it("returns errors for ready summary with empty goals and affected_files", () => {
+    const summary: IntakeSummary = {
+      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
+      ready: true,
+      source_type: "documents",
+      goals: [],
+      non_goals: [],
+      constraints: [],
+      affected_files: [],
+      open_questions: [],
+    };
+    const errors = intakeSummaryContentErrors(summary);
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors.some((e) => e.includes("goals"))).toBe(true);
+  });
+
+  it("does not flag non-ready summaries for empty content", () => {
+    const summary: IntakeSummary = {
+      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
+      ready: false,
+      source_type: "documents",
+      goals: [],
+      non_goals: [],
+      constraints: [],
+      affected_files: [],
+      open_questions: [],
+    };
+    expect(intakeSummaryContentErrors(summary)).toEqual([]);
+  });
+});
+
+// N-R02: validateSuppliedInput unit tests
+describe("validateSuppliedInput", () => {
+  it("returns ok:true for valid JSON without schema_version", () => {
+    const result = validateSuppliedInput("file.json", JSON.stringify({ foo: "bar" }));
+    expect(result.ok).toBe(true);
+  });
+
+  it("returns ok:false for malformed JSON", () => {
+    const result = validateSuppliedInput("file.json", "{ not json");
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected not ok");
+    expect(result.reason).toContain("not valid JSON");
+  });
+
+  it("returns ok:false for JSON with unknown schema_version", () => {
+    const result = validateSuppliedInput(
+      "file.json",
+      JSON.stringify({ schema_version: "unknown/v9" }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected not ok");
+    expect(result.reason).toContain("unknown/v9");
+  });
+
+  it("returns ok:true for JSON with a known schema_version", () => {
+    const result = validateSuppliedInput(
+      "file.json",
+      JSON.stringify({ schema_version: "audit-findings/v1alpha1" }),
+    );
+    expect(result.ok).toBe(true);
   });
 });

@@ -153,7 +153,7 @@ describe("stepUtils exports are stable after extraction", () => {
         parallel_safe: true,
         dependencies: [],
       };
-      const state = makeState({ "F-001": { status: "documented" } });
+      const state = makeState({ "F-001": { status: "pending" } });
       expect(dependenciesSatisfied(block, state)).toBe(true);
     });
 
@@ -171,7 +171,7 @@ describe("stepUtils exports are stable after extraction", () => {
         dependencies: ["B-001"],
       };
       const state = makeState(
-        { "F-001": { status: "documented" }, "F-002": { status: "documented" } },
+        { "F-001": { status: "pending" }, "F-002": { status: "pending" } },
         [depBlock, dependentBlock],
       );
       expect(dependenciesSatisfied(dependentBlock, state)).toBe(false);

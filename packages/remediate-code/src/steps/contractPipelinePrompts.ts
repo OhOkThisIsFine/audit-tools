@@ -52,23 +52,133 @@ const ROLES: Record<string, ContractPipelineRole> = {
     description:
       "Collect the code and documentation context relevant to the goal.",
   },
-  design: {
-    title: "Design",
+  decomposition: {
+    title: "Module Decomposition",
     requiredInputKeys: ["goal_spec", "context_bundle"],
-    outputKey: "design_spec",
+    outputKey: "module_decomposition",
     outputSchema: `{
-  "contract_version": "remediate-code-contract-pipeline/design-spec/v1alpha1",
+  "contract_version": "remediate-code-contract-pipeline/module-decomposition/v1alpha1",
   "goal_id": "<from goal_spec>",
-  "design_narrative": "<high-level narrative>",
-  "invariants": [{ "id": "<id>", "description": "<boundary/invariant>" }],
-  "affected_paths": ["<repo-relative paths>"],
+  "modules": [{
+    "name": "<module-name>",
+    "responsibilities": "<brief description of what this module does>",
+    "file_scope": ["<repo-relative paths owned by this module>"]
+  }],
   "created_at": "<ISO-8601>"
 }`,
-    description: "Propose a design that satisfies the goal spec invariants.",
+    description:
+      "Decompose the goal into a set of named modules with rough responsibilities and file scope. Do not draft seam contracts yet — only identify modules and their file ownership.",
+  },
+  module_contract_drafting: {
+    title: "Per-Module Contract Drafting",
+    requiredInputKeys: ["goal_spec", "context_bundle", "module_decomposition"],
+    outputKey: "module_contracts",
+    outputSchema: `{
+  "contract_version": "remediate-code-contract-pipeline/module-contracts/v1alpha1",
+  "goal_id": "<from goal_spec>",
+  "module_contracts": [{
+    "name": "<module-name — must match module_decomposition>",
+    "inputs": ["<what this module receives as input>"],
+    "outputs": ["<what this module produces as output>"],
+    "invariants": ["<invariant that must hold — include a verification_obligation note>"],
+    "side_effects": ["<observable side-effects with owner>"],
+    "validation_boundary": "<what this module validates vs. what callers must guarantee>",
+    "failure_modes": ["<ways this module can fail and how callers should handle them>"],
+    "neighbor_needs": [{
+      "neighbor": "<module-name>",
+      "needs": "<what this module needs from that neighbor>"
+    }]
+  }],
+  "created_at": "<ISO-8601>"
+}`,
+    description:
+      "For every module in the decomposition, draft a contract covering inputs, outputs, invariants, side-effects, validation boundary, failure modes, and what it needs from each neighbor. Read each module's file scope from the repository before drafting. No single agent owns both sides of a seam.",
+  },
+  seam_reconciliation: {
+    title: "Seam Reconciliation",
+    requiredInputKeys: ["module_decomposition", "module_contracts"],
+    outputKey: "seam_reconciliation_report",
+    outputSchema: `{
+  "contract_version": "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
+  "goal_id": "<from module_contracts>",
+  "mismatches": [{
+    "seam_id": "<seam-identifier>",
+    "module_a": "<module-name>",
+    "module_b": "<module-name>",
+    "description": "<what A declares vs. what B declares — the mismatch>",
+    "resolution": {
+      "decision": "<which side adjusts — A | B | both>",
+      "agreed_interface": "<the reconciled interface both sides must adopt>"
+    }
+  }],
+  "created_at": "<ISO-8601>"
+}`,
+    description:
+      "Deterministically list every seam mismatch where module A's declared output differs from module B's declared input (or neighbor_need). For each mismatch, decide which side adjusts and what the agreed interface is. A seam_reconciliation_report with no mismatches (all seams already consistent) is valid.",
+  },
+  contract_finalization: {
+    title: "Per-Module Contract Finalization",
+    requiredInputKeys: ["module_contracts", "seam_reconciliation_report"],
+    outputKey: "finalized_module_contracts",
+    outputSchema: `{
+  "contract_version": "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
+  "goal_id": "<from module_contracts>",
+  "module_contracts": [{
+    "name": "<module-name>",
+    "inputs": ["<final — incorporating reconciliation decisions>"],
+    "outputs": ["<final — incorporating reconciliation decisions>"],
+    "invariants": ["<invariant id + description>"],
+    "side_effects": ["<side-effect with owner>"],
+    "validation_boundary": "<finalized validation boundary>",
+    "failure_modes": ["<failure mode + caller handling>"],
+    "seam_adjustments": ["<adjustments made per seam_reconciliation_report, if any>"]
+  }],
+  "created_at": "<ISO-8601>"
+}`,
+    description:
+      "For every module contract in module_contracts, incorporate any reconciliation decisions from seam_reconciliation_report and produce the finalized module contract. Record which seam adjustments were applied.",
+  },
+  cyclic_seam_resolution: {
+    title: "Cyclic Seam Resolution",
+    requiredInputKeys: ["obligation_ledger"],
+    outputKey: "cyclic_seam_resolution",
+    outputSchema: `{
+  "contract_version": "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+  "goal_id": "<from obligation_ledger>",
+  "cycles": [{
+    "members": ["<obligation-id>", "..."],
+    "break_strategy": "mediator | single_authority",
+    "resolution_description": "<what was changed and why>",
+    "exception_registration": "<scoped exception name when single_authority, otherwise null>"
+  }],
+  "status": "no_cycles | resolved",
+  "created_at": "<ISO-8601>"
+}`,
+    description:
+      "Detect and resolve circular interface-definition obligations in the obligation ledger. If no cycles exist, record status=no_cycles and an empty cycles array. For each detected cycle, choose a sanctioned break strategy (mediator module or single authority) and record the resolution. Verify mentally that the break does not re-introduce a cycle before writing the output.",
+  },
+  obligation_ledger: {
+    title: "Obligation Ledger",
+    requiredInputKeys: ["goal_spec", "finalized_module_contracts"],
+    outputKey: "obligation_ledger",
+    outputSchema: `{
+  "contract_version": "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
+  "goal_id": "<from goal_spec>",
+  "obligations": [{
+    "id": "<obligation-id>",
+    "description": "<concrete obligation>",
+    "kind": "invariant|behavioral|structural|test",
+    "depends_on": [],
+    "status": "pending"
+  }],
+  "created_at": "<ISO-8601>"
+}`,
+    description:
+      "Derive a bounded set of implementation obligations from the goal spec and finalized module contracts. Each invariant in the finalized module contracts yields an invariant obligation; each seam interface yields a test obligation. Derive obligations largely deterministically from the finalized contracts.",
   },
   critique: {
     title: "Conceptual Design Critique",
-    requiredInputKeys: ["goal_spec", "design_spec"],
+    requiredInputKeys: ["goal_spec", "finalized_module_contracts"],
     outputKey: "conceptual_design_critique",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/conceptual-design-critique/v1alpha1",
@@ -78,11 +188,33 @@ const ROLES: Record<string, ContractPipelineRole> = {
   "created_at": "<ISO-8601>"
 }`,
     description:
-      "Provide philosophy/alternatives/directions critique of the proposed design.",
+      "Provide philosophy/alternatives/directions critique of the finalized module contracts.",
+  },
+  test_validator_plan: {
+    title: "Test and Validator Plan",
+    requiredInputKeys: ["goal_spec", "obligation_ledger"],
+    outputKey: "test_validator_plan",
+    outputSchema: `{
+  "contract_version": "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
+  "goal_id": "<from goal_spec>",
+  "test_specs": [{
+    "obligation_id": "<id from obligation_ledger>",
+    "name": "<short test name>",
+    "kind": "unit | integration | schema | invariant | e2e",
+    "assertions": ["<concrete, falsifiable assertion>"],
+    "inapplicable_claim": {
+      "obligation_id": "<must match obligation_id above>",
+      "reason": "<falsifiable reason checkable against the ledger>"
+    }
+  }],
+  "created_at": "<ISO-8601>"
+}`,
+    description:
+      "Convert every obligation in the obligation ledger into a concrete test spec BEFORE any implementation begins. One TestSpec entry per obligation. A worker may flag a planned test inapplicable only by citing the specific obligation_id it disputes and providing a falsifiable reason that can be checked against the ledger — bare rationale is not sufficient. Do not invent obligations not present in the ledger.",
   },
   assessment: {
     title: "Contract Assessment",
-    requiredInputKeys: ["goal_spec", "design_spec", "obligation_ledger"],
+    requiredInputKeys: ["goal_spec", "finalized_module_contracts", "obligation_ledger"],
     outputKey: "contract_assessment_report",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/contract-assessment-report/v1alpha1",
@@ -96,7 +228,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
   },
   critic: {
     title: "Adversarial Critic (Counterexample Search)",
-    requiredInputKeys: ["goal_spec", "design_spec", "obligation_ledger", "contract_assessment_report"],
+    requiredInputKeys: ["goal_spec", "finalized_module_contracts", "obligation_ledger", "contract_assessment_report"],
     outputKey: "counterexample",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/counterexample/v1alpha1",
@@ -116,7 +248,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
   },
   judge: {
     title: "Adversarial Judge",
-    requiredInputKeys: ["goal_spec", "design_spec", "obligation_ledger", "contract_assessment_report", "counterexample"],
+    requiredInputKeys: ["goal_spec", "finalized_module_contracts", "obligation_ledger", "contract_assessment_report", "counterexample"],
     outputKey: "judge_report",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/judge-report/v1alpha1",
@@ -128,7 +260,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
     "rationale": "<one-line justification>"
   }],
   "repair_directive": {
-    "target": "design_spec | obligation_ledger | contract_assessment_report",
+    "target": "finalized_module_contracts | obligation_ledger | contract_assessment_report",
     "instruction": "<bounded instruction for regenerating the target artifact>"
   },
   "created_at": "<ISO-8601>"
@@ -138,7 +270,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
   },
   implementation_planning: {
     title: "Implementation Planning (DAG)",
-    requiredInputKeys: ["goal_spec", "context_bundle", "design_spec", "obligation_ledger", "contract_assessment_report", "counterexample", "judge_report"],
+    requiredInputKeys: ["goal_spec", "context_bundle", "finalized_module_contracts", "obligation_ledger", "contract_assessment_report", "counterexample", "judge_report"],
     outputKey: "implementation_dag",
     outputSchema: `{
   "contract_version": "remediate-code-contract-pipeline/implementation-dag/v1alpha1",
@@ -191,6 +323,13 @@ export interface ContractPipelineRenderInput {
   sourcePaths?: string[];
   /** Repository root path — passed to workers for cwd anchoring. */
   repoRoot?: string;
+  /**
+   * Path to the Path-A seed file when the intake source is a structured
+   * audit-findings report. When present, goal_normalization and
+   * context_collection prompts reference the seed so every pipeline node
+   * traces back to an auditor finding.
+   */
+  pathASeedPath?: string;
 }
 
 export interface ContractPipelineRenderResult {
@@ -243,13 +382,26 @@ export function renderContractPipelinePrompt(
     ? `\n> Set the shell/tool working directory to \`${input.repoRoot}\` before running any commands.\n`
     : "";
 
+  // Path-A seed section: included for goal_normalization and context_collection
+  // when the intake source is a structured audit-findings report.
+  const PATH_A_SEED_ROLES = new Set([
+    "goal_normalization",
+    "context_collection",
+    "decomposition",
+    "module_contract_drafting",
+  ]);
+  const pathASeedSection =
+    input.pathASeedPath && PATH_A_SEED_ROLES.has(input.role)
+      ? `\n## Path-A Audit Seed\n\nThis run originates from a structured audit-findings report. The seed file below contains the findings summary and affected files — your output must frame the goal and context around these findings so every subsequent pipeline node traces to an auditor finding:\n\n- \`${input.pathASeedPath}\` (path_a_seed)\n`
+      : "";
+
   const prompt = `# ${role.title}
 
 ${role.description}
 ${cwdNote}
 ## Required Inputs
 ${inputSections.length > 0 ? inputSections.join("\n") : "_No artifact inputs required for this role._"}
-${sourceSections}
+${sourceSections}${pathASeedSection}
 ## Your Task
 
 Read only the artifact files listed above. Do not read unrelated source files.
@@ -279,8 +431,14 @@ export function listContractPipelineRoles(): string[] {
 export const CONTRACT_PIPELINE_PHASE_ORDER: string[] = [
   "goal_normalization",
   "context_collection",
-  "design",
+  "decomposition",
+  "module_contract_drafting",
+  "seam_reconciliation",
+  "contract_finalization",
   "critique",
+  "obligation_ledger",
+  "cyclic_seam_resolution",
+  "test_validator_plan",
   "assessment",
   "critic",
   "judge",
@@ -292,7 +450,7 @@ export const CONTRACT_PIPELINE_PHASE_ORDER: string[] = [
 
 export interface ContractRepairRenderInput {
   /** The contract artifact the judge ordered regenerated. */
-  target: "design_spec" | "obligation_ledger" | "contract_assessment_report";
+  target: "finalized_module_contracts" | "obligation_ledger" | "contract_assessment_report";
   /** The judge's bounded regeneration instruction. */
   instruction: string;
   /** Resolved file paths for all contract-pipeline artifacts. */
@@ -303,21 +461,8 @@ export interface ContractRepairRenderInput {
 
 /** Schema shape per repair target, sourced from the producing role. */
 const REPAIR_TARGET_SCHEMA: Record<ContractRepairRenderInput["target"], () => string> = {
-  design_spec: () => ROLES.design.outputSchema,
-  // obligation_ledger has no ROLES entry (it renders via the bespoke
-  // obligation-ledger prompt), so its schema shape lives here.
-  obligation_ledger: () => `{
-  "contract_version": "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
-  "goal_id": "<from goal_spec>",
-  "obligations": [{
-    "id": "<obligation-id>",
-    "description": "<concrete obligation>",
-    "kind": "invariant|behavioral|structural|test",
-    "depends_on": [],
-    "status": "pending"
-  }],
-  "created_at": "<ISO-8601>"
-}`,
+  finalized_module_contracts: () => ROLES.contract_finalization.outputSchema,
+  obligation_ledger: () => ROLES.obligation_ledger.outputSchema,
   contract_assessment_report: () => ROLES.assessment.outputSchema,
 };
 
@@ -338,7 +483,7 @@ export function renderContractRepairPrompt(
   }
   const requiredInputs = [
     "goal_spec",
-    "design_spec",
+    "finalized_module_contracts",
     "obligation_ledger",
     "contract_assessment_report",
     "counterexample",
@@ -388,6 +533,3 @@ Downstream artifacts are re-derived automatically after this repair — do not e
   return { prompt, outputPath };
 }
 
-// Re-export the obligation-ledger role separately since it maps to a phase that
-// exists in the DAG but is triggered from the assessment step internally.
-export const OBLIGATION_LEDGER_ROLE_KEY = "obligation_ledger_phase" as const;

@@ -34,6 +34,13 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
 
   obligations.push(
     obligation(
+      "provider_confirmation",
+      has(bundle.provider_confirmation) ? "satisfied" : "missing",
+    ),
+  );
+
+  obligations.push(
+    obligation(
       "repo_manifest",
       has(bundle.repo_manifest) ? "satisfied" : "missing",
     ),
@@ -116,19 +123,34 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
 
   obligations.push(
     obligation(
-      "design_review_completed",
-      bundle.design_assessment?.reviewed ? "satisfied" : "missing",
-    ),
-  );
-
-  obligations.push(
-    obligation(
       "intent_checkpoint_current",
       staleOrSatisfied(
         staleArtifacts,
         ["intent_checkpoint.json"],
         has(bundle.intent_checkpoint),
       ),
+    ),
+  );
+
+  // Backward-compat: old artifacts only have `reviewed`; new artifacts have
+  // contract_reviewed and conceptual_reviewed. Treat both as satisfied when
+  // the legacy flag is set and neither new flag is present.
+  const legacyReviewed =
+    bundle.design_assessment?.reviewed === true &&
+    bundle.design_assessment?.contract_reviewed !== true &&
+    bundle.design_assessment?.conceptual_reviewed !== true;
+
+  obligations.push(
+    obligation(
+      "design_review_contract_completed",
+      (bundle.design_assessment?.contract_reviewed === true || legacyReviewed) ? "satisfied" : "missing",
+    ),
+  );
+
+  obligations.push(
+    obligation(
+      "design_review_conceptual_completed",
+      (bundle.design_assessment?.conceptual_reviewed === true || legacyReviewed) ? "satisfied" : "missing",
     ),
   );
 
@@ -166,12 +188,24 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
   const deferredTaskIds = new Set<string>(
     bundle.active_dispatch?.deferred_task_ids ?? [],
   );
+  // Tasks stranded by a partial-completion terminal (OBL-A06): when the dispatch
+  // engine fires an empty-pool or livelock terminal and records it on
+  // active_dispatch, those tasks will never be dispatched. Treat them as
+  // uncovered so the pipeline can proceed to synthesis on partial coverage
+  // rather than stalling forever. This shortcut fires ONLY when the terminal
+  // was deliberately written — gate on its presence, not on the deferred list.
+  const partialTerminal = bundle.active_dispatch?.partial_completion_terminal;
+  const strandedTaskIds = new Set<string>(
+    partialTerminal?.stranded_ids ?? [],
+  );
+
   const hasPendingAuditTasks =
     bundle.audit_tasks?.some(
       (task) =>
         task.status !== "complete" &&
         !completedTaskIds.has(task.task_id) &&
-        !deferredTaskIds.has(task.task_id),
+        !deferredTaskIds.has(task.task_id) &&
+        !strandedTaskIds.has(task.task_id),
     ) ?? false;
 
   if (hasPendingAuditTasks) {
@@ -234,8 +268,11 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
     ),
   );
 
+  // A run is "not_started" only when neither the session gate (provider_confirmation)
+  // nor the first intake artifact (repo_manifest) has been produced. Once the provider
+  // gate fires, the run is live and must not be cleaned up as stale.
   let status: AuditTopLevelStatus = "not_started";
-  if (!has(bundle.repo_manifest)) {
+  if (!has(bundle.provider_confirmation) && !has(bundle.repo_manifest)) {
     status = "not_started";
   } else if (obligations.some((o) => o.state === "blocked")) {
     status = "blocked";

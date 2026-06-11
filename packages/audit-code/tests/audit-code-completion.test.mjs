@@ -120,7 +120,7 @@ test("audit-code wrapper reaches a blocked handoff by default and leaves only au
     const blocked = JSON.parse((await runWrapper([], { cwd: root })).stdout);
     assertMatchesJsonSchema(responseSchema, blocked, "auditCodeResponse:blocked");
     assert.equal(blocked.audit_state.status, "blocked");
-    assert.equal(blocked.selected_executor, "agent");
+    assert.equal(blocked.selected_executor, "rolling_dispatch_executor");
 
     const tasks = JSON.parse(
       await readFile(join(root, ".audit-tools/audit", "audit_tasks.json"), "utf8"),

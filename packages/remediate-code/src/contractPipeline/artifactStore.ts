@@ -20,9 +20,14 @@ import { readOptionalJsonFile, writeJsonFile } from "@audit-tools/shared";
 export const CP_ARTIFACT_NAMES = [
   "goal_spec",
   "context_bundle",
-  "design_spec",
+  "module_decomposition",
+  "module_contracts",
+  "seam_reconciliation_report",
+  "finalized_module_contracts",
   "conceptual_design_critique",
   "obligation_ledger",
+  "cyclic_seam_resolution",
+  "test_validator_plan",
   "contract_assessment_report",
   "counterexample",
   "judge_report",
@@ -36,20 +41,27 @@ export type ContractPipelineArtifactName = (typeof CP_ARTIFACT_NAMES)[number];
 // An artifact is stale when any dependency it lists is missing or has a
 // different content hash than recorded at write time.
 
-const DEPENDENCY_MAP: Record<ContractPipelineArtifactName, ContractPipelineArtifactName[]> = {
+export const DEPENDENCY_MAP: Record<ContractPipelineArtifactName, ContractPipelineArtifactName[]> = {
   goal_spec: [],
   context_bundle: ["goal_spec"],
-  design_spec: ["goal_spec", "context_bundle"],
-  conceptual_design_critique: ["goal_spec", "design_spec"],
-  obligation_ledger: ["goal_spec", "design_spec"],
-  contract_assessment_report: ["goal_spec", "design_spec", "obligation_ledger"],
-  counterexample: ["goal_spec", "design_spec", "obligation_ledger", "contract_assessment_report"],
-  judge_report: ["goal_spec", "design_spec", "obligation_ledger", "contract_assessment_report", "counterexample"],
+  module_decomposition: ["goal_spec", "context_bundle"],
+  module_contracts: ["goal_spec", "context_bundle", "module_decomposition"],
+  seam_reconciliation_report: ["module_decomposition", "module_contracts"],
+  finalized_module_contracts: ["module_contracts", "seam_reconciliation_report"],
+  conceptual_design_critique: ["goal_spec", "finalized_module_contracts"],
+  obligation_ledger: ["goal_spec", "finalized_module_contracts"],
+  cyclic_seam_resolution: ["obligation_ledger"],
+  test_validator_plan: ["goal_spec", "obligation_ledger"],
+  contract_assessment_report: ["goal_spec", "finalized_module_contracts", "obligation_ledger", "cyclic_seam_resolution", "test_validator_plan"],
+  counterexample: ["goal_spec", "finalized_module_contracts", "obligation_ledger", "cyclic_seam_resolution", "test_validator_plan", "contract_assessment_report"],
+  judge_report: ["goal_spec", "finalized_module_contracts", "obligation_ledger", "cyclic_seam_resolution", "test_validator_plan", "contract_assessment_report", "counterexample"],
   implementation_dag: [
     "goal_spec",
     "context_bundle",
-    "design_spec",
+    "finalized_module_contracts",
     "obligation_ledger",
+    "cyclic_seam_resolution",
+    "test_validator_plan",
     "contract_assessment_report",
     "counterexample",
     "judge_report",
@@ -57,7 +69,7 @@ const DEPENDENCY_MAP: Record<ContractPipelineArtifactName, ContractPipelineArtif
   verification_report: [
     "goal_spec",
     "context_bundle",
-    "design_spec",
+    "finalized_module_contracts",
     "obligation_ledger",
     "contract_assessment_report",
     "implementation_dag",
@@ -78,6 +90,14 @@ export interface ContractPipelineArtifactEnvelope {
 
 export function contractPipelineDir(artifactsDir: string): string {
   return join(artifactsDir, "intake", "contract");
+}
+
+/**
+ * Path to the optional Path-A seed file. Present only when the intake source
+ * is a structured audit-findings report; absent for document/conversation runs.
+ */
+export function pathASeedFilePath(artifactsDir: string): string {
+  return join(contractPipelineDir(artifactsDir), "path_a_seed.json");
 }
 
 export function contractArtifactFilePath(

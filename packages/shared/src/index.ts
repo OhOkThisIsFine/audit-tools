@@ -41,6 +41,20 @@ export type {
   AuditFindingsReport,
 } from "./types/finding.js";
 export type { IntentCheckpoint } from "./types/intentCheckpoint.js";
+export type { InterpretedIntent } from "./intent/freeFormIntentInterpreter.js";
+export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
+
+// Intent interpretation
+export type {
+  IntentClauseKind,
+  IntentClause,
+  ClauseInterpretResult,
+} from "./intent/clauseInterpreter.js";
+export {
+  decomposeIntent,
+  assessClauseEncodability,
+  interpretIntent,
+} from "./intent/clauseInterpreter.js";
 export type {
   RemediationOutcomeStatus,
   RemediationOutcome,
@@ -132,6 +146,8 @@ export {
   BLOCK_SAFETY_MARGIN,
   BYTES_PER_TOKEN,
   ESTIMATED_TOKENS_PER_LINE,
+  ESTIMATED_PROMPT_OVERHEAD_TOKENS,
+  ESTIMATED_ITEM_OVERHEAD_TOKENS,
   estimateTokensFromBytes,
   resolveContextBudget,
 } from "./tokens.js";
@@ -262,6 +278,19 @@ export {
   createFreshSessionProvider,
 } from "./providers/providerFactory.js";
 
+// Provider confirmation (Gate-0 pool discovery + selection)
+export type {
+  CapabilityTier,
+  DiscoveredProvider,
+  ConfirmedProviderPool,
+} from "./providers/providerConfirmation.js";
+export {
+  discoverProviders,
+  queryProviderQuota,
+  buildProviderConfirmationDisplay,
+  applyProviderConfirmationSelections,
+} from "./providers/providerConfirmation.js";
+
 // Quota
 export type {
   LimitSource,
@@ -341,6 +370,8 @@ export type {
 export {
   computeDispatchCapacity,
   summarizeDispatchCapacityPools,
+  detectLivelock,
+  buildEmptyPoolTerminal,
 } from "./quota/capacity.js";
 export type {
   CapacityPool,
@@ -348,8 +379,15 @@ export type {
   DispatchCapacityPoolSummary,
   DispatchCapacity,
   ComputeDispatchCapacityInput,
+  PartialCompletionReason,
+  PartialCompletionTerminal,
 } from "./quota/capacity.js";
-export { DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE } from "./prompts.js";
+export type { CacheablePromptParts } from "./prompts.js";
+export {
+  buildCacheablePrompt,
+  DO_NOT_TOKEN_WRAP_NOTE,
+  DISPATCH_PROMPT_HANDOFF_NOTE,
+} from "./prompts.js";
 
 // Contract-pipeline artifact types (shared across both orchestrators)
 export type {
@@ -377,6 +415,8 @@ export type {
   VerificationReport,
   VerificationTraceEntry,
   FindingVerificationTrace,
+  TestSpec,
+  TestValidatorPlan,
 } from "./types/contractPipeline.js";
 export {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
@@ -389,6 +429,7 @@ export {
   CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
   CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION,
+  CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
 } from "./types/contractPipeline.js";
 export { LearnedQuotaSource } from "./quota/learnedQuotaSource.js";
 
@@ -402,3 +443,68 @@ export {
   ClaudeCodeErrorParser,
   getErrorParserForProvider,
 } from "./quota/errorParsers/index.js";
+
+// Rolling engine — provider-pool-change semantics (drop + re-route)
+export type {
+  ProviderPoolEventKind,
+  ProviderPoolEvent,
+  RollingEnginePoolEntry,
+  RollingEnginePool,
+  EnginePacketToken,
+  RollingEnginePoolState,
+} from "./quota/rollingEngine.js";
+export {
+  dropProvider,
+  reroutePackets,
+} from "./quota/rollingEngine.js";
+
+// Rolling engine paused-state + livelock guard (N-S09)
+export type {
+  RollingEngineLifecycleState,
+  SettledExclusionSet,
+  AdvancePausedStateOptions,
+} from "./rolling/pausedState.js";
+export {
+  LIVELOCK_PAUSE_LIMIT,
+  filterNewProviders,
+  checkLivelockGuard,
+  advancePausedState,
+} from "./rolling/pausedState.js";
+
+// Rolling dispatch engine (packet-type-agnostic, quota-only throttle)
+export type {
+  RollingDispatchPacket,
+  RollingDispatchResult,
+  ProviderSlot,
+  InFlightEntry,
+  RollingDispatchState,
+  RollingDispatchConfig,
+  RollingDispatchOptions,
+  RollingDispatcher,
+} from "./dispatch/rollingDispatch.js";
+export {
+  InFlightTokenTracker,
+  scorePacketComplexity,
+  selectProvider,
+  createRollingDispatcher,
+} from "./dispatch/rollingDispatch.js";
+
+// Versioned seam contracts (N-X06) — pinned interface types + version constants
+export type {
+  RollingDispatchEnginePacket,
+  RollingDispatchEngineResult,
+  RollingDispatchEngineContract,
+} from "./types/rollingDispatch.js";
+export { ROLLING_DISPATCH_ENGINE_VERSION } from "./types/rollingDispatch.js";
+
+export type {
+  ConfirmedPoolEntry,
+  ProviderConfirmationResult,
+} from "./types/providerConfirmation.js";
+export { PROVIDER_CONFIRMATION_RESULT_VERSION } from "./types/providerConfirmation.js";
+
+export type {
+  EncodedClause,
+  FreeFormIntentInterpretation,
+} from "./types/intentInterpretation.js";
+export { FREE_FORM_INTENT_INTERPRETATION_VERSION } from "./types/intentInterpretation.js";

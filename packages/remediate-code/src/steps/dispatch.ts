@@ -1,6 +1,9 @@
 import { mkdir, rename } from "node:fs/promises";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, dirname } from "node:path";
+import { OwnershipRegistry } from "../dispatch/ownershipRegistry.js";
+import { routeAmendmentRequest } from "../dispatch/amendmentClaim.js";
+import { spawnSync } from "node:child_process";
 import { StateStore, type RemediationState } from "../state/store.js";
 import type {
   ClarificationRequest,
@@ -8,6 +11,15 @@ import type {
   ItemSpec,
   RemediationBlock,
 } from "../state/types.js";
+import type {
+  SessionConfig,
+  HostConcurrencyLimit,
+  WaveSchedule,
+  QuotaStateEntry,
+  BackoffState,
+  ResolvedProviderName,
+  DispatchCapacityPoolSummary,
+} from "@audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
   readJsonFile,
@@ -20,23 +32,23 @@ import {
   detectRepoConventions,
   formatRepoConventions,
   toPromptPathToken,
+  estimateTokensFromBytes,
   type FindingTheme,
-  type SessionConfig,
 } from "@audit-tools/shared";
 import {
   validateClarificationRequest,
-  validateDocumentResponse,
-  validateItemSpec,
 } from "../validation/remediationState.js";
 import { validateImplementWorkerResult } from "../validation/artifacts.js";
 import {
   REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+  REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION,
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
   type DispatchModelHint,
+  type DispatchPhase,
   type DispatchPlanItem,
-  type DocumentWorkerResult,
   type ImplementWorkerResult,
   type RemediationDispatchPlan,
+  type RemediationDispatchQuota,
 } from "./types.js";
 import {
   classifyFindingRisk,
@@ -44,9 +56,342 @@ import {
   dependenciesSatisfied,
   isTerminalStatus,
 } from "./stepUtils.js";
-import { scheduleWave, buildDispatchQuota } from "./waveScheduler.js";
-import { ESTIMATED_FINDING_OVERHEAD_TOKENS, ESTIMATED_BLOCK_BASE_TOKENS } from "../phases/plan.js";
 import { resnapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
+import {
+  computeDispatchCapacity,
+  resolveHostActiveSubagentLimit,
+  readQuotaState,
+  buildProviderModelKey,
+  computeBackoffCooldownMs,
+  computeBackoffFailureWeight,
+  summarizeDispatchCapacityPools,
+} from "../quota/index.js";
+export { resolveHostActiveSubagentLimit };
+export {
+  detectHostActiveSubagentLimit as detectHostConcurrencyFromEnv,
+} from "../quota/hostLimits.js";
+
+// ---------------------------------------------------------------------------
+// WaveScheduler types and functions (inlined from waveScheduler.ts)
+// waveScheduler.ts is now a thin re-export shim pointing here.
+// ---------------------------------------------------------------------------
+
+export type { HostConcurrencyLimit };
+
+const DEFAULT_WAVE_SIZE = 5;
+
+export interface ScheduleWaveInput {
+  hostMaxConcurrent?: number | null;
+  sessionConfig: SessionConfig | null;
+  itemCount: number;
+  estimatedSlotTokens?: number[];
+  providerName?: ResolvedProviderName;
+  hostModel?: string | null;
+  env?: NodeJS.ProcessEnv;
+}
+
+export function normalizeSlotTokens(tokens: number[] | undefined, count: number): number[] {
+  if (!tokens || tokens.length === 0) return new Array(count).fill(0);
+  if (tokens.length > count) return tokens.slice(0, count);
+  if (tokens.length < count) return [...tokens, ...new Array(count - tokens.length).fill(0)];
+  return tokens;
+}
+
+function averageSlotTokens(estimatedSlotTokens?: number[]): number {
+  if (!estimatedSlotTokens || estimatedSlotTokens.length === 0) return 0;
+  const total = estimatedSlotTokens.reduce((a, b) => a + b, 0);
+  return Math.floor(total / estimatedSlotTokens.length);
+}
+
+export interface WaveScheduleResult extends WaveSchedule {
+  wave_size: number;
+  estimated_wave_tokens: number;
+  host_concurrency_limit: HostConcurrencyLimit | null;
+  capacity_pools?: DispatchCapacityPoolSummary[];
+}
+
+export function resolveHostConcurrencyLimit(options: {
+  hostMaxConcurrent?: number | null;
+  sessionConfig: SessionConfig | null;
+  env?: NodeJS.ProcessEnv;
+}): HostConcurrencyLimit | null {
+  return resolveHostActiveSubagentLimit({
+    explicitLimit: options.hostMaxConcurrent,
+    sessionConfig: options.sessionConfig ?? {},
+    env: options.env,
+  });
+}
+
+function _capacityPoolSummary(
+  poolId: string,
+  slots: number,
+  schedule: WaveSchedule,
+): DispatchCapacityPoolSummary {
+  return {
+    pool_id: poolId,
+    slots,
+    model: schedule.model,
+    confidence: schedule.confidence,
+    source: schedule.source,
+    resolved_limits: schedule.resolved_limits,
+    host_concurrency_limit: schedule.host_concurrency_limit,
+    cooldown_until: schedule.cooldown_until,
+    estimated_wave_tokens: schedule.estimated_wave_tokens,
+    binding_cap: schedule.binding_cap ?? "none",
+    quota_source_snapshot: schedule.quota_source_snapshot ?? null,
+  };
+}
+
+export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveScheduleResult> {
+  const sessionConfig = input.sessionConfig ?? {};
+  const providerName = input.providerName ?? (sessionConfig as { provider?: ResolvedProviderName }).provider ?? "claude-code";
+  const hostModel = input.hostModel ?? (sessionConfig as { block_quota?: { host_model?: string | null } }).block_quota?.host_model ?? null;
+
+  const hostLimit = resolveHostConcurrencyLimit({
+    hostMaxConcurrent: input.hostMaxConcurrent,
+    sessionConfig,
+    env: input.env,
+  });
+
+  const quota = (sessionConfig as { quota?: { enabled?: boolean } }).quota;
+  if (!quota || quota.enabled === false) {
+    const cap = hostLimit?.active_subagents ?? DEFAULT_WAVE_SIZE;
+    const waveSize = Math.max(1, Math.min(cap, input.itemCount));
+    const avgTokens = averageSlotTokens(input.estimatedSlotTokens);
+    const schedule: WaveScheduleResult = {
+      wave_size: waveSize,
+      estimated_wave_tokens: waveSize * avgTokens,
+      cooldown_until: null,
+      confidence: "low",
+      source: "default",
+      resolved_limits: {
+        context_tokens: 32_000,
+        output_tokens: 4_096,
+        requests_per_minute: null,
+        input_tokens_per_minute: null,
+        output_tokens_per_minute: null,
+      },
+      host_concurrency_limit: hostLimit,
+      model: hostModel,
+      binding_cap: hostLimit && waveSize < input.itemCount ? "host_concurrency" : "none",
+    };
+    return {
+      ...schedule,
+      capacity_pools: [_capacityPoolSummary(buildProviderModelKey(providerName, hostModel), waveSize, schedule)],
+    };
+  }
+
+  let quotaStateEntry: QuotaStateEntry | null = null;
+  try {
+    const key = buildProviderModelKey(providerName, hostModel);
+    const state = await readQuotaState();
+    quotaStateEntry = state.entries[key] ?? null;
+  } catch (err) {
+    process.stderr.write(`[waveScheduler] readQuotaState failed; falling back to default wave size. ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+
+  const capacity = computeDispatchCapacity({
+    pools: [
+      {
+        id: buildProviderModelKey(providerName, hostModel),
+        providerName,
+        hostModel,
+        hostConcurrencyLimit: hostLimit,
+        quotaStateEntry,
+      },
+    ],
+    sessionConfig,
+    pendingItemTokens: normalizeSlotTokens(input.estimatedSlotTokens, input.itemCount),
+  });
+
+  return {
+    ...capacity.primary.schedule,
+    capacity_pools: summarizeDispatchCapacityPools(capacity),
+  };
+}
+
+export function buildDispatchQuota(
+  runId: string,
+  phase: DispatchPhase,
+  schedule: WaveScheduleResult,
+  quotaStateEntry?: QuotaStateEntry | null,
+): RemediationDispatchQuota {
+  let backoffState: BackoffState | null = null;
+  const count = quotaStateEntry?.consecutive_429_count ?? 0;
+  if (count > 0) {
+    backoffState = {
+      consecutive_429_count: count,
+      current_cooldown_ms: computeBackoffCooldownMs(count),
+      current_failure_weight: computeBackoffFailureWeight(count),
+    };
+  }
+
+  return {
+    contract_version: REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION,
+    run_id: runId,
+    phase,
+    host_concurrency_limit: schedule.host_concurrency_limit,
+    wave_size: schedule.wave_size,
+    estimated_wave_tokens: schedule.estimated_wave_tokens,
+    model: schedule.model,
+    confidence: schedule.confidence,
+    source: schedule.source,
+    resolved_limits: schedule.resolved_limits,
+    cooldown_until: schedule.cooldown_until,
+    binding_cap: schedule.binding_cap ?? "none",
+    capacity_pools: schedule.capacity_pools,
+    quota_source_snapshot: schedule.quota_source_snapshot ?? null,
+    backoff_state: backoffState,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Byte-based token estimation helpers
+// ---------------------------------------------------------------------------
+
+/** Fixed prompt overhead per dispatch slot (prompt instructions, JSON schema, etc.). */
+const PROMPT_OVERHEAD_TOKENS = 2000;
+
+/** Sum the byte sizes of a list of absolute or repo-relative file paths. */
+function sumFileSizes(filePaths: string[]): number {
+  let total = 0;
+  for (const p of filePaths) {
+    try {
+      total += statSync(p).size;
+    } catch {
+      // Missing file → 0 bytes; not an error for estimation purposes.
+    }
+  }
+  return total;
+}
+
+/** Estimate slot tokens for an implement dispatch slot from readFiles byte sizes. */
+function estimateImplementSlotTokens(readFiles: string[], root: string): number {
+  const absPaths = readFiles.map((f) =>
+    f.startsWith("/") || /^[A-Za-z]:[/\\]/.test(f) ? f : join(root, f),
+  );
+  const bytes = sumFileSizes(absPaths);
+  return estimateTokensFromBytes(bytes) + PROMPT_OVERHEAD_TOKENS;
+}
+
+// ---------------------------------------------------------------------------
+// detectRepoConventions cache (one call per repo root per process)
+// ---------------------------------------------------------------------------
+
+/** Module-level cache: repo root → formatted conventions string. */
+export const detectRepoConventionsCache = new Map<string, string>();
+
+function getCachedConventions(root: string): string {
+  if (detectRepoConventionsCache.has(root)) {
+    return detectRepoConventionsCache.get(root)!;
+  }
+  const result = formatRepoConventions(detectRepoConventions(root));
+  detectRepoConventionsCache.set(root, result);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Worktree dispatch engine
+// ---------------------------------------------------------------------------
+
+export interface WorktreeVerifyResult {
+  passed: boolean;
+  output: string;
+}
+
+/** Create an isolated git worktree on a fresh branch at HEAD. Throws on non-zero exit. */
+export function createWorktree(root: string, worktreePath: string, branchName: string): void {
+  const result = spawnSync(
+    "git",
+    ["worktree", "add", "-b", branchName, worktreePath, "HEAD"],
+    { cwd: root, encoding: "utf8", shell: false },
+  );
+  if (result.status !== 0) {
+    const stderr = (result.stderr ?? "").trim();
+    const stdout = (result.stdout ?? "").trim();
+    throw new Error(
+      `git worktree add failed (exit ${result.status ?? "unknown"}):\n${stderr || stdout}`,
+    );
+  }
+}
+
+/** Remove a git worktree. Best-effort: logs but does not throw on failure. */
+export function removeWorktree(root: string, worktreePath: string): void {
+  const result = spawnSync(
+    "git",
+    ["worktree", "remove", "--force", worktreePath],
+    { cwd: root, encoding: "utf8", shell: false },
+  );
+  if (result.status !== 0) {
+    const stderr = (result.stderr ?? "").trim();
+    process.stderr.write(
+      `[remediate-code] worktree remove failed (exit ${result.status ?? "unknown"}): ${stderr}\n`,
+    );
+  }
+}
+
+/** Run each targeted command in the worktree directory. Returns pass/fail and combined output. */
+export function verifyNodeInWorktree(
+  worktreePath: string,
+  targetedCommands: string[],
+): WorktreeVerifyResult {
+  const outputs: string[] = [];
+  for (const cmd of targetedCommands) {
+    const [bin, ...args] = cmd.split(" ");
+    const r = spawnSync(bin, args, {
+      cwd: worktreePath,
+      encoding: "utf8",
+      shell: false,
+    });
+    const combined = [r.stdout ?? "", r.stderr ?? ""].filter(Boolean).join("\n");
+    outputs.push(`$ ${cmd}\n${combined}`);
+    if (r.status !== 0) {
+      return { passed: false, output: outputs.join("\n---\n") };
+    }
+  }
+  return { passed: true, output: outputs.join("\n---\n") };
+}
+
+/** Merge the worktree branch into the current HEAD via cherry-pick. On failure, removes the worktree and returns the error. */
+export function mergeWorktree(
+  root: string,
+  worktreePath: string,
+  branchName: string,
+): { success: true } | { success: false; error: string } {
+  // Get the tip commit of the worktree branch
+  const revResult = spawnSync("git", ["rev-parse", branchName], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (revResult.status !== 0) {
+    const errMsg = (revResult.stderr ?? "").trim();
+    removeWorktree(root, worktreePath);
+    return { success: false, error: `Failed to resolve worktree branch ${branchName}: ${errMsg}` };
+  }
+
+  const worktreeTip = revResult.stdout.trim();
+  const mergeResult = spawnSync("git", ["cherry-pick", worktreeTip], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (mergeResult.status !== 0) {
+    const stderr = (mergeResult.stderr ?? "").trim();
+    // Abort the cherry-pick so the main tree stays clean
+    spawnSync("git", ["cherry-pick", "--abort"], { cwd: root, shell: false });
+    removeWorktree(root, worktreePath);
+    return { success: false, error: `cherry-pick failed: ${stderr}` };
+  }
+
+  removeWorktree(root, worktreePath);
+  return { success: true };
+}
+
+/** Worktree path for a remediation block. */
+export function worktreePath(root: string, blockId: string, runId: string): string {
+  return join(root, ".audit-tools", "worktrees", `remediate-${blockId}-${runId}`);
+}
 
 export interface DispatchOptions {
   root: string;
@@ -64,17 +409,6 @@ function markTerminal(item: { started_at?: string; completed_at?: string }): voi
   item.completed_at = now;
 }
 
-async function tryLoadExistingDocumentResult(resultPath: string): Promise<boolean> {
-  if (!existsSync(resultPath)) return false;
-  try {
-    const result = await readJsonFile<DocumentWorkerResult>(resultPath);
-    const issues = validateDocumentResponse(result);
-    return issues.filter((i) => i.severity === "error").length === 0;
-  } catch {
-    return false;
-  }
-}
-
 async function tryLoadExistingImplementResult(
   resultPath: string,
 ): Promise<ImplementWorkerResult | undefined> {
@@ -88,13 +422,13 @@ async function tryLoadExistingImplementResult(
   }
 }
 
-function documentedFindingIdsForBlock(
+function pendingOrDocumentedFindingIdsForBlock(
   block: RemediationBlock,
   state: RemediationState,
 ): string[] {
   return block.items.filter((findingId) => {
     const item = state.items?.[findingId];
-    return item?.status === "documented" && Boolean(item.item_spec);
+    return item?.status === "pending" && !isTerminalStatus(item.status);
   });
 }
 
@@ -122,36 +456,6 @@ function dispatchPlanPath(
   phase: string,
 ): string {
   return join(runDir(artifactsDir, runId, phase), "dispatch-plan.json");
-}
-
-const SENSITIVE_LENSES = new Set([
-  "security",
-  "data_integrity",
-  "reliability",
-]);
-const SAFE_LENS_PATTERN =
-  /\b(style|format|lint|typo|whitespace|cosmetic|config)\b/i;
-
-export function buildDocumentModelHint(finding: Finding): DispatchModelHint {
-  const deepReasons: string[] = [];
-  if (finding.severity === "critical" || finding.severity === "high") {
-    deepReasons.push(`severity_${finding.severity}`);
-  }
-  if (SENSITIVE_LENSES.has(finding.lens.toLowerCase())) {
-    deepReasons.push(`sensitive_lens_${finding.lens}`);
-  }
-  if (deepReasons.length > 0) {
-    return { tier: "deep", reasons: deepReasons };
-  }
-
-  const lowRisk =
-    (finding.severity === "low" || finding.severity === "info") &&
-    finding.confidence === "high";
-  if (lowRisk && SAFE_LENS_PATTERN.test(finding.lens)) {
-    return { tier: "small", reasons: ["low_severity_safe_lens"] };
-  }
-
-  return { tier: "standard", reasons: ["default_document_item"] };
 }
 
 const TEST_FILE_RE = /\.(test|spec)\.[cm]?[jt]sx?$/;
@@ -219,9 +523,16 @@ export function buildTestFileIndex(root: string): TestFileEntry[] {
   return index;
 }
 
+/**
+ * Collect test files from `index` that reference any of `sourceFiles` by
+ * module basename. When `packageRoot` is supplied (repo-relative prefix, e.g.
+ * `packages/foo`), only test files under that package are considered —
+ * otherwise all test files in the index are matched (existing behavior).
+ */
 export function collectReferencingTests(
   index: TestFileEntry[],
   sourceFiles: string[],
+  packageRoot?: string,
 ): string[] {
   if (sourceFiles.length === 0 || index.length === 0) return [];
   const basenames = sourceFiles
@@ -232,9 +543,15 @@ export function collectReferencingTests(
     (b) => new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`),
   );
   const sourceSet = new Set(sourceFiles.map((f) => f.replace(/\\/g, "/")));
+  // Normalize packageRoot to forward slashes and ensure it ends without trailing slash
+  const pkgPrefix = packageRoot
+    ? packageRoot.replace(/\\/g, "/").replace(/\/$/, "") + "/"
+    : null;
   const result: string[] = [];
   for (const { rel, content } of index) {
     if (sourceSet.has(rel)) continue;
+    // If a package scope is set, skip files outside that package
+    if (pkgPrefix && !rel.startsWith(pkgPrefix)) continue;
     if (needles.some((re) => re.test(content))) result.push(rel);
   }
   return result;
@@ -242,6 +559,30 @@ export function collectReferencingTests(
 
 function uniquePaths(paths: string[]): string[] {
   return [...new Set(paths)];
+}
+
+/**
+ * Detect the nearest ancestor directory containing a `package.json` for the
+ * first source file in `sourceFiles` (walk up, stop at `root`). Returns the
+ * repo-relative path prefix (e.g. `packages/foo`) or undefined if none found.
+ */
+function detectPackageRoot(sourceFiles: string[], root: string): string | undefined {
+  if (sourceFiles.length === 0) return undefined;
+  const first = sourceFiles[0];
+  // Resolve to absolute path relative to root if not already absolute
+  const absFirst = first.startsWith("/") || /^[A-Za-z]:[/\\]/.test(first)
+    ? first
+    : join(root, first);
+  let dir = dirname(absFirst);
+  while (dir !== root && dir.length > root.length) {
+    if (existsSync(join(dir, "package.json"))) {
+      return relative(root, dir).replace(/\\/g, "/");
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
 }
 
 /**
@@ -326,27 +667,6 @@ function buildImplementDispatchItem(
   };
 }
 
-/**
- * Construct the DispatchPlanItem for a document task. Single source of truth so
- * prepareDocumentDispatch and mergeDocumentResults stay in lockstep on item shape.
- */
-function buildDocumentDispatchItem(finding: Finding, dir: string): DispatchPlanItem {
-  const taskId = `document-${finding.id}`;
-  const promptPath = join(dir, `${taskId}.md`);
-  const resultPath = join(dir, `${taskId}.result.json`);
-  return {
-    task_id: taskId,
-    finding_id: finding.id,
-    prompt_path: promptPath,
-    result_path: resultPath,
-    model_hint: buildDocumentModelHint(finding),
-    access: {
-      read_paths: finding.affected_files.map((f) => f.path),
-      write_paths: [resultPath],
-    },
-  };
-}
-
 export function buildImplementModelHint(
   block: RemediationBlock,
   state: RemediationState,
@@ -401,18 +721,6 @@ export function buildImplementModelHint(
   return { tier: "standard", reasons: ["default_implement_block"] };
 }
 
-// Phase 7A: reuse the auditor's synthesis theme (no new LLM pass) to hand the
-// worker the shared root-cause fix pattern when this finding carries one.
-function themeHint(
-  finding: Finding,
-  themes: FindingTheme[] | undefined,
-): string {
-  if (!finding.theme_id) return "";
-  const theme = themes?.find((t) => t.theme_id === finding.theme_id);
-  if (!theme) return "";
-  return `\nSYNTHESIS THEME (${theme.theme_id} — ${theme.title}):\nRoot cause: ${theme.root_cause}\nSuggested fix pattern: ${theme.suggested_fix_pattern}\nApply this shared pattern where it fits this finding.\n`;
-}
-
 function contractPipelineTraceLines(finding: Finding): string[] {
   const lines: string[] = [];
   if (finding.contract_goal_id) {
@@ -430,15 +738,10 @@ function contractPipelineTraceLines(finding: Finding): string[] {
   return lines;
 }
 
-function contractPipelineTraceSection(finding: Finding): string {
+function contractPipelineTraceBullets(finding: Finding): string {
   const lines = contractPipelineTraceLines(finding);
   if (lines.length === 0) return "";
   return `\n## Contract Pipeline Traceability\n\n${lines.map((line) => `- ${line}`).join("\n")}\n`;
-}
-
-function contractPipelineTraceBullets(finding: Finding): string {
-  const lines = contractPipelineTraceLines(finding);
-  return lines.length > 0 ? `${lines.map((line) => `- ${line}`).join("\n")}\n` : "";
 }
 
 /**
@@ -467,112 +770,75 @@ allowed in addition to the file access above.
 `;
 }
 
-function findingPrompt(
-  finding: Finding,
-  resultPath: string,
-  conventions: string,
-  themeHintText: string,
-  repoRoot: string,
-  feedbackDisplay: string,
-  clarificationContext: string,
-): string {
-  // Normalize paths to forward slashes so bash-like shells on Windows do not
-  // treat backslashes as escape characters when the host copies these paths.
-  const rootDisplay = toPromptPathToken(repoRoot);
-  const resultDisplay = toPromptPathToken(resultPath);
-  // When this finding is being re-documented after a clarification round, carry
-  // the user's answer so the worker finalizes the item_spec instead of asking
-  // the same question again. Set by applyClarificationResolution on re-open.
-  const clarificationSection = clarificationContext
-    ? `\n## Previous clarification\n\nYou previously requested clarification on this finding. The user responded:\n\n> ${clarificationContext}\n\nUse this answer to finalize the item_spec rather than requesting clarification again.\n`
-    : "";
-  return `
-# Document Remediation Item
+// ---------------------------------------------------------------------------
+// Infra-modifying block detection
+// ---------------------------------------------------------------------------
 
-You are documenting one remediation item. Use only the finding context below.
-Repository root: ${rootDisplay}
-Set the shell/tool workdir to the repository root when running any command; do not rely on cwd state from prior shell calls.
+/**
+ * Canonical set of infra files whose modification can break the live dispatcher
+ * while the run is in progress. Paths are repo-relative forward-slash strings.
+ */
+const INFRA_FILE_PATHS = new Set([
+  "packages/remediate-code/src/steps/nextStep.ts",
+  "packages/remediate-code/src/steps/dispatch.ts",
+  "packages/remediate-code/src/state/store.ts",
+  "packages/remediate-code/src/steps/contractPipeline.ts",
+  "packages/remediate-code/src/steps/waveScheduler.ts",
+  "packages/remediate-code/src/steps/stepWriter.ts",
+]);
 
-## Finding
-
-- ID: ${finding.id}
-- Title: ${finding.title}
-- Severity: ${finding.severity}
-- Confidence: ${finding.confidence}
-- Lens: ${finding.lens}
-- Summary: ${finding.summary}
-- Files: ${finding.affected_files.map((file) => file.path).join(", ")}
-
-## Evidence
-
-${(finding.evidence ?? []).map((item) => `- ${item}`).join("\n")}
-${contractPipelineTraceSection(finding)}
-${themeHintText}${clarificationSection}${conventions ? `\n${conventions}\n` : ""}
-## Output
-
-Write JSON to exactly:
-
-\`${resultDisplay}\`
-
-Use one of these shapes:
-
-\`\`\`json
-{
-  "type": "item_spec",
-  "item_spec": {
-    "finding_id": "${finding.id}",
-    "concrete_change": "...",
-    "no_change": false,
-    "touched_files": ["repo/relative/path.ts"],
-    "tests_to_write": [{ "name": "...", "assertions": ["..."] }],
-    "not_applicable_steps": []
-  }
-}
-\`\`\`
-
-Set \`no_change\` to \`true\` when the existing code is already correct and no
-source changes are needed. When \`no_change\` is true, \`concrete_change\` should
-explain why the code is already correct.
-
-List every repo-relative path your fix will create or modify in \`touched_files\`.
-If the real fix belongs in files other than the \`Files\` listed above, put the
-correct paths there — the implementer is granted write access to exactly these
-(falling back to the finding's files only if you omit \`touched_files\`).
-
-If any remediation steps do not apply to this finding, list them in
-\`not_applicable_steps\`. Each entry must be an object with a \`step\` field
-(one of: \`"Document"\`, \`"Write Tests"\`, \`"Refactor Code"\`,
-\`"Verify Code Against Tests"\`, \`"Verify Code Against Documentation"\`) and a
-required \`rationale\` string explaining why it does not apply. Example:
-
-\`\`\`json
-"not_applicable_steps": [
-  { "step": "Write Tests", "rationale": "Finding is a config-only change with no testable logic." }
-]
-\`\`\`
-
-\`\`\`json
-{
-  "type": "clarification_request",
-  "clarifications": [
-    {
-      "finding_id": "${finding.id}",
-      "category": "scope_of_fix",
-      "description": "..."
+/**
+ * Returns true when any path in `writePaths` matches the set of infra files
+ * (normalised to repo-relative forward-slash strings). Used to gate the
+ * live-surface verification section in the implement prompt.
+ */
+export function isInfraModifyingBlock(writePaths: string[]): boolean {
+  for (const p of writePaths) {
+    const normalized = p.replace(/\\/g, "/");
+    if (INFRA_FILE_PATHS.has(normalized)) return true;
+    // Also match if the path ends with the infra file's relative segment,
+    // e.g. an absolute path like /abs/root/packages/remediate-code/src/steps/dispatch.ts
+    for (const infraPath of INFRA_FILE_PATHS) {
+      if (normalized.endsWith("/" + infraPath)) return true;
     }
-  ]
+  }
+  return false;
 }
-\`\`\`
 
-Windows PowerShell: do not pipe an inline foreach statement directly into ConvertTo-Json.
-Assign the foreach output to a variable first, then pipe that variable to ConvertTo-Json.
+function infraModifyingSection(repoRoot: string): string {
+  const rootDisplay = toPromptPathToken(repoRoot);
+  return `
+## Infra-modifying block
 
-## File access
+This block modifies the dispatch/orchestration engine that the current run
+executes. Before and after editing, follow these steps:
 
-Read: ${finding.affected_files.map((f) => f.path).join(", ")}
-Write: ${resultDisplay}
-Do not read or write files outside these paths.
-${reflectionInvitation(feedbackDisplay, finding.id, finding.lens)}`;
+1. **Snapshot dist (rollback artefact):** Before editing any file, copy
+   \`packages/remediate-code/dist/\` to a temporary path (e.g. append
+   \`.infra-snapshot-<timestamp>\` to the dist path). Record that snapshot
+   path in your result evidence so the run can roll back if needed. The
+   copy must be an atomic rename, not an overwrite-in-place.
+
+2. **Build after editing:** After completing all edits, run:
+   \`\`\`
+   npm run build -w packages/remediate-code
+   \`\`\`
+   from \`${rootDisplay}\`. If the build fails, **restore the snapshotted dist**
+   (rename the snapshot back to \`dist/\`) before writing your result, mark the
+   item blocked, and record the build failure in \`failure_reason\`.
+
+3. **Live-surface smoke:** After a successful build, run:
+   \`\`\`
+   npm test -w packages/remediate-code
+   \`\`\`
+   from \`${rootDisplay}\` to exercise the rebuilt dispatcher (not the stale
+   global bin). If any test fails, restore the dist snapshot, mark the item
+   blocked, and record the failure in \`failure_reason\`.
+
+4. **Dist swap is atomic:** If you need to restore the snapshot, use a rename
+   (atomic replace) rather than overwriting files in-place, so the live engine
+   is never in a partial state during the swap.
+`;
 }
 
 function implementPrompt(
@@ -582,21 +848,40 @@ function implementPrompt(
   conventions: string,
   repoRoot: string,
   feedbackDisplay: string,
+  worktreeRoot?: string,
 ): string {
   const items = block.items.flatMap((findingId) => {
     const item = state.items?.[findingId];
     const finding = state.plan?.findings.find((entry) => entry.id === findingId);
-    if (!item?.item_spec || !finding) return [];
+    if (!finding) return [];
     // Only render items that still need implementing — never a resolved item
     // from a prior wave or one the user skipped (deemed_inappropriate/ignored).
-    if (item.status !== "documented") return [];
+    if (!item || isTerminalStatus(item.status)) return [];
+    if (item.status !== "pending") return [];
+    // item_spec may be pre-populated from the plan DAG node or absent;
+    // either way the implementer receives finding context directly.
     return [{ finding, spec: item.item_spec }];
   });
 
+  // When a worktreeRoot is supplied, the worker operates in the worktree, not
+  // the main repo root. Source file paths are prefixed with the worktree root.
+  // The result path always lives in the artifacts dir (outside the worktree).
+  const effectiveRoot = worktreeRoot ?? repoRoot;
   // Normalize to forward slashes for host-facing prompt text; bash-like shells
   // on Windows treat backslashes as escape characters.
-  const rootDisplay = toPromptPathToken(repoRoot);
+  const rootDisplay = toPromptPathToken(effectiveRoot);
   const resultDisplay = toPromptPathToken(resultPath);
+
+  // Prefix each source file path with the worktree root when applicable.
+  function resolveFilePath(rel: string): string {
+    if (!worktreeRoot) return rel;
+    if (rel.startsWith("/") || /^[A-Za-z]:[/\\]/.test(rel)) return rel;
+    return toPromptPathToken(join(worktreeRoot, rel));
+  }
+
+  const worktreeNote = worktreeRoot
+    ? `\nYou are working in a worktree at ${toPromptPathToken(worktreeRoot)}; all file edits go here. Do not edit files outside this worktree.\n`
+    : "";
 
   return `
 # Implement Remediation Block
@@ -621,19 +906,19 @@ ${items
     ({ finding, spec }) => `
 ### ${finding.id} - ${finding.title}
 
-- Files: ${itemReadFiles(finding, spec).join(", ")}
+- Files: ${itemReadFiles(finding, spec).map(resolveFilePath).join(", ")}
 - Summary: ${finding.summary}
-- Concrete change: ${spec.concrete_change}
+${spec ? `- Concrete change: ${spec.concrete_change}
 - Tests to write: ${spec.tests_to_write
       .map((test) => `${test.name}: ${test.assertions.join("; ")}`)
-      .join(" | ")}
+      .join(" | ")}` : ""}
 ${contractPipelineTraceBullets(finding)}
 `,
   )
   .join("\n")}
-${conventions ? `\n${conventions}\n` : ""}
+${conventions ? `\n${conventions}\n` : ""}${isInfraModifyingBlock(blockWriteFiles(block, state)) ? infraModifyingSection(repoRoot) : ""}
 ## Verification
-
+${worktreeNote}
 Run changed or newly created tests by name when possible, and record the focused
 command and result in the affected item's evidence. If a broad or full-suite
 command fails in a dirty worktree and appears unrelated or pre-existing, record
@@ -693,362 +978,6 @@ async function loadStateOrThrow(
   return state;
 }
 
-export async function prepareDocumentDispatch(
-  options: DispatchOptions,
-  runId: string,
-  onlyFindingId?: string,
-  waveOptions?: { hostMaxConcurrent?: number; sessionConfig?: SessionConfig | null },
-): Promise<RemediationDispatchPlan> {
-  const state = await loadStateOrThrow(options.artifactsDir);
-  if (!state.plan || !state.items) {
-    throw new Error("Cannot prepare document dispatch without plan and items.");
-  }
-
-  const dir = runDir(options.artifactsDir, runId, "document");
-  await mkdir(dir, { recursive: true });
-
-  // Phase 7A: detect house style once per dispatch (filesystem scan) and inject
-  // "match the surrounding code" guidance into every worker prompt.
-  const conventions = formatRepoConventions(detectRepoConventions(options.root));
-
-  const seenFindingIds = new Set<string>();
-  const candidateFindings = state.plan.findings.filter((finding) => {
-    const item = state.items?.[finding.id];
-    if (
-      (!onlyFindingId || finding.id === onlyFindingId) &&
-      item &&
-      item.status === "pending" &&
-      !seenFindingIds.has(finding.id)
-    ) {
-      seenFindingIds.add(finding.id);
-      return true;
-    }
-    return false;
-  });
-
-  const items: DispatchPlanItem[] = [];
-  let reconciledCount = 0;
-  for (const finding of candidateFindings) {
-    const item = buildDocumentDispatchItem(finding, dir);
-
-    if (await tryLoadExistingDocumentResult(item.result_path)) {
-      reconciledCount++;
-      continue;
-    }
-
-    await writeTextFile(
-      item.prompt_path,
-      findingPrompt(
-        finding,
-        item.result_path,
-        conventions,
-        themeHint(finding, state.plan.themes),
-        options.root,
-        toPromptPathToken(join(options.artifactsDir, AGENT_FEEDBACK_FILENAME)),
-        state.items?.[finding.id]?.clarification_context ?? "",
-      ),
-    );
-    items.push(item);
-  }
-  if (reconciledCount > 0) {
-    console.log(`Reconciliation: reused ${reconciledCount} existing document results.`);
-  }
-
-  const plan: RemediationDispatchPlan = {
-    contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
-    phase: "document",
-    run_id: runId,
-    // Normalize to forward slashes so hosts running bash-like shells on Windows
-    // receive paths that survive shell expansion (backslash is an escape char).
-    repo_root: toPromptPathToken(options.root),
-    artifacts_dir: toPromptPathToken(options.artifactsDir),
-    items,
-  };
-
-  await writeJsonFile(dispatchPlanPath(options.artifactsDir, runId, "document"), plan);
-
-  const schedule = await scheduleWave({
-    hostMaxConcurrent: waveOptions?.hostMaxConcurrent,
-    sessionConfig: waveOptions?.sessionConfig ?? null,
-    itemCount: items.length,
-    estimatedSlotTokens: items.map(() => ESTIMATED_FINDING_OVERHEAD_TOKENS),
-  });
-  process.stderr.write(
-    `[remediate-code] dispatch: document wave_size=${schedule.wave_size} of ${items.length} item(s) ` +
-      `source=${schedule.source} cap=${schedule.binding_cap ?? "none"}\n`,
-  );
-  const quota = buildDispatchQuota(runId, "document", schedule);
-  await writeJsonFile(join(dir, "dispatch-quota.json"), quota);
-
-  return plan;
-}
-
-interface ClarificationResolution {
-  finding_id: string;
-  action: "clarified" | "deemed_inappropriate";
-  rationale?: string;
-}
-
-/**
- * Tolerantly normalize the user-authored `clarification_resolution.json`. Accepts
- * a bare array, `{ resolutions: [...] }`, `{ items: [...] }`, or a finding-id
- * keyed object; each entry must carry an `action` of "clarified" or
- * "deemed_inappropriate". Unrecognized entries are dropped. Ported verbatim from
- * the former in-process document phase, which was the only prior consumer.
- */
-function normalizeClarificationResolutions(
-  value: unknown,
-): ClarificationResolution[] {
-  if (Array.isArray(value)) {
-    return value.filter(isRecord).flatMap((entry) => {
-      if (
-        typeof entry.finding_id === "string" &&
-        (entry.action === "clarified" ||
-          entry.action === "deemed_inappropriate")
-      ) {
-        return [
-          {
-            finding_id: entry.finding_id,
-            action: entry.action,
-            rationale:
-              typeof entry.rationale === "string" ? entry.rationale : undefined,
-          },
-        ];
-      }
-      return [];
-    });
-  }
-
-  if (!isRecord(value)) return [];
-
-  if (Array.isArray(value.resolutions)) {
-    return normalizeClarificationResolutions(value.resolutions);
-  }
-  if (Array.isArray(value.items)) {
-    return normalizeClarificationResolutions(value.items);
-  }
-
-  return Object.entries(value).flatMap(([findingId, entry]) => {
-    if (!isRecord(entry)) return [];
-    if (entry.action !== "clarified" && entry.action !== "deemed_inappropriate") {
-      return [];
-    }
-    return [
-      {
-        finding_id:
-          typeof entry.finding_id === "string" ? entry.finding_id : findingId,
-        action: entry.action,
-        rationale:
-          typeof entry.rationale === "string" ? entry.rationale : undefined,
-      },
-    ];
-  });
-}
-
-/**
- * Consume `clarification_resolution.json` — the symmetric counterpart to the
- * clarification raise in `mergeDocumentResults`, and a mirror of triage.ts's
- * `triage_resolution.json` consume. `deemed_inappropriate` findings are marked
- * terminal; `clarified` findings are re-opened (status → pending) for
- * re-documentation with the user's rationale carried into the next dispatch
- * prompt via `clarification_context`. The resolution file is archived so a later
- * clarification round cannot re-apply stale answers. Returns the saved state;
- * the caller wraps it with a state-transition step (as merge results are).
- */
-export async function applyClarificationResolution(
-  options: DispatchOptions,
-  state: RemediationState,
-): Promise<RemediationState> {
-  if (!state.plan || !state.items) {
-    throw new Error(
-      "Cannot apply clarification resolution without plan and items.",
-    );
-  }
-
-  const resolutionPath = join(
-    options.artifactsDir,
-    "clarification_resolution.json",
-  );
-  const resolutions = normalizeClarificationResolutions(
-    await readOptionalJsonFile<unknown>(resolutionPath),
-  );
-  if (resolutions.length === 0) {
-    throw new Error(
-      `Invalid ${resolutionPath}: expected an array, { resolutions: [...] }, ` +
-        `{ items: [...] }, or a finding-id-keyed object of ` +
-        `{ finding_id, action: "clarified" | "deemed_inappropriate", rationale? } entries.`,
-    );
-  }
-
-  for (const res of resolutions) {
-    const item = state.items[res.finding_id];
-    if (!item) continue;
-    if (res.action === "deemed_inappropriate") {
-      item.status = "deemed_inappropriate";
-      item.failure_reason = res.rationale;
-      markTerminal(item);
-    } else {
-      // Re-open for re-documentation, carrying the user's answer into the next
-      // document-dispatch prompt (rendered by findingPrompt).
-      item.status = "pending";
-      item.clarification_context = res.rationale;
-    }
-  }
-
-  if (existsSync(resolutionPath)) {
-    await withFsRetry(() =>
-      rename(resolutionPath, `${resolutionPath}.consumed-${Date.now()}`),
-    );
-  }
-
-  // Mirror mergeDocumentResults' transition: any clarified finding is pending
-  // again → re-plan and re-dispatch documentation; if none remain pending (all
-  // deemed inappropriate), advance to documenting.
-  const remainingPending = state.plan.findings.some(
-    (f) => state.items?.[f.id]?.status === "pending",
-  );
-  state.status = remainingPending ? "planning" : "documenting";
-  state.clarifications = [];
-  state.closing_plan ??= { action: "none" };
-
-  await new StateStore(options.artifactsDir).saveState(state);
-  return state;
-}
-
-export async function mergeDocumentResults(
-  options: DispatchOptions,
-  runId: string,
-): Promise<RemediationState> {
-  const plan = await readJsonFile<RemediationDispatchPlan>(
-    dispatchPlanPath(options.artifactsDir, runId, "document"),
-  );
-  if (
-    plan.contract_version !== REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION ||
-    plan.phase !== "document"
-  ) {
-    throw new Error("Document dispatch plan has an unsupported contract.");
-  }
-
-  const store = new StateStore(options.artifactsDir);
-  const state = await loadStateOrThrow(options.artifactsDir);
-  if (!state.plan || !state.items) {
-    throw new Error("Cannot merge document results without plan and items.");
-  }
-
-  const dir = runDir(options.artifactsDir, runId, "document");
-  const plannedFindingIds = new Set(
-    plan.items.map((item) => item.finding_id).filter((id): id is string => typeof id === "string"),
-  );
-  const itemsToMerge = [...plan.items];
-  for (const finding of state.plan.findings) {
-    const stateItem = state.items[finding.id];
-    if (!stateItem || stateItem.status !== "pending" || plannedFindingIds.has(finding.id)) {
-      continue;
-    }
-
-    const item = buildDocumentDispatchItem(finding, dir);
-    if (!(await tryLoadExistingDocumentResult(item.result_path))) {
-      continue;
-    }
-
-    itemsToMerge.push(item);
-  }
-
-  const clarifications: ClarificationRequest[] = [];
-  for (const item of itemsToMerge) {
-    if (!item.finding_id) {
-      throw new Error(`Document dispatch item ${item.task_id} is missing finding_id.`);
-    }
-    if (!existsSync(item.result_path)) {
-      console.warn(`Missing document worker result: ${item.result_path} — marking ${item.finding_id} blocked.`);
-      const stateItem = state.items[item.finding_id];
-      stateItem.status = "blocked";
-      markTerminal(stateItem);
-      stateItem.failure_reason = `Document worker did not produce a result file: ${item.result_path}`;
-      continue;
-    }
-
-    const result = await readJsonFile<DocumentWorkerResult>(item.result_path);
-    const issues = validateDocumentResponse(result);
-    const errors = issues.filter((issue) => issue.severity === "error");
-    if (errors.length > 0) {
-      console.warn(`Invalid document result for ${item.finding_id} — marking blocked.`);
-      const stateItem = state.items[item.finding_id];
-      stateItem.status = "blocked";
-      markTerminal(stateItem);
-      stateItem.failure_reason =
-        `Invalid document result:\n${formatValidationIssues(errors)}`;
-      continue;
-    }
-
-    if (result.type === "item_spec") {
-      const spec = result.item_spec as ItemSpec;
-      const specIssues = validateItemSpec(spec).filter(
-        (issue) => issue.severity === "error",
-      );
-      if (specIssues.length > 0) {
-        console.warn(`Invalid item spec for ${item.finding_id} — marking blocked.`);
-        const stateItem = state.items[item.finding_id];
-        stateItem.status = "blocked";
-        markTerminal(stateItem);
-        stateItem.failure_reason = formatValidationIssues(specIssues);
-        continue;
-      }
-      const stateItem = state.items[item.finding_id];
-      stateItem.item_spec = spec;
-      stateItem.status = "documented";
-      markStarted(stateItem);
-      await writeJsonFile(
-        join(options.artifactsDir, `item_spec_${item.finding_id}.json`),
-        spec,
-      );
-      continue;
-    }
-
-    for (const clarification of result.clarifications ?? []) {
-      const clarificationIssues = validateClarificationRequest(clarification);
-      const clarificationErrors = clarificationIssues.filter(
-        (issue) => issue.severity === "error",
-      );
-      if (clarificationErrors.length > 0) {
-        throw new Error(formatValidationIssues(clarificationErrors));
-      }
-      clarifications.push(clarification as ClarificationRequest);
-    }
-  }
-
-  if (clarifications.length > 0) {
-    await writeJsonFile(
-      join(options.artifactsDir, "clarification_request.json"),
-      clarifications,
-    );
-    state.status = "waiting_for_clarification";
-    state.clarifications = clarifications;
-  } else {
-    const remainingPending = state.plan?.findings.some(
-      (f) => state.items?.[f.id]?.status === "pending",
-    );
-    state.status = remainingPending ? "planning" : "documenting";
-    state.clarifications = [];
-    state.closing_plan ??= { action: "none" };
-  }
-
-  const mergedItems = state.items;
-  const mergedDocumented = itemsToMerge.filter(
-    (item) => item.finding_id && mergedItems[item.finding_id]?.status === "documented",
-  ).length;
-  const rejectedDocuments = itemsToMerge.filter(
-    (item) => item.finding_id && mergedItems[item.finding_id]?.status === "blocked",
-  ).length;
-  process.stderr.write(
-    `[remediate-code] dispatch: merged ${mergedDocumented} document result(s), ` +
-      `${rejectedDocuments} rejected, ${clarifications.length} clarification(s)\n`,
-  );
-
-  await store.saveState(state);
-  return state;
-}
-
 export async function prepareImplementDispatch(
   options: DispatchOptions,
   runId: string,
@@ -1063,9 +992,9 @@ export async function prepareImplementDispatch(
   const dir = runDir(options.artifactsDir, runId, "implement");
   await mkdir(dir, { recursive: true });
 
-  // Phase 7A: same house-style guidance as the document dispatch, so the
-  // implementing worker also matches the surrounding code.
-  const conventions = formatRepoConventions(detectRepoConventions(options.root));
+  // Use the module-level cache so repeated calls within the same process do not
+  // re-scan the filesystem for repo conventions.
+  const conventions = getCachedConventions(options.root);
 
   const seenBlockIds = new Set<string>();
   const candidateBlocks = state.plan.blocks.filter((block) => {
@@ -1077,7 +1006,7 @@ export async function prepareImplementDispatch(
     if (!dependenciesSatisfied(block, state)) return false;
     const hasWork = block.items.some((findingId) => {
       const item = state.items?.[findingId];
-      return item?.status === "documented" && item.item_spec;
+      return item?.status === "pending";
     });
     if (hasWork) {
       seenBlockIds.add(block.block_id);
@@ -1091,25 +1020,21 @@ export async function prepareImplementDispatch(
   const testIndex = buildTestFileIndex(options.root);
 
   const items: DispatchPlanItem[] = [];
+  const itemReadFileLists: string[][] = [];
   let reconciledCount = 0;
-  // Wave-time file-disjointness: mergeBlocksSharingFiles enforced disjoint
-  // affected_files at plan time, but the document phase's touched_files and the
-  // pulled-in test files can introduce NEW shared paths. Track the write paths
-  // already claimed by this wave and defer any block that would collide, so two
-  // workers never edit the same file concurrently in the main tree. A deferred
-  // block stays `documented` and re-dispatches in a later wave.
-  const claimedWritePaths = new Set<string>();
-  let deferredForFileConflict = 0;
   for (const block of candidateBlocks) {
     const item = buildImplementDispatchItem(block, state, dir);
+    const readFiles = blockReadFiles(block, state);
+
+    // Detect the package root from this block's source files: walk up from the
+    // first source file to the nearest ancestor with a package.json (stop at root).
+    const packageRoot = detectPackageRoot(readFiles, options.root);
 
     // Pull test files that reference this block's source into its access, so the
     // worker that changes or removes a symbol also fixes the tests that assert it
     // (otherwise their breakage is orphaned for a separate central mop-up).
-    const referencingTests = collectReferencingTests(
-      testIndex,
-      blockReadFiles(block, state),
-    );
+    // Scoped to the block's package to avoid pulling in unrelated package tests.
+    const referencingTests = collectReferencingTests(testIndex, readFiles, packageRoot);
     if (referencingTests.length > 0 && item.access) {
       item.access.read_paths = [
         ...new Set([...item.access.read_paths, ...referencingTests]),
@@ -1120,28 +1045,25 @@ export async function prepareImplementDispatch(
     }
 
     // Reconcile an already-produced result regardless of wave packing.
-    const documentedFindingIds = documentedFindingIdsForBlock(block, state);
+    const pendingFindingIds = pendingOrDocumentedFindingIdsForBlock(block, state);
     const existingResult = await tryLoadExistingImplementResult(item.result_path);
     if (existingResult) {
-      if (implementResultCoversFindings(existingResult, documentedFindingIds)) {
+      if (implementResultCoversFindings(existingResult, pendingFindingIds)) {
         reconciledCount++;
         continue;
       }
       process.stderr.write(
         `[remediate-code] dispatch: existing implement result for block ${block.block_id} ` +
-          `does not cover ${documentedFindingIds.length} still-documented item(s); re-dispatching\n`,
+          `does not cover ${pendingFindingIds.length} still-pending item(s); re-dispatching\n`,
       );
       await archiveIncompleteImplementResult(item.result_path);
     }
 
-    const writePaths = (item.access?.write_paths ?? []).filter(
-      (p) => p !== item.result_path,
-    );
-    if (writePaths.some((p) => claimedWritePaths.has(p))) {
-      deferredForFileConflict++;
-      continue;
-    }
-    for (const p of writePaths) claimedWritePaths.add(p);
+    // No wave-time file-conflict deferral heuristic: parallel blocks with
+    // overlapping files are both dispatched. Parallel safety comes from the planner
+    // (mergeBlocksSharingFiles) and dependency ordering (dependenciesSatisfied).
+    // Workers operate in isolated worktrees; verification prevents bad merges from
+    // dirtying the main tree.
 
     await writeTextFile(
       item.prompt_path,
@@ -1155,23 +1077,11 @@ export async function prepareImplementDispatch(
       ),
     );
     items.push(item);
+    itemReadFileLists.push([...readFiles, ...referencingTests]);
   }
   if (reconciledCount > 0) {
     console.log(`Reconciliation: reused ${reconciledCount} existing implement results.`);
   }
-  if (deferredForFileConflict > 0) {
-    process.stderr.write(
-      `[remediate-code] dispatch: deferred ${deferredForFileConflict} block(s) with overlapping write paths to a later wave.\n`,
-    );
-  }
-
-  // Host-dispatched implement workers edit the main tree directly (their prompts
-  // use repo-root-relative paths), so per-block worktrees were created but never
-  // written to — mergeWorktree no-op'd and the `remediate-<block>` branches only
-  // collided across runs. Parallel safety instead comes from the planner: blocks
-  // that share a file are merged (mergeBlocksSharingFiles) and dependency-ordered
-  // blocks dispatch in separate waves (dependenciesSatisfied), so the blocks in
-  // any one wave are file-disjoint and safe to edit concurrently in place.
 
   const plan: RemediationDispatchPlan = {
     contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
@@ -1189,7 +1099,9 @@ export async function prepareImplementDispatch(
     hostMaxConcurrent: waveOptions?.hostMaxConcurrent,
     sessionConfig: waveOptions?.sessionConfig ?? null,
     itemCount: items.length,
-    estimatedSlotTokens: items.map(() => ESTIMATED_BLOCK_BASE_TOKENS),
+    estimatedSlotTokens: itemReadFileLists.map((files) =>
+      estimateImplementSlotTokens(files, options.root),
+    ),
   });
   process.stderr.write(
     `[remediate-code] dispatch: implement wave_size=${schedule.wave_size} of ${items.length} item(s) ` +
@@ -1239,7 +1151,7 @@ export async function mergeImplementResults(
     }
     const hasDocumentedWork = block.items.some((findingId) => {
       const stateItem = state.items?.[findingId];
-      return stateItem?.status === "documented" && stateItem.item_spec;
+      return stateItem?.status === "pending";
     });
     if (!hasDocumentedWork) {
       continue;
@@ -1247,16 +1159,26 @@ export async function mergeImplementResults(
 
     const item = buildImplementDispatchItem(block, state, dir);
     const existingResult = await tryLoadExistingImplementResult(item.result_path);
-    const documentedFindingIds = documentedFindingIdsForBlock(block, state);
+    const pendingFindingIds = pendingOrDocumentedFindingIdsForBlock(block, state);
     if (
       !existingResult ||
-      !implementResultCoversFindings(existingResult, documentedFindingIds)
+      !implementResultCoversFindings(existingResult, pendingFindingIds)
     ) {
       continue;
     }
 
     itemsToMerge.push(item);
   }
+
+  // Build a lightweight ownership registry seeded from each block's declared
+  // write_paths so amended_files checks are correct even when no rolling-dispatch
+  // registry was persisted (interim path, until rollingDispatch replaces this).
+  const mergeRegistry = new OwnershipRegistry();
+  const dagNodes = itemsToMerge.flatMap((item) => {
+    if (!item.block_id || !item.access) return [];
+    return [{ node_id: item.block_id, write_paths: item.access.write_paths }];
+  });
+  mergeRegistry.initialize(dagNodes);
 
   for (const item of itemsToMerge) {
     if (!existsSync(item.result_path)) {
@@ -1279,6 +1201,48 @@ export async function mergeImplementResults(
     }
     const result = await readJsonFile<unknown>(item.result_path);
     assertImplementWorkerResult(result, item.result_path);
+
+    // Gate amended_files through the ownership registry (N-R22).
+    // Unowned amended paths are granted and added to this block's effective scope
+    // for verification; owned/contended paths block the item with a seam conflict.
+    const blockId = item.block_id ?? "";
+    if (result.amended_files && result.amended_files.length > 0) {
+      const { granted, seam_routed } = routeAmendmentRequest(
+        mergeRegistry,
+        blockId,
+        result.amended_files,
+      );
+      if (granted.length > 0 && item.access) {
+        // Expand the block's effective write scope for downstream verification.
+        item.access.write_paths = uniquePaths([...item.access.write_paths, ...granted]);
+      }
+      if (seam_routed.length > 0) {
+        // Mark all non-terminal items in this block as blocked with seam conflict detail.
+        const block = state.plan?.blocks.find((b) => b.block_id === blockId);
+        for (const findingId of block?.items ?? []) {
+          const stateItem = state.items[findingId];
+          if (!stateItem || isTerminalStatus(stateItem.status)) continue;
+          stateItem.status = "blocked";
+          markTerminal(stateItem);
+          stateItem.failure_reason =
+            `Seam conflict on amended_files: ${seam_routed
+              .map((r) => {
+                const reason = r.reason;
+                if (reason.outcome === "owned") {
+                  return `${r.path} owned by ${reason.owner_node_id}`;
+                } else if (reason.outcome === "contended") {
+                  return `${r.path} contended by ${reason.sibling_node_id}`;
+                }
+                return r.path;
+              })
+              .join("; ")}`;
+        }
+        // Release any grants we just made before moving on (best-effort cleanup).
+        mergeRegistry.releaseAmendments(blockId);
+        continue;
+      }
+    }
+
     for (const itemResult of result.item_results) {
       const stateItem = state.items[itemResult.finding_id];
       if (!stateItem) {
@@ -1315,6 +1279,9 @@ export async function mergeImplementResults(
           itemResult.failure_reason ?? "Implementation worker blocked.";
       }
     }
+
+    // Release this block's amendment claims after it has been merged or blocked.
+    mergeRegistry.releaseAmendments(blockId);
   }
 
   // Re-baseline affected-file hashes: the implement phase legitimately rewrites
@@ -1343,14 +1310,14 @@ export async function mergeImplementResults(
       `${implementRejected} rejected\n`,
   );
 
-  // Route back to documenting while documented work remains (later dependency
+  // Route back to implementing while pending work remains (later dependency
   // waves, or blocks deferred this wave because a prerequisite was still
   // running) so the next next-step dispatches the now-ready blocks; otherwise
   // advance to implementing → triage.
   const moreToImplement = Object.values(state.items).some(
-    (it) => it.status === "documented" && Boolean(it.item_spec),
+    (it) => it.status === "pending",
   );
-  state.status = moreToImplement ? "documenting" : "implementing";
+  state.status = moreToImplement ? "implementing" : "implementing";
   await store.saveState(state);
   return state;
 }
@@ -1364,7 +1331,7 @@ export async function readExtractedPlanIfPresent(
 export async function readDispatchPlan(
   artifactsDir: string,
   runId: string,
-  phase: "document" | "implement",
+  phase: "implement",
 ): Promise<RemediationDispatchPlan> {
   return readJsonFile(dispatchPlanPath(artifactsDir, runId, phase));
 }

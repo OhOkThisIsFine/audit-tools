@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -194,6 +195,28 @@ async function writeStructuredAuditSource(): Promise<string> {
   return sourcePath;
 }
 
+async function acknowledgeResume(): Promise<void> {
+  await writeFile(
+    join(ARTIFACTS_DIR, "confirm_resume_ack.json"),
+    JSON.stringify({ choice: "resume" }),
+    "utf8",
+  );
+}
+
+async function writeIntentCheckpoint(): Promise<void> {
+  await writeFile(
+    join(ARTIFACTS_DIR, "intent_checkpoint.json"),
+    JSON.stringify({
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: new Date().toISOString(),
+      scope_summary: "Test scope",
+      intent_summary: "Test intent",
+      confirmed_by: "host",
+    }),
+    "utf8",
+  );
+}
+
 /**
  * Drive the fabricated run through the real close path (one bounded next-step
  * on the closing state), then delete every state artifact so the reconstruction
@@ -202,9 +225,12 @@ async function writeStructuredAuditSource(): Promise<string> {
 async function completeRunAndDeleteState(): Promise<any> {
   await writeStructuredAuditSource();
   await new StateStore(ARTIFACTS_DIR).saveState(makeCompletedRunClosingState());
+  await acknowledgeResume();
+  await writeIntentCheckpoint();
 
+  // Folded: closing state runs close and returns present_report in one call.
   const step = await decideNextStep({ root: REPO_DIR });
-  expect(step.step_kind).toBe("state_transition");
+  expect(step.step_kind).toBe("present_report");
   expect(existsSync(OUTCOMES_PATH)).toBe(true);
 
   // Prove no hidden dependence on the state machine file: remove state.json and

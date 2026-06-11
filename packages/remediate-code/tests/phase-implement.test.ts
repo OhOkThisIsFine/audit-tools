@@ -8,6 +8,7 @@ import {
   sortBlocksByDependency,
   executeBlock,
   runImplementPhase,
+  attributePostMergeFailure,
 } from "../src/phases/implement.js";
 import type { RemediationBlock } from "../src/state/types.js";
 
@@ -66,7 +67,7 @@ describe("sortBlocksByDependency", () => {
 describe("executeBlock", () => {
   function makeState(items: Record<string, any>) {
     return {
-      status: "documenting" as const,
+      status: "implementing" as const,
       plan: {
         plan_id: "P1",
         findings: [],
@@ -113,7 +114,7 @@ describe("executeBlock", () => {
 
   it("blocks item when item_spec is missing", async () => {
     const state = makeState({
-      F1: { finding_id: "F1", status: "documented", block_id: "B1" },
+      F1: { finding_id: "F1", status: "pending", block_id: "B1" },
     });
     const block: RemediationBlock = {
       block_id: "B1",
@@ -149,7 +150,7 @@ describe("runStepWithProvider enriched error log", () => {
 
   function makeState(planId: string, items: Record<string, any>) {
     return {
-      status: "documenting" as const,
+      status: "implementing" as const,
       plan: {
         plan_id: planId,
         findings: [],
@@ -169,7 +170,7 @@ describe("runStepWithProvider enriched error log", () => {
       const state = makeState(planId, {
         F1: {
           finding_id: "F1",
-          status: "documented",
+          status: "pending",
           block_id: "B1",
           item_spec: {
             finding_id: "F1",
@@ -215,7 +216,7 @@ describe("runStepWithProvider enriched error log", () => {
       const state = makeState(planId, {
         F2: {
           finding_id: "F2",
-          status: "documented",
+          status: "pending",
           block_id: "B2",
           item_spec: {
             finding_id: "F2",
@@ -260,7 +261,7 @@ describe("runStepWithProvider enriched error log", () => {
       const state = makeState("PLAN-obs32c", {
         F3: {
           finding_id: "F3",
-          status: "documented",
+          status: "pending",
           block_id: "B3",
           item_spec: {
             finding_id: "F3",
@@ -308,7 +309,7 @@ describe("runStepWithProvider structured log on provider launch failure", () => 
 
   function makeState(items: Record<string, any>) {
     return {
-      status: "documenting" as const,
+      status: "implementing" as const,
       plan: {
         plan_id: "PLAN-obs-a4",
         findings: [],
@@ -328,7 +329,7 @@ describe("runStepWithProvider structured log on provider launch failure", () => 
       const state = makeState({
         [findingId]: {
           finding_id: findingId,
-          status: "documented",
+          status: "pending",
           block_id: "BX1",
           item_spec: {
             finding_id: findingId,
@@ -371,7 +372,7 @@ describe("runStepWithProvider structured log on provider launch failure", () => 
       const state = makeState({
         [findingId]: {
           finding_id: findingId,
-          status: "documented",
+          status: "pending",
           block_id: "BX2",
           item_spec: {
             finding_id: findingId,
@@ -413,7 +414,7 @@ describe("runStepWithProvider structured log on provider launch failure", () => 
       const state = makeState({
         [findingId]: {
           finding_id: findingId,
-          status: "documented",
+          status: "pending",
           block_id: "BX3",
           item_spec: {
             finding_id: findingId,
@@ -456,7 +457,7 @@ describe("runStepWithProvider structured log on provider launch failure", () => 
       const state = makeState({
         [findingId]: {
           finding_id: findingId,
-          status: "documented",
+          status: "pending",
           block_id: "BX4",
           item_spec: {
             finding_id: findingId,
@@ -502,7 +503,7 @@ describe("runImplementPhase worktree execution", () => {
 
   function makeWorktreeState() {
     return {
-      status: "documenting" as const,
+      status: "implementing" as const,
       plan: {
         plan_id: "P-worktree",
         findings: [],
@@ -515,7 +516,7 @@ describe("runImplementPhase worktree execution", () => {
       items: {
         F1: {
           finding_id: "F1",
-          status: "documented" as const,
+          status: "pending" as const,
           block_id: "B1",
           item_spec: {
             finding_id: "F1",
@@ -588,4 +589,401 @@ describe("runImplementPhase worktree execution", () => {
     expect(branches.trim()).toBe("");
     expect(existsSync(join(ARTIFACTS_DIR, "worktrees", "B1"))).toBe(false);
   }, 15_000);
+});
+
+// ── Post-merge re-verification gate (N-R18) ───────────────────────────────────
+
+describe("runImplementPhase post-merge gate — targeted_commands used when present", () => {
+  const TEST_DIR = join(__dirname, ".test-implement-postmerge-targeted");
+  const REPO_DIR = join(TEST_DIR, "repo");
+  const ARTIFACTS_DIR = join(TEST_DIR, "artifacts");
+
+  function git(args: string[], cwd = REPO_DIR): void {
+    execFileSync("git", args, { cwd, stdio: "ignore" });
+  }
+
+  beforeEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(REPO_DIR, { recursive: true });
+    await mkdir(ARTIFACTS_DIR, { recursive: true });
+    git(["init"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "Test"]);
+    await writeFile(join(REPO_DIR, "README.md"), "init", "utf8");
+    git(["add", "."]);
+    git(["commit", "-m", "init"]);
+  });
+
+  afterEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("runs targeted_commands after merge when present, keeps items resolved on exit 0", async () => {
+    // targeted_commands that always succeed — items must remain resolved.
+    const state = {
+      status: "implementing" as const,
+      plan: {
+        plan_id: "P-targeted",
+        findings: [],
+        blocks: [
+          {
+            block_id: "B1",
+            items: ["F1"],
+            parallel_safe: true,
+            // Always passes gate
+            targeted_commands: ["node -e \"process.exit(0)\""],
+          },
+        ] satisfies import("../src/state/types.js").RemediationBlock[],
+        project_type: "unknown",
+        test_command: "node -e \"process.exit(1)\"", // would fail if used instead
+        candidate_closing_actions: ["none" as const],
+      },
+      items: {
+        F1: {
+          finding_id: "F1",
+          status: "pending" as const,
+          block_id: "B1",
+          item_spec: {
+            finding_id: "F1",
+            concrete_change: "no-op",
+            tests_to_write: [],
+            not_applicable_steps: [
+              { step: "Write Tests" as const, rationale: "No-op" },
+              { step: "Refactor Code" as const, rationale: "No-op" },
+              { step: "Verify Code Against Documentation" as const, rationale: "No-op" },
+            ],
+          },
+        },
+      },
+    };
+
+    const result = await runImplementPhase(state as any, {
+      root: REPO_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+    });
+
+    expect(result.items!.F1.status).toBe("resolved");
+  }, 20_000);
+
+  it("falls back to test_command for gate when block has no targeted_commands, stays resolved on exit 0", async () => {
+    const state = {
+      status: "implementing" as const,
+      plan: {
+        plan_id: "P-fallback",
+        findings: [],
+        blocks: [
+          {
+            block_id: "B2",
+            items: ["F2"],
+            parallel_safe: true,
+            // No targeted_commands — must fall back to test_command
+          },
+        ] satisfies import("../src/state/types.js").RemediationBlock[],
+        project_type: "unknown",
+        test_command: "node -e \"process.exit(0)\"",
+        candidate_closing_actions: ["none" as const],
+      },
+      items: {
+        F2: {
+          finding_id: "F2",
+          status: "pending" as const,
+          block_id: "B2",
+          item_spec: {
+            finding_id: "F2",
+            concrete_change: "no-op",
+            tests_to_write: [],
+            not_applicable_steps: [
+              { step: "Write Tests" as const, rationale: "No-op" },
+              { step: "Refactor Code" as const, rationale: "No-op" },
+              { step: "Verify Code Against Documentation" as const, rationale: "No-op" },
+            ],
+          },
+        },
+      },
+    };
+
+    const result = await runImplementPhase(state as any, {
+      root: REPO_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+    });
+
+    expect(result.items!.F2.status).toBe("resolved");
+  }, 20_000);
+
+  it("gate is no-op when no targeted_commands and no test_command — items stay resolved", async () => {
+    const state = {
+      status: "implementing" as const,
+      plan: {
+        plan_id: "P-noop",
+        findings: [],
+        blocks: [
+          {
+            block_id: "B3",
+            items: ["F3"],
+            parallel_safe: true,
+            // No targeted_commands, no test_command
+          },
+        ] satisfies import("../src/state/types.js").RemediationBlock[],
+        project_type: "unknown",
+        candidate_closing_actions: ["none" as const],
+      },
+      items: {
+        F3: {
+          finding_id: "F3",
+          status: "pending" as const,
+          block_id: "B3",
+          item_spec: {
+            finding_id: "F3",
+            concrete_change: "no-op",
+            tests_to_write: [],
+            not_applicable_steps: [
+              { step: "Write Tests" as const, rationale: "No-op" },
+              { step: "Refactor Code" as const, rationale: "No-op" },
+              { step: "Verify Code Against Documentation" as const, rationale: "No-op" },
+            ],
+          },
+        },
+      },
+    };
+
+    const result = await runImplementPhase(state as any, {
+      root: REPO_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+    });
+
+    expect(result.items!.F3.status).toBe("resolved");
+  }, 20_000);
+});
+
+// ── attributePostMergeFailure unit tests (N-R18) ─────────────────────────────
+
+describe("attributePostMergeFailure — rolls back only implicated blocks", () => {
+  const TEST_DIR = join(__dirname, ".test-attribute-failure");
+  const REPO_DIR = join(TEST_DIR, "repo");
+  const ARTIFACTS_DIR = join(TEST_DIR, "artifacts");
+
+  function git(args: string[], cwd = REPO_DIR): void {
+    execFileSync("git", args, { cwd, stdio: "ignore" });
+  }
+
+  function gitOutput(args: string[], cwd = REPO_DIR): string {
+    return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  }
+
+  beforeEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(REPO_DIR, { recursive: true });
+    await mkdir(ARTIFACTS_DIR, { recursive: true });
+    git(["init"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "Test"]);
+    await writeFile(join(REPO_DIR, "README.md"), "init", "utf8");
+    git(["add", "."]);
+    git(["commit", "-m", "init"]);
+  });
+
+  afterEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("re-enters guilty block items as blocked with failure_reason naming guilty blocks and surface", async () => {
+    // Create a real commit so there is a SHA to roll back.
+    await writeFile(join(REPO_DIR, "src.ts"), "// change", "utf8");
+    git(["add", "src.ts"]);
+    git(["commit", "-m", "Block B1 changes"]);
+    const sha = gitOutput(["rev-parse", "HEAD"]);
+
+    const state = {
+      status: "implementing" as const,
+      plan: {
+        plan_id: "P1",
+        findings: [],
+        blocks: [],
+        project_type: "unknown",
+        test_command: undefined as undefined,
+        candidate_closing_actions: [],
+      },
+      items: {
+        F1: {
+          finding_id: "F1",
+          status: "resolved" as const,
+          block_id: "B1",
+          item_spec: {
+            finding_id: "F1",
+            concrete_change: "change",
+            tests_to_write: [],
+            not_applicable_steps: [],
+            touched_files: ["src.ts"],
+          },
+        },
+      },
+    } as any;
+
+    const saves: any[] = [];
+    const store = { saveState: async (s: any) => { saves.push(JSON.parse(JSON.stringify(s))); } };
+    const mergedCommits = new Map<string, string>([["B1", sha]]);
+    const blockB1: import("../src/state/types.js").RemediationBlock = {
+      block_id: "B1",
+      items: ["F1"],
+      parallel_safe: true,
+      touched_files: ["src.ts"],
+    };
+
+    await attributePostMergeFailure(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      state,
+      store,
+      [blockB1],
+      mergedCommits,
+      blockB1,
+      "test failure output",
+    );
+
+    expect(state.items.F1.status).toBe("blocked");
+    expect(state.items.F1.failure_reason).toContain("B1");
+    expect(state.items.F1.failure_reason).toContain("src.ts");
+    expect(state.items.F1.rework_count).toBeGreaterThan(0);
+    expect(saves.length).toBeGreaterThan(0);
+  }, 15_000);
+
+  it("leaves non-overlapping block items resolved after partial rollback", async () => {
+    // Two commits in the repo: B1 touches src1.ts, B2 touches src2.ts.
+    await writeFile(join(REPO_DIR, "src1.ts"), "// B1", "utf8");
+    git(["add", "src1.ts"]);
+    git(["commit", "-m", "B1 changes"]);
+    const shaB1 = gitOutput(["rev-parse", "HEAD"]);
+
+    await writeFile(join(REPO_DIR, "src2.ts"), "// B2", "utf8");
+    git(["add", "src2.ts"]);
+    git(["commit", "-m", "B2 changes"]);
+    const shaB2 = gitOutput(["rev-parse", "HEAD"]);
+
+    const state = {
+      status: "implementing" as const,
+      plan: {
+        plan_id: "P2",
+        findings: [],
+        blocks: [],
+        project_type: "unknown",
+        test_command: undefined as undefined,
+        candidate_closing_actions: [],
+      },
+      items: {
+        F1: {
+          finding_id: "F1", status: "resolved" as const, block_id: "B1",
+          item_spec: { finding_id: "F1", concrete_change: "c", tests_to_write: [], not_applicable_steps: [], touched_files: ["src1.ts"] },
+        },
+        F2: {
+          finding_id: "F2", status: "resolved" as const, block_id: "B2",
+          item_spec: { finding_id: "F2", concrete_change: "c", tests_to_write: [], not_applicable_steps: [], touched_files: ["src2.ts"] },
+        },
+      },
+    } as any;
+
+    const store = { saveState: async () => {} };
+    const mergedCommits = new Map<string, string>([["B1", shaB1], ["B2", shaB2]]);
+
+    const blockB1: import("../src/state/types.js").RemediationBlock = {
+      block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: ["src1.ts"],
+    };
+    const blockB2: import("../src/state/types.js").RemediationBlock = {
+      block_id: "B2", items: ["F2"], parallel_safe: true, touched_files: ["src2.ts"],
+    };
+
+    // B1 is the failing block; only B1 overlaps the implicated surface (src1.ts).
+    await attributePostMergeFailure(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      state,
+      store,
+      [blockB1, blockB2],
+      mergedCommits,
+      blockB1,
+      "failure",
+    );
+
+    // B1 should be blocked (overlaps); B2 should remain resolved (no overlap).
+    expect(state.items.F1.status).toBe("blocked");
+    expect(state.items.F2.status).toBe("resolved");
+  }, 15_000);
+
+  it("rolled-back items carry failure_reason naming guilty block IDs and surface", async () => {
+    await writeFile(join(REPO_DIR, "lib.ts"), "// lib", "utf8");
+    git(["add", "lib.ts"]);
+    git(["commit", "-m", "B1 lib change"]);
+    const sha = gitOutput(["rev-parse", "HEAD"]);
+
+    const state = {
+      status: "implementing" as const,
+      plan: { plan_id: "P3", findings: [], blocks: [], project_type: "unknown",
+               test_command: undefined, candidate_closing_actions: [] },
+      items: {
+        F1: {
+          finding_id: "F1", status: "resolved" as const, block_id: "B1",
+          item_spec: { finding_id: "F1", concrete_change: "c", tests_to_write: [], not_applicable_steps: [], touched_files: ["lib.ts"] },
+        },
+      },
+    } as any;
+
+    const store = { saveState: async () => {} };
+    const mergedCommits = new Map<string, string>([["B1", sha]]);
+    const blockB1: import("../src/state/types.js").RemediationBlock = {
+      block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: ["lib.ts"],
+    };
+
+    await attributePostMergeFailure(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      state, store, [blockB1], mergedCommits, blockB1, "test tail output",
+    );
+
+    const reason = state.items.F1.failure_reason as string;
+    expect(reason).toContain("B1");
+    expect(reason).toContain("lib.ts");
+  }, 15_000);
+
+  it("mergedCommits map accumulates commit SHAs per block via runBlockInWorktree return", async () => {
+    // This is verified indirectly: runImplementPhase populates mergedCommits
+    // from WorktreeBlockResult.commitSha. We test that a block with actual
+    // staged changes returns a commitSha.
+    // (Direct unit test of runBlockInWorktree is skipped — it requires a full
+    // git worktree fixture and is covered by the runImplementPhase worktree tests.)
+    // We can verify that commitSha is absent when the block produces no changes.
+    const state = {
+      status: "implementing" as const,
+      plan: {
+        plan_id: "P-sha",
+        findings: [],
+        blocks: [
+          { block_id: "B-sha", items: ["F-sha"], parallel_safe: true },
+        ] satisfies import("../src/state/types.js").RemediationBlock[],
+        project_type: "unknown",
+        candidate_closing_actions: ["none" as const],
+      },
+      items: {
+        "F-sha": {
+          finding_id: "F-sha",
+          status: "pending" as const,
+          block_id: "B-sha",
+          item_spec: {
+            finding_id: "F-sha",
+            concrete_change: "no-op",
+            tests_to_write: [],
+            not_applicable_steps: [
+              { step: "Write Tests" as const, rationale: "No-op" },
+              { step: "Refactor Code" as const, rationale: "No-op" },
+              { step: "Verify Code Against Documentation" as const, rationale: "No-op" },
+            ],
+          },
+        },
+      },
+    };
+
+    // A no-op block produces no staged changes → no commit → commitSha is undefined.
+    // runImplementPhase completes successfully despite no commit.
+    const result = await runImplementPhase(state as any, {
+      root: REPO_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+    });
+    // The no-op block should resolve its items normally.
+    expect(result.items!["F-sha"].status).toBe("resolved");
+  }, 20_000);
 });

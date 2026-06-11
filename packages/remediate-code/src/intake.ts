@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import {
   readOptionalJsonFile,
   readOptionalTextFile,
+  isRecord,
 } from "@audit-tools/shared";
 
 export const INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION =
@@ -54,6 +55,7 @@ export function intakePaths(artifactsDir: string): {
   clarificationResolution: string;
   brief: string;
   extractedPlan: string;
+  intentCheckpoint: string;
 } {
   const dir = join(artifactsDir, "intake");
   return {
@@ -64,6 +66,7 @@ export function intakePaths(artifactsDir: string): {
     clarificationResolution: join(dir, "intake-clarifications.json"),
     brief: join(dir, "remediation-brief.md"),
     extractedPlan: join(artifactsDir, "extracted-plan.json"),
+    intentCheckpoint: join(artifactsDir, "intent_checkpoint.json"),
   };
 }
 
@@ -158,8 +161,92 @@ export function blockingIntakeQuestions(
   );
 }
 
+export function intakeSummaryContentErrors(summary: IntakeSummary): string[] {
+  if (!summary.ready) return [];
+  const errors: string[] = [];
+  if (summary.goals.length === 0) errors.push("goals must be non-empty");
+  // structured_audit sources carry affected_files per finding, so an empty top-level
+  // affected_files list is valid for that source type. Only require it for document-based intake.
+  if (summary.source_type !== "structured_audit" && summary.affected_files.length === 0) {
+    errors.push("affected_files must be non-empty");
+  }
+  return errors;
+}
+
 export function isIntakeReady(summary: IntakeSummary | undefined): boolean {
-  return Boolean(summary?.ready) && blockingIntakeQuestions(summary).length === 0;
+  return (
+    Boolean(summary?.ready) &&
+    blockingIntakeQuestions(summary).length === 0 &&
+    (summary ? intakeSummaryContentErrors(summary).length === 0 : true)
+  );
+}
+
+export interface ClarificationValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Validate the `intake-clarifications.json` file against the IntakeClarifications
+ * schema. Returns valid=true when the file is well-formed and addresses at least
+ * one blocking question (if blocking questions exist). Returns valid=false with
+ * error details when the resolution is malformed or fails to address blocking
+ * questions.
+ */
+export function validateClarificationResolution(
+  resolution: unknown,
+  blockingQuestions: IntakeOpenQuestion[],
+): ClarificationValidationResult {
+  const errors: string[] = [];
+
+  if (!isRecord(resolution)) {
+    errors.push("clarification resolution must be a JSON object");
+    return { valid: false, errors };
+  }
+
+  if (!Array.isArray(resolution.answers)) {
+    errors.push("clarification resolution must have an 'answers' array");
+    return { valid: false, errors };
+  }
+
+  const answers = resolution.answers as unknown[];
+  for (let i = 0; i < answers.length; i++) {
+    const answer = answers[i];
+    if (!isRecord(answer)) {
+      errors.push(`answers[${i}] must be an object`);
+      continue;
+    }
+    if (typeof answer.question_id !== "string" || !answer.question_id) {
+      errors.push(`answers[${i}] is missing required field 'question_id'`);
+    }
+    if (typeof answer.answer !== "string") {
+      errors.push(`answers[${i}] is missing required field 'answer'`);
+    }
+  }
+
+  if (errors.length > 0) {
+    return { valid: false, errors };
+  }
+
+  // Check that at least one blocking question is addressed
+  if (blockingQuestions.length > 0) {
+    const answeredIds = new Set(
+      answers
+        .filter(isRecord)
+        .map((a) => a.question_id)
+        .filter((id): id is string => typeof id === "string"),
+    );
+    const blockingIds = blockingQuestions.map((q) => q.id);
+    const addressedBlocking = blockingIds.filter((id) => answeredIds.has(id));
+    if (addressedBlocking.length === 0) {
+      errors.push(
+        `answers address none of the blocking question ids: ${blockingIds.join(", ")}`,
+      );
+      return { valid: false, errors };
+    }
+  }
+
+  return { valid: true, errors: [] };
 }
 
 export async function readIntakeArtifacts(
@@ -178,9 +265,15 @@ export async function readIntakeArtifacts(
     ),
     conversationStart: await readOptionalTextFile(paths.conversationStart),
     summary: await readOptionalJsonFile<IntakeSummary>(paths.summary),
-    clarificationResolution: await readOptionalJsonFile<unknown>(
-      paths.clarificationResolution,
-    ),
+    clarificationResolution: await (async () => {
+      try {
+        return await readOptionalJsonFile<unknown>(paths.clarificationResolution);
+      } catch {
+        // Malformed JSON in the clarification file is treated as absent;
+        // validation in resolveIntakeStep will re-emit collect_intake_clarifications.
+        return undefined;
+      }
+    })(),
     brief: await readOptionalTextFile(paths.brief),
   };
 }

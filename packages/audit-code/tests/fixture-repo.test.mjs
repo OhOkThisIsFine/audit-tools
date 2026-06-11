@@ -40,6 +40,10 @@ test("committed fixture repo supports external analyzer import and deterministic
   await withFixtureRepo(async (root) => {
     let bundle = {};
 
+    // Provider confirmation gate auto-completes headlessly.
+    const providerConf = await advanceAudit(bundle, { root });
+    bundle = providerConf.updated_bundle;
+
     const intake = await advanceAudit(bundle, { root });
     bundle = intake.updated_bundle;
 

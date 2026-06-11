@@ -305,7 +305,13 @@ export function mergeFindings(
 
   const allDesignFindings = [
     ...(designAssessment?.findings ?? []),
-    ...(designAssessment?.review_findings ?? []),
+    // New parallel-pass findings
+    ...(designAssessment?.contract_findings ?? []),
+    ...(designAssessment?.conceptual_findings ?? []),
+    // Backward-compat: legacy single-pass findings
+    ...((designAssessment?.contract_findings === undefined && designAssessment?.conceptual_findings === undefined)
+      ? (designAssessment?.review_findings ?? [])
+      : []),
   ];
   for (const finding of allDesignFindings) {
     upsertFinding(merged, finding);

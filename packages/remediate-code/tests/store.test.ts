@@ -43,7 +43,7 @@ describe("StateStore", () => {
     const statuses: RemediationState["status"][] = [
       "pending",
       "planning",
-      "documenting",
+      "implementing",
       "implementing",
       "closing",
       "triage",
@@ -114,9 +114,9 @@ describe("StateStore", () => {
   it("second save succeeds after first save releases lock", async () => {
     const store = new StateStore(TEST_DIR);
     await store.saveState({ status: "planning" });
-    await store.saveState({ status: "documenting" });
+    await store.saveState({ status: "implementing" });
     const loaded = await store.loadState();
-    expect(loaded?.status).toBe("documenting");
+    expect(loaded?.status).toBe("implementing");
   });
 
   it("cleans up lock and temp files when temp write fails", async () => {

@@ -41,6 +41,9 @@ import {
 import { buildToolingManifest } from "./toolingManifest.js";
 
 type ArtifactPayloadMap = {
+  // --- Phase 0: Session gate ---
+  provider_confirmation: unknown;
+
   // --- Phase 1: Intake & classification ---
   repo_manifest: RepoManifest;
   file_disposition: FileDisposition;
@@ -164,6 +167,7 @@ function textArtifact<K extends ArtifactBundleKey>(
 }
 
 export const ARTIFACT_DEFINITIONS = {
+  provider_confirmation: jsonArtifact("provider_confirmation.json", "intake"),
   repo_manifest: jsonArtifact("repo_manifest.json", "intake"),
   file_disposition: jsonArtifact("file_disposition.json", "intake"),
   auto_fixes_applied: jsonArtifact("auto_fixes_applied.json", "intake"),

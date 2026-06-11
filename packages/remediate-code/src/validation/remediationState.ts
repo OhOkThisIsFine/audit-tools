@@ -209,7 +209,6 @@ export function validateItemSpec(
     );
   } else {
     const validSteps = new Set([
-      "Document",
       "Write Tests",
       "Refactor Code",
       "Verify Code Against Tests",
@@ -260,59 +259,6 @@ export function validateClarificationRequest(
       `Invalid category "${value.category}"; expected one of ${[...VALID_CLARIFICATION_CATEGORIES].join(", ")}.`,
     );
   }
-  return issues;
-}
-
-export function validateDocumentResponse(
-  value: unknown,
-  path = "document_response",
-): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, "Expected an object.");
-    return issues;
-  }
-
-  if (value.type !== "item_spec" && value.type !== "clarification_request") {
-    pushValidationIssue(
-      issues,
-      `${path}.type`,
-      `Expected "item_spec" or "clarification_request", got "${value.type}".`,
-    );
-    return issues;
-  }
-
-  if (value.type === "item_spec") {
-    if (!isRecord(value.item_spec)) {
-      pushValidationIssue(
-        issues,
-        `${path}.item_spec`,
-        "Expected an object when type is 'item_spec'.",
-      );
-    } else {
-      issues.push(...validateItemSpec(value.item_spec, `${path}.item_spec`));
-    }
-  }
-
-  if (value.type === "clarification_request") {
-    if (
-      !Array.isArray(value.clarifications) ||
-      value.clarifications.length === 0
-    ) {
-      pushValidationIssue(
-        issues,
-        `${path}.clarifications`,
-        "Expected a non-empty array when type is 'clarification_request'.",
-      );
-    } else {
-      for (const [i, clar] of value.clarifications.entries()) {
-        issues.push(
-          ...validateClarificationRequest(clar, `${path}.clarifications[${i}]`),
-        );
-      }
-    }
-  }
-
   return issues;
 }
 

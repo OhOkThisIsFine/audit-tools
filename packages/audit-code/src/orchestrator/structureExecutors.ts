@@ -95,9 +95,21 @@ export function runDesignAssessmentExecutor(
   });
 
   const previous = bundle.design_assessment;
-  if (previous?.reviewed) {
-    designAssessment.reviewed = true;
-    designAssessment.review_findings = previous.review_findings ?? [];
+  if (previous) {
+    // Carry forward review completion flags and findings from a prior assessment.
+    if (previous.contract_reviewed) {
+      designAssessment.contract_reviewed = true;
+      designAssessment.contract_findings = previous.contract_findings ?? [];
+    }
+    if (previous.conceptual_reviewed) {
+      designAssessment.conceptual_reviewed = true;
+      designAssessment.conceptual_findings = previous.conceptual_findings ?? [];
+    }
+    // Backward-compat: legacy artifacts only have `reviewed` / `review_findings`.
+    if (previous.reviewed && !previous.contract_reviewed && !previous.conceptual_reviewed) {
+      designAssessment.reviewed = true;
+      designAssessment.review_findings = previous.review_findings ?? [];
+    }
   }
 
   return {
@@ -112,6 +124,7 @@ export function runDesignAssessmentExecutor(
 
 export function runDesignReviewAutoComplete(
   bundle: ArtifactBundle,
+  pass: "contract" | "conceptual" | "both" = "both",
 ): ExecutorRunResult {
   const existing = bundle.design_assessment;
   if (!existing) {
@@ -120,12 +133,22 @@ export function runDesignReviewAutoComplete(
     );
   }
 
-  const updated = {
-    ...existing,
-    reviewed: true,
-    review_findings: existing.review_findings ?? [],
-  };
+  const updated = { ...existing };
 
+  if (pass === "contract" || pass === "both") {
+    updated.contract_reviewed = true;
+    updated.contract_findings = existing.contract_findings ?? [];
+  }
+  if (pass === "conceptual" || pass === "both") {
+    updated.conceptual_reviewed = true;
+    updated.conceptual_findings = existing.conceptual_findings ?? [];
+  }
+
+  // Remove legacy fields to keep artifacts clean going forward.
+  delete updated.reviewed;
+  delete updated.review_findings;
+
+  const passLabel = pass === "both" ? "both passes" : `${pass} pass`;
   return {
     updated: {
       ...bundle,
@@ -133,6 +156,6 @@ export function runDesignReviewAutoComplete(
     },
     artifacts_written: ["design_assessment.json"],
     progress_summary:
-      "Design review auto-completed (host-agent review available via next-step).",
+      `Design review auto-completed (${passLabel}; host-agent review available via next-step).`,
   };
 }

@@ -46,7 +46,6 @@ import {
   taskResultPath,
   packetPromptPath,
   artifactNameForId,
-  toBase64Url,
   fromBase64Url,
   getFlag,
 } from "./args.js";
@@ -147,6 +146,17 @@ export interface PrepareDispatchResult {
   } | null;
   warning_count: number;
   dispatch_warnings_path: string | null;
+}
+
+export interface DispatchPlanEntry {
+  packet_id: string;
+  description: string;
+  prompt_path: string;
+  /** Path where the host/skill should write the worker's captured inline AuditResult[] payload. */
+  result_path: string;
+  complexity: DispatchComplexity;
+  model_hint: DispatchModelHint;
+  access: { read_paths: string[]; write_paths: string[]; forbidden_patterns: string[] };
 }
 
 export function dispatchResultMapPath(runDir: string): string {
@@ -516,7 +526,9 @@ export function buildTaskSections(
 }
 
 /**
- * Wraps the 75-line array-join block and returns the assembled prompt string.
+ * Wraps the array-join block and returns the assembled prompt string.
+ * Workers emit AuditResult[] inline in their response; the skill/host captures
+ * and writes the JSON to `result_path` on their behalf. No shell submit command.
  */
 export function buildPacketPrompt(params: {
   packet: ReturnType<typeof buildReviewPackets>[number];
@@ -524,17 +536,17 @@ export function buildPacketPrompt(params: {
   fileList: string;
   largeFileSection: string[];
   taskSections: string[];
-  submitCommand: string;
+  resultPath: string;
   repoRoot?: string;
   freeFormIntent?: string;
 }): string {
-  const { packet, fileList, largeFileSection, taskSections, submitCommand, repoRoot, freeFormIntent } = params;
+  const { packet, fileList, largeFileSection, taskSections, resultPath, repoRoot, freeFormIntent } = params;
   const largeFileMode = isIsolatedLargeFilePacket(packet);
   const intentSection = freeFormIntent?.trim()
     ? ["## Audit intent", freeFormIntent.trim(), ""]
     : [];
   return [
-    "You are a code auditor. Review this packet once, then submit exactly one result per listed task.",
+    "You are a code auditor. Review this packet once, then emit exactly one result per listed task.",
     repoRoot ? `Repository root: ${repoRoot}` : "Repository root: use the root from the step contract.",
     "Set the shell/tool workdir to the repository root when running backend commands.",
     "",
@@ -544,6 +556,7 @@ export function buildPacketPrompt(params: {
     `task_count: ${packet.task_ids.length}`,
     `lenses: ${packet.lenses.join(", ")}`,
     `estimated_tokens: ${packet.estimated_tokens}`,
+    `result_path: ${resultPath}`,
     "",
     "## Files to read",
     largeFileMode
@@ -557,11 +570,10 @@ export function buildPacketPrompt(params: {
     "## Tasks",
     ...taskSections,
     "## Output",
-    "Do not write files directly. Do not use a Write tool, create temp files, edit source files,",
-    "remediate findings, run unrelated audits, or write any result file yourself (e.g.",
-    "packet-*-result.json / audit_result_*.json) — the submit-packet command below is the only",
-    "way to record results, and it writes them inside the artifacts directory for you.",
-    "Produce one JSON array containing exactly one AuditResult object for each listed task.",
+    "Do not write files, run shell commands, or edit source files. Do not use a Write tool or",
+    "create temp files. Produce one JSON array containing exactly one AuditResult object for",
+    "each listed task and emit it INLINE in your response (do NOT write files yourself —",
+    "the skill captures your inline payload and writes it to result_path on your behalf).",
     "Windows PowerShell: do not pipe an inline foreach statement directly into ConvertTo-Json.",
     "Assign the foreach output to a variable first, then pipe that variable to ConvertTo-Json.",
     "PowerShell also unwraps single-element arrays: @(@{...}) collapses to one object, so a",
@@ -570,8 +582,7 @@ export function buildPacketPrompt(params: {
     "",
     "Schema file (resolve relative to this prompt's directory): audit_result.schema.json",
     "  $refs resolved from the same directory: finding.schema.json, audit_task.schema.json",
-    "You MAY validate your JSON array against the schema before calling submit-packet. This is optional;",
-    "  the submit command performs the authoritative validation and will report any errors.",
+    "You MAY validate your JSON array against the schema before emitting. This is optional.",
     "",
     "Required AuditResult fields:",
     "  task_id       copy from the task metadata",
@@ -605,16 +616,8 @@ export function buildPacketPrompt(params: {
     "3. Only reference files from the packet unless a finding genuinely crosses a boundary.",
     "4. findings: [] is correct when you find nothing genuine.",
     "",
-    "## Submit",
-    "Pipe the JSON array on stdin to this command:",
-    `  ${submitCommand}`,
-    "  (If using Windows PowerShell, you MUST use `Get-Content <file> | & <command>` instead of the `<` operator.)",
-    "",
-    "The command validates and writes the packet-owned result files. Exit 0 means accepted.",
-    "Non-zero: read the errors, fix the JSON, and run the same submit command again. Retry up to 3 times.",
-    "",
     "## Final response",
-    `After the submit command succeeds, reply exactly: valid: ${packet.packet_id}, findings=<total finding count>`,
+    `Emit the JSON array inline. Reply exactly: valid: ${packet.packet_id}, findings=<total finding count>`,
   ].join("\n");
 }
 
@@ -851,14 +854,7 @@ export async function prepareDispatchArtifacts(params: {
     filterPackets(packets, priorDispatchThisRun, sessionConfig);
   const budgetCapped = deferredPackets.length > 0;
 
-  const plan: Array<{
-    packet_id: string;
-    description: string;
-    prompt_path: string;
-    complexity: DispatchComplexity;
-    model_hint: DispatchModelHint;
-    access: { read_paths: string[]; write_paths: string[]; forbidden_patterns: string[] };
-  }> = [];
+  const plan: DispatchPlanEntry[] = [];
   const resultMapEntries: DispatchResultMapEntry[] = [];
   for (const task of tasks) {
     if (priorResultTaskIds.has(task.task_id)) {
@@ -922,11 +918,10 @@ export async function prepareDispatchArtifacts(params: {
             ]
           : [];
     const taskSections = buildTaskSections(packetTasks, lensDefs, lineIndex);
-    const submitCommand =
-      `node packages/audit-code/audit-code.mjs submit-packet ` +
-      `--run-id-b64 ${toBase64Url(runId)} ` +
-      `--packet-id-b64 ${toBase64Url(packet.packet_id)} ` +
-      `--artifacts-dir-b64 ${toBase64Url(artifactsDir)}`;
+    // Inline emit: the worker emits AuditResult[] in their response; the
+    // skill/host captures and writes to packetResultPath. Per-task result paths
+    // are kept in the result map for ingestion after capture.
+    const packetResultPath = join(taskResultsDir, artifactNameForId(packet.packet_id, "inline-result.json"));
     const complexity = buildDispatchComplexity(packet, largeFileMode);
     for (const task of packetTasks) {
       resultMapEntries.push({
@@ -936,7 +931,7 @@ export async function prepareDispatchArtifacts(params: {
       });
     }
 
-    const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection, taskSections, submitCommand, repoRoot: reviewRoot, freeFormIntent: bundle.intent_checkpoint?.free_form_intent });
+    const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection, taskSections, resultPath: packetResultPath, repoRoot: reviewRoot, freeFormIntent: bundle.intent_checkpoint?.free_form_intent });
     await writeFile(promptPath, prompt, "utf8");
     const packetWritePaths = packetTasks
       .map((task) => resultPathByTaskId.get(task.task_id))
@@ -947,6 +942,7 @@ export async function prepareDispatchArtifacts(params: {
         `Audit ${packet.file_paths.length} file(s), ${packet.task_ids.length} task(s), ${packet.lenses.length} lens(es) (~${packet.total_lines} lines)` +
         (largeFileMode ? " [isolated large-file mode]" : ""),
       prompt_path: promptPath,
+      result_path: packetResultPath,
       complexity,
       model_hint: buildDispatchModelHint(complexity),
       access: {

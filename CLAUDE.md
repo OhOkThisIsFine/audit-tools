@@ -103,7 +103,7 @@ The core loop lives in `src/orchestrator/advance.ts` (`advanceAudit`). Each invo
 3. Dispatches to exactly one executor (intake → disposition → structure → planning → agent review → ingestion → runtime validation → synthesis).
 4. Persists updated artifacts and returns a structured execution summary.
 
-The priority chain in `nextStep.ts`: `repo_manifest` → `file_disposition` → `auto_fixes_applied` → `syntax_resolved` → `structure_artifacts` → `graph_enrichment_current` → `design_assessment_current` → `design_review_completed` → `intent_checkpoint_current` → `planning_artifacts` → `audit_tasks_completed` → `audit_results_ingested` → `runtime_validation_current` → `synthesis_current` → `synthesis_narrative_current`. Synthesis emits the canonical `audit-findings.json` (the machine contract; `audit-report.md` is a render of it); the optional `synthesis_narrative_current` step layers an LLM narrative (themes / executive summary / top risks) onto it and omits cleanly without a provider.
+The priority chain in `nextStep.ts`: `provider_confirmation` → `repo_manifest` → `file_disposition` → `auto_fixes_applied` → `syntax_resolved` → `structure_artifacts` → `graph_enrichment_current` → `design_assessment_current` → `intent_checkpoint_current` → `design_review_contract_completed` → `design_review_conceptual_completed` → `planning_artifacts` → `audit_tasks_completed` → `audit_results_ingested` → `runtime_validation_current` → `synthesis_current` → `synthesis_narrative_current`. Synthesis emits the canonical `audit-findings.json` (the machine contract; `audit-report.md` is a render of it); the optional `synthesis_narrative_current` step layers an LLM narrative (themes / executive summary / top risks) onto it and omits cleanly without a provider.
 
 ### Artifact system
 
@@ -187,6 +187,8 @@ Trigger this flow with a package's `release:patch` / `:minor` / `:major` scripts
 - **PowerShell JSON generation is statement-safe.** Do not pipe an inline
   PowerShell `foreach` statement directly into `ConvertTo-Json`; assign the
   `foreach` output to a variable first, then pipe that variable.
+- **Atomic-replace ordering invariant.** Every destructive change — deleting a fast path, a phase, a scheduler, a cap, or a monolithic pass — ships as a single atomic replace: new mechanism and deletion of the old in the same commit/node. Never add-then-delete across separate commits. A node that lands while either orchestrator is unbuildable or its test suite is red violates this invariant.
+- **Green-at-every-commit gate.** Before pushing any node, run `npm run build -w @audit-tools/shared && npm run build && npm run check` from the repo root and confirm zero errors. Dogfooding note: orchestrator-behavior verification uses each package's local dev wrapper or test harness, never the stale global bin.
 
 ## Preferences & standing decisions
 
@@ -199,6 +201,7 @@ A living log of how to resolve recurring forks, so agents don't re-ask settled q
 - **Resolve toward the durable contract.** LLM-vs-deterministic → deterministic; any graph/language question → the language-neutral contract (see Conventions).
 - **Budget context before asking an LLM.** When dispatching agents or rendering prompts, prefer small, obligation-specific packets over broad repo/report dumps; expand context only when the task genuinely needs it.
 - **Split design assessment into two named modes.** When assessing design, use **contract assessment** for invariants / boundaries / obligations and **conceptual design critique** for philosophy / alternatives / better directions — the bare phrase "design assessment" is too ambiguous.
+- **Caveman mode (full) is active globally.** Communicate using ultra-compressed caveman style (full) across all responses and agents to minimize token consumption.
 
 ## Known friction & deferred fixes
 

@@ -3,6 +3,7 @@ import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { IntentCheckpoint } from "@audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ActiveDispatchState } from "../types/activeDispatch.js";
 import type {
   AuditFindingsReport,
   CriticalFlowManifest,
@@ -60,6 +61,12 @@ export interface AuditReportSummary {
    * (which omits it) stays assignable to this render shape; defaults to 0.
    */
   budget_deferred_task_count?: number;
+  /**
+   * Units/tasks stranded by a partial-completion terminal (empty-pool or
+   * livelock guard). Distinct from budget deferrals. Optional so the shared
+   * `AuditFindingsSummary` stays assignable to this render shape.
+   */
+  stranded_unit_count?: number;
 }
 
 export interface AuditReportModel {
@@ -147,6 +154,8 @@ export function buildAuditReportModel(params: {
   runtimeValidationTaskManifest?: RuntimeValidationTaskManifest;
   externalAnalyzerResults?: ExternalAnalyzerResults;
   designAssessment?: DesignAssessment;
+  /** Active dispatch state; when a partial-completion terminal is set, its stranded count is carried into the summary. */
+  activeDispatch?: ActiveDispatchState | null;
 }): AuditReportModel {
   // Re-key the finalized findings with globally-unique, content-addressed ids
   // before anything addresses them by id. mergeFindings emits exactly one
@@ -172,6 +181,8 @@ export function buildAuditReportModel(params: {
     criticalFlows: params.criticalFlows,
   });
   const coverage = coverageSummary(params.coverageMatrix);
+  const strandedUnitCount =
+    params.activeDispatch?.partial_completion_terminal?.stranded_ids?.length ?? 0;
   const model: AuditReportModel = {
     summary: {
       finding_count: findings.length,
@@ -181,6 +192,7 @@ export function buildAuditReportModel(params: {
       audited_file_count: coverage.audited_file_count,
       excluded_file_count: coverage.excluded_file_count,
       budget_deferred_task_count: coverage.budget_deferred_task_count,
+      ...(strandedUnitCount > 0 ? { stranded_unit_count: strandedUnitCount } : {}),
       runtime_validation_status_breakdown: runtimeStatusBreakdown(
         params.runtimeValidationReport,
         params.runtimeValidationTaskManifest,
@@ -302,6 +314,11 @@ export function renderAuditReportMarkdown(
     ...((report.summary.budget_deferred_task_count ?? 0) > 0
       ? [
           `- Not audited (budget): ${report.summary.budget_deferred_task_count} task(s) skipped by packet budget cap`,
+        ]
+      : []),
+    ...((report.summary.stranded_unit_count ?? 0) > 0
+      ? [
+          `- Not audited (provider pool exhausted): ${report.summary.stranded_unit_count} unit(s) were not audited because the provider pool was exhausted before dispatch could complete (partial coverage)`,
         ]
       : []),
     "",

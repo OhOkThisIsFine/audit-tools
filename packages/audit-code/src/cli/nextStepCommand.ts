@@ -32,7 +32,11 @@ import {
   edgeReasoningContentHash,
   type EdgeReasoningResults,
 } from "../orchestrator/edgeReasoning.js";
-import { renderDesignReviewPrompt } from "../orchestrator/designReviewPrompt.js";
+import {
+  renderDesignReviewPrompt,
+  renderContractReviewPrompt,
+  renderConceptualReviewPrompt,
+} from "../orchestrator/designReviewPrompt.js";
 import { computeScopePreDigest } from "../orchestrator/intentCheckpointExecutor.js";
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
 import { buildPathLookup } from "../extractors/graph.js";
@@ -269,36 +273,96 @@ export async function handleGraphEnrichmentBranch(
 
 type BranchActionResult =
   | { action: "continue" }
-  | { action: "return"; result: { kind: "design_review"; state: AuditState; bundle: ArtifactBundle } };
+  | { action: "return"; result: { kind: "design_review"; state: AuditState; bundle: ArtifactBundle } }
+  | { action: "return"; result: { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle } }
+  | { action: "return"; result: { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle } }
+  | { action: "return"; result: { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle } };
 
 /**
- * Handle the `design_review` incoming-artifact polling block.
- * Returns `continue` if an incoming findings file was consumed, or `return`
- * with a design_review kind when the host turn is still needed.
+ * Handle the `design_review_contract` or `design_review_conceptual` incoming-artifact
+ * polling blocks. Checks for contract and/or conceptual findings files independently.
+ *
+ * Returns:
+ *   - `continue`               → one or both incoming files were consumed; advance loop.
+ *   - `design_review_parallel` → both passes still needed; dispatch two subagents.
+ *   - `design_review_contract` → only contract pass still needed.
+ *   - `design_review_conceptual` → only conceptual pass still needed.
+ *
+ * Also handles legacy `design-review-findings.json` for backward compatibility.
  */
 export async function handleDesignReviewBranch(
   params: Pick<NextStepParams, "artifactsDir">,
   bundle: ArtifactBundle,
   state: AuditState,
 ): Promise<BranchActionResult> {
-  const findingsIncoming = await tryConsumeIncoming<Finding[]>(
+  const existing = bundle.design_assessment;
+
+  // Legacy: consume old combined findings file.
+  const legacyIncoming = await tryConsumeIncoming<Finding[]>(
     params.artifactsDir,
     "design-review-findings.json",
   );
-  if (findingsIncoming && Array.isArray(findingsIncoming.value)) {
-    const existing = bundle.design_assessment;
-    if (existing) {
-      existing.review_findings = findingsIncoming.value;
-      existing.reviewed = true;
-      await writeJsonFile(
-        join(params.artifactsDir, "design_assessment.json"),
-        existing,
-      );
-      await unlink(findingsIncoming.path).catch(() => {});
-      return { action: "continue" };
-    }
+  if (legacyIncoming && Array.isArray(legacyIncoming.value) && existing) {
+    existing.review_findings = legacyIncoming.value;
+    existing.reviewed = true;
+    await writeJsonFile(
+      join(params.artifactsDir, "design_assessment.json"),
+      existing,
+    );
+    await unlink(legacyIncoming.path).catch(() => {});
+    return { action: "continue" };
   }
-  return { action: "return", result: { kind: "design_review", state, bundle } };
+
+  // New: consume contract-findings and/or conceptual-findings independently.
+  const contractIncoming = await tryConsumeIncoming<Finding[]>(
+    params.artifactsDir,
+    "design-review-contract-findings.json",
+  );
+  const conceptualIncoming = await tryConsumeIncoming<Finding[]>(
+    params.artifactsDir,
+    "design-review-conceptual-findings.json",
+  );
+
+  let consumed = false;
+
+  if (contractIncoming && Array.isArray(contractIncoming.value) && existing) {
+    existing.contract_findings = contractIncoming.value;
+    existing.contract_reviewed = true;
+    await unlink(contractIncoming.path).catch(() => {});
+    consumed = true;
+  }
+
+  if (conceptualIncoming && Array.isArray(conceptualIncoming.value) && existing) {
+    existing.conceptual_findings = conceptualIncoming.value;
+    existing.conceptual_reviewed = true;
+    await unlink(conceptualIncoming.path).catch(() => {});
+    consumed = true;
+  }
+
+  if (consumed && existing) {
+    await writeJsonFile(
+      join(params.artifactsDir, "design_assessment.json"),
+      existing,
+    );
+    return { action: "continue" };
+  }
+
+  // Determine which passes still need to run.
+  const contractDone = existing?.contract_reviewed === true;
+  const conceptualDone = existing?.conceptual_reviewed === true;
+
+  if (!contractDone && !conceptualDone) {
+    return { action: "return", result: { kind: "design_review_parallel", state, bundle } };
+  }
+  if (!contractDone) {
+    return { action: "return", result: { kind: "design_review_contract", state, bundle } };
+  }
+  if (!conceptualDone) {
+    return { action: "return", result: { kind: "design_review_conceptual", state, bundle } };
+  }
+
+  // Both done — should not normally reach here (obligations would be satisfied).
+  return { action: "continue" };
 }
 
 type SynthesisNarrativeBranchResult =
@@ -442,9 +506,12 @@ export async function checkFinalizationCycle(ctx: {
 
 // ── Coordinator ───────────────────────────────────────────────────────────────
 
-async function runDeterministicForNextStep(params: NextStepParams): Promise<
-  | { kind: "semantic_review"; state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun }
+export async function runDeterministicForNextStep(params: NextStepParams): Promise<
+  | { kind: "semantic_review"; state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun; selectedExecutor?: string | null }
   | { kind: "design_review"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
   | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
@@ -517,9 +584,14 @@ async function runDeterministicForNextStep(params: NextStepParams): Promise<
       // fallthrough: run the executor below
     }
 
-    // Host-delegation executors (design_review, agent) exit the deterministic
-    // loop entirely — they pause the pipeline and hand control to the LLM agent.
-    if (decision.selected_executor === "design_review") {
+    // Host-delegation executors (design_review_contract, design_review_conceptual,
+    // agent) exit the deterministic loop entirely — they pause the pipeline and
+    // hand control to the LLM agent.
+    if (
+      decision.selected_executor === "design_review_contract" ||
+      decision.selected_executor === "design_review_conceptual" ||
+      decision.selected_executor === "design_review"
+    ) {
       const branch = await handleDesignReviewBranch(params, bundle, state);
       if (branch.action === "continue") continue;
       return branch.result;
@@ -529,6 +601,16 @@ async function runDeterministicForNextStep(params: NextStepParams): Promise<
       const branch = await handleSynthesisNarrativeBranch(params, bundle, state);
       if (branch.action === "continue") continue;
       return branch.result;
+    }
+
+    // Provider confirmation gate: auto-complete headlessly and continue the loop.
+    // The provider gate is session-level; it fires once at the start of a run and
+    // writes a default provider_confirmation.json immediately — no host step needed.
+    if (decision.selected_executor === "provider_confirmation_executor") {
+      const provResult = await executeAndRecord(params, analyzersRef.value, decision, index, lastSummary);
+      lastSummary = provResult.progress_summary;
+      await clearDispatchFiles(params.artifactsDir);
+      continue;
     }
 
     // Confirm-intent host step: when the checkpoint is missing, hand control to
@@ -542,6 +624,7 @@ async function runDeterministicForNextStep(params: NextStepParams): Promise<
     if (isHostDelegationExecutor(decision.selected_executor ?? "")) {
       return {
         kind: "semantic_review",
+        selectedExecutor: decision.selected_executor,
         ...(await ensureSemanticReviewRun({
           root: params.root,
           artifactsDir: params.artifactsDir,
@@ -713,6 +796,8 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   }
 
   if (result.kind === "design_review") {
+    // Legacy combined fallback (only fires when selected_executor === "design_review" which
+    // no longer exists in EXECUTOR_REGISTRY; kept for safety in case an old artifact references it).
     const designReviewResultsPath = join(
       artifactsDir,
       "incoming",
@@ -747,6 +832,152 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         design_review_results: designReviewResultsPath,
       },
       prompt: fullPrompt,
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "design_review_parallel") {
+    // Both passes are unsatisfied — dispatch two independent subagents simultaneously.
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir);
+    const contractResultsPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    const conceptualResultsPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
+    const reviewOptions = { max_units: sessionConfig.design_review?.max_units };
+
+    const contractPromptText = [
+      renderContractReviewPrompt(result.bundle, reviewOptions),
+      "## Results path",
+      "",
+      "Write the JSON array of contract-review findings to:",
+      "",
+      `  ${contractResultsPath}`,
+      "",
+      `Then run: ${continueCommand}`,
+      "",
+    ].join("\n");
+
+    const conceptualPromptText = [
+      renderConceptualReviewPrompt(result.bundle, reviewOptions),
+      "## Results path",
+      "",
+      "Write the JSON array of conceptual-review findings to:",
+      "",
+      `  ${conceptualResultsPath}`,
+      "",
+      `Then run: ${continueCommand}`,
+      "",
+    ].join("\n");
+
+    const contractPromptPath = join(artifactsDir, "incoming", "design-review-contract-prompt.md");
+    const conceptualPromptPath = join(artifactsDir, "incoming", "design-review-conceptual-prompt.md");
+    await writeFile(contractPromptPath, contractPromptText, "utf8");
+    await writeFile(conceptualPromptPath, conceptualPromptText, "utf8");
+
+    const dispatchPrompt = [
+      "# Design review — parallel dispatch",
+      "",
+      "Dispatch **two independent subagents simultaneously** to perform the two design review passes:",
+      "",
+      "1. **Contract review** (adversarial): read the prompt at the contract prompt path, write findings to the contract results path.",
+      "2. **Conceptual review** (generative): read the prompt at the conceptual prompt path, write findings to the conceptual results path.",
+      "",
+      "Both subagents receive the full prompt for their respective pass. Dispatch them in parallel; do not wait for one before starting the other.",
+      "",
+      "When both subagents have written their results, run:",
+      "",
+      `  ${continueCommand}`,
+      "",
+    ].join("\n");
+
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "design_review_parallel",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Dispatch two subagents (contract and conceptual review) in parallel, then run next-step when both have written their findings.",
+      repoRoot: root,
+      artifactPaths: {
+        contract_prompt: contractPromptPath,
+        contract_results: contractResultsPath,
+        conceptual_prompt: conceptualPromptPath,
+        conceptual_results: conceptualResultsPath,
+      },
+      prompt: dispatchPrompt,
+      access: {
+        read_paths: [contractPromptPath, conceptualPromptPath],
+        write_paths: [contractResultsPath, conceptualResultsPath],
+      },
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "design_review_contract") {
+    // Only the contract pass remains.
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir);
+    const contractResultsPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    const prompt = [
+      renderContractReviewPrompt(result.bundle, { max_units: sessionConfig.design_review?.max_units }),
+      "## Results path",
+      "",
+      "Write the JSON array of contract-review findings to:",
+      "",
+      `  ${contractResultsPath}`,
+      "",
+      `Then run: ${continueCommand}`,
+      "",
+    ].join("\n");
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "design_review_contract",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Write contract review findings to the results path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        design_review_contract_results: contractResultsPath,
+      },
+      prompt,
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "design_review_conceptual") {
+    // Only the conceptual pass remains.
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir);
+    const conceptualResultsPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
+    const prompt = [
+      renderConceptualReviewPrompt(result.bundle, { max_units: sessionConfig.design_review?.max_units }),
+      "## Results path",
+      "",
+      "Write the JSON array of conceptual-review findings to:",
+      "",
+      `  ${conceptualResultsPath}`,
+      "",
+      `Then run: ${continueCommand}`,
+      "",
+    ].join("\n");
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "design_review_conceptual",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Write conceptual review findings to the results path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        design_review_conceptual_results: conceptualResultsPath,
+      },
+      prompt,
     });
     console.log(JSON.stringify(step, null, 2));
     return;
@@ -938,6 +1169,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     hostMaxActiveSubagents,
     hostCanRestrictSubagentTools,
     hostCanSelectSubagentModel,
+    selectedExecutor: result.selectedExecutor,
   });
   console.log(JSON.stringify(step, null, 2));
 }

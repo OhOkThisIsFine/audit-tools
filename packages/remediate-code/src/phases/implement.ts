@@ -157,7 +157,6 @@ export async function executeBlock(
         "resolved_no_change",
         "deemed_inappropriate",
         "ignored",
-        "pending",
       ].includes(item.status)
     )
       continue;
@@ -176,7 +175,7 @@ export async function executeBlock(
     const skipTests = itemSpec.not_applicable_steps.find(
       (s) => s.step === REMEDIATION_STEP.WRITE_TESTS,
     );
-    if (!skipTests && item.status === "documented") {
+    if (!skipTests && item.status === "pending") {
       const prompt = `Write tests for the following finding:\nID: ${findingId}\nSpec: ${JSON.stringify(itemSpec, null, 2)}`;
       const stepSuccess = await runStepWithProvider(
         provider,
@@ -209,7 +208,7 @@ export async function executeBlock(
         await store.saveState(state);
         continue;
       }
-    } else if (item.status === "documented") {
+    } else if (item.status === "pending") {
       item.status = "tested";
       item.last_successful_step = REMEDIATION_STEP.WRITE_TESTS;
       await store.saveState(state);
@@ -411,6 +410,8 @@ function canUseGitWorktrees(root: string): boolean {
 interface WorktreeBlockResult {
   ok: boolean;
   state?: RemediationState;
+  /** The commit SHA created in the worktree for this block, if any. */
+  commitSha?: string;
 }
 
 // Runs a block in a git worktree branch. State mutations are kept in a cloned
@@ -483,6 +484,7 @@ async function runBlockInWorktree(
     cwd: blockRoot,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  let commitSha: string | undefined;
   if (hasStagedChanges.status !== 0) {
     const commitRes = runCommand(
       "git",
@@ -509,8 +511,19 @@ async function runBlockInWorktree(
       });
       return { ok: false };
     }
+    // Capture the commit SHA for the post-merge re-verification gate so the
+    // merge loop can roll back exactly this block's changes when attribution
+    // identifies it as part of a guilty set (N-R18).
+    const shaRes = runCommand("git", ["rev-parse", "HEAD"], {
+      cwd: blockRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (shaRes.status === 0 && shaRes.stdout) {
+      commitSha = shaRes.stdout.toString().trim();
+    }
   }
-  return { ok: true, state: blockState };
+  return { ok: true, state: blockState, commitSha };
 }
 
 function mergeWorktreeBlock(
@@ -573,6 +586,194 @@ function mergeWorktreeBlock(
   return rebaseAndTestSuccess;
 }
 
+/**
+ * Runs the post-merge re-verification gate for `failedBlock` after it was
+ * merged into the main tree.  On failure, bisects (in reverse-merge order) to
+ * find the smallest guilty subset of already-merged blocks whose `touched_files`
+ * overlap the implicated surface, reverts only those commits, and re-enters
+ * their items into triage (status `'blocked'` + `failure_reason` attribution).
+ * Non-guilty merged blocks are left intact.
+ *
+ * @param options       Orchestrator options (root / artifactsDir).
+ * @param state         Mutable remediation state (items mutated in place).
+ * @param store         State store used to persist mutations.
+ * @param mergedBlocks  All blocks merged so far, in merge order (oldest first).
+ * @param mergedCommits Map<block_id → commitSha> accumulated during the merge loop.
+ * @param failedBlock   The block whose post-merge gate just failed.
+ * @param testOutput    Tail of test stdout+stderr from the failed gate run.
+ */
+export async function attributePostMergeFailure(
+  options: OrchestratorOptions,
+  state: RemediationState,
+  store: Pick<StateStore, "saveState">,
+  mergedBlocks: RemediationBlock[],
+  mergedCommits: Map<string, string>,
+  failedBlock: RemediationBlock,
+  testOutput: string,
+): Promise<void> {
+  // Gather candidates: all merged blocks (including the just-merged one) whose
+  // touched_files overlap failedBlock's touched_files, or whose items touch the
+  // same files as failedBlock.
+  const failedFiles = new Set<string>([
+    ...(failedBlock.touched_files ?? []),
+    ...failedBlock.items.flatMap(
+      (id) => state.items?.[id]?.item_spec?.touched_files ?? [],
+    ),
+  ]);
+
+  const candidates = mergedBlocks.filter((b) => {
+    const bFiles = new Set<string>([
+      ...(b.touched_files ?? []),
+      ...b.items.flatMap(
+        (id) => state.items?.[id]?.item_spec?.touched_files ?? [],
+      ),
+    ]);
+    for (const f of bFiles) {
+      if (failedFiles.has(f)) return true;
+    }
+    // Also include the failed block itself (its commit is always a candidate).
+    return b.block_id === failedBlock.block_id;
+  });
+
+  if (candidates.length === 0) {
+    // No overlap info — treat the failed block as the sole guilty party.
+    candidates.push(failedBlock);
+  }
+
+  // Bisect: iterate candidates in reverse-merge order (most-recently merged
+  // first). For each candidate, revert its commit and re-run the gate; the
+  // first candidate whose revert makes the gate pass is the guilty block.
+  // If no single revert isolates the failure, mark all candidates guilty.
+  const gateCommand = (
+    (failedBlock.targeted_commands?.length ? failedBlock.targeted_commands : null) ??
+    (state.plan!.test_command ? [state.plan!.test_command] : null)
+  );
+
+  const reverseMergeOrder = [...candidates].reverse();
+  let guiltySet: RemediationBlock[] = candidates; // default: all guilty
+
+  if (gateCommand && candidates.length > 1) {
+    // Try reverting each candidate in isolation to find the guilty one.
+    for (const candidate of reverseMergeOrder) {
+      const sha = mergedCommits.get(candidate.block_id);
+      if (!sha) continue;
+      // Revert candidate's commit (no-commit so we can test then reset).
+      const revertRes = runCommand(
+        "git",
+        ["revert", "--no-commit", sha],
+        { cwd: options.root, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      if (revertRes.status !== 0) {
+        // Can't isolate — revert with abort and fall through to all-guilty.
+        runCommand("git", ["revert", "--abort"], {
+          cwd: options.root,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        continue;
+      }
+      // Run gate command after reverting.
+      let allPass = true;
+      for (const cmd of gateCommand) {
+        const testResult = runShellCommand(cmd, {
+          cwd: options.root,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        if (testResult.status !== 0) { allPass = false; break; }
+      }
+      // Reset the tentative revert regardless of outcome.
+      runCommand("git", ["reset", "--hard", "HEAD"], {
+        cwd: options.root,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      if (allPass) {
+        // Reverting this candidate restored green: it's the guilty one.
+        guiltySet = [candidate];
+        break;
+      }
+    }
+  }
+
+  // Roll back guilty blocks: git revert --no-commit each guilty commit, then
+  // commit the combined revert so the main tree stays clean.
+  const guiltyIds = guiltySet.map((b) => b.block_id).join(", ");
+  const guiltyFiles = Array.from(failedFiles).join(", ") || "(unknown)";
+  const attributionMsg =
+    `Post-merge gate failed. Guilty blocks: [${guiltyIds}]. ` +
+    `Implicated surface: ${guiltyFiles}. ` +
+    `Test tail: ${testOutput.slice(-500)}`;
+
+  const commitShasToRevert = guiltySet
+    .map((b) => mergedCommits.get(b.block_id))
+    .filter((sha): sha is string => !!sha);
+
+  if (commitShasToRevert.length > 0) {
+    // Revert commits in reverse-merge order (newest first) to minimize conflicts.
+    for (const sha of [...commitShasToRevert].reverse()) {
+      runCommand("git", ["revert", "--no-commit", sha], {
+        cwd: options.root,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    }
+    const combinedMsg = `Revert guilty blocks [${guiltyIds}] — post-merge gate failure`;
+    runCommand("git", ["commit", "-m", combinedMsg], {
+      cwd: options.root,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  }
+
+  // Re-enter every rolled-back block's items into triage.
+  for (const guiltyBlock of guiltySet) {
+    for (const findingId of guiltyBlock.items) {
+      const item = state.items?.[findingId];
+      if (!item) continue;
+      item.status = "blocked";
+      item.failure_reason = attributionMsg;
+      item.rework_count = (item.rework_count ?? 0) + 1;
+    }
+  }
+  await store.saveState(state);
+}
+
+/**
+ * Runs the post-merge re-verification gate for a just-merged block.
+ * Returns `{ passed: boolean; testOutput: string }`.
+ * When neither `targeted_commands` nor `test_command` is available the gate
+ * is a no-op and always returns `{ passed: true, testOutput: "" }`.
+ */
+function runPostMergeGate(
+  block: RemediationBlock,
+  options: OrchestratorOptions,
+  testCommand: string | undefined,
+): { passed: boolean; testOutput: string } {
+  const commands: string[] = block.targeted_commands?.length
+    ? block.targeted_commands
+    : testCommand
+      ? [testCommand]
+      : [];
+
+  if (commands.length === 0) {
+    return { passed: true, testOutput: "" };
+  }
+
+  let combinedOutput = "";
+  for (const cmd of commands) {
+    const result = runShellCommand(cmd, {
+      cwd: options.root,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout = result.stdout ? result.stdout.toString() : "";
+    const stderr = result.stderr ? result.stderr.toString() : "";
+    combinedOutput += (stdout + "\n" + stderr).trim() + "\n";
+    if (result.status !== 0) {
+      return {
+        passed: false,
+        testOutput: combinedOutput.trim().slice(-RETRY_TEST_OUTPUT_TAIL_CHARS),
+      };
+    }
+  }
+  return { passed: true, testOutput: combinedOutput.trim() };
+}
+
 export async function runImplementPhase(
   state: RemediationState,
   options: OrchestratorOptions,
@@ -607,6 +808,12 @@ export async function runImplementPhase(
   const worktreeFailedBlocks: RemediationBlock[] = [];
   const worktreeResults = new Map<string, WorktreeBlockResult>();
   const sequentialFallbackQueue: RemediationBlock[] = [];
+  // Accumulated during the merge loop: block_id → commit SHA in main tree
+  // after the merge. Used by attributePostMergeFailure to roll back guilty
+  // blocks when the post-merge gate fails (N-R18).
+  const mergedCommits = new Map<string, string>();
+  // Blocks whose worktree branch was successfully merged, in merge order.
+  const successfullyMergedBlocks: RemediationBlock[] = [];
 
   if (useWorktrees) {
     const parallelPromises = parallelBlocks.map(async (block) => {
@@ -633,6 +840,33 @@ export async function runImplementPhase(
       if (merged && result?.state) {
         mergeBlockState(state, result.state, block);
         await store.saveState(state);
+
+        // Record the commitSha returned from the worktree so the post-merge
+        // gate can attribute and roll back exactly this block if needed.
+        if (result.commitSha) {
+          mergedCommits.set(block.block_id, result.commitSha);
+        }
+        successfullyMergedBlocks.push(block);
+
+        // Post-merge re-verification gate (N-R18): run targeted_commands (or
+        // fall back to test_command) against the NOW-MERGED main tree. On
+        // failure, attribute to the guilty subset of merged blocks and re-enter
+        // their items into triage.
+        const gate = runPostMergeGate(block, options, state.plan!.test_command);
+        if (!gate.passed) {
+          console.warn(
+            `[implement] event=post_merge_gate_failed block_id=${block.block_id} surface_files=${(block.touched_files ?? []).join(",")} test_output_tail=${gate.testOutput.slice(-200)}`,
+          );
+          await attributePostMergeFailure(
+            options,
+            state,
+            store,
+            successfullyMergedBlocks,
+            mergedCommits,
+            block,
+            gate.testOutput,
+          );
+        }
       } else if (!merged) {
         sequentialFallbackQueue.push(block);
       }

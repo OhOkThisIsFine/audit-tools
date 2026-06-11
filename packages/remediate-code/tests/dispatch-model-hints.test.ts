@@ -7,7 +7,6 @@ import type {
   RemediationItemState,
 } from "../src/state/types.js";
 import {
-  buildDocumentModelHint,
   buildImplementModelHint,
 } from "../src/steps/dispatch.js";
 
@@ -25,84 +24,6 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
     ...overrides,
   };
 }
-
-describe("buildDocumentModelHint", () => {
-  it("deep tier for critical severity", () => {
-    const hint = buildDocumentModelHint(
-      makeFinding({ severity: "critical", lens: "tests", confidence: "medium" }),
-    );
-    expect(hint.tier).toBe("deep");
-    expect(hint.reasons).toContain("severity_critical");
-  });
-
-  it("deep tier for high severity", () => {
-    const hint = buildDocumentModelHint(
-      makeFinding({ severity: "high", lens: "tests", confidence: "low" }),
-    );
-    expect(hint.tier).toBe("deep");
-    expect(hint.reasons).toContain("severity_high");
-  });
-
-  it("deep tier for sensitive lens (security)", () => {
-    const hint = buildDocumentModelHint(
-      makeFinding({ severity: "medium", lens: "security", confidence: "medium" }),
-    );
-    expect(hint.tier).toBe("deep");
-    expect(hint.reasons).toContain("sensitive_lens_security");
-  });
-
-  it("deep tier for data_integrity lens", () => {
-    const hint = buildDocumentModelHint(
-      makeFinding({ severity: "medium", lens: "data_integrity", confidence: "low" }),
-    );
-    expect(hint.tier).toBe("deep");
-    expect(hint.reasons).toContain("sensitive_lens_data_integrity");
-  });
-
-  it("deep tier for reliability lens", () => {
-    const hint = buildDocumentModelHint(
-      makeFinding({ severity: "low", lens: "reliability", confidence: "high" }),
-    );
-    expect(hint.tier).toBe("deep");
-    expect(hint.reasons).toContain("sensitive_lens_reliability");
-  });
-
-  // Finding.lens is a free-form string (the auditor narrows it to its Lens union),
-  // and buildDocumentModelHint's SAFE_LENS_PATTERN keys on cosmetic lens labels
-  // (style/format/lint/typo/…). These cases intentionally use such labels to
-  // exercise the small-tier "safe lens" branch — they are valid string inputs,
-  // not canonical-enum values.
-  it("small tier for low-severity high-confidence safe lens", () => {
-    const hint = buildDocumentModelHint(
-      makeFinding({ severity: "low", confidence: "high", lens: "style" }),
-    );
-    expect(hint.tier).toBe("small");
-    expect(hint.reasons).toContain("low_severity_safe_lens");
-  });
-
-  it("small tier for 'info' severity with a safe lens pattern", () => {
-    const hint = buildDocumentModelHint(
-      makeFinding({ severity: "info", confidence: "high", lens: "lint" }),
-    );
-    expect(hint.tier).toBe("small");
-  });
-
-  it("standard tier as default (medium severity, non-sensitive lens)", () => {
-    const hint = buildDocumentModelHint(
-      makeFinding({ severity: "medium", lens: "maintainability", confidence: "medium" }),
-    );
-    expect(hint.tier).toBe("standard");
-    expect(hint.reasons).toContain("default_document_item");
-  });
-
-  it("low severity but low confidence falls through to standard, not small", () => {
-    const hint = buildDocumentModelHint(
-      makeFinding({ severity: "low", confidence: "low", lens: "style" }),
-    );
-    // Low confidence disqualifies the small tier even with a safe lens.
-    expect(hint.tier).toBe("standard");
-  });
-});
 
 /**
  * Assemble a minimal RemediationState containing the given findings (and
@@ -123,7 +44,7 @@ function makeStateWithBlock(
   for (const finding of findings) {
     const item: RemediationItemState = {
       finding_id: finding.id,
-      status: "documented",
+      status: "pending",
       block_id: blockId,
     };
     if (specs[finding.id]) {

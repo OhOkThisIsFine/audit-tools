@@ -10,6 +10,8 @@
  * payload.
  */
 
+import type { FindingSeverity } from "./finding.js";
+
 // ── Version constants ────────────────────────────────────────────────────────
 
 export const CONTRACT_PIPELINE_GOAL_SPEC_VERSION =
@@ -41,6 +43,12 @@ export const CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION =
 
 export const CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION =
   "remediate-code-verification-report/v1alpha1" as const;
+
+export const CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION =
+  "remediate-code-contract-pipeline/seam-negotiation/v1alpha1" as const;
+
+export const CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION =
+  "remediate-code-contract-pipeline/test-validator-plan/v1alpha1" as const;
 
 // ── GoalSpec ─────────────────────────────────────────────────────────────────
 
@@ -89,6 +97,32 @@ export interface DesignSpecInvariant {
   description: string;
 }
 
+/** Optional structured annotation: one module with declared inputs and outputs. */
+export interface DesignSpecModule {
+  id: string;
+  inputs: string[];
+  outputs: string[];
+}
+
+/** Optional structured annotation: one side effect with a declared owner. */
+export interface DesignSpecSideEffect {
+  id: string;
+  owner: string;
+}
+
+/** Optional structured annotation: one external dependency with failure semantics. */
+export interface DesignSpecExternalDependency {
+  id: string;
+  failure_semantics: string;
+}
+
+/** Optional structured annotation: one trust boundary with untrusted inputs and a validation ref. */
+export interface DesignSpecTrustBoundary {
+  id: string;
+  untrusted_inputs: string[];
+  validation_ref: string;
+}
+
 export interface DesignSpec {
   contract_version: typeof CONTRACT_PIPELINE_DESIGN_SPEC_VERSION;
   goal_id: string;
@@ -100,6 +134,14 @@ export interface DesignSpec {
   affected_paths: string[];
   /** ISO-8601 timestamp when this design was created. */
   created_at: string;
+  /** Optional: structured module annotations (id, inputs, outputs). */
+  modules?: DesignSpecModule[];
+  /** Optional: structured side-effect annotations (id, owner). */
+  side_effects?: DesignSpecSideEffect[];
+  /** Optional: structured external-dependency annotations (id, failure_semantics). */
+  external_dependencies?: DesignSpecExternalDependency[];
+  /** Optional: structured trust-boundary annotations (id, untrusted_inputs, validation_ref). */
+  trust_boundaries?: DesignSpecTrustBoundary[];
 }
 
 // ── ConceptualDesignCritique ──────────────────────────────────────────────────
@@ -133,6 +175,10 @@ export interface ObligationEntry {
   depends_on: string[];
   /** Current status of this obligation. */
   status: "pending" | "satisfied" | "failed";
+  /** Lower value = higher priority; enables first-class scheduling. */
+  priority?: number;
+  /** Traceability: where this obligation originated. */
+  source?: "design_spec" | "critique" | "counterexample" | "manual";
 }
 
 export interface ObligationLedger {
@@ -140,6 +186,43 @@ export interface ObligationLedger {
   goal_id: string;
   obligations: ObligationEntry[];
   /** ISO-8601 timestamp when this ledger was created. */
+  created_at: string;
+}
+
+// ── TestValidatorPlan ─────────────────────────────────────────────────────────
+
+/** One test spec derived from a ledger obligation, to be created before code. */
+export interface TestSpec {
+  /** The obligation ID from the ObligationLedger this test spec covers. */
+  obligation_id: string;
+  /** Short name for this test. */
+  name: string;
+  /** Kind of test. */
+  kind: "unit" | "integration" | "schema" | "invariant" | "e2e";
+  /** Concrete, falsifiable assertion strings for this test. Must be non-empty. */
+  assertions: string[];
+  /**
+   * When present, declares this test inapplicable. The claim must cite the
+   * specific obligation ID and provide a falsifiable reason checkable against
+   * the ledger — bare rationale is insufficient.
+   */
+  inapplicable_claim?: {
+    /** The obligation ID this claim disputes (must match obligation_id above). */
+    obligation_id: string;
+    /** Falsifiable reason why this test is inapplicable per the ledger. */
+    reason: string;
+  };
+}
+
+/**
+ * Pre-code test specification plan: converts ledger obligations into concrete
+ * test specs, validators, and schemas BEFORE any implementation begins.
+ */
+export interface TestValidatorPlan {
+  contract_version: typeof CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION;
+  goal_id: string;
+  test_specs: TestSpec[];
+  /** ISO-8601 timestamp when this plan was created. */
   created_at: string;
 }
 
@@ -257,6 +340,29 @@ export interface ImplementationDAGNode {
   targeted_commands: string[];
   /** Current status of this task. */
   status: "pending" | "in_progress" | "resolved" | "blocked";
+  /** Repo-relative paths this node will modify (write scope). */
+  affected_files?: string[];
+  /**
+   * Repo-relative paths this node will create or modify (declared outputs).
+   * Written by the implementation-planning LLM. Promoted to `affected_files`
+   * in the extracted plan so the document worker gets a non-degenerate read
+   * allowlist. Optional: existing DAGs without it remain valid.
+   */
+  output_files?: string[];
+  /** Repo-relative paths the worker must read (context scope). */
+  read_scope?: string[];
+  /** Audit lens this node targets (mirrors Finding.lens). */
+  lens?: string;
+  /** Severity inherited from the driving finding. */
+  severity?: FindingSeverity;
+  /** Repo-relative files this node is expected to touch (from finalized module contract scope). */
+  files_likely_touched?: string[];
+  /** Upstream contracts' declared outputs this node depends on (preconditions). */
+  preconditions?: string[];
+  /** Human-readable description of the concrete changes this node is expected to produce. */
+  expected_changes?: string;
+  /** Human-readable verification checks beyond targeted_commands. */
+  verification?: string[];
 }
 
 /** One directed edge in the implementation DAG. */
@@ -307,5 +413,41 @@ export interface VerificationReport {
   /** Overall report verdict. */
   overall_status: "passed" | "failed";
   /** ISO-8601 timestamp when this report was created. */
+  created_at: string;
+}
+
+// ── Multi-agent seam negotiation ──────────────────────────────────────────────
+
+/** Role an agent plays at a multi-agent seam boundary. */
+export type SeamRole = "author" | "reviewer" | "verifier" | "judge";
+
+/** One agent's participation in a seam at a DAG node boundary. */
+export interface AgentSeam {
+  /** Stable identifier for this seam instance. */
+  seam_id: string;
+  /** DAG node this seam is attached to. */
+  node_id: string;
+  /** Role this agent plays at the seam. */
+  role: SeamRole;
+  /** Advisory hint for selecting the agent backend (e.g. "claude-code"). */
+  agent_hint?: string;
+  /** Artifact path the previous agent writes and this agent reads as handoff. */
+  handoff_artifact: string;
+  /** Artifact paths this agent must read before starting. */
+  read_artifacts: string[];
+  /** Artifact paths this agent is allowed to write. */
+  write_artifacts: string[];
+  /** Constraints the agent must respect (e.g. "must not modify unrelated files"). */
+  constraints: string[];
+}
+
+/** Record of a seam negotiation pass for a goal's implementation DAG. */
+export interface SeamNegotiationRecord {
+  contract_version: typeof CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION;
+  /** Goal this negotiation belongs to. */
+  goal_id: string;
+  /** All seams across all DAG nodes for this goal. */
+  seams: AgentSeam[];
+  /** ISO-8601 timestamp when this record was created. */
   created_at: string;
 }

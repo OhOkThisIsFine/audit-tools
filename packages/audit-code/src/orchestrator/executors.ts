@@ -17,6 +17,13 @@ export function isHostDelegationExecutor(id: string): boolean {
 
 export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   {
+    id: "provider_confirmation_executor",
+    kind: "host_delegation",
+    obligation_ids: ["provider_confirmation"],
+    description:
+      "Pause for the host to discover and confirm the provider pool (capability tiers, quota state); writes provider_confirmation.json.",
+  },
+  {
     id: "intake_executor",
     kind: "deterministic",
     obligation_ids: ["repo_manifest", "file_disposition"],
@@ -52,11 +59,18 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
       "Run deterministic structural analysis to assess overall project design.",
   },
   {
-    id: "design_review",
+    id: "design_review_contract",
     kind: "host_delegation",
-    obligation_ids: ["design_review_completed"],
+    obligation_ids: ["design_review_contract_completed"],
     description:
-      "Pause the pipeline and delegate a holistic project design review to the active LLM agent.",
+      "Pause the pipeline and delegate the contract-assessment pass (adversarial: inferred contracts, counterexamples, trust boundaries) to the active LLM agent.",
+  },
+  {
+    id: "design_review_conceptual",
+    kind: "host_delegation",
+    obligation_ids: ["design_review_conceptual_completed"],
+    description:
+      "Pause the pipeline and delegate the conceptual-design-critique pass (generative: tool opportunities, architecture patterns, simplification, integration, missing capabilities) to the active LLM agent.",
   },
   {
     id: "planning_executor",
@@ -93,10 +107,10 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   },
   {
     id: "synthesis_narrative_executor",
-    kind: "deterministic",
+    kind: "host_delegation",
     obligation_ids: ["synthesis_narrative_current"],
     description:
-      "Resolve the optional synthesis narrative (themes, executive summary, top risks); omit deterministically without a provider.",
+      "Pause for the host to supply a synthesis narrative (themes, executive summary, top risks); headless auto-complete writes status:omitted when narrative is disabled.",
   },
   {
     id: "external_analyzer_import_executor",
@@ -122,8 +136,15 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   {
     id: "agent",
     kind: "host_delegation",
+    obligation_ids: [],
+    description:
+      "Legacy host-delegation placeholder (no longer owns audit_tasks_completed; superseded by rolling_dispatch_executor). Kept for backward compatibility in ongoing runs.",
+  },
+  {
+    id: "rolling_dispatch_executor",
+    kind: "host_delegation",
     obligation_ids: ["audit_tasks_completed"],
     description:
-      "Pause the pipeline and delegate pending codebase review tasks or syntax resolutions to the active LLM agent.",
+      "Drive the rolling dispatch loop: check quota, dispatch fitting packets to worker sub-agents, fold ingestion inline after each result, and proceed until all pending tasks are complete or a partial-coverage terminal fires.",
   },
 ];

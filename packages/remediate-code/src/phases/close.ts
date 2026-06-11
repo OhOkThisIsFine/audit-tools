@@ -40,7 +40,6 @@ import type {
 } from "../state/types.js";
 import { intakePaths, type IntakeSourceManifest } from "../intake.js";
 import { isAuditFindingsReport } from "./plan.js";
-import { rationaleAsksForRetry } from "../steps/stepUtils.js";
 
 const OUTCOME_BY_STATUS: Record<string, RemediationOutcomeStatus> = {
   resolved: "resolved",
@@ -409,6 +408,54 @@ export function collectStagingFiles(root: string): string[] {
   );
 }
 
+/**
+ * Generate a commit message derived from item summaries and finding titles.
+ * Falls back to a generic message when there are no findings to summarize.
+ */
+function generateCommitMessage(state: RemediationState): string {
+  const findings = state.plan?.findings ?? [];
+  const items = Object.values(state.items ?? {});
+  const resolvedFindingIds = new Set(
+    items
+      .filter((i) => i.status === "resolved" || i.status === "resolved_no_change")
+      .map((i) => i.finding_id),
+  );
+  const resolved = findings.filter((f) => resolvedFindingIds.has(f.id));
+  if (resolved.length === 0) {
+    return "Remediation complete";
+  }
+  if (resolved.length === 1) {
+    return `Fix: ${resolved[0]!.title ?? resolved[0]!.id}`;
+  }
+  const titles = resolved
+    .slice(0, 3)
+    .map((f) => f.title ?? f.id)
+    .join(", ");
+  const suffix = resolved.length > 3 ? ` (+${resolved.length - 3} more)` : "";
+  return `Fix: ${titles}${suffix}`;
+}
+
+/** Actions that require user confirmation before executing. */
+const PREVIEW_ACTIONS = new Set<string>(["commit", "push", "open-pr", "publish"]);
+
+/**
+ * Check whether the closing action needs a confirmation preview. Returns the
+ * preview data if confirmation is needed, or undefined if the action may
+ * proceed immediately (pre_authorized, action === 'none'/'tag'/'custom', or
+ * no files to stage).
+ */
+function checkClosingPreview(
+  state: RemediationState,
+  options: OrchestratorOptions,
+): { files: string[]; commit_message: string } | undefined {
+  const closingPlan = state.closing_plan!;
+  if (closingPlan.pre_authorized === true) return undefined;
+  if (!PREVIEW_ACTIONS.has(closingPlan.action)) return undefined;
+  const files = collectStagingFiles(options.root);
+  const commitMessage = generateCommitMessage(state);
+  return { files, commit_message: commitMessage };
+}
+
 function executeClosingAction(
   state: RemediationState,
   options: OrchestratorOptions,
@@ -443,9 +490,11 @@ function executeClosingAction(
         commands: [],
       };
     }
+    const commitMessage = state.closing_plan!.closing_action_preview?.commit_message
+      ?? generateCommitMessage(state);
     const committed =
       run("git", ["add", "--", ...files]) &&
-      run("git", ["commit", "-m", "Auto-remediation complete"]);
+      run("git", ["commit", "-m", commitMessage]);
     if (committed && action === "push") {
       run("git", ["push"]);
     } else if (committed && action === "open-pr") {
@@ -509,39 +558,94 @@ function runCombinedTestSuite(
 }
 
 /**
- * On a combined-test failure, re-block every resolved item (a failure here is
- * typically a cross-block interaction) and report whether anything was blocked
- * — the caller transitions back to triage when so.
+ * Parse test output to extract implicated file paths. Looks for common test
+ * runner patterns (e.g. "FAIL src/foo.ts", "at src/foo.ts:12", "● foo.ts").
+ */
+function extractImplicatedPaths(testOutput: string): string[] {
+  const paths = new Set<string>();
+  // Match patterns like: FAIL src/foo.ts, at Object.<anonymous> (src/foo.ts:12),
+  // src/foo.ts:12:3, ● src/foo.ts
+  const pathPattern = /(?:FAIL\s+|at\s+\S+\s+\(|●\s+)?([^\s()]+\.[a-z]{1,6})(?::\d+)?/g;
+  let match: RegExpExecArray | null;
+  while ((match = pathPattern.exec(testOutput)) !== null) {
+    const candidate = match[1]!;
+    // Only keep plausible repo-relative paths (contain at least one slash or look like a file)
+    if (candidate.includes("/") || candidate.includes("\\") || /\.[a-z]{1,6}$/.test(candidate)) {
+      // Normalize backslashes, strip leading ./
+      const normalized = candidate.replace(/\\/g, "/").replace(/^\.\//, "");
+      if (!normalized.startsWith("node_modules/")) {
+        paths.add(normalized);
+      }
+    }
+  }
+  return [...paths];
+}
+
+/**
+ * On a combined-test failure, selectively re-block items whose touched_files
+ * overlap with the failing tests' implicated paths. When attribution is
+ * ambiguous (no overlap found), falls back to re-blocking all resolved items.
+ * Returns whether any item was blocked — the caller transitions back to triage.
  */
 function blockResolvedItemsOnCombinedFailure(
   state: RemediationState,
   testOutput: string,
 ): boolean {
-  let anyBlocked = false;
-  for (const item of Object.values(state.items ?? {})) {
-    if (item.status === "resolved" || item.status === "resolved_no_change") {
-      item.status = "blocked";
-      item.completed_at = new Date().toISOString();
-      item.failure_reason = `Combined test suite failed after remediation (likely a cross-block interaction issue).${testOutput ? `\n\nTest output:\n${testOutput}` : ""}`;
-      anyBlocked = true;
+  const resolvedItems = Object.values(state.items ?? {}).filter(
+    (i) => i.status === "resolved" || i.status === "resolved_no_change",
+  );
+  if (resolvedItems.length === 0) return false;
+
+  const implicatedPaths = extractImplicatedPaths(testOutput);
+  const now = new Date().toISOString();
+
+  // Attempt attribution: find items whose touched_files overlap implicated paths.
+  let attributed: typeof resolvedItems = [];
+  if (implicatedPaths.length > 0) {
+    for (const item of resolvedItems) {
+      const touchedFiles = item.item_spec?.touched_files ?? [];
+      const overlaps = touchedFiles.some((tf) =>
+        implicatedPaths.some(
+          (ip) => tf === ip || tf.endsWith(`/${ip}`) || ip.endsWith(`/${tf}`) || tf.endsWith(ip) || ip.endsWith(tf),
+        ),
+      );
+      if (overlaps) attributed.push(item);
     }
   }
-  return anyBlocked;
+
+  const fallback = attributed.length === 0;
+  const toBlock = fallback ? resolvedItems : attributed;
+  const attributionNote = fallback
+    ? `Attribution attempt found no touched_files overlap with failing paths [${implicatedPaths.slice(0, 5).join(", ")}]; falling back to re-blocking all resolved items.`
+    : `Attributed to ${attributed.length} item(s) with overlapping touched_files [${implicatedPaths.slice(0, 5).join(", ")}].`;
+
+  for (const item of toBlock) {
+    item.status = "blocked";
+    item.completed_at = now;
+    item.failure_reason = `Combined test suite failed after remediation. ${attributionNote}${testOutput ? `\n\nTest output:\n${testOutput}` : ""}`;
+  }
+
+  return true;
+}
+
+interface E2eTestResult {
+  ran: boolean;
+  passed: boolean;
+  output: string;
 }
 
 /**
  * Run end-to-end tests on the fully merged state. E2e runs once here (not
  * per-block) because interdependent refactors can break e2e flows even when
- * per-item unit tests pass. A failure hard-errors the run: the changes are
- * complete but not shippable until investigated manually. Returns `undefined`
- * when no e2e_command is configured.
+ * per-item unit tests pass. Returns `{ ran: false }` when no e2e_command is
+ * configured. Never throws — failure is returned as `passed: false`.
  */
 function runE2eTests(
   state: RemediationState,
   options: OrchestratorOptions,
-): boolean | undefined {
+): E2eTestResult {
   if (!state.plan?.e2e_command) {
-    return undefined;
+    return { ran: false, passed: true, output: "" };
   }
   console.log("Running end-to-end tests on combined post-remediation state...");
   const e2eResult = runShellCommand(state.plan.e2e_command, {
@@ -556,12 +660,11 @@ function runE2eTests(
     )
       .trim()
       .slice(-FAILURE_OUTPUT_TAIL_CHARS);
-    throw new Error(
-      `End-to-end tests failed after full remediation. The code changes are complete but the system does not pass e2e validation. Review the output and investigate before retrying.\n\n${e2eOutput}`,
-    );
+    console.warn("End-to-end tests failed after remediation. Transitioning to triage.");
+    return { ran: true, passed: false, output: e2eOutput };
   }
   console.log("End-to-end tests passed.");
-  return e2ePassed;
+  return { ran: true, passed: true, output: "" };
 }
 
 interface ResolvedReportEntry {
@@ -781,10 +884,18 @@ function buildRemediationReportMarkdown(
  * Branches first, artifact dir last so a crash mid-cleanup leaves a recoverable
  * state. Failures are non-fatal but recorded via structured RunLogger context
  * (OBS-003) rather than a bare console.warn.
+ *
+ * The artifacts directory is only deleted on a fully-green close (all items
+ * resolved, combined test passed, closing action succeeded). When the run is
+ * not fully green — e2e failed, combined test failed, or closing action failed —
+ * the artifacts directory is preserved for diagnosis.
  */
 async function cleanupTempBranchesAndArtifacts(
   options: OrchestratorOptions,
   completeState: RemediationState,
+  combinedTest: CombinedTestResult,
+  e2eResult: E2eTestResult,
+  closingResult: ClosingResult,
   runLogger?: RunLogger,
 ): Promise<void> {
   try {
@@ -818,6 +929,24 @@ async function cleanupTempBranchesAndArtifacts(
     await store.saveState(completeState);
   } catch {
     // Non-fatal — we still return complete
+  }
+
+  // Only delete artifacts on a fully-green close. When any test or closing
+  // action failed, preserve the directory for diagnosis.
+  const fullyGreen =
+    combinedTest.passed &&
+    e2eResult.passed &&
+    closingResult.status !== "failed";
+
+  if (!fullyGreen) {
+    runLogger?.event({
+      phase: "close",
+      kind: "artifact_write",
+      obligation: "closing",
+      artifact: options.artifactsDir,
+      note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, closing=${closingResult.status})`,
+    });
+    return;
   }
 
   try {
@@ -859,12 +988,38 @@ function buildVerificationReport(
     (state.plan?.findings ?? []).map((f) => [f.id, f]),
   );
 
+  const isSkippedStatus = (status: string): boolean =>
+    status === "ignored" || status === "deemed_inappropriate";
+
   for (const item of Object.values(state.items ?? {})) {
     const finding = findingsById.get(item.finding_id);
+    const isResolved = item.status === "resolved" || item.status === "resolved_no_change";
+    const isSkipped = isSkippedStatus(item.status);
     const traces: VerificationTraceEntry[] = [];
-    const itemPassed =
-      (item.status === "resolved" || item.status === "resolved_no_change") &&
-      combinedTest.passed;
+    const itemPassed = isResolved && combinedTest.passed;
+
+    if (isSkipped) {
+      // Ignored/inappropriate items are excluded from overall_status — they
+      // get a single skipped trace and an overall_status of 'skipped'.
+      // The shared FindingVerificationTrace type only allows "passed"|"failed"
+      // but remediate-code extends this set with "skipped" so the close phase
+      // can exclude settled user decisions from the run verdict. The cast is
+      // intentional: the JSON output uses "skipped" as a discriminant even
+      // though the shared TS type narrows the union.
+      traces.push({
+        trace_id: `${item.finding_id}:skipped`,
+        kind: "task",
+        label: item.status === "ignored" ? "ignored by user" : "deemed inappropriate",
+        evidence: [item.failure_reason ?? item.status],
+        status: "failed",
+      });
+      findings.push({
+        finding_id: item.finding_id,
+        traces,
+        overall_status: "skipped" as unknown as "passed",
+      });
+      continue;
+    }
 
     // Combined test suite trace.
     const suiteLabel = combinedTest.suite_name ?? "combined test suite";
@@ -962,8 +1117,13 @@ function buildVerificationReport(
   // Sort by finding_id for determinism.
   findings.sort((a, b) => a.finding_id.localeCompare(b.finding_id));
 
+  // Overall status: ignored/inappropriate (skipped) items do NOT contribute
+  // to failure — only resolved/non-skipped items count.
   const overallPassed =
-    combinedTest.passed && findings.every((f) => f.overall_status === "passed");
+    combinedTest.passed &&
+    findings
+      .filter((f) => (f.overall_status as string) !== "skipped")
+      .every((f) => f.overall_status === "passed");
 
   // Derive goal_id from the plan if available.
   const goalId = (state.plan as { goal_id?: string } | undefined)?.goal_id;
@@ -975,20 +1135,6 @@ function buildVerificationReport(
     overall_status: overallPassed ? "passed" : "failed",
     created_at: new Date().toISOString(),
   };
-}
-
-function reblockRetryableIgnoredItems(state: RemediationState): boolean {
-  let changed = false;
-  for (const item of Object.values(state.items ?? {})) {
-    if (item.status !== "ignored" || !rationaleAsksForRetry(item.failure_reason)) {
-      continue;
-    }
-    item.status = "blocked";
-    delete item.completed_at;
-    item.failure_reason = `Retry requested from ignored/deferred rationale: ${item.failure_reason}`;
-    changed = true;
-  }
-  return changed;
 }
 
 export async function runClosePhase(
@@ -1004,12 +1150,18 @@ export async function runClosePhase(
     );
   }
 
-  if (reblockRetryableIgnoredItems(state)) {
-    console.log("Retryable ignored items found during close. Transitioning back to triage.");
-    return { ...state, status: "triage" };
+  // 1. Check whether closing action requires user confirmation (preview).
+  // When not pre-authorized and action is confirmable, generate the file list +
+  // commit message, attach them to closing_plan.closing_action_preview, and
+  // return the updated state so the host can present the preview. The host sets
+  // closing_plan.pre_authorized = true before the next next-step call.
+  const preview = checkClosingPreview(state, options);
+  if (preview) {
+    const updatedClosingPlan = { ...state.closing_plan, closing_action_preview: preview };
+    return { ...state, closing_plan: updatedClosingPlan };
   }
 
-  // 1. Run the full test suite; on failure re-block resolved items and triage.
+  // 2. Run the full test suite; on failure re-block resolved items and triage.
   const combinedTest = runCombinedTestSuite(state, options);
   if (!combinedTest.passed) {
     console.log("Full test suite failed. Transitioning back to triage.");
@@ -1021,10 +1173,15 @@ export async function runClosePhase(
     );
   }
 
-  // 2. Run end-to-end tests on the fully merged post-remediation state.
-  const e2ePassed = runE2eTests(state, options);
+  // 3. Run end-to-end tests on the fully merged post-remediation state.
+  const e2eResult = runE2eTests(state, options);
+  if (!e2eResult.passed) {
+    console.log("End-to-end tests failed. Transitioning back to triage.");
+    blockResolvedItemsOnCombinedFailure(state, e2eResult.output);
+    return { ...state, status: "triage" };
+  }
 
-  // 3. Execute the closing action and record exact command outcomes before
+  // 4. Execute the closing action and record exact command outcomes before
   // reporting success.
   console.log(`Executing closing action: ${state.closing_plan.action}`);
   const closingResult = executeClosingAction(state, options);
@@ -1062,7 +1219,7 @@ export async function runClosePhase(
     state,
     entries,
     closingResult,
-    e2ePassed,
+    e2eResult.ran ? e2eResult.passed : undefined,
     outcomesReport,
     combinedTest,
     feedbackText ? parseReflectionsNdjson(feedbackText) : [],
@@ -1101,7 +1258,7 @@ export async function runClosePhase(
       duration_ms: combinedTest.duration_ms,
       ...(combinedTest.output ? { failure_summary: combinedTest.output } : {}),
     },
-    ...(e2ePassed !== undefined ? { e2e_result: { passed: e2ePassed } } : {}),
+    ...(e2eResult.ran ? { e2e_result: { passed: e2eResult.passed } } : {}),
     closing_result: {
       action: state.closing_plan.action,
       status: closingResult.status,
@@ -1146,8 +1303,8 @@ export async function runClosePhase(
   });
   console.log("Remediation report generated.");
 
-  // 6. Clean up temporary branches and artifact directory.
-  await cleanupTempBranchesAndArtifacts(options, completeState, runLogger);
+  // 6. Clean up temporary branches and artifact directory (only when fully green).
+  await cleanupTempBranchesAndArtifacts(options, completeState, combinedTest, e2eResult, closingResult, runLogger);
 
   return completeState;
 }

@@ -185,6 +185,35 @@ structured-path tests pre-write a checkpoint.
 
 ## Features to add later
 
+### Remediation workflow redesign — *spec complete 2026-06-10*
+
+Full design agreed and documented in
+[`docs/remediation-workflow-design.md`](remediation-workflow-design.md).
+Key changes: always-confirm intake (auto-discovered input, pre-existing runs,
+merge-into-existing-plan option), input validation at manifest time, one
+consolidated synthesis+intent user stop with a pre-drafted checkpoint, the
+contract pipeline as the universal planning engine for BOTH input paths with
+multi-agent seam negotiation (decomposition → parallel per-module contract
+drafting → deterministic seam reconciliation → obligation ledger →
+test/validator plan → deterministic design gates → critic/judge/repair),
+metadata-enriched DAG promotion, dissolution of the document phase, rolling
+worktree-isolated dispatch with per-node contract verification before merge,
+context-carrying triage retries, and an evidence-backed close. Includes a
+verified current-code defect table (fix regardless of redesign sequencing) and
+a cross-tool alignment section shared with the audit redesign. Subsumes the
+*empty Files/Read allowlists* and *sibling-task drift* friction entries above
+(structural fixes; interim mitigations also specified).
+
+### Audit workflow redesign — *spec complete 2026-06-10*
+
+Full design agreed and documented in [`docs/audit-workflow-design.md`](audit-workflow-design.md).
+Key changes: provider confirmation gate, batched deterministic steps, extended
+intent checkpoint (disposition overrides + lens proposals + scope collapse),
+split design review (contract + conceptual, parallel), rolling quota-aware
+dispatch with capability routing, ingestion folded into dispatch, structured
+output for all host-delegation steps and auditor workers, synthesis narrative
+always runs. Implement against that document.
+
 ### Contract-governed implementation pipeline — *shipped 2026-06*
 
 The full pipeline is built and wired: artifact contracts, JSON schemas,
@@ -230,3 +259,9 @@ audit-code loads the file into the bundle with an `agent-feedback.jsonl →
 audit-report.md` staleness edge (always-rehashed like `tooling_manifest.json`;
 see `spec/dependency-map.md`), and remediate-code aggregates it in the close
 phase. Both reports emit a "Process Feedback" section when reflections exist.
+
+### Token savings and model routing
+
+Consider using https://github.com/mr-beaver/tokencost and/or 
+https://github.com/chopratejas/headroom and compare to 
+https://github.com/MrGray17/opentoken and other skills I may not have seen.

@@ -7,12 +7,33 @@ const {
   lookupModelLimits,
   KNOWN_MODEL_LIMITS,
   BYTES_PER_TOKEN,
+  ESTIMATED_TOKENS_PER_LINE,
+  ESTIMATED_PROMPT_OVERHEAD_TOKENS,
+  ESTIMATED_ITEM_OVERHEAD_TOKENS,
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_OUTPUT_TOKENS,
   BLOCK_SAFETY_MARGIN,
 // Note: We intentionally import from the TypeScript source in `../src` so that tests run directly against the
 // uncompiled source. The `npm test` script builds before running tests, but this file imports src/ directly.
 } = await import("../src/tokens.ts");
+
+test("estimateTokensFromBytes is the single token-estimation primitive in shared", () => {
+  // Zero and non-positive/non-finite inputs estimate to zero
+  assert.equal(estimateTokensFromBytes(0), 0);
+  assert.equal(estimateTokensFromBytes(-1), 0);
+  assert.equal(estimateTokensFromBytes(Number.NaN), 0);
+  assert.equal(estimateTokensFromBytes(Infinity), 0);
+  // 400 bytes / 4 bytes-per-token = 100 tokens
+  assert.equal(estimateTokensFromBytes(400), 100);
+  // 1 byte → ceil(1/4) = 1
+  assert.equal(estimateTokensFromBytes(1), 1);
+  // ESTIMATED_TOKENS_PER_LINE × BYTES_PER_TOKEN consistency (value is 16)
+  assert.equal(ESTIMATED_TOKENS_PER_LINE * BYTES_PER_TOKEN, BYTES_PER_TOKEN * ESTIMATED_TOKENS_PER_LINE);
+  assert.equal(ESTIMATED_TOKENS_PER_LINE * BYTES_PER_TOKEN, 16);
+  // Canonical overhead constants
+  assert.equal(ESTIMATED_PROMPT_OVERHEAD_TOKENS, 900);
+  assert.equal(ESTIMATED_ITEM_OVERHEAD_TOKENS, 600);
+});
 
 test("estimateTokensFromBytes is monotonic and zero for non-positive/non-finite", () => {
   assert.equal(estimateTokensFromBytes(0), 0);

@@ -100,9 +100,9 @@ test("finalization converges through the real persist/reload loop without oscill
       trail.push(decision.selected_obligation);
 
       let res;
-      if (decision.selected_executor === "agent") {
+      if (decision.selected_executor === "agent" || decision.selected_executor === "rolling_dispatch_executor") {
         const results = resultsForPending(bundle);
-        assert.ok(results.length > 0, "agent handoff must have pending tasks to answer");
+        assert.ok(results.length > 0, "agent/rolling_dispatch_executor handoff must have pending tasks to answer");
         res = await advanceAudit(bundle, {
           root,
           lineIndex: LINE_INDEX,

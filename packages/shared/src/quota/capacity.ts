@@ -9,6 +9,79 @@ import type { QuotaUsageSnapshot } from "./quotaSource.js";
 import { scheduleWave, type DiscoveredRateLimitsInput } from "./scheduler.js";
 
 /**
+ * Reason a partial-completion terminal fired on the dispatch engine.
+ * - `empty_pool`: no capacity pools are available (pool list is empty or every
+ *   pool reports zero slots) and the engine cannot dispatch remaining items.
+ * - `livelock_guard`: N consecutive waves passed with zero progress (all items
+ *   remain undispatchable despite pools being present) and the guard tripped.
+ */
+export type PartialCompletionReason = "empty_pool" | "livelock_guard";
+
+/**
+ * Consumer-neutral signal that the dispatch engine reached a terminal it cannot
+ * recover from on its own. The caller must route stranded items through a
+ * consumer-specific handler (e.g. audit marks them uncovered and proceeds to
+ * synthesis; remediate marks them blocked and proceeds to close).
+ *
+ * Produced by {@link detectLivelock} and persisted on the active-dispatch
+ * artifact so both the audit and remediation orchestrators can inspect it in
+ * their state-derivation logic.
+ */
+export interface PartialCompletionTerminal {
+  reason: PartialCompletionReason;
+  /** task/unit IDs the engine could not dispatch. */
+  stranded_ids: string[];
+}
+
+/**
+ * Detect a livelock or empty-pool condition after a series of no-progress waves
+ * and return a {@link PartialCompletionTerminal} if one is found.
+ *
+ * Call this after each dispatch wave where no items were dispatched. When
+ * `consecutiveNoProgressWaves` reaches or exceeds `noProgressLimit` (default
+ * 3), the engine is declared livelocked and a terminal is returned. If
+ * `pendingIds` is empty the terminal reason is `empty_pool` regardless of the
+ * wave count (no work remains to stall on). Returns `null` when the condition
+ * has not yet been reached.
+ *
+ * The caller is responsible for persisting the returned terminal and routing
+ * stranded items through its consumer-specific handler.
+ */
+export function detectLivelock(options: {
+  pendingIds: string[];
+  consecutiveNoProgressWaves: number;
+  noProgressLimit?: number;
+}): PartialCompletionTerminal | null {
+  const { pendingIds, consecutiveNoProgressWaves, noProgressLimit = 3 } = options;
+
+  if (pendingIds.length === 0) {
+    return null; // nothing stranded — no terminal needed
+  }
+
+  if (consecutiveNoProgressWaves >= noProgressLimit) {
+    return {
+      reason: "livelock_guard",
+      stranded_ids: [...pendingIds],
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Produce an `empty_pool` {@link PartialCompletionTerminal} for the given IDs.
+ * Call this when `computeDispatchCapacity` would throw because no pools are
+ * available, so the caller can record the terminal and route stranded items
+ * without crashing.
+ */
+export function buildEmptyPoolTerminal(strandedIds: string[]): PartialCompletionTerminal {
+  return {
+    reason: "empty_pool",
+    stranded_ids: [...strandedIds],
+  };
+}
+
+/**
  * A dispatch capacity pool: one backend (a provider + host model) that runs
  * review/worker subagents in parallel, each in its own fresh session with its
  * own context window. The conversation host's own subagents are one pool; a
