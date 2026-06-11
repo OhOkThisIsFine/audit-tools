@@ -809,7 +809,7 @@ async function main() {
       assert.equal(blocked.audit_state.status, "blocked");
       assert.equal(blocked.progress_made, true);
       assert.equal(blocked.next_likely_step, null);
-      assert.equal(blocked.selected_executor, "agent");
+      assert.equal(blocked.selected_executor, "rolling_dispatch_executor");
   assert.equal(blocked.handoff.status, "blocked");
   // Provider could be opencode if available, or local-subprocess as fallback
   assert.ok(/local-subprocess|opencode|claude-code/.test(blocked.handoff.provider ?? ""));
@@ -878,7 +878,7 @@ async function main() {
       );
       assert.equal(rerun.progress_made, true);
       assert.equal(rerun.audit_state.status, "blocked");
-      assert.equal(rerun.selected_executor, "agent");
+      assert.equal(rerun.selected_executor, "rolling_dispatch_executor");
       assert.equal(rerun.next_likely_step, null);
       assert.equal(rerun.handoff.status, "blocked");
       process.stderr.write(`[smoke:packaged] elapsed: rerun after completion (expect a fresh blocked audit) — ${Date.now() - stepStart}ms\n`);
