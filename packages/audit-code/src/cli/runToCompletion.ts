@@ -60,6 +60,7 @@ import {
   buildBlockedAuditState,
   buildManualReviewBlocker,
   emitEnvelope,
+  isLlmDispatchExecutor,
   shouldRunInlineExecutor,
 } from "./envelope.js";
 import { renderSemanticReviewStep } from "./semanticReviewStep.js";
@@ -743,15 +744,15 @@ async function runSingleWorkerStep(params: {
   let pendingRuntimeUpdatesPath = params.pendingRuntimeUpdatesPath;
   let pendingExternalAnalyzerPath = params.pendingExternalAnalyzerPath;
   const pendingAuditTasks =
-    preferredExecutor === "agent"
+    isLlmDispatchExecutor(preferredExecutor)
       ? await addFileLineCountHints(root, buildPendingAuditTasks(bundle))
       : undefined;
   const pendingAuditTasksPath =
-    preferredExecutor === "agent"
+    isLlmDispatchExecutor(preferredExecutor)
       ? join(paths.runDir, "pending-audit-tasks.json")
       : undefined;
   const providerAuditResultsPath =
-    preferredExecutor === "agent"
+    isLlmDispatchExecutor(preferredExecutor)
       ? join(paths.runDir, "run-results.json")
       : auditResultsPath;
   const providerReadPaths = new Set<string>();
@@ -911,7 +912,7 @@ async function handleLocalSubprocessBlock(params: {
     anyProgress,
     artifactsWritten,
   } = params;
-  if (preferredExecutor !== "agent" || provider.name !== LOCAL_SUBPROCESS_PROVIDER_NAME) {
+  if (!isLlmDispatchExecutor(preferredExecutor) || provider.name !== LOCAL_SUBPROCESS_PROVIDER_NAME) {
     return false;
   }
   const blocker = buildManualReviewBlocker(provider.name);
@@ -944,7 +945,7 @@ async function handleLocalSubprocessBlock(params: {
     repo_root: root,
     artifacts_dir: artifactsDir,
     obligation_id: obligationId,
-    preferred_executor: preferredExecutor,
+    preferred_executor: preferredExecutor!,
     result_path: blockPaths.resultPath,
     worker_command: [
       process.execPath,
@@ -1447,7 +1448,7 @@ const explicitProvider = getExplicitProvider(argv);
     }
 
     if (
-      decision.selected_executor === "agent" &&
+      isLlmDispatchExecutor(decision.selected_executor) &&
       bundle.audit_tasks?.some(
         (t) =>
           t.tags?.includes("selective_deepening") &&
@@ -1523,7 +1524,7 @@ const explicitProvider = getExplicitProvider(argv);
       return;
     }
 
-    if (preferredExecutor === "agent" && parallelWorkers > 1) {
+    if (isLlmDispatchExecutor(preferredExecutor) && parallelWorkers > 1) {
       const waveResult = await runParallelWaveStep({
         root,
         artifactsDir,

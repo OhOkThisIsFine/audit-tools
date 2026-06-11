@@ -31,8 +31,9 @@ export interface BuildChunkedTaskOptions {
    */
   max_task_lines?: number;
   /**
-   * Maximum number of files in one review task. Default: 8. Set to 0 to
-   * disable aggregate file-count splitting.
+   * Maximum number of files in one review task. Default: 0 (disabled).
+   * Token budget (max_task_lines) is the real constraint; file-count splitting
+   * is off by default. Set to a positive integer to re-enable.
    */
   max_task_files?: number;
   /**
@@ -41,6 +42,12 @@ export interface BuildChunkedTaskOptions {
    */
   tiny_test_file_lines?: number;
   limit_lenses?: Lens[];
+  /**
+   * Lenses whose tasks should have their priority elevated by one tier
+   * (low→medium, medium→high). Derived from free_form_intent at planning time;
+   * never promoted above 'high'.
+   */
+  intent_priority_boost?: Lens[];
   external_analyzer_results?: ExternalAnalyzerResults;
   critical_flows?: CriticalFlowManifest;
 }
@@ -49,22 +56,32 @@ function taskPriority(
   hasExternalSignal: boolean,
   lens: Lens,
   isCriticalFlow = false,
+  intentBoostLenses?: Set<Lens>,
 ): "high" | "medium" | "low" {
+  let base: "high" | "medium" | "low";
   if (isCriticalFlow) {
-    return lens === "security" || lens === "reliability" || lens === "correctness"
-      ? "high"
-      : "medium";
-  }
-  if (
+    base =
+      lens === "security" || lens === "reliability" || lens === "correctness"
+        ? "high"
+        : "medium";
+  } else if (
     hasExternalSignal &&
     (lens === "security" || lens === "data_integrity" || lens === "reliability")
   ) {
-    return "high";
+    base = "high";
+  } else if (hasExternalSignal) {
+    base = "medium";
+  } else {
+    base = lens === "security" || lens === "data_integrity" ? "medium" : "low";
   }
-  if (hasExternalSignal) {
-    return "medium";
+
+  // Apply intent_priority_boost: elevate one tier, never above 'high'.
+  if (intentBoostLenses && intentBoostLenses.has(lens)) {
+    if (base === "low") return "medium";
+    if (base === "medium") return "high";
+    // already "high" — no change
   }
-  return lens === "security" || lens === "data_integrity" ? "medium" : "low";
+  return base;
 }
 
 function pickAnalyzerLens(category: string): Lens {
@@ -91,7 +108,7 @@ function pickAnalyzerLens(category: string): Lens {
 
 const DEFAULT_FILE_SPLIT_THRESHOLD = 5000;
 const DEFAULT_MAX_TASK_LINES = 3000;
-const DEFAULT_MAX_TASK_FILES = 15;
+const DEFAULT_MAX_TASK_FILES = 0;
 const DEFAULT_TINY_TEST_FILE_LINES = 250;
 const TINY_TEST_UNIT_ID = "tests-tiny-files";
 
@@ -323,6 +340,10 @@ export function buildChunkedAuditTasks(
     }
   }
 
+  const intentBoostSet = options.intent_priority_boost && options.intent_priority_boost.length > 0
+    ? new Set<Lens>(options.intent_priority_boost)
+    : undefined;
+
   const budgetLimits: TaskBudgetLimits = { maxTaskLines, maxTaskFiles };
   const taskBlockContext = {
     tasks,
@@ -345,7 +366,7 @@ export function buildChunkedAuditTasks(
       passId: `flow-pass:${block.lens}`,
       lens: block.lens,
       filePaths: block.file_paths,
-      priority: taskPriority(hasExternalSignal, block.lens, true),
+      priority: taskPriority(hasExternalSignal, block.lens, true, intentBoostSet),
       tags: withSignalTag(["critical_flow", `critical_flow:${block.flow_id}`], hasExternalSignal),
       rationale: (filePaths, splitKind) =>
         splitKind === "large_file"
@@ -401,7 +422,7 @@ export function buildChunkedAuditTasks(
       passId: `pass:${block.lens}`,
       lens: block.lens,
       filePaths: block.filePaths,
-      priority: taskPriority(hasExternalSignal, block.lens),
+      priority: taskPriority(hasExternalSignal, block.lens, false, intentBoostSet),
       tags: withSignalTag([], hasExternalSignal),
       rationale: (filePaths, splitKind) =>
         splitKind === "large_file"

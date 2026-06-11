@@ -6,7 +6,7 @@ import {
   buildDispatchQuota,
   normalizeSlotTokens,
   type WaveScheduleResult,
-} from "../src/steps/waveScheduler.js";
+} from "../src/steps/dispatch.js";
 import {
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,

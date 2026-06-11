@@ -1,3 +1,21 @@
+// Best-effort import of shared OpenCode permission helpers.
+// On a fresh checkout before `npm run build`, the dist may not exist yet;
+// buildMergedOpenCodeProjectConfig throws a clear error in that case.
+let mergeOpenCodeAgentPermissionRule;
+let withoutOpenCodeWildcard;
+let migrateOpenCodeGlobalExternalDirectory;
+export let sharedOpenCodePermissions = false;
+
+try {
+  const shared = await import('@audit-tools/shared');
+  mergeOpenCodeAgentPermissionRule = shared.mergeOpenCodeAgentPermissionRule;
+  withoutOpenCodeWildcard = shared.withoutOpenCodeWildcard;
+  migrateOpenCodeGlobalExternalDirectory = shared.migrateOpenCodeGlobalExternalDirectory;
+  sharedOpenCodePermissions = true;
+} catch {
+  // shared not yet built — callers that need merge logic will throw below
+}
+
 export const OPENCODE_AUDIT_EDIT_PERMISSION = {
   '*': 'ask',
   '.audit-code/**': 'allow',
@@ -85,70 +103,10 @@ export function renderOpenCodeProjectConfig(_root) {
   };
 }
 
-export function objectValue(value) {
+function objectValue(value) {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value
     : {};
-}
-
-export function mergeOpenCodePermissionRule(existingRule, generatedRule, managedRules = {}) {
-  if (generatedRule && typeof generatedRule === 'object' && !Array.isArray(generatedRule)) {
-    const generatedObject = generatedRule;
-    const merged = {};
-    const existingObject =
-      existingRule && typeof existingRule === 'object' && !Array.isArray(existingRule)
-        ? existingRule
-        : {};
-
-    if (typeof existingRule === 'string') {
-      merged['*'] = existingRule;
-    } else {
-      merged['*'] = existingObject['*'] ?? generatedObject['*'] ?? 'ask';
-    }
-
-    for (const [key, value] of Object.entries(generatedObject)) {
-      if (key !== '*') merged[key] = value;
-    }
-    for (const [key, value] of Object.entries(existingObject)) {
-      if (key !== '*') merged[key] = value;
-    }
-    for (const [key, value] of Object.entries(managedRules)) {
-      merged[key] = value;
-    }
-
-    return merged;
-  }
-
-  return existingRule ?? generatedRule;
-}
-
-export function mergeOpenCodePermissionConfig(existingPermission, generatedPermission) {
-  if (!existingPermission || typeof existingPermission !== 'object' || Array.isArray(existingPermission)) {
-    return generatedPermission;
-  }
-
-  return {
-    ...generatedPermission,
-    ...existingPermission,
-    read: generatedPermission.read,
-    glob: generatedPermission.glob,
-    grep: generatedPermission.grep,
-    external_directory: mergeOpenCodePermissionRule(
-      existingPermission.external_directory,
-      generatedPermission.external_directory,
-      OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION,
-    ),
-    edit: mergeOpenCodePermissionRule(
-      existingPermission.edit,
-      generatedPermission.edit,
-      OPENCODE_AUDIT_EDIT_PERMISSION,
-    ),
-    bash: mergeOpenCodePermissionRule(
-      existingPermission.bash,
-      generatedPermission.bash,
-      OPENCODE_AUDIT_BASH_PERMISSION,
-    ),
-  };
 }
 
 export function removeManagedOpenCodeCommand(commandConfig) {
@@ -224,31 +182,57 @@ export function assertOpenCodeAuditPermissionConfig(permissionConfig, label) {
   }
 }
 
+function mergePermissionBlock(existingPermission, generatedPermission) {
+  const existing = objectValue(existingPermission);
+  return {
+    ...generatedPermission,
+    ...existing,
+    read: generatedPermission.read,
+    glob: generatedPermission.glob,
+    grep: generatedPermission.grep,
+    external_directory: mergeOpenCodeAgentPermissionRule(
+      existing.external_directory,
+      generatedPermission.external_directory,
+      OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION,
+    ),
+    edit: mergeOpenCodeAgentPermissionRule(
+      existing.edit,
+      generatedPermission.edit,
+      withoutOpenCodeWildcard(OPENCODE_AUDIT_EDIT_PERMISSION),
+    ),
+    bash: mergeOpenCodeAgentPermissionRule(
+      existing.bash,
+      generatedPermission.bash,
+      withoutOpenCodeWildcard(OPENCODE_AUDIT_BASH_PERMISSION),
+    ),
+  };
+}
+
 export function buildMergedOpenCodeProjectConfig(existing, root) {
+  if (!sharedOpenCodePermissions) {
+    throw new Error(
+      '@audit-tools/shared is not available. Run "npm run build -w @audit-tools/shared" before deploying OpenCode config.',
+    );
+  }
   const generated = renderOpenCodeProjectConfig(root);
   const mergedMcp = objectValue(existing.mcp);
   delete mergedMcp.auditor;
+  const existingAuditor = objectValue(objectValue(existing.agent).auditor);
   return {
     ...existing,
     $schema: existing.$schema ?? generated.$schema,
     command: removeManagedOpenCodeCommand(existing.command),
     mcp: mergedMcp,
-    permission: {
-      ...mergeOpenCodePermissionConfig(existing.permission, generated.permission),
-      external_directory: { '*': 'allow' },
-    },
+    permission: mergePermissionBlock(existing.permission, generated.permission),
     agent: {
       ...objectValue(existing.agent),
       auditor: {
-        ...objectValue(objectValue(existing.agent).auditor),
+        ...existingAuditor,
         ...generated.agent.auditor,
-        permission: {
-          ...mergeOpenCodePermissionConfig(
-            objectValue(objectValue(existing.agent).auditor).permission,
-            generated.agent.auditor.permission,
-          ),
-          external_directory: { '*': 'allow' },
-        },
+        permission: mergePermissionBlock(
+          existingAuditor.permission,
+          generated.agent.auditor.permission,
+        ),
       },
     },
   };

@@ -11,6 +11,7 @@ export interface NextStepDecision {
 }
 
 export const PRIORITY: string[] = [
+  "provider_confirmation",
   "repo_manifest",
   "file_disposition",
   "auto_fixes_applied",
@@ -18,8 +19,9 @@ export const PRIORITY: string[] = [
   "structure_artifacts",
   "graph_enrichment_current",
   "design_assessment_current",
-  "design_review_completed",
   "intent_checkpoint_current",
+  "design_review_contract_completed",
+  "design_review_conceptual_completed",
   "planning_artifacts",
   "audit_tasks_completed",
   "audit_results_ingested",

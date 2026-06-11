@@ -141,6 +141,7 @@ test("run-to-completion starts intake for manifestless source repositories", asy
     await mkdir(join(root, "src"), { recursive: true });
     await writeFile(join(root, "src", "app.js"), "export const ok = true;\n");
 
+    // max-runs 2: step 1 is provider_confirmation_executor, step 2 is intake_executor.
     const result = await captureRunCli([
       process.execPath,
       join(repoRoot, "dist", "cli.js"),
@@ -150,7 +151,7 @@ test("run-to-completion starts intake for manifestless source repositories", asy
       "--artifacts-dir",
       join(root, ".audit-tools/audit"),
       "--max-runs",
-      "1",
+      "2",
     ]);
     const parsed = JSON.parse(result.stdout);
 
@@ -170,6 +171,7 @@ test("run-to-completion blocks empty or documentation-only repositories after in
   try {
     await writeFile(join(root, "README.md"), "# Notes only\n");
 
+    // max-runs 2: step 1 is provider_confirmation_executor, step 2 is intake_executor (throws for no auditable files).
     const result = await captureRunCli([
       process.execPath,
       join(repoRoot, "dist", "cli.js"),
@@ -179,7 +181,7 @@ test("run-to-completion blocks empty or documentation-only repositories after in
       "--artifacts-dir",
       join(root, ".audit-tools/audit"),
       "--max-runs",
-      "1",
+      "2",
     ]);
     const parsed = JSON.parse(result.stdout);
 

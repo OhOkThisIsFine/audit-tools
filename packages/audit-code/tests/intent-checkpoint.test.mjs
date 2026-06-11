@@ -24,10 +24,11 @@ function obligationState(bundle, id) {
   return deriveAuditState(bundle).obligations.find((o) => o.id === id)?.state;
 }
 
-// A bundle where every obligation up to and including design_review_completed
+// A bundle where every obligation up to and including design_assessment_current
 // is satisfied, but the intent checkpoint has not yet been written.
 function readyForIntentBundle() {
   return {
+    provider_confirmation: {},
     repo_manifest: { files: [{ path: "src/a.ts" }] },
     file_disposition: { files: [{ path: "src/a.ts", status: "included" }] },
     auto_fixes_applied: {},
@@ -38,7 +39,7 @@ function readyForIntentBundle() {
     critical_flows: { flows: [] },
     risk_register: { items: [] },
     analyzer_capability: {},
-    design_assessment: { reviewed: true },
+    design_assessment: { reviewed: false },
   };
 }
 
@@ -66,17 +67,17 @@ await test("intent_checkpoint_current: satisfied once the checkpoint is present"
   assert.equal(obligationState(bundle, "intent_checkpoint_current"), "satisfied");
 });
 
-// ── Priority ordering: after design_review_completed, before planning ───────
+// ── Priority ordering: after design_assessment_current, before design_review_contract_completed ───────
 
-await test("decideNextStep selects intent_checkpoint after design review, before planning", () => {
+await test("decideNextStep selects intent_checkpoint after design assessment, before design review", () => {
   const decision = decideNextStep(readyForIntentBundle());
   assert.equal(decision.selected_obligation, "intent_checkpoint_current");
   assert.equal(decision.selected_executor, "intent_checkpoint_executor");
 });
 
-await test("decideNextStep advances to planning once the checkpoint exists", () => {
+await test("decideNextStep advances to design_review_contract_completed once the checkpoint exists", () => {
   const bundle = { ...readyForIntentBundle(), intent_checkpoint: validCheckpoint() };
-  assert.equal(decideNextStep(bundle).selected_obligation, "planning_artifacts");
+  assert.equal(decideNextStep(bundle).selected_obligation, "design_review_contract_completed");
 });
 
 // ── Deterministic scope pre-digest ──────────────────────────────────────────
@@ -110,11 +111,22 @@ await test("computeScopePreDigest counts auditable files and surfaces auto-exclu
     { dir: "src", files: 2 },
     { dir: "lib", files: 1 },
   ]);
-  assert.equal(pre.auto_excluded.length, 2);
+  // excluded_summary replaces the old auto_excluded flat list — it uses
+  // collapsed aggregate rows or individual rows.
+  const totalExcluded = pre.excluded_summary.reduce(
+    (acc, row) => acc + ("prefix" in row ? row.file_count : 1),
+    0,
+  );
+  assert.equal(totalExcluded, 2);
+  // node_modules/ is a single-file vendor exclusion in this fixture — appears as individual row
   assert.ok(
-    pre.auto_excluded.some(
-      (e) => e.path === "node_modules/x/y.js" && e.status === "vendor",
+    pre.excluded_summary.some(
+      (e) => "path" in e && e.path === "node_modules/x/y.js" && e.status === "vendor",
+    ) ||
+    pre.excluded_summary.some(
+      (e) => "prefix" in e && e.prefix === "node_modules" && e.status === "vendor",
     ),
+    "node_modules vendor file should appear in excluded_summary",
   );
 });
 
@@ -127,7 +139,9 @@ await test("renderConfirmIntentPrompt includes the scope picture, target path, a
       since: null,
       files_in_scope: 3,
       scope_dirs: [{ dir: "src", files: 2 }],
-      auto_excluded: [{ path: "dist/out.js", status: "generated" }],
+      excluded_summary: [{ path: "dist/out.js", status: "generated", reason: "build output" }],
+      disposition_override_proposals: [],
+      lens_proposals: [],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
@@ -252,7 +266,7 @@ await test("buildPacketPrompt threads free_form_intent into the worker prompt", 
     fileList: "- src/a.ts",
     largeFileSection: [],
     taskSections: ["### t1"],
-    submitCommand: "submit",
+    resultPath: "/artifacts/runs/run-1/task-results/inline-result.json",
     repoRoot: "/repo",
     freeFormIntent: "Focus on auth and crypto boundaries.",
   });
@@ -267,7 +281,7 @@ await test("buildPacketPrompt omits the intent section when none is provided", (
     fileList: "- src/a.ts",
     largeFileSection: [],
     taskSections: ["### t1"],
-    submitCommand: "submit",
+    resultPath: "/artifacts/runs/run-1/task-results/inline-result.json",
     repoRoot: "/repo",
   });
   assert.doesNotMatch(prompt, /## Audit intent/);

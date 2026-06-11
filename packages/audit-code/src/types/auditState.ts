@@ -22,4 +22,10 @@ export interface AuditState {
   last_obligation?: string;
   blockers?: string[];
   obligations: AuditObligation[];
+  /**
+   * Set when the rolling dispatch engine fires a partial-completion terminal
+   * (empty pool or livelock). Allows synthesis to proceed on partial coverage
+   * without hard-gating on `audit_tasks_completed`.
+   */
+  partial_coverage_terminal?: boolean;
 }

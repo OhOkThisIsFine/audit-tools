@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - packages/audit-code/**
+      - packages/remediate-code/**
       - packages/shared/**
       - .github/workflows/**
       - package.json

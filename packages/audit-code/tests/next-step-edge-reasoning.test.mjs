@@ -34,7 +34,9 @@ function edgeIdentity(edge) {
  * graph_enrichment_current as the next outstanding obligation. Returns the
  * structure-stage bundle so the caller can shape the graph before persisting. */
 async function buildStructureReadyBundle(root) {
-  const intake = await advanceAudit({}, { root });
+  // Provider confirmation is the session-level gate; auto-completes headlessly.
+  const providerConf = await advanceAudit({}, { root });
+  const intake = await advanceAudit(providerConf.updated_bundle, { root });
   const prepared = {
     ...intake.updated_bundle,
     auto_fixes_applied: { executed_tools: [], timestamp: "2026-04-22T00:00:00Z" },

@@ -12,6 +12,18 @@ export interface RemediationBlock {
   items: string[];
   parallel_safe: boolean;
   dependencies?: string[];
+  /**
+   * Commands to run as a post-merge verification gate after this block's
+   * worktree branch is merged into the main tree. When present, these are
+   * preferred over `RemediationPlan.test_command` for the gate check.
+   */
+  targeted_commands?: string[];
+  /**
+   * Repo-relative paths that this block's implementation is expected to touch.
+   * Used by `attributePostMergeFailure` to identify which merged blocks share
+   * an implicated surface when the post-merge gate fails.
+   */
+  touched_files?: string[];
 }
 
 export interface RemediationPlan {
@@ -36,7 +48,6 @@ export interface RemediationPlan {
  * of truth for these magic strings.
  */
 export const REMEDIATION_STEP = {
-  DOCUMENT: "Document",
   WRITE_TESTS: "Write Tests",
   REFACTOR_CODE: "Refactor Code",
   VERIFY_AGAINST_TESTS: "Verify Code Against Tests",
@@ -81,9 +92,28 @@ export interface ClarificationRequest {
   options?: string[];
 }
 
+export interface ClosingActionPreview {
+  /** Repo-relative paths that would be staged for the commit. */
+  files: string[];
+  /** Generated commit message derived from item summaries / finding titles. */
+  commit_message: string;
+}
+
 export interface ClosingPlan {
   action: ClosingAction;
   custom_command?: string[];
+  /**
+   * When true, the host has explicitly confirmed the closing action preview and
+   * the close phase may proceed to execute git/publish commands without an
+   * additional confirmation prompt.
+   */
+  pre_authorized?: boolean;
+  /**
+   * Set by the close phase before executing actions that require user
+   * confirmation. Contains the staged file list and generated commit message so
+   * the host can present them to the user. Cleared once the action executes.
+   */
+  closing_action_preview?: ClosingActionPreview;
 }
 
 export interface TestSpec {
@@ -224,7 +254,6 @@ export interface RemediationItemState {
   finding_id: string;
   status:
     | "pending"
-    | "documented"
     | "tested"
     | "tested_successfully"
     | "refactored"
@@ -244,10 +273,18 @@ export interface RemediationItemState {
   started_at?: string;
   /** ISO-8601 timestamp when this item most recently reached a terminal status. */
   completed_at?: string;
-  /**
-   * User rationale from a resolved clarification request (action "clarified"),
-   * threaded into the next document-dispatch prompt so re-documentation has the
-   * context the worker was missing. Set by `applyClarificationResolution`.
-   */
+  /** User's clarification answer, carried from applyClarificationResolution into the implement prompt. */
   clarification_context?: string;
+  /**
+   * The failure context (failure_reason + last_successful_step) captured at
+   * the time this item was queued for retry. Carried into re-dispatch prompts
+   * so the worker knows what failed previously and avoids identical attempts.
+   */
+  failure_context?: string;
+  /**
+   * Times this item was sent back for rework due to infrastructure failures
+   * (quota, rate-limit, EPERM, timeout, tool crash, provider error). Split from
+   * `rework_count` so the two failure classes can have independent retry budgets.
+   */
+  infra_rework_count?: number;
 }

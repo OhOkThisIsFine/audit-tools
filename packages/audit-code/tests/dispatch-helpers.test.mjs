@@ -103,15 +103,16 @@ test("buildPacketPrompt — assembles expected prompt sections", () => {
   const packetTasks = [makeAuditTask("abc")];
   const fileList = "- src/abc.ts (100 lines)";
   const taskSections = ["### task-abc", "unit_id: unit-abc"];
-  const submitCommand = "node packages/audit-code/audit-code.mjs submit-packet --run-id-b64 xxx";
+  const resultPath = "/artifacts/runs/run-1/task-results/abc-inline-result.json";
 
-  const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection: [], taskSections, submitCommand });
+  const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection: [], taskSections, resultPath });
 
   assert.ok(typeof prompt === "string");
   assert.match(prompt, /packet_id: abc/);
+  assert.match(prompt, /result_path:/);
   assert.match(prompt, /Repository root:/);
   assert.match(prompt, /Set the shell\/tool workdir to the repository root/i);
-  assert.match(prompt, /submit-packet/);
+  assert.doesNotMatch(prompt, /submit-packet/, "prompt must NOT contain submit-packet");
   assert.ok(prompt.includes(fileList));
   assert.ok(prompt.includes("### task-abc"));
   assert.match(prompt, /do not pipe an inline foreach statement directly into ConvertTo-Json/i);
@@ -121,32 +122,29 @@ test("buildPacketPrompt — assembles expected prompt sections", () => {
   assert.match(prompt, /valid: abc, findings=/);
 });
 
-test("FINDING-018: buildPacketPrompt — forbids ad-hoc result files and routes submission through submit-packet", () => {
+test("N-A06: buildPacketPrompt — instructs inline emit, includes result_path, no submit-packet command", () => {
   const packet = makePacket("abc");
   const packetTasks = [makeAuditTask("abc")];
   const fileList = "- src/abc.ts (100 lines)";
   const taskSections = ["### task-abc"];
-  const submitCommand = "node packages/audit-code/audit-code.mjs submit-packet --run-id-b64 xxx";
+  const resultPath = "/artifacts/runs/run-1/task-results/abc-inline-result.json";
 
-  const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection: [], taskSections, submitCommand });
+  const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection: [], taskSections, resultPath });
 
-  assert.match(prompt, /Do not write files directly/i, "prompt must forbid ad-hoc file writes");
-  assert.ok(
-    prompt.includes("packet-*-result.json") && prompt.includes("audit_result_*.json"),
-    "prompt must name common stray result filename patterns",
-  );
-  assert.ok(
-    prompt.includes("the submit-packet command below is the only"),
-    "prompt must name submit-packet as the only submission path",
-  );
-  assert.ok(
-    prompt.includes("way to record results"),
-    "prompt must state submit-packet is the only way to record results",
-  );
-  assert.ok(
-    prompt.includes("it writes them inside the artifacts directory"),
-    "prompt must state submit-packet writes packet-owned result files",
-  );
+  // No submit-packet shell command
+  assert.doesNotMatch(prompt, /submit-packet/, "prompt must NOT contain submit-packet");
+  assert.doesNotMatch(prompt, /Get-Content.*\|.*&/, "prompt must NOT contain PowerShell Get-Content pipe workaround");
+
+  // result_path is present
+  assert.ok(prompt.includes(resultPath), "prompt must include the result_path value");
+  assert.match(prompt, /result_path:/, "prompt must have result_path field in header");
+
+  // Inline emit instruction
+  assert.match(prompt, /emit.*inline/i, "prompt must instruct worker to emit inline");
+  assert.match(prompt, /skill captures/i, "prompt must state skill captures the payload");
+
+  // Still forbids ad-hoc writes
+  assert.match(prompt, /Do not write files/i, "prompt must still forbid ad-hoc file writes");
 });
 
 // ── buildTaskSections ─────────────────────────────────────────────────────────

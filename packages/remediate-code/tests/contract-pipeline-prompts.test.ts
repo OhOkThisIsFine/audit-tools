@@ -18,9 +18,14 @@ function cpPath(name: string): string {
 const ALL_PATHS = {
   goal_spec: cpPath("goal_spec"),
   context_bundle: cpPath("context_bundle"),
-  design_spec: cpPath("design_spec"),
+  module_decomposition: cpPath("module_decomposition"),
+  module_contracts: cpPath("module_contracts"),
+  seam_reconciliation_report: cpPath("seam_reconciliation_report"),
+  finalized_module_contracts: cpPath("finalized_module_contracts"),
   conceptual_design_critique: cpPath("conceptual_design_critique"),
   obligation_ledger: cpPath("obligation_ledger"),
+  cyclic_seam_resolution: cpPath("cyclic_seam_resolution"),
+  test_validator_plan: cpPath("test_validator_plan"),
   contract_assessment_report: cpPath("contract_assessment_report"),
   counterexample: cpPath("counterexample"),
   judge_report: cpPath("judge_report"),
@@ -32,8 +37,14 @@ describe("contract pipeline prompt renderer — all roles", () => {
   const EXPECTED_ROLES = [
     "goal_normalization",
     "context_collection",
-    "design",
+    "decomposition",
+    "module_contract_drafting",
+    "seam_reconciliation",
+    "contract_finalization",
     "critique",
+    "obligation_ledger",
+    "cyclic_seam_resolution",
+    "test_validator_plan",
     "assessment",
     "critic",
     "judge",
@@ -204,10 +215,97 @@ describe("adversarial critic and judge roles", () => {
   });
 });
 
+describe("test_validator_plan role", () => {
+  it("renders a valid prompt for test_validator_plan", () => {
+    const result = renderContractPipelinePrompt({
+      role: "test_validator_plan",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+    expect(result.prompt.length).toBeGreaterThan(0);
+    expect(result.outputPath).toBe(ALL_PATHS.test_validator_plan);
+  });
+
+  it("prompt includes test_validator_plan output path", () => {
+    const result = renderContractPipelinePrompt({
+      role: "test_validator_plan",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+    expect(result.prompt).toContain(ALL_PATHS.test_validator_plan);
+  });
+
+  it("prompt includes goal_spec and obligation_ledger as required inputs", () => {
+    const result = renderContractPipelinePrompt({
+      role: "test_validator_plan",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+    expect(result.prompt).toContain(ALL_PATHS.goal_spec);
+    expect(result.prompt).toContain(ALL_PATHS.obligation_ledger);
+  });
+
+  it("prompt contains obligation_id field description", () => {
+    const result = renderContractPipelinePrompt({
+      role: "test_validator_plan",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+    expect(result.prompt).toContain("obligation_id");
+  });
+
+  it("prompt contains inapplicable_claim description requiring ledger citation", () => {
+    const result = renderContractPipelinePrompt({
+      role: "test_validator_plan",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+    expect(result.prompt).toContain("inapplicable_claim");
+  });
+
+  it("prompt contains contract_version schema shape", () => {
+    const result = renderContractPipelinePrompt({
+      role: "test_validator_plan",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+    expect(result.prompt).toContain("contract_version");
+  });
+
+  it("prompt matches stop after writing instruction", () => {
+    const result = renderContractPipelinePrompt({
+      role: "test_validator_plan",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+    });
+    expect(result.prompt.toLowerCase()).toMatch(/stop after writing/i);
+  });
+
+  it("CONTRACT_PIPELINE_PHASE_ORDER places test_validator_plan correctly", () => {
+    const order = CONTRACT_PIPELINE_PHASE_ORDER;
+    const tvpIdx = order.indexOf("test_validator_plan");
+    const critiqueIdx = order.indexOf("critique");
+    const assessmentIdx = order.indexOf("assessment");
+    expect(tvpIdx).toBeGreaterThan(-1);
+    expect(assessmentIdx).toBeGreaterThan(tvpIdx);
+    expect(tvpIdx).toBeGreaterThan(critiqueIdx);
+  });
+
+  it("throws when obligation_ledger path missing for test_validator_plan", () => {
+    expect(() =>
+      renderContractPipelinePrompt({
+        role: "test_validator_plan",
+        artifactPaths: { ...ALL_PATHS, obligation_ledger: undefined },
+        repoRoot: FAKE_REPO_ROOT,
+      }),
+    ).toThrow(/obligation_ledger/);
+  });
+});
+
 describe("contract repair prompt", () => {
   it("renders a full-rewrite prompt for each repair target", () => {
     for (const target of [
-      "design_spec",
+      "finalized_module_contracts",
       "obligation_ledger",
       "contract_assessment_report",
     ] as const) {
@@ -229,18 +327,18 @@ describe("contract repair prompt", () => {
   it("throws when the target artifact path is missing", () => {
     expect(() =>
       renderContractRepairPrompt({
-        target: "design_spec",
+        target: "finalized_module_contracts",
         instruction: "Fix.",
-        artifactPaths: { ...ALL_PATHS, design_spec: undefined },
+        artifactPaths: { ...ALL_PATHS, finalized_module_contracts: undefined },
       }),
-    ).toThrow(/design_spec/);
+    ).toThrow(/finalized_module_contracts/);
   });
 });
 
 describe("contract pipeline prompt renderer — isolation", () => {
   it("does not include unrelated artifact paths from other roles", () => {
     // goal_normalization requires no inputs; its prompt should not embed
-    // context_bundle or design_spec paths in the input section.
+    // context_bundle or finalized_module_contracts paths in the input section.
     const result = renderContractPipelinePrompt({
       role: "goal_normalization",
       artifactPaths: ALL_PATHS,

@@ -8,12 +8,15 @@ import {
   detectStaleArtifacts,
   contractArtifactExists,
   contractPipelineDir,
+  DEPENDENCY_MAP,
 } from "../src/contractPipeline/artifactStore.js";
 import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
   CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
-  CONTRACT_PIPELINE_DESIGN_SPEC_VERSION,
 } from "@audit-tools/shared";
+
+const CP_MODULE_DECOMPOSITION_VERSION = "remediate-code-contract-pipeline/module-decomposition/v1alpha1" as const;
+const CP_FINALIZED_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1" as const;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-cp-artifact-store");
@@ -41,13 +44,29 @@ function makeContextBundle(goalId = "GOAL-001") {
   };
 }
 
-function makeDesignSpec(goalId = "GOAL-001") {
+function makeModuleDecomposition(goalId = "GOAL-001") {
   return {
-    contract_version: CONTRACT_PIPELINE_DESIGN_SPEC_VERSION,
+    contract_version: CP_MODULE_DECOMPOSITION_VERSION,
     goal_id: goalId,
-    design_narrative: "Add tests.",
-    invariants: [],
-    affected_paths: [],
+    modules: [{ name: "mod-a", responsibilities: "Does A.", file_scope: ["src/a.ts"] }],
+    created_at: new Date().toISOString(),
+  };
+}
+
+function makeFinalizedModuleContracts(goalId = "GOAL-001") {
+  return {
+    contract_version: CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+    goal_id: goalId,
+    module_contracts: [{
+      name: "mod-a",
+      inputs: ["x"],
+      outputs: ["y"],
+      invariants: [],
+      side_effects: [],
+      validation_boundary: "validates x",
+      failure_modes: [],
+      seam_adjustments: [],
+    }],
     created_at: new Date().toISOString(),
   };
 }
@@ -99,22 +118,22 @@ describe("contract pipeline artifact store", () => {
 
 describe("contract pipeline staleness", () => {
   it("no artifacts are reported stale when all are freshly written", async () => {
-    // Write a minimal chain: goal_spec → context_bundle → design_spec
+    // Write a minimal chain: goal_spec → context_bundle → module_decomposition
     await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", makeGoalSpec());
     await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", makeContextBundle());
-    await writeContractArtifact(ARTIFACTS_DIR, "design_spec", makeDesignSpec());
+    await writeContractArtifact(ARTIFACTS_DIR, "module_decomposition", makeModuleDecomposition());
 
     const result = await detectStaleArtifacts(ARTIFACTS_DIR);
     expect(result.stale).not.toContain("goal_spec");
     expect(result.stale).not.toContain("context_bundle");
-    expect(result.stale).not.toContain("design_spec");
+    expect(result.stale).not.toContain("module_decomposition");
   });
 
   it("changing GoalSpec causes every downstream artifact to be reported stale", async () => {
     // Write chain.
     await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", makeGoalSpec("OLD"));
     await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", makeContextBundle("OLD"));
-    await writeContractArtifact(ARTIFACTS_DIR, "design_spec", makeDesignSpec("OLD"));
+    await writeContractArtifact(ARTIFACTS_DIR, "module_decomposition", makeModuleDecomposition("OLD"));
 
     // Now rewrite goal_spec with different content.
     await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", makeGoalSpec("NEW"));
@@ -122,16 +141,16 @@ describe("contract pipeline staleness", () => {
     const result = await detectStaleArtifacts(ARTIFACTS_DIR);
     // goal_spec itself is fresh (we just wrote it).
     expect(result.stale).not.toContain("goal_spec");
-    // context_bundle and design_spec have goal_spec in their dependency hashes, but
+    // context_bundle and module_decomposition have goal_spec in their dependency hashes, but
     // those hashes were recorded from the OLD goal_spec.
     expect(result.stale).toContain("context_bundle");
-    expect(result.stale).toContain("design_spec");
+    expect(result.stale).toContain("module_decomposition");
   });
 
-  it("changing ContextBundle causes design_spec stale without marking GoalSpec stale", async () => {
+  it("changing ContextBundle causes module_decomposition stale without marking GoalSpec stale", async () => {
     await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", makeGoalSpec());
     await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", makeContextBundle("OLD"));
-    await writeContractArtifact(ARTIFACTS_DIR, "design_spec", makeDesignSpec());
+    await writeContractArtifact(ARTIFACTS_DIR, "module_decomposition", makeModuleDecomposition());
 
     // Rewrite context_bundle.
     await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", { ...makeContextBundle(), context_summary: "Updated." });
@@ -139,7 +158,7 @@ describe("contract pipeline staleness", () => {
     const result = await detectStaleArtifacts(ARTIFACTS_DIR);
     expect(result.stale).not.toContain("goal_spec");
     expect(result.stale).not.toContain("context_bundle");
-    expect(result.stale).toContain("design_spec");
+    expect(result.stale).toContain("module_decomposition");
   });
 
   it("reports absent artifacts correctly when they have never been written", async () => {
@@ -148,18 +167,18 @@ describe("contract pipeline staleness", () => {
 
     const result = await detectStaleArtifacts(ARTIFACTS_DIR);
     expect(result.absent).toContain("context_bundle");
-    expect(result.absent).toContain("design_spec");
+    expect(result.absent).toContain("module_decomposition");
     expect(result.absent).not.toContain("goal_spec");
   });
 
   it("missing dependency causes downstream to be reported stale", async () => {
-    // Write goal_spec and design_spec but NOT context_bundle.
+    // Write goal_spec and finalized_module_contracts but NOT context_bundle or module_decomposition.
     await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", makeGoalSpec());
-    await writeContractArtifact(ARTIFACTS_DIR, "design_spec", makeDesignSpec());
+    await writeContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts", makeFinalizedModuleContracts());
 
     const result = await detectStaleArtifacts(ARTIFACTS_DIR);
-    // design_spec depends on context_bundle which is absent.
-    expect(result.stale).toContain("design_spec");
+    // finalized_module_contracts depends on module_contracts (→ module_decomposition → context_bundle) which are absent.
+    expect(result.stale).toContain("finalized_module_contracts");
   });
 
   it("absent artifacts are reported as absent rather than crashing", async () => {
@@ -167,5 +186,28 @@ describe("contract pipeline staleness", () => {
     const result = await detectStaleArtifacts(ARTIFACTS_DIR);
     expect(Array.isArray(result.absent)).toBe(true);
     expect(result.absent).toContain("goal_spec");
+  });
+});
+
+describe("artifact store dependency map — test_validator_plan", () => {
+  it("DEPENDENCY_MAP test_validator_plan contains goal_spec and obligation_ledger", () => {
+    expect(DEPENDENCY_MAP["test_validator_plan"]).toContain("goal_spec");
+    expect(DEPENDENCY_MAP["test_validator_plan"]).toContain("obligation_ledger");
+  });
+
+  it("DEPENDENCY_MAP contract_assessment_report contains test_validator_plan", () => {
+    expect(DEPENDENCY_MAP["contract_assessment_report"]).toContain("test_validator_plan");
+  });
+
+  it("DEPENDENCY_MAP counterexample contains test_validator_plan", () => {
+    expect(DEPENDENCY_MAP["counterexample"]).toContain("test_validator_plan");
+  });
+
+  it("DEPENDENCY_MAP judge_report contains test_validator_plan", () => {
+    expect(DEPENDENCY_MAP["judge_report"]).toContain("test_validator_plan");
+  });
+
+  it("DEPENDENCY_MAP implementation_dag contains test_validator_plan", () => {
+    expect(DEPENDENCY_MAP["implementation_dag"]).toContain("test_validator_plan");
   });
 });

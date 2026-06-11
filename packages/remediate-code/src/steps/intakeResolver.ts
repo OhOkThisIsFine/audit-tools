@@ -1,8 +1,8 @@
-import { readFile } from "node:fs/promises";
-import { StateStore } from "../state/store.js";
-import type { RemediationState } from "../state/store.js";
-import { writeJsonFile } from "@audit-tools/shared";
-import { runPlanPhase, isAuditFindingsReport } from "../phases/plan.js";
+import { existsSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { readOptionalJsonFile, writeJsonFile } from "@audit-tools/shared";
+import { isAuditFindingsReport } from "../phases/plan.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
 import {
@@ -10,25 +10,57 @@ import {
   buildDocumentSourceManifest,
   buildStructuredAuditSourceManifest,
   intakePaths,
+  intakeSummaryContentErrors,
   isIntakeReady,
+  blockingIntakeQuestions,
   readIntakeArtifacts,
   resolveManifestSources,
   sourceManifestsEquivalent,
+  validateClarificationResolution,
   type IntakeSource,
   type IntakeSourceManifest,
   type IntakeSummary,
 } from "../intake.js";
 
+const KNOWN_SCHEMA_VERSIONS = new Set([
+  "audit-findings/v1alpha1",
+  "remediate-code-intake-source-manifest/v1alpha1",
+  "remediate-code-intake-summary/v1alpha1",
+  "remediate-code-intake-clarifications/v1alpha1",
+]);
+
+export function validateSuppliedInput(
+  _path: string,
+  content: string,
+): { ok: true } | { ok: false; reason: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return { ok: false, reason: "file is not valid JSON" };
+  }
+  if (
+    parsed !== null &&
+    typeof parsed === "object" &&
+    "schema_version" in parsed
+  ) {
+    const sv = (parsed as Record<string, unknown>).schema_version;
+    if (typeof sv === "string" && !KNOWN_SCHEMA_VERSIONS.has(sv)) {
+      return { ok: false, reason: `unrecognised schema_version: ${sv}` };
+    }
+  }
+  return { ok: true };
+}
+
 export type IntakeResult =
   | { kind: "step"; step: RemediationStep }
-  | { kind: "state"; state: RemediationState };
+  | { kind: "pipeline_ready" };
 
 export async function resolveIntakeStep(params: {
   root: string;
   artifactsDir: string;
   input?: string | string[];
   inputResolution: InputResolution;
-  store: StateStore;
   loaderCommand: (cmd: string) => string;
   randomRunId: (prefix?: string) => string;
   collectStartingPointPrompt: (
@@ -42,17 +74,14 @@ export async function resolveIntakeStep(params: {
     resolvedSources: IntakeSource[],
     paths: ReturnType<typeof intakePaths>,
     hasClarificationResolution: boolean,
+    intentCheckpointPath?: string,
   ) => string;
   collectIntakeClarificationsPrompt: (
     summary: IntakeSummary,
     paths: ReturnType<typeof intakePaths>,
   ) => string;
-  extractFindingsPrompt: (
-    paths: ReturnType<typeof intakePaths>,
-    resolvedSources: IntakeSource[],
-  ) => string;
 }): Promise<IntakeResult> {
-  const { root, artifactsDir, inputResolution, store } = params;
+  const { root, artifactsDir, inputResolution } = params;
   const paths = intakePaths(artifactsDir);
   let intake = await readIntakeArtifacts(artifactsDir);
   const previousManifest = intake.manifest;
@@ -65,6 +94,90 @@ export async function resolveIntakeStep(params: {
     // artifacts is decided below by comparing against the persisted manifest —
     // an unchanged candidate set must NOT discard a ready summary/brief.
     manifest = undefined;
+  }
+
+  // Auto-discovered input confirmation gate: when a candidate was found via
+  // default discovery (no --input supplied) and no manifest has ever been
+  // written for this run (previousManifest is undefined), present the file to
+  // the user before writing source-manifest.json. Only after the user confirms
+  // (via confirm_auto_discovered_input_ack.json) does the run proceed to write
+  // the manifest and continue. Re-derivation (previousManifest set but cleared
+  // above) does NOT re-trigger the gate — the user already confirmed that input.
+  if (
+    !inputResolution.supplied &&
+    inputResolution.existing.length > 0 &&
+    !manifest &&
+    !previousManifest
+  ) {
+    const ackPath = join(artifactsDir, "confirm_auto_discovered_input_ack.json");
+    const ack = await readOptionalJsonFile<{ status?: string }>(ackPath);
+    if (!ack || ack.status !== "confirmed") {
+      const candidatePath = inputResolution.existing[0];
+      // Determine source type label for the prompt
+      let sourceTypeLabel = "document";
+      let findingCount: number | undefined;
+      let mtimeStr: string | undefined;
+      try {
+        const fileStat = await stat(candidatePath);
+        mtimeStr = fileStat.mtime.toISOString();
+      } catch { /* best-effort */ }
+      if (candidatePath.toLowerCase().endsWith(".json")) {
+        try {
+          const content = await readFile(candidatePath, "utf8");
+          const parsed = JSON.parse(content);
+          if (isAuditFindingsReport(parsed)) {
+            sourceTypeLabel = "structured_audit";
+            const asRecord = parsed as unknown as Record<string, unknown>;
+            if (Array.isArray(asRecord.findings)) {
+              findingCount = (asRecord.findings as unknown[]).length;
+            }
+          }
+        } catch { /* best-effort */ }
+      }
+      const detailLines = [
+        `- **Path**: \`${candidatePath}\``,
+        `- **Type**: ${sourceTypeLabel}`,
+        mtimeStr ? `- **Last modified**: ${mtimeStr}` : undefined,
+        findingCount !== undefined ? `- **Findings**: ${findingCount}` : undefined,
+      ].filter((line): line is string => Boolean(line));
+
+      return {
+        kind: "step",
+        step: await writeCurrentStep({
+          stepKind: "confirm_auto_discovered_input",
+          status: "blocked",
+          runId: params.randomRunId("INPUT"),
+          repoRoot: root,
+          artifactsDir,
+          prompt: [
+            "# Confirm Auto-Discovered Input",
+            "",
+            "A remediation input was automatically discovered. Please confirm whether to use it.",
+            "",
+            ...detailLines,
+            "",
+            `If you want to use this file, write the following to \`${ackPath}\`:`,
+            "",
+            "```json",
+            '{ "status": "confirmed" }',
+            "```",
+            "",
+            `If you want to use a different file, write \`{ "status": "declined" }\` to \`${ackPath}\` and re-run with \`--input <path>\`.`,
+            "",
+            `Then run: \`${params.loaderCommand("next-step")}\``,
+          ].join("\n"),
+          allowedCommands: [
+            params.loaderCommand("next-step"),
+            params.loaderCommand("next-step --input <path>"),
+          ],
+          stopCondition:
+            "Stop after presenting the discovered file to the user and writing the ack.",
+          artifactPaths: {
+            confirm_auto_discovered_input_ack: ackPath,
+          },
+        }),
+      };
+    }
   }
 
   if (inputResolution.supplied && inputResolution.missing.length > 0) {
@@ -106,6 +219,34 @@ export async function resolveIntakeStep(params: {
 
     if (shouldTryAuditFastPath) {
       const content = await readFile(singleInput, "utf8");
+      if (inputResolution.supplied) {
+        const validation = validateSuppliedInput(singleInput, content);
+        if (!validation.ok) {
+          return {
+            kind: "step",
+            step: await writeCurrentStep({
+              stepKind: "collect_starting_point",
+              status: "blocked",
+              runId: params.randomRunId("INPUT"),
+              repoRoot: root,
+              artifactsDir,
+              prompt: params.collectStartingPointPrompt(
+                root,
+                inputResolution.checked,
+                [singleInput],
+                paths,
+              ),
+              allowedCommands: [params.loaderCommand("next-step"), params.loaderCommand("next-step --input <path>")],
+              stopCondition:
+                `Stop after providing a valid remediation starting point. Error: ${validation.reason}`,
+              artifactPaths: {
+                source_manifest: paths.sourceManifest,
+                conversation_start: paths.conversationStart,
+              },
+            }),
+          };
+        }
+      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(content);
@@ -196,9 +337,41 @@ export async function resolveIntakeStep(params: {
 
   const summary = manifestRefreshed ? undefined : intake.summary;
   const brief = manifestRefreshed ? undefined : intake.brief;
-  const clarificationResolution = manifestRefreshed
+  const rawClarificationResolution = manifestRefreshed
     ? undefined
     : intake.clarificationResolution;
+
+  // Validate clarification resolution before forwarding it to synthesize_intake.
+  // A malformed or empty resolution file must not silently corrupt the synthesis
+  // pass — re-emit collect_intake_clarifications with the validation errors so the
+  // host can supply a corrected resolution.
+  let clarificationResolution: unknown = rawClarificationResolution;
+  if (rawClarificationResolution !== undefined && summary && !isIntakeReady(summary)) {
+    const blocking = blockingIntakeQuestions(summary);
+    const validation = validateClarificationResolution(rawClarificationResolution, blocking);
+    if (!validation.valid) {
+      const errorDetail = validation.errors.map((e) => `- ${e}`).join("\n");
+      return {
+        kind: "step",
+        step: await writeCurrentStep({
+          stepKind: "collect_intake_clarifications",
+          status: "blocked",
+          runId: params.randomRunId("INTAKE"),
+          repoRoot: root,
+          artifactsDir,
+          prompt: `${params.collectIntakeClarificationsPrompt(summary, paths)}\n\n**Validation errors in the previous clarification file:**\n${errorDetail}\n\nPlease rewrite the file at \`${paths.clarificationResolution}\` with a valid answers array before rerunning next-step.`,
+          allowedCommands: [params.loaderCommand("next-step")],
+          stopCondition:
+            "Stop after asking the user to correct the clarification answers.",
+          artifactPaths: {
+            intake_summary: paths.summary,
+            intake_clarifications: paths.clarificationResolution,
+            remediation_brief: paths.brief,
+          },
+        }),
+      };
+    }
+  }
 
   if (
     !summary ||
@@ -233,6 +406,36 @@ export async function resolveIntakeStep(params: {
   }
 
   if (!isIntakeReady(summary)) {
+    // If the summary claims ready:true but has empty required fields, re-issue
+    // synthesize_intake so the agent rewrites the summary with proper content.
+    if (summary.ready && intakeSummaryContentErrors(summary).length > 0) {
+      return {
+        kind: "step",
+        step: await writeCurrentStep({
+          stepKind: "synthesize_intake",
+          status: "ready",
+          runId: params.randomRunId("INTAKE"),
+          repoRoot: root,
+          artifactsDir,
+          prompt: params.synthesizeIntakePrompt(
+            paths.sourceManifest,
+            sourceResolution.resolved,
+            paths,
+            Boolean(clarificationResolution),
+          ),
+          allowedCommands: [params.loaderCommand("next-step")],
+          stopCondition:
+            "Stop after rewriting the intake summary with non-empty goals and affected_files, then rerunning next-step.",
+          artifactPaths: {
+            source_manifest: paths.sourceManifest,
+            intake_summary: paths.summary,
+            remediation_brief: paths.brief,
+            intake_clarifications: paths.clarificationResolution,
+          },
+        }),
+      };
+    }
+
     return {
       kind: "step",
       step: await writeCurrentStep({
@@ -254,37 +457,9 @@ export async function resolveIntakeStep(params: {
     };
   }
 
-  const structuredAuditSource = sourceResolution.resolved.find(
-    (source) => source.type === "structured_audit",
-  );
-  if (structuredAuditSource) {
-    const state = await runPlanPhase(
-      { status: "pending" },
-      { root, artifactsDir, input: structuredAuditSource.path },
-    );
-    await store.saveState(state);
-    return { kind: "state", state };
-  }
-
-  return {
-    kind: "step",
-    step: await writeCurrentStep({
-      stepKind: "extract_findings",
-      status: "ready",
-      runId: params.randomRunId("EXTRACT"),
-      repoRoot: root,
-      artifactsDir,
-      prompt: params.extractFindingsPrompt(paths, sourceResolution.resolved),
-      allowedCommands: [params.loaderCommand("next-step")],
-      stopCondition:
-        "Stop after writing extracted-plan.json and rerunning next-step.",
-      artifactPaths: {
-        source_manifest: paths.sourceManifest,
-        remediation_brief: paths.brief,
-        extracted_plan: paths.extractedPlan,
-      },
-    }),
-  };
+  // Intake is ready. Both structured_audit and document/conversation sources
+  // enter the contract pipeline. Signal the caller to route to the pipeline.
+  return { kind: "pipeline_ready" };
 }
 
 export interface InputResolution {

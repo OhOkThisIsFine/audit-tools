@@ -89,29 +89,36 @@ async function withTempRepo(fn) {
 
 test("audit-code wrapper supports repeated bounded invocations in single-step mode with a stable artifact directory", async () => {
   await withTempRepo(async (root) => {
+    // Provider confirmation auto-completes headlessly in single-step mode.
     const first = JSON.parse(
       (await runWrapper(["--single-step"], { cwd: root })).stdout,
     );
-    assert.equal(first.selected_executor, "intake_executor");
-    assert.equal(first.next_likely_step, "auto_fixes_applied");
+    assert.equal(first.selected_executor, "provider_confirmation_executor");
+    assert.equal(first.next_likely_step, "repo_manifest");
 
     const second = JSON.parse(
       (await runWrapper(["--single-step"], { cwd: root })).stdout,
     );
-    assert.equal(second.selected_executor, "auto_fix_executor");
-    assert.equal(second.next_likely_step, "syntax_resolved");
+    assert.equal(second.selected_executor, "intake_executor");
+    assert.equal(second.next_likely_step, "auto_fixes_applied");
 
     const third = JSON.parse(
       (await runWrapper(["--single-step"], { cwd: root })).stdout,
     );
-    assert.equal(third.selected_executor, "syntax_resolution_executor");
-    assert.equal(third.next_likely_step, "structure_artifacts");
+    assert.equal(third.selected_executor, "auto_fix_executor");
+    assert.equal(third.next_likely_step, "syntax_resolved");
 
     const fourth = JSON.parse(
       (await runWrapper(["--single-step"], { cwd: root })).stdout,
     );
-    assert.equal(fourth.selected_executor, "structure_executor");
-    assert.equal(fourth.next_likely_step, "graph_enrichment_current");
+    assert.equal(fourth.selected_executor, "syntax_resolution_executor");
+    assert.equal(fourth.next_likely_step, "structure_artifacts");
+
+    const fifth = JSON.parse(
+      (await runWrapper(["--single-step"], { cwd: root })).stdout,
+    );
+    assert.equal(fifth.selected_executor, "structure_executor");
+    assert.equal(fifth.next_likely_step, "graph_enrichment_current");
 
     // Graph enrichment runs between structure and design assessment. In
     // single-step mode it never prompts: optional analyzers resolve or fall
@@ -122,16 +129,10 @@ test("audit-code wrapper supports repeated bounded invocations in single-step mo
     assert.equal(enrichment.selected_executor, "graph_enrichment_executor");
     assert.equal(enrichment.next_likely_step, "design_assessment_current");
 
-    const fifth = JSON.parse(
-      (await runWrapper(["--single-step"], { cwd: root })).stdout,
-    );
-    assert.equal(fifth.selected_executor, "design_assessment_executor");
-    assert.equal(fifth.next_likely_step, "design_review_completed");
-
     const sixth = JSON.parse(
       (await runWrapper(["--single-step"], { cwd: root })).stdout,
     );
-    assert.equal(sixth.selected_executor, "design_review");
+    assert.equal(sixth.selected_executor, "design_assessment_executor");
     assert.equal(sixth.next_likely_step, "intent_checkpoint_current");
 
     // Intent checkpoint auto-completes headlessly in single-step mode.
@@ -139,15 +140,27 @@ test("audit-code wrapper supports repeated bounded invocations in single-step mo
       (await runWrapper(["--single-step"], { cwd: root })).stdout,
     );
     assert.equal(seventh.selected_executor, "intent_checkpoint_executor");
-    assert.equal(seventh.next_likely_step, "planning_artifacts");
+    assert.equal(seventh.next_likely_step, "design_review_contract_completed");
 
     const eighth = JSON.parse(
       (await runWrapper(["--single-step"], { cwd: root })).stdout,
     );
-    assert.equal(eighth.selected_executor, "planning_executor");
-    assert.ok(Array.isArray(eighth.artifacts_written));
-    assert.ok(eighth.artifacts_written.includes("audit_tasks.json"));
-    assert.ok(eighth.artifacts_written.includes("requeue_tasks.json"));
+    assert.equal(eighth.selected_executor, "design_review_contract");
+    assert.equal(eighth.next_likely_step, "design_review_conceptual_completed");
+
+    const eighthB = JSON.parse(
+      (await runWrapper(["--single-step"], { cwd: root })).stdout,
+    );
+    assert.equal(eighthB.selected_executor, "design_review_conceptual");
+    assert.equal(eighthB.next_likely_step, "planning_artifacts");
+
+    const ninth = JSON.parse(
+      (await runWrapper(["--single-step"], { cwd: root })).stdout,
+    );
+    assert.equal(ninth.selected_executor, "planning_executor");
+    assert.ok(Array.isArray(ninth.artifacts_written));
+    assert.ok(ninth.artifacts_written.includes("audit_tasks.json"));
+    assert.ok(ninth.artifacts_written.includes("requeue_tasks.json"));
   });
 });
 

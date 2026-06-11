@@ -8,6 +8,7 @@ import {
   mergeBlocksSharingFiles,
   buildCoverageLedger,
   splitBlocksByContextBudget,
+  estimateGroupTokens,
   ESTIMATED_BLOCK_BASE_TOKENS,
   ESTIMATED_FINDING_OVERHEAD_TOKENS,
 } from "../src/phases/plan.js";
@@ -1129,5 +1130,50 @@ describe("runPlanPhase — content-driven structured-audit report parsing", () =
         input: jsonPath,
       }),
     ).rejects.toThrow();
+  });
+});
+
+// ── N-S04: estimateGroupTokens uses shared constants ─────────────────────────
+
+describe("estimateGroupTokens uses shared constants (N-S04)", () => {
+  function finding(id: string, files: string[]) {
+    return {
+      id,
+      title: id,
+      category: "correctness",
+      severity: "low" as const,
+      confidence: "high" as const,
+      lens: "correctness" as const,
+      summary: `summary ${id}`,
+      affected_files: files.map((path) => ({ path })),
+      evidence: ["Evidence."],
+    };
+  }
+
+  it("empty findings returns ESTIMATED_PROMPT_OVERHEAD_TOKENS (900)", () => {
+    const result = estimateGroupTokens([], [], new Map());
+    // 900 base + estimateTokensFromBytes(0) + 0 items * 600 = 900
+    expect(result).toBe(ESTIMATED_BLOCK_BASE_TOKENS);
+    expect(result).toBe(900);
+  });
+
+  it("one finding with 400 bytes returns 900 + 100 + 600 = 1600", () => {
+    const f = finding("F1", ["src/a.ts"]);
+    const fileByteCounts = new Map([["src/a.ts", 400]]);
+    const result = estimateGroupTokens(["F1"], [f as any], fileByteCounts);
+    // 900 base + ceil(400/4)=100 file tokens + 1*600 item overhead = 1600
+    expect(result).toBe(ESTIMATED_BLOCK_BASE_TOKENS + 100 + ESTIMATED_FINDING_OVERHEAD_TOKENS);
+    expect(result).toBe(1600);
+  });
+
+  it("two findings returns base + file_bytes_tokens + 2 * ESTIMATED_FINDING_OVERHEAD_TOKENS", () => {
+    const f1 = finding("F1", ["src/a.ts"]);
+    const f2 = finding("F2", ["src/b.ts"]);
+    // 200 bytes each → 50 tokens each → 100 total file tokens
+    const fileByteCounts = new Map([["src/a.ts", 200], ["src/b.ts", 200]]);
+    const result = estimateGroupTokens(["F1", "F2"], [f1 as any, f2 as any], fileByteCounts);
+    // 900 + ceil(200/4)+ceil(200/4) + 2*600 = 900 + 50 + 50 + 1200 = 2200
+    expect(result).toBe(ESTIMATED_BLOCK_BASE_TOKENS + 100 + 2 * ESTIMATED_FINDING_OVERHEAD_TOKENS);
+    expect(result).toBe(2200);
   });
 });

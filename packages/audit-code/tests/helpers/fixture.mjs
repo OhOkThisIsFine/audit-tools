@@ -126,7 +126,11 @@ export function buildSyntheticResults(tasks, lineIndex) {
  * next-step-narrative.test.mjs.
  */
 export async function advanceFixtureToPlanning(root) {
-  const intake = await advanceAudit({}, { root });
+  // Provider confirmation is the first session-level gate; headless, it
+  // auto-completes deterministically and writes provider_confirmation.json.
+  const providerConfirmation = await advanceAudit({}, { root });
+
+  const intake = await advanceAudit(providerConfirmation.updated_bundle, { root });
   const preparedBundle = {
     ...intake.updated_bundle,
     auto_fixes_applied: {
@@ -151,16 +155,20 @@ export async function advanceFixtureToPlanning(root) {
   const enrichment = await advanceAudit(structure.updated_bundle);
 
   const designAssessment = await advanceAudit(enrichment.updated_bundle);
-  const designReview = await advanceAudit(designAssessment.updated_bundle);
 
-  // The intent checkpoint sits between design review and planning. Headless, it
-  // auto-completes a default full-scope checkpoint; the executor requires a root
-  // for scope resolution.
-  const intentCheckpoint = await advanceAudit(designReview.updated_bundle, {
+  // The intent checkpoint now sits after design assessment and before design
+  // review. Headless, it auto-completes a default full-scope checkpoint; the
+  // executor requires a root for scope resolution.
+  const intentCheckpoint = await advanceAudit(designAssessment.updated_bundle, {
     root,
   });
 
-  const planning = await advanceAudit(intentCheckpoint.updated_bundle, {
+  // Design review is now split into two passes: contract (adversarial) and
+  // conceptual (generative). Both auto-complete headlessly.
+  const designReviewContract = await advanceAudit(intentCheckpoint.updated_bundle);
+  const designReviewConceptual = await advanceAudit(designReviewContract.updated_bundle);
+
+  const planning = await advanceAudit(designReviewConceptual.updated_bundle, {
     root,
     lineIndex: FIXTURE_LINE_INDEX,
   });

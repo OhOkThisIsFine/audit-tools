@@ -25,6 +25,8 @@ import {
   discoverProjectCommands,
   resolveContextBudget,
   estimateTokensFromBytes,
+  ESTIMATED_PROMPT_OVERHEAD_TOKENS,
+  ESTIMATED_ITEM_OVERHEAD_TOKENS,
   type SessionConfig,
 } from "@audit-tools/shared";
 import { createFreshSessionProvider } from "../providers/index.js";
@@ -334,11 +336,13 @@ function deriveBlocksFromGitCocommit(
   return blocks;
 }
 
-// Block-sizing constants specific to the remediator (the per-line ratio is the
-// shared `ESTIMATED_TOKENS_PER_LINE`; the model-limit table and budget math now
-// live in @audit-tools/shared).
-export const ESTIMATED_BLOCK_BASE_TOKENS = 900;
-export const ESTIMATED_FINDING_OVERHEAD_TOKENS = 600;
+// Block-sizing constants: now single-sourced from @audit-tools/shared.
+// Re-exported under their legacy names so any callers outside this package
+// (and dispatch.ts) can migrate to the shared constants at their own pace.
+export {
+  ESTIMATED_PROMPT_OVERHEAD_TOKENS as ESTIMATED_BLOCK_BASE_TOKENS,
+  ESTIMATED_ITEM_OVERHEAD_TOKENS as ESTIMATED_FINDING_OVERHEAD_TOKENS,
+} from "@audit-tools/shared";
 
 function resolveContextBudgetFromConfig(sessionConfig: SessionConfig | null): number {
   const quota = sessionConfig?.block_quota ?? {};
@@ -448,7 +452,7 @@ function groupFindingsByFileOverlap(findingIds: string[], findings: Finding[], r
   return [...groups.values()];
 }
 
-function estimateGroupTokens(
+export function estimateGroupTokens(
   findingIds: string[],
   findings: Finding[],
   fileByteCounts: Map<string, number>,
@@ -460,9 +464,9 @@ function estimateGroupTokens(
   }
   const totalBytes = [...uniqueFiles].reduce((sum, p) => sum + (fileByteCounts.get(p) ?? 0), 0);
   return (
-    ESTIMATED_BLOCK_BASE_TOKENS +
+    ESTIMATED_PROMPT_OVERHEAD_TOKENS +
     estimateTokensFromBytes(totalBytes) +
-    findingIds.length * ESTIMATED_FINDING_OVERHEAD_TOKENS
+    findingIds.length * ESTIMATED_ITEM_OVERHEAD_TOKENS
   );
 }
 

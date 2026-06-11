@@ -92,13 +92,16 @@ function isPathExcluded(finding: Finding, checkpoint: IntentCheckpoint): boolean
  * lens / package / theme filters, or whose files fall under `excluded_scope` /
  * `must_not_touch`. Returns the kept findings and the ids of the dropped ones
  * (for the coverage ledger and the final report). A checkpoint with no filters
- * or exclusions keeps everything.
+ * or exclusions keeps everything. A draft checkpoint (confirmed_by: "draft") is
+ * not yet confirmed — no filtering is applied.
  */
 export function filterFindingsByCheckpoint(
   findings: Finding[],
   checkpoint: IntentCheckpoint | undefined,
 ): { kept: Finding[]; droppedIds: string[] } {
   if (!checkpoint) return { kept: findings, droppedIds: [] };
+  // Draft checkpoints have not been confirmed by the host; treat as absent.
+  if (checkpoint.confirmed_by === "draft") return { kept: findings, droppedIds: [] };
   const hasConstraints =
     Boolean(checkpoint.filters) ||
     (checkpoint.excluded_scope?.length ?? 0) > 0 ||

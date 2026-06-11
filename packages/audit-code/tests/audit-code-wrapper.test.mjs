@@ -33,7 +33,6 @@ import {
   _getInstallProfile,
 } from "../audit-code-wrapper-install-hosts.mjs";
 import {
-  mergeOpenCodePermissionConfig,
   assertOpenCodeAuditPermissionConfig,
   buildMergedOpenCodeProjectConfig,
   OPENCODE_AUDIT_BASH_PERMISSION,
@@ -421,18 +420,29 @@ function assertSharedHostInstallResponse(parsed, root, paths) {
 test("audit-code wrapper supports bounded single-step mode", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
-    const { stdout } = await runWrapper(["--single-step"], { cwd: root });
-    const parsed = JSON.parse(stdout);
+    // First step: provider confirmation gate auto-completes headlessly.
+    const { stdout: stdout0 } = await runWrapper(["--single-step"], { cwd: root });
+    const step0 = JSON.parse(stdout0);
 
     const info = await stat(artifactsDir);
     assert.equal(info.isDirectory(), true);
-    assertMatchesJsonSchema(responseSchema, parsed, "auditCodeResponse");
-    assert.equal(parsed.contract_version, "audit-code/v1alpha1");
-    assert.equal(parsed.selected_executor, "intake_executor");
-    assert.equal(parsed.progress_made, true);
-    assert.equal(parsed.next_likely_step, "auto_fixes_applied");
-    assert.equal(parsed.handoff.status, "active");
-    assert.equal(parsed.handoff.suggested_commands.length, 0);
+    assertMatchesJsonSchema(responseSchema, step0, "auditCodeResponse");
+    assert.equal(step0.contract_version, "audit-code/v1alpha1");
+    assert.equal(step0.selected_executor, "provider_confirmation_executor");
+    assert.equal(step0.progress_made, true);
+    assert.equal(step0.next_likely_step, "repo_manifest");
+    assert.equal(step0.handoff.status, "active");
+
+    // Second step: intake executor runs.
+    const { stdout: stdout1 } = await runWrapper(["--single-step"], { cwd: root });
+    const step1 = JSON.parse(stdout1);
+
+    assertMatchesJsonSchema(responseSchema, step1, "auditCodeResponse");
+    assert.equal(step1.selected_executor, "intake_executor");
+    assert.equal(step1.progress_made, true);
+    assert.equal(step1.next_likely_step, "auto_fixes_applied");
+    assert.equal(step1.handoff.status, "active");
+    assert.equal(step1.handoff.suggested_commands.length, 0);
   });
 });
 
@@ -464,7 +474,7 @@ test("audit-code wrapper reaches a terminal blocked handoff from repo root with 
     assert.equal(parsed.audit_state.status, "blocked");
     assert.equal(parsed.progress_made, true);
     assert.equal(parsed.next_likely_step, null);
-    assert.equal(parsed.selected_executor, "agent");
+    assert.equal(parsed.selected_executor, "rolling_dispatch_executor");
   assert.ok(parsed.artifacts_written.includes("run-ledger.json"));
   assert.match(parsed.progress_summary, /audit-results\.json|Worker launch failed|Ready for LLM semantic review|single-task fallback/i);
   assert.equal(parsed.handoff.status, "blocked");
@@ -1624,26 +1634,6 @@ test("build helpers are isolated from install helpers", async () => {
 });
 
 test("OpenCode permission helpers are importable from the dedicated module", () => {
-  // mergeOpenCodePermissionConfig with a null existing config returns the
-  // generated config unchanged.
-  const generated = {
-    read: "allow",
-    glob: "allow",
-    grep: "allow",
-    external_directory: { "*": "allow" },
-    edit: { "*": "ask", ".audit-code/**": "allow" },
-    bash: { "*": "allow", "audit-code run-to-completion*": "deny" },
-  };
-  const merged = mergeOpenCodePermissionConfig(null, generated);
-  assert.deepEqual(merged, generated);
-
-  // mergeOpenCodePermissionConfig with an empty existing config preserves
-  // the generated values for read/glob/grep.
-  const mergedFromEmpty = mergeOpenCodePermissionConfig({}, generated);
-  assert.equal(mergedFromEmpty.read, "allow");
-  assert.equal(mergedFromEmpty.glob, "allow");
-  assert.equal(mergedFromEmpty.grep, "allow");
-
   // assertOpenCodeAuditPermissionConfig throws when required bash rules are missing.
   const badPermission = {
     read: "allow",
@@ -1660,6 +1650,15 @@ test("OpenCode permission helpers are importable from the dedicated module", () 
     () => assertOpenCodeAuditPermissionConfig(badPermission, "permission"),
     /bash must allow|bash must deny/,
   );
+
+  // buildMergedOpenCodeProjectConfig with an empty existing config preserves
+  // the generated values for read/glob/grep and sets external_directory allow.
+  const builtFromEmpty = buildMergedOpenCodeProjectConfig({}, "/tmp/repo");
+  assert.equal(builtFromEmpty.permission?.read, "allow");
+  assert.equal(builtFromEmpty.permission?.glob, "allow");
+  assert.equal(builtFromEmpty.permission?.grep, "allow");
+  assert.equal(builtFromEmpty.permission?.external_directory?.["*"], "allow");
+  assert.equal(builtFromEmpty.agent?.auditor?.permission?.read, "allow");
 
   // buildMergedOpenCodeProjectConfig produces a config with the required
   // permission structure even when called with an empty existing config.
@@ -1688,59 +1687,43 @@ test("renderOpenCodePermissionConfig bash block includes Select-String", () => {
   );
 });
 
-test("mergeOpenCodePermissionConfig preserves '*': 'allow' on external_directory even when existing config has a more restrictive value", () => {
-  const generated = {
-    read: "allow",
-    glob: "allow",
-    grep: "allow",
-    external_directory: { "*": "allow" },
-    edit: { "*": "ask", ".audit-code/**": "allow" },
-    bash: { "*": "allow", "audit-code run-to-completion*": "deny" },
-  };
-
+test("buildMergedOpenCodeProjectConfig preserves '*': 'allow' on external_directory even when existing config has a more restrictive value", () => {
   // User had '*': 'ask' on external_directory — managed rule must override to 'allow'
-  const askExisting = { external_directory: { "*": "ask" } };
-  const mergedAsk = mergeOpenCodePermissionConfig(askExisting, generated);
-  assert.equal(mergedAsk.external_directory["*"], "allow",
+  const askExisting = { permission: { external_directory: { "*": "ask" } } };
+  const mergedAsk = buildMergedOpenCodeProjectConfig(askExisting, "/tmp/repo");
+  assert.equal(mergedAsk.permission.external_directory["*"], "allow",
     "managed rule must override user '*': 'ask' to 'allow' on external_directory");
 
   // User had '*': 'deny' on external_directory — managed rule must override to 'allow'
-  const denyExisting = { external_directory: { "*": "deny" } };
-  const mergedDeny = mergeOpenCodePermissionConfig(denyExisting, generated);
-  assert.equal(mergedDeny.external_directory["*"], "allow",
+  const denyExisting = { permission: { external_directory: { "*": "deny" } } };
+  const mergedDeny = buildMergedOpenCodeProjectConfig(denyExisting, "/tmp/repo");
+  assert.equal(mergedDeny.permission.external_directory["*"], "allow",
     "managed rule must override user '*': 'deny' to 'allow' on external_directory");
 
   // Undefined existing external_directory — managed rule must still produce 'allow'
-  const undefinedExisting = {};
-  const mergedUndefined = mergeOpenCodePermissionConfig(undefinedExisting, generated);
-  assert.equal(mergedUndefined.external_directory["*"], "allow",
+  const undefinedExisting = { permission: {} };
+  const mergedUndefined = buildMergedOpenCodeProjectConfig(undefinedExisting, "/tmp/repo");
+  assert.equal(mergedUndefined.permission.external_directory["*"], "allow",
     "managed rule must produce 'allow' even when existing external_directory is undefined");
 });
 
-test("mergeOpenCodePermissionConfig does not let user external_directory override the managed allow rule (parity with edit/bash behavior)", () => {
-  const generated = {
-    read: "allow",
-    glob: "allow",
-    grep: "allow",
-    external_directory: { "*": "allow" },
-    edit: { "*": "ask", ".audit-code/**": "allow" },
-    bash: { "*": "allow", "audit-code run-to-completion*": "deny" },
-  };
-
+test("buildMergedOpenCodeProjectConfig does not let user external_directory override the managed allow rule (parity with edit/bash behavior)", () => {
   // A user-owned external_directory object with no '*' key still gets '*': 'allow'
-  const noStarExisting = { external_directory: { "some/path/**": "ask" } };
-  const mergedNoStar = mergeOpenCodePermissionConfig(noStarExisting, generated);
-  assert.equal(mergedNoStar.external_directory["*"], "allow",
+  const noStarExisting = { permission: { external_directory: { "some/path/**": "ask" } } };
+  const mergedNoStar = buildMergedOpenCodeProjectConfig(noStarExisting, "/tmp/repo");
+  assert.equal(mergedNoStar.permission.external_directory["*"], "allow",
     "managed rule must add '*': 'allow' even when existing object has no '*' key");
 
-  // Parity with edit: a user '*': 'deny' on edit is overridden to 'ask' by the managed rule
-  const editDenyExisting = { edit: { "*": "deny" } };
-  const mergedEditDeny = mergeOpenCodePermissionConfig(editDenyExisting, generated);
-  assert.equal(mergedEditDeny.edit["*"], "ask",
-    "managed OPENCODE_AUDIT_EDIT_PERMISSION must override user '*': 'deny' on edit");
-  // Same behavior must hold for external_directory
-  const extDenyExisting = { external_directory: { "*": "deny" } };
-  const mergedExtDeny = mergeOpenCodePermissionConfig(extDenyExisting, generated);
-  assert.equal(mergedExtDeny.external_directory["*"], "allow",
+  // Parity with edit: a user '*': 'deny' on edit is preserved for '*' key (managed rules use withoutOpenCodeWildcard for edit)
+  const editDenyExisting = { permission: { edit: { "*": "deny" } } };
+  const mergedEditDeny = buildMergedOpenCodeProjectConfig(editDenyExisting, "/tmp/repo");
+  // The '*' key on edit comes from the generated permission (OPENCODE_AUDIT_EDIT_PERMISSION has '*': 'ask')
+  // mergeOpenCodeAgentPermissionRule: existing '*' wins over generated '*', but managed rules (without wildcard) override specifics
+  assert.equal(mergedEditDeny.permission.edit["*"], "deny",
+    "user '*': 'deny' on edit is preserved (agent-scope merge keeps existing wildcard)");
+  // Same behavior must hold for external_directory: managed OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION includes '*'
+  const extDenyExisting = { permission: { external_directory: { "*": "deny" } } };
+  const mergedExtDeny = buildMergedOpenCodeProjectConfig(extDenyExisting, "/tmp/repo");
+  assert.equal(mergedExtDeny.permission.external_directory["*"], "allow",
     "OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION must override user '*': 'deny' on external_directory");
 });

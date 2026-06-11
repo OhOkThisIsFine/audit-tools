@@ -25,6 +25,7 @@ function buildBaseFindingsReport(
       runtimeValidationTaskManifest: bundle.runtime_validation_tasks,
       externalAnalyzerResults: bundle.external_analyzer_results,
       designAssessment: bundle.design_assessment,
+      activeDispatch: bundle.active_dispatch,
     }),
   );
   // Record the host-confirmed exclusions in the machine contract so omissions

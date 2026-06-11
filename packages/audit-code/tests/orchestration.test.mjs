@@ -81,6 +81,7 @@ function createAuditTask(status = "pending") {
 
 function createDecisionBundle(overrides = {}) {
   return {
+    provider_confirmation: { confirmed_at: "2026-04-22T00:00:00Z", confirmed_by: "host" },
     repo_manifest: createRepoManifest(),
     file_disposition: { files: [] },
     auto_fixes_applied: { applied: [] },
@@ -127,12 +128,14 @@ function findObligation(state, id) {
 
 test("decideNextStep covers representative priority states", () => {
   const intakeDecision = decideNextStep({
+    provider_confirmation: { confirmed_at: "2026-04-22T00:00:00Z", confirmed_by: "host" },
     repo_manifest: createRepoManifest(),
   });
   assert.equal(intakeDecision.selected_obligation, "file_disposition");
   assert.equal(intakeDecision.selected_executor, "intake_executor");
 
   const structureDecision = decideNextStep({
+    provider_confirmation: { confirmed_at: "2026-04-22T00:00:00Z", confirmed_by: "host" },
     repo_manifest: createRepoManifest(),
     file_disposition: { files: [] },
     auto_fixes_applied: { applied: [] },
@@ -149,7 +152,7 @@ test("decideNextStep covers representative priority states", () => {
     withArtifactMetadata(createDecisionBundle()),
   );
   assert.equal(agentDecision.selected_obligation, "audit_tasks_completed");
-  assert.equal(agentDecision.selected_executor, "agent");
+  assert.equal(agentDecision.selected_executor, "rolling_dispatch_executor");
 
   const synthesisDecision = decideNextStep(
     withArtifactMetadata(
@@ -207,7 +210,8 @@ test("advanceAudit emits a structured run log threading obligation → executor 
     const logPath = join(root, "run.log.jsonl");
     const runLogger = new RunLogger(logPath, { now: () => 0 });
 
-    const intake = await advanceAudit({}, { root, runLogger });
+    const providerConf = await advanceAudit({}, { root, runLogger });
+    const intake = await advanceAudit(providerConf.updated_bundle, { root, runLogger });
     const preparedBundle = {
       ...intake.updated_bundle,
       auto_fixes_applied: { executed_tools: [], timestamp: "2026-04-22T00:00:00Z" },
@@ -240,19 +244,26 @@ test("advanceAudit emits a structured run log threading obligation → executor 
         .slice(0, secondInvocationStart)
         .every((event) => event.correlationId === firstCorrelationId),
     );
+    // The third invocation (advanceAudit(preparedBundle)) starts at the next
+    // "obligation" event after the second one. Events between second and third
+    // invocations all share secondCorrelationId.
+    const thirdInvocationStart = events.findIndex(
+      (event, index) => index > secondInvocationStart && event.kind === "obligation",
+    );
+    const endOfSecondInvocation = thirdInvocationStart > 0 ? thirdInvocationStart : events.length;
     assert.ok(
       events
-        .slice(secondInvocationStart)
+        .slice(secondInvocationStart, endOfSecondInvocation)
         .every((event) => event.correlationId === secondCorrelationId),
     );
 
     const obligations = events
       .filter((event) => event.kind === "obligation")
       .map((event) => event.obligation);
-    // First obligation is the top of the priority chain; the intake executor
-    // satisfies repo_manifest + file_disposition together, so the next logged
-    // obligation is structure_artifacts.
-    assert.equal(obligations[0], "repo_manifest");
+    // First obligation is the top of the priority chain (provider_confirmation);
+    // after the provider gate, the intake executor satisfies repo_manifest +
+    // file_disposition together, so structure_artifacts follows.
+    assert.equal(obligations[0], "provider_confirmation");
     assert.ok(obligations.includes("structure_artifacts"));
 
     // Executor start/end pairs are emitted, and end carries a numeric duration.
@@ -269,14 +280,14 @@ test("advanceAudit emits a structured run log threading obligation → executor 
   });
 });
 
-test("advanceAudit pauses on agent handoff after planning artifacts exist", async () => {
+test("advanceAudit pauses on rolling_dispatch_executor handoff after planning artifacts exist", async () => {
   await withTempDir("audit-code-orchestration-", async (root) => {
     await writeFixtureRepo(root);
 
     const { planning } = await advanceFixtureToPlanning(root);
     const handoff = await advanceAudit(planning.updated_bundle);
 
-    assert.equal(handoff.selected_executor, "agent");
+    assert.equal(handoff.selected_executor, "rolling_dispatch_executor");
     assert.equal(handoff.selected_obligation, "audit_tasks_completed");
     assert.equal(handoff.progress_made, false);
     assert.equal(handoff.next_likely_step, "audit_tasks_completed");
@@ -577,7 +588,10 @@ test("decideNextStep emits a warning reason when no executor is registered for t
   // registered executor depending on the configuration. Instead, we fabricate a
   // minimal complete-except-narrative bundle and confirm the reason string matches
   // one of the two defined patterns.
-  const normalDecision = decideNextStep({ repo_manifest: createRepoManifest() });
+  const normalDecision = decideNextStep({
+    provider_confirmation: { confirmed_at: "2026-04-22T00:00:00Z", confirmed_by: "host" },
+    repo_manifest: createRepoManifest(),
+  });
   // Normal path: an executor IS registered for the selected obligation.
   assert.equal(normalDecision.selected_obligation, "file_disposition");
   assert.ok(

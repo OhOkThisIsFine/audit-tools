@@ -57,8 +57,13 @@ test("advanceAudit wraps executor failures with executor and obligation context"
     `auditor-lambda-missing-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   );
 
+  // Pre-supply provider_confirmation so the first unsatisfied obligation is
+  // repo_manifest, causing intake_executor to be selected and fail.
   await assert.rejects(
-    () => advanceAudit({}, { root: missingRoot }),
+    () => advanceAudit(
+      { provider_confirmation: { confirmed_at: new Date().toISOString(), confirmed_by: "host" } },
+      { root: missingRoot },
+    ),
     (error) => {
       assert.match(
         error.message,

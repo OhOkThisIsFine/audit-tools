@@ -94,6 +94,28 @@ function readPackageJson(dir: string): PackageJsonShape | undefined {
   }
 }
 
+/**
+ * Headless deterministic fallback for the provider confirmation gate — mirrors
+ * the `runIntentCheckpointAutoComplete` pattern. The conversation-first flow
+ * emits a `provider_confirmation` host step; this runs only when `advanceAudit`
+ * is driven headlessly with no host to confirm the provider pool, writing a
+ * default provider_confirmation artifact so the pipeline can proceed.
+ */
+export function runProviderConfirmationAutoComplete(
+  bundle: ArtifactBundle,
+): ExecutorRunResult {
+  const confirmation = {
+    confirmed_at: new Date().toISOString(),
+    confirmed_by: "host",
+    note: "Auto-completed provider confirmation (headless).",
+  };
+  return {
+    updated: { ...bundle, provider_confirmation: confirmation },
+    artifacts_written: ["provider_confirmation.json"],
+    progress_summary: "Auto-completed provider confirmation gate (headless).",
+  };
+}
+
 export async function runIntakeExecutor(
   bundle: ArtifactBundle,
   root: string,

@@ -188,21 +188,109 @@ await test("handleGraphEnrichmentBranch returns fallthrough when unresolved is e
 
 // ── handleDesignReviewBranch ──────────────────────────────────────────────────
 
-await test("handleDesignReviewBranch returns design_review when no incoming findings file", async () => {
+await test("handleDesignReviewBranch returns design_review_parallel when both passes unsatisfied and no incoming files", async () => {
   await withTempDir(async (artifactsDir) => {
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    // No design-review-findings.json written — the function should return design_review.
-    const bundle = { design_assessment: { reviewed: false } };
+    // No incoming files — both passes unsatisfied → parallel dispatch.
+    const bundle = { design_assessment: { contract_reviewed: false, conceptual_reviewed: false } };
     const state = { status: "planning" };
     const params = { artifactsDir };
 
     const branch = await handleDesignReviewBranch(params, bundle, state);
     assert.equal(branch.action, "return");
-    assert.equal(branch.result.kind, "design_review");
+    assert.equal(branch.result.kind, "design_review_parallel");
   });
 });
 
-await test("handleDesignReviewBranch returns continue after merging a valid findings file and deleting it", async () => {
+await test("handleDesignReviewBranch returns continue after merging contract findings only, sets contract_reviewed=true", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+
+    const contractPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    await writeFile(contractPath, JSON.stringify([{ id: "DR-001", title: "contract finding" }]), "utf8");
+
+    const designAssessmentPath = join(artifactsDir, "design_assessment.json");
+    await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
+
+    const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    const state = { status: "planning" };
+    const params = { artifactsDir };
+
+    const branch = await handleDesignReviewBranch(params, bundle, state);
+    assert.equal(branch.action, "continue");
+
+    // Written design_assessment.json should have contract_reviewed === true
+    const { readFile } = await import("node:fs/promises");
+    const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
+    assert.equal(written.contract_reviewed, true);
+    assert.ok(!written.conceptual_reviewed, "conceptual_reviewed should be falsy");
+  });
+});
+
+await test("handleDesignReviewBranch returns continue after merging conceptual findings only, sets conceptual_reviewed=true", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+
+    const conceptualPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
+    await writeFile(conceptualPath, JSON.stringify([{ id: "DR-001", title: "conceptual finding" }]), "utf8");
+
+    const designAssessmentPath = join(artifactsDir, "design_assessment.json");
+    await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [], contract_reviewed: true }), "utf8");
+
+    const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: true, conceptual_reviewed: false } };
+    const state = { status: "planning" };
+    const params = { artifactsDir };
+
+    const branch = await handleDesignReviewBranch(params, bundle, state);
+    assert.equal(branch.action, "continue");
+
+    const { readFile } = await import("node:fs/promises");
+    const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
+    assert.equal(written.conceptual_reviewed, true);
+  });
+});
+
+await test("handleDesignReviewBranch returns continue after merging both incoming files simultaneously", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+
+    const contractPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    const conceptualPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
+    await writeFile(contractPath, JSON.stringify([{ id: "DR-001", title: "contract" }]), "utf8");
+    await writeFile(conceptualPath, JSON.stringify([{ id: "DR-001", title: "conceptual" }]), "utf8");
+
+    const designAssessmentPath = join(artifactsDir, "design_assessment.json");
+    await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
+
+    const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    const state = { status: "planning" };
+    const params = { artifactsDir };
+
+    const branch = await handleDesignReviewBranch(params, bundle, state);
+    assert.equal(branch.action, "continue");
+
+    const { readFile } = await import("node:fs/promises");
+    const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
+    assert.equal(written.contract_reviewed, true);
+    assert.equal(written.conceptual_reviewed, true);
+  });
+});
+
+await test("handleDesignReviewBranch returns single-pass design_review_conceptual when contract pass already satisfied", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    // No incoming files, contract already done.
+    const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: true, conceptual_reviewed: false } };
+    const state = { status: "planning" };
+    const params = { artifactsDir };
+
+    const branch = await handleDesignReviewBranch(params, bundle, state);
+    assert.equal(branch.action, "return");
+    assert.equal(branch.result.kind, "design_review_conceptual");
+  });
+});
+
+await test("handleDesignReviewBranch returns continue after merging a valid legacy findings file and deleting it", async () => {
   await withTempDir(async (artifactsDir) => {
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
 

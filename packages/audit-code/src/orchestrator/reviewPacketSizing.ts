@@ -1,5 +1,9 @@
 import type { AuditTask } from "../types.js";
-import { estimateTokensFromBytes } from "@audit-tools/shared";
+import {
+  estimateTokensFromBytes,
+  ESTIMATED_TOKENS_PER_LINE,
+  ESTIMATED_PROMPT_OVERHEAD_TOKENS,
+} from "@audit-tools/shared";
 
 // Per-packet sizing / token-budget arithmetic for review packetization,
 // extracted from reviewPackets.ts. Estimates derive from manifest byte counts
@@ -7,8 +11,11 @@ import { estimateTokensFromBytes } from "@audit-tools/shared";
 
 export const DEFAULT_MAX_TASKS_PER_PACKET = 0;
 const DEFAULT_TARGET_PACKET_LINES = 8000;
-export const ESTIMATED_TOKENS_PER_LINE = 4;
-export const ESTIMATED_PACKET_PROMPT_TOKENS = 900;
+// ESTIMATED_TOKENS_PER_LINE and ESTIMATED_PROMPT_OVERHEAD_TOKENS are single-sourced
+// from @audit-tools/shared; ESTIMATED_TOKENS_PER_LINE is re-exported so reviewPackets.ts
+// consumers remain stable. ESTIMATED_PACKET_PROMPT_TOKENS aliases the shared constant.
+export { ESTIMATED_TOKENS_PER_LINE };
+export const ESTIMATED_PACKET_PROMPT_TOKENS = ESTIMATED_PROMPT_OVERHEAD_TOKENS;
 // Default per-packet content-token budget. Kept equal to the legacy
 // line-target × per-line estimate so byte-derived sizing lands on the same
 // thresholds as the old line-based sizing when the line fallback is in effect.

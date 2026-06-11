@@ -27,20 +27,55 @@ function markTerminal(item: { started_at?: string; completed_at?: string }): voi
   item.completed_at = now;
 }
 
-// Cap on silent auto-retries (when the user approved at preview). Without it, an
-// item that fails deterministically — including one stranded by an unsatisfiable
-// block dependency, which handleDocumenting marks `blocked` — would be retried
-// forever (documenting→implement→triage→documenting). After the cap, fall through
-// to a real triage prompt so the user decides (ignore/halt).
-const MAX_AUTO_RETRIES = 2;
+// Caps on silent auto-retries (when the user approved at preview). Split by
+// failure class so transient infra failures get more headroom than deterministic
+// contract/test failures. After the cap, fall through to a real triage prompt.
+const MAX_AUTO_RETRIES_CONTRACT = 2;
+const MAX_AUTO_RETRIES_INFRA = 5;
+
+/** Keywords that identify infra failures (quota, rate-limit, EPERM, provider crash). */
+const INFRA_FAILURE_RE =
+  /\b(quota|rate.?limit|EPERM|timeout|tool.?crash|provider.?error)\b/i;
+
+function classifyFailure(failureReason: string | undefined): "infra" | "contract" {
+  if (failureReason && INFRA_FAILURE_RE.test(failureReason)) return "infra";
+  return "contract";
+}
+
+function buildFailureContext(
+  failureReason: string | undefined,
+  lastSuccessfulStep: string | undefined,
+): string {
+  const parts: string[] = [];
+  if (failureReason) parts.push(`failure: ${failureReason}`);
+  if (lastSuccessfulStep) parts.push(`last successful step: ${lastSuccessfulStep}`);
+  return parts.join("; ") || "unknown";
+}
 
 function retryBlockedItem(
-  item: { status: string; started_at?: string; completed_at?: string; rework_count?: number },
+  item: {
+    status: string;
+    started_at?: string;
+    completed_at?: string;
+    rework_count?: number;
+    infra_rework_count?: number;
+    failure_context?: string;
+    failure_reason?: string;
+    last_successful_step?: string;
+  },
+  failureClass: "infra" | "contract",
 ): void {
-  // "documented" maps to runImplementPhase in the orchestrator switch.
-  item.status = "documented";
+  // Capture failure context before resetting state so the re-dispatched
+  // prompt carries what failed and avoids an identical retry.
+  item.failure_context = buildFailureContext(item.failure_reason, item.last_successful_step);
+  // "pending" maps to the implement dispatch in the orchestrator.
+  item.status = "pending";
   markRetry(item);
-  item.rework_count = (item.rework_count ?? 0) + 1;
+  if (failureClass === "infra") {
+    item.infra_rework_count = (item.infra_rework_count ?? 0) + 1;
+  } else {
+    item.rework_count = (item.rework_count ?? 0) + 1;
+  }
 }
 
 async function archiveIfPresent(path: string, suffix: "consumed" | "stale"): Promise<void> {
@@ -109,31 +144,51 @@ export async function runTriagePhase(
       let requiresRetry = false;
       const retryFindingIds = new Set<string>();
 
+      // Triage outcome artifact — records per-finding resolution actions.
+      const triageOutcome: { finding_id: string; action: string }[] = [];
+
       for (const res of resolution.items) {
         if (res.action === "halt") {
           await archiveIfPresent(resolutionPath, "consumed");
-          console.log("Halt requested during triage. Marking run complete.");
-          return { ...state, status: "complete" };
+          console.log("Halt requested during triage. Routing through close (partial report).");
+          triageOutcome.push({ finding_id: res.finding_id, action: "halted" });
+          await writeJsonFile(
+            join(options.artifactsDir, "triage-outcome.json"),
+            { resolved_at: new Date().toISOString(), items: triageOutcome },
+          );
+          return { ...state, status: "closing", closing_context: "user_halted" };
         }
 
         const item = state.items[res.finding_id];
         if (item && item.status === "blocked") {
-          if (res.action === "retry" || rationaleAsksForRetry(res.rationale)) {
-            retryBlockedItem(item);
+          // Fix: explicit `action` is authoritative; rationaleAsksForRetry is a
+          // tie-breaker used only when action is absent (e.g. action === undefined).
+          const shouldRetry =
+            res.action === "retry" ||
+            (res.action === undefined && rationaleAsksForRetry(res.rationale));
+          if (shouldRetry) {
+            const failureClass = classifyFailure(item.failure_reason);
+            retryBlockedItem(item, failureClass);
             retryFindingIds.add(res.finding_id);
             requiresRetry = true;
+            triageOutcome.push({ finding_id: res.finding_id, action: "retried" });
           } else if (res.action === "ignore") {
             item.status = "ignored";
             markTerminal(item);
             item.failure_reason = res.rationale ?? "User ignored during triage";
+            triageOutcome.push({ finding_id: res.finding_id, action: "ignored" });
           }
         }
       }
 
       await archiveIfPresent(resolutionPath, "consumed");
+      await writeJsonFile(
+        join(options.artifactsDir, "triage-outcome.json"),
+        { resolved_at: new Date().toISOString(), items: triageOutcome },
+      );
       if (requiresRetry) {
         await archiveImplementResultsForRetries(state, options, retryFindingIds);
-        return { ...state, status: "documenting" };
+        return { ...state, status: "implementing" };
       }
     } else {
       // If the user approved findings in the preview, auto-retry those rather
@@ -144,15 +199,22 @@ export async function runTriagePhase(
         let autoRetried = false;
         for (const item of blockedItems) {
           // Stop auto-retrying an item that has already been retried the cap
-          // number of times — it leaves it `blocked` so the fall-through below
-          // routes the run to a human triage prompt instead of looping.
-          if ((item.rework_count ?? 0) >= MAX_AUTO_RETRIES) continue;
-          retryBlockedItem(item);
+          // number of times for its failure class — leaves it `blocked` so the
+          // fall-through below routes the run to a human triage prompt.
+          const failureClass = classifyFailure(item.failure_reason);
+          const cap =
+            failureClass === "infra" ? MAX_AUTO_RETRIES_INFRA : MAX_AUTO_RETRIES_CONTRACT;
+          const usedCount =
+            failureClass === "infra"
+              ? (item.infra_rework_count ?? 0)
+              : (item.rework_count ?? 0);
+          if (usedCount >= cap) continue;
+          retryBlockedItem(item, failureClass);
           autoRetried = true;
         }
         if (autoRetried) {
           console.log("User approved these items at preview — auto-retrying blocked findings.");
-          return { ...state, status: "documenting" };
+          return { ...state, status: "implementing" };
         }
       }
 

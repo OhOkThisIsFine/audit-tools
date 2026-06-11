@@ -6,9 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { runCommand } from "./utils/commands.js";
 import { decideNextStep } from "./steps/nextStep.js";
 import {
-  mergeDocumentResults,
   mergeImplementResults,
-  prepareDocumentDispatch,
   prepareImplementDispatch,
 } from "./steps/dispatch.js";
 import { validateArtifacts } from "./validation/artifacts.js";
@@ -145,50 +143,6 @@ program
       }),
     );
     console.log(JSON.stringify(step, null, 2));
-  });
-
-program
-  .command("prepare-document-dispatch")
-  .description("Prepare bounded document prompts for pending findings")
-  .requiredOption("--run-id <id>", "Run id")
-  .option("--root <path>", "Repository root", ".")
-  .option(
-    "--artifacts-dir <path>",
-    "Artifacts directory",
-    ".audit-tools/remediation",
-  )
-  .action(async (options) => {
-    const plan = await withBackendLogsOnStderr(() =>
-      prepareDocumentDispatch(
-        {
-          root: resolve(options.root),
-          artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
-        },
-        options.runId,
-      ),
-    );
-    console.log(JSON.stringify(plan, null, 2));
-  });
-
-program
-  .command("merge-document-results")
-  .description("Validate and merge document worker results")
-  .requiredOption("--run-id <id>", "Run id")
-  .option("--root <path>", "Repository root", ".")
-  .option(
-    "--artifacts-dir <path>",
-    "Artifacts directory",
-    ".audit-tools/remediation",
-  )
-  .action(async (options) => {
-    const state = await mergeDocumentResults(
-      {
-        root: resolve(options.root),
-        artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
-      },
-      options.runId,
-    );
-    console.log(JSON.stringify({ status: "ok", state_status: state.status }, null, 2));
   });
 
 program

@@ -1,8 +1,55 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
-import type { IntentCheckpoint } from "@audit-tools/shared";
+import type { IntentCheckpoint, FileDispositionStatus } from "@audit-tools/shared";
+import type { Lens } from "../types.js";
 import { resolveAuditScope } from "./scope.js";
 import { isAuditExcludedStatus } from "../extractors/disposition.js";
+import {
+  isBuildOutput,
+  isVendorPath,
+  isGeneratedPath,
+  isGeneratedTestArtifactPath,
+  normalizeExtractorPath,
+} from "../extractors/pathPatterns.js";
+import { isMandatoryLens } from "./lensSelection.js";
+import { LENSES } from "@audit-tools/shared";
+
+/**
+ * A row in the excluded_summary that represents a collapsed directory.
+ * Present when all files under a directory prefix share the same status+reason.
+ */
+export interface AggregatedExcludedRow {
+  prefix: string;
+  file_count: number;
+  status: string;
+  reason: string;
+}
+
+/**
+ * A row in the excluded_summary that represents an individual "oddball" file —
+ * a file that is excluded while its sibling files in the same directory are
+ * included (or have a different status/reason than the directory majority).
+ */
+export interface IndividualExcludedRow {
+  path: string;
+  status: string;
+  reason: string;
+}
+
+/** Union type discriminated by presence of `prefix` vs `path`. */
+export type ExcludedSummaryRow = AggregatedExcludedRow | IndividualExcludedRow;
+
+export interface DispositionOverrideProposal {
+  path: string;
+  proposed_status: FileDispositionStatus;
+  reason: string;
+}
+
+export interface LensProposal {
+  lens: Lens;
+  action: "include" | "exclude";
+  reason: string;
+}
 
 /**
  * Deterministic pre-digest of the audit scope, shown to the host in the
@@ -17,11 +64,199 @@ export interface ScopePreDigest {
   files_in_scope: number;
   /** Top-level directories of in-scope files, with file counts (desc). */
   scope_dirs: Array<{ dir: string; files: number }>;
-  /** A sample of files already excluded by the deterministic disposition pass. */
-  auto_excluded: Array<{ path: string; status: string }>;
+  /**
+   * Collapsed excluded-scope summary. Directories where all files share the
+   * same status+reason are emitted as a single aggregate row; individual
+   * "oddball" files are emitted as individual rows.
+   */
+  excluded_summary: ExcludedSummaryRow[];
+  /**
+   * Suspicious inclusions: files whose path matches build-output, vendor, or
+   * generated patterns but whose disposition status is `included`. These are
+   * heuristic misses that the host may want to override.
+   */
+  disposition_override_proposals: DispositionOverrideProposal[];
+  /**
+   * Lens proposals informed by codebase character (language distribution,
+   * test presence, network surface, config files). Mandatory lenses are never
+   * proposed for exclusion.
+   */
+  lens_proposals: LensProposal[];
 }
 
-const AUTO_EXCLUDED_SAMPLE_LIMIT = 25;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the collapsed excluded-scope summary from the full excluded file list.
+ *
+ * Algorithm:
+ *  1. Group excluded files by top-level prefix.
+ *  2. For each prefix group, check if ALL files in the group share the same
+ *     status+reason. If so, emit one aggregate row.
+ *  3. If not all files in the group agree, emit individual rows only for the
+ *     files whose status+reason differs from the majority in that prefix (the
+ *     "oddballs"). Files matching the majority are still collapsed into an
+ *     aggregate row.
+ */
+function buildExcludedSummary(
+  excluded: Array<{ path: string; status: string; reason?: string }>,
+): ExcludedSummaryRow[] {
+  // Group by top-level prefix
+  const byPrefix = new Map<string, Array<{ path: string; status: string; reason: string }>>();
+  for (const file of excluded) {
+    const prefix = file.path.split(/[\\/]/)[0] || ".";
+    if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
+    byPrefix.get(prefix)!.push({ path: file.path, status: file.status, reason: file.reason ?? "" });
+  }
+
+  const rows: ExcludedSummaryRow[] = [];
+  for (const [prefix, files] of byPrefix) {
+    if (files.length === 1) {
+      // Single file — emit as individual row
+      rows.push({ path: files[0].path, status: files[0].status, reason: files[0].reason });
+      continue;
+    }
+
+    // Count (status+reason) combinations to find majority
+    const keyCount = new Map<string, number>();
+    for (const f of files) {
+      const key = `${f.status}|${f.reason}`;
+      keyCount.set(key, (keyCount.get(key) ?? 0) + 1);
+    }
+    const majorityEntry = [...keyCount.entries()].sort((a, b) => b[1] - a[1])[0];
+    const [majorityKey, majorityCount] = majorityEntry;
+    const [majorityStatus, majorityReason] = majorityKey.split("|") as [string, string];
+
+    const oddballs = files.filter((f) => `${f.status}|${f.reason}` !== majorityKey);
+
+    if (majorityCount > 1) {
+      // Emit aggregate row for the majority
+      rows.push({
+        prefix,
+        file_count: majorityCount,
+        status: majorityStatus,
+        reason: majorityReason,
+      });
+    } else if (oddballs.length === 0) {
+      // All files have unique keys but there's only 1 majority — emit all individually
+      for (const f of files) {
+        rows.push({ path: f.path, status: f.status, reason: f.reason });
+      }
+      continue;
+    }
+
+    // Emit oddball rows individually
+    for (const f of oddballs) {
+      rows.push({ path: f.path, status: f.status, reason: f.reason });
+    }
+  }
+
+  return rows;
+}
+
+/**
+ * Scan included files for suspicious inclusions (build-output, vendor, or
+ * generated patterns) and emit override proposals.
+ */
+function buildDispositionOverrideProposals(
+  dispositionFiles: Array<{ path: string; status: string }>,
+): DispositionOverrideProposal[] {
+  const proposals: DispositionOverrideProposal[] = [];
+  for (const file of dispositionFiles) {
+    if (file.status !== "included") continue;
+    const norm = normalizeExtractorPath(file.path);
+    if (isBuildOutput(norm)) {
+      proposals.push({ path: file.path, proposed_status: "generated", reason: "path matches build-output pattern (dist/build)" });
+    } else if (isVendorPath(norm)) {
+      proposals.push({ path: file.path, proposed_status: "vendor", reason: "path matches vendor pattern" });
+    } else if (isGeneratedPath(norm)) {
+      proposals.push({ path: file.path, proposed_status: "generated", reason: "path matches generated-file pattern" });
+    } else if (isGeneratedTestArtifactPath(norm)) {
+      proposals.push({ path: file.path, proposed_status: "generated", reason: "path matches generated test-artifact pattern" });
+    }
+  }
+  return proposals;
+}
+
+/**
+ * Derive lens proposals from codebase character:
+ * - unit_manifest shape (language distribution, test units, network surface)
+ * - design_assessment findings tags (optional)
+ *
+ * Never proposes excluding a mandatory lens.
+ */
+function buildLensProposals(
+  unitManifest: { units: Array<{ kind?: string; required_lenses?: string[] }> } | undefined,
+  inScopePaths: string[],
+  dispositionFiles: Array<{ path: string; status: string }>,
+): LensProposal[] {
+  const proposals: LensProposal[] = [];
+
+  // Determine codebase character from unit manifest and paths
+  const units = unitManifest?.units ?? [];
+
+  // Check for network-surface units (kind contains "interface"/"api"/"http")
+  const hasNetworkSurface = units.some((u) => {
+    const kind = (u.kind ?? "").toLowerCase();
+    return kind.includes("interface") || kind.includes("api") || kind.includes("http") || kind.includes("network");
+  }) || inScopePaths.some((p) => {
+    const norm = normalizeExtractorPath(p);
+    return norm.includes("/api/") || norm.includes("/routes/") || norm.includes("/controllers/");
+  });
+
+  // Check for test units
+  const hasTestUnits = units.some((u) => {
+    const kind = (u.kind ?? "").toLowerCase();
+    return kind.includes("test") || kind.includes("spec");
+  }) || inScopePaths.some((p) => {
+    const norm = normalizeExtractorPath(p);
+    return norm.includes("/test/") || norm.includes("/tests/") || norm.includes("/spec/") || norm.includes(".test.") || norm.includes(".spec.");
+  });
+
+  // Check for config files
+  const hasConfigFiles = inScopePaths.some((p) => {
+    const norm = normalizeExtractorPath(p);
+    const base = norm.split("/").at(-1) ?? "";
+    return base.endsWith(".yaml") || base.endsWith(".yml") || base.endsWith(".env") ||
+      base.endsWith(".config.js") || base.endsWith(".config.ts") ||
+      base.startsWith(".env") || base === "config.json" || base === "settings.json";
+  }) || dispositionFiles.some((f) => {
+    const norm = normalizeExtractorPath(f.path);
+    const base = norm.split("/").at(-1) ?? "";
+    return base.endsWith(".yaml") || base.endsWith(".yml");
+  });
+
+  // Build proposals
+  for (const lens of LENSES as readonly Lens[]) {
+    const mandatory = isMandatoryLens(lens as Lens);
+
+    if (lens === "operability" && !hasNetworkSurface) {
+      if (mandatory) {
+        proposals.push({ lens, action: "include", reason: "mandatory lens; no network-surface units detected (vacuous pass)" });
+      } else {
+        proposals.push({ lens, action: "exclude", reason: "no network-surface units detected; operability review may not apply" });
+      }
+    } else if (lens === "tests" && !hasTestUnits) {
+      if (mandatory) {
+        proposals.push({ lens, action: "include", reason: "mandatory lens; no test units detected (vacuous pass)" });
+      } else {
+        proposals.push({ lens, action: "exclude", reason: "no test units detected; tests lens may not apply" });
+      }
+    } else if (lens === "config_deployment" && !hasConfigFiles) {
+      if (mandatory) {
+        proposals.push({ lens, action: "include", reason: "mandatory lens; no config files detected (vacuous pass)" });
+      } else {
+        proposals.push({ lens, action: "exclude", reason: "no config/deployment files detected; config_deployment lens may not apply" });
+      }
+    }
+    // Mandatory lenses with zero in-scope units: note but don't exclude
+    // (handled above inline)
+  }
+
+  return proposals;
+}
 
 export function computeScopePreDigest(
   bundle: ArtifactBundle,
@@ -56,14 +291,18 @@ export function computeScopePreDigest(
     .map(([dir, files]) => ({ dir, files }))
     .sort((a, b) => b.files - a.files);
 
+  const excluded_summary = buildExcludedSummary(excluded);
+  const disposition_override_proposals = buildDispositionOverrideProposals(dispositionFiles);
+  const lens_proposals = buildLensProposals(bundle.unit_manifest, inScopePaths, dispositionFiles);
+
   return {
     mode: scope.mode === "delta" ? "delta" : "full",
     since: scope.since ?? null,
     files_in_scope: inScopePaths.length,
     scope_dirs,
-    auto_excluded: excluded
-      .slice(0, AUTO_EXCLUDED_SAMPLE_LIMIT)
-      .map((file) => ({ path: file.path, status: file.status })),
+    excluded_summary,
+    disposition_override_proposals,
+    lens_proposals,
   };
 }
 

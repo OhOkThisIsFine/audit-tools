@@ -10,6 +10,7 @@ import {
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { isFileMissingError, withFsRetry } from "@audit-tools/shared";
+import type { PartialCompletionTerminal } from "@audit-tools/shared";
 import {
   RemediationPlan,
   RemediationItemState,
@@ -22,7 +23,6 @@ export interface RemediationState {
   status:
     | "pending"
     | "planning"
-    | "documenting"
     | "waiting_for_clarification"
     | "implementing"
     | "triage"
@@ -36,6 +36,19 @@ export interface RemediationState {
   started_at?: string;
   step_count?: number;
   plan_coverage?: CoverageLedger;
+  /**
+   * Set when the dispatch engine fires a partial-completion terminal (empty pool
+   * or livelock guard). When present, `decideNextStep` treats stranded
+   * documented/pending items as `blocked` and routes the run to close rather
+   * than looping forever on undispatchable work (INV-X06 / OBL-S09).
+   */
+  partial_completion_terminal?: PartialCompletionTerminal;
+  /**
+   * Reason the run was routed to close without all items reaching a terminal
+   * status. Set by the triage phase on `halt` so the close phase can stamp
+   * a `user_halted` marker in the partial report.
+   */
+  closing_context?: "user_halted";
 }
 
 const STATE_FILENAME = "state.json";

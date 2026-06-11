@@ -90,9 +90,9 @@ const ADVANCE_PAST_DESIGN_REVIEW_TERMINAL_KINDS = new Set([
   "present_report",
 ]);
 
-// Several pause step kinds (analyzer_install + design_review + confirm_intent,
-// plus optional edge_reasoning), each at most once; allow extra headroom.
-const MAX_STRUCTURE_PHASE_PAUSES = 6;
+// Several pause step kinds (analyzer_install + design_review_parallel/contract/conceptual
+// + confirm_intent + optional edge_reasoning), each at most once; allow extra headroom.
+const MAX_STRUCTURE_PHASE_PAUSES = 8;
 
 async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrapperOpts = {}) {
   const incomingDir = join(root, ".audit-tools/audit", "incoming");
@@ -112,6 +112,34 @@ async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrappe
       await mkdir(incomingDir, { recursive: true });
       await writeFile(
         join(incomingDir, "design-review-findings.json"),
+        JSON.stringify([], null, 2) + "\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "design_review_parallel") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        join(incomingDir, "design-review-contract-findings.json"),
+        JSON.stringify([], null, 2) + "\n",
+      );
+      await writeFile(
+        join(incomingDir, "design-review-conceptual-findings.json"),
+        JSON.stringify([], null, 2) + "\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "design_review_contract") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        join(incomingDir, "design-review-contract-findings.json"),
+        JSON.stringify([], null, 2) + "\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "design_review_conceptual") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        join(incomingDir, "design-review-conceptual-findings.json"),
         JSON.stringify([], null, 2) + "\n",
       );
       continue;

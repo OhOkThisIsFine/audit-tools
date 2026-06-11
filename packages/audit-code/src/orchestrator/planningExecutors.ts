@@ -21,8 +21,44 @@ import {
   buildReviewPackets,
   sizeIndexFromManifest,
 } from "./reviewPackets.js";
+import { resolveEffectiveLenses } from "./lensSelection.js";
 import { autoCompleteTrivialCoverage } from "./trivialAudit.js";
 import type { ExecutorRunResult } from "./executorResult.js";
+import type { Lens } from "../types.js";
+
+// ---------------------------------------------------------------------------
+// Free-form intent interpreter (keyword → lens boost, deterministic, no LLM)
+// ---------------------------------------------------------------------------
+
+const KEYWORD_LENS_MAP: Array<{ keywords: string[]; lens: Lens }> = [
+  { keywords: ["security", "auth", "authentication", "authorization", "secrets", "credentials"], lens: "security" },
+  { keywords: ["data", "integrity", "validation", "validate", "schema"], lens: "data_integrity" },
+  { keywords: ["perf", "performance", "speed", "latency", "throughput"], lens: "performance" },
+  { keywords: ["test", "tests", "testing", "coverage"], lens: "tests" },
+  { keywords: ["reliability", "resilience", "fault", "retry", "failover"], lens: "reliability" },
+  { keywords: ["observability", "logging", "metrics", "tracing", "monitoring"], lens: "observability" },
+  { keywords: ["config", "configuration", "deployment", "deploy", "environment"], lens: "config_deployment" },
+  { keywords: ["architecture", "design", "structure", "coupling", "dependency", "dependencies"], lens: "architecture" },
+  { keywords: ["maintainability", "maintainable", "readability", "readable", "lint", "style"], lens: "maintainability" },
+  { keywords: ["correctness", "bug", "bugs", "logic", "errors"], lens: "correctness" },
+];
+
+/**
+ * Interpret a free-form intent string into lenses to priority-boost.
+ * Deterministic keyword scan — no LLM call.
+ * INV-S04: the verbatim intent string never appears in output fields.
+ */
+export function interpretFreeFormIntent(text: string): Lens[] {
+  if (!text || text.trim().length === 0) return [];
+  const lower = text.toLowerCase();
+  const boosts = new Set<Lens>();
+  for (const { keywords, lens } of KEYWORD_LENS_MAP) {
+    if (keywords.some((kw) => lower.includes(kw))) {
+      boosts.add(lens);
+    }
+  }
+  return [...boosts];
+}
 
 export async function runPlanningExecutor(
   bundle: ArtifactBundle,
@@ -49,10 +85,55 @@ export async function runPlanningExecutor(
 
   const resolvedScope = scope ?? fullAuditScope();
   const externalAnalyzerResults = bundle.external_analyzer_results;
+
+  // Apply disposition_overrides before coverage initialization so overridden
+  // files never enter coverage at all (not just filtered after).
+  // Supports exact path match and prefix match (entry.path or entry.path + '/').
+  const dispositionOverrides = bundle.intent_checkpoint?.disposition_overrides;
+  let effectiveFileDisposition = bundle.file_disposition;
+  if (dispositionOverrides && dispositionOverrides.length > 0) {
+    effectiveFileDisposition = {
+      ...bundle.file_disposition,
+      files: bundle.file_disposition.files.map((f) => {
+        for (const override of dispositionOverrides) {
+          if (
+            f.path === override.path ||
+            f.path.startsWith(override.path + "/")
+          ) {
+            return { ...f, status: override.status, reason: override.reason };
+          }
+        }
+        return f;
+      }),
+    };
+  }
+
+  // Resolve effective lenses from lens_selection (mandatory lenses always
+  // included; resolveEffectiveLenses enforces this invariant).
+  const lensSelectionInclude = bundle.intent_checkpoint?.lens_selection?.include;
+  const lensSelectionExclude = bundle.intent_checkpoint?.lens_selection?.exclude;
+  let effectiveLenses: Lens[] | undefined;
+  if (lensSelectionInclude !== undefined || lensSelectionExclude !== undefined) {
+    // Build a selected set: start from include (or all), subtract exclude
+    const baseSelected = lensSelectionInclude ?? undefined;
+    const resolved = resolveEffectiveLenses(baseSelected ?? null);
+    if (lensSelectionExclude && lensSelectionExclude.length > 0) {
+      const excludeSet = new Set(lensSelectionExclude);
+      // resolveEffectiveLenses already enforces mandatory lenses; we just
+      // need to apply the exclude filter after re-resolving
+      const afterExclude = resolved.filter((l) => !excludeSet.has(l));
+      // resolveEffectiveLenses ensures mandatory lenses are always present —
+      // call again with afterExclude so mandatory lenses are re-unioned in
+      effectiveLenses = resolveEffectiveLenses(afterExclude);
+    } else {
+      effectiveLenses = resolved;
+    }
+  }
+
   const coverage = initializeCoverageFromPlan(
     bundle.repo_manifest,
     bundle.unit_manifest,
-    bundle.file_disposition,
+    effectiveFileDisposition,
     externalAnalyzerResults,
   );
   const skippedTrivialPaths = autoCompleteTrivialCoverage(
@@ -83,9 +164,16 @@ export async function runPlanningExecutor(
         bundle.runtime_validation_report,
       )
     : undefined;
+  // Interpret free_form_intent into lens priority boosts (deterministic, no LLM).
+  const intentBoostLenses = interpretFreeFormIntent(
+    bundle.intent_checkpoint?.free_form_intent ?? "",
+  );
+
   const auditTasks = buildChunkedAuditTasks(coverage, lineIndex, {
     external_analyzer_results: externalAnalyzerResults,
     critical_flows: bundle.critical_flows,
+    ...(effectiveLenses !== undefined ? { limit_lenses: effectiveLenses } : {}),
+    ...(intentBoostLenses.length > 0 ? { intent_priority_boost: intentBoostLenses } : {}),
   });
   const taggedAuditTasks = auditTasks.map((task) => ({
     ...task,

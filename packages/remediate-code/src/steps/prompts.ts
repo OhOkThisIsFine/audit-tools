@@ -187,10 +187,13 @@ export function synthesizeIntakePrompt(
   sources: IntakeSource[],
   paths: ReturnType<typeof intakePaths>,
   hasClarificationResolution: boolean,
+  intentCheckpointPath?: string,
 ): string {
   const clarificationText = hasClarificationResolution
     ? `\nAlso read the clarification answers at:\n\n\`${paths.clarificationResolution}\`\n`
     : "";
+
+  const checkpointPath = intentCheckpointPath ?? paths.intentCheckpoint;
 
   return `
 # Synthesize Remediation Intake
@@ -252,6 +255,43 @@ The brief must include:
 - acceptance criteria
 - open questions, if any
 
+Also write a preliminary intent checkpoint to exactly:
+
+\`${checkpointPath}\`
+
+\`\`\`json
+{
+  "schema_version": "intent-checkpoint/v1",
+  "confirmed_at": "<ISO-8601 timestamp for when this draft was created>",
+  "confirmed_by": "draft",
+  "scope_summary": "<pre-populated scope derived from the goals and affected_files above>",
+  "intent_summary": "<pre-populated intent derived from the goals and source_type above>",
+  "filters": {},
+  "pre_draft_questions": [
+    {
+      "id": "Q-001",
+      "question": "<question text from open_questions above>",
+      "blocking": true
+    }
+  ],
+  "closing_action": "commit"
+}
+\`\`\`
+
+Rules for the preliminary checkpoint:
+- \`confirmed_by\` MUST be \`"draft"\` (sentinel for unconfirmed state).
+- Pre-populate \`scope_summary\` from the goals and affected areas; pre-populate
+  \`intent_summary\` from the overall purpose (e.g. "full remediation of security
+  findings from the audit report").
+- Copy ALL open_questions into \`pre_draft_questions\`, preserving their ids and
+  blocking flags. Non-blocking questions are included as FYI context.
+- Suggest \`closing_action\` as \`"commit"\` by default (valid options:
+  \`"commit"\`, \`"none"\`).
+- If a \`free_form_intent\` was interpreted (e.g. "prioritizing security
+  findings"), record a brief explanation in \`intent_interpretation\`.
+- Leave \`filters\` empty (\`{}\`) unless the source clearly implies specific
+  severity/lens/package scope.
+
 Do not edit source files.
 
 Then run:
@@ -304,74 +344,3 @@ Then run:
 `;
 }
 
-export function extractFindingsPrompt(
-  paths: ReturnType<typeof intakePaths>,
-  sources: IntakeSource[],
-): string {
-  return `
-# Extract Findings From Intake Brief
-
-Read the remediation launch brief:
-
-\`${paths.brief}\`
-
-You may use the source files listed below only to preserve evidence and
-traceability:
-
-${formatIntakeSources(sources)}
-
-Extract actionable remediation items into JSON at exactly:
-
-\`${paths.extractedPlan}\`
-
-Use this exact shape:
-
-\`\`\`json
-{
-  "findings": [
-    {
-      "id": "FINDING-001",
-      "title": "Short title",
-      "category": "User Goal",
-      "severity": "medium",
-      "confidence": "high",
-      "lens": "maintainability",
-      "summary": "One-sentence description",
-      "affected_files": [{ "path": "relative/path/to/file.ts" }],
-      "evidence": ["specific source note, user statement, or document observation"]
-    }
-  ],
-  "blocks": [
-    {
-      "block_id": "B-001",
-      "items": ["FINDING-001", "FINDING-002"],
-      "parallel_safe": true,
-      "dependencies": []
-    }
-  ]
-}
-\`\`\`
-
-For conversational refactor goals, choose the closest existing \`lens\` value
-instead of inventing a new one: \`correctness\`, \`architecture\`,
-\`maintainability\`, \`security\`, \`reliability\`, \`performance\`,
-\`data_integrity\`, \`tests\`, \`operability\`, \`config_deployment\`, or
-\`observability\`. Group related findings into blocks by shared files or
-logical cohesion. Do not edit source files.
-
-Grounding requirements (a deterministic validator checks every path you cite;
-phantom paths are stripped and all-phantom findings are dropped):
-
-- Each \`affected_files[].path\` must be a repo-relative path that exists on
-  disk. Verify before citing; never guess a path from prose. If you cannot
-  identify a real file, emit an empty \`affected_files\` array instead —
-  discovery happens during documentation.
-- Each \`evidence\` entry should cite a real \`path:line\` location when one
-  exists (e.g. \`"src/auth.ts:42 — token is never revoked"\`). Findings with no
-  real-path evidence are downgraded to low confidence.
-
-Then run:
-
-\`${loaderCommand("next-step")}\`
-`;
-}

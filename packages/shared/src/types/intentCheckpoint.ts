@@ -1,3 +1,5 @@
+import type { FileDispositionStatus } from "./disposition.js";
+
 /**
  * The accepted scope and intent for a run, confirmed by the host before
  * planning. Single-sourced so both orchestrators share one shape: audit-code
@@ -9,12 +11,21 @@
 export interface IntentCheckpoint {
   schema_version: "intent-checkpoint/v1";
   confirmed_at: string;
-  confirmed_by: "host";
+  /**
+   * `"host"` — checkpoint has been reviewed and confirmed by the host agent.
+   * `"draft"` — preliminary checkpoint pre-populated by synthesize_intake worker;
+   *   not yet confirmed; planning must not begin and filtering must not apply.
+   */
+  confirmed_by: "host" | "draft";
   /** Human-readable description of the confirmed scope. */
   scope_summary: string;
   /** Human-readable description of the goal (e.g. full-audit / delta). */
   intent_summary: string;
-  /** Free-form intent threaded into worker/dispatch prompts. */
+  /**
+   * Free-form intent; interpreted into priority/lens/scope signals at planning
+   * time via freeFormIntentInterpreter. Never threaded verbatim into worker or
+   * dispatch prompts (see freeFormIntentInterpreter, INV-S04).
+   */
   free_form_intent?: string;
   /** Paths intentionally excluded from the run, each with a reason. */
   excluded_scope?: Array<{ path: string; reason: string }>;
@@ -26,5 +37,40 @@ export interface IntentCheckpoint {
     lenses?: string[];
     packages?: string[];
     themes?: string[];
+  };
+  /**
+   * Clauses from free_form_intent that could not be encoded as lens-weight,
+   * priority, or scope signals. Each entry carries the original clause text,
+   * the blocking checkpoint question raised for it, and the optional host
+   * answer once resolved. These survive as explicit machine-checkable
+   * contract constraints threaded into planning and worker prompts.
+   */
+  constraint_clauses?: Array<{
+    /** The original unencodable clause text. */
+    text: string;
+    /** The blocking checkpoint question generated for this clause. */
+    checkpoint_question: string;
+    /** The host's answer to the checkpoint question once resolved. */
+    host_answer?: string;
+  }>;
+  /**
+   * Per-file or per-prefix status corrections accepted by the host. Applied
+   * before coverage initialization so overridden files never become audit
+   * tasks. Typically sourced from `disposition_override_proposals` in the
+   * scope pre-digest shown during the `confirm_intent` step.
+   */
+  disposition_overrides?: Array<{
+    path: string;
+    status: FileDispositionStatus;
+    reason: string;
+  }>;
+  /**
+   * Accepted or modified lens set from the host, derived from the
+   * `lens_proposals` in the scope pre-digest. `include` is additive (always
+   * merged with mandatory lenses); `exclude` removes non-mandatory lenses.
+   */
+  lens_selection?: {
+    include?: string[];
+    exclude?: string[];
   };
 }

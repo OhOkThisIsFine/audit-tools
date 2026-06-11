@@ -9,14 +9,13 @@ export const REMEDIATION_WORKER_RESULT_CONTRACT_VERSION =
 
 export type RemediationStepKind =
   | "confirm_intent"
+  | "confirm_auto_discovered_input"
+  | "confirm_resume_or_restart"
   | "locate_input"
   | "collect_starting_point"
   | "synthesize_intake"
   | "collect_intake_clarifications"
   | "contract_pipeline"
-  | "extract_findings"
-  | "dispatch_document"
-  | "document_single_item"
   | "collect_clarifications"
   | "classify_impl_risks"
   | "preview_implement"
@@ -27,7 +26,7 @@ export type RemediationStepKind =
   | "present_report"
   | "input_conflict"
   | "unhandled_state"
-  | "state_transition";
+  | "zero_documentable_findings";
 
 import type { StepStatus, DispatchModelHint } from "@audit-tools/shared";
 
@@ -77,12 +76,6 @@ export interface RemediationDispatchPlan {
   items: DispatchPlanItem[];
 }
 
-export interface DocumentWorkerResult {
-  type: "item_spec" | "clarification_request";
-  item_spec?: unknown;
-  clarifications?: unknown[];
-}
-
 export interface ImplementWorkerItemResult {
   finding_id: string;
   status: "resolved" | "blocked";
@@ -94,6 +87,14 @@ export interface ImplementWorkerResult {
   contract_version: typeof REMEDIATION_WORKER_RESULT_CONTRACT_VERSION;
   phase: "implement";
   item_results: ImplementWorkerItemResult[];
+  /**
+   * Paths the worker edited outside its declared contract scope. Used by
+   * `mergeImplementResults` to gate amendment claims through the ownership
+   * registry: unowned paths are granted and added to the block's effective scope
+   * for verification; owned/contended paths block the item and emit a seam
+   * conflict event.
+   */
+  amended_files?: string[];
 }
 
 export const REMEDIATION_CLOSING_RESULT_CONTRACT_VERSION =
