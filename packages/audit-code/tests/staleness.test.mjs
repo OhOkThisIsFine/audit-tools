@@ -287,7 +287,6 @@ test("external analyzer results invalidate planning-derived artifacts", () => {
   for (const artifact of [
     "coverage_matrix.json",
     "audit_tasks.json",
-    "review_packets.json",
     "requeue_tasks.json",
     "audit-report.md",
   ]) {
@@ -300,7 +299,6 @@ test("external analyzer results invalidate planning-derived artifacts", () => {
   const initialBundle = {
     coverage_matrix: { files: [] },
     audit_tasks: [],
-    review_packets: [],
     requeue_tasks: [],
     audit_report: "# stale\n",
   };
@@ -313,7 +311,6 @@ test("external analyzer results invalidate planning-derived artifacts", () => {
 
   assert.ok(stale.has("coverage_matrix.json"));
   assert.ok(stale.has("audit_tasks.json"));
-  assert.ok(stale.has("review_packets.json"));
   assert.ok(stale.has("requeue_tasks.json"));
   assert.ok(stale.has("audit-report.md"));
 });
@@ -407,7 +404,6 @@ test("external analyzer results do not falsely mark unrelated upstream artifacts
     },
     coverage_matrix: { files: [] },
     audit_tasks: [],
-    review_packets: [],
     requeue_tasks: [],
     audit_report: "# stale\n",
   };

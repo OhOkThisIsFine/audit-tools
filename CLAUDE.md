@@ -107,7 +107,7 @@ The priority chain in `nextStep.ts`: `provider_confirmation` → `repo_manifest`
 
 ### Artifact system
 
-Artifacts under `.audit-tools/audit/` are the continuity layer: `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `coverage_matrix.json`, `audit_tasks.json`, `review_packets.json`, `audit_results.jsonl`, `runtime_validation_report.json`, `audit-findings.json` (canonical machine contract), `synthesis-narrative.json` (narrative marker). Staleness is tracked via an explicit dependency DAG (`spec/dependency-map.md`, implemented in `src/orchestrator/staleness.ts` and `src/orchestrator/artifactMetadata.ts`).
+Artifacts under `.audit-tools/audit/` are the continuity layer: `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `coverage_matrix.json`, `audit_tasks.json`, `task_affinity_graph.json`, `audit_results.jsonl`, `runtime_validation_report.json`, `audit-findings.json` (canonical machine contract), `synthesis-narrative.json` (narrative marker). Review packets are partitioned just-in-time at dispatch, never persisted. Staleness is tracked via an explicit dependency DAG (`spec/dependency-map.md`, implemented in `src/orchestrator/staleness.ts` and `src/orchestrator/artifactMetadata.ts`).
 
 ### Entrypoint, providers, schemas, lenses
 

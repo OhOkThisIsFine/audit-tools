@@ -159,19 +159,6 @@ export function validateArtifactBundle(
       ),
     );
   }
-  if (bundle.review_packets) {
-    for (const [index, packet] of bundle.review_packets.entries()) {
-      issues.push(
-        ...requireKeys(packet, `review_packets:${index}`, [
-          "packet_id",
-          "task_ids",
-          "lenses",
-          "file_paths",
-          "file_line_counts",
-        ]),
-      );
-    }
-  }
   if (bundle.tooling_manifest) {
     issues.push(
       ...requireKeys(
@@ -217,11 +204,6 @@ export function validateArtifactBundle(
     task_id: string;
     line_ranges?: Array<{ path: string; start: number; end: number }>;
   }>(bundle.requeue_tasks);
-  const reviewPackets = asArray<{
-    packet_id: string;
-    file_paths: string[];
-    file_line_counts: Record<string, number>;
-  }>(bundle.review_packets);
   const coverageFiles = asArray<{
     path: string;
     unit_ids: string[];
@@ -537,22 +519,6 @@ export function validateArtifactBundle(
             "Line range end must be greater than or equal to start",
           );
         }
-      }
-    }
-  }
-
-  if (bundle.review_packets) {
-    for (const [index, packet] of reviewPackets.entries()) {
-      const filePaths = asArray<string>(packet.file_paths);
-      const missingPaths = filePaths.filter(
-        (path) => !hasOwnProperty(packet.file_line_counts ?? {}, path),
-      );
-      if (missingPaths.length > 0) {
-        pushIssue(
-          issues,
-          `review_packets:${packet.packet_id ?? index}`,
-          `Every listed file must have a corresponding file_line_counts entry; missing ${missingPaths.join(", ")}`,
-        );
       }
     }
   }
