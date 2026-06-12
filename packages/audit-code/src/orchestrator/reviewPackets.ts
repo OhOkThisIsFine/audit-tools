@@ -541,8 +541,8 @@ export function buildReviewPacketsFromPartition(
       .filter((task): task is AuditTask => task !== undefined)
       .sort(compareTasksForPacket);
     if (clusterTasks.length === 0) continue;
-    packets.push(
-      buildPacket(
+    packets.push({
+      ...buildPacket(
         clusterTasks,
         packetIndex,
         options.lineIndex,
@@ -550,7 +550,8 @@ export function buildReviewPacketsFromPartition(
         graphEdges,
         options.graphBundle,
       ),
-    );
+      routing_risk: cluster.routing_risk,
+    });
     packetIndex += 1;
   }
 

@@ -98,6 +98,7 @@ export type {
   ObservabilityConfig,
   SynthesisConfig,
   GraphConfig,
+  DispatchRoutingTiers,
   DispatchConfig,
   DesignReviewConfig,
   AnalyzerSetting,
