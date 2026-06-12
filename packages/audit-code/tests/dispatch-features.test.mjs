@@ -222,6 +222,34 @@ await test("JIT partition splits a cluster that exceeds the context budget", asy
   );
 });
 
+await test("capability handshake: host-reported context window collapses the split (N5b)", async (t) => {
+  // 2 × 20000 = 40000 exceeds the ~28k default input budget → splits to 2 packets
+  // with no handshake. When the host reports a 200k window, the same cluster fits
+  // in one packet — the budget now reflects the real dispatch model.
+  const tasks = sharedFileTasks(20000);
+  const { artifactsDir } = await makeArtifactsDir(tasks);
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  const result = await prepareDispatchArtifacts({
+    packageRoot,
+    runId: RUN_ID,
+    artifactsDir,
+    root: artifactsDir,
+    sessionConfig: {},
+    hostModel: null,
+    hostContextTokens: 200_000,
+    hostOutputTokens: 32_000,
+  });
+  assert.equal(
+    result.packet_count,
+    1,
+    "a 200k host window packs the cluster the 32k default would split",
+  );
+  // The dispatch-quota records the discovered budget for this session.
+  const quota = await readJson(join(artifactsDir, "runs", RUN_ID, "dispatch-quota.json"));
+  assert.equal(quota.resolved_limits.context_tokens, 200_000);
+  assert.equal(quota.source, "discovered_capability");
+});
+
 await test("JIT partition splits a coherent cluster at the risk-mass ceiling", async (t) => {
   // Small tokens (would merge on token budget alone) but each task is near-max
   // risk; risk_mass_budget caps aggregate risk so they cannot share a packet.

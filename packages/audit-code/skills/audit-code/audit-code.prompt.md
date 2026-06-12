@@ -25,22 +25,33 @@ monorepo root). From the monorepo root use:
 node packages/audit-code/audit-code.mjs ensure --quiet
 ```
 
-Then ask the backend for exactly one next step. This host can dispatch review
-subagents in parallel (via the `Agent`/`task` tool), so report that capacity on
-every `next-step` call — otherwise the backend assumes it cannot parallelize and
-sizes dispatch waves to one packet at a time:
+Then ask the backend for exactly one next step. This is also the **capability
+handshake**: report what you can dispatch to *right now* on every `next-step`
+call, so the backend sizes review packets to your real model instead of a
+conservative 32k floor. Report:
+
+- `--host-max-active-subagents` — how many review subagents you can run in
+  parallel (via the `Agent`/`task` tool). Without it the backend assumes serial
+  dispatch and sizes waves to one packet at a time.
+- `--host-context-tokens` / `--host-output-tokens` — the context window and
+  output cap of the model your review subagents run on. These size each packet
+  to fill the real window; omit them and dispatch falls back to the conservative
+  32k default (many tiny packets). Use the actual numbers for your dispatch
+  model — discover them, do not guess a smaller-than-real value.
 
 ```bash
-audit-code next-step --host-max-active-subagents 4
+audit-code next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
 ```
 
-`4` is a safe default for this host; raise it for more parallelism or lower it
-under rate-limit pressure. The backend's learned quota adapts from there.
+`4` is a safe concurrency default for this host; raise it for more parallelism or
+lower it under rate-limit pressure. The backend's learned quota adapts from
+there. The token values should match the window of the model dispatching the
+packets (e.g. 200000 / 32000 for a 200k-context model).
 
 When developing `auditor-lambda` itself, from the monorepo root use:
 
 ```bash
-node packages/audit-code/audit-code.mjs next-step --host-max-active-subagents 4
+node packages/audit-code/audit-code.mjs next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
 ```
 
 Read the returned JSON only far enough to find `prompt_path`, then read and
@@ -77,8 +88,8 @@ Use MCP tools only as a compatibility adapter when direct shell access to
 `continue_audit` tools return the same one-step contract; they are not a
 separate orchestration path.
 
-When a step prompt tells you to continue, run
-`audit-code next-step --host-max-active-subagents 4` again and follow only the
-newly returned `prompt_path`.
+When a step prompt tells you to continue, run `audit-code next-step` again with
+the same capability flags (`--host-max-active-subagents`, `--host-context-tokens`,
+`--host-output-tokens`) and follow only the newly returned `prompt_path`.
 
 Stop when the current step prompt tells you to stop.
