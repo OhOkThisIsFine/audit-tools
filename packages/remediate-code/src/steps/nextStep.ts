@@ -77,6 +77,8 @@ export interface NextStepOptions {
   hostOutputTokens?: number | null;
   /** Ordered model roster (lowest rank first); outranks the scalar pair. */
   hostModels?: HostModelRosterEntry[] | null;
+  /** Opaque model identity for the quota key when no model name resolves. */
+  hostModelId?: string | null;
   finalizeClosing?: boolean;
   forceReplan?: boolean;
   sessionConfig?: SessionConfig | null;
@@ -941,6 +943,7 @@ Then run:
       hostContextTokens: options.hostContextTokens,
       hostOutputTokens: options.hostOutputTokens,
       hostModels: options.hostModels,
+      hostModelId: options.hostModelId,
     };
     const onlyBlock = !canDispatchImpl ? implementBlocks[0].block_id : undefined;
     const dispatchPlan = await prepareImplementDispatch(

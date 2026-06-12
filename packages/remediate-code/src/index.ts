@@ -80,7 +80,11 @@ program
   )
   .option(
     "--host-models <json>",
-    "Ordered JSON roster of dispatchable models (lowest rank first): [{rank, context_tokens, output_tokens}]",
+    "Ordered JSON roster of dispatchable models (lowest rank first): [{rank, context_tokens, output_tokens, model_id?}]",
+  )
+  .option(
+    "--host-model-id <id>",
+    "Opaque model identity used only to key quota learning (provider/<id>)",
   )
   .option(
     "--finalize-closing",
@@ -115,6 +119,7 @@ program
         hostModels: options.hostModels
           ? parseHostModelRoster(options.hostModels)
           : undefined,
+        hostModelId: options.hostModelId || undefined,
         finalizeClosing: options.finalizeClosing === true,
         forceReplan: options.forceReplan === true,
       }),
@@ -150,7 +155,11 @@ program
   )
   .option(
     "--host-models <json>",
-    "Ordered JSON roster of dispatchable models (lowest rank first): [{rank, context_tokens, output_tokens}]",
+    "Ordered JSON roster of dispatchable models (lowest rank first): [{rank, context_tokens, output_tokens, model_id?}]",
+  )
+  .option(
+    "--host-model-id <id>",
+    "Opaque model identity used only to key quota learning (provider/<id>)",
   )
   .option(
     "--finalize-closing",
@@ -181,6 +190,7 @@ program
         hostModels: options.hostModels
           ? parseHostModelRoster(options.hostModels)
           : undefined,
+        hostModelId: options.hostModelId || undefined,
         finalizeClosing: options.finalizeClosing === true,
         forceReplan: options.forceReplan === true,
       }),

@@ -36,6 +36,8 @@ export async function renderSemanticReviewStep(params: {
   hostOutputTokens?: number | null;
   /** Ordered model roster (lowest rank first); outranks the scalar pair. */
   hostModelRoster?: HostModelRosterEntry[] | null;
+  /** Opaque model identity for the quota key when no model name resolves. */
+  hostModelId?: string | null;
   hostCanRestrictSubagentTools: boolean;
   hostCanSelectSubagentModel: boolean;
   /** Which executor selected this step; controls prompt variant. */
@@ -92,6 +94,7 @@ export async function renderSemanticReviewStep(params: {
     hostContextTokens: params.hostContextTokens,
     hostOutputTokens: params.hostOutputTokens,
     hostModelRoster: params.hostModelRoster,
+    hostModelId: params.hostModelId,
   });
   const mergeCommand = mergeAndIngestCommand(artifactsDir, activeReviewRun.run_id);
   const continueCommand = nextStepCommand(root, artifactsDir);

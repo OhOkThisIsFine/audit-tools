@@ -57,7 +57,9 @@ context to your real model instead of a conservative 32k floor. Report:
   `{"rank": "small"|"standard"|"deep", "context_tokens": N, "output_tokens": N}`.
   Ranks are relative capability labels that line up with each item's
   `model_hint.tier` — never report model names to the backend. Report only ranks
-  you can actually dispatch to.
+  you can actually dispatch to. Each entry may carry an optional opaque
+  `model_id` (and `--host-model-id` is the single-model equivalent) used only to
+  key per-model quota learning — it is never interpreted.
 - `--host-context-tokens` / `--host-output-tokens` — single-model shorthand when
   every worker runs on one model: the context window and output cap of that
   model. When `--host-models` is also given, the roster wins. Omit both and

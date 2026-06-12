@@ -1,4 +1,4 @@
-import { getArtifactsDir, getExplicitProvider, getFlag, getHostContextTokens, getHostMaxActiveSubagents, getHostModel, getHostModelRoster, getHostOutputTokens, getRootDir } from "./args.js";
+import { getArtifactsDir, getExplicitProvider, getFlag, getHostContextTokens, getHostMaxActiveSubagents, getHostModel, getHostModelId, getHostModelRoster, getHostOutputTokens, getRootDir } from "./args.js";
 import { createFreshSessionProvider } from "../providers/index.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { prepareDispatchArtifacts } from "./dispatch.js";
@@ -26,6 +26,7 @@ export async function cmdPrepareDispatch(argv: string[]): Promise<void> {
     hostContextTokens: getHostContextTokens(argv),
     hostOutputTokens: getHostOutputTokens(argv),
     hostModelRoster: getHostModelRoster(argv),
+    hostModelId: getHostModelId(argv),
   });
   console.log(JSON.stringify(result, null, 2));
 }

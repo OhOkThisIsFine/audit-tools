@@ -79,6 +79,7 @@ import {
   getFlag,
   getHostContextTokens,
   getHostMaxActiveSubagents,
+  getHostModelId,
   getHostModelRoster,
   getHostOutputTokens,
   getMaxRuns,
@@ -723,6 +724,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   const hostContextTokens = getHostContextTokens(argv);
   const hostOutputTokens = getHostOutputTokens(argv);
   const hostModelRoster = getHostModelRoster(argv);
+  const hostModelId = getHostModelId(argv);
   let sessionConfig: SessionConfig;
   try {
     sessionConfig = await loadSessionConfig(artifactsDir);
@@ -1192,6 +1194,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     hostContextTokens,
     hostOutputTokens,
     hostModelRoster,
+    hostModelId,
     hostCanRestrictSubagentTools,
     hostCanSelectSubagentModel,
     selectedExecutor: result.selectedExecutor,
