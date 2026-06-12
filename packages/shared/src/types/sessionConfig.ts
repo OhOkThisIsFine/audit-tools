@@ -194,6 +194,15 @@ export interface DesignReviewConfig {
    * the user-confirmed source and this config the host/session override.
    */
   conceptual_depth?: "shallow" | "deep";
+  /**
+   * Number of independent perspective subagents to fan out when
+   * `conceptual_depth` is `"deep"`. Ignored when shallow. Clamped to the
+   * supported range (2 … number of built-in perspectives); defaults to
+   * `DEFAULT_CONCEPTUAL_PERSPECTIVES`. Mirrors
+   * `IntentCheckpoint.design_review.perspectives`, which is the user-confirmed
+   * source; this config is the host/session override.
+   */
+  perspectives?: number;
 }
 
 /**

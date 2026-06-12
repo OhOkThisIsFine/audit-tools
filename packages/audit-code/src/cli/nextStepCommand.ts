@@ -35,8 +35,11 @@ import {
 import {
   renderDesignReviewPrompt,
   renderContractReviewPrompt,
-  renderConceptualReviewPrompt,
 } from "../orchestrator/designReviewPrompt.js";
+import {
+  prepareConceptualDispatch,
+  resolveConceptualReviewSettings,
+} from "./conceptualDispatch.js";
 import { computeScopePreDigest } from "../orchestrator/intentCheckpointExecutor.js";
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
 import { buildPathLookup } from "../extractors/graph.js";
@@ -842,18 +845,28 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   }
 
   if (result.kind === "design_review_parallel") {
-    // Both passes are unsatisfied — dispatch two independent subagents simultaneously.
+    // Both passes are unsatisfied — dispatch the contract pass and the
+    // conceptual pass simultaneously. The conceptual pass is shallow (one agent)
+    // or deep (N independent perspective subagents + an independent judge),
+    // resolved JIT from the user-confirmed checkpoint / session config.
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir);
     const contractResultsPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
-    const conceptualResultsPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
-    const reviewOptions = {
-      max_units: sessionConfig.design_review?.max_units,
-      conceptual_depth: sessionConfig.design_review?.conceptual_depth,
-    };
+
+    const conceptualSettings = resolveConceptualReviewSettings(
+      result.bundle,
+      sessionConfig,
+    );
+    const conceptual = await prepareConceptualDispatch({
+      artifactsDir,
+      bundle: result.bundle,
+      settings: conceptualSettings,
+    });
 
     const contractPromptText = [
-      renderContractReviewPrompt(result.bundle, reviewOptions),
+      renderContractReviewPrompt(result.bundle, {
+        max_units: conceptualSettings.max_units,
+      }),
       "## Results path",
       "",
       "Write the JSON array of contract-review findings to:",
@@ -864,34 +877,18 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "",
     ].join("\n");
 
-    const conceptualPromptText = [
-      renderConceptualReviewPrompt(result.bundle, reviewOptions),
-      "## Results path",
-      "",
-      "Write the JSON array of conceptual-review findings to:",
-      "",
-      `  ${conceptualResultsPath}`,
-      "",
-      `Then run: ${continueCommand}`,
-      "",
-    ].join("\n");
-
     const contractPromptPath = join(artifactsDir, "incoming", "design-review-contract-prompt.md");
-    const conceptualPromptPath = join(artifactsDir, "incoming", "design-review-conceptual-prompt.md");
     await writeFile(contractPromptPath, contractPromptText, "utf8");
-    await writeFile(conceptualPromptPath, conceptualPromptText, "utf8");
 
     const dispatchPrompt = [
       "# Design review — parallel dispatch",
       "",
-      "Dispatch **two independent subagents simultaneously** to perform the two design review passes:",
+      "Run the two design-review passes concurrently. Do not wait for one before starting the other.",
       "",
-      "1. **Contract review** (adversarial): read the prompt at the contract prompt path, write findings to the contract results path.",
-      "2. **Conceptual review** (generative): read the prompt at the conceptual prompt path, write findings to the conceptual results path.",
+      "1. **Contract review** (adversarial): dispatch a subagent that reads the prompt at the contract prompt path and writes findings to the contract results path.",
+      `2. ${conceptual.instructionLines.join("\n   ")}`,
       "",
-      "Both subagents receive the full prompt for their respective pass. Dispatch them in parallel; do not wait for one before starting the other.",
-      "",
-      "When both subagents have written their results, run:",
+      "When the contract results and the conceptual results have both been written, run:",
       "",
       `  ${continueCommand}`,
       "",
@@ -904,18 +901,17 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Dispatch two subagents (contract and conceptual review) in parallel, then run next-step when both have written their findings.",
+        "Dispatch the contract and conceptual review passes in parallel, then run next-step when both the contract results and the (judged) conceptual results have been written.",
       repoRoot: root,
       artifactPaths: {
         contract_prompt: contractPromptPath,
         contract_results: contractResultsPath,
-        conceptual_prompt: conceptualPromptPath,
-        conceptual_results: conceptualResultsPath,
+        ...conceptual.artifactPaths,
       },
       prompt: dispatchPrompt,
       access: {
-        read_paths: [contractPromptPath, conceptualPromptPath],
-        write_paths: [contractResultsPath, conceptualResultsPath],
+        read_paths: [contractPromptPath, ...conceptual.readPaths],
+        write_paths: [contractResultsPath, ...conceptual.writePaths],
       },
     });
     console.log(JSON.stringify(step, null, 2));
@@ -957,37 +953,51 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   }
 
   if (result.kind === "design_review_conceptual") {
-    // Only the conceptual pass remains.
+    // Only the conceptual pass remains — shallow (one agent) or deep (N
+    // independent perspective subagents + an independent judge), resolved JIT
+    // from the user-confirmed checkpoint / session config.
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir);
-    const conceptualResultsPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
+    const conceptualSettings = resolveConceptualReviewSettings(
+      result.bundle,
+      sessionConfig,
+    );
+    const conceptual = await prepareConceptualDispatch({
+      artifactsDir,
+      bundle: result.bundle,
+      settings: conceptualSettings,
+    });
+
     const prompt = [
-      renderConceptualReviewPrompt(result.bundle, {
-        max_units: sessionConfig.design_review?.max_units,
-        conceptual_depth: sessionConfig.design_review?.conceptual_depth,
-      }),
-      "## Results path",
+      "# Design review — conceptual pass",
       "",
-      "Write the JSON array of conceptual-review findings to:",
+      conceptual.instructionLines.join("\n"),
       "",
-      `  ${conceptualResultsPath}`,
+      "When the conceptual results have been written, run:",
       "",
-      `Then run: ${continueCommand}`,
+      `  ${continueCommand}`,
       "",
     ].join("\n");
+
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "design_review_conceptual",
       status: "ready",
       runId: null,
       allowedCommands: [continueCommand],
-      stopCondition:
-        "Write conceptual review findings to the results path, then run next-step.",
+      stopCondition: conceptual.deep
+        ? "Dispatch the conceptual perspective subagents in parallel, then the independent judge, then run next-step once the merged conceptual results are written."
+        : "Write conceptual review findings to the results path, then run next-step.",
       repoRoot: root,
       artifactPaths: {
-        design_review_conceptual_results: conceptualResultsPath,
+        design_review_conceptual_results: conceptual.conceptualResultsPath,
+        ...conceptual.artifactPaths,
       },
       prompt,
+      access: {
+        read_paths: conceptual.readPaths,
+        write_paths: conceptual.writePaths,
+      },
     });
     console.log(JSON.stringify(step, null, 2));
     return;
