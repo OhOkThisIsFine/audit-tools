@@ -192,6 +192,34 @@ lenses, shallow).
   `model_hint` → persisted-risk + JIT-tier.
 - Capability discovery, estimates, and tiering are language- and model-neutral.
 
+## Implementation progress (2026-06-12)
+
+Landed green on branch `feat/provider-neutral-task-graph` (additive,
+non-behavior-changing — the graph is built alongside the old packet path and the
+partitioner is not yet wired, so the tree stays green and resumable):
+
+- **N1** — frozen `token_estimate` + `risk_estimate` on every task
+  (`computeRiskEstimate`, planning enrich, schema, tests).
+- **N2** — `task_affinity_graph.json` artifact (`taskAffinityGraph.ts`): frozen
+  task nodes + soft weighted affinity edges; io/dependency/schema/tests.
+- **N4a** — `partitionTaskGraph.ts`: pure greedy union-find partition under
+  token + risk-mass ceilings (Phase-B core algorithm), tested. Not yet wired.
+
+**Next: N4b (the keystone atomic replace).** Key finding for whoever picks it up:
+the dispatch flow **packetizes before it computes quota** (`buildReviewPackets`
+at `src/cli/dispatch.ts:774`; `computeDispatchQuota` ~923), and dispatch
+**rebuilds** packets at dispatch time rather than reading the persisted
+`review_packets.json`. So N4b is localized to the dispatch flow but must
+**reorder quota-before-packetization** so the partition sees the model's real
+context budget (`resolved_limits.context_tokens`). Adapter path: export
+`buildPacket` (the single-packet constructor at `reviewPackets.ts:342`) and add a
+`buildReviewPacketsFromPartition` that maps each `GraphPacket`'s task ids →
+`AuditTask[]` → `buildPacket`; swap it in at the dispatch call site and delete the
+old `buildReviewPackets` call in the same commit. Expect packet-count test churn
+in `dispatch-features.test.mjs`. Then **N5** (capability handshake / retire
+`KNOWN_MODEL_LIMITS`) makes that budget real, **N6** condensed confirm_intent,
+**N7** deep conceptual fan-out, **N8** remediate-code parity.
+
 ## Resolved decisions (2026-06-12)
 
 1. **Plan/dispatch seam, via a task graph.** Planning persists a provider-neutral
