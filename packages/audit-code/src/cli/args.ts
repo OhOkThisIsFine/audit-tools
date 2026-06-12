@@ -7,7 +7,9 @@ import {
   renderPromptCommand,
   toPromptPathToken,
   quotePromptCommandArg,
+  parseHostModelRoster,
   type SessionConfig,
+  type HostModelRosterEntry,
 } from "@audit-tools/shared";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 
@@ -286,6 +288,33 @@ export function getHostContextTokens(argv: string[]): number | null {
 /** Output-token cap the host reports for its dispatch model (handshake). */
 export function getHostOutputTokens(argv: string[]): number | null {
   return parsePositiveIntegerFlag(argv, "--host-output-tokens") ?? null;
+}
+
+/**
+ * Ordered model roster the host reports at the dispatch handshake
+ * (`--host-models`, JSON array, lowest rank first) — the multi-rank
+ * generalization of the scalar `--host-context-tokens`/`--host-output-tokens`
+ * pair. `rank` values are RELATIVE labels (`small`/`standard`/`deep`) aligned
+ * with `model_hint.tier`; windows are discovered, never guessed, and the host
+ * never names a model. Malformed input throws (shared parser) so a mistyped
+ * handshake fails loudly instead of silently downgrading to the floor.
+ */
+export function getHostModelRoster(
+  argv: string[],
+): HostModelRosterEntry[] | null {
+  const raw = getFlag(argv, "--host-models");
+  return raw ? parseHostModelRoster(raw) : null;
+}
+
+/**
+ * Opaque model identity the host reports for its dispatch model
+ * (`--host-model-id`). Used ONLY as a quota-key segment so quota learning keys
+ * on `provider/<id>` instead of `provider/*` when no model name is resolvable —
+ * never a window authority, never matched against a name table.
+ */
+export function getHostModelId(argv: string[]): string | null {
+  const value = getFlag(argv, "--host-model-id");
+  return value && value.trim().length > 0 ? value.trim() : null;
 }
 
 export function resolveRunProviderName(

@@ -188,3 +188,65 @@ test("prepareConceptualDispatch (deep): perspective count is clamped to the buil
   // readPaths = N perspectives + 1 judge
   assert.equal(dispatch.readPaths.length, CONCEPTUAL_PERSPECTIVES.length + 1);
 });
+
+// ── F4: conceptual fan-out carries model tiers ────────────────────────────────
+
+test("deep fan-out carries standard tier on perspectives and deep on the judge", async (t) => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  const dispatch = await prepareConceptualDispatch({
+    artifactsDir,
+    bundle: minimalBundle(),
+    settings: { conceptual_depth: "deep", perspectives: 3 },
+    hostCanSelectSubagentModel: true,
+  });
+  assert.deepEqual(dispatch.modelHints, {
+    perspectives: { tier: "standard", reasons: ["conceptual_perspective_ideation"] },
+    judge: { tier: "deep", reasons: ["conceptual_judge_synthesis"] },
+  });
+  const instr = dispatch.instructionLines.join("\n");
+  const perspectiveTierCount = (instr.match(/\[model_hint\.tier: standard\]/g) ?? []).length;
+  assert.equal(perspectiveTierCount, 3, "each perspective line renders its tier");
+  assert.match(instr, /independent judge.*\[model_hint\.tier: deep\]/s);
+  assert.match(instr, /Map each `model_hint\.tier`/);
+});
+
+test("tiers stay inert metadata when the host cannot select subagent models", async (t) => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  const dispatch = await prepareConceptualDispatch({
+    artifactsDir,
+    bundle: minimalBundle(),
+    settings: { conceptual_depth: "deep", perspectives: 3 },
+  });
+  assert.equal(dispatch.modelHints?.judge.tier, "deep");
+  assert.doesNotMatch(dispatch.instructionLines.join("\n"), /model_hint/);
+});
+
+test("perspective tier is overridable via settings; shallow path carries no hints", async (t) => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  const deep = await prepareConceptualDispatch({
+    artifactsDir,
+    bundle: minimalBundle(),
+    settings: { conceptual_depth: "deep", perspectives: 2, perspective_tier: "deep" },
+    hostCanSelectSubagentModel: true,
+  });
+  assert.equal(deep.modelHints?.perspectives.tier, "deep");
+
+  const shallow = await prepareConceptualDispatch({
+    artifactsDir,
+    bundle: minimalBundle(),
+    settings: { conceptual_depth: "shallow" },
+    hostCanSelectSubagentModel: true,
+  });
+  assert.equal(shallow.modelHints, undefined);
+  assert.doesNotMatch(shallow.instructionLines.join("\n"), /model_hint/);
+});
+
+test("resolveConceptualReviewSettings threads perspective_tier from session config", () => {
+  const s = resolveConceptualReviewSettings(minimalBundle(), {
+    design_review: { conceptual_depth: "deep", perspective_tier: "small" },
+  });
+  assert.equal(s.perspective_tier, "small");
+});

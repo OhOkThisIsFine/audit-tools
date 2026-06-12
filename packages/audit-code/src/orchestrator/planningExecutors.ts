@@ -18,7 +18,6 @@ import {
 } from "./taskBuilder.js";
 import {
   buildAuditPlanMetrics,
-  buildReviewPackets,
   sizeIndexFromManifest,
 } from "./reviewPackets.js";
 import { taskContentTokens } from "./reviewPacketSizing.js";
@@ -222,11 +221,6 @@ export async function runPlanningExecutor(
     ...pendingRequeueTasks.map(freezeEstimates),
   ];
 
-  const reviewPackets = buildReviewPackets(allDispatchTasks, {
-    graphBundle: bundle.graph_bundle,
-    lineIndex,
-    sizeIndex: resolvedSizeIndex,
-  });
   // Provider-neutral task-affinity graph (Phase A of the plan/dispatch seam):
   // frozen task nodes + soft weighted affinity edges. Dispatch partitions this
   // just-in-time; see docs/capability-discovery-and-tiered-dispatch-design.md.
@@ -254,7 +248,6 @@ export async function runPlanningExecutor(
       runtime_validation_report: runtimeValidationReport,
       audit_tasks: enrichedAuditTasks,
       audit_plan_metrics: auditPlanMetrics,
-      review_packets: reviewPackets,
       task_affinity_graph: taskAffinityGraph,
       requeue_tasks: requeuePayload.tasks,
       audit_report: undefined,
@@ -267,11 +260,10 @@ export async function runPlanningExecutor(
       ...(runtimeValidationReport ? ["runtime_validation_report.json"] : []),
       "audit_tasks.json",
       "audit_plan_metrics.json",
-      "review_packets.json",
       "requeue_tasks.json",
     ],
     progress_summary:
-      `Built planning artifacts; generated ${taggedAuditTasks.length} review tasks in ${reviewPackets.length} packet(s) and ${requeuePayload.task_count} requeue tasks.` +
+      `Built planning artifacts; generated ${taggedAuditTasks.length} review tasks (packets partition just-in-time at dispatch) and ${requeuePayload.task_count} requeue tasks.` +
       scopeSummary +
       (skippedTrivialPaths.length > 0
         ? ` Skipped ${skippedTrivialPaths.length} trivial path${skippedTrivialPaths.length === 1 ? "" : "s"} from semantic review.`

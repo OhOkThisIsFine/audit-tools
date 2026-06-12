@@ -323,7 +323,6 @@ function makeRvBundle(tasks) {
     graph_bundle: undefined,
     external_analyzer_results: undefined,
     audit_plan_metrics: undefined,
-    review_packets: undefined,
     requeue_tasks: undefined,
     audit_report: undefined,
     file_disposition: undefined,

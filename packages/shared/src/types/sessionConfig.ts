@@ -1,3 +1,5 @@
+import type { DispatchModelTier } from "./stepContract.js";
+
 export const PROVIDER_NAMES = [
   "auto",
   "local-subprocess",
@@ -115,6 +117,19 @@ export interface SynthesisConfig {
   narrative?: boolean;
 }
 
+/**
+ * Relative cut points (on the normalized [0,1] risk scale) that map a packet's
+ * `routing_risk` (max member risk) to a relative model rank. These are NOT
+ * model names or per-model windows — ranks stay relative and windows are
+ * discovered at the dispatch handshake (no-hardcoded-models invariant).
+ */
+export interface DispatchRoutingTiers {
+  /** routing_risk >= deep_at routes to the top rank. Default 0.66. */
+  deep_at?: number;
+  /** routing_risk >= standard_at routes to the middle rank. Default 0.33. */
+  standard_at?: number;
+}
+
 export interface DispatchConfig {
   /**
    * When `agent_count` (packets dispatched this run, after budget
@@ -140,6 +155,11 @@ export interface DispatchConfig {
    * values are discovered at handshake it defaults to DEFAULT_RISK_MASS_BUDGET.
    */
   risk_mass_budget?: number;
+  /**
+   * Override the relative risk→rank cut points used to derive each packet's
+   * `model_hint.tier` from its `routing_risk` at dispatch.
+   */
+  routing_tiers?: DispatchRoutingTiers;
 }
 
 export interface GraphConfig {
@@ -203,6 +223,13 @@ export interface DesignReviewConfig {
    * source; this config is the host/session override.
    */
   perspectives?: number;
+  /**
+   * Relative model rank for the deep conceptual pass's perspective subagents
+   * (divergent ideation rarely needs the top rank). Defaults to `"standard"`.
+   * The judge always routes `"deep"` — it merges/dedups/ranks across every
+   * perspective output, the hardest reasoning step in the pass.
+   */
+  perspective_tier?: DispatchModelTier;
 }
 
 /**

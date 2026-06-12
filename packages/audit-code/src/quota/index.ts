@@ -7,6 +7,8 @@ import type {
   BackoffState as _BackoffState,
   WaveBindingCap as _WaveBindingCap,
   DispatchCapacityPoolSummary as _DispatchCapacityPoolSummary,
+  DispatchModelTier as _DispatchModelTier,
+  HostModelRosterEntry as _HostModelRosterEntry,
 } from "@audit-tools/shared";
 
 // Re-exported from @audit-tools/shared
@@ -116,6 +118,10 @@ export interface DispatchQuota {
   cooldown_until: string | null;
   binding_cap?: _WaveBindingCap;
   capacity_pools?: _DispatchCapacityPoolSummary[];
+  /** Echo of the host-reported model roster (lowest rank first), when given. */
+  host_model_roster?: _HostModelRosterEntry[];
+  /** Per-tier packet input budgets (context − output) derived from the roster. */
+  tier_budgets?: Record<_DispatchModelTier, number>;
   quota_source_snapshot?: _QuotaUsageSnapshot | null;
   backoff_state?: _BackoffState | null;
 }

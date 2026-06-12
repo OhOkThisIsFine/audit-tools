@@ -98,6 +98,7 @@ export type {
   ObservabilityConfig,
   SynthesisConfig,
   GraphConfig,
+  DispatchRoutingTiers,
   DispatchConfig,
   DesignReviewConfig,
   AnalyzerSetting,
@@ -353,6 +354,7 @@ export type { SlidingWindowResult } from "./quota/slidingWindow.js";
 export {
   scheduleWave,
   buildProviderModelKey,
+  parseHostModelRoster,
   DEFAULT_SAFETY_MARGIN,
   DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
   DEFAULT_FIRST_CONTACT_CONCURRENCY,
@@ -362,6 +364,7 @@ export {
 export type {
   ScheduleWaveOptions,
   DiscoveredRateLimitsInput,
+  HostModelRosterEntry,
 } from "./quota/scheduler.js";
 export {
   computeDispatchCapacity,

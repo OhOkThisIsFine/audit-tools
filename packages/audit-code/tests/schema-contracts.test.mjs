@@ -9,7 +9,7 @@ import { buildRiskRegister } from "../src/extractors/risk.ts";
 import { buildSurfaceManifest } from "../src/extractors/surfaces.ts";
 import { buildGraphBundle } from "../src/extractors/graph.ts";
 import { buildRuntimeValidationTasks } from "../src/orchestrator/runtimeValidation.ts";
-import { buildAuditPlanMetrics, buildReviewPackets } from "../src/orchestrator/reviewPackets.ts";
+import { buildAuditPlanMetrics } from "../src/orchestrator/reviewPackets.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -698,7 +698,6 @@ test("strict schema contracts accept real builder output and reject unexpected f
   const unitManifestSchema = await loadSchema("unit_manifest.schema.json");
   const surfaceManifestSchema = await loadSchema("surface_manifest.schema.json");
   const graphBundleSchema = await loadSchema("graph_bundle.schema.json");
-  const reviewPacketsSchema = await loadSchema("review_packets.schema.json");
   const auditPlanMetricsSchema = await loadSchema(
     "audit_plan_metrics.schema.json",
   );
@@ -769,11 +768,6 @@ test("strict schema contracts accept real builder output and reject unexpected f
       priority: "medium",
     },
   ];
-  const reviewPackets = JSON.parse(
-    JSON.stringify(buildReviewPackets(auditTasks, { graphBundle })),
-  );
-  assertMatchesJsonSchema(reviewPacketsSchema, reviewPackets, "reviewPackets");
-
   const auditPlanMetrics = JSON.parse(
     JSON.stringify(
       buildAuditPlanMetrics(auditTasks, {
@@ -853,23 +847,6 @@ test("strict schema contracts accept real builder output and reject unexpected f
 
   assert.throws(
     () =>
-      assertMatchesJsonSchema(reviewPacketsSchema, [
-        {
-          ...reviewPackets[0],
-          key_edges: [
-            {
-              from: "src/api/auth.ts",
-              to: "infra/deploy.yml",
-              confidence: 2,
-            },
-          ],
-        },
-      ]),
-    /key_edges\[0\]\.confidence must be <= 1/i,
-  );
-
-  assert.throws(
-    () =>
       assertMatchesJsonSchema(auditPlanMetricsSchema, {
         ...auditPlanMetrics,
         packet_quality: {
@@ -882,19 +859,12 @@ test("strict schema contracts accept real builder output and reject unexpected f
 });
 
 test("planning artifact examples match published schemas", async () => {
-  const reviewPacketsSchema = await loadSchema("review_packets.schema.json");
   const riskRegisterSchema = await loadSchema("risk_register.schema.json");
   const auditPlanMetricsSchema = await loadSchema(
     "audit_plan_metrics.schema.json",
   );
   const externalAnalyzerResultsSchema = await loadSchema(
     "external_analyzer_results.schema.json",
-  );
-  const reviewPacketsExample = JSON.parse(
-    await readFile(
-      join(repoRoot, "examples", "review_packets.example.json"),
-      "utf8",
-    ),
   );
   const riskRegisterExample = JSON.parse(
     await readFile(
@@ -915,11 +885,6 @@ test("planning artifact examples match published schemas", async () => {
     ),
   );
 
-  assertMatchesJsonSchema(
-    reviewPacketsSchema,
-    reviewPacketsExample,
-    "reviewPacketsExample",
-  );
   assertMatchesJsonSchema(
     riskRegisterSchema,
     riskRegisterExample,

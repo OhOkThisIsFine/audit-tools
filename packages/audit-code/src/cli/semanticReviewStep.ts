@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { SessionConfig } from "@audit-tools/shared";
+import type { HostModelRosterEntry, SessionConfig } from "@audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { createFreshSessionProvider } from "../providers/index.js";
@@ -34,6 +34,10 @@ export async function renderSemanticReviewStep(params: {
   hostContextTokens?: number | null;
   /** Output cap the host reports for its dispatch model (handshake). */
   hostOutputTokens?: number | null;
+  /** Ordered model roster (lowest rank first); outranks the scalar pair. */
+  hostModelRoster?: HostModelRosterEntry[] | null;
+  /** Opaque model identity for the quota key when no model name resolves. */
+  hostModelId?: string | null;
   hostCanRestrictSubagentTools: boolean;
   hostCanSelectSubagentModel: boolean;
   /** Which executor selected this step; controls prompt variant. */
@@ -89,6 +93,8 @@ export async function renderSemanticReviewStep(params: {
     hostActiveSubagentLimit: params.hostMaxActiveSubagents,
     hostContextTokens: params.hostContextTokens,
     hostOutputTokens: params.hostOutputTokens,
+    hostModelRoster: params.hostModelRoster,
+    hostModelId: params.hostModelId,
   });
   const mergeCommand = mergeAndIngestCommand(artifactsDir, activeReviewRun.run_id);
   const continueCommand = nextStepCommand(root, artifactsDir);
