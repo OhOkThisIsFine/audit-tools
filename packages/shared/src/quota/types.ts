@@ -1,7 +1,7 @@
 export type LimitSource =
   | "explicit_config"
+  | "discovered_capability"
   | "cli_flags"
-  | "known_metadata"
   | "provider_default"
   | "learned"
   | "default";

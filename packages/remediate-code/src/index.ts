@@ -70,6 +70,14 @@ program
     "Maximum number of subagents the host can run concurrently",
   )
   .option(
+    "--host-context-tokens <n>",
+    "Context window of the model the host's dispatch subagents run on",
+  )
+  .option(
+    "--host-output-tokens <n>",
+    "Output-token cap of the model the host's dispatch subagents run on",
+  )
+  .option(
     "--finalize-closing",
     "Finalize a closing remediation state from a generated close_run step",
   )
@@ -92,6 +100,12 @@ program
         ),
         hostMaxConcurrent: options.hostMaxConcurrent
           ? parseInt(options.hostMaxConcurrent, 10) || undefined
+          : undefined,
+        hostContextTokens: options.hostContextTokens
+          ? parseInt(options.hostContextTokens, 10) || undefined
+          : undefined,
+        hostOutputTokens: options.hostOutputTokens
+          ? parseInt(options.hostOutputTokens, 10) || undefined
           : undefined,
         finalizeClosing: options.finalizeClosing === true,
         forceReplan: options.forceReplan === true,
@@ -119,6 +133,14 @@ program
     "Maximum number of subagents the host can run concurrently",
   )
   .option(
+    "--host-context-tokens <n>",
+    "Context window of the model the host's dispatch subagents run on",
+  )
+  .option(
+    "--host-output-tokens <n>",
+    "Output-token cap of the model the host's dispatch subagents run on",
+  )
+  .option(
     "--finalize-closing",
     "Finalize a closing remediation state from a generated close_run step",
   )
@@ -137,6 +159,12 @@ program
         ),
         hostMaxConcurrent: options.hostMaxConcurrent
           ? parseInt(options.hostMaxConcurrent, 10) || undefined
+          : undefined,
+        hostContextTokens: options.hostContextTokens
+          ? parseInt(options.hostContextTokens, 10) || undefined
+          : undefined,
+        hostOutputTokens: options.hostOutputTokens
+          ? parseInt(options.hostOutputTokens, 10) || undefined
           : undefined,
         finalizeClosing: options.finalizeClosing === true,
         forceReplan: options.forceReplan === true,

@@ -314,6 +314,51 @@ describe("scheduleWave — quota-enabled path", () => {
   });
 });
 
+describe("scheduleWave — host capability handshake (N8)", () => {
+  it("sizes resolved_limits to the host-reported window on the default path", async () => {
+    const result = await scheduleWave({
+      sessionConfig: null, // quota disabled → default early-return branch
+      itemCount: 3,
+      hostContextTokens: 200_000,
+      hostOutputTokens: 32_000,
+      env: {} as any,
+    });
+    expect(result.resolved_limits.context_tokens).toBe(200_000);
+    expect(result.resolved_limits.output_tokens).toBe(32_000);
+  });
+
+  it("falls back to the conservative 32k floor when no window is reported", async () => {
+    const result = await scheduleWave({
+      sessionConfig: null,
+      itemCount: 3,
+      env: {} as any,
+    });
+    expect(result.resolved_limits.context_tokens).toBe(32_000);
+    expect(result.resolved_limits.output_tokens).toBe(4_096);
+  });
+
+  it("lifts resolved_limits above the floor on the quota-enabled path", async () => {
+    const floor = await scheduleWave({
+      sessionConfig: { quota: { enabled: true } },
+      itemCount: 3,
+      estimatedSlotTokens: [1000, 2000, 3000],
+      env: {} as any,
+    });
+    const discovered = await scheduleWave({
+      sessionConfig: { quota: { enabled: true } },
+      itemCount: 3,
+      estimatedSlotTokens: [1000, 2000, 3000],
+      hostContextTokens: 200_000,
+      hostOutputTokens: 32_000,
+      env: {} as any,
+    });
+    // Without a handshake the discovered_capability rung is absent → conservative
+    // floor; reporting the real window sizes the budget up to it.
+    expect(floor.resolved_limits.context_tokens).toBe(32_000);
+    expect(discovered.resolved_limits.context_tokens).toBe(200_000);
+  });
+});
+
 describe("normalizeSlotTokens", () => {
   it("truncates a too-long array to count", () => {
     expect(normalizeSlotTokens([100, 200, 300], 2)).toEqual([100, 200]);

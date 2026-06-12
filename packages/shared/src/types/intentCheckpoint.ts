@@ -73,4 +73,20 @@ export interface IntentCheckpoint {
     include?: string[];
     exclude?: string[];
   };
+  /**
+   * Conceptual design-review depth, confirmed by the host during
+   * `confirm_intent`. Provider-neutral: it records *how much* conceptual review
+   * to do, never *which model* runs it (model choice is resolved JIT at dispatch
+   * against the active provider's discovered roster).
+   * - `conceptual_depth: "shallow"` (default when omitted) — a single conceptual
+   *   reviewer.
+   * - `conceptual_depth: "deep"` — fan out `perspectives` independent reviewers
+   *   with maximally dissimilar perspectives, then compile via an independent
+   *   judge.
+   * `perspectives` bounds the deep fan-out count; ignored when shallow.
+   */
+  design_review?: {
+    conceptual_depth?: "shallow" | "deep";
+    perspectives?: number;
+  };
 }

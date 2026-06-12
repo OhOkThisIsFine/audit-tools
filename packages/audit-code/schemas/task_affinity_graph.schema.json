@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task_affinity_graph.schema.json",
+  "title": "Task Affinity Graph",
+  "description": "Provider-neutral planning artifact (Phase A of the plan/dispatch seam): task nodes with frozen token/risk estimates and soft weighted affinity edges. Dispatch partitions this just-in-time; it encodes no model/packet/tier/concurrency decision.",
+  "type": "object",
+  "required": ["schema_version", "nodes", "edges"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "task-affinity-graph/v1"
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "task_id",
+          "unit_id",
+          "lens",
+          "file_paths",
+          "token_estimate",
+          "risk_estimate"
+        ],
+        "properties": {
+          "task_id": { "type": "string" },
+          "unit_id": { "type": "string" },
+          "lens": { "type": "string" },
+          "file_paths": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "token_estimate": { "type": "number", "minimum": 0 },
+          "risk_estimate": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "kind", "weight"],
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "shared_file",
+              "cross_lens_same_file",
+              "same_flow",
+              "same_unit",
+              "call_adjacent",
+              "same_dir"
+            ]
+          },
+          "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

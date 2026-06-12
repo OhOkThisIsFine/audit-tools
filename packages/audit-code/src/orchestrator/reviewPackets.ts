@@ -31,6 +31,11 @@ import {
   buildPacketGraphContext,
 } from "./reviewPacketGraph.js";
 import { sanitizeSegment } from "./selectiveDeepening/shared.js";
+import {
+  partitionTaskGraph,
+  DEFAULT_RISK_MASS_BUDGET,
+} from "./partitionTaskGraph.js";
+import type { TaskAffinityGraph } from "./taskAffinityGraph.js";
 
 // Re-exported for scope.ts, which imports the canonical path normalizer here.
 export { normalizeGraphPath };
@@ -339,7 +344,7 @@ function mergeGraphConnectedGroups(
   return result;
 }
 
-function buildPacket(
+export function buildPacket(
   tasks: AuditTask[],
   packetIndex: number,
   lineIndex?: Record<string, number>,
@@ -494,6 +499,62 @@ export function buildReviewPackets(
   options: BuildReviewPacketOptions = {},
 ): ReviewPacket[] {
   return buildReviewPacketPlanningData(tasks, options).packets;
+}
+
+export interface BuildPartitionPacketOptions {
+  /** The task-affinity graph to partition (restricted to the dispatch tasks). */
+  graph: TaskAffinityGraph;
+  /** Context-token ceiling per packet (dispatching model's input budget). */
+  contextTokenBudget: number;
+  /** Risk-mass ceiling per packet. Defaults to DEFAULT_RISK_MASS_BUDGET. */
+  riskMassBudget?: number;
+  lineIndex?: Record<string, number>;
+  sizeIndex?: Record<string, number>;
+  graphBundle?: GraphBundle;
+}
+
+/**
+ * Just-in-time packetization (Phase B): partition the provider-neutral
+ * task-affinity graph under the active model's context + risk-mass ceilings,
+ * then materialize each cluster into the same `ReviewPacket` contract the old
+ * plan-time builder emitted — so all downstream dispatch-plan / prompt /
+ * complexity / model_hint rendering is unchanged. This replaces the frozen
+ * plan-time `buildReviewPackets` packetization at the dispatch call site.
+ */
+export function buildReviewPacketsFromPartition(
+  tasks: AuditTask[],
+  options: BuildPartitionPacketOptions,
+): ReviewPacket[] {
+  const taskById = new Map(tasks.map((task) => [task.task_id, task]));
+  const graphEdges = collectGraphEdges(options.graphBundle);
+  const clusters = partitionTaskGraph(options.graph, {
+    contextTokenBudget: options.contextTokenBudget,
+    riskMassBudget: options.riskMassBudget ?? DEFAULT_RISK_MASS_BUDGET,
+    promptOverheadTokens: ESTIMATED_PACKET_PROMPT_TOKENS,
+  });
+
+  const packets: ReviewPacket[] = [];
+  let packetIndex = 0;
+  for (const cluster of clusters) {
+    const clusterTasks = cluster.task_ids
+      .map((taskId) => taskById.get(taskId))
+      .filter((task): task is AuditTask => task !== undefined)
+      .sort(compareTasksForPacket);
+    if (clusterTasks.length === 0) continue;
+    packets.push(
+      buildPacket(
+        clusterTasks,
+        packetIndex,
+        options.lineIndex,
+        options.sizeIndex,
+        graphEdges,
+        options.graphBundle,
+      ),
+    );
+    packetIndex += 1;
+  }
+
+  return packets.sort(comparePackets);
 }
 
 export function orderTasksForPacketReview(

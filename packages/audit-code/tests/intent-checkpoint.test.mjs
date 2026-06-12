@@ -157,6 +157,30 @@ await test("renderConfirmIntentPrompt includes the scope picture, target path, a
   assert.match(prompt, /audit-code next-step/);
 });
 
+await test("renderConfirmIntentPrompt asks for conceptual design-review depth (default shallow) and offers it in the JSON shape", () => {
+  const prompt = renderConfirmIntentPrompt(
+    {
+      mode: "full",
+      since: null,
+      files_in_scope: 3,
+      scope_dirs: [{ dir: "src", files: 2 }],
+      excluded_summary: [],
+      disposition_override_proposals: [],
+      lens_proposals: [],
+    },
+    {
+      intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
+      continueCommand: "audit-code next-step",
+    },
+  );
+  assert.match(prompt, /Conceptual design-review depth/);
+  assert.match(prompt, /shallow.*\(default\)/);
+  assert.match(prompt, /\bdeep\b/);
+  // The depth choice is part of the single confirmation round, and offered in the JSON shape.
+  assert.match(prompt, /Ask the conceptual design-review depth/);
+  assert.match(prompt, /"design_review":\s*\{\s*"conceptual_depth":\s*"shallow",\s*"perspectives":\s*5\s*\}/);
+});
+
 // ── Validation ──────────────────────────────────────────────────────────────
 
 await test("validateArtifactBundle accepts a well-formed checkpoint", () => {

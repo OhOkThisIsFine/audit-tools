@@ -273,6 +273,21 @@ export function getHostMaxActiveSubagents(argv: string[]): number | null {
   return parsePositiveIntegerFlag(argv, "--host-max-active-subagents") ?? null;
 }
 
+/**
+ * Context window (input tokens) the host reports for the model it will dispatch
+ * subagents to — the dispatch-time capability handshake. Outranks the static
+ * model table when sizing packets, so the partition fills the real model's
+ * window instead of the conservative 32k default.
+ */
+export function getHostContextTokens(argv: string[]): number | null {
+  return parsePositiveIntegerFlag(argv, "--host-context-tokens") ?? null;
+}
+
+/** Output-token cap the host reports for its dispatch model (handshake). */
+export function getHostOutputTokens(argv: string[]): number | null {
+  return parsePositiveIntegerFlag(argv, "--host-output-tokens") ?? null;
+}
+
 export function resolveRunProviderName(
   argv: string[],
   sessionConfig: SessionConfig,

@@ -73,6 +73,8 @@ export interface NextStepOptions {
   input?: string | string[];
   hostCanDispatchSubagents?: boolean;
   hostMaxConcurrent?: number;
+  hostContextTokens?: number | null;
+  hostOutputTokens?: number | null;
   finalizeClosing?: boolean;
   forceReplan?: boolean;
   sessionConfig?: SessionConfig | null;
@@ -931,7 +933,12 @@ Then run:
     });
 
     const runId = stateRunId(state);
-    const waveOptsImpl = { hostMaxConcurrent: options.hostMaxConcurrent, sessionConfig: sessionConfigImpl ?? null };
+    const waveOptsImpl = {
+      hostMaxConcurrent: options.hostMaxConcurrent,
+      sessionConfig: sessionConfigImpl ?? null,
+      hostContextTokens: options.hostContextTokens,
+      hostOutputTokens: options.hostOutputTokens,
+    };
     const onlyBlock = !canDispatchImpl ? implementBlocks[0].block_id : undefined;
     const dispatchPlan = await prepareImplementDispatch(
       { root, artifactsDir },

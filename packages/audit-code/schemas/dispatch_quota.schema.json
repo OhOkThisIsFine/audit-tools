@@ -55,7 +55,7 @@
     },
     "source": {
       "type": "string",
-      "enum": ["explicit_config", "cli_flags", "known_metadata", "provider_default", "learned", "default"],
+      "enum": ["explicit_config", "discovered_capability", "cli_flags", "provider_default", "learned", "default"],
       "description": "Where the resolved limits came from."
     },
     "host_concurrency_limit": {
@@ -122,7 +122,7 @@
           "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
           "source": {
             "type": "string",
-            "enum": ["explicit_config", "cli_flags", "known_metadata", "provider_default", "learned", "default"]
+            "enum": ["explicit_config", "discovered_capability", "cli_flags", "provider_default", "learned", "default"]
           },
           "resolved_limits": {
             "type": "object",
