@@ -320,10 +320,65 @@ Remediate's planning stays provider-neutral — block sizing
 **only JIT at dispatch**, consistent with the plan/dispatch seam. 3 new
 `wave-scheduler.test.ts` cases (default-path window, floor fallback, quota-enabled
 lift above floor); full suite green (remediate 1136 pass / shared 385 /
-audit-code unaffected). This was the last redesign node; remaining work is the
-follow-ons below (relative model-rank routing of packets/subagents via
-`partitionTaskGraph.routing_risk`, multi-model roster, model-identity on
-`model: null`), none blocking.
+audit-code unaffected). This was the last redesign node; the follow-ons landed
+as F1–F5 below.
+
+### Follow-ons F1–F5 (2026-06-12, branch `feat/tiered-model-routing`)
+
+**F1 — `routing_risk` drives the audit dispatch tier (DONE).** The JIT
+partition's `routing_risk` (max member risk) now rides each `ReviewPacket`
+(`buildReviewPacketsFromPartition` attaches it; plan-time packets leave it
+unset) and `resolveDispatchTier` replaces the complexity-only
+`buildDispatchModelHint` (deleted, atomic): risk-primary baseline against
+relative cut points (`deep_at` 0.66 / `standard_at` 0.33, overridable via
+`sessionConfig.dispatch.routing_tiers`, validated) with complexity signals as
+ESCALATORS ONLY (`isolated_large_file` / `critical_flow` /
+`external_analyzer_signal` / `lens_verification` / `high_estimated_tokens` floor
+deep; `sensitive_lens` / `medium_priority` floor standard — never lower).
+Reasons stay attributable (`routing_risk:NN` first, then fired escalators).
+`high_priority` dropped as an escalator: priority already seeds
+`computeRiskEstimate` (high → 0.7 ≥ deep_at). Tests: `tier-routing.test.mjs`
+replaces `dispatch-model-hint.test.mjs`.
+
+**F2 — multi-model roster handshake (DONE).** `--host-models` accepts an
+ordered JSON roster (lowest rank first) of `{rank, context_tokens,
+output_tokens}`; `rank` reuses the `DispatchModelTier` vocabulary, shared type
+`HostModelRosterEntry` + `parseHostModelRoster` single-source the contract.
+audit-code `buildDispatchPool` builds one `CapacityPool` per reported rank
+(pools/allocations/summaries carry `rank`), derives `tierBudgets` (a missing
+rank falls back to the nearest reported rank, preferring the more capable), and
+partitions **design (a): partition-then-validate** — initial partition under the
+largest window so coherent clusters aren't over-split, then
+`fitPacketsToTierBudgets` re-splits any packet whose risk-routed tier has a
+smaller window (bounded fixed-point; un-splittable packets fall to the
+tier-aware oversized warning). `dispatch-quota.json` carries the roster echo +
+`tier_budgets` + per-rank pools ordered most-capable-first. Scalar
+`--host-context-tokens`/`--host-output-tokens` stays as the single-window
+shorthand (roster wins); no handshake ⇒ conservative single pool, unchanged.
+remediate-code parity: `--host-models` on `run`/`next-step`, `scheduleWave`
+builds per-rank pools, the roster's top entry feeds the quota-disabled fallback
+window. Both skill prompts document the roster.
+
+**F3 — opaque model identity keys quota (DONE).** `--host-model-id` (both
+orchestrators) and per-roster-entry `model_id` are OPAQUE quota-key segments
+only — never window authorities, never matched to a name table. Key chain:
+`provider/<entry.model_id ?? resolved model ?? host-model-id ?? *>`; per-rank
+pools resolve quota state, cached limits, and usage snapshots per key.
+
+**F4 — conceptual fan-out carries tiers (DONE).** `prepareConceptualDispatch`
+attaches `modelHints` to the deep pass: perspectives → `standard` (divergent
+ideation; overridable via `sessionConfig.design_review.perspective_tier`), judge
+→ `deep` (merge/dedup/rank is the hardest step). Tiers render into the
+instruction lines only under `--host-can-select-subagent-model` (same guard as
+the packet path); shallow unchanged.
+
+**F5 — `review_packets.json` no longer persisted (DONE).** Dispatch rebuilds
+packets JIT; the artifact's only reader was the validator. Removed from the
+executors' writes, bundle loader, staleness dependency map, validator, and
+schemas (+ example + drift-test entries); the in-memory `ReviewPacket` type and
+`buildReviewPacketsFromPartition` remain. Requeue-folding tests re-anchored on
+`task_affinity_graph` / `audit_plan_metrics`. E2E linked smoke
+(blocked → ingest → completed → fresh rerun) green with nothing persisted.
 
 ## Resolved decisions (2026-06-12)
 
@@ -349,4 +404,16 @@ follow-ons below (relative model-rank routing of packets/subagents via
    (seam bugs are the prize); the risk-mass ceiling is tunable from real outcomes.
 5. **Deep conceptual fan-out configurable** (`design_review.perspectives`), default
    ~5 + independent judge. **Conceptual depth default: shallow.**
+6. **Tier = risk baseline + escalator floors (F1).** A packet's rank derives from
+   `routing_risk` against relative cut points; complexity can only RAISE the tier.
+   Cut points are positions on the normalized risk scale, never model names.
+7. **Roster sizing = partition-then-validate (F2, design a).** Partition once under
+   the largest reported window, then re-split per assigned tier budget — chosen
+   over partition-per-tier to preserve cross-tier affinity coherence. A tier the
+   host didn't report maps to the nearest reported rank (prefer the more capable).
+8. **Model identity is an opaque quota-key segment (F3).** `model_id` /
+   `--host-model-id` key learning as `provider/<id>`; they are never window
+   authorities and never compared to a name table.
+9. **Packets are never persisted (F5).** The task-affinity graph is the only
+   persisted dispatch surface; packets exist solely JIT at dispatch.
 ```
