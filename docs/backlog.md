@@ -109,6 +109,41 @@ rather than "where the code is today."
   downstream symptom of the scope pollution above (auditing huge JSON), but worth
   noting for any task that must read wide JSON.
 
+### Friction from 2026-06-11 dogfood self-audit
+
+- **Lens selection needs interactive user confirmation.** The `confirm_intent`
+  step proposes lens exclusions but the host auto-writes `intent_checkpoint.json`
+  without pausing for user input. Should present proposals, allow the user to
+  accept/reject/add custom lenses, then write the checkpoint. Currently users
+  can only exclude proposed lenses — no affordance for requesting unlisted ones.
+- **Conceptual design review lacks depth control.** A single subagent runs the
+  full conceptual review. Should support optional multi-reviewer depth: fan out
+  N independent reviewers with distinct philosophies (e.g. DDD purist, pragmatic
+  simplicity, security-first), then a judge compiles the strongest ideas. Maps
+  to the existing Workflow judge-panel pattern or an MCP multi-agent skill.
+- **wave_size dispatch not replaced by rolling quota-aware dispatch.** The
+  redesign spec called for rolling dispatch that adapts to learned quota, but
+  the current implementation still uses fixed `wave_size` batching (162 packets
+  across 41 waves of 4). This wastes quota on under-packed waves and can't
+  adapt mid-run to rate-limit feedback.
+- **Subagent prompts include `next-step` in allowed_commands.** Design review
+  subagents called `next-step` themselves, advancing the pipeline before the
+  host confirmed both passes were complete. The contract review agent pushed
+  past the conceptual-review gate while that agent was still running. Subagents
+  should write findings only; `next-step` is a host-only command.
+- **Canary wave skipped in fan-out dispatch.** `canary_packet_id: null` despite
+  `phase: "fan_out"` — the canary→graduate flow from the redesign isn't wired.
+  The orchestrator jumps straight to full-fleet dispatch without validating a
+  single packet first.
+- **High packet count / low tasks-per-packet ratio.** 162 packets for 228 tasks
+  (1.4 tasks/packet). The redesign's rolling dispatch should batch by unit
+  proximity to reduce dispatch overhead — many current packets contain only one
+  task, wasting a full agent context per trivial review.
+- **No quota pre-check before dispatch commitment.** The dispatch plan commits to
+  162 agents without consulting learned rate limits or provider capacity. The
+  redesign spec called for quota-aware dispatch that checks available budget
+  before sizing the fleet and adapts dynamically to 429/TPM signals mid-run.
+
 ## Deferred fixes (product bugs)
 
 ### Manual real-OpenCode validation of scoped permissions (user-owned)

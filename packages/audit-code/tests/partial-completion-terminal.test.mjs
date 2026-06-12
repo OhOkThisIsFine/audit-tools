@@ -69,8 +69,6 @@ await test("N-CE301: partial_completion_terminal present → audit_tasks_complet
       packet_count: 1,
       task_count: 1,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       partial_completion_terminal: {
         reason: "empty_pool",
         stranded_ids: ["T1"],
@@ -98,8 +96,6 @@ await test("N-CE301: livelock_guard terminal also satisfies audit_tasks_complete
       packet_count: 2,
       task_count: 2,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       partial_completion_terminal: {
         reason: "livelock_guard",
         stranded_ids: ["T2", "T3"],
@@ -123,8 +119,6 @@ await test("N-CE301: terminal only covers stranded IDs — non-stranded pending 
       packet_count: 2,
       task_count: 2,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       // Only T1 is stranded — T2 should still show as missing
       partial_completion_terminal: {
         reason: "empty_pool",
@@ -148,8 +142,6 @@ await test("N-CE301: stranded_unit_count populated from partial_completion_termi
       packet_count: 2,
       task_count: 2,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       partial_completion_terminal: {
         reason: "empty_pool",
         stranded_ids: ["T1", "T2"],
@@ -177,8 +169,6 @@ await test("N-CE301: renderAuditReportMarkdown includes partial-coverage warning
       packet_count: 2,
       task_count: 2,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       partial_completion_terminal: {
         reason: "empty_pool",
         stranded_ids: ["T1", "T2"],

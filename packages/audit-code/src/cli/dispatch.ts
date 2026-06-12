@@ -87,7 +87,7 @@ export interface DispatchFanout {
 
 /**
  * FINDING-012: pure-arithmetic fan-out summary the loader can gate on. Given the
- * number of agents (packets emitted this round, after canary/budget filtering)
+ * number of agents (packets emitted this round, after budget filtering)
  * and the resolved wave size, derive the wave count, a human-readable summary,
  * and whether the agent count exceeds the confirmation threshold (default 10).
  * No LLM call, no side effects, no prompting.
@@ -123,11 +123,7 @@ export interface PrepareDispatchResult {
   skipped_task_count: number;
   /** Subagent parallelism resolved for this dispatch run. */
   wave_size: number;
-  /** "canary" on first contact when only the top packet was emitted; "fan_out" otherwise. */
-  phase: "canary" | "fan_out";
-  /** packet_id of the emitted canary packet when phase==="canary", else null. */
-  canary_packet_id: string | null;
-  /** Total agents that will be launched this run (packet_count after canary/budget). */
+  /** Total agents that will be launched this run (packet_count after budget filtering). */
   agent_count: number;
   /** ceil(agent_count / max(1, wave_size)). */
   wave_count: number;
@@ -393,43 +389,29 @@ export function buildPendingAuditTasks(bundle: ArtifactBundle) {
 interface FilterPacketsResult {
   emitPackets: ReturnType<typeof buildReviewPackets>;
   deferredPackets: ReturnType<typeof buildReviewPackets>;
-  phase: "canary" | "fan_out";
-  canaryPacketId: string | null;
-  doCanary: boolean;
-  /** Total packets after canary filtering, before the budget cap (needed by active-dispatch state). */
-  postCanaryCount: number;
 }
 
 /**
- * Encapsulates the canary and budget-cap filtering logic.
- * Returns the subset of packets to emit this round plus deferred packets and
- * phase metadata.
+ * Encapsulates the budget-cap filtering logic.
+ * Returns the subset of packets to emit this round plus deferred packets.
  */
 export function filterPackets(
   packets: ReturnType<typeof buildReviewPackets>,
-  priorDispatchThisRun: boolean,
   sessionConfig: SessionConfig,
 ): FilterPacketsResult {
-  const firstContact = !priorDispatchThisRun;
-  const canaryEnabled = sessionConfig.dispatch?.canary !== false; // default on
-  const doCanary = firstContact && canaryEnabled && packets.length > 1;
-  const canaryPacketId = doCanary ? packets[0]!.packet_id : null;
-  const phase: "canary" | "fan_out" = doCanary ? "canary" : "fan_out";
-  const postCanaryPackets = doCanary ? packets.slice(0, 1) : packets;
-
   const maxPackets = sessionConfig.dispatch?.max_packets;
   const budgetCapped =
     typeof maxPackets === "number" &&
     maxPackets >= 0 &&
-    maxPackets < postCanaryPackets.length;
+    maxPackets < packets.length;
   const emitPackets = budgetCapped
-    ? postCanaryPackets.slice(0, maxPackets)
-    : postCanaryPackets;
+    ? packets.slice(0, maxPackets)
+    : packets;
   const deferredPackets = budgetCapped
-    ? postCanaryPackets.slice(maxPackets)
+    ? packets.slice(maxPackets)
     : [];
 
-  return { emitPackets, deferredPackets, phase, canaryPacketId, doCanary, postCanaryCount: postCanaryPackets.length };
+  return { emitPackets, deferredPackets };
 }
 
 /**
@@ -779,17 +761,6 @@ export async function prepareDispatchArtifacts(params: {
   // can optionally self-validate before calling submit-packet.
   await writePacketSchemaFiles(taskResultsDir, params.packageRoot);
 
-  // FINDING-011: read the prior dispatch state (if any) so a fan-out round can
-  // detect a preceding canary that never produced an accepted result.
-  let priorActiveDispatch: ActiveDispatchState | null = null;
-  try {
-    priorActiveDispatch = await readJsonFile<ActiveDispatchState>(
-      join(artifactsDir, ACTIVE_DISPATCH_FILENAME),
-    );
-  } catch {
-    /* none yet */
-  }
-
   const priorResultTaskIds = new Set<string>();
   for (const task of tasks) {
     if (existsSync(taskResultPath(taskResultsDir, task.task_id))) {
@@ -831,27 +802,12 @@ export async function prepareDispatchArtifacts(params: {
   }
 
   // Packets come back priority-ordered (high -> medium -> low), so packets[0] is
-  // the top-priority packet. Filtering composes in a fixed order: canary first
-  // (emit only the top packet on first contact), then the budget cap (top-K).
+  // the top-priority packet. Budget cap (top-K) is the only filter.
   //
-  // FINDING-011: single-worker canary. On first contact with a multi-packet run,
-  // dispatch only the top packet; the held-back packets' tasks keep no result
-  // file, so they re-enter `dispatchTasks` on the next call (fan-out).
-  //
-  // Graduation signal: the canary fires only on the FIRST dispatch of a run and
-  // then fans out. "First dispatch" is recorded directly by active-dispatch.json
-  // (written at the end of every prepareDispatch), so derive it from
-  // priorActiveDispatch.run_id. The previous signal — "no pending task has a
-  // result file" (priorResultTaskIds.size === 0) — silently broke: merge-and-ingest
-  // prunes accepted task_ids out of pending-audit-tasks.json, so post-canary the
-  // still-pending tasks have no result files, priorResultTaskIds stayed empty, and
-  // the canary re-fired every cycle (1 packet forever, never reaching fan-out).
-  const priorDispatchThisRun = priorActiveDispatch?.run_id === runId;
   // FINDING-013: top-K coverage budget. Budget defaults OFF (no cap) so default
-  // behavior is unchanged. Canary takes precedence: a canary round only emits 1
-  // packet regardless of the budget.
-  const { emitPackets, deferredPackets, phase, canaryPacketId, doCanary, postCanaryCount } =
-    filterPackets(packets, priorDispatchThisRun, sessionConfig);
+  // behavior is unchanged.
+  const { emitPackets, deferredPackets } =
+    filterPackets(packets, sessionConfig);
   const budgetCapped = deferredPackets.length > 0;
 
   const plan: DispatchPlanEntry[] = [];
@@ -988,26 +944,6 @@ export async function prepareDispatchArtifacts(params: {
 
   warnings.push(...collectOversizedWarnings(plan, waveSchedule));
 
-  // FINDING-011: when advancing past a canary, warn if it never produced an
-  // accepted result. submit-packet writes the per-task result file ONLY after
-  // validation passes, so presence of that file == ACCEPTED. We map the recorded
-  // canary packet_id back to its task ids via the result map and check whether
-  // those tasks now have accepted results (i.e. landed in priorResultTaskIds).
-  if (!doCanary && priorActiveDispatch?.phase === "canary" && priorActiveDispatch.canary_packet_id) {
-    const canaryAccepted =
-      priorActiveDispatch.run_id === runId
-        ? (await loadDispatchResultMap(runDir))?.entries
-            .filter((entry) => entry.packet_id === priorActiveDispatch!.canary_packet_id)
-            .every((entry) => priorResultTaskIds.has(entry.task_id)) ?? false
-        : false;
-    if (!canaryAccepted) {
-      warnings.push({
-        code: "canary_not_accepted",
-        message: `Canary packet ${priorActiveDispatch.canary_packet_id} did not produce an accepted result before fan-out; remaining packets are being dispatched anyway.`,
-      });
-    }
-  }
-
   const warningsPath = warnings.length > 0
     ? join(runDir, "dispatch-warnings.json")
     : null;
@@ -1025,11 +961,9 @@ export async function prepareDispatchArtifacts(params: {
     packet_count: plan.length,
     task_count: orderedTasks.length,
     status: "active",
-    phase,
-    canary_packet_id: canaryPacketId,
     ...(budgetCapped
       ? {
-          budget_packet_count: postCanaryCount,
+          budget_packet_count: packets.length,
           deferred_packet_ids: deferredPacketIds,
           deferred_task_ids: deferredTaskIds,
         }
@@ -1052,8 +986,6 @@ export async function prepareDispatchArtifacts(params: {
     task_count: orderedTasks.length,
     skipped_task_count: priorResultTaskIds.size,
     wave_size: dispatchCapacity.total_slots,
-    phase,
-    canary_packet_id: canaryPacketId,
     agent_count: fanout.agent_count,
     wave_count: fanout.wave_count,
     confirmation_recommended: fanout.confirmation_recommended,

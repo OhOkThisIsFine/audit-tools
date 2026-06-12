@@ -93,21 +93,7 @@ test("dispatchQuotaPath null — quota lines are absent, simple plan instruction
   );
 });
 
-test("phase:canary — canary-round line is included", () => {
-  const result = renderDispatchReviewPrompt(
-    makeParams({ phase: "canary" }),
-  );
-  assert.ok(result.includes("CANARY round"), "expected 'CANARY round' to be present");
-});
-
-test("phase:fan_out — canary-round line is absent", () => {
-  const result = renderDispatchReviewPrompt(
-    makeParams({ phase: "fan_out" }),
-  );
-  assert.ok(!result.includes("CANARY round"), "expected 'CANARY round' to be absent");
-});
-
-test("phase omitted (undefined) — canary-round line is absent", () => {
+test("prompt does not contain canary-round text", () => {
   const result = renderDispatchReviewPrompt(makeParams());
   assert.ok(!result.includes("CANARY round"), "expected 'CANARY round' to be absent");
 });

@@ -117,13 +117,7 @@ export interface SynthesisConfig {
 
 export interface DispatchConfig {
   /**
-   * Dispatch only the top-priority packet on first contact (phase "canary"),
-   * then fan out the remaining packets once the canary produces an accepted
-   * result. No-op when a run has <=1 packet. Defaults to true (on).
-   */
-  canary?: boolean;
-  /**
-   * When `agent_count` (packets dispatched this run, after canary/budget
+   * When `agent_count` (packets dispatched this run, after budget
    * filtering) exceeds this value the loader should pause and ask the user to
    * confirm before fan-out. Defaults to 10.
    */
@@ -216,7 +210,7 @@ export interface SessionConfig {
   analyzers?: Record<string, AnalyzerSetting>;
   /** Optional graph-enrichment tuning (Phase 4B edge reasoning). */
   graph?: GraphConfig;
-  /** Dispatch fan-out controls (canary, confirmation threshold, packet budget). */
+  /** Dispatch fan-out controls (confirmation threshold, packet budget). */
   dispatch?: DispatchConfig;
   /** Optional design-review tuning (focused reading list budget). */
   design_review?: DesignReviewConfig;

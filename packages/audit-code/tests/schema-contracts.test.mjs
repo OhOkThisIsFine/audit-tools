@@ -1279,34 +1279,16 @@ test("step_contract schema validates progress with all StepProgress fields (ARC-
         {
           ...baseStep,
           progress: {
-            summary: "Dispatching canary packet",
-            phase: "canary",
-            canary_packet_id: "pkt-001",
-          },
-        },
-        "stepCanary",
-      ),
-    "progress with phase=canary and canary_packet_id should pass schema",
-  );
-
-  assert.doesNotThrow(
-    () =>
-      assertMatchesJsonSchema(
-        stepContractSchema,
-        {
-          ...baseStep,
-          progress: {
-            summary: "Fan-out in progress",
-            phase: "fan_out",
+            summary: "Dispatch in progress",
             agent_count: 8,
             wave_count: 2,
             confirmation_recommended: false,
             dispatch_summary: "8 agents across 2 waves",
           },
         },
-        "stepFanOut",
+        "stepDispatch",
       ),
-    "progress with phase=fan_out and all fan-out fields should pass schema",
+    "progress with all fan-out fields should pass schema",
   );
 
   assert.doesNotThrow(

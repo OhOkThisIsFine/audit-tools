@@ -36,10 +36,6 @@ export interface StepProgress {
   completed_tasks?: number;
   /** Subagent parallelism resolved for this dispatch run. */
   wave_size?: number;
-  /** "canary" when only the top packet was emitted this round; "fan_out" otherwise. */
-  phase?: "canary" | "fan_out";
-  /** packet_id of the emitted canary packet when `phase === "canary"`. */
-  canary_packet_id?: string | null;
   /** Total agents (packets) that will be launched this run. */
   agent_count?: number;
   /** Number of dispatch waves for this run (`ceil(agent_count / wave_size)`). */

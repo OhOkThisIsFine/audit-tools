@@ -106,12 +106,10 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
 
   const passing: AuditResult[] = [];
   const failing: Array<{ task_id: string; errors: string[] }> = [];
-  // Pending tasks that were NOT dispatched this round (canary emitted only the
-  // top packet, or a budget cap deferred packets). They are not failures — they
-  // re-enter dispatch on the next round — so they are tracked separately and must
-  // never inflate rejected_count, force a non-zero exit, or gate the completion
-  // marker. Conflating them with failures is what produced the spurious
-  // "180 failed" + exit-2 on every canary merge.
+  // Pending tasks that were NOT dispatched this round (a budget cap deferred
+  // packets). They are not failures — they re-enter dispatch on the next round —
+  // so they are tracked separately and must never inflate rejected_count, force a
+  // non-zero exit, or gate the completion marker.
   const notDispatched: string[] = [];
   const seenTaskIds = new Set<string>();
   const spuriousFiles: string[] = [];
@@ -285,8 +283,8 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
     const dispatch = await readJsonFile<ActiveDispatchState>(activeDispatchPath);
     if (dispatch.run_id === runId) {
       // "merged" only when this round is fully drained: every dispatched task
-      // accepted AND nothing held back. A canary (notDispatched > 0) stays
-      // "active" because the fan-out round on the same run-id still has to merge.
+      // accepted AND nothing held back (budget-capped notDispatched > 0 stays
+      // "active" because a follow-up round on the same run-id still has to merge).
       dispatch.status =
         failing.length > 0 || notDispatched.length > 0 ? "active" : "merged";
       await writeJsonFile(activeDispatchPath, dispatch);
@@ -320,7 +318,7 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   // "partial" whenever work remains for this run — either genuine dispatched
   // failures (failing) or tasks held back this round (notDispatched). The exit
   // code below distinguishes the two: only genuine failures exit non-zero, so a
-  // canary reports status "partial" but exits 0 (progressing, not an error).
+  // budget-capped round reports status "partial" but exits 0 (progressing, not an error).
   const status = failing.length > 0 || notDispatched.length > 0
     ? "partial"
     : (result?.progress_made ? "completed" : "no_progress");
@@ -357,9 +355,9 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   // Record a completion marker for a fully-merged run so a stray re-invocation
   // replays this summary (above) instead of re-processing — and possibly
   // clobbering — terminal state. Only when this round is fully drained: genuine
-  // failures stay replayable for retry, and a canary (notDispatched > 0) must NOT
-  // be marked complete or the fan-out merge on the same run-id would short-circuit
-  // to an idempotent replay and silently drop the fan-out results.
+  // failures stay replayable for retry, and budget-capped rounds (notDispatched > 0)
+  // must NOT be marked complete or a follow-up merge on the same run-id would
+  // short-circuit to an idempotent replay and silently drop deferred results.
   //
   // Selective deepening appends new pending tasks to the SAME run-id; this marker
   // can therefore go stale once those tasks are later dispatched and answered. The
