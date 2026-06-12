@@ -13,22 +13,22 @@ const FLOW_REVIEW_LENSES: Lens[] = [
 
 export interface FlowReviewBlock {
   flow_id: string;
-  lens: Lens;
+  lens: string;
   file_paths: string[];
 }
 
-function lensPathKey(lens: Lens, path: string): string {
+function lensPathKey(lens: string, path: string): string {
   return `${lens}:${path}`;
 }
 
-function flowLensPriority(lens: Lens): number {
-  const index = FLOW_REVIEW_LENSES.indexOf(lens);
+function flowLensPriority(lens: string): number {
+  const index = (FLOW_REVIEW_LENSES as string[]).indexOf(lens);
   return index >= 0 ? index : FLOW_REVIEW_LENSES.length;
 }
 
 export function claimFlowReviewBlocks(
   criticalFlows: CriticalFlowManifest,
-  pendingByLens: Map<Lens, Set<string>>,
+  pendingByLens: Map<string, Set<string>>,
   assigned: Set<string>,
 ): FlowReviewBlock[] {
   const candidates: FlowReviewBlock[] = [];

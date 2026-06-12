@@ -65,10 +65,16 @@ test("resolved lenses are sorted in canonical LENSES registry order", () => {
   assert.ok(perfIdx < testsIdx, "performance should precede tests in canonical order");
 });
 
-test("unknown/invalid lenses in selection are silently filtered out", () => {
-  const lenses = resolveEffectiveLenses(["performance", "not_a_lens"]);
-  assert.ok(!lenses.includes("not_a_lens"));
+test("custom (non-canonical) lenses in selection are preserved after canonical lenses", () => {
+  const lenses = resolveEffectiveLenses(["performance", "whimsy"]);
+  assert.ok(lenses.includes("whimsy"));
   assert.ok(lenses.includes("performance"));
+  assert.ok(lenses.indexOf("performance") < lenses.indexOf("whimsy"));
+});
+
+test("custom lenses are de-duplicated", () => {
+  const lenses = resolveEffectiveLenses(["whimsy", "whimsy", "performance"]);
+  assert.equal(lenses.filter((l) => l === "whimsy").length, 1);
 });
 
 // ── validateLensSelection ─────────────────────────────────────────────────────
@@ -91,9 +97,10 @@ test("validateLensSelection rejects a non-array value", () => {
   assert.ok(issues.some((i) => i.severity === "error"));
 });
 
-test("validateLensSelection rejects unknown lens names", () => {
+test("validateLensSelection warns on unknown lens names (custom lenses accepted)", () => {
   const issues = validateLensSelection(["performance", "bogus_lens"]);
-  assert.ok(issues.some((i) => i.path.includes("[1]")));
+  assert.ok(issues.some((i) => i.path.includes("[1]") && i.severity === "warning"));
+  assert.ok(!issues.some((i) => i.severity === "error"));
 });
 
 // ── isMandatoryLens ───────────────────────────────────────────────────────────

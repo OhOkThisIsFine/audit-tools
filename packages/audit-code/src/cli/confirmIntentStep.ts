@@ -1,3 +1,5 @@
+import { LENSES } from "@audit-tools/shared";
+import { MANDATORY_LENSES } from "../orchestrator/lensSelection.js";
 import type { ScopePreDigest, AggregatedExcludedRow } from "../orchestrator/intentCheckpointExecutor.js";
 
 function isAggregatedRow(row: { prefix?: string; path?: string }): row is AggregatedExcludedRow {
@@ -94,9 +96,35 @@ export function renderConfirmIntentPrompt(
           "",
         ]
       : []),
+    "## Lens catalog",
+    "",
+    "The following canonical lenses are available:",
+    "",
+    ...LENSES.map((lens) => {
+      const isMandatory = (MANDATORY_LENSES as readonly string[]).includes(lens);
+      return `- **${lens}**${isMandatory ? " *(mandatory)*" : ""}`;
+    }),
+    "",
+    "Mandatory lenses (security, correctness, reliability, data_integrity) are",
+    "always included regardless of selection.",
+    "",
+    "**Custom lenses are also accepted.** You may define any additional review",
+    "perspective — the lens name is freeform. Workers receive the lens name and",
+    "the `free_form_intent` as context for custom lenses.",
+    "",
+    "## User confirmation required",
+    "",
+    "Before writing the checkpoint, confirm with the user:",
+    "",
+    "1. Present the scope summary above.",
+    "2. Present the lens selection (default: all canonical lenses, or per the",
+    "   proposals above). Ask which lenses to include/exclude and whether the",
+    "   user wants to add any custom lenses.",
+    "3. Wait for the user to confirm before proceeding.",
+    "",
     "## What to do",
     "",
-    "Write `intent_checkpoint.json` to:",
+    "After the user confirms, write `intent_checkpoint.json` to:",
     "",
     `  ${opts.intentCheckpointPath}`,
     "",
@@ -123,9 +151,9 @@ export function renderConfirmIntentPrompt(
     '  "Excluded / Out-of-Scope".',
     "- `disposition_overrides` patches the file disposition before coverage",
     "  initialization — overridden files never enter coverage at all.",
-    "- `lens_selection.exclude` removes non-mandatory lenses from task generation.",
-    "  Mandatory lenses (security, correctness, reliability, data_integrity) are",
-    "  always included regardless of this field.",
+    "- `lens_selection.include` and `lens_selection.exclude` accept both canonical",
+    "  and custom lens names. Custom lenses generate tasks using the unit's files",
+    "  with context derived from the lens name and `free_form_intent`.",
     "- Leave the optional fields out to audit the full discovered scope.",
     "",
     `Then run: ${opts.continueCommand}`,

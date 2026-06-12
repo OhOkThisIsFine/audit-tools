@@ -136,7 +136,9 @@ function packetIdFor(tasks: AuditTask[], packetIndex: number): string {
 }
 
 function compareTasksForPacket(a: AuditTask, b: AuditTask): number {
-  const lensDelta = LENS_ORDER.indexOf(a.lens) - LENS_ORDER.indexOf(b.lens);
+  const aIdx = LENS_ORDER.indexOf(a.lens as Lens);
+  const bIdx = LENS_ORDER.indexOf(b.lens as Lens);
+  const lensDelta = (aIdx === -1 ? LENS_ORDER.length : aIdx) - (bIdx === -1 ? LENS_ORDER.length : bIdx);
   if (lensDelta !== 0) return lensDelta;
   return a.task_id.localeCompare(b.task_id);
 }
@@ -783,7 +785,7 @@ export function buildAuditPlanMetrics(
     0,
   );
   const uniqueFiles = new Set(tasks.flatMap((task) => task.file_paths));
-  const lensTaskCounts: Partial<Record<Lens, number>> = {};
+  const lensTaskCounts: Record<string, number> = {};
   const priorityTaskCounts: AuditPlanMetrics["priority_task_counts"] = {
     high: 0,
     medium: 0,

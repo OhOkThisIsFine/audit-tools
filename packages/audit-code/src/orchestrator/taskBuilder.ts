@@ -41,22 +41,22 @@ export interface BuildChunkedTaskOptions {
    * Default: 250. Set to 0 to disable tiny-test batching.
    */
   tiny_test_file_lines?: number;
-  limit_lenses?: Lens[];
+  limit_lenses?: string[];
   /**
    * Lenses whose tasks should have their priority elevated by one tier
    * (low→medium, medium→high). Derived from free_form_intent at planning time;
    * never promoted above 'high'.
    */
-  intent_priority_boost?: Lens[];
+  intent_priority_boost?: string[];
   external_analyzer_results?: ExternalAnalyzerResults;
   critical_flows?: CriticalFlowManifest;
 }
 
 function taskPriority(
   hasExternalSignal: boolean,
-  lens: Lens,
+  lens: string,
   isCriticalFlow = false,
-  intentBoostLenses?: Set<Lens>,
+  intentBoostLenses?: Set<string>,
 ): "high" | "medium" | "low" {
   let base: "high" | "medium" | "low";
   if (isCriticalFlow) {
@@ -84,7 +84,7 @@ function taskPriority(
   return base;
 }
 
-function pickAnalyzerLens(category: string): Lens {
+function pickAnalyzerLens(category: string): string {
   const normalized = category.toLowerCase();
   if (
     normalized.includes("security") ||
@@ -174,7 +174,7 @@ function addTaskBlock(
     scopeId: string;
     unitId: string;
     passId: string;
-    lens: Lens;
+    lens: string;
     filePaths: string[];
     priority: AuditTask["priority"];
     tags: string[];
@@ -310,7 +310,7 @@ export function buildChunkedAuditTasks(
   const coverageByPath = new Map(
     coverageMatrix.files.map((file) => [file.path, file]),
   );
-  const pendingByLens = new Map<Lens, Set<string>>();
+  const pendingByLens = new Map<string, Set<string>>();
 
   for (const file of coverageMatrix.files) {
     if (file.audit_status === "excluded") {
@@ -341,7 +341,7 @@ export function buildChunkedAuditTasks(
   }
 
   const intentBoostSet = options.intent_priority_boost && options.intent_priority_boost.length > 0
-    ? new Set<Lens>(options.intent_priority_boost)
+    ? new Set<string>(options.intent_priority_boost)
     : undefined;
 
   const budgetLimits: TaskBudgetLimits = { maxTaskLines, maxTaskFiles };

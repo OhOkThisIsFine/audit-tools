@@ -35,9 +35,10 @@ test("sortLenses returns lenses in LENS_ORDER canonical order, ignoring input or
   ]);
 });
 
-test("sortLenses filters out lenses not present in LENS_ORDER", () => {
+test("sortLenses preserves custom lenses after canonical lenses", () => {
   assert.deepEqual(sortLenses(["correctness", "unknown_lens"]), [
     "correctness",
+    "unknown_lens",
   ]);
   assert.deepEqual(sortLenses([]), []);
 });

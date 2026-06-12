@@ -17,7 +17,7 @@ const DEFAULT_LENS_ORDER: Lens[] = [
 
 export interface TaskBuildOptions {
   pass_prefix?: string;
-  limit_lenses?: Lens[];
+  limit_lenses?: string[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -33,9 +33,9 @@ function assertStringArray(
   }
 }
 
-function assertLensArray(value: unknown, label: string): asserts value is Lens[] {
-  if (!Array.isArray(value) || value.some((item) => !isLens(item))) {
-    throw new TypeError(`${label} must be an array of supported lenses.`);
+function assertLensArray(value: unknown, label: string): asserts value is string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new TypeError(`${label} must be an array of strings.`);
   }
 }
 
@@ -64,7 +64,7 @@ function assertUnitManifest(
 
 function normalizedOptions(rawOptions: unknown): {
   passPrefix: string;
-  allowed: Set<Lens>;
+  allowed: Set<string> | null;
 } {
   const options = coerceJsonObjectArg<Record<string, unknown>>(
     rawOptions as Record<string, unknown> | string | undefined,
@@ -80,7 +80,7 @@ function normalizedOptions(rawOptions: unknown): {
 
   return {
     passPrefix: options.pass_prefix ?? "pass",
-    allowed: new Set(options.limit_lenses ?? DEFAULT_LENS_ORDER),
+    allowed: options.limit_lenses ? new Set(options.limit_lenses as string[]) : null,
   };
 }
 
@@ -94,7 +94,7 @@ export function buildAuditTasks(
 
   for (const unit of unitManifest.units) {
     for (const lens of unit.required_lenses) {
-      if (!allowed.has(lens)) {
+      if (allowed && !allowed.has(lens)) {
         continue;
       }
 
