@@ -187,11 +187,13 @@ export interface DesignReviewConfig {
   max_units?: number;
   /**
    * Controls the depth of the conceptual design review pass.
-   * - `"standard"` (default): single-agent conceptual review.
-   * - `"deep"`: instructs the host to fan out 3-5 independent reviewers with
-   *   maximally dissimilar perspectives, then compile via a judge.
+   * - `"shallow"` (default): single-agent conceptual review.
+   * - `"deep"`: instructs the host to fan out independent reviewers with
+   *   maximally dissimilar perspectives, then compile via an independent judge.
+   * Mirrors `IntentCheckpoint.design_review.conceptual_depth`; the checkpoint is
+   * the user-confirmed source and this config the host/session override.
    */
-  conceptual_depth?: "standard" | "deep";
+  conceptual_depth?: "shallow" | "deep";
 }
 
 /**
