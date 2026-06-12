@@ -239,6 +239,8 @@ This was the **last redesign node.** Remaining items are non-blocking follow-ons
 
 ## NEXT: follow-ons (none blocking)
 
+> **Fully specified in [handoff-tiered-dispatch-followons.md](handoff-tiered-dispatch-followons.md)** — nodes F1–F5 with exact hooks, acceptance tests, and a whole-set definition of done. Summary below.
+
 - **Relative model-rank routing.** `partitionTaskGraph.routing_risk` is computed
   per packet but nothing consumes it for model selection yet (audit's deep
   conceptual fan-out dispatches *subagents*, not *models*). Wire packet/subagent
