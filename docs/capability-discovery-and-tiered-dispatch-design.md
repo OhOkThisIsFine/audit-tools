@@ -229,13 +229,34 @@ partitioner is not yet wired, so the tree stays green and resumable):
   (harmless; `buildAuditPlanMetrics`/`operatorHandoff` still build packets for
   metrics). Stripping it as a persisted artifact is its own later node.
 
-**Next: N5 (capability handshake — makes the budget real).** Extend
-`provider_confirmation` so the host reports discovered models + context windows +
-real concurrency. **Retire `KNOWN_MODEL_LIMITS`** as a source of truth; fix the
-`model: null` / 32k-default path so `buildDispatchPool`'s `contextBudgetTokens`
-reflects the real model (e.g. 200k) instead of the 32k fallback — at which point
-the 163-packet over-split collapses to ~30. Then **N6** condensed confirm_intent,
-**N7** deep conceptual fan-out, **N8** remediate-code parity.
+- **N5a** — **discovered-capability threading (shared), landed.** `resolveLimits`
+  gains a `discovered_capability` rung between explicit config and the static
+  known-model table: a host-reported context/output window outranks the hardcoded
+  table and the 32k default. `DiscoveredRateLimitsInput`/`DiscoveredRateLimits`
+  gain `context_tokens`/`output_tokens`; `scheduleWave` forwards `discoveredLimits`
+  into `resolveLimits`; `LimitSource` gains `discovered_capability`. Additive —
+  nothing populated the window yet (N5b does). Scheduler tests cover the rung.
+- **N5b** — **capability handshake wired into dispatch, landed.** The host reports
+  its dispatch model's real window via `--host-context-tokens` /
+  `--host-output-tokens` (alongside `--host-max-active-subagents`), plumbed through
+  `next-step` → `renderSemanticReviewStep` → `prepareDispatchArtifacts` →
+  `buildDispatchPool`, which merges them FIRST into the pool's `discoveredLimits`
+  (`source: "host_capability"`). N5a's rung then sizes `contextBudgetTokens` to the
+  real window. The ephemeral `dispatch-quota.json` records it
+  (`source: "discovered_capability"`, real `context_tokens`). The audit-code skill
+  prompt now instructs the host to discover + report these. Integration test: a
+  cluster the 32k default splits to 2 packets packs into 1 under a reported 200k
+  window. The `163 → ~30` collapse now happens whenever the host reports its window.
+
+**Next: N5c — retire `KNOWN_MODEL_LIMITS` as authority.** With discovered
+capabilities authoritative, delete the static-table rung from `resolveLimits`
+(`lookupKnownModel`/`lookupModelLimits`) and the `PROVIDER_DEFAULT_HOST_MODEL`
+hardcoded model id (`shared/src/quota/limits.ts`), plus the table itself
+(`shared/src/tokens.ts`). Note: `resolveContextBudget` in `tokens.ts` is also used
+by remediate-code's plan phase — that consumer sweep overlaps **N8** (remediate
+parity), so N5c + N8 may land together. Headless with no reported window honestly
+falls to the conservative default (not a hardcoded 200k) — that is correct, not a
+regression. Then **N6** condensed confirm_intent, **N7** deep conceptual fan-out.
 
 ## Resolved decisions (2026-06-12)
 

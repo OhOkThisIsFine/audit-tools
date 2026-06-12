@@ -3,7 +3,7 @@
 **Date:** 2026-06-12
 **Branch:** `feat/provider-neutral-task-graph` (pushed to `audit-tools` remote)
 **Spec:** [capability-discovery-and-tiered-dispatch-design.md](capability-discovery-and-tiered-dispatch-design.md) — read this first; it is the design of record.
-**Status:** Phase-A data model + Phase-B core algorithm + **N4b (the keystone dispatch swap) landed green.** Dispatch now packetizes JIT by partitioning the task-affinity graph under the dispatching model's context + risk-mass ceilings, quota-before-packetization. Next is N5 (capability handshake — makes the budget real). See the spec's Implementation-progress section for the N4b detail.
+**Status:** Phase-A data model + Phase-B core (N4b) + **N5a/N5b (capability handshake) landed green.** Dispatch packetizes JIT under the dispatching model's context + risk-mass ceilings, and the host now reports its real context window (`--host-context-tokens`/`--host-output-tokens`) so the budget reflects the real model instead of the 32k floor. Next is **N5c** (retire `KNOWN_MODEL_LIMITS` as authority — overlaps N8 remediate parity). See the spec's Implementation-progress section for the per-node detail.
 
 ---
 

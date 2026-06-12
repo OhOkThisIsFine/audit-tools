@@ -626,6 +626,10 @@ async function buildDispatchPool(params: {
   hostModel: string | null | undefined;
   queryLimits: ((model: string | null) => Promise<ProviderRateLimits | null>) | undefined;
   hostActiveSubagentLimit: number | null | undefined;
+  /** Context window the host reports for its dispatch model (handshake). */
+  hostContextTokens?: number | null;
+  /** Output cap the host reports for its dispatch model (handshake). */
+  hostOutputTokens?: number | null;
 }): Promise<ResolvedDispatchPool> {
   const { sessionConfig, queryLimits, hostActiveSubagentLimit } = params;
   const quotaProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
@@ -648,7 +652,24 @@ async function buildDispatchPool(params: {
       .catch(() => null)
     ?? null;
   const dispatchCachedLimits = await lookupDiscoveredLimits(quotaProviderKey).catch(() => null);
-  const discoveredLimits = mergeDiscoveredLimits(providerLimits, dispatchCachedLimits);
+  // The capability handshake: the host reported its dispatch model's real
+  // context/output window this session. Merged FIRST so it outranks the queried
+  // and cached limits for context/output (N5a's discovered-capability rung then
+  // sizes the partition to the real window). RPM/TPM stay null here and fill
+  // from the queried/cached sources.
+  const hostCapabilityLimits: DiscoveredRateLimits | null =
+    params.hostContextTokens != null || params.hostOutputTokens != null
+      ? {
+          context_tokens: params.hostContextTokens ?? null,
+          output_tokens: params.hostOutputTokens ?? null,
+          source: "host_capability",
+        }
+      : null;
+  const discoveredLimits = mergeDiscoveredLimits(
+    hostCapabilityLimits,
+    providerLimits,
+    dispatchCachedLimits,
+  );
   const halfLifeHours =
     sessionConfig.quota?.empirical_half_life_hours ??
     DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
@@ -786,6 +807,10 @@ export async function prepareDispatchArtifacts(params: {
   hostModel?: string | null;
   queryLimits?: (model: string | null) => Promise<ProviderRateLimits | null>;
   hostActiveSubagentLimit?: number | null;
+  /** Context window the host reports for its dispatch model (handshake). */
+  hostContextTokens?: number | null;
+  /** Output cap the host reports for its dispatch model (handshake). */
+  hostOutputTokens?: number | null;
 }): Promise<PrepareDispatchResult> {
   const runId = params.runId;
   const artifactsDir = params.artifactsDir;
@@ -855,6 +880,8 @@ export async function prepareDispatchArtifacts(params: {
     hostModel: params.hostModel,
     queryLimits: params.queryLimits,
     hostActiveSubagentLimit: params.hostActiveSubagentLimit,
+    hostContextTokens: params.hostContextTokens,
+    hostOutputTokens: params.hostOutputTokens,
   });
   const taskGraph = resolveDispatchTaskGraph(bundle, orderedTasks);
   const packets = buildReviewPacketsFromPartition(orderedTasks, {
