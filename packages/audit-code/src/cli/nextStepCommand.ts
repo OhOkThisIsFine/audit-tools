@@ -843,7 +843,10 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     const continueCommand = nextStepCommand(root, artifactsDir);
     const contractResultsPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
     const conceptualResultsPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
-    const reviewOptions = { max_units: sessionConfig.design_review?.max_units };
+    const reviewOptions = {
+      max_units: sessionConfig.design_review?.max_units,
+      conceptual_depth: sessionConfig.design_review?.conceptual_depth,
+    };
 
     const contractPromptText = [
       renderContractReviewPrompt(result.bundle, reviewOptions),
@@ -955,7 +958,10 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     const continueCommand = nextStepCommand(root, artifactsDir);
     const conceptualResultsPath = join(artifactsDir, "incoming", "design-review-conceptual-findings.json");
     const prompt = [
-      renderConceptualReviewPrompt(result.bundle, { max_units: sessionConfig.design_review?.max_units }),
+      renderConceptualReviewPrompt(result.bundle, {
+        max_units: sessionConfig.design_review?.max_units,
+        conceptual_depth: sessionConfig.design_review?.conceptual_depth,
+      }),
       "## Results path",
       "",
       "Write the JSON array of conceptual-review findings to:",

@@ -175,6 +175,13 @@ export interface DesignReviewConfig {
    * Defaults to a value that scales with repo size (see renderDesignReviewPrompt).
    */
   max_units?: number;
+  /**
+   * Controls the depth of the conceptual design review pass.
+   * - `"standard"` (default): single-agent conceptual review.
+   * - `"deep"`: instructs the host to fan out 3-5 independent reviewers with
+   *   maximally dissimilar perspectives, then compile via a judge.
+   */
+  conceptual_depth?: "standard" | "deep";
 }
 
 /**
