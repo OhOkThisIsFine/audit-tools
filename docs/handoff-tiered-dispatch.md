@@ -35,7 +35,10 @@ Binding rules (also in CLAUDE.md Conventions + memory `model-provider-ide-agnost
 | N1 — frozen estimates on tasks | `7ce4da8c` | `types.ts` (AuditTask.token_estimate/risk_estimate), `auditTaskUtils.computeRiskEstimate`, `planningExecutors` enrich, `schemas/audit_task.schema.json`, `tests/audit-task-utils.test.mjs` |
 | N2 — task-affinity graph | `79ff565a` | `orchestrator/taskAffinityGraph.ts`, `io/artifacts.ts`, `orchestrator/dependencyMap.ts`, `schemas/task_affinity_graph.schema.json`, `tests/task-affinity-graph.test.mjs` |
 | N4a — partition algorithm | `2dcc6c30` | `orchestrator/partitionTaskGraph.ts`, `tests/partition-task-graph.test.mjs` |
-| docs | `d83bfdfb` | spec progress section |
+| N4b — partition wired into dispatch | `1e22fd06` | `cli/dispatch.ts`, `orchestrator/reviewPackets.ts`, `orchestrator/taskAffinityGraph.ts`, `orchestrator/partitionTaskGraph.ts`, `shared/types/sessionConfig.ts`, `tests/dispatch-features.test.mjs` |
+| N5a — discovered-capability threading (shared) | `17ef3e02` | `shared/quota/limits.ts`, `shared/quota/scheduler.ts`, `shared/quota/types.ts`, `shared/tests/scheduler.test.mjs` |
+| N5b — handshake wired into dispatch budget | `b5ac76d9` | `cli/{args,dispatch,prepareDispatchCommand,semanticReviewStep,nextStepCommand}.ts`, `quota/discoveredLimits.ts`, `skills/audit-code/audit-code.prompt.md`, `tests/dispatch-features.test.mjs` |
+| docs | `d83bfdfb` (+ inline in above) | spec progress section |
 
 Verify green before continuing:
 ```
@@ -85,20 +88,62 @@ it); stripping it as a persisted artifact is a later node.
 
 ---
 
-## NEXT: N5 — capability handshake (makes the budget real)
+## DONE: N5a/N5b — capability handshake makes the budget real
 
-Until N5, `buildDispatchPool` still resolves `model: null` → `local-subprocess`
-→ 32k/4k default, so the partition splits to ~163 packets at 32k. N5 makes the
-budget real:
+The host now reports its dispatch model's real context window at the handshake,
+so packets fill the real window instead of the conservative 32k floor.
 
-- **N5 — capability handshake (makes the budget real).** Extend the existing
-  `provider_confirmation` step so the host reports its discovered models + context
-  windows + real concurrency. **Retire `KNOWN_MODEL_LIMITS`** (`shared/src/tokens.ts`)
-  as a source of truth — read discovered capabilities instead. Fix `model: null`:
-  host-subagent dispatch resolved to the `local-subprocess` pool with no model
-  identity (`resolveHostModel`, `shared/src/quota/limits.ts:68`; `PROVIDER_DEFAULT_HOST_MODEL`).
-  After N5, N4b's `contextTokenBudget` reflects the real model (e.g. 200k) instead of
-  the 32k default → the 163-packet over-split collapses to ~30.
+- **N5a (shared):** `resolveLimits` gains a `discovered_capability` rung between
+  explicit per-model config and the static known-model table — a reported
+  context/output window outranks the hardcoded table and the 32k default.
+  `DiscoveredRateLimitsInput`/`DiscoveredRateLimits` gain
+  `context_tokens`/`output_tokens`; `scheduleWave` forwards `discoveredLimits` into
+  `resolveLimits`; `LimitSource` gains `discovered_capability`. Additive — nothing
+  populated the window until N5b. Three scheduler tests cover the rung.
+- **N5b (audit-code):** new `--host-context-tokens` / `--host-output-tokens` flags
+  (`getHostContextTokens`/`getHostOutputTokens`), reported alongside
+  `--host-max-active-subagents` on every `next-step`. Plumbed
+  `next-step → renderSemanticReviewStep → prepareDispatchArtifacts →
+  buildDispatchPool`, which merges them FIRST into the pool's `discoveredLimits`
+  (`source: "host_capability"`). N5a's rung then sizes `contextBudgetTokens` to the
+  real window. `dispatch-quota.json` records it (`source: "discovered_capability"`,
+  real `context_tokens`). Skill prompt instructs the host to discover + report its
+  window; omitting falls back to the conservative default. Integration test: a
+  2×20000-token shared-file cluster splits to 2 packets at the 32k default, packs
+  into 1 under a reported 200k window. The `163 → ~30` collapse happens whenever
+  the host reports its window. Full suite green (1789 pass).
+
+---
+
+## NEXT: N5c — retire `KNOWN_MODEL_LIMITS` as authority
+
+This is the one remaining N5 piece, deliberately deferred because it touches the
+model-agnostic core AND a second package (remediate). With discovered
+capabilities now authoritative for audit dispatch:
+
+- Delete the **static known-model rung** from `resolveLimits`
+  (`shared/src/quota/limits.ts`): remove the `lookupKnownModel(hostModel)` branch
+  (rung 2). After N5a/N5b, discovered capability supplies the real window; the
+  table only ever produced a *guessed* 200k for named models — exactly the
+  hardcoded model knowledge the binding rules forbid.
+- Delete `PROVIDER_DEFAULT_HOST_MODEL` (`limits.ts:51`, the hardcoded
+  `anthropic/claude-opus-4-8` id) and the `KNOWN_MODEL_LIMITS` table +
+  `lookupModelLimits` (`shared/src/tokens.ts`), plus the barrel re-exports
+  (`shared/src/index.ts`) and `tokens.test.mjs`.
+- **Consumer sweep (the catch):** `resolveContextBudget` in `tokens.ts` is also
+  used by **remediate-code's plan phase** (`packages/remediate-code/src/phases/plan.ts:347`
+  → `resolveContextBudgetFromConfig`). Removing the table changes its fallback, so
+  remediate must move to the same discovered-capability channel — this overlaps
+  **N8 (remediate parity)**, so N5c + N8 likely land together as one atomic node.
+- **Headless honesty:** with no reported window, resolution falls to the
+  conservative default (32k), NOT a hardcoded 200k. That is correct, not a
+  regression — headless can't discover, so it shouldn't pretend.
+- **Atomic-replace:** delete the table in the same commit that makes discovered
+  capability the sole authority; green build+test for BOTH packages
+  (`env -u CLAUDECODE npm run check` at root + each suite).
+
+Then the remaining nodes:
+
 - **N6 — condensed confirm_intent roundtrip.** One `AskUserQuestion` covering scope
   + lenses + conceptual depth (default shallow). Add `design_review?: {conceptual_depth, perspectives}`
   to `IntentCheckpoint` (`shared/src/types/intentCheckpoint.ts`). Render in
@@ -108,7 +153,17 @@ budget real:
   subagents + an **independent** judge/merge, configurable count. Wire depth from the
   checkpoint into the `design_review_parallel` dispatch (`nextStepCommand.ts:840-919`).
 - **N8 — remediate-code parity.** Mirror the plan/dispatch seam + JIT into
-  remediate-code's implement/verify dispatch.
+  remediate-code's implement/verify dispatch (folds in the N5c consumer sweep).
+
+### N5b follow-ons worth noting (not blocking)
+- **Model identity on `model: null`.** N5b threads the context *window* but not a
+  model *id* when `resolveHostModel` returns null; quota learning still keys on
+  `provider/*`. A handshake-reported opaque model id (for the quota key + multi-pool
+  routing) is a clean follow-on — fold into N7's tiered routing or N5c.
+- **Multi-model roster + tiered routing.** N5b reports a single active window. The
+  spec's full vision (opaque ordered model list, route each packet by max-risk →
+  relative rank) is **N7 territory** — `partitionTaskGraph` already computes
+  `routing_risk` per packet; nothing consumes it for model selection yet.
 
 ---
 
