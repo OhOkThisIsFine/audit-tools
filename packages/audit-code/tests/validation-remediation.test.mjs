@@ -166,56 +166,6 @@ test("validateArtifactBundle rejects invalid audit task line ranges", () => {
   );
 });
 
-test("validateArtifactBundle rejects review packets missing listed file line counts", () => {
-  const packet = {
-    packet_id: "packet-1",
-    task_ids: ["task-1"],
-    unit_ids: ["unit-1"],
-    pass_ids: ["pass:security"],
-    lenses: ["security"],
-    file_paths: ["src/api/auth.ts", "src/lib/session.ts"],
-    file_line_counts: { "src/api/auth.ts": 12 },
-    total_lines: 12,
-    priority: "high",
-    quality: {
-      cohesion_score: 1,
-      internal_edge_count: 0,
-      boundary_edge_count: 0,
-      unexplained_file_count: 0,
-    },
-    rationale: "Review auth.",
-    estimated_tokens: 1000,
-  };
-
-  const issues = validateArtifactBundle({ review_packets: [packet] });
-  assert.ok(
-    issues.some(
-      (issue) =>
-        issue.path === "review_packets:packet-1" &&
-        /every listed file must have a corresponding file_line_counts entry/i.test(
-          issue.message,
-        ) &&
-        /src\/lib\/session\.ts/i.test(issue.message),
-    ),
-  );
-
-  assert.deepEqual(
-    validateArtifactBundle({
-      review_packets: [
-        {
-          ...packet,
-          file_line_counts: {
-            "src/api/auth.ts": 12,
-            "src/lib/session.ts": 8,
-          },
-          total_lines: 20,
-        },
-      ],
-    }),
-    [],
-  );
-});
-
 test("validateAuditResults exposes a shared path alias for empty evidence failures", () => {
   const issues = validateAuditResults(
     [

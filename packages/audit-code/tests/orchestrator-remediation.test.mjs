@@ -178,7 +178,6 @@ test("external analyzer import clears planning-derived outputs in memory", () =>
       flow_coverage: { flows: [] },
       audit_tasks: [],
       audit_plan_metrics: { task_count: 0, packet_count: 0, priority_counts: {} },
-      review_packets: [],
       requeue_tasks: [],
       audit_report: "# stale\n",
     },
@@ -191,7 +190,6 @@ test("external analyzer import clears planning-derived outputs in memory", () =>
   assert.equal(run.updated.external_analyzer_results.tool, "semgrep");
   assert.equal(run.updated.coverage_matrix, undefined);
   assert.equal(run.updated.audit_tasks, undefined);
-  assert.equal(run.updated.review_packets, undefined);
   assert.equal(run.updated.requeue_tasks, undefined);
   assert.equal(run.updated.audit_report, undefined);
 });
@@ -674,7 +672,7 @@ test("result ingestion appends selective deepening tasks to the next review plan
   assert.equal(run.updated.audit_tasks[0].status, "complete");
   assert.equal(run.updated.audit_tasks[1].status, "pending");
   assert.ok(run.updated.audit_tasks[1].tags.includes("selective_deepening"));
-  assert.ok(run.artifacts_written.includes("review_packets.json"));
+  assert.ok(run.artifacts_written.includes("audit_plan_metrics.json"));
   assert.match(run.progress_summary, /selective deepening task/i);
 });
 
@@ -740,7 +738,7 @@ test("runtime validation updates append disagreement follow-ups to the next revi
   const followup = run.updated.audit_tasks[1];
   assert.ok(followup.tags.includes("trigger:runtime_validation_disagreement"));
   assert.equal(followup.status, "pending");
-  assert.ok(run.artifacts_written.includes("review_packets.json"));
+  assert.ok(run.artifacts_written.includes("audit_plan_metrics.json"));
   assert.match(run.progress_summary, /selective deepening task/i);
 });
 
@@ -1844,7 +1842,7 @@ const { runPlanningExecutor } = await import(
   "../src/orchestrator/planningExecutors.ts"
 );
 
-test("planning executor folds pending requeue tasks into review_packets", async () => {
+test("planning executor folds pending requeue tasks into the dispatch surface", async () => {
   const tmpRoot = await mkdtemp(join(tmpdir(), "planning-requeue-"));
   try {
     const bundle = {
@@ -1872,25 +1870,26 @@ test("planning executor folds pending requeue tasks into review_packets", async 
     const lineIndex = { "src/api/auth.ts": 50 };
     const result = await runPlanningExecutor(bundle, tmpRoot, lineIndex);
 
-    // review_packets must be present and non-empty
-    assert.ok(Array.isArray(result.updated.review_packets));
+    // Packets are partitioned just-in-time at dispatch (never persisted); the
+    // planning-time dispatch surface is the task-affinity graph.
+    assert.ok(Array.isArray(result.updated.task_affinity_graph?.nodes));
     assert.ok(
-      result.updated.review_packets.length > 0,
-      "expected at least one review packet",
+      result.updated.task_affinity_graph.nodes.length > 0,
+      "expected at least one task-affinity node",
     );
 
     // The requeue payload is built before folding; any pending requeue task
-    // file paths must appear in review_packets
-    const packetFilePaths = new Set(
-      result.updated.review_packets.flatMap((p) => p.file_paths),
+    // file paths must appear in the dispatch surface
+    const dispatchFilePaths = new Set(
+      result.updated.task_affinity_graph.nodes.flatMap((n) => n.file_paths),
     );
     for (const requeueTask of (result.updated.requeue_tasks ?? []).filter(
       (t) => t.status === "pending",
     )) {
       for (const path of requeueTask.file_paths) {
         assert.ok(
-          packetFilePaths.has(path),
-          `requeue task path "${path}" must appear in at least one review packet`,
+          dispatchFilePaths.has(path),
+          `requeue task path "${path}" must appear in the task-affinity graph`,
         );
       }
     }
@@ -1899,10 +1898,11 @@ test("planning executor folds pending requeue tasks into review_packets", async 
   }
 });
 
-test("ingestion executor folds pending requeue tasks for uncovered files into review_packets", () => {
+test("ingestion executor folds pending requeue tasks for uncovered files into the dispatch surface", () => {
   // Scenario: auth.ts is ingested (coverage complete), utils.ts has no task
   // and remains uncovered → buildRequeuePayload generates a pending task for
-  // it → that task must appear in review_packets.
+  // it → that task must count toward the refreshed plan metrics (packets
+  // themselves are partitioned just-in-time at dispatch).
   const authTask = {
     task_id: "src-api-auth:security",
     unit_id: "src-api-auth",
@@ -1957,15 +1957,22 @@ test("ingestion executor folds pending requeue tasks for uncovered files into re
   assert.ok(requeueTask, "expected a pending requeue task for src/lib/utils.ts");
   assert.equal(requeueTask.status, "pending");
 
-  // The requeue task must appear in a review packet so dispatch actually covers it
-  const packetFilePaths = new Set(
-    (run.updated.review_packets ?? []).flatMap((p) => p.file_paths),
+  // The requeue task must count toward the dispatch surface so JIT
+  // packetization actually covers it: refreshed metrics span the persisted
+  // tasks PLUS every pending requeue task not already tracked.
+  const trackedIds = new Set(run.updated.audit_tasks.map((t) => t.task_id));
+  const foldedRequeue = (run.updated.requeue_tasks ?? []).filter(
+    (t) => t.status === "pending" && !trackedIds.has(t.task_id),
   );
   assert.ok(
-    packetFilePaths.has("src/lib/utils.ts"),
-    "src/lib/utils.ts from requeue task must appear in review_packets",
+    foldedRequeue.some((t) => t.file_paths.includes("src/lib/utils.ts")),
+    "utils requeue task must be part of the folded dispatch surface",
   );
-  assert.ok(run.artifacts_written.includes("review_packets.json"));
+  assert.equal(
+    run.updated.audit_plan_metrics.task_count,
+    run.updated.audit_tasks.length + foldedRequeue.length,
+  );
+  assert.ok(run.artifacts_written.includes("audit_plan_metrics.json"));
 });
 
 test("ingestion executor deduplicates requeue tasks already present in audit_tasks", () => {
@@ -2024,13 +2031,17 @@ test("ingestion executor deduplicates requeue tasks already present in audit_tas
     [],
   );
 
-  // review_packets must contain at most one entry for utils.ts (no duplicate packet)
-  const utilsPackets = (run.updated.review_packets ?? []).filter((p) =>
-    p.file_paths.includes("src/lib/utils.ts"),
+  // The dispatch surface must count utils.ts once (no duplicate task): the
+  // already-tracked utils requeue task must not be re-added via the requeue
+  // folding path, so metrics never exceed tracked tasks + genuinely-new
+  // pending requeue tasks.
+  const trackedIds = new Set(run.updated.audit_tasks.map((t) => t.task_id));
+  const foldedRequeue = (run.updated.requeue_tasks ?? []).filter(
+    (t) => t.status === "pending" && !trackedIds.has(t.task_id),
   );
-  const utilsTaskIds = utilsPackets.flatMap((p) => p.task_ids);
-  const duplicates = utilsTaskIds.filter(
-    (id) => utilsTaskIds.indexOf(id) !== utilsTaskIds.lastIndexOf(id),
+  assert.equal(
+    run.updated.audit_plan_metrics.task_count,
+    run.updated.audit_tasks.length + foldedRequeue.length,
+    "requeue task must not be folded into the dispatch surface twice",
   );
-  assert.deepEqual(duplicates, [], "requeue task must not appear twice in review_packets");
 });

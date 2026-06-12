@@ -13,7 +13,6 @@ Important schemas live under `schemas/`, including:
 - `audit_task.schema.json`
 - `audit_plan_metrics.schema.json`
 - `graph_bundle.schema.json`
-- `review_packets.schema.json`
 - `runtime_validation_update.example.json` in `examples/`
 
 ## Wrapper envelope
@@ -67,7 +66,6 @@ The backend stores resumable artifacts under `.audit-artifacts/`, including:
 - `coverage_matrix.json`
 - `risk_register.json`
 - `audit_tasks.json`
-- `review_packets.json`
 - `audit_plan_metrics.json`
 - `audit_results.jsonl`
 - `runtime_validation_tasks.json`
@@ -106,11 +104,10 @@ directly instead of issuing a second `next-step`.
 Packet dispatch preserves the existing `AuditTask` and `AuditResult`
 contracts. It changes the worker-facing unit of work.
 
-Planning artifacts are shaped by:
+Packets are partitioned just-in-time at dispatch (never persisted); planning
+artifacts are shaped by:
 
-- `schemas/review_packets.schema.json`
 - `schemas/audit_plan_metrics.schema.json`
-- `examples/review_packets.example.json`
 - `examples/audit_plan_metrics.example.json`
 
 Normal packet flow:
