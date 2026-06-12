@@ -167,6 +167,124 @@ export interface DesignReviewOptions {
 }
 
 /**
+ * A conceptual-review perspective: a deliberately narrow value system one
+ * independent reviewer adopts. The deep conceptual pass fans these out to real
+ * parallel subagents (one perspective each), then merges via an independent
+ * judge. Provider-neutral — a perspective is a *lens*, never a model.
+ */
+export interface ConceptualPerspective {
+  name: string;
+  /** The value system this reviewer judges the codebase through. */
+  lens: string;
+}
+
+/**
+ * Built-in conceptual perspectives, ordered most-to-least commonly useful. The
+ * deep fan-out takes the first `perspectives` of these. Each is a maximally
+ * dissimilar value system so the union covers angles no single pass would. A
+ * reviewer may sharpen its lens to the codebase, but stays in character.
+ */
+export const CONCEPTUAL_PERSPECTIVES: readonly ConceptualPerspective[] = [
+  {
+    name: "Pragmatist",
+    lens:
+      "Does this actually work for users? What's the shortest path to value? Flag anything that adds ceremony or indirection without earning its keep.",
+  },
+  {
+    name: "Mathematician seeking elegance",
+    lens:
+      "Minimal complexity, orthogonal abstractions, no redundancy. Flag overlapping concepts that should be unified and abstractions that fail to compose.",
+  },
+  {
+    name: "Short attention span",
+    lens:
+      "Frustrated by anything taking >30 seconds to understand. If a design can't be explained simply, it's too complex. Flag cognitive-load hotspots and implicit knowledge.",
+  },
+  {
+    name: "Novelty-seeker",
+    lens:
+      "Always hunting for the latest tool, pattern, or library that could replace hand-rolled machinery. Flag wheels being reinvented and standards being ignored.",
+  },
+  {
+    name: "Adversary",
+    lens:
+      "What could go wrong, what's fragile, what breaks under pressure or at scale? Flag failure modes the happy path quietly assumes away.",
+  },
+  {
+    name: "Maintainer inheriting this cold",
+    lens:
+      "A new engineer six months from now with no context. Flag what would take longest to learn, what's implicit, and what has no obvious entry point.",
+  },
+  {
+    name: "Minimalist",
+    lens:
+      "What could be deleted entirely? Flag features, layers, and options that exist but earn little, and capabilities that duplicate one another.",
+  },
+];
+
+/** Default number of deep-review perspectives when the host does not specify. */
+export const DEFAULT_CONCEPTUAL_PERSPECTIVES = 5;
+
+/**
+ * Clamp a requested perspective count into the supported range: at least 2
+ * (one perspective is just a shallow review) and at most the number of built-in
+ * perspectives. Non-finite / undefined ⇒ the default.
+ */
+export function clampPerspectiveCount(requested?: number): number {
+  if (requested === undefined || !Number.isFinite(requested)) {
+    return DEFAULT_CONCEPTUAL_PERSPECTIVES;
+  }
+  return Math.max(2, Math.min(CONCEPTUAL_PERSPECTIVES.length, Math.floor(requested)));
+}
+
+/** The first `count` (clamped) built-in perspectives for a deep fan-out. */
+export function selectPerspectives(count?: number): ConceptualPerspective[] {
+  return CONCEPTUAL_PERSPECTIVES.slice(0, clampPerspectiveCount(count));
+}
+
+/** Shared "what to look for" block for any conceptual-review prompt. */
+function conceptualCritiqueInstructions(): string[] {
+  return [
+    "## Conceptual design critique instructions",
+    "",
+    "- **Tool and library opportunities**: third-party tools, libraries, or frameworks that would improve the project. Concrete suggestions with rationale, not generic advice.",
+    "- **Architecture pattern improvements**: structural changes that would improve extensibility, testability, or maintainability. Consider whether the current abstractions match the problem domain.",
+    "- **Design simplification**: areas where the design is over-engineered or where simpler alternatives would work. Conversely, areas that are under-designed for their importance.",
+    "- **Integration and generalization**: opportunities to make the project more portable, composable, or protocol-aligned (e.g., MCP, standard APIs, plugin architectures).",
+    "- **Missing capabilities**: gaps in the design that would become pain points as the project evolves.",
+    "",
+  ];
+}
+
+/** Shared finding-output-format block for any conceptual-review prompt. */
+function conceptualOutputFormat(resultsPathNote: string): string[] {
+  return [
+    "## Output format",
+    "",
+    "Produce a JSON array of findings. Each finding must conform to:",
+    "",
+    "```json",
+    "{",
+    '  "id": "DR-001",',
+    '  "title": "short descriptive title",',
+    '  "category": "one of: tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability",',
+    '  "severity": "one of: critical, high, medium, low, info",',
+    '  "confidence": "one of: high, medium, low",',
+    '  "lens": "architecture",',
+    '  "summary": "detailed explanation of the observation and the recommended change",',
+    '  "affected_files": [{"path": "relevant/file.ts"}],',
+    '  "systemic": true',
+    "}",
+    "```",
+    "",
+    resultsPathNote,
+    "",
+    "Focus on substantive, actionable observations. Prefer fewer high-quality findings over many surface-level ones.",
+    "",
+  ];
+}
+
+/**
  * Render the shared structural context block that is identical for both the
  * contract-review and conceptual-review passes. Placing it first in both
  * prompts makes it cache-eligible when the same bundle is used for both agents.
@@ -273,10 +391,14 @@ export function renderContractReviewPrompt(
 }
 
 /**
- * Conceptual-design review prompt (generative pass).
+ * Conceptual-design review prompt (generative pass — shallow / single agent).
  * Produces broad architectural and design improvement observations.
  * Categories: tool_opportunity, architecture_pattern, design_simplification,
  * integration, missing_capability.
+ *
+ * The deep multi-perspective variant is real dispatch fan-out, not an in-prompt
+ * instruction — see `renderConceptualPerspectivePrompt` /
+ * `renderConceptualJudgePrompt`.
  */
 export function renderConceptualReviewPrompt(
   bundle: ArtifactBundle,
@@ -285,46 +407,6 @@ export function renderConceptualReviewPrompt(
   const unitCount = bundle.unit_manifest?.units.length ?? 0;
   const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
   const maxUnits = options.max_units ?? defaultMaxUnits;
-  const isDeep = options.conceptual_depth === "deep";
-
-  const deepSection = isDeep ? [
-    "## Deep review: multi-perspective fan-out",
-    "",
-    "This review uses **deep** conceptual depth. Instead of a single review pass,",
-    "fan out 3–5 independent reviewers with maximally dissimilar perspectives,",
-    "then compile the results via a judge.",
-    "",
-    "**Principle:** maximize dissimilarity between perspectives. Each reviewer",
-    "should approach the codebase from a fundamentally different value system so",
-    "the union of their observations covers angles no single perspective would.",
-    "",
-    "**Example perspectives** (choose or invent based on codebase character):",
-    "",
-    "- A **pragmatist**: “Does this actually work for users? What’s the shortest",
-    "  path to value?”",
-    "- A **mathematician seeking elegance**: minimal complexity, orthogonal",
-    "  abstractions, no redundancy.",
-    "- Someone with a **short attention span**: frustrated by anything taking",
-    "  >30 seconds to understand. If the design can’t be explained simply, it’s",
-    "  too complex.",
-    "- A **novelty-seeker**: always looking for the latest tool, pattern, or",
-    "  library that could replace hand-rolled machinery.",
-    "- An **adversary**: what could go wrong, what’s fragile, what breaks under",
-    "  pressure or at scale?",
-    "",
-    "These are examples, not a fixed set. Choose or invent perspectives that",
-    "fit this specific codebase’s character and domain.",
-    "",
-    "**Process:**",
-    "1. Spawn 3–5 independent sub-agents, each given one perspective and the",
-    "   shared structural context below. They must not see each other’s output.",
-    "2. Collect their findings.",
-    "3. Run a judge agent that merges, deduplicates, and ranks the combined",
-    "   findings. The judge resolves contradictions and drops low-confidence",
-    "   observations that no other perspective corroborates.",
-    "4. The judge’s merged output is the final conceptual review result.",
-    "",
-  ] : [];
 
   return [
     "# Project conceptual design review (generative pass)",
@@ -332,37 +414,87 @@ export function renderConceptualReviewPrompt(
     "You are performing the **conceptual-design-critique** pass on this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide generative observations about broader architecture ideas that static analysis cannot produce.",
     "",
     renderSharedStructuralContext(bundle, maxUnits),
-    ...deepSection,
-    "## Conceptual design critique instructions",
+    ...conceptualCritiqueInstructions(),
+    ...conceptualOutputFormat(
+      "Write the JSON array to the conceptual review results path provided below. Use finding IDs starting with DR-001.",
+    ),
+  ].join("\n");
+}
+
+/**
+ * One perspective's conceptual-review prompt (deep fan-out). Each perspective
+ * is dispatched to an independent subagent that reviews *only* through its
+ * assigned value system and must not see the other perspectives' output — a
+ * separate judge merges them. This is the real fan-out that replaces the old
+ * single-agent "imagine several perspectives" instruction.
+ */
+export function renderConceptualPerspectivePrompt(
+  bundle: ArtifactBundle,
+  perspective: ConceptualPerspective,
+  index: number,
+  total: number,
+  options: DesignReviewOptions = {},
+): string {
+  const unitCount = bundle.unit_manifest?.units.length ?? 0;
+  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
+  const maxUnits = options.max_units ?? defaultMaxUnits;
+
+  return [
+    `# Conceptual design review — perspective ${index + 1} of ${total}: ${perspective.name}`,
     "",
-    "- **Tool and library opportunities**: third-party tools, libraries, or frameworks that would improve the project. Concrete suggestions with rationale, not generic advice.",
-    "- **Architecture pattern improvements**: structural changes that would improve extensibility, testability, or maintainability. Consider whether the current abstractions match the problem domain.",
-    "- **Design simplification**: areas where the design is over-engineered or where simpler alternatives would work. Conversely, areas that are under-designed for their importance.",
-    "- **Integration and generalization**: opportunities to make the project more portable, composable, or protocol-aligned (e.g., MCP, standard APIs, plugin architectures).",
-    "- **Missing capabilities**: gaps in the design that would become pain points as the project evolves.",
+    `You are **one of ${total} independent reviewers**, each assigned a deliberately different value system. You will NOT see the other reviewers' output, and a separate judge agent will merge everyone's findings. Do **not** try to be balanced or cover the other angles — your value is the one perspective no one else takes. Review the whole codebase, but judge it only through your assigned lens.`,
     "",
-    "## Output format",
+    `## Your perspective: ${perspective.name}`,
     "",
-    "Produce a JSON array of findings. Each finding must conform to:",
+    perspective.lens,
     "",
-    "```json",
-    "{",
-    '  "id": "DR-001",',
-    '  "title": "short descriptive title",',
-    '  "category": "one of: tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability",',
-    '  "severity": "one of: critical, high, medium, low, info",',
-    '  "confidence": "one of: high, medium, low",',
-    '  "lens": "architecture",',
-    '  "summary": "detailed explanation of the observation and the recommended change",',
-    '  "affected_files": [{"path": "relevant/file.ts"}],',
-    '  "systemic": true',
-    "}",
-    "```",
+    "You may sharpen or extend this lens to fit this codebase's character and domain, but stay in character.",
     "",
-    "Write the JSON array to the conceptual review results path provided below. Use finding IDs starting with DR-001.",
+    renderSharedStructuralContext(bundle, maxUnits),
+    ...conceptualCritiqueInstructions(),
+    ...conceptualOutputFormat(
+      "Write the JSON array of findings *from your perspective only* to the results path provided below. Use finding IDs starting with DR-001.",
+    ),
+  ].join("\n");
+}
+
+/**
+ * The independent judge prompt (deep fan-out). The judge is a fresh agent —
+ * never one of the perspective authors — that reads every perspective's
+ * findings, merges and deduplicates them, resolves contradictions, drops
+ * low-confidence observations no other perspective corroborates, and writes the
+ * single merged conceptual-review result the orchestrator ingests.
+ */
+export function renderConceptualJudgePrompt(
+  perspectiveResults: Array<{ name: string; path: string }>,
+): string {
+  const sources = perspectiveResults.map(
+    (p, i) => `${i + 1}. **${p.name}** — \`${p.path}\``,
+  );
+
+  return [
+    "# Conceptual design review — judge / merge pass",
     "",
-    "Focus on substantive, actionable observations. Prefer fewer high-quality findings over many surface-level ones.",
+    `You are an **independent judge**. Several reviewers each examined this project through a different value system and wrote their findings to separate files. You did **not** author any of them — your job is to merge them into one ranked, deduplicated conceptual-review result.`,
     "",
+    "## Perspective result files",
+    "",
+    "Read each of these JSON finding arrays:",
+    "",
+    ...sources,
+    "",
+    "## Judging instructions",
+    "",
+    "- **Merge** all findings into a single list.",
+    "- **Deduplicate**: collapse findings that describe the same underlying observation, even if worded differently. Keep the clearest statement and note corroboration in the summary.",
+    "- **Resolve contradictions**: when two perspectives disagree, keep the better-evidenced position; if genuinely unresolved, keep it and say so.",
+    "- **Rank** by impact and actionability.",
+    "- **Drop** low-confidence observations that only one perspective raised and nothing else corroborates. A high-confidence single-perspective finding stays.",
+    "- Do not invent new findings; you are merging, not reviewing.",
+    "",
+    ...conceptualOutputFormat(
+      "Write the merged, ranked JSON array to the conceptual review results path provided below. Renumber finding IDs sequentially from DR-001.",
+    ),
   ].join("\n");
 }
 
