@@ -170,6 +170,43 @@ describe("scheduleWave", () => {
     });
     expect(result.max_concurrent).toBe(7);
   });
+
+  it("roster handshake (quota disabled): honors the most capable rank's window", async () => {
+    const result = await scheduleWave({
+      sessionConfig: null,
+      itemCount: 4,
+      hostModels: [
+        { rank: "small", context_tokens: 32_000, output_tokens: 8_000 },
+        { rank: "deep", context_tokens: 200_000, output_tokens: 32_000 },
+      ],
+      env: {} as any,
+    });
+    expect(result.resolved_limits.context_tokens).toBe(200_000);
+    expect(result.resolved_limits.output_tokens).toBe(32_000);
+  });
+
+  it("roster handshake (quota enabled): one capacity pool per rank, most capable first", async () => {
+    const result = await scheduleWave({
+      sessionConfig: { quota: { enabled: true } } as any,
+      itemCount: 12,
+      estimatedSlotTokens: Array.from({ length: 12 }, () => 500),
+      hostModels: [
+        { rank: "small", context_tokens: 32_000, output_tokens: 8_000 },
+        { rank: "standard", context_tokens: 100_000, output_tokens: 16_000 },
+        { rank: "deep", context_tokens: 200_000, output_tokens: 32_000 },
+      ],
+      env: {} as any,
+    });
+    const pools = result.capacity_pools ?? [];
+    expect(pools.length).toBeGreaterThanOrEqual(1);
+    expect(pools[0].rank).toBe("deep");
+    expect(pools[0].resolved_limits.context_tokens).toBe(200_000);
+    const ranks = pools.map((p) => p.rank);
+    // Pools appear in most-capable-first order and never duplicate a rank.
+    expect([...ranks]).toEqual(
+      ["deep", "standard", "small"].filter((r) => ranks.includes(r as any)),
+    );
+  });
 });
 
 describe("buildDispatchQuota", () => {

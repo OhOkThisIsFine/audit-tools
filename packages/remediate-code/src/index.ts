@@ -12,6 +12,7 @@ import {
 import { validateArtifacts } from "./validation/artifacts.js";
 import {
   setQuotaStateDir,
+  parseHostModelRoster,
   mergeOpenCodeAgentPermissionRule,
   mergeOpenCodeGlobalPermissionRule,
   migrateOpenCodeGlobalExternalDirectory,
@@ -78,6 +79,10 @@ program
     "Output-token cap of the model the host's dispatch subagents run on",
   )
   .option(
+    "--host-models <json>",
+    "Ordered JSON roster of dispatchable models (lowest rank first): [{rank, context_tokens, output_tokens}]",
+  )
+  .option(
     "--finalize-closing",
     "Finalize a closing remediation state from a generated close_run step",
   )
@@ -106,6 +111,9 @@ program
           : undefined,
         hostOutputTokens: options.hostOutputTokens
           ? parseInt(options.hostOutputTokens, 10) || undefined
+          : undefined,
+        hostModels: options.hostModels
+          ? parseHostModelRoster(options.hostModels)
           : undefined,
         finalizeClosing: options.finalizeClosing === true,
         forceReplan: options.forceReplan === true,
@@ -141,6 +149,10 @@ program
     "Output-token cap of the model the host's dispatch subagents run on",
   )
   .option(
+    "--host-models <json>",
+    "Ordered JSON roster of dispatchable models (lowest rank first): [{rank, context_tokens, output_tokens}]",
+  )
+  .option(
     "--finalize-closing",
     "Finalize a closing remediation state from a generated close_run step",
   )
@@ -165,6 +177,9 @@ program
           : undefined,
         hostOutputTokens: options.hostOutputTokens
           ? parseInt(options.hostOutputTokens, 10) || undefined
+          : undefined,
+        hostModels: options.hostModels
+          ? parseHostModelRoster(options.hostModels)
           : undefined,
         finalizeClosing: options.finalizeClosing === true,
         forceReplan: options.forceReplan === true,

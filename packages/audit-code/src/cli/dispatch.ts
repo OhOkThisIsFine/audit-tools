@@ -12,6 +12,8 @@ import type {
   SessionConfig,
   DispatchModelHint,
   DispatchModelTier,
+  HostModelRosterEntry,
+  GraphBundle,
 } from "@audit-tools/shared";
 import { buildQuotaSource } from "@audit-tools/shared/quota/compositeQuotaSource";
 import type {
@@ -645,22 +647,73 @@ export function buildPacketPrompt(params: {
 }
 
 interface ResolvedDispatchPool {
-  hostPool: CapacityPool;
+  /**
+   * Capacity pools available to this dispatch — one per reported roster rank,
+   * or a single pool for the scalar/absent handshake.
+   */
+  pools: CapacityPool[];
   hostModel: string | null;
   /**
-   * Per-packet input-token ceiling for partitioning: the model's resolved
-   * context window minus its reserved output budget. Discovered here so the JIT
-   * graph partition (which runs BEFORE quota/capacity) sizes packets to the real
-   * dispatching model rather than a frozen plan-time cap.
+   * Per-packet input-token ceiling for the INITIAL partition: the largest
+   * rank's resolved context window minus its reserved output budget. Coherent
+   * clusters partition under the most generous window first; the per-tier
+   * re-fit pass then re-splits any packet routed to a smaller rank.
    */
   contextBudgetTokens: number;
+  /**
+   * Per-tier packet input budgets (context − output) when the host reported a
+   * model roster; null for the single-window handshake (every tier shares
+   * `contextBudgetTokens`).
+   */
+  tierBudgets: Record<DispatchModelTier, number> | null;
+}
+
+const TIER_ORDER: DispatchModelTier[] = ["small", "standard", "deep"];
+
+/**
+ * Fill per-tier budgets from the reported roster ranks. A tier the host did
+ * not report falls back to the nearest reported rank (preferring the more
+ * capable one on ties), mirroring how a host maps a tier hint onto its closest
+ * available model.
+ */
+export function resolveTierBudgets(
+  perRank: ReadonlyMap<DispatchModelTier, number>,
+): Record<DispatchModelTier, number> {
+  if (perRank.size === 0) {
+    throw new Error("resolveTierBudgets requires at least one reported rank.");
+  }
+  const out = {} as Record<DispatchModelTier, number>;
+  TIER_ORDER.forEach((tier, i) => {
+    const direct = perRank.get(tier);
+    if (direct !== undefined) {
+      out[tier] = direct;
+      return;
+    }
+    for (let distance = 1; distance < TIER_ORDER.length; distance++) {
+      const up = TIER_ORDER[i + distance];
+      const down = TIER_ORDER[i - distance];
+      if (up && perRank.has(up)) {
+        out[tier] = perRank.get(up)!;
+        return;
+      }
+      if (down && perRank.has(down)) {
+        out[tier] = perRank.get(down)!;
+        return;
+      }
+    }
+  });
+  return out;
 }
 
 /**
- * Resolve the dispatching host pool (host-model resolution, quota state lookup,
- * provider-limits query) and probe its resolved context budget — everything
- * needed to size the JIT graph partition. The pool is reused by
+ * Resolve the dispatching host pool(s) (host-model resolution, quota state
+ * lookup, provider-limits query) and probe their resolved context budgets —
+ * everything needed to size the JIT graph partition. The pools are reused by
  * `finalizeDispatchQuota` after packetization, so this work happens once.
+ *
+ * With a host model roster (`--host-models`), one pool is built per reported
+ * rank, each with its own discovered window; otherwise the scalar handshake
+ * (or nothing) yields the single conservative pool exactly as before.
  *
  * The probe runs `computeDispatchCapacity` with no pending work: resolved limits
  * are model-derived (not work-derived), so the context window is available
@@ -675,6 +728,8 @@ async function buildDispatchPool(params: {
   hostContextTokens?: number | null;
   /** Output cap the host reports for its dispatch model (handshake). */
   hostOutputTokens?: number | null;
+  /** Ordered model roster (lowest rank first); outranks the scalar pair. */
+  hostModelRoster?: HostModelRosterEntry[] | null;
 }): Promise<ResolvedDispatchPool> {
   const { sessionConfig, queryLimits, hostActiveSubagentLimit } = params;
   const quotaProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
@@ -697,11 +752,70 @@ async function buildDispatchPool(params: {
       .catch(() => null)
     ?? null;
   const dispatchCachedLimits = await lookupDiscoveredLimits(quotaProviderKey).catch(() => null);
-  // The capability handshake: the host reported its dispatch model's real
-  // context/output window this session. Merged FIRST so it outranks the queried
-  // and cached limits for context/output (N5a's discovered-capability rung then
-  // sizes the partition to the real window). RPM/TPM stay null here and fill
-  // from the queried/cached sources.
+  const halfLifeHours =
+    sessionConfig.quota?.empirical_half_life_hours ??
+    DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
+  const quotaSource = buildQuotaSource({ halfLifeHours });
+  const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(quotaProviderKey).catch(() => null);
+
+  // The capability handshake limits are merged FIRST so they outrank the
+  // queried and cached limits for context/output (the discovered-capability
+  // rung then sizes the partition to the real window). RPM/TPM stay null in
+  // the capability entry and fill from the queried/cached sources.
+  const buildPool = (
+    capability: DiscoveredRateLimits | null,
+    rank?: DispatchModelTier,
+  ): CapacityPool => ({
+    id: quotaProviderKey,
+    providerName: quotaProviderName,
+    hostModel,
+    ...(rank ? { rank } : {}),
+    hostConcurrencyLimit,
+    quotaStateEntry,
+    discoveredLimits: mergeDiscoveredLimits(
+      capability,
+      providerLimits,
+      dispatchCachedLimits,
+    ),
+    quotaSourceSnapshot,
+  });
+  const probeBudget = (pool: CapacityPool): number => {
+    const probe = computeDispatchCapacity({
+      pools: [pool],
+      sessionConfig,
+      pendingItemTokens: [],
+    });
+    const limits = probe.primary.schedule.resolved_limits;
+    return Math.max(1, limits.context_tokens - limits.output_tokens);
+  };
+
+  const roster = params.hostModelRoster ?? null;
+  if (roster && roster.length > 0) {
+    const pools: CapacityPool[] = [];
+    const perRank = new Map<DispatchModelTier, number>();
+    for (const entry of roster) {
+      const pool = buildPool(
+        {
+          context_tokens: entry.context_tokens,
+          output_tokens: entry.output_tokens,
+          source: "host_capability",
+        },
+        entry.rank,
+      );
+      pools.push(pool);
+      perRank.set(entry.rank, probeBudget(pool));
+    }
+    const tierBudgets = resolveTierBudgets(perRank);
+    return {
+      pools,
+      hostModel,
+      contextBudgetTokens: Math.max(...Object.values(tierBudgets)),
+      tierBudgets,
+    };
+  }
+
+  // Single-window handshake (scalar shorthand) or no handshake at all: one
+  // pool, conservative floor when nothing was reported — unchanged behavior.
   const hostCapabilityLimits: DiscoveredRateLimits | null =
     params.hostContextTokens != null || params.hostOutputTokens != null
       ? {
@@ -710,36 +824,13 @@ async function buildDispatchPool(params: {
           source: "host_capability",
         }
       : null;
-  const discoveredLimits = mergeDiscoveredLimits(
-    hostCapabilityLimits,
-    providerLimits,
-    dispatchCachedLimits,
-  );
-  const halfLifeHours =
-    sessionConfig.quota?.empirical_half_life_hours ??
-    DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
-  const quotaSource = buildQuotaSource({ halfLifeHours });
-  const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(quotaProviderKey).catch(() => null);
-  const hostPool: CapacityPool = {
-    id: quotaProviderKey,
-    providerName: quotaProviderName,
-    hostModel,
-    hostConcurrencyLimit,
-    quotaStateEntry,
-    discoveredLimits,
-    quotaSourceSnapshot,
-  };
-  const probe = computeDispatchCapacity({
+  const hostPool = buildPool(hostCapabilityLimits);
+  return {
     pools: [hostPool],
-    sessionConfig,
-    pendingItemTokens: [],
-  });
-  const limits = probe.primary.schedule.resolved_limits;
-  const contextBudgetTokens = Math.max(
-    1,
-    limits.context_tokens - limits.output_tokens,
-  );
-  return { hostPool, hostModel, contextBudgetTokens };
+    hostModel,
+    contextBudgetTokens: probeBudget(hostPool),
+    tierBudgets: null,
+  };
 }
 
 /**
@@ -751,18 +842,28 @@ async function finalizeDispatchQuota(params: {
   runId: string;
   runDir: string;
   sessionConfig: SessionConfig;
-  hostPool: CapacityPool;
+  pools: CapacityPool[];
   hostModel: string | null;
   perPacketTokens: number[];
+  /** Echo of the host's reported roster, when one was given. */
+  hostModelRoster?: HostModelRosterEntry[] | null;
+  /** Per-tier packet input budgets derived from the roster, when given. */
+  tierBudgets?: Record<DispatchModelTier, number> | null;
 }): Promise<{
   dispatchQuota: DispatchQuota;
   dispatchQuotaPath: string;
   waveSchedule: ReturnType<typeof computeDispatchCapacity>["primary"]["schedule"];
   dispatchCapacity: ReturnType<typeof computeDispatchCapacity>;
 }> {
-  const { runId, runDir, sessionConfig, hostPool, hostModel, perPacketTokens } = params;
+  const { runId, runDir, sessionConfig, hostModel, perPacketTokens } = params;
+  // Most-capable rank first: computeDispatchCapacity hands the largest pending
+  // items to the first pool, and the biggest packets belong on the rank with
+  // the largest window.
+  const rankOrder = (pool: CapacityPool): number =>
+    pool.rank ? TIER_ORDER.indexOf(pool.rank) : TIER_ORDER.length;
+  const pools = [...params.pools].sort((a, b) => rankOrder(b) - rankOrder(a));
   const dispatchCapacity = computeDispatchCapacity({
-    pools: [hostPool],
+    pools,
     sessionConfig,
     pendingItemTokens: perPacketTokens,
   });
@@ -779,6 +880,10 @@ async function finalizeDispatchQuota(params: {
     cooldown_until: dispatchCapacity.cooldown_until,
     binding_cap: dispatchCapacity.binding_cap,
     capacity_pools: summarizeDispatchCapacityPools(dispatchCapacity),
+    ...(params.hostModelRoster?.length
+      ? { host_model_roster: params.hostModelRoster }
+      : {}),
+    ...(params.tierBudgets ? { tier_budgets: params.tierBudgets } : {}),
     quota_source_snapshot: waveSchedule.quota_source_snapshot ?? null,
     backoff_state: null,
   };
@@ -815,21 +920,97 @@ function resolveDispatchTaskGraph(
 }
 
 /**
+ * Per-tier re-fit pass (partition-then-validate, design (a) of the roster
+ * handshake): the initial partition runs under the LARGEST reported window so
+ * coherent clusters are not over-split, but risk routing may then assign a
+ * packet to a rank with a smaller window. Re-partition just that packet's
+ * subgraph under its assigned tier's budget. The re-split sub-packets get
+ * their own tiers, so iterate to a bounded fixed point; a packet that cannot
+ * split further (single task, or the partition refuses) is left for the
+ * oversized-packet warning.
+ */
+export function fitPacketsToTierBudgets(params: {
+  packets: ReviewPacket[];
+  taskGraph: TaskAffinityGraph;
+  orderedTasks: AuditTask[];
+  tierBudgets: Record<DispatchModelTier, number>;
+  sessionConfig: SessionConfig;
+  lineIndex?: Record<string, number>;
+  sizeIndex?: Record<string, number>;
+  graphBundle?: GraphBundle;
+}): ReviewPacket[] {
+  const { tierBudgets, sessionConfig } = params;
+  let packets = params.packets;
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    const next: ReviewPacket[] = [];
+    for (const packet of packets) {
+      const hint = resolveDispatchTier({
+        routingRisk: packet.routing_risk,
+        complexity: buildDispatchComplexity(
+          packet,
+          isIsolatedLargeFilePacket(packet),
+        ),
+        routingTiers: sessionConfig.dispatch?.routing_tiers,
+      });
+      if (
+        packet.estimated_tokens <= tierBudgets[hint.tier] ||
+        packet.task_ids.length <= 1
+      ) {
+        next.push(packet);
+        continue;
+      }
+      const memberIds = new Set(packet.task_ids);
+      const subPackets = buildReviewPacketsFromPartition(
+        params.orderedTasks.filter((task) => memberIds.has(task.task_id)),
+        {
+          graph: filterTaskAffinityGraph(params.taskGraph, memberIds),
+          contextTokenBudget: tierBudgets[hint.tier],
+          riskMassBudget: sessionConfig.dispatch?.risk_mass_budget,
+          graphBundle: params.graphBundle,
+          lineIndex: params.lineIndex,
+          sizeIndex: params.sizeIndex,
+        },
+      );
+      if (subPackets.length <= 1) {
+        next.push(packet);
+        continue;
+      }
+      next.push(...subPackets);
+      changed = true;
+    }
+    packets = next;
+    if (!changed) break;
+  }
+  return packets;
+}
+
+/**
  * Extracts the context-budget warning loop.
- * Returns warnings for packets whose estimated token count exceeds the context budget.
+ * Returns warnings for packets whose estimated token count exceeds the context
+ * budget — the assigned tier's budget when the host reported a roster, the
+ * single resolved window otherwise.
  * When confidence is 'low', returns an empty array (limits are unreliable).
  */
 export function collectOversizedWarnings(
-  plan: Array<{ packet_id: string; complexity: DispatchComplexity }>,
+  plan: Array<{
+    packet_id: string;
+    complexity: DispatchComplexity;
+    model_hint?: DispatchModelHint;
+  }>,
   waveSchedule: { confidence: string; resolved_limits: { context_tokens: number; output_tokens: number } },
+  tierBudgets?: Record<DispatchModelTier, number> | null,
 ): Array<{ code: string; message: string }> {
   if (waveSchedule.confidence === "low") {
     return [];
   }
-  const contextBudget =
+  const fallbackBudget =
     waveSchedule.resolved_limits.context_tokens - waveSchedule.resolved_limits.output_tokens;
   const warnings: Array<{ code: string; message: string }> = [];
   for (const p of plan) {
+    const tier = p.model_hint?.tier;
+    const contextBudget =
+      tierBudgets && tier ? tierBudgets[tier] : fallbackBudget;
     if (p.complexity.estimated_tokens > contextBudget) {
       warnings.push({
         code: "oversized_packet",
@@ -856,6 +1037,8 @@ export async function prepareDispatchArtifacts(params: {
   hostContextTokens?: number | null;
   /** Output cap the host reports for its dispatch model (handshake). */
   hostOutputTokens?: number | null;
+  /** Ordered model roster (lowest rank first); outranks the scalar pair. */
+  hostModelRoster?: HostModelRosterEntry[] | null;
 }): Promise<PrepareDispatchResult> {
   const runId = params.runId;
   const artifactsDir = params.artifactsDir;
@@ -927,9 +1110,10 @@ export async function prepareDispatchArtifacts(params: {
     hostActiveSubagentLimit: params.hostActiveSubagentLimit,
     hostContextTokens: params.hostContextTokens,
     hostOutputTokens: params.hostOutputTokens,
+    hostModelRoster: params.hostModelRoster,
   });
   const taskGraph = resolveDispatchTaskGraph(bundle, orderedTasks);
-  const packets = buildReviewPacketsFromPartition(orderedTasks, {
+  let packets = buildReviewPacketsFromPartition(orderedTasks, {
     graph: taskGraph,
     contextTokenBudget: dispatchPool.contextBudgetTokens,
     riskMassBudget: sessionConfig.dispatch?.risk_mass_budget,
@@ -937,6 +1121,18 @@ export async function prepareDispatchArtifacts(params: {
     lineIndex,
     sizeIndex,
   });
+  if (dispatchPool.tierBudgets) {
+    packets = fitPacketsToTierBudgets({
+      packets,
+      taskGraph,
+      orderedTasks,
+      tierBudgets: dispatchPool.tierBudgets,
+      sessionConfig,
+      lineIndex,
+      sizeIndex,
+      graphBundle: bundle.graph_bundle,
+    });
+  }
   const tasksById = new Map(orderedTasks.map((task) => [task.task_id, task]));
   const resultPathByTaskId = new Map(
     orderedTasks.map((task) => [
@@ -1086,12 +1282,16 @@ export async function prepareDispatchArtifacts(params: {
     runId,
     runDir,
     sessionConfig,
-    hostPool: dispatchPool.hostPool,
+    pools: dispatchPool.pools,
     hostModel: dispatchPool.hostModel,
     perPacketTokens,
+    hostModelRoster: params.hostModelRoster,
+    tierBudgets: dispatchPool.tierBudgets,
   });
 
-  warnings.push(...collectOversizedWarnings(plan, waveSchedule));
+  warnings.push(
+    ...collectOversizedWarnings(plan, waveSchedule, dispatchPool.tierBudgets),
+  );
 
   const warningsPath = warnings.length > 0
     ? join(runDir, "dispatch-warnings.json")
