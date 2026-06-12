@@ -306,6 +306,17 @@ export function getHostModelRoster(
   return raw ? parseHostModelRoster(raw) : null;
 }
 
+/**
+ * Opaque model identity the host reports for its dispatch model
+ * (`--host-model-id`). Used ONLY as a quota-key segment so quota learning keys
+ * on `provider/<id>` instead of `provider/*` when no model name is resolvable —
+ * never a window authority, never matched against a name table.
+ */
+export function getHostModelId(argv: string[]): string | null {
+  const value = getFlag(argv, "--host-model-id");
+  return value && value.trim().length > 0 ? value.trim() : null;
+}
+
 export function resolveRunProviderName(
   argv: string[],
   sessionConfig: SessionConfig,

@@ -99,6 +99,11 @@ export interface ScheduleWaveInput {
    * reported rank, each with its own discovered window.
    */
   hostModels?: HostModelRosterEntry[] | null;
+  /**
+   * Opaque model identity for the quota key when no model name resolves —
+   * a key segment ONLY (`provider/<id>`), never a window authority.
+   */
+  hostModelId?: string | null;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -167,6 +172,9 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
   const sessionConfig = input.sessionConfig ?? {};
   const providerName = input.providerName ?? (sessionConfig as { provider?: ResolvedProviderName }).provider ?? "claude-code";
   const hostModel = input.hostModel ?? (sessionConfig as { block_quota?: { host_model?: string | null } }).block_quota?.host_model ?? null;
+  // Quota-key identity: resolved model name, else the host's opaque id, else
+  // null → `provider/*`. Per-roster-rank `model_id` overrides per pool below.
+  const quotaModelKeySegment = hostModel ?? input.hostModelId ?? null;
   const roster = input.hostModels?.length
     ? sortRosterMostCapableFirst(input.hostModels)
     : null;
@@ -219,35 +227,41 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     };
     return {
       ...schedule,
-      capacity_pools: [_capacityPoolSummary(buildProviderModelKey(providerName, hostModel), waveSize, schedule)],
+      capacity_pools: [_capacityPoolSummary(buildProviderModelKey(providerName, quotaModelKeySegment), waveSize, schedule)],
     };
   }
 
-  let quotaStateEntry: QuotaStateEntry | null = null;
+  let quotaEntries: Record<string, QuotaStateEntry> = {};
   try {
-    const key = buildProviderModelKey(providerName, hostModel);
     const state = await readQuotaState();
-    quotaStateEntry = state.entries[key] ?? null;
+    quotaEntries = state.entries;
   } catch (err) {
     process.stderr.write(`[waveScheduler] readQuotaState failed; falling back to default wave size. ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   // One capacity pool per reported roster rank (most capable first), each with
-  // its own discovered window; a single pool for the scalar/absent handshake.
-  const pools = (roster ?? [null]).map((entry) => ({
-    id: buildProviderModelKey(providerName, hostModel),
-    providerName,
-    hostModel,
-    ...(entry ? { rank: entry.rank } : {}),
-    hostConcurrencyLimit: hostLimit,
-    quotaStateEntry,
-    discoveredLimits: entry
-      ? {
-          context_tokens: entry.context_tokens,
-          output_tokens: entry.output_tokens,
-        }
-      : hostCapabilityLimits,
-  }));
+  // its own discovered window and quota key; a single pool for the scalar/
+  // absent handshake. A rank's opaque `model_id` keys that pool's quota.
+  const pools = (roster ?? [null]).map((entry) => {
+    const poolKey = buildProviderModelKey(
+      providerName,
+      entry?.model_id ?? quotaModelKeySegment,
+    );
+    return {
+      id: poolKey,
+      providerName,
+      hostModel,
+      ...(entry ? { rank: entry.rank } : {}),
+      hostConcurrencyLimit: hostLimit,
+      quotaStateEntry: quotaEntries[poolKey] ?? null,
+      discoveredLimits: entry
+        ? {
+            context_tokens: entry.context_tokens,
+            output_tokens: entry.output_tokens,
+          }
+        : hostCapabilityLimits,
+    };
+  });
   const capacity = computeDispatchCapacity({
     pools,
     sessionConfig,
@@ -1038,6 +1052,7 @@ export async function prepareImplementDispatch(
     hostContextTokens?: number | null;
     hostOutputTokens?: number | null;
     hostModels?: HostModelRosterEntry[] | null;
+    hostModelId?: string | null;
   },
 ): Promise<RemediationDispatchPlan> {
   const state = await loadStateOrThrow(options.artifactsDir);
@@ -1157,6 +1172,7 @@ export async function prepareImplementDispatch(
     hostContextTokens: waveOptions?.hostContextTokens,
     hostOutputTokens: waveOptions?.hostOutputTokens,
     hostModels: waveOptions?.hostModels,
+    hostModelId: waveOptions?.hostModelId,
     itemCount: items.length,
     estimatedSlotTokens: itemReadFileLists.map((files) =>
       estimateImplementSlotTokens(files, options.root),

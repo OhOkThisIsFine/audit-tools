@@ -730,6 +730,8 @@ async function buildDispatchPool(params: {
   hostOutputTokens?: number | null;
   /** Ordered model roster (lowest rank first); outranks the scalar pair. */
   hostModelRoster?: HostModelRosterEntry[] | null;
+  /** Opaque model identity for the quota key when no model name resolves. */
+  hostModelId?: string | null;
 }): Promise<ResolvedDispatchPool> {
   const { sessionConfig, queryLimits, hostActiveSubagentLimit } = params;
   const quotaProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
@@ -739,9 +741,13 @@ async function buildDispatchPool(params: {
     explicitModel: params.hostModel,
     envVar: "AUDIT_CODE_HOST_MODEL",
   });
-  const quotaProviderKey = buildProviderModelKey(quotaProviderName, hostModel);
+  // Quota-key identity: the resolved model name when one exists, else the
+  // host's opaque `--host-model-id` (a key segment ONLY — never a window
+  // authority), else null → `provider/*`. Per-roster-rank `model_id` overrides
+  // per pool below.
+  const quotaModelKeySegment = hostModel ?? params.hostModelId ?? null;
+  const quotaProviderKey = buildProviderModelKey(quotaProviderName, quotaModelKeySegment);
   const quotaState = await readQuotaState().catch((): { version: 2; entries: Record<string, never> } => ({ version: 2, entries: {} }));
-  const quotaStateEntry = quotaState.entries[quotaProviderKey] ?? null;
   const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
     explicitLimit: hostActiveSubagentLimit,
     sessionConfig,
@@ -751,34 +757,40 @@ async function buildDispatchPool(params: {
       .then((r) => r ? { ...r, source: "provider_query" } : null)
       .catch(() => null)
     ?? null;
-  const dispatchCachedLimits = await lookupDiscoveredLimits(quotaProviderKey).catch(() => null);
   const halfLifeHours =
     sessionConfig.quota?.empirical_half_life_hours ??
     DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
   const quotaSource = buildQuotaSource({ halfLifeHours });
-  const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(quotaProviderKey).catch(() => null);
 
   // The capability handshake limits are merged FIRST so they outrank the
   // queried and cached limits for context/output (the discovered-capability
   // rung then sizes the partition to the real window). RPM/TPM stay null in
   // the capability entry and fill from the queried/cached sources.
-  const buildPool = (
+  const buildPool = async (
     capability: DiscoveredRateLimits | null,
     rank?: DispatchModelTier,
-  ): CapacityPool => ({
-    id: quotaProviderKey,
-    providerName: quotaProviderName,
-    hostModel,
-    ...(rank ? { rank } : {}),
-    hostConcurrencyLimit,
-    quotaStateEntry,
-    discoveredLimits: mergeDiscoveredLimits(
-      capability,
-      providerLimits,
-      dispatchCachedLimits,
-    ),
-    quotaSourceSnapshot,
-  });
+    modelId?: string,
+  ): Promise<CapacityPool> => {
+    const poolKey = modelId
+      ? buildProviderModelKey(quotaProviderName, modelId)
+      : quotaProviderKey;
+    const dispatchCachedLimits = await lookupDiscoveredLimits(poolKey).catch(() => null);
+    const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(poolKey).catch(() => null);
+    return {
+      id: poolKey,
+      providerName: quotaProviderName,
+      hostModel,
+      ...(rank ? { rank } : {}),
+      hostConcurrencyLimit,
+      quotaStateEntry: quotaState.entries[poolKey] ?? null,
+      discoveredLimits: mergeDiscoveredLimits(
+        capability,
+        providerLimits,
+        dispatchCachedLimits,
+      ),
+      quotaSourceSnapshot,
+    };
+  };
   const probeBudget = (pool: CapacityPool): number => {
     const probe = computeDispatchCapacity({
       pools: [pool],
@@ -794,13 +806,14 @@ async function buildDispatchPool(params: {
     const pools: CapacityPool[] = [];
     const perRank = new Map<DispatchModelTier, number>();
     for (const entry of roster) {
-      const pool = buildPool(
+      const pool = await buildPool(
         {
           context_tokens: entry.context_tokens,
           output_tokens: entry.output_tokens,
           source: "host_capability",
         },
         entry.rank,
+        entry.model_id,
       );
       pools.push(pool);
       perRank.set(entry.rank, probeBudget(pool));
@@ -824,7 +837,7 @@ async function buildDispatchPool(params: {
           source: "host_capability",
         }
       : null;
-  const hostPool = buildPool(hostCapabilityLimits);
+  const hostPool = await buildPool(hostCapabilityLimits);
   return {
     pools: [hostPool],
     hostModel,
@@ -1039,6 +1052,8 @@ export async function prepareDispatchArtifacts(params: {
   hostOutputTokens?: number | null;
   /** Ordered model roster (lowest rank first); outranks the scalar pair. */
   hostModelRoster?: HostModelRosterEntry[] | null;
+  /** Opaque model identity for the quota key when no model name resolves. */
+  hostModelId?: string | null;
 }): Promise<PrepareDispatchResult> {
   const runId = params.runId;
   const artifactsDir = params.artifactsDir;
@@ -1111,6 +1126,7 @@ export async function prepareDispatchArtifacts(params: {
     hostContextTokens: params.hostContextTokens,
     hostOutputTokens: params.hostOutputTokens,
     hostModelRoster: params.hostModelRoster,
+    hostModelId: params.hostModelId,
   });
   const taskGraph = resolveDispatchTaskGraph(bundle, orderedTasks);
   let packets = buildReviewPacketsFromPartition(orderedTasks, {

@@ -51,6 +51,13 @@ export interface HostModelRosterEntry {
   context_tokens: number;
   /** Output-token cap of the model serving this rank. */
   output_tokens: number;
+  /**
+   * Optional OPAQUE identity for the model serving this rank, used ONLY as a
+   * quota-key segment (`provider/<model_id>`) so quota learning stays
+   * per-model. Never a window authority and never compared against a name
+   * table — the no-hardcoded-models invariant holds.
+   */
+  model_id?: string;
 }
 
 const HOST_MODEL_RANKS = new Set<string>(["small", "standard", "deep"]);
@@ -95,10 +102,20 @@ export function parseHostModelRoster(raw: string): HostModelRosterEntry[] {
         `--host-models[${index}].output_tokens must be a positive integer.`,
       );
     }
+    const { model_id } = entry as Record<string, unknown>;
+    if (
+      model_id !== undefined &&
+      (typeof model_id !== "string" || model_id.trim().length === 0)
+    ) {
+      throw new Error(
+        `--host-models[${index}].model_id must be a non-empty string when provided.`,
+      );
+    }
     return {
       rank: rank as DispatchModelTier,
       context_tokens: context_tokens as number,
       output_tokens: output_tokens as number,
+      ...(model_id !== undefined ? { model_id: model_id as string } : {}),
     };
   });
 }

@@ -40,7 +40,10 @@ conservative 32k floor. Report:
   `model_hint.tier` — never report model names to the backend. Report only ranks
   you can actually dispatch to; the backend partitions and budgets each packet
   against the window of the rank its risk routes it to. Discover the real
-  windows, do not guess smaller-than-real values.
+  windows, do not guess smaller-than-real values. Each entry may carry an
+  optional opaque `model_id` (and `--host-model-id` is the single-model
+  equivalent) used only to key per-model quota learning — it is never
+  interpreted.
 - `--host-context-tokens` / `--host-output-tokens` — single-model shorthand when
   every subagent runs on one model: the context window and output cap of that
   model. When `--host-models` is also given, the roster wins. Omit both and

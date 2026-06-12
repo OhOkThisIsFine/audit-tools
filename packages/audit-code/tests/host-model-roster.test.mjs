@@ -195,6 +195,57 @@ await test("dispatch-quota carries the roster echo, tier budgets, and per-rank p
   assert.equal(quota.capacity_pools[0].resolved_limits.context_tokens, 200000);
 });
 
+// ── opaque model identity → quota key (F3) ───────────────────────────────────
+
+await test("--host-model-id keys the quota pool as provider/<id>; absent → provider/*", async (t) => {
+  for (const [hostModelId, suffix] of [
+    ["opaque-x", "/opaque-x"],
+    [null, "/*"],
+  ]) {
+    const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.1));
+    t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+    await prepareDispatchArtifacts({
+      packageRoot,
+      runId: RUN_ID,
+      artifactsDir,
+      root: artifactsDir,
+      sessionConfig: {},
+      hostModel: null,
+      hostModelId,
+    });
+    const quota = await readJson(join(runDir, "dispatch-quota.json"));
+    assert.ok(
+      quota.capacity_pools[0].pool_id.endsWith(suffix),
+      `pool_id ${quota.capacity_pools[0].pool_id} should end with ${suffix}`,
+    );
+  }
+});
+
+await test("per-rank model_id keys each roster pool's quota independently", async (t) => {
+  const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.9));
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  await prepareDispatchArtifacts({
+    packageRoot,
+    runId: RUN_ID,
+    artifactsDir,
+    root: artifactsDir,
+    sessionConfig: {},
+    hostModel: null,
+    hostModelRoster: [
+      { rank: "small", context_tokens: 7500, output_tokens: 1500, model_id: "rank-s" },
+      { rank: "deep", context_tokens: 200000, output_tokens: 32000, model_id: "rank-d" },
+    ],
+  });
+  const quota = await readJson(join(runDir, "dispatch-quota.json"));
+  const poolIds = quota.capacity_pools.map((pool) => pool.pool_id);
+  assert.ok(poolIds[0].endsWith("/rank-d"), `deep pool keys its own id: ${poolIds[0]}`);
+  // The roster echo retains each rank's opaque id for downstream consumers.
+  assert.deepEqual(
+    quota.host_model_roster.map((entry) => entry.model_id),
+    ["rank-s", "rank-d"],
+  );
+});
+
 await test("scalar handshake without a roster keeps the single-pool path (no tier budgets)", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.1));
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));

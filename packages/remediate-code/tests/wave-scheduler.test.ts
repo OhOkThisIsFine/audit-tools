@@ -207,6 +207,40 @@ describe("scheduleWave", () => {
       ["deep", "standard", "small"].filter((r) => ranks.includes(r as any)),
     );
   });
+
+  it("opaque --host-model-id keys quota as provider/<id>; absent → provider/*", async () => {
+    const withId = await scheduleWave({
+      sessionConfig: { quota: { enabled: true } } as any,
+      itemCount: 2,
+      hostModelId: "opaque-x",
+      env: {} as any,
+    });
+    expect(withId.capacity_pools?.[0].pool_id).toMatch(/\/opaque-x$/);
+    const withoutId = await scheduleWave({
+      sessionConfig: { quota: { enabled: true } } as any,
+      itemCount: 2,
+      env: {} as any,
+    });
+    expect(withoutId.capacity_pools?.[0].pool_id).toMatch(/\/\*$/);
+  });
+
+  it("per-rank model_id keys each roster pool independently", async () => {
+    const result = await scheduleWave({
+      sessionConfig: { quota: { enabled: true } } as any,
+      itemCount: 8,
+      estimatedSlotTokens: Array.from({ length: 8 }, () => 500),
+      hostModels: [
+        { rank: "standard", context_tokens: 100_000, output_tokens: 16_000, model_id: "rank-s" },
+        { rank: "deep", context_tokens: 200_000, output_tokens: 32_000, model_id: "rank-d" },
+      ],
+      env: {} as any,
+    });
+    const pools = result.capacity_pools ?? [];
+    expect(pools[0].pool_id).toMatch(/\/rank-d$/);
+    if (pools.length > 1) {
+      expect(pools[1].pool_id).toMatch(/\/rank-s$/);
+    }
+  });
 });
 
 describe("buildDispatchQuota", () => {
