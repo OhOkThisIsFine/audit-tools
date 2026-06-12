@@ -41,9 +41,11 @@ rather than "where the code is today."
 - **`opentoken wrap` CLI is not always installed.** The global instruction is to
   wrap every terminal command in `opentoken wrap <cmd>`, but the `opentoken`
   binary isn't on PATH in every environment (absent in both bash and PowerShell on
-  a 2026-06 Windows session). When it's missing, run commands directly and route
-  only genuinely large outputs through the `opentoken_transform` MCP tool —
-  wrapping a 2-line build log is pointless.
+  a 2026-06 Windows session; confirmed still absent 2026-06-11). When it's
+  missing, run commands directly and route only genuinely large outputs through
+  a compression MCP tool — wrapping a 2-line build log is pointless. Direction:
+  headroom replaces opentoken (see *Token savings and model routing*); this
+  entry retires when the orchestrator swap ships.
 - **`t.mock.module` is unusable in audit-code tests.** audit-code runs tests via
   `node --import tsx/esm --test`; `t.mock.module` needs
   `--experimental-test-module-mocks` and conflicts with the tsx/esm loader, so it
@@ -260,27 +262,41 @@ audit-report.md` staleness edge (always-rehashed like `tooling_manifest.json`;
 see `spec/dependency-map.md`), and remediate-code aggregates it in the close
 phase. Both reports emit a "Process Feedback" section when reflections exist.
 
-### Token savings and model routing
+### Token savings and model routing — DECIDED 2026-06-11
 
-Candidates evaluated 2026-06-11 (config-overhaul session); integration deferred
-until the workflow redesigns land — these belong in the dispatch/quota layer,
-not in host config:
+**Decision: headroom (https://github.com/chopratejas/headroom) replaces
+opentoken everywhere.** Host level done; orchestrator swap is a redesign work
+item.
 
-- **headroom** (https://github.com/chopratejas/headroom) — compresses tool
-  outputs / logs / files / JSON / code before they reach the LLM (60–95%
-  claimed), lossless-with-retrieval (originals stored, model gets a fetch-back
-  tool), npm + Python, usable as library / proxy / MCP server. Strongest
-  candidate: compress review-packet evidence and worker outputs in both
-  orchestrators; overlaps and may supersede `opentoken wrap`.
-- **tokencost** (https://github.com/AgentOps-AI/tokencost; JS port
-  https://github.com/backmesh/tokencost) — per-model token counting + USD cost
-  tables for 400+ models. Fit: make `pendingItemTokens` /
-  `computeDispatchCapacity` estimates real in `@audit-tools/shared` quota, and
-  add per-run cost reporting to the ledgers.
-- **opentoken** (https://github.com/MrGray17/opentoken) — already installed as
-  MCP (wrap/transform). Keep for now under the command-class wrap policy
-  (control-plane commands exempt); compare against headroom on packet
-  compression and keep one.
+- **Host (done 2026-06-11):** `headroom` MCP server registered at user scope
+  (`claude mcp add --scope user headroom -- headroom mcp serve`); the
+  opentoken entry was removed from the Desktop config in the same pass.
+  Windows install trap: PyPI ships no Windows wheels for the Rust extension
+  and `[all]` needs MSVC (hnswlib) — working recipe is
+  `uv tool install --no-build headroom-ai --with fastapi --with uvicorn --with mcp`
+  (pure-python wheel, 0.20.15). Proxy mode (`headroom proxy` +
+  `ANTHROPIC_BASE_URL=http://127.0.0.1:8787`; auto-compresses all tool-output
+  traffic with CCR retrieval) is installed but NOT enabled — validate it in a
+  single opt-in session before any global env flip.
+- **Orchestrators (redesign work item):** replace the opentoken exec-wrap with
+  the npm `headroom-ai` TS SDK (`compress(messages, { model })`) as a library
+  step — compress packet evidence at build time and worker payloads at
+  ingestion. Atomic replace in one node: delete `wrapForOpenToken` /
+  `quoteForOpenTokenCmd` / `runTracked`'s `opentoken` option
+  (`shared/src/tooling/exec.ts`), the sessionConfig field, the `prompts.ts`
+  wrap-exemption text, and provider wiring (~28 files reference opentoken).
+  Bonus: this deletes the cmd.exe wrap-quoting trap class entirely.
+- **tokencost — take the function, not the dependency.** `tokencost-js`
+  (backmesh fork, 19 commits) counts Claude tokens via the Anthropic counting
+  API — a network call + API key inside deterministic planning is the wrong
+  shape (workers run on subscription CLIs), and the Python original can't run
+  in the Node orchestrators. Instead: a local tokenizer (`gpt-tokenizer` or
+  `js-tiktoken`) behind a new `estimateTokensFromText()` in
+  `shared/src/tokens.ts`, replacing the `BYTES_PER_TOKEN = 4` heuristic
+  wherever real text is available, plus per-model price fields on
+  `KNOWN_MODEL_LIMITS` for ledger cost reporting. Learned RPM/TPM limits stay
+  authoritative — estimates only set the prior. Slot into the redesign's
+  rolling-dispatch node (it touches `rollingEngine.ts` anyway).
 
 ### Nightly autonomous audit→remediate pipeline — capstone, blocked on the redesigns
 
