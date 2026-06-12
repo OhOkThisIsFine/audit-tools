@@ -132,7 +132,7 @@ export interface RemediationDispatchQuota {
   run_id: string;
   phase: DispatchPhase;
   host_concurrency_limit: HostConcurrencyLimit | null;
-  wave_size: number;
+  max_concurrent_agents: number;
   estimated_wave_tokens: number;
   model: string | null;
   confidence: LimitConfidence;

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "audit-code-dispatch-quota/v1alpha2",
   "title": "DispatchQuota",
-  "description": "Quota schedule for a prepare-dispatch run. Written beside dispatch-plan.json. Hosts must launch at most wave_size packets per wave, then re-read this file before the next wave to pick up any updated limits.",
+  "description": "Quota schedule for a prepare-dispatch run. Written beside dispatch-plan.json. Hosts maintain up to max_concurrent_agents subagents running simultaneously (rolling dispatch).",
   "type": "object",
   "required": [
     "contract_version",
@@ -12,8 +12,7 @@
     "confidence",
     "source",
     "host_concurrency_limit",
-    "wave_size",
-    "estimated_wave_tokens",
+    "max_concurrent_agents",
     "cooldown_until"
   ],
   "additionalProperties": false,
@@ -32,7 +31,7 @@
     },
     "resolved_limits": {
       "type": "object",
-      "description": "The rate and context limits used to compute the wave size.",
+      "description": "The rate and context limits used to compute max concurrency.",
       "required": [
         "context_tokens",
         "output_tokens",
@@ -83,15 +82,10 @@
         }
       }
     },
-    "wave_size": {
+    "max_concurrent_agents": {
       "type": "integer",
       "minimum": 1,
-      "description": "Maximum number of packets to dispatch in a single wave."
-    },
-    "estimated_wave_tokens": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Estimated total input tokens for one wave at the recommended wave_size."
+      "description": "Maximum number of subagents to run simultaneously (rolling dispatch)."
     },
     "cooldown_until": {
       "type": ["string", "null"],

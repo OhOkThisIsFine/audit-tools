@@ -69,7 +69,7 @@ test("scheduleWave caps by discovered RPM", () => {
     discoveredLimits: { requests_per_minute: 10, source: "header_extraction" },
   });
   // 10 * 0.8 safety margin = 8
-  assert.equal(schedule.wave_size, 8);
+  assert.equal(schedule.max_concurrent, 8);
 });
 
 test("scheduleWave caps by discovered TPM", () => {
@@ -85,7 +85,7 @@ test("scheduleWave caps by discovered TPM", () => {
     },
   });
   // sumTopN of 5 slots (50000) > 40000 budget, sumTopN of 4 slots (40000) <= 40000 → wave = 4
-  assert.equal(schedule.wave_size, 4);
+  assert.equal(schedule.max_concurrent, 4);
 });
 
 test("scheduleWave explicit config overrides discovered limits", () => {
@@ -103,7 +103,7 @@ test("scheduleWave explicit config overrides discovered limits", () => {
     discoveredLimits: { requests_per_minute: 50, source: "header_extraction" },
   });
   // explicit config RPM (5) wins: 5 * 0.8 = 4
-  assert.equal(schedule.wave_size, 4);
+  assert.equal(schedule.max_concurrent, 4);
 });
 
 test("scheduleWave first-contact cap does not fire when discoveredLimits provide RPM", () => {
@@ -116,7 +116,7 @@ test("scheduleWave first-contact cap does not fire when discoveredLimits provide
     discoveredLimits: { requests_per_minute: 100, source: "header_extraction" },
   });
   // RPM cap: 100 * 0.8 = 80, requestedConcurrency = 22 → wave = 22 (no first-contact)
-  assert.equal(schedule.wave_size, 22);
+  assert.equal(schedule.max_concurrent, 22);
 });
 
 test("scheduleWave first-contact cap applies with custom value", () => {
@@ -127,7 +127,7 @@ test("scheduleWave first-contact cap applies with custom value", () => {
     requestedConcurrency: 22,
     quotaStateEntry: null,
   });
-  assert.equal(schedule.wave_size, 5);
+  assert.equal(schedule.max_concurrent, 5);
 });
 
 // ── File-backed I/O functions ────────────────────────────────────────────────

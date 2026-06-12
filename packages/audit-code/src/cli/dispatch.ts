@@ -80,35 +80,27 @@ export const DEFAULT_DISPATCH_CONFIRM_THRESHOLD = 10;
 
 export interface DispatchFanout {
   agent_count: number;
-  wave_count: number;
+  max_concurrent_agents: number;
   confirmation_recommended: boolean;
   dispatch_summary: string;
 }
 
-/**
- * FINDING-012: pure-arithmetic fan-out summary the loader can gate on. Given the
- * number of agents (packets emitted this round, after budget filtering)
- * and the resolved wave size, derive the wave count, a human-readable summary,
- * and whether the agent count exceeds the confirmation threshold (default 10).
- * No LLM call, no side effects, no prompting.
- */
 export function computeDispatchFanout(params: {
   agentCount: number;
-  waveSize: number;
+  maxConcurrent: number;
   confirmThreshold?: number;
 }): DispatchFanout {
   const agentCount = params.agentCount;
-  const waveSize = params.waveSize;
-  const waveCount = Math.ceil(agentCount / Math.max(1, waveSize));
+  const maxConcurrent = params.maxConcurrent;
   const confirmThreshold =
     params.confirmThreshold ?? DEFAULT_DISPATCH_CONFIRM_THRESHOLD;
   const confirmationRecommended = agentCount > confirmThreshold;
   const dispatchSummary =
-    `${agentCount} agent${agentCount !== 1 ? "s" : ""} across ` +
-    `${waveCount} wave${waveCount !== 1 ? "s" : ""} (wave_size=${waveSize})`;
+    `${agentCount} agent${agentCount !== 1 ? "s" : ""}, ` +
+    `max ${maxConcurrent} concurrent (rolling)`;
   return {
     agent_count: agentCount,
-    wave_count: waveCount,
+    max_concurrent_agents: maxConcurrent,
     confirmation_recommended: confirmationRecommended,
     dispatch_summary: dispatchSummary,
   };
@@ -121,15 +113,13 @@ export interface PrepareDispatchResult {
   packet_count: number;
   task_count: number;
   skipped_task_count: number;
-  /** Subagent parallelism resolved for this dispatch run. */
-  wave_size: number;
+  /** Max subagents running simultaneously (rolling dispatch). */
+  max_concurrent_agents: number;
   /** Total agents that will be launched this run (packet_count after budget filtering). */
   agent_count: number;
-  /** ceil(agent_count / max(1, wave_size)). */
-  wave_count: number;
   /** True when agent_count exceeds sessionConfig.dispatch?.confirm_threshold (default 10). */
   confirmation_recommended: boolean;
-  /** Human-readable summary, e.g. "12 agents across 3 waves (wave_size=4)". */
+  /** Human-readable summary, e.g. "12 agents, max 4 concurrent (rolling)". */
   dispatch_summary: string;
   /** True when a max_packets budget capped the emitted packets this run. */
   budget_capped: boolean;
@@ -672,8 +662,7 @@ async function computeDispatchQuota(params: {
     confidence: waveSchedule.confidence,
     source: waveSchedule.source,
     host_concurrency_limit: waveSchedule.host_concurrency_limit,
-    wave_size: dispatchCapacity.total_slots,
-    estimated_wave_tokens: dispatchCapacity.estimated_wave_tokens,
+    max_concurrent_agents: dispatchCapacity.total_slots,
     cooldown_until: dispatchCapacity.cooldown_until,
     binding_cap: dispatchCapacity.binding_cap,
     capacity_pools: summarizeDispatchCapacityPools(dispatchCapacity),
@@ -974,7 +963,7 @@ export async function prepareDispatchArtifacts(params: {
   // FINDING-012: pure-arithmetic fan-out summary the loader can gate on.
   const fanout = computeDispatchFanout({
     agentCount: plan.length,
-    waveSize: dispatchCapacity.total_slots,
+    maxConcurrent: dispatchCapacity.total_slots,
     confirmThreshold: sessionConfig.dispatch?.confirm_threshold,
   });
 
@@ -985,9 +974,8 @@ export async function prepareDispatchArtifacts(params: {
     packet_count: plan.length,
     task_count: orderedTasks.length,
     skipped_task_count: priorResultTaskIds.size,
-    wave_size: dispatchCapacity.total_slots,
+    max_concurrent_agents: dispatchCapacity.total_slots,
     agent_count: fanout.agent_count,
-    wave_count: fanout.wave_count,
     confirmation_recommended: fanout.confirmation_recommended,
     dispatch_summary: fanout.dispatch_summary,
     budget_capped: budgetCapped,

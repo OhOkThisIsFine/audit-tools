@@ -566,8 +566,7 @@ test("dispatch quota schema enforces cooldown_until date-time format through hel
     confidence: "medium",
     source: "default",
     host_concurrency_limit: null,
-    wave_size: 2,
-    estimated_wave_tokens: 1000,
+    max_concurrent_agents: 2,
     cooldown_until: "2026-05-20T16:45:30Z",
   };
 
@@ -610,8 +609,7 @@ test("dispatch quota schema accepts multi-pool capacity summaries", async () => 
     confidence: "medium",
     source: "provider_default",
     host_concurrency_limit: null,
-    wave_size: 5,
-    estimated_wave_tokens: 5000,
+    max_concurrent_agents: 5,
     cooldown_until: null,
     binding_cap: "host_concurrency",
     capacity_pools: [
@@ -1281,9 +1279,9 @@ test("step_contract schema validates progress with all StepProgress fields (ARC-
           progress: {
             summary: "Dispatch in progress",
             agent_count: 8,
-            wave_count: 2,
+            max_concurrent_agents: 4,
             confirmation_recommended: false,
-            dispatch_summary: "8 agents across 2 waves",
+            dispatch_summary: "8 agents, max 4 concurrent (rolling)",
           },
         },
         "stepDispatch",

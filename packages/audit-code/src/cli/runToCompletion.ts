@@ -1167,7 +1167,7 @@ async function runParallelWaveStep(params: {
     quotaSourceSnapshot,
     discoveredLimits,
   });
-  const waveSize = waveSchedule.wave_size;
+  const waveSize = waveSchedule.max_concurrent;
 
   if (waveSchedule.cooldown_until) {
     const waitMs = new Date(waveSchedule.cooldown_until).getTime() - Date.now();

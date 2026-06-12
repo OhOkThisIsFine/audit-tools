@@ -2,7 +2,7 @@
  * Integration tests for shared-engine behaviors from the workflow redesign (N-S08).
  *
  * Five tests:
- *   1. quota-only throttling — wave_size bounded exclusively by RPM
+ *   1. quota-only throttling — max_concurrent bounded exclusively by RPM
  *   2. capability-tier routing — classifyProvider + agentHostFallbackConcurrency
  *   3. free_form_intent never emitted verbatim by shared-layer prompt builders
  *   4. emptied provider pool reaches waiting_for_provider terminal (pending — ProviderPool)
@@ -25,10 +25,10 @@ const { filterNewProviders, advancePausedState } = await import(
 const { interpretIntent } = await import("../src/intent/clauseInterpreter.ts");
 
 // ---------------------------------------------------------------------------
-// 1. Quota-only throttling — wave_size bounded exclusively by RPM
+// 1. Quota-only throttling — max_concurrent bounded exclusively by RPM
 // ---------------------------------------------------------------------------
 
-test("quota-only throttling: wave_size bounded exclusively by RPM when it is the sole constraint", () => {
+test("quota-only throttling: max_concurrent bounded exclusively by RPM when it is the sole constraint", () => {
   const N = 7;
   const schedule = scheduleWave({
     providerName: "claude-code",
@@ -50,9 +50,9 @@ test("quota-only throttling: wave_size bounded exclusively by RPM when it is the
   });
 
   assert.equal(
-    schedule.wave_size,
+    schedule.max_concurrent,
     N,
-    `wave_size should equal RPM limit ${N}, got ${schedule.wave_size}`,
+    `max_concurrent should equal RPM limit ${N}, got ${schedule.max_concurrent}`,
   );
   assert.equal(
     schedule.binding_cap,

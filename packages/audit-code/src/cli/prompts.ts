@@ -86,13 +86,11 @@ export function renderDispatchReviewPrompt(params: {
         `  Dispatch plan:  ${params.dispatchPlanPath}`,
         `  Dispatch quota: ${params.dispatchQuotaPath}`,
         "",
-        "Use the `wave_size` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before starting the first wave.",
+        "Use `max_concurrent_agents` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before dispatching.",
         "",
-        "`host_concurrency_limit` records any detected hard host cap that contributed to `wave_size`.",
+        "Maintain up to `max_concurrent_agents` subagents running simultaneously. As each completes and its result is captured, immediately dispatch the next pending entry. If you hit a rate limit (429/TPM/RPM), pause until the reset time clears, then continue.",
         "",
-        "For each wave: use the `task` tool (or equivalent subagent dispatch) to launch up to `wave_size` subagents in parallel (one per entry), wait for all to finish, then start the next wave.",
-        "",
-        'If a subagent reports a host session/usage limit (e.g. "hit your session limit · resets <time>") instead of submitting its result, do not immediately re-dispatch it: run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets. Re-dispatching into an active limit just loses the wave.',
+        'If a subagent reports a host session/usage limit (e.g. "hit your session limit · resets <time>") instead of submitting its result, do not immediately re-dispatch it: run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
       ]
     : [
         "Read this generated dispatch plan:",
@@ -266,9 +264,9 @@ export function renderRollingDispatchPrompt(params: {
         `  Dispatch plan:  ${params.dispatchPlanPath}`,
         `  Dispatch quota: ${params.dispatchQuotaPath}`,
         "",
-        "Use the `wave_size` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before starting the first wave.",
+        "Use `max_concurrent_agents` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before dispatching.",
         "",
-        "For each wave: use the `task` tool (or equivalent subagent dispatch) to launch up to `wave_size` subagents in parallel (one per entry), wait for all to finish, then start the next wave.",
+        "Maintain up to `max_concurrent_agents` subagents running simultaneously. As each completes and its result is captured, immediately dispatch the next pending entry. If you hit a rate limit (429/TPM/RPM), pause until the reset time clears, then continue.",
         "",
         'If a subagent reports a host session/usage limit instead of emitting its result, run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
       ]

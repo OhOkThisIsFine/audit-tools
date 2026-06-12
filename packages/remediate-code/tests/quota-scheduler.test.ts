@@ -38,7 +38,7 @@ describe("scheduleWave (quota module)", () => {
       hostModel: null,
       requestedConcurrency: 10,
     });
-    expect(result.wave_size).toBe(10);
+    expect(result.max_concurrent).toBe(10);
     expect(result.confidence).toBe("high");
   });
 
@@ -54,7 +54,7 @@ describe("scheduleWave (quota module)", () => {
         description: "test",
       },
     });
-    expect(result.wave_size).toBeLessThanOrEqual(3);
+    expect(result.max_concurrent).toBeLessThanOrEqual(3);
   });
 
   it("applies RPM cap", () => {
@@ -73,10 +73,10 @@ describe("scheduleWave (quota module)", () => {
       hostModel: "test/model",
       requestedConcurrency: 20,
     });
-    expect(result.wave_size).toBeLessThanOrEqual(Math.floor(5 * DEFAULT_SAFETY_MARGIN));
+    expect(result.max_concurrent).toBeLessThanOrEqual(Math.floor(5 * DEFAULT_SAFETY_MARGIN));
   });
 
-  it("respects cooldown — forces wave_size=1", () => {
+  it("respects cooldown — forces max_concurrent=1", () => {
     const futureTime = new Date(Date.now() + 60_000).toISOString();
     const entry = makeEntry({ cooldown_until: futureTime });
     const result = scheduleWave({
@@ -86,7 +86,7 @@ describe("scheduleWave (quota module)", () => {
       requestedConcurrency: 10,
       quotaStateEntry: entry,
     });
-    expect(result.wave_size).toBe(1);
+    expect(result.max_concurrent).toBe(1);
     expect(result.cooldown_until).toBe(futureTime);
   });
 
@@ -107,7 +107,7 @@ describe("scheduleWave (quota module)", () => {
       requestedConcurrency: 10,
       quotaStateEntry: entry,
     });
-    expect(result.wave_size).toBeGreaterThan(1);
+    expect(result.max_concurrent).toBeGreaterThan(1);
     expect(result.cooldown_until).toBeNull();
   });
 
@@ -126,7 +126,7 @@ describe("scheduleWave (quota module)", () => {
       requestedConcurrency: 20,
       quotaStateEntry: entry,
     });
-    expect(result.wave_size).toBeLessThanOrEqual(3);
+    expect(result.max_concurrent).toBeLessThanOrEqual(3);
   });
 
   it("ramps up concurrency after consecutive successes", () => {
@@ -143,7 +143,7 @@ describe("scheduleWave (quota module)", () => {
       requestedConcurrency: 20,
       quotaStateEntry: entry,
     });
-    expect(result.wave_size).toBe(3);
+    expect(result.max_concurrent).toBe(3);
   });
 
   it("throttles when quota source shows <10% remaining", () => {
@@ -161,7 +161,7 @@ describe("scheduleWave (quota module)", () => {
         source: "test",
       },
     });
-    expect(result.wave_size).toBe(1);
+    expect(result.max_concurrent).toBe(1);
   });
 
   it("halves when quota source shows <30% remaining", () => {
@@ -190,7 +190,7 @@ describe("scheduleWave (quota module)", () => {
         source: "test",
       },
     });
-    expect(result.wave_size).toBeLessThanOrEqual(3);
+    expect(result.max_concurrent).toBeLessThanOrEqual(3);
   });
 
   it("uses per-slot token estimates for TPM capping", () => {
@@ -210,7 +210,7 @@ describe("scheduleWave (quota module)", () => {
       requestedConcurrency: 10,
       estimatedSlotTokens: [5000, 4000, 3000, 2000, 1000],
     });
-    expect(result.wave_size).toBeLessThan(10);
+    expect(result.max_concurrent).toBeLessThan(10);
   });
 
   it("defaults agent-host providers to parallel dispatch, unknown providers to 1", () => {
@@ -222,7 +222,7 @@ describe("scheduleWave (quota module)", () => {
       hostModel: null,
       requestedConcurrency: 10,
     });
-    expect(agentHost.wave_size).toBe(DEFAULT_AGENT_HOST_CONCURRENCY);
+    expect(agentHost.max_concurrent).toBe(DEFAULT_AGENT_HOST_CONCURRENCY);
 
     // A genuinely unknown (non-agent-host) provider stays conservative at 1.
     const unknown = scheduleWave({
@@ -231,7 +231,7 @@ describe("scheduleWave (quota module)", () => {
       hostModel: null,
       requestedConcurrency: 10,
     });
-    expect(unknown.wave_size).toBe(1);
+    expect(unknown.max_concurrent).toBe(1);
   });
 
   it("allows unlimited for local provider", () => {
@@ -244,7 +244,7 @@ describe("scheduleWave (quota module)", () => {
       hostModel: null,
       requestedConcurrency: 10,
     });
-    expect(result.wave_size).toBe(10);
+    expect(result.max_concurrent).toBe(10);
   });
 });
 

@@ -353,8 +353,7 @@ const baseQuota = {
   confidence: "high",
   source: "known_metadata",
   host_concurrency_limit: null,
-  wave_size: 5,
-  estimated_wave_tokens: 100000,
+  max_concurrent_agents: 5,
   cooldown_until: null,
 };
 

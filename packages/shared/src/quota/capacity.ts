@@ -297,8 +297,8 @@ function schedulePool(
   return {
     pool_id: pool.id,
     slots: itemTokens.length > 0
-      ? Math.min(schedule.wave_size, itemTokens.length)
-      : schedule.wave_size,
+      ? Math.min(schedule.max_concurrent, itemTokens.length)
+      : schedule.max_concurrent,
     schedule,
   };
 }

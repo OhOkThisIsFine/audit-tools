@@ -96,16 +96,15 @@ export async function renderSemanticReviewStep(params: {
     progress: {
       summary:
         `Dispatching ${dispatch.packet_count} review packet(s) covering ` +
-        `${dispatch.task_count} task(s) in waves of ${dispatch.wave_size}` +
+        `${dispatch.task_count} task(s), max ${dispatch.max_concurrent_agents} concurrent (rolling)` +
         (dispatch.skipped_task_count > 0
           ? `; ${dispatch.skipped_task_count} task(s) already completed.`
           : "."),
       pending_packets: dispatch.packet_count,
       pending_tasks: dispatch.task_count,
       completed_tasks: dispatch.skipped_task_count,
-      wave_size: dispatch.wave_size,
+      max_concurrent_agents: dispatch.max_concurrent_agents,
       agent_count: dispatch.agent_count,
-      wave_count: dispatch.wave_count,
       confirmation_recommended: dispatch.confirmation_recommended,
       dispatch_summary: dispatch.dispatch_summary,
     },

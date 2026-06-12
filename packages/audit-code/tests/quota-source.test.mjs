@@ -126,7 +126,7 @@ test("scheduleWave throttles to 1 when remaining_pct < 10%", () => {
     requestedConcurrency: 10,
     quotaSourceSnapshot: snapshot,
   });
-  assert.equal(schedule.wave_size, 1);
+  assert.equal(schedule.max_concurrent, 1);
   assert.equal(schedule.cooldown_until, snapshot.reset_at);
   assert.deepEqual(schedule.quota_source_snapshot, snapshot);
 });
@@ -147,7 +147,7 @@ test("scheduleWave halves wave when remaining_pct < 30%", () => {
     requestedConcurrency: 10,
     quotaSourceSnapshot: snapshot,
   });
-  assert.equal(schedule.wave_size, 5);
+  assert.equal(schedule.max_concurrent, 5);
 });
 
 test("scheduleWave does not throttle when remaining_pct >= 30%", () => {
@@ -166,5 +166,5 @@ test("scheduleWave does not throttle when remaining_pct >= 30%", () => {
     requestedConcurrency: 10,
     quotaSourceSnapshot: snapshot,
   });
-  assert.equal(schedule.wave_size, 10);
+  assert.equal(schedule.max_concurrent, 10);
 });

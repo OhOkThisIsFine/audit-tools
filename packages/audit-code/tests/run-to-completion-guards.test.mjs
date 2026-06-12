@@ -49,7 +49,7 @@ test("deepeningCycles boundary: must exceed MAX_DEEPENING_CYCLES, not equal it",
 
 // ── (2) cooldown_until wait branch ───────────────────────────────────────────
 
-test("scheduleWave returns wave_size 1 and the cooldown timestamp during an active cooldown", () => {
+test("scheduleWave returns max_concurrent 1 and the cooldown timestamp during an active cooldown", () => {
   const future = new Date(Date.now() + 60_000).toISOString();
   const schedule = scheduleWave({
     providerName: "opencode",
@@ -59,7 +59,7 @@ test("scheduleWave returns wave_size 1 and the cooldown timestamp during an acti
     quotaStateEntry: { cooldown_until: future },
   });
   assert.equal(schedule.cooldown_until, future);
-  assert.equal(schedule.wave_size, 1);
+  assert.equal(schedule.max_concurrent, 1);
 });
 
 test("cooldown waitMs: future is positive, past is non-positive, and the cap holds", () => {
