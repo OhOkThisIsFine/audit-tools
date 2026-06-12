@@ -948,6 +948,59 @@ test("high fan-in graph edges do not collapse shared files into every packet", (
   assert.equal(metrics.packet_quality.largest_unexplained_packet_files, 0);
 });
 
+test("directory-proximity merge combines small packets sharing a deep directory", () => {
+  // Three tasks in src/services/payments/ (depth 3) — should merge into one packet.
+  // One task in src/utils/ (depth 2) — should stay separate (depth < 3).
+  const tasks = [
+    makeTask("payments-validate:security", "security", {
+      unit_id: "payments-validate",
+      file_paths: ["src/services/payments/validate.ts"],
+      file_line_counts: { "src/services/payments/validate.ts": 30 },
+    }),
+    makeTask("payments-charge:security", "security", {
+      unit_id: "payments-charge",
+      file_paths: ["src/services/payments/charge.ts"],
+      file_line_counts: { "src/services/payments/charge.ts": 25 },
+    }),
+    makeTask("payments-refund:security", "security", {
+      unit_id: "payments-refund",
+      file_paths: ["src/services/payments/refund.ts"],
+      file_line_counts: { "src/services/payments/refund.ts": 20 },
+    }),
+    makeTask("utils-format:security", "security", {
+      unit_id: "utils-format",
+      file_paths: ["src/utils/format.ts"],
+      file_line_counts: { "src/utils/format.ts": 15 },
+    }),
+  ];
+
+  const packets = buildReviewPackets(tasks);
+
+  // The three payments tasks share src/services/payments (depth 3) → merged.
+  // The utils task stays alone (src/utils is depth 2 < minDepth 3).
+  assert.equal(packets.length, 2, `expected 2 packets, got ${packets.length}`);
+  const paymentsPacket = packets.find((p) =>
+    p.file_paths.includes("src/services/payments/validate.ts"),
+  );
+  assert.ok(paymentsPacket, "should have a payments packet");
+  assert.ok(
+    paymentsPacket.file_paths.includes("src/services/payments/charge.ts"),
+    "payments packet should include charge.ts",
+  );
+  assert.ok(
+    paymentsPacket.file_paths.includes("src/services/payments/refund.ts"),
+    "payments packet should include refund.ts",
+  );
+  const utilsPacket = packets.find((p) =>
+    p.file_paths.includes("src/utils/format.ts"),
+  );
+  assert.ok(utilsPacket, "should have a utils packet");
+  assert.ok(
+    !utilsPacket.file_paths.includes("src/services/payments/validate.ts"),
+    "utils packet should not include payments files",
+  );
+});
+
 test("tiny test files batch across unit boundaries per lens", () => {
   const tasks = buildChunkedAuditTasks(
     {
