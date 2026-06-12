@@ -130,6 +130,16 @@ export interface DispatchConfig {
    * Default: all packets (no cap).
    */
   max_packets?: number;
+  /**
+   * Risk-mass ceiling for the just-in-time graph partition (Phase B of the
+   * plan/dispatch seam): the maximum aggregate node-risk a single packet may
+   * accumulate before the partitioner splits a coherent cluster along its
+   * weakest internal edge. Node risk is in [0,1]. A ceiling, not a quota —
+   * high-risk clusters are never padded with low-risk filler. Model-parameterized
+   * in principle (a stronger model warrants a higher ceiling); until per-model
+   * values are discovered at handshake it defaults to DEFAULT_RISK_MASS_BUDGET.
+   */
+  risk_mass_budget?: number;
 }
 
 export interface GraphConfig {
