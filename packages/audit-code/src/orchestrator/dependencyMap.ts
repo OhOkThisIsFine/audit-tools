@@ -142,9 +142,14 @@ export const ARTIFACT_DEPENDENTS_MAP: Record<string, string[]> = {
   "audit_tasks.json": [
     "audit_plan_metrics.json",
     "review_packets.json",
+    "task_affinity_graph.json",
   ],
   "audit_plan_metrics.json": [],
   "review_packets.json": [],
+  // Provider-neutral task-affinity graph derived from audit_tasks (Phase A of
+  // the plan/dispatch seam). A leaf: dispatch partitions it just-in-time and
+  // persists nothing back. See docs/capability-discovery-and-tiered-dispatch-design.md.
+  "task_affinity_graph.json": [],
   "runtime_validation_report.json": [
     "audit-report.md",
   ],
