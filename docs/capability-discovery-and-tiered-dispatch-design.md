@@ -204,20 +204,37 @@ partitioner is not yet wired, so the tree stays green and resumable):
   task nodes + soft weighted affinity edges; io/dependency/schema/tests.
 - **N4a** — `partitionTaskGraph.ts`: pure greedy union-find partition under
   token + risk-mass ceilings (Phase-B core algorithm), tested. Not yet wired.
+- **N4b** — **the keystone atomic replace, landed.** Dispatch now packetizes by
+  partitioning the task-affinity graph JIT under the dispatching model's
+  context + risk-mass ceilings, quota-before-packetization:
+  - `computeDispatchQuota` split into `buildDispatchPool` (resolves host pool +
+    probes the context budget, runs *before* packetization) and
+    `finalizeDispatchQuota` (capacity/wave schedule over the real per-packet
+    layout, runs *after*).
+  - `buildPacket` exported; new `buildReviewPacketsFromPartition` maps each
+    `GraphPacket`'s task ids → `AuditTask[]` → `buildPacket`, returning the same
+    `ReviewPacket[]` contract so all downstream rendering is unchanged. The old
+    `buildReviewPackets` call is deleted from the dispatch flow (same commit).
+  - `resolveDispatchTaskGraph` prefers the persisted `task_affinity_graph`
+    (filtered to pending tasks via `filterTaskAffinityGraph`), falling back to
+    `buildTaskAffinityGraph` when it's absent or doesn't cover every pending task.
+  - Risk-mass ceiling: provisional `DEFAULT_RISK_MASS_BUDGET = 4`, overridable via
+    `sessionConfig.dispatch.risk_mass_budget`. Provisional until N5.
+  - Three integration tests in `dispatch-features.test.mjs` prove the levers:
+    affinity-linked tasks merge under budget; an oversized cluster splits on the
+    token ceiling; a high-risk cluster splits on the risk-mass ceiling.
 
-**Next: N4b (the keystone atomic replace).** Key finding for whoever picks it up:
-the dispatch flow **packetizes before it computes quota** (`buildReviewPackets`
-at `src/cli/dispatch.ts:774`; `computeDispatchQuota` ~923), and dispatch
-**rebuilds** packets at dispatch time rather than reading the persisted
-`review_packets.json`. So N4b is localized to the dispatch flow but must
-**reorder quota-before-packetization** so the partition sees the model's real
-context budget (`resolved_limits.context_tokens`). Adapter path: export
-`buildPacket` (the single-packet constructor at `reviewPackets.ts:342`) and add a
-`buildReviewPacketsFromPartition` that maps each `GraphPacket`'s task ids →
-`AuditTask[]` → `buildPacket`; swap it in at the dispatch call site and delete the
-old `buildReviewPackets` call in the same commit. Expect packet-count test churn
-in `dispatch-features.test.mjs`. Then **N5** (capability handshake / retire
-`KNOWN_MODEL_LIMITS`) makes that budget real, **N6** condensed confirm_intent,
+  Note: with N4b the persisted `review_packets.json` is no longer the dispatch
+  authority (dispatch never read it — it rebuilds). Left in place for N4b
+  (harmless; `buildAuditPlanMetrics`/`operatorHandoff` still build packets for
+  metrics). Stripping it as a persisted artifact is its own later node.
+
+**Next: N5 (capability handshake — makes the budget real).** Extend
+`provider_confirmation` so the host reports discovered models + context windows +
+real concurrency. **Retire `KNOWN_MODEL_LIMITS`** as a source of truth; fix the
+`model: null` / 32k-default path so `buildDispatchPool`'s `contextBudgetTokens`
+reflects the real model (e.g. 200k) instead of the 32k fallback — at which point
+the 163-packet over-split collapses to ~30. Then **N6** condensed confirm_intent,
 **N7** deep conceptual fan-out, **N8** remediate-code parity.
 
 ## Resolved decisions (2026-06-12)

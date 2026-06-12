@@ -41,6 +41,16 @@ export interface PartitionOptions {
   promptOverheadTokens?: number;
 }
 
+/**
+ * Provisional risk-mass ceiling used until N5 supplies real per-model values.
+ * Node risk is in [0,1] (high-risk task ≈ 0.7–1.0), so ~4 lets a single agent
+ * hold a handful of high-risk tasks (a coherent critical flow) before the cap
+ * forces a split along the weakest internal edge. Tunable from real outcomes;
+ * a stronger model warrants a higher ceiling. Exposed as the `risk_mass_budget`
+ * dispatch knob.
+ */
+export const DEFAULT_RISK_MASS_BUDGET = 4;
+
 interface Cluster {
   parent: number;
   tokens: number;

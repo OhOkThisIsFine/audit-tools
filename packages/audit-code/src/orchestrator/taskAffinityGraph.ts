@@ -53,6 +53,21 @@ export interface TaskAffinityGraph {
   edges: TaskAffinityEdge[];
 }
 
+/**
+ * Restrict a task-affinity graph to a set of task ids, keeping only nodes whose
+ * task survives and edges whose both endpoints survive. Used at dispatch to
+ * partition only the still-pending tasks from a persisted full-run graph.
+ */
+export function filterTaskAffinityGraph(
+  graph: TaskAffinityGraph,
+  keep: ReadonlySet<string>,
+): TaskAffinityGraph {
+  const nodes = graph.nodes.filter((n) => keep.has(n.task_id));
+  const have = new Set(nodes.map((n) => n.task_id));
+  const edges = graph.edges.filter((e) => have.has(e.from) && have.has(e.to));
+  return { schema_version: graph.schema_version, nodes, edges };
+}
+
 // Per-kind base weights. Tuned so stronger structural coupling packs first.
 const KIND_WEIGHT: Record<TaskAffinityEdgeKind, number> = {
   shared_file: 0.9,
