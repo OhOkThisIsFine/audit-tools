@@ -7,7 +7,12 @@ import {
   writeJsonFile,
   DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
 } from "@audit-tools/shared";
-import type { ProviderRateLimits, SessionConfig, DispatchModelHint } from "@audit-tools/shared";
+import type {
+  ProviderRateLimits,
+  SessionConfig,
+  DispatchModelHint,
+  DispatchModelTier,
+} from "@audit-tools/shared";
 import { buildQuotaSource } from "@audit-tools/shared/quota/compositeQuotaSource";
 import type {
   ActiveDispatchState,
@@ -57,9 +62,17 @@ import {
 } from "./args.js";
 
 export const LARGE_FILE_PACKET_TARGET_LINES = 2500;
-export const SMALL_MODEL_HINT_MAX_LINES = 500;
-export const SMALL_MODEL_HINT_MAX_ESTIMATED_TOKENS = 3000;
 export const DEEP_MODEL_HINT_MIN_ESTIMATED_TOKENS = 9000;
+
+/**
+ * Default relative cut points mapping a packet's `routing_risk` (max member
+ * risk, in [0,1]) to a relative model rank. Provider-neutral: these are
+ * positions on a normalized risk scale, never named models or model windows
+ * (the no-hardcoded-models invariant). Overridable via
+ * `sessionConfig.dispatch.routing_tiers`.
+ */
+export const DEFAULT_DEEP_ROUTING_RISK = 0.66;
+export const DEFAULT_STANDARD_ROUTING_RISK = 0.33;
 
 export interface DispatchComplexity {
   priority: NonNullable<AuditTask["priority"]>;
@@ -218,19 +231,59 @@ export function buildDispatchComplexity(
   };
 }
 
-export function buildDispatchModelHint(complexity: DispatchComplexity): DispatchModelHint {
-  const deepReasons: string[] = [];
-  if (complexity.priority === "high") deepReasons.push("high_priority");
-  if (complexity.large_file_mode) deepReasons.push("isolated_large_file");
+const TIER_RANK: Record<DispatchModelTier, number> = {
+  small: 0,
+  standard: 1,
+  deep: 2,
+};
+
+const SENSITIVE_HINT_LENSES = new Set(["security", "data_integrity", "reliability"]);
+
+/**
+ * Derive a packet's relative model rank from its `routing_risk` (the JIT graph
+ * partition's max member risk) — the risk-primary baseline — with complexity
+ * signals acting as ESCALATORS ONLY: they can raise the tier (a genuinely
+ * large/critical-flow packet still gets the top rank at low risk) but never
+ * lower the risk baseline. Cut points are relative positions on the normalized
+ * risk scale, never model names (no-hardcoded-models invariant).
+ */
+export function resolveDispatchTier(params: {
+  /** Max member risk from the partition; undefined when no partition ran. */
+  routingRisk: number | undefined;
+  complexity: DispatchComplexity;
+  /** Relative cut-point overrides (sessionConfig.dispatch.routing_tiers). */
+  routingTiers?: { deep_at?: number; standard_at?: number };
+}): DispatchModelHint {
+  const { routingRisk, complexity } = params;
+  const deepAt = params.routingTiers?.deep_at ?? DEFAULT_DEEP_ROUTING_RISK;
+  const standardAt =
+    params.routingTiers?.standard_at ?? DEFAULT_STANDARD_ROUTING_RISK;
+
+  const baseline: DispatchModelTier =
+    routingRisk === undefined
+      ? "small"
+      : routingRisk >= deepAt
+        ? "deep"
+        : routingRisk >= standardAt
+          ? "standard"
+          : "small";
+  const reasons: string[] = [
+    routingRisk === undefined
+      ? "routing_risk:unknown"
+      : `routing_risk:${routingRisk.toFixed(2)}`,
+  ];
+
+  const deepEscalators: string[] = [];
+  if (complexity.large_file_mode) deepEscalators.push("isolated_large_file");
   if (complexity.estimated_tokens >= DEEP_MODEL_HINT_MIN_ESTIMATED_TOKENS) {
-    deepReasons.push("high_estimated_tokens");
+    deepEscalators.push("high_estimated_tokens");
   }
   if (
     complexity.tags.some(
       (tag) => tag === "critical_flow" || tag.startsWith("critical_flow:"),
     )
   ) {
-    deepReasons.push("critical_flow");
+    deepEscalators.push("critical_flow");
   }
   if (
     complexity.tags.some(
@@ -238,39 +291,31 @@ export function buildDispatchModelHint(complexity: DispatchComplexity): Dispatch
         tag === "external_analyzer_signal" || tag.startsWith("external_tool:"),
     )
   ) {
-    deepReasons.push("external_analyzer_signal");
+    deepEscalators.push("external_analyzer_signal");
   }
   if (complexity.tags.includes("lens_verification")) {
-    deepReasons.push("lens_verification");
-  }
-  if (deepReasons.length > 0) {
-    return { tier: "deep", reasons: deepReasons };
+    deepEscalators.push("lens_verification");
   }
 
-  const sensitiveLenses = new Set(["security", "data_integrity", "reliability"]);
-  const hasSensitiveLens = complexity.lenses.some((lens) =>
-    sensitiveLenses.has(lens),
-  );
-  if (
-    complexity.priority === "low" &&
-    complexity.total_lines <= SMALL_MODEL_HINT_MAX_LINES &&
-    complexity.estimated_tokens <= SMALL_MODEL_HINT_MAX_ESTIMATED_TOKENS &&
-    !hasSensitiveLens &&
-    complexity.tags.length === 0
-  ) {
-    return { tier: "small", reasons: ["small_low_priority_packet"] };
+  const standardEscalators: string[] = [];
+  if (complexity.lenses.some((lens) => SENSITIVE_HINT_LENSES.has(lens))) {
+    standardEscalators.push("sensitive_lens");
+  }
+  if (complexity.priority === "medium") {
+    standardEscalators.push("medium_priority");
   }
 
-  const reasons: string[] = [];
-  if (complexity.priority === "medium") reasons.push("medium_priority");
-  if (hasSensitiveLens) reasons.push("sensitive_lens");
-  if (complexity.total_lines > SMALL_MODEL_HINT_MAX_LINES) {
-    reasons.push("moderate_size");
+  let tier = baseline;
+  if (deepEscalators.length > 0 && TIER_RANK.deep > TIER_RANK[tier]) {
+    tier = "deep";
   }
-  return {
-    tier: "standard",
-    reasons: reasons.length > 0 ? reasons : ["default_review_packet"],
-  };
+  if (standardEscalators.length > 0 && TIER_RANK.standard > TIER_RANK[tier]) {
+    tier = "standard";
+  }
+  // Reasons stay attributable: the risk baseline first, then every escalator
+  // that fired (even ones below the final tier — they explain the floor).
+  reasons.push(...deepEscalators, ...standardEscalators);
+  return { tier, reasons };
 }
 
 export function withinRoot(root: string, path: string): string {
@@ -1005,7 +1050,11 @@ export async function prepareDispatchArtifacts(params: {
       prompt_path: promptPath,
       result_path: packetResultPath,
       complexity,
-      model_hint: buildDispatchModelHint(complexity),
+      model_hint: resolveDispatchTier({
+        routingRisk: packet.routing_risk,
+        complexity,
+        routingTiers: sessionConfig.dispatch?.routing_tiers,
+      }),
       access: {
         read_paths: [
           promptPath,
