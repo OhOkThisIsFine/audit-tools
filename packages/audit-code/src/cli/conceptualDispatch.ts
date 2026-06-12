@@ -1,6 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { SessionConfig } from "@audit-tools/shared";
+import type {
+  DispatchModelHint,
+  DispatchModelTier,
+  SessionConfig,
+} from "@audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import {
   type DesignReviewOptions,
@@ -14,6 +18,11 @@ export interface ConceptualReviewSettings {
   max_units?: number;
   conceptual_depth: "shallow" | "deep";
   perspectives?: number;
+  /**
+   * Relative rank for perspective subagents (divergent ideation). Defaults to
+   * `"standard"`; the judge always routes `"deep"`.
+   */
+  perspective_tier?: DispatchModelTier;
 }
 
 /**
@@ -33,6 +42,7 @@ export function resolveConceptualReviewSettings(
     conceptual_depth:
       checkpoint?.conceptual_depth ?? cfg?.conceptual_depth ?? "shallow",
     perspectives: checkpoint?.perspectives ?? cfg?.perspectives,
+    perspective_tier: cfg?.perspective_tier,
   };
 }
 
@@ -51,6 +61,12 @@ export interface ConceptualDispatch {
   readPaths: string[];
   /** Result files the host's subagents write. */
   writePaths: string[];
+  /**
+   * Relative model ranks for the deep fan-out: perspectives route `"standard"`
+   * by default (divergent ideation), the judge routes `"deep"` (it merges,
+   * dedups, and ranks across every perspective output). Absent when shallow.
+   */
+  modelHints?: { perspectives: DispatchModelHint; judge: DispatchModelHint };
 }
 
 /**
@@ -66,6 +82,12 @@ export async function prepareConceptualDispatch(opts: {
   artifactsDir: string;
   bundle: ArtifactBundle;
   settings: ConceptualReviewSettings;
+  /**
+   * Render each subagent's `model_hint.tier` into the instruction lines. Only
+   * set when the host reported it can act on model hints — otherwise the tiers
+   * stay inert metadata on `modelHints`, mirroring the packet-dispatch path.
+   */
+  hostCanSelectSubagentModel?: boolean;
 }): Promise<ConceptualDispatch> {
   const { artifactsDir, bundle, settings } = opts;
   const incoming = join(artifactsDir, "incoming");
@@ -102,6 +124,18 @@ export async function prepareConceptualDispatch(opts: {
   }
 
   // Deep: real fan-out — N perspective subagents + an independent judge.
+  const modelHints = {
+    perspectives: {
+      tier: settings.perspective_tier ?? "standard",
+      reasons: ["conceptual_perspective_ideation"],
+    },
+    judge: {
+      tier: "deep",
+      reasons: ["conceptual_judge_synthesis"],
+    },
+  } satisfies ConceptualDispatch["modelHints"];
+  const renderTier = (hint: DispatchModelHint): string =>
+    opts.hostCanSelectSubagentModel ? ` [model_hint.tier: ${hint.tier}]` : "";
   const perspectives = selectPerspectives(settings.perspectives);
   const total = perspectives.length;
   const perspectiveFiles: Array<{
@@ -141,7 +175,7 @@ export async function prepareConceptualDispatch(opts: {
 
   const perspectiveLines = perspectiveFiles.map(
     (f, i) =>
-      `   - Perspective ${i + 1} (${f.name}): prompt \`${f.promptPath}\` → findings \`${f.resultsPath}\``,
+      `   - Perspective ${i + 1} (${f.name}): prompt \`${f.promptPath}\` → findings \`${f.resultsPath}\`${renderTier(modelHints.perspectives)}`,
   );
 
   const artifactPaths: Record<string, string> = {
@@ -160,7 +194,12 @@ export async function prepareConceptualDispatch(opts: {
       `**Conceptual review** (generative, deep — ${total}-perspective fan-out):`,
       `1. Dispatch these ${total} independent perspective subagents **in parallel**. Each reviews only through its own value system and must NOT see the others' output:`,
       ...perspectiveLines,
-      `2. When all ${total} perspectives have written their findings, dispatch ONE **independent judge** subagent — it must be a different agent than any of the perspectives: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.`,
+      `2. When all ${total} perspectives have written their findings, dispatch ONE **independent judge** subagent — it must be a different agent than any of the perspectives: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.${renderTier(modelHints.judge)}`,
+      ...(opts.hostCanSelectSubagentModel
+        ? [
+            "Map each `model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names.",
+          ]
+        : []),
     ],
     artifactPaths,
     readPaths: [...perspectiveFiles.map((f) => f.promptPath), judgePromptPath],
@@ -168,5 +207,6 @@ export async function prepareConceptualDispatch(opts: {
       ...perspectiveFiles.map((f) => f.resultsPath),
       conceptualResultsPath,
     ],
+    modelHints,
   };
 }

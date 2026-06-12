@@ -865,6 +865,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       artifactsDir,
       bundle: result.bundle,
       settings: conceptualSettings,
+      hostCanSelectSubagentModel,
     });
 
     const contractPromptText = [
@@ -970,6 +971,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       artifactsDir,
       bundle: result.bundle,
       settings: conceptualSettings,
+      hostCanSelectSubagentModel,
     });
 
     const prompt = [

@@ -1,3 +1,5 @@
+import type { DispatchModelTier } from "./stepContract.js";
+
 export const PROVIDER_NAMES = [
   "auto",
   "local-subprocess",
@@ -221,6 +223,13 @@ export interface DesignReviewConfig {
    * source; this config is the host/session override.
    */
   perspectives?: number;
+  /**
+   * Relative model rank for the deep conceptual pass's perspective subagents
+   * (divergent ideation rarely needs the top rank). Defaults to `"standard"`.
+   * The judge always routes `"deep"` — it merges/dedups/ranks across every
+   * perspective output, the hardest reasoning step in the pass.
+   */
+  perspective_tier?: DispatchModelTier;
 }
 
 /**
