@@ -1,4 +1,5 @@
 import type { QuotaConfig, ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
+import type { DispatchModelTier } from "../types/stepContract.js";
 import type {
   HostConcurrencyLimit,
   QuotaStateEntry,
@@ -35,6 +36,88 @@ export interface DiscoveredRateLimitsInput {
   context_tokens?: number | null;
   /** Discovered output cap for the dispatching model, if reported. */
   output_tokens?: number | null;
+}
+
+/**
+ * One entry of the host's model roster, reported at the dispatch handshake
+ * (lowest rank first). `rank` is a RELATIVE capability label that reuses the
+ * `DispatchModelTier` vocabulary so it lines up with each packet's
+ * `model_hint.tier`; the windows are discovered, never assumed. The host still
+ * never names a model to the backend (no-hardcoded-models invariant).
+ */
+export interface HostModelRosterEntry {
+  rank: DispatchModelTier;
+  /** Context window (input tokens) of the model serving this rank. */
+  context_tokens: number;
+  /** Output-token cap of the model serving this rank. */
+  output_tokens: number;
+  /**
+   * Optional OPAQUE identity for the model serving this rank, used ONLY as a
+   * quota-key segment (`provider/<model_id>`) so quota learning stays
+   * per-model. Never a window authority and never compared against a name
+   * table — the no-hardcoded-models invariant holds.
+   */
+  model_id?: string;
+}
+
+const HOST_MODEL_RANKS = new Set<string>(["small", "standard", "deep"]);
+
+/**
+ * Parse and validate a `--host-models` handshake value (JSON array, lowest
+ * rank first) into a roster. Single-sourced here so both orchestrators accept
+ * the identical contract. Malformed input throws so a mistyped handshake fails
+ * loudly instead of silently downgrading to the conservative floor.
+ */
+export function parseHostModelRoster(raw: string): HostModelRosterEntry[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `--host-models must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error(
+      "--host-models must be a non-empty JSON array of {rank, context_tokens, output_tokens} entries.",
+    );
+  }
+  return parsed.map((entry, index) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new Error(`--host-models[${index}] must be a JSON object.`);
+    }
+    const { rank, context_tokens, output_tokens } = entry as Record<string, unknown>;
+    if (typeof rank !== "string" || !HOST_MODEL_RANKS.has(rank)) {
+      throw new Error(
+        `--host-models[${index}].rank must be one of: small, standard, deep.`,
+      );
+    }
+    if (!Number.isInteger(context_tokens) || (context_tokens as number) <= 0) {
+      throw new Error(
+        `--host-models[${index}].context_tokens must be a positive integer.`,
+      );
+    }
+    if (!Number.isInteger(output_tokens) || (output_tokens as number) <= 0) {
+      throw new Error(
+        `--host-models[${index}].output_tokens must be a positive integer.`,
+      );
+    }
+    const { model_id } = entry as Record<string, unknown>;
+    if (
+      model_id !== undefined &&
+      (typeof model_id !== "string" || model_id.trim().length === 0)
+    ) {
+      throw new Error(
+        `--host-models[${index}].model_id must be a non-empty string when provided.`,
+      );
+    }
+    return {
+      rank: rank as DispatchModelTier,
+      context_tokens: context_tokens as number,
+      output_tokens: output_tokens as number,
+      ...(model_id !== undefined ? { model_id: model_id as string } : {}),
+    };
+  });
 }
 
 export interface ScheduleWaveOptions {

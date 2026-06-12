@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, type SessionConfig } from "@audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, type SessionConfig, type HostModelRosterEntry } from "@audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { runPlanPhase, applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -75,6 +75,10 @@ export interface NextStepOptions {
   hostMaxConcurrent?: number;
   hostContextTokens?: number | null;
   hostOutputTokens?: number | null;
+  /** Ordered model roster (lowest rank first); outranks the scalar pair. */
+  hostModels?: HostModelRosterEntry[] | null;
+  /** Opaque model identity for the quota key when no model name resolves. */
+  hostModelId?: string | null;
   finalizeClosing?: boolean;
   forceReplan?: boolean;
   sessionConfig?: SessionConfig | null;
@@ -938,6 +942,8 @@ Then run:
       sessionConfig: sessionConfigImpl ?? null,
       hostContextTokens: options.hostContextTokens,
       hostOutputTokens: options.hostOutputTokens,
+      hostModels: options.hostModels,
+      hostModelId: options.hostModelId,
     };
     const onlyBlock = !canDispatchImpl ? implementBlocks[0].block_id : undefined;
     const dispatchPlan = await prepareImplementDispatch(

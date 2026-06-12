@@ -15,7 +15,6 @@ import {
 } from "./resultIngestion.js";
 import {
   buildAuditPlanMetrics,
-  buildReviewPackets,
   sizeIndexFromManifest,
 } from "./reviewPackets.js";
 import { updateRuntimeValidationReport } from "./runtimeValidationUpdate.js";
@@ -63,14 +62,9 @@ function appendSelectiveDeepeningTasks(params: {
         lineIndex,
         sizeIndex,
       }),
-      review_packets: buildReviewPackets(auditTasks, {
-        graphBundle: params.bundle.graph_bundle,
-        lineIndex,
-        sizeIndex,
-      }),
     },
     taskCount: selectiveDeepeningTasks.length,
-    artifacts: ["audit_tasks.json", "audit_plan_metrics.json", "review_packets.json"],
+    artifacts: ["audit_tasks.json", "audit_plan_metrics.json"],
   };
 }
 
@@ -194,11 +188,6 @@ export function runResultIngestionExecutor(
       lineIndex,
       sizeIndex,
     }),
-    review_packets: buildReviewPackets(allDispatchTasks, {
-      graphBundle: selectiveDeepening.bundle.graph_bundle,
-      lineIndex,
-      sizeIndex,
-    }),
   };
 
   return {
@@ -211,7 +200,6 @@ export function runResultIngestionExecutor(
       "audit_results.jsonl",
       "audit_tasks.json",
       "audit_plan_metrics.json",
-      "review_packets.json",
       "requeue_tasks.json",
     ],
     progress_summary:
@@ -354,7 +342,6 @@ export function runExternalAnalyzerImportExecutor(
       runtime_validation_report: undefined,
       audit_tasks: undefined,
       audit_plan_metrics: undefined,
-      review_packets: undefined,
       requeue_tasks: undefined,
       audit_report: undefined,
     },

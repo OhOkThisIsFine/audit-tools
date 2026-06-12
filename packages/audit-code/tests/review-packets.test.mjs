@@ -1119,9 +1119,11 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
       tags: [],
       large_file_mode: false,
     });
+    // Tasks here carry no frozen risk_estimate, so the rebuilt affinity graph
+    // reports routing_risk 0 and the standard-floor escalators set the tier.
     assert.deepEqual(plan[0].model_hint, {
       tier: "standard",
-      reasons: ["medium_priority", "sensitive_lens"],
+      reasons: ["routing_risk:0.00", "sensitive_lens", "medium_priority"],
     });
     const resultMap = JSON.parse(
       await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
@@ -1193,7 +1195,7 @@ test("prepare-dispatch marks tiny low-risk packets for small model routing", asy
     assert.equal(plan[0].complexity.total_lines, 12);
     assert.deepEqual(plan[0].model_hint, {
       tier: "small",
-      reasons: ["small_low_priority_packet"],
+      reasons: ["routing_risk:0.00"],
     });
   });
 });

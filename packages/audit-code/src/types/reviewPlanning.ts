@@ -42,6 +42,13 @@ export interface ReviewPacket {
   quality: ReviewPacketQuality;
   rationale: string;
   estimated_tokens: number;
+  /**
+   * Max member risk (in [0,1]) from the just-in-time graph partition — the
+   * signal that routes this packet to a relative model rank. Present only on
+   * dispatch-time packets built via `buildReviewPacketsFromPartition`; the
+   * plan-time builder has no partition and leaves it unset.
+   */
+  routing_risk?: number;
 }
 
 /**

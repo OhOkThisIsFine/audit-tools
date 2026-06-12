@@ -234,6 +234,44 @@ function isSupportedConfiguredCommand(command: string): boolean {
   return isBareExecutableName(trimmed) || isDirectExecutablePath(trimmed);
 }
 
+function validateRoutingTiers(
+  value: unknown,
+  issues: ValidationIssue[],
+): void {
+  if (!isRecord(value)) {
+    pushIssue(
+      issues,
+      "dispatch.routing_tiers",
+      "dispatch.routing_tiers must be a JSON object.",
+    );
+    return;
+  }
+  for (const key of ["deep_at", "standard_at"] as const) {
+    const cut = value[key];
+    if (
+      cut !== undefined &&
+      (typeof cut !== "number" || !Number.isFinite(cut) || cut < 0 || cut > 1)
+    ) {
+      pushIssue(
+        issues,
+        `dispatch.routing_tiers.${key}`,
+        `dispatch.routing_tiers.${key} must be a number in [0, 1] when provided.`,
+      );
+    }
+  }
+  if (
+    typeof value.deep_at === "number" &&
+    typeof value.standard_at === "number" &&
+    value.deep_at < value.standard_at
+  ) {
+    pushIssue(
+      issues,
+      "dispatch.routing_tiers",
+      "dispatch.routing_tiers.deep_at must be >= standard_at.",
+    );
+  }
+}
+
 export function validateSessionConfig(value: unknown): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   if (value === undefined) {
@@ -354,6 +392,9 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
           "dispatch.max_packets",
           "dispatch.max_packets must be a non-negative integer when provided.",
         );
+      }
+      if (value.dispatch.routing_tiers !== undefined) {
+        validateRoutingTiers(value.dispatch.routing_tiers, issues);
       }
     }
   }

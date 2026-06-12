@@ -20,6 +20,7 @@ import type {
   ResolvedProviderName,
   DispatchCapacityPoolSummary,
   DiscoveredRateLimitsInput,
+  HostModelRosterEntry,
 } from "@audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
@@ -92,6 +93,17 @@ export interface ScheduleWaveInput {
   hostContextTokens?: number | null;
   /** Output cap the host reports for its dispatch model (handshake). */
   hostOutputTokens?: number | null;
+  /**
+   * Ordered model roster (lowest rank first) from the multi-rank handshake
+   * (`--host-models`); outranks the scalar pair. One capacity pool is built per
+   * reported rank, each with its own discovered window.
+   */
+  hostModels?: HostModelRosterEntry[] | null;
+  /**
+   * Opaque model identity for the quota key when no model name resolves —
+   * a key segment ONLY (`provider/<id>`), never a window authority.
+   */
+  hostModelId?: string | null;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -145,10 +157,27 @@ function _capacityPoolSummary(
   };
 }
 
+/** Most-capable rank first, so the largest pending items land on the rank with the largest window. */
+const RANK_ORDER: Record<string, number> = { small: 0, standard: 1, deep: 2 };
+
+function sortRosterMostCapableFirst(
+  roster: HostModelRosterEntry[],
+): HostModelRosterEntry[] {
+  return [...roster].sort(
+    (a, b) => (RANK_ORDER[b.rank] ?? -1) - (RANK_ORDER[a.rank] ?? -1),
+  );
+}
+
 export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveScheduleResult> {
   const sessionConfig = input.sessionConfig ?? {};
   const providerName = input.providerName ?? (sessionConfig as { provider?: ResolvedProviderName }).provider ?? "claude-code";
   const hostModel = input.hostModel ?? (sessionConfig as { block_quota?: { host_model?: string | null } }).block_quota?.host_model ?? null;
+  // Quota-key identity: resolved model name, else the host's opaque id, else
+  // null → `provider/*`. Per-roster-rank `model_id` overrides per pool below.
+  const quotaModelKeySegment = hostModel ?? input.hostModelId ?? null;
+  const roster = input.hostModels?.length
+    ? sortRosterMostCapableFirst(input.hostModels)
+    : null;
 
   const hostLimit = resolveHostConcurrencyLimit({
     hostMaxConcurrent: input.hostMaxConcurrent,
@@ -157,15 +186,18 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
   });
 
   // The capability handshake: the host reported its dispatch model's real
-  // context/output window this session. Carried into the pool's discoveredLimits
-  // so the shared discovered_capability rung sizes the budget to the real window
+  // context/output window this session (the roster's most capable entry under
+  // the multi-rank handshake). Carried into the pool's discoveredLimits so the
+  // shared discovered_capability rung sizes the budget to the real window
   // instead of the conservative 32k floor. RPM/TPM stay null and fill from the
   // learned quota state.
+  const hostContextTokens = input.hostContextTokens ?? roster?.[0]?.context_tokens ?? null;
+  const hostOutputTokens = input.hostOutputTokens ?? roster?.[0]?.output_tokens ?? null;
   const hostCapabilityLimits: DiscoveredRateLimitsInput | null =
-    input.hostContextTokens != null || input.hostOutputTokens != null
+    hostContextTokens != null || hostOutputTokens != null
       ? {
-          context_tokens: input.hostContextTokens ?? null,
-          output_tokens: input.hostOutputTokens ?? null,
+          context_tokens: hostContextTokens,
+          output_tokens: hostOutputTokens,
         }
       : null;
 
@@ -183,8 +215,8 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
       resolved_limits: {
         // Honor a host-reported window even with quota disabled; fall back to the
         // conservative floor only when nothing was discovered.
-        context_tokens: input.hostContextTokens ?? 32_000,
-        output_tokens: input.hostOutputTokens ?? 4_096,
+        context_tokens: hostContextTokens ?? 32_000,
+        output_tokens: hostOutputTokens ?? 4_096,
         requests_per_minute: null,
         input_tokens_per_minute: null,
         output_tokens_per_minute: null,
@@ -195,30 +227,43 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     };
     return {
       ...schedule,
-      capacity_pools: [_capacityPoolSummary(buildProviderModelKey(providerName, hostModel), waveSize, schedule)],
+      capacity_pools: [_capacityPoolSummary(buildProviderModelKey(providerName, quotaModelKeySegment), waveSize, schedule)],
     };
   }
 
-  let quotaStateEntry: QuotaStateEntry | null = null;
+  let quotaEntries: Record<string, QuotaStateEntry> = {};
   try {
-    const key = buildProviderModelKey(providerName, hostModel);
     const state = await readQuotaState();
-    quotaStateEntry = state.entries[key] ?? null;
+    quotaEntries = state.entries;
   } catch (err) {
     process.stderr.write(`[waveScheduler] readQuotaState failed; falling back to default wave size. ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
+  // One capacity pool per reported roster rank (most capable first), each with
+  // its own discovered window and quota key; a single pool for the scalar/
+  // absent handshake. A rank's opaque `model_id` keys that pool's quota.
+  const pools = (roster ?? [null]).map((entry) => {
+    const poolKey = buildProviderModelKey(
+      providerName,
+      entry?.model_id ?? quotaModelKeySegment,
+    );
+    return {
+      id: poolKey,
+      providerName,
+      hostModel,
+      ...(entry ? { rank: entry.rank } : {}),
+      hostConcurrencyLimit: hostLimit,
+      quotaStateEntry: quotaEntries[poolKey] ?? null,
+      discoveredLimits: entry
+        ? {
+            context_tokens: entry.context_tokens,
+            output_tokens: entry.output_tokens,
+          }
+        : hostCapabilityLimits,
+    };
+  });
   const capacity = computeDispatchCapacity({
-    pools: [
-      {
-        id: buildProviderModelKey(providerName, hostModel),
-        providerName,
-        hostModel,
-        hostConcurrencyLimit: hostLimit,
-        quotaStateEntry,
-        discoveredLimits: hostCapabilityLimits,
-      },
-    ],
+    pools,
     sessionConfig,
     pendingItemTokens: normalizeSlotTokens(input.estimatedSlotTokens, input.itemCount),
   });
@@ -1006,6 +1051,8 @@ export async function prepareImplementDispatch(
     sessionConfig?: SessionConfig | null;
     hostContextTokens?: number | null;
     hostOutputTokens?: number | null;
+    hostModels?: HostModelRosterEntry[] | null;
+    hostModelId?: string | null;
   },
 ): Promise<RemediationDispatchPlan> {
   const state = await loadStateOrThrow(options.artifactsDir);
@@ -1124,6 +1171,8 @@ export async function prepareImplementDispatch(
     sessionConfig: waveOptions?.sessionConfig ?? null,
     hostContextTokens: waveOptions?.hostContextTokens,
     hostOutputTokens: waveOptions?.hostOutputTokens,
+    hostModels: waveOptions?.hostModels,
+    hostModelId: waveOptions?.hostModelId,
     itemCount: items.length,
     estimatedSlotTokens: itemReadFileLists.map((files) =>
       estimateImplementSlotTokens(files, options.root),

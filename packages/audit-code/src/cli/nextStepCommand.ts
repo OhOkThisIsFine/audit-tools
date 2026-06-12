@@ -79,6 +79,8 @@ import {
   getFlag,
   getHostContextTokens,
   getHostMaxActiveSubagents,
+  getHostModelId,
+  getHostModelRoster,
   getHostOutputTokens,
   getMaxRuns,
   getOptionalBooleanFlag,
@@ -721,6 +723,8 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   const hostMaxActiveSubagents = getHostMaxActiveSubagents(argv);
   const hostContextTokens = getHostContextTokens(argv);
   const hostOutputTokens = getHostOutputTokens(argv);
+  const hostModelRoster = getHostModelRoster(argv);
+  const hostModelId = getHostModelId(argv);
   let sessionConfig: SessionConfig;
   try {
     sessionConfig = await loadSessionConfig(artifactsDir);
@@ -861,6 +865,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       artifactsDir,
       bundle: result.bundle,
       settings: conceptualSettings,
+      hostCanSelectSubagentModel,
     });
 
     const contractPromptText = [
@@ -966,6 +971,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       artifactsDir,
       bundle: result.bundle,
       settings: conceptualSettings,
+      hostCanSelectSubagentModel,
     });
 
     const prompt = [
@@ -1189,6 +1195,8 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     hostMaxActiveSubagents,
     hostContextTokens,
     hostOutputTokens,
+    hostModelRoster,
+    hostModelId,
     hostCanRestrictSubagentTools,
     hostCanSelectSubagentModel,
     selectedExecutor: result.selectedExecutor,

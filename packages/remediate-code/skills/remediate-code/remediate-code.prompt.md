@@ -52,11 +52,26 @@ context to your real model instead of a conservative 32k floor. Report:
 - `--host-can-dispatch-subagents` / `--host-max-concurrent` — whether you can run
   callable subagents and how many in parallel. Without them the backend assumes
   serial dispatch.
-- `--host-context-tokens` / `--host-output-tokens` — the context window and output
-  cap of the model your implementation subagents run on. These size each worker's
-  budget to fill the real window; omit them and dispatch falls back to the
-  conservative 32k default. Use the actual numbers for your dispatch model —
-  discover them, do not guess a smaller-than-real value.
+- `--host-models` — an ordered JSON array (lowest rank first) of the models you
+  can dispatch workers to *right now*, one entry per relative rank:
+  `{"rank": "small"|"standard"|"deep", "context_tokens": N, "output_tokens": N}`.
+  Ranks are relative capability labels that line up with each item's
+  `model_hint.tier` — never report model names to the backend. Report only ranks
+  you can actually dispatch to. Each entry may carry an optional opaque
+  `model_id` (and `--host-model-id` is the single-model equivalent) used only to
+  key per-model quota learning — it is never interpreted.
+- `--host-context-tokens` / `--host-output-tokens` — single-model shorthand when
+  every worker runs on one model: the context window and output cap of that
+  model. When `--host-models` is also given, the roster wins. Omit both and
+  dispatch falls back to the conservative 32k default. Use the actual numbers
+  for your dispatch model — discover them, do not guess a smaller-than-real
+  value.
+
+```bash
+remediate-code next-step --input <path> --host-max-concurrent 4 --host-models '[{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
+```
+
+Or with a single dispatch model:
 
 ```bash
 remediate-code next-step --input <path> --host-max-concurrent 4 --host-context-tokens 200000 --host-output-tokens 32000
