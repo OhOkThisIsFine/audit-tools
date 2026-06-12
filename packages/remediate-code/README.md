@@ -62,19 +62,15 @@ at the current `@audit-tools/shared` sources instead of stale compiled output.
 | Command | Description |
 | --- | --- |
 | `remediate-code next-step [--input <path>] [--host-can-dispatch-subagents true\|false]` | Decide and render exactly one next action |
-| `remediate-code prepare-document-dispatch --run-id <id>` | Write bounded item-spec prompts |
-| `remediate-code merge-document-results --run-id <id>` | Validate item specs or clarification requests and advance state |
 | `remediate-code prepare-implement-dispatch --run-id <id>` | Write bounded implementation prompts |
 | `remediate-code merge-implement-results --run-id <id>` | Validate implementation results and update item state |
 | `remediate-code validate-artifacts` | Validate runtime artifacts |
-| `remediate-code run --input <path>` | Deprecated compatibility alias that prints one `next-step` JSON contract |
 | `remediate-code install` | Deprecated alias that repairs global assets and writes no repo-local host files |
 | `remediate-code ensure [--quiet]` | Repair/check global Claude, Codex, and OpenCode assets |
 
 `next-step` is the single canonical execution path. Hosts and IDEs should call
 it repeatedly, read the returned `prompt_path`, follow that one prompt, and then
-call `next-step` again only when the prompt says to continue. The deprecated
-`run` and `mcp` surfaces remain non-breaking adapters for older integrations.
+call `next-step` again only when the prompt says to continue.
 
 ## Auditor Compatibility
 

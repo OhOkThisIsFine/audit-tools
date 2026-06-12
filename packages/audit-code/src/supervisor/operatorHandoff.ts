@@ -198,7 +198,8 @@ function buildSuggestedCommands(
   }
 
   return suggestedInputs.map(
-    (item) => `audit-code ${item.flag} ${quoteShellPath(item.suggested_path)}`,
+    (item) =>
+      `audit-code advance-audit ${item.flag} ${quoteShellPath(item.suggested_path)}`,
   );
 }
 

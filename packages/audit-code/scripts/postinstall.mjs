@@ -46,17 +46,14 @@ const OPENCODE_AUDIT_EDIT_PERMISSION = {
 
 const OPENCODE_AUDIT_BASH_PERMISSION = {
   '*': 'allow',
-  'audit-code run-to-completion*': 'deny',
   'audit-code synthesize*': 'deny',
   'audit-code cleanup*': 'deny',
   'audit-code requeue*': 'deny',
   'audit-code ingest-results*': 'deny',
-  '*dist*index.js* run-to-completion*': 'deny',
   '*dist*index.js* synthesize*': 'deny',
   '*dist*index.js* cleanup*': 'deny',
   '*dist*index.js* requeue*': 'deny',
   '*dist*index.js* ingest-results*': 'deny',
-  '*audit-code.mjs* run-to-completion*': 'deny',
   '*audit-code.mjs* synthesize*': 'deny',
   '*audit-code.mjs* cleanup*': 'deny',
   '*audit-code.mjs* requeue*': 'deny',

@@ -124,9 +124,15 @@ test("buildAuditCodeHandoff quotes suggested command paths and falls back to loc
 
   assert.equal(handoff.suggested_inputs.length, 4);
   assert.equal(handoff.suggested_commands.length, 4);
-  assert.ok(handoff.suggested_commands[0].startsWith('audit-code --results "'));
+  assert.ok(
+    handoff.suggested_commands[0].startsWith('audit-code advance-audit --results "'),
+  );
   assert.ok(handoff.suggested_commands[0].endsWith('audit-results.json"'));
-  assert.ok(handoff.suggested_commands[1].startsWith('audit-code --batch-results "'));
+  assert.ok(
+    handoff.suggested_commands[1].startsWith(
+      'audit-code advance-audit --batch-results "',
+    ),
+  );
   assert.ok(handoff.suggested_commands[1].endsWith('audit-results-batch"'));
   assert.match(
     handoff.interactive_provider_hint ?? "",
@@ -337,7 +343,7 @@ test("writeAuditCodeHandoffArtifacts prepares the batch-results inbox alongside 
     await access(batchPath);
     assert.match(
       await readFile(join(artifactsDir, "operator-handoff.md"), "utf8"),
-      /audit-code --batch-results/i,
+      /audit-code advance-audit --batch-results/i,
     );
   });
 });

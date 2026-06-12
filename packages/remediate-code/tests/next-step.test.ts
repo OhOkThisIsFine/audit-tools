@@ -1470,27 +1470,18 @@ describe("decideNextStep", () => {
     expect(JSON.parse(result.stdout).step_kind).toBe("contract_pipeline");
   });
 
-  it("CLI run is a deprecated parseable next-step alias", async () => {
-    await writeReadyStructuredAuditIntake(AUDIT_FIXTURE);
-
+  it("CLI run alias is deleted (next-step is the only loop)", async () => {
     const result = spawnSync(
       process.execPath,
-      [WRAPPER, "run", "--root", REPO_DIR, "--input", AUDIT_FIXTURE],
+      [WRAPPER, "run", "--root", REPO_DIR],
       {
         cwd: REPO_DIR,
         encoding: "utf8",
       },
     );
 
-    expect(result.status).toBe(0);
-    expect(() => JSON.parse(result.stdout)).not.toThrow();
-    expect(JSON.parse(result.stdout).contract_version).toBe(
-      "remediate-code-step/v1alpha1",
-    );
-    expect(result.stdout.trimStart().startsWith("{")).toBe(true);
-    expect(result.stderr).toMatch(/`run` is deprecated/);
-    // N-R06: no "Running Plan Phase" — structured audit enters contract pipeline
-    expect(JSON.parse(result.stdout).step_kind).toBe("contract_pipeline");
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/unknown command/i);
   });
 
   it("CLI next-step accepts the backend-rendered --force-replan flag", () => {

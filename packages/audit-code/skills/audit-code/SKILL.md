@@ -110,10 +110,10 @@ node packages/audit-code/audit-code.mjs   # from the monorepo root
 That keeps the run pinned to the local wrapper and local `dist/` output instead
 of whichever global `audit-code` binary happens to be on `PATH`.
 
-Debug one-step mode:
+Debug one-step mode (prints the execution envelope for one bounded advance):
 
 ```bash
-audit-code --single-step
+audit-code advance-audit
 ```
 
 ## Backend mode note

@@ -95,50 +95,38 @@ Typical examples include custom instructions, `.cursorrules`, prompt libraries, 
 
 The CLI in this repository is backend infrastructure and a repo-local fallback surface.
 
-From the target repository root:
-
-```bash
-audit-code
-```
-
-Repository-local equivalent:
-
-```bash
-node /path/to/auditor-lambda/audit-code.mjs
-```
-
-This wrapper:
-
-- defaults artifacts to `<repo-root>/.audit-artifacts`
-- creates that directory automatically
-- auto-builds `dist/` if it is missing
-- advances fresh worker sessions automatically until the audit completes or the remaining work requires imported results or an interactive provider
-- continues through provider-assisted audit review automatically when `.audit-artifacts/session-config.json` selects an interactive provider bridge
-- keeps those provider bridges as fallback compatibility modes rather than the primary product path
-- emits `contract_version: "audit-code/v1alpha1"`
-- refreshes `.audit-artifacts/operator-handoff.json` and `.audit-artifacts/operator-handoff.md` with suggested evidence-import paths and continuation hints
-
-Explicit root override still exists for callers running from outside the target repository:
-
-```bash
-audit-code --root /path/to/repo
-```
-
-For one bounded debug step instead of run-to-completion:
-
-```bash
-audit-code --single-step
-```
-
-For the conversation step engine used by `/audit-code`:
+The conversation step engine used by `/audit-code` — the single execution loop —
+runs from the target repository root:
 
 ```bash
 audit-code next-step
 ```
 
-This writes `.audit-artifacts/steps/current-step.json` and
-`.audit-artifacts/steps/current-prompt.md`; hosts should follow only the
-returned step prompt.
+Repository-local equivalent:
+
+```bash
+node /path/to/auditor-lambda/audit-code.mjs next-step
+```
+
+This advances deterministic audit state one bounded step, writes
+`.audit-tools/audit/steps/current-step.json` and
+`.audit-tools/audit/steps/current-prompt.md`, auto-builds `dist/` if it is
+missing, and creates the artifacts directory automatically. Hosts follow only
+the returned step prompt, then call `next-step` again. A bare `audit-code`
+invocation prints usage; there is no implicit batch loop.
+
+Explicit root override still exists for callers running from outside the target repository:
+
+```bash
+audit-code next-step --root /path/to/repo
+```
+
+For one bounded debug advance that prints the execution envelope
+(`contract_version: "audit-code/v1alpha1"`) instead of a step contract:
+
+```bash
+audit-code advance-audit
+```
 
 For an operator-side artifact consistency check:
 
@@ -148,10 +136,10 @@ audit-code validate
 
 That check now covers the artifact bundle plus `session-config.json` and explicit provider readiness.
 
-For native batch ingestion of multiple result files:
+For native batch ingestion of multiple result files during a debug advance:
 
 ```bash
-audit-code --batch-results /path/to/audit-results-dir
+audit-code advance-audit --batch-results /path/to/audit-results-dir
 ```
 
 For task-to-coverage inspection without reverse-engineering multiple artifacts:

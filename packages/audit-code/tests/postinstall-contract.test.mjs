@@ -61,7 +61,6 @@ test("postinstall seeds Codex skill metadata with the canonical hyphenated displ
     assert.equal(opencodeConfig.permission?.bash?.["*"], undefined);
     assert.equal(opencodeConfig.permission?.bash?.["audit-code"], "allow");
     assert.equal(opencodeConfig.permission?.bash?.["audit-code next-step*"], "allow");
-    assert.equal(opencodeConfig.permission?.bash?.["audit-code run-to-completion*"], "deny");
     assert.equal(opencodeConfig.permission?.bash?.["audit-code synthesize*"], "deny");
     assert.equal(opencodeConfig.permission?.bash?.["Select-String *"], undefined);
     assert.equal(opencodeConfig.agent?.auditor?.permission?.read, "allow");
@@ -110,10 +109,9 @@ test("postinstall global scope seeds no broad allows on a fresh config (CFG-4996
     assert.equal(config.permission?.external_directory, undefined);
 
     // Denylist hygiene rules are still present at the top level.
-    assert.equal(config.permission?.bash?.["audit-code run-to-completion*"], "deny");
     assert.equal(config.permission?.bash?.["audit-code synthesize*"], "deny");
     assert.equal(config.permission?.bash?.["audit-code cleanup*"], "deny");
-    assert.equal(config.permission?.bash?.["*dist*index.js* run-to-completion*"], "deny");
+    assert.equal(config.permission?.bash?.["*dist*index.js* synthesize*"], "deny");
     assert.equal(config.permission?.bash?.["rm *"], "deny");
 
     // Specific allows remain.
@@ -194,7 +192,7 @@ test("postinstall keeps auditor agent broad-allow-with-denylist and is idempoten
     // Agent scope keeps the broad allow plus the denylist.
     assert.equal(first.agent?.auditor?.permission?.bash?.["*"], "allow");
     assert.deepEqual(first.agent?.auditor?.permission?.external_directory, { "*": "allow" });
-    assert.equal(first.agent?.auditor?.permission?.bash?.["audit-code run-to-completion*"], "deny");
+    assert.equal(first.agent?.auditor?.permission?.bash?.["audit-code synthesize*"], "deny");
     assert.equal(first.agent?.auditor?.permission?.bash?.["rm *"], "deny");
 
     // Re-running is idempotent for both scopes (no duplicate or mutated rules).

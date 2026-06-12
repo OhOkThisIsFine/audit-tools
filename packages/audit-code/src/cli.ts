@@ -13,17 +13,12 @@ import {
   getRootDir,
   getBatchResultsDir,
   getMaxRuns,
-  getAgentBatchSize,
-  getParallelWorkers,
   getTimeoutMs,
-  chunkArray,
-  getUiMode,
   looksLikeCliFlag,
   countLines,
   warnIfNotGitRepo,
 } from "./cli/args.js";
 import { cmdNextStep } from "./cli/nextStepCommand.js";
-import { cmdRunToCompletion } from "./cli/runToCompletion.js";
 import { cmdWorkerRun } from "./cli/workerRunCommand.js";
 import { cmdSubmitPacket } from "./cli/submitPacketCommand.js";
 import { cmdMergeAndIngest } from "./cli/mergeAndIngestCommand.js";
@@ -57,11 +52,7 @@ export const cliTestUtils = {
   getRootDir,
   getBatchResultsDir,
   getMaxRuns,
-  getAgentBatchSize,
-  getParallelWorkers,
   getTimeoutMs,
-  chunkArray,
-  getUiMode,
   looksLikeCliFlag,
   countLines,
   warnIfNotGitRepo,
@@ -79,9 +70,6 @@ async function main(argv: string[]): Promise<void> {
       return;
     case "next-step":
       await cmdNextStep(argv);
-      return;
-    case "run-to-completion":
-      await cmdRunToCompletion(argv);
       return;
     case "worker-run":
       await cmdWorkerRun(argv);
@@ -146,7 +134,7 @@ async function main(argv: string[]): Promise<void> {
     default:
       console.error(`Unknown command: ${command}`);
       console.error(
-        "Available commands: sample-run, advance-audit, next-step, run-to-completion, worker-run, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, resynthesize, cleanup, prepare-dispatch, merge-and-ingest, submit-packet, validate-result, quota, status, dispatch-status",
+        "Available commands: sample-run, advance-audit, next-step, worker-run, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, resynthesize, cleanup, prepare-dispatch, merge-and-ingest, submit-packet, validate-result, quota, status, dispatch-status",
       );
       process.exitCode = 1;
   }

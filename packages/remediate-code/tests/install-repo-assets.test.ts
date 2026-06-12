@@ -91,8 +91,7 @@ describe("global-first install helpers", () => {
       expect(generatedBash[pattern]).toBe(action);
     }
     // deny rules that should propagate from opencode.json
-    expect(generatedBash["remediate-code run*"]).toBe("deny");
-    expect(generatedBash["*remediate-code.mjs* run*"]).toBe("deny");
+    expect(generatedBash["rm *"]).toBe("deny");
   });
 });
 

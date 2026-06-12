@@ -115,7 +115,7 @@ describe("scripts/postinstall.mjs", () => {
       "remediate-code next-step",
     );
     expect(config.permission.bash["remediate-code next-step*"]).toBe("allow");
-    expect(config.permission.bash["remediate-code run*"]).toBe("deny");
+    expect(config.permission.bash["rm *"]).toBe("deny");
   });
 
   it("preserves a non-managed existing \"*\" wildcard in the global bash permission (COR-fc1f12a6)", async () => {
@@ -139,7 +139,7 @@ describe("scripts/postinstall.mjs", () => {
     expect(config.permission.bash["*"]).toBe("deny");
     // Specific managed glob patterns must still be present.
     expect(config.permission.bash["remediate-code next-step*"]).toBe("allow");
-    expect(config.permission.bash["remediate-code run*"]).toBe("deny");
+    expect(config.permission.bash["rm *"]).toBe("deny");
   });
 
   it("preserves an existing agent-scope \"*\" wildcard over the managed default (COR-fc1f12a6)", async () => {
@@ -162,7 +162,7 @@ describe("scripts/postinstall.mjs", () => {
 
     const config = JSON.parse(await readFile(configPath, "utf8"));
     expect(config.agent.remediator.permission.bash["*"]).toBe("allow");
-    expect(config.agent.remediator.permission.bash["remediate-code run*"]).toBe("deny");
+    expect(config.agent.remediator.permission.bash["rm *"]).toBe("deny");
   });
 
   it("does not seed a global bash wildcard on a fresh config; agent scope falls back to \"ask\" (COR-fc1f12a6)", async () => {

@@ -16,11 +16,10 @@ import { prepareDispatchArtifacts } from "./dispatch.js";
 import { packageRoot } from "./paths.js";
 
 // Renders the actionable semantic-review step (packet dispatch or single-task
-// fallback) and writes steps/current-step.json. Shared by next-step and
-// run-to-completion so the backend produces the actionable step itself rather
-// than handing the host a second command. Host dispatch capability is resolved
-// by the caller (flag -> session config -> env -> default true) and is never
-// required from the host to make progress.
+// fallback) and writes steps/current-step.json, so the backend produces the
+// actionable step itself rather than handing the host a second command. Host
+// dispatch capability is resolved by the caller (flag -> session config -> env
+// -> default true) and is never required from the host to make progress.
 //
 // When selectedExecutor is 'rolling_dispatch_executor', uses the rolling
 // dispatch prompt (inline AuditResult[] emit, no submit-packet shell command).

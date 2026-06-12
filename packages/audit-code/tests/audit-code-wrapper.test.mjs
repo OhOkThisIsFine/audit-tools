@@ -178,14 +178,12 @@ function assertOpenCodeAuditPermissions(config) {
   assert.equal(config.permission?.bash?.["audit-code"], "allow");
   assert.equal(config.permission?.bash?.["audit-code ensure*"], "allow");
   assert.equal(config.permission?.bash?.["audit-code next-step*"], "allow");
-  assert.equal(config.permission?.bash?.["audit-code run-to-completion*"], "deny");
   assert.equal(config.permission?.bash?.["audit-code synthesize*"], "deny");
   assert.equal(config.permission?.bash?.["audit-code cleanup*"], "deny");
   assert.equal(config.permission?.bash?.["audit-code requeue*"], "deny");
   assert.equal(config.permission?.bash?.["audit-code ingest-results*"], "deny");
   assert.equal(config.permission?.bash?.["*audit-code.mjs* submit-packet*"], "allow");
   assert.equal(config.permission?.bash?.["*audit-code.mjs* worker-run*"], "allow");
-  assert.equal(config.permission?.bash?.["*audit-code.mjs* run-to-completion*"], "deny");
   assert.equal(config.permission?.bash?.["*audit-code.mjs* synthesize*"], "deny");
   assert.equal(config.permission?.bash?.["*node* *auditor-lambda*dist*index.js* worker-run*"], "allow");
   assert.equal(config.permission?.bash?.["Select-String *"], "allow");
@@ -261,11 +259,99 @@ function validAuditResultForTask(task, overrides = {}) {
   };
 }
 
+// Pause step kinds that next-step can emit before review dispatch is ready
+// (analyzer install decision, intent confirmation, design review passes,
+// optional edge reasoning), each at most once; allow extra headroom.
+const MAX_PRE_DISPATCH_PAUSES = 8;
+
+// Drive `next-step` past the host pause steps that precede review dispatch by
+// answering each pause headlessly (skip analyzer installs, confirm the default
+// scope, submit empty design-review findings). Returns the first
+// dispatch-ready step (dispatch_review or single_task_fallback).
+async function startDispatchRun(root) {
+  const incomingDir = join(root, ".audit-tools/audit", "incoming");
+  for (let i = 0; i < MAX_PRE_DISPATCH_PAUSES; i++) {
+    const step = JSON.parse(
+      (await runWrapper(["next-step"], { cwd: root })).stdout,
+    );
+    if (step.step_kind === "analyzer_install") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        step.artifact_paths.analyzer_decisions,
+        JSON.stringify({ typescript: "skip" }, null, 2) + "\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "confirm_intent") {
+      await writeFile(
+        step.artifact_paths.intent_checkpoint,
+        JSON.stringify(
+          {
+            schema_version: "intent-checkpoint/v1",
+            confirmed_at: "2026-04-22T00:00:00Z",
+            confirmed_by: "host",
+            scope_summary: "test scope",
+            intent_summary: "full-audit",
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "design_review_parallel") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        join(incomingDir, "design-review-contract-findings.json"),
+        "[]\n",
+      );
+      await writeFile(
+        join(incomingDir, "design-review-conceptual-findings.json"),
+        "[]\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "design_review_contract") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        join(incomingDir, "design-review-contract-findings.json"),
+        "[]\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "design_review_conceptual") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        join(incomingDir, "design-review-conceptual-findings.json"),
+        "[]\n",
+      );
+      continue;
+    }
+    if (
+      step.step_kind === "edge_reasoning" ||
+      step.step_kind === "edge_reasoning_dispatch"
+    ) {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(step.artifact_paths.edge_reasoning_results, "[]\n");
+      continue;
+    }
+    if (
+      step.step_kind === "dispatch_review" ||
+      step.step_kind === "single_task_fallback"
+    ) {
+      return step;
+    }
+    throw new Error(
+      `startDispatchRun: unexpected step kind '${step.step_kind}' (iteration ${i})`,
+    );
+  }
+  throw new Error("next-step did not reach a dispatch-ready step");
+}
+
 async function setupDispatchFixture(root) {
-  const { stdout } = await runWrapper([], { cwd: root });
-  const parsed = JSON.parse(stdout);
-  const runId = parsed.handoff.active_review_run?.run_id;
-  const artifactsDir = parsed.handoff.artifacts_dir;
+  const step = await startDispatchRun(root);
+  const runId = step.run_id;
+  const artifactsDir = step.artifacts_dir;
 
   assert.ok(runId);
   assert.ok(artifactsDir);
@@ -394,11 +480,11 @@ function assertSharedHostInstallResponse(parsed, root, paths) {
   assert.equal(parsed.unsupported_hosts.length, 0);
 }
 
-test("audit-code wrapper supports bounded single-step mode", async () => {
+test("audit-code wrapper advance-audit runs one bounded deterministic advance and prints the execution envelope", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
-    // First step: provider confirmation gate auto-completes headlessly.
-    const { stdout: stdout0 } = await runWrapper(["--single-step"], { cwd: root });
+    // First advance: provider confirmation gate auto-completes headlessly.
+    const { stdout: stdout0 } = await runWrapper(["advance-audit"], { cwd: root });
     const step0 = JSON.parse(stdout0);
 
     const info = await stat(artifactsDir);
@@ -410,8 +496,8 @@ test("audit-code wrapper supports bounded single-step mode", async () => {
     assert.equal(step0.next_likely_step, "repo_manifest");
     assert.equal(step0.handoff.status, "active");
 
-    // Second step: intake executor runs.
-    const { stdout: stdout1 } = await runWrapper(["--single-step"], { cwd: root });
+    // Second advance: intake executor runs.
+    const { stdout: stdout1 } = await runWrapper(["advance-audit"], { cwd: root });
     const step1 = JSON.parse(stdout1);
 
     assertMatchesJsonSchema(responseSchema, step1, "auditCodeResponse");
@@ -425,7 +511,7 @@ test("audit-code wrapper supports bounded single-step mode", async () => {
 
 test("audit-code wrapper can explain a resolved task id", async () => {
   await withTempRepo(async (root) => {
-    await runWrapper([], { cwd: root });
+    await startDispatchRun(root);
     const tasks = JSON.parse(
       await readFile(join(root, ".audit-tools/audit", "audit_tasks.json"), "utf8"),
     );
@@ -441,92 +527,52 @@ test("audit-code wrapper can explain a resolved task id", async () => {
   });
 });
 
-test("audit-code wrapper reaches a terminal blocked handoff from repo root with no arguments under local-subprocess", async () => {
+test("next-step reaches a ready review dispatch step from repo root under local-subprocess", async () => {
   await withTempRepo(async (root) => {
-    const { stdout } = await runWrapper([], { cwd: root });
-    const parsed = JSON.parse(stdout);
+    const step = await startDispatchRun(root);
 
-    assertMatchesJsonSchema(responseSchema, parsed, "auditCodeResponse:noArgs");
-    assert.equal(parsed.contract_version, "audit-code/v1alpha1");
-    assert.equal(parsed.audit_state.status, "blocked");
-    assert.equal(parsed.progress_made, true);
-    assert.equal(parsed.next_likely_step, null);
-    assert.equal(parsed.selected_executor, "rolling_dispatch_executor");
-  assert.ok(parsed.artifacts_written.includes("run-ledger.json"));
-  assert.match(parsed.progress_summary, /audit-results\.json|Worker launch failed|Ready for LLM semantic review|single-task fallback/i);
-  assert.equal(parsed.handoff.status, "blocked");
-  assert.equal(parsed.handoff.provider, "local-subprocess");
-  assert.ok(parsed.handoff.pending_obligations.includes("audit_tasks_completed"));
-  assert.ok(parsed.handoff.suggested_inputs.length >= 0);
-  assert.ok(parsed.handoff.suggested_commands.length >= 0);
-  assert.match(parsed.handoff.interactive_provider_hint, /session-config\.json|Provider:/i);
-  // active_review_run may not be present if provider launch failed
-    assert.match(
-      parsed.handoff.artifact_paths.current_task.replaceAll("\\", "/"),
-      /\/dispatch\/current-task\.json$/,
-    );
+    assert.equal(step.contract_version, "audit-code-step/v1alpha1");
+    assert.equal(step.status, "ready");
+    assert.match(step.step_kind, /^(dispatch_review|single_task_fallback)$/);
+    assert.ok(step.run_id);
+    assert.equal(step.repo_root, root);
+    assert.equal(step.artifacts_dir, join(root, ".audit-tools/audit"));
 
-    const handoffJson = JSON.parse(
-      await readFile(parsed.handoff.artifact_paths.operator_handoff_json, "utf8"),
-    );
-  assert.equal(handoffJson.status, "blocked");
-  assert.equal(handoffJson.provider, "local-subprocess");
-  // active_review_run may not be present if provider launch failed
-  if (handoffJson.active_review_run && parsed.handoff.active_review_run) {
-    assert.equal(
-      handoffJson.active_review_run.audit_results_path,
-      parsed.handoff.active_review_run.audit_results_path,
-    );
-  }
-
-  const handoffMarkdown = await readFile(
-    parsed.handoff.artifact_paths.operator_handoff_markdown,
-    "utf8",
-  );
-  assert.match(handoffMarkdown, /audit-code operator handoff/i);
-  // Active review run section and packet dispatch command only present if review handoff exists
-  if (parsed.handoff.active_review_run) {
-    assert.match(handoffMarkdown, /Active review run:/i);
-    assert.match(handoffMarkdown, /next-step/i);
-    assert.doesNotMatch(handoffMarkdown, /prepare-dispatch/i);
-    // next-step outputs (dispatch plan / single-task prompt) live in the step
-    // contract, not the hand-off file_map.
-    assert.equal(parsed.handoff.file_map.single_task_prompt, undefined);
-    assert.equal(parsed.handoff.file_map.dispatch_plan, undefined);
-    // Collapse: run-to-completion pre-renders the actionable review step itself,
-    // so the host can act on steps/current-step.json without a second next-step
-    // round-trip.
+    // The printed contract matches the persisted current-step.json, so the host
+    // can act on steps/current-step.json without a second next-step round-trip.
     const currentStep = JSON.parse(
       await readFile(
         join(root, ".audit-tools/audit", "steps", "current-step.json"),
         "utf8",
       ),
     );
-    assert.match(
-      currentStep.step_kind,
-      /^(dispatch_review|single_task_fallback)$/,
-    );
-    assert.equal(currentStep.run_id, parsed.handoff.active_review_run.run_id);
+    assert.equal(currentStep.step_kind, step.step_kind);
+    assert.equal(currentStep.run_id, step.run_id);
+
+    // The dispatch run covers every planned audit task.
     const allAuditTasks = JSON.parse(
       await readFile(join(root, ".audit-tools/audit", "audit_tasks.json"), "utf8"),
     );
+    assert.ok(allAuditTasks.length > 0);
     const pendingRunTasks = JSON.parse(
       await readFile(
-        parsed.handoff.active_review_run.pending_audit_tasks_path,
+        join(root, ".audit-tools/audit", "runs", step.run_id, "pending-audit-tasks.json"),
         "utf8",
       ),
     );
     assert.equal(pendingRunTasks.length, allAuditTasks.length);
-  }
-});
+
+    // The step prompt is the host's sole instruction surface.
+    const prompt = await readFile(step.prompt_path, "utf8");
+    assert.match(prompt, /merge-and-ingest|exactly one AuditResult/i);
+  });
 });
 
 test("merge-and-ingest blocks when assigned task results are missing", async () => {
   await withTempRepo(async (root) => {
-    const { stdout } = await runWrapper([], { cwd: root });
-    const parsed = JSON.parse(stdout);
-    const runId = parsed.handoff.active_review_run?.run_id;
-    const artifactsDir = parsed.handoff.artifacts_dir;
+    const step = await startDispatchRun(root);
+    const runId = step.run_id;
+    const artifactsDir = step.artifacts_dir;
 
     assert.ok(runId);
     assert.ok(artifactsDir);
@@ -621,10 +667,9 @@ test("merge-and-ingest self-heals a stale completion marker by re-ingesting a st
         return false;
       }
     };
-    const { stdout } = await runWrapper([], { cwd: root });
-    const parsed = JSON.parse(stdout);
-    const runId = parsed.handoff.active_review_run?.run_id;
-    const artifactsDir = parsed.handoff.artifacts_dir;
+    const dispatchStep = await startDispatchRun(root);
+    const runId = dispatchStep.run_id;
+    const artifactsDir = dispatchStep.artifacts_dir;
     const runDir = join(artifactsDir, "runs", runId);
     const pendingPath = join(runDir, "pending-audit-tasks.json");
     const resultMapPath = join(runDir, "dispatch-result-map.json");
@@ -703,12 +748,15 @@ test("merge-and-ingest self-heals a stale completion marker by re-ingesting a st
 
 test("all packets dispatched in one round, merge ingests everything", async () => {
   await withTempRepo(async (root) => {
-    const { stdout } = await runWrapper([], { cwd: root });
-    const parsed = JSON.parse(stdout);
-    const runId = parsed.handoff.active_review_run?.run_id;
-    const artifactsDir = parsed.handoff.artifacts_dir;
+    const dispatchStep = await startDispatchRun(root);
+    const runId = dispatchStep.run_id;
+    const artifactsDir = dispatchStep.artifacts_dir;
     assert.ok(runId);
     assert.ok(artifactsDir);
+    await runWrapper(
+      ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
+      { cwd: root },
+    );
     const runDir = join(artifactsDir, "runs", runId);
 
     // Submit every packet currently in the plan (reads the live result map).
@@ -884,10 +932,9 @@ test("isCanonicalResultFilename separates canonical results from stray files", (
 
 test("merge-and-ingest rejects swapped task result files", async () => {
   await withTempRepo(async (root) => {
-    const { stdout } = await runWrapper([], { cwd: root });
-    const parsed = JSON.parse(stdout);
-    const runId = parsed.handoff.active_review_run?.run_id;
-    const artifactsDir = parsed.handoff.artifacts_dir;
+    const dispatchStep = await startDispatchRun(root);
+    const runId = dispatchStep.run_id;
+    const artifactsDir = dispatchStep.artifacts_dir;
 
     assert.ok(runId);
     assert.ok(artifactsDir);
@@ -1010,19 +1057,51 @@ test("assertWorkspaceInstalled flags missing or foreign @audit-tools/shared", ()
 
 test("audit-code wrapper prints help text", async () => {
   const { stdout } = await runWrapper(["--help"]);
-  assert.ok(stdout.includes("run the wrapper with no arguments"));
-  assert.ok(
-    stdout.includes(
-      "default behavior advances the audit automatically until it completes or no further automatic progress is possible",
-    ),
-  );
-  assert.ok(stdout.includes("--single-step"));
-  assert.ok(stdout.includes("--batch-results"));
+  assert.ok(stdout.includes("Usage: node audit-code.mjs <command>"));
+  assert.ok(stdout.includes("Primary usage (conversation-first):"));
+  assert.ok(stdout.includes("next-step advances deterministic audit state"));
+  assert.ok(stdout.includes("advance-audit runs exactly one deterministic advance"));
   assert.ok(stdout.includes("explain-task <task_id>"));
   assert.ok(stdout.includes("ensure lazily bootstraps repo-local"));
   assert.ok(stdout.includes("install bootstraps /audit-code"));
-  assert.ok(stdout.includes("next-step advances deterministic audit state"));
   assert.ok(stdout.includes("install-host --host copilot"));
+  // The batch loop and its flags are gone from the product surface.
+  assert.ok(!stdout.includes("--single-step"));
+  assert.ok(!stdout.includes("run-to-completion"));
+});
+
+test("audit-code wrapper bare invocation prints help and exits 0 without starting an audit", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "audit-code-bare-help-"));
+  try {
+    const { stdout } = await runWrapper([], { cwd: tempDir });
+    assert.ok(stdout.includes("Usage: node audit-code.mjs <command>"));
+    assert.ok(stdout.includes("next-step advances deterministic audit state"));
+    // The help path must not create audit state.
+    await assert.rejects(() => stat(join(tempDir, ".audit-tools")));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("audit-code wrapper rejects unknown commands with exit 1 and help text", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "audit-code-unknown-cmd-"));
+  try {
+    const { child, stdoutRef, stderrRef } = spawnWrapper(["definitely-not-a-command"], {
+      cwd: tempDir,
+    });
+    const code = await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", resolve);
+    });
+    assert.equal(code, 1);
+    assert.match(stderrRef.value, /Unknown command: definitely-not-a-command/);
+    // Usage guidance accompanies the failure.
+    assert.ok(stdoutRef.value.includes("Usage: node audit-code.mjs <command>"));
+    // The failure path must not create audit state.
+    await assert.rejects(() => stat(join(tempDir, ".audit-tools")));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("audit-code wrapper prints package version", async () => {
