@@ -89,23 +89,22 @@ audit-code
 
 The wrapper:
 
-- defaults artifacts to `<repo-root>/.audit-artifacts`
-- advances deterministic work automatically
-- stops cleanly when semantic review is required and no configured bridge can
-  continue
-- emits `contract_version: "audit-code/v1alpha1"`
-- refreshes `.audit-artifacts/operator-handoff.json` and
-  `.audit-artifacts/operator-handoff.md`
+- defaults artifacts to `<repo-root>/.audit-tools/audit`
+- advances exactly one bounded step per invocation (`next-step` for the
+  conversation step contract; `advance-audit` for the debug envelope)
+- prints usage on a bare invocation — there is no implicit batch loop
+- refreshes `operator-handoff.json` and `operator-handoff.md` under the
+  artifacts directory
 
 Useful fallback commands:
 
 ```bash
 audit-code next-step
-audit-code --single-step
-audit-code --results /path/to/audit_results.json
-audit-code --batch-results /path/to/results-dir
-audit-code --updates /path/to/runtime_validation_update.json
-audit-code --external-analyzer-results /path/to/external_analyzer_results.json
+audit-code advance-audit
+audit-code advance-audit --results /path/to/audit_results.json
+audit-code advance-audit --batch-results /path/to/results-dir
+audit-code advance-audit --updates /path/to/runtime_validation_update.json
+audit-code advance-audit --external-analyzer-results /path/to/external_analyzer_results.json
 audit-code explain-task <task_id>
 audit-code validate
 audit-code cleanup

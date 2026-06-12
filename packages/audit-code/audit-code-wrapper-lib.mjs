@@ -114,7 +114,14 @@ function run(command, args, options = {}) {
 
 function printHelp({ usageName, preferredEntrypoint }) {
   const lines = [
-    `Usage: node ${usageName} [--single-step] [--root PATH] [--artifacts-dir PATH] [--results FILE] [--batch-results DIR] [--updates FILE] [--external-analyzer-results FILE] [--timeout MS]`,
+    `Usage: node ${usageName} <command> [--root PATH] [--artifacts-dir PATH]`,
+    '',
+    'Primary usage (conversation-first):',
+    '- next-step advances deterministic audit state one bounded step and writes',
+    '  .audit-tools/audit/steps/current-step.json plus current-prompt.md; the host',
+    '  agent follows only the returned step prompt and calls next-step again',
+    '- advance-audit runs exactly one deterministic advance and prints the',
+    '  execution envelope (debugging / bounded-step testing)',
     '',
     'Helper commands:',
     '- prompt-path prints the absolute path to the canonical /audit-code prompt asset',
@@ -123,7 +130,6 @@ function printHelp({ usageName, preferredEntrypoint }) {
     '- verify-install smoke-tests the generated host assets after install',
     '- mcp starts the local stdio MCP server for repo-local IDE integrations',
     '- install-host --host copilot keeps the narrower Copilot-focused install path available',
-    '- next-step advances deterministic audit state and writes .audit-tools/audit/steps/current-step.json plus current-prompt.md',
     '- validate checks the current artifact bundle plus session-config/provider readiness and exits non-zero when issues exist',
     '- validate-results --results FILE validates AuditResult payloads against the active task manifest without ingesting them',
     '- explain-task <task_id> prints the resolved file coverage and current status for a task id',
@@ -133,19 +139,9 @@ function printHelp({ usageName, preferredEntrypoint }) {
     '- validate-result --run-id <id> --task-id <id> [--artifacts-dir <dir>] validates a single task result against the schema and line counts',
     '  generated packet prompts may use --run-id-b64, --task-id-b64, and --artifacts-dir-b64 to avoid shell-sensitive raw ids',
     '',
-    'Primary usage:',
-    '- from the repository root, run the wrapper with no arguments',
-    '- default behavior advances the audit automatically until it completes or no further automatic progress is possible',
-    '- each wrapper response refreshes operator-handoff.json and operator-handoff.md under the artifacts directory',
-    '- use --single-step only for debugging or bounded-step testing',
-    '',
     'Defaults:',
     '- --root .',
     '- --artifacts-dir <root>/.audit-tools/audit',
-    '',
-    'Completion signals:',
-    '- done: audit_state.status is complete',
-    '- blocked/no further automatic progress: progress_made is false and next_likely_step is null'
   ];
 
   if (preferredEntrypoint && preferredEntrypoint !== usageName) {
@@ -211,9 +207,7 @@ async function runDistCommandInline(commandName, argv) {
 export async function runAuditCodeWrapper({
   usageName,
   argv = process.argv.slice(2),
-  ensureArtifactsDir = true,
-  preferredEntrypoint,
-  defaultSingleStep = false
+  preferredEntrypoint
 }) {
   if (hasFlag(argv, '--help') || hasFlag(argv, '-h')) {
     printHelp({ usageName, preferredEntrypoint });
@@ -300,21 +294,20 @@ export async function runAuditCodeWrapper({
     return;
   }
 
-  const wrapperArgs = [...argv];
-  if (defaultSingleStep && !hasFlag(wrapperArgs, '--single-step')) {
-    wrapperArgs.push('--single-step');
-  }
-  const rootValue = resolve(getFlag(wrapperArgs, '--root') ?? '.');
-  const artifactsDir = resolve(getFlag(wrapperArgs, '--artifacts-dir') ?? join(rootValue, '.audit-tools', 'audit'));
-
-  setDefaultFlag(wrapperArgs, '--root', rootValue);
-  setDefaultFlag(wrapperArgs, '--artifacts-dir', artifactsDir);
-
-  if (ensureArtifactsDir) {
-    await mkdir(artifactsDir, { recursive: true });
+  if (argv[0] === 'advance-audit') {
+    await runDistCommand('advance-audit', argv.slice(1), { ensureArtifactsDir: true });
+    return;
   }
 
-  await ensureBuilt();
-  const command = hasFlag(wrapperArgs, '--single-step') ? 'advance-audit' : 'run-to-completion';
-  await run(nodeExecutable(), [distEntry, command, ...wrapperArgs]);
+  // No implicit default command: the audit advances one bounded step per
+  // invocation via `next-step` (conversation-first). A bare invocation prints
+  // usage; an unrecognized command fails loudly instead of silently running
+  // something else.
+  if (argv.length === 0) {
+    printHelp({ usageName, preferredEntrypoint });
+    return;
+  }
+
+  printHelp({ usageName, preferredEntrypoint });
+  throw new Error(`Unknown command: ${argv[0]}`);
 }

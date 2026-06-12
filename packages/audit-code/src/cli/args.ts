@@ -13,16 +13,11 @@ import {
 } from "@audit-tools/shared";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 
-export type UiMode = "visible" | "headless";
-
 export const DIRECT_CLI_DEFAULTS = {
   rootDir: ".",
   artifactsDir: ".audit-tools/audit",
   maxRuns: 1000,
-  agentBatchSize: 6,
-  parallelWorkers: 1,
   timeoutMs: 30 * 60 * 1000, // 30 minutes
-  uiMode: "headless" as UiMode,
 };
 
 function isLongFlagToken(value: string | undefined): boolean {
@@ -239,22 +234,6 @@ export function getMaxRuns(argv: string[]): number {
   return parsePositiveIntegerFlag(argv, "--max-runs") ?? DIRECT_CLI_DEFAULTS.maxRuns;
 }
 
-export function getAgentBatchSize(argv: string[], sessionConfig: SessionConfig): number {
-  return (
-    parsePositiveIntegerFlag(argv, "--agent-batch-size") ??
-    normalizePositiveInteger(sessionConfig.agent_task_batch_size) ??
-    DIRECT_CLI_DEFAULTS.agentBatchSize
-  );
-}
-
-export function getParallelWorkers(argv: string[], sessionConfig: SessionConfig): number {
-  return (
-    parsePositiveIntegerFlag(argv, "--parallel") ??
-    normalizePositiveInteger(sessionConfig.parallel_workers) ??
-    DIRECT_CLI_DEFAULTS.parallelWorkers
-  );
-}
-
 export function getTimeoutMs(argv: string[], sessionConfig: SessionConfig): number {
   return (
     parsePositiveIntegerFlag(argv, "--timeout") ??
@@ -325,28 +304,6 @@ export function resolveRunProviderName(
     getExplicitProvider(argv),
     sessionConfig,
   );
-}
-
-export function chunkArray<T>(arr: T[], size: number): T[][] {
-  const chunkSize = normalizePositiveInteger(size);
-  if (chunkSize === undefined) {
-    throw new Error("chunkArray size must be a positive integer.");
-  }
-  const chunks: T[][] = [];
-  for (let i = 0; i < arr.length; i += chunkSize) {
-    chunks.push(arr.slice(i, i + chunkSize));
-  }
-  return chunks;
-}
-
-export function getUiMode(
-  argv: string[],
-  fallback: UiMode = DIRECT_CLI_DEFAULTS.uiMode,
-): UiMode {
-  const raw = getFlag(argv, "--ui");
-  if (raw === "visible") return "visible";
-  if (raw === "headless") return "headless";
-  return fallback;
 }
 
 export function looksLikeCliFlag(value: string | undefined): boolean {

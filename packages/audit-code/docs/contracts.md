@@ -15,9 +15,9 @@ Important schemas live under `schemas/`, including:
 - `graph_bundle.schema.json`
 - `runtime_validation_update.example.json` in `examples/`
 
-## Wrapper envelope
+## Execution envelope (`advance-audit`)
 
-Until completion, `audit-code` returns a JSON envelope with:
+Each `advance-audit` debug step returns a JSON envelope with:
 
 - `contract_version`
 - `audit_state`
@@ -29,8 +29,9 @@ Until completion, `audit-code` returns a JSON envelope with:
 - `next_likely_step`
 - `handoff`
 
-On completion, the canonical output is repo-root `audit-report.md`. Intermediate
-`.audit-artifacts/` state is cleaned up when the completed report is promoted.
+On completion, the canonical outputs are `.audit-tools/audit-report.md` and
+`.audit-tools/audit-findings.json`. Intermediate artifact state is cleaned up
+when the completed report is promoted.
 
 ## AuditResult
 
@@ -95,9 +96,9 @@ from `--host-can-dispatch-subagents true|false` (optional) → session config
 or the single-task fallback (`single_task_fallback`). No capability handshake is
 required; pass the flag only to override the resolved default.
 
-`run-to-completion` renders the same step when it reaches the semantic-review
-boundary, so a host on the batch entrypoint can act on `steps/current-step.json`
-directly instead of issuing a second `next-step`.
+`next-step` is the only execution loop; there is no batch entrypoint. Every
+invocation advances one bounded step and renders the actionable step contract
+directly.
 
 ## Dispatch packets
 

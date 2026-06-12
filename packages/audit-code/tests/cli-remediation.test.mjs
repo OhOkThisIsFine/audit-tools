@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,17 +36,10 @@ test("CLI flag parsing falls back when values are missing or malformed", () => {
     cliTestUtils.getFlag(["node", "cli", "plan", "--root"], "--root", "."),
     ".",
   );
-  assert.equal(cliTestUtils.getUiMode(["node", "cli", "--ui", "visible"]), "visible");
-  assert.equal(
-    cliTestUtils.getUiMode(["node", "cli", "--ui", "unsupported"], "visible"),
-    "visible",
-  );
 });
 
 test("CLI numeric options prefer argv, then session config, then documented defaults", () => {
   const sessionConfig = {
-    agent_task_batch_size: 3,
-    parallel_workers: 4,
     timeout_ms: 9_000,
   };
 
@@ -59,38 +52,6 @@ test("CLI numeric options prefer argv, then session config, then documented defa
     cliTestUtils.getMaxRuns(["node", "cli", "--max-runs", "NaN"]),
     cliTestUtils.defaults.maxRuns,
   );
-
-  assert.equal(
-    cliTestUtils.getAgentBatchSize(
-      ["node", "cli", "--agent-batch-size", "2"],
-      sessionConfig,
-    ),
-    2,
-  );
-  assert.equal(
-    cliTestUtils.getAgentBatchSize(
-      ["node", "cli", "--agent-batch-size", "-1"],
-      sessionConfig,
-    ),
-    3,
-  );
-  assert.equal(cliTestUtils.getAgentBatchSize(["node", "cli"], {}), 6);
-
-  assert.equal(
-    cliTestUtils.getParallelWorkers(
-      ["node", "cli", "--parallel", "6"],
-      sessionConfig,
-    ),
-    6,
-  );
-  assert.equal(
-    cliTestUtils.getParallelWorkers(
-      ["node", "cli", "--parallel", "0"],
-      sessionConfig,
-    ),
-    4,
-  );
-  assert.equal(cliTestUtils.getParallelWorkers(["node", "cli"], {}), 1);
 
   assert.equal(
     cliTestUtils.getTimeoutMs(["node", "cli", "--timeout", "1200"], sessionConfig),
@@ -106,17 +67,7 @@ test("CLI numeric options prefer argv, then session config, then documented defa
   );
 });
 
-test("CLI helper utilities chunk arrays and count lines deterministically", async () => {
-  assert.deepEqual(cliTestUtils.chunkArray([1, 2, 3, 4, 5], 2), [
-    [1, 2],
-    [3, 4],
-    [5],
-  ]);
-  assert.throws(
-    () => cliTestUtils.chunkArray([1, 2, 3], 0),
-    /positive integer/i,
-  );
-
+test("CLI helper utilities count lines deterministically", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-cli-lines-"));
   try {
     const emptyFile = join(tempDir, "empty.txt");
@@ -135,61 +86,66 @@ test("CLI helper utilities chunk arrays and count lines deterministically", asyn
   }
 });
 
-test("run-to-completion starts intake for manifestless source repositories", async () => {
+test("next-step starts intake for manifestless source repositories", async () => {
   const root = await mkdtemp(join(tmpdir(), "audit-code-manifestless-"));
   try {
     await mkdir(join(root, "src"), { recursive: true });
     await writeFile(join(root, "src", "app.js"), "export const ok = true;\n");
 
-    // max-runs 2: step 1 is provider_confirmation_executor, step 2 is intake_executor.
+    const artifactsDir = join(root, ".audit-tools/audit");
+    // next-step advances the deterministic spine: provider confirmation
+    // auto-completes headlessly, then intake builds the repo manifest and file
+    // disposition before the run pauses at its first host step.
     const result = await captureRunCli([
       process.execPath,
       join(repoRoot, "dist", "cli.js"),
-      "run-to-completion",
+      "next-step",
       "--root",
       root,
       "--artifacts-dir",
-      join(root, ".audit-tools/audit"),
-      "--max-runs",
-      "2",
+      artifactsDir,
     ]);
-    const parsed = JSON.parse(result.stdout);
 
     assert.equal(result.exitCode, 0);
-    assert.equal(parsed.selected_executor, "intake_executor");
-    assert.equal(parsed.audit_state.status, "active");
-    assert.ok(parsed.artifacts_written.includes("repo_manifest.json"));
-    assert.ok(parsed.artifacts_written.includes("file_disposition.json"));
+    const step = JSON.parse(result.stdout);
+    assert.equal(step.contract_version, "audit-code-step/v1alpha1");
+    assert.equal(step.status, "ready");
+    // Intake ran: the manifest artifacts exist on disk.
+    assert.equal(
+      (await stat(join(artifactsDir, "repo_manifest.json"))).isFile(),
+      true,
+    );
+    assert.equal(
+      (await stat(join(artifactsDir, "file_disposition.json"))).isFile(),
+      true,
+    );
     assert.doesNotMatch(result.stdout + result.stderr, /No recognisable project signals/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("run-to-completion blocks empty or documentation-only repositories after intake validation", async () => {
+test("next-step blocks empty or documentation-only repositories after intake validation", async () => {
   const root = await mkdtemp(join(tmpdir(), "audit-code-no-auditable-"));
   try {
     await writeFile(join(root, "README.md"), "# Notes only\n");
 
-    // max-runs 2: step 1 is provider_confirmation_executor, step 2 is intake_executor (throws for no auditable files).
+    // Intake throws for repositories with no auditable files; next-step
+    // surfaces the failure as a non-zero exit with the intake validation
+    // message rather than inventing audit work.
     const result = await captureRunCli([
       process.execPath,
       join(repoRoot, "dist", "cli.js"),
-      "run-to-completion",
+      "next-step",
       "--root",
       root,
       "--artifacts-dir",
       join(root, ".audit-tools/audit"),
-      "--max-runs",
-      "2",
     ]);
-    const parsed = JSON.parse(result.stdout);
 
-    assert.equal(result.exitCode, 0);
-    assert.equal(parsed.selected_executor, "intake_executor");
-    assert.equal(parsed.audit_state.status, "blocked");
-    assert.match(parsed.progress_summary, /No auditable files found/);
-    assert.doesNotMatch(parsed.progress_summary, /No recognisable project signals/i);
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /No auditable files found/);
+    assert.doesNotMatch(result.stdout + result.stderr, /No recognisable project signals/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

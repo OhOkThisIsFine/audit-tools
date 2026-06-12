@@ -271,7 +271,7 @@ export async function advanceAudit(
       // `agent` and `rolling_dispatch_executor` are host-delegation executors:
       // the review tasks are dispatched to sub-agents by the host and ingested
       // via merge-and-ingest + next-step. advanceAudit cannot complete them
-      // deterministically. Callers (next-step / run-to-completion) route them
+      // deterministically. The next-step caller routes them
       // through host delegation before reaching here; if dispatched into
       // advanceAudit directly they fall through to the default branch, which
       // returns a no-progress "selected but not yet dispatched" handoff rather

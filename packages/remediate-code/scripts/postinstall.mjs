@@ -65,9 +65,6 @@ const OPENCODE_REMEDIATE_EDIT_PERMISSION = {
 
 const OPENCODE_REMEDIATE_BASH_PERMISSION = {
   "*": "ask",
-  "remediate-code run*": "deny",
-  "*dist*index.js* run*": "deny",
-  "*remediate-code.mjs* run*": "deny",
   "remediate-code": "allow",
   "remediate-code ensure*": "allow",
   "remediate-code next-step*": "allow",

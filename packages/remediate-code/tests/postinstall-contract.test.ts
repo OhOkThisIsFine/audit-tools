@@ -56,8 +56,6 @@ describe("postinstall OpenCode permission scopes (CFG-4996560e)", () => {
     expect(config.permission.bash["*"]).toBeUndefined();
     expect(config.permission.external_directory).toBeUndefined();
     // Denylist hygiene rules are still present at the top level.
-    expect(config.permission.bash["remediate-code run*"]).toBe("deny");
-    expect(config.permission.bash["*remediate-code.mjs* run*"]).toBe("deny");
     expect(config.permission.bash["rm *"]).toBe("deny");
     // Specific allows remain.
     expect(config.permission.bash["remediate-code next-step*"]).toBe("allow");
@@ -122,7 +120,6 @@ describe("postinstall OpenCode permission scopes (CFG-4996560e)", () => {
 
     // The remediator agent scope keeps its deny rules and managed allows.
     expect(firstConfig.agent.remediator.permission.bash["*"]).toBe("ask");
-    expect(firstConfig.agent.remediator.permission.bash["remediate-code run*"]).toBe("deny");
     expect(firstConfig.agent.remediator.permission.bash["rm *"]).toBe("deny");
     expect(firstConfig.agent.remediator.permission.bash["remediate-code next-step*"]).toBe(
       "allow",
@@ -149,7 +146,7 @@ describe("postinstall OpenCode permission scopes (CFG-4996560e)", () => {
     const config = await readConfig();
     expect(config.permission.bash["*"]).toBeUndefined();
     expect(config.permission.external_directory).toBeUndefined();
-    expect(config.permission.bash["remediate-code run*"]).toBe("deny");
+    expect(config.permission.bash["remediate-code ensure*"]).toBe("allow");
     expect(config.agent.remediator.permission.bash["*"]).toBe("ask");
   });
 
@@ -174,8 +171,8 @@ describe("postinstall OpenCode permission scopes (CFG-4996560e)", () => {
     expect(config.permission.bash["*"]).toBeUndefined();
     expect(config.permission.external_directory).toBeUndefined();
     // Both deny hygiene sets are present at the top level.
-    expect(config.permission.bash["audit-code run-to-completion*"]).toBe("deny");
-    expect(config.permission.bash["remediate-code run*"]).toBe("deny");
+    expect(config.permission.bash["audit-code synthesize*"]).toBe("deny");
+    expect(config.permission.bash["rm *"]).toBe("deny");
     // Agent scopes keep their per-package deployments unchanged.
     expect(config.agent.auditor.permission.bash["*"]).toBe("allow");
     expect(config.agent.auditor.permission.external_directory).toEqual({ "*": "allow" });

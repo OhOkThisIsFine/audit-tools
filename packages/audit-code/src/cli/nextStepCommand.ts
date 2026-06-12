@@ -556,8 +556,10 @@ export async function runDeterministicForNextStep(params: NextStepParams): Promi
         kind: "complete",
         state,
         bundle,
+        // Promotion copies the report to the artifacts dir's PARENT
+        // (.audit-tools/audit-report.md), not the repo root.
         finalReportPath: promoted.promoted
-          ? join(params.root, AUDIT_REPORT_FILENAME)
+          ? join(dirname(params.artifactsDir), AUDIT_REPORT_FILENAME)
           : join(params.artifactsDir, AUDIT_REPORT_FILENAME),
       };
     }

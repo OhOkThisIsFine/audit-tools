@@ -64,13 +64,13 @@ async function withTempRepo(fn) {
   }
 }
 
-test("audit-code fails loudly on malformed session-config.json", async () => {
+test("audit-code advance-audit fails loudly on malformed session-config.json", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
     await writeFile(join(artifactsDir, "session-config.json"), "{not-json\n");
 
-    const result = await runNode(wrapperPath, [], { cwd: root });
+    const result = await runNode(wrapperPath, ["advance-audit"], { cwd: root });
     const combined = `${result.stderr}\n${result.stdout}`;
 
     assert.notEqual(result.code, 0);
@@ -84,7 +84,7 @@ test("audit-code fails loudly on malformed session-config.json", async () => {
   });
 });
 
-test("audit-code fails loudly on invalid session-config fields", async () => {
+test("audit-code advance-audit fails loudly on invalid session-config fields", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -93,7 +93,7 @@ test("audit-code fails loudly on invalid session-config fields", async () => {
       JSON.stringify({ provider: "definitely-not-a-provider" }, null, 2),
     );
 
-    const result = await runNode(wrapperPath, [], { cwd: root });
+    const result = await runNode(wrapperPath, ["advance-audit"], { cwd: root });
     const combined = `${result.stderr}\n${result.stdout}`;
 
     assert.notEqual(result.code, 0);

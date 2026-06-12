@@ -11,12 +11,9 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { assertMatchesJsonSchema } from "../tests/helpers/jsonSchemaAssert.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const schemaPath = join(repoRoot, "schemas", "audit-code-v1alpha1.schema.json");
 const packageJsonPath = join(repoRoot, "package.json");
-const responseSchema = JSON.parse(await readFile(schemaPath, "utf8"));
 const packageVersion = JSON.parse(
   await readFile(packageJsonPath, "utf8"),
 ).version;
@@ -73,6 +70,121 @@ function installedAuditCodeCommand(installDir) {
   return process.platform === "win32"
     ? join(installDir, "node_modules", ".bin", "audit-code.cmd")
     : join(installDir, "node_modules", ".bin", "audit-code");
+}
+
+function installedDistCliPath(installDir) {
+  return join(installDir, "node_modules", "auditor-lambda", "dist", "cli.js");
+}
+
+const STEP_CONTRACT_VERSION = "audit-code-step/v1alpha1";
+
+// Pause step kinds that next-step can emit before review dispatch is ready
+// (analyzer install decision, intent confirmation, design review passes,
+// optional edge reasoning), each at most once; allow extra headroom.
+const MAX_PRE_DISPATCH_PAUSES = 8;
+
+// Drive `next-step` past the host pause steps that precede review dispatch by
+// answering each pause headlessly (skip analyzer installs, confirm the default
+// scope, submit empty design-review findings). Returns the first
+// dispatch-ready step (dispatch_review or single_task_fallback).
+async function advanceToDispatchReady(runNextStep, root) {
+  const incomingDir = join(root, ".audit-tools", "audit", "incoming");
+  for (let i = 0; i < MAX_PRE_DISPATCH_PAUSES; i++) {
+    const step = JSON.parse((await runNextStep()).stdout);
+    assert.equal(step.contract_version, STEP_CONTRACT_VERSION);
+    detail(`next-step -> ${step.step_kind} (${step.status})`);
+    if (step.step_kind === "analyzer_install") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        step.artifact_paths.analyzer_decisions,
+        JSON.stringify({ typescript: "skip" }, null, 2) + "\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "confirm_intent") {
+      await writeFile(
+        step.artifact_paths.intent_checkpoint,
+        JSON.stringify(
+          {
+            schema_version: "intent-checkpoint/v1",
+            confirmed_at: new Date().toISOString(),
+            confirmed_by: "host",
+            scope_summary: "Full repository scope as discovered by intake.",
+            intent_summary: "full-audit",
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "design_review_parallel") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(join(incomingDir, "design-review-contract-findings.json"), "[]\n");
+      await writeFile(join(incomingDir, "design-review-conceptual-findings.json"), "[]\n");
+      continue;
+    }
+    if (step.step_kind === "design_review_contract") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(join(incomingDir, "design-review-contract-findings.json"), "[]\n");
+      continue;
+    }
+    if (step.step_kind === "design_review_conceptual") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(join(incomingDir, "design-review-conceptual-findings.json"), "[]\n");
+      continue;
+    }
+    if (
+      step.step_kind === "edge_reasoning" ||
+      step.step_kind === "edge_reasoning_dispatch"
+    ) {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(step.artifact_paths.edge_reasoning_results, "[]\n");
+      continue;
+    }
+    if (
+      step.step_kind === "dispatch_review" ||
+      step.step_kind === "single_task_fallback"
+    ) {
+      return step;
+    }
+    throw new Error(
+      `advanceToDispatchReady: unexpected step kind '${step.step_kind}' (iteration ${i})`,
+    );
+  }
+  throw new Error("next-step did not reach a dispatch-ready step");
+}
+
+// Disable the synthesis narrative so finalization stays fully deterministic
+// (no synthesis_narrative host pause). Merges into any session config that the
+// run has already persisted (e.g. analyzer skip decisions).
+async function disableNarrative(root) {
+  const configPath = join(root, ".audit-tools", "audit", "session-config.json");
+  let config = {};
+  try {
+    config = JSON.parse(await readFile(configPath, "utf8"));
+  } catch {
+    // No session config yet — start fresh.
+  }
+  config.synthesis = { ...(config.synthesis ?? {}), narrative: false };
+  await writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
+}
+
+// Bound the number of next-step calls needed to finalize after ingestion.
+const MAX_FINALIZE_STEPS = 5;
+
+async function nextStepUntilPresentReport(runNextStep) {
+  for (let i = 0; i < MAX_FINALIZE_STEPS; i++) {
+    const step = JSON.parse((await runNextStep()).stdout);
+    assert.equal(step.contract_version, STEP_CONTRACT_VERSION);
+    detail(`next-step -> ${step.step_kind} (${step.status})`);
+    if (step.step_kind === "present_report") {
+      return step;
+    }
+  }
+  throw new Error(
+    `next-step did not reach present_report within ${MAX_FINALIZE_STEPS} calls`,
+  );
 }
 
 function findHostGuidance(installedHost, host) {
@@ -788,36 +900,29 @@ async function main() {
       assert.equal(verifiedInstall.hosts.length, 4);
       process.stderr.write(`[smoke:packaged] elapsed: verify generated host assets — ${Date.now() - stepStart}ms\n`);
 
-      stepStart = Date.now();
-      step("first run (expect blocked)");
-      const blocked = JSON.parse(
-        (
-          await runCommand(auditCodeCommand, [], {
-            cwd: root,
-            label: "audit-code (initial run)",
-            failureHint:
-              "Inspect .audit-tools/audit/operator-handoff.* and rerun with AUDIT_CODE_VERBOSE=1 if the packaged wrapper blocks earlier than expected.",
-          })
-        ).stdout,
-      );
-      assertMatchesJsonSchema(
-        responseSchema,
-        blocked,
-        "auditCodeResponse:blocked",
-      );
-      assert.equal(blocked.contract_version, "audit-code/v1alpha1");
-      assert.equal(blocked.audit_state.status, "blocked");
-      assert.equal(blocked.progress_made, true);
-      assert.equal(blocked.next_likely_step, null);
-      assert.equal(blocked.selected_executor, "rolling_dispatch_executor");
-  assert.equal(blocked.handoff.status, "blocked");
-  // Provider could be opencode if available, or local-subprocess as fallback
-  assert.ok(/local-subprocess|opencode|claude-code/.test(blocked.handoff.provider ?? ""));
-      process.stderr.write(`[smoke:packaged] elapsed: first run (expect blocked) — ${Date.now() - stepStart}ms\n`);
+      const runNextStep = () =>
+        runCommand(auditCodeCommand, ["next-step"], {
+          cwd: root,
+          label: "audit-code next-step",
+          failureHint:
+            "Inspect .audit-tools/audit/steps/current-step.json and rerun with AUDIT_CODE_VERBOSE=1 if the packaged wrapper fails earlier than expected.",
+        });
 
+      stepStart = Date.now();
+      step("next-step until dispatch_review (expect a ready review step)");
+      const dispatchStep = await advanceToDispatchReady(runNextStep, root);
+      assert.equal(dispatchStep.contract_version, "audit-code-step/v1alpha1");
+      assert.equal(dispatchStep.status, "ready");
+      assert.match(dispatchStep.step_kind, /^(dispatch_review|single_task_fallback)$/);
+      assert.ok(dispatchStep.run_id);
       const tasks = JSON.parse(
         await readFile(join(root, ".audit-tools", "audit", "audit_tasks.json"), "utf8"),
       );
+      assert.ok(tasks.length > 0);
+      process.stderr.write(`[smoke:packaged] elapsed: next-step until dispatch_review — ${Date.now() - stepStart}ms\n`);
+
+      stepStart = Date.now();
+      step("ingest synthetic results");
       const resultsPath = join(root, "audit_results.json");
       await writeFile(
         resultsPath,
@@ -827,65 +932,64 @@ async function main() {
           2,
         ),
       );
-
-      stepStart = Date.now();
-      step("ingest results (expect completed)");
-      const completed = JSON.parse(
+      await disableNarrative(root);
+      const ingested = JSON.parse(
         (
           await runCommand(
-            auditCodeCommand,
-            ["--results", resultsPath],
+            process.execPath,
+            [
+              installedDistCliPath(installDir),
+              "ingest-results",
+              "--root",
+              root,
+              "--artifacts-dir",
+              join(root, ".audit-tools", "audit"),
+              "--results",
+              resultsPath,
+            ],
             {
               cwd: root,
-              label: "audit-code --results <synthetic-results>",
+              label: "ingest-results --results <synthetic-results>",
               failureHint:
-                "Inspect the generated audit_results.json file and .audit-tools/audit contents if ingestion or synthesis fails unexpectedly.",
+                "Inspect the generated audit_results.json file and .audit-tools/audit contents if ingestion fails unexpectedly.",
             },
           )
         ).stdout,
       );
-      assertMatchesJsonSchema(
-        responseSchema,
-        completed,
-        "auditCodeResponse:completed",
-      );
-      assert.equal(completed.selected_executor, "synthesis_narrative_executor");
-      assert.equal(completed.audit_state.status, "complete");
-      assert.equal(completed.next_likely_step, null);
-      assert.equal(completed.handoff.status, "complete");
+      assert.equal(ingested.selected_executor, "result_ingestion_executor");
+      process.stderr.write(`[smoke:packaged] elapsed: ingest synthetic results — ${Date.now() - stepStart}ms\n`);
+
+      stepStart = Date.now();
+      step("next-step until present_report (expect completion + promotion)");
+      const presented = await nextStepUntilPresentReport(runNextStep);
+      assert.equal(presented.status, "complete");
       assert.equal(
         await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8").then((content) => /# Audit Report/.test(content)),
         true,
       );
-      process.stderr.write(`[smoke:packaged] elapsed: ingest results (expect completed) — ${Date.now() - stepStart}ms\n`);
+      await stat(join(root, ".audit-tools", "audit-findings.json"));
+      // Completion cleans the audit working artifacts (only the present_report
+      // step scaffolding remains so the host can follow prompt_path).
+      await assert.rejects(() =>
+        stat(join(root, ".audit-tools", "audit", "audit_tasks.json")),
+      );
+      process.stderr.write(`[smoke:packaged] elapsed: next-step until present_report — ${Date.now() - stepStart}ms\n`);
 
       stepStart = Date.now();
-      step("rerun after completion (expect a fresh blocked audit)");
-      const rerun = JSON.parse(
-        (
-          await runCommand(auditCodeCommand, [], {
-            cwd: root,
-            label: "audit-code (rerun after completion)",
-            failureHint:
-              "A rerun should start a fresh blocked audit. Inspect the retained .audit-tools/audit-report.md and regenerated .audit-tools/audit state if behavior diverges.",
-          })
-        ).stdout,
+      step("rerun after completion (expect a fresh audit step)");
+      const rerun = JSON.parse((await runNextStep()).stdout);
+      assert.equal(rerun.contract_version, "audit-code-step/v1alpha1");
+      assert.notEqual(
+        rerun.step_kind,
+        "present_report",
+        "a rerun after completion must start a fresh audit, not re-present the old report",
       );
-      assertMatchesJsonSchema(
-        responseSchema,
-        rerun,
-        "auditCodeResponse:rerun",
-      );
-      assert.equal(rerun.progress_made, true);
-      assert.equal(rerun.audit_state.status, "blocked");
-      assert.equal(rerun.selected_executor, "rolling_dispatch_executor");
-      assert.equal(rerun.next_likely_step, null);
-      assert.equal(rerun.handoff.status, "blocked");
-      process.stderr.write(`[smoke:packaged] elapsed: rerun after completion (expect a fresh blocked audit) — ${Date.now() - stepStart}ms\n`);
+      assert.equal(rerun.status, "ready");
+      process.stderr.write(`[smoke:packaged] elapsed: rerun after completion (expect a fresh audit step) — ${Date.now() - stepStart}ms\n`);
     });
 
     success(
-      `Validated tarball ${tarballFilename}, packaged install bootstrap surfaces, and the blocked/completed/rerun audit flow. Total elapsed: ${Math.round((Date.now() - smokeStart) / 1000)}s.`,
+      `Validated tarball ${tarballFilename}, packaged install bootstrap surfaces, and the next-step/ingest-results/present_report audit flow. Total elapsed: ${Math.round((Date.now() - smokeStart) / 1000)}s.`,
     );
   } finally {
     if (tarballPath) {
