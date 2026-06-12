@@ -63,7 +63,7 @@ export type WaveBindingCap =
   | "none";
 
 export interface WaveSchedule {
-  wave_size: number;
+  max_concurrent: number;
   estimated_wave_tokens: number;
   cooldown_until: string | null;
   confidence: LimitConfidence;
@@ -73,7 +73,7 @@ export interface WaveSchedule {
   model: string | null;
   quota_source_snapshot?: import("./quotaSource.js").QuotaUsageSnapshot | null;
   /**
-   * Which cap bound the final `wave_size` ("none" if nothing reduced the
+   * Which cap bound the final `max_concurrent` ("none" if nothing reduced the
    * requested concurrency). Optional so existing constructions stay valid.
    */
   binding_cap?: WaveBindingCap;

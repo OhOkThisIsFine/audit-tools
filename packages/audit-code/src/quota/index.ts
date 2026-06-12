@@ -113,8 +113,7 @@ export interface DispatchQuota {
   confidence: _LimitConfidence;
   source: _LimitSource;
   host_concurrency_limit: _HostConcurrencyLimit | null;
-  wave_size: number;
-  estimated_wave_tokens: number;
+  max_concurrent_agents: number;
   cooldown_until: string | null;
   binding_cap?: _WaveBindingCap;
   capacity_pools?: _DispatchCapacityPoolSummary[];

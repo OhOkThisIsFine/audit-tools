@@ -2,7 +2,7 @@
  * Rolling dispatch engine — packet-type-agnostic.
  *
  * Key design invariants:
- * - No wave_size in the public API; quota headroom from `scheduleWave` is the
+ * - No max_concurrent in the public API; quota headroom from `scheduleWave` is the
  *   sole throttle (INV-S05).
  * - TPacket is fully opaque; the engine never inspects packet payload.
  * - Terminal hooks (synthesis, ingestion) are NOT inline — consumers supply an
@@ -238,7 +238,7 @@ export function selectProvider<TPacket>(
       quotaSourceSnapshot: pool.quotaSourceSnapshot ?? null,
     });
 
-    if (schedule.wave_size > 0) {
+    if (schedule.max_concurrent > 0) {
       return {
         providerName: pool.providerName,
         hostModel: pool.hostModel,

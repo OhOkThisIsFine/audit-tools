@@ -247,7 +247,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
       output_tokens_per_minute: null,
     };
     return {
-      wave_size: waveSize,
+      max_concurrent: waveSize,
       estimated_wave_tokens: slotsSorted ? sumTopN(slotsSorted, waveSize) : waveSize * avgTokens,
       cooldown_until: null,
       confidence: "high",
@@ -338,7 +338,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   waveSize = Math.max(1, waveSize);
 
   return {
-    wave_size: waveSize,
+    max_concurrent: waveSize,
     estimated_wave_tokens: slotsSorted ? sumTopN(slotsSorted, waveSize) : waveSize * avgTokens,
     cooldown_until: cooldownUntil,
     confidence,

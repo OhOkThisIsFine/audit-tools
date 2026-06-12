@@ -75,7 +75,7 @@ test("dispatchQuotaPath non-null — quota lines are included", () => {
     makeParams({ dispatchQuotaPath: "/repo/.audit-tools/audit/dispatch-quota.json" }),
   );
   assert.ok(result.includes("Dispatch quota:"), "expected 'Dispatch quota:' to be present");
-  assert.ok(result.includes("wave_size"), "expected 'wave_size' to be present");
+  assert.ok(result.includes("max_concurrent_agents"), "expected 'max_concurrent_agents' to be present");
   assert.ok(result.includes("cooldown_until"), "expected 'cooldown_until' to be present");
 });
 

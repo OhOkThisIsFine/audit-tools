@@ -38,13 +38,13 @@ test("rpm cap: scheduleWave respects requests_per_minute limit", () => {
     quotaStateEntry: null,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.wave_size, 4, "wave_size should be capped by rpm");
+  assert.equal(schedule.max_concurrent, 4, "max_concurrent should be capped by rpm");
   assert.equal(schedule.binding_cap, "rpm");
 });
 
 test("tpm cap: scheduleWave respects input_tokens_per_minute limit", () => {
   // 10 slots each costing 1000 tokens = 10_000 total; budget allows only 5_000
-  // at safety_margin=1.0, so wave_size should be 5.
+  // at safety_margin=1.0, so max_concurrent should be 5.
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {
@@ -63,7 +63,7 @@ test("tpm cap: scheduleWave respects input_tokens_per_minute limit", () => {
     quotaStateEntry: null,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.wave_size, 5, "wave_size should be capped by tpm");
+  assert.equal(schedule.max_concurrent, 5, "max_concurrent should be capped by tpm");
   assert.equal(schedule.binding_cap, "tpm");
 });
 
@@ -86,7 +86,7 @@ test("learned cap: scheduleWave uses quotaStateEntry when provided", () => {
     quotaStateEntry,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.wave_size, 1, "wave_size should be capped by learned history");
+  assert.equal(schedule.max_concurrent, 1, "max_concurrent should be capped by learned history");
   assert.equal(schedule.binding_cap, "learned");
 });
 
@@ -106,7 +106,7 @@ test("fallback cap: scheduleWave applies unknown_hosted_concurrency when no lear
     quotaStateEntry: null,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.wave_size, 2, "wave_size should be capped by fallback");
+  assert.equal(schedule.max_concurrent, 2, "max_concurrent should be capped by fallback");
   assert.equal(schedule.binding_cap, "fallback");
 });
 
@@ -129,6 +129,6 @@ test("first_contact cap: scheduleWave applies first_contact_concurrency for unco
     quotaStateEntry: null,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.wave_size, 2, "wave_size should be capped by first_contact");
+  assert.equal(schedule.max_concurrent, 2, "max_concurrent should be capped by first_contact");
   assert.equal(schedule.binding_cap, "first_contact");
 });

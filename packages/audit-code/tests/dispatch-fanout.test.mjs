@@ -8,13 +8,13 @@ const { computeDispatchFanout } = await import("../src/cli/dispatch.ts");
 await test("FINDING-012: confirmation_recommended is false at the threshold and true above it", () => {
   // agent_count 10, threshold 10 → false (strictly greater-than).
   assert.equal(
-    computeDispatchFanout({ agentCount: 10, waveSize: 4, confirmThreshold: 10 })
+    computeDispatchFanout({ agentCount: 10, maxConcurrent: 4, confirmThreshold: 10 })
       .confirmation_recommended,
     false,
   );
   // agent_count 11, threshold 10 → true.
   assert.equal(
-    computeDispatchFanout({ agentCount: 11, waveSize: 4, confirmThreshold: 10 })
+    computeDispatchFanout({ agentCount: 11, maxConcurrent: 4, confirmThreshold: 10 })
       .confirmation_recommended,
     true,
   );
@@ -22,23 +22,23 @@ await test("FINDING-012: confirmation_recommended is false at the threshold and 
 
 await test("FINDING-012: confirm_threshold defaults to 10 when unset", () => {
   assert.equal(
-    computeDispatchFanout({ agentCount: 10, waveSize: 4 }).confirmation_recommended,
+    computeDispatchFanout({ agentCount: 10, maxConcurrent: 4 }).confirmation_recommended,
     false,
   );
   assert.equal(
-    computeDispatchFanout({ agentCount: 11, waveSize: 4 }).confirmation_recommended,
+    computeDispatchFanout({ agentCount: 11, maxConcurrent: 4 }).confirmation_recommended,
     true,
   );
 });
 
 await test("FINDING-012: a custom confirm_threshold is honoured", () => {
   assert.equal(
-    computeDispatchFanout({ agentCount: 6, waveSize: 4, confirmThreshold: 5 })
+    computeDispatchFanout({ agentCount: 6, maxConcurrent: 4, confirmThreshold: 5 })
       .confirmation_recommended,
     true,
   );
   assert.equal(
-    computeDispatchFanout({ agentCount: 5, waveSize: 4, confirmThreshold: 5 })
+    computeDispatchFanout({ agentCount: 5, maxConcurrent: 4, confirmThreshold: 5 })
       .confirmation_recommended,
     false,
   );
@@ -46,41 +46,39 @@ await test("FINDING-012: a custom confirm_threshold is honoured", () => {
 
 // ── FINDING-012: dispatch_summary text format ───────────────────────────────
 
-await test("FINDING-012: dispatch_summary formats plural agents and waves", () => {
+await test("FINDING-012: dispatch_summary formats plural agents", () => {
   assert.equal(
-    computeDispatchFanout({ agentCount: 12, waveSize: 4 }).dispatch_summary,
-    "12 agents across 3 waves (wave_size=4)",
+    computeDispatchFanout({ agentCount: 12, maxConcurrent: 4 }).dispatch_summary,
+    "12 agents, max 4 concurrent (rolling)",
   );
 });
 
-await test("FINDING-012: dispatch_summary singularizes 1 agent / 1 wave", () => {
+await test("FINDING-012: dispatch_summary singularizes 1 agent", () => {
   assert.equal(
-    computeDispatchFanout({ agentCount: 1, waveSize: 1 }).dispatch_summary,
-    "1 agent across 1 wave (wave_size=1)",
+    computeDispatchFanout({ agentCount: 1, maxConcurrent: 1 }).dispatch_summary,
+    "1 agent, max 1 concurrent (rolling)",
   );
 });
 
-await test("FINDING-012: dispatch_summary with agent_count=5 wave_size=4", () => {
+await test("FINDING-012: dispatch_summary with agent_count=5 maxConcurrent=4", () => {
   assert.equal(
-    computeDispatchFanout({ agentCount: 5, waveSize: 4 }).dispatch_summary,
-    "5 agents across 2 waves (wave_size=4)",
+    computeDispatchFanout({ agentCount: 5, maxConcurrent: 4 }).dispatch_summary,
+    "5 agents, max 4 concurrent (rolling)",
   );
 });
 
 await test("FINDING-012: dispatch_summary is always present regardless of confirmation_recommended", () => {
   for (const agentCount of [0, 1, 5, 12, 50]) {
-    const f = computeDispatchFanout({ agentCount, waveSize: 4 });
+    const f = computeDispatchFanout({ agentCount, maxConcurrent: 4 });
     assert.equal(typeof f.dispatch_summary, "string");
     assert.ok(f.dispatch_summary.length > 0);
   }
 });
 
-// ── FINDING-012: wave_count math ────────────────────────────────────────────
+// ── FINDING-012: max_concurrent_agents on result ───────────────────────────
 
-await test("FINDING-012: wave_count = ceil(agent_count / max(1, wave_size))", () => {
-  assert.equal(computeDispatchFanout({ agentCount: 10, waveSize: 4 }).wave_count, 3);
-  assert.equal(computeDispatchFanout({ agentCount: 8, waveSize: 4 }).wave_count, 2);
-  assert.equal(computeDispatchFanout({ agentCount: 0, waveSize: 4 }).wave_count, 0);
-  // Degenerate wave_size=0 → max(1,0)=1 → ceil(7/1)=7.
-  assert.equal(computeDispatchFanout({ agentCount: 7, waveSize: 0 }).wave_count, 7);
+await test("FINDING-012: max_concurrent_agents is passed through on the result", () => {
+  assert.equal(computeDispatchFanout({ agentCount: 10, maxConcurrent: 4 }).max_concurrent_agents, 4);
+  assert.equal(computeDispatchFanout({ agentCount: 8, maxConcurrent: 4 }).max_concurrent_agents, 4);
+  assert.equal(computeDispatchFanout({ agentCount: 1, maxConcurrent: 1 }).max_concurrent_agents, 1);
 });

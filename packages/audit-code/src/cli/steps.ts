@@ -34,18 +34,16 @@ export interface StepProgress {
   pending_tasks?: number;
   /** Audit tasks already completed before this run (skipped as done). */
   completed_tasks?: number;
-  /** Subagent parallelism resolved for this dispatch run. */
-  wave_size?: number;
+  /** Max subagents running simultaneously (rolling dispatch). */
+  max_concurrent_agents?: number;
   /** Total agents (packets) that will be launched this run. */
   agent_count?: number;
-  /** Number of dispatch waves for this run (`ceil(agent_count / wave_size)`). */
-  wave_count?: number;
   /**
    * True when `agent_count` exceeds the configured confirm threshold and the
    * loader should pause for user confirmation before fan-out (FINDING-012).
    */
   confirmation_recommended?: boolean;
-  /** Human-readable fan-out summary, e.g. "12 agents across 3 waves (wave_size=4)". */
+  /** Human-readable fan-out summary, e.g. "12 agents, max 4 concurrent (rolling)". */
   dispatch_summary?: string;
 }
 

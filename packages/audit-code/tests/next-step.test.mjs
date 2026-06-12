@@ -287,7 +287,7 @@ test("next-step true emits dispatch_review and prepares dispatch artifacts", asy
     assert.equal(Array.isArray(plan), true);
     assert.ok(plan.length > 0);
     assert.match(prompt, /dispatch-quota\.json/);
-    assert.match(prompt, /wave_size/);
+    assert.match(prompt, /max_concurrent_agents/);
     assert.match(prompt, /merge-and-ingest/);
     assert.doesNotMatch(prompt, /single-task fallback/i);
   });

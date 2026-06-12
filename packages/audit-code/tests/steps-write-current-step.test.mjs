@@ -120,7 +120,7 @@ test("writeCurrentStep includes progress when supplied", async () => {
   try {
     const artifactsDir = join(dir, "artifacts");
     await mkdir(artifactsDir, { recursive: true });
-    const progress = { summary: "12 tasks remaining", pending_tasks: 12, wave_size: 4 };
+    const progress = { summary: "12 tasks remaining", pending_tasks: 12, max_concurrent_agents: 4 };
     const step = await writeCurrentStep({ ...baseParams(artifactsDir), progress });
     assert.deepStrictEqual(step.progress, progress);
   } finally {

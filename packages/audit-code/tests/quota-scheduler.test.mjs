@@ -99,7 +99,7 @@ test("scheduleWave returns requestedConcurrency when quota is disabled", () => {
     hostModel: null,
     requestedConcurrency: 22,
   });
-  assert.equal(schedule.wave_size, 22);
+  assert.equal(schedule.max_concurrent, 22);
 });
 
 test("scheduleWave caps wave size by RPM limit", () => {
@@ -118,7 +118,7 @@ test("scheduleWave caps wave size by RPM limit", () => {
     requestedConcurrency: 22,
   });
   // floor(10 * 0.8) = 8
-  assert.equal(schedule.wave_size, 8);
+  assert.equal(schedule.max_concurrent, 8);
 });
 
 test("scheduleWave caps wave size by TPM limit using per-slot estimates", () => {
@@ -138,7 +138,7 @@ test("scheduleWave caps wave size by TPM limit using per-slot estimates", () => 
     // Slot estimates: [8000, 6000, 4000, 2000, 1000]. Top-3 = 18000 > 10000, top-2 = 14000 > 10000, top-1 = 8000 < 10000
     estimatedSlotTokens: [8000, 6000, 4000, 2000, 1000],
   });
-  assert.equal(schedule.wave_size, 1);
+  assert.equal(schedule.max_concurrent, 1);
 });
 
 test("scheduleWave per-slot TPM allows more slots when they fit budget", () => {
@@ -158,7 +158,7 @@ test("scheduleWave per-slot TPM allows more slots when they fit budget", () => {
     // Slot estimates: [3000, 3000, 3000, 3000, 3000]. Top-5 = 15000 < 20000
     estimatedSlotTokens: [3000, 3000, 3000, 3000, 3000],
   });
-  assert.equal(schedule.wave_size, 5);
+  assert.equal(schedule.max_concurrent, 5);
 });
 
 test("scheduleWave estimated_wave_tokens uses actual slot sums", () => {
@@ -169,7 +169,7 @@ test("scheduleWave estimated_wave_tokens uses actual slot sums", () => {
     requestedConcurrency: 3,
     estimatedSlotTokens: [5000, 3000, 1000],
   });
-  assert.equal(schedule.wave_size, 3);
+  assert.equal(schedule.max_concurrent, 3);
   assert.equal(schedule.estimated_wave_tokens, 9000);
 });
 
@@ -190,7 +190,7 @@ test("scheduleWave caps wave size by TPM limit", () => {
     estimatedSlotTokens: [3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000],
   });
   // sumTopN of 4 slots (4*3000=12000) > 10000, sumTopN of 3 slots (3*3000=9000) <= 10000 → wave = 3
-  assert.equal(schedule.wave_size, 3);
+  assert.equal(schedule.max_concurrent, 3);
 });
 
 test("scheduleWave caps wave size by host active subagent limit", () => {
@@ -218,7 +218,7 @@ test("scheduleWave caps wave size by host active subagent limit", () => {
     hostConcurrencyLimit,
     quotaStateEntry,
   });
-  assert.equal(schedule.wave_size, 6);
+  assert.equal(schedule.max_concurrent, 6);
   assert.deepEqual(schedule.host_concurrency_limit, hostConcurrencyLimit);
 });
 
@@ -234,7 +234,7 @@ test("scheduleWave applies host active subagent limit even when quota is disable
       description: "Host active subagent limit reported by the conversation host.",
     },
   });
-  assert.equal(schedule.wave_size, 6);
+  assert.equal(schedule.max_concurrent, 6);
 });
 
 test("scheduleWave: a reported host limit supersedes the conservative unknown-hosted fallback", () => {
@@ -254,7 +254,7 @@ test("scheduleWave: a reported host limit supersedes the conservative unknown-ho
       description: "Host active subagent limit reported by the conversation host.",
     },
   });
-  assert.equal(schedule.wave_size, 4);
+  assert.equal(schedule.max_concurrent, 4);
 });
 
 test("scheduleWave: a reported host limit never raises waves above a known RPM cap", () => {
@@ -274,7 +274,7 @@ test("scheduleWave: a reported host limit never raises waves above a known RPM c
     },
     discoveredLimits: { requests_per_minute: 3, source: "provider_query" },
   });
-  assert.equal(schedule.wave_size, 3);
+  assert.equal(schedule.max_concurrent, 3);
 });
 
 test("scheduleWave clamps unknown hosted providers to configured fallback concurrency", () => {
@@ -285,7 +285,7 @@ test("scheduleWave clamps unknown hosted providers to configured fallback concur
     requestedConcurrency: 22,
     quotaStateEntry: null,
   });
-  assert.equal(schedule.wave_size, 3);
+  assert.equal(schedule.max_concurrent, 3);
 
   const belowCap = scheduleWave({
     providerName: "claude-code",
@@ -294,7 +294,7 @@ test("scheduleWave clamps unknown hosted providers to configured fallback concur
     requestedConcurrency: 4,
     quotaStateEntry: null,
   });
-  assert.equal(belowCap.wave_size, 4);
+  assert.equal(belowCap.max_concurrent, 4);
 });
 
 test("scheduleWave defaults agent-host providers to parallel dispatch, not serial", () => {
@@ -309,7 +309,7 @@ test("scheduleWave defaults agent-host providers to parallel dispatch, not seria
     requestedConcurrency: 96,
     quotaStateEntry: null,
   });
-  assert.equal(wide.wave_size, 8);
+  assert.equal(wide.max_concurrent, 8);
 
   // The requested concurrency still caps it when smaller than the default.
   const narrow = scheduleWave({
@@ -319,7 +319,7 @@ test("scheduleWave defaults agent-host providers to parallel dispatch, not seria
     requestedConcurrency: 3,
     quotaStateEntry: null,
   });
-  assert.equal(narrow.wave_size, 3);
+  assert.equal(narrow.max_concurrent, 3);
 
   // A genuinely unknown (non-agent-host) provider stays conservative at 1.
   const unknown = scheduleWave({
@@ -329,7 +329,7 @@ test("scheduleWave defaults agent-host providers to parallel dispatch, not seria
     requestedConcurrency: 96,
     quotaStateEntry: null,
   });
-  assert.equal(unknown.wave_size, 1);
+  assert.equal(unknown.max_concurrent, 1);
 });
 
 test("resolveHostModel: explicit -> config -> env -> per-provider default -> null", () => {
@@ -382,7 +382,7 @@ test("scheduleWave clamps unknown local providers to configured fallback concurr
     requestedConcurrency: 22,
     quotaStateEntry: null,
   });
-  assert.equal(schedule.wave_size, 5);
+  assert.equal(schedule.max_concurrent, 5);
 
   const belowCap = scheduleWave({
     providerName: "local-subprocess",
@@ -391,7 +391,7 @@ test("scheduleWave clamps unknown local providers to configured fallback concurr
     requestedConcurrency: 4,
     quotaStateEntry: null,
   });
-  assert.equal(belowCap.wave_size, 4);
+  assert.equal(belowCap.max_concurrent, 4);
 });
 
 test("scheduleWave respects unlimited local concurrency without clamping", () => {
@@ -402,7 +402,7 @@ test("scheduleWave respects unlimited local concurrency without clamping", () =>
     requestedConcurrency: 22,
     quotaStateEntry: null,
   });
-  assert.equal(schedule.wave_size, 22);
+  assert.equal(schedule.max_concurrent, 22);
 });
 
 test("scheduleWave still applies host limit when local concurrency is unlimited", () => {
@@ -418,7 +418,7 @@ test("scheduleWave still applies host limit when local concurrency is unlimited"
       description: "Host active subagent limit.",
     },
   });
-  assert.equal(schedule.wave_size, 8);
+  assert.equal(schedule.max_concurrent, 8);
 });
 
 test("scheduleWave applies first-contact cap for unconfigured local providers", () => {
@@ -430,7 +430,7 @@ test("scheduleWave applies first-contact cap for unconfigured local providers", 
       requestedConcurrency: 22,
       quotaStateEntry: null,
     });
-    assert.equal(schedule.wave_size, 3, `expected first-contact cap for ${providerName}`);
+    assert.equal(schedule.max_concurrent, 3, `expected first-contact cap for ${providerName}`);
   }
 });
 
@@ -443,7 +443,7 @@ test("scheduleWave bypasses first-contact cap when discovered limits exist", () 
     quotaStateEntry: null,
     discoveredLimits: { requests_per_minute: 20, source: "header_extraction" },
   });
-  assert.equal(schedule.wave_size, 16); // 20 * 0.8 safety margin = 16
+  assert.equal(schedule.max_concurrent, 16); // 20 * 0.8 safety margin = 16
 });
 
 test("scheduleWave bypasses first-contact cap when quota state exists", () => {
@@ -460,7 +460,7 @@ test("scheduleWave bypasses first-contact cap when quota state exists", () => {
       "5": { success_weight: 5, failure_weight: 0 },
     }),
   });
-  assert.equal(schedule.wave_size, 6); // ramp-up: 5 succeeded + 1
+  assert.equal(schedule.max_concurrent, 6); // ramp-up: 5 succeeded + 1
 });
 
 test("scheduleWave uses full local concurrency when unknown_local_concurrency is unlimited", () => {
@@ -471,7 +471,7 @@ test("scheduleWave uses full local concurrency when unknown_local_concurrency is
     requestedConcurrency: 22,
     quotaStateEntry: null,
   });
-  assert.equal(schedule.wave_size, 22);
+  assert.equal(schedule.max_concurrent, 22);
 });
 
 test("scheduleWave respects learned concurrency cap (ramp-up disabled)", () => {
@@ -489,7 +489,7 @@ test("scheduleWave respects learned concurrency cap (ramp-up disabled)", () => {
     requestedConcurrency: 22,
     quotaStateEntry: entry,
   });
-  assert.equal(schedule.wave_size, 4);
+  assert.equal(schedule.max_concurrent, 4);
 });
 
 test("scheduleWave reduces to 1 during active cooldown", () => {
@@ -502,7 +502,7 @@ test("scheduleWave reduces to 1 during active cooldown", () => {
     requestedConcurrency: 22,
     quotaStateEntry: entry,
   });
-  assert.equal(schedule.wave_size, 1);
+  assert.equal(schedule.max_concurrent, 1);
   assert.equal(schedule.cooldown_until, cooldownUntil);
 });
 
@@ -522,11 +522,11 @@ test("scheduleWave ignores expired cooldown", () => {
     requestedConcurrency: 22,
     quotaStateEntry: entry,
   });
-  assert.ok(schedule.wave_size > 1, "expired cooldown should not reduce wave size to 1");
+  assert.ok(schedule.max_concurrent > 1, "expired cooldown should not reduce max_concurrent to 1");
   assert.equal(schedule.cooldown_until, null);
 });
 
-test("scheduleWave wave_size is always at least 1", () => {
+test("scheduleWave max_concurrent is always at least 1", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {
@@ -537,7 +537,7 @@ test("scheduleWave wave_size is always at least 1", () => {
     hostModel: "test/model",
     requestedConcurrency: 0,
   });
-  assert.equal(schedule.wave_size, 1);
+  assert.equal(schedule.max_concurrent, 1);
 });
 
 test("scheduleWave source and confidence reflect the limit origin", () => {
@@ -674,7 +674,7 @@ test("scheduleWave uses ramp-up by default with quota state", () => {
     quotaStateEntry: entry,
   });
   // maxSafe=2, ramp-up gives 3
-  assert.equal(schedule.wave_size, 3);
+  assert.equal(schedule.max_concurrent, 3);
 });
 
 test("scheduleWave disables ramp-up when ramp_up_enabled is false", () => {
@@ -689,7 +689,7 @@ test("scheduleWave disables ramp-up when ramp_up_enabled is false", () => {
     requestedConcurrency: 22,
     quotaStateEntry: entry,
   });
-  assert.equal(schedule.wave_size, 2);
+  assert.equal(schedule.max_concurrent, 2);
 });
 
 // ── binding_cap (OBS-005): which cap bound the final wave size ───────────────
@@ -707,7 +707,7 @@ test("scheduleWave reports binding_cap='rpm' when the RPM limit binds", () => {
     hostModel: "anthropic/claude-sonnet-4-6",
     requestedConcurrency: 22,
   });
-  assert.equal(schedule.wave_size, 8);
+  assert.equal(schedule.max_concurrent, 8);
   assert.equal(schedule.binding_cap, "rpm");
 });
 
@@ -725,7 +725,7 @@ test("scheduleWave reports binding_cap='tpm' when the TPM limit binds", () => {
     requestedConcurrency: 5,
     estimatedSlotTokens: [8000, 6000, 4000, 2000, 1000],
   });
-  assert.equal(schedule.wave_size, 1);
+  assert.equal(schedule.max_concurrent, 1);
   assert.equal(schedule.binding_cap, "tpm");
 });
 
@@ -753,7 +753,7 @@ test("scheduleWave reports binding_cap='first_contact' for an unconfigured local
     requestedConcurrency: 22,
     quotaStateEntry: null,
   });
-  assert.equal(schedule.wave_size, 3);
+  assert.equal(schedule.max_concurrent, 3);
   assert.equal(schedule.binding_cap, "first_contact");
 });
 
@@ -765,7 +765,7 @@ test("scheduleWave reports binding_cap='fallback' when the configured fallback b
     requestedConcurrency: 22,
     quotaStateEntry: null,
   });
-  assert.equal(schedule.wave_size, 3);
+  assert.equal(schedule.max_concurrent, 3);
   assert.equal(schedule.binding_cap, "fallback");
 });
 
@@ -794,7 +794,7 @@ test("scheduleWave reports binding_cap='host_concurrency' when the host limit bi
       description: "Host active subagent limit.",
     },
   });
-  assert.equal(schedule.wave_size, 6);
+  assert.equal(schedule.max_concurrent, 6);
   assert.equal(schedule.binding_cap, "host_concurrency");
 });
 
@@ -805,6 +805,6 @@ test("scheduleWave reports binding_cap='none' when nothing reduces the requested
     hostModel: null,
     requestedConcurrency: 4,
   });
-  assert.equal(schedule.wave_size, 4);
+  assert.equal(schedule.max_concurrent, 4);
   assert.equal(schedule.binding_cap, "none");
 });

@@ -176,7 +176,7 @@ await test("single packet on first contact dispatches normally", async (t) => {
 
 // ── FINDING-012: confirmation threshold + dispatch summary ───────────────────
 
-await test("FINDING-012: confirmation_recommended, wave_count, and dispatch_summary on the result", async (t) => {
+await test("FINDING-012: confirmation_recommended and dispatch_summary on the result", async (t) => {
   const tasks = multiPacketTasks();
   const { artifactsDir } = await makeArtifactsDir(tasks);
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
@@ -187,12 +187,8 @@ await test("FINDING-012: confirmation_recommended, wave_count, and dispatch_summ
   // Below the default threshold of 10 → not recommended.
   assert.equal(result.confirmation_recommended, false);
   assert.equal(typeof result.dispatch_summary, "string");
-  assert.match(result.dispatch_summary, /agent.* across .*wave/);
-  // wave_count = ceil(agent_count / max(1, wave_size)).
-  assert.equal(
-    result.wave_count,
-    Math.ceil(result.agent_count / Math.max(1, result.wave_size)),
-  );
+  assert.match(result.dispatch_summary, /agent.* max .* concurrent/);
+  assert.equal(typeof result.max_concurrent_agents, "number");
 });
 
 await test("FINDING-012: confirmation_recommended flips when agent_count exceeds confirm_threshold", async (t) => {

@@ -104,8 +104,6 @@ function averageSlotTokens(estimatedSlotTokens?: number[]): number {
 }
 
 export interface WaveScheduleResult extends WaveSchedule {
-  wave_size: number;
-  estimated_wave_tokens: number;
   host_concurrency_limit: HostConcurrencyLimit | null;
   capacity_pools?: DispatchCapacityPoolSummary[];
 }
@@ -159,7 +157,7 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     const waveSize = Math.max(1, Math.min(cap, input.itemCount));
     const avgTokens = averageSlotTokens(input.estimatedSlotTokens);
     const schedule: WaveScheduleResult = {
-      wave_size: waveSize,
+      max_concurrent: waveSize,
       estimated_wave_tokens: waveSize * avgTokens,
       cooldown_until: null,
       confidence: "low",
@@ -231,7 +229,7 @@ export function buildDispatchQuota(
     run_id: runId,
     phase,
     host_concurrency_limit: schedule.host_concurrency_limit,
-    wave_size: schedule.wave_size,
+    max_concurrent_agents: schedule.max_concurrent,
     estimated_wave_tokens: schedule.estimated_wave_tokens,
     model: schedule.model,
     confidence: schedule.confidence,
@@ -1104,7 +1102,7 @@ export async function prepareImplementDispatch(
     ),
   });
   process.stderr.write(
-    `[remediate-code] dispatch: implement wave_size=${schedule.wave_size} of ${items.length} item(s) ` +
+    `[remediate-code] dispatch: implement max_concurrent=${schedule.max_concurrent} of ${items.length} item(s) ` +
       `source=${schedule.source} cap=${schedule.binding_cap ?? "none"}\n`,
   );
   const quota = buildDispatchQuota(runId, "implement", schedule);

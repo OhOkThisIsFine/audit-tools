@@ -101,14 +101,14 @@ describe("resolveHostConcurrencyLimit", () => {
 });
 
 describe("scheduleWave", () => {
-  it("uses host-reported limit as wave_size cap", async () => {
+  it("uses host-reported limit as max_concurrent cap", async () => {
     const result = await scheduleWave({
       hostMaxConcurrent: 3,
       sessionConfig: null,
       itemCount: 10,
       env: {} as any,
     });
-    expect(result.wave_size).toBe(3);
+    expect(result.max_concurrent).toBe(3);
     expect(result.host_concurrency_limit!.active_subagents).toBe(3);
   });
 
@@ -118,27 +118,27 @@ describe("scheduleWave", () => {
       itemCount: 20,
       env: {} as any,
     });
-    expect(result.wave_size).toBe(5);
+    expect(result.max_concurrent).toBe(5);
     expect(result.host_concurrency_limit).toBeNull();
   });
 
-  it("wave_size never exceeds item count", async () => {
+  it("max_concurrent never exceeds item count", async () => {
     const result = await scheduleWave({
       hostMaxConcurrent: 10,
       sessionConfig: null,
       itemCount: 3,
       env: {} as any,
     });
-    expect(result.wave_size).toBe(3);
+    expect(result.max_concurrent).toBe(3);
   });
 
-  it("wave_size is always >= 1", async () => {
+  it("max_concurrent is always >= 1", async () => {
     const result = await scheduleWave({
       sessionConfig: null,
       itemCount: 0,
       env: {} as any,
     });
-    expect(result.wave_size).toBe(1);
+    expect(result.max_concurrent).toBe(1);
   });
 
   it("computes estimated_wave_tokens correctly", async () => {
@@ -149,7 +149,7 @@ describe("scheduleWave", () => {
       estimatedSlotTokens: Array.from({ length: 10 }, () => 600),
       env: {} as any,
     });
-    expect(result.wave_size).toBe(4);
+    expect(result.max_concurrent).toBe(4);
     expect(result.estimated_wave_tokens).toBe(2400);
   });
 
@@ -168,7 +168,7 @@ describe("scheduleWave", () => {
       itemCount: 20,
       env: {} as any,
     });
-    expect(result.wave_size).toBe(7);
+    expect(result.max_concurrent).toBe(7);
   });
 });
 
@@ -185,7 +185,7 @@ describe("buildDispatchQuota", () => {
     expect(quota.contract_version).toBe("remediate-code-dispatch-quota/v1alpha2");
     expect(quota.run_id).toBe("RUN-123");
     expect(quota.phase).toBe("document");
-    expect(quota.wave_size).toBe(5);
+    expect(quota.max_concurrent_agents).toBe(5);
     expect(quota.estimated_wave_tokens).toBe(3000);
     expect(quota.host_concurrency_limit!.active_subagents).toBe(5);
     expect(quota.confidence).toBeDefined();
@@ -209,7 +209,7 @@ describe("buildDispatchQuota", () => {
     });
     const quota = buildDispatchQuota("RUN-456", "implement", schedule);
     expect(quota.phase).toBe("implement");
-    expect(quota.wave_size).toBe(3);
+    expect(quota.max_concurrent_agents).toBe(3);
     expect(quota.host_concurrency_limit).toBeNull();
   });
 });
@@ -301,14 +301,14 @@ describe("scheduleWave — quota-enabled path", () => {
 
     // The quota path (not the default early-return) was taken: a positive,
     // integral wave size with defined confidence/source comes back.
-    expect(Number.isInteger(result.wave_size)).toBe(true);
-    expect(result.wave_size).toBeGreaterThan(0);
+    expect(Number.isInteger(result.max_concurrent)).toBe(true);
+    expect(result.max_concurrent).toBeGreaterThan(0);
     expect(result.confidence).toBeDefined();
     expect(result.source).toBeDefined();
     expect(result.capacity_pools).toEqual([
       expect.objectContaining({
         pool_id: "claude-code/*",
-        slots: result.wave_size,
+        slots: result.max_concurrent,
       }),
     ]);
   });
@@ -385,7 +385,7 @@ describe("scheduleWave — logs to stderr when readQuotaState throws", () => {
 
     // scheduleWave must not throw — it falls back gracefully
     expect(result).toBeDefined();
-    expect(result!.wave_size).toBeGreaterThan(0);
+    expect(result!.max_concurrent).toBeGreaterThan(0);
 
     // stderr must have received the diagnostic message
     const stderrOutput = written.join("");

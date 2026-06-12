@@ -1003,7 +1003,7 @@ Read the dispatch plan and quota JSONs:
 \`${planPath}\`
 \`${implQuotaPath}\`
 
-Launch at most \`wave_size\` subagents simultaneously (from the quota file).
+Maintain up to \`max_concurrent_agents\` subagents running simultaneously (from the quota file).
 Each item's \`model_hint.tier\` suggests which model to use (small/standard/deep).
 If your provider has rate limits, pace launches accordingly.
 
