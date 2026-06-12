@@ -181,6 +181,18 @@ Prefer the `/ship` skill (`.claude/skills/ship/SKILL.md`) for the full land-and-
 - **One bounded step per invocation.** Neither orchestrator should recursively complete an entire run in a single call. Steps are intentionally bounded so a single failure doesn't block the run, sub-agents can work in parallel, and results compose via deterministic schemas.
 - **Prefer deterministic execution over LLM inference** when both can satisfy an obligation. Upstream artifacts must be valid before refreshing downstream ones.
 - **Language-neutral graph contract.** Graph edges use `from`, `to`, `kind`, optional `direction`/`confidence`/`reason`. New language analyzers should enrich the shared artifacts, not invent language-specific planning paths.
+- **Provider / model / IDE agnostic — never hardcode model identities.** No model
+  names, per-model context/output windows, tier→model maps, or "available model"
+  lists baked into backend code. Discover them **dynamically at runtime** from the
+  host/provider/IDE (the conversation host enumerates its models + capabilities;
+  the backend consumes that). Tiering routes by *relative* advertised capability
+  (cheapest / mid / top), not by named models. A hardcoded model table is a bug,
+  not a fallback. (A static table like `KNOWN_MODEL_LIMITS` is legacy to retire,
+  not a source of truth.)
+- **Conversation-first means an LLM is always in the loop.** These tools run in
+  conversation with a host LLM agent, so "deterministic suggestion → LLM review"
+  is a real two-phase flow that is *always* available — never gate LLM review/
+  judgment behind "if a provider exists." The host agent is the provider.
 - **Windows-aware.** This repo is developed on Windows; package-manager shims (`npm`, `npx`, `pnpm`, `yarn`) run through the command shell so `.cmd` wrappers resolve reliably.
 - **Generated host prompts are cwd-explicit.** Any prompt that asks a host or
   worker to run backend commands must either render cwd-independent commands or

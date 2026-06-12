@@ -18,6 +18,12 @@ rather than "where the code is today."
 
 ## Known friction (agent / dev experience)
 
+- **Stale "waves" wording in the rolling-dispatch prompt.** The rolling dispatch
+  step prompt header still reads "After all waves complete:" even though dispatch
+  is fully rolling (`max_concurrent_agents`, no `wave_size`). Cosmetic; reword to
+  "After all packets complete:" in the dispatch prompt renderer. (Spotted 2026-06-12
+  dispatch verification.)
+
 - **Global install defers `postinstall` under npm's allow-scripts policy.**
   `npm install -g auditor-lambda` installs the bin but prints
   `npm warn allow-scripts … (postinstall: node scripts/postinstall.mjs)` and skips
