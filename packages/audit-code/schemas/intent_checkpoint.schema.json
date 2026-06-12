@@ -22,8 +22,8 @@
       "description": "When the scope/intent was confirmed."
     },
     "confirmed_by": {
-      "const": "host",
-      "description": "Who confirmed the checkpoint (the host, or the headless harness acting as host)."
+      "enum": ["host", "draft"],
+      "description": "`host` — reviewed and confirmed by the host agent (or the headless harness acting as host). `draft` — preliminary, pre-populated by synthesize_intake; planning must not begin and filtering must not apply until confirmed."
     },
     "scope_summary": {
       "type": "string",
@@ -69,6 +69,60 @@
         "lenses": { "type": "array", "items": { "type": "string" } },
         "packages": { "type": "array", "items": { "type": "string" } },
         "themes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "constraint_clauses": {
+      "type": "array",
+      "description": "free_form_intent clauses that could not be encoded as lens/priority/scope signals, kept as explicit machine-checkable constraints.",
+      "items": {
+        "type": "object",
+        "required": ["text", "checkpoint_question"],
+        "properties": {
+          "text": { "type": "string", "description": "The original unencodable clause text." },
+          "checkpoint_question": { "type": "string", "description": "The blocking checkpoint question raised for this clause." },
+          "host_answer": { "type": "string", "description": "The host's answer once resolved." }
+        },
+        "additionalProperties": false
+      }
+    },
+    "disposition_overrides": {
+      "type": "array",
+      "description": "Per-file/per-prefix status corrections applied before coverage initialization so overridden files never become audit tasks.",
+      "items": {
+        "type": "object",
+        "required": ["path", "status", "reason"],
+        "properties": {
+          "path": { "type": "string", "description": "Path or path prefix to override." },
+          "status": { "type": "string", "description": "Corrected file-disposition status (e.g. generated, vendor, excluded)." },
+          "reason": { "type": "string", "description": "Why the status is corrected." }
+        },
+        "additionalProperties": false
+      }
+    },
+    "lens_selection": {
+      "type": "object",
+      "description": "Accepted or modified lens set. `include` is additive (merged with mandatory lenses); `exclude` removes non-mandatory lenses. Both accept canonical and custom lens names.",
+      "properties": {
+        "include": { "type": "array", "items": { "type": "string" } },
+        "exclude": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "design_review": {
+      "type": "object",
+      "description": "Conceptual design-review depth confirmed by the host. Provider-neutral — records how much review to do, never which model runs it.",
+      "properties": {
+        "conceptual_depth": {
+          "type": "string",
+          "enum": ["shallow", "deep"],
+          "description": "`shallow` (default when omitted) = one conceptual reviewer; `deep` = parallel independent reviewers compiled by an independent judge."
+        },
+        "perspectives": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Bounds the deep fan-out count; ignored when shallow."
+        }
       },
       "additionalProperties": false
     }

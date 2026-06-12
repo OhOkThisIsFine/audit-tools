@@ -163,7 +163,7 @@ function formatDeterministicFindings(findings: Finding[], max = 20): string {
 
 export interface DesignReviewOptions {
   max_units?: number;
-  conceptual_depth?: "standard" | "deep";
+  conceptual_depth?: "shallow" | "deep";
 }
 
 /**

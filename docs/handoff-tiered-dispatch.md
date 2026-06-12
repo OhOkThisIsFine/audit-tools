@@ -148,12 +148,35 @@ now the sole context-window authority.
   `known_metadata` assertions become `discovered_capability` (handshake reports a
   window) or `provider_default` (named model, no discovered window).
 
+## DONE: N6 — condensed confirm_intent roundtrip
+
+Landed on branch (all three suites green: shared 385 / audit-code 1788 /
+remediate 1133). The user-confirmed checkpoint now carries conceptual-depth intent;
+N7 consumes it for the actual fan-out.
+
+- `IntentCheckpoint` (`shared/src/types/intentCheckpoint.ts`) gains
+  `design_review?: { conceptual_depth?: "shallow" | "deep"; perspectives?: number }`
+  — provider-neutral (records *how much* review, never which model).
+- **Vocabulary unified on `"shallow" | "deep"`.** The pre-existing
+  `DesignReviewConfig.conceptual_depth` (`sessionConfig.ts`) and
+  `DesignReviewOptions.conceptual_depth` (`designReviewPrompt.ts`) `"standard"`
+  value was renamed to `"shallow"` — only `=== "deep"` was ever read, so it's
+  behavior-preserving. (The `"standard"` still in `dispatch-model-hint`/
+  `review-packets` tests is the unrelated model-hint *tier*, untouched.)
+- `renderConfirmIntentPrompt` (`confirmIntentStep.ts`) renders a "Conceptual
+  design-review depth" section, folds the depth question into the single
+  confirmation round (default **shallow**), and offers `design_review` in the JSON
+  shape. New prompt test in `intent-checkpoint.test.mjs`.
+- `intent_checkpoint.schema.json` gains `design_review` and (same drift-fix pass)
+  the three live-but-unschema'd fields `constraint_clauses` /
+  `disposition_overrides` / `lens_selection` + `confirmed_by: draft` — the schema
+  had `additionalProperties: false` while lagging the type. Not enforced at runtime
+  today (validation only requireKeys), but now correct.
+- Headless auto-complete (`intentCheckpointExecutor.ts`) unchanged: omitting
+  `design_review` ⇒ shallow.
+
 ## NEXT: the remaining nodes
 
-- **N6 — condensed confirm_intent roundtrip.** One `AskUserQuestion` covering scope
-  + lenses + conceptual depth (default shallow). Add `design_review?: {conceptual_depth, perspectives}`
-  to `IntentCheckpoint` (`shared/src/types/intentCheckpoint.ts`). Render in
-  `confirmIntentStep.ts`.
 - **N7 — deep conceptual = real fan-out.** Promote the in-prompt "imagine
   perspectives" (`designReviewPrompt.ts:288-327`) to N real parallel perspective
   subagents + an **independent** judge/merge, configurable count. Wire depth from the

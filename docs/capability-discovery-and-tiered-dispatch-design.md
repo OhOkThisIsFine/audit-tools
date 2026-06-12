@@ -262,8 +262,28 @@ consumer (`resolveContextBudgetFromConfig`) dropped its `hostModel` arg; the
 fuller move of remediate onto the discovered-capability *channel* rides **N8**.
 All three suites green.
 
-**Next: N6 — condensed `confirm_intent` roundtrip,** then **N7** deep conceptual
-fan-out, **N8** remediate-code parity (folds in remediate's discovered-capability
+**N6 — condensed `confirm_intent` roundtrip (DONE).** `IntentCheckpoint` gains a
+provider-neutral `design_review?: { conceptual_depth?: "shallow" | "deep";
+perspectives?: number }` (records *how much* conceptual review, never which
+model). The vocabulary was unified on `"shallow" | "deep"`: the existing
+`DesignReviewConfig.conceptual_depth` / `DesignReviewOptions.conceptual_depth`
+`"standard"` value was renamed to `"shallow"` (only `=== "deep"` was ever read, so
+the rename is behavior-preserving; the `"standard"` left in tests is the unrelated
+model-hint *tier*). `renderConfirmIntentPrompt` now renders a "Conceptual
+design-review depth" section, folds the depth question into the single
+confirmation round (default **shallow**), and offers `design_review` in the JSON
+shape. Schema (`intent_checkpoint.schema.json`) gains `design_review` and, in the
+same pass, the three live-but-undocumented fields (`constraint_clauses`,
+`disposition_overrides`, `lens_selection`) plus `confirmed_by: draft` — it had
+`additionalProperties: false` while lagging the type, so a valid checkpoint would
+have been rejected had anything enforced it. Headless auto-complete omits
+`design_review` ⇒ shallow default, no change needed. Depth is recorded only; the
+actual fan-out wiring is **N7**. All three suites green (shared 385 / audit-code
+1788 / remediate 1133).
+
+**Next: N7** deep conceptual fan-out (promote the in-prompt perspectives to N real
+parallel subagents + independent judge, wired from `IntentCheckpoint.design_review`),
+then **N8** remediate-code parity (folds in remediate's discovered-capability
 window plumbing).
 
 ## Resolved decisions (2026-06-12)
