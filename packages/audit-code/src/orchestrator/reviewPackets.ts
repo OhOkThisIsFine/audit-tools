@@ -211,9 +211,109 @@ function chunkPacketTasks(
   return chunks;
 }
 
+function directoryOfPath(filePath: string): string {
+  const lastSlash = Math.max(
+    filePath.lastIndexOf("/"),
+    filePath.lastIndexOf("\\"),
+  );
+  return lastSlash > 0 ? filePath.slice(0, lastSlash) : "";
+}
+
+function directoryDepth(dir: string): number {
+  if (!dir) return 0;
+  return dir.split(/[/\\]/).length;
+}
+
+function groupDirectories(tasks: AuditTask[], minDepth: number): Set<string> {
+  const dirs = new Set<string>();
+  for (const task of tasks) {
+    for (const fp of task.file_paths) {
+      const dir = directoryOfPath(fp);
+      if (directoryDepth(dir) >= minDepth) {
+        dirs.add(dir);
+      }
+    }
+  }
+  return dirs;
+}
+
+function mergeByDirectoryProximity(
+  groups: AuditTask[][],
+  targetPacketTokens: number,
+  sizeIndex?: Record<string, number>,
+  lineIndex?: Record<string, number>,
+): AuditTask[][] {
+  const verbose = Boolean(process.env.AUDIT_CODE_VERBOSE);
+  const groupTokens = groups.map((tasks) =>
+    fileGroupContentTokens(
+      new Set(tasks.flatMap((t) => t.file_paths)),
+      tasks,
+      sizeIndex,
+      lineIndex,
+    ),
+  );
+
+  const dirToGroups = new Map<string, Set<number>>();
+  for (let i = 0; i < groups.length; i++) {
+    for (const dir of groupDirectories(groups[i], 3)) {
+      const set = dirToGroups.get(dir) ?? new Set();
+      set.add(i);
+      dirToGroups.set(dir, set);
+    }
+  }
+
+  const canonical = groups.map((_, i) => i);
+  const find = (i: number): number => {
+    while (canonical[i] !== i) {
+      canonical[i] = canonical[canonical[i]];
+      i = canonical[i];
+    }
+    return i;
+  };
+
+  const sortedDirs = [...dirToGroups.entries()]
+    .filter(([, indices]) => indices.size > 1)
+    .sort(([a], [b]) => directoryDepth(b) - directoryDepth(a));
+
+  for (const [dir, indices] of sortedDirs) {
+    const roots = [...new Set([...indices].map(find))];
+    if (roots.length < 2) continue;
+    roots.sort((a, b) => groupTokens[a] - groupTokens[b]);
+
+    const target = roots[0];
+    for (let i = 1; i < roots.length; i++) {
+      const source = find(roots[i]);
+      if (find(target) === source) continue;
+      const t = find(target);
+      const combined = groupTokens[t] + groupTokens[source];
+      if (combined <= targetPacketTokens) {
+        if (verbose) {
+          process.stderr.write(
+            `[audit-code:packet-planning] directory-proximity merge: dir="${dir}" combined=${combined} budget=${targetPacketTokens}\n`,
+          );
+        }
+        groups[t] = [...groups[t], ...groups[source]];
+        groups[source] = [];
+        groupTokens[t] = combined;
+        groupTokens[source] = 0;
+        canonical[source] = t;
+      }
+    }
+  }
+
+  return groups.filter((g) => g.length > 0);
+}
+
+interface MergeGroupsOptions {
+  targetPacketTokens?: number;
+  sizeIndex?: Record<string, number>;
+  lineIndex?: Record<string, number>;
+}
+
 function mergeGraphConnectedGroups(
   groups: Map<string, AuditTask[]>,
   graphEdges: GraphEdge[],
+  options?: MergeGroupsOptions,
 ): AuditTask[][] {
   const uf = unionFindFromGroups(groups, graphEdges);
 
@@ -225,7 +325,18 @@ function mergeGraphConnectedGroups(
     merged.set(root, current);
   }
 
-  return [...merged.values()];
+  let result = [...merged.values()];
+
+  if (options?.targetPacketTokens) {
+    result = mergeByDirectoryProximity(
+      result,
+      options.targetPacketTokens,
+      options.sizeIndex,
+      options.lineIndex,
+    );
+  }
+
+  return result;
 }
 
 function buildPacket(
@@ -341,6 +452,7 @@ function buildReviewPacketPlanningData(
   const groupedTasks = mergeGraphConnectedGroups(
     groups,
     planningGraphEdges,
+    { targetPacketTokens, sizeIndex: options.sizeIndex, lineIndex: options.lineIndex },
   ).sort((a, b) => {
     const aPriority = Math.max(...a.map((task) => priorityRank(task.priority)));
     const bPriority = Math.max(...b.map((task) => priorityRank(task.priority)));
