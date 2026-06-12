@@ -157,192 +157,30 @@ await test("FINDING-009: the packet prompt references the schema file and retain
   assert.match(prompt, /4\. findings: \[\] is correct when you find nothing genuine\./);
 });
 
-// ── FINDING-011: single-worker canary ───────────────────────────────────────
+// ── All packets dispatched in one round (canary removed) ──────────────────────
 
-await test("FINDING-011: first contact with multiple packets emits only the canary packet", async (t) => {
+await test("all packets dispatched in one round on first contact", async (t) => {
   const tasks = multiPacketTasks();
-  const { artifactsDir, runDir } = await makeArtifactsDir(tasks);
+  const { artifactsDir } = await makeArtifactsDir(tasks);
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir);
-
-  assert.equal(result.packet_count, 1, "only the canary packet is emitted");
-  assert.equal(result.phase, "canary");
-  assert.ok(result.canary_packet_id, "canary_packet_id is set");
-  // task_count still reflects all remaining tasks, not just the canary's.
-  assert.equal(result.task_count, tasks.length);
-
-  const plan = await readJson(join(runDir, "dispatch-plan.json"));
-  assert.equal(plan.length, 1, "dispatch plan has exactly one entry");
-  assert.equal(plan[0].packet_id, result.canary_packet_id);
-
-  const active = await readActiveDispatch(artifactsDir);
-  assert.equal(active.phase, "canary");
-  assert.equal(active.canary_packet_id, result.canary_packet_id);
-  assert.equal(active.packet_count, 1);
-  assert.equal(active.task_count, tasks.length);
-
-  // Exactly one packet prompt file exists.
-  const taskResultsDir = join(runDir, "task-results");
-  assert.ok(await exists(packetPromptPath(taskResultsDir, result.canary_packet_id)));
+  assert.equal(result.packet_count, tasks.length);
 });
 
-await test("FINDING-011: fan-out after an accepted canary result dispatches the remaining packets", async (t) => {
-  const tasks = multiPacketTasks();
-  const { artifactsDir, runDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
-
-  const first = await run(artifactsDir);
-  assert.equal(first.phase, "canary");
-  const canaryPlan = await readJson(join(runDir, "dispatch-plan.json"));
-  // Map the canary packet to its tasks via the result map, then accept them.
-  const resultMap = await readJson(join(runDir, "dispatch-result-map.json"));
-  const canaryTaskIds = resultMap.entries
-    .filter((e) => e.packet_id === first.canary_packet_id)
-    .map((e) => e.task_id);
-  assert.ok(canaryTaskIds.length >= 1);
-  await acceptPacketTasks(runDir, canaryTaskIds);
-
-  const second = await run(artifactsDir);
-  assert.equal(second.phase, "fan_out");
-  assert.equal(second.canary_packet_id, null);
-  assert.equal(second.skipped_task_count, canaryTaskIds.length);
-
-  // The second round's plan excludes the canary's tasks and includes the rest.
-  const plan2 = await readJson(join(runDir, "dispatch-plan.json"));
-  const plan2PacketIds = plan2.map((p) => p.packet_id);
-  assert.ok(
-    !plan2PacketIds.includes(first.canary_packet_id),
-    "canary packet not re-dispatched",
-  );
-  assert.equal(plan2.length, tasks.length - canaryTaskIds.length);
-
-  // No canary_not_accepted warning since the canary was accepted.
-  assert.equal(second.warning_count >= 0, true);
-  const warningsPath = join(runDir, "dispatch-warnings.json");
-  if (await exists(warningsPath)) {
-    const warnings = await readJson(warningsPath);
-    assert.ok(
-      !warnings.some((w) => w.code === "canary_not_accepted"),
-      "no canary_not_accepted warning when canary was accepted",
-    );
-  }
-  // Sanity: the first plan was a single entry.
-  assert.equal(canaryPlan.length, 1);
-});
-
-await test("FINDING-011 regression: canary graduates to fan-out even after merge-and-ingest prunes the accepted canary tasks from the pending list", async (t) => {
-  const tasks = multiPacketTasks();
-  const { artifactsDir, runDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
-
-  const first = await run(artifactsDir);
-  assert.equal(first.phase, "canary");
-
-  // Accept the canary packet's tasks (submit-packet writes these result files).
-  const resultMap = await readJson(join(runDir, "dispatch-result-map.json"));
-  const canaryTaskIds = resultMap.entries
-    .filter((e) => e.packet_id === first.canary_packet_id)
-    .map((e) => e.task_id);
-  await acceptPacketTasks(runDir, canaryTaskIds);
-
-  // Reproduce what merge-and-ingest does after accepting the canary: it rewrites
-  // pending-audit-tasks.json to EXCLUDE the now-completed canary tasks. The old
-  // firstContact signal (result files keyed off the pending list) broke on exactly
-  // this — the canary's task_ids leave the list, so no still-pending task has a
-  // result file, priorResultTaskIds stayed empty, and the canary re-fired forever
-  // (1 packet per cycle, never reaching fan-out). Graduation must now come from the
-  // active-dispatch marker (run_id), not the prune-corrupted result-file scan.
-  const remaining = tasks.filter((task) => !canaryTaskIds.includes(task.task_id));
-  await writeFile(
-    join(runDir, "pending-audit-tasks.json"),
-    JSON.stringify(remaining),
-    "utf8",
-  );
-
-  const second = await run(artifactsDir);
-  assert.equal(second.phase, "fan_out", "canary must graduate to fan-out, not re-fire");
-  assert.equal(second.canary_packet_id, null);
-  // Every remaining packet is dispatched in this one fan-out round (parallelizable),
-  // instead of one packet per cycle.
-  const plan2 = await readJson(join(runDir, "dispatch-plan.json"));
-  assert.equal(plan2.length, remaining.length);
-  assert.ok(
-    !plan2.some((p) => p.packet_id === first.canary_packet_id),
-    "canary packet is not re-dispatched",
-  );
-});
-
-await test("FINDING-011: fan-out warns when the prior canary produced no accepted result", async (t) => {
-  const tasks = multiPacketTasks();
-  const { artifactsDir, runDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
-
-  const first = await run(artifactsDir);
-  assert.equal(first.phase, "canary");
-  // Do NOT accept the canary. Instead, simulate at least one OTHER task being
-  // done so priorResultTaskIds is non-empty (forces fan-out) while the canary's
-  // own task remains unaccepted.
-  const resultMap = await readJson(join(runDir, "dispatch-result-map.json"));
-  const canaryTaskIds = new Set(
-    resultMap.entries
-      .filter((e) => e.packet_id === first.canary_packet_id)
-      .map((e) => e.task_id),
-  );
-  const otherTaskId = tasks.map((t) => t.task_id).find((id) => !canaryTaskIds.has(id));
-  assert.ok(otherTaskId, "a non-canary task exists");
-  await acceptPacketTasks(runDir, [otherTaskId]);
-
-  const second = await run(artifactsDir);
-  assert.equal(second.phase, "fan_out");
-  assert.ok(second.dispatch_warnings_path, "warnings file written");
-  assert.ok(second.warning_count >= 1);
-  const warnings = await readJson(second.dispatch_warnings_path);
-  assert.ok(
-    warnings.some((w) => w.code === "canary_not_accepted"),
-    "canary_not_accepted warning emitted",
-  );
-  // Fan-out still proceeds: remaining packets are dispatched.
-  const plan2 = await readJson(join(runDir, "dispatch-plan.json"));
-  assert.ok(plan2.length >= 1, "remaining packets dispatched, not blocked");
-});
-
-await test("FINDING-011: no-op for a single packet on first contact", async (t) => {
+await test("single packet on first contact dispatches normally", async (t) => {
   const { artifactsDir } = await makeArtifactsDir(singlePacketTask());
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir);
-  assert.equal(result.packet_count, 1);
-  assert.equal(result.phase, "fan_out");
-  assert.equal(result.canary_packet_id, null);
-});
-
-await test("FINDING-011: canary disabled dispatches all packets in one round", async (t) => {
-  const tasks = multiPacketTasks();
-  const { artifactsDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
-  const result = await run(artifactsDir, { dispatch: { canary: false } });
-  assert.equal(result.packet_count, tasks.length);
-  assert.equal(result.phase, "fan_out");
-  assert.equal(result.canary_packet_id, null);
-});
-
-await test("FINDING-011: canary defaults on when sessionConfig.dispatch is undefined", async (t) => {
-  const tasks = multiPacketTasks();
-  const { artifactsDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
-  const result = await run(artifactsDir, {}); // no dispatch field
-  assert.equal(result.phase, "canary");
   assert.equal(result.packet_count, 1);
 });
 
 // ── FINDING-012: confirmation threshold + dispatch summary ───────────────────
 
 await test("FINDING-012: confirmation_recommended, wave_count, and dispatch_summary on the result", async (t) => {
-  // Disable canary so all packets are emitted in one round and agent_count is
-  // the full packet count.
   const tasks = multiPacketTasks();
   const { artifactsDir } = await makeArtifactsDir(tasks);
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
-  const result = await run(artifactsDir, { dispatch: { canary: false } });
+  const result = await run(artifactsDir);
 
   assert.equal(result.agent_count, tasks.length);
   assert.equal(typeof result.confirmation_recommended, "boolean");
@@ -358,20 +196,20 @@ await test("FINDING-012: confirmation_recommended, wave_count, and dispatch_summ
 });
 
 await test("FINDING-012: confirmation_recommended flips when agent_count exceeds confirm_threshold", async (t) => {
-  const tasks = multiPacketTasks(); // 3 packets when canary off
+  const tasks = multiPacketTasks(); // 3 packets
   const { artifactsDir } = await makeArtifactsDir(tasks);
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // threshold 2, agent_count 3 → recommended.
   const above = await run(artifactsDir, {
-    dispatch: { canary: false, confirm_threshold: 2 },
+    dispatch: { confirm_threshold: 2 },
   });
   assert.equal(above.agent_count, 3);
   assert.equal(above.confirmation_recommended, true);
 
   // threshold 3, agent_count 3 → NOT recommended (strictly greater-than).
   const at = await run(artifactsDir, {
-    dispatch: { canary: false, confirm_threshold: 3 },
+    dispatch: { confirm_threshold: 3 },
   });
   assert.equal(at.confirmation_recommended, false);
 });
@@ -383,9 +221,9 @@ await test("FINDING-013: max_packets caps emitted packets and records deferred i
   const { artifactsDir, runDir } = await makeArtifactsDir(tasks);
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
 
-  // Disable canary so the budget is the only filter; cap at 2 of 3.
+  // Cap at 2 of 3.
   const result = await run(artifactsDir, {
-    dispatch: { canary: false, max_packets: 2 },
+    dispatch: { max_packets: 2 },
   });
   assert.equal(result.budget_capped, true);
   assert.equal(result.packet_count, 2);
@@ -408,7 +246,7 @@ await test("FINDING-013: max_packets >= packet count is no cap (budget off)", as
   const { artifactsDir } = await makeArtifactsDir(tasks);
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir, {
-    dispatch: { canary: false, max_packets: 99 },
+    dispatch: { max_packets: 99 },
   });
   assert.equal(result.budget_capped, false);
   assert.equal(result.packet_count, tasks.length);
@@ -422,7 +260,7 @@ await test("FINDING-013: budget defaults OFF — all packets emitted when max_pa
   const tasks = multiPacketTasks();
   const { artifactsDir } = await makeArtifactsDir(tasks);
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
-  const result = await run(artifactsDir, { dispatch: { canary: false } });
+  const result = await run(artifactsDir);
   assert.equal(result.budget_capped, false);
   assert.equal(result.packet_count, tasks.length);
 });
@@ -432,7 +270,7 @@ await test("FINDING-013: budget defaults OFF — all packets emitted when max_pa
 await test("FINDING-018: dispatch plan entries include access.read_paths with prompt path and source files", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
-  await run(artifactsDir, { dispatch: { canary: false } });
+  await run(artifactsDir);
 
   const plan = await readJson(join(runDir, "dispatch-plan.json"));
   assert.equal(plan.length, 1);
@@ -453,7 +291,7 @@ await test("FINDING-018: dispatch plan entries include access.read_paths with pr
 await test("FINDING-018: dispatch plan entries access.write_paths contains only task result paths, not directories", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
-  await run(artifactsDir, { dispatch: { canary: false } });
+  await run(artifactsDir);
 
   const plan = await readJson(join(runDir, "dispatch-plan.json"));
   const entry = plan[0];
@@ -482,7 +320,7 @@ await test("FINDING-018: dispatch plan entries access.write_paths contains only 
 await test("FINDING-018: dispatch plan entries include forbidden_patterns for common stray filenames", async (t) => {
   const { artifactsDir } = await makeArtifactsDir(singlePacketTask());
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
-  await run(artifactsDir, { dispatch: { canary: false } });
+  await run(artifactsDir);
 
   const plan = await readJson(join(join(artifactsDir, "runs", RUN_ID), "dispatch-plan.json"));
   const entry = plan[0];

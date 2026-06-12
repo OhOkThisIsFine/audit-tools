@@ -124,8 +124,6 @@ test("N-A06: deriveAuditState with partial_completion_terminal treats stranded t
       packet_count: 0,
       task_count: 1,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       partial_completion_terminal: {
         reason: "empty_pool",
         stranded_ids: ["t-stranded"],

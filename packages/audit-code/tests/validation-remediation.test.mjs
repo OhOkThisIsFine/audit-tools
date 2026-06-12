@@ -813,7 +813,7 @@ test("validateSessionConfig validates the dispatch sub-object fields", () => {
   assert.deepEqual(
     validateSessionConfig({
       provider: "local-subprocess",
-      dispatch: { canary: true, confirm_threshold: 2, max_packets: 10 },
+      dispatch: { confirm_threshold: 2, max_packets: 10 },
     }),
     [],
   );
@@ -825,16 +825,6 @@ test("validateSessionConfig validates the dispatch sub-object fields", () => {
       (issue) =>
         issue.path === "dispatch" &&
         /must be a JSON object/i.test(issue.message),
-    ),
-  );
-
-  // dispatch.canary is a string (not boolean) — issue on path 'dispatch.canary'
-  const issuesCanary = validateSessionConfig({ dispatch: { canary: "yes" } });
-  assert.ok(
-    issuesCanary.some(
-      (issue) =>
-        issue.path === "dispatch.canary" &&
-        /must be a boolean/i.test(issue.message),
     ),
   );
 

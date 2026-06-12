@@ -27,59 +27,39 @@ function makePacket(id, priority = "medium") {
 }
 
 function makeSessionConfig(overrides = {}) {
-  return { dispatch: { canary: true, ...overrides } };
+  return { dispatch: { ...overrides } };
 }
 
-test("filterPackets — canary fires only on first contact when multiple packets exist", () => {
+test("filterPackets — all packets emitted when no budget cap", () => {
   const packets = [makePacket("p1"), makePacket("p2"), makePacket("p3")];
 
-  // First contact (priorDispatchThisRun=false), canary ON, multiple packets → canary
-  const r1 = filterPackets(packets, false, makeSessionConfig());
-  assert.equal(r1.phase, "canary");
-  assert.equal(r1.emitPackets.length, 1);
+  const r1 = filterPackets(packets, makeSessionConfig());
+  assert.equal(r1.emitPackets.length, 3);
   assert.equal(r1.deferredPackets.length, 0);
-  assert.equal(r1.doCanary, true);
-
-  // After first dispatch (priorDispatchThisRun=true) → fan_out
-  const r2 = filterPackets(packets, true, makeSessionConfig());
-  assert.equal(r2.phase, "fan_out");
-  assert.equal(r2.emitPackets.length, 3);
-  assert.equal(r2.doCanary, false);
-
-  // canary=false skips canary even on first contact
-  const r3 = filterPackets(packets, false, makeSessionConfig({ canary: false }));
-  assert.equal(r3.phase, "fan_out");
-  assert.equal(r3.doCanary, false);
-
-  // Single packet: canary is skipped regardless of firstContact
-  const single = [makePacket("p1")];
-  const r4 = filterPackets(single, false, makeSessionConfig());
-  assert.equal(r4.phase, "fan_out");
-  assert.equal(r4.doCanary, false);
 });
 
 test("filterPackets — budget cap slices emitPackets and populates deferredPackets", () => {
   const packets = ["p1", "p2", "p3", "p4", "p5"].map((id) => makePacket(id));
 
   // max_packets=2 → emit first 2, defer remaining 3
-  const r1 = filterPackets(packets, true, makeSessionConfig({ max_packets: 2 }));
+  const r1 = filterPackets(packets, makeSessionConfig({ max_packets: 2 }));
   assert.equal(r1.emitPackets.length, 2);
   assert.equal(r1.deferredPackets.length, 3);
 
   // max_packets=0 → emit nothing, defer all
-  const r2 = filterPackets(packets, true, makeSessionConfig({ max_packets: 0 }));
+  const r2 = filterPackets(packets, makeSessionConfig({ max_packets: 0 }));
   assert.equal(r2.emitPackets.length, 0);
   assert.equal(r2.deferredPackets.length, 5);
 
   // max_packets >= length → no deferral
-  const r3 = filterPackets(packets, true, makeSessionConfig({ max_packets: 10 }));
+  const r3 = filterPackets(packets, makeSessionConfig({ max_packets: 10 }));
   assert.equal(r3.deferredPackets.length, 0);
   assert.equal(r3.emitPackets.length, 5);
 
-  // Budget cap + first contact + multiple packets: canary takes precedence → 1 packet emitted
-  const r4 = filterPackets(packets, false, makeSessionConfig({ max_packets: 2 }));
-  assert.equal(r4.emitPackets.length, 1, "canary wins: only 1 packet emitted");
-  assert.equal(r4.doCanary, true);
+  // Budget cap + multiple packets: only cap applies
+  const r4 = filterPackets(packets, makeSessionConfig({ max_packets: 2 }));
+  assert.equal(r4.emitPackets.length, 2);
+  assert.equal(r4.deferredPackets.length, 3);
 });
 
 // ── buildPacketPrompt ─────────────────────────────────────────────────────────

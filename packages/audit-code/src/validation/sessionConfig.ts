@@ -334,16 +334,6 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
       pushIssue(issues, "dispatch", "dispatch must be a JSON object.");
     } else {
       if (
-        value.dispatch.canary !== undefined &&
-        typeof value.dispatch.canary !== "boolean"
-      ) {
-        pushIssue(
-          issues,
-          "dispatch.canary",
-          "dispatch.canary must be a boolean when provided.",
-        );
-      }
-      if (
         value.dispatch.confirm_threshold !== undefined &&
         (!Number.isInteger(value.dispatch.confirm_threshold) ||
           Number(value.dispatch.confirm_threshold) < 0)

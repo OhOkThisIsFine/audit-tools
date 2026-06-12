@@ -43,8 +43,6 @@ await test("FINDING-013: deferred tasks are excluded so audit_tasks_completed is
       packet_count: 3,
       task_count: 5,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       deferred_task_ids: ["d", "e"],
     },
   };
@@ -70,8 +68,6 @@ await test("FINDING-013: with active_dispatch but no deferred ids, logic is unch
       packet_count: 5,
       task_count: 5,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       // no deferred_task_ids
     },
   };
@@ -88,8 +84,6 @@ await test("FINDING-013: all non-deferred tasks complete → satisfied even with
       packet_count: 3,
       task_count: 3,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       deferred_task_ids: [],
     },
   };

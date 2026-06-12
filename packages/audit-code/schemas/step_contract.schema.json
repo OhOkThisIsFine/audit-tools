@@ -47,8 +47,6 @@
         "pending_tasks": { "type": "integer" },
         "completed_tasks": { "type": "integer" },
         "wave_size": { "type": "integer" },
-        "phase": { "type": "string", "enum": ["canary", "fan_out"] },
-        "canary_packet_id": { "type": ["string", "null"] },
         "agent_count": { "type": "integer" },
         "wave_count": { "type": "integer" },
         "confirmation_recommended": { "type": "boolean" },

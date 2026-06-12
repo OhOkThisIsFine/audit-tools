@@ -450,8 +450,6 @@ test("S4: after audit_tasks_completed, audit_results_ingested is next determinis
       packet_count: 1,
       task_count: 1,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       partial_completion_terminal: {
         reason: "empty_pool",
         stranded_ids: ["T1"],
@@ -615,8 +613,6 @@ test("S6: empty provider pool sets partial_completion_terminal and satisfies aud
       packet_count: 2,
       task_count: 2,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       partial_completion_terminal: {
         reason: "empty_pool",
         stranded_ids: ["T1", "T2"],
@@ -650,8 +646,6 @@ test("S6: livelock_guard terminal also satisfies audit_tasks_completed", () => {
       packet_count: 1,
       task_count: 1,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       partial_completion_terminal: {
         reason: "livelock_guard",
         stranded_ids: ["T1"],
@@ -682,8 +676,6 @@ test("S6: non-stranded pending tasks still block even with a partial terminal fo
       packet_count: 2,
       task_count: 2,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       partial_completion_terminal: {
         reason: "empty_pool",
         stranded_ids: ["T1"], // T2 not stranded
@@ -725,8 +717,6 @@ test("S6: after partial terminal, synthesis produces valid audit-findings with s
       packet_count: 1,
       task_count: 1,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       partial_completion_terminal: {
         reason: "empty_pool",
         stranded_ids: ["T1"],
@@ -780,8 +770,6 @@ test("S6: run does not stall — terminal satisfies audit_tasks_completed and ne
       packet_count: 1,
       task_count: 1,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
       partial_completion_terminal: {
         reason: "livelock_guard",
         stranded_ids: ["T1"],

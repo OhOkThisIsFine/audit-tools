@@ -515,8 +515,6 @@ test("ArtifactBundle active_dispatch field still typed as ActiveDispatchState af
       packet_count: 1,
       task_count: 1,
       status: "active",
-      phase: "fan_out",
-      canary_packet_id: null,
     };
     await wf(join(dir, "active-dispatch.json"), JSON.stringify(activeDispatch));
     const bundle2 = await load(dir);
