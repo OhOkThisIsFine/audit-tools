@@ -18,19 +18,6 @@ rather than "where the code is today."
 
 ## Known friction (agent / dev experience)
 
-- **Document-phase dispatch prompts render empty Files/Read allowlists.** When a
-  finding has no `affected_files`, the document worker prompt grants an empty
-  Read list even though the finding summary names concrete source files, so
-  workers must either spec blind or read outside their grant (every 2026-06-10
-  contract-run documenter hit this). Fix direction: render files named in the
-  finding summary into both the Files field and the Read allowlist, or grant
-  explicit repo-wide read for documentation tasks.
-- **Sibling-task drift in dispatched prompts.** When one block lands between
-  planning and a dependent block's dispatch (e.g. a function the prompt names was
-  rewritten, an enum grew), the later worker prompt still carries the stale
-  contract; workers reconciled by hand. Fix direction: re-render dependent
-  prompts after a prerequisite block merges, or include the landed surface's
-  current contract in the dispatch note.
 - **Global install defers `postinstall` under npm's allow-scripts policy.**
   `npm install -g auditor-lambda` installs the bin but prints
   `npm warn allow-scripts … (postinstall: node scripts/postinstall.mjs)` and skips
@@ -124,21 +111,13 @@ rather than "where the code is today."
 
 ## Deferred fixes (product bugs)
 
-### audit-code: align project-scope OpenCode deploy with the scoped permission helpers
+### Manual real-OpenCode validation of scoped permissions (user-owned)
 
-The CFG-4996560e fix (shipped 2026-06-10: global top-level OpenCode config no
-longer seeds `bash['*']='allow'` / `external_directory['*']='allow'`, actively
-migrates old broad rules away, auditor agent scope keeps broad-allow-with-denylist,
-helpers hoisted into `@audit-tools/shared/opencodePermissions`) deliberately left
-one surface untouched: `packages/audit-code/audit-code-wrapper-opencode.mjs`
-holds a third copy of the merge helpers used for the **project-level**
-`opencode.json` written by `audit-code install --host opencode`, and it still
-deploys the broad rules at project scope. Decide whether project scope should
-mirror the agent-scoped model, then align it with the shared helpers. Also still
-pending: **manual validation against real OpenCode** that agent-scoped allowances
-propagate to spawned subtasks (can't be unit-tested; user-owned — revert by
-re-adding the rule or rerunning an older postinstall if audits start hitting
-ask-prompts).
+The project-scope OpenCode deploy was aligned with the shared scoped-permission
+helpers by the redesign run (N-D02, shipped 2026-06-11). Still pending: manual
+validation against real OpenCode that agent-scoped allowances propagate to
+spawned subtasks (can't be unit-tested). Revert path if audits start hitting
+ask-prompts: re-add the broad rule or rerun an older postinstall.
 
 ### audit-code + remediate-code: scope & intent checkpoint — *shipped 2026-06-09*
 
@@ -187,34 +166,15 @@ structured-path tests pre-write a checkpoint.
 
 ## Features to add later
 
-### Remediation workflow redesign — *spec complete 2026-06-10*
+### Workflow redesigns — *shipped 2026-06-11*
 
-Full design agreed and documented in
-[`docs/remediation-workflow-design.md`](remediation-workflow-design.md).
-Key changes: always-confirm intake (auto-discovered input, pre-existing runs,
-merge-into-existing-plan option), input validation at manifest time, one
-consolidated synthesis+intent user stop with a pre-drafted checkpoint, the
-contract pipeline as the universal planning engine for BOTH input paths with
-multi-agent seam negotiation (decomposition → parallel per-module contract
-drafting → deterministic seam reconciliation → obligation ledger →
-test/validator plan → deterministic design gates → critic/judge/repair),
-metadata-enriched DAG promotion, dissolution of the document phase, rolling
-worktree-isolated dispatch with per-node contract verification before merge,
-context-carrying triage retries, and an evidence-backed close. Includes a
-verified current-code defect table (fix regardless of redesign sequencing) and
-a cross-tool alignment section shared with the audit redesign. Subsumes the
-*empty Files/Read allowlists* and *sibling-task drift* friction entries above
-(structural fixes; interim mitigations also specified).
-
-### Audit workflow redesign — *spec complete 2026-06-10*
-
-Full design agreed and documented in [`docs/audit-workflow-design.md`](audit-workflow-design.md).
-Key changes: provider confirmation gate, batched deterministic steps, extended
-intent checkpoint (disposition overrides + lens proposals + scope collapse),
-split design review (contract + conceptual, parallel), rolling quota-aware
-dispatch with capability routing, ingestion folded into dispatch, structured
-output for all host-delegation steps and auditor workers, synthesis narrative
-always runs. Implement against that document.
+Both redesigns ([`docs/audit-workflow-design.md`](audit-workflow-design.md),
+[`docs/remediation-workflow-design.md`](remediation-workflow-design.md)) were
+implemented end-to-end by the 46-node contract-pipeline run completed
+2026-06-11 (46/46 resolved, 0 blocked) and shipped through today's releases
+(auditor-lambda 0.17.0 / remediator-lambda 0.14.0 / @audit-tools/shared
+0.14.0). The design docs remain the durable contracts. Next validation step:
+dogfood — a fresh self-audit on the new architecture.
 
 ### Contract-governed implementation pipeline — *shipped 2026-06*
 
@@ -286,22 +246,22 @@ item.
   (`shared/src/tooling/exec.ts`), the sessionConfig field, the `prompts.ts`
   wrap-exemption text, and provider wiring (~28 files reference opentoken).
   Bonus: this deletes the cmd.exe wrap-quoting trap class entirely.
-- **tokencost — take the function, not the dependency.** `tokencost-js`
-  (backmesh fork, 19 commits) counts Claude tokens via the Anthropic counting
-  API — a network call + API key inside deterministic planning is the wrong
-  shape (workers run on subscription CLIs), and the Python original can't run
-  in the Node orchestrators. Instead: a local tokenizer (`gpt-tokenizer` or
-  `js-tiktoken`) behind a new `estimateTokensFromText()` in
-  `shared/src/tokens.ts`, replacing the `BYTES_PER_TOKEN = 4` heuristic
-  wherever real text is available, plus per-model price fields on
-  `KNOWN_MODEL_LIMITS` for ledger cost reporting. Learned RPM/TPM limits stay
-  authoritative — estimates only set the prior. Slot into the redesign's
-  rolling-dispatch node (it touches `rollingEngine.ts` anyway).
+- **tokencost — rejected entirely (2026-06-11), including the local-tokenizer
+  substitute.** `tokencost-js` counts Claude tokens via the Anthropic counting
+  API (a network call inside deterministic planning — wrong shape) and the
+  Python original can't run in Node. The local-tokenizer alternative was also
+  dropped: the shipped redesign standardized byte-based estimation as the
+  single primitive (N-S04, `estimateTokensFromBytes`), quota learning
+  self-corrects from real 429/TPM signals, `BLOCK_SAFETY_MARGIN` absorbs
+  estimator error, and BPE tokenizers aren't Claude's tokenizer anyway. The
+  headroom proxy's stats are the measured-usage upgrade path. Optional later:
+  per-model price fields on `KNOWN_MODEL_LIMITS` for ledger cost lines (pure
+  data, no deps). Revisit a tokenizer only on observed systematic mispacking.
 
-### Nightly autonomous audit→remediate pipeline — capstone, blocked on the redesigns
+### Nightly autonomous audit→remediate pipeline — capstone, UNBLOCKED
 
-Decision 2026-06-11: no scheduled autonomy until the audit + remediation
-workflow redesigns land. Then build once, on the new architecture: scheduled
-run (cloud routine or local headless `claude -p`) → audit → auto-remediate
-actionable findings behind green test gates → PR + findings report, escalating
-only ambiguity/low-confidence fixes to Ethan.
+Decision 2026-06-11 was redesigns-first — and they landed the same day (46/46).
+Remaining gate: one dogfooding self-audit on the new architecture. Then build:
+scheduled run (cloud routine or local headless `claude -p`) → audit →
+auto-remediate actionable findings behind green test gates → PR + findings
+report, escalating only ambiguity/low-confidence fixes to Ethan.
