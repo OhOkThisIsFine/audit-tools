@@ -18,6 +18,11 @@ rather than "where the code is today."
 
 ## Known friction (agent / dev experience)
 
+- **Run CLAUDECODE-unset tests via the PowerShell tool, not nested `cmd /c`.**
+  `cmd /c "set CLAUDECODE=&& npm test"` from inside the bash tool printed only the
+  cmd banner and swallowed all test output. `$env:CLAUDECODE=$null; npm test` in the
+  PowerShell tool works cleanly. (Spotted 2026-06-12 during N6.)
+
 - **Stale "waves" wording in the rolling-dispatch prompt.** The rolling dispatch
   step prompt header still reads "After all waves complete:" even though dispatch
   is fully rolling (`max_concurrent_agents`, no `wave_size`). Cosmetic; reword to
