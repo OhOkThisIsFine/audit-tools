@@ -3,7 +3,7 @@
 **Date:** 2026-06-12
 **Branch:** `feat/provider-neutral-task-graph` (pushed to `audit-tools` remote)
 **Spec:** [capability-discovery-and-tiered-dispatch-design.md](capability-discovery-and-tiered-dispatch-design.md) — read this first; it is the design of record.
-**Status:** Phase-A data model + Phase-B core (N4b) + N5a/N5b (capability handshake) + **N5c (`KNOWN_MODEL_LIMITS` retired) landed green.** Dispatch packetizes JIT under the dispatching model's context + risk-mass ceilings; the host reports its real context window (`--host-context-tokens`/`--host-output-tokens`); and the static known-model table is gone — discovered capability (or explicit config) is the sole window authority, falling to a conservative 32k floor when nothing is discovered (never a guessed per-model window). Next is **N6** (condensed `confirm_intent` roundtrip). See the spec's Implementation-progress section for the per-node detail.
+**Status:** **All redesign nodes landed green (N1 → N8).** Dispatch packetizes JIT under the dispatching model's context + risk-mass ceilings; the host reports its real context window (`--host-context-tokens`/`--host-output-tokens`) in **both orchestrators**; the static known-model table is gone (discovered capability or explicit config is the sole window authority, falling to a conservative 32k floor when nothing is discovered); `confirm_intent` carries conceptual-depth intent (N6) that drives a real subagent + independent-judge fan-out (N7); and **N8** mirrored audit's capability handshake into remediate's implement dispatch. Remaining work is non-blocking follow-ons (relative model-rank routing of packets/subagents, multi-model roster, stripping `review_packets.json`). See the spec's Implementation-progress section for per-node detail.
 
 ---
 
@@ -207,11 +207,49 @@ model-rank routing of those subagents (and of all packets) via
 `partitionTaskGraph.routing_risk` is still unconsumed; fold into the tiered-routing
 work alongside N8's multi-pool plumbing.
 
-## NEXT: the remaining nodes
+## DONE: N8 — remediate-code capability handshake (parity with N5b)
 
-- **N8 — remediate-code parity.** Mirror the plan/dispatch seam + JIT into
-  remediate-code's implement/verify dispatch (folds in the N5c consumer sweep +
-  the host-window discovered-capability flags audit got in N5b).
+Landed on branch (remediate 1136 pass / shared 385; root check green). Remediate's
+implement dispatch now honors a host-reported context/output window, JIT, exactly
+like audit-code.
+
+- **CLI:** `--host-context-tokens` / `--host-output-tokens` added to both
+  `next-step` and the deprecated `run` alias (`src/index.ts`), parsed into
+  `NextStepOptions.hostContextTokens`/`hostOutputTokens` (`steps/nextStep.ts`).
+- **Threading:** `decideNextStep` → `buildImplementDispatchStep` builds
+  `waveOptsImpl` with the two fields → `prepareImplementDispatch(waveOptions)` →
+  `scheduleWave`. `prepareImplementDispatch`'s `waveOptions` type + the standalone
+  `prepare-implement-dispatch` CLI command path both carry them.
+- **`steps/dispatch.ts:scheduleWave`:** `ScheduleWaveInput` gains
+  `hostContextTokens`/`hostOutputTokens`; the body builds a shared
+  `DiscoveredRateLimitsInput { context_tokens, output_tokens }` and (a) sets it as
+  the `computeDispatchCapacity` pool's `discoveredLimits` (N5a's
+  `discovered_capability` rung then sizes the window), and (b) uses it in the
+  quota-disabled default branch in place of the hardcoded 32k/4096 floor.
+- **Planning stays provider-neutral:** `plan.ts:resolveContextBudgetFromConfig` is
+  untouched — block sizing is config/floor-based; the discovered window applies
+  only JIT at dispatch (the plan/dispatch seam).
+- **Skill prompt:** `remediate-code.prompt.md` gained a capability-handshake
+  section (mirrors audit's) instructing the host to discover + report its window
+  and concurrency on every `next-step`.
+- **Tests:** 3 new `wave-scheduler.test.ts` cases (default-path window, floor
+  fallback, quota-enabled lift above floor).
+
+This was the **last redesign node.** Remaining items are non-blocking follow-ons.
+
+## NEXT: follow-ons (none blocking)
+
+- **Relative model-rank routing.** `partitionTaskGraph.routing_risk` is computed
+  per packet but nothing consumes it for model selection yet (audit's deep
+  conceptual fan-out dispatches *subagents*, not *models*). Wire packet/subagent
+  routing to a discovered relative model rank — needs the multi-model roster below.
+- **Multi-model roster + model identity on `model: null`.** The handshake reports a
+  single active window; the full vision is an opaque ordered model list with
+  per-model windows, routing each packet by max-risk → relative rank. Also thread a
+  handshake-reported opaque model id for the quota key when `resolveHostModel`
+  returns null.
+- **Strip `review_packets.json` as a persisted artifact** (audit-code) — dispatch
+  no longer reads it; it's left building for metrics only.
 
 ### N5b follow-ons worth noting (not blocking)
 - **Model identity on `model: null`.** N5b threads the context *window* but not a

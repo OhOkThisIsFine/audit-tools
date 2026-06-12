@@ -302,9 +302,28 @@ perspectives/judge are themselves packetized JIT by the active provider; relativ
 model-rank routing of those subagents is the broader N7-territory follow-on the
 `partitionTaskGraph.routing_risk` already computes but nothing yet consumes.
 
-**Next: N8** remediate-code parity — mirror the plan/dispatch seam + JIT into
-remediate-code's implement/verify dispatch, folding in remediate's
-discovered-capability window plumbing (the host-window flags audit got in N5b).
+**N8 — remediate-code capability handshake (DONE).** Mirrored audit's N5b
+host-window plumbing into remediate's implement dispatch. New CLI flags
+`--host-context-tokens` / `--host-output-tokens` on both `next-step` and the
+deprecated `run` alias (parsed into `NextStepOptions.hostContextTokens` /
+`hostOutputTokens`), threaded `decideNextStep → buildImplementDispatchStep`'s
+`waveOptsImpl → prepareImplementDispatch(waveOptions) → scheduleWave`.
+`ScheduleWaveInput` gains the two fields; `scheduleWave` builds a
+`DiscoveredRateLimitsInput { context_tokens, output_tokens }` from them and (a)
+carries it on the `computeDispatchCapacity` pool's `discoveredLimits` so N5a's
+shared `discovered_capability` rung sizes the budget to the real window, and (b)
+honors the reported window in the quota-disabled default branch instead of the
+hardcoded 32k/4096 floor. The remediate skill prompt gained a capability-handshake
+section instructing the host to discover + report its window (and concurrency).
+Remediate's planning stays provider-neutral — block sizing
+(`resolveContextBudgetFromConfig`) is unchanged; the discovered window applies
+**only JIT at dispatch**, consistent with the plan/dispatch seam. 3 new
+`wave-scheduler.test.ts` cases (default-path window, floor fallback, quota-enabled
+lift above floor); full suite green (remediate 1136 pass / shared 385 /
+audit-code unaffected). This was the last redesign node; remaining work is the
+follow-ons below (relative model-rank routing of packets/subagents via
+`partitionTaskGraph.routing_risk`, multi-model roster, model-identity on
+`model: null`), none blocking.
 
 ## Resolved decisions (2026-06-12)
 
