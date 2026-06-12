@@ -51,11 +51,11 @@ test("buildAuditTasks rejects malformed unit manifests with path-aware errors", 
             unit_id: "src-auth",
             name: "Auth",
             files: ["src/api/auth.ts"],
-            required_lenses: ["security", "mystery"],
+            required_lenses: [42],
           },
         ],
       }),
-    /unitManifest\.units\[0\]\.required_lenses must be an array of supported lenses/i,
+    /unitManifest\.units\[0\]\.required_lenses must be an array of strings/i,
   );
 
   assert.throws(
@@ -64,13 +64,28 @@ test("buildAuditTasks rejects malformed unit manifests with path-aware errors", 
   );
 });
 
+test("buildAuditTasks accepts custom (non-canonical) lens names", () => {
+  const tasks = buildAuditTasks({
+    units: [
+      {
+        unit_id: "src-auth",
+        name: "Auth",
+        files: ["src/api/auth.ts"],
+        required_lenses: ["security", "whimsy"],
+      },
+    ],
+  });
+  assert.ok(tasks.some((t) => t.lens === "whimsy"));
+  assert.ok(tasks.some((t) => t.lens === "security"));
+});
+
 test("buildAuditTasks validates options before generating tasks", () => {
   assert.throws(
     () =>
       buildAuditTasks(createUnitManifest(), {
-        limit_lenses: ["security", "mystery"],
+        limit_lenses: [123],
       }),
-    /options\.limit_lenses must be an array of supported lenses/i,
+    /options\.limit_lenses must be an array of strings/i,
   );
   assert.throws(
     () => buildAuditTasks(createUnitManifest(), { pass_prefix: 42 }),

@@ -101,7 +101,7 @@ function inferUnitId(path: string, kind: string): string {
 
 export { LENS_ORDER, sortLenses } from "./auditTaskUtils.js";
 
-function applyExtensionLensGuards(path: string, lenses: Lens[]): Lens[] {
+function applyExtensionLensGuards(path: string, lenses: string[]): string[] {
   const n = path.toLowerCase();
   if (n.endsWith(".schema.json") || n.endsWith(".schema.ts")) {
     return lenses.filter((l) => l === "data_integrity");
@@ -115,9 +115,9 @@ function applyExtensionLensGuards(path: string, lenses: Lens[]): Lens[] {
 export function deriveRequiredLensesForPath(
   path: string,
   options: { isBrowserExtensionProject?: boolean } = {},
-): Lens[] {
+): string[] {
   const assignment = bucketFile(path);
-  const required = new Set<Lens>();
+  const required = new Set<string>();
 
   for (const bucket of assignment.buckets) {
     for (const lens of LENS_MAP[bucket]) {
@@ -134,7 +134,7 @@ export function deriveRequiredLensesForPath(
   return applyExtensionLensGuards(path, sortLenses(required));
 }
 
-function inferCriticalFlows(files: string[], requiredLenses: Lens[]): string[] {
+function inferCriticalFlows(files: string[], requiredLenses: string[]): string[] {
   const flows = new Set<string>();
   const tokens = new Set(
     files.flatMap((f) => pathTokens(normalizeExtractorPath(f))),
@@ -192,7 +192,7 @@ export function buildUnitManifest(
     }
 
     const assignment = bucketFile(file.path);
-    const required = new Set<Lens>(existing.required_lenses);
+    const required = new Set<string>(existing.required_lenses);
     for (const lens of deriveRequiredLensesForPath(file.path, {
       isBrowserExtensionProject,
     })) {

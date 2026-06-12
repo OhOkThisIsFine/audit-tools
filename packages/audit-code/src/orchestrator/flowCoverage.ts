@@ -46,7 +46,7 @@ export function buildFlowCoverage(
         continue;
       }
       for (const lens of record.completed_lenses) {
-        if (required.includes(lens)) {
+        if ((required as string[]).includes(lens)) {
           completed.add(lens);
         }
       }

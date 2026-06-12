@@ -112,7 +112,7 @@ export async function runPlanningExecutor(
   // included; resolveEffectiveLenses enforces this invariant).
   const lensSelectionInclude = bundle.intent_checkpoint?.lens_selection?.include;
   const lensSelectionExclude = bundle.intent_checkpoint?.lens_selection?.exclude;
-  let effectiveLenses: Lens[] | undefined;
+  let effectiveLenses: string[] | undefined;
   if (lensSelectionInclude !== undefined || lensSelectionExclude !== undefined) {
     // Build a selected set: start from include (or all), subtract exclude
     const baseSelected = lensSelectionInclude ?? undefined;

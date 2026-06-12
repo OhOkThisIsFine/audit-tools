@@ -82,7 +82,7 @@ export interface AuditUnit {
   kind?: string;
   files: string[];
   risk_score?: number;
-  required_lenses: Lens[];
+  required_lenses: string[];
   critical_flows?: string[];
 }
 
@@ -94,7 +94,7 @@ export interface FileCoverageRecord {
   path: string;
   total_lines: number;
   pass_id: string;
-  lens?: Lens;
+  lens?: string;
   agent_role?: string;
 }
 
@@ -126,8 +126,8 @@ export interface CoverageFileRecord {
   unit_ids: string[];
   classification_status: ClassificationStatus;
   audit_status: string;
-  required_lenses: Lens[];
-  completed_lenses: Lens[];
+  required_lenses: string[];
+  completed_lenses: string[];
 }
 
 export interface CoverageMatrix {
@@ -140,7 +140,7 @@ export interface AuditTask {
   task_id: string;
   unit_id: string;
   pass_id: string;
-  lens: Lens;
+  lens: string;
   file_paths: string[];
   file_line_counts?: Record<string, number>;
   line_ranges?: Array<{
@@ -157,11 +157,11 @@ export interface AuditTask {
   completion_reason?: string;
 }
 
-// The canonical field set lives in @audit-tools/shared. The auditor narrows
-// `lens` to its strongly-typed `Lens` union; everything else is inherited so
+// The canonical field set lives in @audit-tools/shared. The auditor accepts
+// any string as lens (canonical + custom); everything else is inherited so
 // the wire contract stays in sync (including `theme_id` added in Phase 6).
 export interface Finding extends Omit<SharedFinding, "lens"> {
-  lens: Lens;
+  lens: string;
 }
 
 export interface AuditVerification {
@@ -177,7 +177,7 @@ export interface AuditResult {
   task_id: string;
   unit_id: string;
   pass_id: string;
-  lens: Lens;
+  lens: string;
   agent_role?: string;
   file_coverage: Array<{
     path: string;

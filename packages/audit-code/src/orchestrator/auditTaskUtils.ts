@@ -21,7 +21,9 @@ export function priorityRank(priority: AuditTask["priority"]): number {
   }
 }
 
-export function sortLenses(lenses: Iterable<Lens>): Lens[] {
+export function sortLenses(lenses: Iterable<string>): string[] {
   const set = new Set(lenses);
-  return LENS_ORDER.filter((lens) => set.has(lens));
+  const canonical = LENS_ORDER.filter((lens) => set.has(lens));
+  const custom = [...set].filter((l) => !LENS_ORDER.includes(l as Lens)).sort();
+  return [...canonical, ...custom];
 }

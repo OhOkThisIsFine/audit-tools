@@ -24,8 +24,9 @@ export const MANDATORY_LENSES: readonly Lens[] = [
 const MANDATORY_LENS_SET: ReadonlySet<Lens> = new Set(MANDATORY_LENSES);
 
 /**
- * Validate the `lenses.selected` session-config value and return any errors.
+ * Validate the `lenses.selected` session-config value and return any issues.
  * Returns an empty array when the value is undefined (meaning "all lenses").
+ * Unknown lens names produce warnings (not errors) so custom lenses are accepted.
  */
 export function validateLensSelection(
   value: unknown,
@@ -40,11 +41,18 @@ export function validateLensSelection(
     return issues;
   }
   for (const [index, item] of value.entries()) {
-    if (typeof item !== "string" || !VALID_LENSES.has(item)) {
+    if (typeof item !== "string") {
       pushValidationIssue(
         issues,
         `${path}[${index}]`,
-        `${path}[${index}] "${String(item)}" is not a valid lens. Valid lenses: ${[...LENSES].join(", ")}.`,
+        `${path}[${index}] must be a string.`,
+      );
+    } else if (!VALID_LENSES.has(item)) {
+      pushValidationIssue(
+        issues,
+        `${path}[${index}]`,
+        `${path}[${index}] "${item}" is not a canonical lens (custom lens accepted). Canonical: ${[...LENSES].join(", ")}.`,
+        "warning",
       );
     }
   }
@@ -54,33 +62,39 @@ export function validateLensSelection(
 /**
  * Resolve the effective lens set from the operator-selected lenses.
  *
- * - When `selected` is undefined/null, returns all lenses (current behavior).
- * - When `selected` is an array of valid lens names, unions in the mandatory
- *   base lenses, de-duplicates, and sorts to the canonical LENSES order.
+ * - When `selected` is undefined/null, returns all canonical lenses.
+ * - When `selected` is an array of lens names, unions in the mandatory base
+ *   lenses, de-duplicates, sorts canonical lenses to registry order, and
+ *   appends any custom (non-canonical) lenses at the end.
  */
-export function resolveEffectiveLenses(selected: string[] | undefined | null): Lens[] {
+export function resolveEffectiveLenses(selected: string[] | undefined | null): string[] {
   if (selected === undefined || selected === null) {
-    // Default: all lenses.
     return [...LENSES];
   }
 
-  // Filter to valid lenses only (invalid ones are caught by validation; tolerate
-  // them here so the runtime path doesn't throw on a misconfigured file).
-  const validSelected = selected.filter((s): s is Lens => VALID_LENSES.has(s));
+  const canonicalSelected = selected.filter((s): s is Lens => VALID_LENSES.has(s));
+  const customSelected = selected.filter((s) => !VALID_LENSES.has(s));
 
-  // Union with mandatory base lenses.
-  const combined = new Set<Lens>([...validSelected, ...MANDATORY_LENSES]);
+  // Union canonical with mandatory base lenses.
+  const combined = new Set<Lens>([...canonicalSelected, ...MANDATORY_LENSES]);
 
-  // Sort to canonical registry order.
-  return LENSES.filter((lens) => combined.has(lens));
+  // Canonical in registry order, then custom appended (preserving input order).
+  const canonical = LENSES.filter((lens) => combined.has(lens));
+  const seenCustom = new Set<string>();
+  const dedupedCustom = customSelected.filter((s) => {
+    if (seenCustom.has(s)) return false;
+    seenCustom.add(s);
+    return true;
+  });
+  return [...canonical, ...dedupedCustom];
 }
 
 /** Returns true when the given lens is in the effective set. */
-export function isLensEffective(lens: Lens, effectiveLenses: Lens[]): boolean {
+export function isLensEffective(lens: string, effectiveLenses: string[]): boolean {
   return effectiveLenses.includes(lens);
 }
 
 /** Returns true when the given lens is in the mandatory base set. */
-export function isMandatoryLens(lens: Lens): boolean {
-  return MANDATORY_LENS_SET.has(lens);
+export function isMandatoryLens(lens: string): boolean {
+  return MANDATORY_LENS_SET.has(lens as Lens);
 }

@@ -30,7 +30,7 @@ export interface ReviewPacket {
   task_ids: string[];
   unit_ids: string[];
   pass_ids: string[];
-  lenses: Lens[];
+  lenses: string[];
   file_paths: string[];
   file_line_counts: Record<string, number>;
   total_lines: number;
@@ -87,7 +87,7 @@ export interface AuditPlanMetrics {
   average_task_lines: number;
   largest_task_id?: string;
   largest_packet_id?: string;
-  lens_task_counts: Partial<Record<Lens, number>>;
+  lens_task_counts: Record<string, number>;
   priority_task_counts: Record<NonNullable<AuditTask["priority"]>, number>;
   packet_quality: PacketQuality;
   packet_size: {

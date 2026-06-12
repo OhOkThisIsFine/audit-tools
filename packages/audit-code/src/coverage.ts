@@ -42,7 +42,7 @@ export function applyUnitCoverage(
   matrix: CoverageMatrix,
   path: string,
   unitId: string,
-  requiredLenses: Lens[],
+  requiredLenses: string[],
 ): void {
   const record = buildFileIndex(matrix).get(path);
   if (!record || record.audit_status === "excluded") return;
@@ -99,7 +99,7 @@ export function findUncoveredFiles(
 
 export function buildRequeueTargets(matrix: CoverageMatrix): Array<{
   path: string;
-  missing_lenses: Lens[];
+  missing_lenses: string[];
 }> {
   return matrix.files
     .filter((file) => file.audit_status !== "excluded")
