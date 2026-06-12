@@ -1,9 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { LENS_ORDER, priorityRank, sortLenses } = await import(
-  "../src/orchestrator/auditTaskUtils.ts"
-);
+const { LENS_ORDER, priorityRank, sortLenses, computeRiskEstimate } =
+  await import("../src/orchestrator/auditTaskUtils.ts");
 const { LENS_REGISTRY, ALL_LENSES, isLens } = await import("../src/types.ts");
 
 // ── priorityRank ──────────────────────────────────────────────────────────────
@@ -17,6 +16,65 @@ test("priorityRank returns 3 for high, 2 for medium, 1 for low", () => {
 test("priorityRank returns 1 for unknown/default priority values", () => {
   assert.equal(priorityRank("unknown"), 1);
   assert.equal(priorityRank(undefined), 1);
+});
+
+// ── computeRiskEstimate ───────────────────────────────────────────────────────
+
+const baseTask = (over = {}) => ({
+  task_id: "t",
+  unit_id: "u",
+  pass_id: "p",
+  lens: "maintainability",
+  file_paths: ["a.ts"],
+  rationale: "r",
+  ...over,
+});
+
+test("computeRiskEstimate seeds from priority (high>medium>low)", () => {
+  assert.equal(computeRiskEstimate(baseTask({ priority: "high" })), 0.7);
+  assert.equal(computeRiskEstimate(baseTask({ priority: "medium" })), 0.4);
+  assert.equal(computeRiskEstimate(baseTask({ priority: "low" })), 0.15);
+  // missing priority defaults to the low seed
+  assert.equal(computeRiskEstimate(baseTask({})), 0.15);
+});
+
+test("computeRiskEstimate adds bonuses for risk-signalling tags and sensitive lenses", () => {
+  // critical_flow (+0.15) on a low-priority task
+  assert.ok(
+    Math.abs(
+      computeRiskEstimate(baseTask({ priority: "low", tags: ["critical_flow"] })) -
+        0.3,
+    ) < 1e-9,
+  );
+  // sensitive lens (+0.1)
+  assert.ok(
+    Math.abs(
+      computeRiskEstimate(baseTask({ priority: "low", lens: "security" })) - 0.25,
+    ) < 1e-9,
+  );
+  // analyzer signal (+0.1) + lens_verification (+0.1)
+  assert.ok(
+    Math.abs(
+      computeRiskEstimate(
+        baseTask({
+          priority: "low",
+          tags: ["external_analyzer_signal", "lens_verification"],
+        }),
+      ) - 0.35,
+    ) < 1e-9,
+  );
+});
+
+test("computeRiskEstimate clamps to [0,1]", () => {
+  const score = computeRiskEstimate(
+    baseTask({
+      priority: "high",
+      lens: "security",
+      tags: ["critical_flow", "external_analyzer_signal", "lens_verification"],
+    }),
+  );
+  assert.ok(score <= 1 && score >= 0, `score ${score} should be within [0,1]`);
+  assert.equal(score, 1); // 0.7 + 0.15 + 0.1 + 0.1 + 0.1 = 1.15 → clamped
 });
 
 // ── sortLenses ────────────────────────────────────────────────────────────────

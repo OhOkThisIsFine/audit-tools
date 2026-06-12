@@ -21,6 +21,8 @@ import {
   buildReviewPackets,
   sizeIndexFromManifest,
 } from "./reviewPackets.js";
+import { taskContentTokens } from "./reviewPacketSizing.js";
+import { computeRiskEstimate } from "./auditTaskUtils.js";
 import { resolveEffectiveLenses } from "./lensSelection.js";
 import { autoCompleteTrivialCoverage } from "./trivialAudit.js";
 import type { ExecutorRunResult } from "./executorResult.js";
@@ -201,7 +203,20 @@ export async function runPlanningExecutor(
           .map((p) => [p, lineIndex[p]]),
       ),
     }));
-  const allDispatchTasks = [...taggedAuditTasks, ...pendingRequeueTasks];
+  // Freeze provider-neutral estimates on every dispatch task: a byte-based
+  // token estimate and a deterministic risk seed. These persist on the task and
+  // become the authoritative inputs to just-in-time dispatch packetization /
+  // routing (the estimate-review step may later refine them). See
+  // docs/capability-discovery-and-tiered-dispatch-design.md.
+  const allDispatchTasks = [...taggedAuditTasks, ...pendingRequeueTasks].map(
+    (task) => ({
+      ...task,
+      token_estimate:
+        task.token_estimate ??
+        taskContentTokens(task, resolvedSizeIndex, lineIndex),
+      risk_estimate: task.risk_estimate ?? computeRiskEstimate(task),
+    }),
+  );
 
   const reviewPackets = buildReviewPackets(allDispatchTasks, {
     graphBundle: bundle.graph_bundle,
