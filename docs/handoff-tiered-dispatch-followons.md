@@ -152,14 +152,18 @@ Each Fn is an independent atomic-replace commit and is **shippable on its own** 
 
 ## Definition of done (the whole set — don't stop partway)
 
-- [ ] **F1** audit packet tier derives from `routing_risk` (complexity escalates only); old complexity-only `buildDispatchModelHint` deleted; tests green.
-- [ ] **F2** `--host-models` roster → multiple `CapacityPool`s with per-rank windows; partition sized/validated per tier; skill prompt updated; scalar shorthand still works; remediate parity.
-- [ ] **F3** opaque `--host-model-id` (and per-rank ids) feed the quota key; falls back to `provider/*`.
-- [ ] **F4** conceptual perspectives (`standard`) + judge (`deep`) carry tiers.
-- [ ] **F5** `review_packets.json` no longer persisted; DAG/validator/schema cleaned; e2e dispatch still converges.
-- [ ] All three suites green with **CLAUDECODE unset** (shared / audit-code `node --test` / remediate vitest).
-- [ ] Spec [capability-discovery-and-tiered-dispatch-design.md](capability-discovery-and-tiered-dispatch-design.md) Implementation-progress + Resolved-decisions updated per node.
-- [ ] **Shipped** via the `/ship` skill: merge to `main`, publish changed packages (minor — these are features), verify live on npm, reinstall global bins + run deferred postinstall, smoke `--version`.
+**STATUS: COMPLETE (2026-06-12).** Shipped as shared 0.17.0 / audit-code 0.20.0 /
+remediate-code 0.17.0 (merge 38b44f6f). See the spec's Implementation-progress
+F1–F5 section for what landed.
+
+- [x] **F1** audit packet tier derives from `routing_risk` (complexity escalates only); old complexity-only `buildDispatchModelHint` deleted; tests green.
+- [x] **F2** `--host-models` roster → multiple `CapacityPool`s with per-rank windows; partition sized/validated per tier; skill prompt updated; scalar shorthand still works; remediate parity.
+- [x] **F3** opaque `--host-model-id` (and per-rank ids) feed the quota key; falls back to `provider/*`.
+- [x] **F4** conceptual perspectives (`standard`) + judge (`deep`) carry tiers.
+- [x] **F5** `review_packets.json` no longer persisted; DAG/validator/schema cleaned; e2e dispatch still converges.
+- [x] All three suites green with **CLAUDECODE unset** (shared 385 / audit-code 1809 / remediate 1140).
+- [x] Spec [capability-discovery-and-tiered-dispatch-design.md](capability-discovery-and-tiered-dispatch-design.md) Implementation-progress + Resolved-decisions updated per node.
+- [x] **Shipped** via the `/ship` skill: merged to `main`, published minor bumps, verified live on npm, reinstalled global bins + ran deferred postinstall, smoked `--version`.
 
 ## Gotchas (same as the parent redesign)
 
