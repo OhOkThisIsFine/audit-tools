@@ -45,12 +45,29 @@ Otherwise use:
 remediate-code next-step
 ```
 
+Every `next-step` call is also the **capability handshake**: report what you can
+dispatch to *right now* so the backend sizes remediation waves and per-worker
+context to your real model instead of a conservative 32k floor. Report:
+
+- `--host-can-dispatch-subagents` / `--host-max-concurrent` — whether you can run
+  callable subagents and how many in parallel. Without them the backend assumes
+  serial dispatch.
+- `--host-context-tokens` / `--host-output-tokens` — the context window and output
+  cap of the model your implementation subagents run on. These size each worker's
+  budget to fill the real window; omit them and dispatch falls back to the
+  conservative 32k default. Use the actual numbers for your dispatch model —
+  discover them, do not guess a smaller-than-real value.
+
+```bash
+remediate-code next-step --input <path> --host-max-concurrent 4 --host-context-tokens 200000 --host-output-tokens 32000
+```
+
 Read the returned JSON only far enough to find `prompt_path`, then read and
 follow only that prompt. Do not read dispatch prompts, schemas, state files,
 or result files unless the current step prompt explicitly instructs you to do
 so.
 
 When a step prompt tells you to continue, run `remediate-code next-step` again
-and follow only the newly returned `prompt_path`.
+(with the same capability flags) and follow only the newly returned `prompt_path`.
 
 Stop when the current step prompt tells you to stop.

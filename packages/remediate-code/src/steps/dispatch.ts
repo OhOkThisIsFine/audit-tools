@@ -19,6 +19,7 @@ import type {
   BackoffState,
   ResolvedProviderName,
   DispatchCapacityPoolSummary,
+  DiscoveredRateLimitsInput,
 } from "@audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
@@ -87,6 +88,10 @@ export interface ScheduleWaveInput {
   estimatedSlotTokens?: number[];
   providerName?: ResolvedProviderName;
   hostModel?: string | null;
+  /** Context window the host reports for its dispatch model (handshake). */
+  hostContextTokens?: number | null;
+  /** Output cap the host reports for its dispatch model (handshake). */
+  hostOutputTokens?: number | null;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -151,6 +156,19 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     env: input.env,
   });
 
+  // The capability handshake: the host reported its dispatch model's real
+  // context/output window this session. Carried into the pool's discoveredLimits
+  // so the shared discovered_capability rung sizes the budget to the real window
+  // instead of the conservative 32k floor. RPM/TPM stay null and fill from the
+  // learned quota state.
+  const hostCapabilityLimits: DiscoveredRateLimitsInput | null =
+    input.hostContextTokens != null || input.hostOutputTokens != null
+      ? {
+          context_tokens: input.hostContextTokens ?? null,
+          output_tokens: input.hostOutputTokens ?? null,
+        }
+      : null;
+
   const quota = (sessionConfig as { quota?: { enabled?: boolean } }).quota;
   if (!quota || quota.enabled === false) {
     const cap = hostLimit?.active_subagents ?? DEFAULT_WAVE_SIZE;
@@ -163,8 +181,10 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
       confidence: "low",
       source: "default",
       resolved_limits: {
-        context_tokens: 32_000,
-        output_tokens: 4_096,
+        // Honor a host-reported window even with quota disabled; fall back to the
+        // conservative floor only when nothing was discovered.
+        context_tokens: input.hostContextTokens ?? 32_000,
+        output_tokens: input.hostOutputTokens ?? 4_096,
         requests_per_minute: null,
         input_tokens_per_minute: null,
         output_tokens_per_minute: null,
@@ -196,6 +216,7 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
         hostModel,
         hostConcurrencyLimit: hostLimit,
         quotaStateEntry,
+        discoveredLimits: hostCapabilityLimits,
       },
     ],
     sessionConfig,
@@ -980,7 +1001,12 @@ export async function prepareImplementDispatch(
   options: DispatchOptions,
   runId: string,
   onlyBlockId?: string,
-  waveOptions?: { hostMaxConcurrent?: number; sessionConfig?: SessionConfig | null },
+  waveOptions?: {
+    hostMaxConcurrent?: number;
+    sessionConfig?: SessionConfig | null;
+    hostContextTokens?: number | null;
+    hostOutputTokens?: number | null;
+  },
 ): Promise<RemediationDispatchPlan> {
   const state = await loadStateOrThrow(options.artifactsDir);
   if (!state.plan || !state.items) {
@@ -1096,6 +1122,8 @@ export async function prepareImplementDispatch(
   const schedule = await scheduleWave({
     hostMaxConcurrent: waveOptions?.hostMaxConcurrent,
     sessionConfig: waveOptions?.sessionConfig ?? null,
+    hostContextTokens: waveOptions?.hostContextTokens,
+    hostOutputTokens: waveOptions?.hostOutputTokens,
     itemCount: items.length,
     estimatedSlotTokens: itemReadFileLists.map((files) =>
       estimateImplementSlotTokens(files, options.root),
