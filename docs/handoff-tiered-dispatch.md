@@ -3,7 +3,7 @@
 **Date:** 2026-06-12
 **Branch:** `feat/provider-neutral-task-graph` (pushed to `audit-tools` remote)
 **Spec:** [capability-discovery-and-tiered-dispatch-design.md](capability-discovery-and-tiered-dispatch-design.md) — read this first; it is the design of record.
-**Status:** Phase-A data model + Phase-B core (N4b) + **N5a/N5b (capability handshake) landed green.** Dispatch packetizes JIT under the dispatching model's context + risk-mass ceilings, and the host now reports its real context window (`--host-context-tokens`/`--host-output-tokens`) so the budget reflects the real model instead of the 32k floor. Next is **N5c** (retire `KNOWN_MODEL_LIMITS` as authority — overlaps N8 remediate parity). See the spec's Implementation-progress section for the per-node detail.
+**Status:** Phase-A data model + Phase-B core (N4b) + N5a/N5b (capability handshake) + **N5c (`KNOWN_MODEL_LIMITS` retired) landed green.** Dispatch packetizes JIT under the dispatching model's context + risk-mass ceilings; the host reports its real context window (`--host-context-tokens`/`--host-output-tokens`); and the static known-model table is gone — discovered capability (or explicit config) is the sole window authority, falling to a conservative 32k floor when nothing is discovered (never a guessed per-model window). Next is **N6** (condensed `confirm_intent` roundtrip). See the spec's Implementation-progress section for the per-node detail.
 
 ---
 
@@ -115,34 +115,40 @@ so packets fill the real window instead of the conservative 32k floor.
 
 ---
 
-## NEXT: N5c — retire `KNOWN_MODEL_LIMITS` as authority
+## DONE: N5c — `KNOWN_MODEL_LIMITS` retired as authority
 
-This is the one remaining N5 piece, deliberately deferred because it touches the
-model-agnostic core AND a second package (remediate). With discovered
-capabilities now authoritative for audit dispatch:
+Landed on branch (atomic replace, all three suites green: shared 385 /
+audit-code 1787 / remediate 1133). Discovered capability (or explicit config) is
+now the sole context-window authority.
 
-- Delete the **static known-model rung** from `resolveLimits`
-  (`shared/src/quota/limits.ts`): remove the `lookupKnownModel(hostModel)` branch
-  (rung 2). After N5a/N5b, discovered capability supplies the real window; the
-  table only ever produced a *guessed* 200k for named models — exactly the
-  hardcoded model knowledge the binding rules forbid.
-- Delete `PROVIDER_DEFAULT_HOST_MODEL` (`limits.ts:51`, the hardcoded
-  `anthropic/claude-opus-4-8` id) and the `KNOWN_MODEL_LIMITS` table +
-  `lookupModelLimits` (`shared/src/tokens.ts`), plus the barrel re-exports
-  (`shared/src/index.ts`) and `tokens.test.mjs`.
-- **Consumer sweep (the catch):** `resolveContextBudget` in `tokens.ts` is also
-  used by **remediate-code's plan phase** (`packages/remediate-code/src/phases/plan.ts:347`
-  → `resolveContextBudgetFromConfig`). Removing the table changes its fallback, so
-  remediate must move to the same discovered-capability channel — this overlaps
-  **N8 (remediate parity)**, so N5c + N8 likely land together as one atomic node.
-- **Headless honesty:** with no reported window, resolution falls to the
-  conservative default (32k), NOT a hardcoded 200k. That is correct, not a
-  regression — headless can't discover, so it shouldn't pretend.
-- **Atomic-replace:** delete the table in the same commit that makes discovered
-  capability the sole authority; green build+test for BOTH packages
-  (`env -u CLAUDECODE npm run check` at root + each suite).
+- **`shared/src/quota/limits.ts`:** deleted the static known-model rung (rung 2)
+  from `resolveLimits`, the `lookupKnownModel` helper, and
+  `PROVIDER_DEFAULT_HOST_MODEL` (the hardcoded `anthropic/claude-opus-4-8` id).
+  `resolveHostModel` now returns `null` when there is no explicit/config/env
+  signal — no hardcoded per-provider model; quota learning keys on `provider/*`
+  and the handshake supplies the window.
+- **`shared/src/tokens.ts`:** deleted `KNOWN_MODEL_LIMITS`, `lookupModelLimits`,
+  and the `ModelTokenLimits` type. `resolveContextBudget` lost its `hostModel`
+  param + table lookup. `DEFAULT_CONTEXT_TOKENS`/`DEFAULT_OUTPUT_TOKENS` lowered
+  to the conservative floor (32k / 4096) matching the quota subsystem — a run
+  that can't discover its window sizes small and honest, never a guessed 200k.
+- **Barrels + types:** removed the re-exports (`shared/src/index.ts`,
+  both `quota/index.ts`) and dropped `"known_metadata"` from the `LimitSource`
+  union (`quota/types.ts`).
+- **Schemas:** both `dispatch_quota.schema.json` enums swap `known_metadata` →
+  `discovered_capability` (the latter was an N5b gap — the source the file
+  actually carries was never in the enum).
+- **Remediate consumer sweep:** `plan.ts:resolveContextBudgetFromConfig` dropped
+  its `hostModel` arg. Remediate still honors `block_quota.context_tokens` when
+  configured; absent that it now sizes to the conservative floor. The fuller
+  remediate move onto the discovered-capability *channel* (host-window flags like
+  audit's N5b) rides **N8**.
+- **Tests:** updated `tokens.test.mjs`, `quota-limits.test.mjs`,
+  `quota-scheduler.test.mjs`, `json-schema-assert.test.mjs` — the old
+  `known_metadata` assertions become `discovered_capability` (handshake reports a
+  window) or `provider_default` (named model, no discovered window).
 
-Then the remaining nodes:
+## NEXT: the remaining nodes
 
 - **N6 — condensed confirm_intent roundtrip.** One `AskUserQuestion` covering scope
   + lenses + conceptual depth (default shallow). Add `design_review?: {conceptual_depth, perspectives}`

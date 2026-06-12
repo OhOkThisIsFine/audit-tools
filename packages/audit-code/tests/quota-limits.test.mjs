@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { resolveLimits, lookupKnownModel, classifyProvider, resolveHostModel } = await import(
+const { resolveLimits, classifyProvider, resolveHostModel } = await import(
   "../../shared/src/quota/limits.ts"
 );
 
@@ -20,24 +20,6 @@ test("classifyProvider maps local-subprocess to local", () => {
 test("classifyProvider maps subprocess-template and vscode-task to unknown", () => {
   assert.equal(classifyProvider("subprocess-template"), "unknown");
   assert.equal(classifyProvider("vscode-task"), "unknown");
-});
-
-test("lookupKnownModel finds anthropic/claude-sonnet-4-6", () => {
-  const found = lookupKnownModel("anthropic/claude-sonnet-4-6");
-  assert.ok(found, "model should be in the DB");
-  assert.equal(found.context_tokens, 200_000);
-  assert.equal(found.output_tokens, 8_192);
-});
-
-test("lookupKnownModel is case-insensitive", () => {
-  const found = lookupKnownModel("Anthropic/Claude-Sonnet-4-6");
-  assert.ok(found);
-  assert.equal(found.context_tokens, 200_000);
-});
-
-test("lookupKnownModel returns undefined for unknown model", () => {
-  const found = lookupKnownModel("unknown-vendor/unknown-model");
-  assert.equal(found, undefined);
 });
 
 test("resolveLimits uses explicit config when quota.models has an entry", () => {
@@ -64,17 +46,30 @@ test("resolveLimits uses explicit config when quota.models has an entry", () => 
   assert.equal(result.limits.input_tokens_per_minute, null);
 });
 
-test("resolveLimits uses known_metadata for recognized model without explicit config", () => {
+test("resolveLimits uses discovered_capability when the handshake reports a window", () => {
+  const result = resolveLimits({
+    providerName: "claude-code",
+    sessionConfig: {},
+    hostModel: "anthropic/claude-opus-4-7",
+    discoveredLimits: { context_tokens: 200_000, output_tokens: 32_000 },
+  });
+  assert.equal(result.source, "discovered_capability");
+  assert.equal(result.confidence, "high");
+  assert.equal(result.limits.context_tokens, 200_000);
+  assert.equal(result.limits.output_tokens, 32_000);
+});
+
+test("resolveLimits falls back to provider_default for a named model with no discovered window", () => {
+  // No static known-model table: a recognized model name carries no special
+  // limits — only a discovered window or explicit config does.
   const result = resolveLimits({
     providerName: "claude-code",
     sessionConfig: {},
     hostModel: "anthropic/claude-opus-4-7",
   });
-  assert.equal(result.source, "known_metadata");
-  assert.equal(result.confidence, "medium");
-  assert.equal(result.limits.context_tokens, 200_000);
-  assert.equal(result.limits.output_tokens, 32_000);
-  assert.equal(result.limits.requests_per_minute, null);
+  assert.equal(result.source, "provider_default");
+  assert.equal(result.confidence, "low");
+  assert.equal(result.limits.context_tokens, 32_000);
 });
 
 test("resolveLimits falls back to provider_default when model is unknown", () => {
@@ -106,7 +101,7 @@ test("resolveLimits with no hostModel falls back to provider_default for hosted 
   assert.equal(result.confidence, "low");
 });
 
-test("explicit_config overrides known_metadata even for a known model", () => {
+test("explicit_config takes precedence for a configured model", () => {
   const result = resolveLimits({
     providerName: "claude-code",
     sessionConfig: {

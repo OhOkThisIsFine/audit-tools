@@ -1,40 +1,22 @@
 // Canonical token-budget arithmetic shared by both orchestrators.
 //
-// Before Phase 0 each package carried its own copy of the model-limits table
-// and a per-line token estimator (auditor `reviewPackets.ts`, remediator
-// `plan.ts`). This module is the single source of truth for:
-//   - the known-model context/output limits,
+// Before Phase 0 each package carried its own copy of a per-line token
+// estimator (auditor `reviewPackets.ts`, remediator `plan.ts`). This module is
+// the single source of truth for:
 //   - the byte- and line-based token estimators,
 //   - the default budgets and safety margin used when sizing work blocks.
+//
+// Model context/output windows are NOT hardcoded here — they are discovered at
+// the dispatch-time capability handshake (see quota/limits.ts
+// `discovered_capability`). When nothing is discovered, sizing falls to the
+// conservative floor below, never to a guessed per-model window.
 
-export interface ModelTokenLimits {
-  context_tokens: number;
-  output_tokens: number;
-}
-
-// Known-model context/output limits. RPM/TPM are tier-dependent and must come
-// from learning, so they are intentionally omitted here (see quota/limits.ts).
-export const KNOWN_MODEL_LIMITS: Record<string, ModelTokenLimits> = {
-  "anthropic/claude-opus-4-8": { context_tokens: 200_000, output_tokens: 32_000 },
-  "anthropic/claude-opus-4-7": { context_tokens: 200_000, output_tokens: 32_000 },
-  "anthropic/claude-sonnet-4-6": { context_tokens: 200_000, output_tokens: 8_192 },
-  "anthropic/claude-haiku-4-5": { context_tokens: 200_000, output_tokens: 8_192 },
-  "anthropic/claude-opus-4-5": { context_tokens: 200_000, output_tokens: 8_192 },
-  "anthropic/claude-sonnet-4-5": { context_tokens: 200_000, output_tokens: 8_192 },
-  "openai/gpt-4o": { context_tokens: 128_000, output_tokens: 16_384 },
-  "openai/gpt-4o-mini": { context_tokens: 128_000, output_tokens: 16_384 },
-  "google/gemini-2.0-flash": { context_tokens: 1_048_576, output_tokens: 8_192 },
-  "google/gemini-1.5-pro": { context_tokens: 2_097_152, output_tokens: 8_192 },
-};
-
-/** Case-insensitive lookup of a known model's context/output limits. */
-export function lookupModelLimits(modelKey: string): ModelTokenLimits | undefined {
-  return KNOWN_MODEL_LIMITS[modelKey.toLowerCase().trim()];
-}
-
-// Conservative default budgets when no model is configured or recognized.
-export const DEFAULT_CONTEXT_TOKENS = 200_000;
-export const DEFAULT_OUTPUT_TOKENS = 8_192;
+// Conservative default budgets when no window is configured or discovered. This
+// matches the quota subsystem's conservative floor (quota/limits.ts
+// `defaultLimits`): a headless run that cannot discover its window sizes small
+// and honest rather than assuming a large model's context.
+export const DEFAULT_CONTEXT_TOKENS = 32_000;
+export const DEFAULT_OUTPUT_TOKENS = 4_096;
 
 // Fraction of the usable window (context − reserved output) a single work block
 // or review packet is allowed to occupy. Leaves headroom for the host prompt.
@@ -65,20 +47,17 @@ export function estimateTokensFromBytes(bytes: number): number {
 
 /**
  * Usable context budget for a single work block: (context − reserved output)
- * scaled by the safety margin. Falls back to a known model's limits, then to
- * the conservative defaults.
+ * scaled by the safety margin. Callers pass the discovered/configured window;
+ * absent that, sizing falls to the conservative floor (never a guessed
+ * per-model window).
  */
 export function resolveContextBudget(input: {
   contextTokens?: number | null;
   reservedOutputTokens?: number | null;
-  hostModel?: string | null;
   safetyMargin?: number;
 }): number {
-  const known = input.hostModel ? lookupModelLimits(input.hostModel) : undefined;
-  const contextTokens =
-    input.contextTokens ?? known?.context_tokens ?? DEFAULT_CONTEXT_TOKENS;
-  const outputTokens =
-    input.reservedOutputTokens ?? known?.output_tokens ?? DEFAULT_OUTPUT_TOKENS;
+  const contextTokens = input.contextTokens ?? DEFAULT_CONTEXT_TOKENS;
+  const outputTokens = input.reservedOutputTokens ?? DEFAULT_OUTPUT_TOKENS;
   const margin = input.safetyMargin ?? BLOCK_SAFETY_MARGIN;
   return Math.floor((contextTokens - outputTokens) * margin);
 }

@@ -1,7 +1,6 @@
 // Re-exported from @audit-tools/shared
 export {
   resolveLimits,
-  lookupKnownModel,
   classifyProvider,
   readQuotaState,
   writeQuotaState,

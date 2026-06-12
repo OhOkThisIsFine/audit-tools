@@ -349,7 +349,6 @@ function resolveContextBudgetFromConfig(sessionConfig: SessionConfig | null): nu
   return resolveContextBudget({
     contextTokens: quota.context_tokens ?? null,
     reservedOutputTokens: quota.reserved_output_tokens ?? null,
-    hostModel: quota.host_model ?? null,
   });
 }
 

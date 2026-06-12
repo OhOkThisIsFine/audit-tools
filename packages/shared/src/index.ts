@@ -137,10 +137,7 @@ export {
 } from "./agentReflections.js";
 
 // Tokens
-export type { ModelTokenLimits } from "./tokens.js";
 export {
-  KNOWN_MODEL_LIMITS,
-  lookupModelLimits,
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_OUTPUT_TOKENS,
   BLOCK_SAFETY_MARGIN,
@@ -309,7 +306,6 @@ export type {
 export type { QuotaSource, QuotaUsageSnapshot } from "./quota/quotaSource.js";
 export {
   resolveLimits,
-  lookupKnownModel,
   classifyProvider,
   resolveHostModel,
   agentHostFallbackConcurrency,

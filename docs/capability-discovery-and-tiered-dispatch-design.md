@@ -118,7 +118,7 @@ artifacts are an ephemeral record of *this* session's JIT choices, not authority
 | Per-packet complexity/tier | Computed but **cosmetic + plan-time** (move risk → persisted, tier → JIT) | [dispatch.ts:215-268](../packages/audit-code/src/cli/dispatch.ts) `buildDispatchModelHint` |
 | Multi-pool capacity | `computeDispatchCapacity({pools:[...]})` accepts N pools; only 1 built today | [capacity.ts:93-279](../packages/shared/src/quota/capacity.ts) |
 | Capability handshake | `provider_confirmation` step exists (first obligation) | nextStep priority chain |
-| Per-model static limits | Hardcoded table — **to retire**; replaced by dispatch-time discovery | [tokens.ts:17-28](../packages/shared/src/tokens.ts) `KNOWN_MODEL_LIMITS` |
+| Per-model static limits | **Retired (N5c)** — replaced by dispatch-time discovery (`discovered_capability`) + conservative floor | gone from `shared/src/{tokens.ts,quota/limits.ts}` |
 | Token estimate | Deterministic byte estimate exists | `estimateTokensFromBytes` (shared) |
 | Packet grouping | Directory/flow-proximity merge exists → **repurpose into edge-weight derivation** (graph, not frozen packets) | [reviewPackets.ts](../packages/audit-code/src/orchestrator/reviewPackets.ts) (commit 3e6983bc) |
 | Code-structure graph | `graph_bundle.json` (units/flows/edges) — **distinct** from the new task-affinity graph | [graph_bundle.json] |
@@ -248,15 +248,23 @@ partitioner is not yet wired, so the tree stays green and resumable):
   cluster the 32k default splits to 2 packets packs into 1 under a reported 200k
   window. The `163 → ~30` collapse now happens whenever the host reports its window.
 
-**Next: N5c — retire `KNOWN_MODEL_LIMITS` as authority.** With discovered
-capabilities authoritative, delete the static-table rung from `resolveLimits`
-(`lookupKnownModel`/`lookupModelLimits`) and the `PROVIDER_DEFAULT_HOST_MODEL`
-hardcoded model id (`shared/src/quota/limits.ts`), plus the table itself
-(`shared/src/tokens.ts`). Note: `resolveContextBudget` in `tokens.ts` is also used
-by remediate-code's plan phase — that consumer sweep overlaps **N8** (remediate
-parity), so N5c + N8 may land together. Headless with no reported window honestly
-falls to the conservative default (not a hardcoded 200k) — that is correct, not a
-regression. Then **N6** condensed confirm_intent, **N7** deep conceptual fan-out.
+**N5c — `KNOWN_MODEL_LIMITS` retired as authority (DONE).** Deleted the
+static-table rung from `resolveLimits`, `lookupKnownModel`, and the
+`PROVIDER_DEFAULT_HOST_MODEL` hardcoded model id (`shared/src/quota/limits.ts`),
+plus the `KNOWN_MODEL_LIMITS` table / `lookupModelLimits` / `ModelTokenLimits`
+(`shared/src/tokens.ts`) and all barrel re-exports. Discovered capability (or
+explicit config) is the sole window authority; `resolveContextBudget` lost its
+`hostModel` lookup and the conservative floor dropped to 32k/4096 — a run that
+can't discover its window sizes small and honest, never a guessed 200k.
+`LimitSource` drops `known_metadata`; both `dispatch_quota.schema.json` enums swap
+it for `discovered_capability` (closing an N5b enum gap). Remediate's plan
+consumer (`resolveContextBudgetFromConfig`) dropped its `hostModel` arg; the
+fuller move of remediate onto the discovered-capability *channel* rides **N8**.
+All three suites green.
+
+**Next: N6 — condensed `confirm_intent` roundtrip,** then **N7** deep conceptual
+fan-out, **N8** remediate-code parity (folds in remediate's discovered-capability
+window plumbing).
 
 ## Resolved decisions (2026-06-12)
 
