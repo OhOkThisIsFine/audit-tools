@@ -1,4 +1,5 @@
 import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
+import type { DispatchModelTier } from "../types/stepContract.js";
 import type {
   HostConcurrencyLimit,
   QuotaStateEntry,
@@ -96,6 +97,12 @@ export interface CapacityPool {
   providerName: ResolvedProviderName;
   hostModel: string | null;
   /**
+   * Relative rank this pool serves when the host reported a model roster at
+   * the handshake (aligned with `DispatchModelHint.tier`). Absent for the
+   * single-window handshake.
+   */
+  rank?: DispatchModelTier;
+  /**
    * Hard ceiling on simultaneously active subagents for this pool, if the host
    * reported one (e.g. `--host-max-active-subagents`, or `parallel_workers` from
    * session-config). null leaves only the rate / learned / first-contact caps.
@@ -112,6 +119,8 @@ export interface CapacityPool {
 /** One pool's slice of the overall dispatch capacity. */
 export interface PoolDispatchAllocation {
   pool_id: string;
+  /** Relative rank this pool serves, when the host reported a roster. */
+  rank?: DispatchModelTier;
   /** Concurrent dispatch slots this pool can sustain right now. */
   slots: number;
   /** Full wave schedule for this pool (resolved limits, binding cap, cooldown). */
@@ -121,6 +130,7 @@ export interface PoolDispatchAllocation {
 /** Compact, serializable view of one pool allocation for dispatch-quota files. */
 export interface DispatchCapacityPoolSummary {
   pool_id: string;
+  rank?: DispatchModelTier;
   slots: number;
   model: string | null;
   confidence: WaveSchedule["confidence"];
@@ -296,6 +306,7 @@ function schedulePool(
   });
   return {
     pool_id: pool.id,
+    ...(pool.rank ? { rank: pool.rank } : {}),
     slots: itemTokens.length > 0
       ? Math.min(schedule.max_concurrent, itemTokens.length)
       : schedule.max_concurrent,
@@ -324,6 +335,7 @@ export function summarizeDispatchCapacityPools(
 ): DispatchCapacityPoolSummary[] {
   return capacity.pools.map((allocation) => ({
     pool_id: allocation.pool_id,
+    ...(allocation.rank ? { rank: allocation.rank } : {}),
     slots: allocation.slots,
     model: allocation.schedule.model,
     confidence: allocation.schedule.confidence,

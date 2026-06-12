@@ -33,11 +33,24 @@ conservative 32k floor. Report:
 - `--host-max-active-subagents` — how many review subagents you can run in
   parallel (via the `Agent`/`task` tool). Without it the backend assumes serial
   dispatch and sizes waves to one packet at a time.
-- `--host-context-tokens` / `--host-output-tokens` — the context window and
-  output cap of the model your review subagents run on. These size each packet
-  to fill the real window; omit them and dispatch falls back to the conservative
-  32k default (many tiny packets). Use the actual numbers for your dispatch
-  model — discover them, do not guess a smaller-than-real value.
+- `--host-models` — an ordered JSON array (lowest rank first) of the models you
+  can dispatch subagents to *right now*, one entry per relative rank:
+  `{"rank": "small"|"standard"|"deep", "context_tokens": N, "output_tokens": N}`.
+  Ranks are relative capability labels that line up with each packet's
+  `model_hint.tier` — never report model names to the backend. Report only ranks
+  you can actually dispatch to; the backend partitions and budgets each packet
+  against the window of the rank its risk routes it to. Discover the real
+  windows, do not guess smaller-than-real values.
+- `--host-context-tokens` / `--host-output-tokens` — single-model shorthand when
+  every subagent runs on one model: the context window and output cap of that
+  model. When `--host-models` is also given, the roster wins. Omit both and
+  dispatch falls back to the conservative 32k default (many tiny packets).
+
+```bash
+audit-code next-step --host-max-active-subagents 4 --host-models '[{"rank":"small","context_tokens":32000,"output_tokens":8000},{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
+```
+
+Or with a single dispatch model:
 
 ```bash
 audit-code next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
@@ -45,7 +58,7 @@ audit-code next-step --host-max-active-subagents 4 --host-context-tokens 200000 
 
 `4` is a safe concurrency default for this host; raise it for more parallelism or
 lower it under rate-limit pressure. The backend's learned quota adapts from
-there. The token values should match the window of the model dispatching the
+there. The token values should match the window of the model(s) dispatching the
 packets (e.g. 200000 / 32000 for a 200k-context model).
 
 When developing `auditor-lambda` itself, from the monorepo root use:
