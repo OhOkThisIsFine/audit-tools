@@ -281,10 +281,30 @@ have been rejected had anything enforced it. Headless auto-complete omits
 actual fan-out wiring is **N7**. All three suites green (shared 385 / audit-code
 1788 / remediate 1133).
 
-**Next: N7** deep conceptual fan-out (promote the in-prompt perspectives to N real
-parallel subagents + independent judge, wired from `IntentCheckpoint.design_review`),
-then **N8** remediate-code parity (folds in remediate's discovered-capability
-window plumbing).
+**N7 — deep conceptual = real dispatch fan-out (DONE).** The old single-agent
+"imagine 3–5 perspectives" instruction (`designReviewPrompt.ts` deepSection) is
+deleted and replaced by real fan-out: a built-in roster of 7 maximally-dissimilar
+`CONCEPTUAL_PERSPECTIVES`, `clampPerspectiveCount`/`selectPerspectives`, and real
+`renderConceptualPerspectivePrompt` + `renderConceptualJudgePrompt` renderers. New
+`cli/conceptualDispatch.ts` owns the JIT seam: `resolveConceptualReviewSettings`
+(user-confirmed `IntentCheckpoint.design_review` wins → `sessionConfig.design_review`
+fallback → default **shallow**) and `prepareConceptualDispatch` — shallow writes one
+conceptual prompt; deep writes N perspective prompt files + a judge prompt, the
+**independent** judge writing the single `design-review-conceptual-findings.json`
+the orchestrator already ingests (state machine unchanged; the perspectives'
+intermediate result files are never ingested). Both dispatch branches
+(`design_review_parallel`, `design_review_conceptual`) resolve depth JIT and emit
+the fan-out instructions + access read/write paths. `DesignReviewConfig` gains
+`perspectives` (mirrors the checkpoint field). 12 new tests in
+`conceptual-fanout.test.mjs`; full suite green (audit-code 1799 pass / 1 skip).
+Note: deep is **dispatch fan-out of subagents**, not multi-*model* routing — the
+perspectives/judge are themselves packetized JIT by the active provider; relative
+model-rank routing of those subagents is the broader N7-territory follow-on the
+`partitionTaskGraph.routing_risk` already computes but nothing yet consumes.
+
+**Next: N8** remediate-code parity — mirror the plan/dispatch seam + JIT into
+remediate-code's implement/verify dispatch, folding in remediate's
+discovered-capability window plumbing (the host-window flags audit got in N5b).
 
 ## Resolved decisions (2026-06-12)
 
