@@ -6,6 +6,10 @@ export interface DiscoveredRateLimits {
   requests_per_minute?: number | null;
   input_tokens_per_minute?: number | null;
   output_tokens_per_minute?: number | null;
+  /** Discovered context window for the dispatch model (capability handshake). */
+  context_tokens?: number | null;
+  /** Discovered output cap for the dispatch model (capability handshake). */
+  output_tokens?: number | null;
   source: string;
 }
 
@@ -113,6 +117,8 @@ export function mergeDiscoveredLimits(
     merged.requests_per_minute ??= source.requests_per_minute;
     merged.input_tokens_per_minute ??= source.input_tokens_per_minute;
     merged.output_tokens_per_minute ??= source.output_tokens_per_minute;
+    merged.context_tokens ??= source.context_tokens;
+    merged.output_tokens ??= source.output_tokens;
   }
   return merged;
 }

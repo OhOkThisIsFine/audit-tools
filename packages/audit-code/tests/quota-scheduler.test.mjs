@@ -332,7 +332,7 @@ test("scheduleWave defaults agent-host providers to parallel dispatch, not seria
   assert.equal(unknown.max_concurrent, 1);
 });
 
-test("resolveHostModel: explicit -> config -> env -> per-provider default -> null", () => {
+test("resolveHostModel: explicit -> config -> env -> null", () => {
   // Explicit override wins over everything.
   assert.equal(
     resolveHostModel({
@@ -363,11 +363,12 @@ test("resolveHostModel: explicit -> config -> env -> per-provider default -> nul
     }),
     "x/env",
   );
-  // Then a per-provider default for a known agent host (engages per-model quota).
-  const claudeCodeDefault = resolveHostModel({ providerName: "claude-code", sessionConfig: {}, env: {} });
-  assert.ok(typeof claudeCodeDefault === "string" && claudeCodeDefault.length > 0,
-    `expected a non-empty per-provider default for claude-code, got ${claudeCodeDefault}`);
-  // A provider without a default and no signal → null (genuinely unknown model).
+  // No signal → null (genuinely unknown model — no hardcoded per-provider
+  // default; the real window comes from the dispatch-time handshake).
+  assert.equal(
+    resolveHostModel({ providerName: "claude-code", sessionConfig: {}, env: {} }),
+    null,
+  );
   assert.equal(
     resolveHostModel({ providerName: "subprocess-template", sessionConfig: {}, env: {} }),
     null,
@@ -545,10 +546,11 @@ test("scheduleWave source and confidence reflect the limit origin", () => {
     providerName: "claude-code",
     sessionConfig: {},
     hostModel: "anthropic/claude-sonnet-4-6",
+    discoveredLimits: { context_tokens: 200_000, output_tokens: 8_192 },
     requestedConcurrency: 1,
   });
-  assert.equal(schedule.source, "known_metadata");
-  assert.equal(schedule.confidence, "medium");
+  assert.equal(schedule.source, "discovered_capability");
+  assert.equal(schedule.confidence, "high");
   assert.equal(schedule.model, "anthropic/claude-sonnet-4-6");
 });
 

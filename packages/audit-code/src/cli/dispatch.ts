@@ -25,9 +25,15 @@ import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import {
   orderTasksForPacketReview,
-  buildReviewPackets,
+  buildReviewPacketsFromPartition,
   sizeIndexFromManifest,
 } from "../orchestrator/reviewPackets.js";
+import type { ReviewPacket } from "../types/reviewPlanning.js";
+import {
+  buildTaskAffinityGraph,
+  filterTaskAffinityGraph,
+  type TaskAffinityGraph,
+} from "../orchestrator/taskAffinityGraph.js";
 import { buildFileAnchorSummary, type FileAnchorSummary } from "../orchestrator/fileAnchors.js";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
@@ -377,8 +383,8 @@ export function buildPendingAuditTasks(bundle: ArtifactBundle) {
 }
 
 interface FilterPacketsResult {
-  emitPackets: ReturnType<typeof buildReviewPackets>;
-  deferredPackets: ReturnType<typeof buildReviewPackets>;
+  emitPackets: ReviewPacket[];
+  deferredPackets: ReviewPacket[];
 }
 
 /**
@@ -386,7 +392,7 @@ interface FilterPacketsResult {
  * Returns the subset of packets to emit this round plus deferred packets.
  */
 export function filterPackets(
-  packets: ReturnType<typeof buildReviewPackets>,
+  packets: ReviewPacket[],
   sessionConfig: SessionConfig,
 ): FilterPacketsResult {
   const maxPackets = sessionConfig.dispatch?.max_packets;
@@ -409,7 +415,7 @@ export function filterPackets(
  * Appends to the provided warnings array on unavailability or failure.
  */
 async function extractPacketAnchor(params: {
-  packet: ReturnType<typeof buildReviewPackets>[number];
+  packet: ReviewPacket;
   reviewRoot: string | undefined;
   bundle: Awaited<ReturnType<typeof loadArtifactBundle>>;
   taskResultsDir: string;
@@ -503,7 +509,7 @@ export function buildTaskSections(
  * and writes the JSON to `result_path` on their behalf. No shell submit command.
  */
 export function buildPacketPrompt(params: {
-  packet: ReturnType<typeof buildReviewPackets>[number];
+  packet: ReviewPacket;
   packetTasks: AuditTask[];
   fileList: string;
   largeFileSection: string[];
@@ -593,26 +599,39 @@ export function buildPacketPrompt(params: {
   ].join("\n");
 }
 
+interface ResolvedDispatchPool {
+  hostPool: CapacityPool;
+  hostModel: string | null;
+  /**
+   * Per-packet input-token ceiling for partitioning: the model's resolved
+   * context window minus its reserved output budget. Discovered here so the JIT
+   * graph partition (which runs BEFORE quota/capacity) sizes packets to the real
+   * dispatching model rather than a frozen plan-time cap.
+   */
+  contextBudgetTokens: number;
+}
+
 /**
- * Encapsulates host-model resolution, quota state lookup, provider-limits query,
- * capacity computation, and writing the dispatch-quota artifact.
+ * Resolve the dispatching host pool (host-model resolution, quota state lookup,
+ * provider-limits query) and probe its resolved context budget — everything
+ * needed to size the JIT graph partition. The pool is reused by
+ * `finalizeDispatchQuota` after packetization, so this work happens once.
+ *
+ * The probe runs `computeDispatchCapacity` with no pending work: resolved limits
+ * are model-derived (not work-derived), so the context window is available
+ * before any packet exists. This is the quota-before-packetization reorder.
  */
-async function computeDispatchQuota(params: {
-  runId: string;
-  artifactsDir: string;
-  runDir: string;
+async function buildDispatchPool(params: {
   sessionConfig: SessionConfig;
-  perPacketTokens: number[];
   hostModel: string | null | undefined;
   queryLimits: ((model: string | null) => Promise<ProviderRateLimits | null>) | undefined;
   hostActiveSubagentLimit: number | null | undefined;
-}): Promise<{
-  dispatchQuota: DispatchQuota;
-  dispatchQuotaPath: string;
-  waveSchedule: ReturnType<typeof computeDispatchCapacity>["primary"]["schedule"];
-  dispatchCapacity: ReturnType<typeof computeDispatchCapacity>;
-}> {
-  const { runId, runDir, sessionConfig, perPacketTokens, queryLimits, hostActiveSubagentLimit } = params;
+  /** Context window the host reports for its dispatch model (handshake). */
+  hostContextTokens?: number | null;
+  /** Output cap the host reports for its dispatch model (handshake). */
+  hostOutputTokens?: number | null;
+}): Promise<ResolvedDispatchPool> {
+  const { sessionConfig, queryLimits, hostActiveSubagentLimit } = params;
   const quotaProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
   const hostModel = resolveHostModel({
     providerName: quotaProviderName,
@@ -633,7 +652,24 @@ async function computeDispatchQuota(params: {
       .catch(() => null)
     ?? null;
   const dispatchCachedLimits = await lookupDiscoveredLimits(quotaProviderKey).catch(() => null);
-  const discoveredLimits = mergeDiscoveredLimits(providerLimits, dispatchCachedLimits);
+  // The capability handshake: the host reported its dispatch model's real
+  // context/output window this session. Merged FIRST so it outranks the queried
+  // and cached limits for context/output (N5a's discovered-capability rung then
+  // sizes the partition to the real window). RPM/TPM stay null here and fill
+  // from the queried/cached sources.
+  const hostCapabilityLimits: DiscoveredRateLimits | null =
+    params.hostContextTokens != null || params.hostOutputTokens != null
+      ? {
+          context_tokens: params.hostContextTokens ?? null,
+          output_tokens: params.hostOutputTokens ?? null,
+          source: "host_capability",
+        }
+      : null;
+  const discoveredLimits = mergeDiscoveredLimits(
+    hostCapabilityLimits,
+    providerLimits,
+    dispatchCachedLimits,
+  );
   const halfLifeHours =
     sessionConfig.quota?.empirical_half_life_hours ??
     DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
@@ -648,6 +684,38 @@ async function computeDispatchQuota(params: {
     discoveredLimits,
     quotaSourceSnapshot,
   };
+  const probe = computeDispatchCapacity({
+    pools: [hostPool],
+    sessionConfig,
+    pendingItemTokens: [],
+  });
+  const limits = probe.primary.schedule.resolved_limits;
+  const contextBudgetTokens = Math.max(
+    1,
+    limits.context_tokens - limits.output_tokens,
+  );
+  return { hostPool, hostModel, contextBudgetTokens };
+}
+
+/**
+ * Compute just-in-time dispatch capacity for the already-resolved pool against
+ * the real per-packet token layout, and write the dispatch-quota artifact.
+ * Runs AFTER packetization so capacity reflects the actual partitioned packets.
+ */
+async function finalizeDispatchQuota(params: {
+  runId: string;
+  runDir: string;
+  sessionConfig: SessionConfig;
+  hostPool: CapacityPool;
+  hostModel: string | null;
+  perPacketTokens: number[];
+}): Promise<{
+  dispatchQuota: DispatchQuota;
+  dispatchQuotaPath: string;
+  waveSchedule: ReturnType<typeof computeDispatchCapacity>["primary"]["schedule"];
+  dispatchCapacity: ReturnType<typeof computeDispatchCapacity>;
+}> {
+  const { runId, runDir, sessionConfig, hostPool, hostModel, perPacketTokens } = params;
   const dispatchCapacity = computeDispatchCapacity({
     pools: [hostPool],
     sessionConfig,
@@ -672,6 +740,33 @@ async function computeDispatchQuota(params: {
   const dispatchQuotaPath = join(runDir, "dispatch-quota.json");
   await writeJsonFile(dispatchQuotaPath, dispatchQuota);
   return { dispatchQuota, dispatchQuotaPath, waveSchedule, dispatchCapacity };
+}
+
+/**
+ * Resolve the task-affinity graph to partition at dispatch: prefer the persisted
+ * provider-neutral graph (built + frozen at planning) restricted to the still-
+ * pending tasks; fall back to building one from the dispatch tasks when the
+ * persisted graph is missing or doesn't cover every pending task (older
+ * artifacts or freshly generated tasks). Frozen per-task estimates live on the
+ * tasks, so a rebuild reuses the same node numbers.
+ */
+function resolveDispatchTaskGraph(
+  bundle: ArtifactBundle,
+  orderedTasks: AuditTask[],
+): TaskAffinityGraph {
+  const pendingIds = new Set(orderedTasks.map((task) => task.task_id));
+  const persisted = bundle.task_affinity_graph;
+  if (persisted && persisted.nodes.length > 0) {
+    const covered = persisted.nodes.filter((node) =>
+      pendingIds.has(node.task_id),
+    ).length;
+    if (covered === pendingIds.size) {
+      return filterTaskAffinityGraph(persisted, pendingIds);
+    }
+  }
+  return buildTaskAffinityGraph(orderedTasks, {
+    graphBundle: bundle.graph_bundle,
+  });
 }
 
 /**
@@ -712,6 +807,10 @@ export async function prepareDispatchArtifacts(params: {
   hostModel?: string | null;
   queryLimits?: (model: string | null) => Promise<ProviderRateLimits | null>;
   hostActiveSubagentLimit?: number | null;
+  /** Context window the host reports for its dispatch model (handshake). */
+  hostContextTokens?: number | null;
+  /** Output cap the host reports for its dispatch model (handshake). */
+  hostOutputTokens?: number | null;
 }): Promise<PrepareDispatchResult> {
   const runId = params.runId;
   const artifactsDir = params.artifactsDir;
@@ -771,7 +870,24 @@ export async function prepareDispatchArtifacts(params: {
     lineIndex,
     sizeIndex,
   });
-  const packets = buildReviewPackets(orderedTasks, {
+
+  // Quota-before-packetization: resolve the dispatching model's context budget
+  // first, then partition the provider-neutral task-affinity graph into packets
+  // sized to that budget (JIT). This replaces the frozen plan-time packet cap —
+  // a run started under one model re-partitions cleanly under another's window.
+  const dispatchPool = await buildDispatchPool({
+    sessionConfig,
+    hostModel: params.hostModel,
+    queryLimits: params.queryLimits,
+    hostActiveSubagentLimit: params.hostActiveSubagentLimit,
+    hostContextTokens: params.hostContextTokens,
+    hostOutputTokens: params.hostOutputTokens,
+  });
+  const taskGraph = resolveDispatchTaskGraph(bundle, orderedTasks);
+  const packets = buildReviewPacketsFromPartition(orderedTasks, {
+    graph: taskGraph,
+    contextTokenBudget: dispatchPool.contextBudgetTokens,
+    riskMassBudget: sessionConfig.dispatch?.risk_mass_budget,
     graphBundle: bundle.graph_bundle,
     lineIndex,
     sizeIndex,
@@ -911,24 +1027,19 @@ export async function prepareDispatchArtifacts(params: {
   } satisfies DispatchResultMap);
 
   const perPacketTokens = plan.map((p) => p.complexity.estimated_tokens);
-  // Size the dispatch just-in-time against the full pending layout (one token
-  // estimate per emitted packet) and the host pool's current limits, rather than
-  // a preset wave size. `parallel_workers` is no longer the ambition — it is
-  // folded into hostConcurrencyLimit as a ceiling (resolveHostActiveSubagentLimit).
-  // Today there is a single pool (the conversation host's subagents); a
-  // heterogeneous provider pool slots in here without changing the call.
-  // Resolve the host model (explicit/CLI override → block_quota.host_model → env
-  // → per-provider default) so per-model quota detection engages with realistic
-  // limits instead of the conservative unknown-model floor.
-  const { dispatchQuotaPath, waveSchedule, dispatchCapacity } = await computeDispatchQuota({
+  // Size the dispatch just-in-time against the partitioned packet layout (one
+  // token estimate per emitted packet) and the host pool resolved above, rather
+  // than a preset wave size. `parallel_workers` is no longer the ambition — it
+  // is folded into hostConcurrencyLimit as a ceiling. Today there is a single
+  // pool (the conversation host's subagents); a heterogeneous provider pool
+  // slots in here without changing the call.
+  const { dispatchQuotaPath, waveSchedule, dispatchCapacity } = await finalizeDispatchQuota({
     runId,
-    artifactsDir,
     runDir,
     sessionConfig,
+    hostPool: dispatchPool.hostPool,
+    hostModel: dispatchPool.hostModel,
     perPacketTokens,
-    hostModel: params.hostModel,
-    queryLimits: params.queryLimits,
-    hostActiveSubagentLimit: params.hostActiveSubagentLimit,
   });
 
   warnings.push(...collectOversizedWarnings(plan, waveSchedule));

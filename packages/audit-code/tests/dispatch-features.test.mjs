@@ -174,6 +174,99 @@ await test("single packet on first contact dispatches normally", async (t) => {
   assert.equal(result.packet_count, 1);
 });
 
+// ── JIT graph partition drives packetization (N4b keystone) ──────────────────
+// Two tasks on the SAME file, different lenses → a strong (cross_lens_same_file)
+// affinity edge. Whether they share a packet is now decided by the dispatching
+// model's context budget at dispatch time, not a frozen plan-time cap.
+
+// `tokenEstimate` is the frozen per-task content-token estimate the partition
+// accumulates against the model's context ceiling.
+function sharedFileTasks(tokenEstimate) {
+  const file = "src/shared/core.ts";
+  return ["security", "correctness"].map((lens) => ({
+    task_id: `t-${lens}`,
+    unit_id: "unit-shared",
+    pass_id: `pass:${lens}`,
+    lens,
+    file_paths: [file],
+    file_line_counts: { [file]: 120 },
+    rationale: `review ${lens}`,
+    priority: "medium",
+    token_estimate: tokenEstimate,
+    risk_estimate: 0.2,
+  }));
+}
+
+await test("JIT partition merges affinity-linked tasks under the context budget", async (t) => {
+  // 2 × 4000 + prompt overhead sits well under the ~28k default input budget.
+  const { artifactsDir } = await makeArtifactsDir(sharedFileTasks(4000));
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  const result = await run(artifactsDir);
+  assert.equal(
+    result.packet_count,
+    1,
+    "small same-file tasks pack into one coherent packet",
+  );
+});
+
+await test("JIT partition splits a cluster that exceeds the context budget", async (t) => {
+  // 2 × 20000 = 40000 exceeds the ~28k default input budget → cannot merge even
+  // across a strong edge; the partition keeps them as separate packets.
+  const { artifactsDir } = await makeArtifactsDir(sharedFileTasks(20000));
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  const result = await run(artifactsDir);
+  assert.equal(
+    result.packet_count,
+    2,
+    "an oversized cluster splits along its weakest edge under the budget",
+  );
+});
+
+await test("capability handshake: host-reported context window collapses the split (N5b)", async (t) => {
+  // 2 × 20000 = 40000 exceeds the ~28k default input budget → splits to 2 packets
+  // with no handshake. When the host reports a 200k window, the same cluster fits
+  // in one packet — the budget now reflects the real dispatch model.
+  const tasks = sharedFileTasks(20000);
+  const { artifactsDir } = await makeArtifactsDir(tasks);
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  const result = await prepareDispatchArtifacts({
+    packageRoot,
+    runId: RUN_ID,
+    artifactsDir,
+    root: artifactsDir,
+    sessionConfig: {},
+    hostModel: null,
+    hostContextTokens: 200_000,
+    hostOutputTokens: 32_000,
+  });
+  assert.equal(
+    result.packet_count,
+    1,
+    "a 200k host window packs the cluster the 32k default would split",
+  );
+  // The dispatch-quota records the discovered budget for this session.
+  const quota = await readJson(join(artifactsDir, "runs", RUN_ID, "dispatch-quota.json"));
+  assert.equal(quota.resolved_limits.context_tokens, 200_000);
+  assert.equal(quota.source, "discovered_capability");
+});
+
+await test("JIT partition splits a coherent cluster at the risk-mass ceiling", async (t) => {
+  // Small tokens (would merge on token budget alone) but each task is near-max
+  // risk; risk_mass_budget caps aggregate risk so they cannot share a packet.
+  const tasks = sharedFileTasks(2000).map((task) => ({
+    ...task,
+    risk_estimate: 0.9,
+  }));
+  const { artifactsDir } = await makeArtifactsDir(tasks);
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  const result = await run(artifactsDir, { dispatch: { risk_mass_budget: 1.0 } });
+  assert.equal(
+    result.packet_count,
+    2,
+    "0.9 + 0.9 = 1.8 exceeds the 1.0 risk-mass ceiling → no merge",
+  );
+});
+
 // ── FINDING-012: confirmation threshold + dispatch summary ───────────────────
 
 await test("FINDING-012: confirmation_recommended and dispatch_summary on the result", async (t) => {

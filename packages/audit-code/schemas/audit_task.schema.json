@@ -56,6 +56,17 @@
       "type": "string",
       "enum": ["high", "medium", "low"]
     },
+    "token_estimate": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Frozen provider-neutral content-token estimate for this task's files; authoritative input to just-in-time dispatch packetization."
+    },
+    "risk_estimate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Frozen provider-neutral audit-risk score in [0,1]; drives just-in-time risk-mass packetization and model-tier routing."
+    },
     "tags": {
       "type": "array",
       "minItems": 1,

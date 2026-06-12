@@ -351,7 +351,7 @@ const baseQuota = {
     output_tokens_per_minute: null,
   },
   confidence: "high",
-  source: "known_metadata",
+  source: "discovered_capability",
   host_concurrency_limit: null,
   max_concurrent_agents: 5,
   cooldown_until: null,

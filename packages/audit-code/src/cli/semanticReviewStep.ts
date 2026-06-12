@@ -30,6 +30,10 @@ export async function renderSemanticReviewStep(params: {
   activeReviewRun: ActiveReviewRun;
   hostCanDispatch: boolean;
   hostMaxActiveSubagents: number | null;
+  /** Context window the host reports for its dispatch model (handshake). */
+  hostContextTokens?: number | null;
+  /** Output cap the host reports for its dispatch model (handshake). */
+  hostOutputTokens?: number | null;
   hostCanRestrictSubagentTools: boolean;
   hostCanSelectSubagentModel: boolean;
   /** Which executor selected this step; controls prompt variant. */
@@ -83,6 +87,8 @@ export async function renderSemanticReviewStep(params: {
     hostModel: sessionConfig.block_quota?.host_model ?? null,
     queryLimits: provider.queryLimits?.bind(provider),
     hostActiveSubagentLimit: params.hostMaxActiveSubagents,
+    hostContextTokens: params.hostContextTokens,
+    hostOutputTokens: params.hostOutputTokens,
   });
   const mergeCommand = mergeAndIngestCommand(artifactsDir, activeReviewRun.run_id);
   const continueCommand = nextStepCommand(root, artifactsDir);

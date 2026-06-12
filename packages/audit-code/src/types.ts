@@ -151,6 +151,21 @@ export interface AuditTask {
   inputs?: Record<string, string>;
   rationale: string;
   priority?: "high" | "medium" | "low";
+  /**
+   * Frozen, provider-neutral estimate of the content tokens this task's files
+   * contribute to a review prompt. Seeded deterministically at planning
+   * (byte-based) and refined/frozen by the estimate-review step. Authoritative
+   * input to just-in-time dispatch packetization — see
+   * docs/capability-discovery-and-tiered-dispatch-design.md.
+   */
+  token_estimate?: number;
+  /**
+   * Frozen, provider-neutral audit-risk score in [0,1] (likelihood × stakes of
+   * latent defects). Seeded deterministically from priority/lens/tags and
+   * refined/frozen by the estimate-review step. Drives just-in-time risk-mass
+   * packetization and model-tier routing; never a model/provider decision.
+   */
+  risk_estimate?: number;
   tags?: string[];
   status?: AuditTaskStatus;
   completed_at?: string;

@@ -15,15 +15,26 @@ import {
 import { computeMaxSafeConcurrency, computeRampUpConcurrency } from "./state.js";
 
 /**
- * Minimal structural shape of RPM/TPM limits discovered at runtime (e.g. via
- * response-header extraction). Declared here so the scheduler stays decoupled
- * from any package-specific discovery implementation — callers may pass a
- * richer object (with a `source` field, etc.); only these fields are read.
+ * Minimal structural shape of capabilities discovered at runtime — RPM/TPM (e.g.
+ * via response-header extraction) plus, from the dispatch-time capability
+ * handshake, the dispatching model's real context/output window. Declared here
+ * so the scheduler stays decoupled from any package-specific discovery
+ * implementation — callers may pass a richer object (with a `source` field,
+ * etc.); only these fields are read.
+ *
+ * `context_tokens`/`output_tokens`, when present, are the discovered model's
+ * window and take precedence over the static known-model table — they are how
+ * dispatch escapes the conservative 32k default once a host reports its real
+ * capabilities (see docs/capability-discovery-and-tiered-dispatch-design.md).
  */
 export interface DiscoveredRateLimitsInput {
   requests_per_minute?: number | null;
   input_tokens_per_minute?: number | null;
   output_tokens_per_minute?: number | null;
+  /** Discovered context window for the dispatching model, if reported. */
+  context_tokens?: number | null;
+  /** Discovered output cap for the dispatching model, if reported. */
+  output_tokens?: number | null;
 }
 
 export interface ScheduleWaveOptions {
@@ -263,7 +274,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   const halfLifeHours =
     quota.empirical_half_life_hours ?? DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
 
-  const { limits, source, confidence } = resolveLimits({ providerName, sessionConfig, hostModel });
+  const { limits, source, confidence } = resolveLimits({ providerName, sessionConfig, hostModel, discoveredLimits });
 
   // Fill null RPM/TPM from discovered limits (provider query or header extraction)
   if (discoveredLimits) {

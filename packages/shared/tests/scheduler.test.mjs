@@ -132,3 +132,61 @@ test("first_contact cap: scheduleWave applies first_contact_concurrency for unco
   assert.equal(schedule.max_concurrent, 2, "max_concurrent should be capped by first_contact");
   assert.equal(schedule.binding_cap, "first_contact");
 });
+
+// ── Discovered-capability context window (N5a) ───────────────────────────────
+// A host that reports its real context window at the dispatch handshake must
+// outrank the conservative default AND the static known-model table.
+
+test("discovered capability: context window overrides the 32k default for a null model", () => {
+  // model:null normally falls to the 32k provider/default floor. A discovered
+  // 200k window must take over so the partition sizes to the real model.
+  const schedule = scheduleWave({
+    providerName: "local-subprocess",
+    sessionConfig: baseSessionConfig(),
+    hostModel: null,
+    requestedConcurrency: 4,
+    quotaStateEntry: null,
+    hostConcurrencyLimit: null,
+    discoveredLimits: { context_tokens: 200_000, output_tokens: 32_000 },
+  });
+  assert.equal(schedule.resolved_limits.context_tokens, 200_000);
+  assert.equal(schedule.resolved_limits.output_tokens, 32_000);
+  assert.equal(schedule.source, "discovered_capability");
+});
+
+test("discovered capability: explicit per-model config still wins over discovery", () => {
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {
+      quota: {
+        enabled: true,
+        safety_margin: 0.8,
+        empirical_half_life_hours: 24,
+        models: { "test/model": { context_tokens: 128_000, output_tokens: 8_192 } },
+      },
+    },
+    hostModel: "test/model",
+    requestedConcurrency: 4,
+    quotaStateEntry: null,
+    hostConcurrencyLimit: null,
+    discoveredLimits: { context_tokens: 200_000, output_tokens: 32_000 },
+  });
+  assert.equal(schedule.resolved_limits.context_tokens, 128_000);
+  assert.equal(schedule.source, "explicit_config");
+});
+
+test("discovered capability: absent context window leaves resolution unchanged", () => {
+  // Only RPM/TPM discovered (no context window) → context still resolves from
+  // the existing rungs, not the discovered channel.
+  const schedule = scheduleWave({
+    providerName: "local-subprocess",
+    sessionConfig: baseSessionConfig(),
+    hostModel: null,
+    requestedConcurrency: 4,
+    quotaStateEntry: null,
+    hostConcurrencyLimit: null,
+    discoveredLimits: { requests_per_minute: 10 },
+  });
+  assert.equal(schedule.resolved_limits.context_tokens, 32_000);
+  assert.notEqual(schedule.source, "discovered_capability");
+});

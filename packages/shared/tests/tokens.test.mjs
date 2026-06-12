@@ -4,8 +4,6 @@ import assert from "node:assert/strict";
 const {
   estimateTokensFromBytes,
   resolveContextBudget,
-  lookupModelLimits,
-  KNOWN_MODEL_LIMITS,
   BYTES_PER_TOKEN,
   ESTIMATED_TOKENS_PER_LINE,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
@@ -51,17 +49,7 @@ test("estimateTokensFromBytes is monotonic and zero for non-positive/non-finite"
   assert.equal(estimateTokensFromBytes(BYTES_PER_TOKEN * 10), 10);
 });
 
-test("lookupModelLimits is case-insensitive and returns known limits", () => {
-  const opus = lookupModelLimits("anthropic/claude-opus-4-7");
-  assert.deepEqual(opus, { context_tokens: 200_000, output_tokens: 32_000 });
-  assert.deepEqual(
-    lookupModelLimits("  ANTHROPIC/CLAUDE-OPUS-4-7 "),
-    KNOWN_MODEL_LIMITS["anthropic/claude-opus-4-7"],
-  );
-  assert.equal(lookupModelLimits("nonexistent/model"), undefined);
-});
-
-test("resolveContextBudget prefers explicit values, then model, then defaults", () => {
+test("resolveContextBudget prefers explicit values, else the conservative floor", () => {
   const explicit = resolveContextBudget({
     contextTokens: 100_000,
     reservedOutputTokens: 4_000,
@@ -69,9 +57,8 @@ test("resolveContextBudget prefers explicit values, then model, then defaults", 
   });
   assert.equal(explicit, Math.floor((100_000 - 4_000) * 0.5));
 
-  const byModel = resolveContextBudget({ hostModel: "anthropic/claude-opus-4-7" });
-  assert.equal(byModel, Math.floor((200_000 - 32_000) * BLOCK_SAFETY_MARGIN));
-
+  // No window configured/discovered → conservative floor, never a guessed
+  // per-model window.
   const defaults = resolveContextBudget({});
   assert.equal(
     defaults,

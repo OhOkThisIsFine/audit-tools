@@ -1,6 +1,6 @@
 import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type { LimitConfidence, LimitSource, ResolvedLimits } from "./types.js";
-import { lookupModelLimits } from "../tokens.js";
+import type { DiscoveredRateLimitsInput } from "./scheduler.js";
 
 export type ProviderType = "hosted" | "local" | "unknown";
 
@@ -45,13 +45,6 @@ export function agentHostFallbackConcurrency(
     : 1;
 }
 
-// Per-provider default host model, used when no explicit model is configured or
-// detected. Lets per-model quota detection engage with realistic limits (Claude
-// models are 200k context) instead of the conservative unknown-model floor.
-const PROVIDER_DEFAULT_HOST_MODEL: Partial<Record<ResolvedProviderName, string>> = {
-  "claude-code": "anthropic/claude-opus-4-8",
-};
-
 export interface ResolveHostModelOptions {
   providerName: ResolvedProviderName;
   sessionConfig: SessionConfig;
@@ -64,10 +57,11 @@ export interface ResolveHostModelOptions {
 
 // Resolve the host model so per-model quota detection can engage. Precedence:
 // explicit override → session-config (block_quota.host_model) → env hint →
-// per-provider default for a known agent host → null (genuinely unknown).
+// null (genuinely unknown — no hardcoded per-provider model). A null model is
+// expected: quota learning keys on `provider/*` and the dispatch-time capability
+// handshake supplies the real window.
 export function resolveHostModel(options: ResolveHostModelOptions): string | null {
   const {
-    providerName,
     sessionConfig,
     explicitModel,
     env = process.env,
@@ -79,15 +73,8 @@ export function resolveHostModel(options: ResolveHostModelOptions): string | nul
     clean(explicitModel) ??
     clean(sessionConfig.block_quota?.host_model) ??
     (envVar ? clean(env[envVar]) : null) ??
-    PROVIDER_DEFAULT_HOST_MODEL[providerName] ??
     null
   );
-}
-
-export function lookupKnownModel(
-  modelKey: string,
-): Pick<ResolvedLimits, "context_tokens" | "output_tokens"> | undefined {
-  return lookupModelLimits(modelKey);
 }
 
 export interface LimitResolutionResult {
@@ -100,6 +87,12 @@ export interface ResolveLimitsOptions {
   providerName: ResolvedProviderName;
   sessionConfig: SessionConfig;
   hostModel?: string | null;
+  /**
+   * Capabilities discovered at the dispatch-time handshake. When this carries a
+   * `context_tokens`, it is the dispatching model's real window and outranks the
+   * static known-model table (but not an explicit per-model config override).
+   */
+  discoveredLimits?: DiscoveredRateLimitsInput | null;
 }
 
 function defaultLimits(sessionConfig: SessionConfig): ResolvedLimits {
@@ -120,9 +113,10 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
 
   // Resolution order:
   // 1. Explicit per-model config overrides
-  // 2. Static known-model metadata
+  // 2. Discovered capability from the dispatch-time handshake
   // 3. Conservative provider-typed default
   // 4. Generic default fallback
+  // (No static known-model table — model windows are discovered, never guessed.)
   if (hostModel && quota.models?.[hostModel]) {
     const override = quota.models[hostModel];
     return {
@@ -138,22 +132,22 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
     };
   }
 
-  // 2. Static known-model database (context/output only; RPM/TPM from learning)
-  if (hostModel) {
-    const known = lookupKnownModel(hostModel);
-    if (known) {
-      return {
-        limits: {
-          context_tokens: known.context_tokens,
-          output_tokens: known.output_tokens,
-          requests_per_minute: null,
-          input_tokens_per_minute: null,
-          output_tokens_per_minute: null,
-        },
-        source: "known_metadata",
-        confidence: "medium",
-      };
-    }
+  // 1.5 Discovered capability: the host reported this model's real window at the
+  // dispatch handshake. Outranks the static table — it is how dispatch sizes to
+  // the real model (e.g. 200k) instead of the conservative default.
+  const discoveredContext = options.discoveredLimits?.context_tokens;
+  if (typeof discoveredContext === "number" && discoveredContext > 0) {
+    return {
+      limits: {
+        context_tokens: discoveredContext,
+        output_tokens: options.discoveredLimits?.output_tokens ?? defaults.output_tokens,
+        requests_per_minute: options.discoveredLimits?.requests_per_minute ?? null,
+        input_tokens_per_minute: options.discoveredLimits?.input_tokens_per_minute ?? null,
+        output_tokens_per_minute: options.discoveredLimits?.output_tokens_per_minute ?? null,
+      },
+      source: "discovered_capability",
+      confidence: "high",
+    };
   }
 
   // 3. Conservative provider defaults. Concurrency caps remain in the scheduler;
