@@ -163,6 +163,7 @@ function formatDeterministicFindings(findings: Finding[], max = 20): string {
 
 export interface DesignReviewOptions {
   max_units?: number;
+  conceptual_depth?: "standard" | "deep";
 }
 
 /**
@@ -284,6 +285,46 @@ export function renderConceptualReviewPrompt(
   const unitCount = bundle.unit_manifest?.units.length ?? 0;
   const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
   const maxUnits = options.max_units ?? defaultMaxUnits;
+  const isDeep = options.conceptual_depth === "deep";
+
+  const deepSection = isDeep ? [
+    "## Deep review: multi-perspective fan-out",
+    "",
+    "This review uses **deep** conceptual depth. Instead of a single review pass,",
+    "fan out 3–5 independent reviewers with maximally dissimilar perspectives,",
+    "then compile the results via a judge.",
+    "",
+    "**Principle:** maximize dissimilarity between perspectives. Each reviewer",
+    "should approach the codebase from a fundamentally different value system so",
+    "the union of their observations covers angles no single perspective would.",
+    "",
+    "**Example perspectives** (choose or invent based on codebase character):",
+    "",
+    "- A **pragmatist**: “Does this actually work for users? What’s the shortest",
+    "  path to value?”",
+    "- A **mathematician seeking elegance**: minimal complexity, orthogonal",
+    "  abstractions, no redundancy.",
+    "- Someone with a **short attention span**: frustrated by anything taking",
+    "  >30 seconds to understand. If the design can’t be explained simply, it’s",
+    "  too complex.",
+    "- A **novelty-seeker**: always looking for the latest tool, pattern, or",
+    "  library that could replace hand-rolled machinery.",
+    "- An **adversary**: what could go wrong, what’s fragile, what breaks under",
+    "  pressure or at scale?",
+    "",
+    "These are examples, not a fixed set. Choose or invent perspectives that",
+    "fit this specific codebase’s character and domain.",
+    "",
+    "**Process:**",
+    "1. Spawn 3–5 independent sub-agents, each given one perspective and the",
+    "   shared structural context below. They must not see each other’s output.",
+    "2. Collect their findings.",
+    "3. Run a judge agent that merges, deduplicates, and ranks the combined",
+    "   findings. The judge resolves contradictions and drops low-confidence",
+    "   observations that no other perspective corroborates.",
+    "4. The judge’s merged output is the final conceptual review result.",
+    "",
+  ] : [];
 
   return [
     "# Project conceptual design review (generative pass)",
@@ -291,6 +332,7 @@ export function renderConceptualReviewPrompt(
     "You are performing the **conceptual-design-critique** pass on this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide generative observations about broader architecture ideas that static analysis cannot produce.",
     "",
     renderSharedStructuralContext(bundle, maxUnits),
+    ...deepSection,
     "## Conceptual design critique instructions",
     "",
     "- **Tool and library opportunities**: third-party tools, libraries, or frameworks that would improve the project. Concrete suggestions with rationale, not generic advice.",
