@@ -18,6 +18,17 @@ rather than "where the code is today."
 
 ## Known friction (agent / dev experience)
 
+- **`run-to-completion` / `quota` commands silently drop the capability-handshake
+  flags.** Neither path parses `--host-context-tokens` / `--host-output-tokens`
+  (since N5b) nor `--host-models` / `--host-model-id` (F2/F3) — a flag passed
+  there is ignored without error and the batch loop sizes from cached/learned
+  limits only (`lookupDiscoveredLimits` still applies). Pre-existing for the
+  scalar pair; surfaced by the F1–F5 adversarial review 2026-06-12. Decide:
+  wire the flags through `runToCompletion`'s `renderSemanticReviewStep`/
+  `scheduleWave` call sites, or declare the handshake conversation-only and
+  reject the flags loudly on the batch path (or retire the second terminal loop
+  entirely — known wart).
+
 - **Run CLAUDECODE-unset tests via the PowerShell tool, not nested `cmd /c`.**
   `cmd /c "set CLAUDECODE=&& npm test"` from inside the bash tool printed only the
   cmd banner and swallowed all test output. `$env:CLAUDECODE=$null; npm test` in the
