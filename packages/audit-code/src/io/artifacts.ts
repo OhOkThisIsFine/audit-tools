@@ -17,6 +17,7 @@ import type {
   AuditPlanMetrics,
   ReviewPacket,
 } from "../types/reviewPlanning.js";
+import type { TaskAffinityGraph } from "../orchestrator/taskAffinityGraph.js";
 import type {
   RuntimeValidationReport,
   RuntimeValidationTaskManifest,
@@ -71,6 +72,7 @@ type ArtifactPayloadMap = {
   audit_tasks: AuditTask[];
   audit_plan_metrics: AuditPlanMetrics;
   review_packets: ReviewPacket[];
+  task_affinity_graph: TaskAffinityGraph;
   requeue_tasks: AuditTask[];
 
   // --- Phase 4: Reporting ---
@@ -202,6 +204,7 @@ export const ARTIFACT_DEFINITIONS = {
   audit_tasks: jsonArtifact("audit_tasks.json", "execution"),
   audit_plan_metrics: jsonArtifact("audit_plan_metrics.json", "execution"),
   review_packets: jsonArtifact("review_packets.json", "execution"),
+  task_affinity_graph: jsonArtifact("task_affinity_graph.json", "execution"),
   requeue_tasks: jsonArtifact("requeue_tasks.json", "execution"),
   audit_report: textArtifact(AUDIT_REPORT_FILENAME, "reporting"),
   audit_findings: jsonArtifact("audit-findings.json", "reporting"),

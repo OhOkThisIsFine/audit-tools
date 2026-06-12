@@ -23,10 +23,11 @@ import {
 } from "./reviewPackets.js";
 import { taskContentTokens } from "./reviewPacketSizing.js";
 import { computeRiskEstimate } from "./auditTaskUtils.js";
+import { buildTaskAffinityGraph } from "./taskAffinityGraph.js";
 import { resolveEffectiveLenses } from "./lensSelection.js";
 import { autoCompleteTrivialCoverage } from "./trivialAudit.js";
 import type { ExecutorRunResult } from "./executorResult.js";
-import type { Lens } from "../types.js";
+import type { AuditTask, Lens } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Free-form intent interpreter (keyword → lens boost, deterministic, no LLM)
@@ -208,20 +209,29 @@ export async function runPlanningExecutor(
   // become the authoritative inputs to just-in-time dispatch packetization /
   // routing (the estimate-review step may later refine them). See
   // docs/capability-discovery-and-tiered-dispatch-design.md.
-  const allDispatchTasks = [...taggedAuditTasks, ...pendingRequeueTasks].map(
-    (task) => ({
-      ...task,
-      token_estimate:
-        task.token_estimate ??
-        taskContentTokens(task, resolvedSizeIndex, lineIndex),
-      risk_estimate: task.risk_estimate ?? computeRiskEstimate(task),
-    }),
-  );
+  const freezeEstimates = (task: AuditTask): AuditTask => ({
+    ...task,
+    token_estimate:
+      task.token_estimate ??
+      taskContentTokens(task, resolvedSizeIndex, lineIndex),
+    risk_estimate: task.risk_estimate ?? computeRiskEstimate(task),
+  });
+  const enrichedAuditTasks = taggedAuditTasks.map(freezeEstimates);
+  const allDispatchTasks = [
+    ...enrichedAuditTasks,
+    ...pendingRequeueTasks.map(freezeEstimates),
+  ];
 
   const reviewPackets = buildReviewPackets(allDispatchTasks, {
     graphBundle: bundle.graph_bundle,
     lineIndex,
     sizeIndex: resolvedSizeIndex,
+  });
+  // Provider-neutral task-affinity graph (Phase A of the plan/dispatch seam):
+  // frozen task nodes + soft weighted affinity edges. Dispatch partitions this
+  // just-in-time; see docs/capability-discovery-and-tiered-dispatch-design.md.
+  const taskAffinityGraph = buildTaskAffinityGraph(allDispatchTasks, {
+    graphBundle: bundle.graph_bundle,
   });
   const auditPlanMetrics = buildAuditPlanMetrics(allDispatchTasks, {
     graphBundle: bundle.graph_bundle,
@@ -242,9 +252,10 @@ export async function runPlanningExecutor(
       flow_coverage: flowCoverage,
       runtime_validation_tasks: runtimeValidationTasks,
       runtime_validation_report: runtimeValidationReport,
-      audit_tasks: taggedAuditTasks,
+      audit_tasks: enrichedAuditTasks,
       audit_plan_metrics: auditPlanMetrics,
       review_packets: reviewPackets,
+      task_affinity_graph: taskAffinityGraph,
       requeue_tasks: requeuePayload.tasks,
       audit_report: undefined,
     },
