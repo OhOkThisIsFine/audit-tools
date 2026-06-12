@@ -208,7 +208,7 @@ A living log of how to resolve recurring forks, so agents don't re-ask settled q
 - **Redesign before scheduled autonomy.** No nightly/cron audit pipelines until the 2026-06-10 workflow redesigns land; then build the scheduled audit→remediate→PR loop once, on the new architecture (see backlog).
 - **Token/context policy lives in the global `~/.claude/CLAUDE.md`.** Delegation (subagents / `llm read`), output discipline (artifacts to files, chunked writes), and the test-flake protocol are global defaults — don't duplicate them here.
 - **Headroom over opentoken (2026-06-11).** Context compression standardizes on headroom: host MCP swapped in at user scope, Desktop opentoken entry removed; the orchestrator swap rides the redesign as a library-mode npm `headroom-ai` step that deletes the exec wrap layer (`wrapForOpenToken` et al.). Proxy mode stays opt-in until validated.
-- **Token estimates stay local and deterministic (2026-06-11).** Never API-call token counting inside planning/dispatch (rejects `tokencost-js`); prefer a local tokenizer + vendored price map in `shared/src/tokens.ts`. Learned RPM/TPM limits remain authoritative; estimates only set the prior.
+- **Token estimates stay local and deterministic (2026-06-11).** Never API-call token counting inside planning/dispatch (rejects `tokencost-js`); no tokenizer dependency either — the shared byte-estimate primitive (`estimateTokensFromBytes`, standardized by redesign node N-S04) is the standard, learned RPM/TPM limits remain authoritative, and headroom proxy stats supply measured usage. Optional later: vendored price map for ledger cost lines.
 
 ## Known friction & deferred fixes
 
