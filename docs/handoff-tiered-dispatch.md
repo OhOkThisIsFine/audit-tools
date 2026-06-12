@@ -175,14 +175,43 @@ N7 consumes it for the actual fan-out.
 - Headless auto-complete (`intentCheckpointExecutor.ts`) unchanged: omitting
   `design_review` ⇒ shallow.
 
+## DONE: N7 — deep conceptual = real dispatch fan-out
+
+Landed on branch (`2409987d`, audit-code 1799 pass / 1 skip; root check green).
+The old single-agent "imagine 3–5 perspectives" instruction is gone; deep
+conceptual review now fans out real subagents + an independent judge, resolved
+JIT from the user-confirmed checkpoint.
+
+- **`designReviewPrompt.ts`:** deleted the in-prompt `deepSection`. Added
+  `CONCEPTUAL_PERSPECTIVES` (7 built-in dissimilar value systems),
+  `clampPerspectiveCount`/`selectPerspectives` (default 5, clamp [2, roster]),
+  and real `renderConceptualPerspectivePrompt` (one value system, "you are 1 of N,
+  won't see the others") + `renderConceptualJudgePrompt` (independent merge/dedup/
+  rank, reads each perspective result file). The shallow renderer now composes
+  extracted `conceptualCritiqueInstructions`/`conceptualOutputFormat` blocks.
+- **`cli/conceptualDispatch.ts` (new):** `resolveConceptualReviewSettings`
+  (checkpoint `design_review` → session config → shallow) + `prepareConceptualDispatch`.
+  Shallow → one conceptual prompt file. Deep → N perspective prompt+result files
+  + a judge prompt; the judge writes the single `design-review-conceptual-findings.json`
+  the orchestrator already ingests, so the **state machine is unchanged** (the
+  perspectives' intermediate result files are never ingested).
+- **`nextStepCommand.ts`:** both `design_review_parallel` and
+  `design_review_conceptual` branches call the helper, emit the fan-out dispatch
+  instructions, and thread `access.read_paths`/`write_paths`.
+- **shared `DesignReviewConfig.perspectives`** mirrors the checkpoint field.
+- **Tests:** `conceptual-fanout.test.mjs` (12) — clamping, perspective/judge
+  rendering, settings precedence, shallow-vs-deep dispatch artifacts.
+
+Follow-on (not N7-blocking): deep fans out *subagents*, not *models* — relative
+model-rank routing of those subagents (and of all packets) via
+`partitionTaskGraph.routing_risk` is still unconsumed; fold into the tiered-routing
+work alongside N8's multi-pool plumbing.
+
 ## NEXT: the remaining nodes
 
-- **N7 — deep conceptual = real fan-out.** Promote the in-prompt "imagine
-  perspectives" (`designReviewPrompt.ts:288-327`) to N real parallel perspective
-  subagents + an **independent** judge/merge, configurable count. Wire depth from the
-  checkpoint into the `design_review_parallel` dispatch (`nextStepCommand.ts:840-919`).
 - **N8 — remediate-code parity.** Mirror the plan/dispatch seam + JIT into
-  remediate-code's implement/verify dispatch (folds in the N5c consumer sweep).
+  remediate-code's implement/verify dispatch (folds in the N5c consumer sweep +
+  the host-window discovered-capability flags audit got in N5b).
 
 ### N5b follow-ons worth noting (not blocking)
 - **Model identity on `model: null`.** N5b threads the context *window* but not a
