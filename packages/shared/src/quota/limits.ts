@@ -1,5 +1,6 @@
 import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type { LimitConfidence, LimitSource, ResolvedLimits } from "./types.js";
+import type { DiscoveredRateLimitsInput } from "./scheduler.js";
 import { lookupModelLimits } from "../tokens.js";
 
 export type ProviderType = "hosted" | "local" | "unknown";
@@ -100,6 +101,12 @@ export interface ResolveLimitsOptions {
   providerName: ResolvedProviderName;
   sessionConfig: SessionConfig;
   hostModel?: string | null;
+  /**
+   * Capabilities discovered at the dispatch-time handshake. When this carries a
+   * `context_tokens`, it is the dispatching model's real window and outranks the
+   * static known-model table (but not an explicit per-model config override).
+   */
+  discoveredLimits?: DiscoveredRateLimitsInput | null;
 }
 
 function defaultLimits(sessionConfig: SessionConfig): ResolvedLimits {
@@ -120,7 +127,8 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
 
   // Resolution order:
   // 1. Explicit per-model config overrides
-  // 2. Static known-model metadata
+  // 1.5 Discovered capability from the dispatch-time handshake
+  // 2. Static known-model metadata (legacy; retiring)
   // 3. Conservative provider-typed default
   // 4. Generic default fallback
   if (hostModel && quota.models?.[hostModel]) {
@@ -134,6 +142,24 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
         output_tokens_per_minute: override.output_tokens_per_minute ?? null,
       },
       source: "explicit_config",
+      confidence: "high",
+    };
+  }
+
+  // 1.5 Discovered capability: the host reported this model's real window at the
+  // dispatch handshake. Outranks the static table — it is how dispatch sizes to
+  // the real model (e.g. 200k) instead of the conservative default.
+  const discoveredContext = options.discoveredLimits?.context_tokens;
+  if (typeof discoveredContext === "number" && discoveredContext > 0) {
+    return {
+      limits: {
+        context_tokens: discoveredContext,
+        output_tokens: options.discoveredLimits?.output_tokens ?? defaults.output_tokens,
+        requests_per_minute: options.discoveredLimits?.requests_per_minute ?? null,
+        input_tokens_per_minute: options.discoveredLimits?.input_tokens_per_minute ?? null,
+        output_tokens_per_minute: options.discoveredLimits?.output_tokens_per_minute ?? null,
+      },
+      source: "discovered_capability",
       confidence: "high",
     };
   }
