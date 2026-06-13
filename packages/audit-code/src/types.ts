@@ -156,7 +156,7 @@ export interface AuditTask {
    * contribute to a review prompt. Seeded deterministically at planning
    * (byte-based) and refined/frozen by the estimate-review step. Authoritative
    * input to just-in-time dispatch packetization — see
-   * docs/capability-discovery-and-tiered-dispatch-design.md.
+   * docs/audit-workflow-design.md.
    */
   token_estimate?: number;
   /**
