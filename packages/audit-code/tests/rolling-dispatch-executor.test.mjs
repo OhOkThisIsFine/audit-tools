@@ -309,3 +309,65 @@ test("INV-07: runRollingDispatch does not silently drop the pool list it receive
   assert.equal(result.partial_reason, "empty_pool");
   assert.deepEqual(result.stranded_ids, []);
 });
+
+// ── TST-8f9c443f: post-run livelock guard contract ───────────────────────────
+//
+// The post-run livelock path (rollingDispatch.ts:117-134) calls detectLivelock
+// with consecutiveNoProgressWaves === livelockLimit === noProgressLimit so any
+// residual pendingIds after run() are always classified as livelock_guard.
+// Testing detectLivelock directly verifies the wrapper's invariant.
+
+const { detectLivelock } = await import("@audit-tools/shared");
+
+test("TST-8f9c443f: detectLivelock returns livelock_guard when pendingIds non-empty and waves >= limit", () => {
+  // This mirrors exactly the call inside runRollingDispatch post-run:
+  // detectLivelock({ pendingIds, consecutiveNoProgressWaves: livelockLimit, noProgressLimit: livelockLimit })
+  const pendingIds = ["pkt-stranded-1", "pkt-stranded-2"];
+  const livelockLimit = 3;
+  const terminal = detectLivelock({
+    pendingIds,
+    consecutiveNoProgressWaves: livelockLimit,
+    noProgressLimit: livelockLimit,
+  });
+  assert.ok(terminal !== null, "detectLivelock must return a terminal when pendingIds non-empty and waves >= limit");
+  assert.equal(terminal.reason, "livelock_guard");
+  assert.deepEqual(terminal.stranded_ids.sort(), pendingIds.sort());
+});
+
+test("TST-8f9c443f: detectLivelock returns null when pendingIds is empty (no residual packets)", () => {
+  // Post-run: if pendingIds is empty, the branch is never entered (null coalesces to no-terminal).
+  const terminal = detectLivelock({
+    pendingIds: [],
+    consecutiveNoProgressWaves: 999,
+    noProgressLimit: 3,
+  });
+  assert.equal(terminal, null, "detectLivelock must return null when pendingIds is empty");
+});
+
+test("TST-8f9c443f: runRollingDispatch post-run invariant — all successfully dispatched packets appear in results", async () => {
+  // Indirectly verifies the post-run path is not triggered on a normal run:
+  // all 3 packets complete, pendingIds is empty after run(), status is complete.
+  const pool = {
+    id: "test-pool",
+    providerName: "local-subprocess",
+    hostModel: null,
+    hostConcurrencyLimit: null,
+  };
+  const packets = [
+    { id: "post-p1", payload: {}, estimatedTokens: 1, complexity: 0.5 },
+    { id: "post-p2", payload: {}, estimatedTokens: 1, complexity: 0.5 },
+    { id: "post-p3", payload: {}, estimatedTokens: 1, complexity: 0.5 },
+  ];
+  const result = await runRollingDispatch(
+    packets,
+    [pool],
+    {},
+    {},
+    async (packet) => ({ packet, outcome: "success" }),
+  );
+  assert.equal(result.status, "complete", "all packets dispatched → complete, no post-run livelock");
+  assert.equal(result.results.length, 3);
+  assert.deepEqual(result.stranded_ids, []);
+  // partial_reason must be absent for a complete run
+  assert.equal(result.partial_reason, undefined);
+});

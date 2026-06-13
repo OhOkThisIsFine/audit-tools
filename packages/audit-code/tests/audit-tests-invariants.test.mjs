@@ -8,7 +8,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -246,5 +246,56 @@ test("INV-audit-tests-07: worker-run-command.test.mjs does not define a local pa
     "worker-run-command.test.mjs must not define a local partitionIssues() — " +
       "the test must exercise the production partition logic via the workerRunCommand dep seam, " +
       "not a shadow copy that can drift from production behavior.",
+  );
+});
+
+// ── FND-REL-0838abd9: example files used by schema-contracts tests must exist ─
+// schema-contracts.test.mjs reads three files from examples/ inside async test
+// bodies. If those files were removed, those tests would fail with ENOENT rather
+// than crashing the module (node:test isolates errors inside test bodies). This
+// invariant makes the dependency explicit and gives a clear failure message
+// if an example file is deleted or renamed.
+
+test("FND-REL-0838abd9: schema-contracts example files exist on disk", () => {
+  const EXAMPLES_DIR = join(PACKAGE_ROOT, "examples");
+  const requiredExamples = [
+    "risk_register.example.json",
+    "audit_plan_metrics.example.json",
+    "external_analyzer_results.example.json",
+  ];
+  const missing = requiredExamples.filter(
+    (f) => !existsSync(join(EXAMPLES_DIR, f)),
+  );
+  assert.deepEqual(
+    missing,
+    [],
+    `These example files are required by schema-contracts tests but are missing from examples/:\n  ${missing.join("\n  ")}`,
+  );
+});
+
+// ── FND-REL-0838abd9-2: src modules imported by schema-contracts must exist ───
+// schema-contracts.test.mjs statically imports six src/*.ts modules at the top
+// of the file. A static import failure causes the entire module to abort before
+// any test runs, producing silent skip rather than a per-test failure.
+// This invariant asserts all six modules exist so a deletion/rename is caught
+// by a direct structural check rather than a mysterious suite-wide skip.
+
+test("FND-REL-0838abd9-2: schema-contracts statically-imported src modules exist on disk", () => {
+  const SRC_DIR = join(PACKAGE_ROOT, "src");
+  const requiredModules = [
+    "orchestrator/unitBuilder.ts",
+    "extractors/risk.ts",
+    "extractors/surfaces.ts",
+    "extractors/graph.ts",
+    "orchestrator/runtimeValidation.ts",
+    "orchestrator/reviewPackets.ts",
+  ];
+  const missing = requiredModules.filter(
+    (m) => !existsSync(join(SRC_DIR, m)),
+  );
+  assert.deepEqual(
+    missing,
+    [],
+    `These src modules are statically imported by schema-contracts.test.mjs but are missing:\n  ${missing.join("\n  ")}`,
   );
 });
