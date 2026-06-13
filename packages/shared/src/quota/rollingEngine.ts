@@ -131,6 +131,23 @@ export function dropProvider(
     requeued_count: requeued.length,
   };
 
+  // Structured observability for pool drops/rerouting (OBS-d81a55ab). Emitted on
+  // its own line and wrapped so a logging failure can never abort a dispatch run.
+  try {
+    process.stderr.write(
+      JSON.stringify({
+        ts: event.timestamp,
+        kind: "rolling_engine_drop_provider",
+        provider_id: pool_id,
+        drop_kind: kind,
+        in_flight_count: event.in_flight_count,
+        requeued_count: event.requeued_count,
+      }) + "\n",
+    );
+  } catch {
+    // Observability must never abort a run.
+  }
+
   return {
     active_pools: [
       ...state.active_pools.slice(0, poolIndex),

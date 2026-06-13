@@ -150,6 +150,12 @@ test("logs a structured error event via RunLogger when a quota source throws", a
   assert.equal(evt.phase, "quota");
   assert.ok(evt.note.includes("bad-source"), `note should include source name, got: ${evt.note}`);
   assert.ok(evt.note.includes("bad-source boom"), `note should include error message, got: ${evt.note}`);
+  // OBS-9ae1a228: the note must name the providerModelKey being queried so an
+  // operator can tell which provider/model combination triggered the failure.
+  assert.ok(
+    evt.note.includes("provider/model"),
+    `note should include the providerModelKey, got: ${evt.note}`,
+  );
 
   // console.warn is NOT called
   assert.equal(warnSpy.mock.calls.length, 0);

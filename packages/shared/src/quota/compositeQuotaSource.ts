@@ -29,7 +29,7 @@ export class CompositeQuotaSource implements QuotaSource {
         this.runLogger.event({
           kind: "error",
           phase: "quota",
-          note: `quota source '${source.name}' threw: ${err instanceof Error ? err.message : String(err)}`,
+          note: `quota source '${source.name}' threw querying ${providerModelKey}: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
     }
