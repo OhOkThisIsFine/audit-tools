@@ -51,7 +51,9 @@ export async function runAuditStep(options: {
   preferredExecutor?: string;
   auditResultsPath?: string;
   runtimeUpdatesPath?: string;
+  /** Provide a file path OR an already-parsed object; path is only read when the object is absent. */
   externalAnalyzerPath?: string;
+  externalAnalyzerData?: ExternalAnalyzerResults;
   narrativeResultsPath?: string;
   edgeReasoningResultsPath?: string;
   analyzers?: Record<string, AnalyzerSetting>;
@@ -117,9 +119,11 @@ export async function runAuditStep(options: {
   const runtimeValidationUpdates = options.runtimeUpdatesPath
     ? await readJsonFile<RuntimeValidationReport>(options.runtimeUpdatesPath)
     : undefined;
-  const externalAnalyzerResults = options.externalAnalyzerPath
-    ? await readJsonFile<ExternalAnalyzerResults>(options.externalAnalyzerPath)
-    : undefined;
+  const externalAnalyzerResults =
+    options.externalAnalyzerData ??
+    (options.externalAnalyzerPath
+      ? await readJsonFile<ExternalAnalyzerResults>(options.externalAnalyzerPath)
+      : undefined);
   const narrativeResults = options.narrativeResultsPath
     ? await readJsonFile<SynthesisNarrative>(options.narrativeResultsPath)
     : undefined;

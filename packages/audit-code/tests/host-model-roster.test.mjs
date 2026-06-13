@@ -66,10 +66,11 @@ test("resolveTierBudgets fills missing ranks from the nearest reported rank", ()
     resolveTierBudgets(new Map([["standard", 2000], ["deep", 3000]])),
     { small: 2000, standard: 2000, deep: 3000 },
   );
-  // missing standard with both neighbors → prefers the more capable (deep)
+  // missing standard, equidistant from both neighbors → prefers the LOWER
+  // (less capable) rank so a tier is never over-budgeted (COR-0e031ac0).
   assert.deepEqual(
     resolveTierBudgets(new Map([["small", 1000], ["deep", 3000]])),
-    { small: 1000, standard: 3000, deep: 3000 },
+    { small: 1000, standard: 1000, deep: 3000 },
   );
   // single reported rank serves every tier
   assert.deepEqual(resolveTierBudgets(new Map([["deep", 3000]])), {
@@ -182,10 +183,11 @@ await test("dispatch-quota carries the roster echo, tier budgets, and per-rank p
   });
   const quota = await readJson(join(runDir, "dispatch-quota.json"));
   assert.deepEqual(quota.host_model_roster, SPLIT_ROSTER);
-  // standard was not reported → falls back to the nearest (deep) budget.
+  // standard was not reported and is equidistant from small and deep → falls
+  // back to the LOWER (small) budget so it is never over-budgeted (COR-0e031ac0).
   assert.deepEqual(quota.tier_budgets, {
     small: 6000,
-    standard: 168000,
+    standard: 6000,
     deep: 168000,
   });
   assert.ok(Array.isArray(quota.capacity_pools));

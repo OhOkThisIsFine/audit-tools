@@ -55,6 +55,37 @@ export function mergeAndIngestCommand(
   ]);
 }
 
+/**
+ * Build the dispatch data lines (plan/quota reading instructions) shared
+ * between the dispatch-review and rolling-dispatch prompts.
+ */
+function buildDispatchDataLines(
+  dispatchPlanPath: string,
+  dispatchQuotaPath: string | null,
+  sessionLimitNote: string,
+): string[] {
+  return dispatchQuotaPath
+    ? [
+        "Read these generated files:",
+        "",
+        `  Dispatch plan:  ${dispatchPlanPath}`,
+        `  Dispatch quota: ${dispatchQuotaPath}`,
+        "",
+        "Use `max_concurrent_agents` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before dispatching.",
+        "",
+        "Maintain up to `max_concurrent_agents` subagents running simultaneously. As each completes and its result is captured, immediately dispatch the next pending entry. If you hit a rate limit (429/TPM/RPM), pause until the reset time clears, then continue.",
+        "",
+        sessionLimitNote,
+      ]
+    : [
+        "Read this generated dispatch plan:",
+        "",
+        `  ${dispatchPlanPath}`,
+        "",
+        "Launch one subagent for each entry in the plan.",
+      ];
+}
+
 export function renderDispatchReviewPrompt(params: {
   root: string;
   artifactsDir: string;
@@ -79,26 +110,11 @@ export function renderDispatchReviewPrompt(params: {
     ? "Restrict review subagents to read/search plus the packet submit command named in their prompt. Do not give them source edit/write tools."
     : "Do not ask the user about per-subagent tool restrictions; this host did not report a callable restriction facility.";
 
-  const dispatchDataLines = params.dispatchQuotaPath
-    ? [
-        "Read these generated files:",
-        "",
-        `  Dispatch plan:  ${params.dispatchPlanPath}`,
-        `  Dispatch quota: ${params.dispatchQuotaPath}`,
-        "",
-        "Use `max_concurrent_agents` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before dispatching.",
-        "",
-        "Maintain up to `max_concurrent_agents` subagents running simultaneously. As each completes and its result is captured, immediately dispatch the next pending entry. If you hit a rate limit (429/TPM/RPM), pause until the reset time clears, then continue.",
-        "",
-        'If a subagent reports a host session/usage limit (e.g. "hit your session limit · resets <time>") instead of submitting its result, do not immediately re-dispatch it: run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
-      ]
-    : [
-        "Read this generated dispatch plan:",
-        "",
-        `  ${params.dispatchPlanPath}`,
-        "",
-        "Launch one subagent for each entry in the plan.",
-      ];
+  const dispatchDataLines = buildDispatchDataLines(
+    params.dispatchPlanPath,
+    params.dispatchQuotaPath,
+    'If a subagent reports a host session/usage limit (e.g. "hit your session limit · resets <time>") instead of submitting its result, do not immediately re-dispatch it: run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
+  );
 
   return [
     "# audit-code dispatch review",
@@ -118,7 +134,7 @@ export function renderDispatchReviewPrompt(params: {
     "",
     "**File access pre-approval:** Each dispatch plan entry includes an `access` object with `read_paths`, `write_paths`, and `forbidden_patterns`. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` and `entry.access.write_paths` for each subagent. Do not grant broad workspace or task-results directory write access. Workers should not access files outside their declared paths.",
     "",
-    "**After all waves complete:**",
+    "**After all packets complete:**",
     "",
     DO_NOT_TOKEN_WRAP_NOTE,
     "",
@@ -257,26 +273,11 @@ export function renderRollingDispatchPrompt(params: {
     ? "Restrict review subagents to read/search tools only — they do not run shell commands. Do not give them source edit/write tools."
     : "Do not ask the user about per-subagent tool restrictions; this host did not report a callable restriction facility.";
 
-  const dispatchDataLines = params.dispatchQuotaPath
-    ? [
-        "Read these generated files:",
-        "",
-        `  Dispatch plan:  ${params.dispatchPlanPath}`,
-        `  Dispatch quota: ${params.dispatchQuotaPath}`,
-        "",
-        "Use `max_concurrent_agents` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before dispatching.",
-        "",
-        "Maintain up to `max_concurrent_agents` subagents running simultaneously. As each completes and its result is captured, immediately dispatch the next pending entry. If you hit a rate limit (429/TPM/RPM), pause until the reset time clears, then continue.",
-        "",
-        'If a subagent reports a host session/usage limit instead of emitting its result, run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
-      ]
-    : [
-        "Read this generated dispatch plan:",
-        "",
-        `  ${params.dispatchPlanPath}`,
-        "",
-        "Launch one subagent for each entry in the plan.",
-      ];
+  const dispatchDataLines = buildDispatchDataLines(
+    params.dispatchPlanPath,
+    params.dispatchQuotaPath,
+    'If a subagent reports a host session/usage limit instead of emitting its result, run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
+  );
 
   return [
     "# audit-code rolling dispatch",
@@ -303,7 +304,7 @@ export function renderRollingDispatchPrompt(params: {
     "",
     "**File access pre-approval:** Each dispatch plan entry includes an `access` object. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` for each subagent (read-only; they do not write files).",
     "",
-    "**After all waves complete:**",
+    "**After all packets complete:**",
     "",
     DO_NOT_TOKEN_WRAP_NOTE,
     "",

@@ -45,7 +45,10 @@ export async function cmdDispatchStatus(argv: string[]): Promise<void> {
       try {
         await readFile(entry.result_path, "utf8");
         completed++;
-      } catch {
+      } catch (e) {
+        // Re-throw permission / IO errors so they surface as real failures rather
+        // than silently appearing as "missing results" (COR-6e84f23c).
+        if (!isFileMissingError(e)) throw e;
         missing.push(entry.task_id);
       }
     }

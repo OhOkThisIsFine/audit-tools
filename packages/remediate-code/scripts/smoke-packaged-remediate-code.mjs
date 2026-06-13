@@ -217,14 +217,17 @@ try {
       if (!existsSync(target)) throw new Error(`not found at ${target}`);
     });
 
-    check("installed command content matches source", () => {
+    check("installed command content matches source body (no frontmatter)", () => {
       const target = join(fakeHome, ".claude", "commands", "remediate-code.md");
       const installed = readFileSync(target, "utf8");
-      const source = readFileSync(
+      const rawSource = readFileSync(
         join(pkgRoot, "skills", "remediate-code", "remediate-code.prompt.md"),
         "utf8",
       );
-      if (installed !== source) throw new Error("content mismatch");
+      const normalized = rawSource.replace(/\r\n/g, "\n");
+      const fmMatch = normalized.match(/^---\n[\s\S]*?\n---\n?/u);
+      const sourceBody = fmMatch ? normalized.slice(fmMatch[0].length) : normalized;
+      if (installed !== sourceBody) throw new Error("content mismatch (installed command should have frontmatter stripped)");
     });
   }
 } finally {

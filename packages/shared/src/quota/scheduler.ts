@@ -153,6 +153,49 @@ export const QUOTA_REMAINING_PCT_LOW = 0.3;
 /** Multiplier applied to the wave when remaining quota is in the LOW band. */
 const QUOTA_LOW_WAVE_MULTIPLIER = 0.5;
 
+interface QuotaSourceAdjustmentResult {
+  waveSize: number;
+  bindingCap: WaveBindingCap;
+  cooldownUntil: string | null;
+}
+
+/**
+ * Apply a real-time quota-source snapshot to the current wave size. The snapshot
+ * is the strongest live signal: when quota is near-exhausted we throttle to 1 and
+ * record the reset time as a cooldown; when it is low (but not critical) we halve
+ * the wave.
+ *
+ * Returns the adjusted wave size, binding cap, and cooldown timestamp. When no
+ * adjustment is needed the inputs are returned unchanged.
+ */
+function applyQuotaSourceAdjustment(
+  waveSize: number,
+  bindingCap: WaveBindingCap,
+  cooldownUntil: string | null,
+  quotaSourceSnapshot: QuotaUsageSnapshot,
+): QuotaSourceAdjustmentResult {
+  if (
+    quotaSourceSnapshot.remaining_pct != null &&
+    quotaSourceSnapshot.remaining_pct < QUOTA_REMAINING_PCT_CRITICAL
+  ) {
+    return {
+      waveSize: 1,
+      bindingCap: waveSize > 1 ? "cooldown" : bindingCap,
+      cooldownUntil: quotaSourceSnapshot.reset_at ?? cooldownUntil,
+    };
+  }
+  if (
+    quotaSourceSnapshot.remaining_pct != null &&
+    quotaSourceSnapshot.remaining_pct < QUOTA_REMAINING_PCT_LOW
+  ) {
+    const reduced = Math.max(1, Math.floor(waveSize * QUOTA_LOW_WAVE_MULTIPLIER));
+    if (reduced < waveSize) {
+      return { waveSize: reduced, bindingCap: "cooldown", cooldownUntil };
+    }
+  }
+  return { waveSize, bindingCap, cooldownUntil };
+}
+
 function sumTopN(sorted: number[], n: number): number {
   let sum = 0;
   for (let i = 0; i < Math.min(n, sorted.length); i++) sum += sorted[i];
@@ -401,29 +444,14 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     bindingCap = uncapped.binding_cap;
   }
 
-  // Apply real-time quota source data if available. A near-exhausted quota
-  // snapshot is the strongest live signal, so when it reduces the wave it
-  // becomes the binding cap (recorded as "cooldown" since it throttles to 1).
+  // Apply real-time quota source data if available (strongest live signal).
   if (quotaSourceSnapshot && !cooldownUntil) {
-    if (
-      quotaSourceSnapshot.remaining_pct != null &&
-      quotaSourceSnapshot.remaining_pct < QUOTA_REMAINING_PCT_CRITICAL
-    ) {
-      if (waveSize > 1) bindingCap = "cooldown";
-      waveSize = 1;
-      if (quotaSourceSnapshot.reset_at) {
-        cooldownUntil = quotaSourceSnapshot.reset_at;
-      }
-    } else if (
-      quotaSourceSnapshot.remaining_pct != null &&
-      quotaSourceSnapshot.remaining_pct < QUOTA_REMAINING_PCT_LOW
-    ) {
-      const reduced = Math.max(1, Math.floor(waveSize * QUOTA_LOW_WAVE_MULTIPLIER));
-      if (reduced < waveSize) {
-        waveSize = reduced;
-        bindingCap = "cooldown";
-      }
-    }
+    ({ waveSize, bindingCap, cooldownUntil } = applyQuotaSourceAdjustment(
+      waveSize,
+      bindingCap,
+      cooldownUntil,
+      quotaSourceSnapshot,
+    ));
   }
 
   const beforeHostCap = waveSize;

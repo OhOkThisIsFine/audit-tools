@@ -14,6 +14,15 @@ const PROMPT_SOURCE = join(
   "remediate-code.prompt.md",
 );
 
+// The Claude command install strips the prompt's YAML frontmatter (body-only),
+// mirroring scripts/postinstall.mjs `splitFrontmatter`. The Codex prompt copy
+// keeps the raw source; only the ~/.claude command is stripped.
+function stripFrontmatter(text: string): string {
+  const normalized = text.replace(/\r\n/g, "\n");
+  const match = normalized.match(/^---\n[\s\S]*?\n---\n?/u);
+  return match ? normalized.slice(match[0].length) : normalized;
+}
+
 function runPostinstall(home = TEMP_HOME) {
   return spawnSync(process.execPath, [POSTINSTALL_SCRIPT], {
     env: { ...process.env, HOME: home, USERPROFILE: home },
@@ -66,7 +75,8 @@ describe("scripts/postinstall.mjs", () => {
     const installed = await readFile(installedPath, "utf8");
     const source = await readFile(PROMPT_SOURCE, "utf8");
 
-    expect(installed).toBe(source);
+    // The installed command is the prompt body with frontmatter stripped.
+    expect(installed).toBe(stripFrontmatter(source));
   });
 
   it("installs Codex skill files", () => {
@@ -205,7 +215,7 @@ describe("scripts/postinstall.mjs", () => {
     expect(result.error).toBeUndefined();
 
     const installed = await readFile(installedPath, "utf8");
-    expect(installed).toBe(await readFile(PROMPT_SOURCE, "utf8"));
+    expect(installed).toBe(stripFrontmatter(await readFile(PROMPT_SOURCE, "utf8")));
     expect(result.stdout).toContain("updated global Claude command");
   });
 });

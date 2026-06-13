@@ -236,7 +236,7 @@ const installs = [
     label: "Claude command",
     path: join(homedir(), ".claude", "commands", "remediate-code.md"),
     sourcePath: promptSourceFile,
-    content: promptSource,
+    content: Buffer.from(promptBody, "utf8"),
   },
   {
     label: "Codex skill",

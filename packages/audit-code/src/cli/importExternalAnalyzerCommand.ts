@@ -17,11 +17,12 @@ export async function cmdImportExternalAnalyzer(argv: string[]): Promise<void> {
       `External analyzer results at '${sourcePath}' must have a 'results' array, but the field is absent or not an array.`,
     );
   }
+  // Pass the already-parsed data so runAuditStep does not read the file a second time.
   const result = await runAuditStep({
     root: getRootDir(argv),
     artifactsDir,
     preferredExecutor: "external_analyzer_import_executor",
-    externalAnalyzerPath: sourcePath,
+    externalAnalyzerData: externalAnalyzerResults,
   });
   console.log(
     JSON.stringify(

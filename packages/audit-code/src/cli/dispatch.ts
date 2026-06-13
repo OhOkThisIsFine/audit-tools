@@ -689,15 +689,20 @@ export function resolveTierBudgets(
       out[tier] = direct;
       return;
     }
+    // Fall back to the NEAREST reported rank — preferring LOWER (less capable)
+    // on ties so a tier is never over-budgeted with a larger window than the
+    // actual model it maps to (COR-0e031ac0: was checking up before down, which
+    // assigned the "deep" context window to "small"-tier packets when only a
+    // higher rank was reported).
     for (let distance = 1; distance < TIER_ORDER.length; distance++) {
-      const up = TIER_ORDER[i + distance];
       const down = TIER_ORDER[i - distance];
-      if (up && perRank.has(up)) {
-        out[tier] = perRank.get(up)!;
-        return;
-      }
+      const up = TIER_ORDER[i + distance];
       if (down && perRank.has(down)) {
         out[tier] = perRank.get(down)!;
+        return;
+      }
+      if (up && perRank.has(up)) {
+        out[tier] = perRank.get(up)!;
         return;
       }
     }
@@ -871,9 +876,11 @@ async function finalizeDispatchQuota(params: {
   const { runId, runDir, sessionConfig, hostModel, perPacketTokens } = params;
   // Most-capable rank first: computeDispatchCapacity hands the largest pending
   // items to the first pool, and the biggest packets belong on the rank with
-  // the largest window.
+  // the largest window. Unranked pools are the LEAST capable (conservative
+  // fallback), so they sort last — not first (COR-eebbabf7: was TIER_ORDER.length
+  // which placed them before ranked pools in descending order).
   const rankOrder = (pool: CapacityPool): number =>
-    pool.rank ? TIER_ORDER.indexOf(pool.rank) : TIER_ORDER.length;
+    pool.rank ? TIER_ORDER.indexOf(pool.rank) : -1;
   const pools = [...params.pools].sort((a, b) => rankOrder(b) - rankOrder(a));
   const dispatchCapacity = computeDispatchCapacity({
     pools,

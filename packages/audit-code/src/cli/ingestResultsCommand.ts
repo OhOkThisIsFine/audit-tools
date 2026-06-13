@@ -4,7 +4,11 @@ import { getArtifactsDir, getBatchResultsDir, getFlag, getRootDir } from "./args
 export async function cmdIngestResults(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
   const batchResultsDir = getBatchResultsDir(argv);
-  if (batchResultsDir && getFlag(argv, "--results")) {
+  // Explicitly check both directions of the mutual-exclusion so the guard does
+  // not silently short-circuit when --batch-results is absent (COR-d40e2710).
+  const hasBatchResults = batchResultsDir !== undefined;
+  const hasSingleResults = getFlag(argv, "--results") !== undefined;
+  if (hasBatchResults && hasSingleResults) {
     throw new Error("Use either --results <file> or --batch-results <dir>, not both.");
   }
   if (batchResultsDir) {
