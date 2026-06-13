@@ -196,6 +196,68 @@ test("deduplication: identical kind+line+name+detail anchors are collapsed to on
   );
 });
 
+// TST-91fc5147: anchor deduplication — negative tests
+test("TST-91fc5147: graph edge that appears in two buckets with the same kind field is deduplicated to one anchor", () => {
+  // The same logical edge {from, to, kind: "imports"} appears in BOTH the
+  // "imports" bucket and the "calls" bucket. Because addAnchor keys on
+  // kind\0line\0name\0detail and edge.kind is taken from the record's `kind`
+  // field (not the bucket name), the dedup key is identical for both occurrences
+  // → only one graph anchor should be emitted even though collectGraphEdges
+  // returns 2 raw edges.
+  const graphBundle = {
+    graphs: {
+      imports: [
+        { from: "src/dedup.ts", to: "src/dep.ts", kind: "imports" },
+      ],
+      calls: [
+        // Same logical edge, same kind field — duplicate
+        { from: "src/dedup.ts", to: "src/dep.ts", kind: "imports" },
+      ],
+    },
+  };
+  const summary = buildFileAnchorSummary({
+    path: "src/dedup.ts",
+    content: "",
+    totalLines: 1,
+    graphBundle,
+  });
+  const graphAnchors = summary.anchors.filter((a) => a.kind === "graph");
+  assert.equal(
+    graphAnchors.length,
+    1,
+    "graph anchor for the same edge appearing in two buckets must be deduplicated to 1",
+  );
+  // Note: counts.graph_edges tracks raw collected edges (pre-dedup), not
+  // the number of anchors emitted. The anchor array is the dedup'd surface.
+  assert.equal(summary.counts.graph_edges, 2, "counts.graph_edges reflects raw edge count (2), not anchor count");
+});
+
+test("TST-91fc5147: two distinct graph edges (different to-targets) each produce separate anchors", () => {
+  // Verify that legitimate distinct edges are NOT collapsed together — dedup
+  // should only suppress actual duplicates.
+  const graphBundle = {
+    graphs: {
+      imports: [
+        { from: "src/dedup.ts", to: "src/dep-a.ts", kind: "imports" },
+        { from: "src/dedup.ts", to: "src/dep-b.ts", kind: "imports" },
+      ],
+    },
+  };
+  const summary = buildFileAnchorSummary({
+    path: "src/dedup.ts",
+    content: "",
+    totalLines: 1,
+    graphBundle,
+  });
+  const graphAnchors = summary.anchors.filter((a) => a.kind === "graph");
+  assert.equal(
+    graphAnchors.length,
+    2,
+    "two distinct outbound edges must produce two separate graph anchors",
+  );
+  assert.equal(summary.counts.graph_edges, 2, "graph_edges count must be 2");
+});
+
 // ── boundary anchors ──────────────────────────────────────────────────────────
 
 test("boundary anchors: single-line file emits only file_start boundary", () => {

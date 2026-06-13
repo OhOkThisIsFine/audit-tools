@@ -942,3 +942,46 @@ test("INV-09: in-scope findings in the same result are retained when one affecte
   const errors = issues.filter((i) => i.severity === "error");
   assert.equal(errors.length, 0, "in-scope finding with valid span must produce no errors");
 });
+
+// ── FND-REL-6f9f6681: commandExists must handle hangs/timeouts gracefully ─────
+
+test("FND-REL-6f9f6681: validateConfiguredProviderEnvironment reports not-found when PATH probe returns false (timeout result)", async () => {
+  // The internal commandExists adds a 5 s timeout to execFileAsync so a stalled
+  // PATH probe (NFS home dir, broken PATH, slow DNS) is killed and returns false
+  // rather than hanging forever.  The injected stub here simulates what the
+  // production code produces after an ETIMEDOUT: false (command not found).
+  const issues = await validateConfiguredProviderEnvironment(
+    { provider: "claude-code", claude_code: { command: "claude" } },
+    {
+      commandExists: () => Promise.resolve(false),
+    },
+  );
+
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.path === "claude_code.command" &&
+        /not found on path/i.test(issue.message),
+    ),
+    `expected a 'not found on PATH' issue; got: ${JSON.stringify(issues)}`,
+  );
+});
+
+test("FND-REL-6f9f6681: validateConfiguredProviderEnvironment reports not-found for opencode when PATH probe returns false", async () => {
+  // Regression guard: same path-probe timeout scenario for opencode provider.
+  const issues = await validateConfiguredProviderEnvironment(
+    { provider: "opencode", opencode: { command: "opencode" } },
+    {
+      commandExists: () => Promise.resolve(false),
+    },
+  );
+
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.path === "opencode.command" &&
+        /not found on path/i.test(issue.message),
+    ),
+    `expected a 'not found on PATH' issue when commandExists returns false; got: ${JSON.stringify(issues)}`,
+  );
+});

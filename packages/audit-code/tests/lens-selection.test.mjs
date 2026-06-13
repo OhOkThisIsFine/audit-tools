@@ -129,3 +129,45 @@ test("isLensEffective returns false for lenses not in the effective set", () => 
   const effective = resolveEffectiveLenses(["performance"]);
   assert.ok(!isLensEffective("architecture", effective));
 });
+
+// ── TST-4510f094: exclude-then-re-union round-trip ────────────────────────────
+
+test("TST-4510f094: resolveEffectiveLenses restores mandatory lenses stripped by an exclude filter (two-call pattern)", () => {
+  // planningExecutors.ts applies this exact pattern:
+  //   const resolved = resolveEffectiveLenses(baseSelected ?? null);
+  //   const afterExclude = resolved.filter(l => !excludeSet.has(l));
+  //   effectiveLenses = resolveEffectiveLenses(afterExclude);
+  //
+  // Explicitly excluding a mandatory lens ('security') in the first call strips
+  // it from afterExclude. The second resolveEffectiveLenses call must re-union
+  // it back into the result.
+  const first = resolveEffectiveLenses(null); // all lenses
+  const afterExclude = first.filter((l) => l !== "security");
+  assert.ok(!afterExclude.includes("security"), "afterExclude must not contain security");
+
+  const second = resolveEffectiveLenses(afterExclude);
+  assert.ok(
+    second.includes("security"),
+    "second resolveEffectiveLenses call must restore mandatory 'security' lens",
+  );
+  for (const mandatory of MANDATORY_LENSES) {
+    assert.ok(
+      second.includes(mandatory),
+      `mandatory lens '${mandatory}' must be present after exclude-then-re-union round-trip`,
+    );
+  }
+});
+
+test("TST-4510f094: excluding all non-mandatory lenses does not drop mandatory lenses on re-union", () => {
+  // Simulate excluding everything except one optional lens — mandatory lenses
+  // must survive the second resolveEffectiveLenses call regardless.
+  const onlyOptional = ["performance"];
+  const afterExclude = onlyOptional.filter((l) => !MANDATORY_LENSES.includes(l));
+  const second = resolveEffectiveLenses(afterExclude);
+  for (const mandatory of MANDATORY_LENSES) {
+    assert.ok(
+      second.includes(mandatory),
+      `mandatory lens '${mandatory}' must be present even when all other lenses are excluded`,
+    );
+  }
+});

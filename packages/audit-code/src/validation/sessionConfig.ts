@@ -173,13 +173,20 @@ function validateAgentProviderSection(
   }
 }
 
+// Maximum wall-clock time for a PATH probe (where/which). 5 s is generous
+// even on slow NFS mounts; prevents validation from hanging indefinitely on
+// broken PATH entries or stalled DNS lookups.
+const COMMAND_EXISTS_TIMEOUT_MS = 5_000;
+
 async function commandExists(command: string): Promise<boolean> {
   const lookupCommand = process.platform === "win32" ? "where" : "which";
   try {
     // execFile (no shell) passes `command` as a literal argv entry, so shell
     // metacharacters in a config-supplied command cannot be interpreted or
     // executed during environment validation.
-    await execFileAsync(lookupCommand, [command]);
+    await execFileAsync(lookupCommand, [command], {
+      timeout: COMMAND_EXISTS_TIMEOUT_MS,
+    });
     return true;
   } catch {
     return false;
