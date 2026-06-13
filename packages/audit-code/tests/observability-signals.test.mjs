@@ -143,10 +143,16 @@ test("normalizeGenericExternalResults drops items missing path/summary and logs 
     result.results.map((r) => r.path),
     ["a.ts", "c.ts"],
   );
-  // Structured drop log emitted with the correct count.
-  const dropLine = lines.find((l) => l.includes("normalizeExternal: dropped"));
-  assert.ok(dropLine, "expected a dropped-item stderr line");
-  assert.match(dropLine, /dropped 2\/4 semgrep finding\(s\) missing path or summary/);
+  // Structured drop event emitted with the correct count.
+  const dropLine = lines.find((l) => {
+    try { const obj = JSON.parse(l.trim()); return obj.event === "normalizer_findings_dropped"; }
+    catch { return false; }
+  });
+  assert.ok(dropLine, "expected a normalizer_findings_dropped JSON event on stderr");
+  const dropEvent = JSON.parse(dropLine.trim());
+  assert.equal(dropEvent.tool, "semgrep");
+  assert.equal(dropEvent.dropped, 2);
+  assert.equal(dropEvent.total, 4);
 });
 
 test("normalizeGenericExternalResults emits no drop log when nothing is dropped", async () => {
@@ -159,7 +165,10 @@ test("normalizeGenericExternalResults emits no drop log when nothing is dropped"
     lines.push(...captured);
   });
   assert.equal(
-    lines.some((l) => l.includes("normalizeExternal: dropped")),
+    lines.some((l) => {
+      try { const obj = JSON.parse(l.trim()); return obj.event === "normalizer_findings_dropped"; }
+      catch { return false; }
+    }),
     false,
   );
 });

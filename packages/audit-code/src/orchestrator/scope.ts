@@ -130,6 +130,15 @@ export function computeAuditScope(
     if (canonicalByNorm.has(pick) && !inScope.has(pick)) {
       if (inScope.size >= maxFiles) {
         budgetHit = true;
+        process.stderr.write(
+          JSON.stringify({
+            kind: "scope_budget_hit",
+            max_files: maxFiles,
+            since: input.since,
+            seed_count: seedKeys.length,
+            ts: new Date().toISOString(),
+          }) + "\n",
+        );
         break;
       }
       inScope.add(pick);

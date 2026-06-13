@@ -109,5 +109,15 @@ export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
     }
   }
 
+  if (stale.size > 0) {
+    process.stderr.write(
+      JSON.stringify({
+        kind: "staleness",
+        stale_artifacts: [...stale].sort(),
+        ts: new Date().toISOString(),
+      }) + "\n",
+    );
+  }
+
   return stale;
 }

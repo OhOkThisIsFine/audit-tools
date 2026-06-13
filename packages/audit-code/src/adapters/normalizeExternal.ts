@@ -36,7 +36,13 @@ export function normalizeGenericExternalResults(
   const dropped = items.length - valid.length;
   if (dropped > 0) {
     process.stderr.write(
-      `[audit-code] normalizeExternal: dropped ${dropped}/${items.length} ${tool} finding(s) missing path or summary\n`,
+      JSON.stringify({
+        event: "normalizer_findings_dropped",
+        tool,
+        dropped,
+        total: items.length,
+        reason: "missing path or summary",
+      }) + "\n",
     );
   }
   return {

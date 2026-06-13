@@ -26,23 +26,24 @@ test("acquireLock blocks when lock is held", async () => {
   const token = await acquireLock(lockPath);
 
   const start = Date.now();
-  // Release after 150ms
+  // Release after one retry interval (60ms) — tests blocking without a long real-time wait
   const releaseTimer = setTimeout(async () => {
     await releaseLock(lockPath, token);
-  }, 150);
+  }, 60);
 
   const token2 = await acquireLock(lockPath, 5000);
   clearTimeout(releaseTimer);
   const elapsed = Date.now() - start;
-  assert.ok(elapsed >= 100, `expected to wait at least 100ms, waited ${elapsed}ms`);
+  assert.ok(elapsed >= 50, `expected to wait at least 50ms, waited ${elapsed}ms`);
   await releaseLock(lockPath, token2);
 });
 
 test("acquireLock times out when lock is never released", async () => {
   const lockPath = tmpLock();
   const token = await acquireLock(lockPath);
+  // 60ms timeout — one retry interval is enough to prove timeout fires; avoids 200ms real wait
   await assert.rejects(
-    () => acquireLock(lockPath, 200),
+    () => acquireLock(lockPath, 60),
     (err) => err instanceof FileLockTimeoutError,
   );
   await releaseLock(lockPath, token);

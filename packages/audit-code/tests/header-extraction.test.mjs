@@ -4,6 +4,28 @@ import assert from "node:assert/strict";
 const { extractRateLimitHeaders } = await import("../src/quota/headerExtraction.ts");
 const { getHeaderExtractorForProvider } = await import("../src/quota/headerExtractors/index.ts");
 
+/**
+ * Diagnostics are emitted as structured JSON lines on stderr (one object per
+ * line). Scan captured chunks for the first JSON object whose `event` field
+ * equals `eventName`; return the parsed object, or null if none is present.
+ */
+function parseStderrEvent(chunks, eventName) {
+  const lines = chunks
+    .join("")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && parsed.event === eventName) return parsed;
+    } catch {
+      // non-JSON stderr noise — ignore
+    }
+  }
+  return null;
+}
+
 // ── extractRateLimitHeaders ─────────────────────────────────────────────────
 
 test("extracts standard x-ratelimit-* headers", () => {
@@ -261,15 +283,13 @@ test("parseResetValue: non-ISO non-numeric value is returned as-is", () => {
 test("extractRateLimitHeaders emits diagnostic to stderr when non-empty text has no matching headers", () => {
   const chunks = [];
   const origWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = (chunk) => { chunks.push(chunk); return true; };
+  process.stderr.write = (chunk) => { chunks.push(String(chunk)); return true; };
   try {
     const result = extractRateLimitHeaders("some random log output\nerror: something failed\n");
     assert.equal(result, null);
-    const combined = chunks.join("");
-    assert.ok(
-      combined.includes("[quota] header extraction: no rate-limit data found in non-empty stderr text"),
-      `expected diagnostic in stderr, got: ${combined}`,
-    );
+    const event = parseStderrEvent(chunks, "header_extraction_no_match");
+    assert.ok(event, `expected a header_extraction_no_match stderr event, got: ${chunks.join("")}`);
+    assert.equal(event.reason, "no rate-limit data found in non-empty stderr text");
   } finally {
     process.stderr.write = origWrite;
   }
@@ -278,14 +298,14 @@ test("extractRateLimitHeaders emits diagnostic to stderr when non-empty text has
 test("extractRateLimitHeaders does NOT emit diagnostic for empty input", () => {
   const chunks = [];
   const origWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = (chunk) => { chunks.push(chunk); return true; };
+  process.stderr.write = (chunk) => { chunks.push(String(chunk)); return true; };
   try {
     const result = extractRateLimitHeaders("");
     assert.equal(result, null);
-    const combined = chunks.join("");
-    assert.ok(
-      !combined.includes("[quota] header extraction:"),
-      `unexpected diagnostic in stderr for empty input: ${combined}`,
+    assert.equal(
+      parseStderrEvent(chunks, "header_extraction_no_match"),
+      null,
+      `unexpected diagnostic in stderr for empty input: ${chunks.join("")}`,
     );
   } finally {
     process.stderr.write = origWrite;
@@ -295,14 +315,14 @@ test("extractRateLimitHeaders does NOT emit diagnostic for empty input", () => {
 test("extractRateLimitHeaders does NOT emit diagnostic for whitespace-only input", () => {
   const chunks = [];
   const origWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = (chunk) => { chunks.push(chunk); return true; };
+  process.stderr.write = (chunk) => { chunks.push(String(chunk)); return true; };
   try {
     const result = extractRateLimitHeaders("   \n\t  ");
     assert.equal(result, null);
-    const combined = chunks.join("");
-    assert.ok(
-      !combined.includes("[quota] header extraction:"),
-      `unexpected diagnostic in stderr for whitespace input: ${combined}`,
+    assert.equal(
+      parseStderrEvent(chunks, "header_extraction_no_match"),
+      null,
+      `unexpected diagnostic in stderr for whitespace input: ${chunks.join("")}`,
     );
   } finally {
     process.stderr.write = origWrite;
@@ -312,15 +332,14 @@ test("extractRateLimitHeaders does NOT emit diagnostic for whitespace-only input
 test("ClaudeCodeHeaderExtractor emits diagnostic when no structured JSON header lines are found in non-empty stderr", () => {
   const chunks = [];
   const origWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = (chunk) => { chunks.push(chunk); return true; };
+  process.stderr.write = (chunk) => { chunks.push(String(chunk)); return true; };
   try {
     const extractor = getHeaderExtractorForProvider("claude-code");
     extractor.extract("plain text line\nanother plain line\n");
-    const combined = chunks.join("");
-    assert.ok(
-      combined.includes("[quota] claude-code header extractor: no structured JSON lines with headers/response_headers found in non-empty stderr"),
-      `expected fallback diagnostic in stderr, got: ${combined}`,
-    );
+    const event = parseStderrEvent(chunks, "header_extractor_fallback");
+    assert.ok(event, `expected a header_extractor_fallback stderr event, got: ${chunks.join("")}`);
+    assert.equal(event.provider, "claude-code");
+    assert.equal(event.reason, "no structured JSON lines with headers/response_headers found in non-empty stderr");
   } finally {
     process.stderr.write = origWrite;
   }
@@ -329,7 +348,7 @@ test("ClaudeCodeHeaderExtractor emits diagnostic when no structured JSON header 
 test("ClaudeCodeHeaderExtractor does NOT emit fallback diagnostic when structured JSON header lines are found", () => {
   const chunks = [];
   const origWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = (chunk) => { chunks.push(chunk); return true; };
+  process.stderr.write = (chunk) => { chunks.push(String(chunk)); return true; };
   try {
     const stderr = [
       '{"level":"info","message":"Starting session"}',
@@ -338,10 +357,10 @@ test("ClaudeCodeHeaderExtractor does NOT emit fallback diagnostic when structure
     const extractor = getHeaderExtractorForProvider("claude-code");
     const result = extractor.extract(stderr);
     assert.notEqual(result, null);
-    const combined = chunks.join("");
-    assert.ok(
-      !combined.includes("[quota] claude-code header extractor: no structured JSON lines"),
-      `unexpected fallback diagnostic when structured lines present: ${combined}`,
+    assert.equal(
+      parseStderrEvent(chunks, "header_extractor_fallback"),
+      null,
+      `unexpected fallback diagnostic when structured lines present: ${chunks.join("")}`,
     );
   } finally {
     process.stderr.write = origWrite;

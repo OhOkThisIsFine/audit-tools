@@ -143,6 +143,19 @@ export async function appendRunLedgerEntry(
   const lockPath = ledgerLockPath(artifactsDir);
   const tempPath = buildTempLedgerPath(artifactsDir);
   await mkdir(artifactsDir, { recursive: true });
+  // Emit a structured event so run outcomes are observable without reading the ledger file.
+  process.stderr.write(
+    JSON.stringify({
+      event: "run_ledger_entry",
+      run_id: entry.run_id,
+      provider: entry.provider,
+      obligation_id: entry.obligation_id,
+      selected_executor: entry.selected_executor,
+      status: entry.status,
+      started_at: entry.started_at,
+      ended_at: entry.ended_at,
+    }) + "\n",
+  );
   await withLedgerLock(lockPath, async () => {
     const ledger = await loadRunLedger(artifactsDir);
     ledger.runs.push(entry);
