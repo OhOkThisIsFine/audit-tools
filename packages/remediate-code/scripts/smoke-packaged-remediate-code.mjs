@@ -110,6 +110,11 @@ try {
   rmSync(smokeRoot, { recursive: true, force: true });
   process.exit(1);
 }
+if (!Array.isArray(sharedPackOutput) || sharedPackOutput.length === 0) {
+  console.error("npm pack --json @audit-tools/shared returned empty array — no tarball produced");
+  rmSync(smokeRoot, { recursive: true, force: true });
+  process.exit(1);
+}
 const sharedTarball = join(packDir, sharedPackOutput[0].filename);
 console.log(`  packed shared: ${sharedTarball} (${Date.now() - sharedPackStart}ms)`);
 
@@ -141,6 +146,11 @@ try {
     "npm pack --json output was not valid JSON (lifecycle script noise may have been mixed in):",
     packResult.stdout.slice(0, 500),
   );
+  rmSync(smokeRoot, { recursive: true, force: true });
+  process.exit(1);
+}
+if (!Array.isArray(packOutput) || packOutput.length === 0) {
+  console.error("npm pack --json returned empty array — no tarball produced");
   rmSync(smokeRoot, { recursive: true, force: true });
   process.exit(1);
 }

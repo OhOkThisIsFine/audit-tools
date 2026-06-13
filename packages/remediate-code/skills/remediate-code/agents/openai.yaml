@@ -1,2 +1,4 @@
-name: remediate-code
-description: Conversation-first remediation workflow that loads one backend-rendered step at a time.
+interface:
+  display_name: "remediate-code"
+  short_description: "Conversation-first remediation workflow that applies one backend-rendered fix at a time."
+  default_prompt: "Start /remediate-code for this repository and continue until all findings are remediated or the workflow blocks for operator input."

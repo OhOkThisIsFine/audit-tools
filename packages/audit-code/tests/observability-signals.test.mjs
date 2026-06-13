@@ -170,18 +170,6 @@ const { buildLineIndex, buildLineIndexForPaths } = await import(
   "../src/cli/lineIndex.ts"
 );
 
-/** Capture and restore console.warn for one async body. */
-async function withCapturedWarn(fn) {
-  const original = console.warn;
-  const calls = [];
-  console.warn = (...args) => calls.push(args.map(String).join(" "));
-  try {
-    return { result: await fn(), warnCalls: calls };
-  } finally {
-    console.warn = original;
-  }
-}
-
 test("buildLineIndex warns on unreadable file and returns 0 for that entry", async () => {
   await withTempDir(async (dir) => {
     const validFile = "valid.ts";
@@ -196,17 +184,20 @@ test("buildLineIndex warns on unreadable file and returns 0 for that entry", asy
       ],
     };
 
-    const { result, warnCalls } = await withCapturedWarn(() =>
-      buildLineIndex(dir, manifest),
-    );
+    let result;
+    const stderrLines = [];
+    await withCapturedStderr(async (lines) => {
+      result = await buildLineIndex(dir, manifest);
+      stderrLines.push(...lines);
+    });
 
     // Non-existent file falls back to 0 line count.
     assert.equal(result["does-not-exist.ts"], 0);
     // Valid file still has the correct count.
     assert.ok(result[validFile] > 0, "valid file should have a positive line count");
-    // A console.warn was emitted containing the failing path and an error message.
-    const warnLine = warnCalls.find((l) => l.includes("does-not-exist.ts"));
-    assert.ok(warnLine, "expected a console.warn for the unreadable file");
+    // A stderr diagnostic was emitted containing the failing path and an error message.
+    const warnLine = stderrLines.find((l) => l.includes("does-not-exist.ts"));
+    assert.ok(warnLine, "expected a stderr diagnostic for the unreadable file");
     assert.match(warnLine, /\[lineIndex\]/);
   });
 });
@@ -216,17 +207,20 @@ test("buildLineIndexForPaths warns on unreadable file and returns 0 for that ent
     const validFile = "module.ts";
     await writeFile(join(dir, validFile), "a\nb\n", "utf8");
 
-    const { result, warnCalls } = await withCapturedWarn(() =>
-      buildLineIndexForPaths(dir, [validFile, "ghost.ts"]),
-    );
+    let result;
+    const stderrLines = [];
+    await withCapturedStderr(async (lines) => {
+      result = await buildLineIndexForPaths(dir, [validFile, "ghost.ts"]);
+      stderrLines.push(...lines);
+    });
 
     // Non-existent path falls back to 0.
     assert.equal(result["ghost.ts"], 0);
     // Valid path has a correct count.
     assert.ok(result[validFile] > 0, "valid file should have a positive line count");
-    // A console.warn was emitted containing the failing path.
-    const warnLine = warnCalls.find((l) => l.includes("ghost.ts"));
-    assert.ok(warnLine, "expected a console.warn for the unreadable path");
+    // A stderr diagnostic was emitted containing the failing path.
+    const warnLine = stderrLines.find((l) => l.includes("ghost.ts"));
+    assert.ok(warnLine, "expected a stderr diagnostic for the unreadable path");
     assert.match(warnLine, /\[lineIndex\]/);
   });
 });

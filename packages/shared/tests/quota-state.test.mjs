@@ -345,6 +345,84 @@ test("ARC-09b7ce76-2: clearBucketFailureEvidence preserves success_weight", asyn
   });
 });
 
+// ── COR-d528d2cd: 'error' outcome must be distinct from 'timeout' ─────────────
+
+test("COR-d528d2cd: 'error' outcome records failure weight but does NOT set rate-limit cooldown", async () => {
+  await withTempStateDir(async () => {
+    // Record an 'error' outcome (non-quota failure).
+    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "error" }, 24);
+
+    const state = await readQuotaState();
+    const entry = state.entries[KEY];
+
+    // Failure weight must be present (error is penalised like timeout).
+    assert.ok(entry.buckets["2"]?.failure_weight > 0, "error outcome must record failure_weight on the bucket");
+
+    // consecutive_429_count must NOT be incremented — errors are not rate limits.
+    assert.equal(
+      entry.consecutive_429_count ?? 0,
+      0,
+      "error outcome must not increment consecutive_429_count",
+    );
+
+    // cooldown_until must NOT be set — only rate_limited triggers exponential backoff cooldown.
+    assert.equal(
+      entry.cooldown_until,
+      null,
+      "error outcome must not set cooldown_until (was collapased to timeout — COR-d528d2cd regression)",
+    );
+  });
+});
+
+test("COR-d528d2cd: 'timeout' outcome records failure weight and does NOT set rate-limit cooldown", async () => {
+  await withTempStateDir(async () => {
+    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "timeout" }, 24);
+
+    const state = await readQuotaState();
+    const entry = state.entries[KEY];
+    assert.ok(entry.buckets["2"]?.failure_weight > 0, "timeout outcome must record failure_weight");
+    assert.equal(entry.consecutive_429_count ?? 0, 0, "timeout must not increment consecutive_429_count");
+    assert.equal(entry.cooldown_until, null, "timeout must not set cooldown_until");
+  });
+});
+
+test("COR-d528d2cd: 'error' and 'timeout' produce identical quota state (both are non-quota failures)", async () => {
+  const KEY_ERR = "provider/model-error";
+  const KEY_TMO = "provider/model-timeout";
+
+  await withTempStateDir(async () => {
+    await recordWaveOutcome(KEY_ERR, { concurrency: 3, estimated_tokens: 0, outcome: "error" }, 24);
+    await recordWaveOutcome(KEY_TMO, { concurrency: 3, estimated_tokens: 0, outcome: "timeout" }, 24);
+
+    const state = await readQuotaState();
+    const errEntry = state.entries[KEY_ERR];
+    const tmoEntry = state.entries[KEY_TMO];
+
+    // Both should have identical failure_weight and zero cooldown.
+    assert.equal(
+      errEntry.buckets["3"]?.failure_weight,
+      tmoEntry.buckets["3"]?.failure_weight,
+      "error and timeout must produce identical failure_weight at the observed concurrency",
+    );
+    assert.equal(errEntry.cooldown_until, null, "error: no cooldown");
+    assert.equal(tmoEntry.cooldown_until, null, "timeout: no cooldown");
+    assert.equal(errEntry.consecutive_429_count ?? 0, 0, "error: no 429 count");
+    assert.equal(tmoEntry.consecutive_429_count ?? 0, 0, "timeout: no 429 count");
+  });
+});
+
+test("COR-d528d2cd: 'rate_limited' outcome correctly increments 429 count and sets cooldown", async () => {
+  await withTempStateDir(async () => {
+    // Confirm rate_limited is not confused with error/timeout.
+    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "rate_limited" }, 24);
+
+    const state = await readQuotaState();
+    const entry = state.entries[KEY];
+    assert.ok(entry.consecutive_429_count > 0, "rate_limited must increment consecutive_429_count");
+    assert.ok(entry.cooldown_until !== null, "rate_limited must set cooldown_until");
+  });
+});
+
 test("ARC-09b7ce76-2: clearBucketFailureEvidence on missing key or bucket is a no-op", async () => {
   await withTempStateDir(async () => {
     // No-op when key does not exist yet.

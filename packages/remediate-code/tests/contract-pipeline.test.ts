@@ -26,6 +26,7 @@ import {
 } from "@audit-tools/shared";
 import {
   validateTestValidatorPlan,
+  validateDesignSpecGates,
   CONTRACT_PIPELINE_VALIDATORS,
 } from "../src/validation/contractPipeline.js";
 
@@ -864,6 +865,77 @@ describe("promoteImplementationDagToExtractedPlan", () => {
 
     expect(block2).toBeDefined();
     expect(block2.dependencies).toEqual(["CP-BLOCK-CP-001"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: COR-86b18f1b — Gate 3 must use exact id match, not includes(),
+// to avoid substring false-positives (e.g. INV-1 ⊂ INV-10).
+// ---------------------------------------------------------------------------
+describe("validateDesignSpecGates Gate 3 — exact invariant id match", () => {
+  it("reports uncovered when obligation id is a superset string (INV-10 does not cover INV-1)", () => {
+    const designSpec = {
+      invariants: [{ id: "INV-1", description: "Sessions stay valid." }],
+    };
+    const obligationLedger = {
+      obligations: [
+        { id: "INV-10", kind: "invariant", description: "Covers INV-10 only." },
+      ],
+    };
+
+    const issues = validateDesignSpecGates(designSpec, obligationLedger);
+
+    // INV-10's id is not an exact match for INV-1; the invariant must be flagged.
+    const found = issues.some((i) => i.path.includes("INV-1") && !i.path.includes("INV-10"));
+    expect(found).toBe(true);
+  });
+
+  it("does not report uncovered when obligation id exactly matches invariant id", () => {
+    const designSpec = {
+      invariants: [{ id: "INV-1", description: "Sessions stay valid." }],
+    };
+    const obligationLedger = {
+      obligations: [
+        { id: "INV-1", kind: "invariant", description: "Exactly covers INV-1." },
+      ],
+    };
+
+    const issues = validateDesignSpecGates(designSpec, obligationLedger);
+
+    const uncovered = issues.filter((i) => i.path.includes("invariants[INV-1]"));
+    expect(uncovered).toHaveLength(0);
+  });
+
+  it("does not report uncovered when obligation description contains invariant id at word boundary", () => {
+    const designSpec = {
+      invariants: [{ id: "INV-1", description: "Sessions stay valid." }],
+    };
+    const obligationLedger = {
+      obligations: [
+        { id: "O-99", kind: "invariant", description: "This obligation covers INV-1 behavior." },
+      ],
+    };
+
+    const issues = validateDesignSpecGates(designSpec, obligationLedger);
+
+    const uncovered = issues.filter((i) => i.path.includes("invariants[INV-1]"));
+    expect(uncovered).toHaveLength(0);
+  });
+
+  it("reports uncovered when description mentions INV-10 but not INV-1 at word boundary", () => {
+    const designSpec = {
+      invariants: [{ id: "INV-1", description: "Sessions stay valid." }],
+    };
+    const obligationLedger = {
+      obligations: [
+        { id: "O-99", kind: "invariant", description: "This obligation covers INV-10 only." },
+      ],
+    };
+
+    const issues = validateDesignSpecGates(designSpec, obligationLedger);
+
+    const uncovered = issues.filter((i) => i.path.includes("invariants[INV-1]"));
+    expect(uncovered).toHaveLength(1);
   });
 });
 

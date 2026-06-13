@@ -36,18 +36,30 @@ function tryParseJson(text: string): Record<string, unknown> | null {
   }
 }
 
-function extractRetryAfterMs(obj: Record<string, unknown>): number | null {
-  const headers = obj["headers"] as Record<string, unknown> | undefined;
-  const retryAfter =
-    (headers?.["retry-after"] as string | number | undefined) ??
-    (headers?.["Retry-After"] as string | number | undefined) ??
-    (obj["retry_after"] as string | number | undefined) ??
-    (obj["retry_after_ms"] as string | number | undefined);
-  if (retryAfter == null) return null;
-  const val = typeof retryAfter === "string" ? Number(retryAfter) : retryAfter;
+function toPositiveNumber(value: string | number | undefined): number | null {
+  if (value == null) return null;
+  const val = typeof value === "string" ? Number(value) : value;
   if (!Number.isFinite(val) || val <= 0) return null;
-  // If the value looks like seconds (< 600), convert to ms
-  return val < 600 ? val * 1000 : val;
+  return val;
+}
+
+function extractRetryAfterMs(obj: Record<string, unknown>): number | null {
+  // A *_ms field is already in milliseconds and must NOT be scaled. Prefer it
+  // when present, returning it verbatim.
+  const retryAfterMs = toPositiveNumber(
+    obj["retry_after_ms"] as string | number | undefined,
+  );
+  if (retryAfterMs != null) return retryAfterMs;
+
+  const headers = obj["headers"] as Record<string, unknown> | undefined;
+  const retryAfterSeconds = toPositiveNumber(
+    (headers?.["retry-after"] as string | number | undefined) ??
+      (headers?.["Retry-After"] as string | number | undefined) ??
+      (obj["retry_after"] as string | number | undefined),
+  );
+  if (retryAfterSeconds == null) return null;
+  // Retry-After (RFC 7231) and retry_after fields are always in seconds; convert to ms.
+  return retryAfterSeconds * 1000;
 }
 
 function detectFromJson(text: string): RateLimitDetectionResult | null {

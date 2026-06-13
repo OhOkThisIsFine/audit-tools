@@ -72,7 +72,6 @@ export async function cmdAdvanceAudit(argv: string[]): Promise<void> {
     analyzers: sessionConfig.analyzers,
     graphLlmEdgeReasoning: sessionConfig.graph?.llm_edge_reasoning,
     since: getFlag(argv, "--since"),
-    opentoken: sessionConfig.opentoken?.enabled,
     runLog: sessionConfig.observability?.run_log,
   });
   if (result.selected_executor !== "agent") {

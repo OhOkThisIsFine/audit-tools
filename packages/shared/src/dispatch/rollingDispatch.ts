@@ -361,8 +361,11 @@ export function createRollingDispatcher<TPacket>(
 
     // Record quota outcome.
     const providerModelKey = buildProviderModelKey(providerSlot.providerName, providerSlot.hostModel);
+    // Map dispatch outcome to quota outcome. 'error' is now a distinct quota
+    // outcome (non-quota failure — no cooldown applied, only failure weight).
     const quotaOutcome = result.outcome === "success" ? "success"
       : result.outcome === "rate_limited" ? "rate_limited"
+      : result.outcome === "error" ? "error"
       : "timeout" as const;
 
     try {

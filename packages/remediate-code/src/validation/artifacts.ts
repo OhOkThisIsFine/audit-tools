@@ -109,7 +109,7 @@ function validateCurrentStep(value: unknown, path: string): ValidationIssue[] {
 function validateDispatchPlan(
   value: unknown,
   path: string,
-): { issues: ValidationIssue[]; phase?: "implement"; resultPaths: string[] } {
+): { issues: ValidationIssue[]; phase?: "document" | "implement"; resultPaths: string[] } {
   const issues: ValidationIssue[] = [];
   const resultPaths: string[] = [];
   if (!isRecord(value)) {
@@ -120,11 +120,11 @@ function validateDispatchPlan(
     pushValidationIssue(issues, `${path}.contract_version`, `${path} has unsupported contract_version.`);
   }
   const phase =
-    value.phase === "implement"
-      ? value.phase
+    value.phase === "implement" || value.phase === "document"
+      ? (value.phase as "document" | "implement")
       : undefined;
   if (!phase) {
-    pushValidationIssue(issues, `${path}.phase`, `${path}.phase must be implement.`);
+    pushValidationIssue(issues, `${path}.phase`, `${path}.phase must be "document" or "implement".`);
   }
   for (const key of ["run_id", "repo_root", "artifacts_dir"]) {
     if (typeof value[key] !== "string") {
@@ -148,6 +148,9 @@ function validateDispatchPlan(
     }
     if (phase === "implement" && typeof item.block_id !== "string") {
       pushValidationIssue(issues, `${itemPath}.block_id`, `${itemPath}.block_id must be a string for implement dispatch.`);
+    }
+    if (phase === "document" && typeof item.finding_id !== "string") {
+      pushValidationIssue(issues, `${itemPath}.finding_id`, `${itemPath}.finding_id must be a string for document dispatch.`);
     }
     if (typeof item.prompt_path === "string" && !existsSync(item.prompt_path)) {
       pushValidationIssue(issues, `${itemPath}.prompt_path`, `${itemPath}.prompt_path points to a missing file: ${item.prompt_path}.`);
@@ -238,7 +241,7 @@ async function validateDispatchArtifacts(
   const files = await collectFiles(runsDir);
   const dispatchPlanPaths = files.filter((file) => file.endsWith("dispatch-plan.json"));
   const resultFiles = files.filter((file) => file.endsWith(".result.json"));
-  const referencedResults = new Map<string, "implement">();
+  const referencedResults = new Map<string, "document" | "implement">();
 
   for (const dispatchPlanPath of dispatchPlanPaths) {
     const plan = await readJsonForValidation(dispatchPlanPath, issues);
