@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { readJsonFile, writeJsonFile } from "@audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
@@ -10,15 +9,6 @@ import {
   entriesByTaskId,
 } from "./dispatch.js";
 import { fromBase64Url, getArtifactsDir, getFlag, readStdinText } from "./args.js";
-
-function findingKey(f: { lens?: string; category?: string; title?: string; affected_files?: Array<{ path: string }> }): string {
-  return [
-    (f.lens ?? "").trim().toLowerCase(),
-    (f.category ?? "").trim().toLowerCase(),
-    (f.title ?? "").trim().toLowerCase(),
-    f.affected_files?.[0]?.path ?? "",
-  ].join("|");
-}
 
 export async function cmdSubmitPacket(argv: string[]): Promise<void> {
   const runId = resolveRunScopedArg(argv, "--run-id", "--run-id-b64");
@@ -146,43 +136,10 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
     throw new Error(`submit-packet rejected ${resolvedPacketId}:\n${resultErrors.join("\n")}`);
   }
 
-  // Check for duplicate findings against already-submitted results in this run
-  const existingFindingKeys = new Set<string>();
-  const otherEntries = resultMap.entries.filter(
-    (e) => e.packet_id !== resolvedPacketId,
-  );
-  for (const other of otherEntries) {
-    try {
-      const existingRaw = JSON.parse(await readFile(other.result_path, "utf8"));
-      // A prior result may be a single AuditResult object or an AuditResult[]
-      // array (e.g. when written by a batch worker). Expand both forms so we
-      // never silently skip findings in array-format prior results (COR-d31ca6b5).
-      const existingResults: AuditResult[] = Array.isArray(existingRaw)
-        ? existingRaw
-        : [existingRaw];
-      for (const existing of existingResults) {
-        if (existing?.findings) {
-          for (const f of existing.findings) {
-            existingFindingKeys.add(findingKey(f));
-          }
-        }
-      }
-    } catch { /* file doesn't exist yet or invalid — skip */ }
-  }
-  let dupCount = 0;
-  for (const result of payload as AuditResult[]) {
-    for (const f of result.findings ?? []) {
-      if (existingFindingKeys.has(findingKey(f))) {
-        dupCount++;
-      }
-    }
-  }
-  if (dupCount > 0) {
-    process.stderr.write(
-      `[submit-packet] Warning: ${dupCount} finding(s) appear to duplicate findings from other packets in this run.\n`,
-    );
-  }
-
+  // Cross-packet finding deduplication is handled at merge-and-ingest time,
+  // where all results are available in memory. submit-packet only validates
+  // that this packet's own results are internally consistent and match the
+  // assigned task list.
   const entryByTaskId = entriesByTaskId(packetEntries);
   const submittedAt = new Date().toISOString();
   for (const result of payload as AuditResult[]) {
@@ -210,7 +167,6 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
         packet_id: resolvedPacketId,
         accepted_count: (payload as AuditResult[]).length,
         finding_count: findingCount,
-        ...(dupCount > 0 ? { duplicate_warning_count: dupCount } : {}),
       },
       null,
       2,

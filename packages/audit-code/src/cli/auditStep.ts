@@ -107,7 +107,7 @@ export async function runAuditStep(options: {
 
     if (warnings.length > 0) {
       process.stderr.write(
-        `audit-results validation: ${warnings.length} warning(s):\n` +
+        `[${new Date().toISOString()}] audit-results validation (artifacts: ${options.artifactsDir}): ${warnings.length} warning(s):\n` +
           formatAuditResultIssues(warnings) +
           "\n",
       );

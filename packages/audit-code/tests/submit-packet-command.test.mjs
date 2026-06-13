@@ -286,9 +286,9 @@ await test("missing assigned task in payload is rejected", async (t) => {
   );
 });
 
-// ── 6. Cross-packet duplicate-finding warning ─────────────────────────────────
+// ── 6. Cross-packet duplicate-finding: submit-packet does NOT warn (handled at merge-and-ingest) ─
 
-await test("cross-packet duplicate finding emits a warning but still accepts", async (t) => {
+await test("cross-packet duplicate finding does NOT emit a warning at submit time (dedup is at merge-and-ingest)", async (t) => {
   const task1 = makeTaskCovering("task-dup-find-1", "src/shared.ts");
 
   // Pre-existing result in another packet with the same finding key
@@ -323,7 +323,9 @@ await test("cross-packet duplicate finding emits a warning but still accepts", a
   });
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
 
-  // Submit a result for pkt-alpha that contains the same finding key
+  // Submit a result for pkt-alpha that contains the same finding key.
+  // submit-packet no longer performs cross-packet dedup scanning — that
+  // responsibility moved to merge-and-ingest where all results are available.
   const newResult = {
     ...makeResult(task1),
     findings: [
@@ -334,17 +336,16 @@ await test("cross-packet duplicate finding emits a warning but still accepts", a
   const { stdout, stderr, error } = await runSubmit(argv);
 
   assert.equal(error, null, `Should not throw; got: ${error?.message}`);
+  // No cross-packet dedup warning at submit time
   assert.ok(
-    stderr.includes("duplicate") || stderr.includes("Warning"),
-    `Expected duplicate warning in stderr, got: ${stderr}`,
+    !stderr.toLowerCase().includes("duplicate"),
+    `Did not expect cross-packet duplicate warning in stderr at submit time, got: ${stderr}`,
   );
-  // The parsed stdout JSON must include duplicate_warning_count >= 1
+  // No duplicate_warning_count in stdout
   const parsedOut = JSON.parse(stdout.trim());
-  assert.ok(
-    typeof parsedOut.duplicate_warning_count === "number" && parsedOut.duplicate_warning_count >= 1,
-    `Expected duplicate_warning_count >= 1 in output, got: ${JSON.stringify(parsedOut)}`,
-  );
-  // Result files should still be written (duplicate is warning-only)
+  assert.equal(parsedOut.duplicate_warning_count, undefined,
+    `Expected no duplicate_warning_count in output, got: ${JSON.stringify(parsedOut)}`);
+  // Result files should still be written
   const resultPath = join(runDir, "task-results", `${task1.task_id}.json`);
   const written = JSON.parse(await readFile(resultPath, "utf8"));
   assert.equal(written.task_id, task1.task_id);
@@ -423,9 +424,14 @@ await test("happy path stamps run_id and one submitted_at value on each result",
   }
 });
 
-// ── 8. findingKey dedup: cross-packet duplicate detection ─────────────────────
+// ── 8. findingKey dedup: cross-packet dedup is handled at merge-and-ingest ─────
+//
+// submit-packet no longer scans prior result files for duplicate findings —
+// that responsibility moved to merge-and-ingest where all results are available
+// in memory for an accurate full-run dedup pass. These tests verify submit-packet
+// accepts without any cross-packet duplicate warning regardless of other packets.
 
-await test("findingKey dedup: same finding in two packets is flagged as duplicate", async (t) => {
+await test("findingKey dedup: same finding in two packets is accepted without warning at submit time", async (t) => {
   const task1 = makeTaskCovering("task-fkdup-1", "src/auth.ts");
   const sharedFinding = {
     id: "FK-001",
@@ -451,60 +457,23 @@ await test("findingKey dedup: same finding in two packets is flagged as duplicat
   });
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
 
-  // Submit same finding (different id, same key fields) in pkt-alpha
+  // Submit same finding (different id, same key fields) in pkt-alpha.
+  // No cross-packet dedup warning expected at submit time.
   const newResult = { ...makeResult(task1), findings: [{ ...sharedFinding, id: "FK-002" }] };
   const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
-  const { stderr, error } = await runSubmit(argv);
+  const { stdout, stderr, error } = await runSubmit(argv);
 
   assert.equal(error, null, `Should not throw; got: ${error?.message}`);
   assert.ok(
-    stderr.includes("duplicate") || stderr.includes("Warning"),
-    `Expected duplicate warning in stderr, got: ${stderr}`,
+    !stderr.toLowerCase().includes("duplicate"),
+    `Did not expect cross-packet duplicate warning at submit time, got: ${stderr}`,
   );
+  const parsed = JSON.parse(stdout.trim());
+  assert.equal(parsed.duplicate_warning_count, undefined,
+    `Expected no duplicate_warning_count in output, got: ${JSON.stringify(parsed)}`);
 });
 
-await test("findingKey dedup: case-insensitive lens match is still a duplicate", async (t) => {
-  const task1 = makeTaskCovering("task-fkcase-1", "src/handler.ts");
-  const baseFinding = {
-    id: "FK-CASE-001",
-    title: "Unhandled Error",
-    lens: "Security",
-    category: "error-handling",
-    severity: "medium",
-    confidence: "medium",
-    summary: "Errors not handled.",
-    affected_files: [{ path: "src/handler.ts" }],
-    evidence: ["src/handler.ts:1 - unhandled error"],
-  };
-
-  const otherTask = makeTaskCovering("task-fkcase-other", "src/handler.ts");
-  // Other packet uses uppercase "Security"; this packet will use lowercase "security"
-  const otherResult = { ...makeResult(otherTask), findings: [baseFinding] };
-
-  const { artifactsDir } = await makeArtifactsDir({
-    tasks: [task1, otherTask],
-    packetTaskIds: [task1.task_id],
-    otherPacketResults: [
-      { packetId: "pkt-case-other", taskId: otherTask.task_id, result: otherResult },
-    ],
-  });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
-
-  const newResult = {
-    ...makeResult(task1),
-    findings: [{ ...baseFinding, id: "FK-CASE-002", lens: "security" }],
-  };
-  const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
-  const { stderr, error } = await runSubmit(argv);
-
-  assert.equal(error, null, `Should not throw; got: ${error?.message}`);
-  assert.ok(
-    stderr.includes("duplicate") || stderr.includes("Warning"),
-    `Expected duplicate warning for case-insensitive lens match, got: ${stderr}`,
-  );
-});
-
-await test("findingKey dedup: finding differing in any key field is NOT a duplicate", async (t) => {
+await test("findingKey dedup: finding differing in any key field is NOT a duplicate (submit-packet never warns either way)", async (t) => {
   const task1 = makeTaskCovering("task-fkdiff-1", "src/other.ts");
   const baseFinding = {
     id: "FK-DIFF-001",
@@ -530,7 +499,7 @@ await test("findingKey dedup: finding differing in any key field is NOT a duplic
   });
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
 
-  // Finding differs only in affected_files path — not a duplicate
+  // Finding differs only in affected_files path
   const newResult = {
     ...makeResult(task1),
     findings: [{ ...baseFinding, id: "FK-DIFF-002", affected_files: [{ path: "src/other.ts" }] }],
@@ -539,18 +508,23 @@ await test("findingKey dedup: finding differing in any key field is NOT a duplic
   const { stdout, stderr, error } = await runSubmit(argv);
 
   assert.equal(error, null, `Should not throw; got: ${error?.message}`);
-  // No duplicate warning expected
+  // No cross-packet warning expected (submit-packet delegates this to merge-and-ingest)
   assert.ok(
-    !stderr.includes("duplicate") && !stderr.includes("Warning"),
-    `Did not expect duplicate warning for differing path, got: ${stderr}`,
+    !stderr.toLowerCase().includes("duplicate"),
+    `Did not expect any duplicate warning at submit time, got: ${stderr}`,
   );
   const parsed = JSON.parse(stdout.trim());
   assert.equal(parsed.duplicate_warning_count, undefined);
 });
 
-// ── 10b. COR-d31ca6b5: cross-packet dup check handles array-format prior results ─
+// ── 10b. COR-d31ca6b5: cross-packet dedup is at merge-and-ingest, not submit-packet ─
+//
+// The original COR-d31ca6b5 fix moved the array-expansion logic to submit-packet.
+// That responsibility has since moved to merge-and-ingest where warnOnDuplicateFindings
+// operates on the in-memory passing[] list — no file scanning needed. This test
+// verifies submit-packet still accepts without cross-packet dedup interference.
 
-await test("findingKey dedup: array-format prior result file is expanded and deduped (COR-d31ca6b5)", async (t) => {
+await test("submit-packet accepts without warning even when prior result is array-format (dedup is at merge-and-ingest)", async (t) => {
   const task1 = makeTaskCovering("task-arrdup-1", "src/shared.ts");
   const dupFinding = {
     id: "ARR-DUP-001",
@@ -565,8 +539,7 @@ await test("findingKey dedup: array-format prior result file is expanded and ded
   };
 
   const otherTask = makeTaskCovering("task-arrdup-other", "src/shared.ts");
-  // Intentionally store the prior result as an AuditResult[] array
-  // (workers may emit arrays; the dedup loop must expand them).
+  // Prior result is an AuditResult[] array — submit-packet no longer reads it.
   const priorResultArray = [{ ...makeResult(otherTask), findings: [dupFinding] }];
 
   const { artifactsDir } = await makeArtifactsDir({
@@ -578,16 +551,20 @@ await test("findingKey dedup: array-format prior result file is expanded and ded
   });
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
 
-  // Submit a result for pkt-alpha containing the same finding key
+  // Submit a result for pkt-alpha containing the same finding key.
+  // No cross-packet dedup at submit time — this is now merge-and-ingest's concern.
   const newResult = { ...makeResult(task1), findings: [{ ...dupFinding, id: "ARR-DUP-002" }] };
   const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
-  const { stderr, error } = await runSubmit(argv);
+  const { stdout, stderr, error } = await runSubmit(argv);
 
   assert.equal(error, null, `Should not throw; got: ${error?.message}`);
   assert.ok(
-    stderr.includes("duplicate") || stderr.includes("Warning"),
-    `Expected duplicate warning because prior result (array-format) contains the same finding. Got stderr: ${stderr}`,
+    !stderr.toLowerCase().includes("duplicate"),
+    `Did not expect cross-packet duplicate warning at submit time, got: ${stderr}`,
   );
+  const parsed = JSON.parse(stdout.trim());
+  assert.equal(parsed.duplicate_warning_count, undefined,
+    `Expected no duplicate_warning_count in output, got: ${JSON.stringify(parsed)}`);
 });
 
 // ── 11. Missing --run-id flag ─────────────────────────────────────────────────

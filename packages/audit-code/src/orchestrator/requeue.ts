@@ -1,6 +1,7 @@
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { AuditTask, CoverageMatrix } from "../types.js";
 import { buildRequeueTargets } from "../coverage.js";
+import { getExternalSignalPaths } from "./requeueUtils.js";
 
 function taskPriority(
   hasExternalSignal: boolean,
@@ -11,23 +12,6 @@ function taskPriority(
     return "medium";
   }
   return "low";
-}
-
-function getExternalSignalPaths(
-  externalAnalyzerResults?: ExternalAnalyzerResults,
-): Set<string> {
-  const results = Array.isArray(externalAnalyzerResults?.results)
-    ? externalAnalyzerResults.results
-    : [];
-  return new Set(
-    results
-      .map((item) =>
-        item && typeof item.path === "string" && item.path.length > 0
-          ? item.path
-          : null,
-      )
-      .filter((path): path is string => path !== null),
-  );
 }
 
 export function buildRequeueTasks(

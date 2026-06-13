@@ -71,17 +71,19 @@ export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
     }
   }
 
-  for (const [upstream, downstreamList] of Object.entries(
-    ARTIFACT_DEPENDENTS_MAP,
-  )) {
-    if (upstream === "tooling_manifest.json" && !present(bundle, upstream)) {
-      continue;
-    }
-    if (!present(bundle, upstream)) {
-      for (const downstream of downstreamList) {
-        const hasMetadataEntry = Boolean(metadata?.artifacts[downstream]);
-        if (present(bundle, downstream) && (!metadata || !hasMetadataEntry)) {
-          stale.add(downstream);
+  if (metadata) {
+    for (const [upstream, downstreamList] of Object.entries(
+      ARTIFACT_DEPENDENTS_MAP,
+    )) {
+      if (upstream === "tooling_manifest.json" && !present(bundle, upstream)) {
+        continue;
+      }
+      if (!present(bundle, upstream)) {
+        for (const downstream of downstreamList) {
+          const hasMetadataEntry = Boolean(metadata.artifacts[downstream]);
+          if (present(bundle, downstream) && !hasMetadataEntry) {
+            stale.add(downstream);
+          }
         }
       }
     }

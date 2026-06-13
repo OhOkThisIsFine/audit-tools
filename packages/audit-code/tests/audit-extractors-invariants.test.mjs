@@ -522,3 +522,146 @@ test("INV-10: fsIntake emits warn diagnostic for oversized files", async () => {
     assert.ok(hasSkipLog, "fsIntake must emit a warn diagnostic for oversized files");
   });
 });
+
+// ── ARC-27aceb61: regex-based import extraction — capability boundary regression ─
+//
+// Finding ARC-27aceb61 notes that graph.ts uses IMPORT_PATTERNS (regex over raw
+// text) to build the dependency graph rather than the TypeScript compiler API.
+// The regex approach is an explicit architectural trade-off: it is language-neutral
+// (works across TS, JS, Python, Go) and deterministic, but has known limits.
+//
+// This block records the capability boundary as a regression assertion so that:
+//   (a) future callers know what the regex layer guarantees, and
+//   (b) any migration to the TS compiler API has a concrete behavioral baseline.
+//
+// Known capabilities: ESM static imports, re-exports, string-literal dynamic
+//   imports `import('./foo')`, CJS require.
+// Known limitations: dynamic imports with template literals `import(\`./\${x}\`)`
+//   are silently missed (cannot be statically resolved by any regex approach).
+//
+// The module contract (finalized_module_contracts.json) already documents:
+//   "import resolution is heuristic/regex today — ARC-27aceb61."
+
+test("ARC-27aceb61: buildGraphBundle extracts ESM static import edges", async () => {
+  const { buildGraphBundle } = await importSourceModule("src/extractors/graph.ts");
+
+  const repoManifest = {
+    files: [
+      { path: "src/a.ts", language: "typescript", size_bytes: 50, excluded: false },
+      { path: "src/b.ts", language: "typescript", size_bytes: 50, excluded: false },
+    ],
+  };
+  const fileContents = {
+    "src/a.ts": `import { foo } from "./b.js";\nexport const x = 1;`,
+    "src/b.ts": `export const foo = 2;`,
+  };
+
+  const bundle = buildGraphBundle(repoManifest, undefined, { fileContents });
+  const importEdges = bundle.graphs.imports;
+
+  const edge = importEdges.find((e) => e.from === "src/a.ts" && e.to === "src/b.ts");
+  assert.ok(
+    edge !== undefined,
+    "buildGraphBundle must extract an ESM import edge from src/a.ts → src/b.ts",
+  );
+  assert.strictEqual(edge.kind, "esm", "import edge must have kind 'esm'");
+  assert.ok(
+    typeof edge.confidence === "number" && edge.confidence > 0,
+    "import edge must have positive confidence",
+  );
+});
+
+test("ARC-27aceb61: buildGraphBundle extracts re-export edges", async () => {
+  const { buildGraphBundle } = await importSourceModule("src/extractors/graph.ts");
+
+  const repoManifest = {
+    files: [
+      { path: "src/index.ts", language: "typescript", size_bytes: 60, excluded: false },
+      { path: "src/utils.ts", language: "typescript", size_bytes: 40, excluded: false },
+    ],
+  };
+  const fileContents = {
+    "src/index.ts": `export { helper } from "./utils.js";`,
+    "src/utils.ts": `export const helper = () => {};`,
+  };
+
+  const bundle = buildGraphBundle(repoManifest, undefined, { fileContents });
+  const importEdges = bundle.graphs.imports;
+
+  const edge = importEdges.find(
+    (e) => e.from === "src/index.ts" && e.to === "src/utils.ts",
+  );
+  assert.ok(
+    edge !== undefined,
+    "buildGraphBundle must extract a re-export edge from src/index.ts → src/utils.ts",
+  );
+  assert.strictEqual(edge.kind, "re-export", "re-export edge must have kind 're-export'");
+});
+
+test("ARC-27aceb61: buildGraphBundle extracts string-literal dynamic import edges", async () => {
+  const { buildGraphBundle } = await importSourceModule("src/extractors/graph.ts");
+
+  const repoManifest = {
+    files: [
+      { path: "src/loader.ts", language: "typescript", size_bytes: 80, excluded: false },
+      { path: "src/module.ts", language: "typescript", size_bytes: 40, excluded: false },
+    ],
+  };
+  const fileContents = {
+    "src/loader.ts": `const mod = await import("./module.js");`,
+    "src/module.ts": `export const value = 42;`,
+  };
+
+  const bundle = buildGraphBundle(repoManifest, undefined, { fileContents });
+  const importEdges = bundle.graphs.imports;
+
+  const edge = importEdges.find(
+    (e) => e.from === "src/loader.ts" && e.to === "src/module.ts",
+  );
+  assert.ok(
+    edge !== undefined,
+    "buildGraphBundle must extract a dynamic-import edge for string-literal specifier",
+  );
+  assert.strictEqual(
+    edge.kind,
+    "dynamic-import",
+    "dynamic import edge must have kind 'dynamic-import'",
+  );
+});
+
+test("ARC-27aceb61: buildGraphBundle does NOT extract template-literal dynamic import edges (known regex limitation)", async () => {
+  // This test documents the known limitation of the regex approach.
+  // Template-literal dynamic imports (`import(\`./\${segment}\`)`) cannot be
+  // statically resolved by regex. The TypeScript compiler API could resolve these
+  // when the template expression is a union of string literals, but the regex
+  // approach silently misses them. This is the trade-off recorded in ARC-27aceb61.
+  const { buildGraphBundle } = await importSourceModule("src/extractors/graph.ts");
+
+  const repoManifest = {
+    files: [
+      { path: "src/dynamic.ts", language: "typescript", size_bytes: 100, excluded: false },
+      { path: "src/feature.ts", language: "typescript", size_bytes: 40, excluded: false },
+    ],
+  };
+  const segment = "feature";
+  // Template literal: import(`./\${segment}.js`) — not a string literal
+  const fileContents = {
+    "src/dynamic.ts": `const seg = "${segment}";\nconst mod = await import(\`./\${seg}.js\`);`,
+    "src/feature.ts": `export const x = 1;`,
+  };
+
+  const bundle = buildGraphBundle(repoManifest, undefined, { fileContents });
+  const importEdges = bundle.graphs.imports;
+
+  const edge = importEdges.find(
+    (e) => e.from === "src/dynamic.ts" && e.to === "src/feature.ts",
+  );
+  // EXPECTED: the regex approach does NOT detect this edge. This is the documented
+  // limitation. If this assertion ever fails, it means the extractor was upgraded
+  // to handle template literals (e.g. via TS compiler API) — update accordingly.
+  assert.strictEqual(
+    edge,
+    undefined,
+    "buildGraphBundle must NOT extract a template-literal dynamic import (known regex limitation — ARC-27aceb61)",
+  );
+});
