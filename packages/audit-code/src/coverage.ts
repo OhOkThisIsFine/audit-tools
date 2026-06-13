@@ -28,7 +28,7 @@ export function markExcludedPath(
   path: string,
   classificationStatus: ClassificationStatus,
 ): void {
-  const record = buildFileIndex(matrix).get(path);
+  const record = matrix.files.find((f) => f.path === path);
   if (!record) return;
 
   record.classification_status = classificationStatus;
@@ -44,7 +44,7 @@ export function applyUnitCoverage(
   unitId: string,
   requiredLenses: string[],
 ): void {
-  const record = buildFileIndex(matrix).get(path);
+  const record = matrix.files.find((f) => f.path === path);
   if (!record || record.audit_status === "excluded") return;
 
   if (!record.unit_ids.includes(unitId)) {

@@ -60,6 +60,7 @@ export function buildArtifactDependenciesMap(): Record<string, string[]> {
   for (const [upstream, downstreamList] of Object.entries(
     ARTIFACT_DEPENDENTS_MAP,
   )) {
+    if (!downstreamList) continue;
     reverse[upstream] ??= [];
     for (const downstream of downstreamList) {
       reverse[downstream] ??= [];

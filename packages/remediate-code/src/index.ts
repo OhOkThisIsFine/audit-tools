@@ -4,6 +4,7 @@ import { join, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runCommand } from "./utils/commands.js";
+import { splitFrontmatter, writeGeneratedFile, objectValue } from "./utils/hostAssets.js";
 import { decideNextStep } from "./steps/nextStep.js";
 import {
   mergeImplementResults,
@@ -278,25 +279,6 @@ export function installRepoAssets(
     log(`remediate-code: no repo-local files were written under ${resolve(root)}.`);
   }
   ensureGlobalAssets(quiet, log, homeDir, resolve(root));
-}
-
-function splitFrontmatter(text: string): { body: string } {
-  const normalized = text.replace(/\r\n/g, "\n");
-  const match = normalized.match(/^---\n[\s\S]*?\n---\n?/u);
-  return { body: match ? normalized.slice(match[0].length) : normalized };
-}
-
-function writeGeneratedFile(path: string, content: Buffer): string {
-  const action = existsSync(path) ? "updated" : "installed";
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content);
-  return action;
-}
-
-function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 }
 
 // Remediator agent scope: managed rules win for specific patterns; an

@@ -75,6 +75,7 @@ export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
     for (const [upstream, downstreamList] of Object.entries(
       ARTIFACT_DEPENDENTS_MAP,
     )) {
+      if (!downstreamList) continue;
       if (upstream === "tooling_manifest.json" && !present(bundle, upstream)) {
         continue;
       }
@@ -95,6 +96,7 @@ export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
     for (const [upstream, downstreamList] of Object.entries(
       ARTIFACT_DEPENDENTS_MAP,
     )) {
+      if (!downstreamList) continue;
       if (!stale.has(upstream)) {
         continue;
       }

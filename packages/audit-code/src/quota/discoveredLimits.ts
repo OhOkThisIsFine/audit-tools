@@ -80,6 +80,16 @@ export async function updateDiscoveredLimits(
   if (limits.output_tokens_per_minute != null) {
     entry.output_tokens_per_minute = limits.output_tokens_per_minute;
   }
+  // Skip the write if the effective limit values are unchanged (source/timestamp
+  // may differ, but only write when a numeric limit actually changed).
+  if (
+    existing &&
+    existing.requests_per_minute === entry.requests_per_minute &&
+    existing.input_tokens_per_minute === entry.input_tokens_per_minute &&
+    existing.output_tokens_per_minute === entry.output_tokens_per_minute
+  ) {
+    return;
+  }
   cache.entries[providerModelKey] = entry;
   await writeDiscoveredLimitsCache(cache);
 }

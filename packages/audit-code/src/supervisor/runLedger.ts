@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { open, mkdir, rename, rm } from "node:fs/promises";
+import { mkdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   RUN_LEDGER_STATUSES,
@@ -19,25 +19,20 @@ function ledgerPath(artifactsDir: string): string {
 }
 
 /**
- * Wrap withFileLock for the run ledger, emitting a stderr message on the first
- * contention event so operators can observe prolonged lock waits before the
- * full timeout expires.
+ * Wrap withFileLock for the run ledger, emitting a stderr message when the
+ * lock file already exists so operators can observe prolonged lock waits
+ * before the full timeout expires.
  */
 async function withLedgerLock<T>(lockPath: string, fn: () => Promise<T>): Promise<T> {
-  // Probe for an immediate lock acquisition; if the lock file already exists,
-  // log contention before delegating to withFileLock for the full retry loop.
+  // Check for contention via stat (read-only probe — no acquire/release cycle).
   try {
-    const fd = await open(lockPath, "wx");
-    await fd.close();
-    // Lock acquired on the first attempt — no contention; release and let
-    // withFileLock manage the full acquire + release lifecycle.
-    await rm(lockPath, { force: true });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
-      process.stderr.write(
-        `[audit-code] runLedger: lock contention detected on ${lockPath}, waiting...\n`,
-      );
-    }
+    await stat(lockPath);
+    // Lock file exists — contention likely; log before entering the retry loop.
+    process.stderr.write(
+      `[audit-code] runLedger: lock contention detected on ${lockPath}, waiting...\n`,
+    );
+  } catch {
+    // Lock file absent — no contention; proceed silently.
   }
   return withFileLock(lockPath, fn);
 }

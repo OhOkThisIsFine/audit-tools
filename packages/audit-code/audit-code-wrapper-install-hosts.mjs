@@ -18,6 +18,13 @@ import {
   findLegacyAuditCodeSurfaceFiles,
   removeLegacyAuditCodeSurfaceFiles,
 } from './audit-code-wrapper-legacy.mjs';
+import {
+  renderVSCodeAgentFile,
+  renderCodexAutomationRecipe,
+  renderAntigravityPlanningGuide,
+  renderGeminiCommandToml as _renderGeminiCommandTomlImpl,
+  repoRelativePath as _repoRelativePath,
+} from './audit-code-wrapper-install-renderers.mjs';
 
 const repoRoot = dirname(fileURLToPath(import.meta.url));
 const promptAssetPath = join(repoRoot, 'skills', 'audit-code', 'audit-code.prompt.md');
@@ -108,86 +115,12 @@ function buildInstallDirective(relativePromptPath) {
   ].join('\n');
 }
 
-function replaceBackslashes(value) {
-  return value.replace(/\\/g, '/');
-}
+// render functions (renderVSCodeAgentFile, renderCodexAutomationRecipe,
+// renderAntigravityPlanningGuide) are imported from audit-code-wrapper-install-renderers.mjs.
+// renderGeminiCommandToml and toRepoRelativePath are aliased below.
+const renderGeminiCommandToml = _renderGeminiCommandTomlImpl;
 
-function renderVSCodeAgentFile() {
-  return [
-    '---',
-    'description: Plan and orchestrate /audit-code through the next-step machine before making code changes.',
-    '---',
-    '',
-    '# Auditor Agent',
-    '',
-    'Use `audit-code next-step` as the primary integration surface for the audit workflow.',
-    '',
-    'When the user asks to run or continue `/audit-code`:',
-    '',
-    '- run `audit-code next-step` directly when shell access is available',
-    '- prefer imported audit results and runtime updates over ad hoc manual state edits',
-    '- treat the deterministic audit report as the final source of truth once the audit completes',
-    '',
-  ].join('\n');
-}
-
-function renderCodexAutomationRecipe() {
-  return [
-    '# Codex re-audit automation recipe',
-    '',
-    'Suggested recurring task:',
-    '',
-    '- Prompt: Re-run the autonomous audit workflow for this repository with `audit-code next-step`, summarize only new or regressed findings, and stop once the deterministic report is current.',
-    '- Cadence: daily on active branches or before release cut-offs',
-    '- Inputs: repository root',
-    '',
-    'Use this recipe as a starting point for a Codex automation once the local workflow is stable in your environment.',
-    '',
-  ].join('\n');
-}
-
-function renderAntigravityPlanningGuide(root) {
-  return [
-    '# Antigravity planning-mode guide',
-    '',
-    'Recommended workflow:',
-    '',
-    '1. Open Antigravity in Planning mode.',
-    '2. Load the repo-local prompt asset or the AGENTS instructions before starting the audit conversation.',
-    '3. Ask Antigravity to use `audit-code next-step` directly.',
-    '4. Review Antigravity artifacts before accepting major code changes or imported evidence.',
-    '',
-    'Recommended repo-local paths:',
-    `- prompt asset: \`${toRepoRelativePath(root, join(root, '.audit-code', 'install', INSTALLED_PROMPT_FILENAME))}\``,
-    '',
-    'Artifact round-tripping policy:',
-    '',
-    '- Browser walkthroughs and validation artifacts should be converted into runtime validation updates before import.',
-    '- Task-specific review artifacts should be normalized into `AuditResult` payloads before using `import_results`.',
-    '',
-  ].join('\n');
-}
-
-function renderGeminiCommandToml(promptBody) {
-  // TOML basic strings use backslash escapes; multi-line basic strings (""")
-  // also require escaping backslashes and double-quotes so the TOML parser
-  // doesn't misinterpret the body. The previous code computed escapedBody
-  // but accidentally embedded the raw unescaped body — this is the fix.
-  const escapedBody = promptBody.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  return [
-    '# /audit-code — Autonomous local-loop code auditing',
-    '# Registered as a Gemini/Antigravity slash command.',
-    '',
-    'description = "Autonomous local-loop code auditing — loads one backend-rendered audit step at a time"',
-    '',
-    'prompt = """',
-    escapedBody.trimEnd(),
-    '"""',
-    '',
-  ].join('\n');
-}
-
-// Exported for testing only — do not call from production code outside this module.
+// Exported for testing only — delegates to the canonical implementation in renderers.
 export const _renderGeminiCommandToml = renderGeminiCommandToml;
 
 export const INSTALL_PROFILE_FLAGS = [

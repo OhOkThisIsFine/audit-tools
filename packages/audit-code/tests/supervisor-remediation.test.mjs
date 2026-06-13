@@ -15,6 +15,26 @@ const { getSessionConfigPath, loadSessionConfig, persistAnalyzerSettings } = awa
 
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
+/**
+ * Builds the artifact_paths object for writeAuditCodeHandoffArtifacts tests.
+ * incomingDir defaults to `join(artifactsDir, "incoming")`.
+ */
+function makeHandoffArtifactPaths(artifactsDir, incomingDir) {
+  const incoming = incomingDir ?? join(artifactsDir, "incoming");
+  return {
+    incoming_dir: incoming,
+    operator_handoff_json: join(artifactsDir, "operator-handoff.json"),
+    operator_handoff_markdown: join(artifactsDir, "operator-handoff.md"),
+    session_config: join(artifactsDir, "session-config.json"),
+    run_ledger: join(artifactsDir, "run-ledger.json"),
+    current_task: join(artifactsDir, "dispatch", "current-task.json"),
+    current_prompt: join(artifactsDir, "dispatch", "current-prompt.md"),
+    current_tasks: join(artifactsDir, "dispatch", "current-tasks.json"),
+    audit_tasks: null,
+    runtime_validation_tasks: null,
+  };
+}
+
 function buildRunLedgerEntry(runId) {
   return {
     run_id: runId,
@@ -161,18 +181,7 @@ test("writeAuditCodeHandoffArtifacts wraps filesystem failures with handoff cont
           suggested_inputs: [],
           suggested_commands: [],
           interactive_provider_hint: null,
-          artifact_paths: {
-            incoming_dir: incomingPath,
-            operator_handoff_json: join(artifactsDir, "operator-handoff.json"),
-            operator_handoff_markdown: join(artifactsDir, "operator-handoff.md"),
-            session_config: join(artifactsDir, "session-config.json"),
-            run_ledger: join(artifactsDir, "run-ledger.json"),
-            current_task: join(artifactsDir, "dispatch", "current-task.json"),
-            current_prompt: join(artifactsDir, "dispatch", "current-prompt.md"),
-            current_tasks: join(artifactsDir, "dispatch", "current-tasks.json"),
-            audit_tasks: null,
-            runtime_validation_tasks: null,
-          },
+          artifact_paths: makeHandoffArtifactPaths(artifactsDir, incomingPath),
         }),
       /Failed to write operator handoff artifacts:/,
     );
@@ -199,18 +208,7 @@ test("writeAuditCodeHandoffArtifacts preserves original error as cause when writ
         suggested_inputs: [],
         suggested_commands: [],
         interactive_provider_hint: null,
-        artifact_paths: {
-          incoming_dir: incomingPath,
-          operator_handoff_json: join(artifactsDir, "operator-handoff.json"),
-          operator_handoff_markdown: join(artifactsDir, "operator-handoff.md"),
-          session_config: join(artifactsDir, "session-config.json"),
-          run_ledger: join(artifactsDir, "run-ledger.json"),
-          current_task: join(artifactsDir, "dispatch", "current-task.json"),
-          current_prompt: join(artifactsDir, "dispatch", "current-prompt.md"),
-          current_tasks: join(artifactsDir, "dispatch", "current-tasks.json"),
-          audit_tasks: null,
-          runtime_validation_tasks: null,
-        },
+        artifact_paths: makeHandoffArtifactPaths(artifactsDir, incomingPath),
       });
     } catch (err) {
       caughtError = err;

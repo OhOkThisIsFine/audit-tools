@@ -24,42 +24,50 @@ export const OPENCODE_AUDIT_EDIT_PERMISSION = {
 
 export const OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION = { '*': 'allow' };
 
-export const OPENCODE_AUDIT_BASH_PERMISSION = {
-  '*': 'allow',
-  'audit-code synthesize*': 'deny',
-  'audit-code cleanup*': 'deny',
-  'audit-code requeue*': 'deny',
-  'audit-code ingest-results*': 'deny',
-  '*dist*index.js* synthesize*': 'deny',
-  '*dist*index.js* cleanup*': 'deny',
-  '*dist*index.js* requeue*': 'deny',
-  '*dist*index.js* ingest-results*': 'deny',
-  '*audit-code.mjs* synthesize*': 'deny',
-  '*audit-code.mjs* cleanup*': 'deny',
-  '*audit-code.mjs* requeue*': 'deny',
-  '*audit-code.mjs* ingest-results*': 'deny',
-  'audit-code': 'allow',
-  'audit-code ensure*': 'allow',
-  'audit-code next-step*': 'allow',
-  'audit-code prepare-dispatch*': 'allow',
-  'audit-code submit-packet*': 'allow',
-  'audit-code merge-and-ingest*': 'allow',
-  'audit-code validate*': 'allow',
-  '*audit-code.mjs': 'allow',
-  '*audit-code.mjs* ensure*': 'allow',
-  '*audit-code.mjs* next-step*': 'allow',
-  '*audit-code.mjs* prepare-dispatch*': 'allow',
-  '*audit-code.mjs* submit-packet*': 'allow',
-  '*audit-code.mjs* merge-and-ingest*': 'allow',
-  '*audit-code.mjs* worker-run*': 'allow',
-  '*audit-code.mjs* validate*': 'allow',
-  '*node* *auditor-lambda*dist*index.js* worker-run*': 'allow',
-  'git status*': 'allow',
-  'git diff*': 'allow',
-  'grep *': 'allow',
-  'Select-String *': 'allow',
-  'rm *': 'deny',
-};
+// Subcommands allowed for both the global bin and the dev wrapper.
+// Adding or removing a subcommand here applies to both invocation forms.
+const AUDIT_CODE_ALLOWED_SUBCOMMANDS = [
+  'ensure*',
+  'next-step*',
+  'prepare-dispatch*',
+  'submit-packet*',
+  'merge-and-ingest*',
+  'validate*',
+];
+// Extra subcommands that only make sense via the dev wrapper (not the global bin).
+const AUDIT_CODE_WRAPPER_EXTRA_SUBCOMMANDS = ['worker-run*'];
+// Subcommands denied for every invocation form.
+const AUDIT_CODE_DENIED_SUBCOMMANDS = ['synthesize*', 'cleanup*', 'requeue*', 'ingest-results*'];
+
+function buildAuditBashPermissions() {
+  /** @type {Record<string, 'allow' | 'deny'>} */
+  const perm = { '*': 'allow' };
+  // Deny rules for every form of invocation (bin, dist, wrapper).
+  for (const sub of AUDIT_CODE_DENIED_SUBCOMMANDS) {
+    perm[`audit-code ${sub}`] = 'deny';
+    perm[`*dist*index.js* ${sub}`] = 'deny';
+    perm[`*audit-code.mjs* ${sub}`] = 'deny';
+  }
+  // Allow rules: bare bin and each subcommand for both the global bin and wrapper.
+  perm['audit-code'] = 'allow';
+  for (const sub of AUDIT_CODE_ALLOWED_SUBCOMMANDS) {
+    perm[`audit-code ${sub}`] = 'allow';
+    perm[`*audit-code.mjs* ${sub}`] = 'allow';
+  }
+  perm['*audit-code.mjs'] = 'allow';
+  for (const sub of AUDIT_CODE_WRAPPER_EXTRA_SUBCOMMANDS) {
+    perm[`*audit-code.mjs* ${sub}`] = 'allow';
+  }
+  perm['*node* *auditor-lambda*dist*index.js* worker-run*'] = 'allow';
+  perm['git status*'] = 'allow';
+  perm['git diff*'] = 'allow';
+  perm['grep *'] = 'allow';
+  perm['Select-String *'] = 'allow';
+  perm['rm *'] = 'deny';
+  return perm;
+}
+
+export const OPENCODE_AUDIT_BASH_PERMISSION = buildAuditBashPermissions();
 
 function externalDirectoryPattern(path) {
   return `${path.replace(/\\/g, '/').replace(/\/+$/u, '')}/**`;
