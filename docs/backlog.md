@@ -8,13 +8,15 @@ too early to encode as implementation contracts.
 an item needs design detail, record durable contracts, gates, and principles
 rather than "where the code is today."
 
-> **Last reconciled 2026-06-09** against the remediation that shipped
-> `@audit-tools/shared@0.10.0` / `auditor-lambda@0.11.0` /
-> `remediator-lambda@0.10.0`. Items verified resolved in-tree were removed;
-> friction surfaced by the June 8–9 self-audit (agents' own feedback +
-> `.audit-tools/audit/audit-report.md`, 281 findings) was folded in. The
-> contract-pipeline spec was trimmed to what is unbuilt — the full original spec
-> is in git history before this date.
+> **Last reconciled 2026-06-13** against the shipped rolling-dispatch redesign +
+> the self-audit remediation. Removed (verified against current `src`): the whole
+> "2026-06-11 dogfood" friction block — lens interactivity, conceptual-review
+> depth, `wave_size`→rolling, host-only `next-step`, canary, packet proximity,
+> quota pre-check — all resolved by the redesign; the stale "waves" wording item;
+> and the shipped-status entries (workflow redesigns, contract-pipeline build,
+> agent reflections, scope/intent checkpoint, structured fast-path). A design-doc
+> drift check ran the same day — unbuilt design commitments are now tracked under
+> *Design commitments not yet built*.
 
 ## Known friction (agent / dev experience)
 
@@ -31,12 +33,6 @@ rather than "where the code is today."
   `cmd /c "set CLAUDECODE=&& npm test"` from inside the bash tool printed only the
   cmd banner and swallowed all test output. `$env:CLAUDECODE=$null; npm test` in the
   PowerShell tool works cleanly. (Spotted 2026-06-12 during N6.)
-
-- **Stale "waves" wording in the rolling-dispatch prompt.** The rolling dispatch
-  step prompt header still reads "After all waves complete:" even though dispatch
-  is fully rolling (`max_concurrent_agents`, no `wave_size`). Cosmetic; reword to
-  "After all packets complete:" in the dispatch prompt renderer. (Spotted 2026-06-12
-  dispatch verification.)
 
 - **Implement-worker result `finding_id` placeholder is ambiguous → merge rejects.**
   `prepareImplementDispatch` renders the result template as `"finding_id": "FINDING-ID"`
@@ -65,7 +61,8 @@ rather than "where the code is today."
   missing, run commands directly and route only genuinely large outputs through
   a compression MCP tool — wrapping a 2-line build log is pointless. Direction:
   headroom replaces opentoken (see *Token savings and model routing*); this
-  entry retires when the orchestrator swap ships.
+  entry retires when the orchestrator swap ships. (As of 2026-06-13 opentoken is
+  still live in `shared/src/tooling/exec.ts` + `prompts.ts`, so this stands.)
 - **`t.mock.module` is unusable in audit-code tests.** audit-code runs tests via
   `node --import tsx/esm --test`; `t.mock.module` needs
   `--experimental-test-module-mocks` and conflicts with the tsx/esm loader, so it
@@ -92,12 +89,13 @@ rather than "where the code is today."
 - **Fresh git worktrees lack `node_modules`.** A newly created worktree resolves
   `@audit-tools/shared` against a stale `dist/` → spurious "no exported member"
   type errors. Run `npm install` in the worktree before `npm run check`.
-- **New default-on orchestrator behavior breaks existing fixtures.** Turning the
-  dispatch canary on by default changed `prepare-dispatch` first-contact output
-  and broke end-to-end fixtures that assumed a single-round, all-packets dispatch;
-  the fix was seeding `dispatch.canary:false` in the test helper. Any new
-  default-on behavior needs a sweep of existing fixtures, or should ship
-  default-off until they catch up.
+- **New default-on orchestrator behavior breaks existing fixtures.** Turning a
+  dispatch behavior on by default can change first-contact output and break
+  end-to-end fixtures that assumed the old shape; the fix at the time was seeding
+  the old default in the test helper. Any new default-on behavior needs a sweep of
+  existing fixtures, or should ship default-off until they catch up. (The original
+  canary example is gone — the canary→graduate phase was removed entirely — but
+  the lesson stands.)
 - **audit-code `node --test` needs the tsx loader.** Bare
   `node --test packages/audit-code/tests/*.test.mjs` fails with
   `ERR_MODULE_NOT_FOUND` because the `.mjs` tests import built `.ts` via `.js`
@@ -126,56 +124,17 @@ rather than "where the code is today."
 
 ### Friction from the June 8–9 self-audit (auditor feedback)
 
-- **`submit-packet` rejects in-boundary `affected_files`.** `file_coverage`
-  validation rejects an `affected_files` entry that crosses a packet boundary even
-  when the referenced file is in the task's declared boundary list (e.g. a
-  `schemas/finding.schema.json` needed to fully describe a duplicate-schema
-  finding). Workers had to drop legitimate evidence files. The error also doesn't
-  surface which files ARE allowed — the assigned `file_paths` are opaque to the
-  agent. **Shipped 2026-06-09:** the rejection now lists the task's allowed files.
-  Still open: whether to *allow* declared-boundary files as `affected_files`
-  evidence (a contract decision — auditors currently may reference only assigned
-  files).
+- **Whether to allow declared-boundary files as `affected_files` evidence.** The
+  `submit-packet` rejection now *lists* the task's allowed files (shipped
+  2026-06-09), but auditors still may reference only their assigned files — a
+  finding that needs to cite an in-boundary-but-unassigned file (e.g. a
+  `schemas/finding.schema.json` to fully describe a duplicate-schema finding) must
+  drop that evidence. Open contract decision: allow declared-boundary files as
+  evidence, or keep the strict assigned-files-only rule.
 - **Read tool truncates lines over ~2000 chars.** Large `file_coverage` arrays
   inside prior-result JSON exceed the per-line cap, so auditors couldn't
-  reconstruct exact arrays and fell back to `Get-Content`/bash. Largely a
-  downstream symptom of the scope pollution above (auditing huge JSON), but worth
-  noting for any task that must read wide JSON.
-
-### Friction from 2026-06-11 dogfood self-audit
-
-- **Lens selection needs interactive user confirmation.** The `confirm_intent`
-  step proposes lens exclusions but the host auto-writes `intent_checkpoint.json`
-  without pausing for user input. Should present proposals, allow the user to
-  accept/reject/add custom lenses, then write the checkpoint. Currently users
-  can only exclude proposed lenses — no affordance for requesting unlisted ones.
-- **Conceptual design review lacks depth control.** A single subagent runs the
-  full conceptual review. Should support optional multi-reviewer depth: fan out
-  N independent reviewers with distinct philosophies (e.g. DDD purist, pragmatic
-  simplicity, security-first), then a judge compiles the strongest ideas. Maps
-  to the existing Workflow judge-panel pattern or an MCP multi-agent skill.
-- **wave_size dispatch not replaced by rolling quota-aware dispatch.** The
-  redesign spec called for rolling dispatch that adapts to learned quota, but
-  the current implementation still uses fixed `wave_size` batching (162 packets
-  across 41 waves of 4). This wastes quota on under-packed waves and can't
-  adapt mid-run to rate-limit feedback.
-- **Subagent prompts include `next-step` in allowed_commands.** Design review
-  subagents called `next-step` themselves, advancing the pipeline before the
-  host confirmed both passes were complete. The contract review agent pushed
-  past the conceptual-review gate while that agent was still running. Subagents
-  should write findings only; `next-step` is a host-only command.
-- **Canary wave skipped in fan-out dispatch.** `canary_packet_id: null` despite
-  `phase: "fan_out"` — the canary→graduate flow from the redesign isn't wired.
-  The orchestrator jumps straight to full-fleet dispatch without validating a
-  single packet first.
-- **High packet count / low tasks-per-packet ratio.** 162 packets for 228 tasks
-  (1.4 tasks/packet). The redesign's rolling dispatch should batch by unit
-  proximity to reduce dispatch overhead — many current packets contain only one
-  task, wasting a full agent context per trivial review.
-- **No quota pre-check before dispatch commitment.** The dispatch plan commits to
-  162 agents without consulting learned rate limits or provider capacity. The
-  redesign spec called for quota-aware dispatch that checks available budget
-  before sizing the fleet and adapts dynamically to 429/TPM signals mid-run.
+  reconstruct exact arrays and fell back to `Get-Content`/bash. Worth noting for
+  any task that must read wide single-line JSON.
 
 ## Deferred fixes (product bugs)
 
@@ -202,42 +161,6 @@ validation against real OpenCode that agent-scoped allowances propagate to
 spawned subtasks (can't be unit-tested). Revert path if audits start hitting
 ask-prompts: re-add the broad rule or rerun an older postinstall.
 
-### audit-code + remediate-code: scope & intent checkpoint — *shipped 2026-06-09*
-
-The lightweight scope/intent checkpoint validated by the June 8–9 self-audit
-shipped across both orchestrators. The enriched `IntentCheckpoint` (shared)
-carries `free_form_intent`, `excluded_scope`, `must_not_touch`, and remediate
-`filters` (severity/lens/package/theme); the design now lives in the code +
-`schemas/intent_checkpoint.schema.json` + the Preferences log, not here.
-
-- **audit-code:** a reachable, conversational `confirm_intent` host step (native
-  `host_delegation` + deterministic scope pre-digest + headless auto-complete
-  fallback). Accepted `excluded_scope` prunes planning before tasks are built,
-  `free_form_intent` is threaded into worker packet prompts, and skipped scope is
-  surfaced in the report ("Excluded / Out-of-Scope") and `audit-findings.json`.
-- **remediate-code:** the confirm step prompt is enriched to the full shape, and
-  `runPlanPhase` filters findings (after cross-lens dedup) by
-  filters/excluded_scope/must_not_touch — drops recorded in the coverage ledger
-  (`dropped_by_checkpoint`) and a "Skipped by Intent Checkpoint" report section.
-
-**Remaining:** the pre-digest *lists* scope dirs + auto-exclusions for the host to
-confirm, but the tool does not itself pre-flag *suspicious* inclusions
-(node_modules/dist/vendored) beyond listing them — the host (an LLM agent) makes
-that call.
-
-### remediate-code: structured `audit-findings.json` fast path skips intake — *resolved 2026-06-09*
-
-Closed by the scope/intent checkpoint (subsumed `FINDING-012`): the
-`confirm_intent` gate sits at the top of `decideNextStepInner` — before any
-source-type branching — so a lone `audit-findings.json` cannot bypass it. The
-structured flow is `synthesize_intake` → `confirm_intent` (summary present, no
-checkpoint) → deterministic `runPlanPhase`, which consumes the JSON contract
-losslessly and applies the checkpoint's filters/excluded_scope/must_not_touch
-(drops recorded as `dropped_by_checkpoint`). Verified end-to-end; regression
-coverage in `tests/next-step.test.ts` ("structured fast path is gated by
-confirm_intent…") — the only test of the no-checkpoint flow, since the other
-structured-path tests pre-write a checkpoint.
-
 ### remediate-code host-dispatch gaps
 
 - **Provider `queryLimits` is deferred because it has near-zero value today.** The
@@ -247,44 +170,61 @@ structured-path tests pre-write a checkpoint.
   a real proactive rate-limit endpoint. This belongs with heterogeneous,
   quota-aware dispatch.
 
+## Design commitments not yet built
+
+Surfaced by a 2026-06-13 drift check of the design docs against `src` (see the
+drift report referenced from that session). These are design decisions the docs
+record but the code has not yet implemented — tracked here so the gap is explicit.
+
+- **`free_form_intent` should be *interpreted*, not threaded verbatim** (both
+  orchestrators). Both design docs say the orchestrator interprets free-form intent
+  to shape lens weighting / priority / scope, and never pastes it into worker
+  prompts. The code pastes it verbatim into packet prompts
+  (`audit-code` `packetPrompt.ts`, `dispatch.ts`; `remediate-code` checkpoint
+  prompt), and the audit `intentInterpreter.ts` — which produces
+  `checkpoint_questions` / `has_unencodable` — is built but **unwired** (no caller
+  reads it), so unencodable clauses are silently dropped instead of escalated to a
+  blocking checkpoint question. Resolve toward the doc (interpret + escalate) or
+  amend the doc to match the verbatim-threading reality.
+- **Rolling per-node dispatch (dispatch-when-verified-complete) — remediate-code.**
+  The design wants per-result re-scheduling: as each node result lands,
+  verify→merge→re-check newly-unblocked nodes→dispatch into freed quota. The code
+  builds one wave per `next-step` and gates `prepareImplementDispatch` on item
+  *status*, not verified-complete; the host dispatches the wave, waits for all
+  results, merges, then re-enters. Batch-then-merge, not rolling.
+- **Provider confirmation Gate-0 (shared, session-level) — remediate-code.** The
+  design wants one provider confirmation spanning an audit→remediate run.
+  remediate-code has no `provider_confirmation` state; each tool resolves its
+  provider independently.
+- **Parallel module-contract phases — remediate-code.** `buildParallelModuleWaveStep`
+  (`contractPipeline.ts`) dispatches a single sequential agent over all modules, not
+  N parallel per-module agents.
+- **audit-code mid-run pause + scope annotation + folded ingestion.**
+  `waiting_for_provider` / `advancePausedState` is built in
+  `shared/src/rolling/pausedState.ts` but `rollingDispatch.ts` doesn't use it (it
+  only detects stranded packets post-run). Design-review prompts don't annotate
+  units `[in scope]` / `[excluded: …]`. Ingestion is still a separate
+  `audit_results_ingested` obligation rather than folded into the dispatch turn.
+
 ## Features to add later
 
-### Workflow redesigns — *shipped 2026-06-11*
+### Contract-governed implementation pipeline — durable principles
 
-Both redesigns ([`docs/audit-workflow-design.md`](audit-workflow-design.md),
-[`docs/remediation-workflow-design.md`](remediation-workflow-design.md)) were
-implemented end-to-end by the 46-node contract-pipeline run completed
-2026-06-11 (46/46 resolved, 0 blocked) and shipped through today's releases
-(auditor-lambda 0.17.0 / remediator-lambda 0.14.0 / @audit-tools/shared
-0.14.0). The design docs remain the durable contracts. Next validation step:
-dogfood — a fresh self-audit on the new architecture.
+The pipeline shipped 2026-06 (artifact contracts, schemas, validators, content-hash
+staleness DAG, deterministic grounding of LLM findings, and the adversarial
+**critic → judge → repair** loop). The build details live in the code + design
+docs; the principles to keep honoring are:
 
-### Contract-governed implementation pipeline — *shipped 2026-06*
-
-The full pipeline is built and wired: artifact contracts, JSON schemas,
-validators, artifact store + content-hash staleness DAG, next-step prompt
-renderers, deterministic grounding of LLM-extracted findings (phantom
-`affected_files` stripped with one bounded repair attempt; evidence classified
-grounded/ungrounded by `path:line` citation with ungrounded findings downgraded
-to low confidence — all recorded in the coverage ledger), and the adversarial
-**critic → judge → repair** loop between assessment and implementation planning
-(counterexample search; `accepted` / `out_of_scope` / `duplicate` / `invalid` /
-`residual_risk` classification; judge-directed targeted repair re-deriving
-downstream artifacts via the staleness DAG, capped at 2 iterations; traceability
-gate rejecting any `implementation_dag` node that traces to no obligation or
-accepted counterexample). Worker-written raw payloads are validated and
-enveloped at ingestion; structured `audit-findings.json` keeps the deterministic
-fast path. The closing `VerificationReport` is emitted by the close phase
-(FINDING-027), not as a pre-implementation pipeline phase — by design.
-
-Durable principles to keep honoring: treat LLM output as untrusted until
-validated; no implementation task without traceability to a requirement,
-invariant, or accepted counterexample; deterministic validators run before LLM
-critics; conceptual critique may propose better designs but adopted changes must
-be reflected in the contract before implementation; "tests pass" is never
-sufficient proof of completion. Use **contract assessment** (invariants /
-boundaries / obligations) and **conceptual design critique** (philosophy /
-alternatives) as the two named modes — never the bare phrase "design assessment".
+- Treat LLM output as untrusted until validated; deterministic validators run
+  before LLM critics.
+- No implementation task without traceability to a requirement, invariant, or
+  accepted counterexample.
+- Conceptual critique may propose better designs, but adopted changes must be
+  reflected in the contract before implementation.
+- "Tests pass" is never sufficient proof of completion.
+- Use **contract assessment** (invariants / boundaries / obligations) and
+  **conceptual design critique** (philosophy / alternatives) as the two named
+  modes — never the bare phrase "design assessment".
 
 ### Heterogeneous multi-agent dispatch — *partial*
 
@@ -295,21 +235,12 @@ Remaining (deferred as `FINDING-020` — cross-package): per-packet provider
 assignment, host-model detection for additional pools, and building a real second
 pool such as an IDE model or another CLI provider.
 
-### Make agent meta-audit reflections a first-class artifact — *shipped 2026-06-09*
-
-Fully shipped. Workers in both orchestrators are invited (opt-in, best-effort)
-to append `agent_reflection` lines to the run's `agent-feedback.jsonl`; the
-parse/aggregate/render lives in `@audit-tools/shared` (`agentReflections.ts`),
-audit-code loads the file into the bundle with an `agent-feedback.jsonl →
-audit-report.md` staleness edge (always-rehashed like `tooling_manifest.json`;
-see `spec/dependency-map.md`), and remediate-code aggregates it in the close
-phase. Both reports emit a "Process Feedback" section when reflections exist.
-
 ### Token savings and model routing — DECIDED 2026-06-11
 
 **Decision: headroom (https://github.com/chopratejas/headroom) replaces
-opentoken everywhere.** Host level done; orchestrator swap is a redesign work
-item.
+opentoken everywhere.** Host level done; orchestrator swap is still open (as of
+2026-06-13 opentoken remains live in `shared/src/tooling/exec.ts`,
+`types/sessionConfig.ts`, and the `DO_NOT_TOKEN_WRAP_NOTE` in `prompts.ts`).
 
 - **Host (done 2026-06-11):** `headroom` MCP server registered at user scope
   (`claude mcp add --scope user headroom -- headroom mcp serve`); the
@@ -327,8 +258,8 @@ item.
   ingestion. Atomic replace in one node: delete `wrapForOpenToken` /
   `quoteForOpenTokenCmd` / `runTracked`'s `opentoken` option
   (`shared/src/tooling/exec.ts`), the sessionConfig field, the `prompts.ts`
-  wrap-exemption text, and provider wiring (~28 files reference opentoken).
-  Bonus: this deletes the cmd.exe wrap-quoting trap class entirely.
+  wrap-exemption text, and provider wiring (~15 src files still reference
+  opentoken). Bonus: this deletes the cmd.exe wrap-quoting trap class entirely.
 - **tokencost — rejected entirely (2026-06-11), including the local-tokenizer
   substitute.** `tokencost-js` counts Claude tokens via the Anthropic counting
   API (a network call inside deterministic planning — wrong shape) and the
@@ -338,13 +269,13 @@ item.
   self-corrects from real 429/TPM signals, `BLOCK_SAFETY_MARGIN` absorbs
   estimator error, and BPE tokenizers aren't Claude's tokenizer anyway. The
   headroom proxy's stats are the measured-usage upgrade path. Optional later:
-  per-model price fields on `KNOWN_MODEL_LIMITS` for ledger cost lines (pure
-  data, no deps). Revisit a tokenizer only on observed systematic mispacking.
+  per-model price fields for ledger cost lines (pure data, no deps). Revisit a
+  tokenizer only on observed systematic mispacking.
 
 ### Nightly autonomous audit→remediate pipeline — capstone, UNBLOCKED
 
-Decision 2026-06-11 was redesigns-first — and they landed the same day (46/46).
-Remaining gate: one dogfooding self-audit on the new architecture. Then build:
-scheduled run (cloud routine or local headless `claude -p`) → audit →
+Redesigns landed 2026-06-11 (46/46); the dogfood gate is met — a fresh self-audit
+ran end-to-end on the new architecture 2026-06-13 (97/97 remediated). Remaining to
+build: scheduled run (cloud routine or local headless `claude -p`) → audit →
 auto-remediate actionable findings behind green test gates → PR + findings
 report, escalating only ambiguity/low-confidence fixes to Ethan.
