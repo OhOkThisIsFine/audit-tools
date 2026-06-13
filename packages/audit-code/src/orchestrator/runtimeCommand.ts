@@ -1,36 +1,25 @@
 import { spawn } from "node:child_process";
-import { quoteForOpenTokenCmd, wrapForOpenToken } from "@audit-tools/shared";
+import { quoteForOpenTokenCmd } from "@audit-tools/shared";
 
 // Deterministic runtime-validation command execution: resolve a command to a
 // platform-correct spawn invocation (Windows package-manager shims need a
-// cmd.exe wrapper), optionally wrap it for opentoken accounting, and run it
-// capturing a confirmed/not_confirmed/inconclusive outcome. Hoisted out of
-// internalExecutors.ts as a shared, side-effect-only helper module.
+// cmd.exe wrapper) and run it capturing a confirmed/not_confirmed/inconclusive
+// outcome. Hoisted out of internalExecutors.ts as a shared, side-effect-only
+// helper module.
 //
-// The cmd.exe quoting (both for the opentoken wrap and the package-manager
-// batch path) reuses the canonical exec.ts helpers so the safe-character set
-// stays unified — the two formerly-private copies here diverged on `@`.
-
-function resolveOpentokenWrap(
-  resolved: { command: string; args: string[] },
-  platform: NodeJS.Platform = process.platform,
-): { command: string; args: string[] } {
-  return wrapForOpenToken(resolved.command, resolved.args, "opentoken", platform);
-}
+// The cmd.exe quoting for the package-manager batch path reuses the canonical
+// exec.ts helpers so the safe-character set stays unified.
 
 export async function runCommand(
   command: string[],
   cwd: string,
-  options: { opentoken?: boolean } = {},
+  options: Record<string, unknown> = {},
 ): Promise<{
   status: "confirmed" | "not_confirmed" | "inconclusive";
   summary: string;
   evidence: string[];
 }> {
-  let spawnCommand = resolveRuntimeValidationSpawnCommand(command);
-  if (options.opentoken) {
-    spawnCommand = resolveOpentokenWrap(spawnCommand);
-  }
+  const spawnCommand = resolveRuntimeValidationSpawnCommand(command);
   const displayCommand = command.join(" ");
   return await new Promise((resolve) => {
     const child = spawn(spawnCommand.command, spawnCommand.args, {

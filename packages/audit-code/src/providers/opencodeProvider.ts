@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { FreshSessionProvider, LaunchFreshSessionInput, OpenCodeConfig, OpenTokenConfig, WorkerTaskWithCommand } from "@audit-tools/shared";
+import type { FreshSessionProvider, LaunchFreshSessionInput, OpenCodeConfig, WorkerTaskWithCommand } from "@audit-tools/shared";
 import {
   readJsonFile,
   spawnLoggedCommand,
@@ -10,11 +10,9 @@ import {
 export class OpenCodeProvider implements FreshSessionProvider {
   name = "opencode";
   private readonly config: OpenCodeConfig;
-  private readonly opentoken: OpenTokenConfig;
 
-  constructor(config: OpenCodeConfig = {}, opentoken: OpenTokenConfig = {}) {
+  constructor(config: OpenCodeConfig = {}) {
     this.config = config;
-    this.opentoken = opentoken;
   }
 
   async launch(input: LaunchFreshSessionInput) {
@@ -30,11 +28,6 @@ export class OpenCodeProvider implements FreshSessionProvider {
       command,
       args,
       applyWorkerTaskLaunchSettings(input, task),
-      undefined,
-      {
-        opentoken: this.opentoken.enabled,
-        opentokenCommand: this.opentoken.command,
-      },
     );
     process.stderr.write(JSON.stringify({ event: "provider_done", provider: this.name, runId: input.runId, obligationId: input.obligationId, accepted: result.accepted, exitCode: result.exitCode ?? null }) + "\n");
     return result;

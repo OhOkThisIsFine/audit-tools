@@ -147,27 +147,30 @@ test("selectProvider — returns null when no pools provided", async () => {
   assert.equal(slot, null);
 });
 
-test("selectProvider — high-complexity routes to higher-capability pool first", async () => {
+test("selectProvider — high-complexity routes to higher-rank pool first (INV-shared-core-02: rank from pool.rank, not provider name)", async () => {
   await setupTmpQuotaDir();
   const packet = makePacket("p1", { complexity: 1.0 });
-  const frontierPool = makePool("frontier-pool", { providerName: "claude-code" });
-  const fastPool = makePool("fast-pool", { providerName: "local-subprocess" });
-  // Pass fast-pool first in array; high-complexity should still prefer frontier.
+  // INV-shared-core-02: routing rank must come from pool.rank (DispatchModelTier),
+  // not from a provider-name lookup table. Both pools use the same providerName.
+  const deepPool = makePool("deep-pool", { providerName: "claude-code", rank: "deep" });
+  const smallPool = makePool("small-pool", { providerName: "claude-code", rank: "small" });
+  // Pass small-pool first in array; high-complexity should still prefer deep.
   const tracker = new InFlightTokenTracker();
-  const slot = selectProvider(packet, [fastPool, frontierPool], tracker, {}, unlimitedSession());
+  const slot = selectProvider(packet, [smallPool, deepPool], tracker, {}, unlimitedSession());
   assert.ok(slot !== null);
-  assert.equal(slot.poolId, "frontier-pool", "high-complexity packet should select frontier pool");
+  assert.equal(slot.poolId, "deep-pool", "high-complexity packet should select pool with rank=deep");
 });
 
-test("selectProvider — low-complexity routes to lower-capability pool first", async () => {
+test("selectProvider — low-complexity routes to lower-rank pool first (INV-shared-core-02: rank from pool.rank, not provider name)", async () => {
   await setupTmpQuotaDir();
   const packet = makePacket("p1", { complexity: 0.0 });
-  const frontierPool = makePool("frontier-pool", { providerName: "claude-code" });
-  const fastPool = makePool("fast-pool", { providerName: "local-subprocess" });
+  // INV-shared-core-02: same providerName, different ranks — low-complexity prefers small.
+  const deepPool = makePool("deep-pool", { providerName: "claude-code", rank: "deep" });
+  const smallPool = makePool("small-pool", { providerName: "claude-code", rank: "small" });
   const tracker = new InFlightTokenTracker();
-  const slot = selectProvider(packet, [frontierPool, fastPool], tracker, {}, unlimitedSession());
+  const slot = selectProvider(packet, [deepPool, smallPool], tracker, {}, unlimitedSession());
   assert.ok(slot !== null);
-  assert.equal(slot.poolId, "fast-pool", "low-complexity packet should select lower-capability pool");
+  assert.equal(slot.poolId, "small-pool", "low-complexity packet should select pool with rank=small");
 });
 
 // ---------------------------------------------------------------------------

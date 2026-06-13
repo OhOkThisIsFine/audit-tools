@@ -64,83 +64,9 @@ function baseInput() {
 const ORIGINAL_COMMAND = "my-cli";
 const ORIGINAL_ARGS = ["--prompt", "p with space", "--flag"];
 
-test("spawnLoggedCommand applies opentoken wrap (default opentoken command)", async () => {
-  const calls = [];
-  const result = await spawnLoggedCommand(
-    ORIGINAL_COMMAND,
-    ORIGINAL_ARGS,
-    baseInput(),
-    undefined,
-    {
-      opentoken: true,
-      createWriteStream: fakeCreateWriteStream,
-      spawn: (command, args) => {
-        calls.push({ command, args });
-        return makeChild();
-      },
-    },
-  );
-
-  assert.equal(calls.length, 1);
-  const { command, args } = calls[0];
-
-  if (process.platform === "win32") {
-    // win32: command becomes cmd.exe and args are ['/d','/s','/c','opentoken wrap ...'].
-    assert.equal(command, process.env.ComSpec ?? "cmd.exe");
-    // quoteCmdArg leaves simple tokens alone and quotes the arg with a space.
-    assert.deepEqual(args, [
-      "/d",
-      "/s",
-      "/c",
-      'opentoken wrap my-cli --prompt "p with space" --flag',
-    ]);
-  } else {
-    // non-win32: command becomes the opentoken command, args are ['wrap', cmd, ...args].
-    assert.equal(command, "opentoken");
-    assert.equal(args[0], "wrap");
-    assert.equal(args[1], ORIGINAL_COMMAND);
-    assert.deepEqual(args.slice(2), ORIGINAL_ARGS);
-  }
-
-  assert.equal(result.accepted, true);
-});
-
-test("spawnLoggedCommand uses a custom opentokenCommand when provided", async () => {
-  const calls = [];
-  const result = await spawnLoggedCommand(
-    ORIGINAL_COMMAND,
-    ORIGINAL_ARGS,
-    baseInput(),
-    undefined,
-    {
-      opentoken: true,
-      opentokenCommand: "ot-custom",
-      createWriteStream: fakeCreateWriteStream,
-      spawn: (command, args) => {
-        calls.push({ command, args });
-        return makeChild();
-      },
-    },
-  );
-
-  assert.equal(calls.length, 1);
-  const { command, args } = calls[0];
-
-  if (process.platform === "win32") {
-    assert.equal(command, process.env.ComSpec ?? "cmd.exe");
-    // The custom command appears inside the inner cmd string instead of 'opentoken'.
-    assert.equal(args[3], 'ot-custom wrap my-cli --prompt "p with space" --flag');
-  } else {
-    // The custom command is used directly as the spawned command.
-    assert.equal(command, "ot-custom");
-    assert.equal(args[0], "wrap");
-    assert.equal(args[1], ORIGINAL_COMMAND);
-  }
-
-  assert.equal(result.accepted, true);
-});
-
-test("spawnLoggedCommand does not wrap when opentoken is not set", async () => {
+test("spawnLoggedCommand passes command and args to spawn untouched (INV-11: opentoken removed)", async () => {
+  // INV-shared-core-11: opentoken wrapping is removed from spawnLoggedCommand.
+  // The command and args passed to spawn must always be exactly the inputs given.
   const calls = [];
   const result = await spawnLoggedCommand(
     ORIGINAL_COMMAND,
@@ -157,7 +83,6 @@ test("spawnLoggedCommand does not wrap when opentoken is not set", async () => {
   );
 
   assert.equal(calls.length, 1);
-  // Without opentoken the original command/args reach spawn untouched.
   assert.equal(calls[0].command, ORIGINAL_COMMAND);
   assert.deepEqual(calls[0].args, ORIGINAL_ARGS);
   assert.equal(result.accepted, true);
@@ -709,4 +634,93 @@ test("spawnLoggedCommand fires both the structured heartbeat to log and onProgre
     process.stderr.write = originalStderrWrite;
     t.mock.timers.reset();
   }
+});
+
+// INV-shared-core-10: spawnLoggedCommand spawn-error 'error'-event path.
+// The 'error' event on the child process (emitted when spawn itself fails,
+// e.g. ENOENT) must cause the returned Promise to reject with a descriptive
+// error rather than hanging forever or silently swallowing the failure.
+test("spawnLoggedCommand rejects when the child process emits an 'error' event (e.g. ENOENT)", async () => {
+  const { EventEmitter } = await import("node:events");
+  const { PassThrough } = await import("node:stream");
+
+  const spawnError = new Error("spawn my-cli ENOENT");
+  spawnError.code = "ENOENT";
+
+  await assert.rejects(
+    spawnLoggedCommand(
+      ORIGINAL_COMMAND,
+      ORIGINAL_ARGS,
+      baseInput(),
+      undefined,
+      {
+        createWriteStream: fakeCreateWriteStream,
+        spawn: () => {
+          const child = new EventEmitter();
+          child.pid = undefined;
+          child.killed = false;
+          child.kill = () => { child.killed = true; return true; };
+          child.stdout = new PassThrough();
+          child.stderr = new PassThrough();
+          child.stdin = new PassThrough();
+          // Emit 'error' on next tick — this is the async spawn-failure path.
+          setImmediate(() => child.emit("error", spawnError));
+          return child;
+        },
+      },
+    ),
+    (err) => {
+      assert.ok(
+        err instanceof Error,
+        `expected an Error instance, got ${typeof err}`,
+      );
+      assert.ok(
+        err.message.includes("ENOENT") || err.message.includes("spawn"),
+        `expected error to mention ENOENT or spawn, got: ${err.message}`,
+      );
+      return true;
+    },
+  );
+});
+
+// INV-shared-core-10: lifecycle test — spawnLoggedCommand start → log flush → settle.
+// Verifies that the full lifecycle (spawn → data events → close → settle) works
+// correctly: stdout/stderr data are written to logs, and the promise resolves
+// with the correct accepted/exitCode fields after the close event.
+test("spawnLoggedCommand lifecycle: stdout/stderr logged and result carries correct fields", async () => {
+  const stdoutLinesSink = [];
+  const stderrLinesSink = [];
+
+  function recordingStream(sink) {
+    const s = new EventEmitter();
+    s.write = (chunk, cb) => {
+      sink.push(String(chunk));
+      if (typeof cb === "function") cb();
+      return true;
+    };
+    s.end = (cb) => { if (typeof cb === "function") cb(); };
+    return s;
+  }
+
+  const input = baseInput();
+  const result = await spawnLoggedCommand(
+    ORIGINAL_COMMAND,
+    ORIGINAL_ARGS,
+    input,
+    undefined,
+    {
+      createWriteStream: (path) => {
+        if (path === input.stdoutPath) return recordingStream(stdoutLinesSink);
+        return recordingStream(stderrLinesSink);
+      },
+      spawn: () => {
+        const child = makeChild();
+        return child;
+      },
+    },
+  );
+
+  assert.equal(result.accepted, true, "lifecycle must settle accepted=true");
+  assert.equal(result.exitCode, 0, "exitCode must be 0 for clean exit");
+  assert.ok(result.command.includes(ORIGINAL_COMMAND), "command must be in result");
 });

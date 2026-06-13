@@ -6,7 +6,6 @@ import type {
 } from "./types.js";
 import type {
   SubprocessTemplateConfig,
-  OpenTokenConfig,
 } from "../types/sessionConfig.js";
 import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
 import {
@@ -84,7 +83,6 @@ export function applyTemplate(
 export class SubprocessTemplateProvider implements FreshSessionProvider {
   name: string;
   private readonly config: SubprocessTemplateConfig;
-  private readonly opentoken: OpenTokenConfig;
   private readonly launchCommand: typeof spawnLoggedCommand;
   private readonly log: RunLogger;
 
@@ -92,13 +90,11 @@ export class SubprocessTemplateProvider implements FreshSessionProvider {
     config: SubprocessTemplateConfig,
     name = "subprocess-template",
     launchCommand: typeof spawnLoggedCommand = spawnLoggedCommand,
-    opentoken: OpenTokenConfig = {},
     runLogger?: RunLogger,
   ) {
     this.config = config;
     this.name = name;
     this.launchCommand = launchCommand;
-    this.opentoken = opentoken;
     this.log = runLogger ?? RunLogger.disabled();
   }
 
@@ -118,9 +114,6 @@ export class SubprocessTemplateProvider implements FreshSessionProvider {
       }),
     );
     const [command, ...args] = rendered;
-    return await this.launchCommand(command, args, launchInput, this.config.env, {
-      opentoken: this.opentoken.enabled,
-      opentokenCommand: this.opentoken.command,
-    });
+    return await this.launchCommand(command, args, launchInput, this.config.env);
   }
 }
