@@ -168,26 +168,27 @@ export function scorePacketComplexity<TPacket>(
 // Capability tier ordering
 // ---------------------------------------------------------------------------
 
-const TIER_RANK: Record<string, number> = {
-  frontier: 3,
-  capable: 2,
-  fast: 1,
-  unknown: 0,
+/**
+ * Numeric rank for a pool's declared DispatchModelTier.
+ *
+ * INV-shared-core-02: pool routing rank must be derived from the pool's
+ * declared `rank` (set at the scheduler handshake from discovered roster
+ * data), never from a hardcoded provider-name → tier lookup table. Absent
+ * rank falls back to the middle tier ("standard"), not to a provider-name
+ * switch, so new providers are neutral rather than silently mis-classified.
+ */
+const DISPATCH_TIER_RANK: Record<string, number> = {
+  deep: 3,
+  standard: 2,
+  small: 1,
 };
 
 function poolCapabilityRank(pool: CapacityPool): number {
-  // CapacityPool doesn't carry capabilityTier directly; derive from providerName.
-  // claude-code = frontier (3), all others default to capable (2).
-  switch (pool.providerName) {
-    case "claude-code": return TIER_RANK["frontier"]!;
-    case "opencode":
-    case "codex":
-    case "subprocess-template":
-    case "vscode-task":
-    case "antigravity":
-      return TIER_RANK["capable"]!;
-    default: return TIER_RANK["unknown"]!;
+  if (pool.rank != null) {
+    return DISPATCH_TIER_RANK[pool.rank] ?? 2;
   }
+  // No roster rank declared — treat as standard (neutral).
+  return DISPATCH_TIER_RANK["standard"]!;
 }
 
 // ---------------------------------------------------------------------------

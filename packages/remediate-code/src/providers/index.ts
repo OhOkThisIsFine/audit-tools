@@ -35,9 +35,9 @@ export function createFreshSessionProvider(
 ): FreshSessionProvider {
   return createSharedFreshSessionProvider(name, sessionConfig, {
     orchestratorName: "remediate-code",
-    createClaudeCodeProvider: (config, opentoken) =>
-      new ClaudeCodeProvider(config, undefined, opentoken),
-    createOpenCodeProvider: (config, opentoken) =>
-      new OpenCodeProvider(config, undefined, opentoken),
+    createClaudeCodeProvider: (config) =>
+      new ClaudeCodeProvider(config),
+    createOpenCodeProvider: (config) =>
+      new OpenCodeProvider(config),
   });
 }

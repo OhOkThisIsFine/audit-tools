@@ -28,15 +28,34 @@ export interface ConfirmedProviderPool {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-const CAPABILITY_TIER_MAP: Record<ResolvedProviderName, CapabilityTier> = {
-  "claude-code": "frontier",
-  opencode: "capable",
-  codex: "capable",
-  "subprocess-template": "capable",
-  "vscode-task": "capable",
-  antigravity: "capable",
-  "local-subprocess": "unknown",
-};
+/**
+ * Default capability tier for a given provider name.
+ *
+ * This is a fallback used only when no session-config override is available.
+ * Tiers are intentionally coarse and static here; the scheduler discovery
+ * path (HostModelRosterEntry / DiscoveredRateLimitsInput) is the authoritative
+ * source of per-model capability at dispatch time.
+ *
+ * INV-shared-core-02: provider-name → tier mapping must NOT be a flat lookup
+ * table that gates dispatch routing. Capability tier on DiscoveredProvider is
+ * a declared/discoverable input, not an opaque internal enum. This function
+ * is the single place where a default is applied; all routing uses the
+ * DispatchModelTier vocabulary on CapacityPool, not this field.
+ */
+function defaultCapabilityTier(name: ResolvedProviderName): CapabilityTier {
+  switch (name) {
+    case "claude-code":
+      return "frontier";
+    case "opencode":
+    case "codex":
+    case "subprocess-template":
+    case "vscode-task":
+    case "antigravity":
+      return "capable";
+    case "local-subprocess":
+      return "unknown";
+  }
+}
 
 /** Probe PATH for a single command. Returns true if the command resolves. */
 function commandExists(command: string): boolean {
@@ -116,7 +135,7 @@ export function discoverProviders(
     discovered.push({
       name: probe.providerName,
       command,
-      capabilityTier: CAPABILITY_TIER_MAP[probe.providerName],
+      capabilityTier: defaultCapabilityTier(probe.providerName),
       detected: true,
       reason: blocked
         ? `detected on PATH but cannot self-spawn from within an active ${probe.providerName} session`

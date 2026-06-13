@@ -446,7 +446,6 @@ describe("provider launch methods", () => {
           calls.push({ command, args, launchInput });
           return { accepted: true, exitCode: 0 };
         },
-        {},
         logger,
       );
 
@@ -489,7 +488,7 @@ describe("provider launch methods", () => {
     });
   });
 
-  it("ClaudeCodeProvider passes opentoken config to launchCommand when enabled", async () => {
+  it("ClaudeCodeProvider does not pass opentoken fields to launchCommand (INV-shared-core-11: opentoken removed)", async () => {
     const savedClaudeCode = process.env.CLAUDECODE;
     delete process.env.CLAUDECODE;
     try {
@@ -501,49 +500,21 @@ describe("provider launch methods", () => {
             calls.push(args);
             return { accepted: true, exitCode: 0 };
           },
-          { enabled: true, command: "opentoken" },
         );
 
         await provider.launch(input);
 
-        expect(calls[0][4]).toMatchObject({
-          opentoken: true,
-          opentokenCommand: "opentoken",
-        });
+        // opentoken fields must not appear in the launch options (4th positional arg)
+        const launchOptions = calls[0][4] ?? {};
+        expect(launchOptions).not.toHaveProperty("opentoken");
+        expect(launchOptions).not.toHaveProperty("opentokenCommand");
       });
     } finally {
       if (savedClaudeCode !== undefined) process.env.CLAUDECODE = savedClaudeCode;
     }
   });
 
-  it("ClaudeCodeProvider passes empty opentoken defaults to launchCommand", async () => {
-    const savedClaudeCode = process.env.CLAUDECODE;
-    delete process.env.CLAUDECODE;
-    try {
-      await withProviderFiles(async ({ input }) => {
-        const calls: any[] = [];
-        const provider = new ClaudeCodeProvider(
-          { command: "claude-test" },
-          async (...args: any[]) => {
-            calls.push(args);
-            return { accepted: true, exitCode: 0 };
-          },
-          {},
-        );
-
-        await provider.launch(input);
-
-        expect(calls[0][4]).toMatchObject({
-          opentoken: undefined,
-          opentokenCommand: undefined,
-        });
-      });
-    } finally {
-      if (savedClaudeCode !== undefined) process.env.CLAUDECODE = savedClaudeCode;
-    }
-  });
-
-  it("OpenCodeProvider passes opentoken config to launchCommand when enabled", async () => {
+  it("OpenCodeProvider does not pass opentoken fields to launchCommand (INV-shared-core-11: opentoken removed)", async () => {
     await withProviderFiles(async ({ input }) => {
       const calls: any[] = [];
       const provider = new OpenCodeProvider(
@@ -552,36 +523,14 @@ describe("provider launch methods", () => {
           calls.push(args);
           return { accepted: true, exitCode: 0 };
         },
-        { enabled: true, command: "opentoken" },
       );
 
       await provider.launch(input);
 
-      expect(calls[0][4]).toMatchObject({
-        opentoken: true,
-        opentokenCommand: "opentoken",
-      });
-    });
-  });
-
-  it("OpenCodeProvider passes empty opentoken defaults to launchCommand", async () => {
-    await withProviderFiles(async ({ input }) => {
-      const calls: any[] = [];
-      const provider = new OpenCodeProvider(
-        { command: "opencode-test" },
-        async (...args: any[]) => {
-          calls.push(args);
-          return { accepted: true, exitCode: 0 };
-        },
-        {},
-      );
-
-      await provider.launch(input);
-
-      expect(calls[0][4]).toMatchObject({
-        opentoken: undefined,
-        opentokenCommand: undefined,
-      });
+      // opentoken fields must not appear in the launch options (4th positional arg)
+      const launchOptions = calls[0][4] ?? {};
+      expect(launchOptions).not.toHaveProperty("opentoken");
+      expect(launchOptions).not.toHaveProperty("opentokenCommand");
     });
   });
 

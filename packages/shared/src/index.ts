@@ -34,12 +34,14 @@ export type {
   FindingConfidence,
   FindingLocation,
   Finding,
+  FindingIdentity,
   WorkBlock,
   FindingTheme,
   SynthesisNarrative,
   AuditFindingsSummary,
   AuditFindingsReport,
 } from "./types/finding.js";
+export { findingIdentity } from "./types/finding.js";
 export type { IntentCheckpoint } from "./types/intentCheckpoint.js";
 export type { InterpretedIntent } from "./intent/freeFormIntentInterpreter.js";
 export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
@@ -225,6 +227,12 @@ export {
   formatValidationIssues,
   requireKeys,
 } from "./validation/basic.js";
+export {
+  AUDIT_FINDINGS_CONTRACT_VERSION,
+  validateAuditFindingsReport,
+  isValidAuditFindingsReport,
+} from "./validation/findingsReport.js";
+export { validateSessionConfig } from "./validation/sessionConfig.js";
 
 // Provider types
 export type {
@@ -430,6 +438,13 @@ export {
   CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION,
   CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
 } from "./types/contractPipeline.js";
+
+// Obligation ledger construction with cycle detection (INV-shared-core-07)
+export type { BuildObligationLedgerOptions } from "./types/obligationLedger.js";
+export {
+  detectObligationCycle,
+  buildObligationLedger,
+} from "./types/obligationLedger.js";
 export { LearnedQuotaSource } from "./quota/learnedQuotaSource.js";
 
 // Parsing utilities

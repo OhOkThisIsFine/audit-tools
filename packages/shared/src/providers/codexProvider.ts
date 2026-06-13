@@ -5,7 +5,7 @@ import type {
   LaunchFreshSessionInput,
   ProviderRateLimits,
 } from "./types.js";
-import type { CodexConfig, OpenTokenConfig } from "../types/sessionConfig.js";
+import type { CodexConfig } from "../types/sessionConfig.js";
 import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
 import {
   applyWorkerTaskLaunchSettings,
@@ -29,17 +29,14 @@ const DEFAULT_CODEX_PROMPT_FLAG = "--prompt";
 export class CodexProvider implements FreshSessionProvider {
   name = "codex";
   private readonly config: CodexConfig;
-  private readonly opentoken: OpenTokenConfig;
   private readonly launchCommand: typeof spawnLoggedCommand;
 
   constructor(
     config: CodexConfig | undefined,
     launchCommand: typeof spawnLoggedCommand = spawnLoggedCommand,
-    opentoken: OpenTokenConfig = {},
   ) {
     this.config = config ?? {};
     this.launchCommand = launchCommand;
-    this.opentoken = opentoken;
   }
 
   async launch(input: LaunchFreshSessionInput) {
@@ -55,11 +52,6 @@ export class CodexProvider implements FreshSessionProvider {
       command,
       args,
       applyWorkerTaskLaunchSettings(input, task),
-      undefined,
-      {
-        opentoken: this.opentoken.enabled,
-        opentokenCommand: this.opentoken.command,
-      },
     );
   }
 

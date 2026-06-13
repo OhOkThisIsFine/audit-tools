@@ -1,6 +1,5 @@
 import { createWriteStream, type WriteStream } from "node:fs";
 import { spawn } from "node:child_process";
-import { wrapForOpenToken } from "../tooling/exec.js";
 import type {
   LaunchFreshSessionInput,
   LaunchFreshSessionResult,
@@ -15,8 +14,6 @@ export interface SpawnLoggedCommandOptions {
   createWriteStream?: typeof createWriteStream;
   spawn?: typeof spawn;
   killGraceMs?: number;
-  opentoken?: boolean;
-  opentokenCommand?: string;
 }
 
 function formatCommand(command: string, args: string[]): string {
@@ -304,21 +301,9 @@ export async function spawnLoggedCommand(
   const spawnProcess = options.spawn ?? spawn;
   const killGraceMs = options.killGraceMs ?? FORCE_KILL_GRACE_MS;
 
-  let resolvedCommand = command;
-  let resolvedArgs = args;
-  if (options.opentoken) {
-    const wrapped = wrapForOpenToken(
-      command,
-      args,
-      options.opentokenCommand ?? "opentoken",
-    );
-    resolvedCommand = wrapped.command;
-    resolvedArgs = wrapped.args;
-  }
-
   const controller = new SpawnRunController(
-    resolvedCommand,
-    resolvedArgs,
+    command,
+    args,
     input,
     env,
     spawnProcess,

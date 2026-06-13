@@ -6,7 +6,6 @@ import type {
   ClaudeCodeConfig,
   CodexConfig,
   OpenCodeConfig,
-  OpenTokenConfig,
 } from "../types/sessionConfig.js";
 import { LocalSubprocessProvider } from "./localSubprocessProvider.js";
 import { SubprocessTemplateProvider } from "./subprocessTemplateProvider.js";
@@ -236,11 +235,9 @@ export interface FreshSessionProviderDeps {
   orchestratorName: string;
   createClaudeCodeProvider: (
     config: ClaudeCodeConfig | undefined,
-    opentoken: OpenTokenConfig,
   ) => FreshSessionProvider;
   createOpenCodeProvider: (
     config: OpenCodeConfig | undefined,
-    opentoken: OpenTokenConfig,
   ) => FreshSessionProvider;
 }
 
@@ -264,7 +261,6 @@ export function createFreshSessionProvider(
     effectiveName,
     sessionConfig,
   );
-  const opentoken = sessionConfig.opentoken ?? {};
   // Log the auto-resolution decision (only when auto-detection actually ran;
   // an explicitly named provider is the caller's choice and needs no signal).
   // local-subprocess means no capable agent provider was detected, so it
@@ -293,17 +289,14 @@ export function createFreshSessionProvider(
       }
       return new SubprocessTemplateProvider(
         sessionConfig.subprocess_template,
-        undefined,
-        undefined,
-        opentoken,
       );
     case "claude-code":
-      return deps.createClaudeCodeProvider(sessionConfig.claude_code, opentoken);
+      return deps.createClaudeCodeProvider(sessionConfig.claude_code);
     case "codex":
       // Codex needs no required config — the command defaults to "codex".
-      return new CodexProvider(sessionConfig.codex, undefined, opentoken);
+      return new CodexProvider(sessionConfig.codex);
     case "opencode":
-      return deps.createOpenCodeProvider(sessionConfig.opencode, opentoken);
+      return deps.createOpenCodeProvider(sessionConfig.opencode);
     case "vscode-task":
       if (!sessionConfig.vscode_task?.command_template?.length) {
         throw new Error(
@@ -313,8 +306,6 @@ export function createFreshSessionProvider(
       return new SubprocessTemplateProvider(
         sessionConfig.vscode_task,
         "vscode-task",
-        undefined,
-        opentoken,
       );
     case "antigravity":
       if (!sessionConfig.antigravity?.command_template?.length) {
@@ -325,8 +316,6 @@ export function createFreshSessionProvider(
       return new SubprocessTemplateProvider(
         sessionConfig.antigravity,
         "antigravity",
-        undefined,
-        opentoken,
       );
     default:
       throw new Error(`Unknown provider: ${providerName}`);

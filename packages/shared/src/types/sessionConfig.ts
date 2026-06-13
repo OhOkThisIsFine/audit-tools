@@ -258,6 +258,7 @@ export interface SessionConfig {
   parallel_workers?: number;
   block_quota?: BlockQuotaConfig;
   quota?: QuotaConfig;
+  /** @deprecated opentoken is superseded by headroom; this field is no longer read. */
   opentoken?: OpenTokenConfig;
   observability?: ObservabilityConfig;
   synthesis?: SynthesisConfig;

@@ -192,7 +192,6 @@ test("SubprocessTemplateProvider: unknown placeholder routes to RunLogger, not c
       calls.push({ command, args });
       return { exitCode: 0, durationMs: 0, stdout: "", stderr: "" };
     },
-    {},
     logger,
   );
 

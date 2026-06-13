@@ -82,6 +82,45 @@ export interface SynthesisNarrative {
   top_risks?: string[];
 }
 
+/**
+ * The canonical identity subset of a Finding — the fields that identify it
+ * across the audit→remediate pipeline without contract-pipeline overlays.
+ *
+ * INV-shared-core-05: consumers that need to identify a finding (deduplicate,
+ * compare, index) should use this type rather than stripping contract_* fields
+ * ad-hoc. `findingIdentity()` extracts it safely.
+ */
+export interface FindingIdentity {
+  id: string;
+  title: string;
+  severity: FindingSeverity;
+  lens: string;
+  affected_files: FindingLocation[];
+  summary: string;
+}
+
+/**
+ * Extract the canonical identity subset from a Finding, dropping any
+ * contract-pipeline overlay fields (contract_goal_id, contract_obligation_ids,
+ * verification_obligation_ids, targeted_commands). This is the stable,
+ * pipeline-portable representation of what a finding IS, separate from how it
+ * participates in a particular remediation run.
+ *
+ * INV-shared-core-05 invariant: the result must be derivable without knowing
+ * which contract-pipeline fields are present, and must round-trip through JSON
+ * without carrying any contract_* fields.
+ */
+export function findingIdentity(finding: Finding): FindingIdentity {
+  return {
+    id: finding.id,
+    title: finding.title,
+    severity: finding.severity,
+    lens: finding.lens,
+    affected_files: finding.affected_files,
+    summary: finding.summary,
+  };
+}
+
 export interface AuditFindingsSummary {
   finding_count: number;
   work_block_count: number;
