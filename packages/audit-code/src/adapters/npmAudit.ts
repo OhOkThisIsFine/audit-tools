@@ -32,7 +32,7 @@ export function normalizeNpmAuditJson(
         id: `npm-audit-${index}`,
         category: "dependency_risk",
         severity,
-        path: "package-lock.json",
+        path: "package.json",
         summary: `Package ${pkg} has a ${severity} severity vulnerability in range ${vuln.range ?? "unknown"}.`,
         rule: pkg,
         raw: vuln,

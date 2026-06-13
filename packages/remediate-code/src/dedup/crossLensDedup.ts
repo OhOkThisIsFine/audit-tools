@@ -148,6 +148,17 @@ export function deduplicateCrossLensFindings(
 
         removed.add(absorbed);
         mergeMap.set(absorbed.id, survivor.id);
+        process.stderr.write(
+          JSON.stringify({
+            level: "info",
+            event: "cross_lens_dedup_merge",
+            absorbed_id: absorbed.id,
+            absorbed_lens: absorbed.lens,
+            survivor_id: survivor.id,
+            survivor_lens: survivor.lens,
+            ts: new Date().toISOString(),
+          }) + "\n",
+        );
         // If the `i`-slot finding was just absorbed (!keepA), stop the inner
         // loop — there is no point comparing an absorbed finding with more
         // candidates. The outer loop's guard (removed.has(group[i])) handles

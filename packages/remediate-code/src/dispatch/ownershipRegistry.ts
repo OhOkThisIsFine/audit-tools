@@ -203,8 +203,18 @@ export class OwnershipRegistry {
     try {
       mkdirSync(dirname(this.checkpointPath), { recursive: true });
       writeFileSync(this.checkpointPath, json, "utf8");
-    } catch {
+    } catch (err) {
       // Best-effort: a checkpoint write failure must not crash the orchestrator.
+      process.stderr.write(
+        JSON.stringify({
+          level: "warn",
+          event: "ownership_registry_persist_failed",
+          path: this.checkpointPath,
+          code: (err as NodeJS.ErrnoException).code ?? null,
+          message: String(err),
+          ts: new Date().toISOString(),
+        }) + "\n",
+      );
     }
   }
 

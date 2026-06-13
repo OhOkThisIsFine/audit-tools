@@ -139,17 +139,17 @@ function buildExcludedSummary(
         status: majorityStatus,
         reason: majorityReason,
       });
-    } else if (oddballs.length === 0) {
-      // All files have unique keys but there's only 1 majority — emit all individually
+      // Emit oddball rows individually (files that differ from the majority)
+      for (const f of oddballs) {
+        rows.push({ path: f.path, status: f.status, reason: f.reason });
+      }
+    } else {
+      // COR-2e048b54: majorityCount === 1 means every file has a unique
+      // status+reason combination. Emit ALL files individually — the original
+      // code emitted only the oddballs and silently dropped the "majority" file.
       for (const f of files) {
         rows.push({ path: f.path, status: f.status, reason: f.reason });
       }
-      continue;
-    }
-
-    // Emit oddball rows individually
-    for (const f of oddballs) {
-      rows.push({ path: f.path, status: f.status, reason: f.reason });
     }
   }
 

@@ -1,4 +1,5 @@
 import type { CoverageMatrix, Lens } from "../types.js";
+import { isLens } from "../types.js";
 import type {
   FlowCoverageManifest,
   FlowCoverageStatus,
@@ -6,18 +7,10 @@ import type {
 import type { CriticalFlowManifest } from "@audit-tools/shared";
 
 function lensSetForFlow(concerns: string[]): Lens[] {
-  const allowed: Lens[] = [
-    "security",
-    "reliability",
-    "correctness",
-    "data_integrity",
-    "operability",
-    "performance",
-    "observability",
-  ];
-  return concerns.filter((concern): concern is Lens =>
-    allowed.includes(concern as Lens),
-  );
+  // COR-59c25418: use the single-source-of-truth `isLens` guard so all valid
+  // lenses (including maintainability, architecture, tests, config_deployment)
+  // are accepted rather than a hardcoded subset.
+  return concerns.filter((concern): concern is Lens => isLens(concern));
 }
 
 export function buildFlowCoverage(

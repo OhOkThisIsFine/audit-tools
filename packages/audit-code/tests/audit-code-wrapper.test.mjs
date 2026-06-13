@@ -618,7 +618,17 @@ test("merge-and-ingest accepts packet task result files as the legacy result arr
       merged.map((result) => result.task_id).sort(),
       tasks.map((task) => task.task_id).sort(),
     );
-    assert.equal(merge.stderr, "");
+    // Structured observability logs (e.g. selectiveDeepening strategy_summary) are
+    // emitted to stderr at info level; only reject lines that indicate actual errors.
+    const stderrLines = merge.stderr.split("\n").filter((l) => l.trim());
+    for (const line of stderrLines) {
+      try {
+        const parsed = JSON.parse(line);
+        assert.notEqual(parsed.level, "error", `Unexpected error-level stderr: ${line}`);
+      } catch {
+        assert.fail(`Unexpected non-JSON stderr from merge-and-ingest: ${line}`);
+      }
+    }
   });
 });
 

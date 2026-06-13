@@ -155,6 +155,41 @@ describe("validateRemediationBlock", () => {
     expect(issues.some((i) => i.path.includes("items"))).toBe(true);
     expect(issues.some((i) => i.path.includes("parallel_safe"))).toBe(true);
   });
+
+  // Regression: DAT-231b69f6 — schema had 'dependencies' required but TS type
+  // and runtime code treat it as optional. Schema aligned to optional; validator
+  // must accept absence and reject non-array values.
+  it("passes a block with explicit dependencies array (DAT-231b69f6)", () => {
+    const issues = validateRemediationBlock({
+      block_id: "B-002",
+      items: ["F-002"],
+      parallel_safe: false,
+      dependencies: ["B-001"],
+    });
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("passes a block without dependencies field (DAT-231b69f6)", () => {
+    const issues = validateRemediationBlock({
+      block_id: "B-003",
+      items: ["F-003"],
+      parallel_safe: true,
+      // dependencies deliberately omitted — should be accepted as optional
+    });
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("errors when dependencies is present but not an array of strings (DAT-231b69f6)", () => {
+    const issues = validateRemediationBlock({
+      block_id: "B-004",
+      items: ["F-004"],
+      parallel_safe: true,
+      dependencies: "B-001",
+    });
+    expect(
+      issues.some((i) => i.severity === "error" && i.path.includes("dependencies")),
+    ).toBe(true);
+  });
 });
 
 describe("validateItemSpec", () => {

@@ -47,19 +47,37 @@ export function routeAmendmentRequest(
 
     if (outcome === "owned") {
       const owner_node_id = registry.contractOwner(path) ?? "unknown";
-      seam_routed.push({
-        path,
-        reason: { outcome: "owned", path, owner_node_id },
-      });
+      const entry: AmendmentClaimResult = { outcome: "owned", path, owner_node_id };
+      seam_routed.push({ path, reason: entry });
+      process.stderr.write(
+        JSON.stringify({
+          level: "warn",
+          event: "amendment_seam_routed",
+          node_id: nodeId,
+          path,
+          outcome: "owned",
+          owner_node_id,
+          ts: new Date().toISOString(),
+        }) + "\n",
+      );
       continue;
     }
 
     // contended
     const sibling_node_id = registry.amendmentClaimant(path) ?? "unknown";
-    seam_routed.push({
-      path,
-      reason: { outcome: "contended", path, sibling_node_id },
-    });
+    const entry: AmendmentClaimResult = { outcome: "contended", path, sibling_node_id };
+    seam_routed.push({ path, reason: entry });
+    process.stderr.write(
+      JSON.stringify({
+        level: "warn",
+        event: "amendment_seam_routed",
+        node_id: nodeId,
+        path,
+        outcome: "contended",
+        sibling_node_id,
+        ts: new Date().toISOString(),
+      }) + "\n",
+    );
   }
 
   return { granted, seam_routed };

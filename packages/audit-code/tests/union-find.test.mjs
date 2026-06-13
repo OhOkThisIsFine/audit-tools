@@ -80,6 +80,33 @@ test("UnionFind: groups() returns a Map where each entry's key is the canonical 
   assert.deepEqual([...groupAll].sort(), ["a", "b", "c"]);
 });
 
+// ---------------------------------------------------------------------------
+// COR-b6f68ad7: iterative path compression must not stack-overflow on deep chains
+// ---------------------------------------------------------------------------
+
+test("COR-b6f68ad7: find() handles deep chains (1000 items) without stack overflow", () => {
+  // Build a degenerate chain: 0→1→2→…→999 via sequential unions, which
+  // before the iterative fix would recurse 999 levels deep on find(0).
+  const keys = Array.from({ length: 1000 }, (_, i) => String(i));
+  const uf = new UnionFind(keys);
+  // Chain: union(0,1), union(1,2), …, union(998, 999) — all resolve to "0" (lex smallest).
+  for (let i = 0; i < 999; i++) {
+    uf.union(String(i), String(i + 1));
+  }
+  // find on any key must return "0" without stack overflow.
+  assert.doesNotThrow(() => {
+    for (const key of keys) {
+      assert.equal(uf.find(key), "0");
+    }
+  }, "find() on a 1000-item chain must not throw (no stack overflow)");
+  // groups() must also complete and return exactly 1 group.
+  const groups = uf.groups();
+  assert.equal(groups.size, 1, "1000-item chain must produce a single group");
+  const allMembers = groups.get("0");
+  assert.ok(allMembers !== undefined, "root must be '0'");
+  assert.equal(allMembers.length, 1000, "all 1000 members must be in the group");
+});
+
 test("UnionFind: groups() root keys are lexicographically smallest in their group", () => {
   // Chain: union z→m, then m→a; root of all three should be 'a'
   const uf = new UnionFind(["a", "b", "c", "m", "z"]);

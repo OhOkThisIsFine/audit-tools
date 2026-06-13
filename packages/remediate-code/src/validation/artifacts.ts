@@ -411,7 +411,7 @@ export async function validateArtifacts(
     const vIssues = CONTRACT_PIPELINE_VALIDATORS[name](payload, name).filter(
       (issue) => issue.severity === "error",
     );
-    if (vIssues.length > 0) issues.push(formatValidationIssues(vIssues));
+    if (vIssues.length > 0) issues.push(`${cpPath}:\n${formatValidationIssues(vIssues)}`);
   }
 
   // Verification report at the root artifacts dir (from FINDING-027).

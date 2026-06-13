@@ -2,10 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "test_spec.schema.json",
   "title": "Test Specification",
+  "description": "Tracks a test written during remediation of an audit finding. finding_id must match an ItemSpec.finding_id in the same remediation run; JSON Schema cannot enforce cross-document referential integrity, so this constraint is enforced at the call site.",
   "type": "object",
   "required": ["finding_id", "test_file", "test_name", "assertions", "status"],
   "properties": {
-    "finding_id": { "type": "string" },
+    "finding_id": {
+      "type": "string",
+      "description": "The finding_id this test spec belongs to. Must reference an existing ItemSpec.finding_id within the same remediation run."
+    },
     "test_file": { "type": "string" },
     "test_name": { "type": "string" },
     "status": {

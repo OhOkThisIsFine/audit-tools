@@ -19,6 +19,15 @@ export async function runCommand(
   summary: string;
   evidence: string[];
 }> {
+  // COR-4a8d9779: fast-fail before spawn so an empty command array produces a
+  // descriptive error instead of an ENOENT from spawn("", ...).
+  if (command.length === 0 || !command[0]) {
+    return {
+      status: "inconclusive",
+      summary: "Runtime validation command is empty — no command to execute",
+      evidence: [],
+    };
+  }
   const spawnCommand = resolveRuntimeValidationSpawnCommand(command);
   const displayCommand = command.join(" ");
   return await new Promise((resolve) => {

@@ -225,6 +225,55 @@ test("computeScopePreDigest notes mandatory lens vacuous pass (include action, n
 });
 
 // ---------------------------------------------------------------------------
+// COR-2e048b54: buildExcludedSummary majority-of-1 drop regression
+// ---------------------------------------------------------------------------
+
+test("COR-2e048b54: excluded-summary includes ALL files when every file in a prefix group has a unique status+reason", () => {
+  // Before the fix: when majorityCount===1 and oddballs.length>0, the "majority"
+  // file (1 file) was silently dropped. After the fix all files are emitted individually.
+  const files = [
+    { path: "src/a.ts", status: "excluded", reason: "reason-a" },
+    { path: "src/b.ts", status: "excluded", reason: "reason-b" },
+    { path: "src/c.ts", status: "excluded", reason: "reason-c" },
+  ];
+  const bundle = makeBaseBundle({ file_disposition: { files } });
+  const digest = computeScopePreDigest(bundle, "/repo");
+
+  // All three files have unique status+reason → majorityCount===1 → must emit all 3 individually.
+  assert.equal(
+    countTotalFiles(digest.excluded_summary),
+    3,
+    "all 3 files must appear in excluded_summary (COR-2e048b54 drop regression)",
+  );
+  const paths = digest.excluded_summary.filter((r) => "path" in r).map((r) => r.path).sort();
+  assert.deepEqual(paths, ["src/a.ts", "src/b.ts", "src/c.ts"].sort());
+});
+
+test("COR-2e048b54: excluded-summary includes the majority file when it is a genuine majority of 2+", () => {
+  // 3 files: 2 share "excluded|majority-reason", 1 is an oddball.
+  // majorityCount===2 → aggregate row for 2 files + individual row for the oddball.
+  const files = [
+    { path: "src/a.ts", status: "excluded", reason: "majority-reason" },
+    { path: "src/b.ts", status: "excluded", reason: "majority-reason" },
+    { path: "src/c.ts", status: "excluded", reason: "different-reason" },
+  ];
+  const bundle = makeBaseBundle({ file_disposition: { files } });
+  const digest = computeScopePreDigest(bundle, "/repo");
+
+  assert.equal(
+    countTotalFiles(digest.excluded_summary),
+    3,
+    "aggregate + oddball must total 3 files",
+  );
+  const aggregateRows = digest.excluded_summary.filter((r) => "prefix" in r && r.prefix === "src");
+  assert.equal(aggregateRows.length, 1, "should produce 1 aggregate row for the 2-file majority");
+  assert.equal(aggregateRows[0].file_count, 2);
+  const individualRows = digest.excluded_summary.filter((r) => "path" in r);
+  assert.equal(individualRows.length, 1, "oddball should appear as an individual row");
+  assert.equal(individualRows[0].path, "src/c.ts");
+});
+
+// ---------------------------------------------------------------------------
 // 4. runPlanningExecutor — disposition_overrides wiring
 // ---------------------------------------------------------------------------
 

@@ -290,3 +290,55 @@ test("extractConventionalRouteEvidence — file matching neither convention retu
     [],
   );
 });
+
+// FND-COR-c86f0260 regression: `api/` at the repo root without a `pages` ancestor
+// must NOT be treated as a Next.js Pages Router API route.
+test("FND-COR-c86f0260: api/ at repo root without pages/ ancestor is not a conventional API route", () => {
+  // Paths that have `api` but no `pages` ancestor — must return empty.
+  assert.deepEqual(extractConventionalRouteEvidence("api/components/page.ts", undefined), []);
+  assert.deepEqual(extractConventionalRouteEvidence("api/health.ts", undefined), []);
+  assert.deepEqual(extractConventionalRouteEvidence("src/api/users.ts", undefined), []);
+});
+
+// FND-COR-9fc7cbdb: extractImportBindings default-candidate split is already correct.
+// `import DefaultExport, { named } from "..."` — split on comma/brace yields "DefaultExport".
+// Verified via buildGraphBundle resolving the binding to the correct handler.
+test("FND-COR-9fc7cbdb: import with default + named bindings resolves default to correct handler", () => {
+  const file = "src/routes/auth.ts";
+  const handler = "src/handlers/auth.ts";
+  const bundle = bundleFor({
+    [file]: [
+      "import loginHandler, { validateToken } from '../handlers/auth';",
+      "router.post('/login', loginHandler);",
+    ].join("\n"),
+    [handler]: "export default function loginHandler() {}\nexport function validateToken() {}\n",
+  });
+  const callEdge = (bundle.graphs.calls ?? []).find(
+    (e) => e.from === file && e.to === handler && e.kind === "route-handler-link",
+  );
+  assert.ok(
+    callEdge !== undefined,
+    "default import binding must resolve to the correct handler via route-handler-link",
+  );
+});
+
+// FND-COR-b29c9d4f: jsonc.ts stripJsonComments block-comment end index is correct.
+// The character immediately after */ must NOT be skipped.
+test("FND-COR-b29c9d4f: stripJsonComments preserves character immediately after block comment", async () => {
+  const { stripJsonComments } = await import(
+    "../src/extractors/graphManifestEdges/jsonc.ts"
+  );
+  // "a/*b*/c" => "ac" (the 'c' after */ must be preserved)
+  assert.equal(stripJsonComments("a/*b*/c"), "ac");
+  // Newlines inside block comments are preserved.
+  assert.equal(stripJsonComments("a/*\n*/c"), "a\nc");
+  // Character directly after closing */ must not be swallowed.
+  assert.equal(stripJsonComments("x/* comment */y"), "xy");
+  // Verify a realistic JSONC snippet.
+  const input = '{\n  // line comment\n  "key": /* block */ "value"\n}';
+  const result = stripJsonComments(input);
+  assert.ok(result.includes('"key"'), "key must survive");
+  assert.ok(result.includes('"value"'), "value must survive");
+  assert.ok(!result.includes("//"), "line comment must be stripped");
+  assert.ok(!result.includes("block"), "block comment content must be stripped");
+});

@@ -555,7 +555,7 @@ test("dispatch quota schema enforces cooldown_until date-time format through hel
   const dispatchQuota = {
     contract_version: "audit-code-dispatch-quota/v1alpha1",
     run_id: "PLAN-1",
-    model: "gpt-test",
+    model: "test-model",
     resolved_limits: {
       context_tokens: 128000,
       output_tokens: 8192,
@@ -900,6 +900,50 @@ test("planning artifact examples match published schemas", async () => {
     externalAnalyzerResultsExample,
     "externalAnalyzerResultsExample",
   );
+});
+
+test("risk_register example keys match live buildRiskRegister output shape", async () => {
+  const riskRegisterSchema = await loadSchema("risk_register.schema.json");
+  const riskRegisterExample = JSON.parse(
+    await readFile(
+      join(repoRoot, "examples", "risk_register.example.json"),
+      "utf8",
+    ),
+  );
+
+  // Call the live builder with a minimal unit manifest matching the example's unit_id.
+  const liveOutput = buildRiskRegister(
+    {
+      units: [
+        {
+          unit_id: "api-auth",
+          name: "api-auth",
+          files: [],
+          risk_score: 9,
+          required_lenses: ["security"],
+        },
+      ],
+    },
+    undefined,
+    undefined,
+  );
+
+  // Live builder output must satisfy the schema (guards against builder/schema drift).
+  assertMatchesJsonSchema(riskRegisterSchema, liveOutput, "liveRiskRegister");
+
+  // Structural key parity: top-level keys and per-item keys must match example.
+  assert.deepEqual(
+    Object.keys(liveOutput).sort(),
+    Object.keys(riskRegisterExample).sort(),
+    "live buildRiskRegister top-level keys must match example file keys",
+  );
+  if (liveOutput.items.length > 0 && riskRegisterExample.items.length > 0) {
+    assert.deepEqual(
+      Object.keys(liveOutput.items[0]).sort(),
+      Object.keys(riskRegisterExample.items[0]).sort(),
+      "live buildRiskRegister item keys must match example file item keys",
+    );
+  }
 });
 
 test("risk register schema accepts planner-scale scores and rejects out-of-scale values", async () => {

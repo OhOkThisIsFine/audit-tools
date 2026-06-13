@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readJsonFile, isFileMissingError } from "@audit-tools/shared";
+import { readJsonFile, isFileMissingError, RunLogger } from "@audit-tools/shared";
 import { type ActiveDispatchState, ACTIVE_DISPATCH_FILENAME, loadDispatchResultMap } from "./dispatch.js";
 import { getArtifactsDir } from "./args.js";
 
@@ -63,6 +63,15 @@ export async function cmdDispatchStatus(argv: string[]): Promise<void> {
   const totalTasks = packetStatus.reduce((s, p) => s + p.task_count, 0);
   const completedTasks = packetStatus.reduce((s, p) => s + p.completed_count, 0);
   const completedPackets = packetStatus.filter((p) => p.missing_task_ids.length === 0).length;
+
+  // FND-OBS-6e84f23c: record dispatch-status checks in run log so operators have
+  // a history of polling events for long-running dispatch sessions.
+  const runLogger = new RunLogger(join(artifactsDir, "run.log.jsonl"));
+  runLogger.event({
+    kind: "step",
+    obligation: "dispatch_status_check",
+    note: `run_id=${activeDispatch.run_id} completed=${completedTasks}/${totalTasks} packets=${completedPackets}/${packetStatus.length}`,
+  });
 
   console.log(JSON.stringify({
     run_id: activeDispatch.run_id,

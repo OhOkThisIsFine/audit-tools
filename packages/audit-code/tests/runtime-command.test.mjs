@@ -116,3 +116,29 @@ test("runCommand: evidence is empty when command produces no output", async () =
   const result = await runCommand(["node", "-e", "process.exit(0)"], process.cwd());
   assert.strictEqual(result.evidence.length, 0, `expected empty evidence, got ${result.evidence.length}`);
 });
+
+// ---------------------------------------------------------------------------
+// COR-4a8d9779: empty command array fast-fail
+// ---------------------------------------------------------------------------
+
+test("COR-4a8d9779: runCommand with empty array returns inconclusive without spawning", async () => {
+  // Before the fix, [] was passed to resolveRuntimeValidationSpawnCommand which
+  // returned { command: "", args: [] }, then spawn("") fired ENOENT — no fast-fail.
+  // After the fix: immediate inconclusive with a descriptive summary.
+  const result = await runCommand([], process.cwd());
+  assert.strictEqual(result.status, "inconclusive");
+  assert.ok(
+    result.summary.includes("empty"),
+    `expected 'empty' in summary, got: ${result.summary}`,
+  );
+  assert.deepEqual(result.evidence, []);
+});
+
+test("COR-4a8d9779: runCommand with a single empty-string element returns inconclusive", async () => {
+  const result = await runCommand([""], process.cwd());
+  assert.strictEqual(result.status, "inconclusive");
+  assert.ok(
+    result.summary.includes("empty"),
+    `expected 'empty' in summary for [\"\"] command, got: ${result.summary}`,
+  );
+});

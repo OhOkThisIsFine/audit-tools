@@ -97,6 +97,17 @@ export function validateRemediationBlock(
   if (typeof value.parallel_safe !== "boolean") {
     pushValidationIssue(issues, `${path}.parallel_safe`, "Expected a boolean.");
   }
+  if (
+    value.dependencies !== undefined &&
+    (!Array.isArray(value.dependencies) ||
+      value.dependencies.some((d) => typeof d !== "string"))
+  ) {
+    pushValidationIssue(
+      issues,
+      `${path}.dependencies`,
+      "Expected an array of strings when present.",
+    );
+  }
   return issues;
 }
 
