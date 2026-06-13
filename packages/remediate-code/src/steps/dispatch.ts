@@ -1392,7 +1392,7 @@ export async function mergeImplementResults(
   const moreToImplement = Object.values(state.items).some(
     (it) => it.status === "pending",
   );
-  state.status = moreToImplement ? "implementing" : "implementing";
+  state.status = moreToImplement ? "implementing" : "triage";
   await store.saveState(state);
   return state;
 }

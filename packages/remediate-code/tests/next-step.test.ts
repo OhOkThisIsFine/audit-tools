@@ -11,6 +11,24 @@ import { StateStore } from "../src/state/store.js";
 import type { RemediationState } from "../src/state/store.js";
 import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../src/steps/types.js";
 import { writeContractArtifact } from "../src/contractPipeline/artifactStore.js";
+import {
+  CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
+  CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
+  CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
+  CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
+  CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
+  CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
+  CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
+  CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+  CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
+} from "@audit-tools/shared";
+import {
+  CP_MODULE_DECOMPOSITION_VERSION,
+  CP_MODULE_CONTRACTS_VERSION,
+  CP_SEAM_RECONCILIATION_REPORT_VERSION,
+  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+  CP_CYCLIC_SEAM_RESOLUTION_VERSION,
+} from "../src/validation/contractPipeline.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-next-step");
@@ -188,7 +206,7 @@ async function writeReadyStructuredAuditIntake(inputPath: string): Promise<void>
 async function writeCompleteContractPipelineDag(): Promise<void> {
   const created_at = "2026-01-01T00:00:00.000Z";
   await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", {
-    contract_version: "remediate-code-contract-pipeline/goal-spec/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
     goal_id: "G1",
     objective: "Clean up the auth flow.",
     non_goals: [],
@@ -197,20 +215,20 @@ async function writeCompleteContractPipelineDag(): Promise<void> {
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", {
-    contract_version: "remediate-code-contract-pipeline/context-bundle/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
     goal_id: "G1",
     entries: [],
     context_summary: "Auth flow context.",
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "module_decomposition", {
-    contract_version: "remediate-code-contract-pipeline/module-decomposition/v1alpha1",
+    contract_version: CP_MODULE_DECOMPOSITION_VERSION,
     goal_id: "G1",
     modules: [{ name: "auth-module", responsibilities: "Handles auth flow.", file_scope: ["src/auth.ts"] }],
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "module_contracts", {
-    contract_version: "remediate-code-contract-pipeline/module-contracts/v1alpha1",
+    contract_version: CP_MODULE_CONTRACTS_VERSION,
     goal_id: "G1",
     module_contracts: [{
       name: "auth-module",
@@ -225,13 +243,13 @@ async function writeCompleteContractPipelineDag(): Promise<void> {
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "seam_reconciliation_report", {
-    contract_version: "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
+    contract_version: CP_SEAM_RECONCILIATION_REPORT_VERSION,
     goal_id: "G1",
     mismatches: [],
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts", {
-    contract_version: "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
+    contract_version: CP_FINALIZED_MODULE_CONTRACTS_VERSION,
     goal_id: "G1",
     module_contracts: [{
       name: "auth-module",
@@ -246,14 +264,14 @@ async function writeCompleteContractPipelineDag(): Promise<void> {
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "conceptual_design_critique", {
-    contract_version: "remediate-code-contract-pipeline/conceptual-design-critique/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
     goal_id: "G1",
     items: [],
     verdict: "approved",
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
-    contract_version: "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
     goal_id: "G1",
     obligations: [
       {
@@ -269,40 +287,40 @@ async function writeCompleteContractPipelineDag(): Promise<void> {
   // cyclic_seam_resolution is auto-written by the pipeline when no cycles exist,
   // but we write it explicitly here so the pipeline sees it and proceeds.
   await writeContractArtifact(ARTIFACTS_DIR, "cyclic_seam_resolution", {
-    contract_version: "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+    contract_version: CP_CYCLIC_SEAM_RESOLUTION_VERSION,
     goal_id: "G1",
     status: "no_cycles",
     cycles: [],
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "test_validator_plan", {
-    contract_version: "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
     goal_id: "G1",
     test_specs: [],
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "contract_assessment_report", {
-    contract_version: "remediate-code-contract-pipeline/contract-assessment-report/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
     goal_id: "G1",
     findings: [],
     verdict: "passed",
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "counterexample", {
-    contract_version: "remediate-code-contract-pipeline/counterexample/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
     goal_id: "G1",
     counterexamples: [],
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "judge_report", {
-    contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
     goal_id: "G1",
     verdict: "approved",
     classifications: [],
     created_at,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
-    contract_version: "remediate-code-contract-pipeline/implementation-dag/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
     goal_id: "G1",
     nodes: [
       {
@@ -1776,6 +1794,7 @@ describe("decideNextStep", () => {
   });
 });
 
+describe("decideNextStep — implementation dispatch and intent gate", () => {
   it("buildImplementDispatchStep: declined ack marks all pending items deemed_inappropriate and returns continueWithState", async () => {
     // Set up a documenting state with two documented items
     const documentingState: RemediationState = makePlanningState({
@@ -2479,6 +2498,7 @@ describe("decideNextStep", () => {
     const nextStep = await decideNextStep({ root: REPO_DIR });
     expect(nextStep.step_kind).not.toBe("confirm_intent");
   });
+});
 
 describe("N-R01: confirm_resume_or_restart gate", () => {
   it("bare re-invocation with planning state emits confirm_resume_or_restart (blocked)", async () => {

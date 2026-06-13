@@ -17,21 +17,10 @@ import {
 import { StateStore } from "../src/state/store.js";
 import type { RemediationState } from "../src/state/store.js";
 import { BYTES_PER_TOKEN } from "@audit-tools/shared";
+import { makeState as makeBaseState } from "./test-helpers.js";
 
-// Minimal state factory
 function makeState(overrides: Partial<RemediationState> = {}): RemediationState {
-  return {
-    status: "implementing",
-    closing_plan: { action: "none" },
-    clarifications: [],
-    plan: {
-      findings: [],
-      blocks: [],
-      themes: [],
-    },
-    items: {},
-    ...overrides,
-  };
+  return makeBaseState({ status: "implementing", ...overrides });
 }
 
 describe("byte-based token estimation — implement dispatch", () => {

@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rm, mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Finding } from "../src/state/types.js";
 import {
   checkAffectedFileIntegrity,
   hashFile,
@@ -9,9 +11,10 @@ import {
   resnapshotAffectedFileHashes,
 } from "../src/utils/fileIntegrity.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-file-integrity");
 
-function mkFinding(path: string): any {
+function mkFinding(path: string): Finding {
   return {
     id: "F-1",
     title: "t",

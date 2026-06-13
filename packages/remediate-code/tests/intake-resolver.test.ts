@@ -37,6 +37,40 @@ function makeStubs() {
   };
 }
 
+/**
+ * Helper: write a complete ready-intake artifact set (manifest + summary + brief)
+ * into the given artifactsDir. Reduces boilerplate for tests that need a "ready" intake.
+ */
+async function writeReadyIntakeArtifacts(
+  artifactsDir: string,
+  docPath: string,
+  summaryOverrides: Partial<IntakeSummary> = {},
+): Promise<void> {
+  const intakeDir = join(artifactsDir, "intake");
+  await mkdir(intakeDir, { recursive: true });
+
+  const manifest: IntakeSourceManifest = {
+    schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+    created_from: "input",
+    sources: [{ type: "document", path: docPath, label: "input-01" }],
+  };
+  await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(manifest), "utf8");
+
+  const summary: IntakeSummary = {
+    schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
+    ready: true,
+    source_type: "documents",
+    goals: ["Fix all bugs"],
+    non_goals: [],
+    constraints: [],
+    affected_files: [{ path: "src/main.ts" }],
+    open_questions: [],
+    ...summaryOverrides,
+  };
+  await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
+  await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\nFix everything.", "utf8");
+}
+
 describe("resolveIntakeStep", () => {
   beforeEach(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });
@@ -435,31 +469,9 @@ describe("resolveIntakeStep", () => {
     // After N-R06: the extract_findings step is removed. resolveIntakeStep now
     // returns { kind: "pipeline_ready" } for document/conversation sources too.
     const artifactsDir = join(TEST_DIR, "artifacts-ready");
-    const intakeDir = join(artifactsDir, "intake");
-    await mkdir(intakeDir, { recursive: true });
-
     const docPath = join(TEST_DIR, "report.md");
     await writeFile(docPath, "# Report\nAll good.", "utf8");
-
-    const manifest: IntakeSourceManifest = {
-      schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
-      created_from: "input",
-      sources: [{ type: "document", path: docPath, label: "input-01" }],
-    };
-    await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(manifest), "utf8");
-
-    const summary: IntakeSummary = {
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: true,
-      source_type: "documents",
-      goals: ["Fix all bugs"],
-      non_goals: [],
-      constraints: [],
-      affected_files: [{ path: "src/main.ts" }],
-      open_questions: [],
-    };
-    await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\nFix everything.", "utf8");
+    await writeReadyIntakeArtifacts(artifactsDir, docPath);
 
     const stubs = makeStubs();
 
@@ -812,31 +824,12 @@ describe("resolveIntakeStep", () => {
 
   it("N-R02: intake summary with ready:true but empty goals re-issues synthesize_intake step", async () => {
     const artifactsDir = join(TEST_DIR, "artifacts-empty-goals");
-    const intakeDir = join(artifactsDir, "intake");
-    await mkdir(intakeDir, { recursive: true });
-
     const docPath = join(TEST_DIR, "feedback-empty-goals.md");
     await writeFile(docPath, "# Feedback", "utf8");
-
-    const manifest: IntakeSourceManifest = {
-      schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
-      created_from: "input",
-      sources: [{ type: "document", path: docPath, label: "input-01" }],
-    };
-    await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(manifest), "utf8");
-
-    const summary: IntakeSummary = {
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: true,
-      source_type: "documents",
+    await writeReadyIntakeArtifacts(artifactsDir, docPath, {
       goals: [],
-      non_goals: [],
-      constraints: [],
       affected_files: [{ path: "src/a.ts" }],
-      open_questions: [],
-    };
-    await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief", "utf8");
+    });
 
     const stubs = makeStubs();
 
@@ -860,31 +853,12 @@ describe("resolveIntakeStep", () => {
 
   it("N-R02: intake summary with ready:true but empty affected_files re-issues synthesize_intake step", async () => {
     const artifactsDir = join(TEST_DIR, "artifacts-empty-affected");
-    const intakeDir = join(artifactsDir, "intake");
-    await mkdir(intakeDir, { recursive: true });
-
     const docPath = join(TEST_DIR, "feedback-empty-affected.md");
     await writeFile(docPath, "# Feedback", "utf8");
-
-    const manifest: IntakeSourceManifest = {
-      schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
-      created_from: "input",
-      sources: [{ type: "document", path: docPath, label: "input-01" }],
-    };
-    await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(manifest), "utf8");
-
-    const summary: IntakeSummary = {
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: true,
-      source_type: "documents",
+    await writeReadyIntakeArtifacts(artifactsDir, docPath, {
       goals: ["Fix bugs"],
-      non_goals: [],
-      constraints: [],
       affected_files: [],
-      open_questions: [],
-    };
-    await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief", "utf8");
+    });
 
     const stubs = makeStubs();
 

@@ -4,21 +4,7 @@ import type { RemediationBlock } from "../src/state/types.js";
 import {
   buildImplementModelHint,
 } from "../src/steps/dispatch.js";
-import { makeState as makeBaseState } from "./test-helpers.js";
-
-function makeFinding(overrides: Partial<Finding> & { id: string }): Finding {
-  return {
-    title: "Example finding",
-    category: "General",
-    severity: "medium",
-    confidence: "medium",
-    lens: "correctness",
-    summary: "Example summary.",
-    affected_files: [{ path: "src/foo.ts" }],
-    evidence: ["ev-1"],
-    ...overrides,
-  };
-}
+import { makeState as makeBaseState, makeFinding } from "./test-helpers.js";
 
 function buildItems(
   findings: Finding[],

@@ -8,20 +8,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { StateStore } from "../src/state/store.js";
 import type { RemediationState } from "../src/state/store.js";
+import { makeState as makeBaseState } from "./test-helpers.js";
 
 function makeState(overrides: Partial<RemediationState> = {}): RemediationState {
-  return {
-    status: "implementing",
-    closing_plan: { action: "none" },
-    clarifications: [],
-    plan: {
-      findings: [],
-      blocks: [],
-      themes: [],
-    },
-    items: {},
-    ...overrides,
-  };
+  return makeBaseState({ status: "implementing", ...overrides });
 }
 
 describe("detectRepoConventions cached once per root", () => {

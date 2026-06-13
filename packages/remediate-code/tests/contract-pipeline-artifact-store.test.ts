@@ -14,9 +14,10 @@ import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
   CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
 } from "@audit-tools/shared";
-
-const CP_MODULE_DECOMPOSITION_VERSION = "remediate-code-contract-pipeline/module-decomposition/v1alpha1" as const;
-const CP_FINALIZED_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1" as const;
+import {
+  CP_MODULE_DECOMPOSITION_VERSION,
+  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+} from "../src/validation/contractPipeline.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-cp-artifact-store");

@@ -984,7 +984,8 @@ describe("ownership-gated affected_files amendment", () => {
     const dir = join(OWNERSHIP_ARTIFACTS, "runs", RUN_ID, "implement");
     await mkdir(dir, { recursive: true });
 
-    // Write a dispatch plan covering B-001 with write_paths=["src/a.ts"].
+    // Dispatch plan covers BOTH B-001 (src/a.ts) and B-002 (src/b.ts) so the
+    // ownership registry knows B-002 owns src/b.ts before processing B-001's result.
     const plan = {
       contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
       phase: "implement",
@@ -1002,22 +1003,52 @@ describe("ownership-gated affected_files amendment", () => {
             write_paths: ["src/a.ts"], // B-001 only owns src/a.ts
           },
         },
+        {
+          task_id: "implement-B-002",
+          block_id: "B-002",
+          prompt_path: join(dir, "implement-B-002.md").replace(/\\/g, "/"),
+          result_path: join(dir, "implement-B-002.result.json").replace(/\\/g, "/"),
+          access: {
+            read_paths: ["src/b.ts"],
+            write_paths: ["src/b.ts"], // B-002 owns src/b.ts — must be in registry
+          },
+        },
       ],
     };
     await writeFile(join(dir, "dispatch-plan.json"), JSON.stringify(plan, null, 2), "utf8");
     await writeFile(join(dir, "implement-B-001.md"), "# Implement\n", "utf8");
+    await writeFile(join(dir, "implement-B-002.md"), "# Implement\n", "utf8");
 
-    // NODE-A (B-001) tries to amend src/b.ts, which is B-002's scope.
+    // B-002 completes successfully and does not claim any out-of-scope files.
     await writeFile(
-      join(dir, "implement-B-001.result.json"),
+      join(dir, "implement-B-002.result.json"),
       JSON.stringify({
         contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
         phase: "implement",
         item_results: [
           {
+            finding_id: "F-002",
+            status: "resolved",
+            evidence: ["Implemented fix for b.ts."],
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    // B-001 worker tries to amend src/b.ts — owned by B-002 — via top-level
+    // amended_files (the actual ImplementWorkerResult field, not item_results).
+    // This must be detected as a seam conflict and F-001 must be blocked.
+    await writeFile(
+      join(dir, "implement-B-001.result.json"),
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        amended_files: ["src/b.ts"], // top-level field — B-001 claims B-002's file
+        item_results: [
+          {
             finding_id: "F-001",
             status: "resolved",
-            amended_files: ["src/b.ts"], // outside B-001 scope → should be blocked/dropped
             evidence: ["Implemented fix."],
           },
         ],
@@ -1030,14 +1061,15 @@ describe("ownership-gated affected_files amendment", () => {
       RUN_ID,
     );
 
-    // The amendment to src/b.ts (owned by B-002) must be gated.
-    // Either the item is blocked, OR the amendment is silently dropped.
-    // Either outcome is correct per the spec.
+    // B-001 claimed src/b.ts (owned by B-002) via amended_files.
+    // The seam_routed path in mergeImplementResults must block F-001.
     const f001 = mergedState.items!["F-001"];
-    const isBlocked = f001.status === "blocked";
-    const isResolvedWithoutCrossScope = f001.status === "resolved";
-    // At least one of these must hold (the ownership gate fires in some form).
-    expect(isBlocked || isResolvedWithoutCrossScope).toBe(true);
+    expect(f001.status).toBe("blocked");
+    expect(f001.failure_reason).toContain("src/b.ts");
+
+    // F-002 was resolved by B-002's result and must not be disturbed.
+    const f002 = mergedState.items!["F-002"];
+    expect(f002.status).toBe("resolved");
 
     await rm(OWNERSHIP_DIR, { recursive: true, force: true });
   });

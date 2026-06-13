@@ -13,6 +13,8 @@ import {
   BASE_COOLDOWN_MS,
   MAX_COOLDOWN_MS,
 } from "@audit-tools/shared";
+// INV-remediate-tests-05: dispatch.ts scheduleWave must also be covered here
+import { scheduleWave as dispatchScheduleWave } from "../src/steps/dispatch.js";
 
 const baseConfig: SessionConfig = {
   provider: "claude-code",
@@ -358,5 +360,30 @@ describe("computeBackoffFailureWeight", () => {
   it("escalates for consecutive 429s", () => {
     expect(computeBackoffFailureWeight(3)).toBe(2.0);
     expect(computeBackoffFailureWeight(5)).toBe(3.0);
+  });
+});
+
+// INV-remediate-tests-05: dispatch.ts scheduleWave — ensures the dispatch
+// package's own scheduleWave wrapper is exercised, not only the shared version.
+describe("dispatch.ts scheduleWave", () => {
+  it("returns a wave schedule with max_concurrent when quota is disabled", async () => {
+    const result = await dispatchScheduleWave({
+      providerName: "claude-code",
+      sessionConfig: { provider: "claude-code", quota: { enabled: false } },
+      hostModel: null,
+      itemCount: 5,
+    });
+    expect(result.max_concurrent).toBe(5);
+  });
+
+  it("caps concurrency at the host limit when quota is enabled", async () => {
+    const result = await dispatchScheduleWave({
+      providerName: "claude-code",
+      sessionConfig: { provider: "claude-code", quota: { enabled: true } },
+      hostModel: null,
+      hostMaxConcurrent: 3,
+      itemCount: 10,
+    });
+    expect(result.max_concurrent).toBeLessThanOrEqual(3);
   });
 });

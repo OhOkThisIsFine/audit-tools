@@ -987,3 +987,140 @@ describe("attributePostMergeFailure — rolls back only implicated blocks", () =
     expect(result.items!["F-sha"].status).toBe("resolved");
   }, 20_000);
 });
+
+// ---------------------------------------------------------------------------
+// TST-2302cd7e: implement.ts executeBlock — tests-pass-before-refactoring guard
+// ---------------------------------------------------------------------------
+
+describe("executeBlock — TST-2302cd7e: tests-pass-before-refactoring guard", () => {
+  it("blocks item with red-green-refactor message when test_command exits 0 after Write Tests step", async () => {
+    const artifactsDir = await mkdtemp(join(tmpdir(), "tst-2302cd7e-"));
+    try {
+      const state: any = {
+        status: "implementing",
+        plan: {
+          plan_id: "P-2302cd7e",
+          findings: [],
+          blocks: [],
+          project_type: "unknown",
+          // A test_command that exits 0 — triggers the guard when write-tests succeeds.
+          test_command: `node -e "process.exit(0)"`,
+          candidate_closing_actions: [],
+        },
+        items: {
+          F1: {
+            finding_id: "F1",
+            status: "pending",
+            block_id: "B1",
+            item_spec: {
+              finding_id: "F1",
+              concrete_change: "fix something",
+              tests_to_write: [{ name: "test-foo", description: "desc", acceptance_criteria: [] }],
+              not_applicable_steps: [
+                // Skip Refactor and Verify so only Write Tests runs — the guard
+                // triggers after Write Tests succeeds and test_command exits 0.
+                { step: "Refactor Code" as const, rationale: "n/a" },
+                { step: "Verify Code Against Documentation" as const, rationale: "n/a" },
+              ],
+            },
+          },
+        },
+      };
+
+      const block: RemediationBlock = {
+        block_id: "B1",
+        items: ["F1"],
+        parallel_safe: true,
+      };
+
+      // A provider that always succeeds (write-tests step returns true).
+      const fakeProvider = {
+        name: "noop-provider",
+        launch: async () => { /* succeed silently */ },
+      };
+
+      const saves: any[] = [];
+      const fakeSave = {
+        saveState: async (s: any) => {
+          saves.push(JSON.parse(JSON.stringify(s)));
+        },
+      };
+
+      await executeBlock(block, artifactsDir, {
+        state,
+        options: { root: artifactsDir, artifactsDir },
+        provider: fakeProvider,
+        store: fakeSave as any,
+      });
+
+      // Item must be blocked with the red-green-refactor guard message.
+      expect(state.items.F1.status).toBe("blocked");
+      expect(state.items.F1.failure_reason).toMatch(/Tests passed before refactoring/);
+      // State must have been saved at the guard branch.
+      expect(saves.some((s) => s.items?.F1?.status === "blocked")).toBe(true);
+    } finally {
+      await rm(artifactsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not trigger guard when test_command exits non-zero after Write Tests step", async () => {
+    const artifactsDir = await mkdtemp(join(tmpdir(), "tst-2302cd7e-nontrigger-"));
+    try {
+      const state: any = {
+        status: "implementing",
+        plan: {
+          plan_id: "P-2302cd7e-b",
+          findings: [],
+          blocks: [],
+          project_type: "unknown",
+          // A test_command that exits 1 — guard must NOT trigger (tests are red as expected).
+          test_command: `node -e "process.exit(1)"`,
+          candidate_closing_actions: [],
+        },
+        items: {
+          F1: {
+            finding_id: "F1",
+            status: "pending",
+            block_id: "B1",
+            item_spec: {
+              finding_id: "F1",
+              concrete_change: "fix something",
+              tests_to_write: [{ name: "test-bar", description: "desc", acceptance_criteria: [] }],
+              not_applicable_steps: [
+                { step: "Refactor Code" as const, rationale: "n/a" },
+                { step: "Verify Code Against Documentation" as const, rationale: "n/a" },
+              ],
+            },
+          },
+        },
+      };
+
+      const block: RemediationBlock = {
+        block_id: "B1",
+        items: ["F1"],
+        parallel_safe: true,
+      };
+
+      const fakeProvider = {
+        name: "noop-provider-b",
+        launch: async () => { /* succeed silently */ },
+      };
+
+      const fakeSave = { saveState: async () => {} };
+
+      await executeBlock(block, artifactsDir, {
+        state,
+        options: { root: artifactsDir, artifactsDir },
+        provider: fakeProvider,
+        store: fakeSave as any,
+      });
+
+      // Tests are red (exit 1) → guard must not fire → item continues through
+      // the skipped Refactor+Verify steps and ultimately resolves.
+      expect(state.items.F1.status).toBe("resolved");
+      expect(state.items.F1.failure_reason).toBeUndefined();
+    } finally {
+      await rm(artifactsDir, { recursive: true, force: true });
+    }
+  });
+});

@@ -46,12 +46,15 @@ import {
   CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
   CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+  CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
 } from "@audit-tools/shared";
-
-const CP_MODULE_DECOMPOSITION_VERSION = "remediate-code-contract-pipeline/module-decomposition/v1alpha1" as const;
-const CP_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/module-contracts/v1alpha1" as const;
-const CP_SEAM_RECONCILIATION_REPORT_VERSION = "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1" as const;
-const CP_FINALIZED_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1" as const;
+import {
+  CP_MODULE_DECOMPOSITION_VERSION,
+  CP_MODULE_CONTRACTS_VERSION,
+  CP_SEAM_RECONCILIATION_REPORT_VERSION,
+  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+  CP_CYCLIC_SEAM_RESOLUTION_VERSION,
+} from "../src/validation/contractPipeline.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-n-r06-universal-cp");

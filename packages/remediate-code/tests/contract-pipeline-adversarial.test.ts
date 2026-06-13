@@ -28,6 +28,25 @@ import {
   type ContractPipelineArtifactName,
 } from "../src/contractPipeline/artifactStore.js";
 import { intakePaths } from "../src/intake.js";
+import {
+  CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
+  CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
+  CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
+  CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
+  CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
+  CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
+  CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
+  CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+} from "@audit-tools/shared";
+
+// Version constants for artifact types not yet exported from @audit-tools/shared.
+// These local consts ensure a single source of truth within this file.
+const CP_MODULE_DECOMPOSITION_VERSION = "remediate-code-contract-pipeline/module-decomposition/v1alpha1" as const;
+const CP_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/module-contracts/v1alpha1" as const;
+const CP_SEAM_RECONCILIATION_REPORT_VERSION = "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1" as const;
+const CP_FINALIZED_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1" as const;
+const CP_CYCLIC_SEAM_RESOLUTION_VERSION = "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1" as const;
+const CP_TEST_VALIDATOR_PLAN_VERSION = "remediate-code-contract-pipeline/test-validator-plan/v1alpha1" as const;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-cp-adversarial");
@@ -58,7 +77,7 @@ function payloads(overrides: {
   const moduleName = "auth-module";
   return {
     goal_spec: {
-      contract_version: "remediate-code-contract-pipeline/goal-spec/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
       goal_id: "G1",
       objective: "Clean up the auth flow.",
       non_goals: [],
@@ -67,20 +86,20 @@ function payloads(overrides: {
       created_at: CREATED_AT,
     },
     context_bundle: {
-      contract_version: "remediate-code-contract-pipeline/context-bundle/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
       goal_id: "G1",
       entries: [],
       context_summary: "Auth flow context.",
       created_at: CREATED_AT,
     },
     module_decomposition: {
-      contract_version: "remediate-code-contract-pipeline/module-decomposition/v1alpha1",
+      contract_version: CP_MODULE_DECOMPOSITION_VERSION,
       goal_id: "G1",
       modules: [{ name: moduleName, responsibilities: "Handles auth.", file_scope: ["src/auth.ts"] }],
       created_at: CREATED_AT,
     },
     module_contracts: {
-      contract_version: "remediate-code-contract-pipeline/module-contracts/v1alpha1",
+      contract_version: CP_MODULE_CONTRACTS_VERSION,
       goal_id: "G1",
       module_contracts: [{
         name: moduleName,
@@ -95,13 +114,13 @@ function payloads(overrides: {
       created_at: CREATED_AT,
     },
     seam_reconciliation_report: {
-      contract_version: "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
+      contract_version: CP_SEAM_RECONCILIATION_REPORT_VERSION,
       goal_id: "G1",
       mismatches: [],
       created_at: CREATED_AT,
     },
     finalized_module_contracts: {
-      contract_version: "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
+      contract_version: CP_FINALIZED_MODULE_CONTRACTS_VERSION,
       goal_id: "G1",
       module_contracts: [{
         name: moduleName,
@@ -116,15 +135,14 @@ function payloads(overrides: {
       created_at: CREATED_AT,
     },
     conceptual_design_critique: {
-      contract_version:
-        "remediate-code-contract-pipeline/conceptual-design-critique/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
       goal_id: "G1",
       items: [],
       verdict: "approved",
       created_at: CREATED_AT,
     },
     obligation_ledger: {
-      contract_version: "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
       goal_id: "G1",
       obligations: [
         {
@@ -138,36 +156,33 @@ function payloads(overrides: {
       created_at: CREATED_AT,
     },
     cyclic_seam_resolution: {
-      contract_version:
-        "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+      contract_version: CP_CYCLIC_SEAM_RESOLUTION_VERSION,
       goal_id: "G1",
       cycles: [],
       status: "no_cycles",
       created_at: CREATED_AT,
     },
     test_validator_plan: {
-      contract_version:
-        "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
+      contract_version: CP_TEST_VALIDATOR_PLAN_VERSION,
       goal_id: "G1",
       test_specs: [],
       created_at: CREATED_AT,
     },
     contract_assessment_report: {
-      contract_version:
-        "remediate-code-contract-pipeline/contract-assessment-report/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
       goal_id: "G1",
       findings: [],
       verdict: "passed",
       created_at: CREATED_AT,
     },
     counterexample: {
-      contract_version: "remediate-code-contract-pipeline/counterexample/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
       goal_id: "G1",
       counterexamples: overrides.counterexamples ?? [],
       created_at: CREATED_AT,
     },
     judge_report: overrides.judge ?? {
-      contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
       goal_id: "G1",
       verdict: "approved",
       classifications: [],
@@ -203,7 +218,7 @@ async function writeRawChainThroughJudge(
 
 function traceableDag(nodeOverrides: Record<string, unknown> = {}) {
   return {
-    contract_version: "remediate-code-contract-pipeline/implementation-dag/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
     goal_id: "G1",
     nodes: [
       {
@@ -298,7 +313,7 @@ describe("clean run: approved judge verdict proceeds to implementation planning"
 
 describe("repair cycle: failing verdict triggers one targeted repair and re-derivation", () => {
   const NEEDS_REPAIR_JUDGE = {
-    contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
     goal_id: "G1",
     verdict: "needs_repair",
     classifications: [
@@ -483,7 +498,7 @@ describe("traceability gate: untraceable implementation_dag nodes never promote"
         },
       ],
       judge: {
-        contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+        contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
         goal_id: "G1",
         verdict: "approved",
         classifications: [
@@ -545,7 +560,7 @@ describe("design-spec structural gates: critic phase gate checks", () => {
         await writeRawArtifact(name, obligationLedgerOverride);
       } else if (name === "cyclic_seam_resolution") {
         await writeRawArtifact(name, {
-          contract_version: "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+          contract_version: CP_CYCLIC_SEAM_RESOLUTION_VERSION,
           goal_id: "G1",
           cycles: [],
           status: "no_cycles",
@@ -553,7 +568,7 @@ describe("design-spec structural gates: critic phase gate checks", () => {
         });
       } else if (name === "test_validator_plan") {
         await writeRawArtifact(name, {
-          contract_version: "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
+          contract_version: CP_TEST_VALIDATOR_PLAN_VERSION,
           goal_id: "G1",
           test_specs: [],
           created_at: CREATED_AT,
@@ -568,7 +583,7 @@ describe("design-spec structural gates: critic phase gate checks", () => {
 
   it("re-emits design phase when finalized_module_contracts has a module missing outputs", async () => {
     const badFinalized = {
-      contract_version: "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
+      contract_version: CP_FINALIZED_MODULE_CONTRACTS_VERSION,
       goal_id: "G1",
       module_contracts: [{
         name: "auth-module",
@@ -595,7 +610,7 @@ describe("design-spec structural gates: critic phase gate checks", () => {
 
   it("appends N-R21 advisory when circular obligation dependency warning is present", async () => {
     const circularLedger = {
-      contract_version: "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
       goal_id: "G1",
       obligations: [
         { id: "O-1", description: "Obligation 1", kind: "behavioral", depends_on: ["O-2"], status: "pending" },
@@ -617,7 +632,7 @@ describe("design-spec structural gates: critic phase gate checks", () => {
 });
 
 describe("inferRepairTarget: judge repair-directive inference (N-R11)", () => {
-  it("defaults to design_spec when there are no accepted classifications", () => {
+  it("defaults to finalized_module_contracts when there are no accepted classifications", () => {
     const result = inferRepairTarget([
       {
         counterexample_id: "CE-1",
@@ -625,11 +640,11 @@ describe("inferRepairTarget: judge repair-directive inference (N-R11)", () => {
         rationale: "This is out of scope.",
       },
     ]);
-    expect(result).toBe("design_spec");
+    expect(result).toBe("finalized_module_contracts");
   });
 
-  it("defaults to design_spec when classifications array is empty", () => {
-    expect(inferRepairTarget([])).toBe("design_spec");
+  it("defaults to finalized_module_contracts when classifications array is empty", () => {
+    expect(inferRepairTarget([])).toBe("finalized_module_contracts");
   });
 
   it("infers obligation_ledger when accepted rationale contains 'obligation'", async () => {
@@ -655,7 +670,7 @@ describe("inferRepairTarget: judge repair-directive inference (N-R11)", () => {
     await ingestContractArtifacts(ARTIFACTS_DIR);
     // Write judge as pre-enveloped artifact (bypasses validator, which requires repair_directive).
     await writeContractArtifact(ARTIFACTS_DIR, "judge_report", {
-      contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
       goal_id: "G1",
       verdict: "needs_repair",
       classifications: [
@@ -692,7 +707,7 @@ describe("inferRepairTarget: judge repair-directive inference (N-R11)", () => {
     }
     await ingestContractArtifacts(ARTIFACTS_DIR);
     await writeContractArtifact(ARTIFACTS_DIR, "judge_report", {
-      contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
       goal_id: "G1",
       verdict: "needs_repair",
       classifications: [
@@ -729,7 +744,7 @@ describe("inferRepairTarget: judge repair-directive inference (N-R11)", () => {
     }
     await ingestContractArtifacts(ARTIFACTS_DIR);
     await writeContractArtifact(ARTIFACTS_DIR, "judge_report", {
-      contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
       goal_id: "G1",
       verdict: "needs_repair",
       classifications: [
@@ -761,7 +776,7 @@ describe("inferRepairTarget: judge repair-directive inference (N-R11)", () => {
         },
       ],
       judge: {
-        contract_version: "remediate-code-contract-pipeline/judge-report/v1alpha1",
+        contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
         goal_id: "G1",
         verdict: "needs_repair",
         classifications: [
@@ -786,15 +801,14 @@ describe("inferRepairTarget: judge repair-directive inference (N-R11)", () => {
     expect(prompt).toMatch(/Add the missing obligation entry/);
   });
 
-  it("inferRepairTarget: the fallback instruction mentions addressing counterexamples", () => {
-    // Pure unit check: design_spec default produces the standard instruction text
-    // via the inferred directive path (tested indirectly via the integration above,
-    // but also verify the pure function returns design_spec for no-accepted-input).
-    expect(inferRepairTarget([])).toBe("design_spec");
+  it("inferRepairTarget: the fallback is finalized_module_contracts (not the deprecated design_spec)", () => {
+    // Pure unit check: fallback produces finalized_module_contracts — the post-redesign
+    // default — not the deprecated design_spec artifact name.
+    expect(inferRepairTarget([])).toBe("finalized_module_contracts");
     expect(
       inferRepairTarget([
         { counterexample_id: "CE-X", classification: "out_of_scope", rationale: "nope" },
       ]),
-    ).toBe("design_spec");
+    ).toBe("finalized_module_contracts");
   });
 });

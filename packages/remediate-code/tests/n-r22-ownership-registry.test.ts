@@ -16,7 +16,6 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
 import { OwnershipRegistry } from "../src/dispatch/ownershipRegistry.js";
 import { routeAmendmentRequest } from "../src/dispatch/amendmentClaim.js";
 import { mergeImplementResults } from "../src/steps/dispatch.js";
@@ -390,8 +389,7 @@ async function writeMinimalState(
     closing_plan: { action: "none" },
   };
 
-  const { writeFileSync } = await import("node:fs");
-  writeFileSync(
+  await writeFile(
     join(artifactsDir, "state.json"),
     JSON.stringify(state, null, 2) + "\n",
     "utf8",
@@ -407,9 +405,8 @@ async function writeDispatchPlan(
     write_paths?: string[];
   }>,
 ): Promise<void> {
-  const { writeFileSync, mkdirSync } = await import("node:fs");
   const dir = join(artifactsDir, "runs", runId, "implement");
-  mkdirSync(dir, { recursive: true });
+  await mkdir(dir, { recursive: true });
 
   const plan = {
     contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
@@ -429,7 +426,7 @@ async function writeDispatchPlan(
     })),
   };
 
-  writeFileSync(
+  await writeFile(
     join(dir, "dispatch-plan.json"),
     JSON.stringify(plan, null, 2) + "\n",
     "utf8",
@@ -442,9 +439,8 @@ describe("mergeImplementResults: unowned amended_files are accepted and added to
     await writeMinimalState(ARTIFACTS_DIR, [{ block_id: "BLK-001", items: ["F-001"] }], [{ id: "F-001" }]);
     await writeDispatchPlan(ARTIFACTS_DIR, runId, [{ block_id: "BLK-001", items: ["F-001"] }]);
 
-    const { mkdirSync, writeFileSync } = await import("node:fs");
     const dir = join(ARTIFACTS_DIR, "runs", runId, "implement");
-    mkdirSync(dir, { recursive: true });
+    await mkdir(dir, { recursive: true });
 
     const result = {
       contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
@@ -452,7 +448,7 @@ describe("mergeImplementResults: unowned amended_files are accepted and added to
       item_results: [{ finding_id: "F-001", status: "resolved", evidence: ["Tests pass."] }],
       amended_files: ["src/shared-util.ts"], // unowned — not in any block's write_paths
     };
-    writeFileSync(
+    await writeFile(
       join(dir, "implement-BLK-001.result.json"),
       JSON.stringify(result, null, 2) + "\n",
       "utf8",
@@ -484,9 +480,8 @@ describe("mergeImplementResults: owned amended_files block the item", () => {
       { block_id: "BLK-002", items: ["F-002"], write_paths: ["src/F-002.ts"] },
     ]);
 
-    const { mkdirSync, writeFileSync } = await import("node:fs");
     const dir = join(ARTIFACTS_DIR, "runs", runId, "implement");
-    mkdirSync(dir, { recursive: true });
+    await mkdir(dir, { recursive: true });
 
     // BLK-001 tries to amend a file that is owned by BLK-002's contract scope
     const result1 = {
@@ -495,7 +490,7 @@ describe("mergeImplementResults: owned amended_files block the item", () => {
       item_results: [{ finding_id: "F-001", status: "resolved", evidence: ["Tests pass."] }],
       amended_files: ["src/F-002.ts"], // owned by BLK-002 → seam conflict
     };
-    writeFileSync(
+    await writeFile(
       join(dir, "implement-BLK-001.result.json"),
       JSON.stringify(result1, null, 2) + "\n",
       "utf8",
@@ -507,7 +502,7 @@ describe("mergeImplementResults: owned amended_files block the item", () => {
       phase: "implement",
       item_results: [{ finding_id: "F-002", status: "resolved", evidence: ["Tests pass."] }],
     };
-    writeFileSync(
+    await writeFile(
       join(dir, "implement-BLK-002.result.json"),
       JSON.stringify(result2, null, 2) + "\n",
       "utf8",

@@ -393,8 +393,8 @@ export async function writePathASeedFromFindings(
  * the failing classifications. Post-redesign the default is
  * `finalized_module_contracts` (not `design_spec`).
  */
-// Post-redesign repair target: finalized_module_contracts replaces design_spec.
-// Cast needed because JudgeRepairTarget in @audit-tools/shared still lists design_spec.
+// Post-redesign: finalized_module_contracts replaces the deprecated design_spec target.
+// ExtendedRepairTarget supersedes the shared JudgeRepairTarget (which still lists design_spec).
 type ExtendedRepairTarget = "finalized_module_contracts" | "obligation_ledger" | "contract_assessment_report";
 
 /**
@@ -405,11 +405,11 @@ type ExtendedRepairTarget = "finalized_module_contracts" | "obligation_ledger" |
  * Priority (first match wins):
  *   obligation/ledger/invariant/constraint keywords → obligation_ledger
  *   assessment/finding/gap keywords                 → contract_assessment_report
- *   fallback                                        → design_spec (upgraded to finalized_module_contracts post-redesign)
+ *   fallback                                        → finalized_module_contracts
  */
 export function inferRepairTarget(
   classifications: JudgeReport["classifications"],
-): "obligation_ledger" | "contract_assessment_report" | "design_spec" {
+): ExtendedRepairTarget {
   const accepted = (classifications ?? []).filter(
     (c) => c.classification === "accepted",
   );
@@ -420,16 +420,12 @@ export function inferRepairTarget(
   if (/assessment|contract finding|gap identified/.test(text)) {
     return "contract_assessment_report";
   }
-  return "design_spec";
+  return "finalized_module_contracts";
 }
 
 function inferRepairDirective(judge: JudgeReport): { target: ExtendedRepairTarget; instruction: string } {
-  const inferred = inferRepairTarget(judge.classifications);
-  // Post-redesign: design_spec maps to finalized_module_contracts.
-  const target: ExtendedRepairTarget =
-    inferred === "design_spec" ? "finalized_module_contracts" : inferred;
   return {
-    target,
+    target: inferRepairTarget(judge.classifications),
     instruction:
       "Address every judge-accepted counterexample in the judge report's classifications.",
   };
@@ -1238,14 +1234,19 @@ export async function promoteImplementationDagToExtractedPlan(
     };
   });
 
-  const blocks = nodes.map((node) => ({
-    block_id: `CP-BLOCK-${node.id}`,
-    items: [node.id],
-    parallel_safe: true,
-    dependencies: ((node as { depends_on?: string[] }).depends_on ?? []).map(
+  const blocks = nodes.map((node) => {
+    const deps = ((node as { depends_on?: string[] }).depends_on ?? []).map(
       (depId) => `CP-BLOCK-${depId}`,
-    ),
-  }));
+    );
+    return {
+      block_id: `CP-BLOCK-${node.id}`,
+      items: [node.id],
+      // INV-remediate-pipeline-02: a block with prerequisites is never
+      // wave-dispatched as independent — parallel_safe derives from depends_on.
+      parallel_safe: deps.length === 0,
+      dependencies: deps,
+    };
+  });
 
   const extractedPlan = {
     plan_id: dag?.goal_id ?? `CP-PLAN-${Date.now()}`,

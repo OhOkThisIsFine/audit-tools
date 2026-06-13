@@ -868,6 +868,23 @@ export async function applyPlanPipeline(
   return { ...plan, blocks };
 }
 
+/**
+ * Prune blocks so that every item reference is still in the kept-findings set,
+ * and drop blocks whose item list becomes empty after pruning.
+ * Used in runPlanPhase wherever a reduction step drops some findings.
+ * Extracted to eliminate the three formerly-duplicated inline occurrences of
+ * blocks.map(b => ({...b, items: b.items.filter(id => keptIds.has(id))})).filter(...)
+ */
+export function pruneBlocksForKeptFindings(
+  blocks: RemediationBlock[],
+  keptFindings: Finding[],
+): RemediationBlock[] {
+  const keptIds = new Set(keptFindings.map((f) => f.id));
+  return blocks
+    .map((b) => ({ ...b, items: (b.items ?? []).filter((id) => keptIds.has(id)) }))
+    .filter((b) => (b.items ?? []).length > 0);
+}
+
 export async function runPlanPhase(
   state: RemediationState,
   options: OrchestratorOptions,
@@ -939,10 +956,7 @@ export async function runPlanPhase(
       console.warn(
         `Plan: dropped ${grounding.dropped.length} extracted finding(s) with no real cited path after repair: ${grounding.dropped.map((d) => d.finding.id).join(", ")}`,
       );
-      const keptIds = new Set(findings.map((f) => f.id));
-      blocks = blocks
-        .map((b) => ({ ...b, items: (b.items ?? []).filter((id) => keptIds.has(id)) }))
-        .filter((b) => (b.items ?? []).length > 0);
+      blocks = pruneBlocksForKeptFindings(blocks, findings);
     }
     if (grounding.ungroundedFindingIds.length > 0) {
       console.warn(
@@ -965,10 +979,7 @@ export async function runPlanPhase(
     findings = findings.filter(
       (f) => Array.isArray(f.evidence) && f.evidence.length > 0,
     );
-    const keptIds = new Set(findings.map((f) => f.id));
-    blocks = blocks
-      .map((b) => ({ ...b, items: (b.items ?? []).filter((id) => keptIds.has(id)) }))
-      .filter((b) => (b.items ?? []).length > 0);
+    blocks = pruneBlocksForKeptFindings(blocks, findings);
   }
 
   // Cross-lens dedup: merge findings that different audit lenses flagged independently
@@ -996,10 +1007,7 @@ export async function runPlanPhase(
       `Plan: intent checkpoint dropped ${droppedByCheckpoint.length} finding(s) from remediation.`,
     );
     findings = keptFindings;
-    const keptIds = new Set(findings.map((f) => f.id));
-    blocks = blocks
-      .map((b) => ({ ...b, items: (b.items ?? []).filter((id) => keptIds.has(id)) }))
-      .filter((b) => (b.items ?? []).length > 0);
+    blocks = pruneBlocksForKeptFindings(blocks, findings);
   }
 
   // Fallback blocks computation if none provided

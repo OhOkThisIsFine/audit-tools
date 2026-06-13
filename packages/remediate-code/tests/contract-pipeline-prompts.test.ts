@@ -333,6 +333,18 @@ describe("contract repair prompt", () => {
       }),
     ).toThrow(/finalized_module_contracts/);
   });
+
+  it("throws when contract_assessment_report path is absent (TST-5ddb69b9)", () => {
+    // renderContractRepairPrompt validates all requiredInputs before emitting the prompt.
+    // contract_assessment_report is one of those required inputs regardless of target.
+    expect(() =>
+      renderContractRepairPrompt({
+        target: "finalized_module_contracts",
+        instruction: "Fix contract.",
+        artifactPaths: { ...ALL_PATHS, contract_assessment_report: undefined },
+      }),
+    ).toThrow(/contract_assessment_report/);
+  });
 });
 
 describe("contract pipeline prompt renderer — isolation", () => {

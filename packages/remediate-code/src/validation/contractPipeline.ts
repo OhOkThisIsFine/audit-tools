@@ -24,7 +24,7 @@ import {
 } from "@audit-tools/shared";
 
 // Version constant for cyclic_seam_resolution artifact.
-const CP_CYCLIC_SEAM_RESOLUTION_VERSION =
+export const CP_CYCLIC_SEAM_RESOLUTION_VERSION =
   "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1" as const;
 
 const CYCLIC_SEAM_RESOLUTION_STATUSES = [
@@ -35,13 +35,13 @@ const CYCLIC_SEAM_RESOLUTION_STATUSES = [
 ] as const;
 
 // Version constants for seam-negotiation artifacts not yet in @audit-tools/shared.
-const CP_MODULE_DECOMPOSITION_VERSION =
+export const CP_MODULE_DECOMPOSITION_VERSION =
   "remediate-code-contract-pipeline/module-decomposition/v1alpha1" as const;
-const CP_MODULE_CONTRACTS_VERSION =
+export const CP_MODULE_CONTRACTS_VERSION =
   "remediate-code-contract-pipeline/module-contracts/v1alpha1" as const;
-const CP_SEAM_RECONCILIATION_REPORT_VERSION =
+export const CP_SEAM_RECONCILIATION_REPORT_VERSION =
   "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1" as const;
-const CP_FINALIZED_MODULE_CONTRACTS_VERSION =
+export const CP_FINALIZED_MODULE_CONTRACTS_VERSION =
   "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1" as const;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

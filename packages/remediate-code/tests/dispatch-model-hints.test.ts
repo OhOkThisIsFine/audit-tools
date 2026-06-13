@@ -9,21 +9,7 @@ import type {
 import {
   buildImplementModelHint,
 } from "../src/steps/dispatch.js";
-
-function makeFinding(overrides: Partial<Finding> = {}): Finding {
-  return {
-    id: "F-001",
-    title: "A finding",
-    category: "correctness",
-    severity: "medium",
-    confidence: "medium",
-    lens: "maintainability",
-    summary: "Something to fix.",
-    affected_files: [{ path: "src/a.ts" }],
-    evidence: [],
-    ...overrides,
-  };
-}
+import { makeFinding, makeSpec } from "./test-helpers.js";
 
 /**
  * Assemble a minimal RemediationState containing the given findings (and
@@ -65,15 +51,6 @@ function makeStateWithBlock(
     closing_plan: { action: "none" },
   } as unknown as RemediationState;
   return { state, block };
-}
-
-function makeSpec(findingId: string, concreteChange: string): ItemSpec {
-  return {
-    finding_id: findingId,
-    concrete_change: concreteChange,
-    tests_to_write: [{ name: `test-${findingId}`, assertions: ["passes"] }],
-    not_applicable_steps: [],
-  };
 }
 
 describe("buildImplementModelHint", () => {
