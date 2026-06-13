@@ -198,14 +198,58 @@ const CAP_PRIORITY: Record<WaveBindingCap, number> = {
 };
 
 /**
+ * Derive the global host-concurrency budget that applies across ALL pools, when
+ * the pools are routing through the SAME conversation host.
+ *
+ * A host concurrency limit (`--host-max-active-subagents`, `AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS`,
+ * or `parallel_workers` in session-config) constrains the TOTAL number of simultaneously
+ * active subagents the conversation host can sustain — not a per-pool ceiling. When
+ * multiple pools (e.g. small/standard/deep ranks) are all dispatching through the same
+ * host, their combined slot usage must stay within this shared global limit.
+ *
+ * Detection heuristic: if ALL pools that carry a host concurrency limit report the
+ * SAME `{active_subagents, source}` pair, they are sharing the same host signal.
+ * In this case the shared value is returned as the global budget. When pools carry
+ * DIFFERENT limits (indicating independent backends with their own concurrency
+ * envelopes), `null` is returned so each pool's limit applies independently.
+ *
+ * A single-pool setup is unaffected: the pool's own `hostConcurrencyLimit` already
+ * applies at `scheduleWave` time.
+ */
+function deriveGlobalHostBudget(pools: CapacityPool[]): number | null {
+  if (pools.length <= 1) return null;
+  const limitsWithLimit = pools.filter((p) => p.hostConcurrencyLimit !== null);
+  if (limitsWithLimit.length === 0) return null;
+  // All pools with limits must report the same active_subagents AND source to be
+  // treated as a shared global limit from the same conversation host.
+  const first = limitsWithLimit[0]!.hostConcurrencyLimit!;
+  const allSame = limitsWithLimit.every(
+    (p) =>
+      p.hostConcurrencyLimit!.active_subagents === first.active_subagents &&
+      p.hostConcurrencyLimit!.source === first.source,
+  );
+  if (!allSame) return null;
+  // Only apply global budget when ALL pools (including those without limits) are
+  // covered. If some pools lack a limit, they are independent backends that can
+  // exceed the shared budget — so we don't enforce a global cap.
+  if (limitsWithLimit.length !== pools.length) return null;
+  return first.active_subagents;
+}
+
+/**
  * Compute just-in-time dispatch capacity across the available pools.
  *
  * The pending layout is partitioned across pools in caller order, with each pool
  * receiving the largest remaining item estimates that fit in its current wave.
- * Each pool is then scheduled independently, so host concurrency, RPM, TPM,
- * learned limits, cooldowns, and real-time quota snapshots remain per-backend.
- * The result sums the per-pool slots without ever exceeding the pending item
- * count for non-empty work.
+ * Each pool is then scheduled independently, so RPM, TPM, learned limits, cooldowns,
+ * and real-time quota snapshots remain per-backend.
+ *
+ * The host concurrency limit (e.g. `--host-max-active-subagents`) is GLOBAL: it
+ * constrains the total across all pools, not each pool independently. When multiple
+ * pools share the same conversation host, a global budget is derived from their
+ * host limits and enforced as a ceiling on cumulative slot allocation so the host is
+ * never over-subscribed. Independent backends with distinct pool IDs are treated as
+ * separate lanes; each backend's per-backend limits remain per-pool.
  */
 export function computeDispatchCapacity(
   input: ComputeDispatchCapacityInput,
@@ -218,6 +262,11 @@ export function computeDispatchCapacity(
     .map((n) => Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0)
     .sort((a, b) => b - a);
 
+  // Global host-concurrency budget: when multiple pools share the same conversation
+  // host, the total slots across all pools must not exceed this limit.
+  const globalHostBudget = deriveGlobalHostBudget(input.pools);
+  let remainingGlobalBudget = globalHostBudget;
+
   const allocations: PoolDispatchAllocation[] = [];
   if (pendingTokens.length === 0) {
     allocations.push(schedulePool(input.pools[0]!, input.sessionConfig, []));
@@ -225,6 +274,7 @@ export function computeDispatchCapacity(
     let cursor = 0;
     for (const pool of input.pools) {
       if (cursor >= pendingTokens.length) break;
+      if (remainingGlobalBudget !== null && remainingGlobalBudget <= 0) break;
 
       const remaining = pendingTokens.slice(cursor);
       const exploratory = schedulePool(pool, input.sessionConfig, remaining);
@@ -232,6 +282,10 @@ export function computeDispatchCapacity(
         1,
         Math.min(exploratory.slots, remaining.length),
       );
+      // Clamp to the remaining global host budget before trimming with the pool schedule.
+      if (remainingGlobalBudget !== null) {
+        assignedCount = Math.min(assignedCount, remainingGlobalBudget);
+      }
       let assignedTokens = remaining.slice(0, assignedCount);
       let allocation = schedulePool(pool, input.sessionConfig, assignedTokens);
 
@@ -259,15 +313,28 @@ export function computeDispatchCapacity(
 
       allocations.push(allocation);
       cursor += allocation.slots;
+      if (remainingGlobalBudget !== null) {
+        remainingGlobalBudget -= allocation.slots;
+      }
     }
   }
 
   const total = allocations.reduce((sum, a) => sum + a.slots, 0);
+  // When a global host budget was in effect, ensure the aggregate total never
+  // exceeds it (the loop above already enforces this, but guard defensively).
+  const effectiveTotal = globalHostBudget !== null
+    ? Math.min(total, globalHostBudget)
+    : total;
   const primary = choosePrimaryAllocation(allocations);
   const bindingCap = allocations.reduce<WaveBindingCap>((worst, a) => {
     const cap = a.schedule.binding_cap ?? "none";
     return CAP_PRIORITY[cap] > CAP_PRIORITY[worst] ? cap : worst;
   }, "none");
+  // When the global budget is the binding constraint, record it.
+  const effectiveBindingCap: WaveBindingCap =
+    globalHostBudget !== null && effectiveTotal < total && effectiveTotal === globalHostBudget
+      ? "host_concurrency"
+      : bindingCap;
   const cooldownUntil =
     allocations
       .map((a) => a.schedule.cooldown_until)
@@ -279,10 +346,10 @@ export function computeDispatchCapacity(
   );
 
   return {
-    total_slots: Math.max(1, total),
+    total_slots: Math.max(1, effectiveTotal),
     pools: allocations,
     primary,
-    binding_cap: bindingCap,
+    binding_cap: effectiveBindingCap,
     cooldown_until: cooldownUntil,
     estimated_wave_tokens: estimatedWaveTokens,
   };
