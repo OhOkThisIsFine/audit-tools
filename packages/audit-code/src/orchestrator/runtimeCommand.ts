@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { quoteForOpenTokenCmd } from "@audit-tools/shared";
+import { quoteForShellInterpreterCmd } from "@audit-tools/shared";
 
 // Deterministic runtime-validation command execution: resolve a command to a
 // platform-correct spawn invocation (Windows package-manager shims need a
@@ -97,7 +97,7 @@ export function resolveRuntimeValidationSpawnCommand(
   if (["npm", "npx", "pnpm", "yarn"].includes(packageManager)) {
     return {
       command: shellCommand,
-      args: ["/d", "/s", "/c", command.map(quoteForOpenTokenCmd).join(" ")],
+      args: ["/d", "/s", "/c", command.map(quoteForShellInterpreterCmd).join(" ")],
     };
   }
   return { command: executable, args };

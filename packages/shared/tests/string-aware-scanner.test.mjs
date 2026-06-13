@@ -124,3 +124,41 @@ test("scanStringAware — onQuoteClose is called with correct quoteChar and inde
   assert.equal(closes[0].q, '"');
   assert.equal(closes[0].i, 13);
 });
+
+// ── Early scan termination (FND-TST-2bc16ad1) ─────────────────────────────────
+
+test("scanStringAware — returning false from onUnquoted stops the scan early", () => {
+  // Scan "abcdef" and return false on the first 'c'. Only 'a' and 'b' should
+  // be delivered before the scan stops. 'd', 'e', 'f' must never be seen.
+  const seen = [];
+  scanStringAware(
+    "abcdef",
+    { quoteChars: ['"'], escapedQuotes: ['"'] },
+    {
+      onUnquoted: (c) => {
+        seen.push(c);
+        if (c === "c") return false; // stop here
+      },
+    },
+  );
+  assert.deepEqual(seen, ["a", "b", "c"], "scan must stop after onUnquoted returns false");
+});
+
+test("scanStringAware — early termination does not fire inside a string (only outside)", () => {
+  // The string literal spans chars 1-5 ('xyz'). The callback fires for 'a'
+  // (outside, before the string) and should stop there. 'xyz' is inside the
+  // string so onUnquoted is never called for those chars.
+  const seen = [];
+  scanStringAware(
+    'a"xyz"b',
+    { quoteChars: ['"'], escapedQuotes: ['"'] },
+    {
+      onUnquoted: (c) => {
+        seen.push(c);
+        if (c === "a") return false;
+      },
+    },
+  );
+  // Scan stops at 'a'; 'b' (outside, after the string) is never reached.
+  assert.deepEqual(seen, ["a"]);
+});

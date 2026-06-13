@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { scanStringAware } from "../parsing/stringAwareScanner.js";
 
 /**
  * Lightweight, deterministic detection of a repository's house style so the
@@ -151,11 +152,26 @@ function detectStyleFromSnippet(snippet: string, conventions: RepoConventions): 
     }
   }
 
-  // Raw character counts across the whole snippet (includes comments, JSDoc, HTML attributes).
-  const rawSingleQuoteCount = (snippet.match(/'/g) ?? []).length;
-  const rawDoubleQuoteCount = (snippet.match(/"/g) ?? []).length;
-  if (rawSingleQuoteCount > 0 || rawDoubleQuoteCount > 0) {
-    conventions.quote_style = rawSingleQuoteCount >= rawDoubleQuoteCount ? "single" : "double";
+  // Count string-opening quote characters using the string-aware scanner with
+  // backtick support so that double-quoted HTML attributes inside template
+  // literals (e.g. `<div class="foo">`) do not skew the tally toward "double"
+  // when the file's actual string literals use single quotes (COR-a1786327).
+  let singleOpenCount = 0;
+  let doubleOpenCount = 0;
+  scanStringAware(
+    snippet,
+    { quoteChars: ['"', "'", "`"], escapedQuotes: ['"', "'"] },
+    {
+      onQuoteOpen(quoteChar) {
+        if (quoteChar === "'") singleOpenCount += 1;
+        else if (quoteChar === '"') doubleOpenCount += 1;
+        // backtick template literal openings are not counted — they don't
+        // indicate the file's string-quoting convention.
+      },
+    },
+  );
+  if (singleOpenCount > 0 || doubleOpenCount > 0) {
+    conventions.quote_style = singleOpenCount >= doubleOpenCount ? "single" : "double";
   }
 }
 

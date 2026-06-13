@@ -164,7 +164,7 @@ export {
   quotePromptCommandArg,
   coerceJsonObjectArg,
   platformCommand,
-  quoteForOpenTokenCmd,
+  quoteForShellInterpreterCmd,
   wrapForOpenToken,
 } from "./tooling/exec.js";
 

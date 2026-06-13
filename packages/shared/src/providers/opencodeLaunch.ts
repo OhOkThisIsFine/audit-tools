@@ -1,4 +1,4 @@
-import { quoteForOpenTokenCmd } from "../tooling/exec.js";
+import { quoteForShellInterpreterCmd } from "../tooling/exec.js";
 
 /**
  * Resolve how to spawn an `opencode` invocation per platform. On Windows the
@@ -8,7 +8,7 @@ import { quoteForOpenTokenCmd } from "../tooling/exec.js";
  * unchanged. Shared by the opencode provider in both orchestrators so neither
  * silently loses the Windows shim.
  *
- * The per-token cmd.exe quoting reuses the canonical `quoteForOpenTokenCmd`
+ * The per-token cmd.exe quoting reuses the canonical `quoteForShellInterpreterCmd`
  * from exec.ts (charset includes `@`); the former private copy here omitted
  * `@`, the one real divergence the audit flagged.
  */
@@ -25,7 +25,7 @@ export function resolveOpenCodeSpawnCommand(
   if (base === "opencode" || base === "npx" || command.endsWith(".cmd")) {
     return {
       command: shellCommand,
-      args: ["/d", "/s", "/c", [command, ...args].map(quoteForOpenTokenCmd).join(" ")],
+      args: ["/d", "/s", "/c", [command, ...args].map(quoteForShellInterpreterCmd).join(" ")],
     };
   }
   return { command, args };

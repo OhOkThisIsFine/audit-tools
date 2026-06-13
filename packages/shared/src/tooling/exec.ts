@@ -51,15 +51,15 @@ const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
 //     quoted string, so doubling double-quotes (`"` → `""`) is correct.
 //     Use this when constructing the argv array for `wrapForWindowsBatch`.
 //
-//   • `quoteForOpenTokenCmd` — for `wrapForOpenToken`: tokens are embedded
-//     into a full command-line *string* that `cmd.exe /c` interprets as a
-//     shell command (e.g. `opentoken wrap <argv…>`).  In this context the
-//     cmd.exe *command interpreter* sees metacharacters (`^&|<>%"`) before
-//     any argv parser, so caret-escaping them is the correct strategy.
-//     Use this when building the inline string argument for `wrapForOpenToken`
-//     or any other `cmd.exe /c "<full-command-string>"` invocation.
+//   • `quoteForShellInterpreterCmd` — for
+//     `wrapForOpenToken`: tokens are embedded into a full command-line *string*
+//     that `cmd.exe /c` interprets as a shell command (e.g. `opentoken wrap
+//     <argv…>`).  In this context the cmd.exe *command interpreter* sees
+//     metacharacters (`^&|<>%"`) before any argv parser, so caret-escaping
+//     them is the correct strategy.  Use this when building the inline string
+//     argument for `wrapForOpenToken` or any `cmd.exe /c "<full-command-string>"`.
 //
-// Do NOT mix them up: `quoteForOpenTokenCmd` is not a substitute for
+// Do NOT mix them up: `quoteForShellInterpreterCmd` is not a substitute for
 // `quoteForCmd` in the batch-wrapping path, and vice versa.
 
 /**
@@ -73,7 +73,7 @@ const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
  *
  * **Do not use this for the opentoken wrap path.**  For that context (where
  * the entire command is a shell string interpreted by cmd.exe before any argv
- * parser runs), use `quoteForOpenTokenCmd` instead.
+ * parser runs), use `quoteForShellInterpreterCmd` instead.
  */
 export function quoteForCmd(arg: string): string {
   if (arg.length === 0) return '""';
@@ -172,22 +172,28 @@ function wrapForWindowsBatch(
 
 /**
  * Quote a single argv token for embedding in a full command-line *string*
- * that `cmd.exe /c` will interpret as a shell command — i.e. the
- * `opentoken wrap <argv…>` invocation assembled in `wrapForOpenToken`.
+ * that `cmd.exe /c` will interpret as a shell command.
  *
- * In this context the cmd.exe *command interpreter* sees metacharacters
- * (`^&|<>%"`) before any argv parser, so the correct strategy is to
- * caret-escape those characters (e.g. `"` → `^"`, `&` → `^&`).  Safe
+ * **Context:** this is the *shell-interpreter* quoting context — the entire
+ * command is one string seen by `cmd.exe` before any argv parser runs.  In
+ * this context metacharacters (`^&|<>%"`) must be caret-escaped.  Safe
  * single-token characters pass through unquoted.
  *
- * Canonical owner of this charset — both `spawnLoggedCommand` and the
- * opencode launcher import it instead of carrying their own copy.
+ * **Do not confuse with `quoteForCmd`**, which is the *argv-parser* context
+ * used by `wrapForWindowsBatch`.  The difference:
  *
- * **Do not use this as a substitute for `quoteForCmd` in the standard
- * batch-wrapping path (`wrapForWindowsBatch`).** That path expects argv-parser
- * quoting (doubled double-quotes), not shell-interpreter caret-escaping.
+ * - `quoteForCmd` (argv-parser): wraps in double-quotes and doubles internal
+ *   `"` → `""`.  Used in `cmd.exe /d /s /c "prog arg"` where cmd.exe's own
+ *   argv parser processes the quoted string.
+ *
+ * - `quoteForShellInterpreterCmd` (shell-interpreter): caret-escapes
+ *   metacharacters.  Used when building an inline shell command string passed
+ *   to `cmd.exe /c`, e.g. `opentoken wrap <argv…>`.
+ *
+ * Canonical owner of this charset — both `wrapForOpenToken` and the
+ * opencode launcher import it instead of carrying their own copy.
  */
-export function quoteForOpenTokenCmd(value: string): string {
+export function quoteForShellInterpreterCmd(value: string): string {
   if (/^[A-Za-z0-9_./:=@+-]+$/u.test(value)) return value;
   return `"${value.replace(/(["^&|<>%])/g, "^$1")}"`;
 }
@@ -195,7 +201,7 @@ export function quoteForOpenTokenCmd(value: string): string {
 /**
  * Wrap `[command, ...args]` as an `<opentoken> wrap …` invocation. On Windows
  * the wrap goes through `cmd.exe /d /s /c` with each token quoted via
- * `quoteForOpenTokenCmd`; on every other platform opentoken is spawned argv-only.
+ * `quoteForShellInterpreterCmd`; on every other platform opentoken is spawned argv-only.
  * Single source of truth for the opentoken wrapping both orchestrators use.
  */
 export function wrapForOpenToken(
@@ -206,7 +212,7 @@ export function wrapForOpenToken(
 ): { command: string; args: string[] } {
   if (platform === "win32") {
     const shell = process.env.ComSpec ?? "cmd.exe";
-    const inner = [command, ...args].map(quoteForOpenTokenCmd).join(" ");
+    const inner = [command, ...args].map(quoteForShellInterpreterCmd).join(" ");
     return { command: shell, args: ["/d", "/s", "/c", `${opentoken} wrap ${inner}`] };
   }
   return { command: opentoken, args: ["wrap", command, ...args] };

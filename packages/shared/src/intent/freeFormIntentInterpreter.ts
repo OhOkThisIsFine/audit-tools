@@ -50,7 +50,28 @@ const DEFAULT_WEIGHT_BOOST = 1.5;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Split input into clauses on sentence, semicolon, and newline boundaries. */
+/**
+ * Split input into clauses on sentence, semicolon, comma, and newline
+ * boundaries.
+ *
+ * **Why comma-splitting is intentional here:**
+ * This function is used for free-form intent *hint* extraction where the input
+ * is a brief, comma-separated list of priorities (e.g. "security, performance,
+ * maintainability"). Commas are the most natural separator for such lists and
+ * splitting on them maximises individual lens keyword coverage.
+ *
+ * **Compare with `clauseInterpreter.decomposeIntent`:**
+ * That function is used for the *blocking-checkpoint* intent pipeline where
+ * clauses must be independently assessable and commas within a clause should
+ * NOT split it (e.g. "focus on modules A, B, and C" is one clause, not three).
+ * It therefore splits only on semicolons, " and ", newlines, and ". " sentence
+ * boundaries — NOT on commas.
+ *
+ * The two functions intentionally have different splitting rules. Any change to
+ * one should be evaluated against the contract of the other. See
+ * `tests/maintainability-split-rules.test.mjs` for a regression assertion that
+ * guards the difference.
+ */
 function decomposeClauses(input: string): string[] {
   return input
     .split(/[.;,\n]+/)

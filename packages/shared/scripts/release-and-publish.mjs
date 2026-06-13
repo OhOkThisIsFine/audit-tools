@@ -7,6 +7,8 @@ import { spawnSync } from "node:child_process";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
+const monorepoRoot = resolve(repoRoot, "../..");
+const rootLockFilePath = resolve(monorepoRoot, "package-lock.json");
 const packageJsonPath = resolve(repoRoot, "package.json");
 const TAG_PREFIX = "shared-";
 const allowedBumps = new Set(["patch", "minor", "major"]);
@@ -70,11 +72,15 @@ function shouldLogPollAttempt(attempt, statusKey, lastLoggedStatusKey) {
 
 function run(command, args, options = {}) {
   const resolved = resolveSpawn(command, args);
-  const result = spawnSync(resolved.command, resolved.args, {
+  const spawnOptions = {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
-  });
+  };
+  if (options.env !== undefined) {
+    spawnOptions.env = options.env;
+  }
+  const result = spawnSync(resolved.command, resolved.args, spawnOptions);
   if (result.error) {
     throw result.error;
   }
@@ -182,8 +188,9 @@ function bumpVersionAndTag(npm) {
   const packageAfter = readPackageJson();
   const tag = `${TAG_PREFIX}v${packageAfter.version}`;
 
-  // shared has no local package-lock.json (monorepo root owns the lock file)
-  run("git", ["add", "package.json", "../../package-lock.json"]);
+  // shared has no local package-lock.json (monorepo root owns the lock file);
+  // use the computed absolute path so this works regardless of package depth.
+  run("git", ["add", "package.json", rootLockFilePath]);
   run("git", ["commit", "-m", `release: ${tag}`]);
   run("git", ["tag", "-a", tag, "-m", tag]);
 
@@ -213,10 +220,14 @@ async function waitForReleaseRun(repoSlug, tag) {
       );
       return match;
     }
-    const statusKey = "pending";
+    // Use a dynamic key that reflects observable API state so status-change
+    // logging fires when the run count changes (previously hardcoded "pending"
+    // made the status-change branch of shouldLogPollAttempt permanently dead).
+    const runsVisible = response.workflow_runs?.length ?? 0;
+    const statusKey = `pending/runs=${runsVisible}`;
     if (shouldLogPollAttempt(attempt, statusKey, lastLoggedStatusKey)) {
       console.log(
-        `[release] waiting for publish run ${tag}: attempt ${attempt}, elapsed ${Date.now() - startedAt}ms`,
+        `[release] waiting for publish run ${tag}: attempt ${attempt}, elapsed ${Date.now() - startedAt}ms, runs visible=${runsVisible}`,
       );
       lastLoggedStatusKey = statusKey;
     }
@@ -330,7 +341,7 @@ async function main() {
     run(npm, ["version", bump, "--no-git-tag-version"]);
     const packageAfter = readPackageJson();
     const newTag = `${TAG_PREFIX}v${packageAfter.version}`;
-    run("git", ["add", "package.json", "../../package-lock.json"]);
+    run("git", ["add", "package.json", rootLockFilePath]);
     run("git", ["commit", "-m", `release: ${newTag}`]);
     console.log(`[release] bumped to ${packageAfter.name}@${packageAfter.version}. Run without --bump-only to tag and publish.`);
     return;
@@ -343,7 +354,12 @@ async function main() {
     console.log("[release] release gate pre-verified by orchestrator; skipping verify:release");
   } else {
     console.log("[release] running release gate");
-    run(npm, ["run", "verify:release"]);
+    // Unset CLAUDECODE so the gate runs in a clean environment equivalent to CI:
+    // when running inside a Claude session CLAUDECODE=1 causes at least one
+    // provider detection test to fail, producing a false-red gate.
+    const gateEnv = { ...process.env };
+    delete gateEnv["CLAUDECODE"];
+    run(npm, ["run", "verify:release"], { env: gateEnv });
   }
 
   console.log(`[release] bumping ${bump} version`);
