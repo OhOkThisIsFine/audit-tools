@@ -306,10 +306,11 @@ function conventionalRoutePath(filePath: string): string | undefined {
   }
 
   const pagesIndex = lowerParts.lastIndexOf("pages");
-  const apiIndex =
-    pagesIndex >= 0
-      ? lowerParts.indexOf("api", pagesIndex + 1)
-      : lowerParts.indexOf("api");
+  // Only look for `api` when a `pages` ancestor exists. Without a `pages` segment
+  // this is not a Next.js Pages Router path, so scanning from the repo root would
+  // produce false-positive API-route matches for any repo that happens to have an
+  // `api/` directory (FND-COR-c86f0260).
+  const apiIndex = pagesIndex >= 0 ? lowerParts.indexOf("api", pagesIndex + 1) : -1;
   if (apiIndex >= 0 && apiIndex < parts.length - 1) {
     const withoutExtension = stripSourceExtension(parts.at(-1) ?? "");
     return routePathFromSegments([...parts.slice(apiIndex, -1), withoutExtension]);

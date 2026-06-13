@@ -117,10 +117,12 @@ test("buildFlowCoverage status=pending when no required lenses are covered", () 
 });
 
 // ---------------------------------------------------------------------------
-// lensSetForFlow silently drops all non-whitelisted concerns
+// COR-59c25418: lensSetForFlow must accept ALL valid lenses via isLens
 // ---------------------------------------------------------------------------
 
-test("lensSetForFlow silently drops non-whitelisted concerns (architecture, maintainability, config_deployment)", () => {
+test("COR-59c25418: lensSetForFlow accepts architecture, maintainability, config_deployment (previously dropped)", () => {
+  // Before the fix these 3 valid lenses were silently filtered by a hardcoded
+  // 7-lens allowlist. After the fix, isLens is the gate and all are accepted.
   const manifest = makeFlow({
     paths: ["src/a.ts"],
     concerns: ["architecture", "maintainability", "config_deployment"],
@@ -132,19 +134,37 @@ test("lensSetForFlow silently drops non-whitelisted concerns (architecture, main
   const result = buildFlowCoverage(manifest, matrix);
   const flow = result.flows[0];
 
-  // None of the concerns pass the allowlist filter.
-  assert.deepEqual(flow.required_lenses, []);
-  // status: required.length === 0 → required.every(...) is vacuously true → "complete"
-  // (This is the current implementation's behaviour for an empty required set.)
-  assert.equal(flow.completed_lenses.length, 0);
-  // No error must be thrown — verified by reaching this assertion.
+  // All three are valid lenses — they must appear in required_lenses.
+  assert.deepEqual(flow.required_lenses.sort(), ["architecture", "config_deployment", "maintainability"]);
+  // Two of three are completed.
+  assert.deepEqual(flow.completed_lenses.sort(), ["architecture", "maintainability"]);
+  // config_deployment is required but not completed → partial.
+  assert.equal(flow.status, "partial");
+});
+
+test("COR-59c25418: lensSetForFlow still drops truly invalid (unknown) concern strings", () => {
+  const manifest = makeFlow({
+    paths: ["src/a.ts"],
+    concerns: ["security", "not_a_real_lens", "reliability"],
+  });
+  const matrix = makeMatrix([
+    { path: "src/a.ts", completed_lenses: ["security", "reliability"] },
+  ]);
+
+  const result = buildFlowCoverage(manifest, matrix);
+  const flow = result.flows[0];
+
+  // "not_a_real_lens" must be filtered out; the two valid lenses are accepted.
+  assert.deepEqual(flow.required_lenses.sort(), ["reliability", "security"]);
+  assert.deepEqual(flow.completed_lenses.sort(), ["reliability", "security"]);
+  assert.equal(flow.status, "complete");
 });
 
 // ---------------------------------------------------------------------------
-// lensSetForFlow keeps allowed lenses and drops disallowed in a mixed list
+// lensSetForFlow keeps all valid lenses in a mixed list
 // ---------------------------------------------------------------------------
 
-test("lensSetForFlow keeps allowed lenses and drops disallowed ones in a mixed concerns list", () => {
+test("lensSetForFlow keeps all valid lenses (including architecture) and drops truly unknown ones", () => {
   const manifest = makeFlow({
     paths: ["src/service.ts"],
     concerns: ["security", "architecture", "reliability"],
@@ -156,8 +176,8 @@ test("lensSetForFlow keeps allowed lenses and drops disallowed ones in a mixed c
   const result = buildFlowCoverage(manifest, matrix);
   const flow = result.flows[0];
 
-  // 'architecture' is not in the 7-item allowlist; only security and reliability survive.
-  assert.deepEqual(flow.required_lenses.sort(), ["reliability", "security"]);
+  // All three are valid lenses — all survive the isLens filter.
+  assert.deepEqual(flow.required_lenses.sort(), ["architecture", "reliability", "security"]);
   assert.deepEqual(flow.completed_lenses, ["security"]);
   assert.equal(flow.status, "partial");
 });

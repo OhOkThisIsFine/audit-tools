@@ -146,7 +146,7 @@ test("normalizeNpmAuditJson preserves 0-based ids and fills unknown vulnerabilit
       {
         id: "npm-audit-0",
         severity: "high",
-        path: "package-lock.json",
+        path: "package.json",
         summary:
           "Package lodash has a high severity vulnerability in range <4.17.21.",
         rule: "lodash",
@@ -154,7 +154,7 @@ test("normalizeNpmAuditJson preserves 0-based ids and fills unknown vulnerabilit
       {
         id: "npm-audit-1",
         severity: "low",
-        path: "package-lock.json",
+        path: "package.json",
         summary:
           "Package minimist has a low severity vulnerability in range unknown.",
         rule: "minimist",

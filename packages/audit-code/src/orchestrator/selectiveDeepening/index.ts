@@ -51,6 +51,18 @@ export function buildSelectiveDeepeningTasks(
     isDeepeningTask(task),
   ).length;
   if (existingDeepeningCount >= maxTotalDeepeningTasks) {
+    // FND-OBS-c8d43100: log when the total budget is already exhausted so
+    // operators can see why selective deepening produced zero tasks.
+    process.stderr.write(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        source: "audit-code:selectiveDeepening",
+        event: "budget_exhausted",
+        level: "info",
+        existing_deepening: existingDeepeningCount,
+        max_total: maxTotalDeepeningTasks,
+      }) + "\n",
+    );
     return [];
   }
   const remainingBudget = maxTotalDeepeningTasks - existingDeepeningCount;
@@ -65,7 +77,12 @@ export function buildSelectiveDeepeningTasks(
     created.push(task);
   }
 
+  // FND-OBS-c8d43100: track per-strategy contribution counts so the summary log
+  // can report which strategies fired and whether budget-capping occurred.
+  const strategyContributions: Record<string, number> = {};
+
   const contexts = findingContexts(options.results, taskById);
+  let beforeFindingFollowup = created.length;
   for (const context of contexts) {
     const triggers: string[] = [];
     if (SEVERITY_RANK[context.finding.severity] >= SEVERITY_RANK.high) {
@@ -87,7 +104,9 @@ export function buildSelectiveDeepeningTasks(
       }),
     );
   }
+  strategyContributions["finding_followup"] = created.length - beforeFindingFollowup;
 
+  let beforeConflict = created.length;
   for (const [key, group] of [...conflictGroups(contexts).entries()].sort(
     ([a], [b]) => a.localeCompare(b),
   )) {
@@ -99,7 +118,9 @@ export function buildSelectiveDeepeningTasks(
       }),
     );
   }
+  strategyContributions["conflict"] = created.length - beforeConflict;
 
+  let beforeSteward = created.length;
   for (const result of options.results) {
     const task = taskById.get(result.task_id);
     for (const followupTask of buildVerificationFollowupTasks({
@@ -110,6 +131,7 @@ export function buildSelectiveDeepeningTasks(
       pushIfNew(followupTask);
     }
   }
+  strategyContributions["steward_followup"] = created.length - beforeSteward;
 
   const runtimeTaskById = new Map(
     (options.runtimeValidationTasks?.tasks ?? []).map((task) => [
@@ -117,6 +139,7 @@ export function buildSelectiveDeepeningTasks(
       task,
     ]),
   );
+  let beforeRuntimeValidation = created.length;
   for (const result of [...(options.runtimeValidationReport?.results ?? [])].sort(
     (a, b) => a.task_id.localeCompare(b.task_id),
   )) {
@@ -144,7 +167,9 @@ export function buildSelectiveDeepeningTasks(
       }),
     );
   }
+  strategyContributions["runtime_validation"] = created.length - beforeRuntimeValidation;
 
+  let beforeLensVerification = created.length;
   for (const task of buildLensVerificationTasks({
     existingTasks,
     results: options.results,
@@ -153,6 +178,7 @@ export function buildSelectiveDeepeningTasks(
   })) {
     pushIfNew(task);
   }
+  strategyContributions["lens_verification"] = created.length - beforeLensVerification;
 
   const cleanResults = options.results
     .map((result) => ({ result, task: taskById.get(result.task_id) }))
@@ -164,6 +190,7 @@ export function buildSelectiveDeepeningTasks(
       return a.result.task_id.localeCompare(b.result.task_id);
     });
 
+  let beforeHighRiskClean = created.length;
   for (const { result, task } of cleanResults) {
     pushIfNew(
       buildHighRiskCleanFollowupTask({
@@ -173,6 +200,23 @@ export function buildSelectiveDeepeningTasks(
       }),
     );
   }
+  strategyContributions["high_risk_clean"] = created.length - beforeHighRiskClean;
+
+  // FND-OBS-c8d43100: emit a structured summary of which strategies fired and
+  // whether the result was budget-capped, so operators can understand deepening decisions.
+  const budgetCapped = created.length >= effectiveMax;
+  process.stderr.write(
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      source: "audit-code:selectiveDeepening",
+      event: "strategy_summary",
+      level: "info",
+      created: created.length,
+      effective_max: effectiveMax,
+      budget_capped: budgetCapped,
+      strategy_contributions: strategyContributions,
+    }) + "\n",
+  );
 
   return created;
 }

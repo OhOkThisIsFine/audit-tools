@@ -57,15 +57,9 @@ export function confirmProviders(
     });
   }
 
-  // Ensure local-subprocess is present (added above if not discovered).
-  if (!pool.some((e) => e.name === "local-subprocess")) {
-    pool.push({
-      name: "local-subprocess",
-      capability_tier: "unknown",
-      excluded: excludeSet.has("local-subprocess"),
-      reason: "always-available fallback; no PATH detection required",
-    });
-  }
+  // COR-108468ae: the dead-code second guard below was removed — local-subprocess
+  // is unconditionally added before the loop when not discovered, so this check
+  // was always a no-op (the first block already guarantees presence).
 
   return {
     schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,

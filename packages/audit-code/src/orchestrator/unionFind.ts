@@ -6,10 +6,21 @@ export class UnionFind {
   }
 
   find(key: string): string {
-    const current = this.parent.get(key) ?? key;
-    if (current === key) return key;
-    const root = this.find(current);
-    this.parent.set(key, root);
+    // COR-b6f68ad7: iterative path compression avoids unbounded recursion that
+    // could stack-overflow on degenerate union chains.
+    //
+    // Phase 1: walk up to find the root.
+    let root = this.parent.get(key) ?? key;
+    while (this.parent.get(root) !== undefined && this.parent.get(root) !== root) {
+      root = this.parent.get(root) as string;
+    }
+    // Phase 2: path compress — point every node on the path directly to root.
+    let current = key;
+    while (current !== root) {
+      const next = this.parent.get(current) ?? root;
+      this.parent.set(current, root);
+      current = next;
+    }
     return root;
   }
 

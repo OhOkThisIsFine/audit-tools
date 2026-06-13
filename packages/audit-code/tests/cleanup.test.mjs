@@ -2,9 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { captureConsole } from "./helpers/captureConsole.mjs";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(here, "..");
 
 const { cleanupStaleArtifactsDir } = await import("../src/cli/cleanup.ts");
+const { cmdCleanup } = await import("../src/cli/cleanupCommand.ts");
 
 async function withTempDir(fn) {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-cleanup-test-"));
@@ -229,5 +235,135 @@ test("cleanupStaleArtifactsDir: force=true deletes even when state file is missi
     assert.equal(result.action, "deleted");
     assert.equal(result.status, "unknown");
     assert.ok(!(await dirExists(artifactsDir)), "directory should be removed when force=true and state file is missing");
+  });
+});
+
+// ── cmdCleanup (CLI wiring) tests ─────────────────────────────────────────────
+// FND-TST-49494736: cleanupCommand.ts CLI wiring — exitCode, stdout JSON shape,
+// force/dryRun flag paths, unknown-status path.
+
+async function runCleanup(artifactsDir, extraFlags = []) {
+  const argv = [
+    process.execPath,
+    join(repoRoot, "src", "cli.ts"),
+    "--artifacts-dir",
+    artifactsDir,
+    ...extraFlags,
+  ];
+  return captureConsole(() => cmdCleanup(argv));
+}
+
+test("cmdCleanup: active status — exitCode=1, JSON action=skipped with reason", async () => {
+  await withTempDir(async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "active" }),
+    );
+
+    const { code, stdout } = await runCleanup(artifactsDir);
+
+    assert.equal(code, 1, "exitCode should be 1 when action is skipped");
+    const parsed = JSON.parse(stdout);
+    assert.equal(parsed.action, "skipped");
+    assert.equal(parsed.artifacts_dir, artifactsDir);
+    assert.ok(typeof parsed.reason === "string" && parsed.reason.length > 0, "reason should be a non-empty string");
+    assert.ok(await dirExists(artifactsDir), "directory should still exist");
+  });
+});
+
+test("cmdCleanup: complete status — exitCode=0, JSON action=deleted", async () => {
+  await withTempDir(async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "complete" }),
+    );
+
+    const { code, stdout } = await runCleanup(artifactsDir);
+
+    assert.equal(code, 0, "exitCode should be 0 when action is deleted");
+    const parsed = JSON.parse(stdout);
+    assert.equal(parsed.action, "deleted");
+    assert.equal(parsed.status, "complete");
+    assert.ok(!(await dirExists(artifactsDir)), "directory should be removed");
+  });
+});
+
+test("cmdCleanup: missing state file (no flags) — exitCode=1, JSON action=skipped, reason mentions --force", async () => {
+  await withTempDir(async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    // No audit_state.json
+
+    const { code, stdout } = await runCleanup(artifactsDir);
+
+    assert.equal(code, 1, "exitCode should be 1 when action is skipped");
+    const parsed = JSON.parse(stdout);
+    assert.equal(parsed.action, "skipped");
+    assert.ok(typeof parsed.reason === "string", "reason should be a string");
+    assert.ok(
+      parsed.reason.includes("--force") || parsed.reason.includes("force"),
+      "reason should mention --force",
+    );
+    assert.ok(await dirExists(artifactsDir), "directory should still exist");
+  });
+});
+
+test("cmdCleanup: --force flag deletes active-status artifacts, exitCode=0", async () => {
+  await withTempDir(async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "active" }),
+    );
+
+    const { code, stdout } = await runCleanup(artifactsDir, ["--force"]);
+
+    assert.equal(code, 0, "exitCode should be 0 when force-deleted");
+    const parsed = JSON.parse(stdout);
+    assert.equal(parsed.action, "deleted");
+    assert.equal(parsed.status, "active");
+    assert.ok(!(await dirExists(artifactsDir)), "directory should be removed with --force");
+  });
+});
+
+test("cmdCleanup: --dry-run flag returns dry-run action without deleting, exitCode=0", async () => {
+  await withTempDir(async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "complete" }),
+    );
+
+    const { code, stdout } = await runCleanup(artifactsDir, ["--dry-run"]);
+
+    assert.equal(code, 0, "exitCode should be 0 for dry-run");
+    const parsed = JSON.parse(stdout);
+    assert.equal(parsed.action, "dry-run");
+    assert.equal(parsed.dry_run, true);
+    assert.ok(await dirExists(artifactsDir), "directory should still exist after dry-run");
+  });
+});
+
+test("cmdCleanup: stdout is always valid JSON", async () => {
+  await withTempDir(async (tempDir) => {
+    const artifactsDir = join(tempDir, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+
+    const { stdout } = await runCleanup(artifactsDir);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      assert.fail(`cmdCleanup stdout is not valid JSON: ${stdout}`);
+    }
+    assert.ok(typeof parsed.action === "string", "action should be a string");
+    assert.ok(typeof parsed.artifacts_dir === "string", "artifacts_dir should be a string");
   });
 });

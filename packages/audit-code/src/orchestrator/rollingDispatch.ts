@@ -87,6 +87,7 @@ export async function runRollingDispatch<TPacket>(
     };
   }
 
+  let dispatchedCount = 0;
   const dispatcher = createRollingDispatcher<TPacket>(
     {
       confirmedPools: activePools,
@@ -97,6 +98,20 @@ export async function runRollingDispatch<TPacket>(
         contract.onResult?.(result);
         // Reset no-progress counter on any result.
         consecutiveNoProgress = 0;
+        // FND-OBS-99e3a861: emit a structured progress line on each result so
+        // operators can monitor dispatch execution without waiting for terminal state.
+        dispatchedCount++;
+        process.stderr.write(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            source: "audit-code:rollingDispatch",
+            event: "packet_result",
+            packet_id: result.packet.id,
+            outcome: result.outcome,
+            completed: dispatchedCount,
+            total: packets.length,
+          }) + "\n",
+        );
       },
     },
   );

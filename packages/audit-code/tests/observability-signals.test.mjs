@@ -748,3 +748,5 @@ test("No truncation stderr is emitted when counts are within limits", async () =
   });
   assert.equal(truncLines.length, 0, "no truncation stderr when within limits");
 });
+
+// FND-OBS-c8d43100/48c05a13/6e84f23c/99e3a861/bf5c7331 tests: audit-dispatch-observability.test.mjs

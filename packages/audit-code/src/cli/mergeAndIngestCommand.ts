@@ -340,6 +340,15 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   // more accurate than per-packet early-warning at submit time).
   warnOnDuplicateFindings(passing);
 
+  // FND-OBS-48c05a13: log notDispatched task IDs early (before ingestion) so
+  // operators can trace which tasks were budget-capped and re-enter dispatch on
+  // the next round, even if ingestion later throws.
+  if (notDispatched.length > 0) {
+    process.stderr.write(
+      `[merge-and-ingest] ${notDispatched.length} task(s) not dispatched this round (budget-capped): ${notDispatched.join(", ")}\n`,
+    );
+  }
+
   const failedTasksPath = join(runDir, "failed-tasks.json");
   if (failing.length > 0) {
     await writeJsonFile(failedTasksPath, failing);

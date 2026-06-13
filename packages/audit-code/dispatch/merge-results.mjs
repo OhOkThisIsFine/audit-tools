@@ -81,6 +81,22 @@ if (failing.length > 0) {
 }
 
 const total = passing.length + failing.length;
+// FND-OBS-bf5c7331: emit a structured JSON summary line to stdout so callers
+// get a machine-readable payload alongside the human-readable text line.
+// Both are written to stdout; the JSON summary line always comes first so
+// programmatic consumers can parse it without stripping the text line.
+process.stdout.write(
+  JSON.stringify({
+    ts: new Date().toISOString(),
+    source: "audit-code:merge-results",
+    event: "merge_summary",
+    total,
+    accepted: passing.length,
+    rejected: failing.length,
+    audit_results_path: auditResultsPath,
+    ...(failing.length > 0 ? { failed_tasks_path: failedTasksPath } : {}),
+  }) + "\n",
+);
 console.log(`✓ ${passing.length}/${total} tasks valid → ${auditResultsPath}`);
 if (failing.length > 0) {
   console.log("  Re-run those tasks in the next cycle.");
