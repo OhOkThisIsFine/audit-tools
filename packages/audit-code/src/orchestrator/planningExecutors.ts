@@ -167,9 +167,29 @@ export async function runPlanningExecutor(
       )
     : undefined;
   // Interpret free_form_intent into lens priority boosts (deterministic, no LLM).
-  const intentBoostLenses = interpretFreeFormIntent(
-    bundle.intent_checkpoint?.free_form_intent ?? "",
-  );
+  const freeFormIntent = bundle.intent_checkpoint?.free_form_intent ?? "";
+  const intentBoostLenses = interpretFreeFormIntent(freeFormIntent);
+  if (freeFormIntent.trim().length > 0) {
+    const matchedKeywords: string[] = [];
+    const unmatchedKeywords: string[] = [];
+    const lowerIntent = freeFormIntent.toLowerCase();
+    for (const { keywords, lens } of KEYWORD_LENS_MAP) {
+      const matched = keywords.filter((kw) => lowerIntent.includes(kw));
+      if (matched.length > 0) {
+        matchedKeywords.push(...matched.map((kw) => `${kw}→${lens}`));
+      } else {
+        unmatchedKeywords.push(...keywords.slice(0, 1).map((kw) => kw));
+      }
+    }
+    process.stderr.write(
+      JSON.stringify({
+        kind: "intent_keyword_interpretation",
+        boosted_lenses: intentBoostLenses,
+        matched_keywords: matchedKeywords,
+        ts: new Date().toISOString(),
+      }) + "\n",
+    );
+  }
 
   const auditTasks = buildChunkedAuditTasks(coverage, lineIndex, {
     external_analyzer_results: externalAnalyzerResults,

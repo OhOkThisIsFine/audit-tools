@@ -77,6 +77,14 @@ function runFormatter(
     toolTimings.push({ tool: toolName, duration_ms: Date.now() - start });
   } else if (outcome === "failed") {
     failedTools.push(toolName);
+    process.stderr.write(
+      JSON.stringify({
+        kind: "auto_fix_formatter_failed",
+        tool: toolName,
+        duration_ms: Date.now() - start,
+        ts: new Date().toISOString(),
+      }) + "\n",
+    );
   }
 }
 

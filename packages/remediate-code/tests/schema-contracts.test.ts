@@ -2,11 +2,37 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const SCHEMA_DIR = join(__dirname, "..", "schemas");
+
+// ── schema source-path guard (TST-97e61b4d-2) ────────────────────────────
+// Schemas ship from packages/remediate-code/schemas/ (source), not from dist/.
+// If this test ever breaks, someone has accidentally pointed SCHEMA_DIR at the
+// dist/ copy (which may be stale/absent), creating a stale-build blind spot.
+describe("schema source-path invariant", () => {
+  it("SCHEMA_DIR resolves to the source schemas/ directory, not dist/", () => {
+    // Must not contain a path segment named "dist"
+    const normalized = SCHEMA_DIR.replace(/\\/g, "/");
+    expect(normalized).not.toMatch(/\/dist\//);
+    expect(normalized).toMatch(/\/schemas$/);
+  });
+
+  it("source schemas/ directory exists at test time", () => {
+    expect(existsSync(SCHEMA_DIR)).toBe(true);
+  });
+
+  it("dist/schemas/ does not shadow source schemas (no dist copy)", () => {
+    // If dist/schemas/ existed, tests reading source schemas would silently
+    // pass even against a stale build that ships incorrect schema content.
+    // This guard ensures the source-schema path is the only schema location.
+    const distSchemaDir = join(__dirname, "..", "dist", "schemas");
+    expect(existsSync(distSchemaDir)).toBe(false);
+  });
+});
 
 const EXPECTED_SCHEMAS = [
   "clarification_request.schema.json",

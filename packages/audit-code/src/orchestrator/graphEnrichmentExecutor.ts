@@ -253,7 +253,15 @@ export async function runGraphEnrichmentExecutor(
       const entry: AnalyzerCapabilityEntry = { id: analyzer.id, resolution: result.resolution, setting, edges_added: 0, routes_added: 0, note: result.note };
       entries.push(entry);
       if (entry.note?.startsWith("Analyzer failed")) {
-        console.warn(`[graph-enrichment] Analyzer '${analyzer.id}' failed: ${entry.note}`);
+        process.stderr.write(
+          JSON.stringify({
+            kind: "graph_enrichment_analyzer_failed",
+            analyzer_id: analyzer.id,
+            resolution: result.resolution,
+            note: entry.note,
+            ts: new Date().toISOString(),
+          }) + "\n",
+        );
       }
       continue;
     }

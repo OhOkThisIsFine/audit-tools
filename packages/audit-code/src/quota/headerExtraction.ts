@@ -85,7 +85,11 @@ export function extractRateLimitHeaders(text: string): ExtractedRateLimits | nul
 
   if (!found && text.trim().length > 0) {
     process.stderr.write(
-      "[quota] header extraction: no rate-limit data found in non-empty stderr text (possible provider format change)\n",
+      JSON.stringify({
+        event: "header_extraction_no_match",
+        reason: "no rate-limit data found in non-empty stderr text",
+        hint: "possible provider format change",
+      }) + "\n",
     );
   }
   return found ? result : null;

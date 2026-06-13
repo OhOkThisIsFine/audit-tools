@@ -166,6 +166,31 @@ test("removeTrailingJsonCommas (via scanStringAware) — comma inside a string l
   assert.ok(result.includes('"a,b"'), "comma inside string should not be removed");
 });
 
+// TST-b29c9d4f: jsonc edge cases — adjacent comments, deeply nested trailing comma, string with /*
+test("stripJsonComments (TST-b29c9d4f) — adjacent block and line comments both stripped", () => {
+  // A block comment immediately followed by a line comment — both must be removed.
+  const input = '{ /* block comment */ // line comment\n"a": 1 }';
+  const result = stripJsonComments(input);
+  assert.ok(!result.includes("block comment"), "block comment content must be removed");
+  assert.ok(!result.includes("line comment"), "line comment content must be removed");
+  assert.ok(result.includes('"a": 1'), "value after both comments must be preserved");
+});
+
+test("stripJsonComments (TST-b29c9d4f) — string containing /* is not treated as a block comment", () => {
+  // A string value that contains the literal characters /* and */ must be left unchanged.
+  const input = '{ "pattern": "/* not a comment */" }';
+  const result = stripJsonComments(input);
+  assert.equal(result, input, "string containing /* must be preserved verbatim");
+});
+
+test("removeTrailingJsonCommas (TST-b29c9d4f) — trailing comma in deeply nested object is removed", () => {
+  // A trailing comma inside a multiply-nested structure must still be stripped.
+  const input = '{"a":{"b":{"c":1,}}}';
+  const result = removeTrailingJsonCommas(input);
+  const parsed = JSON.parse(result);
+  assert.deepEqual(parsed, { a: { b: { c: 1 } } });
+});
+
 // stripTomlComment regressions
 test("stripTomlComment (via scanStringAware) — # outside a string truncates the line", () => {
   const result = stripTomlComment('key = "value" # comment');

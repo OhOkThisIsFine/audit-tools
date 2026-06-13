@@ -42,71 +42,101 @@ function skipAnalyzer(id = "fake-skip") {
   };
 }
 
-/** Capture console.warn calls during fn(). Returns { result, warnings[] }. */
-async function withWarnCapture(fn) {
-  const warnings = [];
-  const original = console.warn;
-  console.warn = (...args) => warnings.push(args.map(String).join(" "));
+/**
+ * Capture process.stderr.write chunks during fn(), then parse them into the
+ * structured `graph_enrichment_analyzer_failed` events the executor emits.
+ * Returns { result, events[], rawLines[] }.
+ */
+async function withCapturedStderr(fn) {
+  const chunks = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    chunks.push(String(chunk));
+    return true;
+  };
+  let result;
   try {
-    const result = await fn();
-    return { result, warnings };
+    result = await fn();
   } finally {
-    console.warn = original;
+    process.stderr.write = original;
   }
+  const rawLines = chunks
+    .join("")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const events = [];
+  for (const line of rawLines) {
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && parsed.kind === "graph_enrichment_analyzer_failed") {
+        events.push(parsed);
+      }
+    } catch {
+      // non-JSON stderr noise — ignore
+    }
+  }
+  return { result, events, rawLines };
 }
 
-// ── console.warn on analyzer throw ─────────────────────────────────────────
+// ── structured stderr diagnostic on analyzer throw ─────────────────────────
+// Diagnostics moved from console.warn to structured stderr JSON events
+// (audit-orchestrator-observability). One throwing analyzer → exactly one
+// `graph_enrichment_analyzer_failed` event carrying the analyzer id + note.
 
-test("graphEnrichmentExecutor emits console.warn when an analyzer throws", async () => {
+test("graphEnrichmentExecutor emits a structured stderr event when an analyzer throws", async () => {
   const thrower = throwingAnalyzer("ts-tree-sitter");
-  const { result, warnings } = await withWarnCapture(() =>
+  const { events } = await withCapturedStderr(() =>
     runGraphEnrichmentExecutor(minBundle(), {
       root: "/virtual/root",
       registry: [thrower],
     }),
   );
 
-  assert.equal(warnings.length, 1, "should emit exactly one console.warn for one throwing analyzer");
-  assert.ok(
-    warnings[0].includes("ts-tree-sitter"),
-    `warn message should include analyzer id; got: ${warnings[0]}`,
+  assert.equal(events.length, 1, "should emit exactly one structured stderr event for one throwing analyzer");
+  assert.equal(
+    events[0].analyzer_id,
+    "ts-tree-sitter",
+    `event should carry the analyzer id; got: ${JSON.stringify(events[0])}`,
   );
   assert.ok(
-    warnings[0].includes("deliberate test failure") || warnings[0].includes("Analyzer failed"),
-    `warn message should include the error summary; got: ${warnings[0]}`,
+    String(events[0].note).includes("deliberate test failure") ||
+      String(events[0].note).includes("Analyzer failed"),
+    `event note should include the error summary; got: ${JSON.stringify(events[0])}`,
   );
 });
 
-test("graphEnrichmentExecutor console.warn message includes the analyzer id", async () => {
+test("graphEnrichmentExecutor structured stderr event includes the analyzer id", async () => {
   const thrower = throwingAnalyzer("py-tree-sitter");
-  const { warnings } = await withWarnCapture(() =>
+  const { events } = await withCapturedStderr(() =>
     runGraphEnrichmentExecutor(minBundle(), {
       root: "/virtual/root",
       registry: [thrower],
     }),
   );
 
-  assert.ok(warnings.length >= 1, "should have at least one warning");
-  assert.ok(
-    warnings[0].includes("py-tree-sitter"),
-    `warn message should include the analyzer id 'py-tree-sitter'; got: ${warnings[0]}`,
+  assert.ok(events.length >= 1, "should have at least one structured stderr event");
+  assert.equal(
+    events[0].analyzer_id,
+    "py-tree-sitter",
+    `event should carry the analyzer id 'py-tree-sitter'; got: ${JSON.stringify(events[0])}`,
   );
 });
 
-test("graphEnrichmentExecutor console.warn message includes the error summary text", async () => {
+test("graphEnrichmentExecutor structured stderr event includes the error summary text", async () => {
   const thrower = throwingAnalyzer("ts-tree-sitter");
-  const { warnings } = await withWarnCapture(() =>
+  const { events } = await withCapturedStderr(() =>
     runGraphEnrichmentExecutor(minBundle(), {
       root: "/virtual/root",
       registry: [thrower],
     }),
   );
 
-  assert.ok(warnings.length >= 1, "should have at least one warning");
-  // The note starts with "Analyzer failed" and should include the error message
+  assert.ok(events.length >= 1, "should have at least one structured stderr event");
+  // The note starts with "Analyzer failed" and should include the error message.
   assert.ok(
-    warnings[0].includes("deliberate test failure"),
-    `warn message should include the original error text; got: ${warnings[0]}`,
+    String(events[0].note).includes("deliberate test failure"),
+    `event note should include the original error text; got: ${JSON.stringify(events[0])}`,
   );
 });
 
@@ -114,7 +144,7 @@ test("graphEnrichmentExecutor console.warn message includes the error summary te
 
 test("graphEnrichmentExecutor omitted progress_summary includes failed analyzer ids", async () => {
   const thrower = throwingAnalyzer("ts-tree-sitter");
-  const { result } = await withWarnCapture(() =>
+  const { result } = await withCapturedStderr(() =>
     runGraphEnrichmentExecutor(minBundle(), {
       root: "/virtual/root",
       registry: [thrower],
@@ -129,7 +159,7 @@ test("graphEnrichmentExecutor omitted progress_summary includes failed analyzer 
 
 test("graphEnrichmentExecutor omitted progress_summary stays clean when no analyzers throw", async () => {
   const skipper = skipAnalyzer("fake-skip");
-  const { result, warnings } = await withWarnCapture(() =>
+  const { result, events } = await withCapturedStderr(() =>
     runGraphEnrichmentExecutor(minBundle(), {
       root: "/virtual/root",
       registry: [skipper],
@@ -141,17 +171,17 @@ test("graphEnrichmentExecutor omitted progress_summary stays clean when no analy
     "Graph enrichment omitted; deterministic regex graph retained.",
     "progress_summary should be unmodified when no analyzer throws",
   );
-  assert.equal(warnings.length, 0, "no warnings should be emitted for skip resolutions");
+  assert.equal(events.length, 0, "no analyzer-failed events should be emitted for skip resolutions");
 });
 
-test("graphEnrichmentExecutor does NOT emit console.warn for skip resolutions", async () => {
+test("graphEnrichmentExecutor does NOT emit a structured stderr event for skip resolutions", async () => {
   const skipper = skipAnalyzer("fake-skip");
-  const { warnings } = await withWarnCapture(() =>
+  const { events } = await withCapturedStderr(() =>
     runGraphEnrichmentExecutor(minBundle(), {
       root: "/virtual/root",
       registry: [skipper],
     }),
   );
 
-  assert.equal(warnings.length, 0, "console.warn should not be called for skipped analyzers");
+  assert.equal(events.length, 0, "no analyzer-failed event should be emitted for skipped analyzers");
 });

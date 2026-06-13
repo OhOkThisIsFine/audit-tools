@@ -92,6 +92,7 @@ async function releaseBuildLock(handle) {
     await handle?.close();
   } finally {
     await unlink(buildLockPath).catch(() => {});
+    process.stderr.write(JSON.stringify({ event: "build_lock_released", pid: process.pid, lock: buildLockPath, released_at: new Date().toISOString() }) + '\n');
   }
 }
 
@@ -115,7 +116,9 @@ async function acquireBuildLock() {
   while (true) {
     try {
       const handle = await open(buildLockPath, 'wx');
-      await handle.writeFile(JSON.stringify({ pid: process.pid, acquired_at: new Date().toISOString() }));
+      const acquiredAt = new Date().toISOString();
+      await handle.writeFile(JSON.stringify({ pid: process.pid, acquired_at: acquiredAt }));
+      process.stderr.write(JSON.stringify({ event: "build_lock_acquired", pid: process.pid, lock: buildLockPath, acquired_at: acquiredAt }) + '\n');
       return handle;
     } catch (error) {
       if (error && error.code === 'EEXIST') {

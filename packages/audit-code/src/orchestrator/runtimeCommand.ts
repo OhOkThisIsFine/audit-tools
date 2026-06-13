@@ -100,14 +100,42 @@ export function resolveRuntimeValidationSpawnCommand(
     return { command: "", args: [] };
   }
   if (platform !== "win32") {
+    process.stderr.write(
+      JSON.stringify({
+        kind: "runtime_spawn_resolved",
+        wrap: "none",
+        executable,
+        platform,
+        ts: new Date().toISOString(),
+      }) + "\n",
+    );
     return { command: executable, args };
   }
   const packageManager = executable.replace(/\.(cmd|bat)$/i, "").toLowerCase();
   if (["npm", "npx", "pnpm", "yarn"].includes(packageManager)) {
+    process.stderr.write(
+      JSON.stringify({
+        kind: "runtime_spawn_resolved",
+        wrap: "cmd.exe",
+        executable,
+        shell_command: shellCommand,
+        platform,
+        ts: new Date().toISOString(),
+      }) + "\n",
+    );
     return {
       command: shellCommand,
       args: ["/d", "/s", "/c", command.map(quoteForShellInterpreterCmd).join(" ")],
     };
   }
+  process.stderr.write(
+    JSON.stringify({
+      kind: "runtime_spawn_resolved",
+      wrap: "none",
+      executable,
+      platform,
+      ts: new Date().toISOString(),
+    }) + "\n",
+  );
   return { command: executable, args };
 }

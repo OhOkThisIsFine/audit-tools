@@ -311,6 +311,13 @@ export async function advanceAudit(
       }
     }
   } catch (error) {
+    log.event({
+      phase: "advance",
+      kind: "error",
+      correlationId,
+      obligation: selectedObligation ?? undefined,
+      note: `Executor ${selectedExecutor} threw: ${error instanceof Error ? error.message : String(error ?? "unknown error")}`,
+    });
     throw formatExecutorFailure(selectedExecutor, selectedObligation, error);
   }
 
