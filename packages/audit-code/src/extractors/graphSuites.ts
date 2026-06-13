@@ -97,7 +97,10 @@ export function extractJsonSchemaReferenceEdges(
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
-  } catch {
+  } catch (e) {
+    process.stderr.write(
+      `[audit-code] graphSuites: JSON parse error in '${fromPath}', skipping schema $ref extraction: ${(e as Error).message ?? String(e)}\n`,
+    );
     return [];
   }
 

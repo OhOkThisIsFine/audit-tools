@@ -158,7 +158,8 @@ test("merge-results.mjs: separates valid and invalid results, writes both output
       "--artifacts-dir", artifactsDir,
     ]);
 
-    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+    // INV-03: exits non-zero (1) when any result failed validation.
+    assert.equal(result.status, 1, `expected non-zero exit on partial failure; stderr: ${result.stderr}`);
 
     const runResultsPath = join(artifactsDir, "runs", runId, "run-results.json");
     const failedTasksPath = join(artifactsDir, "runs", runId, "failed-tasks.json");
@@ -243,5 +244,65 @@ test("validate-result.mjs: emits a stderr warning when pending-audit-tasks.json 
 
     // Validation must still run and pass for the valid result
     assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  });
+});
+
+// ── INV-01: merge-results.mjs expands AuditResult[] arrays ──────────────────
+
+test("INV-01: merge-results.mjs expands a top-level AuditResult[] array from a single file", () => {
+  withTempDir("dispatch-scripts-array-", (artifactsDir) => {
+    const runId = "run-array";
+    const taskResultsDir = join(artifactsDir, "runs", runId, "task-results");
+    mkdirSync(taskResultsDir, { recursive: true });
+
+    // A single file containing an AuditResult[] array with two results.
+    const t1 = minimalValidResult("task-array-1");
+    const t2 = minimalValidResult("task-array-2");
+    writeFileSync(
+      join(taskResultsDir, "packet-abc-inline-result.json"),
+      JSON.stringify([t1, t2], null, 2),
+      "utf8",
+    );
+
+    const result = run(mergeScript, [
+      "--run-id", runId,
+      "--artifacts-dir", artifactsDir,
+    ]);
+
+    // Both elements are valid → clean exit.
+    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+
+    const runResultsPath = join(artifactsDir, "runs", runId, "run-results.json");
+    const runResults = JSON.parse(readFileSync(runResultsPath, "utf8"));
+    assert.equal(runResults.length, 2, "both array elements should be merged");
+    const ids = runResults.map((r) => r.task_id).sort();
+    assert.deepEqual(ids, ["task-array-1", "task-array-2"]);
+
+    // stdout should reflect 2/2 tasks valid.
+    assert.match(result.stdout, /2\/2 tasks valid/i);
+  });
+});
+
+// ── INV-03: merge-results.mjs exits 0 on clean merge ────────────────────────
+
+test("INV-03: merge-results.mjs exits 0 when all results are valid", () => {
+  withTempDir("dispatch-scripts-cleanexit-", (artifactsDir) => {
+    const runId = "run-cleanexit";
+    const taskResultsDir = join(artifactsDir, "runs", runId, "task-results");
+    mkdirSync(taskResultsDir, { recursive: true });
+
+    writeFileSync(
+      join(taskResultsDir, "task-ok.json"),
+      JSON.stringify(minimalValidResult("task-ok"), null, 2),
+      "utf8",
+    );
+
+    const result = run(mergeScript, [
+      "--run-id", runId,
+      "--artifacts-dir", artifactsDir,
+    ]);
+
+    assert.equal(result.status, 0, `expected clean exit; stderr: ${result.stderr}`);
+    assert.match(result.stdout, /1\/1 tasks valid/i);
   });
 });

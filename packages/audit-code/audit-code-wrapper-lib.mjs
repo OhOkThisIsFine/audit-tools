@@ -13,10 +13,11 @@ import {
   _INSTALL_HOST_DEFINITIONS,
   _getInstallHostKeys,
   _getInstallProfile,
+  _renderGeminiCommandToml,
 } from './audit-code-wrapper-install-hosts.mjs';
 
 export { shouldBuildDistForPaths, assertWorkspaceInstalled };
-export { _INSTALL_HOST_ORDER, _INSTALL_HOST_DEFINITIONS, _getInstallHostKeys, _getInstallProfile };
+export { _INSTALL_HOST_ORDER, _INSTALL_HOST_DEFINITIONS, _getInstallHostKeys, _getInstallProfile, _renderGeminiCommandToml };
 
 const repoRoot = dirname(fileURLToPath(import.meta.url));
 const distEntry = join(repoRoot, 'dist', 'index.js');

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type * as TS from "typescript";
@@ -40,7 +40,7 @@ async function loadTypescript(dependencyPath?: string): Promise<typeof TS> {
   if (dependencyPath) {
     try {
       const manifest = JSON.parse(
-        readFileSync(join(dependencyPath, "package.json"), "utf8"),
+        await readFile(join(dependencyPath, "package.json"), "utf8"),
       ) as { main?: string };
       const mainPath = resolve(dependencyPath, manifest.main ?? "index.js");
       const mod = (await import(pathToFileURL(mainPath).href)) as {

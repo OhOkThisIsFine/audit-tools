@@ -70,11 +70,9 @@ export async function runRollingDispatch<TPacket>(
   const allResults: RollingDispatchResult<TPacket>[] = [];
   let consecutiveNoProgress = 0;
 
-  // Early exit when pool is empty.
-  const activePools = confirmedPools.filter((p) => {
-    // Non-excluded check happens upstream; trust the caller's pool list.
-    return true;
-  });
+  // Pool filtering happens upstream (providerConfirmation). Trust the caller's
+  // pool list — a filter that always returns true is a contract lie (INV-07).
+  const activePools = confirmedPools;
 
   if (activePools.length === 0) {
     const strandedIds = packets.map((p) => p.id);

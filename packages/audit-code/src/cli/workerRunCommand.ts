@@ -151,8 +151,16 @@ export async function cmdWorkerRun(
     process.stderr.write(
       `[workerRunCommand] Failed to write result to ${task.result_path}: ${writeError instanceof Error ? writeError.message : String(writeError)}\n`,
     );
-    // Best-effort second attempt with the degraded result.
-    await writeJsonFile(task.result_path, writeFailedResult);
+    // Best-effort second attempt with the degraded result. If this also fails,
+    // rethrow so the caller sees a hard failure (COR-5332acdf).
+    try {
+      await writeJsonFile(task.result_path, writeFailedResult);
+    } catch (fallbackError) {
+      process.stderr.write(
+        `[workerRunCommand] Fallback write also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}\n`,
+      );
+      throw fallbackError;
+    }
     console.log(JSON.stringify(writeFailedResult, null, 2));
     process.exitCode = 1;
     return;

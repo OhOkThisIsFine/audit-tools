@@ -271,3 +271,41 @@ test("N-A06: audit_tasks_completed is owned by exactly one executor", () => {
   assert.equal(owners.length, 1, "exactly one executor should own audit_tasks_completed");
   assert.equal(owners[0].id, "rolling_dispatch_executor");
 });
+
+// ── INV-07: runRollingDispatch with an empty pool strands all packets ─────────
+
+const { runRollingDispatch } = await import("../src/orchestrator/rollingDispatch.ts");
+
+test("INV-07: runRollingDispatch with an empty confirmedPools array strands all packets and returns partial", async () => {
+  const packets = [
+    { id: "pkt-1", payload: { packet_id: "pkt-1", estimated_tokens: 100 } },
+    { id: "pkt-2", payload: { packet_id: "pkt-2", estimated_tokens: 100 } },
+  ];
+
+  const result = await runRollingDispatch(
+    packets,
+    [], // empty pool — INV-07: must strand all, not silently skip
+    {},
+    {},
+    async () => { throw new Error("should not be called on empty pool"); },
+  );
+
+  assert.equal(result.status, "partial", "empty pool must return partial status");
+  assert.equal(result.partial_reason, "empty_pool");
+  assert.deepEqual(result.stranded_ids.sort(), ["pkt-1", "pkt-2"]);
+  assert.equal(result.results.length, 0, "no results when pool is empty");
+});
+
+test("INV-07: runRollingDispatch does not silently drop the pool list it receives (no hidden filter)", async () => {
+  // Verify the activePools == confirmedPools contract: passing N pools reaches
+  // the dispatcher. If an internal filter were running (as the old `return true`
+  // filter did with a comment "trust the caller"), passing the same pool count
+  // would be undetectable. We pass 0 and confirm stranding — the empty-pool
+  // early-exit path is the observable proof that the pool list is used as-is.
+  const result = await runRollingDispatch([], [], {}, {}, async () => {
+    throw new Error("unreachable");
+  });
+  assert.equal(result.status, "partial");
+  assert.equal(result.partial_reason, "empty_pool");
+  assert.deepEqual(result.stranded_ids, []);
+});

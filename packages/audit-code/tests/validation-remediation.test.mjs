@@ -462,7 +462,9 @@ test("validateAuditResults accepts affected_files path with leading ./ prefix wh
   assert.equal(pathErrors.length, 0, `unexpected affected_files errors: ${JSON.stringify(pathErrors)}`);
 });
 
-test("validateAuditResults still produces an error for affected_files path genuinely not in file_coverage", () => {
+test("validateAuditResults produces a WARNING (not error) for affected_files path not in file_coverage (INV-09 strip-and-warn)", () => {
+  // INV-09: out-of-scope affected_files must not hard-reject the entire result.
+  // The validation now emits a warning so the in-scope findings are retained.
   const tasks = [
     {
       task_id: "task-af-miss",
@@ -502,14 +504,25 @@ test("validateAuditResults still produces an error for affected_files path genui
     { lineIndex: { "src/foo.ts": 10 } },
   );
 
+  // Must be a warning, NOT an error (strip-and-warn, not hard reject).
   const pathErrors = issues.filter(
     (i) => i.severity === "error" && /affected_files\[0\]\.path/.test(i.field ?? ""),
   );
-  assert.equal(pathErrors.length, 1, `expected exactly one affected_files path error, got: ${JSON.stringify(pathErrors)}`);
+  assert.equal(pathErrors.length, 0, `out-of-scope affected_files must not produce a hard error, got: ${JSON.stringify(pathErrors)}`);
+
+  const pathWarnings = issues.filter(
+    (i) => i.severity === "warning" && /affected_files\[0\]\.path/.test(i.field ?? ""),
+  );
+  assert.equal(pathWarnings.length, 1, `expected exactly one affected_files path warning, got: ${JSON.stringify(pathWarnings)}`);
   assert.match(
-    pathErrors[0].message,
-    /assigned files are: src\/foo\.ts/,
-    "error should surface the task's allowed files",
+    pathWarnings[0].message,
+    /out-of-scope/i,
+    "warning message must mention out-of-scope",
+  );
+  assert.match(
+    pathWarnings[0].message,
+    /src\/foo\.ts/,
+    "warning should surface the task's allowed files",
   );
 });
 
@@ -847,4 +860,85 @@ test("validateConfiguredProviderEnvironment checks explicit executable paths wit
   assert.deepEqual(issues, []);
   assert.equal(commandLookups, 0);
   assert.equal(pathLookups, 1);
+});
+
+// ── INV-09: out-of-scope affected_files is a warning, not a hard error ────────
+
+test("INV-09: affected_files path outside file_coverage is a warning (not an error)", () => {
+  const result = {
+    task_id: "t-scope",
+    unit_id: "unit-scope",
+    pass_id: "pass:security",
+    lens: "security",
+    file_coverage: [{ path: "src/auth.ts", total_lines: 50 }],
+    findings: [
+      {
+        id: "SEC-001",
+        title: "Out of scope reference",
+        category: "cross-boundary-reference",
+        severity: "high",
+        confidence: "medium",
+        lens: "security",
+        summary: "This finding cites a file outside the packet.",
+        affected_files: [{ path: "src/other.ts" }], // out-of-scope
+        evidence: ["src/other.ts:10 - see line 10"],
+      },
+    ],
+  };
+  const task = {
+    task_id: "t-scope",
+    unit_id: "unit-scope",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/auth.ts"],
+    file_line_counts: { "src/auth.ts": 50 },
+    rationale: "test",
+    priority: "medium",
+  };
+
+  const issues = validateAuditResults([result], [task], { lineIndex: { "src/auth.ts": 50 } });
+  const errors = issues.filter((i) => i.severity === "error");
+  const warnings = issues.filter((i) => i.severity === "warning");
+
+  assert.equal(errors.length, 0, "out-of-scope affected_files must not be a hard error");
+  assert.equal(warnings.length, 1, "out-of-scope affected_files must emit a warning");
+  assert.match(warnings[0].message, /out-of-scope/i, "warning message must mention out-of-scope");
+});
+
+test("INV-09: in-scope findings in the same result are retained when one affected_files entry is out-of-scope", () => {
+  const result = {
+    task_id: "t-mixed",
+    unit_id: "unit-mixed",
+    pass_id: "pass:correctness",
+    lens: "correctness",
+    file_coverage: [{ path: "src/core.ts", total_lines: 30 }],
+    findings: [
+      {
+        id: "COR-001",
+        title: "In-scope finding",
+        category: "null-dereference",
+        severity: "medium",
+        confidence: "high",
+        lens: "correctness",
+        summary: "An in-scope finding.",
+        affected_files: [{ path: "src/core.ts", line_start: 5, line_end: 10 }],
+        evidence: ["src/core.ts:5 - dereference"],
+      },
+    ],
+  };
+  const task = {
+    task_id: "t-mixed",
+    unit_id: "unit-mixed",
+    pass_id: "pass:correctness",
+    lens: "correctness",
+    file_paths: ["src/core.ts"],
+    file_line_counts: { "src/core.ts": 30 },
+    rationale: "test",
+    priority: "medium",
+  };
+
+  const issues = validateAuditResults([result], [task], { lineIndex: { "src/core.ts": 30 } });
+  // A clean result with only in-scope entries should produce no errors or warnings.
+  const errors = issues.filter((i) => i.severity === "error");
+  assert.equal(errors.length, 0, "in-scope finding with valid span must produce no errors");
 });

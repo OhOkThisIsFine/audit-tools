@@ -79,9 +79,9 @@ export async function emitEnvelope(params: {
 
 export function buildManualReviewBlocker(providerName: string): string {
   return providerName === LOCAL_SUBPROCESS_PROVIDER_NAME
-    ? "Ready for LLM semantic review. If the host exposes a callable subagent tool, prepare dispatch and fan out packets. " +
-      "If not, use single-task fallback: review only the first pending task, write one AuditResult to the run audit-results path, execute worker_command, then stop."
-    : "Audit blocked: waiting for manual audit results or interactive provider configuration.";
+    ? "Audit blocked: waiting for manual audit results or interactive provider configuration."
+    : "Ready for LLM semantic review. If the host exposes a callable subagent tool, prepare dispatch and fan out packets. " +
+      "If not, use single-task fallback: review only the first pending task, write one AuditResult to the run audit-results path, execute worker_command, then stop.";
 }
 
 /** Executors that require the LLM host agent to dispatch sub-agents; must NOT be run inline. */

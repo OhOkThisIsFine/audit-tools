@@ -125,15 +125,19 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
 
     // Not part of this round's plan. Still read it so a current task can be
     // recovered by task_id (e.g. a subagent wrote a valid result under a
-    // non-assigned name).
+    // non-assigned name, or wrote an inline AuditResult[] array to a packet
+    // result file). Expand top-level arrays element-by-element so a worker
+    // that emits an AuditResult[] payload can be recovered by task_id (INV-01).
     try {
       const raw = await readFile(filePath, "utf8");
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const tid = typeof (parsed as Record<string, unknown>).task_id === "string"
-          ? String((parsed as Record<string, unknown>).task_id) : undefined;
+      const candidates: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+      for (const item of candidates) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+        const tid = typeof (item as Record<string, unknown>).task_id === "string"
+          ? String((item as Record<string, unknown>).task_id) : undefined;
         if (tid && !fallbackByTaskId.has(tid)) {
-          fallbackByTaskId.set(tid, parsed);
+          fallbackByTaskId.set(tid, item);
         }
       }
     } catch { /* not parseable — skip */ }
@@ -322,10 +326,20 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   const status = failing.length > 0 || notDispatched.length > 0
     ? "partial"
     : (result?.progress_made ? "completed" : "no_progress");
+  // WorkerResultStatus does not have "partial"; use "blocked" when tasks failed
+  // but progress was also made (passing.length > 0), else "no_progress" for all
+  // failures (COR-48c05a13: was always "no_progress" even when passing.length > 0
+  // and result.progress_made is true).
+  const workerResultStatus: import("../types/workerResult.js").WorkerResultStatus =
+    failing.length === 0
+      ? (result?.progress_made ? "completed" : "no_progress")
+      : passing.length > 0 || result?.progress_made
+        ? "blocked"
+        : "no_progress";
   const workerResult = buildWorkerResult({
     runId,
     obligationId: workerTask.obligation_id,
-    status: failing.length > 0 ? "no_progress" : (result?.progress_made ? "completed" : "no_progress"),
+    status: workerResultStatus,
     progressMade: result?.progress_made ?? false,
     selectedExecutor: result?.selected_executor ?? null,
     artifactsWritten: result?.artifacts_written ?? [],

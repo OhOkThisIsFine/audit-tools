@@ -215,7 +215,7 @@ export async function handleGraphEnrichmentBranch(
       params.artifactsDir,
       "analyzer-decisions.json",
     );
-    if (incoming && typeof incoming.value === "object") {
+    if (incoming && incoming.value !== null && typeof incoming.value === "object") {
       const settings: Record<string, AnalyzerSetting> = {};
       for (const [id, value] of Object.entries(incoming.value)) {
         if (
@@ -304,19 +304,24 @@ export async function handleDesignReviewBranch(
 ): Promise<BranchActionResult> {
   const existing = bundle.design_assessment;
 
-  // Legacy: consume old combined findings file.
+  // Legacy: consume old combined findings file. Always unlink when present to
+  // prevent accumulation, even when design_assessment is absent (COR-68f07c3e).
   const legacyIncoming = await tryConsumeIncoming<Finding[]>(
     params.artifactsDir,
     "design-review-findings.json",
   );
-  if (legacyIncoming && Array.isArray(legacyIncoming.value) && existing) {
-    existing.review_findings = legacyIncoming.value;
-    existing.reviewed = true;
-    await writeJsonFile(
-      join(params.artifactsDir, "design_assessment.json"),
-      existing,
-    );
+  if (legacyIncoming) {
     await unlink(legacyIncoming.path).catch(() => {});
+    if (Array.isArray(legacyIncoming.value) && existing) {
+      existing.review_findings = legacyIncoming.value;
+      existing.reviewed = true;
+      await writeJsonFile(
+        join(params.artifactsDir, "design_assessment.json"),
+        existing,
+      );
+      return { action: "continue" };
+    }
+    // File consumed (deleted) but no target to merge into — loop again.
     return { action: "continue" };
   }
 
@@ -332,18 +337,24 @@ export async function handleDesignReviewBranch(
 
   let consumed = false;
 
-  if (contractIncoming && Array.isArray(contractIncoming.value) && existing) {
-    existing.contract_findings = contractIncoming.value;
-    existing.contract_reviewed = true;
+  // Always delete incoming files when present; only merge data when existing
+  // design_assessment is present (COR-68f07c3e).
+  if (contractIncoming) {
     await unlink(contractIncoming.path).catch(() => {});
-    consumed = true;
+    if (Array.isArray(contractIncoming.value) && existing) {
+      existing.contract_findings = contractIncoming.value;
+      existing.contract_reviewed = true;
+      consumed = true;
+    }
   }
 
-  if (conceptualIncoming && Array.isArray(conceptualIncoming.value) && existing) {
-    existing.conceptual_findings = conceptualIncoming.value;
-    existing.conceptual_reviewed = true;
+  if (conceptualIncoming) {
     await unlink(conceptualIncoming.path).catch(() => {});
-    consumed = true;
+    if (Array.isArray(conceptualIncoming.value) && existing) {
+      existing.conceptual_findings = conceptualIncoming.value;
+      existing.conceptual_reviewed = true;
+      consumed = true;
+    }
   }
 
   if (consumed && existing) {
