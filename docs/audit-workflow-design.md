@@ -148,9 +148,20 @@ Runs after the intent checkpoint so the reviewer works within confirmed scope.
 - Categories: `tool_opportunity`, `architecture_pattern`,
   `design_simplification`, `integration`, `missing_capability`
 
-Both passes dispatched simultaneously as two independent host_delegation agents.
-Finding sets merge into synthesis as distinct report sections, separate from
-auditor findings.
+**Conceptual review depth (shallow / deep).** Depth is a provider-neutral
+checkpoint field (`design_review.conceptual_depth: "shallow" | "deep"`, default
+shallow). Shallow runs one conceptual agent. Deep fans out a configurable count
+(`design_review.perspectives`) of independent perspective subagents — a built-in
+roster of maximally-dissimilar perspectives — plus an **independent** judge/merge
+agent (an author never marks its own work); the judge writes the single
+conceptual-findings artifact the orchestrator ingests. The perspectives and judge
+are themselves packetized JIT by the active provider, so deep review survives a
+provider switch.
+
+The contract pass and the conceptual pass dispatch simultaneously as independent
+host_delegation agents (the conceptual pass expanding to its perspective fan-out
+under deep). Finding sets merge into synthesis as distinct report sections,
+separate from auditor findings.
 
 **Structured output:** both agents emit findings inline; skill writes to disk.
 
@@ -177,6 +188,19 @@ budget (`max_task_lines`, byte-based `sizeIndex` sizing) is the real constraint.
 **free_form_intent shaping applied:** orchestrator uses the interpreted intent
 to adjust lens weighting and task priority signals before tasks are built.
 
+**Planning's persisted output is a provider-neutral task-affinity graph** (not a
+packet list). Nodes = tasks (unit × lens), each carrying a deterministic
+byte-based **token estimate** and a **risk estimate** (lens sensitivity,
+critical-flow membership, analyzer signal, blast radius), both frozen after one
+always-on LLM estimate review. Edges = soft, weighted **affinity** (`kind` +
+`weight`: shared file → same unit → same directory → critical-flow/call adjacency
+→ cross-lens-same-file → same lens), deterministically derived (LLM-tunable),
+never frozen — they are the flexibility each provider uses to cut its own packets.
+Kept distinct from `graph_bundle.json` (code structure). Packets do not exist at
+plan time, and the plan encodes no provider/model/concurrency decision — so a run
+resumes across providers/IDEs mid-flight with no replanning (this is the
+plan/dispatch seam).
+
 ---
 
 ## Dispatch — rolling, quota + capability-routed
@@ -188,11 +212,29 @@ are the only throttle. RPM and TPM per provider/model are tracked from: prior
 quota queries, estimated in-flight token usage per task, and results as they
 arrive.
 
-**Per-packet provider selection:** before dispatching each packet, the
-orchestrator scores its complexity (priority, lenses, estimated tokens, critical
-flow membership) and selects the provider/model from the confirmed pool
-accordingly. High-complexity packets route to more capable models;
-lower-complexity packets route to faster/cheaper ones.
+**JIT graph partition (no plan-time packets).** Each time a provider picks up the
+run it performs a capability handshake — the models it can dispatch to right now
+(an opaque ordered roster with context/output windows + relative rank) and its
+real parallel capacity — then partitions the task-affinity graph into packets by
+greedy agglomerative merge along descending edge weight, under two
+model-parameterized **ceilings (not quotas)**: a **token ceiling** (the chosen
+model's discovered context minus overhead) and a **risk-mass ceiling** (aggregate
+node risk one agent should scrutinize at once). A coherent high-risk cluster that
+exceeds the risk-mass ceiling splits along its weakest internal edge; high-risk
+packets are never padded with low-risk filler. With a multi-rank roster: partition
+once under the largest window, then re-split any packet whose routed tier has a
+smaller window (partition-then-validate, to preserve cross-tier coherence).
+
+**Risk-routed tiering.** A packet's tier = its **max** node risk against relative
+cut points, mapped to a relative rank in the roster (low → cheapest available;
+high → top available). Complexity signals (isolated large file, critical flow,
+analyzer signal, lens verification, high token estimate, sensitive lens) are
+**escalators only** — they raise a tier, never lower it. No named models; degrade
+gracefully when fewer ranks are reported. An optional opaque `model_id` per roster
+entry keys per-model quota learning (`provider/<id>`) and is never a window
+authority or matched to a name table. Handshake, partition, and routing are never
+persisted as decisions — the dispatch-quota/capacity artifacts record this
+session's JIT choices, not authority.
 
 **Rolling dispatch loop:**
 1. Check quota state across all providers in the confirmed pool
