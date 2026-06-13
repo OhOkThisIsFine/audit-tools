@@ -985,3 +985,181 @@ test("FND-REL-6f9f6681: validateConfiguredProviderEnvironment reports not-found 
     `expected a 'not found on PATH' issue when commandExists returns false; got: ${JSON.stringify(issues)}`,
   );
 });
+
+// ── TST-6f9f6681: codex branch of validateConfiguredProviderEnvironment ────────
+
+test("TST-6f9f6681: validateConfiguredProviderEnvironment reports not-found for codex when PATH probe returns false", async () => {
+  const issues = await validateConfiguredProviderEnvironment(
+    { provider: "codex", codex: { command: "codex" } },
+    {
+      commandExists: () => Promise.resolve(false),
+    },
+  );
+
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.path === "codex.command" &&
+        /not found on path/i.test(issue.message),
+    ),
+    `expected a 'not found on PATH' issue for codex when commandExists returns false; got: ${JSON.stringify(issues)}`,
+  );
+});
+
+test("TST-6f9f6681: validateConfiguredProviderEnvironment accepts codex when PATH probe returns true", async () => {
+  const issues = await validateConfiguredProviderEnvironment(
+    { provider: "codex", codex: { command: "codex" } },
+    {
+      commandExists: () => Promise.resolve(true),
+    },
+  );
+
+  const codexIssues = issues.filter((issue) => issue.path === "codex.command");
+  assert.equal(
+    codexIssues.length,
+    0,
+    `expected no codex.command issues when codex is found on PATH; got: ${JSON.stringify(codexIssues)}`,
+  );
+});
+
+test("TST-6f9f6681: validateConfiguredProviderEnvironment rejects compound codex command and skips PATH probe", async () => {
+  let commandLookups = 0;
+  const issues = await validateConfiguredProviderEnvironment(
+    { provider: "codex", codex: { command: "node /path/to/codex.js" } },
+    {
+      commandExists: () => {
+        commandLookups++;
+        return Promise.resolve(true);
+      },
+    },
+  );
+
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.path === "codex.command" &&
+        /put cli flags in extra_args/i.test(issue.message),
+    ),
+    `expected a compound-command issue for codex; got: ${JSON.stringify(issues)}`,
+  );
+  assert.equal(commandLookups, 0, "PATH probe must not run for compound commands");
+});
+
+test("TST-6f9f6681: validateConfiguredProviderEnvironment accepts codex explicit executable path when it exists", async () => {
+  const issues = await validateConfiguredProviderEnvironment(
+    {
+      provider: "codex",
+      codex: { command: "/usr/local/bin/codex" },
+    },
+    {
+      commandExists: () => Promise.resolve(false),
+      pathExists: (commandPath) => commandPath === "/usr/local/bin/codex",
+    },
+  );
+
+  const codexIssues = issues.filter((issue) => issue.path === "codex.command");
+  assert.equal(
+    codexIssues.length,
+    0,
+    `expected no codex.command issues when absolute path exists; got: ${JSON.stringify(codexIssues)}`,
+  );
+});
+
+// ── TST-6f9f6681-2: synthesis and routing_tiers sections of validateSessionConfig ────
+
+test("TST-6f9f6681-2: validateSessionConfig accepts synthesis object with narrative boolean", () => {
+  assert.deepEqual(
+    validateSessionConfig({
+      provider: "local-subprocess",
+      synthesis: { narrative: true },
+    }),
+    [],
+    "synthesis.narrative: true should produce no issues",
+  );
+
+  assert.deepEqual(
+    validateSessionConfig({
+      provider: "local-subprocess",
+      synthesis: { narrative: false },
+    }),
+    [],
+    "synthesis.narrative: false should produce no issues",
+  );
+});
+
+test("TST-6f9f6681-2: validateSessionConfig rejects synthesis as array", () => {
+  const issues = validateSessionConfig({ synthesis: ["narrative"] });
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.path === "synthesis" &&
+        /must be a json object/i.test(issue.message),
+    ),
+    `expected a synthesis-must-be-object issue; got: ${JSON.stringify(issues)}`,
+  );
+});
+
+test("TST-6f9f6681-2: validateSessionConfig rejects synthesis.narrative as non-boolean", () => {
+  const issues = validateSessionConfig({ synthesis: { narrative: "yes" } });
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.path === "synthesis.narrative" &&
+        /must be a boolean/i.test(issue.message),
+    ),
+    `expected a synthesis.narrative type error; got: ${JSON.stringify(issues)}`,
+  );
+});
+
+test("TST-6f9f6681-2: validateSessionConfig accepts dispatch.routing_tiers with valid deep_at and standard_at", () => {
+  assert.deepEqual(
+    validateSessionConfig({
+      provider: "local-subprocess",
+      dispatch: { routing_tiers: { deep_at: 0.8, standard_at: 0.4 } },
+    }),
+    [],
+    "routing_tiers with deep_at >= standard_at should produce no issues",
+  );
+});
+
+test("TST-6f9f6681-2: validateSessionConfig rejects dispatch.routing_tiers as array", () => {
+  const issues = validateSessionConfig({
+    dispatch: { routing_tiers: ["deep_at"] },
+  });
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.path === "dispatch.routing_tiers" &&
+        /must be a json object/i.test(issue.message),
+    ),
+    `expected dispatch.routing_tiers-must-be-object issue; got: ${JSON.stringify(issues)}`,
+  );
+});
+
+test("TST-6f9f6681-2: validateSessionConfig rejects dispatch.routing_tiers.deep_at out of range", () => {
+  const issues = validateSessionConfig({
+    dispatch: { routing_tiers: { deep_at: 1.5, standard_at: 0.5 } },
+  });
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.path === "dispatch.routing_tiers.deep_at" &&
+        /\[0, 1\]/.test(issue.message),
+    ),
+    `expected deep_at range error; got: ${JSON.stringify(issues)}`,
+  );
+});
+
+test("TST-6f9f6681-2: validateSessionConfig rejects routing_tiers where deep_at < standard_at", () => {
+  const issues = validateSessionConfig({
+    dispatch: { routing_tiers: { deep_at: 0.3, standard_at: 0.7 } },
+  });
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.path === "dispatch.routing_tiers" &&
+        /deep_at must be >= standard_at/i.test(issue.message),
+    ),
+    `expected deep_at < standard_at ordering error; got: ${JSON.stringify(issues)}`,
+  );
+});

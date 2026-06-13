@@ -80,6 +80,15 @@ test("resolveTierBudgets fills missing ranks from the nearest reported rank", ()
   });
 });
 
+// TST-df8bc2ec: empty roster map — must throw rather than silently dispatch with wrong budgets
+test("resolveTierBudgets throws when given an empty roster Map", () => {
+  assert.throws(
+    () => resolveTierBudgets(new Map()),
+    (err) => err instanceof Error && /at least one reported rank/i.test(err.message),
+    "empty Map must throw with a descriptive error",
+  );
+});
+
 // ── partition-then-validate against per-rank windows ─────────────────────────
 
 // Two affinity-linked tasks (same unit/dir, different lens+file). Frozen

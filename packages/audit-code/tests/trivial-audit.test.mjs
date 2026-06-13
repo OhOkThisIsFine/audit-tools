@@ -47,6 +47,23 @@ await test("isTrivialAuditPath is case-insensitive for __init__.py basename chec
   });
 });
 
+// TST-f0b6f64e: lineCount=0 short-circuits before the __init__.py name check —
+// any file with zero lines is trivial regardless of its name.
+await test("isTrivialAuditPath returns true for a non-__init__.py file with lineCount 0", async (t) => {
+  await t.test("regular .ts file with 0 lines is trivial", () => {
+    assert.equal(isTrivialAuditPath("src/generated/stub.ts", 0), true);
+  });
+
+  await t.test("regular .py file with 0 lines is trivial", () => {
+    assert.equal(isTrivialAuditPath("module/empty.py", 0), true);
+  });
+
+  await t.test("any file with 1 line is also trivial (lineCount <= 1 short-circuits)", () => {
+    // lineCount <= 1 is a separate short-circuit that covers any file name.
+    assert.equal(isTrivialAuditPath("src/regular.ts", 1), true);
+  });
+});
+
 // ── autoCompleteTrivialCoverage — guard branches ──────────────────────────────
 
 await test("autoCompleteTrivialCoverage skips files where required_lenses is already empty", async (t) => {

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { assertNonEmptyString, assertStringArray, describeValue, fail, isRecord, looksLikeCliFlag, assertAccessibleDirectory } from "./validate.mjs";
 import { buildSyntheticResults } from "./synthetic-results.mjs";
 
@@ -55,35 +56,51 @@ async function validateWorkerTask(task) {
   await assertAccessibleDirectory(task.artifacts_dir, "task.artifacts_dir");
 }
 
-const taskPath = process.argv[2];
-if (!taskPath) {
-  throw new Error("provider-assisted-bridge requires the task path argument.");
-}
+// TST-27c498da: guard top-level side-effecting code so that this file can be
+// imported in tests without triggering argv-driven execution.
+//
+// Compare via pathToFileURL(argv[1]).href rather than URL(import.meta.url).pathname:
+// on Windows the latter yields a drive-prefixed path with a leading slash
+// (e.g. "/C:/.../bridge.mjs") that never equals the backslash path in argv[1],
+// so the guard was silently false and the whole bridge no-opped (exit 0, no
+// results written). pathToFileURL produces the exact "file:///C:/..." form that
+// import.meta.url uses on every platform.
+const isMainModule =
+  typeof import.meta.url === "string" &&
+  process.argv[1] != null &&
+  pathToFileURL(process.argv[1]).href === import.meta.url;
 
-const task = await readJsonFile(taskPath, "task");
-await validateWorkerTask(task);
-
-if (task.preferred_executor === "agent") {
-  if (!task.audit_results_path) {
-    throw new Error("Agent task is missing audit_results_path.");
+if (isMainModule) {
+  const taskPath = process.argv[2];
+  if (!taskPath) {
+    throw new Error("provider-assisted-bridge requires the task path argument.");
   }
 
-  const tasksPath =
-    task.pending_audit_tasks_path ??
-    join(task.artifacts_dir, "audit_tasks.json");
-  const pendingTasks = await readJsonFile(tasksPath, "pending audit tasks");
-  if (!Array.isArray(pendingTasks)) {
-    fail("pending audit tasks must be a JSON array.");
-  }
-  await mkdir(dirname(task.audit_results_path), { recursive: true });
-  await writeFile(
-    task.audit_results_path,
-    JSON.stringify(await buildSyntheticResults(pendingTasks, task.repo_root), null, 2),
-    "utf8",
-  );
-}
+  const task = await readJsonFile(taskPath, "task");
+  await validateWorkerTask(task);
 
-const [command, ...args] = task.worker_command;
-assertNonEmptyString(command, "task.worker_command[0]");
-const exitCode = await runCommand(command, args, task.repo_root);
-process.exitCode = exitCode;
+  if (task.preferred_executor === "agent") {
+    if (!task.audit_results_path) {
+      throw new Error("Agent task is missing audit_results_path.");
+    }
+
+    const tasksPath =
+      task.pending_audit_tasks_path ??
+      join(task.artifacts_dir, "audit_tasks.json");
+    const pendingTasks = await readJsonFile(tasksPath, "pending audit tasks");
+    if (!Array.isArray(pendingTasks)) {
+      fail("pending audit tasks must be a JSON array.");
+    }
+    await mkdir(dirname(task.audit_results_path), { recursive: true });
+    await writeFile(
+      task.audit_results_path,
+      JSON.stringify(await buildSyntheticResults(pendingTasks, task.repo_root), null, 2),
+      "utf8",
+    );
+  }
+
+  const [command, ...args] = task.worker_command;
+  assertNonEmptyString(command, "task.worker_command[0]");
+  const exitCode = await runCommand(command, args, task.repo_root);
+  process.exitCode = exitCode;
+}

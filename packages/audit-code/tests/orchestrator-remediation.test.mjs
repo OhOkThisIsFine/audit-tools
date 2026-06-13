@@ -1810,6 +1810,46 @@ const { runPlanningExecutor } = await import(
   "../src/orchestrator/planningExecutors.ts"
 );
 
+// TST-c7bdc07c: runPlanningExecutor with an empty lineIndex — exercises the
+// path-resolution branch where no file has a known line count.
+test("planning executor completes with an empty lineIndex (no line counts available)", async () => {
+  const tmpRoot = await mkdtemp(join(tmpdir(), "planning-empty-lineindex-"));
+  try {
+    const bundle = {
+      repo_manifest: {
+        repository: { name: "test-repo" },
+        generated_at: "2026-01-01T00:00:00Z",
+        files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: 100 }],
+      },
+      file_disposition: { files: [] },
+      unit_manifest: {
+        units: [
+          {
+            unit_id: "src-api-auth",
+            name: "Auth",
+            files: ["src/api/auth.ts"],
+            required_lenses: ["security"],
+          },
+        ],
+      },
+      surface_manifest: { surfaces: [] },
+      critical_flows: { flows: [] },
+      risk_register: { items: [] },
+    };
+
+    // Empty lineIndex — no file has a known line count.
+    const result = await runPlanningExecutor(bundle, tmpRoot, {});
+
+    assert.ok(result, "executor must return a result");
+    assert.ok(Array.isArray(result.updated.task_affinity_graph?.nodes), "must produce a task-affinity graph");
+    // With zero line counts the task is still planned (may have 0-line estimate)
+    // but must NOT throw.
+    assert.ok(typeof result.updated === "object", "updated bundle must be an object");
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("planning executor folds pending requeue tasks into the dispatch surface", async () => {
   const tmpRoot = await mkdtemp(join(tmpdir(), "planning-requeue-"));
   try {

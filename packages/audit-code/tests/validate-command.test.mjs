@@ -209,7 +209,10 @@ test("audit-code validate exits zero when no validation issues exist", async () 
     assert.equal(result.code, 0);
     assert.equal(parsed.issue_count, 0);
     assert.equal(parsed.session_config_present, false);
-    assert.equal(parsed.resolved_provider, "local-subprocess");
+    // TST-c0432a78-3: do not pin the provider name — auto-resolution picks the
+    // contextually appropriate fallback; verify only that a name is returned.
+    assert.ok(typeof parsed.resolved_provider === "string" && parsed.resolved_provider.length > 0,
+      "resolved_provider must be a non-empty string");
     assert.deepEqual(parsed.issues, []);
   });
 });

@@ -73,6 +73,50 @@ test("NestJS @Controller({ path }) object form resolves the prefix", () => {
   assert.ok(hasRoute(routes, "POST", "/auth/login", file));
 });
 
+// TST-10b463bb: multiple @Controller decorators in the same file — each method
+// must use the prefix of the nearest preceding @Controller (document-order walk).
+test("NestJS multiple @Controller decorators in one file assign prefix by document order", () => {
+  const file = "src/multi.controller.ts";
+  const routes = routesOf({
+    [file]: [
+      "import { Controller, Get, Post } from '@nestjs/common';",
+      "@Controller('cats')",
+      "export class CatsController {",
+      "  @Get()",
+      "  findAll() {}",
+      "}",
+      "@Controller('dogs')",
+      "export class DogsController {",
+      "  @Get(':id')",
+      "  findOne() {}",
+      "  @Post()",
+      "  create() {}",
+      "}",
+    ].join("\n"),
+  });
+
+  assert.ok(hasRoute(routes, "GET", "/cats", file), "GET /cats from first controller");
+  assert.ok(hasRoute(routes, "GET", "/dogs/:id", file), "GET /dogs/:id from second controller");
+  assert.ok(hasRoute(routes, "POST", "/dogs", file), "POST /dogs from second controller");
+  // The cats controller's GET must NOT pick up the dogs prefix
+  assert.ok(!hasRoute(routes, "GET", "/dogs", file), "GET /dogs must not exist (cats has no prefix '/dogs')");
+});
+
+test("NestJS @Controller with no argument (empty prefix) yields bare-path routes", () => {
+  const file = "src/root.controller.ts";
+  const routes = routesOf({
+    [file]: [
+      "@Controller()",
+      "export class RootController {",
+      "  @Get('health')",
+      "  health() {}",
+      "}",
+    ].join("\n"),
+  });
+
+  assert.ok(hasRoute(routes, "GET", "/health", file), "GET /health — empty prefix leaves sub-path bare");
+});
+
 test("FastAPI decorator routes map method + path to the handler file", () => {
   const file = "service/views.py";
   const routes = routesOf({

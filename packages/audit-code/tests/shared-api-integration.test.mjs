@@ -136,6 +136,58 @@ test("runRollingDispatch: terminates with status partial when pool is empty", as
   assert.equal(terminalCalls[0].status, "partial");
 });
 
+// TST-30655614: individual packet failure path — one packet returns outcome:'failed'
+// while another succeeds. The engine considers both "dispatched"; the overall
+// status is "complete" (all packets processed) but the failed packet is visible
+// in the results with outcome:'failed'. This test pins the contract.
+test("runRollingDispatch: one packet outcome:failed is included in results with outcome failed", async () => {
+  const onResultCalls = [];
+
+  const packets = [
+    { id: "p-ok", payload: "task-ok", estimatedTokens: 100, complexity: 0.5 },
+    { id: "p-fail", payload: "task-fail", estimatedTokens: 100, complexity: 0.5 },
+  ];
+
+  const pool = [
+    {
+      id: "local-subprocess:null",
+      providerName: "local-subprocess",
+      hostModel: null,
+      hostConcurrencyLimit: null,
+    },
+  ];
+
+  const contract = {
+    livelockGuard: 3,
+    onResult: (result) => {
+      onResultCalls.push({ id: result.packet.id, outcome: result.outcome });
+    },
+    consumerTerminal: undefined,
+  };
+
+  const dispatchPacket = async (packet) => {
+    if (packet.id === "p-fail") {
+      return { packet, outcome: "failed" };
+    }
+    return { packet, outcome: "success" };
+  };
+
+  const result = await runRollingDispatch(packets, pool, {}, contract, dispatchPacket);
+
+  // Both packets are dispatched; outcome:'failed' is a completed result, not a strandedId.
+  assert.equal(result.status, "complete", "all packets dispatched → status is complete");
+  assert.equal(result.stranded_ids.length, 0, "no stranded packets — failure is still a dispatch result");
+
+  // onResult is invoked for every dispatched packet, including the failed one.
+  const resultIds = onResultCalls.map((r) => r.id);
+  assert.ok(resultIds.includes("p-ok"), "onResult should be called for the successful packet");
+  assert.ok(resultIds.includes("p-fail"), "onResult should be called for the failed packet");
+
+  // Verify the failed packet's outcome is correctly recorded.
+  const failedResult = onResultCalls.find((r) => r.id === "p-fail");
+  assert.equal(failedResult?.outcome, "failed", "failed packet must have outcome:failed in results");
+});
+
 // ============================================================================
 // 2. ProviderConfirmationResult contract
 // ============================================================================

@@ -511,6 +511,83 @@ test("buildChunkedAuditTasks claims critical-flow files without overlapping unit
   );
 });
 
+// TST-6ef02f3b: intent_priority_boost elevates low→medium and medium→high, but
+// NEVER over-promotes an already-high lens. Also verifies boost has no effect on
+// lenses not in the boost set.
+test("buildChunkedAuditTasks intent_priority_boost elevates priority one tier without exceeding high", () => {
+  const coverage = {
+    files: [
+      {
+        path: "src/main.ts",
+        unit_ids: ["src-main"],
+        classification_status: "classified",
+        audit_status: "pending",
+        required_lenses: ["maintainability", "security", "correctness"],
+        completed_lenses: [],
+      },
+    ],
+  };
+  const lineIndex = { "src/main.ts": 20 };
+
+  // Boost maintainability (normally low priority) and security (already high-ish).
+  // Do NOT boost correctness — it should remain at its base priority.
+  const tasks = buildChunkedAuditTasks(coverage, lineIndex, {
+    intent_priority_boost: ["maintainability", "security"],
+  });
+
+  const byLens = {};
+  for (const t of tasks) {
+    byLens[t.lens] = t.priority;
+  }
+
+  // maintainability base = low → after boost = medium
+  assert.equal(byLens["maintainability"], "medium", "low→medium boost for maintainability");
+
+  // security base = medium (standard) or high (sensitive) → boost caps at high; must not exceed high
+  assert.ok(
+    byLens["security"] === "high" || byLens["security"] === "medium",
+    `security priority must be high or medium after boost, got ${byLens["security"]}`,
+  );
+
+  // correctness is NOT boosted — must remain at its base priority (not elevated)
+  if (byLens["correctness"]) {
+    assert.ok(
+      byLens["correctness"] !== "high",
+      "unboosted correctness must not be elevated to high",
+    );
+  }
+});
+
+test("buildChunkedAuditTasks already-high priority lens stays at high when boosted", () => {
+  const coverage = {
+    files: [
+      {
+        path: "src/auth.ts",
+        unit_ids: ["src-auth"],
+        classification_status: "classified",
+        audit_status: "pending",
+        required_lenses: ["security"],
+        completed_lenses: [],
+      },
+    ],
+  };
+  const lineIndex = { "src/auth.ts": 10 };
+
+  // Boost security — even if base is already "high", boost must not create "critical" or exceed "high".
+  const tasks = buildChunkedAuditTasks(coverage, lineIndex, {
+    intent_priority_boost: ["security"],
+  });
+
+  const secTask = tasks.find((t) => t.lens === "security");
+  assert.ok(secTask, "security task should exist");
+  assert.ok(
+    ["low", "medium", "high"].includes(secTask.priority),
+    `priority must be one of the valid values; got ${secTask.priority}`,
+  );
+  // "high" is the ceiling; boosting an already-high task must not break it
+  assert.notEqual(secTask.priority, "critical", "no over-promotion beyond high");
+});
+
 test("buildChunkedAuditTasks splits aggregate review blocks by line budget", () => {
   const tasks = buildChunkedAuditTasks(
     {

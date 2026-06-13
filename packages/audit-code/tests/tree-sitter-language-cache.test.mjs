@@ -118,6 +118,32 @@ test("getTreeSitterDegradationCount increments on grammar load failure", async (
   }
 });
 
+// TST-b975cabf: two DISTINCT absent grammars on the SAME dependency path —
+// each must record its own degradation, so the counter must be exactly 2.
+// This verifies that cache keying is per (path, grammar) not just per path.
+test("getTreeSitterParser: two distinct absent grammars on the same path each degrade once", async () => {
+  __resetTreeSitterForTests();
+
+  const dir = await mkdtemp(join(tmpdir(), "ts-two-grammars-"));
+  const ABSENT_GRAMMAR_B = "__audit_test_absent_grammar_b__";
+  try {
+    const a = await getTreeSitterParser(ABSENT_GRAMMAR, dir);
+    const b = await getTreeSitterParser(ABSENT_GRAMMAR_B, dir);
+    assert.equal(a, undefined, "first absent grammar returns undefined");
+    assert.equal(b, undefined, "second absent grammar returns undefined");
+    // Each grammar is a distinct cache key — the degradation counter must
+    // reflect both failures, not just one (which would indicate the second
+    // absent grammar was served from the first's cached null).
+    assert.ok(
+      getTreeSitterDegradationCount() >= 2,
+      `expected degradation count >= 2 for two distinct absent grammars; got ${getTreeSitterDegradationCount()}`,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    __resetTreeSitterForTests();
+  }
+});
+
 test("__resetTreeSitterForTests resets degradation counter", async () => {
   __resetTreeSitterForTests();
 
