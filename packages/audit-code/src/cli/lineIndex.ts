@@ -16,6 +16,7 @@ export async function buildLineIndex(
   repoManifest: RepoManifest,
 ): Promise<Record<string, number>> {
   const entries: Array<readonly [string, number]> = [];
+  let failureCount = 0;
   for (let i = 0; i < repoManifest.files.length; i += LINE_COUNT_BATCH_SIZE) {
     const batch = repoManifest.files.slice(i, i + LINE_COUNT_BATCH_SIZE);
     const results = await Promise.all(
@@ -32,11 +33,17 @@ export async function buildLineIndex(
           process.stderr.write(
             `[lineIndex] ${kind} counting lines for '${file.path}': ${err instanceof Error ? err.message : String(err)}\n`,
           );
+          failureCount++;
           return [file.path, 0] as const;
         }
       }),
     );
     entries.push(...results);
+  }
+  if (failureCount > 0) {
+    process.stderr.write(
+      `[lineIndex] ${failureCount} of ${repoManifest.files.length} file(s) failed line counting; those entries default to 0.\n`,
+    );
   }
   return Object.fromEntries(entries);
 }
@@ -47,6 +54,7 @@ export async function buildLineIndexForPaths(
 ): Promise<Record<string, number>> {
   const uniquePaths = [...new Set(paths)].sort();
   const entries: Array<readonly [string, number]> = [];
+  let failureCount = 0;
   const batchSize = LINE_COUNT_BATCH_SIZE;
   for (let i = 0; i < uniquePaths.length; i += batchSize) {
     const batch = uniquePaths.slice(i, i + batchSize);
@@ -59,11 +67,17 @@ export async function buildLineIndexForPaths(
           process.stderr.write(
             `[lineIndex] ${kind} counting lines for '${path}': ${err instanceof Error ? err.message : String(err)}\n`,
           );
+          failureCount++;
           return [path, 0] as const;
         }
       }),
     );
     entries.push(...results);
+  }
+  if (failureCount > 0) {
+    process.stderr.write(
+      `[lineIndex] ${failureCount} of ${uniquePaths.length} file(s) failed line counting; those entries default to 0.\n`,
+    );
   }
   return Object.fromEntries(entries);
 }

@@ -3,23 +3,7 @@ import type { AuditTask, CoverageMatrix, Lens } from "../types.js";
 import { isLens } from "../types.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
 import type { CriticalFlowManifest } from "@audit-tools/shared";
-
-function getExternalSignalPaths(
-  externalAnalyzerResults?: ExternalAnalyzerResults,
-): Set<string> {
-  const results = Array.isArray(externalAnalyzerResults?.results)
-    ? externalAnalyzerResults.results
-    : [];
-  return new Set(
-    results
-      .map((item) =>
-        item && typeof item.path === "string" && item.path.length > 0
-          ? item.path
-          : null,
-      )
-      .filter((path): path is string => path !== null),
-  );
-}
+import { getExternalSignalPaths } from "./requeueUtils.js";
 
 function taskPriority(
   hasExternalSignal: boolean,

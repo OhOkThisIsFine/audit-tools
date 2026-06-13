@@ -110,12 +110,17 @@ export const ARTIFACT_DEPENDENTS_MAP: Record<string, string[]> = {
   // or delta) and gates coverage: in delta mode it decides which coverage
   // entries are (re)queued vs. inherited-complete/excluded. A changed scope
   // (different `--since`/seed set → new content hash) re-stales coverage so the
-  // plan rebuilds. No cycle: planning writes scope.json AND coverage_matrix.json
-  // in one advanceAudit call, and computeArtifactMetadata is dependency-first,
-  // so coverage records the post-write scope revision (mirrors graph_bundle →
-  // analyzer_capability and audit-findings → narrative).
+  // plan rebuilds. audit_tasks.json is also listed directly so a scope change
+  // that produces coverage_matrix with identical content (same files, same
+  // buckets) still re-stales tasks — without this edge the transitive path
+  // scope→coverage_matrix→audit_tasks would silently carry stale tasks when
+  // coverage content is unchanged (ARC-cebe3421-3). No cycle: planning writes
+  // scope.json, coverage_matrix.json, and audit_tasks.json in one advanceAudit
+  // call, and computeArtifactMetadata is dependency-first, so each records the
+  // post-write scope revision (mirrors graph_bundle → analyzer_capability).
   "scope.json": [
     "coverage_matrix.json",
+    "audit_tasks.json",
   ],
   "coverage_matrix.json": [
     "flow_coverage.json",

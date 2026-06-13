@@ -406,6 +406,17 @@ export async function executeAndRecord(
   lastSummary: string,
 ): Promise<AdvanceAuditResult> {
   try {
+    // Write a "started" marker before execution so a host watching the filesystem
+    // can tell which executor is active during a long-running step (OBS-0d4c2311).
+    const startedAt = new Date().toISOString();
+    await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
+      iteration: index + 1,
+      max_runs: params.maxRuns,
+      executor: decision.selected_executor,
+      obligation: decision.selected_obligation,
+      status: "running",
+      started_at: startedAt,
+    });
     const result = await runAuditStep({
       root: params.root,
       artifactsDir: params.artifactsDir,
@@ -420,6 +431,8 @@ export async function executeAndRecord(
       last_obligation: decision.selected_obligation,
       progress_made: result.progress_made,
       summary: result.progress_summary,
+      status: "complete",
+      started_at: startedAt,
       timestamp: new Date().toISOString(),
     });
     return result;

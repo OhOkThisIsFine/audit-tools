@@ -49,9 +49,24 @@ test("INV-03: scope.json → coverage_matrix is in ARTIFACT_DEPENDENTS_MAP", () 
   );
 });
 
-test("INV-03: coverage_matrix.json is downstream of scope.json transitively to audit_tasks.json and flow_coverage.json", () => {
-  // scope → coverage_matrix → [audit_tasks, flow_coverage, ...]
-  // We verify the transitive closure reaches audit_tasks.json and flow_coverage.json.
+test("INV-03: scope.json has direct edges to coverage_matrix.json AND audit_tasks.json", () => {
+  // ARC-cebe3421-3: without a direct scope→audit_tasks edge, a scope change that
+  // produces coverage_matrix with identical content (same files/buckets) silently
+  // carries stale tasks built under the old scope — the transitive path
+  // scope→coverage_matrix→audit_tasks only fires when coverage_matrix content changes.
+  const scopeDeps = ARTIFACT_DEPENDENTS_MAP["scope.json"] ?? [];
+  assert.ok(
+    scopeDeps.includes("coverage_matrix.json"),
+    "scope.json must list coverage_matrix.json as a direct dependent",
+  );
+  assert.ok(
+    scopeDeps.includes("audit_tasks.json"),
+    "scope.json must list audit_tasks.json as a DIRECT dependent (ARC-cebe3421-3: scope change that produces identical coverage_matrix content must still re-stale tasks)",
+  );
+});
+
+test("INV-03: coverage_matrix.json is downstream of scope.json transitively to flow_coverage.json and audit-report.md", () => {
+  // scope → coverage_matrix → [flow_coverage, audit-report.md, ...]
   const dependents = ARTIFACT_DEPENDENTS_MAP;
 
   function transitiveDownstream(start) {
@@ -77,13 +92,6 @@ test("INV-03: coverage_matrix.json is downstream of scope.json transitively to a
     fromScope.has("flow_coverage.json"),
     "scope.json must transitively reach flow_coverage.json (via coverage_matrix)",
   );
-  // audit_tasks.json does NOT depend on scope.json directly (no edge scope→audit_tasks),
-  // but it does depend on coverage_matrix only if coverage_matrix is in audit_tasks deps.
-  // Check: is audit_tasks.json downstream of coverage_matrix?
-  const coverageDeps = dependents["coverage_matrix.json"] ?? [];
-  // audit_tasks does NOT appear in coverage_matrix's dependents (they are co-produced by
-  // planning_executor, not derived from each other). Verify the DAG is correct.
-  // Instead verify scope is upstream of audit-report.md (the synthesis gate).
   assert.ok(
     fromScope.has("audit-report.md"),
     "scope.json must transitively reach audit-report.md so scope changes re-stale synthesis",
@@ -453,5 +461,142 @@ test("INV-08: orchestrator source files contain no hardcoded model names or wind
     violations.length,
     0,
     `Orchestrator source must not hardcode model identities. Violations:\n${violations.join("\n")}`,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// INV-09: legacyReviewed staleness gate (ARC-14c59af5-2)
+// ---------------------------------------------------------------------------
+
+test("INV-09: stale design_assessment.json does NOT activate legacyReviewed — both review obligations are missing", () => {
+  // A design_assessment with reviewed:true but no contract_reviewed/conceptual_reviewed
+  // is a pre-split legacy artifact. When the artifact is NOT stale (no upstream change),
+  // the backward-compat path should still apply (satisfies both obligations).
+  // When it IS stale, the obligations must be missing (trigger fresh review passes).
+  //
+  // We need a bundle where design_assessment.json is stale. To produce staleness we
+  // give it computed metadata then change a dependency (unit_manifest).
+  const base = {
+    repo_manifest: { repository: { name: "f" }, generated_at: "t", files: [] },
+    file_disposition: { files: [] },
+    unit_manifest: { units: [] },
+    surface_manifest: { surfaces: [] },
+    graph_bundle: { graphs: {} },
+    critical_flows: { flows: [], fallback_required: false },
+    risk_register: { items: [] },
+    design_assessment: {
+      generated_at: "2026-01-01T00:00:00Z",
+      findings: [],
+      // Legacy pre-split: only `reviewed`, neither contract_reviewed nor conceptual_reviewed
+      reviewed: true,
+    },
+  };
+  const metadata = computeArtifactMetadata(base);
+  // Simulate a structural change: unit_manifest content changes, which stales design_assessment.json
+  // (unit_manifest.json → design_assessment.json is an edge in ARTIFACT_DEPENDENTS_MAP).
+  const staleBundle = {
+    ...base,
+    unit_manifest: { units: [{ unit_id: "x", name: "x", kind: "module", files: ["x.ts"], required_lenses: [], risk_score: 1, critical_flows: [] }] },
+    artifact_metadata: metadata,
+  };
+  const state = deriveAuditState(staleBundle);
+  const contract = state.obligations.find((o) => o.id === "design_review_contract_completed");
+  const conceptual = state.obligations.find((o) => o.id === "design_review_conceptual_completed");
+  assert.ok(contract, "design_review_contract_completed must be present");
+  assert.ok(conceptual, "design_review_conceptual_completed must be present");
+  assert.equal(
+    contract.state,
+    "missing",
+    "design_review_contract_completed must be missing when design_assessment.json is stale (legacyReviewed gate)",
+  );
+  assert.equal(
+    conceptual.state,
+    "missing",
+    "design_review_conceptual_completed must be missing when design_assessment.json is stale (legacyReviewed gate)",
+  );
+});
+
+test("INV-09: non-stale legacy design_assessment (reviewed:true) still satisfies both review obligations", () => {
+  // The backward-compat path must remain active when the artifact is present and fresh.
+  const bundle = {
+    design_assessment: {
+      generated_at: "2026-01-01T00:00:00Z",
+      findings: [],
+      reviewed: true,
+      // no contract_reviewed or conceptual_reviewed
+    },
+  };
+  const state = deriveAuditState(bundle);
+  const contract = state.obligations.find((o) => o.id === "design_review_contract_completed");
+  const conceptual = state.obligations.find((o) => o.id === "design_review_conceptual_completed");
+  assert.ok(contract, "design_review_contract_completed must be present");
+  assert.ok(conceptual, "design_review_conceptual_completed must be present");
+  // Without metadata, computeStaleArtifacts returns an empty stale set,
+  // so design_assessment.json is NOT in the stale set → legacyReviewed fires.
+  assert.equal(
+    contract.state,
+    "satisfied",
+    "non-stale legacy reviewed:true must satisfy design_review_contract_completed",
+  );
+  assert.equal(
+    conceptual.state,
+    "satisfied",
+    "non-stale legacy reviewed:true must satisfy design_review_conceptual_completed",
+  );
+});
+
+test("INV-09: split design_assessment (contract_reviewed + conceptual_reviewed) satisfies both obligations regardless of staleness", () => {
+  // New-format artifacts with explicit split flags always satisfy the obligations
+  // as long as the flags are true (the staleness gate only applies to the legacy path).
+  const bundle = {
+    design_assessment: {
+      generated_at: "2026-01-01T00:00:00Z",
+      findings: [],
+      contract_reviewed: true,
+      conceptual_reviewed: true,
+    },
+  };
+  const state = deriveAuditState(bundle);
+  const contract = state.obligations.find((o) => o.id === "design_review_contract_completed");
+  const conceptual = state.obligations.find((o) => o.id === "design_review_conceptual_completed");
+  assert.equal(contract?.state, "satisfied", "contract_reviewed=true must satisfy contract obligation");
+  assert.equal(conceptual?.state, "satisfied", "conceptual_reviewed=true must satisfy conceptual obligation");
+});
+
+// ---------------------------------------------------------------------------
+// INV-10: scope.json → audit_tasks.json direct staleness edge (ARC-cebe3421-3)
+// ---------------------------------------------------------------------------
+
+test("INV-10: a scope change stales audit_tasks.json even when coverage_matrix content is unchanged", () => {
+  // This is the ARC-cebe3421-3 regression guard. Without a direct scope→audit_tasks edge,
+  // if scope changes but coverage_matrix content happens to be identical, audit_tasks
+  // would not re-stale (the transitive path never fires). The direct edge ensures
+  // scope revision changes always propagate to audit_tasks.
+
+  // Build initial bundle with scope.json and audit_tasks.json present.
+  const base = {
+    scope: { mode: "full", seed_files: [], generated_at: "2026-01-01T00:00:00Z" },
+    coverage_matrix: { files: [] },
+    audit_tasks: [],
+    requeue_tasks: [],
+    audit_plan_metrics: { task_count: 0, packet_count: 0, priority_counts: {} },
+  };
+  const metadata = computeArtifactMetadata(base);
+
+  // Simulate scope content change (different --since produces different seed_files).
+  const changedScopeBundle = {
+    ...base,
+    scope: { mode: "delta", seed_files: ["src/auth.ts"], generated_at: "2026-01-01T00:00:00Z" },
+    artifact_metadata: metadata,
+  };
+
+  const stale = computeStaleArtifacts(changedScopeBundle);
+  assert.ok(
+    stale.has("coverage_matrix.json"),
+    "coverage_matrix.json must be stale when scope changes",
+  );
+  assert.ok(
+    stale.has("audit_tasks.json"),
+    "audit_tasks.json must be stale when scope changes (direct edge guards against identical-coverage no-fire)",
   );
 });

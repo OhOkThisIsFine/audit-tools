@@ -47,12 +47,19 @@ export async function cmdStatus(argv: string[]): Promise<void> {
   const recentRuns = ledger.runs
     .slice(-RECENT_RUN_LIMIT)
     .reverse()
-    .map((entry) => ({
-      run_id: entry.run_id,
-      obligation_id: entry.obligation_id,
-      status: entry.status,
-      started_at: entry.started_at,
-    }));
+    .map((entry) => {
+      const startMs = Date.parse(entry.started_at);
+      const endMs = Date.parse(entry.ended_at);
+      const duration_ms = Number.isFinite(startMs) && Number.isFinite(endMs) ? endMs - startMs : undefined;
+      return {
+        run_id: entry.run_id,
+        obligation_id: entry.obligation_id,
+        status: entry.status,
+        started_at: entry.started_at,
+        ended_at: entry.ended_at,
+        ...(duration_ms !== undefined ? { duration_ms } : {}),
+      };
+    });
 
   // 3. Find the most recent run directory and read pending-audit-tasks.json
   let pendingTasksSummary: {
@@ -116,12 +123,26 @@ export async function cmdStatus(argv: string[]): Promise<void> {
     }
   }
 
+  // Derive the started_at and elapsed time for the current last_obligation from
+  // the most recent ledger entry that matches it, so operators can tell whether
+  // the audit is stuck or merely running.
+  const lastObligationEntry = auditState.last_obligation
+    ? [...ledger.runs].reverse().find((r) => r.obligation_id === auditState.last_obligation)
+    : undefined;
+  const lastObligationStartedAt = lastObligationEntry?.started_at ?? null;
+  const lastObligationElapsedMs =
+    lastObligationStartedAt
+      ? Date.now() - Date.parse(lastObligationStartedAt)
+      : null;
+
   console.log(
     JSON.stringify(
       {
         artifacts_dir: artifactsDir,
         status: auditState.status,
         last_obligation: auditState.last_obligation ?? null,
+        last_obligation_started_at: lastObligationStartedAt,
+        last_obligation_elapsed_ms: lastObligationElapsedMs,
         last_executor: auditState.last_executor ?? null,
         blockers: auditState.blockers ?? [],
         obligations_summary: obligationStates,

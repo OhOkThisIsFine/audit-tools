@@ -24,79 +24,108 @@ import { PACKET_SCHEMA_FILENAMES } from "../io/runArtifacts.js";
 // scanning for spurious files.
 const PACKET_SCHEMA_FILENAME_SET = new Set<string>(PACKET_SCHEMA_FILENAMES);
 
-export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
-  const runId = getFlag(argv, "--run-id");
-  if (!runId) throw new Error("merge-and-ingest requires --run-id <run_id>");
-  const artifactsDir = getArtifactsDir(argv);
+/**
+ * Canonical key for a finding used to detect cross-packet duplicates.
+ * Stable across result ordering: lens + category + title + first affected file.
+ */
+function findingKey(f: { lens?: string; category?: string; title?: string; affected_files?: Array<{ path: string }> }): string {
+  return [
+    (f.lens ?? "").trim().toLowerCase(),
+    (f.category ?? "").trim().toLowerCase(),
+    (f.title ?? "").trim().toLowerCase(),
+    f.affected_files?.[0]?.path ?? "",
+  ].join("|");
+}
 
-  const runDir = join(artifactsDir, "runs", runId);
-  const taskResultsDir = join(runDir, "task-results");
-  const auditResultsPath = join(runDir, "run-results.json");
-  const taskPath = join(runDir, "task.json");
-  const tasksPath = join(runDir, "pending-audit-tasks.json");
-  const mergeCompletePath = join(runDir, "merge-complete.json");
+/**
+ * Scan the accepted results and warn when findings share the same canonical key
+ * across different packets. All results are in memory at merge time, so this
+ * check is more accurate than the per-packet early-warning that previously lived
+ * in submit-packet.
+ */
+function warnOnDuplicateFindings(passing: AuditResult[]): void {
+  const seenKeys = new Map<string, string>(); // key → task_id
+  let dupCount = 0;
+  for (const result of passing) {
+    for (const f of result.findings ?? []) {
+      const key = findingKey(f);
+      const prior = seenKeys.get(key);
+      if (prior) {
+        dupCount++;
+      } else {
+        seenKeys.set(key, result.task_id);
+      }
+    }
+  }
+  if (dupCount > 0) {
+    process.stderr.write(
+      `[merge-and-ingest] Warning: ${dupCount} finding(s) appear to duplicate findings across packets in this run.\n`,
+    );
+  }
+}
 
-  // Idempotency: a fully-merged run is terminal. A stray re-invocation for the
-  // same run-id (e.g. after the run already advanced to the next deepening
-  // round, which rewrites this run dir's pending-audit-tasks.json to the *next*
-  // round's tasks) must be a clean no-op — not a spurious "all results missing"
-  // hard failure that also truncates the transient results file. Replay the
-  // recorded summary and exit 0.
+/**
+ * Check for a completed-run marker and either replay its summary (no-op) or
+ * invalidate a stale marker and signal to re-process.
+ *
+ * Returns the prior summary object when the run is definitively terminal
+ * (caller should replay and return), or null when processing must continue.
+ */
+async function checkIdempotencyReplay(
+  runId: string,
+  mergeCompletePath: string,
+  tasksPath: string,
+  taskResultsDir: string,
+): Promise<Record<string, unknown> | null> {
   let priorSummary: Record<string, unknown> | null = null;
   try {
     priorSummary = await readJsonFile<Record<string, unknown>>(mergeCompletePath);
   } catch (e) {
     if (!isFileMissingError(e)) throw e;
   }
-  if (priorSummary) {
-    // A completion marker can go stale. Selective deepening appends new pending
-    // tasks to the SAME run-id, and — in the no-progress-loop bug — their answers
-    // already sit on disk under canonical per-task names while the marker says the
-    // run is done. If any pending task has a recoverable on-disk result, the marker
-    // no longer reflects reality: discard it and re-process so those answers ingest
-    // instead of replaying a no-op forever. A genuinely terminal run (no pending
-    // tasks, or pending tasks not yet answered — e.g. a new round handled under a
-    // different run-id) still replays cleanly.
-    let pendingWithResults = 0;
-    try {
-      const pending = await readJsonFile<AuditTask[]>(tasksPath);
-      for (const task of pending) {
-        if (existsSync(taskResultPath(taskResultsDir, task.task_id))) {
-          pendingWithResults++;
-        }
+  if (!priorSummary) return null;
+
+  // A completion marker can go stale. Selective deepening appends new pending
+  // tasks to the SAME run-id, and — in the no-progress-loop bug — their answers
+  // already sit on disk under canonical per-task names while the marker says the
+  // run is done. If any pending task has a recoverable on-disk result, the marker
+  // no longer reflects reality: discard it and re-process so those answers ingest
+  // instead of replaying a no-op forever. A genuinely terminal run (no pending
+  // tasks, or pending tasks not yet answered — e.g. a new round handled under a
+  // different run-id) still replays cleanly.
+  let pendingWithResults = 0;
+  try {
+    const pending = await readJsonFile<AuditTask[]>(tasksPath);
+    for (const task of pending) {
+      if (existsSync(taskResultPath(taskResultsDir, task.task_id))) {
+        pendingWithResults++;
       }
-    } catch { /* no pending-tasks file — treat as terminal and replay */ }
-    if (pendingWithResults === 0) {
-      console.log(
-        JSON.stringify({ ...priorSummary, idempotent_replay: true }, null, 2),
-      );
-      return;
     }
-    process.stderr.write(
-      `[merge-and-ingest] completion marker for ${runId} is stale: ` +
-        `${pendingWithResults} pending task(s) have un-ingested on-disk results; re-processing.\n`,
-    );
-    await rm(mergeCompletePath, { force: true });
+  } catch { /* no pending-tasks file — treat as terminal and replay */ }
+
+  if (pendingWithResults === 0) {
+    return priorSummary;
   }
 
-  const workerTask = await readJsonFile<WorkerTask>(taskPath);
-  const resultMap = await loadDispatchResultMap(runDir);
-  if (!resultMap) {
-    throw new Error(
-      `No ${DISPATCH_RESULT_MAP_FILENAME} found for run ${runId}; run prepare-dispatch first.`,
-    );
-  }
-
-  let allTasks: AuditTask[] = [];
-  try { allTasks = await readJsonFile<AuditTask[]>(tasksPath); } catch { /* may not exist */ }
-  const entryByTaskId = entriesByTaskId(resultMap.entries);
-  if (entryByTaskId.size !== resultMap.entries.length) {
-    throw new Error(`Dispatch result map for run ${runId} contains duplicate task entries.`);
-  }
-  const expectedPaths = new Set(
-    resultMap.entries.map((entry) => resolve(entry.result_path)),
+  process.stderr.write(
+    `[merge-and-ingest] completion marker for ${runId} is stale: ` +
+      `${pendingWithResults} pending task(s) have un-ingested on-disk results; re-processing.\n`,
   );
+  await rm(mergeCompletePath, { force: true });
+  return null;
+}
 
+/**
+ * Scan the task-results/ directory to build a fallback lookup table keyed by
+ * task_id from files that are NOT in the expected result-path set for this
+ * round. Also tracks spurious (non-canonical) filenames for warning output.
+ *
+ * Returns both the fallback map and the list of spurious filenames.
+ */
+async function scanTaskResults(
+  taskResultsDir: string,
+  expectedPaths: Set<string>,
+): Promise<{ fallbackByTaskId: Map<string, unknown>; spuriousFiles: string[] }> {
   let files: string[];
   try {
     files = (await readdir(taskResultsDir)).filter(f => f.endsWith(".json")).sort();
@@ -104,17 +133,9 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
     files = [];
   }
 
-  const passing: AuditResult[] = [];
-  const failing: Array<{ task_id: string; errors: string[] }> = [];
-  // Pending tasks that were NOT dispatched this round (a budget cap deferred
-  // packets). They are not failures — they re-enter dispatch on the next round —
-  // so they are tracked separately and must never inflate rejected_count, force a
-  // non-zero exit, or gate the completion marker.
-  const notDispatched: string[] = [];
-  const seenTaskIds = new Set<string>();
+  const fallbackByTaskId = new Map<string, unknown>();
   const spuriousFiles: string[] = [];
 
-  const fallbackByTaskId = new Map<string, unknown>();
   for (const filename of files) {
     // Schema pointer files (audit_result/finding/audit_task .schema.json) are
     // copied into task-results/ by prepare-dispatch for optional worker
@@ -151,15 +172,29 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
     }
   }
 
-  // Collapse stray-file warnings into a single stderr line so the real summary
-  // (emitted as the sole stdout JSON payload) is never buried under a wall of
-  // per-file warnings.
-  if (spuriousFiles.length > 0) {
-    process.stderr.write(
-      `[merge-and-ingest] Warning: ${spuriousFiles.length} unexpected file(s) in ` +
-        `task-results/ ignored: ${spuriousFiles.join(", ")}\n`,
-    );
-  }
+  return { fallbackByTaskId, spuriousFiles };
+}
+
+/**
+ * Validate each pending task's result, classifying into passing/failing/notDispatched.
+ * Reads results from the result-map paths or falls back to the task_id lookup table
+ * for tasks recovered from non-canonical files.
+ */
+async function validateAndCollectResults(
+  allTasks: AuditTask[],
+  entryByTaskId: Map<string, { result_path: string; task_id: string; packet_id: string }>,
+  fallbackByTaskId: Map<string, unknown>,
+): Promise<{
+  passing: AuditResult[];
+  failing: Array<{ task_id: string; errors: string[] }>;
+  notDispatched: string[];
+}> {
+  const passing: AuditResult[] = [];
+  const failing: Array<{ task_id: string; errors: string[] }> = [];
+  // Pending tasks that were NOT dispatched this round (budget cap deferred
+  // packets). Not failures — they re-enter dispatch on the next round.
+  const notDispatched: string[] = [];
+  const seenTaskIds = new Set<string>();
 
   for (const task of allTasks) {
     const entry = entryByTaskId.get(task.task_id);
@@ -240,6 +275,70 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
       failing.push({ task_id: taskId ?? task.task_id, errors: resultErrors });
     }
   }
+
+  return { passing, failing, notDispatched };
+}
+
+export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
+  const runId = getFlag(argv, "--run-id");
+  if (!runId) throw new Error("merge-and-ingest requires --run-id <run_id>");
+  const artifactsDir = getArtifactsDir(argv);
+
+  const runDir = join(artifactsDir, "runs", runId);
+  const taskResultsDir = join(runDir, "task-results");
+  const auditResultsPath = join(runDir, "run-results.json");
+  const taskPath = join(runDir, "task.json");
+  const tasksPath = join(runDir, "pending-audit-tasks.json");
+  const mergeCompletePath = join(runDir, "merge-complete.json");
+
+  // Phase 1: idempotency — replay a completed run or discard a stale marker.
+  const priorSummary = await checkIdempotencyReplay(runId, mergeCompletePath, tasksPath, taskResultsDir);
+  if (priorSummary) {
+    console.log(JSON.stringify({ ...priorSummary, idempotent_replay: true }, null, 2));
+    return;
+  }
+
+  const workerTask = await readJsonFile<WorkerTask>(taskPath);
+  const resultMap = await loadDispatchResultMap(runDir);
+  if (!resultMap) {
+    throw new Error(
+      `No ${DISPATCH_RESULT_MAP_FILENAME} found for run ${runId}; run prepare-dispatch first.`,
+    );
+  }
+
+  let allTasks: AuditTask[] = [];
+  try { allTasks = await readJsonFile<AuditTask[]>(tasksPath); } catch { /* may not exist */ }
+  const entryByTaskId = entriesByTaskId(resultMap.entries);
+  if (entryByTaskId.size !== resultMap.entries.length) {
+    throw new Error(`Dispatch result map for run ${runId} contains duplicate task entries.`);
+  }
+  const expectedPaths = new Set(
+    resultMap.entries.map((entry) => resolve(entry.result_path)),
+  );
+
+  // Phase 2: scan task-results/ to build the fallback-by-task_id recovery table.
+  const { fallbackByTaskId, spuriousFiles } = await scanTaskResults(taskResultsDir, expectedPaths);
+
+  // Collapse stray-file warnings into a single stderr line so the real summary
+  // (emitted as the sole stdout JSON payload) is never buried under a wall of
+  // per-file warnings.
+  if (spuriousFiles.length > 0) {
+    process.stderr.write(
+      `[merge-and-ingest] Warning: ${spuriousFiles.length} unexpected file(s) in ` +
+        `task-results/ ignored: ${spuriousFiles.join(", ")}\n`,
+    );
+  }
+
+  // Phase 3: validate each task's result and classify into passing/failing/notDispatched.
+  const { passing, failing, notDispatched } = await validateAndCollectResults(
+    allTasks,
+    entryByTaskId,
+    fallbackByTaskId,
+  );
+
+  // Phase 4: warn on cross-packet duplicate findings (all results in memory here —
+  // more accurate than per-packet early-warning at submit time).
+  warnOnDuplicateFindings(passing);
 
   const failedTasksPath = join(runDir, "failed-tasks.json");
   if (failing.length > 0) {

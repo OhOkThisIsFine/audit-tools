@@ -1,0 +1,304 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { writeJsonFile } from "@audit-tools/shared";
+import type { AuditTask } from "../../types.js";
+import type { ReviewPacket } from "../../types/reviewPlanning.js";
+import type { ArtifactBundle } from "../../io/artifacts.js";
+import { buildFileAnchorSummary, type FileAnchorSummary } from "../../orchestrator/fileAnchors.js";
+import { artifactNameForId } from "../args.js";
+import { withinRoot } from "./paths.js";
+import { isIsolatedLargeFilePacket } from "./packetFilter.js";
+
+// Prompt rendering: large-file anchor extraction, packet graph context
+// rendering, task section building, and full packet prompt assembly.
+
+function renderAnchorPreview(
+  summary: FileAnchorSummary,
+  anchorPath: string,
+): string[] {
+  const preview = summary.anchors.slice(0, 24).map((anchor) => {
+    const location = anchor.line ? `${summary.path}:${anchor.line}` : summary.path;
+    const detail = anchor.detail ? ` - ${anchor.detail}` : "";
+    return `- ${location} [${anchor.kind}] ${anchor.name}${detail}`;
+  });
+  return [
+    "## Large File Review Mode",
+    "This packet is intentionally isolated because it covers one large file.",
+    "Use targeted reads/searches within this file, guided by the mechanical anchors.",
+    "Do not read unrelated files unless a finding cannot be evidenced without a direct boundary check.",
+    `Anchor file: ${anchorPath}`,
+    `Anchor counts: symbols=${summary.counts.symbols}, routes=${summary.counts.routes}, keywords=${summary.counts.keywords}, graph_edges=${summary.counts.graph_edges}, analyzer_signals=${summary.counts.analyzer_signals}, omitted=${summary.omitted_anchor_count}`,
+    "Anchor preview:",
+    ...(preview.length > 0 ? preview : ["- no anchors extracted beyond file boundaries"]),
+    "",
+  ];
+}
+
+function formatPacketConfidence(value: number | undefined): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(2)
+    : "n/a";
+}
+
+function renderPacketGraphContext(packet: {
+  entrypoints?: string[];
+  key_edges?: Array<{
+    from: string;
+    to: string;
+    kind?: string;
+    confidence?: number;
+    reason?: string;
+  }>;
+  boundary_files?: string[];
+  quality?: {
+    cohesion_score: number;
+    internal_edge_count: number;
+    boundary_edge_count: number;
+    unexplained_file_count: number;
+  };
+}): string[] {
+  const hasContext =
+    (packet.entrypoints?.length ?? 0) > 0 ||
+    (packet.key_edges?.length ?? 0) > 0 ||
+    (packet.boundary_files?.length ?? 0) > 0 ||
+    packet.quality !== undefined;
+  if (!hasContext) {
+    return [];
+  }
+
+  const lines = ["## Packet graph context"];
+  if (packet.entrypoints?.length) {
+    lines.push("Entrypoints:");
+    lines.push(...packet.entrypoints.map((entrypoint) => `- ${entrypoint}`));
+  }
+  if (packet.key_edges?.length) {
+    lines.push("Key internal edges:");
+    lines.push(
+      ...packet.key_edges.map((edge) => {
+        const kind = edge.kind ? ` [${edge.kind}]` : "";
+        const reason = edge.reason ? ` - ${edge.reason}` : "";
+        return `- ${edge.from} -> ${edge.to}${kind} confidence=${formatPacketConfidence(edge.confidence)}${reason}`;
+      }),
+    );
+  }
+  if (packet.boundary_files?.length) {
+    lines.push("Boundary files to check only when evidence crosses the packet:");
+    lines.push(...packet.boundary_files.map((path) => `- ${path}`));
+  }
+  if (packet.quality) {
+    lines.push(
+      `Quality: cohesion=${packet.quality.cohesion_score}, internal_edges=${packet.quality.internal_edge_count}, boundary_edges=${packet.quality.boundary_edge_count}, unexplained_files=${packet.quality.unexplained_file_count}`,
+    );
+  }
+  lines.push("");
+  return lines;
+}
+
+/**
+ * Encapsulates large-file anchor extraction for a single packet.
+ * Appends to the provided warnings array on unavailability or failure.
+ */
+export async function extractPacketAnchor(params: {
+  packet: ReviewPacket;
+  reviewRoot: string | undefined;
+  bundle: ArtifactBundle;
+  taskResultsDir: string;
+  warnings: Array<{ code: string; message: string }>;
+}): Promise<{ anchorPath: string | null; anchorSummary: FileAnchorSummary | null }> {
+  const { packet, reviewRoot, bundle, taskResultsDir, warnings } = params;
+  if (!reviewRoot) {
+    warnings.push({
+      code: "large_file_anchor_unavailable",
+      message: `large single-file packet ${packet.packet_id} has no repo root available for anchor extraction`,
+    });
+    return { anchorPath: null, anchorSummary: null };
+  }
+  try {
+    const filePath = packet.file_paths[0]!;
+    const totalLines = packet.file_line_counts[filePath] ?? packet.total_lines;
+    const content = await readFile(withinRoot(reviewRoot, filePath), "utf8");
+    const anchorSummary = buildFileAnchorSummary({
+      path: filePath,
+      content,
+      totalLines,
+      graphBundle: bundle.graph_bundle,
+      externalAnalyzerResults: bundle.external_analyzer_results,
+    });
+    const anchorPath = join(taskResultsDir, artifactNameForId(packet.packet_id, "anchors.json"));
+    await writeJsonFile(anchorPath, anchorSummary);
+    return { anchorPath, anchorSummary };
+  } catch (error) {
+    warnings.push({
+      code: "large_file_anchor_failed",
+      message:
+        `large single-file packet ${packet.packet_id} could not be anchored mechanically: ` +
+        (error instanceof Error ? error.message : String(error)),
+    });
+    return { anchorPath: null, anchorSummary: null };
+  }
+}
+
+/**
+ * Extracts the per-task flatMap that builds task section lines.
+ */
+export function buildTaskSections(
+  packetTasks: AuditTask[],
+  lensDefs: Record<string, { description: string; do_not_report: string }>,
+  lineIndex: Record<string, number>,
+): string[] {
+  return packetTasks.flatMap((task) => {
+    const lensDef = lensDefs[task.lens];
+    const inputLines = task.inputs
+      ? Object.entries(task.inputs)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, value]) => `input.${key}: ${value}`)
+      : [];
+    const isLensVerification = task.tags?.includes("lens_verification") ?? false;
+    const coverageTemplate = task.file_paths.map((path) => ({
+      path,
+      total_lines: task.file_line_counts?.[path] ?? lineIndex[path] ?? 0,
+    }));
+    return [
+      `### ${task.task_id}`,
+      `unit_id: ${task.unit_id}`,
+      `pass_id: ${task.pass_id}`,
+      `lens: ${task.lens}`,
+      ...(task.tags?.length ? [`tags: ${task.tags.join(", ")}`] : []),
+      ...inputLines,
+      `rationale: ${task.rationale}`,
+      "",
+      `Lens guidance: ${lensDef?.description ?? task.lens}`,
+      `Do NOT report: ${lensDef?.do_not_report ?? "N/A"}`,
+      ...(isLensVerification
+        ? [
+            "",
+            "Lens verification mode: review the prior result summary in the rationale and use only targeted source checks.",
+            "Do not redo every packet and do not write direct findings for this task.",
+            "Return findings: [] plus verification metadata. Include followup_tasks only for bounded, specific re-review packets.",
+          ]
+        : []),
+      "",
+      "file_coverage (copy exactly into your AuditResult for this task):",
+      "```json",
+      JSON.stringify(coverageTemplate),
+      "```",
+      "",
+    ];
+  });
+}
+
+/**
+ * Wraps the array-join block and returns the assembled prompt string.
+ * Workers emit AuditResult[] inline in their response; the skill/host captures
+ * and writes the JSON to `result_path` on their behalf. No shell submit command.
+ */
+export function buildPacketPrompt(params: {
+  packet: ReviewPacket;
+  packetTasks: AuditTask[];
+  fileList: string;
+  largeFileSection: string[];
+  taskSections: string[];
+  resultPath: string;
+  repoRoot?: string;
+  freeFormIntent?: string;
+}): string {
+  const { packet, fileList, largeFileSection, taskSections, resultPath, repoRoot, freeFormIntent } = params;
+  const largeFileMode = isIsolatedLargeFilePacket(packet);
+  const intentSection = freeFormIntent?.trim()
+    ? ["## Audit intent", freeFormIntent.trim(), ""]
+    : [];
+  return [
+    "You are a code auditor. Review this packet once, then emit exactly one result per listed task.",
+    repoRoot ? `Repository root: ${repoRoot}` : "Repository root: use the root from the step contract.",
+    "Set the shell/tool workdir to the repository root when running backend commands.",
+    "",
+    ...intentSection,
+    "## Packet",
+    `packet_id: ${packet.packet_id}`,
+    `task_count: ${packet.task_ids.length}`,
+    `lenses: ${packet.lenses.join(", ")}`,
+    `estimated_tokens: ${packet.estimated_tokens}`,
+    `result_path: ${resultPath}`,
+    "",
+    "## Files to read",
+    largeFileMode
+      ? "Use targeted Read/Grep calls. Paths are repo-relative to the repository root above."
+      : "Use your Read tool. Paths are repo-relative to the repository root above.",
+    "Use host Read and Grep tools for source inspection. Do not use shell search commands.",
+    fileList,
+    "",
+    ...renderPacketGraphContext(packet),
+    ...largeFileSection,
+    "## Tasks",
+    ...taskSections,
+    "## Output",
+    "Do not write files, run shell commands, or edit source files. Do not use a Write tool or",
+    "create temp files. Produce one JSON array containing exactly one AuditResult object for",
+    "each listed task and emit it INLINE in your response (do NOT write files yourself —",
+    "the skill captures your inline payload and writes it to result_path on your behalf).",
+    "Windows PowerShell: do not pipe an inline foreach statement directly into ConvertTo-Json.",
+    "Assign the foreach output to a variable first, then pipe that variable to ConvertTo-Json.",
+    "PowerShell also unwraps single-element arrays: @(@{...}) collapses to one object, so a",
+    "one-result submission serializes as an object (not a 1-element array) and is rejected. Wrap it",
+    "yourself: '[' + (ConvertTo-Json $obj -Depth 12) + ']', or build the array with Write-Output -NoEnumerate.",
+    "",
+    "Schema file (resolve relative to this prompt's directory): audit_result.schema.json",
+    "  $refs resolved from the same directory: finding.schema.json, audit_task.schema.json",
+    "You MAY validate your JSON array against the schema before emitting. This is optional.",
+    "",
+    "Required AuditResult fields:",
+    "  task_id       copy from the task metadata",
+    "  unit_id       copy from the task metadata",
+    "  pass_id       copy from the task metadata",
+    "  lens          copy from the task metadata",
+    "  file_coverage [{path, total_lines}] - copy the exact template from each task section above. You MUST include total_lines. Do not omit or zero it out, as this will cause fatal validation errors.",
+    "  findings      [] or array of finding objects",
+    "",
+    "Lens verification tasks:",
+    "  tasks tagged lens_verification must use findings: [] and include verification:",
+    "  {verified: boolean, needs_followup: boolean, concerns?: string[],",
+    "   coverage_concerns?: string[], confidence_concerns?: string[],",
+    "   followup_tasks?: AuditTask[]}.",
+    "  Follow-up AuditTask suggestions must stay bounded to files in this packet and use the same lens.",
+    "",
+    "Each finding object:",
+    "  id            unique ID, e.g. \"COR-001\"",
+    "  title         short title",
+    "  category      specific finding category, such as missing-validation or command-execution",
+    "  severity      critical|high|medium|low|info",
+    "  confidence    high|medium|low",
+    "  lens          must match the task lens exactly",
+    "  summary       1-2 sentence description",
+    "  affected_files  [{path, line_start?, line_end?, symbol?}] - objects, not strings; min 1 entry",
+    "  evidence     [\"path/to/file.ts:42 - description of what you see there\"] - min 1 entry",
+    "",
+    "Constraints:",
+    "1. line_end must not exceed the file's actual line count.",
+    "2. affected_files entries are objects with a path key, not plain strings.",
+    "3. Only reference files from the packet unless a finding genuinely crosses a boundary.",
+    "4. findings: [] is correct when you find nothing genuine.",
+    "",
+    "## Final response",
+    `Emit the JSON array inline. Reply exactly: valid: ${packet.packet_id}, findings=<total finding count>`,
+  ].join("\n");
+}
+
+export function buildLargeFileSection(
+  largeFileMode: boolean,
+  anchorSummary: FileAnchorSummary | null,
+  anchorPath: string | null,
+): string[] {
+  if (anchorSummary && anchorPath) {
+    return renderAnchorPreview(anchorSummary, anchorPath);
+  }
+  if (largeFileMode) {
+    return [
+      "## Large File Review Mode",
+      "This packet is intentionally isolated because it covers one large file.",
+      "Use targeted reads/searches within this file only.",
+      "No mechanical anchor file was available, so rely on targeted symbol and keyword searches before reading broad ranges.",
+      "",
+    ];
+  }
+  return [];
+}

@@ -292,36 +292,33 @@ function getExternalSignalResults(
   );
 }
 
-export function buildChunkedAuditTasks(
+/**
+ * Resolve option defaults and build the map of pending (file path → lens)
+ * pairs from the coverage matrix, filtering out excluded files, completed
+ * lenses, lens-filter violations, and trivial audit paths.
+ */
+function buildPendingByLens(
   coverageMatrix: CoverageMatrix,
   unitLineIndex: UnitLineIndex,
-  options: BuildChunkedTaskOptions = {},
-): AuditTask[] {
-  const fileSplitThreshold = options.file_split_threshold ?? DEFAULT_FILE_SPLIT_THRESHOLD;
-  const maxTaskLines = options.max_task_lines ?? DEFAULT_MAX_TASK_LINES;
-  const maxTaskFiles = options.max_task_files ?? DEFAULT_MAX_TASK_FILES;
-  const tinyTestFileLines = options.tiny_test_file_lines ?? DEFAULT_TINY_TEST_FILE_LINES;
+  externalPaths: Set<string>,
+  options: {
+    limit_lenses?: string[];
+    enforceLensFilter: boolean;
+    tinyTestFileLines: number;
+  },
+): Map<string, Set<string>> {
   const allowed = new Set(options.limit_lenses ?? []);
-  const enforceLensFilter = allowed.size > 0;
-  const tasks: AuditTask[] = [];
-  const seen = new Set<string>();
-  const externalPaths = getExternalSignalPaths(options.external_analyzer_results);
-
-  const coverageByPath = new Map(
-    coverageMatrix.files.map((file) => [file.path, file]),
-  );
   const pendingByLens = new Map<string, Set<string>>();
 
   for (const file of coverageMatrix.files) {
     if (file.audit_status === "excluded") {
       continue;
     }
-
     for (const lens of file.required_lenses) {
       if (file.completed_lenses.includes(lens)) {
         continue;
       }
-      if (enforceLensFilter && !allowed.has(lens)) {
+      if (options.enforceLensFilter && !allowed.has(lens)) {
         continue;
       }
       if (
@@ -333,62 +330,36 @@ export function buildChunkedAuditTasks(
       ) {
         continue;
       }
-
       const pending = pendingByLens.get(lens) ?? new Set<string>();
       pending.add(file.path);
       pendingByLens.set(lens, pending);
     }
   }
+  return pendingByLens;
+}
 
-  const intentBoostSet = options.intent_priority_boost && options.intent_priority_boost.length > 0
-    ? new Set<string>(options.intent_priority_boost)
-    : undefined;
-
-  const budgetLimits: TaskBudgetLimits = { maxTaskLines, maxTaskFiles };
-  const taskBlockContext = {
-    tasks,
-    seen,
-    unitLineIndex,
-    fileSplitThreshold,
-    budgetLimits,
-  };
-
-  const assigned = new Set<string>();
-  const flowBlocks = options.critical_flows
-    ? claimFlowReviewBlocks(options.critical_flows, pendingByLens, assigned)
-    : [];
-
-  for (const block of flowBlocks) {
-    const hasExternalSignal = block.file_paths.some((path) => externalPaths.has(path));
-    addTaskBlock({
-      scopeId: `flow:${block.flow_id}`,
-      unitId: `flow:${block.flow_id}`,
-      passId: `flow-pass:${block.lens}`,
-      lens: block.lens,
-      filePaths: block.file_paths,
-      priority: taskPriority(hasExternalSignal, block.lens, true, intentBoostSet),
-      tags: withSignalTag(["critical_flow", `critical_flow:${block.flow_id}`], hasExternalSignal),
-      rationale: (filePaths, splitKind) =>
-        splitKind === "large_file"
-          ? `Audit ${filePaths[0]} (large file from critical flow ${block.flow_id}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`
-          : splitKind === "budget"
-            ? `Audit part of critical flow ${block.flow_id} (${filePaths.length} file${filePaths.length === 1 ? "" : "s"}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`
-          : `Audit critical flow ${block.flow_id} (${filePaths.length} file${filePaths.length === 1 ? "" : "s"}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`,
-    }, taskBlockContext);
-  }
-
+/**
+ * Group remainder (non-flow) pending paths by lens+unit into review blocks,
+ * skipping paths already assigned to a flow block.
+ */
+function buildRemainderBlocks(
+  pendingByLens: Map<string, Set<string>>,
+  assigned: Set<string>,
+  coverageByPath: Map<string, CoverageMatrix["files"][number]>,
+  unitLineIndex: UnitLineIndex,
+  externalPaths: Set<string>,
+  tinyTestFileLines: number,
+): Array<{ lens: Lens; unitId: string; filePaths: string[] }> {
   const groupedRemainders = new Map<string, { lens: Lens; unitId: string; filePaths: string[] }>();
   for (const lens of LENS_ORDER) {
     const pendingPaths = pendingByLens.get(lens);
     if (!pendingPaths || pendingPaths.size === 0) {
       continue;
     }
-
     for (const path of [...pendingPaths].sort((a, b) => a.localeCompare(b))) {
       if (assigned.has(`${lens}:${path}`)) {
         continue;
       }
-
       const lineCount = unitLineIndex[path] ?? 0;
       const isTinyTestReview =
         tinyTestFileLines > 0 &&
@@ -409,12 +380,80 @@ export function buildChunkedAuditTasks(
       groupedRemainders.set(key, current);
     }
   }
-
-  for (const block of [...groupedRemainders.values()].sort((a, b) => {
+  return [...groupedRemainders.values()].sort((a, b) => {
     const lensDelta = LENS_ORDER.indexOf(a.lens) - LENS_ORDER.indexOf(b.lens);
     if (lensDelta !== 0) return lensDelta;
     return a.unitId.localeCompare(b.unitId);
-  })) {
+  });
+}
+
+export function buildChunkedAuditTasks(
+  coverageMatrix: CoverageMatrix,
+  unitLineIndex: UnitLineIndex,
+  options: BuildChunkedTaskOptions = {},
+): AuditTask[] {
+  const fileSplitThreshold = options.file_split_threshold ?? DEFAULT_FILE_SPLIT_THRESHOLD;
+  const maxTaskLines = options.max_task_lines ?? DEFAULT_MAX_TASK_LINES;
+  const maxTaskFiles = options.max_task_files ?? DEFAULT_MAX_TASK_FILES;
+  const tinyTestFileLines = options.tiny_test_file_lines ?? DEFAULT_TINY_TEST_FILE_LINES;
+  const allowed = new Set(options.limit_lenses ?? []);
+  const enforceLensFilter = allowed.size > 0;
+  const externalPaths = getExternalSignalPaths(options.external_analyzer_results);
+
+  // Phase 1: resolve pending work by lens.
+  const pendingByLens = buildPendingByLens(coverageMatrix, unitLineIndex, externalPaths, {
+    limit_lenses: options.limit_lenses,
+    enforceLensFilter,
+    tinyTestFileLines,
+  });
+
+  const intentBoostSet =
+    options.intent_priority_boost && options.intent_priority_boost.length > 0
+      ? new Set<string>(options.intent_priority_boost)
+      : undefined;
+
+  const tasks: AuditTask[] = [];
+  const seen = new Set<string>();
+  const budgetLimits: TaskBudgetLimits = { maxTaskLines, maxTaskFiles };
+  const taskBlockContext = { tasks, seen, unitLineIndex, fileSplitThreshold, budgetLimits };
+
+  // Phase 2: claim critical-flow review blocks first (highest priority).
+  const assigned = new Set<string>();
+  const flowBlocks = options.critical_flows
+    ? claimFlowReviewBlocks(options.critical_flows, pendingByLens, assigned)
+    : [];
+
+  for (const block of flowBlocks) {
+    const hasExternalSignal = block.file_paths.some((path) => externalPaths.has(path));
+    addTaskBlock({
+      scopeId: `flow:${block.flow_id}`,
+      unitId: `flow:${block.flow_id}`,
+      passId: `flow-pass:${block.lens}`,
+      lens: block.lens,
+      filePaths: block.file_paths,
+      priority: taskPriority(hasExternalSignal, block.lens, true, intentBoostSet),
+      tags: withSignalTag(["critical_flow", `critical_flow:${block.flow_id}`], hasExternalSignal),
+      rationale: (filePaths, splitKind) =>
+        splitKind === "large_file"
+          ? `Audit ${filePaths[0]} (large file from critical flow ${block.flow_id}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`
+          : splitKind === "budget"
+            ? `Audit part of critical flow ${block.flow_id} (${filePaths.length} file${filePaths.length === 1 ? "" : "s"}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`
+            : `Audit critical flow ${block.flow_id} (${filePaths.length} file${filePaths.length === 1 ? "" : "s"}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`,
+    }, taskBlockContext);
+  }
+
+  // Phase 3: group and emit remainder tasks (files not assigned to a flow block).
+  const coverageByPath = new Map(coverageMatrix.files.map((file) => [file.path, file]));
+  const remainderBlocks = buildRemainderBlocks(
+    pendingByLens,
+    assigned,
+    coverageByPath,
+    unitLineIndex,
+    externalPaths,
+    tinyTestFileLines,
+  );
+
+  for (const block of remainderBlocks) {
     const hasExternalSignal = block.filePaths.some((path) => externalPaths.has(path));
     addTaskBlock({
       scopeId: block.unitId,
@@ -429,10 +468,11 @@ export function buildChunkedAuditTasks(
           ? `Audit ${filePaths[0]} (large file split from ${block.unitId}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`
           : splitKind === "budget"
             ? `Audit part of ${block.unitId} (${filePaths.length} file${filePaths.length === 1 ? "" : "s"}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`
-          : `Audit ${block.unitId} (${filePaths.length} file${filePaths.length === 1 ? "" : "s"}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`,
+            : `Audit ${block.unitId} (${filePaths.length} file${filePaths.length === 1 ? "" : "s"}) under the ${block.lens} lens.${hasExternalSignal ? " External analyzer signals raise priority." : ""}`,
     }, taskBlockContext);
   }
 
+  // Phase 4: sort by priority descending, then stable by task_id.
   return tasks.sort((a, b) => {
     const priorityDelta = priorityRank(b.priority) - priorityRank(a.priority);
     if (priorityDelta !== 0) return priorityDelta;

@@ -500,6 +500,32 @@ test("readPackageVersion logs to stderr on JSON parse error and returns null (OB
   });
 });
 
+test("ARTIFACT_DEFINITIONS each have a non-null phase field from the 5 valid audit phases (ARC-dd468422)", async () => {
+  // Regression: ArtifactBundle was originally a flat bag of 30+ optional fields
+  // with no phase-based grouping. This test asserts that every artifact definition
+  // carries an explicit phase from the canonical set, so the grouping cannot regress.
+  const { ARTIFACT_DEFINITIONS } = await import("../src/io/artifacts.ts");
+  const validPhases = new Set(["intake", "analysis", "execution", "reporting", "supervisor"]);
+  const entries = Object.entries(ARTIFACT_DEFINITIONS);
+  assert.ok(entries.length >= 25, `expected at least 25 artifact definitions, got ${entries.length}`);
+  const missingPhase = [];
+  const badPhase = [];
+  for (const [key, def] of entries) {
+    if (def.phase === undefined || def.phase === null) {
+      missingPhase.push(key);
+    } else if (!validPhases.has(def.phase)) {
+      badPhase.push(`${key}: '${def.phase}'`);
+    }
+  }
+  assert.deepEqual(missingPhase, [], `artifact definitions missing phase: ${missingPhase.join(", ")}`);
+  assert.deepEqual(badPhase, [], `artifact definitions with invalid phase: ${badPhase.join(", ")}`);
+  // Each phase must be represented — the grouping is meaningful, not nominal.
+  const presentPhases = new Set(entries.map(([, def]) => def.phase));
+  for (const phase of validPhases) {
+    assert.ok(presentPhases.has(phase), `phase '${phase}' has no artifact definitions`);
+  }
+});
+
 test("ArtifactBundle active_dispatch field still typed as ActiveDispatchState after ARC-13a4083a refactor", async () => {
   const { loadArtifactBundle: load } = await import("../src/io/artifacts.ts");
   await withTempDir("arc-13a4083a-", async (dir) => {

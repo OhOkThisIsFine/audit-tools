@@ -135,10 +135,16 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
   // Backward-compat: old artifacts only have `reviewed`; new artifacts have
   // contract_reviewed and conceptual_reviewed. Treat both as satisfied when
   // the legacy flag is set and neither new flag is present.
+  // Guard: a stale design_assessment.json must NOT activate the legacy path —
+  // the artifact was written by an old executor before the split; once stale it
+  // triggers design_assessment_current and the executor will write a fresh
+  // artifact with the new fields. Letting a stale legacy artifact permanently
+  // satisfy both obligations bypasses the split-review passes (ARC-14c59af5-2).
   const legacyReviewed =
     bundle.design_assessment?.reviewed === true &&
     bundle.design_assessment?.contract_reviewed !== true &&
-    bundle.design_assessment?.conceptual_reviewed !== true;
+    bundle.design_assessment?.conceptual_reviewed !== true &&
+    !staleArtifacts.has("design_assessment.json");
 
   obligations.push(
     obligation(
