@@ -21,22 +21,23 @@ test("shouldRunInlineExecutor returns true for non-null non-agent executor", () 
 });
 
 // ── buildManualReviewBlocker ────────────────────────────────────────────────
+// local-subprocess = headless/local provider that CANNOT dispatch sub-agents →
+// blocked, waiting for manual results. LLM providers (codex, claude-code, etc.)
+// CAN dispatch → "Ready for LLM semantic review" fan-out message (COR-dc621e7a).
 
-test("buildManualReviewBlocker returns fan-out instructions for local-subprocess", () => {
-  const result = buildManualReviewBlocker("local-subprocess");
-  assert.match(result, /Ready for LLM semantic review/);
-  assert.match(result, /fan out packets/);
+test("buildManualReviewBlocker returns blocked message for local-subprocess (cannot dispatch)", () => {
+  assert.equal(
+    buildManualReviewBlocker("local-subprocess"),
+    "Audit blocked: waiting for manual audit results or interactive provider configuration.",
+  );
 });
 
-test("buildManualReviewBlocker returns blocked message for other providers", () => {
-  assert.equal(
-    buildManualReviewBlocker("codex"),
-    "Audit blocked: waiting for manual audit results or interactive provider configuration.",
-  );
-  assert.equal(
-    buildManualReviewBlocker("claude-code"),
-    "Audit blocked: waiting for manual audit results or interactive provider configuration.",
-  );
+test("buildManualReviewBlocker returns fan-out instructions for LLM providers", () => {
+  for (const provider of ["codex", "claude-code", "opencode"]) {
+    const result = buildManualReviewBlocker(provider);
+    assert.match(result, /Ready for LLM semantic review/, `${provider}: expected fan-out message`);
+    assert.match(result, /fan out packets/, `${provider}: expected fan-out packets mention`);
+  }
 });
 
 // ── buildBlockedAuditState ──────────────────────────────────────────────────

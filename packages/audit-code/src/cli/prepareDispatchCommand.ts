@@ -9,9 +9,15 @@ export async function cmdPrepareDispatch(argv: string[]): Promise<void> {
   const runId = getFlag(argv, "--run-id");
   if (!runId) throw new Error("prepare-dispatch requires --run-id <run_id>");
   const artifactsDir = getArtifactsDir(argv);
-  const sessionConfig = await loadSessionConfig(artifactsDir).catch(
-    () => ({} as SessionConfig),
-  );
+  let sessionConfig: SessionConfig;
+  try {
+    sessionConfig = await loadSessionConfig(artifactsDir);
+  } catch (e) {
+    process.stderr.write(
+      `[prepare-dispatch] session-config.json is invalid — using defaults. Error: ${e instanceof Error ? e.message : String(e)}\n`,
+    );
+    sessionConfig = {} as SessionConfig;
+  }
   const provider = createFreshSessionProvider(getExplicitProvider(argv), sessionConfig);
   const hostModel = getHostModel(argv) ?? sessionConfig.block_quota?.host_model ?? null;
   const result = await prepareDispatchArtifacts({

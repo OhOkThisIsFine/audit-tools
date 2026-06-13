@@ -12,7 +12,7 @@ export type ReflectionClarity =
   | "mostly_clear"
   | "ambiguous"
   | "unclear";
-export type ReflectionSeverity = "info" | "low" | "medium" | "high";
+export type ReflectionSeverity = "info" | "low" | "medium" | "high" | "critical";
 
 export interface AgentReflection {
   task_id: string;
@@ -38,8 +38,10 @@ const SEVERITY_VALUES = new Set<ReflectionSeverity>([
   "low",
   "medium",
   "high",
+  "critical",
 ]);
 const SEVERITY_RANK: Record<ReflectionSeverity, number> = {
+  critical: 4,
   high: 3,
   medium: 2,
   low: 1,
@@ -130,6 +132,7 @@ export function aggregateReflections(
     low: 0,
     medium: 0,
     high: 0,
+    critical: 0,
   };
   const friction = new Map<string, number>();
   const ambiguities = new Map<string, number>();

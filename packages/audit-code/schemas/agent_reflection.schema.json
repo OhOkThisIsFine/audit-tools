@@ -36,7 +36,7 @@
     },
     "severity": {
       "type": "string",
-      "enum": ["info", "low", "medium", "high"],
+      "enum": ["info", "low", "medium", "high", "critical"],
       "description": "How much the reported friction/ambiguity impeded the work."
     }
   },

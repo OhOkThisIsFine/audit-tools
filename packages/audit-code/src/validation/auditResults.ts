@@ -852,14 +852,19 @@ export function validateAuditResults(
         }
         const affectedPathNorm = normalizeCoveragePath(affected.path as string);
         if (!declaredAssignedCoveragePaths.has(affectedPathNorm)) {
+          // Out-of-scope affected_files: strip the finding location but retain the
+          // finding itself. Emit a warning (not a hard error) so a worker result that
+          // cites one cross-boundary file is not wholesale rejected — a hard reject
+          // would strand the in-scope findings for the task (INV-09 / FRIC-010).
           pushIssue(issues, {
             result_index: i,
             task_id: taskId,
             field: `${label}.affected_files[${k}].path`,
+            severity: "warning",
             message:
-              `affected_files path '${affected.path}' is not in the declared assigned file_coverage. ` +
-              `Add it to this result's file_coverage first` +
-              (task ? `; the task's assigned files are: ${task.file_paths.join(", ")}.` : "."),
+              `affected_files path '${affected.path}' is not in the declared assigned file_coverage (out-of-scope). ` +
+              `In-scope findings are retained; this entry is informational only.` +
+              (task ? ` The task's assigned files are: ${task.file_paths.join(", ")}.` : ""),
           });
           continue;
         }

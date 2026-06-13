@@ -120,13 +120,11 @@ function renderVSCodeAgentFile() {
     '',
     '# Auditor Agent',
     '',
-    'Use `audit-code next-step` as the primary integration surface for the audit workflow. The installed auditor MCP server is a compatibility adapter over the same step contract.',
+    'Use `audit-code next-step` as the primary integration surface for the audit workflow.',
     '',
     'When the user asks to run or continue `/audit-code`:',
     '',
     '- run `audit-code next-step` directly when shell access is available',
-    '- if MCP is the only available integration, call `start_audit`, `get_status`, and `continue_audit`; those tools return the same one-step contract',
-    '- read `audit-code://handoff/current` and `audit-code://artifacts/current` when the audit blocks or you need current context',
     '- prefer imported audit results and runtime updates over ad hoc manual state edits',
     '- treat the deterministic audit report as the final source of truth once the audit completes',
     '',
@@ -171,6 +169,10 @@ function renderAntigravityPlanningGuide(root) {
 }
 
 function renderGeminiCommandToml(promptBody) {
+  // TOML basic strings use backslash escapes; multi-line basic strings (""")
+  // also require escaping backslashes and double-quotes so the TOML parser
+  // doesn't misinterpret the body. The previous code computed escapedBody
+  // but accidentally embedded the raw unescaped body — this is the fix.
   const escapedBody = promptBody.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return [
     '# /audit-code — Autonomous local-loop code auditing',
@@ -179,11 +181,14 @@ function renderGeminiCommandToml(promptBody) {
     'description = "Autonomous local-loop code auditing — loads one backend-rendered audit step at a time"',
     '',
     'prompt = """',
-    promptBody.trimEnd(),
+    escapedBody.trimEnd(),
     '"""',
     '',
   ].join('\n');
 }
+
+// Exported for testing only — do not call from production code outside this module.
+export const _renderGeminiCommandToml = renderGeminiCommandToml;
 
 export const INSTALL_PROFILE_FLAGS = [
   'writeVSCode',

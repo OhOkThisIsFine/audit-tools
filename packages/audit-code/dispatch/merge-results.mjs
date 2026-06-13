@@ -44,22 +44,27 @@ const failing = [];
 
 for (const filename of files) {
   const filePath = join(taskResultsDir, filename);
-  let resultObj;
+  let parsed;
   try {
-    resultObj = JSON.parse(readFileSync(filePath, "utf8"));
+    parsed = JSON.parse(readFileSync(filePath, "utf8"));
   } catch (e) {
     failing.push({ task_id: filename, errors: [`Invalid JSON: ${e.message}`] });
     continue;
   }
 
-  const taskId = resultObj?.task_id;
-  const task = (taskId && taskMap[taskId]) ? taskMap[taskId] : null;
-  const { valid, errors } = validateResult(resultObj, task);
+  // Expand top-level AuditResult[] arrays — a worker that emits an array
+  // payload must not be treated as one invalid object (INV-01 / COR-bf5c7331).
+  const candidates = Array.isArray(parsed) ? parsed : [parsed];
+  for (const resultObj of candidates) {
+    const taskId = resultObj?.task_id;
+    const task = (taskId && taskMap[taskId]) ? taskMap[taskId] : null;
+    const { valid, errors } = validateResult(resultObj, task);
 
-  if (valid) {
-    passing.push(resultObj);
-  } else {
-    failing.push({ task_id: taskId ?? filename, errors });
+    if (valid) {
+      passing.push(resultObj);
+    } else {
+      failing.push({ task_id: taskId ?? filename, errors });
+    }
   }
 }
 
@@ -75,10 +80,12 @@ if (failing.length > 0) {
   }
 }
 
-const total = files.length;
+const total = passing.length + failing.length;
 console.log(`✓ ${passing.length}/${total} tasks valid → ${auditResultsPath}`);
 if (failing.length > 0) {
   console.log("  Re-run those tasks in the next cycle.");
 }
 
-process.exit(0);
+// Exit non-zero when any result failed validation so callers can detect
+// partial merges and avoid treating them as clean success (INV-03 / COR-bf5c7331-2).
+process.exit(failing.length > 0 ? 1 : 0);

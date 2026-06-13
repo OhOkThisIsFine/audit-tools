@@ -60,10 +60,16 @@ function detectCycles(edges: GraphEdge[]): string[][] {
   }
 
   const cycles: string[][] = [];
-  const visited = new Set<string>();
-  const stack = new Set<string>();
 
+  // Each DFS root gets a fresh per-DFS visited set so that nodes already fully
+  // explored via one root are re-entered from a new root. This is required
+  // because a shared visited set across DFS starts prevents detection of cycles
+  // that are reachable from a later root only through an already-visited node
+  // (the "diamond reachability" case). The stack (current DFS path) is still
+  // per-path-bookkeeping and correctly identifies back-edges within each DFS.
   for (const node of adjacency.keys()) {
+    const visited = new Set<string>();
+    const stack = new Set<string>();
     dfsVisit(node, [], adjacency, visited, stack, cycles);
   }
   return cycles;

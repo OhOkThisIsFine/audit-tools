@@ -23,7 +23,15 @@ import {
 
 export async function cmdQuota(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
-  const sessionConfig = await loadSessionConfig(artifactsDir).catch(() => ({} as SessionConfig));
+  let sessionConfig: SessionConfig;
+  try {
+    sessionConfig = await loadSessionConfig(artifactsDir);
+  } catch (e) {
+    process.stderr.write(
+      `[quota] session-config.json is invalid — using defaults. Error: ${e instanceof Error ? e.message : String(e)}\n`,
+    );
+    sessionConfig = {} as SessionConfig;
+  }
   const explicitProvider = getExplicitProvider(argv);
   const hostModel = getHostModel(argv);
   const providerName = resolveFreshSessionProviderName(explicitProvider, sessionConfig);

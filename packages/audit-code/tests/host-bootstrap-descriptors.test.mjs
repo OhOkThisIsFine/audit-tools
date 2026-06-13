@@ -1,11 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   _INSTALL_HOST_ORDER as INSTALL_HOST_ORDER,
   _INSTALL_HOST_DEFINITIONS as INSTALL_HOST_DEFINITIONS,
   _getInstallHostKeys as getInstallHostKeys,
   _getInstallProfile as getInstallProfile,
+  _renderGeminiCommandToml as renderGeminiCommandToml,
 } from "../audit-code-wrapper-lib.mjs";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(here, "..");
 
 test("every host in INSTALL_HOST_ORDER has a complete descriptor with verify", () => {
   for (const hostKey of INSTALL_HOST_ORDER) {
@@ -94,6 +101,97 @@ test("install profile skips descriptors whose profile predicate is false", () =>
   assert.equal(openProfile.writeOpenCode, true);
   assert.equal(openProfile.writeAgents, true);
 });
+
+// ── INV-audit-infra-07: renderGeminiCommandToml emits escaped body ───────────
+
+test("renderGeminiCommandToml embeds escaped body (not raw promptBody) in TOML output", () => {
+  // A prompt body containing a backslash and a double-quote — characters that
+  // must be escaped in a TOML basic multi-line string.
+  const rawBody = 'Say "hello" and use C:\\path\\to\\file.';
+  const toml = renderGeminiCommandToml(rawBody);
+
+  // The TOML must contain the escaped forms.
+  assert.ok(
+    toml.includes('\\"hello\\"'),
+    "TOML output must escape double-quotes in the prompt body",
+  );
+  assert.ok(
+    toml.includes("C:\\\\path\\\\to\\\\file"),
+    "TOML output must escape backslashes in the prompt body",
+  );
+  // The raw unescaped content must NOT appear verbatim inside the TOML string.
+  const promptSectionStart = toml.indexOf('prompt = """');
+  assert.ok(promptSectionStart >= 0, "TOML output must contain the prompt field");
+  const promptContent = toml.slice(promptSectionStart);
+  assert.ok(
+    !promptContent.includes('"hello"') || promptContent.includes('\\"hello\\"'),
+    "Raw unescaped double-quotes must not appear in the TOML prompt body",
+  );
+});
+
+test("renderGeminiCommandToml handles a body without special characters unchanged", () => {
+  const plainBody = "Run audit-code next-step for the repo.";
+  const toml = renderGeminiCommandToml(plainBody);
+  assert.ok(toml.includes(plainBody), "Plain body must appear verbatim in TOML output");
+  assert.ok(toml.includes('prompt = """'), "TOML must use multi-line basic string syntax");
+  assert.ok(toml.startsWith("# /audit-code"), "TOML must start with the header comment");
+});
+
+// ── INV-audit-infra-09: no stale MCP tool references in rendered assets ─────
+
+test("renderAntigravityAssets text does not reference removed MCP tools (INV-audit-infra-09)", () => {
+  // These tools were removed when the MCP surface was dropped. Any rendered
+  // asset that instructs the host agent to call them silently fails because the
+  // tools no longer exist.
+  const STALE_MCP_TOOLS = ["start_audit", "get_status", "continue_audit"];
+  const installHostsPath = join(repoRoot, "audit-code-wrapper-install-hosts.mjs");
+  const source = readFileSync(installHostsPath, "utf8");
+  for (const tool of STALE_MCP_TOOLS) {
+    // Allow deny-list entries (e.g. 'deny' rules in permission config) and
+    // comments, but not live instructions to the agent to *call* the tool.
+    // A bare tool name appearing as a string literal in rendered text is a signal.
+    const inInstructionContext = new RegExp(
+      `call\`[^]*\`${tool}|call.*\`${tool}\`|\`${tool}\`.*call|\\bcall ${tool}\\b`,
+      "g",
+    );
+    assert.ok(
+      !inInstructionContext.test(source),
+      `Rendered host assets must not instruct the agent to call removed MCP tool '${tool}'`,
+    );
+    // The direct string reference that was found in the VsCodeAgentFile / MCP
+    // agent instruction text — a plain inline mention in a rendered template string.
+    const inRenderContext = new RegExp(
+      `call \`${tool}\`|call.*${tool}.*those tools return`,
+      "g",
+    );
+    assert.ok(
+      !inRenderContext.test(source),
+      `Rendered host asset template must not reference removed MCP tool '${tool}'`,
+    );
+  }
+});
+
+// ── INV-audit-infra-10: agent_reflection.schema.json severity enum ───────────
+
+test("agent_reflection.schema.json severity enum includes 'critical' (INV-audit-infra-10)", () => {
+  const schemaPath = join(repoRoot, "schemas", "agent_reflection.schema.json");
+  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+  const severityEnum = schema?.properties?.severity?.enum;
+  assert.ok(Array.isArray(severityEnum), "severity must have an enum in agent_reflection.schema.json");
+  assert.ok(
+    severityEnum.includes("critical"),
+    `agent_reflection.schema.json severity enum must include 'critical' to match finding severity; got: ${JSON.stringify(severityEnum)}`,
+  );
+  // All expected severity levels must be present.
+  for (const level of ["info", "low", "medium", "high", "critical"]) {
+    assert.ok(
+      severityEnum.includes(level),
+      `severity enum must include '${level}'`,
+    );
+  }
+});
+
+// ── verify function ──────────────────────────────────────────────────────────
 
 test("verify function receives correct context shape", async () => {
   // Test that the verify callback is called with the expected argument shape
