@@ -160,7 +160,7 @@ export const ARTIFACT_DEPENDENTS_MAP: Partial<Record<ArtifactFileName, ArtifactF
   "audit_plan_metrics.json": [],
   // Provider-neutral task-affinity graph derived from audit_tasks (Phase A of
   // the plan/dispatch seam). A leaf: dispatch partitions it just-in-time and
-  // persists nothing back. See docs/capability-discovery-and-tiered-dispatch-design.md.
+  // persists nothing back. See docs/audit-workflow-design.md.
   "task_affinity_graph.json": [],
   "runtime_validation_report.json": [
     "audit-report.md",

@@ -26,7 +26,7 @@ import { computeMaxSafeConcurrency, computeRampUpConcurrency } from "./state.js"
  * `context_tokens`/`output_tokens`, when present, are the discovered model's
  * window and take precedence over the static known-model table — they are how
  * dispatch escapes the conservative 32k default once a host reports its real
- * capabilities (see docs/capability-discovery-and-tiered-dispatch-design.md).
+ * capabilities (see docs/audit-workflow-design.md).
  */
 export interface DiscoveredRateLimitsInput {
   requests_per_minute?: number | null;
