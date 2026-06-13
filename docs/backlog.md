@@ -172,9 +172,10 @@ ask-prompts: re-add the broad rule or rerun an older postinstall.
 
 ## Design commitments not yet built
 
-Surfaced by a 2026-06-13 drift check of the design docs against `src` (see the
-drift report referenced from that session). These are design decisions the docs
-record but the code has not yet implemented — tracked here so the gap is explicit.
+Surfaced by a 2026-06-13 drift check of the design docs against `src`. These are
+design decisions the docs record but the code has not implemented — tracked here
+so the gap is explicit. Re-run the check (design doc vs code) to refresh; don't
+record build status in the design docs themselves.
 
 - **`free_form_intent` should be *interpreted*, not threaded verbatim** (both
   orchestrators). Both design docs say the orchestrator interprets free-form intent

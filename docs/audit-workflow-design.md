@@ -1,8 +1,9 @@
 # Audit workflow design decisions
 
-Agreed decisions from a full walkthrough of the audit pipeline (2026-06-10).
-These are forward-looking design targets, not current state.
-Implement against this document; remove entries as they ship.
+The target design of the audit pipeline — a declarative contract describing the
+system as it is meant to work. It is **not** a status log: completion is verified
+separately against the code (audits, invariant tests, the periodic drift check),
+and this document is never edited to record what has or hasn't shipped.
 
 ---
 
@@ -167,13 +168,11 @@ Overridden files never enter coverage. This is a deeper hook than
 `excluded_scope` (which filters after coverage is initialized) and ensures
 overridden files never become audit tasks.
 
-**Lens selection wired:** `resolveEffectiveLenses` (built in `lensSelection.ts`,
-currently unwired) is called with `lens_selection` from the intent checkpoint.
-Mandatory lenses are always included.
+**Lens selection:** `resolveEffectiveLenses` is called with `lens_selection`
+from the intent checkpoint. Mandatory lenses are always included.
 
-**8-file task cap removed:** `max_task_files` removed or set to a degenerate
-guard value only. Token budget (`max_task_lines`, byte-based `sizeIndex`
-sizing) is the real constraint.
+**No N-file task cap:** `max_task_files` is a degenerate guard only; the token
+budget (`max_task_lines`, byte-based `sizeIndex` sizing) is the real constraint.
 
 **free_form_intent shaping applied:** orchestrator uses the interpreted intent
 to adjust lens weighting and task priority signals before tasks are built.
@@ -182,7 +181,7 @@ to adjust lens weighting and task priority signals before tasks are built.
 
 ## Dispatch — rolling, quota + capability-routed
 
-**wave_size removed.** No pre-computed batch size.
+**No pre-computed wave size.** Dispatch is not batched into fixed waves.
 
 **No separate concurrency cap.** With accurate token estimation, quota limits
 are the only throttle. RPM and TPM per provider/model are tracked from: prior
@@ -267,8 +266,8 @@ shared between the two tools — implement once, in `@audit-tools/shared`:
 - **Findings contract as remediation seed.** Remediation's contract pipeline
   now consumes `audit-findings.json` to seed goal normalization (both-paths
   design). The findings contract must stay rich enough for that: stable IDs,
-  affected files with line evidence, lens/severity, theme links — all present
-  today; preserve them through any audit-side refactor.
+  affected files with line evidence, lens/severity, theme links — kept rich
+  enough to seed remediation through any audit-side refactor.
 - **Token estimation** (`estimateTokensFromBytes`) and the **prompt-caching
   principle** (shared prefix first, per-agent payload last) apply identically
   to auditor workers, design-review agents, and remediation seam-negotiation
