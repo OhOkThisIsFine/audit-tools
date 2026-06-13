@@ -13,6 +13,7 @@ import type {
   SynthesisNarrative,
 } from "@audit-tools/shared";
 import {
+  AUDIT_FINDINGS_CONTRACT_VERSION as SHARED_AUDIT_FINDINGS_CONTRACT_VERSION,
   AUDITOR_REPORT_MARKER,
   renderProcessFeedbackSection,
   type AgentReflection,
@@ -25,8 +26,14 @@ import { buildWorkBlocks, type WorkBlock } from "./workBlocks.js";
 import { mergeFindings } from "./mergeFindings.js";
 import { assignStableFindingIds } from "./findingIdentity.js";
 
-/** Contract version stamped onto the canonical `audit-findings.json`. */
-export const AUDIT_FINDINGS_CONTRACT_VERSION = "audit-tools/audit-findings/v1";
+/**
+ * Contract version stamped onto the canonical `audit-findings.json`.
+ * Single-sourced from `@audit-tools/shared` so the auditor's output and the
+ * remediator's validator can never drift (guarded by the
+ * `seam-artifact-ipc-envelope` test).
+ */
+export const AUDIT_FINDINGS_CONTRACT_VERSION =
+  SHARED_AUDIT_FINDINGS_CONTRACT_VERSION;
 
 /**
  * Anything renderable as the deterministic audit report. Both `AuditReportModel`

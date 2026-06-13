@@ -8,6 +8,13 @@ import {
   type WaveScheduleResult,
 } from "../src/steps/dispatch.js";
 import {
+  scheduleWave as shimScheduleWave,
+  normalizeSlotTokens as shimNormalizeSlotTokens,
+  buildDispatchQuota as shimBuildDispatchQuota,
+  resolveHostConcurrencyLimit as shimResolveHostConcurrencyLimit,
+  detectHostConcurrencyFromEnv as shimDetectHostConcurrencyFromEnv,
+} from "../src/steps/waveScheduler.js";
+import {
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
 } from "../src/quota/index.js";
@@ -507,5 +514,44 @@ describe("scheduleWave — logs to stderr when readQuotaState throws", () => {
     const stderrOutput = written.join("");
     expect(stderrOutput).toContain("[waveScheduler] readQuotaState failed");
     expect(stderrOutput).toContain("simulated quota state read failure");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TST-aebbb698: waveScheduler.ts re-export shim — dedicated surface tests
+// ---------------------------------------------------------------------------
+// waveScheduler.ts is a thin re-export shim. These tests import from it
+// directly (not from dispatch.js) to verify all named exports are live and
+// function-identical to their dispatch.ts origins.
+describe("waveScheduler.ts re-export shim (TST-aebbb698)", () => {
+  it("scheduleWave re-export is function-identical to dispatch.scheduleWave", () => {
+    expect(shimScheduleWave).toBe(scheduleWave);
+  });
+
+  it("normalizeSlotTokens re-export is function-identical to dispatch.normalizeSlotTokens", () => {
+    expect(shimNormalizeSlotTokens).toBe(normalizeSlotTokens);
+  });
+
+  it("buildDispatchQuota re-export is function-identical to dispatch.buildDispatchQuota", () => {
+    expect(shimBuildDispatchQuota).toBe(buildDispatchQuota);
+  });
+
+  it("resolveHostConcurrencyLimit re-export is function-identical to dispatch.resolveHostConcurrencyLimit", () => {
+    expect(shimResolveHostConcurrencyLimit).toBe(resolveHostConcurrencyLimit);
+  });
+
+  it("detectHostConcurrencyFromEnv re-export is function-identical to dispatch.detectHostConcurrencyFromEnv", () => {
+    expect(shimDetectHostConcurrencyFromEnv).toBe(detectHostConcurrencyFromEnv);
+  });
+
+  it("shim scheduleWave produces same result as dispatch.scheduleWave for basic input", async () => {
+    const input = {
+      sessionConfig: null as null,
+      itemCount: 4,
+      env: {} as NodeJS.ProcessEnv,
+    };
+    const fromDispatch = await scheduleWave(input);
+    const fromShim = await shimScheduleWave(input);
+    expect(fromShim.max_concurrent).toBe(fromDispatch.max_concurrent);
   });
 });

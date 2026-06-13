@@ -38,13 +38,16 @@ import {
   CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
   CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+  CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
 } from "@audit-tools/shared";
+import {
+  CP_MODULE_DECOMPOSITION_VERSION,
+  CP_MODULE_CONTRACTS_VERSION,
+  CP_SEAM_RECONCILIATION_REPORT_VERSION,
+  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+  CP_CYCLIC_SEAM_RESOLUTION_VERSION,
+} from "../src/validation/contractPipeline.js";
 import { readFile } from "node:fs/promises";
-
-const CP_MODULE_DECOMPOSITION_VERSION = "remediate-code-contract-pipeline/module-decomposition/v1alpha1" as const;
-const CP_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/module-contracts/v1alpha1" as const;
-const CP_SEAM_RECONCILIATION_REPORT_VERSION = "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1" as const;
-const CP_FINALIZED_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1" as const;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-n-r07");
@@ -166,14 +169,14 @@ async function writeFullChainThroughJudge(): Promise<void> {
     created_at: CREATED_AT,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "cyclic_seam_resolution", {
-    contract_version: "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+    contract_version: CP_CYCLIC_SEAM_RESOLUTION_VERSION,
     goal_id: "G1",
     cycles: [],
     status: "no_cycles",
     created_at: CREATED_AT,
   });
   await writeContractArtifact(ARTIFACTS_DIR, "test_validator_plan", {
-    contract_version: "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
+    contract_version: CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
     goal_id: "G1",
     test_specs: [],
     created_at: CREATED_AT,
@@ -485,14 +488,14 @@ describe("buildNextContractPipelineStep emits a step for each seam phase", () =>
       created_at: CREATED_AT,
     });
     await writeRaw("cyclic_seam_resolution", {
-      contract_version: "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+      contract_version: CP_CYCLIC_SEAM_RESOLUTION_VERSION,
       goal_id: "G1",
       cycles: [],
       status: "no_cycles",
       created_at: CREATED_AT,
     });
     await writeRaw("test_validator_plan", {
-      contract_version: "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
       goal_id: "G1",
       test_specs: [],
       created_at: CREATED_AT,
@@ -545,14 +548,14 @@ describe("evaluateJudgeGate infers repair target from failing classifications wh
       created_at: CREATED_AT,
     });
     await writeContractArtifact(ARTIFACTS_DIR, "cyclic_seam_resolution", {
-      contract_version: "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
+      contract_version: CP_CYCLIC_SEAM_RESOLUTION_VERSION,
       goal_id: "G1",
       cycles: [],
       status: "no_cycles",
       created_at: CREATED_AT,
     });
     await writeContractArtifact(ARTIFACTS_DIR, "test_validator_plan", {
-      contract_version: "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
+      contract_version: CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
       goal_id: "G1",
       test_specs: [],
       created_at: CREATED_AT,

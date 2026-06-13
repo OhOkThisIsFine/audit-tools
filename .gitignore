@@ -50,3 +50,6 @@ dist/
 .remediation-artifacts/
 .agents/
 skills-lock.json
+
+# Test scratch — vitest test-plan artifacts written under packages/*/tests/
+.test-plan-artifacts-*/

@@ -481,3 +481,162 @@ test("releaseLock is idempotent when lock file is already gone", async () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// 16. withFileLock preserves the original fn() error when releaseLock also fails
+// ---------------------------------------------------------------------------
+test("withFileLock preserves original fn() error when releaseLock also throws", async () => {
+  await withTempDir(async (dir) => {
+    const lockPath = tmpLockPath(dir);
+    const { unlink, mkdir } = await import("node:fs/promises");
+    const original = new Error("original fn failure");
+
+    await assert.rejects(
+      () =>
+        withFileLock(lockPath, async () => {
+          // Sabotage the release: replace the lock file with a directory so
+          // releaseLock's readFile throws a non-ENOENT error (EISDIR/EPERM).
+          await unlink(lockPath);
+          await mkdir(lockPath);
+          throw original;
+        }),
+      (err) => {
+        assert.equal(
+          err,
+          original,
+          "must surface fn()'s original error, not the secondary release error",
+        );
+        return true;
+      },
+    );
+
+    await rm(lockPath, { recursive: true, force: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 17. withFileLock surfaces the releaseLock error when fn() succeeded
+// ---------------------------------------------------------------------------
+test("withFileLock surfaces the releaseLock error when fn() succeeds", async () => {
+  await withTempDir(async (dir) => {
+    const lockPath = tmpLockPath(dir);
+    const { unlink, mkdir } = await import("node:fs/promises");
+
+    await assert.rejects(
+      () =>
+        withFileLock(lockPath, async () => {
+          // fn() succeeds, but we sabotage release so releaseLock throws. With no
+          // fn() error to preserve, that release error must propagate.
+          await unlink(lockPath);
+          await mkdir(lockPath);
+          return "ok";
+        }),
+      (err) => {
+        assert.ok(err instanceof Error, "the release error should propagate");
+        return true;
+      },
+    );
+
+    await rm(lockPath, { recursive: true, force: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 18. acquireLock honours the timeout deadline without large overshoot
+// ---------------------------------------------------------------------------
+test("acquireLock honours the timeout deadline without large overshoot", async () => {
+  await withTempDir(async (dir) => {
+    const lockPath = tmpLockPath(dir);
+    const token = await acquireLock(lockPath); // hold a fresh (non-stale) lock
+    const timeoutMs = 250;
+    const start = Date.now();
+    try {
+      await assert.rejects(
+        () => acquireLock(lockPath, timeoutMs),
+        (e) => e instanceof FileLockTimeoutError,
+      );
+    } finally {
+      await releaseLock(lockPath, token);
+    }
+    const elapsed = Date.now() - start;
+    // Deadline is checked before stale-check IO and the backoff sleep is clamped
+    // to the time left, so we neither give up early nor overshoot by a full
+    // backoff interval.
+    assert.ok(elapsed >= timeoutMs - 60, `should not give up early; elapsed=${elapsed}ms`);
+    assert.ok(elapsed <= timeoutMs + 600, `should not overshoot the deadline; elapsed=${elapsed}ms`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 19. acquireLock uses exponential backoff — far fewer wakeups than a fixed poll
+// ---------------------------------------------------------------------------
+test("acquireLock uses exponential backoff — far fewer wakeups than a fixed 50ms poll", async () => {
+  await withTempDir(async (dir) => {
+    const lockPath = tmpLockPath(dir);
+    const token = await acquireLock(lockPath); // hold the lock so the acquirer spins
+
+    const realSetTimeout = globalThis.setTimeout;
+    let sleepCalls = 0;
+    globalThis.setTimeout = (fn, ms, ...rest) => {
+      sleepCalls++;
+      return realSetTimeout(fn, ms, ...rest);
+    };
+    try {
+      const timeoutMs = 1200;
+      await assert.rejects(
+        () => acquireLock(lockPath, timeoutMs),
+        (e) => e instanceof FileLockTimeoutError,
+      );
+      // A fixed 50ms poll over 1.2s would sleep ~24 times; exponential backoff
+      // (50,100,200,400,500,…) reaches the deadline in well under 15 wakeups.
+      assert.ok(
+        sleepCalls < 15,
+        `expected <15 backoff sleeps over 1.2s, got ${sleepCalls}`,
+      );
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      await releaseLock(lockPath, token);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 20. TOCTOU: many acquirers racing one stale lock all succeed, none clobbered
+// ---------------------------------------------------------------------------
+test("concurrent acquirers racing a stale lock get distinct tokens with no clobber", async () => {
+  await withTempDir(async (dir) => {
+    const lockPath = tmpLockPath(dir);
+    const { writeFile: wf, utimes: ut } = await import("node:fs/promises");
+
+    // Plant a stale lock (older than STALE_LOCK_MS) that every acquirer must steal.
+    await wf(lockPath, "stale-holder-token", { flag: "wx" });
+    const past = new Date(Date.now() - 60_000);
+    await ut(lockPath, past, past);
+
+    const N = 5;
+    const tokens = new Set();
+    let concurrent = 0;
+    let maxConcurrent = 0;
+
+    await Promise.all(
+      Array.from({ length: N }, () =>
+        (async () => {
+          const t = await acquireLock(lockPath, 15_000);
+          tokens.add(t);
+          concurrent++;
+          maxConcurrent = Math.max(maxConcurrent, concurrent);
+          await new Promise((r) => setTimeout(r, 5));
+          concurrent--;
+          await releaseLock(lockPath, t);
+        })(),
+      ),
+    );
+
+    // Token-checked stale removal + wx-exclusive create guarantee the stale-steal
+    // race never admits two holders and never clobbers a freshly created lock:
+    // every acquirer gets a distinct token and runs alone.
+    assert.equal(tokens.size, N, "every acquirer must obtain a distinct token");
+    assert.equal(maxConcurrent, 1, "mutual exclusion must hold through the stale-steal race");
+    await assert.rejects(() => stat(lockPath), { code: "ENOENT" }, "lock released at the end");
+  });
+});

@@ -233,12 +233,18 @@ describe("claimedWritePaths heuristic absent from prepareImplementDispatch", () 
 // ---------------------------------------------------------------------------
 
 describe("worktree-rooted implement prompt rendering", () => {
-  // We test implementPrompt indirectly via prepareImplementDispatch with a worktreeRoot.
-  // Since implementPrompt is not exported, we verify the output prompt file content.
-  it("implement prompt uses worktreeRoot in Repository root line when supplied", async () => {
-    // This is verified by the dispatch-worktree integration tests.
-    // The unit test here just validates the absence of claimedWritePaths is correct
-    // (already tested above).
-    expect(true).toBe(true);
+  // We test implementPrompt indirectly via checking the dispatch source uses worktreeRoot.
+  // Since implementPrompt is not exported, we verify the source-level contract.
+  it("dispatch source references worktreeRoot in prompt rendering (not always the repo root)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join: pathJoin, dirname: pathDirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+
+    const testsDir = pathDirname(fileURLToPath(import.meta.url));
+    const dispatchPath = pathJoin(testsDir, "..", "src", "steps", "dispatch.ts");
+    const source = readFileSync(dispatchPath, "utf8");
+    // The dispatch source must reference worktreeRoot so isolated workers see
+    // their worktree path, not the main repo root.
+    expect(source).toContain("worktreeRoot");
   });
 });

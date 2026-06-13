@@ -38,6 +38,19 @@ rather than "where the code is today."
   "After all packets complete:" in the dispatch prompt renderer. (Spotted 2026-06-12
   dispatch verification.)
 
+- **Implement-worker result `finding_id` placeholder is ambiguous → merge rejects.**
+  `prepareImplementDispatch` renders the result template as `"finding_id": "FINDING-ID"`
+  with a tempting `Satisfies obligations: FND-*` line just above it, so standard-tier
+  workers report the `FND-*` *obligation* id (and split one node into several
+  `item_results`) instead of the node/item id shown under `## Items` / `Findings:` —
+  the `N-*` key that `state.items` is actually keyed by. `merge-implement-results`
+  then throws `Unknown finding_id in implement result: FND-…`. The correct id is just
+  `block_id` minus the `CP-BLOCK-` prefix. Fix in the renderer: emit the real node id
+  into the template and instruct "one item_result per item id under ## Items; never use
+  the FND-* obligation ids." Workaround 2026-06-13: inject the exact node id into each
+  worker's dispatch wrapper prompt — eliminated the error for 11/11 wave-2 blocks
+  (3/7 wave-1 blocks hit it and needed post-hoc result-file patching).
+
 - **Global install defers `postinstall` under npm's allow-scripts policy.**
   `npm install -g auditor-lambda` installs the bin but prints
   `npm warn allow-scripts … (postinstall: node scripts/postinstall.mjs)` and skips

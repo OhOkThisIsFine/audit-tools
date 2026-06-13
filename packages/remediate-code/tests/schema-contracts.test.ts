@@ -35,6 +35,7 @@ describe("schema source-path invariant", () => {
 });
 
 const EXPECTED_SCHEMAS = [
+  "agent_reflection.schema.json",
   "clarification_request.schema.json",
   "closing_result.schema.json",
   "closing_plan.schema.json",
@@ -47,6 +48,7 @@ const EXPECTED_SCHEMAS = [
   "remediation_outcomes.schema.json",
   "remediation_plan.schema.json",
   "remediation_report.schema.json",
+  "shared.schema.json",
   "test_spec.schema.json",
   "triage_batch.schema.json",
   "verification_result.schema.json",
@@ -74,22 +76,37 @@ describe("JSON schema contracts", () => {
         expect((schema as Record<string, unknown>).$schema).toMatch(/json-schema\.org/);
       });
 
-      it("has a type or $ref at the root", () => {
+      it("has a type or $ref at the root, or is a pure $defs library schema", () => {
         const s = schema as Record<string, unknown>;
         const hasType = typeof s.type === "string";
         const hasRef = typeof s.$ref === "string";
         const hasOneOf = Array.isArray(s.oneOf);
         const hasAnyOf = Array.isArray(s.anyOf);
-        expect(hasType || hasRef || hasOneOf || hasAnyOf).toBe(true);
+        // Schemas used only as definition libraries (e.g. shared.schema.json) have
+        // only $defs at the root — that is valid JSON Schema 2020-12 usage.
+        const isDefsLibrary = typeof s.$defs === "object" && s.$defs !== null &&
+          !hasType && !hasRef && !hasOneOf && !hasAnyOf;
+        expect(hasType || hasRef || hasOneOf || hasAnyOf || isDefsLibrary).toBe(true);
       });
     });
   }
 
-  it("all expected schemas are present", async () => {
+  it("all expected schemas are present on disk", async () => {
     const { readdir } = await import("node:fs/promises");
     const files = await readdir(SCHEMA_DIR);
     const schemaFiles = files.filter((f) => f.endsWith(".schema.json"));
     expect(schemaFiles.length).toBeGreaterThanOrEqual(EXPECTED_SCHEMAS.length);
+  });
+
+  it("no schema files exist on disk that are missing from EXPECTED_SCHEMAS (bidirectional coverage)", async () => {
+    // A new schema file added to schemas/ must also be added to EXPECTED_SCHEMAS above —
+    // otherwise it ships untested. This test auto-detects the gap.
+    const { readdir } = await import("node:fs/promises");
+    const files = await readdir(SCHEMA_DIR);
+    const schemaFiles = files.filter((f) => f.endsWith(".schema.json")).sort();
+    const expectedSorted = [...EXPECTED_SCHEMAS].sort();
+    const missing = schemaFiles.filter((f) => !expectedSorted.includes(f));
+    expect(missing).toEqual([]);
   });
 });
 

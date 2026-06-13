@@ -298,6 +298,16 @@ import {
   validateJudgeReport,
   validateImplementationDAG,
   validateVerificationReport,
+  validateModuleDecomposition,
+  validateModuleContracts,
+  validateSeamReconciliationReport,
+  validateFinalizedModuleContracts,
+  validateCyclicSeamResolution,
+  CP_MODULE_DECOMPOSITION_VERSION,
+  CP_MODULE_CONTRACTS_VERSION,
+  CP_SEAM_RECONCILIATION_REPORT_VERSION,
+  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+  CP_CYCLIC_SEAM_RESOLUTION_VERSION,
 } from "../src/validation/contractPipeline.js";
 import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
@@ -543,6 +553,140 @@ describe("contract pipeline validators", () => {
         }],
       });
       expect(issues.some((i) => i.message.includes("evidence"))).toBe(true);
+    });
+  });
+
+  describe("validateModuleDecomposition", () => {
+    const valid = {
+      contract_version: CP_MODULE_DECOMPOSITION_VERSION,
+      goal_id: "G-001",
+      modules: [{ name: "mod-a", responsibilities: "Does A.", file_scope: ["src/a.ts"] }],
+      created_at: new Date().toISOString(),
+    };
+
+    it("accepts a well-formed ModuleDecomposition", () => {
+      expect(validateModuleDecomposition(valid).filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects wrong contract_version", () => {
+      const issues = validateModuleDecomposition({ ...valid, contract_version: "wrong/v999" });
+      expect(issues.some((i) => i.path.includes("contract_version"))).toBe(true);
+    });
+
+    it("rejects missing modules array", () => {
+      const { modules: _, ...noModules } = valid;
+      const issues = validateModuleDecomposition(noModules);
+      expect(issues.some((i) => i.path.includes("modules"))).toBe(true);
+    });
+  });
+
+  describe("validateModuleContracts", () => {
+    const valid = {
+      contract_version: CP_MODULE_CONTRACTS_VERSION,
+      goal_id: "G-001",
+      module_contracts: [{
+        name: "mod-a",
+        inputs: ["x"],
+        outputs: ["y"],
+        invariants: [],
+        side_effects: [],
+        validation_boundary: "validates x",
+        failure_modes: [],
+        neighbor_needs: [],
+      }],
+      created_at: new Date().toISOString(),
+    };
+
+    it("accepts a well-formed ModuleContracts", () => {
+      expect(validateModuleContracts(valid).filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects wrong contract_version", () => {
+      const issues = validateModuleContracts({ ...valid, contract_version: "wrong/v999" });
+      expect(issues.some((i) => i.path.includes("contract_version"))).toBe(true);
+    });
+
+    it("rejects missing module_contracts array", () => {
+      const { module_contracts: _, ...noContracts } = valid;
+      const issues = validateModuleContracts(noContracts);
+      expect(issues.some((i) => i.path.includes("module_contracts"))).toBe(true);
+    });
+  });
+
+  describe("validateSeamReconciliationReport", () => {
+    const valid = {
+      contract_version: CP_SEAM_RECONCILIATION_REPORT_VERSION,
+      goal_id: "G-001",
+      mismatches: [],
+      created_at: new Date().toISOString(),
+    };
+
+    it("accepts a well-formed SeamReconciliationReport with no mismatches", () => {
+      expect(validateSeamReconciliationReport(valid).filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects wrong contract_version", () => {
+      const issues = validateSeamReconciliationReport({ ...valid, contract_version: "wrong/v999" });
+      expect(issues.some((i) => i.path.includes("contract_version"))).toBe(true);
+    });
+
+    it("rejects a mismatch entry without required resolution fields", () => {
+      const issues = validateSeamReconciliationReport({
+        ...valid,
+        mismatches: [{ seam_id: "S-1", module_a: "A", module_b: "B", description: "Mismatch." }],
+      });
+      expect(issues.some((i) => i.path.includes("resolution"))).toBe(true);
+    });
+  });
+
+  describe("validateFinalizedModuleContracts", () => {
+    const valid = {
+      contract_version: CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+      goal_id: "G-001",
+      module_contracts: [{
+        name: "mod-a",
+        inputs: ["x"],
+        outputs: ["y"],
+        invariants: [],
+        side_effects: [],
+        validation_boundary: "validates x",
+        failure_modes: [],
+        seam_adjustments: [],
+      }],
+      created_at: new Date().toISOString(),
+    };
+
+    it("accepts a well-formed FinalizedModuleContracts", () => {
+      expect(validateFinalizedModuleContracts(valid).filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects wrong contract_version", () => {
+      const issues = validateFinalizedModuleContracts({ ...valid, contract_version: "wrong/v999" });
+      expect(issues.some((i) => i.path.includes("contract_version"))).toBe(true);
+    });
+  });
+
+  describe("validateCyclicSeamResolution", () => {
+    const valid = {
+      contract_version: CP_CYCLIC_SEAM_RESOLUTION_VERSION,
+      goal_id: "G-001",
+      cycles: [],
+      status: "no_cycles",
+      created_at: new Date().toISOString(),
+    };
+
+    it("accepts a well-formed CyclicSeamResolution with no_cycles status", () => {
+      expect(validateCyclicSeamResolution(valid).filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects wrong contract_version", () => {
+      const issues = validateCyclicSeamResolution({ ...valid, contract_version: "wrong/v999" });
+      expect(issues.some((i) => i.path.includes("contract_version"))).toBe(true);
+    });
+
+    it("rejects invalid status", () => {
+      const issues = validateCyclicSeamResolution({ ...valid, status: "unknown_status" });
+      expect(issues.some((i) => i.path.includes("status"))).toBe(true);
     });
   });
 

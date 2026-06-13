@@ -2,7 +2,11 @@ import { writeFile, unlink, stat, readFile } from "node:fs/promises";
 import type { RunLogger } from "../observability/runLog.js";
 
 const STALE_LOCK_MS = 30_000;
-const RETRY_INTERVAL_MS = 50;
+// Lock-acquire retry uses exponential backoff (initial → doubling → max) rather
+// than a fixed poll, so a long contention window costs far fewer wakeups. The
+// sleep is always clamped to the time left so backoff never overshoots timeoutMs.
+const RETRY_INTERVAL_INITIAL_MS = 50;
+const RETRY_INTERVAL_MAX_MS = 500;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const STALE_CHECK_INTERVAL_MS = 1_000;
 
@@ -54,6 +58,7 @@ export async function acquireLock(
   const token = generateOwnerToken();
   const deadline = Date.now() + timeoutMs;
   let lastStaleCheckAt = 0;
+  let retryInterval = RETRY_INTERVAL_INITIAL_MS;
 
   while (true) {
     try {
@@ -68,6 +73,13 @@ export async function acquireLock(
       if (code !== "EEXIST" && code !== "EPERM" && code !== "EACCES") throw err;
     }
 
+    // Check the deadline BEFORE any stale-check IO (stat/readFile) or sleep, so a
+    // slow filesystem cannot push the actual return time past timeoutMs.
+    if (Date.now() >= deadline) {
+      logger?.event({ kind: "error", note: "lock_timeout", lock_path: lockPath, timeout_ms: timeoutMs } as never);
+      throw new FileLockTimeoutError(lockPath);
+    }
+
     const now = Date.now();
     if (now - lastStaleCheckAt >= STALE_CHECK_INTERVAL_MS) {
       lastStaleCheckAt = now;
@@ -78,16 +90,18 @@ export async function acquireLock(
         // TOCTOU where blind stale removal could clobber a newly-acquired lock.
         await removeStaleLock(lockPath, staleToken);
         logger?.event({ kind: "step", note: "stale_lock_removed", lock_path: lockPath } as never);
+        // Progress was made (a slot may have opened); retry promptly and reset
+        // the backoff window.
+        retryInterval = RETRY_INTERVAL_INITIAL_MS;
         continue;
       }
     }
 
-    if (Date.now() >= deadline) {
-      logger?.event({ kind: "error", note: "lock_timeout", lock_path: lockPath, timeout_ms: timeoutMs } as never);
-      throw new FileLockTimeoutError(lockPath);
-    }
-
-    await new Promise<void>((r) => setTimeout(r, RETRY_INTERVAL_MS));
+    // Exponential backoff, clamped to the time left so we never sleep past the
+    // deadline. Doubles each idle cycle up to RETRY_INTERVAL_MAX_MS.
+    const sleepMs = Math.min(retryInterval, Math.max(0, deadline - Date.now()));
+    await new Promise<void>((r) => setTimeout(r, sleepMs));
+    retryInterval = Math.min(retryInterval * 2, RETRY_INTERVAL_MAX_MS);
   }
 }
 
@@ -112,9 +126,20 @@ export async function withFileLock<T>(
   logger?: RunLogger,
 ): Promise<T> {
   const token = await acquireLock(lockPath, timeoutMs, logger);
+  let hasFnError = false;
   try {
     return await fn();
+  } catch (err) {
+    hasFnError = true;
+    throw err;
   } finally {
-    await releaseLock(lockPath, token);
+    try {
+      await releaseLock(lockPath, token);
+    } catch (releaseErr) {
+      // If fn() already threw, preserve that original error for the caller — a
+      // secondary failure while releasing the lock must not mask the real cause.
+      // If fn() succeeded, the release error is the only failure, so surface it.
+      if (!hasFnError) throw releaseErr;
+    }
   }
 }

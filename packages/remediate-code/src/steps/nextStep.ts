@@ -1803,7 +1803,7 @@ async function buildConfirmIntentStep(ctx: {
       ? `\`\`\`json\n${JSON.stringify(draft.filters, null, 2)}\n\`\`\``
       : "(none — remediating all findings)";
 
-    const closingOptions = "`commit`or`none`";
+    const closingOptions = "`commit` or `none`";
 
     prompt = `
 # Confirm Remediation Scope and Intent

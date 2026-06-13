@@ -456,7 +456,7 @@ function checkClosingPreview(
   return { files, commit_message: commitMessage };
 }
 
-function executeClosingAction(
+export function executeClosingAction(
   state: RemediationState,
   options: OrchestratorOptions,
 ): ClosingResult {

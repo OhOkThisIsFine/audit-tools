@@ -36,6 +36,27 @@ audit-code next-step --host-max-active-subagents 4
 `4` is a safe default for this host; raise it for more parallelism or lower it
 under rate-limit pressure. The backend's learned quota adapts from there.
 
+This `next-step` call is also the **capability handshake** — report what you can
+dispatch to *right now* so the backend sizes review packets to your real model
+instead of a conservative 32k floor:
+
+```bash
+audit-code next-step --host-max-active-subagents 4 --host-models '[{"rank":"small","context_tokens":32000,"output_tokens":8000},{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
+```
+
+Or with a single dispatch model:
+
+```bash
+audit-code next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
+```
+
+- `--host-max-active-subagents` — parallel subagent capacity (via the `Agent`/`task`
+  tool). Without it the backend assumes serial dispatch.
+- `--host-models` — ordered JSON array (lowest rank first) of models you can dispatch
+  to right now; ranks (`small`/`standard`/`deep`) are relative labels, never model names.
+- `--host-context-tokens` / `--host-output-tokens` — single-model shorthand. When
+  `--host-models` is also given, the roster wins.
+
 When developing `auditor-lambda` itself, from the monorepo root use:
 
 ```bash
