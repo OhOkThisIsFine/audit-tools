@@ -237,8 +237,12 @@ export function applyNarrative(
   const themes: FindingTheme[] = [];
 
   for (const theme of narrative.themes ?? []) {
+    // Deduplicate within the theme first, then filter to valid ids that have not
+    // yet been claimed by a prior (first-claiming) theme. This enforces the
+    // "each finding belongs to at most one theme" contract — the first theme in
+    // narrative.themes to list a given id wins; later themes have it stripped.
     const findingIds = [
-      ...new Set((theme.finding_ids ?? []).filter((id) => validFindingIds.has(id))),
+      ...new Set((theme.finding_ids ?? []).filter((id) => validFindingIds.has(id) && !themeByFinding.has(id))),
     ];
     themes.push({
       theme_id: theme.theme_id,
@@ -248,9 +252,7 @@ export function applyNarrative(
       suggested_fix_pattern: theme.suggested_fix_pattern,
     });
     for (const id of findingIds) {
-      if (!themeByFinding.has(id)) {
-        themeByFinding.set(id, theme.theme_id);
-      }
+      themeByFinding.set(id, theme.theme_id);
     }
   }
 

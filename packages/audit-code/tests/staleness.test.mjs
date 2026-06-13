@@ -422,3 +422,18 @@ test("external analyzer results do not falsely mark unrelated upstream artifacts
   assert.ok(stale.has("coverage_matrix.json"), "coverage_matrix.json should be stale");
   assert.ok(stale.has("audit_tasks.json"), "audit_tasks.json should be stale");
 });
+
+// TST-aa3c406e: computeStaleArtifacts must handle an absent artifact_metadata field
+// without throwing or returning a non-empty stale set (no metadata → can't determine
+// freshness → nothing is stale by comparison).
+test("computeStaleArtifacts returns empty set when artifact_metadata is absent", () => {
+  const stale = computeStaleArtifacts({});
+  assert.ok(stale instanceof Set, "must return a Set");
+  assert.equal(stale.size, 0, "empty bundle → no artifact_metadata → no stale artifacts");
+});
+
+test("computeStaleArtifacts returns empty set when artifact_metadata key is present but undefined", () => {
+  const stale = computeStaleArtifacts({ artifact_metadata: undefined });
+  assert.ok(stale instanceof Set, "must return a Set");
+  assert.equal(stale.size, 0, "undefined artifact_metadata → no stale artifacts");
+});

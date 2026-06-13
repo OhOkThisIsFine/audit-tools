@@ -28,8 +28,8 @@ export function renderSynthesisNarrativePrompt(
       : [];
 
   if (findings.length > MAX_RENDERED_FINDINGS) {
-    console.warn(
-      `[audit-code] synthesisNarrative: truncated findings list to ${MAX_RENDERED_FINDINGS} of ${findings.length} total — remaining findings omitted from narrative prompt (see audit-findings.json)`
+    process.stderr.write(
+      `[audit-code] synthesisNarrative: truncated findings list to ${MAX_RENDERED_FINDINGS} of ${findings.length} total — remaining findings omitted from narrative prompt (see audit-findings.json)\n`
     );
   }
 

@@ -173,23 +173,40 @@ test("jsonSchemaAssert preserves refs, combiners, const, and enum behavior after
   });
 
   await t.test(
-    "silently ignores not keyword — helper does not implement not, so value matching the not-schema still passes",
+    "not keyword: rejects values that satisfy the not-schema",
     () => {
-      // The helper does not implement the `not` keyword — it is silently ignored.
-      // A value that should be rejected by `not: { type: 'string' }` still passes.
-      assert.doesNotThrow(
+      // The helper now implements the `not` keyword (TST-3f7508d4 fix).
+      // A value matching `not: { type: 'string' }` must be rejected.
+      assert.throws(
         () => assertMatchesJsonSchema({ not: { type: "string" } }, "a string value", "val"),
-        "not constraint is silently ignored by the helper",
+        /must NOT satisfy the 'not' schema/,
+        "string value must be rejected by not:string",
       );
-      // Combining `not` with another keyword: the `not` portion is still silently ignored.
+      // A value NOT matching the not-schema must be accepted.
+      assert.doesNotThrow(
+        () => assertMatchesJsonSchema({ not: { type: "string" } }, 42, "val"),
+        "integer is accepted because it does not satisfy the not:string sub-schema",
+      );
+      // Combining with type: not constraint must still fire.
+      assert.throws(
+        () =>
+          assertMatchesJsonSchema(
+            { type: "string", not: { minLength: 5 } },
+            "hello world",
+            "val",
+          ),
+        /must NOT satisfy the 'not' schema/,
+        "string of length > 5 must be rejected by not:minLength:5",
+      );
+      // Value satisfying type but not the not-schema: pass.
       assert.doesNotThrow(
         () =>
           assertMatchesJsonSchema(
-            { type: "string", not: { minLength: 3 } },
+            { type: "string", not: { minLength: 5 } },
             "hi",
             "val",
           ),
-        "not constraint on minLength is silently ignored",
+        "short string passes because it does not satisfy not:minLength:5",
       );
     },
   );

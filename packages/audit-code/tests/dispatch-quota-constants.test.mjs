@@ -3,16 +3,17 @@ import assert from "node:assert/strict";
 
 // reviewPacketSizing re-exports ESTIMATED_TOKENS_PER_LINE from @audit-tools/shared
 // and aliases ESTIMATED_PROMPT_OVERHEAD_TOKENS as ESTIMATED_PACKET_PROMPT_TOKENS.
+// Import from TypeScript source (via tsx) so tests are never poisoned by stale dist/.
 const {
   ESTIMATED_TOKENS_PER_LINE,
   ESTIMATED_PACKET_PROMPT_TOKENS,
   DEFAULT_TARGET_PACKET_TOKENS,
   taskContentTokens,
   sizeIndexFromManifest,
-} = await import("../dist/orchestrator/reviewPacketSizing.js");
+} = await import("../src/orchestrator/reviewPacketSizing.ts");
 
-// Shared constants for cross-check
-const { ESTIMATED_TOKENS_PER_LINE: sharedETPL } = await import("../../shared/dist/tokens.js");
+// Shared constants for cross-check — import from source, not compiled dist/
+const { ESTIMATED_TOKENS_PER_LINE: sharedETPL } = await import("@audit-tools/shared");
 
 test("reviewPacketSizing uses shared ESTIMATED_TOKENS_PER_LINE (no local duplicate)", () => {
   // The value sourced from reviewPacketSizing must equal the shared one.

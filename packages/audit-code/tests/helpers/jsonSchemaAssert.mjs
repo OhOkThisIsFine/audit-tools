@@ -153,6 +153,14 @@ function validateCombinerKeywords(schema, value, path, context) {
     );
     assert.equal(passCount, 1, `${path} must satisfy exactly one oneOf branch`);
   }
+
+  if (schema.not !== undefined && schema.not !== null) {
+    const notError = tryValidateNode(schema.not, value, path, context);
+    assert.ok(
+      notError !== null,
+      `${path} must NOT satisfy the 'not' schema`,
+    );
+  }
 }
 
 function validateIfThenKeyword(schema, value, path, context) {
