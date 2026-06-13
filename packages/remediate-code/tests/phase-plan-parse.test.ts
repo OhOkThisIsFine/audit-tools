@@ -16,22 +16,39 @@ async function loadSimpleReport() {
   return JSON.parse(await readFile(SIMPLE_FIXTURE, "utf8"));
 }
 
-describe("isAuditFindingsReport", () => {
-  it("accepts a report with findings and a contract version", () => {
+// INV-remediate-state-07: contract_version must be present; unknown/absent is rejected.
+describe("isAuditFindingsReport — INV-remediate-state-07: contract_version required", () => {
+  it("accepts a report with findings and the expected contract_version", () => {
     expect(
-      isAuditFindingsReport({ contract_version: "x", findings: [] }),
+      isAuditFindingsReport({
+        contract_version: "audit-tools/audit-findings/v1alpha1",
+        findings: [],
+        work_blocks: [],
+        summary: {},
+      }),
     ).toBe(true);
   });
 
-  it("accepts a report with findings and work_blocks (no contract_version)", () => {
-    expect(isAuditFindingsReport({ findings: [], work_blocks: [] })).toBe(true);
+  it("accepts a report with a different-but-non-empty contract_version (warning, not error)", () => {
+    // A mismatch is a warning in the shared validator — the report is still structurally usable.
+    expect(
+      isAuditFindingsReport({
+        contract_version: "audit-findings/v1alpha1",
+        findings: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects a report with no contract_version field", () => {
+    // INV-remediate-state-07: absent contract_version is now an error.
+    expect(isAuditFindingsReport({ findings: [], work_blocks: [] })).toBe(false);
   });
 
   it("rejects non-objects, markdown strings, and shapes without findings", () => {
     expect(isAuditFindingsReport(null)).toBe(false);
     expect(isAuditFindingsReport("# Audit Report\n## Findings\n")).toBe(false);
-    expect(isAuditFindingsReport({ work_blocks: [] })).toBe(false);
-    expect(isAuditFindingsReport({ findings: "nope" })).toBe(false);
+    expect(isAuditFindingsReport({ work_blocks: [], contract_version: "x" })).toBe(false);
+    expect(isAuditFindingsReport({ findings: "nope", contract_version: "x" })).toBe(false);
   });
 });
 

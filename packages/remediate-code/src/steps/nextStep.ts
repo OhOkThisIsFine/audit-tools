@@ -1788,8 +1788,9 @@ async function buildConfirmIntentStep(ctx: {
       Array.isArray(draftRaw.pre_draft_questions)
         ? (draftRaw.pre_draft_questions as Array<{ id: string; question: string; blocking?: boolean }>)
         : [];
-    const blockingQs = preDraftQuestions.filter((q) => q.blocking !== false);
-    const nonBlockingQs = preDraftQuestions.filter((q) => q.blocking === false);
+    // INV-remediate-state-06: only explicit blocking===true is blocking.
+    const blockingQs = preDraftQuestions.filter((q) => q.blocking === true);
+    const nonBlockingQs = preDraftQuestions.filter((q) => q.blocking !== true);
     const intentInterpretation = typeof draftRaw.intent_interpretation === "string" ? draftRaw.intent_interpretation : undefined;
     const suggestedClosingAction = typeof draftRaw.closing_action === "string" ? draftRaw.closing_action : undefined;
 

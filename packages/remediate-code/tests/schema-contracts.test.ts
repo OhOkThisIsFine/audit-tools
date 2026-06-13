@@ -169,6 +169,28 @@ describe("JSON schema field-level consistency", () => {
     );
   });
 
+  it("dispatch_quota schema required field is max_concurrent_agents not wave_size (INV-remediate-infra-01)", async () => {
+    const schema = JSON.parse(
+      await readFile(join(SCHEMA_DIR, "dispatch_quota.schema.json"), "utf8"),
+    );
+    // Runtime emits max_concurrent_agents; schema must match.
+    expect(schema.required).toContain("max_concurrent_agents");
+    expect(schema.required).not.toContain("wave_size");
+    expect(schema.properties).toHaveProperty("max_concurrent_agents");
+    expect(schema.properties).not.toHaveProperty("wave_size");
+  });
+
+  it("contract_pipeline schema JudgeRepairDirective target enum includes finalized_module_contracts (INV-remediate-infra-06)", async () => {
+    const schema = JSON.parse(
+      await readFile(join(SCHEMA_DIR, "contract_pipeline.schema.json"), "utf8"),
+    );
+    const judgeRepairDirective = (schema.$defs as Record<string, Record<string, unknown>>).JudgeRepairDirective;
+    const targetEnum = (judgeRepairDirective.properties as Record<string, Record<string, unknown>>).target.enum as string[];
+    expect(targetEnum).toContain("finalized_module_contracts");
+    expect(targetEnum).toContain("obligation_ledger");
+    expect(targetEnum).toContain("contract_assessment_report");
+  });
+
   it("test_spec schema requires assertions", async () => {
     const schema = JSON.parse(
       await readFile(join(SCHEMA_DIR, "test_spec.schema.json"), "utf8"),

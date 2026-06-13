@@ -11,6 +11,7 @@ import {
 import { writeFile, readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import type { AuditFindingsReport, FindingTheme, IntentCheckpoint } from "@audit-tools/shared";
+import { isValidAuditFindingsReport } from "@audit-tools/shared";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
@@ -127,17 +128,17 @@ export function parseAuditFindingsReport(report: AuditFindingsReport): {
   return { findings, blocks, themes };
 }
 
-/** Whether a parsed JSON value looks like the auditor's audit-findings report. */
+/**
+ * Whether a parsed JSON value is a valid audit-findings report.
+ *
+ * INV-remediate-state-07: delegates to the shared validator which enforces
+ * contract_version presence and expected value. An absent or mismatched
+ * contract_version is rejected here rather than silently trusted.
+ */
 export function isAuditFindingsReport(
   value: unknown,
 ): value is AuditFindingsReport {
-  if (!value || typeof value !== "object") return false;
-  const report = value as Partial<AuditFindingsReport>;
-  return (
-    Array.isArray(report.findings) &&
-    (typeof report.contract_version === "string" ||
-      Array.isArray(report.work_blocks))
-  );
+  return isValidAuditFindingsReport(value);
 }
 
 /** Parse JSON content into an audit-findings report, or undefined if it is not one. */

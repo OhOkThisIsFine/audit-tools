@@ -363,3 +363,6 @@ try {
 }
 
 console.log(`remediate-code: postinstall complete — ${succeeded} succeeded, ${failed} failed (${Date.now() - postinstallStart}ms)`);
+if (failed > 0) {
+  process.exitCode = 1;
+}

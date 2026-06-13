@@ -8,6 +8,10 @@ const MIN_EVIDENCE_WEIGHT = 0.5;
 // (a failure at 5 makes 6, 7, 8, 9 suspect too), so failure weight spreads over
 // this many buckets past the observed concurrency.
 const FAILURE_SPREAD_BUCKETS = 4;
+// computeMaxSafeConcurrency (and computeRampUpConcurrency) scans up to this many
+// levels. Bucket writes are capped at this ceiling so quota-state.json does not
+// grow indefinitely with entries that will never be read back.
+export const MAX_BUCKET_LEVEL = 32;
 
 let _stateDir: string | undefined;
 let _statePath: string | undefined;
@@ -103,7 +107,7 @@ export function computeMaxSafeConcurrency(
     if (!bucket) break;
     if (
       bucket.success_weight >= MIN_EVIDENCE_WEIGHT &&
-      bucket.success_weight > bucket.failure_weight
+      bucket.failure_weight < MIN_EVIDENCE_WEIGHT
     ) {
       maxSafe = n;
     } else {
@@ -158,6 +162,34 @@ export async function recordWaveOutcome(
   await withFileLock(lockPath, () => recordWaveOutcomeUnsafe(providerModelKey, outcome, halfLifeHours));
 }
 
+/**
+ * Targeted recovery: zero out the failure_weight on a single concurrency bucket
+ * for a given provider-model key. Use this when a sparse or stale failure entry
+ * at level `concurrency` is permanently capping the inferred safe concurrency —
+ * the scan in computeMaxSafeConcurrency breaks at the first bucket whose
+ * failure_weight dominates, so clearing one bad entry unblocks all higher levels.
+ *
+ * This is faster than waiting for the 24-hour decay half-life to clear bad entries.
+ * success_weight is preserved; only the failure evidence is removed.
+ */
+export async function clearBucketFailureEvidence(
+  providerModelKey: string,
+  concurrency: number,
+): Promise<void> {
+  const lockPath = getQuotaStatePath() + ".lock";
+  await withFileLock(lockPath, async () => {
+    const state = await readQuotaState();
+    const entry = state.entries[providerModelKey];
+    if (!entry) return;
+    const bucket = entry.buckets[String(concurrency)];
+    if (!bucket) return;
+    bucket.failure_weight = 0;
+    entry.updated_at = new Date().toISOString();
+    state.entries[providerModelKey] = entry;
+    await writeQuotaState(state);
+  });
+}
+
 async function recordWaveOutcomeUnsafe(
   providerModelKey: string,
   outcome: ObservedWaveOutcome,
@@ -169,7 +201,11 @@ async function recordWaveOutcomeUnsafe(
   if (outcome.outcome === "success") {
     entry.consecutive_429_count = 0;
     entry.cooldown_until = null;
-    for (let n = 1; n <= outcome.concurrency; n++) {
+    // Cap at MAX_BUCKET_LEVEL: levels above this are never read back by
+    // computeMaxSafeConcurrency, so writing them would grow the state file
+    // indefinitely without ever influencing scheduling decisions.
+    const successCeiling = Math.min(outcome.concurrency, MAX_BUCKET_LEVEL);
+    for (let n = 1; n <= successCeiling; n++) {
       const bucket = entry.buckets[String(n)] ?? { success_weight: 0, failure_weight: 0 };
       bucket.success_weight += 1.0;
       entry.buckets[String(n)] = bucket;
@@ -190,7 +226,16 @@ async function recordWaveOutcomeUnsafe(
     const failureWeight = outcome.outcome === "rate_limited"
       ? computeBackoffFailureWeight(new429Count)
       : 1.0;
-    for (let n = outcome.concurrency; n <= outcome.concurrency + FAILURE_SPREAD_BUCKETS; n++) {
+    // Spread failure evidence from outcome.concurrency through
+    // outcome.concurrency + FAILURE_SPREAD_BUCKETS, but cap at
+    // MAX_BUCKET_LEVEL + FAILURE_SPREAD_BUCKETS — beyond this ceiling the
+    // scan loop in computeMaxSafeConcurrency will never reach, so additional
+    // entries only bloat the file.
+    const failureCeiling = Math.min(
+      outcome.concurrency + FAILURE_SPREAD_BUCKETS,
+      MAX_BUCKET_LEVEL + FAILURE_SPREAD_BUCKETS,
+    );
+    for (let n = outcome.concurrency; n <= failureCeiling; n++) {
       const bucket = entry.buckets[String(n)] ?? { success_weight: 0, failure_weight: 0 };
       bucket.failure_weight += failureWeight;
       entry.buckets[String(n)] = bucket;

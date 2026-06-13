@@ -333,6 +333,7 @@ export {
   writeQuotaState,
   computeMaxSafeConcurrency,
   recordWaveOutcome,
+  clearBucketFailureEvidence,
   decayWeight,
   applyDecayToEntry,
   computeBackoffCooldownMs,
@@ -340,6 +341,7 @@ export {
   computeRampUpConcurrency,
   BASE_COOLDOWN_MS,
   MAX_COOLDOWN_MS,
+  MAX_BUCKET_LEVEL,
 } from "./quota/state.js";
 export {
   detectRateLimitError,

@@ -1,15 +1,11 @@
-import {
-  readFile,
-  writeFile,
-  mkdir,
-  open,
-  rename,
-  rm,
-  stat,
-} from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { isFileMissingError, withFsRetry } from "@audit-tools/shared";
+import {
+  isFileMissingError,
+  withFsRetry,
+  withFileLock,
+} from "@audit-tools/shared";
 import type { PartialCompletionTerminal } from "@audit-tools/shared";
 import {
   RemediationPlan,
@@ -51,12 +47,40 @@ export interface RemediationState {
   closing_context?: "user_halted";
 }
 
+/** Known status values for RemediationState — used for schema validation on load. */
+const KNOWN_STATUSES = new Set<string>([
+  "pending",
+  "planning",
+  "waiting_for_clarification",
+  "implementing",
+  "triage",
+  "waiting_for_triage",
+  "closing",
+  "complete",
+]);
+
+/** Validate that a parsed JSON value is a usable RemediationState. */
+function validateState(value: unknown): string[] {
+  const errors: string[] = [];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    errors.push("state.json must be a JSON object");
+    return errors;
+  }
+  const obj = value as Record<string, unknown>;
+  if (!("status" in obj)) {
+    errors.push("Missing required field: status");
+  } else if (!KNOWN_STATUSES.has(obj["status"] as string)) {
+    errors.push(
+      `Unknown status "${String(obj["status"])}"; expected one of: ${[...KNOWN_STATUSES].join(", ")}`,
+    );
+  }
+  return errors;
+}
+
 const STATE_FILENAME = "state.json";
 const LOCK_FILENAME = "state.lock";
-const LOCK_RETRY_DELAY_MS = 20;
-const LOCK_RETRY_MAX_DELAY_MS = 250;
-const LOCK_RETRY_LIMIT = 20;
-const LOCK_STALE_MS = 30_000;
+/** Timeout for the shared file lock (matches old LOCK_STALE_MS * RETRY_LIMIT budget). */
+const LOCK_TIMEOUT_MS = 30_000;
 
 function statePath(artifactsDir: string): string {
   return join(artifactsDir, STATE_FILENAME);
@@ -67,112 +91,7 @@ function lockPath(artifactsDir: string): string {
 }
 
 function tempStatePath(artifactsDir: string): string {
-  return join(
-    artifactsDir,
-    `${STATE_FILENAME}.${process.pid}.${randomUUID()}.tmp`,
-  );
-}
-
-function isFileExistsError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code: unknown }).code === "EEXIST"
-  );
-}
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function logLockDebug(
-  tag: string,
-  fields: Record<string, string | number | boolean | undefined>,
-): void {
-  console.debug(JSON.stringify({ tag, ...fields }));
-}
-
-async function removeStaleLockIfNeeded(
-  lock: string,
-  correlationId?: string,
-): Promise<boolean> {
-  try {
-    const lockStat = await stat(lock);
-    // Try PID-based liveness check first
-    try {
-      const content = await readFile(lock, "utf8");
-      const pid = parseInt(content.trim(), 10);
-      if (!isNaN(pid) && pid > 0) {
-        try {
-          process.kill(pid, 0); // signal 0 = liveness check
-          // Process is alive — only remove if stale by time
-          if (Date.now() - lockStat.mtimeMs <= LOCK_STALE_MS) return false;
-        } catch {
-          // Process is dead — safe to remove
-          await rm(lock, { force: true });
-          logLockDebug("remediate_state_lock_stale_removed", {
-            lock,
-            reason: "dead_pid",
-            pid,
-            correlationId,
-          });
-          return true;
-        }
-      }
-    } catch {
-      // Can't read PID — fall through to time-based check
-    }
-    if (Date.now() - lockStat.mtimeMs <= LOCK_STALE_MS) return false;
-    await rm(lock, { force: true });
-    logLockDebug("remediate_state_lock_stale_removed", {
-      lock,
-      reason: "mtime",
-      correlationId,
-    });
-    return true;
-  } catch (error) {
-    if (isFileMissingError(error)) return true;
-    throw error;
-  }
-}
-
-async function acquireLock(
-  artifactsDir: string,
-  correlationId?: string,
-): Promise<Awaited<ReturnType<typeof open>>> {
-  const lock = lockPath(artifactsDir);
-  await mkdir(artifactsDir, { recursive: true });
-
-  for (let attempt = 0; attempt < LOCK_RETRY_LIMIT; attempt++) {
-    try {
-      const handle = await open(lock, "wx");
-      await handle.write(String(process.pid));
-      return handle;
-    } catch (error) {
-      if (!isFileExistsError(error)) throw error;
-      if (await removeStaleLockIfNeeded(lock, correlationId)) {
-        continue;
-      }
-      logLockDebug("remediate_state_lock_retry", {
-        lock,
-        attempt: attempt + 1,
-        correlationId,
-      });
-      if (attempt === LOCK_RETRY_LIMIT - 1) {
-        throw new Error(
-          `Timed out waiting to write ${statePath(artifactsDir)}: lock file ${lock} is held.`,
-        );
-      }
-      await sleep(
-        Math.min(
-          LOCK_RETRY_DELAY_MS * 2 ** Math.min(attempt, 4),
-          LOCK_RETRY_MAX_DELAY_MS,
-        ),
-      );
-    }
-  }
-  throw new Error(`Failed to acquire lock for ${statePath(artifactsDir)}.`);
+  return join(artifactsDir, `${STATE_FILENAME}.${randomUUID()}.tmp`);
 }
 
 interface StateStoreFileOps {
@@ -187,7 +106,8 @@ export class StateStore {
   constructor(
     private artifactsDir: string,
     fileOps: Partial<StateStoreFileOps> = {},
-    private readonly correlationId?: string,
+    // correlationId retained for API compatibility; no longer used in lock body
+    private readonly _correlationId?: string,
   ) {
     this.fileOps = { writeFile, rename, rm, ...fileOps };
   }
@@ -196,10 +116,26 @@ export class StateStore {
     await mkdir(this.artifactsDir, { recursive: true });
   }
 
+  /**
+   * Read state.json and schema-validate it. Returns null when the file is
+   * absent. Throws when the file is present but fails schema validation
+   * (corrupt or version-drifted — callers must not silently swallow such a
+   * state and hand it to the state machine). INV-remediate-state-01.
+   *
+   * Does NOT hold the lock — use `mutate` for any read-modify-write transition
+   * that requires TOCTOU safety (INV-remediate-state-02).
+   */
   async loadState(): Promise<RemediationState | null> {
     try {
       const data = await readFile(statePath(this.artifactsDir), "utf8");
-      return JSON.parse(data) as RemediationState;
+      const parsed: unknown = JSON.parse(data);
+      const errors = validateState(parsed);
+      if (errors.length > 0) {
+        throw new Error(
+          `state.json failed schema validation: ${errors.join("; ")}`,
+        );
+      }
+      return parsed as RemediationState;
     } catch (error) {
       if (isFileMissingError(error)) {
         return null;
@@ -208,21 +144,70 @@ export class StateStore {
     }
   }
 
+  /**
+   * TOCTOU-safe read-modify-write: acquires the file lock ONCE, loads the
+   * current state (or null), passes it to `fn`, and writes the returned state
+   * before releasing the lock. No other holder can interleave between the load
+   * and the save. INV-remediate-state-02 + INV-remediate-state-03.
+   */
+  async mutate(
+    fn: (current: RemediationState | null) => Promise<RemediationState>,
+  ): Promise<RemediationState> {
+    await mkdir(this.artifactsDir, { recursive: true });
+    const lock = lockPath(this.artifactsDir);
+    let next!: RemediationState;
+    await withFileLock(
+      lock,
+      async () => {
+        // Load inside the lock — no TOCTOU gap between load and save.
+        let current: RemediationState | null = null;
+        try {
+          const data = await readFile(statePath(this.artifactsDir), "utf8");
+          const parsed: unknown = JSON.parse(data);
+          const errors = validateState(parsed);
+          if (errors.length > 0) {
+            throw new Error(
+              `state.json failed schema validation: ${errors.join("; ")}`,
+            );
+          }
+          current = parsed as RemediationState;
+        } catch (err) {
+          if (!isFileMissingError(err)) throw err;
+        }
+        next = await fn(current);
+        await this._writeStateLocked(next);
+      },
+      LOCK_TIMEOUT_MS,
+    );
+    return next;
+  }
+
+  /**
+   * Save state.json unconditionally (no TOCTOU protection). Prefer `mutate`
+   * for transitions; use this only when the caller holds an external guarantee
+   * that no concurrent writer exists (e.g. single-agent close phase).
+   * INV-remediate-state-04: write to temp then atomic rename.
+   */
   async saveState(state: RemediationState): Promise<void> {
-    const lockHandle = await acquireLock(this.artifactsDir, this.correlationId);
+    await mkdir(this.artifactsDir, { recursive: true });
+    const lock = lockPath(this.artifactsDir);
+    await withFileLock(
+      lock,
+      async () => {
+        await this._writeStateLocked(state);
+      },
+      LOCK_TIMEOUT_MS,
+    );
+  }
+
+  /** Write temp + atomic rename while the caller already holds the lock. */
+  private async _writeStateLocked(state: RemediationState): Promise<void> {
     const path = statePath(this.artifactsDir);
     const temp = tempStatePath(this.artifactsDir);
-
     try {
       await this.fileOps.writeFile(temp, JSON.stringify(state, null, 2), "utf8");
       await withFsRetry(() => this.fileOps.rename(temp, path));
     } finally {
-      await lockHandle.close().catch((error) => {
-        console.warn(`Failed to close state lock ${lockPath(this.artifactsDir)}:`, error);
-      });
-      await this.fileOps.rm(lockPath(this.artifactsDir), { force: true }).catch((error) => {
-        console.warn(`Failed to remove state lock ${lockPath(this.artifactsDir)}:`, error);
-      });
       await this.fileOps.rm(temp, { force: true }).catch(() => undefined);
     }
   }

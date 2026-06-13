@@ -8,7 +8,7 @@
     "run_id",
     "phase",
     "host_concurrency_limit",
-    "wave_size",
+    "max_concurrent_agents",
     "estimated_wave_tokens",
     "model",
     "confidence",
@@ -43,7 +43,7 @@
         }
       ]
     },
-    "wave_size": { "type": "integer", "minimum": 1 },
+    "max_concurrent_agents": { "type": "integer", "minimum": 1 },
     "estimated_wave_tokens": { "type": "integer", "minimum": 0 },
     "model": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
     "confidence": { "type": "string", "enum": ["high", "medium", "low"] },

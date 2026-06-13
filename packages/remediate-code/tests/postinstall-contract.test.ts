@@ -150,6 +150,17 @@ describe("postinstall OpenCode permission scopes (CFG-4996560e)", () => {
     expect(config.agent.remediator.permission.bash["*"]).toBe("ask");
   });
 
+  it("exits non-zero when at least one file install fails (INV-remediate-infra-08)", async () => {
+    // Block the Claude command target by creating a directory in its place so
+    // writeFile throws EISDIR — a partial deploy must not report success (exit 0).
+    const claudeCommandDir = join(TEMP_HOME, ".claude", "commands", "remediate-code.md");
+    await mkdir(claudeCommandDir, { recursive: true });
+
+    const result = runPostinstall();
+    // At least one install fails → non-zero exit.
+    expect(result.status).toBeGreaterThan(0);
+  });
+
   it("audit-code and remediate-code deploy identical scoped permission behavior", async () => {
     // Both packages import the hoisted @audit-tools/shared helpers; running
     // them back to back against the same global config must leave no broad
