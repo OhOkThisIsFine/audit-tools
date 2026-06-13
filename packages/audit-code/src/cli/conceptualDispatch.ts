@@ -202,7 +202,13 @@ export async function prepareConceptualDispatch(opts: {
         : []),
     ],
     artifactPaths,
-    readPaths: [...perspectiveFiles.map((f) => f.promptPath), judgePromptPath],
+    // Perspective result files must be in readPaths: the judge subagent reads
+    // them to merge and synthesise the final output (COR-60ca1f72).
+    readPaths: [
+      ...perspectiveFiles.map((f) => f.promptPath),
+      ...perspectiveFiles.map((f) => f.resultsPath),
+      judgePromptPath,
+    ],
     writePaths: [
       ...perspectiveFiles.map((f) => f.resultsPath),
       conceptualResultsPath,

@@ -153,10 +153,18 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
   );
   for (const other of otherEntries) {
     try {
-      const existing = JSON.parse(await readFile(other.result_path, "utf8")) as AuditResult;
-      if (existing?.findings) {
-        for (const f of existing.findings) {
-          existingFindingKeys.add(findingKey(f));
+      const existingRaw = JSON.parse(await readFile(other.result_path, "utf8"));
+      // A prior result may be a single AuditResult object or an AuditResult[]
+      // array (e.g. when written by a batch worker). Expand both forms so we
+      // never silently skip findings in array-format prior results (COR-d31ca6b5).
+      const existingResults: AuditResult[] = Array.isArray(existingRaw)
+        ? existingRaw
+        : [existingRaw];
+      for (const existing of existingResults) {
+        if (existing?.findings) {
+          for (const f of existing.findings) {
+            existingFindingKeys.add(findingKey(f));
+          }
         }
       }
     } catch { /* file doesn't exist yet or invalid — skip */ }

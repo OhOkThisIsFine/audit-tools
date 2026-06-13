@@ -277,39 +277,12 @@ export function computeDispatchCapacity(
       if (remainingGlobalBudget !== null && remainingGlobalBudget <= 0) break;
 
       const remaining = pendingTokens.slice(cursor);
-      const exploratory = schedulePool(pool, input.sessionConfig, remaining);
-      let assignedCount = Math.max(
-        1,
-        Math.min(exploratory.slots, remaining.length),
+      const allocation = schedulePoolConverging(
+        pool,
+        input.sessionConfig,
+        remaining,
+        remainingGlobalBudget,
       );
-      // Clamp to the remaining global host budget before trimming with the pool schedule.
-      if (remainingGlobalBudget !== null) {
-        assignedCount = Math.min(assignedCount, remainingGlobalBudget);
-      }
-      let assignedTokens = remaining.slice(0, assignedCount);
-      let allocation = schedulePool(pool, input.sessionConfig, assignedTokens);
-
-      // Scheduling the exact high-cost slice can be more restrictive than the
-      // exploratory pass over all remaining work. Trim until the allocation and
-      // assigned slice agree, leaving the excess items for later pools/waves.
-      while (assignedTokens.length > 1 && allocation.slots < assignedTokens.length) {
-        assignedCount = allocation.slots;
-        assignedTokens = assignedTokens.slice(0, assignedCount);
-        allocation = schedulePool(pool, input.sessionConfig, assignedTokens);
-      }
-
-      if (
-        (allocation.schedule.binding_cap ?? "none") === "none" &&
-        (exploratory.schedule.binding_cap ?? "none") !== "none"
-      ) {
-        allocation = {
-          ...allocation,
-          schedule: {
-            ...allocation.schedule,
-            binding_cap: exploratory.schedule.binding_cap,
-          },
-        };
-      }
 
       allocations.push(allocation);
       cursor += allocation.slots;
@@ -353,6 +326,71 @@ export function computeDispatchCapacity(
     cooldown_until: cooldownUntil,
     estimated_wave_tokens: estimatedWaveTokens,
   };
+}
+
+/**
+ * Schedule a single pool against the items it has been allocated, converging on
+ * a consistent slot count via a three-pass algorithm:
+ *
+ *  1. **Exploratory pass** — call `schedulePool` over ALL remaining items to get
+ *     an unconstrained slot estimate and the full binding-cap attribution (RPM,
+ *     TPM, learned, etc.). Using the full remaining set lets the TPM budget see
+ *     the realistic token landscape rather than only the items already assigned.
+ *
+ *  2. **Initial assigned-slice pass** — narrow the token list to `assignedCount`
+ *     items (clamped by the exploratory result and the global host budget) and
+ *     re-schedule. Scheduling only the assigned slice can be MORE restrictive than
+ *     the exploratory pass, because the TPM cap iterates over the actual slot costs.
+ *
+ *  3. **Convergence loop** — if the second pass returns fewer slots than items
+ *     assigned (the assigned slice was still over-budget), trim to the returned
+ *     slot count and re-schedule until assignment and slots agree. Each iteration
+ *     removes at least one item, so the loop always terminates.
+ *
+ * The binding cap from the exploratory pass is preserved on the final allocation
+ * when the narrowed slice loses its cap signal (e.g. the slice is so small that
+ * it fits within any limit).
+ */
+function schedulePoolConverging(
+  pool: CapacityPool,
+  sessionConfig: SessionConfig,
+  remaining: number[],
+  remainingGlobalBudget: number | null,
+): PoolDispatchAllocation {
+  // Pass 1: exploratory — full remaining set for cap attribution.
+  const exploratory = schedulePool(pool, sessionConfig, remaining);
+  let assignedCount = Math.max(1, Math.min(exploratory.slots, remaining.length));
+  // Clamp to the remaining global host budget before narrowing with the pool schedule.
+  if (remainingGlobalBudget !== null) {
+    assignedCount = Math.min(assignedCount, remainingGlobalBudget);
+  }
+
+  // Pass 2: initial assigned-slice.
+  let assignedTokens = remaining.slice(0, assignedCount);
+  let allocation = schedulePool(pool, sessionConfig, assignedTokens);
+
+  // Pass 3: convergence — trim until assignment and slots agree.
+  while (assignedTokens.length > 1 && allocation.slots < assignedTokens.length) {
+    assignedCount = allocation.slots;
+    assignedTokens = assignedTokens.slice(0, assignedCount);
+    allocation = schedulePool(pool, sessionConfig, assignedTokens);
+  }
+
+  // Preserve the exploratory binding cap when the narrowed slice lost its cap signal.
+  if (
+    (allocation.schedule.binding_cap ?? "none") === "none" &&
+    (exploratory.schedule.binding_cap ?? "none") !== "none"
+  ) {
+    allocation = {
+      ...allocation,
+      schedule: {
+        ...allocation.schedule,
+        binding_cap: exploratory.schedule.binding_cap,
+      },
+    };
+  }
+
+  return allocation;
 }
 
 function schedulePool(

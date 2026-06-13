@@ -6,6 +6,7 @@ const {
   buildPacketPrompt,
   buildTaskSections,
   collectOversizedWarnings,
+  resolveTierBudgets,
 } = await import("../src/cli/dispatch.ts");
 
 // ── filterPackets ─────────────────────────────────────────────────────────────
@@ -225,4 +226,48 @@ test("collectOversizedWarnings — returns empty array when all packets are with
   const plan = [makePlanEntry("p1", 100), makePlanEntry("p2", 200)];
   const warnings = collectOversizedWarnings(plan, makeWaveSchedule("medium"));
   assert.deepEqual(warnings, []);
+});
+
+// ── resolveTierBudgets (COR-0e031ac0) ─────────────────────────────────────────
+
+test("resolveTierBudgets — direct entries survive unchanged", () => {
+  const perRank = new Map([["small", 1000], ["standard", 2000], ["deep", 4000]]);
+  const out = resolveTierBudgets(perRank);
+  assert.equal(out.small, 1000);
+  assert.equal(out.standard, 2000);
+  assert.equal(out.deep, 4000);
+});
+
+test("resolveTierBudgets — missing tier falls back to lower rank (not higher) when both equidistant", () => {
+  // Only 'small' and 'deep' reported; 'standard' is equidistant from both.
+  // Must prefer 'small' (lower / less capable) to avoid over-budgeting (COR-0e031ac0).
+  const perRank = new Map([["small", 1000], ["deep", 4000]]);
+  const out = resolveTierBudgets(perRank);
+  assert.equal(out.standard, 1000, "standard should inherit from small (lower tier), not deep (higher tier)");
+});
+
+test("resolveTierBudgets — missing 'small' takes the nearest lower rank and does not inherit deep (COR-0e031ac0)", () => {
+  // Only 'standard' and 'deep' reported. 'small' has no lower neighbour, so it
+  // must take the nearest LOWER reported tier. Since only 'standard' is lower (i=0,
+  // distance=1: up=standard, down=none — actually 'standard' is higher than 'small'),
+  // in practice 'small' must fall back to 'standard' (the nearest reported).
+  // Critical assertion: it must NOT take 'deep' budget when 'standard' is available.
+  const perRank = new Map([["standard", 2000], ["deep", 4000]]);
+  const out = resolveTierBudgets(perRank);
+  // 'small' is below 'standard'; nearest is 'standard' (up at distance 1). It should
+  // prefer down first, but there is no lower rank, so it must use 'standard', NOT 'deep'.
+  assert.equal(out.small, 2000, "small must use standard's budget (not deep's) when standard is the nearest reported");
+  assert.notEqual(out.small, 4000, "small must NOT inherit deep's over-sized budget");
+});
+
+test("resolveTierBudgets — missing 'deep' takes the nearest higher rank (standard, not small)", () => {
+  // Only 'small' and 'standard' reported. 'deep' has no upper neighbour; it
+  // should take the nearest lower = 'standard', NOT 'small'.
+  const perRank = new Map([["small", 1000], ["standard", 2000]]);
+  const out = resolveTierBudgets(perRank);
+  assert.equal(out.deep, 2000, "deep should fall back to standard (nearest), not small");
+});
+
+test("resolveTierBudgets — throws on empty map", () => {
+  assert.throws(() => resolveTierBudgets(new Map()), /requires at least one/);
 });

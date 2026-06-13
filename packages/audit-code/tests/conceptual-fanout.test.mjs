@@ -150,16 +150,19 @@ test("prepareConceptualDispatch (deep): writes N perspective prompts + an indepe
     settings: { conceptual_depth: "deep", perspectives: 3 },
   });
   assert.equal(dispatch.deep, true);
-  // 3 perspective prompts + 1 judge prompt are read; 3 perspective results + 1 judged result written
-  assert.equal(dispatch.readPaths.length, 4);
+  // readPaths: 3 perspective prompts + 3 perspective result files + 1 judge prompt (COR-60ca1f72)
+  // writePaths: 3 perspective results + 1 judged result
+  assert.equal(dispatch.readPaths.length, 7);
   assert.equal(dispatch.writePaths.length, 4);
   // the judge writes the single ingested results file
   assert.equal(
     dispatch.writePaths[dispatch.writePaths.length - 1],
     dispatch.conceptualResultsPath,
   );
-  // every declared prompt file exists on disk
-  for (const p of dispatch.readPaths) {
+  // perspective prompt files exist on disk (result files don't yet — perspectives haven't run)
+  const perspectivePromptPaths = dispatch.readPaths.filter((p) => p.includes("-prompt.md"));
+  assert.equal(perspectivePromptPaths.length, 4); // 3 perspective prompts + 1 judge prompt
+  for (const p of perspectivePromptPaths) {
     await access(p);
   }
   // instruction text names a 3-perspective fan-out and an independent judge
@@ -185,8 +188,8 @@ test("prepareConceptualDispatch (deep): perspective count is clamped to the buil
     bundle: minimalBundle(),
     settings: { conceptual_depth: "deep", perspectives: 999 },
   });
-  // readPaths = N perspectives + 1 judge
-  assert.equal(dispatch.readPaths.length, CONCEPTUAL_PERSPECTIVES.length + 1);
+  // readPaths = N perspective prompts + N perspective result files + 1 judge prompt (COR-60ca1f72)
+  assert.equal(dispatch.readPaths.length, CONCEPTUAL_PERSPECTIVES.length * 2 + 1);
 });
 
 // ── F4: conceptual fan-out carries model tiers ────────────────────────────────

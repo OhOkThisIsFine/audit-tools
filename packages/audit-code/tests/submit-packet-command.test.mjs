@@ -548,6 +548,48 @@ await test("findingKey dedup: finding differing in any key field is NOT a duplic
   assert.equal(parsed.duplicate_warning_count, undefined);
 });
 
+// ── 10b. COR-d31ca6b5: cross-packet dup check handles array-format prior results ─
+
+await test("findingKey dedup: array-format prior result file is expanded and deduped (COR-d31ca6b5)", async (t) => {
+  const task1 = makeTaskCovering("task-arrdup-1", "src/shared.ts");
+  const dupFinding = {
+    id: "ARR-DUP-001",
+    title: "Array-Wrapped Finding",
+    lens: "security",
+    category: "Injection",
+    severity: "high",
+    confidence: "high",
+    summary: "Found via array-format prior result.",
+    affected_files: [{ path: "src/shared.ts" }],
+    evidence: ["src/shared.ts:1 - evidence"],
+  };
+
+  const otherTask = makeTaskCovering("task-arrdup-other", "src/shared.ts");
+  // Intentionally store the prior result as an AuditResult[] array
+  // (workers may emit arrays; the dedup loop must expand them).
+  const priorResultArray = [{ ...makeResult(otherTask), findings: [dupFinding] }];
+
+  const { artifactsDir } = await makeArtifactsDir({
+    tasks: [task1, otherTask],
+    packetTaskIds: [task1.task_id],
+    otherPacketResults: [
+      { packetId: "pkt-arr-other", taskId: otherTask.task_id, result: priorResultArray },
+    ],
+  });
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  // Submit a result for pkt-alpha containing the same finding key
+  const newResult = { ...makeResult(task1), findings: [{ ...dupFinding, id: "ARR-DUP-002" }] };
+  const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
+  const { stderr, error } = await runSubmit(argv);
+
+  assert.equal(error, null, `Should not throw; got: ${error?.message}`);
+  assert.ok(
+    stderr.includes("duplicate") || stderr.includes("Warning"),
+    `Expected duplicate warning because prior result (array-format) contains the same finding. Got stderr: ${stderr}`,
+  );
+});
+
 // ── 11. Missing --run-id flag ─────────────────────────────────────────────────
 
 await test("throws when --run-id is missing", async (t) => {
