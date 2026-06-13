@@ -50,11 +50,22 @@ test("pythonLogicalLines: well-formed multiline import is still a single logical
   const content = "from foo import (\n  bar,\n  baz\n)";
   const pl = lookup("src/mod.py", "foo/bar.py", "foo/baz.py");
   const edges = extractPythonImportEdges("src/mod.py", content, pl);
-  // With correct paren tracking, exactly one or two edges are emitted (bar and
-  // baz as submodule targets). The important invariant is no crash and at least
-  // one edge recognised.
-  assert.ok(Array.isArray(edges));
-  assert.ok(edges.length >= 0); // non-negative — just no throw
+  // Both `bar` and `baz` must be resolved as submodule targets in a single
+  // logical-line parse (not two truncated lines from bad paren tracking).
+  assert.ok(Array.isArray(edges), "must return an array");
+  assert.ok(
+    edges.length >= 2,
+    `must emit at least 2 edges (bar+baz resolved), got ${edges.length}: ${JSON.stringify(edges)}`,
+  );
+  const tos = edges.map((e) => e.to);
+  assert.ok(
+    tos.some((t) => t.includes("bar")),
+    `expected an edge to foo/bar.py, got: ${JSON.stringify(tos)}`,
+  );
+  assert.ok(
+    tos.some((t) => t.includes("baz")),
+    `expected an edge to foo/baz.py, got: ${JSON.stringify(tos)}`,
+  );
 });
 
 test("pythonLogicalLines: file with no imports returns no edges", () => {

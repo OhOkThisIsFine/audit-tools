@@ -120,73 +120,79 @@ test("renderSynthesisNarrativePrompt renders sentinel line when findings array i
   assert.doesNotMatch(prompt, /more findings/, "no overflow note when findings empty");
 });
 
-// ── console.warn on truncation (OBS-32acf269) ────────────────────────────────
+// ── process.stderr on truncation (INV-audit-reporting-08 / OBS-ad223196) ─────
+// The truncation notice MUST go through process.stderr.write, not console.warn.
 
-/** Capture and restore console.warn for a synchronous body. */
-function withCapturedWarnSync(fn) {
-  const original = console.warn;
-  const calls = [];
-  console.warn = (...args) => calls.push(args.map(String).join(" "));
+/** Capture and restore process.stderr.write for a synchronous body. */
+function withCapturedStderrSync(fn) {
+  const original = process.stderr.write.bind(process.stderr);
+  const chunks = [];
+  process.stderr.write = (chunk) => {
+    chunks.push(typeof chunk === "string" ? chunk : chunk.toString());
+    return true;
+  };
   try {
     const result = fn();
-    return { result, warnCalls: calls };
+    return { result, stderrChunks: chunks };
   } finally {
-    console.warn = original;
+    process.stderr.write = original;
   }
 }
 
-test("renderSynthesisNarrativePrompt emits console.warn when findings exceed MAX_RENDERED_FINDINGS", () => {
+test("renderSynthesisNarrativePrompt emits to process.stderr when findings exceed MAX_RENDERED_FINDINGS", () => {
   const TOTAL = MAX_RENDERED_FINDINGS + 1; // 121
   const findings = Array.from({ length: TOTAL }, (_, i) => makeFinding(i + 1));
   const report = makeReport(findings);
 
-  const { warnCalls } = withCapturedWarnSync(() =>
+  const { stderrChunks } = withCapturedStderrSync(() =>
     renderSynthesisNarrativePrompt(report),
   );
 
-  assert.equal(warnCalls.length, 1, "console.warn called exactly once");
-  assert.match(warnCalls[0], /synthesisNarrative: truncated/, "warn message mentions truncation");
+  const truncationChunks = stderrChunks.filter((c) => c.includes("synthesisNarrative: truncated"));
+  assert.equal(truncationChunks.length, 1, "process.stderr.write called exactly once with the truncation notice");
   assert.ok(
-    warnCalls[0].includes(String(MAX_RENDERED_FINDINGS)),
-    `warn includes the cap (${MAX_RENDERED_FINDINGS})`,
+    truncationChunks[0].includes(String(MAX_RENDERED_FINDINGS)),
+    `stderr notice includes the cap (${MAX_RENDERED_FINDINGS})`,
   );
   assert.ok(
-    warnCalls[0].includes(String(TOTAL)),
-    `warn includes the total count (${TOTAL})`,
+    truncationChunks[0].includes(String(TOTAL)),
+    `stderr notice includes the total count (${TOTAL})`,
   );
 });
 
-test("renderSynthesisNarrativePrompt does NOT emit console.warn for exactly MAX_RENDERED_FINDINGS findings", () => {
+test("renderSynthesisNarrativePrompt does NOT emit to process.stderr for exactly MAX_RENDERED_FINDINGS findings", () => {
   const findings = Array.from({ length: MAX_RENDERED_FINDINGS }, (_, i) =>
     makeFinding(i + 1),
   );
   const report = makeReport(findings);
 
-  const { warnCalls } = withCapturedWarnSync(() =>
+  const { stderrChunks } = withCapturedStderrSync(() =>
     renderSynthesisNarrativePrompt(report),
   );
 
-  assert.equal(warnCalls.length, 0, "no console.warn when at exactly the cap");
+  const truncationChunks = stderrChunks.filter((c) => c.includes("truncated findings list"));
+  assert.equal(truncationChunks.length, 0, "no stderr truncation notice when at exactly the cap");
 });
 
-test("renderSynthesisNarrativePrompt does NOT emit console.warn for fewer than MAX_RENDERED_FINDINGS findings", () => {
+test("renderSynthesisNarrativePrompt does NOT emit to process.stderr for fewer than MAX_RENDERED_FINDINGS findings", () => {
   const findings = Array.from({ length: 5 }, (_, i) => makeFinding(i + 1));
   const report = makeReport(findings);
 
-  const { warnCalls } = withCapturedWarnSync(() =>
+  const { stderrChunks } = withCapturedStderrSync(() =>
     renderSynthesisNarrativePrompt(report),
   );
 
-  assert.equal(warnCalls.length, 0, "no console.warn for small finding list");
+  const truncationChunks = stderrChunks.filter((c) => c.includes("truncated findings list"));
+  assert.equal(truncationChunks.length, 0, "no stderr truncation notice for small finding list");
 });
 
-test("renderSynthesisNarrativePrompt still contains overflow note when console.warn fires", () => {
+test("renderSynthesisNarrativePrompt still contains overflow note in prompt when stderr fires", () => {
   const TOTAL = MAX_RENDERED_FINDINGS + 10; // 130
   const findings = Array.from({ length: TOTAL }, (_, i) => makeFinding(i + 1));
   const report = makeReport(findings);
 
   let prompt;
-  withCapturedWarnSync(() => {
+  withCapturedStderrSync(() => {
     prompt = renderSynthesisNarrativePrompt(report);
   });
 
