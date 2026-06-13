@@ -185,6 +185,30 @@ test("skips flows whose lens has no pending paths", () => {
   assert.deepEqual(blocks, []);
 });
 
+// TST-a8ea07db: pendingByLens HAS an entry for the lens but the intersection
+// with the flow's paths is empty — the flow must be skipped, not emitted empty.
+test("skips flow when pendingByLens entry exists but no flow path is pending", () => {
+  const criticalFlows = {
+    flows: [
+      {
+        id: "flow-disjoint",
+        name: "Disjoint Flow",
+        paths: ["src/x.ts", "src/y.ts"],
+        entrypoints: ["src/x.ts"],
+        concerns: ["security"],
+        confidence: "high",
+      },
+    ],
+    fallback_required: false,
+  };
+  // pendingByLens has a security entry, but it contains completely different paths.
+  const pendingByLens = new Map([["security", new Set(["src/a.ts", "src/b.ts"])]]);
+
+  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set());
+
+  assert.deepEqual(blocks, [], "flow with zero matching paths after filtering must be skipped");
+});
+
 test("ignores concerns that are not in the DEFAULT_FLOW_LENS_PRIORITY list", () => {
   const criticalFlows = {
     flows: [

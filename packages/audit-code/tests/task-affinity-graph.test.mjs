@@ -123,6 +123,28 @@ test("call_adjacent edges derive from the graph bundle (best-effort, path endpoi
   assert.equal(e.kind, "call_adjacent");
 });
 
+// TST-3ba2ef76: overlapping but not identical file sets — partial overlap must produce
+// a cross_lens_same_file edge when the tasks share at least one file.
+test("tasks with overlapping but not identical file sets get a cross_lens_same_file edge for the shared file", () => {
+  // t-x has [a.ts, b.ts]; t-y has [b.ts, c.ts] — they share b.ts only.
+  const overlap = buildTaskAffinityGraph([
+    task({ task_id: "t-x", unit_id: "ux", lens: "security", file_paths: ["a.ts", "b.ts"] }),
+    task({ task_id: "t-y", unit_id: "uy", lens: "correctness", file_paths: ["b.ts", "c.ts"] }),
+  ]);
+  const e = edgeBetween(overlap, "t-x", "t-y");
+  assert.ok(e, "expected an edge between tasks sharing one file");
+  assert.equal(e.kind, "cross_lens_same_file", "shared file with different lens → cross_lens_same_file");
+});
+
+test("tasks with fully disjoint file sets and different units/dirs have no affinity edge", () => {
+  const disjoint = buildTaskAffinityGraph([
+    task({ task_id: "t-p", unit_id: "up", lens: "security", file_paths: ["dirA/x.ts"] }),
+    task({ task_id: "t-q", unit_id: "uq", lens: "security", file_paths: ["dirB/y.ts"] }),
+  ]);
+  const e = edgeBetween(disjoint, "t-p", "t-q");
+  assert.equal(e, undefined, "fully disjoint tasks with different dirs must have no edge");
+});
+
 test("graph validates against task_affinity_graph.schema.json", async () => {
   const schema = await loadSchema("task_affinity_graph.schema.json");
   const graph = buildTaskAffinityGraph(TASKS);

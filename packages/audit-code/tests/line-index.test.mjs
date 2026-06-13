@@ -39,6 +39,20 @@ function writeLines(dir, name, lineCount) {
 // buildLineIndex
 // ---------------------------------------------------------------------------
 
+// TST-e733eba0: empty manifest is valid at pipeline startup
+test("buildLineIndex returns an empty object for a manifest with zero files", async (t) => {
+  const dir = setup();
+  try {
+    const manifest = { files: [] };
+    const result = await buildLineIndex(dir, manifest);
+
+    assert.ok(typeof result === "object" && result !== null, "result should be an object");
+    assert.equal(Object.keys(result).length, 0, "empty manifest should produce empty line-count record");
+  } finally {
+    teardown();
+  }
+});
+
 test("buildLineIndex returns a line-count record keyed by file path", async (t) => {
   const dir = setup();
   try {
