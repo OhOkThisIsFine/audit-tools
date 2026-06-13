@@ -693,13 +693,6 @@ test("S6: non-stranded pending tasks still block even with a partial terminal fo
 });
 
 test("S6: after partial terminal, synthesis produces valid audit-findings with stranded count", () => {
-  const { buildAuditReportModel, buildAuditFindingsReport } = (() => {
-    // Synchronous require-style for the dynamic import already done above
-    return {
-      buildAuditReportModel: null,
-      buildAuditFindingsReport: null,
-    };
-  })();
   // Use runSynthesisExecutor as the integration surface
   const partialBundle = {
     ...makePostDesignReviewBundle(),
@@ -735,13 +728,8 @@ test("S6: after partial terminal, synthesis produces valid audit-findings with s
   assert.equal(typeof run.updated.audit_findings.contract_version, "string");
   assert.ok(run.updated.audit_report, "audit_report must be rendered");
 
-  // stranded_unit_count populated from the terminal
-  const model = (() => {
-    const { buildAuditReportModel: barm } = { buildAuditReportModel: null };
-    return null;
-  })();
-  // Verify via the summary in audit_findings when stranded count flows through
-  // (partial coverage marker in the report — see CE-301 test for exhaustive checks)
+  // stranded_unit_count flows through synthesis into audit_findings/audit_report;
+  // see the CE-301 test for exhaustive stranded-count checks.
   assert.ok(
     run.artifacts_written.includes("audit-findings.json"),
     "audit-findings.json must be written",

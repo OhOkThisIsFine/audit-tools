@@ -42,7 +42,19 @@ function readOptionalSource(path, label) {
   return readFileSync(path);
 }
 
+// splitFrontmatter, writeGeneratedFile, and objectValue are single-sourced in
+// src/utils/hostAssets.ts. Import them from the compiled output best-effort;
+// fall back to inline definitions so postinstall works even on a fresh checkout
+// where dist/ may not be built yet.
+let _hostAssets = null;
+try {
+  _hostAssets = await import(join(pkgRoot, "dist", "utils", "hostAssets.js"));
+} catch {
+  // dist not built yet — inline fallbacks below will be used.
+}
+
 function writeGeneratedFile(path, content) {
+  if (_hostAssets) return _hostAssets.writeGeneratedFile(path, content);
   const action = existsSync(path) ? "updated" : "installed";
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, content);
@@ -50,6 +62,7 @@ function writeGeneratedFile(path, content) {
 }
 
 function splitFrontmatter(text) {
+  if (_hostAssets) return _hostAssets.splitFrontmatter(text);
   const normalized = text.replace(/\r\n/g, "\n");
   const match = normalized.match(/^---\n[\s\S]*?\n---\n?/u);
   return { body: match ? normalized.slice(match[0].length) : normalized };
@@ -89,6 +102,7 @@ const OPENCODE_REMEDIATE_BASH_PERMISSION = {
 };
 
 function objectValue(value) {
+  if (_hostAssets) return _hostAssets.objectValue(value);
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};

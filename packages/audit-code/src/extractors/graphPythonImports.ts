@@ -1,10 +1,17 @@
 import { posix } from "node:path";
 import type { GraphEdge } from "@audit-tools/shared";
+import { scanStringAware } from "@audit-tools/shared";
 import {
   graphEdge,
   normalizeGraphPath,
   resolveCandidate,
 } from "./graphPathUtils.js";
+
+// Python allows backslash escapes in both single- and double-quoted strings.
+const PYTHON_SCAN_OPTIONS = {
+  quoteChars: ['"', "'"] as const,
+  escapedQuotes: ['"', "'"] as const,
+} as const;
 
 const PYTHON_SOURCE_EXTENSIONS = [".py", ".pyi"] as const;
 const PYTHON_PACKAGE_INDEX_FILES = ["__init__.py", "__init__.pyi"] as const;
@@ -18,68 +25,29 @@ export function isPythonSourcePath(path: string): boolean {
 }
 
 function stripPythonLineComment(line: string): string {
-  let quote: "'" | '"' | undefined;
-  let escaped = false;
-
-  for (let index = 0; index < line.length; index++) {
-    const char = line[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (quote) {
-      if (char === "\\") {
-        escaped = true;
-        continue;
+  let commentIndex: number | undefined;
+  scanStringAware(line, PYTHON_SCAN_OPTIONS, {
+    onUnquoted(char, i) {
+      if (char === "#") {
+        commentIndex = i;
+        return false;
       }
-      if (char === quote) {
-        quote = undefined;
-      }
-      continue;
-    }
-    if (char === "'" || char === '"') {
-      quote = char;
-      continue;
-    }
-    if (char === "#") {
-      return line.slice(0, index);
-    }
-  }
-
-  return line;
+    },
+  });
+  return commentIndex !== undefined ? line.slice(0, commentIndex) : line;
 }
 
 function pythonParenDelta(line: string): number {
-  let quote: "'" | '"' | undefined;
-  let escaped = false;
   let delta = 0;
-
-  for (const char of line) {
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (quote) {
-      if (char === "\\") {
-        escaped = true;
-        continue;
+  scanStringAware(line, PYTHON_SCAN_OPTIONS, {
+    onUnquoted(char) {
+      if (char === "(") {
+        delta += 1;
+      } else if (char === ")") {
+        delta -= 1;
       }
-      if (char === quote) {
-        quote = undefined;
-      }
-      continue;
-    }
-    if (char === "'" || char === '"') {
-      quote = char;
-      continue;
-    }
-    if (char === "(") {
-      delta += 1;
-    } else if (char === ")") {
-      delta -= 1;
-    }
-  }
-
+    },
+  });
   return delta;
 }
 

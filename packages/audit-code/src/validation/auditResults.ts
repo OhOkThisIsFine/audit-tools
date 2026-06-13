@@ -582,13 +582,269 @@ function coversAffectedSpan(
   );
 }
 
+/** Context threaded through per-result validation helpers. */
+interface ResultValidationContext {
+  result: Record<string, unknown>;
+  task: AuditTask | undefined;
+  taskId: string;
+  resultIndex: number;
+  taskNormMap: Map<string, string>;
+  normLineIndex: Map<string, number>;
+  allTasks: AuditTask[];
+}
+
+function validateResultIdentityFields(ctx: ResultValidationContext, issues: AuditResultIssue[]): void {
+  const { result, task, taskId, resultIndex, allTasks } = ctx;
+  validateRequiredStringField(result.task_id, "task_id", taskId, resultIndex, issues);
+  validateRequiredStringField(result.unit_id, "unit_id", taskId, resultIndex, issues);
+  validateRequiredStringField(result.pass_id, "pass_id", taskId, resultIndex, issues);
+  validateRequiredStringField(result.lens, "lens", taskId, resultIndex, issues);
+
+  if (typeof result.lens === "string" && !VALID_LENSES.has(result.lens)) {
+    pushIssue(issues, {
+      result_index: resultIndex,
+      task_id: taskId,
+      field: "lens",
+      message: `Invalid lens '${result.lens}'. Must be one of: ${[...VALID_LENSES].join(", ")}.`,
+    });
+  }
+
+  if (task) {
+    validateExpectedStringField(result.unit_id, "unit_id", task.unit_id, taskId, resultIndex, issues);
+    validateExpectedStringField(result.pass_id, "pass_id", task.pass_id, taskId, resultIndex, issues);
+    validateExpectedStringField(result.lens, "lens", task.lens, taskId, resultIndex, issues);
+  }
+
+  if (allTasks.length > 0 && !task) {
+    pushIssue(issues, {
+      result_index: resultIndex,
+      task_id: taskId,
+      field: "task_id",
+      message:
+        `Unknown task_id '${taskId}'. Use the active task manifest for valid ids: ` +
+        allTasks.map((item) => item.task_id).join(", "),
+    });
+  }
+}
+
+function validateFileCoverageEntry(
+  entry: unknown,
+  j: number,
+  ctx: ResultValidationContext,
+  seenCoveragePaths: Set<string>,
+  declaredAssignedCoveragePaths: Set<string>,
+  normalizedFileCoverage: NormalizedFileCoverage[],
+  issues: AuditResultIssue[],
+): void {
+  const { task, taskId, resultIndex, taskNormMap, normLineIndex } = ctx;
+  if (!isRecord(entry)) {
+    pushIssue(issues, {
+      result_index: resultIndex,
+      task_id: taskId,
+      field: `file_coverage[${j}]`,
+      message: `file_coverage[${j}] must be an object, got ${describeValue(entry)}.`,
+    });
+    return;
+  }
+
+  const entryNorm = isNonEmptyString(entry.path) ? normalizeCoveragePath(entry.path as string) : "";
+  const canonicalPath = taskNormMap.get(entryNorm);
+
+  if (!isNonEmptyString(entry.path)) {
+    pushIssue(issues, { result_index: resultIndex, task_id: taskId, field: `file_coverage[${j}].path`, message: "file_coverage entry has an empty path." });
+  } else if (task && !canonicalPath) {
+    pushIssue(issues, {
+      result_index: resultIndex,
+      task_id: taskId,
+      field: `file_coverage[${j}].path`,
+      message: `file_coverage path '${entry.path}' is not listed in the task file_paths. Declare only assigned files; allowed for this task: ${task.file_paths.join(", ")}.`,
+    });
+  } else if (seenCoveragePaths.has(entryNorm)) {
+    pushIssue(issues, { result_index: resultIndex, task_id: taskId, field: `file_coverage[${j}].path`, message: `file_coverage path '${entry.path}' is duplicated. Declare each file once.` });
+  } else {
+    seenCoveragePaths.add(entryNorm);
+  }
+
+  if (entryNorm.length > 0 && (!task || canonicalPath)) {
+    declaredAssignedCoveragePaths.add(canonicalPath ?? entryNorm);
+  }
+
+  if (!Number.isInteger(entry.total_lines)) {
+    pushIssue(issues, { result_index: resultIndex, task_id: taskId, field: `file_coverage[${j}].total_lines`, message: `file_coverage[${j}].total_lines must be an integer, got ${describeValue(entry.total_lines)}.` });
+  }
+  if (Number.isInteger(entry.total_lines) && Number(entry.total_lines) < 0) {
+    pushIssue(issues, { result_index: resultIndex, task_id: taskId, field: `file_coverage[${j}].total_lines`, message: "file_coverage total_lines must be zero or greater." });
+  }
+  const expectedLineCount = entryNorm.length > 0 ? normLineIndex.get(entryNorm) : undefined;
+  if (Number.isInteger(entry.total_lines) && typeof expectedLineCount === "number" && Number(entry.total_lines) !== expectedLineCount) {
+    pushIssue(issues, {
+      result_index: resultIndex,
+      task_id: taskId,
+      field: `file_coverage[${j}].total_lines`,
+      message: `file_coverage[${j}].total_lines must match the current file line count for '${entry.path}' (expected ${expectedLineCount}, got ${entry.total_lines}).`,
+    });
+  }
+
+  if (entryNorm.length > 0 && Number.isInteger(entry.total_lines) && Number(entry.total_lines) >= 0 && (!task || canonicalPath)) {
+    normalizedFileCoverage.push({ path: canonicalPath ?? entryNorm, total_lines: Number(entry.total_lines) });
+  }
+}
+
+/**
+ * Validate the file_coverage array of a single result.
+ * Returns the normalized coverage entries and declared assigned path set.
+ */
+function validateResultFileCoverage(
+  ctx: ResultValidationContext,
+  issues: AuditResultIssue[],
+): { normalizedFileCoverage: NormalizedFileCoverage[]; declaredAssignedCoveragePaths: Set<string> } {
+  const { result, task, taskId, resultIndex } = ctx;
+  const fileCoverage = result.file_coverage;
+  const normalizedFileCoverage: NormalizedFileCoverage[] = [];
+  const declaredAssignedCoveragePaths = new Set<string>();
+
+  if (!Array.isArray(fileCoverage) || fileCoverage.length === 0) {
+    pushIssue(issues, {
+      result_index: resultIndex,
+      task_id: taskId,
+      field: "file_coverage",
+      message: "file_coverage is empty — each result must declare every assigned file it reviewed and the file's total line count.",
+    });
+    return { normalizedFileCoverage, declaredAssignedCoveragePaths };
+  }
+
+  const seenCoveragePaths = new Set<string>();
+  for (let j = 0; j < fileCoverage.length; j++) {
+    validateFileCoverageEntry(fileCoverage[j], j, ctx, seenCoveragePaths, declaredAssignedCoveragePaths, normalizedFileCoverage, issues);
+  }
+
+  if (task) {
+    for (const path of task.file_paths) {
+      if (!seenCoveragePaths.has(normalizeCoveragePath(path))) {
+        pushIssue(issues, { result_index: resultIndex, task_id: taskId, field: "file_coverage", message: `file_coverage must include every assigned file. Missing '${path}'.` });
+      }
+    }
+  }
+
+  return { normalizedFileCoverage, declaredAssignedCoveragePaths };
+}
+
+function validateResultFindings(
+  ctx: ResultValidationContext,
+  normalizedFileCoverage: NormalizedFileCoverage[],
+  declaredAssignedCoveragePaths: Set<string>,
+  issues: AuditResultIssue[],
+): boolean {
+  const { result, task, taskId, resultIndex } = ctx;
+  const findings = result.findings;
+  if (!Array.isArray(findings)) {
+    pushIssue(issues, { result_index: resultIndex, task_id: taskId, field: "findings", message: `findings must be an array, got ${describeValue(findings)}.` });
+    return false; // signal to skip verification
+  }
+
+  for (let j = 0; j < findings.length; j++) {
+    const label = `findings[${j}]`;
+    const finding = findings[j];
+    issues.push(...validateFinding(finding, label, taskId, resultIndex));
+
+    if (!isRecord(finding) || !Array.isArray(finding.affected_files)) continue;
+
+    const expectedFindingLens =
+      task?.lens ??
+      (typeof result.lens === "string" && VALID_LENSES.has(result.lens) ? result.lens : undefined);
+    if (expectedFindingLens && typeof finding.lens === "string" && finding.lens !== expectedFindingLens) {
+      pushIssue(issues, {
+        result_index: resultIndex,
+        task_id: taskId,
+        field: `${label}.lens`,
+        message: `${label}.lens must match the assigned task lens (expected '${expectedFindingLens}', got '${finding.lens}').`,
+      });
+    }
+
+    for (let k = 0; k < finding.affected_files.length; k++) {
+      const affected = finding.affected_files[k];
+      if (!isRecord(affected) || !isNonEmptyString(affected.path)) continue;
+      const affectedPathNorm = normalizeCoveragePath(affected.path as string);
+      if (!declaredAssignedCoveragePaths.has(affectedPathNorm)) {
+        // Out-of-scope: warn but retain the finding (INV-09 / FRIC-010).
+        pushIssue(issues, {
+          result_index: resultIndex,
+          task_id: taskId,
+          field: `${label}.affected_files[${k}].path`,
+          severity: "warning",
+          message:
+            `affected_files path '${affected.path}' is not in the declared assigned file_coverage (out-of-scope). ` +
+            `In-scope findings are retained; this entry is informational only.` +
+            (task ? ` The task's assigned files are: ${task.file_paths.join(", ")}.` : ""),
+        });
+        continue;
+      }
+      if (!Number.isInteger(affected.line_start)) continue;
+      const start = Number(affected.line_start);
+      const end = Number.isInteger(affected.line_end) ? Number(affected.line_end) : start;
+      if (!coversAffectedSpan(normalizedFileCoverage, affectedPathNorm, start, end)) {
+        pushIssue(issues, {
+          result_index: resultIndex,
+          task_id: taskId,
+          field: `${label}.affected_files[${k}]`,
+          message:
+            `affected_files line span ${affected.path}:${start}-${end} falls outside the declared file_coverage. ` +
+            "Fix the affected_files location or correct file_coverage.total_lines.",
+        });
+      }
+    }
+  }
+
+  return true;
+}
+
+/** Validate a single result record; push issues into `issues`. */
+function validateSingleAuditResult(
+  result: unknown,
+  resultIndex: number,
+  taskMap: Map<string, AuditTask>,
+  allTasks: AuditTask[],
+  normLineIndex: Map<string, number>,
+  issues: AuditResultIssue[],
+): void {
+  if (!isRecord(result)) {
+    pushIssue(issues, {
+      result_index: resultIndex,
+      task_id: `result[${resultIndex}]`,
+      field: `results[${resultIndex}]`,
+      message: `Each audit result must be an object, got ${describeValue(result)}.`,
+    });
+    return;
+  }
+
+  const taskId = issueTaskId(result, resultIndex);
+  const task = taskMap.get(taskId);
+
+  const taskNormMap = new Map<string, string>();
+  if (task) {
+    for (const fp of task.file_paths) {
+      taskNormMap.set(normalizeCoveragePath(fp), fp);
+    }
+  }
+
+  const ctx: ResultValidationContext = { result, task, taskId, resultIndex, taskNormMap, normLineIndex, allTasks };
+
+  validateResultIdentityFields(ctx, issues);
+
+  const { normalizedFileCoverage, declaredAssignedCoveragePaths } = validateResultFileCoverage(ctx, issues);
+
+  const findingsOk = validateResultFindings(ctx, normalizedFileCoverage, declaredAssignedCoveragePaths, issues);
+  if (!findingsOk) return;
+
+  validateVerification(result.verification, result, task, normalizedFileCoverage, taskId, resultIndex, issues);
+}
+
 export function validateAuditResults(
   results: unknown,
   tasks: AuditTask[],
   options: ValidateAuditResultOptions = {},
 ): AuditResultIssue[] {
   const issues: AuditResultIssue[] = [];
-  const taskMap = new Map(tasks.map((task) => [task.task_id, task]));
 
   if (!Array.isArray(results)) {
     pushIssue(issues, {
@@ -600,303 +856,16 @@ export function validateAuditResults(
     return issues;
   }
 
+  const taskMap = new Map(tasks.map((task) => [task.task_id, task]));
+  const normLineIndex = new Map<string, number>();
+  if (options.lineIndex) {
+    for (const [k, v] of Object.entries(options.lineIndex)) {
+      normLineIndex.set(normalizeCoveragePath(k), v);
+    }
+  }
+
   for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    if (!isRecord(result)) {
-      pushIssue(issues, {
-        result_index: i,
-        task_id: `result[${i}]`,
-        field: `results[${i}]`,
-        message: `Each audit result must be an object, got ${describeValue(result)}.`,
-      });
-      continue;
-    }
-
-    const taskId = issueTaskId(result, i);
-    const task = taskMap.get(taskId);
-
-    validateRequiredStringField(result.task_id, "task_id", taskId, i, issues);
-    validateRequiredStringField(result.unit_id, "unit_id", taskId, i, issues);
-    validateRequiredStringField(result.pass_id, "pass_id", taskId, i, issues);
-    validateRequiredStringField(result.lens, "lens", taskId, i, issues);
-
-    if (
-      typeof result.lens === "string" &&
-      !VALID_LENSES.has(result.lens)
-    ) {
-      pushIssue(issues, {
-        result_index: i,
-        task_id: taskId,
-        field: "lens",
-        message: `Invalid lens '${result.lens}'. Must be one of: ${[...VALID_LENSES].join(", ")}.`,
-      });
-    }
-
-    if (task) {
-      validateExpectedStringField(
-        result.unit_id,
-        "unit_id",
-        task.unit_id,
-        taskId,
-        i,
-        issues,
-      );
-      validateExpectedStringField(
-        result.pass_id,
-        "pass_id",
-        task.pass_id,
-        taskId,
-        i,
-        issues,
-      );
-      validateExpectedStringField(
-        result.lens,
-        "lens",
-        task.lens,
-        taskId,
-        i,
-        issues,
-      );
-    }
-
-    if (tasks.length > 0 && !task) {
-      pushIssue(issues, {
-        result_index: i,
-        task_id: taskId,
-        field: "task_id",
-        message:
-          `Unknown task_id '${taskId}'. Use the active task manifest for valid ids: ` +
-          tasks.map((item) => item.task_id).join(", "),
-      });
-    }
-
-    const taskNormMap = new Map<string, string>();
-    if (task) {
-      for (const fp of task.file_paths) {
-        taskNormMap.set(normalizeCoveragePath(fp), fp);
-      }
-    }
-    const normLineIndex = new Map<string, number>();
-    if (options.lineIndex) {
-      for (const [k, v] of Object.entries(options.lineIndex)) {
-        normLineIndex.set(normalizeCoveragePath(k), v);
-      }
-    }
-
-    const fileCoverage = result.file_coverage;
-    const normalizedFileCoverage: NormalizedFileCoverage[] = [];
-    const declaredAssignedCoveragePaths = new Set<string>();
-    if (!Array.isArray(fileCoverage) || fileCoverage.length === 0) {
-      pushIssue(issues, {
-        result_index: i,
-        task_id: taskId,
-        field: "file_coverage",
-        message:
-          "file_coverage is empty — each result must declare every assigned file it reviewed and the file's total line count.",
-      });
-    } else {
-      const seenCoveragePaths = new Set<string>();
-      for (let j = 0; j < fileCoverage.length; j++) {
-        const entry = fileCoverage[j];
-        if (!isRecord(entry)) {
-          pushIssue(issues, {
-            result_index: i,
-            task_id: taskId,
-            field: `file_coverage[${j}]`,
-            message: `file_coverage[${j}] must be an object, got ${describeValue(entry)}.`,
-          });
-          continue;
-        }
-
-        const entryNorm = isNonEmptyString(entry.path)
-          ? normalizeCoveragePath(entry.path as string)
-          : "";
-        const canonicalPath = taskNormMap.get(entryNorm);
-        if (!isNonEmptyString(entry.path)) {
-          pushIssue(issues, {
-            result_index: i,
-            task_id: taskId,
-            field: `file_coverage[${j}].path`,
-            message: "file_coverage entry has an empty path.",
-          });
-        } else if (task && !canonicalPath) {
-          pushIssue(issues, {
-            result_index: i,
-            task_id: taskId,
-            field: `file_coverage[${j}].path`,
-            message:
-              `file_coverage path '${entry.path}' is not listed in the task file_paths. ` +
-              `Declare only assigned files; allowed for this task: ${task.file_paths.join(", ")}.`,
-          });
-        } else if (seenCoveragePaths.has(entryNorm)) {
-          pushIssue(issues, {
-            result_index: i,
-            task_id: taskId,
-            field: `file_coverage[${j}].path`,
-            message: `file_coverage path '${entry.path}' is duplicated. Declare each file once.`,
-          });
-        } else {
-          seenCoveragePaths.add(entryNorm);
-        }
-        if (entryNorm.length > 0 && (!task || canonicalPath)) {
-          declaredAssignedCoveragePaths.add(canonicalPath ?? entryNorm);
-        }
-
-        if (!Number.isInteger(entry.total_lines)) {
-          pushIssue(issues, {
-            result_index: i,
-            task_id: taskId,
-            field: `file_coverage[${j}].total_lines`,
-            message: `file_coverage[${j}].total_lines must be an integer, got ${describeValue(entry.total_lines)}.`,
-          });
-        }
-        if (
-          Number.isInteger(entry.total_lines) &&
-          Number(entry.total_lines) < 0
-        ) {
-          pushIssue(issues, {
-            result_index: i,
-            task_id: taskId,
-            field: `file_coverage[${j}].total_lines`,
-            message: "file_coverage total_lines must be zero or greater.",
-          });
-        }
-        const expectedLineCount = entryNorm.length > 0
-          ? normLineIndex.get(entryNorm)
-          : undefined;
-        if (
-          Number.isInteger(entry.total_lines) &&
-          typeof expectedLineCount === "number" &&
-          Number(entry.total_lines) !== expectedLineCount
-        ) {
-          pushIssue(issues, {
-            result_index: i,
-            task_id: taskId,
-            field: `file_coverage[${j}].total_lines`,
-            message:
-              `file_coverage[${j}].total_lines must match the current file line count for '${entry.path}' ` +
-              `(expected ${expectedLineCount}, got ${entry.total_lines}).`,
-          });
-        }
-        if (
-          entryNorm.length > 0 &&
-          Number.isInteger(entry.total_lines) &&
-          Number(entry.total_lines) >= 0 &&
-          (!task || canonicalPath)
-        ) {
-          normalizedFileCoverage.push({
-            path: canonicalPath ?? entryNorm,
-            total_lines: Number(entry.total_lines),
-          });
-        }
-      }
-
-      if (task) {
-        for (const path of task.file_paths) {
-          if (!seenCoveragePaths.has(normalizeCoveragePath(path))) {
-            pushIssue(issues, {
-              result_index: i,
-              task_id: taskId,
-              field: "file_coverage",
-              message: `file_coverage must include every assigned file. Missing '${path}'.`,
-            });
-          }
-        }
-      }
-    }
-
-    const findings = result.findings;
-    if (!Array.isArray(findings)) {
-      pushIssue(issues, {
-        result_index: i,
-        task_id: taskId,
-        field: "findings",
-        message: `findings must be an array, got ${describeValue(findings)}.`,
-      });
-      continue;
-    }
-
-    for (let j = 0; j < findings.length; j++) {
-      const label = `findings[${j}]`;
-      const finding = findings[j];
-      issues.push(...validateFinding(finding, label, taskId, i));
-
-      if (!isRecord(finding) || !Array.isArray(finding.affected_files)) {
-        continue;
-      }
-
-      const expectedFindingLens =
-        task?.lens ??
-        (typeof result.lens === "string" && VALID_LENSES.has(result.lens)
-          ? result.lens
-          : undefined);
-      if (
-        expectedFindingLens &&
-        typeof finding.lens === "string" &&
-        finding.lens !== expectedFindingLens
-      ) {
-        pushIssue(issues, {
-          result_index: i,
-          task_id: taskId,
-          field: `${label}.lens`,
-          message:
-            `${label}.lens must match the assigned task lens ` +
-            `(expected '${expectedFindingLens}', got '${finding.lens}').`,
-        });
-      }
-
-      for (let k = 0; k < finding.affected_files.length; k++) {
-        const affected = finding.affected_files[k];
-        if (!isRecord(affected) || !isNonEmptyString(affected.path)) {
-          continue;
-        }
-        const affectedPathNorm = normalizeCoveragePath(affected.path as string);
-        if (!declaredAssignedCoveragePaths.has(affectedPathNorm)) {
-          // Out-of-scope affected_files: strip the finding location but retain the
-          // finding itself. Emit a warning (not a hard error) so a worker result that
-          // cites one cross-boundary file is not wholesale rejected — a hard reject
-          // would strand the in-scope findings for the task (INV-09 / FRIC-010).
-          pushIssue(issues, {
-            result_index: i,
-            task_id: taskId,
-            field: `${label}.affected_files[${k}].path`,
-            severity: "warning",
-            message:
-              `affected_files path '${affected.path}' is not in the declared assigned file_coverage (out-of-scope). ` +
-              `In-scope findings are retained; this entry is informational only.` +
-              (task ? ` The task's assigned files are: ${task.file_paths.join(", ")}.` : ""),
-          });
-          continue;
-        }
-        if (!Number.isInteger(affected.line_start)) {
-          continue;
-        }
-        const start = Number(affected.line_start);
-        const end = Number.isInteger(affected.line_end)
-          ? Number(affected.line_end)
-          : start;
-        if (!coversAffectedSpan(normalizedFileCoverage, affectedPathNorm, start, end)) {
-          pushIssue(issues, {
-            result_index: i,
-            task_id: taskId,
-            field: `${label}.affected_files[${k}]`,
-            message:
-              `affected_files line span ${affected.path}:${start}-${end} falls outside the declared file_coverage. ` +
-              "Fix the affected_files location or correct file_coverage.total_lines.",
-          });
-        }
-      }
-    }
-
-    validateVerification(
-      result.verification,
-      result,
-      task,
-      normalizedFileCoverage,
-      taskId,
-      i,
-      issues,
-    );
+    validateSingleAuditResult(results[i], i, taskMap, tasks, normLineIndex, issues);
   }
 
   if (issues.length > 0) {

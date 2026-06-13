@@ -95,6 +95,9 @@ async function makeArtifactsDir({
     result_path: join(runDir, "task-results", `${taskId}.json`),
   }));
 
+  // Ensure task-results exists before writing any pre-existing result files.
+  await mkdir(join(runDir, "task-results"), { recursive: true });
+
   // Add entries for other packets
   for (const other of otherPacketResults) {
     entries.push({
@@ -103,7 +106,6 @@ async function makeArtifactsDir({
       result_path: join(runDir, "task-results", `${other.taskId}.json`),
     });
     // Write the pre-existing result file
-    await mkdir(join(runDir, "task-results"), { recursive: true });
     await writeFile(
       join(runDir, "task-results", `${other.taskId}.json`),
       JSON.stringify(other.result),
@@ -120,8 +122,6 @@ async function makeArtifactsDir({
     }),
     "utf8",
   );
-
-  await mkdir(join(runDir, "task-results"), { recursive: true });
   return { artifactsDir, runDir };
 }
 

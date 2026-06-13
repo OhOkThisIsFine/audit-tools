@@ -126,7 +126,6 @@ async function analyzeFixture(files) {
         excluded: false,
       })),
     };
-    const { buildPathLookup } = await import("../src/extractors/graph.ts");
     const pathLookup = buildPathLookup(repo, new Map());
     const includedFiles = [...new Set(pathLookup.values())];
     return await typescriptAnalyzer.analyze(

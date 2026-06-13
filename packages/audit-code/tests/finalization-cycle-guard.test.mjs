@@ -34,6 +34,9 @@ const {
   writeCoreArtifacts,
 } = await import("../src/io/artifacts.ts");
 const { writeJsonFile } = await import("@audit-tools/shared");
+const { computeArtifactStateSignature } = await import(
+  "../src/orchestrator/artifactMetadata.ts"
+);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -95,6 +98,34 @@ async function makeFakeResult(artDir, bundle) {
   };
 }
 
+// ── Shared helper ────────────────────────────────────────────────────────────
+// Builds the seenStateSignatures / obligationTrail pair that trips the cycle
+// guard on the first call when index >= tolerance - 1.
+//
+// The guard fires when: index + 1 - seenStateSignatures.size >= tolerance.
+// To trigger it with tolerance=16, pre-seed one already-seen signature so that
+// size stays 1 even after the call adds its own (duplicate) sig, then use
+// index = tolerance - 1:  (tolerance) - 1 = tolerance - 1 >= tolerance? No.
+// Correct: index = tolerance  → index+1=tolerance+1, size=1
+//   → tolerance+1 - 1 = tolerance >= tolerance ✓
+//
+// So: seed with sig×1, call with index = tolerance (here: 16).
+
+/**
+ * Builds a seenStateSignatures/obligationTrail pair that will trip the guard
+ * on the very first call when index = TOLERANCE (default 16).
+ *
+ * @param {string} sig  The content-hash signature of the bundle under test.
+ * @param {number} [tolerance=16]
+ */
+function makeCycleTrigger(sig, tolerance = 16) {
+  const seenStateSignatures = new Set([sig]);
+  const obligationTrail = Array.from({ length: tolerance }, (_, i) =>
+    i % 2 === 0 ? "synthesis_current" : "runtime_validation_current"
+  );
+  return { seenStateSignatures, obligationTrail, index: tolerance };
+}
+
 // ── In-process unit tests for checkFinalizationCycle ─────────────────────────
 
 test("checkFinalizationCycle returns undefined while loop is still progressing", async () => {
@@ -132,32 +163,11 @@ test("checkFinalizationCycle fires and writes deterministic-progress.json with c
     const state = deriveAuditState(bundle);
     const result = await makeFakeResult(artDir, bundle);
 
-    // Pre-populate the seenStateSignatures Set with TOLERANCE unique entries
-    // (simulating 16 distinct prior states), then add one more iteration —
-    // index+1=17 distinct = 17-16=1 extra → 17-16=1 < 16? No. Let's think:
-    // condition: index + 1 - seenStateSignatures.size >= tolerance (16)
-    // We want: 17 - 1 = 16 >= 16 → true (fires on index=16, with 1 unique signature)
-    // Achieve this: fill seenStateSignatures with 1 entry, call with index=15
-    // → 16 - 1 = 15 >= 16 = false. Call with index=16 → 17 - 1 = 16 >= 16 = true.
-    // But checkFinalizationCycle adds the new signature itself, so we pre-seed
-    // with 0 entries and call 17 times, or seed with tolerance-1 identical entries.
-    // Simplest: pre-seed with 1 already-seen signature (the same as result's bundle),
-    // and set index to 16 (so count becomes 17, uniques stays 1 → 17-1=16 >= 16 ✓).
+    const { seenStateSignatures, obligationTrail, index } =
+      makeCycleTrigger(computeArtifactStateSignature(bundle));
 
-    // Add the same signature manually 1 time (simulate seen-before).
-    const { computeArtifactStateSignature } = await import(
-      "../src/orchestrator/artifactMetadata.ts"
-    );
-    const sig = computeArtifactStateSignature(bundle);
-    const seenStateSignatures = new Set([sig]);
-    const obligationTrail = Array.from({ length: 16 }, (_, i) =>
-      i % 2 === 0 ? "synthesis_current" : "runtime_validation_current"
-    );
-
-    // index=16: index+1=17, seenStateSignatures.size will be 1 (same sig added again)
-    // → 17 - 1 = 16 >= 16 → fires
     const outcome = await checkFinalizationCycle({
-      index: 16,
+      index,
       obligationTrail,
       seenStateSignatures,
       tolerance: 16,
@@ -169,7 +179,6 @@ test("checkFinalizationCycle fires and writes deterministic-progress.json with c
     });
 
     assert.ok(outcome !== undefined, "checkFinalizationCycle should fire");
-    // Confirm deterministic-progress.json was written
     const progressPath = join(artDir, "steps", "deterministic-progress.json");
     const progress = JSON.parse(await readFile(progressPath, "utf8"));
     assert.equal(progress.cycle_detected, true, "cycle_detected must be true");
@@ -188,15 +197,11 @@ test("checkFinalizationCycle routes to blocked when no report is present", async
     const state = deriveAuditState(bundle);
     const result = await makeFakeResult(artDir, bundle);
 
-    const { computeArtifactStateSignature } = await import(
-      "../src/orchestrator/artifactMetadata.ts"
-    );
-    const sig = computeArtifactStateSignature(bundle);
-    const seenStateSignatures = new Set([sig]);
-    const obligationTrail = Array.from({ length: 16 }, () => "synthesis_current");
+    const { seenStateSignatures, obligationTrail, index } =
+      makeCycleTrigger(computeArtifactStateSignature(bundle));
 
     const outcome = await checkFinalizationCycle({
-      index: 16,
+      index,
       obligationTrail,
       seenStateSignatures,
       tolerance: 16,
@@ -222,15 +227,11 @@ test("checkFinalizationCycle routes to complete when audit_report is present in 
     const state = deriveAuditState(bundle);
     const result = await makeFakeResult(artDir, bundle);
 
-    const { computeArtifactStateSignature } = await import(
-      "../src/orchestrator/artifactMetadata.ts"
-    );
-    const sig = computeArtifactStateSignature(bundle);
-    const seenStateSignatures = new Set([sig]);
-    const obligationTrail = Array.from({ length: 16 }, () => "synthesis_current");
+    const { seenStateSignatures, obligationTrail, index } =
+      makeCycleTrigger(computeArtifactStateSignature(bundle));
 
     const outcome = await checkFinalizationCycle({
-      index: 16,
+      index,
       obligationTrail,
       seenStateSignatures,
       tolerance: 16,
@@ -286,16 +287,11 @@ test("deterministic-progress.json written by checkFinalizationCycle has required
     const state = deriveAuditState(bundle);
     const result = await makeFakeResult(artDir, bundle);
 
-    const { computeArtifactStateSignature } = await import(
-      "../src/orchestrator/artifactMetadata.ts"
-    );
-    const sig = computeArtifactStateSignature(bundle);
-    const seenStateSignatures = new Set([sig]);
-    const obligations = ["synthesis_current", "runtime_validation_current"];
-    const obligationTrail = Array.from({ length: 16 }, (_, i) => obligations[i % 2]);
+    const { seenStateSignatures, obligationTrail, index } =
+      makeCycleTrigger(computeArtifactStateSignature(bundle));
 
     await checkFinalizationCycle({
-      index: 16,
+      index,
       obligationTrail,
       seenStateSignatures,
       tolerance: 16,

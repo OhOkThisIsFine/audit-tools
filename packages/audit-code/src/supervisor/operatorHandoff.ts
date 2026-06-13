@@ -60,16 +60,16 @@ export interface AuditCodeHandoff {
   file_map?: Record<string, string>;
 }
 
-const INCOMING_DIRNAME = "incoming";
-const OPERATOR_HANDOFF_JSON_FILENAME = "operator-handoff.json";
-const OPERATOR_HANDOFF_MARKDOWN_FILENAME = "operator-handoff.md";
-const SESSION_CONFIG_FILENAME = "session-config.json";
-const RUN_LEDGER_FILENAME = "run-ledger.json";
-const CURRENT_TASK_FILENAME = "current-task.json";
-const CURRENT_PROMPT_FILENAME = "current-prompt.md";
-const CURRENT_TASKS_FILENAME = "current-tasks.json";
-const AUDIT_TASKS_FILENAME = "audit_tasks.json";
-const RUNTIME_VALIDATION_TASKS_FILENAME = "runtime_validation_tasks.json";
+export const INCOMING_DIRNAME = "incoming";
+export const OPERATOR_HANDOFF_JSON_FILENAME = "operator-handoff.json";
+export const OPERATOR_HANDOFF_MARKDOWN_FILENAME = "operator-handoff.md";
+export const SESSION_CONFIG_FILENAME = "session-config.json";
+export const RUN_LEDGER_FILENAME = "run-ledger.json";
+export const CURRENT_TASK_FILENAME = "current-task.json";
+export const CURRENT_PROMPT_FILENAME = "current-prompt.md";
+export const CURRENT_TASKS_FILENAME = "current-tasks.json";
+export const AUDIT_TASKS_FILENAME = "audit_tasks.json";
+export const RUNTIME_VALIDATION_TASKS_FILENAME = "runtime_validation_tasks.json";
 const BLOCKED_STATUS: AuditTopLevelStatus = "blocked";
 const COMPLETE_STATUS: AuditTopLevelStatus = "complete";
 const NOT_STARTED_STATUS: AuditTopLevelStatus = "not_started";

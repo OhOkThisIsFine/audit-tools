@@ -318,6 +318,15 @@ export function extractChromeExtensionManifestEdges(
   return edges;
 }
 
+// tag → the attribute that carries its resource reference. Mirrors html.ts so
+// both the regex floor and the tree-sitter analyzer track the same relationships.
+// Changes to which tags are tracked need only be made here and in html.ts.
+const HTML_RESOURCE_ATTRIBUTE: Record<string, string> = {
+  script: "src",
+  link: "href",
+  img: "src",
+};
+
 function extractHtmlAttributeReferences(
   content: string,
   elementName: string,
@@ -346,25 +355,23 @@ export function extractHtmlResourceEdges(
     return [];
   }
 
-  const references = [
-    ...extractHtmlAttributeReferences(content, "script", "src"),
-    ...extractHtmlAttributeReferences(content, "link", "href"),
-  ];
   const edges: GraphEdge[] = [];
-  for (const specifier of references) {
-    const target = resolveLocalReference(fromPath, specifier, pathLookup);
-    if (!target) {
-      continue;
+  for (const [elementName, attributeName] of Object.entries(HTML_RESOURCE_ATTRIBUTE)) {
+    for (const specifier of extractHtmlAttributeReferences(content, elementName, attributeName)) {
+      const target = resolveLocalReference(fromPath, specifier, pathLookup);
+      if (!target) {
+        continue;
+      }
+      edges.push(
+        graphEdge({
+          from: fromPath,
+          to: target,
+          kind: HTML_RESOURCE_EDGE,
+          confidence: HTML_RESOURCE_EDGE_CONFIDENCE,
+          reason: `HTML <${elementName} ${attributeName}> resource references '${specifier}'.`,
+        }),
+      );
     }
-    edges.push(
-      graphEdge({
-        from: fromPath,
-        to: target,
-        kind: HTML_RESOURCE_EDGE,
-        confidence: HTML_RESOURCE_EDGE_CONFIDENCE,
-        reason: `HTML resource attribute references '${specifier}'.`,
-      }),
-    );
   }
   return edges;
 }

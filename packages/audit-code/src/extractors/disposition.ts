@@ -270,6 +270,19 @@ function aggregateByPrefix(posixPaths: readonly string[]): VcsIgnoredAggregate[]
 }
 
 /**
+ * Build a skipped VcsIgnoreSummary for any guard branch or clean fallback.
+ * All three skip return sites share the same shape; centralising here means
+ * future guard additions only need to call this helper.
+ */
+function skippedVcsIgnore(
+  skipped_reason: string,
+  ignored_count = 0,
+  guard_branch?: VcsIgnoreGuardBranch,
+): VcsIgnoreSummary {
+  return { applied: false, ignored_count, skipped_reason, guard_branch };
+}
+
+/**
  * Applies shared path heuristics to mark files that should be excluded or
  * down-scoped before audit planning begins. When `options.root` is provided,
  * additionally classifies vcs-ignored files out of scope via one batched
@@ -298,11 +311,7 @@ export function buildFileDisposition(
     // Clean fallback: keep the existing targeted exclusions only.
     return {
       files: baseline,
-      vcs_ignore: {
-        applied: false,
-        ignored_count: 0,
-        skipped_reason: `gitignore rule skipped: ${evaluation.reason}`,
-      },
+      vcs_ignore: skippedVcsIgnore(`gitignore rule skipped: ${evaluation.reason}`),
     };
   }
 
@@ -316,13 +325,11 @@ export function buildFileDisposition(
   if (total > 0 && ignoredCount === total) {
     return {
       files: baseline,
-      vcs_ignore: {
-        applied: false,
-        ignored_count: ignoredCount,
-        guard_branch: "root_ignored",
-        skipped_reason:
-          "gitignore rule skipped: audit root itself is ignored (every candidate file matched ignore rules)",
-      },
+      vcs_ignore: skippedVcsIgnore(
+        "gitignore rule skipped: audit root itself is ignored (every candidate file matched ignore rules)",
+        ignoredCount,
+        "root_ignored",
+      ),
     };
   }
   // Share guard: an ignore rule that would exclude more than
@@ -331,14 +338,12 @@ export function buildFileDisposition(
   if (total > 0 && ignoredCount / total > VCS_IGNORED_MAX_SHARE) {
     return {
       files: baseline,
-      vcs_ignore: {
-        applied: false,
-        ignored_count: ignoredCount,
-        guard_branch: "share_exceeded",
-        skipped_reason:
-          `gitignore rule skipped: ignored share ${(ignoredCount / total).toFixed(3)} ` +
+      vcs_ignore: skippedVcsIgnore(
+        `gitignore rule skipped: ignored share ${(ignoredCount / total).toFixed(3)} ` +
           `exceeds VCS_IGNORED_MAX_SHARE (${VCS_IGNORED_MAX_SHARE})`,
-      },
+        ignoredCount,
+        "share_exceeded",
+      ),
     };
   }
 

@@ -5,6 +5,11 @@ import { writeJsonFile } from "@audit-tools/shared";
 import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import type { RunPaths, DispatchBatchRun } from "./runArtifactTypes.js";
+import {
+  CURRENT_TASK_FILENAME,
+  CURRENT_PROMPT_FILENAME,
+  CURRENT_TASKS_FILENAME,
+} from "../supervisor/operatorHandoff.js";
 
 export type { RunPaths, DispatchBatchRun } from "./runArtifactTypes.js";
 
@@ -48,14 +53,18 @@ export async function writePacketSchemaFiles(
 ): Promise<void> {
   await copySchemaFiles(targetDir, PACKET_SCHEMA_FILENAMES.map(name => ({ srcPath: join(pkgRoot, "schemas", name), name })));
 }
-const CURRENT_TASK_FILENAME = "current-task.json";
-const CURRENT_PROMPT_FILENAME = "current-prompt.md";
-const CURRENT_TASKS_FILENAME = "current-tasks.json";
+// CURRENT_TASK_FILENAME, CURRENT_PROMPT_FILENAME, CURRENT_TASKS_FILENAME
+// imported from operatorHandoff.ts (shared canonical filenames).
 const CURRENT_SINGLE_TASK_FILENAME = "current-single-task.json";
 const CURRENT_SINGLE_TASK_PROMPT_FILENAME = "current-single-task-prompt.md";
 const CURRENT_SCHEMA_FILENAME = "audit-result.schema.json";
 const CURRENT_RESULTS_SCHEMA_FILENAME = "audit-results.schema.json";
 const CURRENT_FINDING_SCHEMA_FILENAME = "finding.schema.json";
+
+// Section labels for the single-task fallback prompt.
+const FALLBACK_PROMPT_TITLE = "# audit-code single-task fallback";
+const FALLBACK_SECTION_FILES = "Assigned files and line counts:";
+const FALLBACK_SECTION_INSTRUCTIONS = "Instructions:";
 
 function pad(value: number, size = 2): string {
   return String(value).padStart(size, "0");
@@ -131,7 +140,7 @@ function renderSingleTaskFallbackPrompt(task: WorkerTask, auditTask: AuditTask):
     .map((path) => `- ${path}: ${auditTask.file_line_counts?.[path] ?? 0} lines`)
     .join("\n");
   return [
-    "# audit-code single-task fallback",
+    FALLBACK_PROMPT_TITLE,
     "",
     "Use this file only when the conversation host cannot dispatch subagents.",
     "This prompt is generated deterministically from the first pending task.",
@@ -143,10 +152,10 @@ function renderSingleTaskFallbackPrompt(task: WorkerTask, auditTask: AuditTask):
     `lens: ${auditTask.lens}`,
     `rationale: ${auditTask.rationale}`,
     "",
-    "Assigned files and line counts:",
+    FALLBACK_SECTION_FILES,
     lineCounts,
     "",
-    "Instructions:",
+    FALLBACK_SECTION_INSTRUCTIONS,
     "1. Read only the assigned files above.",
     "2. Produce exactly one AuditResult object for task_id above, wrapped in a JSON array.",
     "3. Write that JSON array to audit_results_path.",

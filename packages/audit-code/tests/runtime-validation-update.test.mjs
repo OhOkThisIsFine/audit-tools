@@ -6,6 +6,25 @@ const { updateRuntimeValidationReport } = await import(
 );
 
 /**
+ * Captures all console.warn calls made during fn(), restores console.warn
+ * afterward (even on throw), and returns the array of argument lists.
+ *
+ * @param {() => void} fn  Synchronous function under test.
+ * @returns {Array<any[]>}  All warn call argument lists.
+ */
+function captureWarn(fn) {
+  const warnMessages = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warnMessages.push(args);
+  try {
+    fn();
+  } finally {
+    console.warn = origWarn;
+  }
+  return warnMessages;
+}
+
+/**
  * Minimal helpers to build test fixtures without importing private types.
  */
 function makeManifest(...ids) {
@@ -166,22 +185,18 @@ test("warns when existing results contain stale task IDs", () => {
   );
   const updates = makeReport();
 
-  const warnMessages = [];
-  const origWarn = console.warn;
-  console.warn = (...args) => warnMessages.push(args);
-  try {
-    const report = updateRuntimeValidationReport(manifest, existing, updates);
-    const ids = report.results.map((r) => r.task_id);
+  let report;
+  const warnMessages = captureWarn(() => {
+    report = updateRuntimeValidationReport(manifest, existing, updates);
+  });
+  const ids = report.results.map((r) => r.task_id);
 
-    assert.equal(warnMessages.length, 1, "console.warn should be called exactly once");
-    assert.ok(
-      warnMessages[0].join(" ").includes("stale-x"),
-      "warning should include the stale task_id",
-    );
-    assert.ok(!ids.includes("stale-x"), "stale result must not appear in output");
-  } finally {
-    console.warn = origWarn;
-  }
+  assert.equal(warnMessages.length, 1, "console.warn should be called exactly once");
+  assert.ok(
+    warnMessages[0].join(" ").includes("stale-x"),
+    "warning should include the stale task_id",
+  );
+  assert.ok(!ids.includes("stale-x"), "stale result must not appear in output");
 });
 
 test("warns when update results contain stale task IDs", () => {
@@ -192,22 +207,18 @@ test("warns when update results contain stale task IDs", () => {
     makeResult("stale-y", "confirmed"), // stale — not in manifest
   );
 
-  const warnMessages = [];
-  const origWarn = console.warn;
-  console.warn = (...args) => warnMessages.push(args);
-  try {
-    const report = updateRuntimeValidationReport(manifest, existing, updates);
-    const ids = report.results.map((r) => r.task_id);
+  let report;
+  const warnMessages = captureWarn(() => {
+    report = updateRuntimeValidationReport(manifest, existing, updates);
+  });
+  const ids = report.results.map((r) => r.task_id);
 
-    assert.equal(warnMessages.length, 1, "console.warn should be called exactly once");
-    assert.ok(
-      warnMessages[0].join(" ").includes("stale-y"),
-      "warning should include the stale task_id",
-    );
-    assert.ok(!ids.includes("stale-y"), "stale update result must not appear in output");
-  } finally {
-    console.warn = origWarn;
-  }
+  assert.equal(warnMessages.length, 1, "console.warn should be called exactly once");
+  assert.ok(
+    warnMessages[0].join(" ").includes("stale-y"),
+    "warning should include the stale task_id",
+  );
+  assert.ok(!ids.includes("stale-y"), "stale update result must not appear in output");
 });
 
 test("consolidates stale IDs from both existing and updates into one warning", () => {
@@ -220,19 +231,14 @@ test("consolidates stale IDs from both existing and updates into one warning", (
     makeResult("stale-q", "confirmed"), // stale in updates
   );
 
-  const warnMessages = [];
-  const origWarn = console.warn;
-  console.warn = (...args) => warnMessages.push(args);
-  try {
+  const warnMessages = captureWarn(() => {
     updateRuntimeValidationReport(manifest, existing, updates);
+  });
 
-    assert.equal(warnMessages.length, 1, "console.warn should be called exactly once even with stale IDs in both sources");
-    const warnText = warnMessages[0].join(" ");
-    assert.ok(warnText.includes("stale-p"), "warning should include stale-p");
-    assert.ok(warnText.includes("stale-q"), "warning should include stale-q");
-  } finally {
-    console.warn = origWarn;
-  }
+  assert.equal(warnMessages.length, 1, "console.warn should be called exactly once even with stale IDs in both sources");
+  const warnText = warnMessages[0].join(" ");
+  assert.ok(warnText.includes("stale-p"), "warning should include stale-p");
+  assert.ok(warnText.includes("stale-q"), "warning should include stale-q");
 });
 
 test("does not warn when all task IDs are valid", () => {
@@ -240,16 +246,11 @@ test("does not warn when all task IDs are valid", () => {
   const existing = makeReport(makeResult("task-a", "confirmed"));
   const updates = makeReport(makeResult("task-b", "not_confirmed"));
 
-  const warnMessages = [];
-  const origWarn = console.warn;
-  console.warn = (...args) => warnMessages.push(args);
-  try {
+  const warnMessages = captureWarn(() => {
     updateRuntimeValidationReport(manifest, existing, updates);
+  });
 
-    assert.equal(warnMessages.length, 0, "console.warn must not be called when all task IDs are valid");
-  } finally {
-    console.warn = origWarn;
-  }
+  assert.equal(warnMessages.length, 0, "console.warn must not be called when all task IDs are valid");
 });
 
 // ---------------------------------------------------------------------------

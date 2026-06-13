@@ -614,6 +614,33 @@ function logGraphExtractionMetric(graphs: BuiltGraphs): void {
   );
 }
 
+/**
+ * Append cross-file (repo-wide) reference edges that can only be resolved after
+ * the per-file pass is complete: analyzer ownership roots, pytest conftest links,
+ * and bounded suite links. These are separated from the per-file loop so each
+ * concern is named and testable in isolation.
+ */
+function accumulateCrossFileEdges(
+  acc: GraphEdgeAccumulator,
+  pathLookup: Map<string, string>,
+  options: BuildGraphBundleOptions,
+): void {
+  acc.references.push(
+    ...extractAnalyzerOwnershipEdges(
+      options.externalAnalyzerResults,
+      pathLookup,
+    ),
+  );
+  acc.references.push(...extractPytestConftestLinks(pathLookup));
+  acc.references.push(
+    ...extractBoundedSuiteEdges(
+      pathLookup,
+      options.fileContents ?? {},
+      acc.references,
+    ),
+  );
+}
+
 export function buildGraphBundle(
   repoManifest: RepoManifest,
   disposition?: FileDisposition,
@@ -655,20 +682,8 @@ export function buildGraphBundle(
     acc.routes.push(...fileRoutes);
     acc.references.push(...extractTestSourceEdges(file.path, pathLookup));
   }
-  acc.references.push(
-    ...extractAnalyzerOwnershipEdges(
-      options.externalAnalyzerResults,
-      pathLookup,
-    ),
-  );
-  acc.references.push(...extractPytestConftestLinks(pathLookup));
-  acc.references.push(
-    ...extractBoundedSuiteEdges(
-      pathLookup,
-      options.fileContents ?? {},
-      acc.references,
-    ),
-  );
+
+  accumulateCrossFileEdges(acc, pathLookup, options);
 
   const graphs = {
     imports: uniqueSortedEdges(acc.imports),

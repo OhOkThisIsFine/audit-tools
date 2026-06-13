@@ -1,19 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { scheduleWave, buildProviderModelKey } = await import(
-  "../../shared/src/quota/scheduler.ts"
-);
-const { detectHostActiveSubagentLimit, resolveHostActiveSubagentLimit } = await import(
-  "../src/quota/hostLimits.ts"
-);
 const {
+  scheduleWave,
+  buildProviderModelKey,
   decayWeight,
   computeMaxSafeConcurrency,
   computeRampUpConcurrency,
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
-} = await import("../../shared/src/quota/state.ts");
+} = await import("@audit-tools/shared");
+const { detectHostActiveSubagentLimit, resolveHostActiveSubagentLimit } = await import(
+  "../src/quota/hostLimits.ts"
+);
 const { resolveHostModel } = await import("../src/quota/index.ts");
 
 // Helper to build a quota state entry with preset bucket weights

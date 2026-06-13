@@ -1,10 +1,27 @@
+import { ARTIFACT_DEFINITIONS, AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
+import { AGENT_FEEDBACK_FILENAME } from "@audit-tools/shared";
+
+/**
+ * The canonical set of artifact filenames, derived from ARTIFACT_DEFINITIONS
+ * (the single source of truth) plus the two special-cased files that participate
+ * in the staleness DAG but are not writable registry entries.
+ *
+ * Constraining ARTIFACT_DEPENDENTS_MAP to this type means a typo or a stale
+ * filename literal (after a rename) is caught at compile time rather than
+ * silently producing a no-op staleness edge.
+ */
+type ArtifactFileName =
+  | (typeof ARTIFACT_DEFINITIONS)[keyof typeof ARTIFACT_DEFINITIONS]["fileName"]
+  | typeof AGENT_FEEDBACK_FILENAME
+  | typeof AUDIT_REPORT_FILENAME;
+
 // Invalidation map keyed by UPSTREAM artifact → the list of DOWNSTREAM
 // artifacts that depend on it (and so become stale when it changes). The name
 // reflects the actual direction: each entry's value is that key's *dependents*.
 // `buildArtifactDependenciesMap` flips this to the "X depends on Y" view used by
 // computeArtifactMetadata. (Renamed from the misleading ARTIFACT_DEPENDENCY_MAP,
 // which read as "X's dependencies" — the opposite of what it stores.)
-export const ARTIFACT_DEPENDENTS_MAP: Record<string, string[]> = {
+export const ARTIFACT_DEPENDENTS_MAP: Partial<Record<ArtifactFileName, ArtifactFileName[]>> = {
   "tooling_manifest.json": [
     "repo_manifest.json",
   ],

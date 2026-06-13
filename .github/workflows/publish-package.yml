@@ -74,13 +74,21 @@ jobs:
           fi
           echo "Publish targets '${TARGET}' — branch gate passed."
       - name: Checkout
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.RELEASE_NODE_VERSION }}
           cache: npm
           registry-url: https://registry.npmjs.org
+      - name: Validate package-lock.json
+        timeout-minutes: 2
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::package-lock.json is missing or malformed."' ERR
+          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('lockfileVersion missing'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('name missing'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
       - name: Upgrade npm for trusted publishing
         timeout-minutes: 5
         shell: bash
@@ -102,13 +110,6 @@ jobs:
         run: |
           set -euo pipefail
           npm run build
-      - name: Validate package-lock.json
-        timeout-minutes: 2
-        shell: bash
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::package-lock.json is missing or malformed."' ERR
-          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('lockfileVersion missing'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('name missing'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
       - name: Verify release gate
         timeout-minutes: 20
         shell: bash
@@ -302,13 +303,21 @@ jobs:
           fi
           echo "Publish targets '${TARGET}' — branch gate passed."
       - name: Checkout
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.RELEASE_NODE_VERSION }}
           cache: npm
           registry-url: https://registry.npmjs.org
+      - name: Validate package-lock.json
+        timeout-minutes: 2
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::package-lock.json is missing or malformed."' ERR
+          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('lockfileVersion missing'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('name missing'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
       - name: Upgrade npm for trusted publishing
         timeout-minutes: 5
         shell: bash
@@ -330,13 +339,6 @@ jobs:
         run: |
           set -euo pipefail
           npm run build
-      - name: Validate package-lock.json
-        timeout-minutes: 2
-        shell: bash
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::package-lock.json is missing or malformed."' ERR
-          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('lockfileVersion missing'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('name missing'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
       - name: Verify release gate
         timeout-minutes: 20
         shell: bash
@@ -530,13 +532,21 @@ jobs:
           fi
           echo "Publish targets '${TARGET}' — branch gate passed."
       - name: Checkout
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.RELEASE_NODE_VERSION }}
           cache: npm
           registry-url: https://registry.npmjs.org
+      - name: Validate package-lock.json
+        timeout-minutes: 2
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::package-lock.json is missing or malformed."' ERR
+          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('lockfileVersion missing'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('name missing'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
       - name: Upgrade npm for trusted publishing
         timeout-minutes: 5
         shell: bash

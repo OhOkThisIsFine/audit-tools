@@ -16,6 +16,27 @@ async function captureRunCli(argv) {
   return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code };
 }
 
+/**
+ * Captures all console.warn calls made during fn(), restores console.warn
+ * afterward (even on throw), and returns the captured output as a string.
+ *
+ * @param {() => void} fn  Synchronous function under test.
+ * @returns {string}  Concatenated warn output.
+ */
+function withCapturedWarn(fn) {
+  let output = "";
+  const originalWarn = console.warn;
+  console.warn = (...args) => {
+    output += args.join(" ") + "\n";
+  };
+  try {
+    fn();
+  } finally {
+    console.warn = originalWarn;
+  }
+  return output;
+}
+
 test("CLI flag parsing falls back when values are missing or malformed", () => {
   assert.equal(
     cliTestUtils.getFlag(
@@ -199,16 +220,7 @@ test("runFirstAvailableCommand prefers PATHEXT shims over extensionless files on
 test("warnIfNotGitRepo warns to stderr when .git is absent", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-no-git-"));
   try {
-    let stderrOutput = "";
-    const originalWarn = console.warn;
-    console.warn = (...args) => {
-      stderrOutput += args.join(" ") + "\n";
-    };
-    try {
-      cliTestUtils.warnIfNotGitRepo(tempDir);
-    } finally {
-      console.warn = originalWarn;
-    }
+    const stderrOutput = withCapturedWarn(() => cliTestUtils.warnIfNotGitRepo(tempDir));
     assert.match(stderrOutput, /does not appear to be a git repository/);
     assert.match(stderrOutput, new RegExp(tempDir.replace(/\\/g, "\\\\")));
   } finally {
@@ -219,21 +231,16 @@ test("warnIfNotGitRepo warns to stderr when .git is absent", async () => {
 test("warnIfNotGitRepo emits warning to stderr (console.warn), not stdout", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-no-git-stderr-"));
   try {
+    // captureConsole captures console.log (stdout) and console.error; withCapturedWarn
+    // captures console.warn. Together they let us assert warn → only warn, not log.
     let stdoutOutput = "";
-    let stderrOutput = "";
     const originalLog = console.log;
-    const originalWarn = console.warn;
-    console.log = (...args) => {
-      stdoutOutput += args.join(" ") + "\n";
-    };
-    console.warn = (...args) => {
-      stderrOutput += args.join(" ") + "\n";
-    };
+    console.log = (...args) => { stdoutOutput += args.join(" ") + "\n"; };
+    let stderrOutput;
     try {
-      cliTestUtils.warnIfNotGitRepo(tempDir);
+      stderrOutput = withCapturedWarn(() => cliTestUtils.warnIfNotGitRepo(tempDir));
     } finally {
       console.log = originalLog;
-      console.warn = originalWarn;
     }
     assert.equal(stdoutOutput, "", "warning must not go to stdout");
     assert.match(stderrOutput, /does not appear to be a git repository/);
@@ -245,13 +252,9 @@ test("warnIfNotGitRepo emits warning to stderr (console.warn), not stdout", asyn
 test("warnIfNotGitRepo does not throw — execution continues after warning", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-no-git-nothrow-"));
   try {
-    const originalWarn = console.warn;
-    console.warn = () => {};
-    try {
-      assert.doesNotThrow(() => cliTestUtils.warnIfNotGitRepo(tempDir));
-    } finally {
-      console.warn = originalWarn;
-    }
+    assert.doesNotThrow(() => {
+      withCapturedWarn(() => cliTestUtils.warnIfNotGitRepo(tempDir));
+    });
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -261,16 +264,7 @@ test("warnIfNotGitRepo emits no warning when .git directory is present", async (
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-with-git-dir-"));
   try {
     await mkdir(join(tempDir, ".git"), { recursive: true });
-    let stderrOutput = "";
-    const originalWarn = console.warn;
-    console.warn = (...args) => {
-      stderrOutput += args.join(" ") + "\n";
-    };
-    try {
-      cliTestUtils.warnIfNotGitRepo(tempDir);
-    } finally {
-      console.warn = originalWarn;
-    }
+    const stderrOutput = withCapturedWarn(() => cliTestUtils.warnIfNotGitRepo(tempDir));
     assert.equal(stderrOutput, "", "no warning expected for a valid git repo");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
@@ -282,16 +276,7 @@ test("warnIfNotGitRepo emits no warning when .git file is present (git worktree)
   try {
     // git worktrees create a .git file (not a directory) pointing to the main repo
     await writeFile(join(tempDir, ".git"), "gitdir: /some/other/repo/.git/worktrees/branch\n");
-    let stderrOutput = "";
-    const originalWarn = console.warn;
-    console.warn = (...args) => {
-      stderrOutput += args.join(" ") + "\n";
-    };
-    try {
-      cliTestUtils.warnIfNotGitRepo(tempDir);
-    } finally {
-      console.warn = originalWarn;
-    }
+    const stderrOutput = withCapturedWarn(() => cliTestUtils.warnIfNotGitRepo(tempDir));
     assert.equal(stderrOutput, "", "no warning expected for a git worktree (.git file)");
   } finally {
     await rm(tempDir, { recursive: true, force: true });

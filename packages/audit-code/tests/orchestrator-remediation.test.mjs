@@ -1656,22 +1656,22 @@ test("buildExternalSignalTasks skips malformed analyzer results and keeps valid 
   assert.equal(tasks[0].priority, "high");
 });
 
-test("conflictGroups suppresses group when both severitySpread and confidenceSpread are below 2", () => {
-  // severity: medium/medium → spread = 0; confidence: high/medium → spread = 1
-  // Both spreads < 2 → combined-spread guard triggers → no conflict task emitted
-  const baseTask = {
-    unit_id: "src-api-auth",
-    pass_id: "pass:security",
-    lens: "security",
-    file_paths: ["src/api/auth.ts"],
-    file_line_counts: { "src/api/auth.ts": 40 },
-    rationale: "Audit auth",
-    priority: "medium",
-    status: "complete",
-  };
-  const taskA = { ...baseTask, task_id: "src-api-auth:security:a" };
-  const taskB = { ...baseTask, task_id: "src-api-auth:security:b" };
-  const makeFinding = (id, severity, confidence) => ({
+// ── conflictGroups spread-guard tests ────────────────────────────────────────
+// Shared fixture for the three spread-guard test cases below.
+// Only task_id suffix varies per call site; all other fields are identical.
+const conflictBaseTask = {
+  unit_id: "src-api-auth",
+  pass_id: "pass:security",
+  lens: "security",
+  file_paths: ["src/api/auth.ts"],
+  file_line_counts: { "src/api/auth.ts": 40 },
+  rationale: "Audit auth",
+  priority: "medium",
+  status: "complete",
+};
+
+function makeConflictFinding(id, severity, confidence) {
+  return {
     id,
     title: "Token validation",
     category: "auth",
@@ -1681,7 +1681,15 @@ test("conflictGroups suppresses group when both severitySpread and confidenceSpr
     summary: "Token validation issue.",
     affected_files: [{ path: "src/api/auth.ts", line_start: 12 }],
     evidence: ["src/api/auth.ts:12 - token check"],
-  });
+  };
+}
+
+test("conflictGroups suppresses group when both severitySpread and confidenceSpread are below 2", () => {
+  // severity: medium/medium → spread = 0; confidence: high/medium → spread = 1
+  // Both spreads < 2 → combined-spread guard triggers → no conflict task emitted
+  const taskA = { ...conflictBaseTask, task_id: "src-api-auth:security:a" };
+  const taskB = { ...conflictBaseTask, task_id: "src-api-auth:security:b" };
+  const makeFinding = makeConflictFinding;
   const results = [
     {
       task_id: taskA.task_id,
@@ -1719,29 +1727,9 @@ test("conflictGroups suppresses group when both severitySpread and confidenceSpr
 test("conflictGroups keeps group when severitySpread >= 2 even if confidenceSpread < 2", () => {
   // severity: high(4) vs low(2) → spread = 2; confidence: high/high → spread = 0
   // severitySpread >= 2 → NOT (severitySpread < 2 && confidenceSpread < 2) → group kept
-  const baseTask = {
-    unit_id: "src-api-auth",
-    pass_id: "pass:security",
-    lens: "security",
-    file_paths: ["src/api/auth.ts"],
-    file_line_counts: { "src/api/auth.ts": 40 },
-    rationale: "Audit auth",
-    priority: "medium",
-    status: "complete",
-  };
-  const taskA = { ...baseTask, task_id: "src-api-auth:security:c" };
-  const taskB = { ...baseTask, task_id: "src-api-auth:security:d" };
-  const makeFinding = (id, severity, confidence) => ({
-    id,
-    title: "Token validation",
-    category: "auth",
-    severity,
-    confidence,
-    lens: "security",
-    summary: "Token validation issue.",
-    affected_files: [{ path: "src/api/auth.ts", line_start: 12 }],
-    evidence: ["src/api/auth.ts:12 - token check"],
-  });
+  const taskA = { ...conflictBaseTask, task_id: "src-api-auth:security:c" };
+  const taskB = { ...conflictBaseTask, task_id: "src-api-auth:security:d" };
+  const makeFinding = makeConflictFinding;
   const results = [
     {
       task_id: taskA.task_id,
@@ -1779,29 +1767,9 @@ test("conflictGroups keeps group when severitySpread >= 2 even if confidenceSpre
 test("conflictGroups keeps group when confidenceSpread >= 2 even if severitySpread < 2", () => {
   // severity: medium/medium → spread = 0; confidence: high(3) vs low(1) → spread = 2
   // confidenceSpread >= 2 → NOT (severitySpread < 2 && confidenceSpread < 2) → group kept
-  const baseTask = {
-    unit_id: "src-api-auth",
-    pass_id: "pass:security",
-    lens: "security",
-    file_paths: ["src/api/auth.ts"],
-    file_line_counts: { "src/api/auth.ts": 40 },
-    rationale: "Audit auth",
-    priority: "medium",
-    status: "complete",
-  };
-  const taskA = { ...baseTask, task_id: "src-api-auth:security:e" };
-  const taskB = { ...baseTask, task_id: "src-api-auth:security:f" };
-  const makeFinding = (id, severity, confidence) => ({
-    id,
-    title: "Token validation",
-    category: "auth",
-    severity,
-    confidence,
-    lens: "security",
-    summary: "Token validation issue.",
-    affected_files: [{ path: "src/api/auth.ts", line_start: 12 }],
-    evidence: ["src/api/auth.ts:12 - token check"],
-  });
+  const taskA = { ...conflictBaseTask, task_id: "src-api-auth:security:e" };
+  const taskB = { ...conflictBaseTask, task_id: "src-api-auth:security:f" };
+  const makeFinding = makeConflictFinding;
   const results = [
     {
       task_id: taskA.task_id,

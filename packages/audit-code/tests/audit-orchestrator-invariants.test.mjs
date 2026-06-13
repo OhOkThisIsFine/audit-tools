@@ -32,6 +32,8 @@ const { computeStaleArtifacts } = await import("../src/orchestrator/staleness.ts
 const { computeArtifactMetadata } = await import("../src/orchestrator/artifactMetadata.ts");
 const { buildArtifactDependenciesMap } = await import("../src/orchestrator/artifactFreshness.ts");
 const { deriveAuditState } = await import("../src/orchestrator/state.ts");
+const { ARTIFACT_DEFINITIONS, AUDIT_REPORT_FILENAME } = await import("../src/io/artifacts.ts");
+const { AGENT_FEEDBACK_FILENAME } = await import("@audit-tools/shared");
 
 // ---------------------------------------------------------------------------
 // INV-03: staleness DAG — scope.json → coverage_matrix chain
@@ -598,5 +600,44 @@ test("INV-10: a scope change stales audit_tasks.json even when coverage_matrix c
   assert.ok(
     stale.has("audit_tasks.json"),
     "audit_tasks.json must be stale when scope changes (direct edge guards against identical-coverage no-fire)",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// INV-11: ARTIFACT_DEPENDENTS_MAP keys and values are all known artifact filenames
+//         (FND-MNT-e5eb0dfc — runtime counterpart of the compile-time ArtifactFileName type constraint)
+// ---------------------------------------------------------------------------
+
+test("INV-11: all ARTIFACT_DEPENDENTS_MAP keys and values are known artifact filenames", () => {
+  // Build the canonical set from ARTIFACT_DEFINITIONS (the single source of truth)
+  // plus the two special-cased files that participate in the staleness DAG.
+  const knownFileNames = new Set([
+    ...Object.values(ARTIFACT_DEFINITIONS).map((def) => def.fileName),
+    AGENT_FEEDBACK_FILENAME,
+    AUDIT_REPORT_FILENAME,
+  ]);
+
+  const unknownKeys = [];
+  const unknownValues = [];
+  for (const [key, dependents] of Object.entries(ARTIFACT_DEPENDENTS_MAP)) {
+    if (!knownFileNames.has(key)) {
+      unknownKeys.push(key);
+    }
+    for (const dep of dependents ?? []) {
+      if (!knownFileNames.has(dep)) {
+        unknownValues.push(`${key} → ${dep}`);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    unknownKeys,
+    [],
+    `ARTIFACT_DEPENDENTS_MAP keys that are not known artifact filenames: ${unknownKeys.join(", ")}`,
+  );
+  assert.deepEqual(
+    unknownValues,
+    [],
+    `ARTIFACT_DEPENDENTS_MAP values that are not known artifact filenames: ${unknownValues.join(", ")}`,
   );
 });

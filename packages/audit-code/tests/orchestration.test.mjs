@@ -563,36 +563,11 @@ test("buildAuditReportModel runtime breakdown omits pending without a manifest",
 });
 
 test("decideNextStep emits a warning reason when no executor is registered for the selected obligation", () => {
-  // Construct a bundle whose state has exactly one actionable obligation whose id
-  // is not present in EXECUTOR_REGISTRY. We do this by supplying a bundle that is
-  // missing only `repo_manifest` (so the top-priority obligation is "repo_manifest"),
-  // then temporarily swap the EXECUTOR_REGISTRY to a version that has no entry for
-  // "repo_manifest", observe the warning, and restore it.
-  //
-  // To avoid mutating the live registry object, we instead call decideNextStep
-  // with a bundle that triggers a known-registered obligation first, then verify
-  // the existing happy-path reason is clean. For the gap path, build a minimal
-  // bundle that leaves `repo_manifest` as the only actionable obligation and check
-  // the returned reason string.
-  //
-  // NOTE: We cannot easily fake an obligation with NO registry entry without
-  // patching the module, but the spec says the observation is about a missing
-  // executor for a *selected* obligation — so we use the no-bundle path and rely
-  // on the implementation to pick "repo_manifest" as the next obligation. If the
-  // registry has an entry for it (normal), this test confirms the normal reason
-  // string. A genuine gap case requires a future obligation id that has no entry.
-  //
-  // The most reliable cross-cutting approach is to call decideNextStep with a
-  // bundle that causes it to select `synthesis_narrative_current` — the one
-  // optional step at the tail of the priority chain that *may or may not* have a
-  // registered executor depending on the configuration. Instead, we fabricate a
-  // minimal complete-except-narrative bundle and confirm the reason string matches
-  // one of the two defined patterns.
+  // Verify the happy-path reason string for a registered obligation (file_disposition).
   const normalDecision = decideNextStep({
     provider_confirmation: { confirmed_at: "2026-04-22T00:00:00Z", confirmed_by: "host" },
     repo_manifest: createRepoManifest(),
   });
-  // Normal path: an executor IS registered for the selected obligation.
   assert.equal(normalDecision.selected_obligation, "file_disposition");
   assert.ok(
     normalDecision.selected_executor !== null,
@@ -606,18 +581,12 @@ test("decideNextStep emits a warning reason when no executor is registered for t
 });
 
 test("decideNextStep reason flags the gap when selected_executor is null", () => {
-  // Directly invoke decideNextStep and inspect the returned reason when the
-  // executor is null. We synthesise this by invoking the helper with a bundle
-  // that triggers `synthesis_narrative_current` — the sole obligation that has
-  // no executor in the default registry (it is deliberately optional and the
-  // executor step is omitted from the registry when narratives are disabled).
-  // If the registry happens to include it, this test degrades gracefully.
-  const { decideNextStep: decide, findObligation: find, PRIORITY } =
-    // Re-use the already-imported module binding from the top of the file.
-    { decideNextStep, findObligation: undefined, PRIORITY: undefined };
-  void find; void PRIORITY;
-
-  const decision = decide({});
+  // With an empty bundle, decideNextStep selects the first actionable obligation.
+  // If that obligation has no registered executor (gap case), the reason must
+  // contain "No executor found for obligation" + the obligation id.
+  // If the registry happens to have an entry (normal case), we fall through
+  // to the normal-path assertion below — the test degrades gracefully.
+  const decision = decideNextStep({});
   if (decision.selected_executor === null && decision.selected_obligation !== null) {
     // Gap case: the reason MUST contain the sentinel phrase and the obligation id.
     assert.match(
