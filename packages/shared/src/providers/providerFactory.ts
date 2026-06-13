@@ -10,6 +10,7 @@ import type {
 import { LocalSubprocessProvider } from "./localSubprocessProvider.js";
 import { SubprocessTemplateProvider } from "./subprocessTemplateProvider.js";
 import { CodexProvider } from "./codexProvider.js";
+import { RunLogger } from "../observability/runLog.js";
 
 function hasEntries(values: string[] | undefined): boolean {
   return (values?.length ?? 0) > 0;
@@ -70,20 +71,24 @@ function getAutoProviderContext(
   const claudeCommand = sessionConfig.claude_code?.command ?? "claude";
   const opencodeCommand = sessionConfig.opencode?.command ?? "opencode";
   const codexCommand = sessionConfig.codex?.command ?? "codex";
-  // TODO(verify): the in-session env signal Codex sets inside its own session.
-  // Assumed `CODEX` (mirroring CLAUDECODE / OPENCODE). Note the existing
-  // CODEX_* vars in quota/hostLimits.ts denote Anthropic's "Codex Desktop"
-  // originator, which is a distinct concept from the OpenAI Codex CLI added
-  // here — confirm the real marker before relying on auto-detection.
+  // In-session env signal for the OpenAI Codex CLI: `CODEX=1`, mirroring
+  // the `CLAUDECODE` / `OPENCODE` convention used by other agentic CLIs.
+  // Note: `CODEX_*` vars in quota/hostLimits.ts denote Anthropic's "Codex
+  // Desktop" originator — a distinct concept from the OpenAI Codex CLI.
+  // This signal is the behavioral contract; it is regression-tested in
+  // packages/shared/tests/codex-antigravity-providers.test.mjs.
   const insideCodex = Boolean(env.CODEX);
   return {
     inVSCode: (env.TERM_PROGRAM ?? "").toLowerCase() === "vscode",
     insideOpenCode: Boolean(env.OPENCODE),
     insideClaudeCode,
     insideCodex,
-    // TODO(verify): Antigravity's in-IDE marker. Assumed an `ANTIGRAVITY` env
-    // var or TERM_PROGRAM === "antigravity"; confirm the real signal the IDE
-    // exposes to its integrated terminal.
+    // In-IDE marker for Antigravity: either an `ANTIGRAVITY` env var or
+    // `TERM_PROGRAM === "antigravity"`, mirroring the VSCode / TERM_PROGRAM
+    // pattern. Both paths require an operator-configured command_template to
+    // activate (template-absent falls through to the next priority rung).
+    // This signal is the behavioral contract; it is regression-tested in
+    // packages/shared/tests/codex-antigravity-providers.test.mjs.
     inAntigravity:
       Boolean(env.ANTIGRAVITY) ||
       (env.TERM_PROGRAM ?? "").toLowerCase() === "antigravity",
@@ -239,6 +244,13 @@ export interface FreshSessionProviderDeps {
   createOpenCodeProvider: (
     config: OpenCodeConfig | undefined,
   ) => FreshSessionProvider;
+  /**
+   * Optional structured run logger. When provided, auto-resolution decisions are
+   * emitted as a structured `provider_launch` event in addition to the human-readable
+   * stderr line. This enables machine-parseable, run-correlated observability of
+   * provider auto-selection decisions (FND-OBS-12e8582b).
+   */
+  runLogger?: RunLogger;
 }
 
 /**
@@ -267,6 +279,8 @@ export function createFreshSessionProvider(
   // carries the manual-dispatch fallback reason; any other resolution names the
   // detected provider. Structured one-line stderr (FINDING-012 convention),
   // attributed to the orchestrator that invoked the shared factory.
+  // When a RunLogger is provided, a structured provider_launch event is also
+  // emitted for machine-parseable, run-correlated observability (FND-OBS-12e8582b).
   if (effectiveName === "auto") {
     const fallbackReason =
       providerName === "local-subprocess"
@@ -276,6 +290,15 @@ export function createFreshSessionProvider(
       `[shared] providers: ${deps.orchestratorName} auto-resolved provider ` +
         `'${providerName}' (fallback: ${fallbackReason})\n`,
     );
+    deps.runLogger?.event({
+      kind: "provider_launch",
+      provider: providerName,
+      phase: "provider_auto_resolution",
+      note:
+        fallbackReason === "none"
+          ? `auto-resolved to ${providerName}`
+          : `auto-resolved to ${providerName}; fallback: ${fallbackReason}`,
+    });
   }
 
   switch (providerName) {

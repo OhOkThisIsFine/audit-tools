@@ -58,6 +58,21 @@ export interface ClauseInterpretResult {
  * clauses. Splits on semicolons, " and ", newlines, and sentence boundaries
  * (". " followed by an uppercase letter or end-of-string). Returns an empty
  * array for empty/whitespace-only input.
+ *
+ * **Why commas do NOT split here:**
+ * This function is used in the *blocking-checkpoint* intent pipeline where
+ * each clause must be an independently assessable directive. A comma within a
+ * clause (e.g. "focus on modules A, B, and C") is part of that directive, not
+ * a clause separator. Splitting on commas would fragment such directives into
+ * unrecognisable pieces, producing spurious unencodable clauses.
+ *
+ * **Compare with `freeFormIntentInterpreter.decomposeClauses`:**
+ * That function splits on commas because it processes brief hint lists where
+ * commas are the primary separator (e.g. "security, performance"). Its output
+ * is a set of keyword-match inputs, not independently assessable directives.
+ *
+ * The two functions intentionally have different splitting rules. See
+ * `tests/maintainability-split-rules.test.mjs` for a regression assertion.
  */
 export function decomposeIntent(free_form_intent: string): IntentClause[] {
   if (!free_form_intent || !free_form_intent.trim()) {
@@ -90,7 +105,7 @@ export function decomposeIntent(free_form_intent: string): IntentClause[] {
       while ((match = sentenceRe.exec(remaining)) !== null) {
         parts.push(remaining.slice(lastIndex, match.index + 1));
         lastIndex = match.index + match[0].length;
-        sentenceRe.lastIndex = lastIndex;
+        // sentenceRe.lastIndex is already at lastIndex after exec; no reassignment needed.
       }
       parts.push(remaining.slice(lastIndex));
       return parts;

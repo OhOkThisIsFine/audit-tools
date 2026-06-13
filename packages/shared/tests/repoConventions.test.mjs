@@ -169,3 +169,21 @@ test("detectStyleFromSnippet: no quote characters leaves quote_style undefined",
     assert.equal(conventions.quote_style, undefined);
   });
 });
+
+test("detectStyleFromSnippet: double-quoted HTML attrs in template literals do not skew to double (COR-a1786327)", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ name: "x" }));
+    await mkdir(join(dir, "src"), { recursive: true });
+    // File uses single-quote string literals throughout, but has a template literal
+    // containing HTML with double-quoted attributes.  The raw-character approach would
+    // see 4 double-quotes (class="foo" x2) vs 2 single-quotes and mis-detect as "double".
+    // The scanner-aware approach skips content inside template literals.
+    const src = [
+      "const cls = 'primary';",
+      "const html = `<div class=\"foo\"><span class=\"bar\">${cls}</span></div>`;",
+    ].join("\n") + "\n";
+    await writeFile(join(dir, "src", "index.ts"), src);
+    const conventions = detectRepoConventions(dir);
+    assert.equal(conventions.quote_style, "single");
+  });
+});

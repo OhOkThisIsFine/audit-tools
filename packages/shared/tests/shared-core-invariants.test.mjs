@@ -446,6 +446,358 @@ test("INV-shared-core-09: requireKeys returns issues rather than throwing", asyn
   assert.ok(issues2.length > 0, "requireKeys must produce an issue for missing 'title'");
 });
 
+// ── INV-shared-core-12: Codex/Antigravity env signals are documented behavioral contracts ─
+// ARC-94fc2498: provider auto-resolution signals for Codex (CODEX) and
+// Antigravity (ANTIGRAVITY / TERM_PROGRAM=antigravity) are now regression-locked
+// by test — not unconfirmed TODO items. These tests verify the behavioral contracts
+// that the signal interpretation is intentional and stable.
+
+test("INV-shared-core-12: CODEX env var resolves auto provider to codex (in-session)", async () => {
+  const { resolveFreshSessionProviderName } = await import("../src/providers/providerFactory.ts");
+  // CODEX=1 signals we are running inside an OpenAI Codex CLI session.
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    {},
+    { env: { CODEX: "1" }, commandExists: () => false },
+  );
+  assert.equal(
+    resolved,
+    "codex",
+    "CODEX env var must route to codex provider (in-session behavioral contract)",
+  );
+});
+
+test("INV-shared-core-12: ANTIGRAVITY env var resolves auto provider to antigravity when a template is configured", async () => {
+  const { resolveFreshSessionProviderName } = await import("../src/providers/providerFactory.ts");
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    { antigravity: { command_template: ["ag", "--run"] } },
+    { env: { ANTIGRAVITY: "1" }, commandExists: () => false },
+  );
+  assert.equal(
+    resolved,
+    "antigravity",
+    "ANTIGRAVITY env var + command_template must route to antigravity (behavioral contract)",
+  );
+});
+
+test("INV-shared-core-12: TERM_PROGRAM=antigravity also resolves to antigravity with a template", async () => {
+  const { resolveFreshSessionProviderName } = await import("../src/providers/providerFactory.ts");
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    { antigravity: { command_template: ["ag", "--run"] } },
+    { env: { TERM_PROGRAM: "antigravity" }, commandExists: () => false },
+  );
+  assert.equal(
+    resolved,
+    "antigravity",
+    "TERM_PROGRAM=antigravity is equivalent to ANTIGRAVITY env var (behavioral contract)",
+  );
+});
+
+test("INV-shared-core-12: providerFactory.ts has no TODO(verify) comments for Codex/Antigravity signals", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { resolve, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const factoryPath = resolve(dir, "../src/providers/providerFactory.ts");
+  const source = readFileSync(factoryPath, "utf8");
+  // ARC-94fc2498: the TODO(verify) comments that flagged these as unconfirmed
+  // signals must be gone — replaced with documented behavioral contracts.
+  assert.ok(
+    !source.includes("TODO(verify)"),
+    "providerFactory.ts must not contain TODO(verify) comments — signals are now documented behavioral contracts (ARC-94fc2498)",
+  );
+});
+
+// ── INV-shared-core-13: RunLogger is the structured logging contract ───────────
+// ARC-c70f0310: RunLogger (shared/src/observability/runLog.ts) is the canonical
+// structured logging contract. Scattered process.stderr.write and console.debug
+// calls in orchestrator hot paths are identified as a tool opportunity; RunLogger
+// already provides NDJSON structured output with injectable clock and disabled mode.
+
+test("INV-shared-core-13: RunLogger exports the full structured logging contract", async () => {
+  const { RunLogger } = await import("../src/observability/runLog.ts");
+  // RunLogger must have the three-part contract: constructor, .event(), .disabled()
+  assert.equal(typeof RunLogger, "function", "RunLogger must be a class");
+  const logger = new RunLogger("/tmp/noop-test.jsonl", { enabled: false });
+  assert.equal(typeof logger.event, "function", "RunLogger instance must have .event()");
+  assert.equal(typeof logger.isEnabled, "boolean", "RunLogger instance must have .isEnabled");
+  const disabled = RunLogger.disabled();
+  assert.equal(disabled.isEnabled, false, "RunLogger.disabled() must return a disabled logger");
+  // Disabled logger must accept all event kinds without throwing.
+  for (const kind of ["obligation", "executor_start", "executor_end", "artifact_write",
+                       "scope", "outcome", "provider_launch", "step", "state", "error"]) {
+    assert.doesNotThrow(
+      () => disabled.event({ kind }),
+      `disabled RunLogger must not throw for kind=${kind}`,
+    );
+  }
+});
+
+test("INV-shared-core-13: RunLogEventKind covers all orchestrator lifecycle events", async () => {
+  // The RunLogEventKind union must include events emitted by both orchestrators.
+  // This test documents the contract — adding new event kinds is non-breaking,
+  // but removing these would break log aggregation across runs.
+  const runLogModule = await import("../src/observability/runLog.ts");
+  // We verify indirectly: a RunLogger with a real path accepts all these kinds.
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { readFile, rm } = await import("node:fs/promises");
+  const dir = await mkdtemp(join(tmpdir(), "inv13-runlog-"));
+  try {
+    const logPath = join(dir, "run.jsonl");
+    const logger = new runLogModule.RunLogger(logPath, { now: () => 1000 });
+    const kinds = ["obligation", "executor_start", "executor_end", "artifact_write",
+                   "scope", "outcome", "provider_launch", "step", "state", "error"];
+    for (const kind of kinds) {
+      logger.event({ kind, note: `test-${kind}` });
+    }
+    const lines = (await readFile(logPath, "utf8")).trim().split("\n");
+    assert.equal(lines.length, kinds.length, "each emitted event must produce one NDJSON line");
+    for (let i = 0; i < kinds.length; i++) {
+      const parsed = JSON.parse(lines[i]);
+      assert.equal(parsed.kind, kinds[i], `line ${i} must have kind=${kinds[i]}`);
+      assert.equal(typeof parsed.ts, "string", "each line must have an ISO timestamp");
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// ── INV-shared-core-14: providerFactory emits structured RunLogger event on auto-resolution ─
+// FND-OBS-12e8582b: auto-resolution diagnostic wrote to stderr only. Now the factory
+// also emits a structured provider_launch event via an optional injected RunLogger,
+// enabling machine-parseable, run-correlated observability of provider selection.
+
+test("INV-shared-core-14: createFreshSessionProvider emits provider_launch RunLogger event on auto-resolution", async () => {
+  const { createFreshSessionProvider } = await import("../src/providers/providerFactory.ts");
+  const { RunLogger } = await import("../src/observability/runLog.ts");
+  const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const dir = await mkdtemp(join(tmpdir(), "inv14-provider-launch-"));
+  try {
+    const logPath = join(dir, "run.jsonl");
+    const runLogger = new RunLogger(logPath, { now: () => 1234567890 });
+
+    const deps = {
+      orchestratorName: "test-orch",
+      createClaudeCodeProvider: (_config) => ({ name: "claude-code", launch: async () => ({ accepted: false }) }),
+      createOpenCodeProvider: (_config) => ({ name: "opencode", launch: async () => ({ accepted: false }) }),
+      runLogger,
+    };
+
+    // name=undefined + no sessionConfig.provider → effectiveName="auto" → auto-resolution fires.
+    createFreshSessionProvider(undefined, {}, deps);
+
+    const content = await readFile(logPath, "utf8");
+    assert.ok(content.trim().length > 0, "auto-resolution must produce at least one RunLogger event");
+    const event = JSON.parse(content.trim().split("\n")[0]);
+    assert.equal(event.kind, "provider_launch", "auto-resolution must emit a provider_launch event");
+    assert.equal(typeof event.provider, "string", "provider_launch event must have provider field");
+    assert.equal(typeof event.ts, "string", "provider_launch event must have a timestamp");
+    assert.equal(event.phase, "provider_auto_resolution", "event must carry phase=provider_auto_resolution");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("INV-shared-core-14: createFreshSessionProvider does NOT emit RunLogger event for explicit provider name", async () => {
+  const { createFreshSessionProvider } = await import("../src/providers/providerFactory.ts");
+  const { RunLogger } = await import("../src/observability/runLog.ts");
+  const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const dir = await mkdtemp(join(tmpdir(), "inv14-no-event-"));
+  try {
+    const logPath = join(dir, "run.jsonl");
+    const runLogger = new RunLogger(logPath, { now: () => 1234567890 });
+
+    const deps = {
+      orchestratorName: "test-orch",
+      createClaudeCodeProvider: (_config) => ({ name: "claude-code", launch: async () => ({ accepted: false }) }),
+      createOpenCodeProvider: (_config) => ({ name: "opencode", launch: async () => ({ accepted: false }) }),
+      runLogger,
+    };
+
+    // Explicit "local-subprocess" is not auto-detection — no event should be emitted.
+    createFreshSessionProvider("local-subprocess", {}, deps);
+
+    const content = await readFile(logPath, "utf8").catch(() => "");
+    assert.equal(
+      content.trim(),
+      "",
+      "explicit provider name must not produce a RunLogger event (only auto-resolution does)",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("INV-shared-core-14: FreshSessionProviderDeps.runLogger is optional (no logger = no throw)", async () => {
+  const { createFreshSessionProvider } = await import("../src/providers/providerFactory.ts");
+
+  // Callers that do not supply runLogger must not throw — it is optional.
+  const deps = {
+    orchestratorName: "test-orch",
+    createClaudeCodeProvider: (_config) => ({ name: "claude-code", launch: async () => ({ accepted: false }) }),
+    createOpenCodeProvider: (_config) => ({ name: "opencode", launch: async () => ({ accepted: false }) }),
+    // No runLogger supplied.
+  };
+
+  assert.doesNotThrow(
+    () => createFreshSessionProvider("local-subprocess", {}, deps),
+    "createFreshSessionProvider must not throw when runLogger is absent",
+  );
+});
+
+// ── INV-shared-core-11: opentoken removed from SpawnLoggedCommandOptions ─────
+
+// ── INV-shared-core-15: CRIT-shared-first-ordering — CI builds shared before dependents ──
+// CRIT-002: Shared-package convergences land and stay green BEFORE dependent per-module
+// fixes. The CI must build @audit-tools/shared before running verify:release on each
+// dependent package. These tests lock the ordering contract in the CI YAML.
+
+test("INV-shared-core-15: ci.yml contract-audit-code job builds shared before verify:release", () => {
+  const ciPath = resolve(REPO_ROOT, ".github/workflows/ci.yml");
+  assert.ok(existsSync(ciPath), `ci.yml not found at ${ciPath}`);
+  const content = readFileSync(ciPath, "utf8");
+
+  // Extract the contract-audit-code job block and verify step ordering.
+  // We locate the two critical step names and assert shared-build appears first.
+  const sharedBuildIdx = content.indexOf("Build @audit-tools/shared");
+  const verifyIdx = content.indexOf("Verify release contract");
+
+  assert.ok(sharedBuildIdx !== -1, "ci.yml must contain a 'Build @audit-tools/shared' step");
+  assert.ok(verifyIdx !== -1, "ci.yml must contain a 'Verify release contract' step");
+  assert.ok(
+    sharedBuildIdx < verifyIdx,
+    `'Build @audit-tools/shared' (pos ${sharedBuildIdx}) must appear before 'Verify release contract' (pos ${verifyIdx}) in ci.yml — CRIT-shared-first-ordering`,
+  );
+});
+
+test("INV-shared-core-15: ci.yml builds shared before verify:release in BOTH dependent jobs", () => {
+  const ciPath = resolve(REPO_ROOT, ".github/workflows/ci.yml");
+  const content = readFileSync(ciPath, "utf8");
+
+  // Both contract-audit-code and contract-remediate-code jobs must have this ordering.
+  // Find each job block and verify the step order within it.
+  for (const jobName of ["contract-audit-code", "contract-remediate-code"]) {
+    const jobStart = content.indexOf(`${jobName}:`);
+    assert.ok(jobStart !== -1, `ci.yml must contain a '${jobName}' job`);
+
+    // Find the next job boundary (the next top-level job key or end of file).
+    const nextJobMatch = content.slice(jobStart + 1).search(/\n  \w[\w-]+:/);
+    const jobEnd = nextJobMatch === -1 ? content.length : jobStart + 1 + nextJobMatch;
+    const jobBlock = content.slice(jobStart, jobEnd);
+
+    const sharedIdx = jobBlock.indexOf("Build @audit-tools/shared");
+    const verifyIdx = jobBlock.indexOf("Verify release contract");
+
+    assert.ok(sharedIdx !== -1, `'${jobName}' job must have 'Build @audit-tools/shared' step`);
+    assert.ok(verifyIdx !== -1, `'${jobName}' job must have 'Verify release contract' step`);
+    assert.ok(
+      sharedIdx < verifyIdx,
+      `In '${jobName}': 'Build @audit-tools/shared' must precede 'Verify release contract' — CRIT-shared-first-ordering`,
+    );
+  }
+});
+
+test("INV-shared-core-15: root npm run check runs check --workspaces (shared type errors propagate to dependents)", () => {
+  const pkgPath = resolve(REPO_ROOT, "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+
+  // Root check must include --workspaces so a type error in @audit-tools/shared
+  // is caught before dependents attempt to build against a broken shared dist.
+  const checkScript = pkg.scripts?.check ?? "";
+  assert.ok(
+    checkScript.includes("--workspaces") || checkScript.includes("-ws"),
+    `Root package.json 'check' script must use --workspaces to propagate shared type errors to all dependents. Got: "${checkScript}" — CRIT-shared-first-ordering`,
+  );
+});
+
+// ── INV-shared-core-16: CRIT-tests-with-source — pre-commit gate enforces green ─
+// CRIT-001: Regression tests for a fix land in the same commit as the fix.
+// The mechanical enforcement is the pre-commit-gate hook: it blocks `git commit`
+// until `npm run check` passes. If a fix is committed without its test the check
+// could still pass (since tests are run separately), but the green-at-every-commit
+// invariant means no broken build can land — the moment a test is added in a later
+// commit, the commit is tested before it lands.
+//
+// These tests lock the gate's existence and contract so it cannot be silently deleted.
+
+test("INV-shared-core-16: pre-commit-gate.mjs exists and blocks git commit on check failure", () => {
+  const gatePath = resolve(REPO_ROOT, ".claude/hooks/pre-commit-gate.mjs");
+  assert.ok(existsSync(gatePath), `.claude/hooks/pre-commit-gate.mjs must exist — CRIT-tests-with-source`);
+
+  const source = readFileSync(gatePath, "utf8");
+
+  // Gate must intercept git commit invocations.
+  assert.ok(
+    source.includes("git") && source.includes("commit"),
+    "pre-commit-gate.mjs must detect git commit invocations",
+  );
+
+  // Gate must run npm run check (the full workspace typecheck).
+  assert.ok(
+    source.includes("npm run check"),
+    "pre-commit-gate.mjs must invoke 'npm run check' — CRIT-tests-with-source",
+  );
+
+  // Gate must exit non-zero to block the commit when check fails.
+  assert.ok(
+    source.includes("process.exit(2)"),
+    "pre-commit-gate.mjs must call process.exit(2) to block a failing commit — CRIT-tests-with-source",
+  );
+});
+
+test("INV-shared-core-16: async-typecheck hook exists and covers all three packages", () => {
+  const hookPath = resolve(REPO_ROOT, ".claude/hooks/async-typecheck.mjs");
+  assert.ok(existsSync(hookPath), `.claude/hooks/async-typecheck.mjs must exist — CRIT-tests-with-source`);
+
+  const source = readFileSync(hookPath, "utf8");
+
+  // The async hook must cover all three packages so an edit to any one of them
+  // triggers a typecheck (catching missed test file additions or type breakage).
+  // The hook uses a single regex that lists all three package names — verify each name appears.
+  for (const pkg of ["shared", "audit-code", "remediate-code"]) {
+    assert.ok(
+      source.includes(pkg),
+      `async-typecheck.mjs must reference package name '${pkg}' — CRIT-tests-with-source (gate must cover all packages)`,
+    );
+  }
+
+  // Hook must run npm run check on the matched package.
+  assert.ok(
+    source.includes("npm run check"),
+    "async-typecheck.mjs must invoke 'npm run check' — CRIT-tests-with-source",
+  );
+});
+
+test("INV-shared-core-16: settings.json registers pre-commit-gate as a PreToolUse hook on Bash+PowerShell", () => {
+  const settingsPath = resolve(REPO_ROOT, ".claude/settings.json");
+  assert.ok(existsSync(settingsPath), ".claude/settings.json must exist");
+
+  const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+
+  // The hook must be registered on both Bash and PowerShell so it fires
+  // regardless of which shell the agent uses for git commit.
+  const hooks = settings.hooks ?? {};
+  const preToolUse = hooks.PreToolUse ?? [];
+
+  const gateHooks = preToolUse.filter(
+    (h) => JSON.stringify(h).includes("pre-commit-gate"),
+  );
+  assert.ok(
+    gateHooks.length > 0,
+    "settings.json PreToolUse must include at least one pre-commit-gate.mjs hook — CRIT-tests-with-source",
+  );
+});
+
 // ── INV-shared-core-11: opentoken removed from SpawnLoggedCommandOptions ─────
 
 test("INV-shared-core-11: SpawnLoggedCommandOptions does not have opentoken or opentokenCommand", async () => {

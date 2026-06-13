@@ -19,27 +19,44 @@ export interface ProjectCommands {
 // Ordering is significant: pickScript() returns the FIRST match, so entries
 // earlier in the list win over later ones.
 //
-// E2E_SCRIPT_NAMES — generic/framework-neutral names appear first so that a
-// project using a standard naming convention (e.g. "test:e2e") is discovered
-// before a framework-specific alias. Framework-specific runner names
-// ("cypress:run", "playwright", "playwright:test") come last because they are
-// only present when a project has opted into that particular runner.
-// When adding a new entry: generic or widely-adopted names go before
-// framework-specific or rarely-used ones.
+// PLACEMENT RULE (applies to every list below):
+//   1. Generic / widely-adopted names first.
+//   2. Framework-specific or rarely-used names last.
 //
-// LINT_SCRIPT_NAMES — "lint" (standard) precedes "lint:check" (less common).
-// The same placement rule applies: well-known names first, variants last.
-const E2E_SCRIPT_NAMES = [
+// E2E_SCRIPT_NAMES: generic/framework-neutral names appear first (e.g.
+// "test:e2e") so that a project using a standard naming convention is
+// discovered before a framework-specific alias. Framework-specific runner
+// names ("cypress:run", "playwright", "playwright:test") come last because
+// they are only present when a project has opted into that particular runner.
+//
+// LINT_SCRIPT_NAMES: "lint" (standard) precedes "lint:check" (less common).
+//
+// When adding a new entry: verify that it is more generic than the entry
+// immediately after it and more specific than the entry immediately before it.
+// The ordering is regression-tested in tests/maintainability-split-rules.test.mjs.
+
+/** E2E script names in discovery preference order (most generic first). */
+const E2E_SCRIPT_NAMES: readonly string[] = [
+  // --- generic / framework-neutral ---
   "e2e",
   "test:e2e",
   "test:e2e:run",
   "test:integration",
+  // --- framework-specific ---
   "cypress:run",
   "playwright",
   "playwright:test",
 ];
-const BUILD_SCRIPT_NAMES = ["build"];
-const LINT_SCRIPT_NAMES = ["lint", "lint:check"];
+
+const BUILD_SCRIPT_NAMES: readonly string[] = ["build"];
+
+/** Lint script names in discovery preference order (most generic first). */
+const LINT_SCRIPT_NAMES: readonly string[] = [
+  // --- generic / standard ---
+  "lint",
+  // --- variants / less common ---
+  "lint:check",
+];
 
 function readPackageScripts(root: string): Record<string, string> | null {
   const packageJsonPath = join(root, "package.json");
@@ -59,7 +76,7 @@ function readPackageScripts(root: string): Record<string, string> | null {
 
 function pickScript(
   scripts: Record<string, string>,
-  names: string[],
+  names: readonly string[],
 ): string[] | undefined {
   for (const name of names) {
     if (scripts[name] && scripts[name].trim().length > 0) {

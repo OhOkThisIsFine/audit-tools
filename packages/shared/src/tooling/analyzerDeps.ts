@@ -21,6 +21,16 @@ export interface ResolvedAnalyzerDep {
 export interface ResolveAnalyzerDepOptions {
   /** Override the cache root; defaults to ~/.audit-tools/analyzer-cache. */
   cacheRoot?: string;
+  /**
+   * Injectable logger for observability output. Defaults to `console.error`
+   * so existing behaviour is preserved when callers do not supply one.
+   * Inject a no-op or custom logger in tests/contexts that need to redirect or
+   * suppress output.
+   *
+   * Signature matches `console.error` so callers can pass it directly:
+   * `log: console.error`.
+   */
+  log?: (...args: unknown[]) => void;
 }
 
 /**
@@ -108,21 +118,22 @@ export function resolveAnalyzerDep(
   options: ResolveAnalyzerDepOptions = {},
 ): ResolvedAnalyzerDep {
   const { name, version } = parseAnalyzerSpec(pkg);
+  const log = options.log ?? ((...args: unknown[]) => { console.error(...args); });
 
   const repoPackageDir = packageDirIn(repoRoot, name);
   if (isInstalledPackage(repoPackageDir)) {
-    console.error("[analyzerDeps] resolved %s via repo: %s", pkg, repoPackageDir);
+    log("[analyzerDeps] resolved %s via repo: %s", pkg, repoPackageDir);
     return { via: "repo", path: repoPackageDir };
   }
 
   const cacheRoot = options.cacheRoot ?? analyzerCacheRoot();
   const cached = findInCache(name, version, cacheRoot);
   if (cached) {
-    console.error("[analyzerDeps] resolved %s via cache: %s", pkg, cached);
+    log("[analyzerDeps] resolved %s via cache: %s", pkg, cached);
     return { via: "cache", path: cached };
   }
 
-  console.error("[analyzerDeps] %s not found in repo or cache (absent)", pkg);
+  log("[analyzerDeps] %s not found in repo or cache (absent)", pkg);
   return { via: "absent" };
 }
 
@@ -130,6 +141,13 @@ export interface InstallToCacheOptions {
   cacheRoot?: string;
   /** Injectable command runner; defaults to the shared runTracked. */
   run?: (argv: string[], cwd: string) => RunTrackedResult;
+  /**
+   * Injectable logger for observability output. Defaults to `console.error`
+   * so existing behaviour is preserved when callers do not supply one.
+   * Inject a no-op or custom logger in tests/contexts that need to redirect or
+   * suppress output.
+   */
+  log?: (...args: unknown[]) => void;
 }
 
 export interface InstallToCacheResult {
@@ -154,6 +172,7 @@ export function installToCache(
   const cacheRoot = options.cacheRoot ?? analyzerCacheRoot();
   const installDir = join(cacheRoot, cacheKey(name, version));
   const run = options.run ?? ((argv, cwd) => runTracked(argv, { cwd }));
+  const log = options.log ?? ((...args: unknown[]) => { console.error(...args); });
 
   try {
     mkdirSync(installDir, { recursive: true });
@@ -165,13 +184,13 @@ export function installToCache(
         "utf8",
       );
     }
-    console.error("[analyzerDeps] installing %s into cache: %s", pkgAtVersion, installDir);
+    log("[analyzerDeps] installing %s into cache: %s", pkgAtVersion, installDir);
     const result = run(
       ["npm", "install", pkgAtVersion, "--no-audit", "--no-fund", "--save-exact"],
       installDir,
     );
     if (result.status !== 0) {
-      console.error(
+      log(
         "[analyzerDeps] npm install %s failed (exit %d): %s",
         pkgAtVersion,
         result.status,
@@ -184,17 +203,17 @@ export function installToCache(
     }
     const packageDir = packageDirIn(installDir, name);
     if (!isInstalledPackage(packageDir)) {
-      console.error(
+      log(
         "[analyzerDeps] npm install %s exited 0 but package directory is absent: %s",
         pkgAtVersion,
         packageDir,
       );
       return { ok: false, error: "package not present after install" };
     }
-    console.error("[analyzerDeps] installed %s -> %s", pkgAtVersion, packageDir);
+    log("[analyzerDeps] installed %s -> %s", pkgAtVersion, packageDir);
     return { ok: true, path: packageDir };
   } catch (error) {
-    console.error(
+    log(
       "[analyzerDeps] installToCache threw for %s: %s",
       pkgAtVersion,
       error instanceof Error ? error.message : String(error),

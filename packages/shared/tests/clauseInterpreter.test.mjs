@@ -47,6 +47,41 @@ test("decomposeIntent — whitespace-only string returns empty array", () => {
   assert.deepStrictEqual(clauses, []);
 });
 
+test("decomposeIntent — sentence-boundary split: two sentences split at '. ' correctly", () => {
+  // Regression for COR-4e4a6c3c: sentenceRe.lastIndex reassignment was redundant;
+  // verify that multi-sentence inputs split at every boundary without skipping or doubling.
+  const clauses = decomposeIntent("Focus on security. Prioritize correctness. Skip tests.");
+  const texts = clauses.map((c) => c.text);
+  assert.ok(
+    texts.some((t) => t.startsWith("Focus on security")),
+    `expected first sentence clause: ${JSON.stringify(texts)}`
+  );
+  assert.ok(
+    texts.some((t) => t.startsWith("Prioritize correctness")),
+    `expected second sentence clause: ${JSON.stringify(texts)}`
+  );
+  assert.ok(
+    texts.some((t) => t.startsWith("Skip tests")),
+    `expected third sentence clause: ${JSON.stringify(texts)}`
+  );
+  // No empty or duplicated clauses.
+  assert.ok(texts.every((t) => t.length > 0), "no empty clauses expected");
+});
+
+test("decomposeIntent — sentence-boundary split: adjacent boundaries do not produce empty clauses", () => {
+  // Regression for COR-4e4a6c3c: ensure no off-by-one produces an empty ghost clause.
+  const clauses = decomposeIntent("A. B. C");
+  const texts = clauses.map((c) => c.text);
+  assert.ok(texts.every((t) => t.length > 0), `all clauses must be non-empty: ${JSON.stringify(texts)}`);
+  // Each expected part should appear exactly once.
+  const matchesA = texts.filter((t) => t.startsWith("A"));
+  const matchesB = texts.filter((t) => t.startsWith("B"));
+  const matchesC = texts.filter((t) => t.startsWith("C"));
+  assert.strictEqual(matchesA.length, 1, `'A' clause should appear exactly once: ${JSON.stringify(texts)}`);
+  assert.strictEqual(matchesB.length, 1, `'B' clause should appear exactly once: ${JSON.stringify(texts)}`);
+  assert.strictEqual(matchesC.length, 1, `'C' clause should appear exactly once: ${JSON.stringify(texts)}`);
+});
+
 // ---------------------------------------------------------------------------
 // assessClauseEncodability — encodable clauses
 // ---------------------------------------------------------------------------
