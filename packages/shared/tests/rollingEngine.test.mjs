@@ -114,6 +114,48 @@ test("dropProvider with unavailable kind records correct event", () => {
   assert.equal(next.active_pools[0].pool.id, "pool-B");
 });
 
+test("dropProvider emits a structured stderr observability line (OBS-d81a55ab)", () => {
+  const poolA = makePool("pool-A");
+  const poolB = makePool("pool-B");
+  const state = makeState({
+    active_pools: [poolA, poolB],
+    in_flight_tokens: [makeToken("pkt-1", "pool-A"), makeToken("pkt-2", "pool-A")],
+  });
+
+  const realWrite = process.stderr.write.bind(process.stderr);
+  const lines = [];
+  process.stderr.write = (chunk, ...rest) => {
+    lines.push(typeof chunk === "string" ? chunk : chunk.toString());
+    return realWrite(chunk, ...rest);
+  };
+  let next;
+  try {
+    next = dropProvider(state, "pool-A", "exhausted");
+  } finally {
+    process.stderr.write = realWrite;
+  }
+
+  // Locate the structured drop record among whatever was written to stderr.
+  const record = lines
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return null;
+      }
+    })
+    .find((r) => r && r.kind === "rolling_engine_drop_provider");
+
+  assert.ok(record, "dropProvider should write a structured JSON observability line");
+  assert.equal(record.provider_id, "pool-A");
+  assert.equal(record.drop_kind, "exhausted");
+  assert.equal(record.in_flight_count, 2);
+  assert.equal(record.requeued_count, 2);
+  assert.ok(record.ts, "record should carry a timestamp");
+  // The drop itself still behaves correctly alongside the logging.
+  assert.equal(next.event_log.length, 1);
+});
+
 test("dropProvider on the last active pool produces empty active_pools", () => {
   const poolA = makePool("pool-A");
   const state = makeState({

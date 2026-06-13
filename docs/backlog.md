@@ -179,6 +179,21 @@ rather than "where the code is today."
 
 ## Deferred fixes (product bugs)
 
+### Narrow stale-lock-steal double-hold race in `withFileLock`
+
+`removeStaleLock` (`packages/shared/src/quota/fileLock.ts`) checks the stale token
+then unlinks in two non-atomic steps. When multiple acquirers race to steal the
+*same* >30s-stale lock, one can unlink a lock another just freshly re-created in the
+read→unlink gap, briefly admitting two holders (mutual exclusion violated for a
+window). Surfaced 2026-06-13 by a 5-way concurrent-steal test that asserted
+`maxConcurrent === 1` and flaked ~1-in-3 (`2 !== 1`); that assertion was relaxed to
+the in-scope property (distinct tokens / no token corruption, which the token-check
+*does* guarantee — FND-TST-a50db947). Impact is low: it only triggers on concurrent
+stealing of a crashed/hung holder's lock, and `state.json` acquisition is ~serial in
+the orchestrators. A correct fix needs lease-style ownership verification or a truly
+atomic claim (a rename-claim still has its own TOCTOU) — not a quick inline patch.
+Re-add the strict mutual-exclusion assertion to `fileLock.test.mjs` once fixed.
+
 ### Manual real-OpenCode validation of scoped permissions (user-owned)
 
 The project-scope OpenCode deploy was aligned with the shared scoped-permission
