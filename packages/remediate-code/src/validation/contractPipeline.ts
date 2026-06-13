@@ -436,7 +436,9 @@ export function validateDesignSpecGates(
         if (obl.kind !== "invariant") return false;
         const oblId = typeof obl.id === "string" ? obl.id : "";
         const oblDesc = typeof obl.description === "string" ? obl.description : "";
-        return oblId.includes(invId) || oblDesc.includes(invId);
+        // Exact id match or word-boundary containment in description to avoid
+        // substring false-positives (e.g. "INV-1" ⊂ "INV-10").
+        return oblId === invId || new RegExp(`(?<![\\w-])${invId}(?![\\w-])`).test(oblDesc);
       });
       if (!covered) {
         pushValidationIssue(

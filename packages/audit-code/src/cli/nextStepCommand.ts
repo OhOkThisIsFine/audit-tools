@@ -120,7 +120,6 @@ type NextStepParams = {
   selfCliPath: string;
   timeoutMs: number;
   maxRuns: number;
-  opentoken?: boolean;
   narrativeEnabled?: boolean;
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
@@ -193,7 +192,7 @@ type GraphEnrichmentBranchResult =
  *   - `fallthrough` → no incoming artifacts; fall through to the deterministic executor.
  */
 export async function handleGraphEnrichmentBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since" | "opentoken">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since">,
   bundle: ArtifactBundle,
   state: AuditState,
   analyzersRef: { value: Record<string, AnalyzerSetting> | undefined },
@@ -234,6 +233,15 @@ export async function handleGraphEnrichmentBranch(
           settings,
         );
         analyzersRef.value = merged.analyzers;
+      } else {
+        // All entries in analyzer-decisions.json failed the recognized-value
+        // check (ephemeral|permanent|skip|repo|auto). Emit a diagnostic so the
+        // operator knows why no settings were applied (COR-03418a9f fix).
+        const invalidEntries = Object.keys(incoming.value).join(", ") || "(none)";
+        process.stderr.write(
+          `[audit-code] analyzer-decisions.json ignored: no recognized values (got: ${invalidEntries}). ` +
+            `Valid values are: ephemeral, permanent, skip, repo, auto.\n`,
+        );
       }
       await unlink(incoming.path).catch(() => {});
       return { action: "continue" };
@@ -264,7 +272,6 @@ export async function handleGraphEnrichmentBranch(
           graphLlmEdgeReasoning: true,
           edgeReasoningResultsPath: edgeReasoningIncoming.path,
           since: params.since,
-          opentoken: params.opentoken,
         });
         await unlink(edgeReasoningIncoming.path).catch(() => {});
         return { action: "continue" };
@@ -395,7 +402,7 @@ type SynthesisNarrativeBranchResult =
  * deterministic omit runs below).
  */
 export async function handleSynthesisNarrativeBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "narrativeEnabled" | "opentoken">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "narrativeEnabled">,
   bundle: ArtifactBundle,
   state: AuditState,
 ): Promise<SynthesisNarrativeBranchResult> {
@@ -409,7 +416,6 @@ export async function handleSynthesisNarrativeBranch(
       artifactsDir: params.artifactsDir,
       preferredExecutor: "synthesis_narrative_executor",
       narrativeResultsPath: narrativeIncoming.path,
-      opentoken: params.opentoken,
     });
     await unlink(narrativeIncoming.path).catch(() => {});
     return { action: "continue" };
@@ -426,7 +432,7 @@ export async function handleSynthesisNarrativeBranch(
  * cause) if the executor fails, preserving the existing throw-with-cause pattern.
  */
 export async function executeAndRecord(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since" | "opentoken" | "maxRuns">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since" | "maxRuns">,
   analyzers: Record<string, AnalyzerSetting> | undefined,
   decision: ReturnType<typeof decideNextStep>,
   index: number,
@@ -439,7 +445,6 @@ export async function executeAndRecord(
       analyzers,
       graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
       since: params.since,
-      opentoken: params.opentoken,
     });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
@@ -591,7 +596,7 @@ export async function runDeterministicForNextStep(params: NextStepParams): Promi
             `[audit-code] nextStep: integrity check — ${integrity.changed_files.length} changed, ` +
               `${integrity.missing_files.length} missing, ${integrity.io_errors.length} io-error(s); re-running intake.\n`,
           );
-          await advanceAudit(bundle, { root: params.root, preferredExecutor: "intake_executor", opentoken: params.opentoken });
+          await advanceAudit(bundle, { root: params.root, preferredExecutor: "intake_executor" });
           continue;
         }
       }
@@ -776,7 +781,6 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     selfCliPath: resolve(argv[1] ?? process.argv[1] ?? ""),
     timeoutMs: getTimeoutMs(argv, sessionConfig),
     maxRuns: getMaxRuns(argv),
-    opentoken: sessionConfig.opentoken?.enabled,
     narrativeEnabled: sessionConfig.synthesis?.narrative !== false,
     analyzers: sessionConfig.analyzers,
     graphLlmEdgeReasoning: sessionConfig.graph?.llm_edge_reasoning,

@@ -95,7 +95,6 @@ await test("handleGraphEnrichmentBranch returns analyzer_install when unresolved
       artifactsDir,
       graphLlmEdgeReasoning: false,
       since: undefined,
-      opentoken: undefined,
     };
 
     const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef);
@@ -153,7 +152,6 @@ await test("handleGraphEnrichmentBranch returns continue after consuming a valid
       artifactsDir,
       graphLlmEdgeReasoning: false,
       since: undefined,
-      opentoken: undefined,
     };
 
     const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef);
@@ -178,7 +176,6 @@ await test("handleGraphEnrichmentBranch returns fallthrough when unresolved is e
       artifactsDir,
       graphLlmEdgeReasoning: false,
       since: undefined,
-      opentoken: undefined,
     };
 
     const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef);

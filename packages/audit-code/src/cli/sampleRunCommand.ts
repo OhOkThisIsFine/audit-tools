@@ -38,14 +38,26 @@ export async function runSample(argv: string[] = process.argv): Promise<void> {
     unitManifest,
     disposition,
   );
+  const sampleUnitId = unitManifest.units[0]?.unit_id ?? "sample-unit";
+  const sampleLens = "security";
+  // Derive task_id from the actual unit ID + lens, matching the real planning
+  // pipeline format (COR-a278fbe0 fix: no hardcoded task_id).
+  const sampleTaskId = `${sampleUnitId}:${sampleLens}`;
   const sampleResults: AuditResult[] = [
     {
-      task_id: "src-api:security:src/api/auth.ts:1-100",
-      unit_id: unitManifest.units[0]?.unit_id ?? "sample-unit",
-      pass_id: "pass:security",
-      lens: "security",
+      task_id: sampleTaskId,
+      unit_id: sampleUnitId,
+      pass_id: `pass:${sampleLens}`,
+      lens: sampleLens,
       agent_role: "security-auditor",
-      file_coverage: [{ path: "src/api/auth.ts", total_lines: 100 }],
+      file_coverage: [
+        {
+          path: "src/api/auth.ts",
+          total_lines: SAMPLE_REPO_FILES.find((f) => f.path === "src/api/auth.ts")
+            ? 100
+            : 0,
+        },
+      ],
       findings: [],
       notes: ["Sample result ingestion path."],
       requires_followup: false,

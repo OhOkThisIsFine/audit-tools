@@ -12,6 +12,11 @@ export async function cmdImportExternalAnalyzer(argv: string[]): Promise<void> {
   ) as string;
   const externalAnalyzerResults =
     await readJsonFile<ExternalAnalyzerResults>(sourcePath);
+  if (!Array.isArray(externalAnalyzerResults.results)) {
+    throw new Error(
+      `External analyzer results at '${sourcePath}' must have a 'results' array, but the field is absent or not an array.`,
+    );
+  }
   const result = await runAuditStep({
     root: getRootDir(argv),
     artifactsDir,

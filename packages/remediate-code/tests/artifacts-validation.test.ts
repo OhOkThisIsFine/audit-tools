@@ -273,4 +273,63 @@ describe("validateDispatchPlan (ValidationIssue[] return style)", () => {
     );
     expect(planErrors).toHaveLength(0);
   });
+
+  // -------------------------------------------------------------------------
+  // Regression: COR-acd27a4f — document phase items must have finding_id;
+  // the validator previously only checked block_id for implement phase.
+  // -------------------------------------------------------------------------
+  it("reports finding_id missing on document dispatch plan item", async () => {
+    const { REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION } = await import("../src/steps/types.js");
+    await saveState();
+    const runDir = join(ARTIFACTS_DIR, "runs", "DOC-1", "document");
+    await mkdir(runDir, { recursive: true });
+    await writeJson(join(runDir, "dispatch-plan.json"), {
+      contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+      phase: "document",
+      run_id: "DOC-1",
+      repo_root: REPO_DIR,
+      artifacts_dir: ARTIFACTS_DIR,
+      items: [
+        {
+          task_id: "TASK-1",
+          // finding_id deliberately omitted — should trigger an error
+          prompt_path: join(runDir, "doc-TASK-1.md"),
+          result_path: join(runDir, "doc-TASK-1.result.json"),
+        },
+      ],
+    });
+
+    const result = await validateArtifacts(ARTIFACTS_DIR, REPO_DIR);
+
+    expect(result.issues.join("\n")).toMatch(/finding_id/i);
+  });
+
+  it("does not report finding_id missing on document item that has finding_id", async () => {
+    const { REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION } = await import("../src/steps/types.js");
+    await saveState();
+    const runDir = join(ARTIFACTS_DIR, "runs", "DOC-2", "document");
+    const promptPath = join(runDir, "doc-TASK-2.md");
+    await mkdir(runDir, { recursive: true });
+    await writeFile(promptPath, "# Document\n", "utf8");
+    await writeJson(join(runDir, "dispatch-plan.json"), {
+      contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+      phase: "document",
+      run_id: "DOC-2",
+      repo_root: REPO_DIR,
+      artifacts_dir: ARTIFACTS_DIR,
+      items: [
+        {
+          task_id: "TASK-2",
+          finding_id: "F-001",
+          prompt_path: promptPath,
+          result_path: join(runDir, "doc-TASK-2.result.json"),
+        },
+      ],
+    });
+
+    const result = await validateArtifacts(ARTIFACTS_DIR, REPO_DIR);
+
+    const findingIdErrors = result.issues.filter((i) => i.includes("finding_id"));
+    expect(findingIdErrors).toHaveLength(0);
+  });
 });

@@ -57,7 +57,6 @@ test("runDeterministicForNextStep advances through all deterministic obligations
       selfCliPath: "audit-code",
       timeoutMs: 30_000,
       maxRuns: 20,
-      opentoken: false,
       narrativeEnabled: false,
       // Skip all analyzers so the test is self-contained and doesn't require
       // external tools (e.g. tsc) to be on PATH in CI.

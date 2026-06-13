@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { countLines } from "./args.js";
 import type { AuditTask, RepoManifest } from "../types.js";
+import { isFileMissingError } from "@audit-tools/shared";
 
 // Line-count helpers extracted from cli.ts. Pure functions over the repo
 // manifest / task file paths — used to annotate audit tasks with per-file line
@@ -25,8 +26,11 @@ export async function buildLineIndex(
             await countLines(resolve(root, file.path)),
           ] as const;
         } catch (err) {
-          console.warn(
-            `[lineIndex] Failed to count lines for '${file.path}': ${err instanceof Error ? err.message : String(err)}`,
+          // Distinguish file-not-found from other IO errors so callers are not
+          // misled into treating a missing file as an empty one (COR-c868f53d).
+          const kind = isFileMissingError(err) ? "file not found" : "IO error";
+          process.stderr.write(
+            `[lineIndex] ${kind} counting lines for '${file.path}': ${err instanceof Error ? err.message : String(err)}\n`,
           );
           return [file.path, 0] as const;
         }
@@ -51,8 +55,9 @@ export async function buildLineIndexForPaths(
         try {
           return [path, await countLines(resolve(root, path))] as const;
         } catch (err) {
-          console.warn(
-            `[lineIndex] Failed to count lines for '${path}': ${err instanceof Error ? err.message : String(err)}`,
+          const kind = isFileMissingError(err) ? "file not found" : "IO error";
+          process.stderr.write(
+            `[lineIndex] ${kind} counting lines for '${path}': ${err instanceof Error ? err.message : String(err)}\n`,
           );
           return [path, 0] as const;
         }

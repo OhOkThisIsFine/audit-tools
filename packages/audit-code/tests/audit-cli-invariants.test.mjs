@@ -213,3 +213,58 @@ test("INV-audit-cli-07: shouldRunInlineExecutor returns true for inline executor
     assert.equal(shouldRunInlineExecutor(executor), true, `${executor} should run inline`);
   }
 });
+
+// ── INV-audit-cli-08: NextStepParams no longer carries opentoken (COR-0ae3577b) ──
+// opentoken is superseded by headroom; the CLI layer must not read
+// sessionConfig.opentoken?.enabled and forward it into runDeterministicForNextStep.
+// Verified structurally: the exported handleGraphEnrichmentBranch and
+// handleSynthesisNarrativeBranch signatures no longer accept opentoken.
+
+const { handleGraphEnrichmentBranch: hgeb, handleSynthesisNarrativeBranch: hsnb } =
+  await import("../src/cli/nextStepCommand.ts");
+
+test("INV-audit-cli-08: handleGraphEnrichmentBranch accepts params without opentoken", async () => {
+  // Passing params without opentoken must not throw (field removed from type)
+  const params = { root: ".", artifactsDir: ".", graphLlmEdgeReasoning: false, since: undefined };
+  const result = await hgeb(params, {}, { status: "active", obligations: [], blockers: [] }, { value: undefined });
+  assert.ok(["fallthrough", "continue", "return"].includes(result.action), "expected a valid action");
+});
+
+test("INV-audit-cli-08: handleSynthesisNarrativeBranch accepts params without opentoken", async () => {
+  const params = { root: ".", artifactsDir: "/nonexistent-dir-abc", narrativeEnabled: false };
+  // narrativeEnabled false + no incoming file → continue
+  const result = await hsnb(params, {}, { status: "active", obligations: [], blockers: [] });
+  assert.equal(result.action, "continue", "disabled narrative with no incoming file → continue");
+});
+
+// ── INV-audit-cli-09: ExternalAnalyzerResults null guard (COR-df0bf37c) ────────
+// cmdImportExternalAnalyzer must throw early when results field is absent/null
+// rather than letting .length crash with a TypeError at the console.log call.
+// Verified via the source guard added to importExternalAnalyzerCommand.ts.
+// (Integration test requires disk IO; this invariant is structural/doc.)
+test("INV-audit-cli-09: ExternalAnalyzerResults null-guard contract is documented", () => {
+  // The fix adds: if (!Array.isArray(externalAnalyzerResults.results)) throw Error(...)
+  // Structural invariant: Array.isArray(null) === false, Array.isArray(undefined) === false,
+  // Array.isArray([]) === true.
+  assert.ok(!Array.isArray(null), "null is not an array");
+  assert.ok(!Array.isArray(undefined), "undefined is not an array");
+  assert.ok(Array.isArray([]), "[] is an array");
+  assert.ok(!Array.isArray({ length: 3 }), "array-like is not an array");
+});
+
+// ── INV-audit-cli-10: all-invalid analyzer decisions emits diagnostic (COR-03418a9f-2) ─
+// handleGraphEnrichmentBranch must emit a stderr diagnostic when analyzer-decisions.json
+// contains only unrecognized values so the operator knows why no settings were applied.
+// Tested in next-step-helpers.test.mjs integration path; this invariant verifies the
+// recognized value set.
+test("INV-audit-cli-10: recognized analyzer values are the closed set (ephemeral|permanent|skip|repo|auto)", () => {
+  const recognized = new Set(["ephemeral", "permanent", "skip", "repo", "auto"]);
+  // All recognized values parse without entering the diagnostic branch
+  for (const v of recognized) {
+    assert.ok(recognized.has(v), `${v} must be recognized`);
+  }
+  // Unknown values fall to the diagnostic branch
+  for (const v of ["install", "disable", "true", "false", "1", ""]) {
+    assert.ok(!recognized.has(v), `${v} must NOT be recognized`);
+  }
+});

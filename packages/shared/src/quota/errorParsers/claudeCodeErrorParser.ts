@@ -28,7 +28,8 @@ export class ClaudeCodeErrorParser implements ErrorParser {
           if (retryAfterMs != null && retryAfterMs > 0) {
             extractedMs = retryAfterMs;
           } else if (retryAfter != null && retryAfter > 0) {
-            extractedMs = retryAfter < 600 ? retryAfter * 1000 : retryAfter;
+            // retry_after is always in seconds; retry_after_ms (handled above) is explicit ms.
+            extractedMs = retryAfter * 1000;
           }
 
           return {

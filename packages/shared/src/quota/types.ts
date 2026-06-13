@@ -88,7 +88,14 @@ export interface BackoffState {
 export interface ObservedWaveOutcome {
   concurrency: number;
   estimated_tokens: number;
-  outcome: "success" | "rate_limited" | "timeout";
+  /**
+   * - `success`: wave completed without error.
+   * - `rate_limited`: provider signalled 429 / quota exhaustion — applies cooldown + backoff.
+   * - `timeout`: execution deadline exceeded — records failure weight but no rate-limit cooldown.
+   * - `error`: provider returned a non-quota error (crash, network failure) — records failure
+   *   weight only; does NOT apply rate-limit cooldown (distinct from quota exhaustion).
+   */
+  outcome: "success" | "rate_limited" | "timeout" | "error";
   cooldown_until?: string | null;
   reset_at?: string | null;
 }

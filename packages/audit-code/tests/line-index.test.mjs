@@ -306,6 +306,30 @@ test("buildLineIndexForPaths maps a path that throws countLines to 0", async (t)
 });
 
 // ---------------------------------------------------------------------------
+// COR-c868f53d: missing vs IO error distinguished in stderr diagnostic
+// ---------------------------------------------------------------------------
+
+test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, returns 0 (COR-c868f53d)", async (t) => {
+  const dir = setup();
+  const stderrChunks = [];
+  const origWrite = process.stderr.write.bind(process.stderr);
+  // Intercept stderr writes for the duration of this test
+  process.stderr.write = (chunk, ...rest) => {
+    stderrChunks.push(typeof chunk === "string" ? chunk : chunk.toString());
+    return origWrite(chunk, ...rest);
+  };
+  try {
+    const result = await buildLineIndexForPaths(dir, ["definitely-missing-abc123.ts"]);
+    assert.equal(result["definitely-missing-abc123.ts"], 0, "missing path maps to 0");
+    const combined = stderrChunks.join("");
+    assert.ok(combined.includes("file not found"), `expected 'file not found' in stderr; got: ${combined}`);
+  } finally {
+    process.stderr.write = origWrite;
+    teardown();
+  }
+});
+
+// ---------------------------------------------------------------------------
 
 test("addFileLineCountHints keys in file_line_counts match task file_paths array", async (t) => {
   const dir = setup();
