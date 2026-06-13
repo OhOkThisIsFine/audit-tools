@@ -191,6 +191,93 @@ test("agent_reflection.schema.json severity enum includes 'critical' (INV-audit-
   }
 });
 
+// ── INV-repo-assets-01/03/04: loader asset parity — handshake flags in all three assets ─
+
+test("INV-repo-assets-01: SKILL.md source carries next-step invocation with capability handshake flags", () => {
+  const skillPath = join(repoRoot, "skills", "audit-code", "SKILL.md");
+  const skill = readFileSync(skillPath, "utf8");
+  const REQUIRED_FLAGS = [
+    "--host-max-active-subagents",
+    "--host-models",
+    "--host-context-tokens",
+    "--host-output-tokens",
+  ];
+  for (const flag of REQUIRED_FLAGS) {
+    assert.ok(
+      skill.includes(flag),
+      `SKILL.md must carry capability handshake flag '${flag}' (INV-repo-assets-01)`,
+    );
+  }
+  assert.ok(
+    skill.includes("audit-code next-step"),
+    "SKILL.md must include an 'audit-code next-step' invocation (INV-repo-assets-01)",
+  );
+});
+
+test("INV-repo-assets-03: SKILL.md contains no hardcoded model names or tier-map tables", () => {
+  const skillPath = join(repoRoot, "skills", "audit-code", "SKILL.md");
+  const skill = readFileSync(skillPath, "utf8");
+  // Relative rank labels ("small"/"standard"/"deep") are fine; concrete model names are not.
+  const FORBIDDEN_PATTERNS = [
+    /claude-[a-z0-9]/i,
+    /gpt-[0-9]/i,
+    /gemini-[a-z]/i,
+    /sonnet|opus|haiku/i,
+    /llama|mistral|codestral/i,
+    /KNOWN_MODEL_LIMITS/,
+    /CAPABILITY_TIER_MAP/,
+  ];
+  for (const pattern of FORBIDDEN_PATTERNS) {
+    assert.ok(
+      !pattern.test(skill),
+      `SKILL.md must not contain hardcoded model identity '${pattern}' (INV-repo-assets-03)`,
+    );
+  }
+});
+
+test("INV-repo-assets-04: all three loader assets carry the same capability handshake flag set", () => {
+  // Canonical source assets — these are what get installed into host environments.
+  // repoRoot = packages/audit-code; monorepoRoot = two levels up.
+  const monorepoRoot = join(repoRoot, "..", "..");
+  const skillPath = join(repoRoot, "skills", "audit-code", "SKILL.md");
+  const promptPath = join(monorepoRoot, ".github", "prompts", "audit-code.prompt.md");
+  const tomlPath = join(monorepoRoot, ".gemini", "commands", "audit-code.toml");
+
+  const skill = readFileSync(skillPath, "utf8");
+  const prompt = readFileSync(promptPath, "utf8");
+  const toml = readFileSync(tomlPath, "utf8");
+
+  const HANDSHAKE_FLAGS = [
+    "--host-max-active-subagents",
+    "--host-models",
+    "--host-context-tokens",
+    "--host-output-tokens",
+  ];
+
+  for (const flag of HANDSHAKE_FLAGS) {
+    assert.ok(
+      skill.includes(flag),
+      `SKILL.md must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`,
+    );
+    assert.ok(
+      prompt.includes(flag),
+      `audit-code.prompt.md must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`,
+    );
+    assert.ok(
+      toml.includes(flag),
+      `audit-code.toml must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`,
+    );
+  }
+
+  // All three must reference the next-step command.
+  for (const [name, content] of [["SKILL.md", skill], ["prompt.md", prompt], ["toml", toml]]) {
+    assert.ok(
+      content.includes("next-step"),
+      `${name} must include 'next-step' invocation (INV-repo-assets-04 parity)`,
+    );
+  }
+});
+
 // ── verify function ──────────────────────────────────────────────────────────
 
 test("verify function receives correct context shape", async () => {

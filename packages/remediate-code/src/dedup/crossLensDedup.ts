@@ -71,6 +71,12 @@ export function deduplicateCrossLensFindings(
 
   const removed = new Set<Finding>();
   const mergeMap = new Map<string, string>();
+  /**
+   * Maps each source finding that participates as a survivor to its cloned
+   * merged copy. INV-remediate-state-05: survivors are cloned so the caller's
+   * original Finding objects are never mutated in place.
+   */
+  const cloneOf = new Map<Finding, Finding>();
 
   for (const group of groups.values()) {
     if (group.length < 2) continue;
@@ -94,7 +100,26 @@ export function deduplicateCrossLensFindings(
         const aConf = CONFIDENCE_RANK[a.confidence] ?? 0;
         const bConf = CONFIDENCE_RANK[b.confidence] ?? 0;
         const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
-        const [survivor, absorbed] = keepA ? [a, b] : [b, a];
+        // originalSurvivor is one of the source Finding objects (a or b).
+        // absorbed is the other source Finding.
+        const originalSurvivor = keepA ? a : b;
+        const absorbed = keepA ? b : a;
+
+        // Re-use the existing clone if this survivor has already been cloned by
+        // a prior pair in this group; otherwise create a new clone.
+        let survivor = cloneOf.get(originalSurvivor);
+        if (!survivor) {
+          survivor = {
+            ...originalSurvivor,
+            affected_files: [...originalSurvivor.affected_files],
+            evidence: originalSurvivor.evidence ? [...originalSurvivor.evidence] : [],
+          };
+          cloneOf.set(originalSurvivor, survivor);
+          // Update the group slot so future pair iterations in the same group
+          // refer to the clone rather than the unmodified source object.
+          const survivorGroupIdx = keepA ? i : j;
+          group[survivorGroupIdx] = survivor;
+        }
 
         const existingPaths = new Set(
           survivor.affected_files.map(
@@ -123,12 +148,20 @@ export function deduplicateCrossLensFindings(
 
         removed.add(absorbed);
         mergeMap.set(absorbed.id, survivor.id);
+        // If the `i`-slot finding was just absorbed (!keepA), stop the inner
+        // loop — there is no point comparing an absorbed finding with more
+        // candidates. The outer loop's guard (removed.has(group[i])) handles
+        // advancing `i` past it on the next outer iteration.
+        if (!keepA) break;
       }
     }
   }
 
+  // Return clones for survivors, original objects for untouched findings.
   return {
-    findings: findings.filter((f) => !removed.has(f)),
+    findings: findings
+      .filter((f) => !removed.has(f))
+      .map((f) => cloneOf.get(f) ?? f),
     mergeMap,
   };
 }

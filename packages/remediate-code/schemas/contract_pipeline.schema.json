@@ -222,7 +222,7 @@
       "properties": {
         "target": {
           "type": "string",
-          "enum": ["design_spec", "obligation_ledger", "contract_assessment_report"]
+          "enum": ["finalized_module_contracts", "obligation_ledger", "contract_assessment_report", "design_spec"]
         },
         "instruction": { "type": "string" }
       }

@@ -58,6 +58,39 @@ subagent models. The backend should not prescribe concrete model names.
 
 Bounded steps are a backend implementation detail, not the intended user experience.
 
+## Loader Protocol
+
+After `audit-code ensure --quiet` bootstraps the repository, ask the backend for
+exactly one next step. This is also the **capability handshake**: report what you
+can dispatch to *right now* on every `next-step` call so the backend sizes review
+packets to your real model instead of a conservative 32k floor.
+
+```bash
+audit-code next-step --host-max-active-subagents 4 --host-models '[{"rank":"small","context_tokens":32000,"output_tokens":8000},{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
+```
+
+Or with a single dispatch model:
+
+```bash
+audit-code next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
+```
+
+Key flags:
+
+- `--host-max-active-subagents` — parallel subagent capacity (via the `Agent`/`task`
+  tool). Without it the backend assumes serial dispatch.
+- `--host-models` — ordered JSON array (lowest rank first) of models you can dispatch
+  subagents to *right now*, one entry per relative rank
+  (`"small"`, `"standard"`, `"deep"`). Ranks are relative capability labels — never
+  report model names to the backend. Each entry may carry an optional opaque
+  `model_id` used only to key per-model quota learning.
+- `--host-context-tokens` / `--host-output-tokens` — single-model shorthand. When
+  `--host-models` is also given, the roster wins.
+
+When a step prompt tells you to continue, repeat `audit-code next-step` with the
+same capability flags and follow only the newly returned `prompt_path`. Stop when
+the current step prompt tells you to stop.
+
 ## Embedded Prompt Payload
 
 The prompt payload in `audit-code.prompt.md` remains the canonical instruction asset.

@@ -156,8 +156,11 @@ export function resolveManifestSources(
 export function blockingIntakeQuestions(
   summary: IntakeSummary | undefined,
 ): IntakeOpenQuestion[] {
+  // INV-remediate-state-06: a question is blocking only when blocking===true.
+  // The old `!== false` treated undefined as blocking; this pins the intended
+  // semantics so a question with no explicit blocking field is NON-blocking.
   return (summary?.open_questions ?? []).filter(
-    (question) => question.blocking !== false,
+    (question) => question.blocking === true,
   );
 }
 

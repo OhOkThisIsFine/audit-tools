@@ -206,6 +206,113 @@ describe("deduplicateCrossLensFindings", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// INV-remediate-state-05: dedup must not mutate source findings in place
+// ---------------------------------------------------------------------------
+
+describe("deduplicateCrossLensFindings — INV-remediate-state-05: source findings are not mutated", () => {
+  it("survivor finding's affected_files is a new array (not the same reference)", () => {
+    const original = makeFinding({
+      id: "A-001",
+      title: "Missing validation check",
+      lens: "security",
+      severity: "high",
+    });
+    const originalFilesRef = original.affected_files;
+
+    deduplicateCrossLensFindings([
+      original,
+      makeFinding({
+        id: "B-001",
+        title: "Missing validation check",
+        lens: "correctness",
+        severity: "low",
+        affected_files: [{ path: "src/foo.ts" }, { path: "src/bar.ts" }],
+      }),
+    ]);
+
+    // Original finding's affected_files must not have been mutated
+    expect(original.affected_files).toBe(originalFilesRef);
+    expect(original.affected_files).toHaveLength(1);
+    expect(original.affected_files[0].path).toBe("src/foo.ts");
+  });
+
+  it("absorbed finding's evidence is unchanged after dedup", () => {
+    const absorbed = makeFinding({
+      id: "B-001",
+      title: "Missing validation check",
+      lens: "correctness",
+      severity: "low",
+      evidence: ["evidence-B"],
+    });
+    const originalEvidence = absorbed.evidence!.slice();
+
+    deduplicateCrossLensFindings([
+      makeFinding({
+        id: "A-001",
+        title: "Missing validation check",
+        lens: "security",
+        severity: "high",
+        evidence: ["evidence-A"],
+      }),
+      absorbed,
+    ]);
+
+    // Absorbed finding's evidence must be unchanged
+    expect(absorbed.evidence).toEqual(originalEvidence);
+  });
+
+  it("survivor finding's summary is unchanged in the source array when absorbed has longer summary", () => {
+    const survivor = makeFinding({
+      id: "A-001",
+      title: "Missing validation check",
+      lens: "security",
+      severity: "high",
+      summary: "Short.",
+    });
+    const originalSummary = survivor.summary;
+
+    deduplicateCrossLensFindings([
+      survivor,
+      makeFinding({
+        id: "B-001",
+        title: "Missing validation check",
+        lens: "correctness",
+        severity: "low",
+        summary: "A much longer summary that exceeds the original in length.",
+      }),
+    ]);
+
+    // The original source finding must not have its summary mutated
+    expect(survivor.summary).toBe(originalSummary);
+  });
+
+  it("returned survivor has merged affected_files while source is clean", () => {
+    const a = makeFinding({
+      id: "A-001",
+      title: "Missing validation check",
+      lens: "security",
+      severity: "high",
+      affected_files: [{ path: "src/foo.ts" }],
+    });
+    const b = makeFinding({
+      id: "B-001",
+      title: "Missing validation check",
+      lens: "correctness",
+      severity: "low",
+      affected_files: [{ path: "src/foo.ts" }, { path: "src/bar.ts" }],
+    });
+
+    const { findings } = deduplicateCrossLensFindings([a, b]);
+
+    // Returned survivor is merged
+    expect(findings).toHaveLength(1);
+    expect(findings[0].affected_files.some((f) => f.path === "src/bar.ts")).toBe(true);
+    // Source finding is clean
+    expect(a.affected_files).toHaveLength(1);
+  });
+});
+
 describe("fixupBlocksAfterDedup", () => {
   it("replaces merged finding IDs in block items", () => {
     const blocks: RemediationBlock[] = [

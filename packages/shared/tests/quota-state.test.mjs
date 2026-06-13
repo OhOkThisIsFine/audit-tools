@@ -4,9 +4,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { setQuotaStateDir, readQuotaState, recordWaveOutcome, applyDecayToEntry, computeRampUpConcurrency } = await import(
-  "../src/quota/state.ts"
-);
+const {
+  setQuotaStateDir,
+  readQuotaState,
+  recordWaveOutcome,
+  clearBucketFailureEvidence,
+  applyDecayToEntry,
+  computeRampUpConcurrency,
+  computeMaxSafeConcurrency,
+  MAX_BUCKET_LEVEL,
+} = await import("../src/quota/state.ts");
 
 async function withTempStateDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), "audit-tools-quota-"));
@@ -217,4 +224,163 @@ test("computeRampUpConcurrency: allows ramp-up when failure_weight is exactly ze
   const entry = makeEntryWithBucket(1, 3.0, 0);
   const result = computeRampUpConcurrency(entry, 24);
   assert.equal(result, 2, "failure_weight === 0 should permit ramp-up to N+1");
+});
+
+// ── ARC-09b7ce76-2 regression: bucket map growth cap ──────────────────────────
+
+test("ARC-09b7ce76-2: success at very high concurrency does not write buckets above MAX_BUCKET_LEVEL", async () => {
+  await withTempStateDir(async () => {
+    // Report a success at a concurrency far above the scan ceiling (MAX_BUCKET_LEVEL=32).
+    const highConcurrency = MAX_BUCKET_LEVEL + 20; // e.g. 52
+    await recordWaveOutcome(KEY, { concurrency: highConcurrency, estimated_tokens: 0, outcome: "success" }, 24);
+
+    const state = await readQuotaState();
+    const buckets = state.entries[KEY].buckets;
+    const keys = Object.keys(buckets).map(Number);
+
+    // No bucket key must exceed MAX_BUCKET_LEVEL — those entries are never read
+    // back and would grow the file indefinitely.
+    const aboveCeiling = keys.filter((k) => k > MAX_BUCKET_LEVEL);
+    assert.equal(
+      aboveCeiling.length,
+      0,
+      `success path wrote buckets above MAX_BUCKET_LEVEL (${MAX_BUCKET_LEVEL}): ${aboveCeiling.join(",")} — ARC-09b7ce76-2 regression`,
+    );
+    // Buckets 1..MAX_BUCKET_LEVEL must be written (proof that success evidence is recorded).
+    assert.ok(
+      buckets[String(MAX_BUCKET_LEVEL)]?.success_weight > 0,
+      `bucket ${MAX_BUCKET_LEVEL} (the ceiling) must have success evidence`,
+    );
+  });
+});
+
+test("ARC-09b7ce76-2: failure spread does not write buckets above MAX_BUCKET_LEVEL + FAILURE_SPREAD_BUCKETS", async () => {
+  await withTempStateDir(async () => {
+    // Failure at a concurrency so high that the spread would go far past the scan ceiling.
+    const highConcurrency = MAX_BUCKET_LEVEL + 10; // 42 — spread would go to 46
+    await recordWaveOutcome(KEY, { concurrency: highConcurrency, estimated_tokens: 0, outcome: "timeout" }, 24);
+
+    const state = await readQuotaState();
+    const buckets = state.entries[KEY].buckets;
+    const keys = Object.keys(buckets).map(Number);
+
+    // FAILURE_SPREAD_BUCKETS = 4 → ceiling is MAX_BUCKET_LEVEL + 4 = 36
+    // No key must exceed that ceiling.
+    const failureCeiling = MAX_BUCKET_LEVEL + 4; // 36
+    const aboveCeiling = keys.filter((k) => k > failureCeiling);
+    assert.equal(
+      aboveCeiling.length,
+      0,
+      `failure spread wrote buckets above ceiling ${failureCeiling}: ${aboveCeiling.join(",")} — ARC-09b7ce76-2 regression`,
+    );
+  });
+});
+
+test("ARC-09b7ce76-2: normal failure spread within range still writes all expected buckets", async () => {
+  await withTempStateDir(async () => {
+    // Failure at concurrency 2 → spread 2..6 inclusive (FAILURE_SPREAD_BUCKETS=4).
+    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "timeout" }, 24);
+
+    const state = await readQuotaState();
+    const buckets = state.entries[KEY].buckets;
+    for (const n of [2, 3, 4, 5, 6]) {
+      assert.ok(buckets[String(n)]?.failure_weight > 0, `bucket ${n} must have failure evidence after spread`);
+    }
+    assert.equal(buckets["7"]?.failure_weight ?? 0, 0, "bucket 7 must not be touched");
+  });
+});
+
+// ── ARC-09b7ce76-2 regression: clearBucketFailureEvidence recovery ─────────────
+
+test("ARC-09b7ce76-2: clearBucketFailureEvidence zeros failure_weight on the target bucket only", async () => {
+  await withTempStateDir(async () => {
+    // Record a failure at concurrency 3 → spread 3..7.
+    await recordWaveOutcome(KEY, { concurrency: 3, estimated_tokens: 0, outcome: "timeout" }, 24);
+
+    // Verify the failure is there.
+    const before = await readQuotaState();
+    assert.ok(before.entries[KEY].buckets["3"].failure_weight > 0, "bucket 3 must have failure evidence");
+    assert.ok(before.entries[KEY].buckets["4"].failure_weight > 0, "bucket 4 must have failure evidence");
+
+    // Clear failure evidence at level 3 only.
+    await clearBucketFailureEvidence(KEY, 3);
+
+    const after = await readQuotaState();
+    assert.equal(
+      after.entries[KEY].buckets["3"].failure_weight,
+      0,
+      "clearBucketFailureEvidence must zero failure_weight on bucket 3",
+    );
+    // Bucket 4 must be unchanged — only the targeted bucket is cleared.
+    assert.ok(
+      after.entries[KEY].buckets["4"].failure_weight > 0,
+      "bucket 4 failure_weight must be unchanged after clearing only bucket 3",
+    );
+  });
+});
+
+test("ARC-09b7ce76-2: clearBucketFailureEvidence preserves success_weight", async () => {
+  await withTempStateDir(async () => {
+    // Record a success at 3 then a failure at 3.
+    await recordWaveOutcome(KEY, { concurrency: 3, estimated_tokens: 0, outcome: "success" }, 24);
+    await recordWaveOutcome(KEY, { concurrency: 3, estimated_tokens: 0, outcome: "timeout" }, 24);
+
+    const before = await readQuotaState();
+    const successWeightBefore = before.entries[KEY].buckets["3"].success_weight;
+    assert.ok(successWeightBefore > 0, "bucket 3 must have success evidence before clearing");
+
+    await clearBucketFailureEvidence(KEY, 3);
+
+    const after = await readQuotaState();
+    assert.equal(
+      after.entries[KEY].buckets["3"].failure_weight,
+      0,
+      "failure_weight must be zeroed",
+    );
+    assert.equal(
+      after.entries[KEY].buckets["3"].success_weight,
+      successWeightBefore,
+      "success_weight must be preserved after clearing failure evidence",
+    );
+  });
+});
+
+test("ARC-09b7ce76-2: clearBucketFailureEvidence on missing key or bucket is a no-op", async () => {
+  await withTempStateDir(async () => {
+    // No-op when key does not exist yet.
+    await clearBucketFailureEvidence("nonexistent/key", 5);
+    const state = await readQuotaState();
+    assert.equal(Object.keys(state.entries).length, 0, "state must remain empty after no-op clear");
+
+    // No-op when bucket does not exist for a known key.
+    await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "success" }, 24);
+    await clearBucketFailureEvidence(KEY, 99); // bucket 99 was never written
+    const stateAfter = await readQuotaState();
+    assert.ok(stateAfter.entries[KEY], "key entry must still exist");
+    assert.ok(stateAfter.entries[KEY].buckets["1"]?.success_weight > 0, "existing bucket must be unaffected");
+  });
+});
+
+test("ARC-09b7ce76-2: clearing blocking failure unblocks computeMaxSafeConcurrency for higher levels", async () => {
+  await withTempStateDir(async () => {
+    // Build evidence: success at levels 1 and 2, then a failure at 2 that blocks further scan.
+    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "success" }, 24);
+    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "success" }, 24);
+    // Failure at 2 adds failure_weight to 2..6, which dominates at level 2 and breaks the scan.
+    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "timeout" }, 24);
+
+    const stateBlocked = await readQuotaState();
+    const entryBlocked = stateBlocked.entries[KEY];
+    // Failure weight at bucket 2 dominates → scan breaks at 2 → maxSafe = 1.
+    const maxBefore = computeMaxSafeConcurrency(entryBlocked, 24);
+    assert.equal(maxBefore, 1, "scan must stop at the failed bucket before recovery");
+
+    // Clear the blocking failure at level 2.
+    await clearBucketFailureEvidence(KEY, 2);
+
+    const stateAfter = await readQuotaState();
+    const entryAfter = stateAfter.entries[KEY];
+    const maxAfter = computeMaxSafeConcurrency(entryAfter, 24);
+    assert.ok(maxAfter >= 2, `maxSafe must advance past the cleared bucket — got ${maxAfter}`);
+  });
 });

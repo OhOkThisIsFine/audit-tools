@@ -657,9 +657,12 @@ test("computeRampUpConcurrency stays at maxSafe when top bucket has failures", (
     "1": { success_weight: 5, failure_weight: 0 },
     "2": { success_weight: 5, failure_weight: 1.0 },
   });
-  // maxSafe=2 (bucket 2: success 5 > failure 1.0), but bucket 2's failure is at/above
-  // MIN_EVIDENCE_WEIGHT so it counts as real evidence → ramp-up to 3 is suppressed.
-  assert.equal(computeMaxSafeConcurrency(entry, 24), 2);
+  // Bucket 2 has real failure evidence (failure_weight 1.0 >= MIN_EVIDENCE_WEIGHT),
+  // so the safe-concurrency scan breaks AT bucket 2 — the last fully-safe level is 1
+  // → maxSafe=1 (the old success>failure rule wrongly admitted bucket 2 as safe).
+  // The maxSafe bucket (1) is itself clean and well-evidenced, so ramp-up still
+  // probes one level above the corrected ceiling: rampUp = maxSafe + 1 = 2.
+  assert.equal(computeMaxSafeConcurrency(entry, 24), 1);
   assert.equal(computeRampUpConcurrency(entry, 24), 2);
 });
 
