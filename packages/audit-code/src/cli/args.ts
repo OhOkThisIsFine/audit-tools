@@ -149,12 +149,14 @@ export function taskResultPath(taskResultsDir: string, taskId: string): string {
   return join(taskResultsDir, artifactNameForId(taskId, "json"));
 }
 
-const CANONICAL_RESULT_FILENAME = /_[0-9a-f]{12}\.json$/i;
+// Canonical result filenames produced by artifactNameForId: a stem, "_", a
+// 12-hex sha256 digest, then ".json" — optionally with one extra suffix segment
+// before ".json" (the host writes packet results as "<stem>_<digest>.inline-result.json").
+const CANONICAL_RESULT_FILENAME = /_[0-9a-f]{12}(\.[a-z0-9-]+)?\.json$/i;
 
-// True when `filename` matches the canonical per-task result naming produced by
-// artifactNameForId (stem + "_" + 12-hex sha256 digest + ".json"). Lets
-// merge-and-ingest tell legitimate prior-round results apart from genuinely
-// stray files (e.g. packet-23-results.json) left in task-results/.
+// True when `filename` matches the canonical result naming above. Lets
+// merge-and-ingest tell legitimate packet / prior-round results apart from
+// genuinely stray files (e.g. packet-23-results.json) left in task-results/.
 export function isCanonicalResultFilename(filename: string): boolean {
   return CANONICAL_RESULT_FILENAME.test(filename);
 }

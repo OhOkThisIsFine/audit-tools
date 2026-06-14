@@ -105,12 +105,22 @@ export async function runAuditStep(options: {
     const warnings = issues.filter((issue) => issue.severity === "warning");
 
     if (warnings.length > 0) {
+      // Cap the per-warning detail so a run with many out-of-scope-evidence
+      // warnings (each listing the task's full assigned-file set) doesn't bury
+      // the rest of the output. The count is exact; the detail is a sample.
+      const WARNING_DETAIL_CAP = 10;
+      const moreSuffix =
+        warnings.length > WARNING_DETAIL_CAP
+          ? `\n  ... (+${warnings.length - WARNING_DETAIL_CAP} more warning(s) suppressed)`
+          : "";
       process.stderr.write(
         `[${new Date().toISOString()}] audit-results validation (artifacts: ${options.artifactsDir}): ${warnings.length} warning(s):\n` +
-          formatAuditResultIssues(warnings) +
+          formatAuditResultIssues(warnings.slice(0, WARNING_DETAIL_CAP)) +
+          moreSuffix +
           "\n",
       );
     }
+
     if (errors.length > 0) {
       throw new Error(formatAuditResultValidationError(errors));
     }

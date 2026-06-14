@@ -1,8 +1,6 @@
 import type { AuditTask } from "../../types.js";
 import {
   type BuildSelectiveDeepeningTaskOptions,
-  DEFAULT_MAX_DEEPENING_TASKS,
-  DEFAULT_MAX_TOTAL_DEEPENING_TASKS,
   DEEPENING_TAG,
   LENS_VERIFICATION_FOLLOWUP_TAG,
   LENS_VERIFICATION_TAG,
@@ -28,12 +26,19 @@ import { buildVerificationFollowupTasks } from "./stewardFollowup.js";
 export type { BuildSelectiveDeepeningTaskOptions } from "./shared.js";
 
 /**
- * Build the bounded set of selective-deepening follow-up tasks. Each strategy
- * (finding-followup, conflict, steward-followup, runtime-validation, lens-
- * verification, high-risk-clean) lives in its own module under this directory;
- * this entry sequences them and enforces the shared budget (`effectiveMax`,
- * `maxTotalDeepeningTasks`) and dedupe (via `pushIfNew`). Task ordering, caps,
- * and dedupe are unchanged from the former single-file implementation.
+ * Build the self-bounding set of selective-deepening follow-up tasks. Each
+ * strategy (finding-followup, conflict, steward-followup, runtime-validation,
+ * lens-verification, high-risk-clean) lives in its own module under this
+ * directory; this entry sequences them and dedupes (via `pushIfNew`).
+ *
+ * There is no per-batch or total-count limit. Each strategy keys its task id off
+ * the finding/unit/lens it verifies, `pushIfNew` dedupes against tasks created in
+ * prior rounds, and no strategy deepens a deepening-sourced result (finding /
+ * conflict / lens-verification / high-risk-clean all filter `isDeepeningTask`;
+ * steward only fires on lens-verification results and its output is not itself a
+ * lens-verification task). The strategy chain is therefore a finite DAG that
+ * converges on its own — each qualifying item is deepened at most once — so the
+ * bound is the size of the qualifying set, never an arbitrary number.
  */
 export function buildSelectiveDeepeningTasks(
   options: BuildSelectiveDeepeningTaskOptions,
@@ -43,34 +48,14 @@ export function buildSelectiveDeepeningTasks(
   );
   const existingTasks = options.existingTasks ?? [];
   const existingIds = new Set(taskById.keys());
-  const maxTasks = options.maxTasks ?? DEFAULT_MAX_DEEPENING_TASKS;
-  const maxTotalDeepeningTasks =
-    options.maxTotalDeepeningTasks ?? DEFAULT_MAX_TOTAL_DEEPENING_TASKS;
-
-  const existingDeepeningCount = existingTasks.filter((task) =>
-    isDeepeningTask(task),
-  ).length;
-  if (existingDeepeningCount >= maxTotalDeepeningTasks) {
-    // FND-OBS-c8d43100: log when the total budget is already exhausted so
-    // operators can see why selective deepening produced zero tasks.
-    process.stderr.write(
-      JSON.stringify({
-        ts: new Date().toISOString(),
-        source: "audit-code:selectiveDeepening",
-        event: "budget_exhausted",
-        level: "info",
-        existing_deepening: existingDeepeningCount,
-        max_total: maxTotalDeepeningTasks,
-      }) + "\n",
-    );
-    return [];
-  }
-  const remainingBudget = maxTotalDeepeningTasks - existingDeepeningCount;
-  const effectiveMax = Math.min(maxTasks, remainingBudget);
   const created: AuditTask[] = [];
 
+  // No cap: each qualifying item is deepened at most once. `pushIfNew` dedupes
+  // against tasks already created (this round or a prior one, via existingIds),
+  // and strategies never deepen a deepening-sourced result, so the qualifying
+  // set is finite and the chain converges on its own.
   function pushIfNew(task: AuditTask): void {
-    if (created.length >= effectiveMax || existingIds.has(task.task_id)) {
+    if (existingIds.has(task.task_id)) {
       return;
     }
     existingIds.add(task.task_id);
@@ -202,9 +187,9 @@ export function buildSelectiveDeepeningTasks(
   }
   strategyContributions["high_risk_clean"] = created.length - beforeHighRiskClean;
 
-  // FND-OBS-c8d43100: emit a structured summary of which strategies fired and
-  // whether the result was budget-capped, so operators can understand deepening decisions.
-  const budgetCapped = created.length >= effectiveMax;
+  // FND-OBS-c8d43100: emit a structured summary of which strategies fired so
+  // operators can understand deepening decisions. Deepening is self-bounding
+  // (each qualifying item deepened at most once), so there is no budget to report.
   process.stderr.write(
     JSON.stringify({
       ts: new Date().toISOString(),
@@ -212,8 +197,6 @@ export function buildSelectiveDeepeningTasks(
       event: "strategy_summary",
       level: "info",
       created: created.length,
-      effective_max: effectiveMax,
-      budget_capped: budgetCapped,
       strategy_contributions: strategyContributions,
     }) + "\n",
   );
@@ -225,5 +208,4 @@ export const selectiveDeepeningTestUtils = {
   DEEPENING_TAG,
   LENS_VERIFICATION_TAG,
   LENS_VERIFICATION_FOLLOWUP_TAG,
-  DEFAULT_MAX_TOTAL_DEEPENING_TASKS,
 };

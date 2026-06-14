@@ -51,7 +51,7 @@ async function withCapturedStderr(fn) {
 const { buildSelectiveDeepeningTasks } = await import(
   "../src/orchestrator/selectiveDeepening/index.ts"
 );
-const { DEFAULT_MAX_TOTAL_DEEPENING_TASKS, DEEPENING_TAG } = await import(
+const { DEEPENING_TAG } = await import(
   "../src/orchestrator/selectiveDeepening/shared.ts"
 );
 
@@ -106,8 +106,6 @@ test("FND-OBS-c8d43100: buildSelectiveDeepeningTasks emits a strategy_summary st
   assert.equal(parsed.source, "audit-code:selectiveDeepening");
   assert.equal(parsed.level, "info");
   assert.ok(typeof parsed.created === "number", "created is a number");
-  assert.ok(typeof parsed.effective_max === "number", "effective_max is a number");
-  assert.ok(typeof parsed.budget_capped === "boolean", "budget_capped is a boolean");
   assert.ok(typeof parsed.strategy_contributions === "object", "strategy_contributions is an object");
   assert.ok("finding_followup" in parsed.strategy_contributions);
   assert.ok("conflict" in parsed.strategy_contributions);
@@ -118,38 +116,37 @@ test("FND-OBS-c8d43100: buildSelectiveDeepeningTasks emits a strategy_summary st
   assert.ok(typeof parsed.ts === "string" && !isNaN(Date.parse(parsed.ts)), "ts is a valid ISO timestamp");
 });
 
-test("FND-OBS-c8d43100: buildSelectiveDeepeningTasks emits budget_exhausted when total deepening cap is reached", () => {
-  const existingDeepeningTasks = Array.from({ length: DEFAULT_MAX_TOTAL_DEEPENING_TASKS }, (_, i) => ({
-    ...makeTask(`deepening-${i}`),
-    tags: [DEEPENING_TAG],
-  }));
+test("buildSelectiveDeepeningTasks is self-bounding: each qualifying finding is deepened at most once (converges, no count cap)", () => {
+  const results = [
+    makeResult("t1", "correctness", {
+      findings: [
+        {
+          id: "F1",
+          severity: "high",
+          confidence: "high",
+          title: "x",
+          category: "c",
+          summary: "s",
+          affected_files: [{ path: "src/t1.ts" }],
+          evidence: [],
+        },
+      ],
+    }),
+  ];
+  const existingTasks = [makeTask("t1")];
 
-  const stderrLines = [];
-  const origWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = (chunk) => { stderrLines.push(String(chunk)); return true; };
-  let result;
-  try {
-    result = buildSelectiveDeepeningTasks({
-      results: [makeResult("new-t1")],
-      existingTasks: [...existingDeepeningTasks, makeTask("new-t1")],
-      lineIndex: {},
-    });
-  } finally {
-    process.stderr.write = origWrite;
-  }
+  const first = buildSelectiveDeepeningTasks({ results, existingTasks, lineIndex: {} });
+  assert.ok(first.length >= 1, "a high-severity finding produces a deepening task");
 
-  assert.equal(result.length, 0, "no tasks created when budget exhausted");
-  const exhaustedLines = stderrLines.filter((l) => {
-    try {
-      const obj = JSON.parse(l.trim());
-      return obj.event === "budget_exhausted";
-    } catch { return false; }
+  // Feed the created deepening tasks back in as existing tasks; the same results
+  // must now produce zero new tasks — the qualifying set is deepened at most once,
+  // so the chain converges without any per-batch or total-count limit.
+  const second = buildSelectiveDeepeningTasks({
+    results,
+    existingTasks: [...existingTasks, ...first],
+    lineIndex: {},
   });
-  assert.equal(exhaustedLines.length, 1, "expected one budget_exhausted log line");
-  const parsed = JSON.parse(exhaustedLines[0].trim());
-  assert.equal(parsed.source, "audit-code:selectiveDeepening");
-  assert.equal(parsed.existing_deepening, DEFAULT_MAX_TOTAL_DEEPENING_TASKS);
-  assert.equal(parsed.max_total, DEFAULT_MAX_TOTAL_DEEPENING_TASKS);
+  assert.equal(second.length, 0, "no new deepening tasks on the second pass — converges");
 });
 
 // ── FND-OBS-99e3a861: rollingDispatch packet_result progress events ───────────

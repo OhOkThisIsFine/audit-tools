@@ -1,5 +1,4 @@
 import { readFile, readdir, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isFileMissingError, readJsonFile, writeJsonFile } from "@audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
@@ -15,7 +14,7 @@ import {
   buildPendingAuditTasks,
 } from "./dispatch.js";
 import { addFileLineCountHints } from "./lineIndex.js";
-import { isCanonicalResultFilename, taskResultPath, getArtifactsDir, getFlag } from "./args.js";
+import { isCanonicalResultFilename, getArtifactsDir, getFlag } from "./args.js";
 import { buildWorkerResult } from "./workerResult.js";
 import { PACKET_SCHEMA_FILENAMES } from "../io/runArtifacts.js";
 
@@ -65,6 +64,38 @@ function warnOnDuplicateFindings(passing: AuditResult[]): void {
 }
 
 /**
+ * Index every task_id that has an on-disk result in task-results/, regardless of
+ * filename convention — packet `.inline-result.json` arrays, canonical per-task
+ * files, or a stray name. The host writes one array file per packet, so a per-
+ * task canonical-name probe never finds these; recovering by task_id matches how
+ * the main ingest path collects results.
+ */
+async function taskIdsWithOnDiskResults(taskResultsDir: string): Promise<Set<string>> {
+  let files: string[];
+  try {
+    files = (await readdir(taskResultsDir)).filter((f) => f.endsWith(".json"));
+  } catch {
+    return new Set();
+  }
+  const ids = new Set<string>();
+  for (const filename of files) {
+    if (PACKET_SCHEMA_FILENAME_SET.has(filename)) continue;
+    try {
+      const parsed = JSON.parse(await readFile(join(taskResultsDir, filename), "utf8"));
+      for (const item of Array.isArray(parsed) ? parsed : [parsed]) {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          const tid = (item as Record<string, unknown>).task_id;
+          if (typeof tid === "string") ids.add(tid);
+        }
+      }
+    } catch {
+      /* not parseable — skip */
+    }
+  }
+  return ids;
+}
+
+/**
  * Check for a completed-run marker and either replay its summary (no-op) or
  * invalidate a stale marker and signal to re-process.
  *
@@ -86,18 +117,19 @@ async function checkIdempotencyReplay(
   if (!priorSummary) return null;
 
   // A completion marker can go stale. Selective deepening appends new pending
-  // tasks to the SAME run-id, and — in the no-progress-loop bug — their answers
-  // already sit on disk under canonical per-task names while the marker says the
-  // run is done. If any pending task has a recoverable on-disk result, the marker
-  // no longer reflects reality: discard it and re-process so those answers ingest
-  // instead of replaying a no-op forever. A genuinely terminal run (no pending
-  // tasks, or pending tasks not yet answered — e.g. a new round handled under a
-  // different run-id) still replays cleanly.
+  // tasks to the SAME run-id, and their answers then land on disk (in this
+  // round's packet result files) while the marker still says the run is done.
+  // If any pending task has a recoverable on-disk result — matched by task_id,
+  // the same way the main ingest path recovers them — the marker no longer
+  // reflects reality: discard it and re-process so those answers ingest instead
+  // of replaying a no-op forever. A genuinely terminal run (no pending tasks, or
+  // pending tasks not yet answered) still replays cleanly.
   let pendingWithResults = 0;
   try {
     const pending = await readJsonFile<AuditTask[]>(tasksPath);
+    const answered = await taskIdsWithOnDiskResults(taskResultsDir);
     for (const task of pending) {
-      if (existsSync(taskResultPath(taskResultsDir, task.task_id))) {
+      if (answered.has(task.task_id)) {
         pendingWithResults++;
       }
     }
@@ -188,13 +220,17 @@ async function validateAndCollectResults(
   passing: AuditResult[];
   failing: Array<{ task_id: string; errors: string[] }>;
   notDispatched: string[];
+  recoveredCount: number;
 }> {
   const passing: AuditResult[] = [];
   const failing: Array<{ task_id: string; errors: string[] }> = [];
-  // Pending tasks that were NOT dispatched this round (budget cap deferred
-  // packets). Not failures — they re-enter dispatch on the next round.
+  // Pending tasks that were NOT dispatched this round. Not failures — they
+  // re-enter dispatch on the next round.
   const notDispatched: string[] = [];
   const seenTaskIds = new Set<string>();
+  // Results recovered by task_id from packet result files. The host writes one
+  // array file per packet, so this is the normal collection path, not an error.
+  let recoveredCount = 0;
 
   for (const task of allTasks) {
     const entry = entryByTaskId.get(task.task_id);
@@ -207,9 +243,7 @@ async function validateAndCollectResults(
         if (isFileMissingError(e)) {
           const fallback = fallbackByTaskId.get(task.task_id);
           if (fallback) {
-            process.stderr.write(
-              `[merge-and-ingest] Recovered result for '${task.task_id}' from unexpected file (matched by task_id)\n`,
-            );
+            recoveredCount++;
             obj = fallback;
           } else {
             failing.push({
@@ -236,9 +270,7 @@ async function validateAndCollectResults(
         notDispatched.push(task.task_id);
         continue;
       }
-      process.stderr.write(
-        `[merge-and-ingest] Recovered un-dispatched task '${task.task_id}' from on-disk result file (matched by task_id)\n`,
-      );
+      recoveredCount++;
       obj = fallback;
     }
     const record = obj && typeof obj === "object" && !Array.isArray(obj)
@@ -276,7 +308,7 @@ async function validateAndCollectResults(
     }
   }
 
-  return { passing, failing, notDispatched };
+  return { passing, failing, notDispatched, recoveredCount };
 }
 
 export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
@@ -330,11 +362,16 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   }
 
   // Phase 3: validate each task's result and classify into passing/failing/notDispatched.
-  const { passing, failing, notDispatched } = await validateAndCollectResults(
+  const { passing, failing, notDispatched, recoveredCount } = await validateAndCollectResults(
     allTasks,
     entryByTaskId,
     fallbackByTaskId,
   );
+  if (recoveredCount > 0) {
+    process.stderr.write(
+      `[merge-and-ingest] Recovered ${recoveredCount} result(s) by task_id from packet result files.\n`,
+    );
+  }
 
   // Phase 4: warn on cross-packet duplicate findings (all results in memory here —
   // more accurate than per-packet early-warning at submit time).

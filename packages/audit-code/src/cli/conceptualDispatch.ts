@@ -195,6 +195,7 @@ export async function prepareConceptualDispatch(opts: {
       `1. Dispatch these ${total} independent perspective subagents **in parallel**. Each reviews only through its own value system and must NOT see the others' output:`,
       ...perspectiveLines,
       `2. When all ${total} perspectives have written their findings, dispatch ONE **independent judge** subagent — it must be a different agent than any of the perspectives: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.${renderTier(modelHints.judge)}`,
+      "Each prompt file above is self-contained — it already defines the reviewer's persona, scope, file grants, and output schema. Pass the `prompt_path` to the subagent as its instruction verbatim; do NOT restate the persona or re-describe the task in your dispatch message (the parenthesised name is only a label for you).",
       ...(opts.hostCanSelectSubagentModel
         ? [
             "Map each `model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names.",

@@ -10,6 +10,22 @@ import { quoteForShellInterpreterCmd } from "@audit-tools/shared";
 // The cmd.exe quoting for the package-manager batch path reuses the canonical
 // exec.ts helpers so the safe-character set stays unified.
 
+// Strip the Claude Code host-signaling env vars before running a runtime-
+// validation command. A suite that branches on CLAUDECODE (this very repo has a
+// provider test that hard-fails when CLAUDECODE=1) would otherwise be graded
+// against the host's interactive-session environment rather than a clean one,
+// marking healthy code "not_confirmed". Runtime validation must observe the
+// command's own behavior, not the harness it happens to run inside.
+function runtimeValidationEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key === "CLAUDECODE" || key.startsWith("CLAUDE_CODE")) {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
 export async function runCommand(
   command: string[],
   cwd: string,
@@ -32,7 +48,7 @@ export async function runCommand(
   return await new Promise((resolve) => {
     const child = spawn(spawnCommand.command, spawnCommand.args, {
       cwd,
-      env: process.env,
+      env: runtimeValidationEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
