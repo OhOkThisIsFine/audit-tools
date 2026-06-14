@@ -17,6 +17,14 @@ rather than "where the code is today."
 > agent reflections, scope/intent checkpoint, structured fast-path). A design-doc
 > drift check ran the same day — unbuilt design commitments are now tracked under
 > *Design commitments not yet built*.
+>
+> **Re-reconciled 2026-06-13 (second pass)** against `src`: removed the `opentoken
+> wrap` friction and the orchestrator opentoken work-item (verified gone from src;
+> guard test `no-opentoken-guard.test.mjs`; superseded by the headroom proxy);
+> narrowed the `free_form_intent` commitment to its genuinely-unbuilt halves —
+> clause escalation (`interpretFreeFormIntentForAudit` still unwired) and
+> remediate-code interpretation (audit-code no-verbatim + lens weighting already
+> shipped).
 
 ## Known friction (agent / dev experience)
 
@@ -54,15 +62,6 @@ rather than "where the code is today."
   silently doesn't run. Finish with `npm approve-scripts auditor-lambda` or invoke
   `postinstall.mjs` manually. (This also gates the overbroad-perms deploy flagged
   by `CFG-4996560e`, so it's not purely a regression.)
-- **`opentoken wrap` CLI is not always installed.** The global instruction is to
-  wrap every terminal command in `opentoken wrap <cmd>`, but the `opentoken`
-  binary isn't on PATH in every environment (absent in both bash and PowerShell on
-  a 2026-06 Windows session; confirmed still absent 2026-06-11). When it's
-  missing, run commands directly and route only genuinely large outputs through
-  a compression MCP tool — wrapping a 2-line build log is pointless. Direction:
-  headroom replaces opentoken (see *Token savings and model routing*); this
-  entry retires when the orchestrator swap ships. (As of 2026-06-13 opentoken is
-  still live in `shared/src/tooling/exec.ts` + `prompts.ts`, so this stands.)
 - **`t.mock.module` is unusable in audit-code tests.** audit-code runs tests via
   `node --import tsx/esm --test`; `t.mock.module` needs
   `--experimental-test-module-mocks` and conflicts with the tsx/esm loader, so it
@@ -177,16 +176,18 @@ design decisions the docs record but the code has not implemented — tracked he
 so the gap is explicit. Re-run the check (design doc vs code) to refresh; don't
 record build status in the design docs themselves.
 
-- **`free_form_intent` should be *interpreted*, not threaded verbatim** (both
-  orchestrators). Both design docs say the orchestrator interprets free-form intent
-  to shape lens weighting / priority / scope, and never pastes it into worker
-  prompts. The code pastes it verbatim into packet prompts
-  (`audit-code` `packetPrompt.ts`, `dispatch.ts`; `remediate-code` checkpoint
-  prompt), and the audit `intentInterpreter.ts` — which produces
-  `checkpoint_questions` / `has_unencodable` — is built but **unwired** (no caller
-  reads it), so unencodable clauses are silently dropped instead of escalated to a
-  blocking checkpoint question. Resolve toward the doc (interpret + escalate) or
-  amend the doc to match the verbatim-threading reality.
+- **`free_form_intent` clause escalation + remediate-code interpretation.**
+  Partially shipped 2026-06-13: audit-code no longer pastes intent verbatim into
+  worker prompts (removed + guarded by `296c1b90` /
+  `no-verbatim-free-form-intent.test.mjs`), and lens-weight interpretation is wired
+  (`planningExecutors.ts` → `interpretFreeFormIntent`). Two halves genuinely remain:
+  (a) the clause-aware `interpretFreeFormIntentForAudit` (`intentInterpreter.ts`) —
+  which produces `checkpoint_questions` / `has_unencodable` — is built but still
+  **unwired** (no caller reads it), so unencodable clauses are silently dropped
+  instead of escalated to a blocking checkpoint question; (b) `remediate-code` still
+  threads `free_form_intent` into remediation worker prompts (`nextStep.ts`) rather
+  than interpreting it for priority / lens weighting. Resolve toward the docs
+  (interpret + escalate) in both orchestrators.
 - **Rolling per-node dispatch (dispatch-when-verified-complete) — remediate-code.**
   The design wants per-result re-scheduling: as each node result lands,
   verify→merge→re-check newly-unblocked nodes→dispatch into freed quota. The code
@@ -247,9 +248,10 @@ pool such as an IDE model or another CLI provider.
 ### Token savings and model routing — DECIDED 2026-06-11
 
 **Decision: headroom (https://github.com/chopratejas/headroom) replaces
-opentoken everywhere.** Host level done; orchestrator swap is still open (as of
-2026-06-13 opentoken remains live in `shared/src/tooling/exec.ts`,
-`types/sessionConfig.ts`, and the `DO_NOT_TOKEN_WRAP_NOTE` in `prompts.ts`).
+opentoken everywhere.** Host level done; orchestrator opentoken removal DONE
+2026-06-13 (deleted from src, guarded by `no-opentoken-guard.test.mjs`). The only
+remaining piece is host-side: enable + validate the headroom proxy in an opt-in
+session before any global env flip (see below).
 
 - **Host (done 2026-06-11):** `headroom` MCP server registered at user scope
   (`claude mcp add --scope user headroom -- headroom mcp serve`); the
@@ -261,14 +263,16 @@ opentoken everywhere.** Host level done; orchestrator swap is still open (as of
   `ANTHROPIC_BASE_URL=http://127.0.0.1:8787`; auto-compresses all tool-output
   traffic with CCR retrieval) is installed but NOT enabled — validate it in a
   single opt-in session before any global env flip.
-- **Orchestrators (redesign work item):** replace the opentoken exec-wrap with
-  the npm `headroom-ai` TS SDK (`compress(messages, { model })`) as a library
-  step — compress packet evidence at build time and worker payloads at
-  ingestion. Atomic replace in one node: delete `wrapForOpenToken` /
-  `quoteForOpenTokenCmd` / `runTracked`'s `opentoken` option
-  (`shared/src/tooling/exec.ts`), the sessionConfig field, the `prompts.ts`
-  wrap-exemption text, and provider wiring (~15 src files still reference
-  opentoken). Bonus: this deletes the cmd.exe wrap-quoting trap class entirely.
+- **Orchestrators — opentoken removal DONE (2026-06-13).** The opentoken exec-wrap
+  (`wrapForOpenToken` / `quoteForOpenTokenCmd` / `runTracked`'s `opentoken` option,
+  the sessionConfig field, provider wiring) was deleted from src — superseded by the
+  host-level headroom proxy (`853e8a79`, `1b4d227a`; guarded by
+  `no-opentoken-guard.test.mjs`), which also retired the cmd.exe wrap-quoting trap
+  class. Optional / unbuilt: a `headroom-ai` TS SDK library step (`compress(messages,
+  { model })`) that compresses packet evidence at build time + worker payloads at
+  ingestion — now low-priority, since the host proxy already compresses tool-output
+  traffic. Minor: a vestigial `DO_NOT_TOKEN_WRAP_NOTE` remains in `prompts.ts`;
+  verify it isn't needed for proxy traffic before deleting it.
 - **tokencost — rejected entirely (2026-06-11), including the local-tokenizer
   substitute.** `tokencost-js` counts Claude tokens via the Anthropic counting
   API (a network call inside deterministic planning — wrong shape) and the
