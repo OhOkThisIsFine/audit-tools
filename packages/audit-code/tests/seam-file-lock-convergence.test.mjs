@@ -41,14 +41,26 @@ const {
   FileLockTimeoutError,
 } = await import("@audit-tools/shared/quota/fileLock");
 
-// ── Import remediate-code StateStore via its built dist ───────────────────────
-// We reach into the built output to avoid depending on the remediate-code
-// package.json exports or a separate build step in this test run.
+// ── Import remediate-code StateStore via its built dist (best-effort) ──────────
+// Reach into the built output rather than package exports. That dist is NOT
+// guaranteed to be built in every per-package CI job (the audit-code publish job
+// builds shared + audit-code only), so import best-effort: when it is absent, skip
+// the cross-protocol non-interference tests (C) — the shared fileLock contract
+// (A/B/D) is exercised regardless. Mirrors the cross-package import-skip pattern in
+// seam-artifact-ipc-envelope.test.mjs.
 const remediateDistStore = new URL(
   "../../../packages/remediate-code/dist/state/store.js",
   import.meta.url,
 );
-const { StateStore } = await import(remediateDistStore.href);
+let StateStore = null;
+try {
+  ({ StateStore } = await import(remediateDistStore.href));
+} catch {
+  StateStore = null;
+}
+const skipNoStore = StateStore
+  ? false
+  : "remediate-code dist not built (per-package CI job) — cross-protocol C tests skipped";
 
 // ── Constants extracted from source (seam: must match both sides) ─────────────
 // If either side changes its stale threshold without the other, a failing test
@@ -141,7 +153,7 @@ test("B5: withFileLock serializes concurrent callers — no lost updates", async
 //    files in the same directory without cross-contamination
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("C1: StateStore.saveState and withFileLock on separate files in the same dir complete without blocking each other", async () => {
+test("C1: StateStore.saveState and withFileLock on separate files in the same dir complete without blocking each other", { skip: skipNoStore }, async () => {
   const dir = tmpDir();
   await mkdir(dir, { recursive: true });
 
@@ -169,7 +181,7 @@ test("C1: StateStore.saveState and withFileLock on separate files in the same di
   assert.equal(lockResult.value, "ok");
 });
 
-test("C2: StateStore.saveState does not consume or interfere with shared fileLock's lock file", async () => {
+test("C2: StateStore.saveState does not consume or interfere with shared fileLock's lock file", { skip: skipNoStore }, async () => {
   const dir = tmpDir();
   await mkdir(dir, { recursive: true });
 
@@ -190,7 +202,7 @@ test("C2: StateStore.saveState does not consume or interfere with shared fileLoc
   await releaseLock(sharedLockPath, token);
 });
 
-test("C3: multiple concurrent StateStore.saveState calls on the same dir serialize correctly (no lost updates)", async () => {
+test("C3: multiple concurrent StateStore.saveState calls on the same dir serialize correctly (no lost updates)", { skip: skipNoStore }, async () => {
   const dir = tmpDir();
   await mkdir(dir, { recursive: true });
 
