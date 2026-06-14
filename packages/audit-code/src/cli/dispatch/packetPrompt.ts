@@ -200,19 +200,17 @@ export function buildPacketPrompt(params: {
   taskSections: string[];
   resultPath: string;
   repoRoot?: string;
-  freeFormIntent?: string;
 }): string {
-  const { packet, fileList, largeFileSection, taskSections, resultPath, repoRoot, freeFormIntent } = params;
+  const { packet, fileList, largeFileSection, taskSections, resultPath, repoRoot } = params;
   const largeFileMode = isIsolatedLargeFilePacket(packet);
-  const intentSection = freeFormIntent?.trim()
-    ? ["## Audit intent", freeFormIntent.trim(), ""]
-    : [];
+  // The user's free-form audit intent is interpreted into lens/priority signals
+  // at planning time and is never threaded verbatim into a worker prompt
+  // (INV-S04; guarded by no-verbatim-free-form-intent.test.mjs).
   return [
     "You are a code auditor. Review this packet once, then emit exactly one result per listed task.",
     repoRoot ? `Repository root: ${repoRoot}` : "Repository root: use the root from the step contract.",
     "Set the shell/tool workdir to the repository root when running backend commands.",
     "",
-    ...intentSection,
     "## Packet",
     `packet_id: ${packet.packet_id}`,
     `task_count: ${packet.task_ids.length}`,

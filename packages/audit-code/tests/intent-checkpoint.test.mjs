@@ -283,22 +283,11 @@ function minimalPacket() {
   };
 }
 
-await test("buildPacketPrompt threads free_form_intent into the worker prompt", () => {
-  const prompt = buildPacketPrompt({
-    packet: minimalPacket(),
-    packetTasks: [],
-    fileList: "- src/a.ts",
-    largeFileSection: [],
-    taskSections: ["### t1"],
-    resultPath: "/artifacts/runs/run-1/task-results/inline-result.json",
-    repoRoot: "/repo",
-    freeFormIntent: "Focus on auth and crypto boundaries.",
-  });
-  assert.match(prompt, /## Audit intent/);
-  assert.match(prompt, /Focus on auth and crypto boundaries\./);
-});
-
-await test("buildPacketPrompt omits the intent section when none is provided", () => {
+await test("buildPacketPrompt never threads free_form_intent into the worker prompt (INV-S04)", () => {
+  // free_form_intent is interpreted into lens/priority signals at planning time
+  // (planningExecutors.interpretFreeFormIntent); it is never pasted into a worker
+  // prompt. The renderer takes no intent parameter, so no "## Audit intent"
+  // section can ever appear.
   const prompt = buildPacketPrompt({
     packet: minimalPacket(),
     packetTasks: [],

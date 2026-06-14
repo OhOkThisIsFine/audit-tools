@@ -153,7 +153,7 @@ export function renderConfirmIntentPrompt(
     '  "confirmed_by": "host",',
     '  "scope_summary": "<what is in scope>",',
     '  "intent_summary": "<the goal, e.g. full-audit / security-focused>",',
-    '  "free_form_intent": "<optional: what to focus on; threaded into worker prompts>",',
+    '  "free_form_intent": "<optional: what to focus on; interpreted into lens/priority signals at planning, never threaded verbatim into worker prompts>",',
     '  "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],',
     '  "must_not_touch": ["<glob>"],',
     '  "disposition_overrides": [{ "path": "<path>", "status": "<generated|vendor|excluded|...>", "reason": "<why>" }],',

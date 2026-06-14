@@ -313,7 +313,7 @@ export async function prepareDispatchArtifacts(params: {
       });
     }
 
-    const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection, taskSections, resultPath: packetResultPath, repoRoot: reviewRoot, freeFormIntent: bundle.intent_checkpoint?.free_form_intent });
+    const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection, taskSections, resultPath: packetResultPath, repoRoot: reviewRoot });
     await writeFile(promptPath, prompt, "utf8");
     const packetWritePaths = packetTasks
       .map((task) => resultPathByTaskId.get(task.task_id))
