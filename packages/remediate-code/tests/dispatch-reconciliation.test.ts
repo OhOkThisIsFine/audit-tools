@@ -469,6 +469,62 @@ describe("host-dispatch backlog fixes — dependencies, skip, access", () => {
     expect(merged.items!["F-001"].status).toBe("resolved");
   });
 
+  it("blocks a verified-already-satisfied (no-change) closure backed only by prose", async () => {
+    const state = makeImplementingState();
+    state.items!["F-001"].item_spec!.no_change = true; // claims "already satisfied"
+    await saveState(state);
+
+    const plan = await prepareImplementDispatch(opts(), "RUN-1");
+    const b1 = plan.items.find((i) => i.block_id === "B-001")!;
+    await writeFile(
+      b1.result_path,
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [
+          {
+            finding_id: "F-001",
+            status: "resolved",
+            evidence: ["Looks already correct; nothing to change."],
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const merged = await mergeImplementResults(opts(), "RUN-1");
+    // No executable proof for the no-change claim → routed to triage, not closed.
+    expect(merged.items!["F-001"].status).toBe("blocked");
+    expect(merged.items!["F-001"].failure_reason).toMatch(/regression test/i);
+  });
+
+  it("allows a verified-already-satisfied closure proven by an executable test", async () => {
+    const state = makeImplementingState();
+    state.items!["F-001"].item_spec!.no_change = true;
+    await saveState(state);
+
+    const plan = await prepareImplementDispatch(opts(), "RUN-1");
+    const b1 = plan.items.find((i) => i.block_id === "B-001")!;
+    await writeFile(
+      b1.result_path,
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [
+          {
+            finding_id: "F-001",
+            status: "resolved",
+            evidence: ["Already handled. npm test -w packages/shared -> 12 pass, 0 fail."],
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const merged = await mergeImplementResults(opts(), "RUN-1");
+    expect(merged.items!["F-001"].status).toBe("resolved_no_change");
+  });
+
   it("pulls test files that reference a block's source into its access", async () => {
     const state = makeImplementingState();
     state.plan!.findings[0].affected_files = [{ path: "src/widget.ts" }];

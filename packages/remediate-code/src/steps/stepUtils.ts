@@ -59,6 +59,27 @@ export function specIndicatesNoChange(
   return NO_CHANGE_RE.test(spec?.concrete_change ?? "");
 }
 
+/**
+ * A line of worker evidence that proves behavior with an EXECUTABLE assertion —
+ * a test/build/check command or a test-result count — rather than prose.
+ */
+export const EXECUTABLE_EVIDENCE_RE =
+  /\b(?:npm|npx|pnpm|yarn|vitest|tsc|node)\b[^\n]*\b(?:test|run|check|build|--test|--import)\b|\b\d+\s+(?:pass(?:ed)?|fail(?:ed)?|tests?)\b|\btests?\s+pass(?:ed|ing)?\b|\b\d+\s*\/\s*\d+\s+(?:pass|green)\b/i;
+
+/**
+ * Whether worker evidence carries an executable verification signal (see
+ * EXECUTABLE_EVIDENCE_RE) rather than prose only. A "verified-already-satisfied"
+ * (no-change) closure must prove the behavior with an executable assertion; prose
+ * claiming "already correct" is not sufficient proof and must route to triage
+ * rather than silently closing the obligation.
+ */
+export function hasExecutableEvidence(
+  evidence: readonly string[] | undefined,
+): boolean {
+  if (!evidence || evidence.length === 0) return false;
+  return evidence.some((line) => EXECUTABLE_EVIDENCE_RE.test(line));
+}
+
 export function rationaleAsksForRetry(rationale: string | undefined): boolean {
   if (!rationale) return false;
   return /\b(deferred?|retry|rerun|requeue|later|dedicated pass|follow-?up|after .*lands?|depends on|blocked)\b/i.test(

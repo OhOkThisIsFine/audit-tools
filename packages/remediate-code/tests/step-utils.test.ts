@@ -5,10 +5,35 @@ import type { RemediationState } from "../src/state/store.js";
 import {
   isTerminalStatus,
   specIndicatesNoChange,
+  hasExecutableEvidence,
   classifyFindingRisk,
   dependenciesSatisfied,
   rationaleAsksForRetry,
 } from "../src/steps/stepUtils.js";
+
+describe("hasExecutableEvidence", () => {
+  it("is false for empty or prose-only evidence", () => {
+    expect(hasExecutableEvidence(undefined)).toBe(false);
+    expect(hasExecutableEvidence([])).toBe(false);
+    expect(
+      hasExecutableEvidence([
+        "Looks already correct; nothing to change.",
+        "Reviewed the file.",
+      ]),
+    ).toBe(false);
+  });
+  it("is true when a line names a test/build/check command", () => {
+    expect(hasExecutableEvidence(["npm test -w packages/shared"])).toBe(true);
+    expect(hasExecutableEvidence(["ran npx vitest run tests/x.test.ts"])).toBe(true);
+    expect(hasExecutableEvidence(["node --test packages/shared/tests/a.test.mjs"])).toBe(true);
+    expect(hasExecutableEvidence(["npm run check -> 0 errors"])).toBe(true);
+  });
+  it("is true when a line reports a test-result count", () => {
+    expect(hasExecutableEvidence(["25/25 pass"])).toBe(true);
+    expect(hasExecutableEvidence(["12 passed, 0 failed"])).toBe(true);
+    expect(hasExecutableEvidence(["all tests pass"])).toBe(true);
+  });
+});
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {

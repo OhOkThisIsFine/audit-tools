@@ -206,6 +206,14 @@ record build status in the design docs themselves.
   only detects stranded packets post-run). Design-review prompts don't annotate
   units `[in scope]` / `[excluded: …]`. Ingestion is still a separate
   `audit_results_ingested` obligation rather than folded into the dispatch turn.
+- **Paired obligations (positive + negative test specs) — remediate-code contract
+  pipeline.** A behavior-*change* obligation should derive BOTH a positive test (the
+  new invariant holds) and a negative test (the old behavior is absent everywhere)
+  at obligation/test-spec derivation time, so a partial implementation cannot satisfy
+  it. The no-prose-closure half has shipped — `mergeImplementResults` gates a
+  `resolved_no_change` ("verified-already-satisfied") closure on executable evidence
+  (`hasExecutableEvidence`), routing prose-only claims to triage. This
+  paired-derivation half is the remaining piece.
 
 ## Features to add later
 

@@ -55,6 +55,7 @@ import {
 import {
   classifyFindingRisk,
   specIndicatesNoChange,
+  hasExecutableEvidence,
   dependenciesSatisfied,
   isTerminalStatus,
 } from "./stepUtils.js";
@@ -1331,21 +1332,33 @@ export async function mergeImplementResults(
       if (itemResult.status === "resolved") {
         const spec = stateItem.item_spec;
         const isNoChange = specIndicatesNoChange(spec);
-        stateItem.status = isNoChange ? "resolved_no_change" : "resolved";
-        markTerminal(stateItem);
-        stateItem.last_successful_step = "Verify Code Against Documentation";
-        if (itemResult.evidence?.length) {
-          await writeJsonFile(
-            join(
-              options.artifactsDir,
-              `result_${itemResult.finding_id}_verify_code_against_documentation.json`,
-            ),
-            {
-              finding_id: itemResult.finding_id,
-              passed: true,
-              reason: itemResult.evidence,
-            },
-          );
+        if (isNoChange && !hasExecutableEvidence(itemResult.evidence)) {
+          // No-prose closure: a "verified-already-satisfied" (no-change) claim must
+          // be backed by an executable assertion (a test/build/check command +
+          // result), not prose — otherwise a real requirement silently no-ops.
+          // Route an unproven no-change claim to triage instead of closing it.
+          stateItem.status = "blocked";
+          markTerminal(stateItem);
+          stateItem.failure_reason =
+            "verified-already-satisfied requires an executable regression test proving " +
+            "the behavior (a test/build/check command + result in evidence), not prose.";
+        } else {
+          stateItem.status = isNoChange ? "resolved_no_change" : "resolved";
+          markTerminal(stateItem);
+          stateItem.last_successful_step = "Verify Code Against Documentation";
+          if (itemResult.evidence?.length) {
+            await writeJsonFile(
+              join(
+                options.artifactsDir,
+                `result_${itemResult.finding_id}_verify_code_against_documentation.json`,
+              ),
+              {
+                finding_id: itemResult.finding_id,
+                passed: true,
+                reason: itemResult.evidence,
+              },
+            );
+          }
         }
       } else {
         stateItem.status = "blocked";
