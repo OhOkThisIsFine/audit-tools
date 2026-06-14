@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { StateStore, RemediationState } from "../src/state/store.js";
+import { StateStore, RemediationState, LOCK_TIMEOUT_MS } from "../src/state/store.js";
+import { STALE_LOCK_MS } from "@audit-tools/shared";
 import { rm, mkdir, writeFile, utimes, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { dirname } from "node:path";
@@ -16,6 +17,14 @@ describe("StateStore", () => {
 
   afterEach(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("LOCK_TIMEOUT_MS stays below the shared stale-lock threshold (no boundary race)", () => {
+    // Derived programmatically as STALE_LOCK_MS - margin. A held-but-fresh lock must
+    // time out before it could be reclaimed as stale, otherwise the timeout is a
+    // load-sensitive race. This guards the relationship if either value changes.
+    expect(LOCK_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(LOCK_TIMEOUT_MS).toBeLessThan(STALE_LOCK_MS);
   });
 
   it("should return null if no state exists", async () => {
