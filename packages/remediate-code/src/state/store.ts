@@ -5,6 +5,7 @@ import {
   isFileMissingError,
   withFsRetry,
   withFileLock,
+  STALE_LOCK_MS,
 } from "@audit-tools/shared";
 import type { PartialCompletionTerminal } from "@audit-tools/shared";
 import {
@@ -79,14 +80,15 @@ function validateState(value: unknown): string[] {
 
 const STATE_FILENAME = "state.json";
 const LOCK_FILENAME = "state.lock";
-// Acquire timeout for the shared file lock. MUST stay below shared fileLock's
-// STALE_LOCK_MS (30s). If they're equal, a fresh-but-held lock reaches its stale
-// threshold (mtime + 30s) at almost the same instant the acquire deadline fires —
-// and because the lock is written just before the acquire starts, the stale point
-// comes first, so a never-released lock can be reclaimed (resolve) instead of
-// timing out (a load-sensitive boundary race). Below the stale threshold a held
-// lock times out deterministically; a genuinely stale (>30s) lock is still reclaimed.
-const LOCK_TIMEOUT_MS = 20_000;
+// Acquire timeout for the shared file lock, DERIVED to stay safely below shared
+// fileLock's STALE_LOCK_MS rather than hardcoded — tying them programmatically so
+// the invariant can't silently drift. A fresh-but-held lock then times out
+// deterministically before it could be reclaimed as stale; an equal/greater
+// timeout makes that a load-sensitive boundary race (the lock is written just
+// before the acquire starts, so its stale point precedes the deadline). The margin
+// absorbs the write→acquire gap, loop overhead, and load drift.
+const LOCK_TIMEOUT_MARGIN_MS = 10_000;
+export const LOCK_TIMEOUT_MS = STALE_LOCK_MS - LOCK_TIMEOUT_MARGIN_MS;
 
 function statePath(artifactsDir: string): string {
   return join(artifactsDir, STATE_FILENAME);

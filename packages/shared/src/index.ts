@@ -356,6 +356,7 @@ export {
   releaseLock,
   withFileLock,
   FileLockTimeoutError,
+  STALE_LOCK_MS,
 } from "./quota/fileLock.js";
 export { runSlidingWindow } from "./quota/slidingWindow.js";
 export type { SlidingWindowResult } from "./quota/slidingWindow.js";

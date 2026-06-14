@@ -1,7 +1,7 @@
 import { writeFile, unlink, stat, readFile } from "node:fs/promises";
 import type { RunLogger } from "../observability/runLog.js";
 
-const STALE_LOCK_MS = 30_000;
+export const STALE_LOCK_MS = 30_000;
 // Lock-acquire retry uses exponential backoff (initial → doubling → max) rather
 // than a fixed poll, so a long contention window costs far fewer wakeups. The
 // sleep is always clamped to the time left so backoff never overshoots timeoutMs.
