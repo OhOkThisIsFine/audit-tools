@@ -1,6 +1,6 @@
 {
   "name": "auditor-lambda",
-  "version": "0.21.1",
+  "version": "0.21.2",
   "private": false,
   "description": "Portable hybrid code-auditing framework for arbitrary repositories.",
   "type": "module",
