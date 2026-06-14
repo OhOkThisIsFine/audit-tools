@@ -26,24 +26,32 @@ monorepo root). From the monorepo root use:
 node packages/audit-code/audit-code.mjs ensure --quiet
 ```
 
-Then ask the backend for exactly one next step. This host can dispatch review
-subagents in parallel (via the `Agent`/`task` tool), so report that capacity on
-every `next-step` call — otherwise the backend assumes it cannot parallelize and
-sizes dispatch waves to one packet at a time:
+Then ask the backend for exactly one next step. This is also the **capability
+handshake**: report what you can dispatch to *right now* on every `next-step`
+call, so the backend sizes review packets to your real model instead of a
+conservative 32k floor. Report:
+
+- `--host-max-active-subagents` — how many review subagents you can run in
+  parallel (via the `Agent`/`task` tool). Without it the backend assumes serial
+  dispatch and sizes waves to one packet at a time.
+- `--host-models` — an ordered JSON array (lowest rank first) of the models you
+  can dispatch subagents to *right now*, one entry per relative rank:
+  `{\"rank\": \"small\"|\"standard\"|\"deep\", \"context_tokens\": N, \"output_tokens\": N}`.
+  Ranks are relative capability labels that line up with each packet's
+  `model_hint.tier` — never report model names to the backend. Report only ranks
+  you can actually dispatch to; the backend partitions and budgets each packet
+  against the window of the rank its risk routes it to. Discover the real
+  windows, do not guess smaller-than-real values. Each entry may carry an
+  optional opaque `model_id` (and `--host-model-id` is the single-model
+  equivalent) used only to key per-model quota learning — it is never
+  interpreted.
+- `--host-context-tokens` / `--host-output-tokens` — single-model shorthand when
+  every subagent runs on one model: the context window and output cap of that
+  model. When `--host-models` is also given, the roster wins. Omit both and
+  dispatch falls back to the conservative 32k default (many tiny packets).
 
 ```bash
-audit-code next-step --host-max-active-subagents 4
-```
-
-`4` is a safe default for this host; raise it for more parallelism or lower it
-under rate-limit pressure. The backend's learned quota adapts from there.
-
-This `next-step` call is also the **capability handshake** — report what you can
-dispatch to *right now* so the backend sizes review packets to your real model
-instead of a conservative 32k floor:
-
-```bash
-audit-code next-step --host-max-active-subagents 4 --host-models '[{"rank":"small","context_tokens":32000,"output_tokens":8000},{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
+audit-code next-step --host-max-active-subagents 4 --host-models '[{\"rank\":\"small\",\"context_tokens\":32000,\"output_tokens\":8000},{\"rank\":\"standard\",\"context_tokens\":200000,\"output_tokens\":32000},{\"rank\":\"deep\",\"context_tokens\":200000,\"output_tokens\":64000}]'
 ```
 
 Or with a single dispatch model:
@@ -52,17 +60,15 @@ Or with a single dispatch model:
 audit-code next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
 ```
 
-- `--host-max-active-subagents` — parallel subagent capacity (via the `Agent`/`task`
-  tool). Without it the backend assumes serial dispatch.
-- `--host-models` — ordered JSON array (lowest rank first) of models you can dispatch
-  to right now; ranks (`small`/`standard`/`deep`) are relative labels, never model names.
-- `--host-context-tokens` / `--host-output-tokens` — single-model shorthand. When
-  `--host-models` is also given, the roster wins.
+`4` is a safe concurrency default for this host; raise it for more parallelism or
+lower it under rate-limit pressure. The backend's learned quota adapts from
+there. The token values should match the window of the model(s) dispatching the
+packets (e.g. 200000 / 32000 for a 200k-context model).
 
 When developing `auditor-lambda` itself, from the monorepo root use:
 
 ```bash
-node packages/audit-code/audit-code.mjs next-step --host-max-active-subagents 4
+node packages/audit-code/audit-code.mjs next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
 ```
 
 Read the returned JSON only far enough to find `prompt_path`, then read and
@@ -74,7 +80,7 @@ If the returned step is a dispatch step, before launching subagents check
 `progress.confirmation_recommended` in `steps/current-step.json`:
 
 - If `progress.confirmation_recommended` is `true`, pause and ask the user:
-  "Ready to launch **{progress.dispatch_summary}** — continue?"
+  \"Ready to launch **{progress.dispatch_summary}** — continue?\"
   Wait for an affirmative reply before proceeding with subagent dispatch.
 - If `progress.confirmation_recommended` is `false` (or absent), proceed
   immediately.
@@ -99,9 +105,9 @@ Use MCP tools only as a compatibility adapter when direct shell access to
 `continue_audit` tools return the same one-step contract; they are not a
 separate orchestration path.
 
-When a step prompt tells you to continue, run
-`audit-code next-step --host-max-active-subagents 4` again and follow only the
-newly returned `prompt_path`.
+When a step prompt tells you to continue, run `audit-code next-step` again with
+the same capability flags (`--host-max-active-subagents`, `--host-context-tokens`,
+`--host-output-tokens`) and follow only the newly returned `prompt_path`.
 
 Stop when the current step prompt tells you to stop.
 """
