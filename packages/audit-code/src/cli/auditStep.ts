@@ -59,7 +59,6 @@ export async function runAuditStep(options: {
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
   since?: string;
-  opentoken?: boolean;
   runLog?: boolean;
 }) {
   const bundle = await loadArtifactBundle(options.artifactsDir);
@@ -144,7 +143,6 @@ export async function runAuditStep(options: {
     graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
     since: options.since,
     preferredExecutor: options.preferredExecutor,
-    opentoken: options.opentoken,
     runLogger,
   });
 

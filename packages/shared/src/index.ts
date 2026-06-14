@@ -96,7 +96,6 @@ export type {
   BlockQuotaConfig,
   QuotaModelLimits,
   QuotaConfig,
-  OpenTokenConfig,
   ObservabilityConfig,
   SynthesisConfig,
   GraphConfig,
@@ -165,7 +164,6 @@ export {
   coerceJsonObjectArg,
   platformCommand,
   quoteForShellInterpreterCmd,
-  wrapForOpenToken,
 } from "./tooling/exec.js";
 
 // Tooling: project command discovery

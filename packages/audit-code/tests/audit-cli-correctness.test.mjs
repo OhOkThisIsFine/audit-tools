@@ -82,14 +82,13 @@ test("COR-df0bf37c: Array.isArray guard distinguishes null/absent results from e
   }
 });
 
-// ── COR-0ae3577b: opentoken no longer read from sessionConfig in CLI ─────────
-// The sessionConfig.opentoken field is @deprecated; CLI commands must not
-// forward sessionConfig.opentoken?.enabled into runDeterministicForNextStep.
-// Structural check: NextStepParams type no longer includes opentoken.
+// ── COR-0ae3577b: CLI forwards no token-wrap option from sessionConfig ───────
+// Token compression is handled by host-level headroom; CLI commands must not
+// forward any session-config wrap flag into runDeterministicForNextStep.
+// Structural check: NextStepParams carries the trimmed params shape.
 
-test("COR-0ae3577b: handleGraphEnrichmentBranch does not accept opentoken in params type", async (t) => {
+test("COR-0ae3577b: handleGraphEnrichmentBranch accepts the trimmed params shape", async (t) => {
   const { handleGraphEnrichmentBranch } = await import("../src/cli/nextStepCommand.ts");
-  // Call with params that omit opentoken — must work without it.
   const params = { root: ".", artifactsDir: ".", graphLlmEdgeReasoning: false, since: undefined };
   const result = await handleGraphEnrichmentBranch(
     params,

@@ -64,8 +64,8 @@ function baseInput() {
 const ORIGINAL_COMMAND = "my-cli";
 const ORIGINAL_ARGS = ["--prompt", "p with space", "--flag"];
 
-test("spawnLoggedCommand passes command and args to spawn untouched (INV-11: opentoken removed)", async () => {
-  // INV-shared-core-11: opentoken wrapping is removed from spawnLoggedCommand.
+test("spawnLoggedCommand passes command and args to spawn untouched (INV-shared-core-11)", async () => {
+  // INV-shared-core-11: spawnLoggedCommand applies no command wrapping.
   // The command and args passed to spawn must always be exactly the inputs given.
   const calls = [];
   const result = await spawnLoggedCommand(

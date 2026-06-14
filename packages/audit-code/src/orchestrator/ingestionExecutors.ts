@@ -211,7 +211,6 @@ export function runResultIngestionExecutor(
 export async function runRuntimeValidationExecutor(
   bundle: ArtifactBundle,
   root: string,
-  options: { opentoken?: boolean } = {},
 ): Promise<ExecutorRunResult> {
   if (!bundle.runtime_validation_tasks) {
     throw new Error("Cannot execute runtime validation without runtime_validation_tasks");
@@ -251,7 +250,7 @@ export async function runRuntimeValidationExecutor(
       uniqueCommandsRun++;
     }
     const outcome =
-      byCommand.get(signature) ?? (await runCommand(task.command, root, { opentoken: options.opentoken }));
+      byCommand.get(signature) ?? (await runCommand(task.command, root));
     byCommand.set(signature, outcome);
     byTaskId.set(task.id, {
       task_id: task.id,
