@@ -249,10 +249,10 @@ export function renderEdgeReasoningDispatchPrompt(params: {
 
 /**
  * Host prompt for the rolling dispatch step.
- * Workers emit AuditResult[] INLINE in their response; the host captures the
- * payload and writes it to `entry.result_path` on the worker's behalf.
- * Ingestion is folded into the same logical turn: after all packets complete
- * the host runs merge-and-ingest once, then next-step.
+ * Each worker writes its own AuditResult[] to `entry.result_path` (an inline
+ * return is a fallback the host captures). Ingestion is folded into the same
+ * logical turn: after all packets complete the host runs merge-and-ingest once,
+ * then next-step.
  */
 export function renderRollingDispatchPrompt(params: {
   root: string;
@@ -286,18 +286,17 @@ export function renderRollingDispatchPrompt(params: {
     "",
     DISPATCH_PROMPT_HANDOFF_NOTE,
     "",
-    "## Inline result capture (no submit-packet command)",
+    "## Result capture (no submit-packet command)",
     "",
-    "Workers emit their AuditResult[] array INLINE in their response text.",
-    "For each subagent that completes:",
-    "1. Extract the JSON array from the response (look for a fenced ```json block or bare JSON array).",
-    "2. Write it to `entry.result_path` from the dispatch plan entry.",
-    "3. Do NOT run submit-packet or any shell command to record results.",
-    "",
-    "Subagent prompt shape:",
-    "",
-    "  Read and follow the audit instructions in: <entry.prompt_path>",
-    "  The result_path is printed in the packet prompt header — the subagent mentions it but does NOT write files.",
+    "Pass `entry.prompt_path` to each subagent as its instruction verbatim — the",
+    "prompt is self-contained (scope, file grants, output schema, and its",
+    "`result_path`). Do not restate it in your dispatch message.",
+    "Each worker writes its own AuditResult[] JSON array to its assigned",
+    "`entry.result_path` and replies with a one-line confirmation; keeping the",
+    "worker payloads out of this conversation is what lets a large fan-out scale.",
+    "Fallback: if a worker returns the AuditResult[] inline instead of writing it,",
+    "extract the JSON array from its reply and write it to `entry.result_path`",
+    "yourself. Do NOT run submit-packet or any shell command to record results.",
     "",
     ...(modelLine ? [modelLine] : []),
     toolsLine,

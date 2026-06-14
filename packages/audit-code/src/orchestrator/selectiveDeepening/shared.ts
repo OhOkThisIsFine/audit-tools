@@ -7,8 +7,6 @@ import type { ExternalAnalyzerResults } from "../../types/externalAnalyzer.js";
 // the ranks, id/hash helpers, path utilities, and tag/limit constants from
 // here. The public entry (`buildSelectiveDeepeningTasks`) lives in `index.ts`.
 
-export const DEFAULT_MAX_DEEPENING_TASKS = 6;
-export const DEFAULT_MAX_TOTAL_DEEPENING_TASKS = 24;
 export const DEEPENING_TAG = "selective_deepening";
 export const LENS_VERIFICATION_TAG = "lens_verification";
 export const LENS_VERIFICATION_FOLLOWUP_TAG = "lens_verification_followup";
@@ -54,8 +52,6 @@ export interface BuildSelectiveDeepeningTaskOptions {
   runtimeValidationTasks?: import("../../types/runtimeValidation.js").RuntimeValidationTaskManifest;
   runtimeValidationReport?: import("../../types/runtimeValidation.js").RuntimeValidationReport;
   externalAnalyzerResults?: ExternalAnalyzerResults;
-  maxTasks?: number;
-  maxTotalDeepeningTasks?: number;
 }
 
 export interface FindingContext {

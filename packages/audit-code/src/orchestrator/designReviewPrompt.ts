@@ -489,7 +489,8 @@ export function renderConceptualJudgePrompt(
     "- **Deduplicate**: collapse findings that describe the same underlying observation, even if worded differently. Keep the clearest statement and note corroboration in the summary.",
     "- **Resolve contradictions**: when two perspectives disagree, keep the better-evidenced position; if genuinely unresolved, keep it and say so.",
     "- **Rank** by impact and actionability.",
-    "- **Drop** low-confidence observations that only one perspective raised and nothing else corroborates. A high-confidence single-perspective finding stays.",
+    "- **Judge on merit, not consensus.** Evaluate each finding on its own evidence, impact, and actionability. Do NOT drop a finding solely because only one perspective raised it — a lone but well-reasoned or high-impact observation must survive. Cross-perspective corroboration only RAISES confidence; it is never a survival requirement.",
+    "- **Drop only genuine noise:** vague, unactionable, unsupported, or out-of-scope assertions — regardless of how many perspectives raised them.",
     "- Do not invent new findings; you are merging, not reviewing.",
     "",
     ...conceptualOutputFormat(

@@ -1,10 +1,30 @@
 import { LENSES } from "@audit-tools/shared";
 import { MANDATORY_LENSES } from "../orchestrator/lensSelection.js";
+import {
+  CONCEPTUAL_PERSPECTIVES,
+  DEFAULT_CONCEPTUAL_PERSPECTIVES,
+} from "../orchestrator/designReviewPrompt.js";
 import type { ScopePreDigest, AggregatedExcludedRow } from "../orchestrator/intentCheckpointExecutor.js";
 
 function isAggregatedRow(row: { prefix?: string; path?: string }): row is AggregatedExcludedRow {
   return "prefix" in row && row.prefix !== undefined;
 }
+
+// One-line meaning per canonical lens, shown in the confirm-intent catalog so the
+// user can choose deliberately instead of guessing from the bare lens name.
+const LENS_DESCRIPTIONS: Record<string, string> = {
+  correctness: "Logic errors, wrong results, broken invariants, mishandled edge cases.",
+  architecture: "Structure, boundaries, coupling, dependency direction, layering.",
+  maintainability: "Readability, duplication, complexity, naming, dead code, change cost.",
+  security: "Injection, authn/authz, secret handling, unsafe input, privilege boundaries.",
+  reliability: "Failure modes, error handling, retries, resource leaks, recovery.",
+  performance: "Hot paths, algorithmic complexity, allocation, avoidable I/O and work.",
+  data_integrity: "Persistence correctness, schema/serialization drift, races, lost or duplicated state.",
+  tests: "Coverage gaps, brittle or flaky tests, missing negative cases, weak assertions.",
+  operability: "Deploy / runbooks, health, config surface, diagnosability in production.",
+  config_deployment: "Build, packaging, CI/CD, release, environment and config wiring.",
+  observability: "Logging, metrics, tracing, and signal quality for debugging incidents.",
+};
 
 /**
  * Render the host-facing prompt for the `confirm_intent` step. Shows the
@@ -102,7 +122,8 @@ export function renderConfirmIntentPrompt(
     "",
     ...LENSES.map((lens) => {
       const isMandatory = (MANDATORY_LENSES as readonly string[]).includes(lens);
-      return `- **${lens}**${isMandatory ? " *(mandatory)*" : ""}`;
+      const desc = LENS_DESCRIPTIONS[lens];
+      return `- **${lens}**${isMandatory ? " *(mandatory)*" : ""}${desc ? ` — ${desc}` : ""}`;
     }),
     "",
     "Mandatory lenses (security, correctness, reliability, data_integrity) are",
@@ -118,9 +139,13 @@ export function renderConfirmIntentPrompt(
     "better directions, distinct from the contract pass). Choose its depth:",
     "",
     "- **shallow** *(default)* — a single conceptual reviewer. Faster, cheaper.",
-    "- **deep** — fan out several independent reviewers with maximally dissimilar",
-    "  perspectives, then compile via an independent judge. Surfaces more, costs",
-    "  more. Set `design_review.perspectives` to bound the fan-out (default ~5).",
+    `- **deep** — fan out ${DEFAULT_CONCEPTUAL_PERSPECTIVES} independent reviewers, each with a maximally`,
+    "  dissimilar value system, then compile via an independent judge. Surfaces more,",
+    "  costs more. The default perspectives are:",
+    ...CONCEPTUAL_PERSPECTIVES.slice(0, DEFAULT_CONCEPTUAL_PERSPECTIVES).map(
+      (p) => `    - **${p.name}** — ${p.lens}`,
+    ),
+    "  Set `design_review.perspectives` to widen or narrow the fan-out.",
     "",
     "This records *how much* review to do, not which model runs it — model choice",
     "is resolved at dispatch against whatever models the provider has then.",
