@@ -97,11 +97,6 @@ export interface QuotaConfig {
   models?: Record<string, QuotaModelLimits>;
 }
 
-export interface OpenTokenConfig {
-  enabled?: boolean;
-  command?: string;
-}
-
 export interface ObservabilityConfig {
   /** Emit the structured run log (run.log.jsonl). Defaults to true. */
   run_log?: boolean;
@@ -258,8 +253,6 @@ export interface SessionConfig {
   parallel_workers?: number;
   block_quota?: BlockQuotaConfig;
   quota?: QuotaConfig;
-  /** @deprecated opentoken is superseded by headroom; this field is no longer read. */
-  opentoken?: OpenTokenConfig;
   observability?: ObservabilityConfig;
   synthesis?: SynthesisConfig;
   /** Per-analyzer resolution policy for the optional graph-enrichment pass. */

@@ -655,8 +655,6 @@ test("INV-shared-core-14: FreshSessionProviderDeps.runLogger is optional (no log
   );
 });
 
-// ── INV-shared-core-11: opentoken removed from SpawnLoggedCommandOptions ─────
-
 // ── INV-shared-core-15: CRIT-shared-first-ordering — CI builds shared before dependents ──
 // CRIT-002: Shared-package convergences land and stay green BEFORE dependent per-module
 // fixes. The CI must build @audit-tools/shared before running verify:release on each
@@ -798,17 +796,12 @@ test("INV-shared-core-16: settings.json registers pre-commit-gate as a PreToolUs
   );
 });
 
-// ── INV-shared-core-11: opentoken removed from SpawnLoggedCommandOptions ─────
+// ── INV-shared-core-11: spawnLoggedCommand applies no command wrapping ───────
 
-test("INV-shared-core-11: SpawnLoggedCommandOptions does not have opentoken or opentokenCommand", async () => {
-  // We verify this by calling spawnLoggedCommand with a minimal options object
-  // that includes those keys — TypeScript would catch this at compile time, but
-  // we add a runtime guard as well. If the fields were present on the interface,
-  // they might silently be used; their absence means the option is dead.
-  //
-  // Since TypeScript is the enforcement mechanism here and runtime JS doesn't
-  // type-check, we assert the behavior: spawnLoggedCommand must NOT wrap the
-  // command when called with any options object (there is no wrapping path anymore).
+test("INV-shared-core-11: spawnLoggedCommand spawns the command unwrapped", async () => {
+  // spawnLoggedCommand must NOT wrap the command when called with any options
+  // object — there is no command-wrapping path anymore. We assert the behavior:
+  // the command and args reach spawn exactly as given.
   const { spawnLoggedCommand } = await import("../src/providers/spawnLoggedCommand.ts");
   const { EventEmitter } = await import("node:events");
   const { PassThrough } = await import("node:stream");
@@ -858,7 +851,7 @@ test("INV-shared-core-11: SpawnLoggedCommandOptions does not have opentoken or o
   );
 
   assert.equal(calls.length, 1);
-  // The command must not have been wrapped (no cmd.exe / opentoken prefix).
+  // The command must not have been wrapped (no cmd.exe / shell prefix).
   assert.equal(calls[0].command, "my-cli", "command must reach spawn unwrapped");
   assert.deepEqual(calls[0].args, ["--arg"], "args must reach spawn unwrapped");
 });

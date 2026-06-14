@@ -13,7 +13,6 @@ import { quoteForShellInterpreterCmd } from "@audit-tools/shared";
 export async function runCommand(
   command: string[],
   cwd: string,
-  options: Record<string, unknown> = {},
 ): Promise<{
   status: "confirmed" | "not_confirmed" | "inconclusive";
   summary: string;

@@ -44,8 +44,8 @@ export function buildCacheablePrompt(parts: CacheablePromptParts): string {
  */
 export const DO_NOT_TOKEN_WRAP_NOTE =
   "Run these backend commands directly — do not pipe them through a " +
-  "token-compression wrapper (e.g. `opentoken wrap`); their JSON / " +
-  "prompt-contract output is parsed verbatim and wrapping corrupts it.";
+  "token-compression wrapper; their JSON / prompt-contract output is parsed " +
+  "verbatim and wrapping corrupts it.";
 
 /**
  * Host instruction emitted in dispatch step prompts: each subagent should

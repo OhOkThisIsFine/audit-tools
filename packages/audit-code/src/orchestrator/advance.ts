@@ -57,7 +57,6 @@ export interface AdvanceAuditOptions {
    */
   since?: string;
   preferredExecutor?: string;
-  opentoken?: boolean;
   runLogger?: RunLogger;
 }
 
@@ -227,9 +226,7 @@ export async function advanceAudit(
         break;
       case "runtime_validation_executor": {
         const root = requireRoot(options.root, "runtime_validation_executor");
-        run = await runRuntimeValidationExecutor(bundle, root, {
-          opentoken: options.opentoken,
-        });
+        run = await runRuntimeValidationExecutor(bundle, root);
         break;
       }
       case "synthesis_executor":

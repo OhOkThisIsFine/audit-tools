@@ -95,21 +95,6 @@ test("resolveExecArgv is a passthrough on non-win32", () => {
   ]);
 });
 
-test("resolveExecArgv applies opentoken wrapping per platform", () => {
-  assert.deepEqual(
-    resolveExecArgv(["git", "status"], { opentoken: "opentoken", platform: "linux" }),
-    ["opentoken", "wrap", "git", "status"],
-  );
-  const win = resolveExecArgv(["git", "status"], {
-    opentoken: "opentoken",
-    platform: "win32",
-  });
-  const shell = process.env.ComSpec ?? "cmd.exe";
-  assert.equal(win[0], shell);
-  assert.deepEqual(win.slice(1, 4), ["/d", "/s", "/c"]);
-  assert.equal(win[4], "opentoken wrap git status");
-});
-
 test("resolveExecArgv tolerates an empty argv", () => {
   assert.deepEqual(resolveExecArgv([]), []);
 });

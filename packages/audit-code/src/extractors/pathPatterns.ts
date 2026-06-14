@@ -185,7 +185,7 @@ export function isNodeModulesOrGit(normalized: string): boolean {
 
 /**
  * `.tmp/` holds transient scratch and bundled tool copies (e.g. a vendored
- * `.tmp/opentoken`). These are not the audited project's source — excluding
+ * `.tmp/cache`). These are not the audited project's source — excluding
  * them keeps the self-audit from auditing its own bundled dependencies.
  */
 export function isTmpPath(normalized: string): boolean {

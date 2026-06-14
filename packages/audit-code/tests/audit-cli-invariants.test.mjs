@@ -214,23 +214,22 @@ test("INV-audit-cli-07: shouldRunInlineExecutor returns true for inline executor
   }
 });
 
-// ── INV-audit-cli-08: NextStepParams no longer carries opentoken (COR-0ae3577b) ──
-// opentoken is superseded by headroom; the CLI layer must not read
-// sessionConfig.opentoken?.enabled and forward it into runDeterministicForNextStep.
+// ── INV-audit-cli-08: NextStepParams carries no token-wrap option (COR-0ae3577b) ──
+// Token compression is handled by host-level headroom; the CLI layer must not
+// read any session-config wrap flag and forward it into runDeterministicForNextStep.
 // Verified structurally: the exported handleGraphEnrichmentBranch and
-// handleSynthesisNarrativeBranch signatures no longer accept opentoken.
+// handleSynthesisNarrativeBranch signatures accept the trimmed params shape.
 
 const { handleGraphEnrichmentBranch: hgeb, handleSynthesisNarrativeBranch: hsnb } =
   await import("../src/cli/nextStepCommand.ts");
 
-test("INV-audit-cli-08: handleGraphEnrichmentBranch accepts params without opentoken", async () => {
-  // Passing params without opentoken must not throw (field removed from type)
+test("INV-audit-cli-08: handleGraphEnrichmentBranch accepts the trimmed params shape", async () => {
   const params = { root: ".", artifactsDir: ".", graphLlmEdgeReasoning: false, since: undefined };
   const result = await hgeb(params, {}, { status: "active", obligations: [], blockers: [] }, { value: undefined });
   assert.ok(["fallthrough", "continue", "return"].includes(result.action), "expected a valid action");
 });
 
-test("INV-audit-cli-08: handleSynthesisNarrativeBranch accepts params without opentoken", async () => {
+test("INV-audit-cli-08: handleSynthesisNarrativeBranch accepts the trimmed params shape", async () => {
   const params = { root: ".", artifactsDir: "/nonexistent-dir-abc", narrativeEnabled: false };
   // narrativeEnabled false + no incoming file → continue
   const result = await hsnb(params, {}, { status: "active", obligations: [], blockers: [] });

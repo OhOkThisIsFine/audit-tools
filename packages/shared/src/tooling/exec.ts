@@ -4,8 +4,8 @@ import { spawnSync, type StdioOptions } from "node:child_process";
 // Phase 0 the remediator (`utils/commands.ts`) and the auditor
 // (`orchestrator/localCommands.ts`) each carried their own copy of the
 // Windows `.cmd`/`.bat` wrapping and quoting logic. `runTracked` is the one
-// implementation: argv-only (never `shell: true`), with optional `opentoken`
-// wrapping, and it reports the argv it actually executed for run-log tracing.
+// implementation: argv-only (never `shell: true`), and it reports the argv it
+// actually executed for run-log tracing.
 
 export interface RunTrackedOptions {
   cwd?: string;
@@ -16,11 +16,6 @@ export interface RunTrackedOptions {
   maxBuffer?: number;
   windowsHide?: boolean;
   stdio?: StdioOptions;
-  /**
-   * Wrap the command as `<opentoken> wrap <argv>`. Pass the opentoken binary
-   * name or path. When unset, no wrapping is applied.
-   */
-  opentoken?: string;
   /** Override the platform; for tests. Defaults to `process.platform`. */
   platform?: NodeJS.Platform;
 }
@@ -29,7 +24,7 @@ export interface RunTrackedResult {
   status: number | null;
   stdout: string;
   stderr: string;
-  /** The argv actually spawned, after platform/opentoken wrapping. */
+  /** The argv actually spawned, after platform wrapping. */
   argv: string[];
   /** The cwd passed to runTracked, if any. undefined means the command inherited the process CWD. */
   cwd?: string;
@@ -51,13 +46,13 @@ const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
 //     quoted string, so doubling double-quotes (`"` → `""`) is correct.
 //     Use this when constructing the argv array for `wrapForWindowsBatch`.
 //
-//   • `quoteForShellInterpreterCmd` — for
-//     `wrapForOpenToken`: tokens are embedded into a full command-line *string*
-//     that `cmd.exe /c` interprets as a shell command (e.g. `opentoken wrap
-//     <argv…>`).  In this context the cmd.exe *command interpreter* sees
-//     metacharacters (`^&|<>%"`) before any argv parser, so caret-escaping
-//     them is the correct strategy.  Use this when building the inline string
-//     argument for `wrapForOpenToken` or any `cmd.exe /c "<full-command-string>"`.
+//   • `quoteForShellInterpreterCmd` — for the opencode launcher
+//     (`resolveOpenCodeSpawnCommand`): tokens are embedded into a full
+//     command-line *string* that `cmd.exe /c` interprets as a shell command.
+//     In this context the cmd.exe *command interpreter* sees metacharacters
+//     (`^&|<>%"`) before any argv parser, so caret-escaping them is the correct
+//     strategy.  Use this when building the inline string argument for any
+//     `cmd.exe /c "<full-command-string>"`.
 //
 // Do NOT mix them up: `quoteForShellInterpreterCmd` is not a substitute for
 // `quoteForCmd` in the batch-wrapping path, and vice versa.
@@ -71,9 +66,9 @@ const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
  * correct strategy is to wrap the token in double-quotes and replace every
  * internal `"` with `""`.
  *
- * **Do not use this for the opentoken wrap path.**  For that context (where
- * the entire command is a shell string interpreted by cmd.exe before any argv
- * parser runs), use `quoteForShellInterpreterCmd` instead.
+ * **Do not use this for shell-interpreter command strings.**  For that context
+ * (where the entire command is a shell string interpreted by cmd.exe before any
+ * argv parser runs), use `quoteForShellInterpreterCmd` instead.
  */
 export function quoteForCmd(arg: string): string {
   if (arg.length === 0) return '""';
@@ -188,10 +183,10 @@ function wrapForWindowsBatch(
  *
  * - `quoteForShellInterpreterCmd` (shell-interpreter): caret-escapes
  *   metacharacters.  Used when building an inline shell command string passed
- *   to `cmd.exe /c`, e.g. `opentoken wrap <argv…>`.
+ *   to `cmd.exe /c`, e.g. the opencode launcher's `cmd.exe /c "<command…>"`.
  *
- * Canonical owner of this charset — both `wrapForOpenToken` and the
- * opencode launcher import it instead of carrying their own copy.
+ * Canonical owner of this charset — the opencode launcher
+ * (`resolveOpenCodeSpawnCommand`) imports it instead of carrying its own copy.
  */
 export function quoteForShellInterpreterCmd(value: string): string {
   if (/^[A-Za-z0-9_./:=@+-]+$/u.test(value)) return value;
@@ -199,43 +194,19 @@ export function quoteForShellInterpreterCmd(value: string): string {
 }
 
 /**
- * Wrap `[command, ...args]` as an `<opentoken> wrap …` invocation. On Windows
- * the wrap goes through `cmd.exe /d /s /c` with each token quoted via
- * `quoteForShellInterpreterCmd`; on every other platform opentoken is spawned argv-only.
- * Single source of truth for the opentoken wrapping both orchestrators use.
- */
-export function wrapForOpenToken(
-  command: string,
-  args: string[],
-  opentoken: string,
-  platform: NodeJS.Platform = process.platform,
-): { command: string; args: string[] } {
-  if (platform === "win32") {
-    const shell = process.env.ComSpec ?? "cmd.exe";
-    const inner = [command, ...args].map(quoteForShellInterpreterCmd).join(" ");
-    return { command: shell, args: ["/d", "/s", "/c", `${opentoken} wrap ${inner}`] };
-  }
-  return { command: opentoken, args: ["wrap", command, ...args] };
-}
-
-/**
  * Resolve a logical argv into the concrete `[command, ...args]` that should be
- * spawned on this platform, applying package-manager shim mapping, optional
- * opentoken wrapping, and Windows batch wrapping. Exposed for callers that
- * spawn asynchronously and only need the resolved argv.
+ * spawned on this platform, applying package-manager shim mapping and Windows
+ * batch wrapping. Exposed for callers that spawn asynchronously and only need
+ * the resolved argv.
  */
 export function resolveExecArgv(
   argv: string[],
-  options: { opentoken?: string; platform?: NodeJS.Platform } = {},
+  options: { platform?: NodeJS.Platform } = {},
 ): string[] {
   if (argv.length === 0) return [];
   const platform = options.platform ?? process.platform;
   const command = platformCommand(argv[0], platform);
   const args = argv.slice(1);
-  if (options.opentoken) {
-    const wrapped = wrapForOpenToken(command, args, options.opentoken, platform);
-    return [wrapped.command, ...wrapped.args];
-  }
   const wrapped = wrapForWindowsBatch(command, args, platform);
   return [wrapped.command, ...wrapped.args];
 }
@@ -262,7 +233,6 @@ export function runTracked(
     };
   }
   const resolved = resolveExecArgv(argv, {
-    opentoken: options.opentoken,
     platform: options.platform,
   });
   const start = Date.now();

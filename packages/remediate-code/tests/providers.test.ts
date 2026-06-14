@@ -488,52 +488,6 @@ describe("provider launch methods", () => {
     });
   });
 
-  it("ClaudeCodeProvider does not pass opentoken fields to launchCommand (INV-shared-core-11: opentoken removed)", async () => {
-    const savedClaudeCode = process.env.CLAUDECODE;
-    delete process.env.CLAUDECODE;
-    try {
-      await withProviderFiles(async ({ input }) => {
-        const calls: any[] = [];
-        const provider = new ClaudeCodeProvider(
-          { command: "claude-test" },
-          async (...args: any[]) => {
-            calls.push(args);
-            return { accepted: true, exitCode: 0 };
-          },
-        );
-
-        await provider.launch(input);
-
-        // opentoken fields must not appear in the launch options (4th positional arg)
-        const launchOptions = calls[0][4] ?? {};
-        expect(launchOptions).not.toHaveProperty("opentoken");
-        expect(launchOptions).not.toHaveProperty("opentokenCommand");
-      });
-    } finally {
-      if (savedClaudeCode !== undefined) process.env.CLAUDECODE = savedClaudeCode;
-    }
-  });
-
-  it("OpenCodeProvider does not pass opentoken fields to launchCommand (INV-shared-core-11: opentoken removed)", async () => {
-    await withProviderFiles(async ({ input }) => {
-      const calls: any[] = [];
-      const provider = new OpenCodeProvider(
-        { command: "opencode-test" },
-        async (...args: any[]) => {
-          calls.push(args);
-          return { accepted: true, exitCode: 0 };
-        },
-      );
-
-      await provider.launch(input);
-
-      // opentoken fields must not appear in the launch options (4th positional arg)
-      const launchOptions = calls[0][4] ?? {};
-      expect(launchOptions).not.toHaveProperty("opentoken");
-      expect(launchOptions).not.toHaveProperty("opentokenCommand");
-    });
-  });
-
   it("LocalSubprocessProvider launches task.worker_command with task timeout", async () => {
     await withProviderFiles(async ({ input }) => {
       const calls: any[] = [];
