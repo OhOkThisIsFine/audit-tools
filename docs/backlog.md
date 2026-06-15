@@ -121,6 +121,88 @@ rather than "where the code is today."
   this guidance (bracket-wrap the output, or `Write-Output -NoEnumerate`).
   (Sibling of the `foreach`/`-Filter` PowerShell traps above.)
 
+- **`--host-can-dispatch-subagents` is documented as a boolean but defined with a value.**
+  The `/remediate-code` and `/audit-code` loaders show `--host-can-dispatch-subagents`
+  as a bare flag, but commander defines it as `--host-can-dispatch-subagents <value>`,
+  so passing it bare swallows the *next* flag as its value
+  (`… --host-can-dispatch-subagents --host-max-concurrent 4` made `4` a stray positional
+  → "too many arguments for 'next-step'"). Spotted 2026-06-14. Fix: define it as a true
+  boolean option (no `<value>`) so the documented usage works, or change the loader docs
+  to `--host-can-dispatch-subagents true`. (The `--host-models` JSON roster itself passes
+  fine through the PowerShell→.cmd shim when single-quoted.)
+- **`conversation-start.md` is not auto-registered as an intake source.** When
+  `/remediate-code` receives conversational/memory guidance *alongside* an `--input`
+  report, the loader writes the guidance to `intake/conversation-start.md`, but
+  `synthesize_intake`'s source-manifest lists only the `--input` document — so the
+  guidance reaches planning only if the host folds it in by hand (it did, 2026-06-14).
+  Fix: have intake discover `intake/conversation-start.md` (and any `intake/*.md`) and
+  add it to the source-manifest as a supplementary `conversation` source, so mixed
+  report+guidance runs are first-class.
+- **Implement-worker `finding_id` trap recurred — renderer fix still unshipped.** The
+  documented renderer fix above (emit the real node id + "one item_result per item id;
+  never FND-*/OBL-* obligation ids") is still not in `prepareImplementDispatch`; the
+  2026-06-14 run hit it again (an opus worker emitted one item_result per obligation incl.
+  `OBL-WS-C` → `merge-implement-results` threw; the result file was patched post-hoc).
+  Two-sided fix worth doing together: (1) renderer emits the node id + the one-entry rule;
+  (2) make `merge-implement-results` *tolerant* — if an unknown `finding_id` is actually a
+  known obligation id, map it back to its owning node instead of throwing (and collapse
+  multiple per-obligation `item_results` for one node).
+
+### Auditor-agnostic robustness — enforce-in-tooling fixes (2026-06-14)
+
+Surfaced re-evaluating the 452-finding remediation run under the standing invariant
+*"enforce in tooling, never host discretion"* (CLAUDE.md). Each item is a place the run only
+succeeded because a capable host intervened — a latent failure mode for a weaker auditor. The
+fix is the enforced change, not host care. (The three Known-friction bullets just above —
+finding_id trap, `--host-can-dispatch-subagents`, conversation-start intake — belong to this set.)
+
+- **Single bootstrap, not write-then-call.** The loader has the host write
+  `conversation-start.md` then separately call `next-step`. Enforce a single entry operation
+  (`next-step` accepts `--guidance-file`, or the loader is one command) so no host must
+  remember the two-step dance.
+- **Upstream evidence must auto-thread to dependent nodes.** The still-real verification node
+  produced the import-graph / COR-3410f5f6 / version verdicts; the host relayed them into the
+  dependent workers' prompts by hand. Enforce: a node's result is automatically threaded into
+  the dispatch prompts of nodes that depend on it (verification edges already exist in the DAG —
+  the dispatcher should ingest the upstream result, not the host).
+- **Bounded findings digest as an artifact.** Reading scope from the 742 KB
+  `audit-findings.json` was hand-rolled PowerShell (overflow-prone). Enforce: intake emits a
+  bounded findings digest (counts, by-severity/lens/package, top findings, work-block map) the
+  step prompt points to — no host should query raw findings ad-hoc.
+- **Worker verification commands declared, not improvised.** Build-race safety (never two
+  `npm run build` on one package; verify via `check`+`test`; rebuild shared between dependency
+  levels) was host reasoning. Enforce: the dispatch plan/worker prompt states the exact verify
+  commands per node (check + package test, never build); the scheduler owns shared rebuilds
+  between levels.
+- **Rolling per-node dispatch + concurrency owned by the scheduler.** The host hand-grouped and
+  hand-paced 6 waves. Enforce dispatch-when-verified-complete with a quota-driven concurrency
+  pool + incremental merge (see *Design commitments not yet built → Rolling per-node dispatch*).
+  The host executes a steady-state pool; it should not design the waves.
+- **Write-scope enforced, not self-reported.** Two workers edited `shared` out of scope
+  (converged green, but unenforced). Enforce: the merge validates each worker's actual edits
+  against its declared write-scope and rejects out-of-scope writes (ARC-f378135d).
+- **Cross-block break propagation.** An OBL-C002 behavior change broke a seam test (SEAM-8c) in
+  another block that the host fixed by hand. Enforce: paired positive+negative obligations
+  (already tracked) + a cross-block reconciliation pass so a behavior change derives the
+  dependent expectations to update — no host mop-up.
+- **Result-shape errors impossible by construction.** `finding_id` / one-entry-per-node and
+  field-type schema errors should be caught at write-time by a shared validator the worker runs,
+  and `merge-implement-results` should be tolerant (map obligation→node, collapse multi-entry)
+  rather than throwing.
+- **Mid-edit typecheck-hook false alarms.** The async PostToolUse hook fired on transient
+  mid-edit states during concurrent waves (authoritative `check` was green each time). Enforce:
+  debounce the hook / scope it to the final edit, and define the final-green node as the
+  authoritative gate, so a weaker host isn't derailed by advisory noise.
+- **Model tier set by the planner, not the host.** `model_hint.tier` was flat "standard"; the
+  host hand-upgraded architecture-heavy nodes to deep. Enforce: the planner sets tier by node
+  complexity.
+- **Per-finding coverage ledger.** The run tracked 17 blocks, not 452 finding dispositions.
+  Enforce a per-finding ledger so every source finding has an auditable terminal disposition
+  (closes CE-007 / OBL-GOAL-COVERAGE).
+- **Generator↔fixture drift guard.** `generate-auditor-contract-fixture.mjs` now imports the
+  shared constant; add a test asserting regenerated output == committed fixture so the generator
+  can never silently re-break the suite.
+
 ### Friction from the June 8–9 self-audit (auditor feedback)
 
 - **Whether to allow declared-boundary files as `affected_files` evidence.** The

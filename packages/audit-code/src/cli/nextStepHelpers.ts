@@ -507,6 +507,83 @@ export async function checkFinalizationCycle(ctx: {
   );
 }
 
+/**
+ * Pre-dispatch no-progress guard (ARC-b8fed771).
+ *
+ * Runs BEFORE a deterministic executor is dispatched. If the loop is about to
+ * re-dispatch the SAME executor for the SAME obligation from an artifact-state
+ * signature it has ALREADY dispatched that exact (executor, obligation) pair
+ * from this run, the prior dispatch left the content-state unchanged (same
+ * signature) — so dispatching it again cannot make progress and would spin.
+ * Stop the loop with a terminal step instead of re-dispatching.
+ *
+ * The dispatch IDENTITY (signature + executor + obligation), not the signature
+ * alone, is the recurrence key. A recurring signature across DIFFERENT executors
+ * is legitimate: no-op-but-satisfying steps (auto-fix with nothing to fix,
+ * syntax-resolution with no errors) leave the artifact content unchanged while
+ * still advancing the obligation chain — those must NOT trip the guard. Only a
+ * literal re-entry of the same executor on the same unchanged state is the
+ * infinite loop this catches.
+ *
+ * This is the immediate-recurrence complement to `checkFinalizationCycle` (the
+ * post-dispatch tolerance-based thrash detector across many executors): this
+ * guard refuses to re-enter the SAME executor on a state it already failed to
+ * advance, rather than waiting for the tolerance window to fill. Returns a
+ * terminal-step result when the guard fires, or undefined to proceed.
+ *
+ * `dispatchedSignatures` is mutated: the current dispatch identity is recorded
+ * so a later iteration that returns to this exact (state, executor, obligation)
+ * trips the guard.
+ */
+export async function checkNoProgressBeforeDispatch(ctx: {
+  index: number;
+  dispatchedSignatures: Set<string>;
+  params: Pick<NextStepParams, "artifactsDir" | "maxRuns" | "root">;
+  bundle: ArtifactBundle;
+  state: AuditState;
+  selectedObligation: string | null | undefined;
+  selectedExecutor: string | null | undefined;
+}): Promise<TerminalStepResult | undefined> {
+  const signature = computeArtifactStateSignature(ctx.bundle);
+  const dispatchKey = `${signature}|${ctx.selectedExecutor ?? ""}|${ctx.selectedObligation ?? ""}`;
+  // "no-metadata" is the pre-artifact bootstrap state (no artifact_metadata yet
+  // — e.g. before the first executor stamps any metadata). Many early
+  // deterministic steps legitimately dispatch from it before metadata exists, so
+  // it is not a no-progress signal; only a real, metadata-bearing signature
+  // recurring for the SAME executor means an executor already ran here without
+  // changing content.
+  if (signature !== "no-metadata" && ctx.dispatchedSignatures.has(dispatchKey)) {
+    await writeJsonFile(
+      join(ctx.params.artifactsDir, "steps", "deterministic-progress.json"),
+      {
+        iteration: ctx.index + 1,
+        max_runs: ctx.params.maxRuns,
+        no_progress_detected: true,
+        repeated_obligation: ctx.selectedObligation ?? "unknown",
+        repeated_executor: ctx.selectedExecutor ?? "unknown",
+        summary:
+          "Pre-dispatch no-progress guard: about to re-dispatch " +
+          `${ctx.selectedExecutor ?? "an executor"} for obligation ` +
+          `${ctx.selectedObligation ?? "unknown"} from an artifact state already ` +
+          "dispatched this run without net progress; stopping instead of looping.",
+        timestamp: new Date().toISOString(),
+      },
+    );
+    return buildTerminalStep(
+      ctx.params,
+      ctx.bundle,
+      ctx.state,
+      "No-progress guard: a deterministic executor was about to re-run on an " +
+        "artifact state it already processed this run without changing it " +
+        `(obligation ${ctx.selectedObligation ?? "unknown"}, executor ` +
+        `${ctx.selectedExecutor ?? "unknown"}). Stopping to avoid an infinite ` +
+        "no-progress loop.",
+    );
+  }
+  ctx.dispatchedSignatures.add(dispatchKey);
+  return undefined;
+}
+
 // ── Coordinator ───────────────────────────────────────────────────────────────
 
 export async function runDeterministicForNextStep(params: NextStepParams): Promise<
@@ -530,6 +607,12 @@ export async function runDeterministicForNextStep(params: NextStepParams): Promi
   const FINALIZATION_CYCLE_TOLERANCE = 16;
   const seenStateSignatures = new Set<string>();
   const obligationTrail: string[] = [];
+  // Pre-dispatch no-progress guard (ARC-b8fed771): dispatch identities
+  // (signature|executor|obligation) already dispatched this run. Re-entering the
+  // SAME executor+obligation on the SAME unchanged state means the prior
+  // dispatch made no net progress — stop, don't dispatch again. A recurring
+  // signature across DIFFERENT executors (no-op-but-satisfying steps) is fine.
+  const dispatchedSignatures = new Set<string>();
 
   for (let index = 0; index < params.maxRuns; index++) {
     const bundle = await loadArtifactBundle(params.artifactsDir);
@@ -658,6 +741,22 @@ export async function runDeterministicForNextStep(params: NextStepParams): Promi
         reason: lastSummary || decision.reason,
       };
     }
+
+    // Pre-dispatch no-progress guard (ARC-b8fed771): refuse to re-dispatch a
+    // deterministic executor on an artifact state already processed this run
+    // without net progress — a content-unchanged signature recurring means
+    // looping, not progressing. Stop here BEFORE dispatch rather than letting
+    // the post-dispatch tolerance window fill.
+    const noProgress = await checkNoProgressBeforeDispatch({
+      index,
+      dispatchedSignatures,
+      params,
+      bundle,
+      state,
+      selectedObligation: decision.selected_obligation,
+      selectedExecutor: decision.selected_executor,
+    });
+    if (noProgress !== undefined) return noProgress;
 
     const result = await executeAndRecord(params, analyzersRef.value, decision, index, lastSummary);
     lastSummary = result.progress_summary;

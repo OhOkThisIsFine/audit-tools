@@ -216,6 +216,23 @@ function toText(value: string | Buffer | null | undefined): string {
   return typeof value === "string" ? value : value.toString();
 }
 
+/**
+ * Strip `CLAUDECODE` and any key matching `/^CLAUDE_CODE/` from an env object.
+ * Always operates on an explicit copy so the original is never mutated.
+ * When `base` is undefined, falls back to `process.env`.
+ */
+export function stripClaudeCodeEnv(
+  base?: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const src = base ?? process.env;
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (k === "CLAUDECODE" || /^CLAUDE_CODE/u.test(k)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 /** Run a command synchronously. argv[0] is the command, the rest are args. */
 export function runTracked(
   argv: string[],
@@ -238,7 +255,7 @@ export function runTracked(
   const start = Date.now();
   const result = spawnSync(resolved[0], resolved.slice(1), {
     cwd: options.cwd,
-    env: options.env,
+    env: stripClaudeCodeEnv(options.env),
     encoding: options.encoding ?? "utf8",
     timeout: options.timeout,
     input: options.input,

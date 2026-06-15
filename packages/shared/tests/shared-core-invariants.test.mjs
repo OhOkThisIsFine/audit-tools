@@ -285,20 +285,51 @@ test("INV-shared-core-06: validateAuditFindingsReport flags missing contract_ver
   );
 });
 
-test("INV-shared-core-06: validateAuditFindingsReport warns on unexpected contract_version", async () => {
-  const { validateAuditFindingsReport, AUDIT_FINDINGS_CONTRACT_VERSION } = await import("../src/validation/findingsReport.ts");
+test("INV-shared-core-06 / OBL-C002-VERSION-TRUST: validateAuditFindingsReport emits error (not warning) on mismatched contract_version", async () => {
+  const { validateAuditFindingsReport } = await import("../src/validation/findingsReport.ts");
 
   const issues = validateAuditFindingsReport({
     contract_version: "unexpected-version/v99",
     findings: [],
     work_blocks: [],
   });
-  // Mismatch is a warning (not an error) so callers can still process older reports.
-  const warnings = issues.filter(i => i.severity === "warning");
-  assert.ok(warnings.length > 0, "unexpected contract_version must produce a warning");
+  // OBL-C002-VERSION-TRUST: mismatch must be an error, not a warning, so
+  // isValidAuditFindingsReport returns false for mismatched versions.
+  const errors = issues.filter(i => i.severity === "error");
+  assert.ok(errors.length > 0, "mismatched contract_version must produce an error (not a warning)");
   assert.ok(
-    warnings.some(i => i.message.includes("unexpected-version")),
-    "warning must cite the unexpected version value",
+    errors.some(i => i.message.includes("unexpected-version")),
+    "error must cite the mismatched version value",
+  );
+  // Confirm no warnings emitted for this case — it's an error.
+  const warnings = issues.filter(i => i.severity === "warning");
+  assert.equal(warnings.length, 0, "version mismatch must not produce a warning; it is an error");
+});
+
+test("INV-shared-core-06 / OBL-C002-VERSION-TRUST: isValidAuditFindingsReport returns false for mismatched contract_version", async () => {
+  const { isValidAuditFindingsReport } = await import("../src/validation/findingsReport.ts");
+
+  // Present-but-mismatched version must cause rejection (return false), not just a warning.
+  assert.equal(
+    isValidAuditFindingsReport({
+      contract_version: "audit-tools/audit-findings/v0alpha0",
+      findings: [],
+      work_blocks: [],
+      summary: { finding_count: 0 },
+    }),
+    false,
+    "isValidAuditFindingsReport must return false when contract_version is present but mismatched",
+  );
+
+  // Any non-canonical version string must be rejected.
+  assert.equal(
+    isValidAuditFindingsReport({
+      contract_version: "some-other-tool/v1",
+      findings: [],
+      work_blocks: [],
+    }),
+    false,
+    "isValidAuditFindingsReport must return false for any non-canonical contract_version",
   );
 });
 

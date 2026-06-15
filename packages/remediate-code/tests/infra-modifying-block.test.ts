@@ -211,7 +211,10 @@ describe("implementPrompt includes live-surface verification section for infra-m
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("rendered prompt includes npm run build -w packages/remediate-code rebuild instruction", async () => {
+  it("infra section is BUILD-FREE: instructs npm run check, never a worker-side build (CE-001)", async () => {
+    // The host builds the package centrally; an infra-modifying node must verify
+    // build-free (no worker-side `npm run build`) to avoid racing the central
+    // build's dist/. (Replaces the prior rebuild-instruction expectation.)
     const dir = join(tmpdir(), `infra-block-test-build-${Date.now()}`);
     const artifactsDir = join(dir, ".audit-tools", "remediation");
     await mkdir(artifactsDir, { recursive: true });
@@ -225,12 +228,13 @@ describe("implementPrompt includes live-surface verification section for infra-m
     );
 
     const promptText = readFileSync(plan.items[0].prompt_path, "utf8");
-    expect(promptText).toContain("npm run build -w packages/remediate-code");
+    expect(promptText).toContain("npm run check");
+    expect(promptText).not.toContain("npm run build -w packages/remediate-code");
 
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("rendered prompt includes npm test -w packages/remediate-code live-surface smoke instruction", async () => {
+  it("infra section does NOT instruct npm test -w (build-prepending) — uses a build-free runner", async () => {
     const dir = join(tmpdir(), `infra-block-test-smoke-${Date.now()}`);
     const artifactsDir = join(dir, ".audit-tools", "remediation");
     await mkdir(artifactsDir, { recursive: true });
@@ -244,12 +248,17 @@ describe("implementPrompt includes live-surface verification section for infra-m
     );
 
     const promptText = readFileSync(plan.items[0].prompt_path, "utf8");
-    expect(promptText).toContain("npm test -w packages/remediate-code");
+    expect(promptText).not.toContain("npm test -w packages/remediate-code");
+    // The build-free runner is what the worker is pointed at instead.
+    expect(promptText).toContain("npx vitest run");
 
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("rendered prompt includes rollback/snapshot instruction", async () => {
+  it("infra section delegates the central build + rollback to the host (no dist snapshot directive)", async () => {
+    // Because the worker no longer builds/republishes the engine, it cannot
+    // brick the live dispatcher; the host owns the central build and any dist
+    // rollback. (Replaces the prior 'Snapshot dist' expectation.)
     const dir = join(tmpdir(), `infra-block-test-rollback-${Date.now()}`);
     const artifactsDir = join(dir, ".audit-tools", "remediation");
     await mkdir(artifactsDir, { recursive: true });
@@ -263,7 +272,8 @@ describe("implementPrompt includes live-surface verification section for infra-m
     );
 
     const promptText = readFileSync(plan.items[0].prompt_path, "utf8");
-    expect(promptText).toContain("Snapshot dist");
+    expect(promptText).not.toContain("Snapshot dist");
+    expect(promptText).toMatch(/host (builds the package centrally|owns the central build)/i);
 
     await rm(dir, { recursive: true, force: true });
   });

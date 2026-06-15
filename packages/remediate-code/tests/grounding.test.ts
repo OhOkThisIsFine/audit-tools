@@ -272,7 +272,7 @@ describe("runPlanPhase — extracted-input grounding (WS1+WS2)", () => {
     await writeFile(
       reportPath,
       JSON.stringify({
-        contract_version: "audit-findings/v1alpha1",
+        contract_version: "audit-tools/audit-findings/v1alpha1",
         summary: {
           finding_count: 1,
           work_block_count: 0,

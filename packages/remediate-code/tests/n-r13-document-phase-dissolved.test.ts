@@ -145,10 +145,10 @@ describe("N-R13: planning transitions directly to implementing", () => {
     expect(step.step_kind).not.toBe("dispatch_document");
     expect(step.step_kind).not.toBe("document_single_item");
 
-    // Should be dispatch_implement or implement_single_item (implementing family)
+    // Should be dispatch_implement or implement_rolling_sequential (implementing family)
     const implementingKinds = [
       "dispatch_implement",
-      "implement_single_item",
+      "implement_rolling_sequential",
       "collect_starting_point",
       "present_report",
       "collect_triage",

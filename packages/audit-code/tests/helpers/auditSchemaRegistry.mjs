@@ -16,17 +16,45 @@ const schemasDir = join(
 );
 
 async function loadAllSchemas() {
-  const files = (await readdir(schemasDir)).filter((f) =>
-    f.endsWith(".schema.json"),
-  );
+  let files;
+  try {
+    files = (await readdir(schemasDir)).filter((f) =>
+      f.endsWith(".schema.json"),
+    );
+  } catch (err) {
+    throw new Error(
+      `auditSchemaRegistry: failed to read schemas directory "${schemasDir}": ${err.message}`,
+      { cause: err },
+    );
+  }
   const registry = {};
   for (const file of files) {
-    registry[file] = JSON.parse(await readFile(join(schemasDir, file), "utf8"));
+    try {
+      registry[file] = JSON.parse(
+        await readFile(join(schemasDir, file), "utf8"),
+      );
+    } catch (err) {
+      throw new Error(
+        `auditSchemaRegistry: failed to load schema file "${file}": ${err.message}`,
+        { cause: err },
+      );
+    }
   }
   return registry;
 }
 
-export const SCHEMA_REGISTRY = await loadAllSchemas();
+let SCHEMA_REGISTRY;
+try {
+  SCHEMA_REGISTRY = await loadAllSchemas();
+} catch (err) {
+  // Re-throw with context so the importing test file sees a clear, diagnosable
+  // message rather than an opaque module-load failure.
+  throw new Error(
+    `auditSchemaRegistry: schema registry initialisation failed — ${err.message}`,
+    { cause: err },
+  );
+}
+export { SCHEMA_REGISTRY };
 
 /**
  * assertMatchesJsonSchema with every published audit-code schema preloaded into

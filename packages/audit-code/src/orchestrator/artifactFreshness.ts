@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { ARTIFACT_DEPENDENTS_MAP } from "./dependencyMap.js";
 
 export function stableStringify(value: unknown): string {
   if (value === undefined) {
@@ -17,33 +16,101 @@ export function stableStringify(value: unknown): string {
   return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`;
 }
 
-// Artifacts that stamp a wall-clock `generated_at` on every (re)build. The
-// timestamp is provenance, not content: two rebuilds with identical data but
-// different timestamps must hash equal, or the artifact's revision churns every
-// rebuild and perpetually re-stales its downstreams (e.g. audit-report.md
-// depends on design_assessment) — a finalization-oscillation hazard.
-const GENERATED_AT_STRIPPED_ARTIFACTS = new Set([
-  "repo_manifest.json",
-  "tooling_manifest.json",
-  "audit_plan_metrics.json",
-  "design_assessment.json",
-]);
+// Non-semantic top-level fields stripped before hashing, per artifact. These
+// are provenance (wall-clock stamps, run ids), NOT content: two rebuilds with
+// identical data but different stamps must hash equal, or the artifact's
+// revision churns every rebuild and perpetually re-stales its downstreams (e.g.
+// audit-report.md depends on design_assessment) — a finalization-oscillation
+// hazard.
+//
+// OBL-C006/CE-005: strip ALL non-semantic fields, not only `generated_at`. The
+// set is per-artifact and extensible; add any field that is provenance rather
+// than meaning. The synthesis-narrative marker carries only semantic counts, so
+// it has no fields to strip — but it (and the narrative-bearing findings
+// contract) get array canonicalization below so a byte-varying-but-
+// semantically-stable narrative still produces a stable content hash, letting
+// the synthesis<->narrative no-progress guard converge.
+const NON_SEMANTIC_FIELDS_BY_ARTIFACT: Record<string, readonly string[]> = {
+  "repo_manifest.json": ["generated_at"],
+  "tooling_manifest.json": ["generated_at"],
+  "audit_plan_metrics.json": ["generated_at"],
+  "design_assessment.json": ["generated_at"],
+  // The narrative-bearing machine contract. `generated_at` (when present) is
+  // provenance; the array canonicalization below makes theme/top-risk ordering
+  // non-load-bearing for the content hash.
+  "audit-findings.json": ["generated_at"],
+  // The narrative marker. Carries only semantic counts today, but strip
+  // `generated_at` defensively so a future provenance stamp can never churn the
+  // synthesis<->narrative signature (OBL-C006).
+  "synthesis-narrative.json": ["generated_at"],
+};
+
+function stripFields(
+  record: Record<string, unknown>,
+  fields: readonly string[],
+): Record<string, unknown> {
+  if (fields.length === 0) return record;
+  const drop = new Set(fields);
+  return Object.fromEntries(
+    Object.entries(record).filter(([key]) => !drop.has(key)),
+  );
+}
+
+/**
+ * Canonically order the semantically-unordered narrative arrays so that a host
+ * narrative which differs ONLY in array order (or in stripped non-semantic
+ * fields) hashes identically. Themes are ordered by `theme_id`, each theme's
+ * `finding_ids` lexically, and `top_risks` lexically. Findings keep their
+ * deterministic synthesis order (already stable). Applied to the narrative
+ * fields wherever they appear (`audit-findings.json` after applyNarrative).
+ */
+function canonicalizeNarrativeArrays(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...record };
+
+  if (Array.isArray(out.themes)) {
+    out.themes = [...(out.themes as Array<Record<string, unknown>>)]
+      .map((theme) => {
+        if (theme && typeof theme === "object" && Array.isArray(theme.finding_ids)) {
+          return {
+            ...theme,
+            finding_ids: [...(theme.finding_ids as string[])].sort(),
+          };
+        }
+        return theme;
+      })
+      .sort((a, b) =>
+        String(a?.theme_id ?? "").localeCompare(String(b?.theme_id ?? "")),
+      );
+  }
+
+  if (Array.isArray(out.top_risks)) {
+    out.top_risks = [...(out.top_risks as string[])].sort();
+  }
+
+  return out;
+}
 
 export function normalizeForMetadataHash(
   artifactName: string,
   value: unknown,
 ): unknown {
-  if (
-    GENERATED_AT_STRIPPED_ARTIFACTS.has(artifactName) &&
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  ) {
-    const record = value as Record<string, unknown>;
-    const { generated_at: _generatedAt, ...rest } = record;
-    return rest;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
   }
-  return value;
+  let record = value as Record<string, unknown>;
+  const nonSemantic = NON_SEMANTIC_FIELDS_BY_ARTIFACT[artifactName];
+  if (nonSemantic) {
+    record = stripFields(record, nonSemantic);
+  }
+  if (
+    artifactName === "audit-findings.json" ||
+    artifactName === "synthesis-narrative.json"
+  ) {
+    record = canonicalizeNarrativeArrays(record);
+  }
+  return record;
 }
 
 export function hashArtifactValue(
@@ -53,19 +120,4 @@ export function hashArtifactValue(
   return createHash("sha256")
     .update(stableStringify(normalizeForMetadataHash(artifactName, value)))
     .digest("hex");
-}
-
-export function buildArtifactDependenciesMap(): Record<string, string[]> {
-  const reverse: Record<string, string[]> = {};
-  for (const [upstream, downstreamList] of Object.entries(
-    ARTIFACT_DEPENDENTS_MAP,
-  )) {
-    if (!downstreamList) continue;
-    reverse[upstream] ??= [];
-    for (const downstream of downstreamList) {
-      reverse[downstream] ??= [];
-      reverse[downstream].push(upstream);
-    }
-  }
-  return reverse;
 }

@@ -171,7 +171,19 @@ function makeApprovedChainPayloads() {
     test_validator_plan: {
       contract_version: "remediate-code-contract-pipeline/test-validator-plan/v1alpha1",
       goal_id: "G1",
-      test_specs: [],
+      // O-1 is a behavioral (testable) obligation: the paired-obligation gate
+      // requires a spec covering both the satisfied path and the failure path.
+      test_specs: [
+        {
+          obligation_id: "O-1",
+          name: "behavior holds and rejects the failure case",
+          kind: "invariant",
+          assertions: [
+            "returns the expected result on the satisfied path",
+            "rejects the invalid input on the failure path",
+          ],
+        },
+      ],
       created_at: CREATED_AT,
     },
     contract_assessment_report: {
@@ -508,15 +520,50 @@ describe("INV-remediate-pipeline-05: traceability gate — untraceable nodes are
 
   it("buildNextContractPipelineStep: untraceable DAG triggers re-emit of implementation_planning", async () => {
     await writeApprovedChain();
-    await writeRawArtifact(
-      "implementation_dag",
-      traceableDag({ satisfies_obligations: [], addresses_counterexamples: [] }),
-    );
+    // The integrity gate (referential integrity + obligation coverage) runs
+    // before the traceability gate, and obligation coverage is a superset of
+    // per-node traceability. To exercise the traceability re-emit path on its
+    // own, the DAG must PASS integrity (every ledger obligation is covered) yet
+    // still contain at least one node that traces to nothing: N-cover satisfies
+    // O-1 (coverage holds) while N-untraceable lists no obligation and no
+    // counterexample (traceability fails on that node).
+    await writeRawArtifact("implementation_dag", {
+      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+      goal_id: "G1",
+      nodes: [
+        {
+          id: "N-cover",
+          title: "Cover O-1",
+          description: "Satisfies the only ledger obligation so integrity passes.",
+          satisfies_obligations: ["O-1"],
+          addresses_counterexamples: [],
+          depends_on: [],
+          verification_obligation_ids: [],
+          targeted_commands: [],
+          status: "pending",
+        },
+        {
+          id: "N-untraceable",
+          title: "Untraceable node",
+          description: "Traces to no obligation and no accepted counterexample.",
+          satisfies_obligations: [],
+          addresses_counterexamples: [],
+          depends_on: [],
+          verification_obligation_ids: [],
+          targeted_commands: [],
+          status: "pending",
+        },
+      ],
+      edges: [],
+      created_at: CREATED_AT,
+    });
 
     const step = await buildNextContractPipelineStep(STEP_OPTIONS);
     expect(step).not.toBeNull();
     const prompt = await promptOf(step!);
     expect(prompt).toMatch(/Traceability Errors From the Previous Attempt/);
+    // The traceability violation names the untraceable node, not the covering one.
+    expect(prompt).toMatch(/N-untraceable/);
     // The bad DAG was archived, not promoted
     expect(existsSync(intakePaths(ARTIFACTS_DIR).extractedPlan)).toBe(false);
   });

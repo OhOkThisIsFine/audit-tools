@@ -439,3 +439,172 @@ test("INV-shared-quota-11: CRIT-name-canonical-tier-field — HostModelRosterEnt
     );
   }
 });
+
+// ── INV-shared-quota-12: INV-QD-12 — parseHostModelRoster opaque model_id round-trip ─
+// Valid input returns entries with the opaque model_id preserved VERBATIM and used
+// only as a quota-key segment; malformed model_id is rejected.
+
+test("INV-shared-quota-12: parseHostModelRoster preserves opaque model_id verbatim and rejects malformed", async () => {
+  const { parseHostModelRoster } = await import("../src/quota/scheduler.ts");
+
+  // Opaque id is preserved exactly (never parsed/normalized/compared to a table).
+  const withId = JSON.stringify([
+    { rank: "deep", context_tokens: 200_000, output_tokens: 64_000, model_id: "vendor::opaque/Build-2026.06" },
+  ]);
+  const roster = parseHostModelRoster(withId);
+  assert.equal(roster[0].model_id, "vendor::opaque/Build-2026.06", "model_id must be preserved verbatim");
+
+  // Absent model_id is allowed (optional).
+  const noId = JSON.stringify([{ rank: "small", context_tokens: 32_000, output_tokens: 4_096 }]);
+  assert.equal(parseHostModelRoster(noId)[0].model_id, undefined, "model_id is optional");
+
+  // Empty/whitespace model_id is rejected.
+  for (const bad of ["", "   "]) {
+    const json = JSON.stringify([{ rank: "small", context_tokens: 32_000, output_tokens: 4_096, model_id: bad }]);
+    assert.throws(
+      () => parseHostModelRoster(json),
+      /model_id must be a non-empty string/i,
+      `model_id '${JSON.stringify(bad)}' must be rejected`,
+    );
+  }
+
+  // Malformed JSON and empty array are rejected.
+  assert.throws(() => parseHostModelRoster("{not json"), /must be valid JSON/i);
+  assert.throws(() => parseHostModelRoster("[]"), /non-empty JSON array/i);
+  // Missing required numeric fields are rejected.
+  assert.throws(
+    () => parseHostModelRoster(JSON.stringify([{ rank: "small", output_tokens: 10 }])),
+    /context_tokens must be a positive integer/i,
+  );
+  assert.throws(
+    () => parseHostModelRoster(JSON.stringify([{ rank: "small", context_tokens: 10 }])),
+    /output_tokens must be a positive integer/i,
+  );
+});
+
+// ── INV-shared-quota-13: INV-QD-04 — no hardcoded model identity in quota/dispatch ──
+// The no-hardcoded-models hard rule: scan the quota/ and dispatch/ source for model-
+// name literals or tier→model maps. Capabilities must be discovered from the host
+// roster / discoveredLimits; model_id is an OPAQUE quota-key segment only.
+
+test("INV-shared-quota-13: INV-QD-04 — no model-name literals in quota/ or dispatch/rollingDispatch", async () => {
+  const { readdir, readFile } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const quotaDir = join(here, "..", "src", "quota");
+  const dispatchFile = join(here, "..", "src", "dispatch", "rollingDispatch.ts");
+
+  // Collect quota/*.ts (incl. errorParsers/*.ts) + the rolling dispatch module.
+  async function collectTs(dir) {
+    const out = [];
+    for (const ent of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, ent.name);
+      if (ent.isDirectory()) out.push(...(await collectTs(full)));
+      else if (ent.name.endsWith(".ts")) out.push(full);
+    }
+    return out;
+  }
+  const files = [...(await collectTs(quotaDir)), dispatchFile];
+
+  // Model-name / vendor-identity literals that must never appear as hardcoded
+  // identities in capacity/scheduling code (case-insensitive). errorParsers may
+  // legitimately match provider ERROR text by provider name (e.g. "claude-code"
+  // as a ResolvedProviderName), so we target MODEL identities, not provider names.
+  const FORBIDDEN = [
+    /\bclaude-3\b/i,
+    /\bclaude-[0-9]/i,
+    /\bgpt-[0-9]/i,
+    /\bgpt-4o\b/i,
+    /\bo[0-9]-(?:mini|preview)\b/i,
+    /\bsonnet\b/i,
+    /\bopus\b/i,
+    /\bhaiku\b/i,
+    /\bgemini\b/i,
+    /\bllama\b/i,
+    /\bmistral\b/i,
+    /\bKNOWN_MODEL_LIMITS\b/,
+    /\bCAPABILITY_TIER_MAP\b/,
+    /\bTIER_TO_MODEL\b/i,
+    /\bMODEL_TO_TIER\b/i,
+  ];
+
+  const hits = [];
+  for (const file of files) {
+    const text = await readFile(file, "utf8");
+    const lines = text.split(/\r?\n/);
+    lines.forEach((line, i) => {
+      for (const pat of FORBIDDEN) {
+        if (pat.test(line)) hits.push(`${file}:${i + 1}: ${line.trim()} (matched ${pat})`);
+      }
+    });
+  }
+
+  assert.deepEqual(
+    hits,
+    [],
+    `No hardcoded model identities / tier→model maps allowed in quota|dispatch (INV-QD-04):\n${hits.join("\n")}`,
+  );
+});
+
+// ── INV-shared-quota-14: INV-QD-02 — total_slots is always >= 1 (property) ────
+// Across a spread of pool/quota configs (including throttled pools that can yield
+// zero per-pool slots), the aggregate floor is 1.
+
+test("INV-shared-quota-14: INV-QD-02 — total_slots >= 1 across pool/quota configurations", async () => {
+  const { computeDispatchCapacity } = await import("../src/quota/capacity.ts");
+
+  function pool(id, overrides = {}) {
+    return {
+      id,
+      providerName: "claude-code",
+      hostModel: null,
+      hostConcurrencyLimit: null,
+      quotaStateEntry: null,
+      discoveredLimits: null,
+      quotaSourceSnapshot: null,
+      ...overrides,
+    };
+  }
+
+  const configs = [
+    // Single pool, host limit zero (clamped to >= 1 aggregate).
+    {
+      pools: [pool("a", { hostConcurrencyLimit: { active_subagents: 0, source: "cli_flags", description: "t" } })],
+      sessionConfig: {},
+      pendingItemTokens: [1000],
+    },
+    // Cooldown-throttled pool via a near-exhausted quota snapshot.
+    {
+      pools: [pool("a", { quotaSourceSnapshot: { remaining_pct: 0.0, reset_at: null } })],
+      sessionConfig: { quota: { enabled: true } },
+      pendingItemTokens: [5000, 5000, 5000],
+    },
+    // Tight RPM cap.
+    {
+      pools: [pool("a", { discoveredLimits: { requests_per_minute: 1 } })],
+      sessionConfig: { quota: { enabled: true, safety_margin: 1.0 } },
+      pendingItemTokens: new Array(10).fill(1000),
+    },
+    // Empty pending layout — still >= 1.
+    { pools: [pool("a")], sessionConfig: {}, pendingItemTokens: [] },
+    // Many same-host pools sharing a tiny limit.
+    {
+      pools: [
+        pool("a", { hostConcurrencyLimit: { active_subagents: 1, source: "host_reported", description: "h" } }),
+        pool("b", { hostConcurrencyLimit: { active_subagents: 1, source: "host_reported", description: "h" } }),
+      ],
+      sessionConfig: {},
+      pendingItemTokens: new Array(8).fill(2000),
+    },
+  ];
+
+  for (const cfg of configs) {
+    const capacity = computeDispatchCapacity(cfg);
+    assert.ok(
+      capacity.total_slots >= 1,
+      `total_slots must be >= 1, got ${capacity.total_slots} for ${JSON.stringify(cfg.pendingItemTokens.length)} items`,
+    );
+  }
+});

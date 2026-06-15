@@ -227,15 +227,22 @@ test("reroutePackets distributes pending tokens across remaining pools", () => {
   }
 });
 
-test("reroutePackets returns state unchanged when active_pools is empty", () => {
+test("reroutePackets strands all pending and emits empty_pool terminal when active_pools is empty (INV-QD-13)", () => {
   const state = makeState({
     active_pools: [],
-    pending_tokens: [makeToken("pkt-1", "pool-A")],
+    pending_tokens: [makeToken("pkt-1", "pool-A"), makeToken("pkt-2", "pool-A")],
   });
 
   const result = reroutePackets(state, {});
   assert.equal(result.allocation, null);
-  assert.equal(result.state, state);
+  // No surviving pool: every pending packet is stranded (zero left assigned to a
+  // dropped pool) and surfaced in an empty_pool terminal.
+  assert.equal(result.state.pending_tokens.length, 0);
+  assert.ok(result.terminal !== null);
+  assert.equal(result.terminal.reason, "empty_pool");
+  assert.deepEqual(result.terminal.stranded_ids.sort(), ["pkt-1", "pkt-2"]);
+  // Original state is not mutated.
+  assert.equal(state.pending_tokens.length, 2);
 });
 
 test("reroutePackets returns state unchanged when no pending tokens", () => {
@@ -244,5 +251,95 @@ test("reroutePackets returns state unchanged when no pending tokens", () => {
 
   const result = reroutePackets(state, {});
   assert.equal(result.allocation, null);
+  assert.equal(result.terminal, null);
   assert.equal(result.state, state);
+});
+
+// ── INV-QD-13 / SEAM-rolling-stranding: no pending token left on a dead pool ──
+// Drop 2 of 3 pools where pending demand exceeds the lone survivor's slot
+// capacity. Every pending token must end on an ACTIVE pool or in stranded_ids —
+// zero may remain assigned to a dropped/exhausted pool.
+
+test("reroutePackets (INV-QD-13): multi-pool drop with pending > survivor slots strands surplus, zero on dead pools", () => {
+  // Three pools, survivor pool-C has a hard ceiling of 2 active subagents.
+  const poolA = makePool("pool-A", 2);
+  const poolB = makePool("pool-B", 2);
+  const poolC = makePool("pool-C", 2);
+
+  // 7 pending packets currently spread across all three pools (incl. the soon-
+  // to-be-dropped pool-A and pool-B).
+  const pending = [
+    makeToken("pkt-1", "pool-A", 5000),
+    makeToken("pkt-2", "pool-A", 4000),
+    makeToken("pkt-3", "pool-B", 3000),
+    makeToken("pkt-4", "pool-B", 2500),
+    makeToken("pkt-5", "pool-C", 2000),
+    makeToken("pkt-6", "pool-C", 1500),
+    makeToken("pkt-7", "pool-A", 1000),
+  ];
+
+  let state = makeState({
+    active_pools: [poolA, poolB, poolC],
+    pending_tokens: pending,
+  });
+
+  // Simultaneously drop pool-A and pool-B (e.g. both exhausted in one pass).
+  state = dropProvider(state, "pool-A", "exhausted");
+  state = dropProvider(state, "pool-B", "exhausted");
+
+  const activeIds = new Set(state.active_pools.map((e) => e.pool.id));
+  assert.deepEqual([...activeIds], ["pool-C"], "only pool-C survives");
+
+  const result = reroutePackets(state, {});
+
+  // INVARIANT: zero pending tokens point at a dropped/exhausted pool.
+  for (const t of result.state.pending_tokens) {
+    assert.ok(
+      activeIds.has(t.assigned_pool_id),
+      `pending token ${t.id} is assigned to non-active pool ${t.assigned_pool_id}`,
+    );
+  }
+
+  // Surplus beyond pool-C's 2 slots must be stranded, not silently dropped.
+  assert.ok(result.terminal !== null, "surplus must surface a terminal");
+  assert.equal(result.terminal.reason, "empty_pool");
+
+  // Every original pending packet is accounted for exactly once: either on an
+  // active pool or in stranded_ids. Nothing vanishes, nothing duplicated.
+  const placedIds = result.state.pending_tokens.map((t) => t.id);
+  const strandedIds = result.terminal.stranded_ids;
+  const allAccounted = [...placedIds, ...strandedIds].sort();
+  assert.deepEqual(
+    allAccounted,
+    pending.map((t) => t.id).sort(),
+    "every pending packet must be either placed on an active pool or stranded",
+  );
+  // No id appears in both sets.
+  for (const id of placedIds) {
+    assert.ok(!strandedIds.includes(id), `${id} must not be both placed and stranded`);
+  }
+  // pool-C can take at most 2 → at least 5 stranded.
+  assert.ok(result.state.pending_tokens.length <= 2, "survivor placed at most its slot count");
+  assert.ok(strandedIds.length >= 5, "surplus beyond survivor slots stranded");
+});
+
+test("reroutePackets (INV-QD-13): single drop within survivor capacity strands nothing", () => {
+  const poolA = makePool("pool-A", 4);
+  const poolB = makePool("pool-B", 8);
+
+  const pending = [
+    makeToken("pkt-1", "pool-A"),
+    makeToken("pkt-2", "pool-A"),
+    makeToken("pkt-3", "pool-A"),
+  ];
+  let state = makeState({ active_pools: [poolA, poolB], pending_tokens: pending });
+  state = dropProvider(state, "pool-A", "exhausted");
+
+  const result = reroutePackets(state, {});
+  // pool-B (8 slots) absorbs all 3 — nothing stranded.
+  assert.equal(result.terminal, null);
+  assert.equal(result.state.pending_tokens.length, 3);
+  for (const t of result.state.pending_tokens) {
+    assert.equal(t.assigned_pool_id, "pool-B");
+  }
 });

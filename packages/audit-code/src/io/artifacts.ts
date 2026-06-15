@@ -10,6 +10,8 @@ import type {
 import type { AuditState } from "../types/auditState.js";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
 import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, GraphBundle, RiskRegister, SurfaceManifest, IntentCheckpoint } from "@audit-tools/shared";
+import type { ProviderConfirmationResult } from "@audit-tools/shared";
+import { PROVIDER_CONFIRMATION_RESULT_VERSION } from "@audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
@@ -38,9 +40,54 @@ import {
 } from "@audit-tools/shared";
 import { buildToolingManifest } from "./toolingManifest.js";
 
+// ---------------------------------------------------------------------------
+// Schema-version guard (ARC-dd468422)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown when a versioned artifact is loaded from disk with a schema_version
+ * field that does not match the expected version constant.  The message names
+ * the artifact and both the expected and actual versions so the operator has
+ * an actionable diagnosis.
+ */
+export class ArtifactSchemaVersionError extends Error {
+  constructor(
+    public readonly artifactName: string,
+    public readonly expected: string,
+    public readonly actual: string,
+  ) {
+    super(
+      `Artifact "${artifactName}" has schema_version "${actual}" but expected "${expected}". ` +
+        `This likely means the artifact was produced by an incompatible version of audit-code. ` +
+        `Delete ${artifactName} from the artifacts directory to regenerate it.`,
+    );
+    this.name = "ArtifactSchemaVersionError";
+  }
+}
+
+/**
+ * Verify the schema_version field of a loaded artifact against the expected
+ * value.  Throws {@link ArtifactSchemaVersionError} on mismatch; silently
+ * returns on `undefined` (artifact not yet produced).
+ */
+function assertArtifactSchemaVersion(
+  artifact: { schema_version?: string } | undefined,
+  artifactName: string,
+  expected: string,
+): void {
+  if (artifact === undefined) return;
+  const actual = (artifact as Record<string, unknown>).schema_version;
+  if (typeof actual !== "string") {
+    throw new ArtifactSchemaVersionError(artifactName, expected, String(actual));
+  }
+  if (actual !== expected) {
+    throw new ArtifactSchemaVersionError(artifactName, expected, actual);
+  }
+}
+
 type ArtifactPayloadMap = {
   // --- Phase 0: Session gate ---
-  provider_confirmation: unknown;
+  provider_confirmation: ProviderConfirmationResult;
 
   // --- Phase 1: Intake & classification ---
   repo_manifest: RepoManifest;
@@ -259,6 +306,20 @@ export async function loadArtifactBundle(
   if (activeDispatch !== undefined) {
     bundle.active_dispatch = activeDispatch;
   }
+
+  // Schema-version guards (ARC-dd468422): versioned artifacts must carry the
+  // exact expected schema_version or the load fails with a diagnosable error.
+  // Checked after the loop so the error message can name both values.
+  assertArtifactSchemaVersion(
+    bundle.intent_checkpoint,
+    "intent_checkpoint.json",
+    "intent-checkpoint/v1",
+  );
+  assertArtifactSchemaVersion(
+    bundle.provider_confirmation,
+    "provider_confirmation.json",
+    PROVIDER_CONFIRMATION_RESULT_VERSION,
+  );
 
   // agent-feedback.jsonl is appended by workers (opt-in reflections), never
   // written by the orchestrator. Parse leniently: malformed lines are skipped,

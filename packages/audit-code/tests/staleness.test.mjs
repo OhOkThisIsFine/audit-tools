@@ -6,11 +6,10 @@ const { computeArtifactMetadata, computeArtifactStateSignature } =
 const { computeStaleArtifacts } =
   await import("../src/orchestrator/staleness.ts");
 const { deriveAuditState } = await import("../src/orchestrator/state.ts");
-const { ARTIFACT_DEPENDENTS_MAP } = await import(
+const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP } = await import(
   "../src/orchestrator/dependencyMap.ts"
 );
 const {
-  buildArtifactDependenciesMap,
   hashArtifactValue,
   stableStringify,
 } = await import("../src/orchestrator/artifactFreshness.ts");
@@ -162,7 +161,7 @@ test("artifact freshness helpers normalize deterministic metadata hashes", () =>
     }),
   );
   assert.ok(
-    buildArtifactDependenciesMap()["coverage_matrix.json"].includes(
+    ARTIFACT_DEPENDS_ON_MAP["coverage_matrix.json"].includes(
       "external_analyzer_results.json",
     ),
   );

@@ -2,21 +2,29 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AUDIT_FINDINGS_CONTRACT_VERSION } from "@audit-tools/shared";
 
 // The remediator consumes the auditor's canonical audit-findings.json (Phase 6/7),
 // so this fixture is that machine contract. The `model` below mirrors the shape
 // the auditor's buildAuditFindingsReport emits; serialising it keeps the fixture
 // in sync without requiring a built auditor-lambda.
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputPath = join(
+const committedFixturePath = join(
   repoRoot,
   "tests",
   "fixtures",
   "auditor-contract-audit-findings.json",
 );
 
+// Allow callers (e.g. the drift-guard test) to redirect output to a temp dir
+// without touching the committed fixture. Priority: argv[2] > env var > committed path.
+const outputPath =
+  process.argv[2] ??
+  process.env["REMEDIATE_FIXTURE_OUT"] ??
+  committedFixturePath;
+
 const model = {
-  contract_version: "audit-findings/v1alpha1",
+  contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
   summary: {
     finding_count: 3,
     work_block_count: 2,

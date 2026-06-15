@@ -104,7 +104,7 @@ test("next-step emits a single host edge-reasoning step, then rewrites only the 
     // No callable subagent facility → a single one-shot host step.
     const paused = JSON.parse(
       (await runWrapper(
-        ["next-step", "--host-can-dispatch-subagents", "false"],
+        ["next-step", "--no-host-can-dispatch-subagents"],
         { cwd: root },
       )).stdout,
     );
@@ -138,7 +138,7 @@ test("next-step emits a single host edge-reasoning step, then rewrites only the 
 
     // Re-run: the orchestrator applies the rewrites inside graph enrichment.
     await runWrapper(
-      ["next-step", "--host-can-dispatch-subagents", "false"],
+      ["next-step", "--no-host-can-dispatch-subagents"],
       { cwd: root },
     );
 
@@ -173,7 +173,7 @@ test("next-step emits a dispatch task carrying the edge-reasoning prompt when th
 
     const step = JSON.parse(
       (await runWrapper(
-        ["next-step", "--host-can-dispatch-subagents", "true"],
+        ["next-step", "--host-can-dispatch-subagents"],
         { cwd: root },
       )).stdout,
     );
@@ -213,7 +213,7 @@ test("next-step does not pause for edge reasoning when the flag is off (graph un
 
     const step = JSON.parse(
       (await runWrapper(
-        ["next-step", "--host-can-dispatch-subagents", "false"],
+        ["next-step", "--no-host-can-dispatch-subagents"],
         { cwd: root },
       )).stdout,
     );
@@ -245,7 +245,7 @@ test("next-step does not pause for edge reasoning when there are no low-confiden
 
     const step = JSON.parse(
       (await runWrapper(
-        ["next-step", "--host-can-dispatch-subagents", "false"],
+        ["next-step", "--no-host-can-dispatch-subagents"],
         { cwd: root },
       )).stdout,
     );

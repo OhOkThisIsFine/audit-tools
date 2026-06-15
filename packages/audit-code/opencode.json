@@ -105,8 +105,7 @@
           "git status*": "allow",
           "git diff*": "allow",
           "grep *": "allow",
-          "rm *": "deny",
-          "Select-String *": "allow"
+          "rm *": "deny"
         },
         "auditor_*": "allow",
         "question": "allow",

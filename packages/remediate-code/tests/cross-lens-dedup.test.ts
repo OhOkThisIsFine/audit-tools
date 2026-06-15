@@ -103,6 +103,81 @@ describe("deduplicateCrossLensFindings", () => {
     expect(findings).toHaveLength(2);
   });
 
+  // OBL-C003-DEDUP / OBL-INV-RPS-07: category is a hard merge-key discriminator.
+  it("does NOT merge cross-lens findings that share a file but differ in category", () => {
+    // Same primary file + similar title + DIFFERENT category → must stay distinct.
+    // Mirrors ARC-86b18f1b (inferred_contract_gap) vs the cross-lens variant: a
+    // different category means a structurally different defect, never collapsed.
+    const { findings, mergeMap } = deduplicateCrossLensFindings([
+      makeFinding({
+        id: "ARC-86b18f1b",
+        title: "Module boundary contract gap",
+        lens: "architecture",
+        category: "inferred_contract_gap",
+        affected_files: [{ path: "src/mod.ts" }],
+      }),
+      makeFinding({
+        id: "COR-86b18f1b",
+        title: "Module boundary contract gap",
+        lens: "correctness",
+        category: "invariant_counterexample",
+        affected_files: [{ path: "src/mod.ts" }],
+      }),
+    ]);
+    expect(findings).toHaveLength(2);
+    expect(mergeMap.size).toBe(0);
+  });
+
+  it("does NOT merge same-lens findings that share a file but differ in category", () => {
+    // ARC-86b18f1b (inferred_contract_gap) vs ARC-86b18f1b-2
+    // (invariant_counterexample): same lens, same file, different category —
+    // the literal OBL-C003-DEDUP example. Must remain two distinct findings.
+    const { findings, mergeMap } = deduplicateCrossLensFindings([
+      makeFinding({
+        id: "ARC-86b18f1b",
+        title: "Boundary invariant",
+        lens: "architecture",
+        category: "inferred_contract_gap",
+        affected_files: [{ path: "src/mod.ts" }],
+      }),
+      makeFinding({
+        id: "ARC-86b18f1b-2",
+        title: "Boundary invariant",
+        lens: "architecture",
+        category: "invariant_counterexample",
+        affected_files: [{ path: "src/mod.ts" }],
+      }),
+    ]);
+    expect(findings).toHaveLength(2);
+    expect(mergeMap.size).toBe(0);
+  });
+
+  it("merges a cross-lens true duplicate that shares lens-file AND category", () => {
+    // ARC-1fa005bb-2 IS a true duplicate of ARC-1fa005bb: same category, same
+    // file, surfaced through two lenses → collapses to one survivor.
+    const { findings, mergeMap } = deduplicateCrossLensFindings([
+      makeFinding({
+        id: "ARC-1fa005bb",
+        title: "Stale dist artifact",
+        lens: "architecture",
+        category: "duplicate_surface",
+        affected_files: [{ path: "src/dup.ts" }],
+        severity: "high",
+      }),
+      makeFinding({
+        id: "TST-1fa005bb-2",
+        title: "Stale dist artifact",
+        lens: "tests",
+        category: "duplicate_surface",
+        affected_files: [{ path: "src/dup.ts" }],
+        severity: "low",
+      }),
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].id).toBe("ARC-1fa005bb");
+    expect(mergeMap.get("TST-1fa005bb-2")).toBe("ARC-1fa005bb");
+  });
+
   it("merges evidence from absorbed finding", () => {
     const { findings } = deduplicateCrossLensFindings([
       makeFinding({ id: "A-001", title: "Missing validation", lens: "security", evidence: ["ev-sec"] }),
@@ -338,5 +413,25 @@ describe("fixupBlocksAfterDedup", () => {
     ];
     const result = fixupBlocksAfterDedup(blocks, new Map());
     expect(result).toBe(blocks);
+  });
+
+  // OBL-C003-DEDUP / OBL-INV-RPS-07: an absorbed finding must never be silently
+  // dropped — when its survivor lives in a different block, the absorbed
+  // finding's block is remapped to the survivor id (the merged finding is still
+  // referenced), not emptied out.
+  it("remaps (never drops) an absorbed finding whose survivor lives in another block", () => {
+    const blocks: RemediationBlock[] = [
+      { block_id: "B-survivor", items: ["SURV"], parallel_safe: true },
+      { block_id: "B-absorbed", items: ["ABS"], parallel_safe: true },
+    ];
+    const mergeMap = new Map([["ABS", "SURV"]]);
+    const result = fixupBlocksAfterDedup(blocks, mergeMap);
+    // The absorbed finding's block now points at the survivor — not dropped.
+    const absorbedBlock = result.find((b) => b.block_id === "B-absorbed")!;
+    expect(absorbedBlock.items).toEqual(["SURV"]);
+    // Every survivor id remains referenced after fixup (no finding lost).
+    const allItems = new Set(result.flatMap((b) => b.items));
+    expect(allItems.has("SURV")).toBe(true);
+    expect(allItems.has("ABS")).toBe(false);
   });
 });

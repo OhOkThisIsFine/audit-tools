@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isGitRepo, writeJsonFile } from "@audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
+import { confirmProviders } from "./providerConfirmation.js";
 import {
   buildFileDisposition,
   isAuditExcludedStatus,
@@ -104,11 +105,7 @@ function readPackageJson(dir: string): PackageJsonShape | undefined {
 export function runProviderConfirmationAutoComplete(
   bundle: ArtifactBundle,
 ): ExecutorRunResult {
-  const confirmation = {
-    confirmed_at: new Date().toISOString(),
-    confirmed_by: "host",
-    note: "Auto-completed provider confirmation (headless).",
-  };
+  const confirmation = confirmProviders({});
   return {
     updated: { ...bundle, provider_confirmation: confirmation },
     artifacts_written: ["provider_confirmation.json"],

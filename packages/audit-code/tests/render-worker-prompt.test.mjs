@@ -73,6 +73,13 @@ test("renderWorkerPrompt suppresses worker_command execution when the task uses 
   );
   assert.match(prompt, /Deferred mode: write results, do not execute worker_command\./i);
   assert.doesNotMatch(prompt, /Then execute worker_command/i);
+  // OBL-INV-APR-09: deferred mode must NOT embed the Command: [argv] execution line
+  // (the worker writes its own results file; no inlined execution instruction).
+  assert.doesNotMatch(
+    prompt,
+    /Command: \[/,
+    "deferred-mode prompt must not contain an embedded Command: argv execution line",
+  );
 });
 
 test("renderWorkerPrompt renders a ## File access section when the task includes an access property", () => {

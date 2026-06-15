@@ -27,10 +27,9 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const orchestratorDir = join(here, "..", "src", "orchestrator");
 
-const { ARTIFACT_DEPENDENTS_MAP } = await import("../src/orchestrator/dependencyMap.ts");
+const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP } = await import("../src/orchestrator/dependencyMap.ts");
 const { computeStaleArtifacts } = await import("../src/orchestrator/staleness.ts");
 const { computeArtifactMetadata } = await import("../src/orchestrator/artifactMetadata.ts");
-const { buildArtifactDependenciesMap } = await import("../src/orchestrator/artifactFreshness.ts");
 const { deriveAuditState } = await import("../src/orchestrator/state.ts");
 const { ARTIFACT_DEFINITIONS, AUDIT_REPORT_FILENAME } = await import("../src/io/artifacts.ts");
 const { AGENT_FEEDBACK_FILENAME } = await import("@audit-tools/shared");
@@ -242,9 +241,9 @@ test("INV-04: re-deriving staleness after a no-op advance yields identical stale
 // INV-05: dependency graph is acyclic
 // ---------------------------------------------------------------------------
 
-test("INV-05: ARTIFACT_DEPENDENCIES_MAP (reverse of ARTIFACT_DEPENDENTS_MAP) is acyclic", () => {
-  // Build the dependencies map (X depends on Y) from ARTIFACT_DEPENDENTS_MAP (X → dependents).
-  const depsMap = buildArtifactDependenciesMap();
+test("INV-05: ARTIFACT_DEPENDS_ON_MAP (the canonical X-depends-on-Y table) is acyclic", () => {
+  // ARC-cebe3421: the canonical dependency table is the single source of truth.
+  const depsMap = ARTIFACT_DEPENDS_ON_MAP;
 
   // DFS cycle detection: if we can compute a topological order (no permanent→temporary revisit)
   // the graph is acyclic.

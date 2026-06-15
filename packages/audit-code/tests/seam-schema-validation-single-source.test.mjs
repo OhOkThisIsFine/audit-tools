@@ -312,21 +312,15 @@ test("SEAM-8b: validateAuditFindingsReport flags missing contract_version as an 
   );
 });
 
-// ── Seam contract 8c: contract_version mismatch is flagged as a warning ───────
+// ── Seam contract 8c: contract_version mismatch is flagged as an error ────────
 
-test("SEAM-8c: validateAuditFindingsReport flags mismatched contract_version as a warning (not error)", () => {
+test("SEAM-8c: validateAuditFindingsReport flags mismatched contract_version as an error", () => {
   const report = { contract_version: "stale-version/v0", findings: [] };
   const issues = validateAuditFindingsReport(report);
   const errors = issues.filter((i) => i.severity === "error");
-  const warnings = issues.filter((i) => i.severity === "warning");
-  assert.equal(
-    errors.filter((i) => i.path.includes("contract_version")).length,
-    0,
-    "contract_version mismatch must not be an error (consumers may still use the report)",
-  );
   assert.ok(
-    warnings.some((i) => i.path.includes("contract_version")),
-    "contract_version mismatch must produce a warning",
+    errors.some((i) => i.path.includes("contract_version")),
+    "contract_version mismatch must be an error so the report is rejected (ARC-a8bef662 / OBL-C002)",
   );
 });
 

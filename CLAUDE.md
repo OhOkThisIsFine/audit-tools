@@ -96,7 +96,7 @@ The priority chain in `nextStep.ts`: `provider_confirmation` → `repo_manifest`
 
 Synthesis emits `audit-findings.json` (machine contract); `audit-report.md` is its render. `synthesis_narrative_current` layers LLM narrative (themes/exec summary/top risks); omits cleanly without provider.
 
-**Artifacts** (`.audit-tools/audit/`): `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `coverage_matrix.json`, `audit_tasks.json`, `task_affinity_graph.json`, `audit_results.jsonl`, `runtime_validation_report.json`, `audit-findings.json`, `synthesis-narrative.json`. Review packets: partitioned JIT at dispatch, never persisted. Staleness: explicit dependency DAG (`spec/dependency-map.md`, `src/orchestrator/staleness.ts`, `src/orchestrator/artifactMetadata.ts`).
+**Artifacts** (`.audit-tools/audit/`): `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `coverage_matrix.json`, `audit_tasks.json`, `task_affinity_graph.json`, `audit_results.jsonl`, `runtime_validation_report.json`, `audit-findings.json`, `synthesis-narrative.json`. Review packets: partitioned JIT at dispatch, never persisted. Staleness: explicit dependency DAG (`packages/audit-code/spec/dependency-map.md`, `src/orchestrator/staleness.ts`, `src/orchestrator/artifactMetadata.ts`).
 
 **Entrypoint:** `audit-code.mjs` → `audit-code-wrapper-lib.mjs`. Conversation-first: `audit-code next-step` writes `.audit-tools/audit/steps/current-step.json` + `current-prompt.md`.
 
@@ -155,6 +155,7 @@ Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + comm
 
 ## Conventions & invariants
 
+- **Auditor-agnostic robustness — enforce in tooling, never host discretion.** The host/auditor agent is a variable of any strength, not a constant. Every workflow correctness property must be guaranteed by the tool itself — CLI option shape, contract validator, renderer template, dispatch-prompt text, scheduler logic, merge tolerance, write-scope enforcement — never by the host *remembering*, *noticing*, or *reasoning*. Any place the workflow only works because a capable host folded in guidance, relayed upstream evidence, paced dispatch safely, picked the right id, verified from disk, or hand-fixed a cross-block break is a **latent failure mode** → move it into the tool so it's impossible to get wrong. "Be careful" / "habit fix" / "my side" is never a fix; prefer changes that make the process *simpler*, not ones that add a step the host must remember. (Generalizes "Conversation-first" and "a needed manual flag is a bug signal".)
 - **Conversation-first.** Normal usage: no manual `--root`, provider, or model flags. Auto-resolution handles it.
 - **One bounded step per invocation.** Neither orchestrator runs to completion in a single call.
 - **Deterministic over LLM.** Upstream artifacts valid before refreshing downstream.

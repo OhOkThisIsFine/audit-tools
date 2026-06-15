@@ -5,6 +5,7 @@
  *   INV-audit-reporting-06 — normalizeExistingFindingsReport recomputes counts from findings+work_blocks
  *   INV-audit-reporting-07 — language-neutral render (no per-ecosystem special-casing)
  *   INV-audit-reporting-08 — truncation diagnostic uses process.stderr, not console.warn
+ *   OBL-INV-APR-09 — buildAuditFindingsReport contract_version === shared constant; deferred prompt has no Command argv
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -15,6 +16,7 @@ const {
   applyNarrative,
   renderAuditReportMarkdown,
   normalizeExistingFindingsReport,
+  AUDIT_FINDINGS_CONTRACT_VERSION,
 } = await import("../src/reporting/synthesis.ts");
 
 const { renderSynthesisNarrativePrompt } = await import(
@@ -593,5 +595,33 @@ test("INV-08: renderSynthesisNarrativePrompt does NOT write to stderr when findi
     truncationMessages.length,
     0,
     "no truncation notice must be emitted when findings are within the render cap",
+  );
+});
+
+// ── OBL-INV-APR-09: contract_version single-source + deferred prompt has no Command argv ──
+
+const { AUDIT_FINDINGS_CONTRACT_VERSION: sharedVersion } = await import("@audit-tools/shared");
+
+test("OBL-INV-APR-09: buildAuditFindingsReport stamps contract_version identical to shared AUDIT_FINDINGS_CONTRACT_VERSION", () => {
+  const report = baseReport();
+
+  // The re-export in synthesis.ts must equal the shared canonical constant.
+  assert.equal(
+    AUDIT_FINDINGS_CONTRACT_VERSION,
+    sharedVersion,
+    "synthesis.ts AUDIT_FINDINGS_CONTRACT_VERSION must re-export the shared constant, not define a local copy",
+  );
+
+  // buildAuditFindingsReport must stamp the canonical version.
+  assert.equal(
+    report.contract_version,
+    sharedVersion,
+    "buildAuditFindingsReport must produce contract_version === shared AUDIT_FINDINGS_CONTRACT_VERSION",
+  );
+
+  // The version string must be non-trivial so a blank re-export cannot pass.
+  assert.ok(
+    typeof sharedVersion === "string" && sharedVersion.length > 0,
+    "shared AUDIT_FINDINGS_CONTRACT_VERSION must be a non-empty string",
   );
 });

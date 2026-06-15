@@ -58,6 +58,13 @@ import {
 import {
   CONTRACT_PIPELINE_VALIDATORS,
   validateDesignSpecGates,
+  validateGoalIdConsistency,
+  validateImplementationDAGIntegrity,
+  validatePairedObligations,
+  validateEvidenceThreaded,
+  validateDigestCoverage,
+  validateReconciliationDerivation,
+  deriveNodeModelTierFromNode,
 } from "../validation/contractPipeline.js";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 import { writeCurrentStep } from "./stepWriter.js";
@@ -538,6 +545,68 @@ export async function validateImplementationDagTraceability(
   return { ok: violations.length === 0, violations };
 }
 
+// ── Contract-obligations promotion gate ───────────────────────────────────────
+
+export interface ContractObligationsGateResult {
+  ok: boolean;
+  violations: string[];
+}
+
+/**
+ * Run the fail-closed contract-obligation gates against the persisted contract
+ * artifacts. Aggregates:
+ *   - validatePairedObligations  (obligation_ledger × test_validator_plan)
+ *   - validateEvidenceThreaded   (assessment × judge × implementation_dag)
+ *   - validateDigestCoverage     (goal_spec.source_type × finding-enumeration × ledger)
+ *   - validateReconciliationDerivation (seam report × finalized contracts)
+ *
+ * Only error-severity issues fail the gate. Each gate is individually tolerant
+ * of an absent input artifact (the upstream phase order guarantees presence by
+ * the time this runs, except the source-scoped digest-coverage check which is
+ * vacuous for non-enumerable sources).
+ */
+export async function evaluateContractObligationsPromotionGate(
+  artifactsDir: string,
+): Promise<ContractObligationsGateResult> {
+  const obligationLedger = envelopePayload(
+    await readContractArtifact(artifactsDir, "obligation_ledger"),
+  );
+  const testValidatorPlan = envelopePayload(
+    await readContractArtifact(artifactsDir, "test_validator_plan"),
+  );
+  const assessment = envelopePayload(
+    await readContractArtifact(artifactsDir, "contract_assessment_report"),
+  );
+  const judge = envelopePayload(await readContractArtifact(artifactsDir, "judge_report"));
+  const dag = envelopePayload(await readContractArtifact(artifactsDir, "implementation_dag"));
+  const seamReport = envelopePayload(
+    await readContractArtifact(artifactsDir, "seam_reconciliation_report"),
+  );
+  const finalizedContracts = envelopePayload(
+    await readContractArtifact(artifactsDir, "finalized_module_contracts"),
+  );
+  const goalSpec = envelopePayload(await readContractArtifact(artifactsDir, "goal_spec"));
+  const sourceType =
+    isRecord(goalSpec) && typeof goalSpec.source_type === "string"
+      ? goalSpec.source_type
+      : undefined;
+  const findingEnumeration = await readOptionalJsonFile<unknown>(
+    intakePaths(artifactsDir).findingEnumeration,
+  );
+
+  const issues = [
+    ...validatePairedObligations(obligationLedger, testValidatorPlan),
+    ...validateEvidenceThreaded(assessment, judge, dag),
+    ...validateDigestCoverage(sourceType, findingEnumeration, obligationLedger),
+    ...validateReconciliationDerivation(seamReport, finalizedContracts),
+  ].filter((issue) => issue.severity === "error");
+
+  return {
+    ok: issues.length === 0,
+    violations: issues.map((issue) => `[${issue.path}] ${issue.message}`),
+  };
+}
+
 // ── Step builder ──────────────────────────────────────────────────────────────
 
 /**
@@ -658,6 +727,39 @@ ${formatValidationIssues(first.issues)}
 
   const nextPhase = nextMissingContractPhase(artifactsDir);
 
+  // 2.5. Goal-ID consistency gate (ARC-86b18f1b): every persisted artifact that
+  //      carries a goal_id must agree on the same value. A mismatch means two
+  //      runs were interleaved; re-emit the earliest mismatched phase so the
+  //      worker can correct it.
+  {
+    const goalIdArtifacts: Record<string, unknown> = {};
+    for (const name of CP_ARTIFACT_NAMES) {
+      const env = await readContractArtifact(artifactsDir, name);
+      if (env) goalIdArtifacts[name] = envelopePayload(env);
+    }
+    const goalIdIssues = validateGoalIdConsistency(goalIdArtifacts);
+    const goalIdErrors = goalIdIssues.filter((i) => i.severity === "error");
+    if (goalIdErrors.length > 0) {
+      // Re-emit the producing phase of the first mismatched artifact.
+      // issue.path is "<artifact_name>.goal_id"; extract the artifact name.
+      const firstPath = goalIdErrors[0]?.path ?? "";
+      const mismatchedArtifact = firstPath.replace(/\.goal_id$/, "") as ContractPipelineArtifactName;
+      const phase = ARTIFACT_TO_PHASE[mismatchedArtifact] ?? "goal_normalization";
+      await archiveContractArtifact(artifactsDir, mismatchedArtifact, "invalid");
+      return buildPhaseStep(
+        phase,
+        `## Goal-ID Consistency Error
+
+Every contract-pipeline artifact must share the same goal_id. The following mismatch was detected:
+
+${goalIdErrors.map((i) => `- [${i.path}] ${i.message}`).join("\n")}
+
+Rewrite the output so its goal_id matches the goal_id established in goal_spec.json.
+`,
+      );
+    }
+  }
+
   // 3. Judge gate: implementation planning is reachable only through an
   //    approved verdict, a bounded targeted repair, or the repair cap.
   if (nextPhase === "implementation_planning") {
@@ -697,9 +799,69 @@ ${gate.note}
     // gate.kind === "proceed": fall through to the normal phase step below.
   }
 
-  // 4. All phases exist: enforce traceability, then convert the
-  //    implementation_dag to an extracted plan.
+  // 4. All phases exist: enforce traceability + referential integrity, then
+  //    convert the implementation_dag to an extracted plan.
   if (!nextPhase) {
+    // 4a. DAG referential integrity + bidirectional coverage (ARC-86b18f1b-2).
+    //     Run before the traceability check so specific referential violations
+    //     are reported first (traceability is a superset check).
+    const dagPayload = envelopePayload(
+      await readContractArtifact(artifactsDir, "implementation_dag"),
+    );
+    const ledgerPayload = envelopePayload(
+      await readContractArtifact(artifactsDir, "obligation_ledger"),
+    );
+    const cePayload = envelopePayload(
+      await readContractArtifact(artifactsDir, "counterexample"),
+    );
+    const judgePayload = envelopePayload(
+      await readContractArtifact(artifactsDir, "judge_report"),
+    );
+    const integrityIssues = validateImplementationDAGIntegrity(
+      dagPayload,
+      ledgerPayload,
+      cePayload,
+      judgePayload,
+    );
+    const integrityErrors = integrityIssues.filter((i) => i.severity === "error");
+    if (integrityErrors.length > 0) {
+      const repairState = await readRepairState(artifactsDir);
+      if (repairState.dag_regenerations.length >= MAX_DAG_REGENERATION_ATTEMPTS) {
+        return writeCurrentStep({
+          stepKind: CONTRACT_STEP_KIND,
+          status: "blocked",
+          runId,
+          repoRoot: root,
+          artifactsDir,
+          prompt: `# Implementation DAG Failed Referential Integrity ${repairState.dag_regenerations.length + 1} Times
+
+The implementation_dag repeatedly contains referential integrity or coverage violations:
+
+${integrityErrors.map((i) => `- [${i.path}] ${i.message}`).join("\n")}
+
+Report this to the user and stop. The contract pipeline cannot promote a plan with integrity violations; the run needs a corrected implementation_dag or obligation_ledger.
+`,
+          allowedCommands: [],
+          stopCondition: "Stop after reporting the integrity failure to the user.",
+        });
+      }
+      repairState.dag_regenerations.push({
+        violations: integrityErrors.map((i) => i.message),
+        at: new Date().toISOString(),
+      });
+      await writeRepairState(artifactsDir, repairState);
+      await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
+      return buildPhaseStep(
+        "implementation_planning",
+        `## Referential Integrity Errors From the Previous Attempt
+
+The previous implementation_dag was rejected and archived due to referential integrity violations. Fix every issue below:
+
+${integrityErrors.map((i) => `- [${i.path}] ${i.message}`).join("\n")}
+`,
+      );
+    }
+
     const traceability = await validateImplementationDagTraceability(artifactsDir);
     if (!traceability.ok) {
       const repairState = await readRepairState(artifactsDir);
@@ -738,6 +900,54 @@ ${traceability.violations.map((v) => `- ${v}`).join("\n")}
 `,
       );
     }
+
+    // 4c. Contract-obligations promotion gates (CP-BLOCK-N-contract-obligations):
+    //     fail-closed cross-artifact checks that must pass before a plan is
+    //     promoted — paired obligations, evidence threading, source-scoped
+    //     digest coverage, and INV-CO-12 reconciliation derivation. Reuses the
+    //     dag_regenerations cap: bounded re-emit of implementation_planning, then
+    //     blocked. These are the invariants that keep the workflow correct
+    //     regardless of host strength, so they are enforced here, never left to
+    //     host discretion.
+    const obligationGate = await evaluateContractObligationsPromotionGate(artifactsDir);
+    if (!obligationGate.ok) {
+      const repairState = await readRepairState(artifactsDir);
+      if (repairState.dag_regenerations.length >= MAX_DAG_REGENERATION_ATTEMPTS) {
+        return writeCurrentStep({
+          stepKind: CONTRACT_STEP_KIND,
+          status: "blocked",
+          runId,
+          repoRoot: root,
+          artifactsDir,
+          prompt: `# Contract-Obligation Gates Failed ${repairState.dag_regenerations.length + 1} Times
+
+The contract-obligation promotion gates repeatedly failed and the plan cannot be promoted:
+
+${obligationGate.violations.map((v) => `- ${v}`).join("\n")}
+
+Report this to the user and stop. The contract pipeline cannot promote a plan that drops obligation coverage, evidence, or a reconciled seam; the run needs a corrected obligation_ledger, test_validator_plan, finalized_module_contracts, or implementation_dag.
+`,
+          allowedCommands: [],
+          stopCondition: "Stop after reporting the contract-obligation gate failure to the user.",
+        });
+      }
+      repairState.dag_regenerations.push({
+        violations: obligationGate.violations,
+        at: new Date().toISOString(),
+      });
+      await writeRepairState(artifactsDir, repairState);
+      await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
+      return buildPhaseStep(
+        "implementation_planning",
+        `## Contract-Obligation Gate Errors From the Previous Attempt
+
+The previous implementation_dag (and/or upstream contract artifacts) failed the fail-closed contract-obligation gates. Fix every issue below before the plan can be promoted:
+
+${obligationGate.violations.map((v) => `- ${v}`).join("\n")}
+`,
+      );
+    }
+
     await promoteImplementationDagToExtractedPlan(artifactsDir);
     return null;
   }
@@ -1228,11 +1438,38 @@ export async function promoteImplementationDagToExtractedPlan(
       contract_goal_id: dag?.goal_id,
       contract_obligation_ids: contractObligations,
       verification_obligation_ids: verificationObligations,
+      addresses_counterexamples: addressedCounterexamples,
+      // Relative model rank for this node (small | standard | deep) derived from
+      // complexity — never a model name (no-hardcoded-models invariant).
+      model_tier: deriveNodeModelTierFromNode(node),
       targeted_commands: node.targeted_commands ?? [],
       preconditions: node.preconditions ?? [],
       expected_changes: node.expected_changes ?? "",
     };
   });
+
+  // finding_id → { obligation_ids, node_ids } trace. Each promoted finding maps
+  // 1:1 to a DAG node, so its node_ids are itself plus every node it depends on
+  // (the upstream nodes whose output it builds on). obligation_ids unions the
+  // satisfied and verification obligations. This is the auditable backward trace
+  // from a remediation finding to the contract obligations it discharges.
+  const nodeIdSet = new Set(nodes.map((n, i) => n.id ?? `CP-${String(i + 1).padStart(3, "0")}`));
+  const traceability: Record<
+    string,
+    { obligation_ids: string[]; node_ids: string[] }
+  > = {};
+  for (const [index, node] of nodes.entries()) {
+    const id = node.id ?? `CP-${String(index + 1).padStart(3, "0")}`;
+    const obligationIds = [
+      ...new Set([
+        ...(node.satisfies_obligations ?? []),
+        ...(node.verification_obligation_ids ?? []),
+      ]),
+    ];
+    const dependsOn = (node.depends_on ?? []).filter((dep) => nodeIdSet.has(dep));
+    const nodeIds = [...new Set([id, ...dependsOn])];
+    traceability[id] = { obligation_ids: obligationIds, node_ids: nodeIds };
+  }
 
   const blocks = nodes.map((node) => {
     const deps = ((node as { depends_on?: string[] }).depends_on ?? []).map(
@@ -1253,6 +1490,8 @@ export async function promoteImplementationDagToExtractedPlan(
     goal_id: dag?.goal_id,
     findings,
     blocks,
+    // finding_id → { obligation_ids, node_ids } backward trace.
+    traceability,
     project_type: "unknown",
     candidate_closing_actions: ["none"],
     source: "contract_pipeline",

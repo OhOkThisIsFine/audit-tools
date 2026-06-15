@@ -20,7 +20,7 @@ export type RemediationStepKind =
   | "classify_impl_risks"
   | "preview_implement"
   | "dispatch_implement"
-  | "implement_single_item"
+  | "implement_rolling_sequential"
   | "collect_triage"
   | "close_run"
   | "present_report"

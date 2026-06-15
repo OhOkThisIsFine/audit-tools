@@ -14,10 +14,16 @@
  *             special-cased lifecycle files). Typos or stale names are caught
  *             at test time rather than silently writing unknown artifacts.
  *
- *   PARITY-2: Every artifact written by an executor that HAS downstream
- *             dependents in ARTIFACT_DEPENDENTS_MAP must be a KEY in that map
- *             so that staleness propagation can reach its consumers. Terminal
- *             artifacts (with zero downstream dependents) are exempt.
+ *   PARITY-2: Every artifact referenced as an upstream in ARTIFACT_DEPENDS_ON_MAP
+ *             (the canonical hand-authored DAG) is writable — by a named executor
+ *             or by the two lifecycle paths. A stale upstream name means consumers
+ *             silently never re-stale. Overlaps with PARITY-3 to provide independent
+ *             verification from the canonical-direction source.
+ *
+ *   PARITY-2b: Every KEY in ARTIFACT_DEPENDS_ON_MAP (a dependent artifact whose
+ *             freshness is defined by its upstreams) is a known filename. A stale
+ *             key means computeArtifactMetadata tracks freshness for a file that
+ *             no executor produces, so the real artifact is never re-staled.
  *
  *   PARITY-3: Every KEY in ARTIFACT_DEPENDENTS_MAP that has at least one
  *             downstream dependent must be writable — either by a named
@@ -45,7 +51,7 @@ const auditCodeRoot = join(here, "..");
 
 // ── Import live modules ───────────────────────────────────────────────────────
 
-const { ARTIFACT_DEPENDENTS_MAP } = await import("../src/orchestrator/dependencyMap.ts");
+const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP } = await import("../src/orchestrator/dependencyMap.ts");
 const { ARTIFACT_DEFINITIONS, AUDIT_REPORT_FILENAME } = await import("../src/io/artifacts.ts");
 const { AGENT_FEEDBACK_FILENAME } = await import("@audit-tools/shared");
 
@@ -212,67 +218,66 @@ test("PARITY-1: every artifact in an executor artifacts_written is a known filen
   );
 });
 
-// ── PARITY-2: executor-written artifacts with downstream dependents are in map ──
+// ── PARITY-2: every upstream referenced in ARTIFACT_DEPENDS_ON_MAP is writable ──
 
-test("PARITY-2: every executor-written artifact whose filename has downstream dependents in the map is itself a KEY in ARTIFACT_DEPENDENTS_MAP", () => {
-  // An artifact X is problematic if:
-  //   - An executor writes X (X is in ALL_EXECUTOR_WRITTEN), AND
-  //   - X is listed as a downstream of something (X ∈ ALL_DOWNSTREAM_VALUES), AND
-  //     specifically as a downstream that means some artifact Y → X exists, BUT
-  //   - X is NOT a key with further outgoing edges — which is fine (it's terminal).
+test("PARITY-2: every artifact referenced as an upstream in ARTIFACT_DEPENDS_ON_MAP is writable (executor or lifecycle)", () => {
+  // ARTIFACT_DEPENDENTS_MAP is DERIVED from ARTIFACT_DEPENDS_ON_MAP — there is
+  // exactly one hand-authored adjacency representation. PARITY-2 therefore checks
+  // the canonical source directly: every artifact that appears as an upstream value
+  // in ARTIFACT_DEPENDS_ON_MAP must be provided by some executor or by a lifecycle
+  // path. A stale rename in the map (old upstream name still listed as a value but
+  // no executor writes it) causes consumers to never see a fresh version of that
+  // upstream — silently breaking staleness propagation.
   //
-  // What we actually guard: if X has NON-EMPTY downstream dependents in the map
-  // (i.e. X IS a key with dependents) then X must be reachable as a key.
-  // This is trivially true: the only way X can have dependents listed is if X IS a key.
-  //
-  // The real parity check: every executor-written artifact that is a KEY in the map
-  // (meaning: consumers depend on X being fresh) must actually be written by an executor.
-  // PARITY-3 covers the reverse. Here, confirm the forward direction:
-  // for each executor-written artifact, if it IS a key with dependents, its write-set
-  // reference is correct and staleness can propagate.
+  // This intentionally overlaps with PARITY-3 (which checks ARTIFACT_DEPENDENTS_MAP
+  // keys) to provide independent verification from the canonical direction.
+  const allWritable = new Set([...ALL_EXECUTOR_WRITTEN, ...LIFECYCLE_WRITTEN_FILES]);
+
+  // Collect every unique upstream filename referenced in ARTIFACT_DEPENDS_ON_MAP.
+  const allUpstreams = new Set(Object.values(ARTIFACT_DEPENDS_ON_MAP).flat());
+
   const mismatches = [];
-  for (const name of ALL_EXECUTOR_WRITTEN) {
-    if (LIFECYCLE_WRITTEN_FILES.has(name)) continue;
-    if (!(name in ARTIFACT_DEPENDENTS_MAP)) {
-      // Not a key at all — it's a pure terminal (no downstream in the map).
-      // That's fine as long as nothing depends on it. Verify it's not a value either
-      // in a way that would require it to be a key.
-      // (This case is acceptable: auto_fixes_applied.json, provider_confirmation.json.)
-      continue;
+  for (const upstream of allUpstreams) {
+    if (!allWritable.has(upstream)) {
+      mismatches.push(upstream);
     }
-    // It IS a key. Verify the key's dependents are non-empty only if there's a real
-    // reason to expect staleness to propagate. This is already guaranteed by the map
-    // structure — we're just confirming the write landed in the right place.
-    // Nothing to fail here for the forward direction.
   }
-  // The above loop found nothing to flag. Report separately if we find any
-  // executor-written artifact that is a NON-KEY but appears as an upstream value
-  // somewhere it shouldn't (i.e., it has dependents claimed by the map under a
-  // DIFFERENT key name — which would indicate a rename).
+
   assert.deepEqual(
-    mismatches,
+    mismatches.sort(),
     [],
-    `Write-set/dependency-map mismatch: [${mismatches.join(", ")}]`,
+    `ARTIFACT_DEPENDS_ON_MAP references upstreams that nothing writes: [${mismatches.join(", ")}]. ` +
+      "Staleness propagation from these artifacts can never fire. " +
+      "If an artifact was renamed, update ARTIFACT_DEPENDS_ON_MAP values to the new filename " +
+      "AND update the executor's artifacts_written to match.",
   );
 });
 
-// ── PARITY-2b: artifacts written by executors that appear in the map are correct ─
+// ── PARITY-2b: every key in ARTIFACT_DEPENDS_ON_MAP is a known filename ─────────
 
-test("PARITY-2b: all executor-written artifacts that ARE keys in ARTIFACT_DEPENDENTS_MAP match the canonical map entries (no stale renames)", () => {
-  // For each executor-written artifact X that appears as a key in the map,
-  // verify it is still a known filename. If an artifact was renamed (old name
-  // removed from ARTIFACT_DEFINITIONS), the map key would be stale.
+test("PARITY-2b: every key in ARTIFACT_DEPENDS_ON_MAP (dependent artifact) is a known filename — no stale renames in the canonical DAG", () => {
+  // ARTIFACT_DEPENDS_ON_MAP is hand-authored. If an artifact is renamed (new name
+  // added to ARTIFACT_DEFINITIONS; old name removed) but its entry in the map is
+  // not updated, the stale key remains. computeArtifactMetadata would compare
+  // upstream revisions for an artifact name that no executor produces, so the
+  // staleness check for that artifact silently becomes a no-op.
+  //
+  // Check: every KEY of ARTIFACT_DEPENDS_ON_MAP (the dependent artifact — one
+  // that depends on upstreams) must appear in KNOWN_FILENAMES. Keys are the
+  // artifacts whose freshness is computed by comparing upstream revisions; a key
+  // that is no longer in ARTIFACT_DEFINITIONS means those freshness comparisons
+  // are wasted and the real artifact is never re-staled.
   const staleMapKeys = [];
-  for (const name of ALL_EXECUTOR_WRITTEN) {
-    if (!KNOWN_FILENAMES.has(name)) continue; // caught by PARITY-1
-    if (name in ARTIFACT_DEPENDENTS_MAP && !KNOWN_FILENAMES.has(name)) {
-      staleMapKeys.push(name);
+  for (const depArtifact of Object.keys(ARTIFACT_DEPENDS_ON_MAP)) {
+    if (!KNOWN_FILENAMES.has(depArtifact)) {
+      staleMapKeys.push(depArtifact);
     }
   }
   assert.deepEqual(
     staleMapKeys.sort(),
     [],
-    `Executor writes artifacts that are map keys but not known filenames: [${staleMapKeys.join(", ")}]`,
+    `ARTIFACT_DEPENDS_ON_MAP keys reference artifact names not in ARTIFACT_DEFINITIONS: [${staleMapKeys.join(", ")}]. ` +
+      "These entries are stale — either add the artifact to ARTIFACT_DEFINITIONS or remove the key from the DAG.",
   );
 });
 

@@ -61,7 +61,7 @@ at the current `@audit-tools/shared` sources instead of stale compiled output.
 
 | Command | Description |
 | --- | --- |
-| `remediate-code next-step [--input <path>] [--host-can-dispatch-subagents true\|false]` | Decide and render exactly one next action |
+| `remediate-code next-step [--input <path>] [--host-can-dispatch-subagents]` | Decide and render exactly one next action |
 | `remediate-code prepare-implement-dispatch --run-id <id>` | Write bounded implementation prompts |
 | `remediate-code merge-implement-results --run-id <id>` | Validate implementation results and update item state |
 | `remediate-code validate-artifacts` | Validate runtime artifacts |

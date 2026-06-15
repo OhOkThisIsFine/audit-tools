@@ -7,6 +7,7 @@ const {
   shellQuote,
   platformCommand,
   runTracked,
+  stripClaudeCodeEnv,
   renderPromptCommand,
   toPromptPathToken,
   coerceJsonObjectArg,
@@ -121,4 +122,73 @@ test("runTracked empty-argv early-return path includes duration_ms of 0", () => 
   const result = runTracked([]);
   assert.equal(result.duration_ms, 0);
   assert.equal(result.cwd, undefined);
+});
+
+// ── stripClaudeCodeEnv unit tests ─────────────────────────────────────────────
+
+test("stripClaudeCodeEnv removes CLAUDECODE and CLAUDE_CODE* keys", () => {
+  const input = {
+    PATH: "/usr/bin",
+    CLAUDECODE: "1",
+    CLAUDE_CODE_ENTRYPOINT: "cli",
+    CLAUDE_CODE_OTHER: "x",
+    // CLAUDE_CODEX starts with CLAUDE_CODE so it is also stripped
+    CLAUDE_CODEX: "stripped",
+    // Keys that do NOT start with CLAUDE_CODE and are not CLAUDECODE are kept
+    OTHER_CLAUDE: "kept",
+    CLAUDECODEFOO: "kept",
+  };
+  const result = stripClaudeCodeEnv(input);
+  assert.ok(!Object.prototype.hasOwnProperty.call(result, "CLAUDECODE"), "CLAUDECODE should be stripped");
+  assert.ok(!Object.prototype.hasOwnProperty.call(result, "CLAUDE_CODE_ENTRYPOINT"), "CLAUDE_CODE_ENTRYPOINT should be stripped");
+  assert.ok(!Object.prototype.hasOwnProperty.call(result, "CLAUDE_CODE_OTHER"), "CLAUDE_CODE_OTHER should be stripped");
+  assert.ok(!Object.prototype.hasOwnProperty.call(result, "CLAUDE_CODEX"), "CLAUDE_CODEX (starts with CLAUDE_CODE) should be stripped");
+  assert.equal(result.PATH, "/usr/bin");
+  assert.equal(result.OTHER_CLAUDE, "kept");
+  // CLAUDECODEFOO does not equal "CLAUDECODE" and does not start with "CLAUDE_CODE" so it is kept
+  assert.equal(result.CLAUDECODEFOO, "kept");
+});
+
+test("stripClaudeCodeEnv does not mutate the input object", () => {
+  const input = { CLAUDECODE: "1", PATH: "/usr/bin" };
+  const copy = { ...input };
+  stripClaudeCodeEnv(input);
+  assert.deepEqual(input, copy);
+});
+
+test("stripClaudeCodeEnv with no argument strips from process.env", () => {
+  const result = stripClaudeCodeEnv();
+  assert.ok(!Object.prototype.hasOwnProperty.call(result, "CLAUDECODE"), "should strip CLAUDECODE from process.env");
+  assert.ok(!Object.prototype.hasOwnProperty.call(result, "CLAUDE_CODE_ENTRYPOINT"), "should strip CLAUDE_CODE_ENTRYPOINT from process.env");
+});
+
+// ── runTracked env-strip integration (real child process) ────────────────────
+
+test("runTracked child sees neither CLAUDECODE nor CLAUDE_CODE* even when parent env has them", () => {
+  // Use node -e to print env keys; detect which env vars are passed through.
+  // We inject CLAUDECODE and a CLAUDE_CODE_ key into options.env and verify
+  // the child doesn't receive them.
+  const script = [
+    "const keys = Object.keys(process.env);",
+    "const found = keys.filter(k => k === 'CLAUDECODE' || /^CLAUDE_CODE/.test(k));",
+    "process.stdout.write(JSON.stringify(found));",
+  ].join(" ");
+
+  // Test 1: explicit env with CLAUDECODE injected
+  const explicitEnv = {
+    ...process.env,
+    CLAUDECODE: "1",
+    CLAUDE_CODE_TEST_KEY: "should-not-appear",
+  };
+  const result1 = runTracked(["node", "-e", script], { env: explicitEnv });
+  assert.equal(result1.status, 0, `node exited non-zero: ${result1.stderr}`);
+  const found1 = JSON.parse(result1.stdout);
+  assert.deepEqual(found1, [], `child saw CLAUDE* keys with explicit env: ${JSON.stringify(found1)}`);
+
+  // Test 2: no explicit env (inherits process.env) — CLAUDECODE is unset in this
+  // test process (runner must unset it), so result should also be empty.
+  const result2 = runTracked(["node", "-e", script]);
+  assert.equal(result2.status, 0, `node exited non-zero: ${result2.stderr}`);
+  const found2 = JSON.parse(result2.stdout);
+  assert.deepEqual(found2, [], `child saw CLAUDE* keys with inherited env: ${JSON.stringify(found2)}`);
 });

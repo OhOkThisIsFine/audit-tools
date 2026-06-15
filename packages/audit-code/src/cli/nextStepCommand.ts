@@ -1,5 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type {
   SessionConfig,
 } from "@audit-tools/shared";
@@ -60,6 +66,7 @@ export {
   handleSynthesisNarrativeBranch,
   executeAndRecord,
   checkFinalizationCycle,
+  checkNoProgressBeforeDispatch,
   runDeterministicForNextStep,
 } from "./nextStepHelpers.js";
 
@@ -72,7 +79,15 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   await mkdir(artifactsDir, { recursive: true });
   await ensureSupervisorDirs(artifactsDir);
 
-  const hostCanDispatchSubagents = getOptionalBooleanFlag(
+  // Single-step bootstrap: fold an optional guidance file into
+  // intake/conversation-start.md in this same invocation, then decide the step —
+  // no separate write-then-call dance for the host to remember.
+  const guidanceFile = getFlag(argv, "--guidance-file");
+  if (guidanceFile) {
+    applyGuidanceFile(artifactsDir, guidanceFile);
+  }
+
+  const hostCanDispatchSubagents = parseHostBooleanFlag(
     argv,
     "--host-can-dispatch-subagents",
   );
@@ -562,4 +577,70 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     selectedExecutor: result.selectedExecutor,
   });
   console.log(JSON.stringify(step, null, 2));
+}
+
+/**
+ * Scan argv for a TRUE boolean flag (parity with remediate-code's commander
+ * boolean). A bare `<flag>` resolves true and NEVER swallows the next token; the
+ * `--no-<flag>` form and the `<flag>=false` spelling resolve false; `<flag>=true`
+ * resolves true; absence stays `undefined` so the tristate reaches
+ * resolveHostDispatchCapability intact. A non-boolean `<flag>=<other>` value
+ * fails loudly. When the flag appears more than once, the last occurrence wins.
+ */
+export function parseHostBooleanFlag(
+  argv: string[],
+  flag: string,
+): boolean | undefined {
+  const negated = `--no-${flag.replace(/^--/, "")}`;
+  let value: boolean | undefined;
+  for (const token of argv) {
+    if (token === flag) {
+      value = true;
+    } else if (token === negated) {
+      value = false;
+    } else if (token === `${flag}=true`) {
+      value = true;
+    } else if (token === `${flag}=false`) {
+      value = false;
+    } else if (token.startsWith(`${flag}=`)) {
+      throw new Error(`${flag} must be either true or false.`);
+    }
+  }
+  return value;
+}
+
+/**
+ * Single-step bootstrap writer for `intake/conversation-start.md`.
+ *
+ * Sole writer + idempotent-on-target (INV-CC-03): re-applying the identical
+ * guidance is a byte-identical no-op (the existing file is left untouched, never
+ * appended to), and a pre-existing file with DIFFERING content is never silently
+ * clobbered — that case fails loudly so host/conversation-authored guidance can't
+ * be lost. The guidance file's bytes are written verbatim.
+ */
+export function applyGuidanceFile(
+  artifactsDir: string,
+  guidanceFilePath: string,
+): string {
+  const target = join(artifactsDir, "intake", "conversation-start.md");
+  const resolvedSource = resolve(guidanceFilePath);
+  if (resolve(target) === resolvedSource) {
+    // The guidance file already IS the target — nothing to copy.
+    return target;
+  }
+  const incoming = readFileSync(resolvedSource);
+  if (existsSync(target)) {
+    const existing = readFileSync(target);
+    if (existing.equals(incoming)) {
+      // Identical re-apply: byte-identical no-op, no rewrite, no append.
+      return target;
+    }
+    throw new Error(
+      `Refusing to overwrite existing ${target} with differing guidance from ${resolvedSource}. ` +
+        `Remove or reconcile the existing conversation-start.md before re-bootstrapping.`,
+    );
+  }
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, incoming);
+  return target;
 }

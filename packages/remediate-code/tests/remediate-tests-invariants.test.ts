@@ -45,20 +45,28 @@ describe("INV-remediate-tests-01: no it() at module scope in test files", () => 
   // describe block, there must be no "  it(" line before the next
   // "describe(" line.
 
-  it("next-step.test.ts has no module-scope it() calls between describe blocks", () => {
-    const src = readTestFile("next-step.test.ts");
-    const lines = src.split("\n");
+  it("the next-step-*.test.ts files have no module-scope it() calls between describe blocks", () => {
+    // The former next-step.test.ts monolith (MNT-86449ec9) was split into
+    // focused next-step-*.test.ts files; this guard now spans every shard so a
+    // stray module-scope it() in any of them is still caught.
+    const shards = listTestFiles().filter((f) => /^next-step-.*\.test\.ts$/.test(f));
+    expect(shards.length).toBeGreaterThan(0);
 
-    // Find all describe( and }); at column 0, and all "  it(" with 2-space indent
-    let depth = 0;
-    let moduleScope = 0;
-    for (const line of lines) {
-      if (/^describe\(/.test(line)) depth++;
-      if (/^\}\);/.test(line) && depth > 0) depth--;
-      // A line at exactly 2-space indent with "it(" is suspicious when depth===0
-      if (/^  it\(/.test(line) && depth === 0) moduleScope++;
+    const violations: string[] = [];
+    for (const file of shards) {
+      const lines = readTestFile(file).split("\n");
+      // Track describe( and }); at column 0; flag any "  it(" at 2-space indent
+      // while no describe is open (depth === 0).
+      let depth = 0;
+      let moduleScope = 0;
+      for (const line of lines) {
+        if (/^describe\(/.test(line)) depth++;
+        if (/^\}\);/.test(line) && depth > 0) depth--;
+        if (/^  it\(/.test(line) && depth === 0) moduleScope++;
+      }
+      if (moduleScope > 0) violations.push(`${file}: ${moduleScope} module-scope it()`);
     }
-    expect(moduleScope).toBe(0);
+    expect(violations).toEqual([]);
   });
 
   it("no test file has a bare it() at column 0 (no indentation)", () => {
@@ -148,13 +156,16 @@ describe("INV-remediate-tests-08: ESM-correct __dirname derivation in .test.ts f
   // .test.ts files that use __dirname must derive it via fileURLToPath(import.meta.url)
   // rather than relying on an implicit polyfill or global.
 
+  // next-step.test.ts (which used __dirname) was split into next-step-*.test.ts
+  // shards (MNT-86449ec9); the shards derive paths from the shared
+  // helpers/nextStepHarness module instead of a local __dirname, so they no
+  // longer belong in this list.
   const FILES_THAT_USE_DIRNAME = [
     "file-integrity.test.ts",
     "store.test.ts",
     "working-directory-prompts.test.ts",
     "remediate-state-invariants.test.ts",
     "remediate-tests-invariants.test.ts",
-    "next-step.test.ts",
     "integration-pipeline.test.ts",
   ];
 
@@ -276,8 +287,13 @@ describe("INV-remediate-tests-04: no either-or set-membership assertions for det
         violations.push(file);
       }
     }
-    // Only the two known debt files are allowed; any new file is a violation.
-    const KNOWN_DEBT = ["integration-pipeline.test.ts", "next-step.test.ts"].sort();
+    // Only the known debt files are allowed; any new file is a violation. The
+    // next-step closing-phase either-or assertion now lives in the
+    // implementation-dispatch shard after the monolith split (MNT-86449ec9).
+    const KNOWN_DEBT = [
+      "integration-pipeline.test.ts",
+      "next-step-implement-dispatch.test.ts",
+    ].sort();
     expect(violations.sort()).toEqual(KNOWN_DEBT);
   });
 });
