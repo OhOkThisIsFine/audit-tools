@@ -9,192 +9,192 @@
 
 ## 0. TL;DR
 
-1. The **workflow-robustness remediation is DONE and committed** (`c6fae403` on `main`), green,
-   **NOT pushed, NOT published**. It was committed *together with* the previously-in-tree
-   452-finding self-audit remediation as one changeset (per Ethan's choice). See §1.
-2. The agreed **next focus** (Ethan, high priority): make creating contracts/obligations/invariants
-   **efficient, less error-prone, and manageable by both weak and strong models, via deterministic
-   tools.** Strategy doc written: [`docs/contract-authoring-determinism-design.md`](contract-authoring-determinism-design.md)
-   (strategies S1–S7). **Not implemented yet.** See §2.
-3. **Decision A is resolved: SHIPPED** — `c6fae403` + the docs were committed, pushed, and
-   published this turn; global bins reinstalled. Decision B (how to drive the determinism work)
-   remains open. See §3.
-4. Operational traps the next instance WILL hit are in §4 — read them before any remediate/audit run.
+1. **Workflow-robustness remediation (`c6fae403`) is SHIPPED** (prior turn): shared 0.17.3 /
+   auditor-lambda 0.21.4 / remediator-lambda 0.18.2, live in the global bins. See §1a.
+2. **Contract-authoring determinism S1 + S3 is now IMPLEMENTED + SHIPPED this turn**
+   (remediate-code only): the obligation ledger is *derived deterministically* (no longer an LLM
+   phase); the test plan and implementation DAG are *skeleton-scaffolded* (the tool pre-fills
+   structure/ids, the model fills only judgment slots); and a `validate-artifact` write-time
+   validator CLI + a generic per-phase self-check reference land S3. See §1b.
+3. **Remaining determinism work:** S2, S4, S5, S6 (remediate-code contract-authoring) + S7, S8
+   (audit-code). All now **dogfoodable** through the improved pipeline. See §2.
+4. **Decision B is resolved** (hand-implemented S1+S3). The open question is now how to drive
+   **S2/S4–S8** — dogfood vs. hand-implement. See §3.
+5. Operational traps the next instance WILL hit are in §4 — read them before any remediate/audit run.
 
 ---
 
-## 1. What just shipped — commit `c6fae403` (held, not pushed/published)
+## 1. What's implemented & shipped
 
-Ran `/remediate-code` on the old `docs/HANDOFF-workflow-robustness.md` (now deleted; superseded by
-this file — its full content is in git history at `c6fae403`) through the full contract pipeline:
-9 modules, 86 obligations, **2 adversarial repair rounds** (independent critic/judge subagents),
-10-node implementation DAG, 4 dispatch waves.
+### 1a. Workflow robustness — `c6fae403` (shipped prior turn)
 
-**Outcome:** 10/10 nodes resolved, 0 blocked. **Green clean-env (CLAUDECODE unset): shared
-550/0/1, audit-code 2121/0/1, remediate-code 77 files / 1513 tests / 0 fail; `npm run build` +
-`npm run check` clean.** Commit = 94 files, +13,127/−5,463 — the 9 robustness modules **plus** the
-in-tree 452-finding remediation, as one landed changeset on `main`.
+`/remediate-code` ran on the old workflow-robustness handoff through the full contract pipeline
+(9 modules, 86 obligations, 2 adversarial repair rounds, 10-node DAG). Every audit→remediate
+correctness property was moved out of host discretion into tooling: tolerant `finding_id`→node
+merge, git-diff write-scope enforcement, `NodeDisposition`, rolling per-node dispatch (deleted
+`waveScheduler.ts`), tool-owned env-scrubbed final gate (INV-RS-10), coarse re-block backstop,
+source-type coverage ledger, `--host-can-dispatch-subagents` true boolean + `--guidance-file`,
+fixture-drift guard. **Shipped** as shared 0.17.3 / audit-code 0.21.4 / remediate-code 0.18.2;
+global bins reinstalled. (Full module list + carried residuals CE-001/002/003 are in git history
+of this file at `c6fae403`; they remain accurate.)
 
-The 9 modules (every audit→remediate correctness property moved out of host discretion into tooling):
-- **dispatch-seam** (`src/steps/dispatch.ts`): exact node-id + one-result-per-node renderer,
-  upstream-evidence threading, tolerant `finding_id`→node merge + multi-entry collapse, git-diff
-  write-scope enforcement (fail-closed), `NodeDisposition` (skip ≠ verified_complete), sibling-red→triage.
-- **rolling-scheduler** (`src/steps/nextStep.ts`; **deleted `waveScheduler.ts`** in an atomic
-  replace): verified-complete rolling per-node dispatch on the shared rolling engine; tool-owned
-  env-scrubbed **final clean-env gate (INV-RS-10)** independent of `plan.test_command`;
-  coarse-deterministic re-block-all-on-unattributable-red backstop.
-- **contract-obligations** (`src/steps/contractPipeline.ts` + `src/validation/contractPipeline*.ts`):
-  fail-closed gates (paired-obligation / evidence-threaded / source-type-scoped digest-coverage /
-  reconciliation-derivation) + `deriveNodeModelTier` (relative ranks, no model names) +
-  downstream-only repair scoping + finding-trace.
-- **intake-digest** (`src/intake.ts`): bounded `findings-digest.json` + complete
-  `finding-enumeration.json` + content-aware single-writer source registration.
-- **coverage-ledger** (`src/state/types.ts` + `src/coverage/findingLedger.ts`): source-type-explicit
-  per-finding/per-node completeness gate (no vacuous 0/0 green on document runs).
-- **cli-capability** (`src/index.ts` + audit-code `src/cli/nextStepCommand.ts`):
-  `--host-can-dispatch-subagents` is now a **true boolean**; `--guidance-file` single-step bootstrap;
-  parity across both orchestrators.
-- **host-loader-docs**: loader docs aligned to the CLI shape (doc↔CLI parity test).
-- **hooks-gate** (`.claude/hooks/async-typecheck.mjs`): debounced, advisory-only.
-- **fixture-drift-guard**: regenerated-equals-committed guard + generator output override.
+### 1b. Contract-authoring determinism S1 + S3 (this turn — remediate-code)
 
-**Carried residuals (deliberate design choices baked into the rolling-scheduler node — know these):**
-- **CE-001** — per-package verify is **build-free + single-flight** (no same-package double/concurrent build).
-- **CE-002** — the runtime/packaged-bin smoke surface (`verify:release` smokes) is a **declared
-  residual**; INV-RS-10's hard floor is scoped to build+check+unit (the smokes are the known
-  Windows-flaky surface and run separately at release).
-- **CE-003** — the coarse re-block path has a **bounded auto-terminate** (`COARSE_REBLOCK_BOUND=2`)
-  so a permanently-red sibling converges to terminal `blocked` for a no-human host (never livelock,
-  never a human-triage strand, never force-close-to-green).
+Implements the first wave of [`docs/contract-authoring-determinism-design.md`](contract-authoring-determinism-design.md):
+*the tool owns structure/ids/cross-refs/derivation; the LLM authors only judgment.*
 
----
-
-## 2. Forward work — contract-authoring determinism (HIGH PRIORITY, not implemented)
-
-**Ethan's ask:** make creating contracts/obligations/invariants efficient, less error-prone, and
-doable by **both weak and strong models**, leveraging **deterministic tools**.
-
-**Doc:** [`docs/contract-authoring-determinism-design.md`](contract-authoring-determinism-design.md).
-**Core idea:** *invert* authoring — the tool owns structure / IDs / cross-refs / derivation /
-validation; the LLM authors only irreducible **judgment** content in small pre-scaffolded,
-write-validated slots. Today all 13 contract artifacts are 100% LLM-authored and the backend only
-validates. The derivable ones (`obligation_ledger`, `test_validator_plan`, `implementation_dag`
-skeleton) have their mapping rules **already encoded as the inverse of existing validators**
-(`validatePairedObligations`, `deriveNodeModelTier`, `validateImplementationDAGIntegrity`); a pure
-`repairDownstreamPhases` deriver exists but is **unwired**; there is **no single ID authority**
-(root of the merge trap in §4).
-
-Strategies (prioritized; plug-in points in the doc):
-- **S1** derive the derivable artifacts in code + **S3** skeleton-scaffold + write-time validation
-  → **do first** (biggest efficiency+robustness; unblocks the weak-model goal).
-- **S2** patch-based repair + wire the dead `repairDownstreamPhases`; **S4** single ID authority
-  (kills the merge trap at the root).
-- **S5** structural linter before the LLM adversarial phases; **S6** single-source the schema
-  (`schemas/contract_pipeline.schema.json` is stale drift).
-- **S7** (parallel **audit-code** track) anti-hallucination by **grounding the claim, not attesting
-  the read**: quote-and-verify on defect claims (tool re-reads the cited verbatim span), executable
-  anchor on behavior claims (tool runs the command), adversarial cross-check + traceability on
-  judgment. Replaces the gameable proof-of-reading remnant (`file_coverage[].total_lines`,
-  `src/orchestrator/fileAnchors.ts`). Cheap + high-ROI; can land early on its own.
-- **S8** (audit-code) fix the **conceptual design review step itself** — it caught *none* of this
-  class in the 452-self-audit, but the review is a **repo-agnostic** tool, so the fix is to restore
-  its degraded *general* design, NOT to teach it this project's concerns. Four fixes: (1) ask
-  **general** first-principles questions ("is the fundamental approach right? what core assumption
-  underlies this, is it sound? what would a clean-sheet redesign do? where's the deepest structural
-  risk?") — NOT project-specific lenses like determinism-vs-LLM / weak-model / ground-truth (a
-  general question against our actual code surfaces our issue as a consequence — that's the point);
-  (2) **orient then roam** — context package + project docs + an `/init`-style overview, then let it
-  read the actual files freely (today: ~20 risk-ranked units, summaries only); (3) make the **judge
-  judge** (merit/validity/what's-missing), not merge+dedup; (4) ground the output (evidence required,
-  = S7 applied) + gate it (can't auto-complete empty). Synthesis: the conceptual review is the one
-  place to **lean into judgment, not determinism** — tooling enables it (orientation + docs + `/init`
-  + freedom) and grounds/gates the output, but never constrains the judgment. Tier-3: raise the odds,
-  can't guarantee. Code-grounded reasons + plug-in points in the determinism doc S8.
+- **S1 flagship — `obligation_ledger` is derived, not authored.** New
+  `src/contractPipeline/derive.ts` → `deriveObligationLedger(finalized_module_contracts)`: a pure
+  function mapping each module to one **structural** "implement per contract" obligation, each
+  module **invariant** to an `invariant` obligation, and each **failure_mode** to a `behavioral`
+  obligation (stable ids, `depends_on: []`). Assembled via the shared `buildObligationLedger`
+  (single-sourced cycle check + envelope). Wired as an **intercept** in
+  `buildNextContractPipelineStep` (`steps/contractPipeline.ts`, after the goal-id gate): when the
+  next phase is `obligation_ledger`, the tool derives → `writeContractArtifact` → recurses —
+  mirroring the cyclic-seam no-cycles fast path. **The obligation ledger is no longer dispatched as
+  an LLM phase.**
+- **S1 skeletons + S3 scaffold — `test_validator_plan` & `implementation_dag`.** These keep an
+  irreducible judgment slot (assertion text; node title/description/commands), so the tool derives
+  their **skeleton** (`buildTestValidatorPlanScaffold` / `buildImplementationDagScaffold` in
+  `derive.ts`) — ids/cross-refs filled, judgment fields blank — and injects it into the dispatch
+  prompt via the existing `buildPhaseStep(phase, extraSection)` mechanism. The model fills only the
+  blanks; it cannot drop, misname, or mis-reference an obligation.
+- **S3 write-time validator — `validate-artifact` CLI** (`src/index.ts`): wraps
+  `CONTRACT_PIPELINE_VALIDATORS`; `--name <artifact> --file <path>` (or stdin); prints
+  `status: ok|error` + issues, exits 0/1. Every contract-pipeline prompt now references it as a
+  pre-`next-step` self-check (generic hint in `renderContractPipelinePrompt`).
+- **Grounding correction (verified against code, not the doc):** `design_spec` is **legacy/unused**
+  — `validateDesignSpecGates` is invoked on `finalized_module_contracts`, whose `invariants` are
+  per-module bare strings, so Gate 3 (invariant↔obligation) never fires. Obligations derive from
+  `finalized_module_contracts` invariants/failure_modes, **not** a `design_spec`.
+- **Tests:** `tests/contract-pipeline-derive-obligations.test.ts` (8: deriver mapping, intercept
+  end-to-end, scaffolds, CLI registration). **Green: remediate-code 1521/0; `npm run build` +
+  `npm run check` clean.** Shipped as remediate-code **0.19.0** (minor; additive CLI + internal
+  derivation — see latest `remediate-code-v*` tag / `npm view`).
+- **Carried residuals (know these):**
+  - The skeleton scaffold is injected only on the **initial-authoring** dispatch of the two phases,
+    not on the judge `proceed_residual` path or the DAG integrity/traceability **repair re-emits**
+    (those keep their targeted error guidance). Low stakes; revisit if repair quality lags.
+  - The `obligation_ledger` **ROLE** in `contractPipelinePrompts.ts` is now vestigial on the normal
+    path (kept for the judge-repair path, where a judge may target `obligation_ledger`, and as shape
+    documentation). The intercept only fires when the artifact is **missing**, so a judge-authored
+    repair is honored; a `finalized_module_contracts` repair staleness-archives the ledger → it
+    **re-derives** from the repaired contracts. This composition is intentional and correct.
 
 ---
 
-## 3. Open decisions for Ethan (ask before acting)
+## 2. Forward work — remaining determinism strategies (HIGH PRIORITY)
 
-- **A — Ship `c6fae403`? → RESOLVED: SHIPPED this turn** (Ethan green-lit). `main` pushed + changed
-  packages published via `/ship`; global bins reinstalled. (The 2 CRLF files —
-  `scripts/generate-auditor-contract-fixture.mjs`, `tests/fixtures/audit-findings-simple.json` —
-  were renormalized to LF as part of the ship clean-tree guard.)
-- **B — How to drive the determinism work?** *(open)* Implement **S1+S3** directly, or **dogfood** it via
-  `audit-code → remediate-code` (once S1/S3 land, the pipeline pays for its own improvement). S7 is
-  independent and can start anytime.
+Doc: [`docs/contract-authoring-determinism-design.md`](contract-authoring-determinism-design.md).
+S1+S3 (§1b) are done. Remaining, prioritized:
+
+- **S2 — patch-based repair + deterministic downstream re-derivation.** On `needs_repair`, the LLM
+  emits a targeted *patch*, not a full rewrite; the tool re-derives downstream via the S1 derivers
+  and re-runs only the adversarial phases the **already-existing-but-unwired** `repairDownstreamPhases`
+  computes (`validation/contractPipelineGates.ts`). Biggest token saving on the expensive phase.
+- **S4 — single ID authority.** A tool-owned registry mints `goal_id`/module/obligation/node ids and
+  owns the `CP-BLOCK-`↔bare-node-id mapping — eliminates the recurring merge trap at the root
+  (the tolerant merge stays as defence-in-depth). New `contractPipeline/idRegistry.ts`.
+- **S5 — structural linter before the adversarial phases.** Run fuller ID-integrity/dangling-ref/
+  coverage-symmetry checks deterministically *before* critic/judge so the adversarial budget is spent
+  on semantics.
+- **S6 — single-source the schema.** `schemas/contract_pipeline.schema.json` is stale drift; make it
+  (or a regenerated equivalent) the one source the validators/derivers/scaffolds consume, or delete
+  it; guard with a generator↔committed test.
+- **S7 — audit-code anti-hallucination by grounding the claim** (independent track, cheap/high-ROI):
+  quote-and-verify on defect claims, executable anchor on behavior claims, traceability on judgment;
+  replaces the gameable `file_coverage[].total_lines` / `orchestrator/fileAnchors.ts` remnant. Can
+  land on its own (needs only the audit-code result schema + ingest).
+- **S8 — audit-code conceptual-design-review fix** (repo-agnostic): general first-principles
+  questions, orient-then-roam over real files, a judge that judges, evidence-grounded + gated output.
+  Lean *into* judgment here, don't constrain it.
+
+**Virtuous cycle:** now that S1/S3 are live, each remaining strategy can be dogfooded through the
+improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent audit-code track.
+
+---
+
+## 3. Open decisions
+
+- **A — Ship `c6fae403`? → RESOLVED: SHIPPED** (prior turn).
+- **B — How to drive the determinism work? → RESOLVED: hand-implemented S1+S3 this turn.**
+- **C — How to drive S2/S4–S8?** *(open)* Now that S1/S3 are live, the cleanest options are
+  **dogfood** (`/remediate-code` on the determinism design doc, scoped to S2/S4/S5/S6 — the
+  improved pipeline implements its own next improvement) or continue **hand-implementing**. **S7+S8
+  are an independent audit-code track** and can start anytime (S7 quote-verify is the cheapest
+  first win). Recommended: S7 (independent, high-ROI) + dogfood S2/S4 next.
 
 ---
 
 ## 4. Operational traps (read before any remediate/audit run)
 
-- **Dogfooding separation (critical):** the `/remediate-code` and `/audit-code` slash workflows run
-  the **global bins** (`remediator-lambda@0.18.1`, `auditor-lambda@0.21.3`), **NOT the working
-  tree**. So the fixes in `c6fae403` are **not live until published** — a fresh run still hits the
-  OLD behavior (the next two traps). Test working-tree changes via the dev wrappers / direct tests,
-  not the slash workflow.
-- **`finding_id` vs `block_id` merge trap (live bin):** implement workers emit the
-  `CP-BLOCK-N-*` block id; `merge-implement-results` wants the **bare `N-*` node id** → "Unknown
-  finding_id". Until the tolerant merge (S4) is published, either instruct workers to emit the bare
-  node id, or patch result files (strip the `CP-BLOCK-` prefix) before merging.
-- **`closing_action` ignored (live bin):** the `intent_checkpoint.closing_action` ("commit") is not
-  honored — close runs "none". Commit manually if needed.
-- **Async typecheck Stop-hook lies during concurrent edits** (snapshots mid-edit states). Trust the
-  authoritative `npm run check`; verify from disk.
-- **Build-race:** never run two `npm run build` on one package concurrently (corrupts `dist`). Until
-  the rolling scheduler is live, the **host** manages this — verify **build-free**: `npm run check`
-  (no emit) + `npx vitest run` (remediate-code) / `node --import tsx/esm --test` (audit-code, shared);
-  **never** `npm test` / `npm run build` (they build). Rebuild `shared` once between dependency levels.
+- **The c6fae403 + S1/S3 fixes ARE live now.** Global bins are current (auditor-lambda 0.21.4 /
+  remediator-lambda ≥0.19.0). The old "not live until published" caveat is resolved: the tolerant
+  `finding_id` merge and `closing_action` honoring are in the live bin. **Confirm the live versions**
+  (`npm ls -g`) before assuming a fix is or isn't present.
+- **`obligation_ledger` is now tool-derived.** A fresh `/remediate-code` run will **not** dispatch an
+  obligation-ledger authoring step — it is auto-written from `finalized_module_contracts`. The
+  `test_validator_plan` and `implementation_planning` prompts now carry a **pre-filled skeleton**;
+  the worker fills only the blank slots. Don't be surprised by either.
+- **Build-race:** never run two `npm run build` on one package concurrently (corrupts `dist`). During
+  dev, verify **build-free**: `npm run check` (no emit) + `npx vitest run` (remediate-code) /
+  `node --import tsx/esm --test` (audit-code, shared); **never** `npm test` / `npm run build` (they
+  build). Rebuild `shared` once between dependency levels.
 - **Always run tests with `CLAUDECODE` unset** (bash: `env -u CLAUDECODE …`; PowerShell:
-  `$env:CLAUDECODE=$null; …`). A Claude session sets `CLAUDECODE=1`, which hard-fails a provider
-  test and poisons runtime grading.
+  `$env:CLAUDECODE=$null; …`). A Claude session sets `CLAUDECODE=1`, which hard-fails a provider test
+  and poisons runtime grading.
 - **Build order:** `npm run build -w @audit-tools/shared` → `npm run build` → `npm run check`.
   Green-at-every-commit is hook-enforced (`.claude/hooks/pre-commit-gate.mjs` runs `check`).
-- **Backend commands** (`next-step`, `merge-implement-results`) run **un-wrapped**; parse `next-step`
-  output by slicing the first `{` to the last `}` (a `[remediate-code] …` log line precedes the JSON).
+- **Backend commands** (`next-step`, `merge-implement-results`, `validate-artifact`) run **un-wrapped**;
+  parse `next-step` output by slicing the first `{` to the last `}` (a `[remediate-code] …` log line
+  precedes the JSON).
 - **Delegate adversarial phases** (critic / judge / counterexample) to **independent** subagents —
   not author-marks-own-homework.
 - **Resume gate:** passing `--input` to `next-step` when a run is already past intake triggers a
   resume-vs-restart gate → write `confirm_resume_ack.json` `{ "choice": "resume" }` and re-run
   **without** `--input`.
+- **Async typecheck Stop-hook lies during concurrent edits** (snapshots mid-edit states). Trust the
+  authoritative `npm run check`; verify from disk.
 
 ---
 
 ## 5. Key file locations
 
 - **Determinism strategy:** [`docs/contract-authoring-determinism-design.md`](contract-authoring-determinism-design.md).
-- **remediate-code contract pipeline:** `src/steps/contractPipeline.ts` (driver/ingest/gates),
-  `src/steps/contractPipelinePrompts.ts` (phase-prompt renderer), `src/validation/contractPipeline.ts`
-  + `contractPipelineGates.ts` (per-artifact validators + the two deterministic transforms
-  `deriveNodeModelTier` / `repairDownstreamPhases`), `src/contractPipeline/artifactStore.ts`
-  (envelope, content/dependency hashing, staleness DAG), `src/steps/dispatch.ts`
-  (`buildBlockAliasMap` / `collapseItemResults` / `mergeImplementResults` — the merge-trap seam),
-  `src/steps/nextStep.ts` (rolling dispatch + final gate), `src/coverage/findingLedger.ts`.
-- **audit-code (S7 target):** `schemas/audit_result.schema.json`, `src/validation/auditResults.ts`,
-  `src/orchestrator/resultIngestion.ts` + `ingestionExecutors.ts`, `src/cli/mergeAndIngestCommand.ts`,
-  `src/cli/validateResultCommand.ts` (existing write-time validator affordance),
-  `src/prompts/renderWorkerPrompt.ts`, `src/orchestrator/fileAnchors.ts` (the proof-of-reading
-  remnant to generalize/replace).
+- **S1+S3 (new):** `packages/remediate-code/src/contractPipeline/derive.ts` (all derivers +
+  scaffolds), `src/steps/contractPipeline.ts` (the `obligation_ledger` intercept + `buildScaffoldSection`
+  + the dispatch branch), `src/steps/contractPipelinePrompts.ts` (generic self-check reference;
+  vestigial `obligation_ledger` ROLE), `src/index.ts` (`validate-artifact` command),
+  `tests/contract-pipeline-derive-obligations.test.ts`.
+- **remediate-code contract pipeline (for S2/S4/S5/S6):** `src/validation/contractPipelineGates.ts`
+  (validators to invert + the dead `repairDownstreamPhases` + `deriveNodeModelTier`),
+  `src/validation/contractPipeline.ts` (`CONTRACT_PIPELINE_VALIDATORS`),
+  `src/contractPipeline/artifactStore.ts` (envelope/hash/staleness DAG), `src/steps/dispatch.ts`
+  (merge seam — the S4 merge-trap consumers).
+- **audit-code (S7/S8 targets):** `schemas/audit_result.schema.json`, `src/validation/auditResults.ts`,
+  `src/orchestrator/resultIngestion.ts` + `fileAnchors.ts` (proof-of-reading remnant to replace),
+  `src/orchestrator/designReviewPrompt.ts` + `structureExecutors.ts` (conceptual review, S8).
 - **Hooks:** `.claude/hooks/pre-commit-gate.mjs` (authoritative commit gate), `async-typecheck.mjs`
   (advisory only).
+- **Backlog:** [`docs/backlog.md`](backlog.md).
 
 ---
 
 ## 6. Commit / ship state
 
-`c6fae403` = the remediation (9 modules + the in-tree 452 work). A follow-up commit landed the docs
-(`docs/contract-authoring-determinism-design.md`, this `docs/HANDOFF.md`, deletion of the old
-`docs/HANDOFF-workflow-robustness.md` — its content is in git history at `c6fae403`). Both were
-**pushed to `main` and the changed packages published to npm this turn** via `/ship`; global bins
-were reinstalled. Working tree should be clean. (Memory files live under `~/.claude/…/memory/`,
-outside the repo.) For exact published versions, see the latest `*-v*` git release tags / `npm view`.
+S1+S3 (the `derive.ts` module + step-builder intercept/scaffold wiring + `validate-artifact` CLI +
+prompt self-check + tests) plus these doc updates were committed, **pushed to `main`, and
+remediate-code published to npm this turn** (minor bump → 0.19.0; shared + audit-code unchanged, not
+re-published); the global `remediate-code` bin was reinstalled. Working tree should be clean. For the
+exact published version, see the latest `remediate-code-v*` git release tag / `npm view remediator-lambda`.
 
 ---
 
 ## 7. References
 
 - **CLAUDE.md** governing invariant: *"Auditor-agnostic robustness — enforce in tooling, never host
-  discretion."* The determinism (§2, S1–S6) and anti-hallucination (S7) work is that invariant
-  applied to the pipeline's own authoring and to the auditor's claims.
-- **Completed-run artifacts:** `.audit-tools/remediation-report.md`,
-  `.audit-tools/remediation-outcomes.json` (gitignored; on disk).
+  discretion."* The determinism (§2) and anti-hallucination (S7) work is that invariant applied to the
+  pipeline's own authoring and to the auditor's claims.
 - **Companion design docs:** `docs/remediation-workflow-design.md`, `docs/audit-workflow-design.md`.
+- **Completed-run artifacts (gitignored, on disk):** `.audit-tools/remediation-report.md`,
+  `.audit-tools/remediation-outcomes.json`.

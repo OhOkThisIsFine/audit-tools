@@ -11,6 +11,11 @@ import {
   prepareImplementDispatch,
 } from "./steps/dispatch.js";
 import { validateArtifacts } from "./validation/artifacts.js";
+import { CONTRACT_PIPELINE_VALIDATORS } from "./validation/contractPipeline.js";
+import {
+  CP_ARTIFACT_NAMES,
+  type ContractPipelineArtifactName,
+} from "./contractPipeline/artifactStore.js";
 import {
   setQuotaStateDir,
   parseHostModelRoster,
@@ -221,6 +226,77 @@ program
     );
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.status === "ok" ? 0 : 1);
+  });
+
+program
+  .command("validate-artifact")
+  .description(
+    "Validate a single contract-pipeline artifact payload against its contract (write-time self-check)",
+  )
+  .requiredOption(
+    "--name <name>",
+    "Contract-pipeline artifact name (e.g. obligation_ledger, test_validator_plan)",
+  )
+  .option("--file <path>", "Path to the artifact JSON file (defaults to stdin)")
+  .action(async (options) => {
+    const name = options.name as ContractPipelineArtifactName;
+    const validator = CONTRACT_PIPELINE_VALIDATORS[name];
+    if (!validator) {
+      console.log(
+        JSON.stringify(
+          {
+            status: "error",
+            message: `Unknown contract-pipeline artifact "${options.name}". Valid names: ${CP_ARTIFACT_NAMES.join(", ")}.`,
+          },
+          null,
+          2,
+        ),
+      );
+      process.exit(2);
+    }
+    let raw: string;
+    try {
+      raw = options.file
+        ? readFileSync(resolve(options.file), "utf8")
+        : readFileSync(0, "utf8");
+    } catch (err) {
+      console.log(
+        JSON.stringify(
+          { status: "error", message: `Could not read artifact input: ${(err as Error).message}` },
+          null,
+          2,
+        ),
+      );
+      process.exit(2);
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(raw);
+    } catch (err) {
+      console.log(
+        JSON.stringify(
+          { status: "error", message: `Artifact is not valid JSON: ${(err as Error).message}` },
+          null,
+          2,
+        ),
+      );
+      process.exit(2);
+    }
+    const issues = validator(payload, name);
+    const errors = issues.filter((issue) => issue.severity === "error");
+    console.log(
+      JSON.stringify(
+        {
+          status: errors.length === 0 ? "ok" : "error",
+          name,
+          issue_count: issues.length,
+          issues,
+        },
+        null,
+        2,
+      ),
+    );
+    process.exit(errors.length === 0 ? 0 : 1);
   });
 
 program
