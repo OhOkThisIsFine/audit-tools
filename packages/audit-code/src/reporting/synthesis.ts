@@ -61,6 +61,12 @@ export interface AuditReportSummary {
   excluded_file_count: number;
   runtime_validation_status_breakdown: Record<string, number>;
   /**
+   * Per-status counts (grounded/ungrounded) of the S7 grounding pass. Optional
+   * so the shared `AuditFindingsSummary` (which also makes it optional) stays
+   * assignable to this render shape; absent when no finding carried a verdict.
+   */
+  grounding_status_breakdown?: Record<string, number>;
+  /**
    * Distinct count of tasks/files NOT audited because a packet budget cap
    * (FINDING-013) deferred them — kept separate from `excluded_file_count`
    * (non-auditable files), since a budget skip is an honest partial-coverage
@@ -103,6 +109,15 @@ function severityBreakdown(findings: Finding[]): Record<string, number> {
 
 function lensBreakdown(findings: Finding[]): Record<string, number> {
   return countBy(findings, (finding) => finding.lens);
+}
+
+/**
+ * Per-status counts of the S7 grounding pass over the findings. Findings with no
+ * grounding verdict (the pass did not run on them) are skipped by `countBy`, so
+ * an empty result means "no finding was graded" and the caller omits the field.
+ */
+function groundingStatusBreakdown(findings: Finding[]): Record<string, number> {
+  return countBy(findings, (finding) => finding.grounding?.status);
 }
 
 function runtimeStatusBreakdown(
@@ -190,6 +205,7 @@ export function buildAuditReportModel(params: {
   const coverage = coverageSummary(params.coverageMatrix);
   const strandedUnitCount =
     params.activeDispatch?.partial_completion_terminal?.stranded_ids?.length ?? 0;
+  const groundingBreakdown = groundingStatusBreakdown(findings);
   const model: AuditReportModel = {
     summary: {
       finding_count: findings.length,
@@ -200,6 +216,9 @@ export function buildAuditReportModel(params: {
       excluded_file_count: coverage.excluded_file_count,
       budget_deferred_task_count: coverage.budget_deferred_task_count,
       ...(strandedUnitCount > 0 ? { stranded_unit_count: strandedUnitCount } : {}),
+      ...(Object.keys(groundingBreakdown).length > 0
+        ? { grounding_status_breakdown: groundingBreakdown }
+        : {}),
       runtime_validation_status_breakdown: runtimeStatusBreakdown(
         params.runtimeValidationReport,
         params.runtimeValidationTaskManifest,
@@ -318,6 +337,15 @@ export function renderAuditReportMarkdown(
     ...(report.summary.lens_breakdown && Object.keys(report.summary.lens_breakdown).length > 0
       ? [`- Lens breakdown: ${formatCountList(report.summary.lens_breakdown)}`]
       : []),
+    ...(report.summary.grounding_status_breakdown &&
+    Object.keys(report.summary.grounding_status_breakdown).length > 0
+      ? [
+          `- Grounding (S7): ${formatCountList(report.summary.grounding_status_breakdown)}` +
+            ((report.summary.grounding_status_breakdown.ungrounded ?? 0) > 0
+              ? " — ungrounded findings are quarantined below"
+              : ""),
+        ]
+      : []),
     `- Fully audited files: ${report.summary.audited_file_count}`,
     `- Excluded non-auditable files: ${report.summary.excluded_file_count}`,
     ...((report.summary.budget_deferred_task_count ?? 0) > 0
@@ -391,6 +419,11 @@ export function renderAuditReportMarkdown(
       }
       lines.push(`- Files: ${finding.affected_files.map((file) => file.path).join(", ")}`);
       lines.push(`- Summary: ${finding.summary}`);
+      if (finding.grounding?.status === "ungrounded") {
+        lines.push(
+          `- ⚠ Grounding: ungrounded — ${finding.grounding.reason ?? "cited span did not re-verify against disk"} (surfaced, not confirmed)`,
+        );
+      }
       if (finding.evidence && finding.evidence.length > 0) {
         lines.push("- Evidence:");
         for (const evidence of finding.evidence) {
@@ -399,6 +432,30 @@ export function renderAuditReportMarkdown(
       }
       lines.push("");
     }
+  }
+
+  // S7 tier-3 surfacing: list the findings the grounding pass could not
+  // re-verify against disk in a dedicated, visually-separated section so they
+  // are never silently confirmed. They remain in the main findings list (and in
+  // the machine contract / work blocks) but are explicitly marked not-confirmed.
+  const ungroundedFindings = report.findings.filter(
+    (finding) => finding.grounding?.status === "ungrounded",
+  );
+  if (ungroundedFindings.length > 0) {
+    lines.push("## Ungrounded Findings (quarantined)", "");
+    lines.push(
+      `${ungroundedFindings.length} finding(s) could not be re-verified against the source on disk (S7 grounding: the cited verbatim span was not found, or no span was provided). They appear above with the other findings but are **not confirmed** — treat them with skepticism and check the code before acting.`,
+      "",
+    );
+    for (const finding of ungroundedFindings) {
+      lines.push(
+        `- **${finding.id}** — ${finding.title} (${finding.severity}, ${finding.lens})`,
+      );
+      if (finding.grounding?.reason) {
+        lines.push(`  - Reason: ${finding.grounding.reason}`);
+      }
+    }
+    lines.push("");
   }
 
   lines.push(...renderProcessFeedbackSection(options.reflections ?? []));
@@ -455,6 +512,7 @@ export function renderAuditReportMarkdown(
 export function normalizeExistingFindingsReport(
   report: AuditFindingsReport,
 ): AuditFindingsReport {
+  const groundingBreakdown = groundingStatusBreakdown(report.findings as Finding[]);
   return {
     ...report,
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
@@ -464,6 +522,9 @@ export function normalizeExistingFindingsReport(
       work_block_count: report.work_blocks.length,
       severity_breakdown: severityBreakdown(report.findings as Finding[]),
       lens_breakdown: lensBreakdown(report.findings as Finding[]),
+      ...(Object.keys(groundingBreakdown).length > 0
+        ? { grounding_status_breakdown: groundingBreakdown }
+        : {}),
     },
   };
 }

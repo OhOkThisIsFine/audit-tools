@@ -156,6 +156,15 @@ export interface AuditFindingsSummary {
   runtime_validation_status_breakdown: Record<string, number>;
   lens_breakdown?: Record<string, number>;
   /**
+   * Per-status counts of the auditor's quote-and-verify grounding pass (S7):
+   * how many findings re-verified against disk (`grounded`) vs. were quarantined
+   * as unverifiable (`ungrounded`). Absent when no finding carried a grounding
+   * verdict (the grounding pass did not run on this report). A non-zero
+   * `ungrounded` count means some findings are surfaced-but-not-confirmed — see
+   * the report's "Ungrounded Findings (quarantined)" section.
+   */
+  grounding_status_breakdown?: Record<string, number>;
+  /**
    * Units/tasks stranded by a partial-completion terminal (empty-pool or
    * livelock guard). Distinct from `budget_deferred_task_count` (planned
    * deferrals) — these units could not be dispatched because the provider pool
