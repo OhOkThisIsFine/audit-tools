@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { mintUniqueId } from "@audit-tools/shared";
 import type { Finding } from "../types.js";
 
 // Stable lens -> id prefix. The lens is the canonical addressing axis, so the
@@ -161,11 +162,7 @@ export function assignStableFindingIds(findings: Finding[]): Finding[] {
       .update(findingIdentitySignature(identityFields(finding)))
       .digest("hex")
       .slice(0, 8);
-    let id = `${prefix}-${hash}`;
-    for (let n = 2; used.has(id); n++) {
-      id = `${prefix}-${hash}-${n}`;
-    }
-    used.add(id);
+    const id = mintUniqueId(used, `${prefix}-${hash}`);
     const reKeyed: Finding = { ...finding, id };
     delete reKeyed.related_findings;
     return reKeyed;

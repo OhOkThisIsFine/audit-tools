@@ -23,6 +23,7 @@
 import {
   buildObligationLedger,
   isRecord,
+  mintUniqueId,
   type ObligationEntry,
   type ObligationLedger,
 } from "@audit-tools/shared";
@@ -80,7 +81,7 @@ export function deriveObligationLedger(
     // Contract-conformance obligation — represents the module even when it
     // declares no invariants/failure modes (structural kind → not testable).
     obligations.push({
-      id: mintId(usedIds, `OBL-${base}-contract`),
+      id: mintUniqueId(usedIds, `OBL-${base}-contract`),
       description:
         `Implement module "${mod.name}" per its finalized contract ` +
         `(inputs: ${fmtList(mod.inputs)} → outputs: ${fmtList(mod.outputs)}; ` +
@@ -93,7 +94,7 @@ export function deriveObligationLedger(
 
     mod.invariants.forEach((invariant, i) => {
       obligations.push({
-        id: mintId(usedIds, `OBL-${base}-inv-${i + 1}`),
+        id: mintUniqueId(usedIds, `OBL-${base}-inv-${i + 1}`),
         description: invariant,
         kind: "invariant",
         depends_on: [],
@@ -104,7 +105,7 @@ export function deriveObligationLedger(
 
     mod.failure_modes.forEach((failureMode, j) => {
       obligations.push({
-        id: mintId(usedIds, `OBL-${base}-fail-${j + 1}`),
+        id: mintUniqueId(usedIds, `OBL-${base}-fail-${j + 1}`),
         description: `Handle failure mode: ${failureMode}`,
         kind: "behavioral",
         depends_on: [],
@@ -265,18 +266,6 @@ function slug(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-}
-
-/** Mint a unique id, disambiguating collisions deterministically by suffix. */
-function mintId(used: Set<string>, base: string): string {
-  let id = base;
-  let n = 2;
-  while (used.has(id)) {
-    id = `${base}-${n}`;
-    n += 1;
-  }
-  used.add(id);
-  return id;
 }
 
 function strArray(value: unknown): string[] {

@@ -28,7 +28,11 @@ export type RemediationStepKind =
   | "unhandled_state"
   | "zero_documentable_findings";
 
-import type { StepStatus, DispatchModelHint } from "@audit-tools/shared";
+import type {
+  StepStatus,
+  DispatchModelHint,
+  AccessDeclaration,
+} from "@audit-tools/shared";
 
 export type RemediationStepStatus = StepStatus;
 
@@ -48,13 +52,11 @@ export interface RemediationStep {
 
 export type DispatchPhase = "document" | "implement";
 
-export type { DispatchModelTier, DispatchModelHint } from "@audit-tools/shared";
-
-export interface AccessDeclaration {
-  read_paths: string[];
-  write_paths: string[];
-  forbidden_patterns?: string[];
-}
+export type {
+  DispatchModelTier,
+  DispatchModelHint,
+  AccessDeclaration,
+} from "@audit-tools/shared";
 
 export interface DispatchPlanItem {
   task_id: string;

@@ -56,7 +56,7 @@ import {
   buildImplementationDagScaffold,
   acceptedCounterexampleIds,
 } from "../contractPipeline/derive.js";
-import { toBlockId } from "../contractPipeline/idRegistry.js";
+import { ensureNodeId, toBlockId } from "../contractPipeline/idRegistry.js";
 import {
   renderContractPipelinePrompt,
   renderContractRepairPrompt,
@@ -1576,7 +1576,7 @@ export async function promoteImplementationDagToExtractedPlan(
 
   const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
   const findings = nodes.map((node, index) => {
-    const id = node.id ?? `CP-${String(index + 1).padStart(3, "0")}`;
+    const id = ensureNodeId(node.id, index);
     const contractObligations = [...new Set(node.satisfies_obligations ?? [])];
     const verificationObligations = [
       ...new Set(node.verification_obligation_ids ?? []),
@@ -1632,13 +1632,13 @@ export async function promoteImplementationDagToExtractedPlan(
   // (the upstream nodes whose output it builds on). obligation_ids unions the
   // satisfied and verification obligations. This is the auditable backward trace
   // from a remediation finding to the contract obligations it discharges.
-  const nodeIdSet = new Set(nodes.map((n, i) => n.id ?? `CP-${String(i + 1).padStart(3, "0")}`));
+  const nodeIdSet = new Set(nodes.map((n, i) => ensureNodeId(n.id, i)));
   const traceability: Record<
     string,
     { obligation_ids: string[]; node_ids: string[] }
   > = {};
   for (const [index, node] of nodes.entries()) {
-    const id = node.id ?? `CP-${String(index + 1).padStart(3, "0")}`;
+    const id = ensureNodeId(node.id, index);
     const obligationIds = [
       ...new Set([
         ...(node.satisfies_obligations ?? []),
@@ -1650,13 +1650,14 @@ export async function promoteImplementationDagToExtractedPlan(
     traceability[id] = { obligation_ids: obligationIds, node_ids: nodeIds };
   }
 
-  const blocks = nodes.map((node) => {
+  const blocks = nodes.map((node, index) => {
+    const nodeId = ensureNodeId(node.id, index);
     const deps = ((node as { depends_on?: string[] }).depends_on ?? []).map(
       (depId) => toBlockId(depId),
     );
     return {
-      block_id: toBlockId(node.id),
-      items: [node.id],
+      block_id: toBlockId(nodeId),
+      items: [nodeId],
       // INV-remediate-pipeline-02: a block with prerequisites is never
       // wave-dispatched as independent — parallel_safe derives from depends_on.
       parallel_safe: deps.length === 0,
