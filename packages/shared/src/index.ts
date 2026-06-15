@@ -157,6 +157,9 @@ export {
 // Concurrency: bounded, order-preserving parallel map
 export { mapWithConcurrency } from "./concurrency.js";
 
+// Id primitives: shared collision-disambiguation convention
+export { mintUniqueId } from "./ids.js";
+
 // Tooling: command execution
 export type { RunTrackedOptions, RunTrackedResult } from "./tooling/exec.js";
 export {

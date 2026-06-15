@@ -1,11 +1,11 @@
+import type { AccessDeclaration } from "@audit-tools/shared";
+
 export const WORKER_COMMAND_MODES = ["run", "deferred"] as const;
 export type WorkerCommandMode = (typeof WORKER_COMMAND_MODES)[number];
 
-export interface AccessDeclaration {
-  read_paths: string[];
-  write_paths: string[];
-  forbidden_patterns?: string[];
-}
+// AccessDeclaration is single-sourced in @audit-tools/shared; re-exported here so
+// existing local importers (cli/steps.ts, prompts/renderWorkerPrompt.ts) are unchanged.
+export type { AccessDeclaration };
 
 /**
  * Worker tasks serialize directly to task.json, so their persisted field names

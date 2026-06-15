@@ -21,6 +21,26 @@
 export const CP_BLOCK_PREFIX = "CP-BLOCK-";
 
 /**
+ * Mint the canonical bare node id for a DAG node, applying the deterministic
+ * `CP-NNN` fallback when the planner-authored `node.id` is missing (the DAG is
+ * parsed from an LLM envelope via an unchecked cast, so `id` can be absent at
+ * runtime). This is the ONE place the fallback rule lives, so a node's finding
+ * id, block id, `items`, and traceability key can never diverge.
+ *
+ * This closes a merge-trap: when `node.id` was missing, the finding id used this
+ * fallback (`CP-001`) but the block id was built from the raw `node.id`
+ * (`CP-BLOCK-undefined`), so `fromBlockId` could not recover the finding id and
+ * the worker result landed in `unresolved`. Routing every node-id site through
+ * `ensureNodeId` makes `fromBlockId(toBlockId(ensureNodeId(...)))` round-trip.
+ */
+export function ensureNodeId(
+  rawId: string | undefined,
+  index: number,
+): string {
+  return rawId ?? `CP-${String(index + 1).padStart(3, "0")}`;
+}
+
+/**
  * Mint the block id for a bare DAG node id. This is the ONLY place the
  * `CP-BLOCK-` prefix is applied — every producer of a block id goes through here.
  */
