@@ -23,10 +23,13 @@
    **S5 + S6 (remediate-code) are ALSO shipped this turn** → remediator-lambda **0.23.0**, commits
    `3b39377` (S5 — deterministic structural floor before the adversarial phases) + `94a2c33` (S6 —
    single-source the contract-pipeline contract in the TS validators; deleted the stale JSON schema)
-   (§1g). **The contract-authoring determinism roadmap is now COMPLETE** (S1/S3/S4/S5/S6 + S7 all tiers
-   + S8 done; S2 dropped). Only two small, **low-priority deferred follow-ons** remain: S8 fix 4b (make
-   the headless empty-auto-complete review visible — the path is largely vestigial) and parallelizing
-   the S7 ingest anchor runs. Items 1–7 below are prior-turn context (still accurate).
+   (§1g). **The contract-authoring determinism roadmap is COMPLETE** (S1/S3/S4/S5/S6 + S7 all tiers
+   + S8 done; S2 dropped). **The S7 ingest-anchor parallelization follow-on is ALSO shipped** (later
+   turn) → **shared 0.20.0 / auditor-lambda 0.25.0 / remediator-lambda 0.24.0**, commit `4cb75931`
+   (§1h): new shared `mapWithConcurrency` grounds findings under a bounded pool (the serial
+   sum-of-spawns was genuinely slow — Ethan flagged it; my "rare" deferral was wrong). **Only ONE
+   low-priority deferred follow-on now remains: S8 fix 4b** (make the headless empty-auto-complete
+   review visible — the path is largely vestigial). Items 1–7 below are prior-turn context (still accurate).
 
 1. **Workflow-robustness remediation (`c6fae403`) is SHIPPED** (prior turn): shared 0.17.3 /
    auditor-lambda 0.21.4 / remediator-lambda 0.18.2, live in the global bins. See §1a.
@@ -196,9 +199,9 @@ Completes S7 (audit-code anti-hallucination). Tier-1 (quote-and-verify, prior tu
 - **Tests:** `tests/grounding-surfacing.test.mjs` (4) + `tests/anchor-grounding.test.mjs` (8).
   **Green: shared 550/0, audit-code 2141/0, remediate-code 1525/0.** Shipped as **shared 0.19.0 /
   auditor-lambda 0.23.0 / remediator-lambda 0.22.0** (CI-green, global bins reinstalled, verified live).
-- **Residual:** anchors run sequentially at ingest (fine — few findings carry one; parallelize only if
-  it bites). The allowlist is deliberately tight (inspection-only): a "test fails" claim needing a test
-  run is *skipped* (falls back to tier-1 + the adversarial cross-check), per the proportionality caveat.
+- **Residual:** anchors now run under a bounded concurrency pool at ingest (§1h — the serial pass was
+  genuinely slow). The allowlist is deliberately tight (inspection-only): a "test fails" claim needing a
+  test run is *skipped* (falls back to tier-1 + the adversarial cross-check), per the proportionality caveat.
 
 ### 1f. Contract-authoring determinism S8 — conceptual design review fix (this turn — audit-code)
 
@@ -260,20 +263,38 @@ remediator-lambda **0.23.0** (shared/audit-code unchanged; CI-green, bin reinsta
 - **Tests:** +3 cases in `tests/contract-obligations-and-gates.test.ts` (S5 gate) + an S6 guard test.
   **Green: remediate-code 1521/0.**
 
+### 1h. S7 ingest-anchor parallelization (later turn — shared + audit-code)
+
+The S7 tier-2 grounding pass spawned each finding's anchor command **sequentially** at ingest
+(`groundPassingFindings`) and in the worker self-check, so many anchored findings cost the *sum* of
+their runtimes — genuinely slow. Ethan flagged it; the earlier "rare / only if it bites" deferral was
+wrong (see memory `proportionality-defer-needs-user-signal`). Commit `4cb75931`; **shared 0.20.0 /
+auditor-lambda 0.25.0 / remediator-lambda 0.24.0** (remediate republished as a shared dependent).
+
+- New shared primitive `mapWithConcurrency(items, limit, fn)` (`packages/shared/src/concurrency.ts`):
+  order-preserving bounded parallel map. Clamps `limit` ≥ 1; empty → `[]`; a rejection propagates.
+- `groundPassingFindings` (ingest) and the `validate-result` self-check now ground findings under a
+  CPU-derived cap `ANCHOR_GROUNDING_CONCURRENCY` (clamped [2, 8], in `anchorGrounding.ts`): serial
+  sum-of-spawns → ~N/cap batches, concurrent spawns capped so the audited machine isn't thrashed. Each
+  unit mutates only its own finding and input order is preserved, so the ungrounded list is deterministic.
+- Coverage gap caught while doing this: `groundPassingFindings` was never exercised with findings by the
+  suite (only the per-finding verifiers were) — exported it + added `tests/grounding-ingest-pass.test.mjs`
+  (multi-result flatten → parallel → ordered ungrounded), plus `shared/tests/concurrency.test.mjs`.
+  **Green: shared 555/0, audit-code 2147/0, remediate-code 1521/0.**
+
 ---
 
 ## 2. Forward work — determinism roadmap COMPLETE; residual low-priority follow-ons
 
 Doc: [`docs/contract-authoring-determinism-design.md`](contract-authoring-determinism-design.md).
 **Every contract-authoring determinism strategy is now done: S1/S3/S4/S5/S6 + S7 (all tiers) + S8;
-S2 dropped (verified redundant).** Only two small, **low-priority deferred follow-ons** remain —
-neither blocks anything (both have a fail-closed or working fallback today):
+S2 dropped (verified redundant).** The S7 ingest-anchor parallelization follow-on also shipped (§1h).
+**Only ONE low-priority deferred follow-on remains** — it doesn't block anything (the current path has
+a working fallback):
 - **S8 fix 4b** — make the headless `runDesignReviewAutoComplete` empty-skip visible (set a
   `*_review_skipped` flag; surface it in the report). Low value: the conversation-first flow always
   runs the review via host_delegation (intercepted before auto-complete) and the batch loop is gone,
   so the path is largely vestigial. Map in §1f / §5.
-- **S7 ingest anchor parallelization** — anchors run sequentially at ingest; parallelize only if the
-  per-finding spawn cost ever bites. See §1e.
 
 The per-strategy record (S2–S8) is below for reference:
 
@@ -298,9 +319,9 @@ The per-strategy record (S2–S8) is below for reference:
   canonical source; a guard test rejects re-introduction.
 - **S7 — audit-code anti-hallucination by grounding the claim. ✅ COMPLETE (all tiers).** Tier-1
   (quote-and-verify, §1c), tier-2 (executable anchors, §1e), and tier-3 (quarantine display +
-  grounded-wins merge, §1e) all shipped. Optional follow-ons (non-blocking): parallelize the
-  sequential ingest anchor runs; add flag-level filtering to widen the inspection-only anchor
-  allowlist if "test fails" anchors prove worth running. (`orchestrator/fileAnchors.ts` is
+  grounded-wins merge, §1e) all shipped; ingest-anchor parallelization shipped too (§1h). Optional
+  follow-on (non-blocking): add flag-level filtering to widen the inspection-only anchor allowlist if
+  "test fails" anchors prove worth running. (`orchestrator/fileAnchors.ts` is
   dispatch-time navigation guidance, left intact — the real gameable gate was `total_lines`, demoted
   in tier-1.)
 - **S8 — audit-code conceptual-design-review fix. ✅ DONE (§1f).** Repo-agnostic first-principles
@@ -329,8 +350,8 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
 
 ## 4. Operational traps (read before any remediate/audit run)
 
-- **Global bins are current: auditor-lambda 0.24.0 / remediator-lambda 0.23.0 (shared 0.19.0).** All
-  shipped fixes (tolerant `finding_id` merge, `closing_action` honoring, S1/S3/S4/S5/S6, S7 all tiers, S8)
+- **Global bins are current: auditor-lambda 0.25.0 / remediator-lambda 0.24.0 (shared 0.20.0).** All
+  shipped fixes (tolerant `finding_id` merge, `closing_action` honoring, S1/S3/S4/S5/S6, S7 all tiers + ingest-anchor parallelization, S8)
   are in the live bins. **Confirm the live versions** (`npm ls -g`) before assuming a fix is or isn't
   present.
 - **Ingest now RUNS commands (S7 tier-2).** `merge-and-ingest` (and the worker `validate-result`
@@ -426,7 +447,11 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
 
 ## 6. Commit / ship state
 
-**THIS TURN shipped three releases.** **(1) MOST RECENT — S5 + S6 (remediate-code contract-authoring
+**Most recent release — S7 ingest-anchor parallelization** (§1h): commit `4cb75931`, releases
+`bc7859ab` / `0b1f655c` / `fe2cd0ad` → **shared 0.20.0 / auditor-lambda 0.25.0 / remediator-lambda 0.24.0**
+(all 3 publish-package CI runs green; bins reinstalled + smoke `audit-code 0.25.0` / `remediate-code 0.24.0`).
+
+The determinism work shipped three releases before it: **(1) S5 + S6 (remediate-code contract-authoring
 track):** commits `3b39377` (S5 pre-adversarial structural floor) + `94a2c33` (S6 single-source schema /
 delete drift), release `0250572e` → **remediator-lambda 0.23.0** (shared/audit-code unchanged); CI run
 `27530893683` green; bin reinstalled + smoke (`remediate-code 0.23.0`). **(2) S8 conceptual design review fix:** commit
