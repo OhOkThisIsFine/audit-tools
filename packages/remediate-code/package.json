@@ -1,6 +1,6 @@
 {
   "name": "remediator-lambda",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "private": false,
   "description": "Autonomous remediation orchestrator for arbitrary repositories.",
   "keywords": [
