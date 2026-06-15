@@ -5,6 +5,11 @@ import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { validateAuditResults } from "../validation/auditResults.js";
 import { verifyFindingGrounding } from "../validation/quoteGrounding.js";
+import {
+  anchorEvidenceLine,
+  combineGroundingWithAnchor,
+  verifyFindingAnchor,
+} from "../validation/anchorGrounding.js";
 import { runAuditStep } from "./auditStep.js";
 import {
   type ActiveDispatchState,
@@ -313,13 +318,17 @@ async function validateAndCollectResults(
 }
 
 /**
- * Quote-and-verify grounding pass (S7): re-read each finding's cited verbatim
- * span from disk and content-match it, annotating `finding.grounding`. A
- * finding whose quote does not re-verify (or that carries no quote) is marked
- * `ungrounded` and surfaced — never silently dropped, never silently admitted as
- * confirmed. Advisory metadata: this does not fail a result, so a weaker
- * auditor's confident-but-fake finding is flagged for review rather than merged
- * as fact. Mutates the findings in place and returns the ungrounded references.
+ * Grounding pass (S7): re-verify each finding against disk before it is admitted
+ * as fact. Tier-1 (quote-and-verify) re-reads the cited verbatim span and
+ * content-matches it; tier-2 (executable anchor) runs the finding's read-only
+ * behavior-check command and lets a refuting run quarantine the claim. The
+ * combined verdict annotates `finding.grounding`; a finding that does not
+ * re-verify is marked `ungrounded` and surfaced — never silently dropped, never
+ * silently admitted as confirmed. The confirmed bit is always the tool's
+ * re-check, never the model's word. Advisory metadata: this does not fail a
+ * result, so a weaker auditor's confident-but-fake finding is flagged for review
+ * rather than merged as fact. Mutates the findings in place and returns the
+ * ungrounded references.
  */
 async function groundPassingFindings(
   repoRoot: string,
@@ -328,9 +337,17 @@ async function groundPassingFindings(
   const ungrounded: Array<{ task_id: string; finding_id: string; path: string }> = [];
   for (const result of passing) {
     for (const finding of result.findings) {
-      const grounding = await verifyFindingGrounding(repoRoot, finding);
-      finding.grounding = grounding;
-      if (grounding.status === "ungrounded") {
+      const tier1 = await verifyFindingGrounding(repoRoot, finding);
+      const anchor = await verifyFindingAnchor(repoRoot, finding);
+      // Record the run (confirmed/refuted/inconclusive) as evidence; a skipped
+      // anchor (off-allowlist / disabled) was not run, so add no noise.
+      if (anchor && anchor.status !== "skipped") {
+        finding.evidence = [
+          ...new Set([...(finding.evidence ?? []), anchorEvidenceLine(anchor)]),
+        ];
+      }
+      finding.grounding = combineGroundingWithAnchor(tier1, anchor);
+      if (finding.grounding.status === "ungrounded") {
         ungrounded.push({
           task_id: result.task_id,
           finding_id: finding.id,
