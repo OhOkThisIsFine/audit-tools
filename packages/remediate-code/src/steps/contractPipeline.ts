@@ -668,6 +668,75 @@ export async function evaluateContractObligationsPromotionGate(
   };
 }
 
+/**
+ * Pre-adversarial structural floor (S5). The subset of the contract-obligation
+ * gates whose inputs all exist by the time the critic phase is reached
+ * (paired-obligation coverage, source-scoped digest coverage, and seam
+ * reconciliation derivation — none of which need the judge verdict or the
+ * implementation_dag). Running them BEFORE the expensive critic/judge loop means
+ * the adversarial phases only ever see structurally-sound obligations, tests, and
+ * contracts, and a structural gap is re-emitted to the precise responsible phase
+ * instead of being discovered at promotion (after the adversarial budget is spent)
+ * and re-emitted to the wrong phase. The full {@link evaluateContractObligationsPromotionGate}
+ * — including the evidence-threading check that needs the judge + DAG — still runs
+ * at promotion as the fail-closed backstop; this gate never replaces it.
+ *
+ * Returns the first failing gate's responsible phase + rendered error lines, or
+ * null when the structural floor is clean. Each underlying validator is tolerant
+ * of an absent input, so this is safe to call at the critic boundary.
+ */
+export async function evaluatePreCriticStructuralGate(
+  artifactsDir: string,
+): Promise<{ phase: "contract_finalization" | "test_validator_plan"; errorLines: string[] } | null> {
+  const obligationLedger = envelopePayload(
+    await readContractArtifact(artifactsDir, "obligation_ledger"),
+  );
+  const testValidatorPlan = envelopePayload(
+    await readContractArtifact(artifactsDir, "test_validator_plan"),
+  );
+  const seamReport = envelopePayload(
+    await readContractArtifact(artifactsDir, "seam_reconciliation_report"),
+  );
+  const finalizedContracts = envelopePayload(
+    await readContractArtifact(artifactsDir, "finalized_module_contracts"),
+  );
+  const goalSpec = envelopePayload(await readContractArtifact(artifactsDir, "goal_spec"));
+  const sourceType =
+    isRecord(goalSpec) && typeof goalSpec.source_type === "string"
+      ? goalSpec.source_type
+      : undefined;
+  const findingEnumeration = await readOptionalJsonFile<unknown>(
+    intakePaths(artifactsDir).findingEnumeration,
+  );
+
+  // Upstream-owned checks first: a derivation/coverage gap is fixed in the
+  // finalized contracts (the obligation ledger is derived from them).
+  const designErrors = [
+    ...validateReconciliationDerivation(seamReport, finalizedContracts),
+    ...validateDigestCoverage(sourceType, findingEnumeration, obligationLedger),
+  ].filter((issue) => issue.severity === "error");
+  if (designErrors.length > 0) {
+    return {
+      phase: "contract_finalization",
+      errorLines: designErrors.map((issue) => `- [${issue.path}] ${issue.message}`),
+    };
+  }
+
+  // A testable obligation without a paired spec is fixed in the test plan
+  // (skeleton-scaffolded from the derived ledger).
+  const testErrors = validatePairedObligations(obligationLedger, testValidatorPlan).filter(
+    (issue) => issue.severity === "error",
+  );
+  if (testErrors.length > 0) {
+    return {
+      phase: "test_validator_plan",
+      errorLines: testErrors.map((issue) => `- [${issue.path}] ${issue.message}`),
+    };
+  }
+
+  return null;
+}
+
 // ── Step builder ──────────────────────────────────────────────────────────────
 
 /**
@@ -1331,6 +1400,10 @@ After writing the output file, run:
   //    (e.g. circular obligation dependencies → N-R21) are appended as an
   //    advisory section to the critic prompt so the critic can take them into account.
   if (nextPhase === "critic") {
+    // 5a. Design-spec structural gates on the finalized_module_contracts (the
+    //     "design" artifact) + obligation_ledger run first: a malformed design
+    //     artifact (error) re-emits the design phase, and a circular-obligation
+    //     dependency (warning) is appended to the critic prompt as advisory.
     const finalizedModuleContractsPayload = envelopePayload(
       await readContractArtifact(artifactsDir, "finalized_module_contracts"),
     );
@@ -1371,6 +1444,27 @@ ${errorLines}
 The following structural issues were detected and should inform your adversarial review. They do not block the pipeline but may indicate areas of design fragility:
 
 ${warningLines}
+`,
+      );
+    }
+
+    // 5b. Pre-adversarial structural floor (S5): once the design artifact itself
+    //     is clean, run the cheap cross-artifact checks whose inputs all exist by
+    //     the critic phase (paired-obligation coverage, source-scoped digest
+    //     coverage, seam reconciliation derivation) so the adversarial loop only
+    //     ever sees structurally-sound obligations/tests/contracts, and a gap is
+    //     re-emitted to the precise responsible phase instead of being discovered
+    //     at promotion after the adversarial budget is spent. evaluateContract
+    //     ObligationsPromotionGate stays the fail-closed backstop at promotion.
+    const preCriticGate = await evaluatePreCriticStructuralGate(artifactsDir);
+    if (preCriticGate) {
+      return buildPhaseStep(
+        preCriticGate.phase,
+        `## Pre-Adversarial Structural Gate Errors
+
+The ${preCriticGate.phase} output failed deterministic structural gates. Fix every issue below before adversarial review begins:
+
+${preCriticGate.errorLines.join("\n")}
 `,
       );
     }

@@ -20,6 +20,7 @@ import {
 } from "../src/validation/contractPipeline.js";
 import {
   evaluateContractObligationsPromotionGate,
+  evaluatePreCriticStructuralGate,
   promoteImplementationDagToExtractedPlan,
 } from "../src/steps/contractPipeline.js";
 import { writeContractArtifact } from "../src/contractPipeline/artifactStore.js";
@@ -543,6 +544,58 @@ async function writeDag(nodes: unknown[]): Promise<void> {
     created_at: CREATED_AT,
   });
 }
+
+describe("evaluatePreCriticStructuralGate (S5 pre-adversarial structural floor)", () => {
+  beforeEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(ARTIFACTS_DIR, { recursive: true });
+  });
+  afterEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("returns null for a structurally-sound chain (the critic only ever sees sound artifacts)", async () => {
+    await seedChain();
+    expect(await evaluatePreCriticStructuralGate(ARTIFACTS_DIR)).toBeNull();
+  });
+
+  it("catches a paired-obligation gap BEFORE the critic and attributes it to test_validator_plan", async () => {
+    await seedChain();
+    // Positive-only assertion: the negative half is missing for a testable obligation.
+    await writeContractArtifact(ARTIFACTS_DIR, "test_validator_plan", {
+      contract_version: CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
+      goal_id: "G1",
+      test_specs: [
+        { obligation_id: "O-1", name: "t", kind: "unit", assertions: ["returns the value"] },
+      ],
+      created_at: CREATED_AT,
+    });
+    const gate = await evaluatePreCriticStructuralGate(ARTIFACTS_DIR);
+    expect(gate).not.toBeNull();
+    expect(gate?.phase).toBe("test_validator_plan");
+    expect(gate?.errorLines.length).toBeGreaterThan(0);
+  });
+
+  it("catches an uncovered enumerated finding (digest coverage) and attributes it to contract_finalization", async () => {
+    await seedChain();
+    await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", {
+      contract_version: CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
+      goal_id: "G1",
+      objective: "Improve.",
+      non_goals: [],
+      success_criteria: ["Improved."],
+      source_type: "structured_audit",
+      created_at: CREATED_AT,
+    });
+    await writeJsonFile(intakePaths(ARTIFACTS_DIR).findingEnumeration, {
+      is_enumerable: true,
+      findings: [{ id: "FND-uncovered" }],
+    });
+    const gate = await evaluatePreCriticStructuralGate(ARTIFACTS_DIR);
+    expect(gate).not.toBeNull();
+    expect(gate?.phase).toBe("contract_finalization");
+  });
+});
 
 describe("evaluateContractObligationsPromotionGate + extracted-plan trace", () => {
   beforeEach(async () => {
