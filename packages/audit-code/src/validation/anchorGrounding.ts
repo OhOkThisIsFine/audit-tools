@@ -18,6 +18,7 @@
  * `AUDIT_CODE_DISABLE_ANCHORS=1`.
  */
 import { spawn } from "node:child_process";
+import { availableParallelism } from "node:os";
 import { stripClaudeCodeEnv } from "@audit-tools/shared";
 import type {
   AnchorExpectation,
@@ -30,6 +31,18 @@ import { normalizeForMatch } from "./quoteGrounding.js";
 
 /** Per-anchor wall-clock budget; a slower command is killed and inconclusive. */
 export const ANCHOR_TIMEOUT_MS = 60_000;
+
+/**
+ * Bounded concurrency for the ingest grounding pass. Anchors spawn child
+ * processes, so a serial pass over many anchored findings costs the *sum* of
+ * their runtimes — noticeably slow in practice. Grounding each finding under a
+ * pool of this size turns that into ~N/cap batches while capping concurrent
+ * spawns so the audited machine is not thrashed. CPU-derived, clamped to [2, 8].
+ */
+export const ANCHOR_GROUNDING_CONCURRENCY = Math.max(
+  2,
+  Math.min(8, availableParallelism()),
+);
 
 /**
  * Inspection-only executables a model-authored anchor may invoke. Every entry is
