@@ -39,7 +39,6 @@ const EXPECTED_SCHEMAS = [
   "clarification_request.schema.json",
   "closing_result.schema.json",
   "closing_plan.schema.json",
-  "contract_pipeline.schema.json",
   "dispatch_quota.schema.json",
   "dispatch_plan.schema.json",
   "finding.schema.json",
@@ -110,54 +109,18 @@ describe("JSON schema contracts", () => {
   });
 });
 
-describe("contract_pipeline schema", () => {
-  const EXPECTED_ARTIFACT_DEFS = [
-    "GoalSpec",
-    "ContextBundle",
-    "DesignSpec",
-    "ConceptualDesignCritique",
-    "ObligationLedger",
-    "ContractAssessmentReport",
-    "CounterexampleReport",
-    "JudgeReport",
-    "ImplementationDAG",
-    "VerificationReport",
-  ];
-
-  let schema: Record<string, unknown>;
-
-  beforeAll(async () => {
-    const content = await readFile(join(SCHEMA_DIR, "contract_pipeline.schema.json"), "utf8");
-    schema = JSON.parse(content) as Record<string, unknown>;
-  });
-
-  it("declares draft 2020-12 JSON Schema metadata", () => {
-    expect(typeof schema.$schema).toBe("string");
-    expect(schema.$schema).toContain("json-schema.org");
-    expect(schema.$schema).toContain("2020-12");
-  });
-
-  it("defines all core artifact types", () => {
-    const defs = schema.$defs as Record<string, unknown>;
-    for (const defName of EXPECTED_ARTIFACT_DEFS) {
-      expect(defs).toHaveProperty(defName);
-    }
-  });
-
-  it("each artifact definition requires a stable contract_version", () => {
-    const defs = schema.$defs as Record<string, Record<string, unknown>>;
-    for (const defName of EXPECTED_ARTIFACT_DEFS) {
-      const def = defs[defName] as Record<string, unknown>;
-      expect(Array.isArray(def.required) && (def.required as string[]).includes("contract_version")).toBe(true);
-    }
-  });
-
-  it("each artifact definition rejects unknown properties", () => {
-    const defs = schema.$defs as Record<string, Record<string, unknown>>;
-    for (const defName of EXPECTED_ARTIFACT_DEFS) {
-      const def = defs[defName] as Record<string, unknown>;
-      expect(def.additionalProperties).toBe(false);
-    }
+// S6 — the contract-pipeline artifact contracts are single-sourced in the TS
+// validators (CONTRACT_PIPELINE_VALIDATORS, src/validation/contractPipeline.ts)
+// and tested in validation.test.ts. The hand-maintained contract_pipeline.schema.json
+// was DELETED: it was unused at runtime, had drifted from the validators (a stale
+// DesignSpec def + ~6 missing modern artifacts), and a second hand-maintained
+// source can only ever drift again — imperative validators cannot be auto-generated
+// into a JSON schema, so there is no non-drifting way to keep both. This guard
+// rejects silent re-introduction of a parallel source; if an external JSON schema
+// is ever genuinely needed, generate it from the validators rather than hand-maintaining it.
+describe("contract_pipeline contract is single-sourced in the TS validators", () => {
+  it("has no hand-maintained contract_pipeline.schema.json (deleted in S6)", () => {
+    expect(existsSync(join(SCHEMA_DIR, "contract_pipeline.schema.json"))).toBe(false);
   });
 });
 
@@ -223,16 +186,10 @@ describe("JSON schema field-level consistency", () => {
     expect(schema.properties).not.toHaveProperty("wave_size");
   });
 
-  it("contract_pipeline schema JudgeRepairDirective target enum includes finalized_module_contracts (INV-remediate-infra-06)", async () => {
-    const schema = JSON.parse(
-      await readFile(join(SCHEMA_DIR, "contract_pipeline.schema.json"), "utf8"),
-    );
-    const judgeRepairDirective = (schema.$defs as Record<string, Record<string, unknown>>).JudgeRepairDirective;
-    const targetEnum = (judgeRepairDirective.properties as Record<string, Record<string, unknown>>).target.enum as string[];
-    expect(targetEnum).toContain("finalized_module_contracts");
-    expect(targetEnum).toContain("obligation_ledger");
-    expect(targetEnum).toContain("contract_assessment_report");
-  });
+  // (The JudgeRepairDirective target-enum invariant INV-remediate-infra-06 is now
+  // enforced + tested on the TS validator itself — validation.test.ts exercises
+  // validateJudgeReport accepting finalized_module_contracts / legacy design_spec
+  // and rejecting an unknown target — not on the deleted JSON schema. See S6.)
 
   it("test_spec schema requires assertions", async () => {
     const schema = JSON.parse(
