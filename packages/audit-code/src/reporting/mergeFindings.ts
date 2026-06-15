@@ -102,6 +102,20 @@ function mergeAffectedFiles(existing: Finding, incoming: Finding): void {
   );
 }
 
+/**
+ * Grounded-wins (S7): a grounded re-emission upgrades the survivor's verdict; an
+ * ungrounded or absent verdict never downgrades a survivor that was already
+ * grounded (or never graded). Without this, merging a same-identity re-emission
+ * that happened to carry no matching quote into a verified survivor would falsely
+ * quarantine a finding that DID re-verify against disk on another pass.
+ */
+function mergeGrounding(
+  existing: Finding["grounding"],
+  incoming: Finding["grounding"],
+): Finding["grounding"] {
+  return incoming?.status === "grounded" ? { status: "grounded" } : existing;
+}
+
 function absorbFinding(survivor: Finding, absorbed: Finding): void {
   mergeAffectedFiles(survivor, absorbed);
   survivor.evidence = [
@@ -111,6 +125,7 @@ function absorbFinding(survivor: Finding, absorbed: Finding): void {
     ]),
   ];
   survivor.systemic = Boolean(survivor.systemic || absorbed.systemic);
+  survivor.grounding = mergeGrounding(survivor.grounding, absorbed.grounding);
   if (absorbed.summary.length > survivor.summary.length) {
     survivor.summary = absorbed.summary;
   }
@@ -279,6 +294,7 @@ function upsertFinding(merged: Map<string, Finding>, finding: Finding): void {
     existing.confidence = finding.confidence;
   }
   existing.systemic = Boolean(existing.systemic || finding.systemic);
+  existing.grounding = mergeGrounding(existing.grounding, finding.grounding);
   existing.impact = existing.impact ?? finding.impact;
   existing.likelihood = existing.likelihood ?? finding.likelihood;
   existing.summary =
