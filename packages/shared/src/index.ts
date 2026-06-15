@@ -34,6 +34,8 @@ export type {
   FindingConfidence,
   FindingLocation,
   FindingGrounding,
+  AnchorExpectation,
+  ExecutableAnchor,
   Finding,
   FindingIdentity,
   WorkBlock,

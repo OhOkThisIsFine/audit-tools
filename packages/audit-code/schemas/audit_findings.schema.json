@@ -102,6 +102,27 @@
             },
             "additionalProperties": false
           },
+          "executable_anchor": {
+            "type": "object",
+            "required": ["command", "confirm_if"],
+            "properties": {
+              "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+              "confirm_if": {
+                "type": "object",
+                "required": ["kind"],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": ["exit_zero", "exit_nonzero", "output_includes", "output_excludes"]
+                  },
+                  "text": { "type": "string" }
+                },
+                "additionalProperties": false
+              },
+              "claim": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
           "contract_goal_id": { "type": "string" },
           "contract_obligation_ids": {
             "type": "array",

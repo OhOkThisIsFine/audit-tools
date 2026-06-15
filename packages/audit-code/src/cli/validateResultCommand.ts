@@ -3,6 +3,10 @@ import { join, resolve } from "node:path";
 import { readJsonFile, type Finding } from "@audit-tools/shared";
 import { validateAuditResults } from "../validation/auditResults.js";
 import { verifyFindingGrounding } from "../validation/quoteGrounding.js";
+import {
+  combineGroundingWithAnchor,
+  verifyFindingAnchor,
+} from "../validation/anchorGrounding.js";
 import { loadDispatchResultMap } from "./dispatch.js";
 import { fromBase64Url, getArtifactsDir, getFlag, taskResultPath } from "./args.js";
 import type { AuditTask } from "../types.js";
@@ -58,10 +62,11 @@ export async function cmdValidateResult(argv: string[]): Promise<void> {
   const issues = validateAuditResults([obj], matchingTasks, { lineIndex });
   const errors = issues.filter(i => i.severity === "error");
 
-  // S7 grounding self-check: re-read each finding's cited verbatim span from
-  // disk (repo root = cwd; the worker runs from the repository root) and flag
-  // findings whose quote does not re-verify, so the worker fixes them before
-  // submitting. Advisory — it does not change the valid/invalid exit code.
+  // S7 grounding self-check: re-verify each finding against disk (repo root =
+  // cwd; the worker runs from the repository root) before submitting — re-read
+  // the cited verbatim span (tier-1) and run any executable anchor (tier-2), so
+  // the worker fixes a hallucinated quote or a refuted behavior claim first.
+  // Advisory — it does not change the valid/invalid exit code.
   const groundingWarnings: string[] = [];
   const findings = (obj as { findings?: unknown }).findings;
   if (Array.isArray(findings)) {
@@ -69,7 +74,9 @@ export async function cmdValidateResult(argv: string[]): Promise<void> {
       if (!f || typeof f !== "object") continue;
       const finding = f as Finding;
       if (typeof finding.id !== "string") continue;
-      const grounding = await verifyFindingGrounding(process.cwd(), finding);
+      const tier1 = await verifyFindingGrounding(process.cwd(), finding);
+      const anchor = await verifyFindingAnchor(process.cwd(), finding);
+      const grounding = combineGroundingWithAnchor(tier1, anchor);
       if (grounding.status === "ungrounded") {
         groundingWarnings.push(`${finding.id}: ${grounding.reason ?? "ungrounded"}`);
       }
@@ -86,7 +93,7 @@ export async function cmdValidateResult(argv: string[]): Promise<void> {
 
   if (groundingWarnings.length > 0) {
     console.error(
-      `⚠ ${groundingWarnings.length} ungrounded finding(s) — copy a verbatim quoted_text span into affected_files; it is re-read and content-matched against disk:`,
+      `⚠ ${groundingWarnings.length} ungrounded finding(s) — copy a verbatim quoted_text span into affected_files (re-read and content-matched against disk), and ensure any executable_anchor command actually confirms the claim:`,
     );
     for (const w of groundingWarnings) console.error(`  ${w}`);
   }

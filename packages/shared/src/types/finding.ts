@@ -37,6 +37,35 @@ export interface FindingGrounding {
   reason?: string;
 }
 
+/**
+ * What outcome of an executable anchor's command CONFIRMS the finding's claim.
+ * The worker declares the falsifiable condition; the tool runs the command and
+ * checks it, so the confirmed bit is the tool's run, never the model's word.
+ * `text` is required for the output_* kinds (the substring to look for).
+ */
+export type AnchorExpectation =
+  | { kind: "exit_zero" }
+  | { kind: "exit_nonzero" }
+  | { kind: "output_includes"; text: string }
+  | { kind: "output_excludes"; text: string };
+
+/**
+ * An executable anchor for a *behavior* claim ("throws" / "test fails" / "no
+ * cycle" / "unused symbol") — S7 tier-2. A read-only inspection command the tool
+ * runs to confirm or refute the claim; a refuting run quarantines the finding as
+ * ungrounded, exactly what disproved hallucinated cycle/symbol findings in the
+ * 452-self-audit. `command` is argv (run without a shell, from the repo root);
+ * the executable must be in the tool's inspection-only allowlist or the anchor is
+ * skipped (not auto-run). `confirm_if` is the falsifiable condition that, when
+ * the tool runs `command`, demonstrates the claim is true.
+ */
+export interface ExecutableAnchor {
+  command: string[];
+  confirm_if: AnchorExpectation;
+  /** Optional human description of what running the command proves. */
+  claim?: string;
+}
+
 export interface Finding {
   id: string;
   title: string;
@@ -67,6 +96,15 @@ export interface Finding {
    * grounding pass runs at ingest.
    */
   grounding?: FindingGrounding;
+  /**
+   * Optional executable anchor for a behavior claim (S7 tier-2). The tool runs
+   * the read-only `command` at ingest and folds the verdict into `grounding`: a
+   * refuting run marks the finding ungrounded (quarantined) with the run as the
+   * reason, a confirming run grounds it; an inconclusive/skipped run leaves the
+   * quote-and-verify (tier-1) grounding in place. Absent for findings with no
+   * runnable behavior claim.
+   */
+  executable_anchor?: ExecutableAnchor;
   /** Contract-pipeline goal this generated remediation finding belongs to. */
   contract_goal_id?: string;
   /** Contract-pipeline obligation IDs this finding/task is intended to satisfy. */
