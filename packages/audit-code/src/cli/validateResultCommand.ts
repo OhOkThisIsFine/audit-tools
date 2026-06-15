@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { readJsonFile } from "@audit-tools/shared";
+import { readJsonFile, type Finding } from "@audit-tools/shared";
 import { validateAuditResults } from "../validation/auditResults.js";
+import { verifyFindingGrounding } from "../validation/quoteGrounding.js";
 import { loadDispatchResultMap } from "./dispatch.js";
 import { fromBase64Url, getArtifactsDir, getFlag, taskResultPath } from "./args.js";
 import type { AuditTask } from "../types.js";
@@ -57,11 +58,36 @@ export async function cmdValidateResult(argv: string[]): Promise<void> {
   const issues = validateAuditResults([obj], matchingTasks, { lineIndex });
   const errors = issues.filter(i => i.severity === "error");
 
+  // S7 grounding self-check: re-read each finding's cited verbatim span from
+  // disk (repo root = cwd; the worker runs from the repository root) and flag
+  // findings whose quote does not re-verify, so the worker fixes them before
+  // submitting. Advisory — it does not change the valid/invalid exit code.
+  const groundingWarnings: string[] = [];
+  const findings = (obj as { findings?: unknown }).findings;
+  if (Array.isArray(findings)) {
+    for (const f of findings) {
+      if (!f || typeof f !== "object") continue;
+      const finding = f as Finding;
+      if (typeof finding.id !== "string") continue;
+      const grounding = await verifyFindingGrounding(process.cwd(), finding);
+      if (grounding.status === "ungrounded") {
+        groundingWarnings.push(`${finding.id}: ${grounding.reason ?? "ungrounded"}`);
+      }
+    }
+  }
+
   if (errors.length === 0) {
     console.log(`✓ valid: ${taskId}`);
   } else {
     console.error(`✗ invalid: ${taskId}`);
     for (const e of errors) console.error(`  ${e.path}: ${e.message}`);
     process.exitCode = 1;
+  }
+
+  if (groundingWarnings.length > 0) {
+    console.error(
+      `⚠ ${groundingWarnings.length} ungrounded finding(s) — copy a verbatim quoted_text span into affected_files; it is re-read and content-matched against disk:`,
+    );
+    for (const w of groundingWarnings) console.error(`  ${w}`);
   }
 }

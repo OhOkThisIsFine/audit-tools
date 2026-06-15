@@ -4,6 +4,7 @@ import { isFileMissingError, readJsonFile, writeJsonFile } from "@audit-tools/sh
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { validateAuditResults } from "../validation/auditResults.js";
+import { verifyFindingGrounding } from "../validation/quoteGrounding.js";
 import { runAuditStep } from "./auditStep.js";
 import {
   type ActiveDispatchState,
@@ -311,6 +312,36 @@ async function validateAndCollectResults(
   return { passing, failing, notDispatched, recoveredCount };
 }
 
+/**
+ * Quote-and-verify grounding pass (S7): re-read each finding's cited verbatim
+ * span from disk and content-match it, annotating `finding.grounding`. A
+ * finding whose quote does not re-verify (or that carries no quote) is marked
+ * `ungrounded` and surfaced — never silently dropped, never silently admitted as
+ * confirmed. Advisory metadata: this does not fail a result, so a weaker
+ * auditor's confident-but-fake finding is flagged for review rather than merged
+ * as fact. Mutates the findings in place and returns the ungrounded references.
+ */
+async function groundPassingFindings(
+  repoRoot: string,
+  passing: AuditResult[],
+): Promise<Array<{ task_id: string; finding_id: string; path: string }>> {
+  const ungrounded: Array<{ task_id: string; finding_id: string; path: string }> = [];
+  for (const result of passing) {
+    for (const finding of result.findings) {
+      const grounding = await verifyFindingGrounding(repoRoot, finding);
+      finding.grounding = grounding;
+      if (grounding.status === "ungrounded") {
+        ungrounded.push({
+          task_id: result.task_id,
+          finding_id: finding.id,
+          path: finding.affected_files?.[0]?.path ?? "?",
+        });
+      }
+    }
+  }
+  return ungrounded;
+}
+
 export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   const runId = getFlag(argv, "--run-id");
   if (!runId) throw new Error("merge-and-ingest requires --run-id <run_id>");
@@ -370,6 +401,19 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   if (recoveredCount > 0) {
     process.stderr.write(
       `[merge-and-ingest] Recovered ${recoveredCount} result(s) by task_id from packet result files.\n`,
+    );
+  }
+
+  // Phase 3.5: quote-and-verify grounding (S7). Re-read each finding's cited
+  // verbatim span from disk and content-match it; annotate the finding and
+  // surface ungrounded findings (hallucinated or stale quotes) without dropping
+  // them. The grounding marker travels with the finding into the merged store.
+  const ungrounded = await groundPassingFindings(workerTask.repo_root, passing);
+  if (ungrounded.length > 0) {
+    process.stderr.write(
+      `[merge-and-ingest] ${ungrounded.length} finding(s) could not be grounded against disk (marked ungrounded): ${ungrounded
+        .map((u) => `${u.finding_id} (${u.path})`)
+        .join(", ")}\n`,
     );
   }
 
