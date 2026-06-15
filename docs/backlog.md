@@ -148,6 +148,78 @@ rather than "where the code is today."
   known obligation id, map it back to its owning node instead of throwing (and collapse
   multiple per-obligation `item_results` for one node).
 
+### Self-audit 2026-06-15 — confirmed dispatch / contract bugs (HIGH)
+
+Surfaced live during a self-audit run (and independently by a Codex Desktop run on
+another checkout). All three are grounded; the first two are the headline fixes.
+
+- **Worker-prompt inline-vs-write contract mismatch (data-loss / scale-defeating).**
+  The rolling-dispatch STEP prompt tells the host "each worker writes its own
+  `AuditResult[]` to its `result_path`," but the generated WORKER PACKET prompt
+  (rendered by `src/cli/dispatch/packetPrompt.ts` / `src/prompts/renderWorkerPrompt.ts`)
+  forbids writing files and tells the worker to return JSON **inline** for the host
+  to capture. So reviewers return valid JSON in chat and write nothing: a capable
+  host must hand-capture every payload (defeating the "keep worker payloads out of
+  host context" scaling goal), and a weaker host silently loses results. Confirmed
+  twice (Codex Desktop; this session — packets 1/3/4 wrote nothing until I
+  force-overrode the prompt). FIX: make the two agree — the worker packet prompt must
+  instruct writing the `AuditResult[]` to its `result_path` (merge-and-ingest already
+  recovers by `task_id`). Enforce-in-tooling: a contract test asserting the rendered
+  worker prompt contains the write-to-`result_path` instruction and does NOT forbid
+  writes, so the step prompt and packet prompt can never drift again.
+
+- **Dispatch is host-waved, not quota-driven rolling — the rolling engine is DORMANT.**
+  Despite ~a dozen refactors of the quota/concurrency math, runs still dispatch in
+  host-managed waves: the dispatch step computes a static N-packet plan with
+  `max_concurrent_agents` = the raw host-reported flag and hands it to the host to
+  pace. The 2026-06-15 conceptual design review found the root cause — the rolling
+  dispatch + worktree engine (`runRollingDispatch` / `driveRollingDispatch` /
+  `createWorktree`) has **zero non-test callers**: built, refactored repeatedly, never
+  wired into the live path. So "compute capacity from quota + dispatch rolling" exists
+  as code but is unused; every run falls back to the host waving packets. FIX
+  (headline; Ethan flagged hard 2026-06-15): wire the rolling engine into the live
+  dispatch path so concurrency derives from quota/capacity (not the raw flag) and
+  dispatch is rolling (dispatch-next-on-complete), atomic-replacing the host-wave
+  fallback (atomic-replace invariant). **DECISION 2026-06-15 (Ethan): WIRE THE ENGINE
+  IN — option (a), NOT delete. Make concurrency quota-derived + dispatch-next-on-complete
+  + move verify-before-accept/write-scope into the deterministic merge. Deferred to a
+  later session.** Before cutting, verify the dormant-caller claim
+  across `shared/src/quota/rollingEngine.ts`, `shared/src/dispatch/rollingDispatch.ts`,
+  `audit-code/src/orchestrator/rollingDispatch.ts`, and `remediate-code/src/steps/dispatch.ts`
+  + `nextStep.ts`. Note the architectural constraint: in conversation-first mode the
+  HOST spawns subagents (the CLI can't spawn Claude agents), so the tool must either
+  drive rolling via the local-subprocess provider, or own the dispatch-next-on-complete
+  bookkeeping the host executes — not just emit a static plan.
+
+- **`.gemini/commands/audit-code.toml` (+ skill loader) continuation drops `--host-models`.**
+  The initial next-step instructions document `--host-models`, but the continuation
+  instructions list only `--host-context-tokens` / `--host-output-tokens`, so a
+  multi-model audit silently reverts to conservative packet sizing after step 1. The
+  capability-flag block is also documented twice and the copies have drifted. (Found
+  by Codex Desktop; the source template lives in `packages/audit-code` and deploys to
+  host repos.) FIX: single-source the capability-flag block and include `--host-models`
+  in the continuation guidance everywhere (skill loader, `.gemini` toml, and the other
+  host command files the wrapper installs). **SHARPENED (Ethan 2026-06-15) — prompts are
+  UNIVERSAL, dispatched per IDE:** the real fix is one canonical prompt body
+  (`skills/audit-code/audit-code.prompt.md`) rendered to each IDE's required file, adapting
+  format only — never per-IDE authored prose. Root cause confirmed in
+  `audit-code-wrapper-install-renderers.mjs`: only `renderGeminiCommandToml(promptBody)`
+  renders from the canonical body; `renderVSCodeAgentFile` / `renderCodexAutomationRecipe` /
+  `renderAntigravityPlanningGuide` author bespoke per-IDE prose that drifts and omits the
+  next-step/capability handshake entirely. So: (1) state the flag block ONCE in the body,
+  continuation references it and MUST include `--host-models`; (2) drive every IDE target
+  from that one body; (3) add a no-drift guard test (committed rendered asset == freshly
+  rendered from source) so a stale render like COR-82a96420 cannot recur. See memory
+  `universal-host-prompts-single-source`.
+
+- **Most worker findings came back `ungrounded` (missing `quoted_text`).** This run:
+  136 of 140 findings marked ungrounded at ingest because workers populated
+  `affected_files` with line/symbol but omitted `quoted_text`, so S7 quote-grounding
+  could not verify them. They're surfaced/quarantined, not deleted, but the signal is
+  badly degraded. FIX: make `quoted_text` effectively mandatory for a finding to count
+  as grounded — the worker packet prompt should require a verbatim quote per
+  `affected_files` entry, and the renderer/self-check should warn when it's absent.
+
 ### Auditor-agnostic robustness — enforce-in-tooling fixes (2026-06-14)
 
 Surfaced re-evaluating the 452-finding remediation run under the standing invariant
@@ -219,6 +291,39 @@ finding_id trap, `--host-can-dispatch-subagents`, conversation-start intake — 
   inside prior-result JSON exceed the per-line cap, so auditors couldn't
   reconstruct exact arrays and fell back to `Get-Content`/bash. Worth noting for
   any task that must read wide single-line JSON.
+
+### Cross-package drift map — reinvented pieces to unite (2026-06-15)
+
+A 6-way recon sweep mapped code duplicated/reinvented across `shared` +
+the two orchestrators that should be single-sourced. Full plan with verified
+`file:line` evidence, fix sketches, and a suggested 4-wave sequence:
+[`drift-consolidation-plan.md`](drift-consolidation-plan.md). The big items
+already live above (dormant rolling engine; IDE-renderer drift; implement-worker
+`finding_id`). **New** items the sweep added, not otherwise tracked:
+
+- **Live merge-trap bug (S, do first):** `remediate-code/src/steps/contractPipeline.ts`
+  derives a DAG node's id with a `?? CP-NNN` fallback for the finding id (`:1579`) but
+  uses **raw** `node.id` for `block_id: toBlockId(node.id)` / `items` (`:1658-1659`);
+  a missing LLM-authored `node.id` → finding `CP-001` vs block `CP-BLOCK-undefined` →
+  result lands `unresolved`. Mint the node id once (or `idRegistry.ensureNodeId`).
+- **No shared finding-identity authority:** `shared` `findingIdentity()` is imported by
+  no orchestrator; three divergent "same finding" rules (audit signature-hash, remediate
+  Jaccard dedup, coverage bare-id). Promote audit's `findingIdentitySignature` to shared.
+- **Grounding lives only in audit-code:** the allowlisted read-only command runner
+  (`anchorGrounding.ts`, a tool-wide *security* policy) and quote-verify
+  (`quoteGrounding.ts`) should move to `shared`; and remediate ignores the auditor's
+  `finding.grounding`/quarantine verdict on the structured path (seam drift).
+- **Step-contract writer duplicated** with real Windows path-separator divergence (audit
+  skips remediate's `toPromptPathToken` normalization) → shared `writeStepContract`.
+- **Small primitives reinvented N×:** model-tier ordinal (3–5×), severity/confidence
+  rank tables (5×, two with *inverted/off-by-one* values — latent bug), `AccessDeclaration`
+  type (3× identical, shared export unused), atomic JSON write (inline in `store.ts`,
+  double-applied in `runLedger.ts`), `mintUniqueId` suffix loop, `sha256` content hash
+  (inconsistent slice lengths), repo-path normalizer (3×), `.audit-tools/<half>` path
+  resolution (audit default ignores `--root` — latent bug), and the provider classes /
+  `headerExtractors` family.
+- **Doc fix:** CLAUDE.md describes `store.ts`'s lock as "20ms backoff, 250ms max, 20
+  retries" — stale; the live code uses the shared `withFileLock` (50→500ms, 30s stale).
 
 ## Deferred fixes (product bugs)
 
@@ -302,6 +407,45 @@ record build status in the design docs themselves.
   paired-derivation half is the remaining piece.
 
 ## Features to add later
+
+### More deterministic analysis in the audit process — investigate
+
+Goal: shift more of the audit's signal from LLM judgment to deterministic static
+analysis, so findings are cheaper, reproducible, and grounded *by construction*.
+Extends the directions already in-tree: `src/adapters/` (semgrep / eslint /
+npm-audit normalizers), `src/extractors/` (deterministic repo analysis feeding the
+language-neutral graph), and `src/validation/anchorGrounding.ts` (S7 — runs
+allowlisted read-only `grep`/`rg`/`madge`/`git` commands to refute ungrounded
+findings). The premise of this repo is "deterministic by default; LLM only for
+judgment" — this item asks where the deterministic frontier can be pushed further.
+
+Investigation plan:
+- **Survey deterministic levers** and decide which graduate to first-class
+  extractors/adapters (enriching the shared graph + risk register) rather than LLM
+  lenses. Candidates: AST/structural matching (tree-sitter, ast-grep); dependency &
+  cycle analysis (`madge` is already shelled out to in `anchorGrounding` — promote to
+  a real extractor that emits graph edges?); dead-code / unused-export (knip,
+  ts-prune); complexity & duplication metrics; type-coverage; broader semgrep
+  rulepacks; CodeQL for deeper dataflow.
+- **Contract conformance is the constraint.** Each new analyzer must enrich shared
+  language-neutral artifacts and route through the adapter-normalize pattern — never
+  fork planning logic per ecosystem (CLAUDE.md invariant). Prefer in-process
+  deterministic adapters (reproducible, no network) over MCP; reserve MCP for cases
+  that need a real external engine (e.g. CodeQL).
+- **Mine ralph-architecture-sweep's *methodology*, not its mechanism**
+  (https://github.com/Aijo24/ralph-architecture-sweep, checked 2026-06-15). It is a
+  Claude Code *skill* driving the `ralph` autonomous loop — LLM-driven multi-agent
+  (proposer agents + an independent verifier), **not** deterministic static analysis,
+  so it does not itself advance the "more deterministic" goal. Architecturally it
+  mirrors what audit-code already has (propose→independent-verify ≈ our critic→judge;
+  analysis-only, delta-aware sweep ≈ our deepening). What's worth extracting is its
+  heuristics, re-expressed as deterministic graph queries: the **deletion test**
+  (imagine removing a module — is it load-bearing, or dead/low-fan-in? → query
+  unused/low-in-degree graph nodes), **seam detection** (repeated patterns across
+  call sites → query repeated call-site signatures / structural clones), and
+  **vertical-slice** issue packaging (already close to our work-block rendering).
+- Decide build vs. defer per lever after the survey; this entry is the *plan to
+  investigate*, not a committed spec.
 
 ### Contract-governed implementation pipeline — durable principles
 

@@ -128,7 +128,7 @@ pending → planning → documenting → implementing → closing → complete
 
 **Dispatch:** parallel waves (`src/steps/dispatch.ts`: `prepareDocumentDispatch` / `mergeDocumentResults` / `prepareImplementDispatch` / `mergeImplementResults`; `src/steps/waveScheduler.ts` for concurrency limiting). Providers mirror audit-code's backend set.
 
-**State persistence** (`src/state/store.ts`): file-backed `RemediationState`, pessimistic file locking (20ms initial backoff, 250ms max, 20 retries, 30s stale-lock cleanup).
+**State persistence** (`src/state/store.ts`): file-backed `RemediationState`, atomic temp-then-rename writes, guarded by the shared `withFileLock` (`@audit-tools/shared/quota/fileLock`: exponential 50ms→500ms backoff, token-checked 30s stale-lock cleanup). The lock is single-sourced — `store.ts` adds no backoff/retry logic of its own.
 
 **Core types** (`src/state/types.ts`): `Finding`, `RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `RemediationItemState`, `TestSpec`, `VerificationResult`, `CoverageLedger`. `src/dedup/crossLensDedup.ts` deduplicates across lenses; `src/intake.ts` orchestrates source manifest, summary, clarification resolution.
 
