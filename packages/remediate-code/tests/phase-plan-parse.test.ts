@@ -29,14 +29,16 @@ describe("isAuditFindingsReport — INV-remediate-state-07: contract_version req
     ).toBe(true);
   });
 
-  it("accepts a report with a different-but-non-empty contract_version (warning, not error)", () => {
-    // A mismatch is a warning in the shared validator — the report is still structurally usable.
+  it("rejects a non-canonical contract_version (mismatch is an error, not a warning)", () => {
+    // INV-shared-core-06 / OBL-C002-VERSION-TRUST: a contract_version that is
+    // present but not exactly AUDIT_FINDINGS_CONTRACT_VERSION is treated as an
+    // error (identical to absent), so the report is rejected rather than trusted.
     expect(
       isAuditFindingsReport({
         contract_version: "audit-findings/v1alpha1",
         findings: [],
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("rejects a report with no contract_version field", () => {

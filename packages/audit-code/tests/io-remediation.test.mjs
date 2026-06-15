@@ -549,3 +549,121 @@ test("ArtifactBundle active_dispatch field still typed as ActiveDispatchState af
     assert.equal(bundle2.active_dispatch?.status, "active");
   });
 });
+
+test("loadArtifactBundle throws ArtifactSchemaVersionError for mismatched intent_checkpoint schema_version (ARC-dd468422)", async () => {
+  const { loadArtifactBundle: load, ArtifactSchemaVersionError } = await import("../src/io/artifacts.ts");
+  const { writeFile: wf } = await import("node:fs/promises");
+  await withTempDir("arc-dd468422-intent-", async (dir) => {
+    // Write intent_checkpoint.json with wrong schema_version
+    const stale = {
+      schema_version: "intent-checkpoint/v0",
+      confirmed_at: new Date().toISOString(),
+      confirmed_by: "host",
+      scope_summary: "all files",
+      intent_summary: "full audit",
+    };
+    await wf(join(dir, "intent_checkpoint.json"), JSON.stringify(stale), "utf8");
+
+    await assert.rejects(
+      load(dir),
+      (err) => {
+        assert.ok(err instanceof ArtifactSchemaVersionError, "must be ArtifactSchemaVersionError");
+        assert.match(err.message, /intent_checkpoint\.json/);
+        assert.match(err.message, /intent-checkpoint\/v0/);
+        assert.match(err.message, /intent-checkpoint\/v1/);
+        return true;
+      },
+    );
+  });
+});
+
+test("loadArtifactBundle succeeds for correct intent_checkpoint schema_version (ARC-dd468422)", async () => {
+  const { loadArtifactBundle: load } = await import("../src/io/artifacts.ts");
+  const { writeFile: wf } = await import("node:fs/promises");
+  await withTempDir("arc-dd468422-intent-ok-", async (dir) => {
+    const valid = {
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: new Date().toISOString(),
+      confirmed_by: "host",
+      scope_summary: "all files",
+      intent_summary: "full audit",
+    };
+    await wf(join(dir, "intent_checkpoint.json"), JSON.stringify(valid), "utf8");
+
+    const bundle = await load(dir);
+    assert.equal(bundle.intent_checkpoint?.schema_version, "intent-checkpoint/v1");
+  });
+});
+
+test("loadArtifactBundle throws ArtifactSchemaVersionError for mismatched provider_confirmation schema_version (ARC-dd468422)", async () => {
+  const { loadArtifactBundle: load, ArtifactSchemaVersionError } = await import("../src/io/artifacts.ts");
+  const { writeFile: wf } = await import("node:fs/promises");
+  await withTempDir("arc-dd468422-provider-", async (dir) => {
+    // Write provider_confirmation.json with wrong schema_version
+    const stale = {
+      schema_version: "0.0.0",
+      confirmed_at: new Date().toISOString(),
+      provider_pool: [],
+      session_level: true,
+    };
+    await wf(join(dir, "provider_confirmation.json"), JSON.stringify(stale), "utf8");
+
+    await assert.rejects(
+      load(dir),
+      (err) => {
+        assert.ok(err instanceof ArtifactSchemaVersionError, "must be ArtifactSchemaVersionError");
+        assert.match(err.message, /provider_confirmation\.json/);
+        assert.match(err.message, /0\.0\.0/);
+        return true;
+      },
+    );
+  });
+});
+
+test("audit-code src/ has no circular imports — madge reports zero cycles (ARC-1fa005bb)", async () => {
+  // ARC-1fa005bb: a dep-cycle was alleged (index.ts -> cli.ts -> io/ -> index.ts).
+  // The STILL-REAL verdict confirmed the cycle does NOT exist in current source.
+  // This regression guard keeps it that way: if any future edit closes a real cycle,
+  // the check fails deterministically here before it can reach production.
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join: pathJoin } = await import("node:path");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
+
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const entrypoint = pathJoin(__dir, "../src/index.ts");
+
+  // madge --circular with --extensions ts lists cycles; exit code 0 + no cycle
+  // lines in output = no cycles.  In non-TTY (execFile) mode madge writes the
+  // "No circular dependency found!" confirmation to stderr and the processed-file
+  // summary to stdout; cycle entries (if any) go to stdout as well.
+  let stdout = "";
+  let stderr = "";
+  let exitCode = 0;
+  try {
+    const result = await execFileAsync(
+      "npx",
+      ["madge", "--circular", "--extensions", "ts", entrypoint],
+      { cwd: pathJoin(__dir, ".."), shell: true },
+    );
+    stdout = result.stdout;
+    stderr = result.stderr;
+  } catch (err) {
+    // madge exits non-zero when it finds cycles
+    stdout = err.stdout ?? "";
+    stderr = err.stderr ?? "";
+    exitCode = err.code ?? 1;
+  }
+
+  // Cycle-free: exit code 0 AND "No circular dependency found!" on stderr.
+  const hasNoCycles =
+    exitCode === 0 && stderr.includes("No circular dependency found!");
+  assert.ok(
+    hasNoCycles,
+    `Circular imports detected in packages/audit-code/src/. ` +
+    `madge stdout:\n${stdout}\nmadge stderr:\n${stderr}\n` +
+    `Fix by ensuring no import chain forms a cycle. ` +
+    `(ARC-1fa005bb regression guard)`,
+  );
+});

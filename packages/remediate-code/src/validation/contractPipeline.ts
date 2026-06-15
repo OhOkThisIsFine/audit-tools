@@ -357,10 +357,22 @@ export function validateDesignSpec(
   return issues;
 }
 
-// ── DesignSpec structural gates ───────────────────────────────────────────────
+// ── DesignSpec structural gates + cross-artifact gates ────────────────────────
 // Extracted to contractPipelineGates.ts (MNT-86b18f1b). Re-exported here for
 // backward-compatible imports — callers do not need to update their import paths.
-export { validateDesignSpecGates } from "./contractPipelineGates.js";
+export {
+  validateDesignSpecGates,
+  validateGoalIdConsistency,
+  validateImplementationDAGIntegrity,
+  validatePairedObligations,
+  validateEvidenceThreaded,
+  validateDigestCoverage,
+  validateReconciliationDerivation,
+  deriveNodeModelTier,
+  deriveNodeModelTierFromNode,
+  repairDownstreamPhases,
+  type NodeComplexitySignals,
+} from "./contractPipelineGates.js";
 
 // ── ConceptualDesignCritique ──────────────────────────────────────────────────
 

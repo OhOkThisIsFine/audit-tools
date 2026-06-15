@@ -95,13 +95,16 @@ describe("isAuditFindingsReport — INV-remediate-state-07: contract_version mus
     ).toBe(true);
   });
 
-  it("accepts a non-canonical but non-empty contract_version (warning, not error)", () => {
+  it("rejects a non-canonical contract_version (mismatch is an error, not a warning)", () => {
+    // INV-remediate-state-07 / OBL-C002-VERSION-TRUST: a present-but-mismatched
+    // contract_version is rejected exactly like an absent one — the report
+    // cannot be processed safely under a foreign contract version.
     expect(
       isAuditFindingsReport({
         contract_version: "audit-findings/v1alpha1",
         findings: [],
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("rejects a report where contract_version is absent (INV-07)", () => {

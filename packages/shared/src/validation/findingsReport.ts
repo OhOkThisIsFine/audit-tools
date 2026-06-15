@@ -26,8 +26,11 @@ export const AUDIT_FINDINGS_CONTRACT_VERSION =
  * the value cannot be used safely; severity "warning" means the value can be
  * used but callers should surface the concern.
  *
- * INV-shared-core-06: contract_version absence or mismatch is flagged as an
- * error, not silently ignored.
+ * INV-shared-core-06 / OBL-C002-VERSION-TRUST: contract_version absence OR
+ * mismatch is flagged as a severity="error". A mismatched version is treated
+ * identically to an absent version — the report must be rejected, not
+ * processed with a warning. This ensures isValidAuditFindingsReport returns
+ * false for any version that is not exactly AUDIT_FINDINGS_CONTRACT_VERSION.
  */
 export function validateAuditFindingsReport(
   value: unknown,
@@ -61,8 +64,7 @@ export function validateAuditFindingsReport(
     pushValidationIssue(
       issues,
       path ? `${path}.contract_version` : "contract_version",
-      `contract_version mismatch: expected "${AUDIT_FINDINGS_CONTRACT_VERSION}", got "${value.contract_version}".`,
-      "warning",
+      `contract_version mismatch: expected "${AUDIT_FINDINGS_CONTRACT_VERSION}", got "${value.contract_version}". Report cannot be processed safely.`,
     );
   }
 
@@ -107,7 +109,10 @@ export function validateAuditFindingsReport(
  * validation with no errors. Warnings do not block the guard.
  *
  * Unlike the plain `isAuditFindingsReport` in remediate-code/phases/plan.ts,
- * this guard enforces contract_version presence (INV-shared-core-06).
+ * this guard enforces contract_version presence AND exact match
+ * (INV-shared-core-06 / OBL-C002-VERSION-TRUST). Both absent and mismatched
+ * contract_version produce severity="error" and cause this function to
+ * return false.
  */
 export function isValidAuditFindingsReport(
   value: unknown,

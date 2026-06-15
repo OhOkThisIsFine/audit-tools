@@ -59,7 +59,7 @@ function mkBlock(id: string, findingIds: string[], dependsOn: string[] = []) {
 
 function makeReport(findings: unknown[], workBlocks: unknown[] = []) {
   return {
-    contract_version: "audit-findings/v1alpha1",
+    contract_version: "audit-tools/audit-findings/v1alpha1",
     summary: {
       finding_count: findings.length,
       work_block_count: workBlocks.length,

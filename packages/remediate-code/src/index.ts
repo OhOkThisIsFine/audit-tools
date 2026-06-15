@@ -64,8 +64,20 @@ program
   )
   .option("--input <path>", "Path to audit report or feedback document")
   .option(
-    "--host-can-dispatch-subagents <value>",
+    "--guidance-file <path>",
+    "Single-step bootstrap: write this file's contents to intake/conversation-start.md (sole, idempotent writer) before deciding the step",
+  )
+  // True boolean (no <value>): a bare flag resolves true and never swallows the
+  // next token. The paired --no- form (and the =false form, normalized below)
+  // resolves false; absence stays undefined so the tristate reaches
+  // resolveHostDispatchCapability intact.
+  .option(
+    "--host-can-dispatch-subagents",
     "Whether the current host can dispatch callable subagents",
+  )
+  .option(
+    "--no-host-can-dispatch-subagents",
+    "Declare that the current host cannot dispatch callable subagents",
   )
   .option(
     "--host-max-concurrent <n>",
@@ -96,14 +108,22 @@ program
     "Rebuild the remediation plan from the existing intake artifacts",
   )
   .action(async (options) => {
+    const artifactsDir = resolveArtifactsDirOption(
+      options.root,
+      options.artifactsDir,
+    );
+    // Single-step bootstrap: fold the optional guidance file into
+    // intake/conversation-start.md in this same invocation, then decide the
+    // step — no separate write-then-call dance for the host to remember.
+    if (options.guidanceFile) {
+      applyGuidanceFile(artifactsDir, options.guidanceFile);
+    }
     const step = await withBackendLogsOnStderr(() =>
       decideNextStep({
         root: options.root,
-        artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
+        artifactsDir,
         input: options.input,
-        hostCanDispatchSubagents: parseOptionalBoolean(
-          options.hostCanDispatchSubagents,
-        ),
+        hostCanDispatchSubagents: options.hostCanDispatchSubagents,
         hostMaxConcurrent: options.hostMaxConcurrent
           ? parseInt(options.hostMaxConcurrent, 10) || undefined
           : undefined,
@@ -210,19 +230,82 @@ program
     process.exit(runValidateCommand());
   });
 
+// Exported so tests can construct argv and parse it through the real program
+// instead of re-deriving option semantics.
+export { program };
+
+/**
+ * Parse argv through the program after normalizing the `=value` form of the
+ * tristate `--host-can-dispatch-subagents` boolean into commander's bare /
+ * negatable forms. Commander treats `--flag=value` on a value-less boolean as an
+ * unknown option, so `--host-can-dispatch-subagents=true|false` is rewritten to
+ * the bare flag / `--no-` flag here. This keeps the flag a true boolean (a bare
+ * flag never swallows the next token) while still accepting the `=false` spelling.
+ */
+export function parseProgram(argv: string[]): void {
+  program.parse(normalizeBooleanFlagArgv(argv, "--host-can-dispatch-subagents"));
+}
+
 // Only parse argv when run directly; skip when imported as a module (e.g. in tests).
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   setQuotaStateDir(join(homedir(), ".remediate-code"));
-  program.parse(process.argv);
+  parseProgram(process.argv);
 }
 
 // --- helpers ---
 
-function parseOptionalBoolean(value: string | undefined): boolean | undefined {
-  if (value === undefined) return undefined;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  throw new Error("--host-can-dispatch-subagents must be true or false.");
+/**
+ * Rewrite `<flag>=true` → `<flag>` and `<flag>=false` → `--no-<flag>` so a
+ * value-less commander boolean can still be set false via the `=` spelling. A
+ * non-boolean `<flag>=<other>` value fails loudly rather than silently defaulting.
+ */
+export function normalizeBooleanFlagArgv(argv: string[], flag: string): string[] {
+  const negated = `--no-${flag.replace(/^--/, "")}`;
+  return argv.map((token) => {
+    if (token === `${flag}=true`) return flag;
+    if (token === `${flag}=false`) return negated;
+    if (token.startsWith(`${flag}=`)) {
+      throw new Error(`${flag} must be true or false.`);
+    }
+    return token;
+  });
+}
+
+/**
+ * Single-step bootstrap writer for `intake/conversation-start.md`.
+ *
+ * Sole writer + idempotent-on-target (INV-CC-03): re-applying the identical
+ * guidance is a byte-identical no-op (the existing file is left untouched, never
+ * appended to), and a pre-existing file with DIFFERING content is never silently
+ * clobbered — that case fails loudly so host/conversation-authored guidance can't
+ * be lost. The guidance file's bytes are written verbatim.
+ */
+export function applyGuidanceFile(
+  artifactsDir: string,
+  guidanceFilePath: string,
+): string {
+  const target = join(artifactsDir, "intake", "conversation-start.md");
+  const resolvedSource = resolve(guidanceFilePath);
+  if (resolve(target) === resolvedSource) {
+    // The guidance file already IS the target — nothing to copy, and reading
+    // then rewriting it would be a pointless self-write.
+    return target;
+  }
+  const incoming = readFileSync(resolvedSource);
+  if (existsSync(target)) {
+    const existing = readFileSync(target);
+    if (existing.equals(incoming)) {
+      // Identical re-apply: byte-identical no-op, no rewrite, no append.
+      return target;
+    }
+    throw new Error(
+      `Refusing to overwrite existing ${target} with differing guidance from ${resolvedSource}. ` +
+        `Remove or reconcile the existing conversation-start.md before re-bootstrapping.`,
+    );
+  }
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, incoming);
+  return target;
 }
 
 async function withBackendLogsOnStderr<T>(fn: () => Promise<T>): Promise<T> {

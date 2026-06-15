@@ -278,7 +278,7 @@ test("next-step true emits dispatch_review and prepares dispatch artifacts", asy
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
-      ["next-step", "--host-can-dispatch-subagents", "true"],
+      ["next-step", "--host-can-dispatch-subagents"],
     );
     const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
     const prompt = await readFile(step.prompt_path, "utf8");
@@ -297,7 +297,7 @@ test("next-step false emits single_task_fallback and does not prepare dispatch",
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
-      ["next-step", "--host-can-dispatch-subagents", "false"],
+      ["next-step", "--no-host-can-dispatch-subagents"],
     );
     const prompt = await readFile(step.prompt_path, "utf8");
 

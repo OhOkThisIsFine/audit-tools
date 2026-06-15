@@ -1,9 +1,11 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
-import { ARTIFACT_DEPENDENTS_MAP } from "./dependencyMap.js";
+import {
+  ARTIFACT_DEPENDENTS_MAP,
+  ARTIFACT_DEPENDS_ON_MAP,
+} from "./dependencyMap.js";
 import { present } from "./artifactMetadata.js";
 import {
-  buildArtifactDependenciesMap,
   hashArtifactValue,
   stableStringify,
 } from "./artifactFreshness.js";
@@ -17,7 +19,10 @@ function computeContentHash(
   return hashArtifactValue(artifactName, value);
 }
 
-const ARTIFACT_DEPENDENCIES_MAP = buildArtifactDependenciesMap();
+// The canonical "X depends on Y" table (ARC-cebe3421) — same single source of
+// truth computeArtifactMetadata records against.
+const ARTIFACT_DEPENDENCIES_MAP: Partial<Record<string, string[]>> =
+  ARTIFACT_DEPENDS_ON_MAP;
 
 export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
   const stale = new Set<string>();

@@ -164,6 +164,7 @@ export {
   coerceJsonObjectArg,
   platformCommand,
   quoteForShellInterpreterCmd,
+  stripClaudeCodeEnv,
 } from "./tooling/exec.js";
 
 // Tooling: project command discovery
@@ -467,6 +468,7 @@ export type {
   RollingEnginePool,
   EnginePacketToken,
   RollingEnginePoolState,
+  ReroutePacketsResult,
 } from "./quota/rollingEngine.js";
 export {
   dropProvider,

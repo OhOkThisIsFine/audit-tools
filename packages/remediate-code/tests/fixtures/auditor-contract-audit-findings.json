@@ -1,9 +1,13 @@
 {
-  "contract_version": "audit-findings/v1alpha1",
+  "contract_version": "audit-tools/audit-findings/v1alpha1",
   "summary": {
     "finding_count": 3,
     "work_block_count": 2,
-    "severity_breakdown": { "high": 1, "medium": 1, "low": 1 },
+    "severity_breakdown": {
+      "high": 1,
+      "medium": 1,
+      "low": 1
+    },
     "audited_file_count": 3,
     "excluded_file_count": 1,
     "runtime_validation_status_breakdown": {}
@@ -11,20 +15,36 @@
   "work_blocks": [
     {
       "id": "block-1",
-      "finding_ids": ["AUD-001", "AUD-002"],
-      "unit_ids": ["src-auth"],
-      "owned_files": ["src/api/auth.ts", "src/lib/session.ts"],
+      "finding_ids": [
+        "AUD-001",
+        "AUD-002"
+      ],
+      "unit_ids": [
+        "src-auth"
+      ],
+      "owned_files": [
+        "src/api/auth.ts",
+        "src/lib/session.ts"
+      ],
       "max_severity": "high",
       "depends_on": [],
       "rationale": "All findings map to the same owned unit and should be remediated together."
     },
     {
       "id": "block-2",
-      "finding_ids": ["AUD-003"],
-      "unit_ids": ["src-billing"],
-      "owned_files": ["src/billing/invoice.ts"],
+      "finding_ids": [
+        "AUD-003"
+      ],
+      "unit_ids": [
+        "src-billing"
+      ],
+      "owned_files": [
+        "src/billing/invoice.ts"
+      ],
       "max_severity": "low",
-      "depends_on": ["block-1"],
+      "depends_on": [
+        "block-1"
+      ],
       "rationale": "Findings share owned units transitively and should remain one non-overlapping remediation block."
     }
   ],
@@ -37,7 +57,11 @@
       "confidence": "high",
       "lens": "security",
       "summary": "Authentication accepts session tokens even when their expiry timestamp is stale.",
-      "affected_files": [{ "path": "src/api/auth.ts" }],
+      "affected_files": [
+        {
+          "path": "src/api/auth.ts"
+        }
+      ],
       "evidence": [
         "src/api/auth.ts:42 - token.exp is decoded but never checked against the current time.",
         "runtime:auth-expiry: expired token still returned 200."
@@ -52,10 +76,16 @@
       "lens": "tests",
       "summary": "The refresh-token branch has no regression test for rejected expired sessions.",
       "affected_files": [
-        { "path": "src/api/auth.ts" },
-        { "path": "src/lib/session.ts" }
+        {
+          "path": "src/api/auth.ts"
+        },
+        {
+          "path": "src/lib/session.ts"
+        }
       ],
-      "evidence": ["tests/auth.test.ts - no case covers expired refresh sessions."]
+      "evidence": [
+        "tests/auth.test.ts - no case covers expired refresh sessions."
+      ]
     },
     {
       "id": "AUD-003",
@@ -65,8 +95,14 @@
       "confidence": "high",
       "lens": "correctness",
       "summary": "Finalized invoices can be moved back to draft by a generic status update.",
-      "affected_files": [{ "path": "src/billing/invoice.ts" }],
-      "evidence": ["src/billing/invoice.ts:88 - updateStatus does not guard finalized invoices."]
+      "affected_files": [
+        {
+          "path": "src/billing/invoice.ts"
+        }
+      ],
+      "evidence": [
+        "src/billing/invoice.ts:88 - updateStatus does not guard finalized invoices."
+      ]
     }
   ]
 }

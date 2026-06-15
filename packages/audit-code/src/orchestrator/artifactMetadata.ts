@@ -5,13 +5,18 @@ import type {
 } from "../types/artifactMetadata.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
+import { ALL_DAG_ARTIFACTS, ARTIFACT_DEPENDS_ON_MAP } from "./dependencyMap.js";
 import {
-  buildArtifactDependenciesMap,
   hashArtifactValue,
   stableStringify,
 } from "./artifactFreshness.js";
 
-const ARTIFACT_DEPENDENCIES_MAP = buildArtifactDependenciesMap();
+// The canonical "X depends on Y" table (ARC-cebe3421). computeArtifactMetadata
+// records each artifact's upstream dependency revisions, so it reads the
+// dependsOn direction directly from the single source of truth.
+const ARTIFACT_DEPENDENCIES_MAP: DependencyLookup = ARTIFACT_DEPENDS_ON_MAP;
+
+type DependencyLookup = Partial<Record<string, string[]>>;
 
 function computeDependencyFirstOrder(
   artifactNames: Iterable<string>,
@@ -71,7 +76,10 @@ export function computeArtifactMetadata(
 ): ArtifactMetadataManifest {
   const artifacts: Record<string, ArtifactMetadataEntry> = {};
   const updated = new Set(updatedArtifacts);
-  const presentArtifacts = Object.keys(ARTIFACT_DEPENDENCIES_MAP).filter(
+  // Enumerate the FULL DAG artifact universe (not just those that depend on
+  // something): a pure-input artifact (scope.json, intent_checkpoint.json, …)
+  // must still get a metadata entry so its dependents can compare revisions.
+  const presentArtifacts = [...ALL_DAG_ARTIFACTS].filter(
     (artifactName) =>
       artifactName !== "artifact_metadata.json" &&
       present(bundle, artifactName),

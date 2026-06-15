@@ -364,6 +364,138 @@ test("createRollingDispatcher — packets enqueued mid-run are dispatched before
 });
 
 // ---------------------------------------------------------------------------
+// Transient-429 recovery (INV-QD-07 / ARC-d81a55ab / SEAM-rolling-stranding-remediate)
+// ---------------------------------------------------------------------------
+
+test("createRollingDispatcher — rate_limited result re-queues the packet and dispatches it to a surviving pool (INV-QD-07)", async () => {
+  await setupTmpQuotaDir();
+  // Two pools. pool-a rate-limits every packet it sees; pool-b succeeds.
+  const attemptsByPool = { "pool-a": 0, "pool-b": 0 };
+
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a"), makePool("pool-b")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      attemptsByPool[slot.poolId] = (attemptsByPool[slot.poolId] ?? 0) + 1;
+      if (slot.poolId === "pool-a") {
+        return { packet, outcome: "rate_limited" };
+      }
+      return { packet, outcome: "success" };
+    },
+  });
+
+  dispatcher.enqueue([makePacket("p1"), makePacket("p2")]);
+  const results = await dispatcher.run();
+
+  // Both packets eventually SUCCEED on the surviving pool — never stranded.
+  assert.equal(results.length, 2, "both packets complete after re-route");
+  assert.ok(results.every((r) => r.outcome === "success"), "all final outcomes success");
+  assert.deepEqual(results.map((r) => r.packet.id).sort(), ["p1", "p2"]);
+
+  // pool-a was dropped after its first rate_limited result, so subsequent
+  // packets route straight to pool-b.
+  assert.ok(attemptsByPool["pool-a"] >= 1, "pool-a attempted at least once");
+  assert.ok(attemptsByPool["pool-b"] >= 2, "both packets land on the surviving pool-b");
+
+  // No terminal — nothing stranded.
+  assert.equal(dispatcher.getTerminal(), null);
+  // The exhausted pool is recorded in state.
+  assert.ok(dispatcher.getState().exhaustedPoolIds.has("pool-a"));
+});
+
+test("createRollingDispatcher — when every pool exhausts, the packet is stranded and surfaced via getTerminal (INV-QD-07 empty_pool)", async () => {
+  await setupTmpQuotaDir();
+  // Single pool that always rate-limits → no survivor → strand.
+  let attempts = 0;
+  const onResultCalls = [];
+
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("only-pool")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => {
+      attempts++;
+      return { packet, outcome: "rate_limited" };
+    },
+    onResult: (r) => onResultCalls.push(r.packet.id),
+  });
+
+  dispatcher.enqueue([makePacket("p1")]);
+  // run() must RESOLVE (never hang / reject) even though the packet can't land.
+  const results = await dispatcher.run();
+
+  // The rate_limited packet is not a completion — no result, no onResult call.
+  assert.equal(results.length, 0, "stranded packet produces no completion result");
+  assert.equal(onResultCalls.length, 0, "onResult not called for a stranded packet");
+
+  // It is surfaced as an empty_pool terminal.
+  const terminal = dispatcher.getTerminal();
+  assert.ok(terminal !== null, "stranded packet must surface a terminal");
+  assert.equal(terminal.reason, "empty_pool");
+  assert.deepEqual(terminal.stranded_ids, ["p1"]);
+
+  // The only pool was dropped after its first rate_limited; bounded retries.
+  assert.ok(attempts >= 1, "packet attempted at least once before stranding");
+  assert.ok(dispatcher.getState().exhaustedPoolIds.has("only-pool"));
+});
+
+test("createRollingDispatcher — dispatch callback that rejects is contained (resolves as error, never rejects run)", async () => {
+  await setupTmpQuotaDir();
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (_packet) => {
+      throw new Error("provider blew up");
+    },
+  });
+
+  dispatcher.enqueue([makePacket("p1")]);
+  // Must not reject — the engine maps a thrown dispatch into an 'error' result.
+  const results = await dispatcher.run();
+  assert.equal(results.length, 1);
+  assert.equal(results[0].outcome, "error");
+  // An 'error' (non-quota failure) is terminal, not re-queued, and not stranded.
+  assert.equal(dispatcher.getTerminal(), null);
+});
+
+// ---------------------------------------------------------------------------
+// selectProvider — exhausted-pool exclusion (INV-QD-07 re-route mechanism)
+// ---------------------------------------------------------------------------
+
+test("selectProvider — skips pools in the exhausted set and routes to a survivor", async () => {
+  await setupTmpQuotaDir();
+  const packet = makePacket("p1", { complexity: 1.0 });
+  // High-complexity normally prefers the deep pool, but it's exhausted → small.
+  const deepPool = makePool("deep-pool", { providerName: "claude-code", rank: "deep" });
+  const smallPool = makePool("small-pool", { providerName: "claude-code", rank: "small" });
+  const tracker = new InFlightTokenTracker();
+  const slot = selectProvider(
+    packet,
+    [deepPool, smallPool],
+    tracker,
+    {},
+    unlimitedSession(),
+    new Set(["deep-pool"]),
+  );
+  assert.ok(slot !== null, "a surviving pool should still be selected");
+  assert.equal(slot.poolId, "small-pool", "exhausted deep-pool must be skipped");
+});
+
+test("selectProvider — returns null when every pool is exhausted", async () => {
+  await setupTmpQuotaDir();
+  const packet = makePacket("p1");
+  const tracker = new InFlightTokenTracker();
+  const slot = selectProvider(
+    packet,
+    [makePool("a"), makePool("b")],
+    tracker,
+    {},
+    unlimitedSession(),
+    new Set(["a", "b"]),
+  );
+  assert.equal(slot, null, "no eligible pool → null");
+});
+
+// ---------------------------------------------------------------------------
 // scorePacketComplexity
 // ---------------------------------------------------------------------------
 

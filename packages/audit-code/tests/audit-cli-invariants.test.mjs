@@ -8,6 +8,12 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(here, "..");
 
 // ── INV-audit-cli-01: buildManualReviewBlocker provider routing ───────────────
 // local-subprocess is the headless path that CANNOT dispatch sub-agents; all
@@ -323,4 +329,59 @@ test("INV-audit-cli-13: runAuditStep function signature accepts externalAnalyzer
   // The option is present in the type: externalAnalyzerData?: ExternalAnalyzerResults
   // Structural verification passes via npm run check (tsc --noEmit).
   assert.ok(true, "externalAnalyzerData option accepted structurally via TypeScript check");
+});
+
+// ── INV-RCI-16: opencode.json top-level bash ↔ agent.auditor.permission.bash parity ──
+// Drift between the two blocks is a latent privilege bug: the agent can run
+// commands the global policy denies, or vice-versa. Both sets of keys and their
+// values must be identical. (Agent-only extras like auditor_*, question, task are
+// NOT bash keys and are therefore out of scope for this check.)
+
+function extractBashBlock(oc) {
+  return oc?.permission?.bash ?? {};
+}
+
+function extractAgentBashBlock(oc) {
+  return oc?.agent?.auditor?.permission?.bash ?? {};
+}
+
+function assertBashParity(label, oc) {
+  const top = extractBashBlock(oc);
+  const agent = extractAgentBashBlock(oc);
+  const topKeys = Object.keys(top).sort();
+  const agentKeys = Object.keys(agent).sort();
+
+  const inTopNotAgent = topKeys.filter((k) => !Object.prototype.hasOwnProperty.call(agent, k));
+  const inAgentNotTop = agentKeys.filter((k) => !Object.prototype.hasOwnProperty.call(top, k));
+  const diffValues = topKeys.filter(
+    (k) => Object.prototype.hasOwnProperty.call(agent, k) && top[k] !== agent[k],
+  );
+
+  assert.deepEqual(
+    inTopNotAgent,
+    [],
+    `${label}: bash keys present in top-level but absent from agent.auditor: ${JSON.stringify(inTopNotAgent)}`,
+  );
+  assert.deepEqual(
+    inAgentNotTop,
+    [],
+    `${label}: bash keys present in agent.auditor but absent from top-level: ${JSON.stringify(inAgentNotTop)}`,
+  );
+  assert.deepEqual(
+    diffValues,
+    [],
+    `${label}: bash keys with differing values between top-level and agent.auditor: ${JSON.stringify(diffValues)}`,
+  );
+}
+
+test("INV-RCI-16: root opencode.json top-level bash ↔ agent.auditor.permission.bash parity", () => {
+  const rootOpencodeJson = join(repoRoot, "..", "..", "opencode.json");
+  const oc = JSON.parse(readFileSync(rootOpencodeJson, "utf8"));
+  assertBashParity("root opencode.json", oc);
+});
+
+test("INV-RCI-16: packages/audit-code/opencode.json top-level bash ↔ agent.auditor.permission.bash parity", () => {
+  const pkgOpencodeJson = join(repoRoot, "opencode.json");
+  const oc = JSON.parse(readFileSync(pkgOpencodeJson, "utf8"));
+  assertBashParity("packages/audit-code/opencode.json", oc);
 });

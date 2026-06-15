@@ -933,10 +933,21 @@ async function cleanupTempBranchesAndArtifacts(
 
   // Only delete artifacts on a fully-green close. When any test or closing
   // action failed, preserve the directory for diagnosis.
+  //
+  // CE-003 force-close guard: a `blocked` terminal item means the run did NOT
+  // fully succeed — the tool-owned final gate (INV-RS-10) coarse-re-blocked or
+  // the bounded backstop terminated the run as blocked. Such a run must never be
+  // "landed green" (artifacts deleted as if complete); a vacuous/unset
+  // plan.test_command (combinedTest vacuously passing) cannot mask a blocked
+  // item. Preserve the artifacts so the partial outcome is diagnosable.
+  const anyBlocked = Object.values(completeState.items ?? {}).some(
+    (it) => it.status === "blocked",
+  );
   const fullyGreen =
     combinedTest.passed &&
     e2eResult.passed &&
-    closingResult.status !== "failed";
+    closingResult.status !== "failed" &&
+    !anyBlocked;
 
   if (!fullyGreen) {
     runLogger?.event({
@@ -944,7 +955,7 @@ async function cleanupTempBranchesAndArtifacts(
       kind: "artifact_write",
       obligation: "closing",
       artifact: options.artifactsDir,
-      note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, closing=${closingResult.status})`,
+      note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, closing=${closingResult.status}, anyBlocked=${anyBlocked})`,
     });
     return;
   }

@@ -867,3 +867,236 @@ describe("validateDesignSpecGates", () => {
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 });
+
+import {
+  validateGoalIdConsistency,
+  validateImplementationDAGIntegrity,
+} from "../src/validation/contractPipeline.js";
+
+// ── ARC-86b18f1b: validateGoalIdConsistency ───────────────────────────────────
+
+describe("validateGoalIdConsistency", () => {
+  it("returns no issues when all artifacts share the same goal_id", () => {
+    const artifacts = {
+      goal_spec: { goal_id: "G-001" },
+      context_bundle: { goal_id: "G-001" },
+      obligation_ledger: { goal_id: "G-001" },
+    };
+    const issues = validateGoalIdConsistency(artifacts);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("returns no issues when only one artifact has a goal_id", () => {
+    const artifacts = {
+      goal_spec: { goal_id: "G-001" },
+      no_goal_id_artifact: { some_other_field: "x" },
+    };
+    const issues = validateGoalIdConsistency(artifacts);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("returns no issues for an empty artifact map", () => {
+    expect(validateGoalIdConsistency({}).filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("errors when two artifacts have different goal_ids", () => {
+    const artifacts = {
+      goal_spec: { goal_id: "G-001" },
+      obligation_ledger: { goal_id: "G-999" },
+    };
+    const issues = validateGoalIdConsistency(artifacts);
+    const errors = issues.filter((i) => i.severity === "error");
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((e) => e.message.includes("G-001"))).toBe(true);
+    expect(errors.some((e) => e.message.includes("G-999"))).toBe(true);
+  });
+
+  it("errors on the mismatched artifact path", () => {
+    const artifacts = {
+      goal_spec: { goal_id: "G-001" },
+      implementation_dag: { goal_id: "WRONG" },
+    };
+    const issues = validateGoalIdConsistency(artifacts);
+    expect(issues.some((i) => i.path === "implementation_dag.goal_id")).toBe(true);
+  });
+
+  it("skips artifacts that are not records", () => {
+    const artifacts = {
+      goal_spec: { goal_id: "G-001" },
+      bad_artifact: null,
+      another_bad: "string",
+    };
+    const issues = validateGoalIdConsistency(artifacts as Record<string, unknown>);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("skips artifacts with empty or missing goal_id", () => {
+    const artifacts = {
+      goal_spec: { goal_id: "G-001" },
+      no_goal: { other: "field" },
+      empty_goal: { goal_id: "" },
+    };
+    const issues = validateGoalIdConsistency(artifacts);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("reports all mismatches when three artifacts each have a different goal_id", () => {
+    const artifacts = {
+      goal_spec: { goal_id: "G-001" },
+      context_bundle: { goal_id: "G-002" },
+      obligation_ledger: { goal_id: "G-003" },
+    };
+    const issues = validateGoalIdConsistency(artifacts);
+    const errors = issues.filter((i) => i.severity === "error");
+    // At minimum context_bundle and obligation_ledger mismatch G-001
+    expect(errors.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ── ARC-86b18f1b-2: validateImplementationDAGIntegrity ────────────────────────
+
+describe("validateImplementationDAGIntegrity", () => {
+  const obligation_ledger = {
+    obligations: [
+      { id: "O-1", description: "Behavior holds.", kind: "behavioral", depends_on: [], status: "pending" },
+      { id: "O-2", description: "Security holds.", kind: "invariant", depends_on: [], status: "pending" },
+    ],
+  };
+
+  const counterexample = {
+    counterexamples: [
+      { id: "CE-1", claim: "The system fails open.", reproduction_steps: [], expected: "deny", actual: "allow", violated_obligation_ids: ["O-2"] },
+    ],
+  };
+
+  const judge_report = {
+    classifications: [
+      { counterexample_id: "CE-1", classification: "accepted", rationale: "Valid." },
+    ],
+  };
+
+  const validDag = {
+    nodes: [
+      {
+        id: "N-1",
+        satisfies_obligations: ["O-1"],
+        verification_obligation_ids: ["O-2"],
+        addresses_counterexamples: ["CE-1"],
+      },
+    ],
+  };
+
+  it("returns no errors for a fully valid DAG", () => {
+    const issues = validateImplementationDAGIntegrity(validDag, obligation_ledger, counterexample, judge_report);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("returns no errors when dag has no nodes (empty DAG — structural validtor handles this)", () => {
+    const emptyDag = { nodes: [] };
+    const issues = validateImplementationDAGIntegrity(emptyDag, obligation_ledger, counterexample, judge_report);
+    // Empty nodes: obligations and counterexamples are uncovered — errors expected
+    const errors = issues.filter((i) => i.severity === "error");
+    expect(errors.some((e) => e.message.includes("O-1"))).toBe(true);
+  });
+
+  it("errors when satisfies_obligations references a non-existent obligation", () => {
+    const dag = {
+      nodes: [{ id: "N-1", satisfies_obligations: ["GHOST-OBL"], verification_obligation_ids: [], addresses_counterexamples: ["CE-1"] }],
+    };
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    const errors = issues.filter((i) => i.severity === "error");
+    expect(errors.some((e) => e.message.includes("GHOST-OBL"))).toBe(true);
+    expect(errors.some((e) => e.path.includes("satisfies_obligations"))).toBe(true);
+  });
+
+  it("errors when verification_obligation_ids references a non-existent obligation", () => {
+    const dag = {
+      nodes: [{ id: "N-1", satisfies_obligations: ["O-1"], verification_obligation_ids: ["GHOST-VER"], addresses_counterexamples: ["CE-1"] }],
+    };
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    const errors = issues.filter((i) => i.severity === "error");
+    expect(errors.some((e) => e.message.includes("GHOST-VER"))).toBe(true);
+    expect(errors.some((e) => e.path.includes("verification_obligation_ids"))).toBe(true);
+  });
+
+  it("errors when addresses_counterexamples references a non-existent counterexample", () => {
+    const dag = {
+      nodes: [{ id: "N-1", satisfies_obligations: ["O-1", "O-2"], verification_obligation_ids: [], addresses_counterexamples: ["CE-GHOST"] }],
+    };
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    const errors = issues.filter((i) => i.severity === "error");
+    expect(errors.some((e) => e.message.includes("CE-GHOST"))).toBe(true);
+    expect(errors.some((e) => e.path.includes("addresses_counterexamples"))).toBe(true);
+  });
+
+  it("errors when an obligation is not covered by any node (bidirectional coverage)", () => {
+    const dag = {
+      nodes: [{ id: "N-1", satisfies_obligations: ["O-1"], verification_obligation_ids: [], addresses_counterexamples: ["CE-1"] }],
+    };
+    // O-2 is in the ledger but no node satisfies or verifies it
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    const errors = issues.filter((i) => i.severity === "error");
+    expect(errors.some((e) => e.message.includes("O-2"))).toBe(true);
+    expect(errors.some((e) => e.path === "implementation_dag.coverage")).toBe(true);
+  });
+
+  it("errors when an accepted counterexample is not addressed by any node (bidirectional coverage)", () => {
+    const dag = {
+      nodes: [{ id: "N-1", satisfies_obligations: ["O-1", "O-2"], verification_obligation_ids: [], addresses_counterexamples: [] }],
+    };
+    // CE-1 is accepted but no node addresses it
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    const errors = issues.filter((i) => i.severity === "error");
+    expect(errors.some((e) => e.message.includes("CE-1"))).toBe(true);
+    expect(errors.some((e) => e.path === "implementation_dag.coverage")).toBe(true);
+  });
+
+  it("does not flag referential issues when obligation_ledger is absent (skips check)", () => {
+    const dag = {
+      nodes: [{ id: "N-1", satisfies_obligations: ["O-UNKNOWN"], verification_obligation_ids: [], addresses_counterexamples: [] }],
+    };
+    // No obligation_ledger — referential check is skipped
+    const issues = validateImplementationDAGIntegrity(dag, undefined, undefined, undefined);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("does not flag counterexample referential issues when counterexample artifact is absent", () => {
+    const dag = {
+      nodes: [{ id: "N-1", satisfies_obligations: ["O-1", "O-2"], verification_obligation_ids: [], addresses_counterexamples: ["CE-GHOST"] }],
+    };
+    // No counterexample artifact — referential check skipped for addresses_counterexamples
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, undefined, undefined);
+    const errors = issues.filter((i) => i.severity === "error");
+    // Should NOT error on CE-GHOST (no counterexample artifact), but SHOULD still check coverage
+    // No judge_report → no accepted counterexamples → coverage check not applicable
+    expect(errors.filter((e) => e.message.includes("CE-GHOST"))).toHaveLength(0);
+  });
+
+  it("counts verification_obligation_ids toward coverage", () => {
+    // O-1 satisfied by node; O-2 only verified (verification_obligation_ids) — still covered
+    const dag = {
+      nodes: [{ id: "N-1", satisfies_obligations: ["O-1"], verification_obligation_ids: ["O-2"], addresses_counterexamples: ["CE-1"] }],
+    };
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("returns no errors when dag is not a record", () => {
+    const issues = validateImplementationDAGIntegrity(null, obligation_ledger, counterexample, judge_report);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("non-accepted counterexamples in judge report do not require coverage", () => {
+    const judgeWithNonAccepted = {
+      classifications: [
+        { counterexample_id: "CE-1", classification: "invalid", rationale: "Not real." },
+      ],
+    };
+    const dag = {
+      nodes: [{ id: "N-1", satisfies_obligations: ["O-1", "O-2"], verification_obligation_ids: [], addresses_counterexamples: [] }],
+    };
+    // CE-1 is not accepted — no coverage needed
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judgeWithNonAccepted);
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+});

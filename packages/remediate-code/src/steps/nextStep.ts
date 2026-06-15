@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, type SessionConfig, type HostModelRosterEntry } from "@audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot } from "@audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { runPlanPhase, applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -26,7 +26,9 @@ import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
 import {
   dependenciesSatisfied,
+  dependencyVerifiedComplete,
   isTerminalStatus,
+  isVerifiedCompleteStatus,
   specIndicatesNoChange,
   classifyFindingRisk,
   type FindingRiskTier,
@@ -37,6 +39,7 @@ import {
 } from "../dedup/crossLensDedup.js";
 import { checkAffectedFileIntegrity } from "../utils/fileIntegrity.js";
 import { resolveIntakeStep } from "./intakeResolver.js";
+import { runCommand } from "../utils/commands.js";
 import {
   buildNextContractPipelineStep,
   shouldEnterContractPipeline,
@@ -82,6 +85,21 @@ export interface NextStepOptions {
   finalizeClosing?: boolean;
   forceReplan?: boolean;
   sessionConfig?: SessionConfig | null;
+  /**
+   * Skip the tool-owned final completion gate (INV-RS-10) at the all-terminal
+   * transition. Production never sets this; it is a test-hermeticity affordance
+   * so suites that drive an unrelated flow to completion do not spawn a real
+   * build. Also honored via `REMEDIATE_SKIP_FINAL_GATE`. The gate's correctness
+   * is verified directly (rolling-scheduler.test.ts) regardless of this flag.
+   */
+  skipFinalGate?: boolean;
+  /**
+   * Injectable runner for the tool-owned final gate (INV-RS-10). When set, the
+   * gate uses it instead of spawning real commands, so the all-terminal
+   * transition (coarse re-block / bounded terminate) can be exercised
+   * deterministically in tests. Unset in production → real env-scrubbed builds.
+   */
+  finalGateRunner?: GateRunner;
 }
 
 export function resolveHostDispatchCapability(options: {
@@ -109,6 +127,24 @@ export function resolveHostDispatchCapability(options: {
 function randomRunId(prefix = "RUN"): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/**
+ * Host-facing note interposing a shared rebuild between rolling dependency
+ * levels. The tool admits a downstream node only once its upstream node is
+ * verified-complete; once that upstream edit lands, the host must rebuild the
+ * shared surface before the next next-step pass so the downstream node
+ * typechecks/runs against the realized output rather than stale `dist/`. The
+ * rebuild is build-FREE single-flight at the package level — one central build,
+ * never a per-node `npm run build` racing it (CE-001).
+ */
+const SHARED_REBUILD_BETWEEN_LEVELS_NOTE = `## Shared rebuild between dependency levels
+
+These nodes were selected because their dependencies are verified-complete. When a
+node you just merged edited \`@audit-tools/shared\` (or any upstream package a later
+node depends on), rebuild that surface ONCE — \`npm run build -w @audit-tools/shared\`
+— before the next \`next-step\` dispatches the now-eligible downstream nodes, so they
+build against the realized upstream output. Do not run a per-node \`npm run build\`;
+the central rebuild is single-flight (one build, never one-per-node racing \`dist/\`).`;
 
 function resolveRoot(root?: string): string {
   return resolve(root ?? ".");
@@ -191,7 +227,9 @@ export type {
 export {
   NO_CHANGE_RE,
   isTerminalStatus,
+  isVerifiedCompleteStatus,
   dependenciesSatisfied,
+  dependencyVerifiedComplete,
   specIndicatesNoChange,
   classifyFindingRisk,
 } from "./stepUtils.js";
@@ -203,16 +241,535 @@ function documentableFindings(state: RemediationState): Finding[] {
   );
 }
 
+/**
+ * Blocks/nodes eligible for the next rolling dispatch pass: those with pending
+ * work AND every dependency VERIFIED-COMPLETE (INV-RS-01 — a SKIP or blocked
+ * dependency never makes a dependent eligible). This is the rolling-scheduler
+ * eligibility gate; it replaced the old `dependenciesSatisfied` (any-terminal)
+ * wave gate so a node whose prerequisite was skipped/blocked is held back rather
+ * than dispatched against a surface that never landed.
+ */
 function implementableBlocks(state: RemediationState): RemediationBlock[] {
   if (!state.plan || !state.items) return [];
   return state.plan.blocks.filter(
     (block) =>
-      dependenciesSatisfied(block, state) &&
+      dependencyVerifiedComplete(block, state) &&
       block.items.some((findingId) => {
         const item = state.items?.[findingId];
         return item?.status === "pending";
       }),
   );
+}
+
+/**
+ * Pending nodes that are NOT eligible because at least one dependency did not
+ * reach a verified-complete disposition (a prerequisite was skipped, blocked, or
+ * is still pending). Once no eligible block remains, these are dead-ended: the
+ * rolling scheduler marks them `blocked` (their upstream surface never landed)
+ * rather than looping forever. Used by `handlePlanning` to make that transition
+ * deterministic.
+ */
+function blockedByUnsatisfiedDependency(
+  state: RemediationState,
+): RemediationBlock[] {
+  if (!state.plan || !state.items) return [];
+  return state.plan.blocks.filter(
+    (block) =>
+      !dependencyVerifiedComplete(block, state) &&
+      block.items.some((findingId) => state.items?.[findingId]?.status === "pending"),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rolling per-node scheduler (CP-BLOCK-N-rolling-scheduler)
+// ---------------------------------------------------------------------------
+//
+// The rolling scheduler replaced the wave-batch shim: instead of dispatching one
+// fixed-size wave per next-step and folding back through `implementing`, a node
+// becomes eligible the instant every dependency reaches a verified-complete
+// disposition (INV-RS-01). Concurrency is owned entirely by the quota scheduler
+// (the `dispatch-quota.json` max_concurrent_agents from `scheduleWave` /
+// `computeDispatchCapacity` — INV-S05 / INV-QD-11), never a separate wave cap.
+// A shared rebuild is interposed between dependency levels so a downstream node
+// typechecks/runs against the freshly-built upstream `@audit-tools/shared`
+// surface; the rebuild is single-flight (CE-001) so the same package is never
+// built twice or concurrently within one dispatch run.
+
+/**
+ * Partition pending nodes into rolling dependency LEVELS. Level 0 is every
+ * pending node already eligible (deps verified-complete now); each subsequent
+ * level is the pending nodes that become eligible once all earlier levels are
+ * assumed verified-complete. The boundary between two levels is exactly where a
+ * shared rebuild is interposed (so a later level builds against the realized
+ * upstream surface). A node with a permanently-unsatisfiable edge (its
+ * prerequisite is skipped/blocked, not merely pending) is NOT placed in any
+ * level — it is dead-ended by `handlePlanning`.
+ *
+ * Pure and deterministic: levels and the nodes within a level are ordered by
+ * block_id so the interposed-rebuild boundaries are stable across runs.
+ */
+export function rollingDependencyLevels(
+  state: RemediationState,
+): RemediationBlock[][] {
+  const plan = state.plan;
+  const items = state.items;
+  if (!plan || !items) return [];
+
+  const blockById = new Map(plan.blocks.map((b) => [b.block_id, b]));
+  const pendingBlocks = plan.blocks
+    .filter((b) => b.items.some((id) => items[id]?.status === "pending"))
+    .sort((a, b) => a.block_id.localeCompare(b.block_id));
+
+  // A dependency edge is "completable" only when the dep node is itself pending
+  // (will be satisfied by some level) or already verified-complete. A skipped /
+  // blocked dependency makes the dependent permanently ineligible — such nodes
+  // never enter a level (INV-RS-01).
+  const isVerifiedNow = (depBlock: RemediationBlock): boolean =>
+    depBlock.items.every((id) => isVerifiedCompleteStatus(items[id]?.status));
+  const isPending = (depBlock: RemediationBlock): boolean =>
+    depBlock.items.some((id) => items[id]?.status === "pending");
+
+  const permanentlyIneligible = (block: RemediationBlock): boolean => {
+    for (const depId of block.dependencies ?? []) {
+      const dep = blockById.get(depId);
+      if (!dep) continue; // dangling edge never strands the DAG
+      if (!isVerifiedNow(dep) && !isPending(dep)) return true; // skipped/blocked dep
+    }
+    return false;
+  };
+
+  const levels: RemediationBlock[][] = [];
+  const placed = new Set<string>();
+  let remaining = pendingBlocks.filter((b) => !permanentlyIneligible(b));
+
+  while (remaining.length > 0) {
+    const ready = remaining.filter((block) =>
+      (block.dependencies ?? []).every((depId) => {
+        const dep = blockById.get(depId);
+        if (!dep) return true; // dangling edge
+        // Satisfied if already verified-complete, or every pending item of the
+        // dep was placed in an earlier level (so it will be verified by then).
+        if (isVerifiedNow(dep)) return true;
+        return dep.items.every(
+          (id) =>
+            isVerifiedCompleteStatus(items[id]?.status) ||
+            (items[id]?.status === "pending" && placed.has(dep.block_id)),
+        );
+      }),
+    );
+    if (ready.length === 0) {
+      // A cycle among the remaining pending nodes: no further level can form.
+      // Leave them unplaced — `handlePlanning` marks them blocked deterministically.
+      break;
+    }
+    levels.push(ready);
+    for (const block of ready) placed.add(block.block_id);
+    remaining = remaining.filter((b) => !placed.has(b.block_id));
+  }
+
+  return levels;
+}
+
+/** A single node's dispatch handler for the in-process rolling engine. */
+export type RollingNodeDispatcher = (
+  block: RemediationBlock,
+  slot: ProviderSlot,
+) => Promise<RollingDispatchResult<{ block_id: string }>>;
+
+export interface DriveRollingDispatchOptions {
+  /** Confirmed quota pools (scheduler-owned concurrency — no separate wave cap). */
+  confirmedPools: CapacityPool[];
+  sessionConfig: SessionConfig;
+  /** Per-node dispatch (host subagent / tool worker). Must resolve, never reject. */
+  dispatchNode: RollingNodeDispatcher;
+  /**
+   * Rebuild `@audit-tools/shared` (and any upstream surface) BETWEEN dependency
+   * levels. Single-flight is enforced by the driver: this is invoked at most
+   * once per inter-level boundary and never concurrently with itself.
+   */
+  rebuildSharedBetweenLevels: () => Promise<void>;
+  /** Per-node estimated input tokens (defaults to a flat overhead estimate). */
+  estimateTokens?: (block: RemediationBlock) => number;
+  /** Quota state dir for `recordWaveOutcome` (defaults to leaving it unset). */
+  quotaStateDir?: string;
+}
+
+export interface DriveRollingDispatchResult {
+  /** Per-level dispatch results, in level order. */
+  levels: Array<{
+    blockIds: string[];
+    results: RollingDispatchResult<{ block_id: string }>[];
+  }>;
+  /** Number of inter-level shared rebuilds performed (== levels.length - 1 when >1 level). */
+  rebuilds: number;
+}
+
+/**
+ * Drive a rolling per-node dispatch run IN PROCESS over the precomputed
+ * dependency levels, wiring onto the shared `createRollingDispatcher`
+ * (quota-only throttle; transient-429 re-queue + empty-pool stranding owned by
+ * the shared engine). The driver's own responsibilities are the two properties
+ * the shared engine does not own:
+ *   1. SHARED-REBUILD-BETWEEN-LEVELS — after a level completes, rebuild the
+ *      upstream surface before the next level dispatches, so dependents
+ *      typecheck/run against the realized upstream output.
+ *   2. SINGLE-FLIGHT BUILD (CE-001) — the rebuild runs exactly once per
+ *      inter-level boundary, never twice or concurrently.
+ *
+ * Within a level, concurrency is whatever the shared engine's quota headroom
+ * allows over `confirmedPools` — there is no wave-size cap (INV-S05).
+ */
+export async function driveRollingDispatch(
+  levels: RemediationBlock[][],
+  options: DriveRollingDispatchOptions,
+): Promise<DriveRollingDispatchResult> {
+  if (options.quotaStateDir) {
+    setQuotaStateDir(options.quotaStateDir);
+  }
+  const estimateTokens = options.estimateTokens ?? (() => 2000);
+  const out: DriveRollingDispatchResult = { levels: [], rebuilds: 0 };
+
+  let rebuildInFlight = false; // single-flight guard (CE-001)
+  for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
+    const level = levels[levelIndex]!;
+
+    // Interpose the shared rebuild BEFORE every level after the first. Guarded so
+    // it can never run twice or concurrently for the same boundary.
+    if (levelIndex > 0) {
+      if (rebuildInFlight) {
+        throw new Error(
+          "driveRollingDispatch: shared rebuild already in flight — single-flight invariant violated (CE-001).",
+        );
+      }
+      rebuildInFlight = true;
+      try {
+        await options.rebuildSharedBetweenLevels();
+        out.rebuilds += 1;
+      } finally {
+        rebuildInFlight = false;
+      }
+    }
+
+    const blockByPacketId = new Map(level.map((b) => [b.block_id, b]));
+    const packets: RollingDispatchPacket<{ block_id: string }>[] = level.map(
+      (block) => ({
+        id: block.block_id,
+        payload: { block_id: block.block_id },
+        estimatedTokens: estimateTokens(block),
+        complexity: 0.5,
+      }),
+    );
+
+    const dispatcher = createRollingDispatcher<{ block_id: string }>({
+      confirmedPools: options.confirmedPools,
+      sessionConfig: options.sessionConfig,
+      dispatchPacket: async (packet, slot) => {
+        const block = blockByPacketId.get(packet.payload.block_id)!;
+        return options.dispatchNode(block, slot);
+      },
+    });
+    dispatcher.enqueue(packets);
+    const results = await dispatcher.run();
+    out.levels.push({ blockIds: level.map((b) => b.block_id), results });
+  }
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Tool-owned final completion gate (INV-RS-10) + coarse re-block (INV-RS-09)
+// ---------------------------------------------------------------------------
+//
+// INV-RS-10: the final completion gate is a TOOL-OWNED, NON-VACUOUS suite that
+// is INDEPENDENT of any `plan.test_command`. A run can only land green when this
+// suite passes; a vacuous/unset `plan.test_command` can never substitute for it.
+// The suite is executed through the env-scrubbing `runTracked` path
+// (`runCommand`), which strips CLAUDECODE / CLAUDE_CODE_* so the gate runs in a
+// clean environment regardless of the host session.
+//
+// Hard floor (always run, in order, single-flight per package — CE-001):
+//   1. npm run build -w @audit-tools/shared   (upstream surface first)
+//   2. npm run build                          (all workspaces)
+//   3. npm run check                          (typecheck, no emit)
+//   4. per-package BUILD-FREE unit suite, each invoked directly so no package is
+//      built twice or concurrently:
+//        - shared:        node --import tsx/esm --test tests/*.test.mjs
+//        - audit-code:    node --import tsx/esm --test tests/*.test.mjs
+//        - remediate-code: npx vitest run
+//
+// CE-002: the hard floor is scoped to build + typecheck + unit. The
+// runtime/packaged-bin smoke surface (the `verify:release` smokes) is recorded
+// as a DECLARED RESIDUAL the floor does not gate, rather than run inline — the
+// packaged-bin smokes are the known Windows-flaky / EPERM surface and an in-loop
+// gate must converge deterministically, so they are surfaced for a separate
+// pass instead of being able to strand the run.
+
+/** One command in the tool-owned final gate. */
+export interface FinalGateCommandSpec {
+  argv: string[];
+  /** True for commands that neither build nor run a build-prepending test script. */
+  build_free: boolean;
+  /** The package this command's unit suite targets (single-flight key), if any. */
+  package_dir?: string;
+  /** Which layer of the floor this belongs to. */
+  layer: "build" | "check" | "unit";
+}
+
+/**
+ * Whether `root` is the audit-tools monorepo — the repo the tool-owned final
+ * gate's suite (INV-RS-10, literally the audit-tools build/check/per-package
+ * commands) applies to. The gate's command list is audit-tools-specific by
+ * design (this remediation run remediates the audit-tools monorepo), so it is
+ * scoped to that structure rather than fabricated for an arbitrary target repo.
+ */
+export function isAuditToolsMonorepo(root: string): boolean {
+  return (
+    existsSync(join(root, "packages", "shared", "package.json")) &&
+    existsSync(join(root, "packages", "audit-code", "package.json")) &&
+    existsSync(join(root, "packages", "remediate-code", "package.json"))
+  );
+}
+
+/**
+ * The tool-owned final-gate command list (INV-RS-10) for the audit-tools
+ * monorepo. Pure and deterministic so tests can assert: it is non-vacuous
+ * (always > 0 build + check + unit commands) for the audit-tools structure,
+ * never references `plan.test_command`, every UNIT command is build-free, and no
+ * package's unit suite appears twice (single-flight — CE-001). Returns `[]` when
+ * `root` is not the audit-tools monorepo (the audit-tools-specific suite is
+ * inapplicable there — see `runToolOwnedFinalGate`).
+ */
+export function toolOwnedFinalGateCommands(root: string): FinalGateCommandSpec[] {
+  if (!isAuditToolsMonorepo(root)) return [];
+  return [
+    { argv: ["npm", "run", "build", "-w", "@audit-tools/shared"], build_free: false, layer: "build" },
+    { argv: ["npm", "run", "build"], build_free: false, layer: "build" },
+    { argv: ["npm", "run", "check"], build_free: true, layer: "check" },
+    // Per-package BUILD-FREE unit suites — invoked directly (never `npm test`,
+    // which prepends a build). Single-flight: each package_dir appears once.
+    {
+      argv: ["node", "--import", "tsx/esm", "--test", "tests/*.test.mjs"],
+      build_free: true,
+      package_dir: "packages/shared",
+      layer: "unit",
+    },
+    {
+      argv: ["node", "--import", "tsx/esm", "--test", "tests/*.test.mjs"],
+      build_free: true,
+      package_dir: "packages/audit-code",
+      layer: "unit",
+    },
+    {
+      argv: ["npx", "vitest", "run"],
+      build_free: true,
+      package_dir: "packages/remediate-code",
+      layer: "unit",
+    },
+  ];
+}
+
+/** A command's recorded outcome within a gate run. */
+export interface FinalGateCommandResult {
+  argv: string[];
+  layer: FinalGateCommandSpec["layer"];
+  package_dir?: string;
+  exit_code: number | null;
+  passed: boolean;
+}
+
+export interface ToolOwnedFinalGateResult {
+  passed: boolean;
+  results: FinalGateCommandResult[];
+  /**
+   * True when the audit-tools-specific suite did not apply (target is not the
+   * audit-tools monorepo). The gate then does not block; it is a declared scope,
+   * not a vacuous pass.
+   */
+  scoped_out: boolean;
+  /**
+   * The runtime/packaging surface the hard floor does NOT gate, declared as a
+   * residual for a separate pass (CE-002). Always present (the floor is scoped
+   * to build+check+unit by design).
+   */
+  runtime_residual: { surface: string; commands: string[] };
+}
+
+/** Injectable runner so the gate is unit-testable without spawning a real build. */
+export type GateRunner = (
+  argv: string[],
+  cwd: string,
+  packageDir?: string,
+) => { status: number | null };
+
+/**
+ * Run the tool-owned final gate (INV-RS-10). Each command runs through
+ * `runCommand` → shared `runTracked`, which scrubs CLAUDECODE / CLAUDE_CODE_*.
+ * The first failing command short-circuits the floor (a broken build makes the
+ * later layers meaningless). A `runner` may be injected for tests. When the
+ * audit-tools suite does not apply (non-monorepo target), the gate is
+ * `scoped_out` (does not block) rather than vacuously passing.
+ */
+export async function runToolOwnedFinalGate(
+  root: string,
+  opts: { runner?: GateRunner } = {},
+): Promise<ToolOwnedFinalGateResult> {
+  const runtime_residual = {
+    surface: "runtime/packaged-bin smokes (verify:release)",
+    commands: [
+      "npm run smoke:packaged-audit-code -w packages/audit-code",
+      "npm run smoke:packaged -w packages/remediate-code",
+    ],
+  };
+
+  const commands = toolOwnedFinalGateCommands(root);
+  if (commands.length === 0) {
+    // Audit-tools-specific suite does not apply here — declared scope, not a
+    // vacuous pass (it never substitutes for a real gate on the audit-tools repo).
+    return { passed: true, results: [], scoped_out: true, runtime_residual };
+  }
+
+  const runner: GateRunner =
+    opts.runner ??
+    ((argv, cwd, packageDir) => {
+      const [command, ...args] = argv;
+      // Package-scoped unit suites run with cwd at the package (no `npm -w`); the
+      // monorepo-root build/check commands run at the repo root.
+      const effectiveCwd = packageDir ? join(root, packageDir) : cwd;
+      // runCommand → runTracked strips CLAUDECODE / CLAUDE_CODE_* (INV-RS-10).
+      const result = runCommand(command, args, {
+        cwd: effectiveCwd,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      return { status: result.status };
+    });
+
+  const results: FinalGateCommandResult[] = [];
+  let passed = true;
+  for (const spec of commands) {
+    const { status } = runner(spec.argv, root, spec.package_dir);
+    const cmdPassed = status === 0;
+    results.push({
+      argv: spec.argv,
+      layer: spec.layer,
+      ...(spec.package_dir ? { package_dir: spec.package_dir } : {}),
+      exit_code: status,
+      passed: cmdPassed,
+    });
+    if (!cmdPassed) {
+      passed = false;
+      break; // short-circuit: later layers are meaningless on a broken floor
+    }
+  }
+
+  return { passed, results, scoped_out: false, runtime_residual };
+}
+
+/**
+ * The bound on coarse re-block iterations before the run converges to a terminal
+ * `blocked` close (CE-003). Two re-block attempts give a flaky-but-recoverable
+ * suite a chance to settle; the third unattributable red terminates
+ * deterministically rather than livelocking.
+ */
+export const COARSE_REBLOCK_BOUND = 2;
+
+const FINAL_GATE_STATE_FILENAME = "final-gate.json";
+
+interface FinalGateSidecar {
+  coarse_reblock_count: number;
+  /** Set once the bounded backstop terminated; the gate is never re-run after. */
+  terminated?: boolean;
+}
+
+async function readFinalGateSidecar(
+  artifactsDir: string,
+): Promise<{ count: number; terminated: boolean }> {
+  const sidecar = await readOptionalJsonFile<FinalGateSidecar>(
+    join(artifactsDir, FINAL_GATE_STATE_FILENAME),
+  );
+  const n = sidecar?.coarse_reblock_count;
+  return {
+    count: typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : 0,
+    terminated: sidecar?.terminated === true,
+  };
+}
+
+async function writeFinalGateSidecar(
+  artifactsDir: string,
+  count: number,
+  terminated: boolean,
+): Promise<void> {
+  await writeJsonFile(join(artifactsDir, FINAL_GATE_STATE_FILENAME), {
+    schema_version: "remediate-code-final-gate/v1alpha1",
+    coarse_reblock_count: count,
+    terminated,
+  });
+}
+
+export type CoarseReblockAction = "reattempt_all" | "terminal_blocked";
+
+export interface CoarseReblockDecision {
+  state: RemediationState;
+  action: CoarseReblockAction;
+  next_count: number;
+}
+
+/**
+ * Coarse re-block-ALL-non-terminal on an unattributable final-gate red
+ * (INV-RS-09) with a bounded, monotonic auto-terminate (CE-003).
+ *
+ * The tool-owned gate is whole-repo, so a red is inherently unattributable to a
+ * single node. Below the bound, EVERY non-skip item (including `resolved` ones —
+ * a resolved item's own change may have caused the red) is re-opened to `pending`
+ * and the run re-attempts the whole repo through the rolling scheduler
+ * (`reattempt_all` → `implementing`). At or above the bound, the run STOPS
+ * re-attempting and converges DETERMINISTICALLY: every non-skip item becomes
+ * terminal `blocked` and the run advances to `closing`.
+ *
+ * CE-003 no-human-host guarantee: the loop is owned entirely by the gate + the
+ * rolling scheduler — it NEVER routes through the human triage prompt
+ * (`waiting_for_triage`) and is bounded by `bound`, so a permanently-red sibling
+ * converges to a terminal `blocked` close deterministically: never livelocking,
+ * never stranding on a human prompt, and never force-closed to green (a RED gate
+ * always leaves `blocked` items, so close.ts's `!anyBlocked` guard keeps the run
+ * out of the fully-green path). User SKIP dispositions (ignored /
+ * deemed_inappropriate) are settled decisions and are left alone. Pure (the
+ * counter is supplied / returned).
+ */
+export function applyCoarseReblock(
+  state: RemediationState,
+  currentCount: number,
+  gateSummary: string,
+  bound: number = COARSE_REBLOCK_BOUND,
+): CoarseReblockDecision {
+  const now = new Date().toISOString();
+  const isSkip = (s: string): boolean =>
+    s === "ignored" || s === "deemed_inappropriate";
+
+  if (currentCount >= bound) {
+    // Bounded auto-terminate: converge DETERMINISTICALLY to a terminal `blocked`
+    // close for a no-human host — never livelock, never a triage prompt, never green.
+    for (const it of Object.values(state.items ?? {})) {
+      if (isSkip(it.status)) continue; // settled user decision — never overturn
+      it.status = "blocked";
+      it.started_at ??= now;
+      it.completed_at = now;
+      it.failure_reason =
+        `Tool-owned final gate failed and the coarse re-block backstop reached its ` +
+        `bound (${bound}); converging to a terminal blocked close (no-human host). ${gateSummary}`;
+    }
+    return { state, action: "terminal_blocked", next_count: currentCount };
+  }
+
+  // Below the bound: re-open every non-skip item to `pending` and re-attempt the
+  // whole repo via the rolling scheduler (NOT the human triage prompt).
+  for (const it of Object.values(state.items ?? {})) {
+    if (isSkip(it.status)) continue;
+    it.status = "pending";
+    it.failure_context =
+      `Re-attempted by the coarse final-gate backstop (unattributable whole-repo red). ${gateSummary}`;
+    delete it.completed_at;
+  }
+  return { state, action: "reattempt_all", next_count: currentCount + 1 };
 }
 
 function resolvedOrTerminalItems(state: RemediationState): RemediationItemState[] {
@@ -945,14 +1502,19 @@ Then run:
       hostModels: options.hostModels,
       hostModelId: options.hostModelId,
     };
-    const onlyBlock = !canDispatchImpl ? implementBlocks[0].block_id : undefined;
+    // Rolling per-node dispatch: prepare EVERY currently-eligible node (deps all
+    // verified-complete), never a single artificially-serialized block. There is
+    // no wave-size cap — concurrency is owned by the quota scheduler
+    // (`dispatch-quota.json` max_concurrent_agents). `prepareImplementDispatch`
+    // itself only admits verified-complete-eligible blocks
+    // (`dependencyVerifiedComplete`), so this is the rolling-eligible frontier.
     const dispatchPlan = await prepareImplementDispatch(
       { root, artifactsDir },
       runId,
-      onlyBlock,
+      undefined,
       waveOptsImpl,
     );
-    // Everything implementable may already be done or skipped (e.g. every Tier 3
+    // Everything eligible may already be done or skipped (e.g. every Tier 3
     // finding excluded) — fold straight to merge rather than dispatching a wave
     // of zero workers.
     if (dispatchPlan.items.length === 0) {
@@ -962,27 +1524,35 @@ Then run:
     const planPath = join(artifactsDir, "runs", runId, "implement", "dispatch-plan.json");
     const mergeCommand = loaderCommand(`merge-implement-results --run-id ${runId}`);
     const nextCommand = loaderCommand("next-step");
+    const implQuotaPath = join(artifactsDir, "runs", runId, "implement", "dispatch-quota.json");
 
     if (!canDispatchImpl) {
-      const item = dispatchPlan.items[0];
-      if (!item) {
-        await mergeImplementResults({ root, artifactsDir }, runId);
-        return decideNextStepLoop(options, runLogger, true);
-      }
+      // A host that cannot dispatch parallel subagents runs the eligible nodes
+      // ITSELF, one at a time — but the orchestrator still emits the FULL eligible
+      // frontier (not one node per next-step). The shared rebuild between
+      // dependency levels happens naturally on the next next-step pass: this
+      // level's results are merged, and the next pass emits the now-eligible
+      // downstream level after the host rebuilds the shared surface.
       return writeCurrentStep({
-        stepKind: "implement_single_item",
+        stepKind: "implement_rolling_sequential",
         status: "ready",
         runId,
         repoRoot: root,
         artifactsDir,
         prompt: `
-# Implement One Remediation Block
+# Implement Eligible Remediation Nodes (sequential)
 
-Read and follow only this prompt:
+Read the dispatch plan:
 
-\`${item.prompt_path}\`
+\`${planPath}\`
 
-After writing the result JSON, run:
+Every item in \`items\` is a node whose dependencies are all verified-complete, so
+they are safe to implement now. Work through them ONE AT A TIME, in order: for each
+item, read and follow only its \`prompt_path\`, then move to the next.
+
+${SHARED_REBUILD_BETWEEN_LEVELS_NOTE}
+
+After all results in this plan exist:
 
 \`${mergeCommand}\`
 
@@ -992,16 +1562,14 @@ Then run:
 `,
         allowedCommands: [mergeCommand, nextCommand],
         stopCondition:
-          "Stop when the single implementation result has been merged and next-step has been run.",
+          "Stop after every eligible node's result has been merged and next-step has been run.",
         artifactPaths: {
           dispatch_plan: planPath,
-          single_task_prompt: item.prompt_path,
-          result: item.result_path,
+          dispatch_quota: implQuotaPath,
         },
       });
     }
 
-    const implQuotaPath = join(artifactsDir, "runs", runId, "implement", "dispatch-quota.json");
     return writeCurrentStep({
       stepKind: "dispatch_implement",
       status: "ready",
@@ -1009,20 +1577,25 @@ Then run:
       repoRoot: root,
       artifactsDir,
       prompt: `
-# Dispatch Implementation Work
+# Dispatch Implementation Work (rolling)
 
 Read the dispatch plan and quota JSONs:
 
 \`${planPath}\`
 \`${implQuotaPath}\`
 
-Maintain up to \`max_concurrent_agents\` subagents running simultaneously (from the quota file).
-Each item's \`model_hint.tier\` suggests which model to use (small/standard/deep).
-If your provider has rate limits, pace launches accordingly.
+Every item in \`items\` is a node whose dependencies are all VERIFIED-COMPLETE
+(INV-RS-01), so all of them are eligible to run now. Concurrency is owned by the
+quota scheduler — maintain up to \`max_concurrent_agents\` subagents running
+simultaneously (from the quota file), with no separate wave-size cap. Each item's
+\`model_hint.tier\` suggests which model to use (small/standard/deep). If your
+provider has rate limits, pace launches accordingly.
 
 For each item in \`items\`, dispatch one subagent with that item's
 \`prompt_path\`. Each subagent may edit source files needed for that bounded
 block and must write only its assigned \`result_path\`.
+
+${SHARED_REBUILD_BETWEEN_LEVELS_NOTE}
 
 ${DISPATCH_PROMPT_HANDOFF_NOTE}
 
@@ -1509,16 +2082,28 @@ async function handlePlanning(
   }
 
   // Transition directly to implementing — no separate document round.
-  // Any item still pending with no dependency-ready block is stuck; mark it
-  // blocked so the run can advance to close rather than looping forever.
+  // Any pending item whose node is NOT eligible for any rolling dispatch pass is
+  // dead-ended (INV-RS-01): a prerequisite was skipped/blocked, so its
+  // verified-complete edge can never be satisfied — never dispatch a dependent
+  // against an upstream surface that did not land. Mark it blocked so the run
+  // advances to close rather than looping forever. A node that is merely
+  // waiting on a still-running prerequisite is NOT here (it would appear in a
+  // later eligible pass); only nodes with a permanently-unsatisfiable edge are.
   let changed = false;
-  for (const it of Object.values(state.items ?? {})) {
-    if (it.status === "pending" && !implementBlocks.some((b) => b.items.includes(it.finding_id))) {
-      it.status = "blocked";
-      it.failure_reason =
-        it.failure_reason ??
-        "Block dependencies were not satisfied (a prerequisite block was blocked, or dependencies are cyclic).";
-      changed = true;
+  if (implementBlocks.length === 0) {
+    for (const block of blockedByUnsatisfiedDependency(state)) {
+      for (const findingId of block.items) {
+        const it = state.items?.[findingId];
+        if (!it || it.status !== "pending") continue;
+        it.status = "blocked";
+        it.failure_reason =
+          it.failure_reason ??
+          "A dependency node did not reach a verified-complete disposition " +
+          "(a prerequisite was skipped, blocked, or the dependencies are cyclic); " +
+          "the rolling scheduler will not dispatch this node against an upstream " +
+          "surface that never landed (INV-RS-01).";
+        changed = true;
+      }
     }
   }
 
@@ -1543,6 +2128,12 @@ async function handleImplementing(
   return decideNextStepLoop(options, runLogger, true);
 }
 
+function hasResolvedItems(state: RemediationState): boolean {
+  return Object.values(state.items ?? {}).some(
+    (it) => it.status === "resolved" || it.status === "resolved_no_change",
+  );
+}
+
 async function handleAllTerminalTransition(
   root: string,
   artifactsDir: string,
@@ -1551,6 +2142,66 @@ async function handleAllTerminalTransition(
   options: NextStepOptions,
   runLogger: RunLogger,
 ): Promise<RemediationStep> {
+  const gateDisabled =
+    options.skipFinalGate === true ||
+    process.env.REMEDIATE_SKIP_FINAL_GATE === "1" ||
+    process.env.REMEDIATE_SKIP_FINAL_GATE === "true";
+
+  const sidecar = await readFinalGateSidecar(artifactsDir);
+
+  // The tool-owned final gate (INV-RS-10) runs at the single all-terminal →
+  // closing funnel, exactly once per arrival here. It is skipped when:
+  //  - there is nothing resolved to validate (everything blocked/skipped), or
+  //  - the bounded backstop already terminated (CE-003 — never re-run after), or
+  //  - it is explicitly disabled for test hermeticity.
+  // The gate is INDEPENDENT of plan.test_command and runs through the
+  // env-scrubbing runTracked path.
+  if (!gateDisabled && !sidecar.terminated && hasResolvedItems(state)) {
+    const gateStart = Date.now();
+    runLogger.event({
+      phase: "next-step",
+      kind: "executor_start",
+      obligation: state.status,
+      note: "tool_owned_final_gate",
+    });
+    const gate = await runToolOwnedFinalGate(root, { runner: options.finalGateRunner });
+    runLogger.event({
+      phase: "next-step",
+      kind: "executor_end",
+      obligation: state.status,
+      note: `tool_owned_final_gate passed=${gate.passed}`,
+      duration_ms: Date.now() - gateStart,
+    });
+
+    if (!gate.passed) {
+      // INV-RS-09: a whole-repo gate red is unattributable → coarse re-block.
+      // CE-003: bounded, monotonic auto-terminate to terminal `blocked`.
+      const failedCmd = gate.results.find((r) => !r.passed);
+      const summary = failedCmd
+        ? `Failing command: ${failedCmd.argv.join(" ")} (exit ${failedCmd.exit_code}).`
+        : "Tool-owned final gate failed.";
+      const decision = applyCoarseReblock(state, sidecar.count, summary);
+      await writeFinalGateSidecar(
+        artifactsDir,
+        decision.next_count,
+        decision.action === "terminal_blocked",
+      );
+      runLogger.event({
+        phase: "next-step",
+        kind: "outcome",
+        obligation: state.status,
+        note: `coarse_reblock action=${decision.action} count=${decision.next_count}`,
+      });
+      // reattempt_all → re-open items to pending and re-run the rolling scheduler
+      // (NEVER the human triage prompt — CE-003 no-human-host path); terminal_blocked
+      // → everything non-skip is now blocked, so close writes the partial report.
+      decision.state.status =
+        decision.action === "reattempt_all" ? "implementing" : "closing";
+      await store.saveState(decision.state);
+      return decideNextStepLoop(options, runLogger, true);
+    }
+  }
+
   state.status = "closing";
   await store.saveState(state);
   return decideNextStepLoop(options, runLogger, true);
@@ -2078,22 +2729,32 @@ async function decideNextStepLoop(
     return handlePlanning(root, artifactsDir, state, options, store, runLogger);
   }
 
-  // Partial-completion terminal hook (OBL-S09 / INV-X06): when the dispatch
-  // engine wrote a terminal on state (empty pool or livelock guard) and not all
-  // items are already terminal, mark every still-non-terminal pending item as
-  // blocked and advance to close rather than looping forever.
+  // Partial-completion terminal hook (OBL-S09 / INV-X06 / OBL-SEAM-RSD-01):
+  // Workstream-C consume side. The shared rolling-dispatch engine
+  // (createRollingDispatcher) re-queues a transient rate_limited/exhausted
+  // packet and re-selects a pool within headroom on the next pass; only when no
+  // pool survives does it surface a PartialCompletionTerminal{reason:'empty_pool',
+  // stranded_ids} (via getTerminal()). remediate-code consumes that terminal
+  // here: the precisely-named stranded ids get a stranded disposition, any other
+  // still-non-terminal item is blocked too (the pool is exhausted, so it cannot
+  // proceed either — this is the no-livelock guarantee), then the run advances
+  // to close. The host-driven dispatch path writes the same terminal shape onto
+  // state, so both producers funnel through this one consumer.
   if (
     state.partial_completion_terminal &&
     !allItemsTerminal(state)
   ) {
     const terminal = state.partial_completion_terminal;
+    const strandedSet = new Set(terminal.stranded_ids ?? []);
     for (const it of Object.values(state.items ?? {})) {
-      if (!isTerminalStatus(it.status)) {
-        it.status = "blocked";
-        it.failure_reason =
-          it.failure_reason ??
-          `Stranded by partial-completion terminal (${terminal.reason}): the provider pool was exhausted before this item could be dispatched.`;
-      }
+      if (isTerminalStatus(it.status)) continue;
+      it.status = "blocked";
+      const stranded = strandedSet.has(it.finding_id);
+      it.failure_reason =
+        it.failure_reason ??
+        (stranded
+          ? `Stranded by partial-completion terminal (${terminal.reason}): the provider pool was exhausted before this item could be dispatched (no pool survived re-routing).`
+          : `Blocked after partial-completion terminal (${terminal.reason}): no provider pool remained to dispatch this item.`);
     }
     // Clear the terminal flag so the recursive fold doesn't re-enter this branch:
     // 'blocked' is not a terminal status, so without clearing, the check would
@@ -2116,6 +2777,36 @@ async function decideNextStepLoop(
         implementBlocks: pendingBlocks,
         runLogger,
       });
+    }
+    // No eligible block remains, but pending nodes whose dependency never reached
+    // verified-complete (a prerequisite was skipped/blocked) would otherwise loop
+    // forever in implementing → triage (triage only acts on `blocked`, not
+    // `pending`). Dead-end them deterministically (INV-RS-01): a node whose
+    // upstream surface never landed is blocked, not dispatched. Without this the
+    // stricter verified-complete gate could livelock the implementing phase.
+    const deadEnded = blockedByUnsatisfiedDependency(state);
+    if (deadEnded.length > 0) {
+      const now = new Date().toISOString();
+      let changed = false;
+      for (const block of deadEnded) {
+        for (const findingId of block.items) {
+          const it = state.items?.[findingId];
+          if (!it || it.status !== "pending") continue;
+          it.status = "blocked";
+          it.started_at ??= now;
+          it.completed_at = now;
+          it.failure_reason =
+            it.failure_reason ??
+            "A dependency node did not reach a verified-complete disposition " +
+            "(a prerequisite was skipped, blocked, or the dependencies are cyclic); " +
+            "the rolling scheduler will not dispatch this node (INV-RS-01).";
+          changed = true;
+        }
+      }
+      if (changed) {
+        await store.saveState(state);
+        return decideNextStepLoop(options, runLogger, true);
+      }
     }
     return handleImplementing(root, artifactsDir, state, runLogger, store, options);
   }

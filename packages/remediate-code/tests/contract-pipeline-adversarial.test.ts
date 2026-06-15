@@ -165,7 +165,19 @@ function payloads(overrides: {
     test_validator_plan: {
       contract_version: CP_TEST_VALIDATOR_PLAN_VERSION,
       goal_id: "G1",
-      test_specs: [],
+      // O-1 is behavioral (testable): the paired-obligation gate requires a spec
+      // asserting both the satisfied path and the failure path before promotion.
+      test_specs: [
+        {
+          obligation_id: "O-1",
+          name: "auth flow behavior holds and rejects the failure case",
+          kind: "invariant",
+          assertions: [
+            "returns the preserved session on the satisfied path",
+            "rejects the request on the failure path",
+          ],
+        },
+      ],
       created_at: CREATED_AT,
     },
     contract_assessment_report: {
@@ -455,7 +467,9 @@ describe("traceability gate: untraceable implementation_dag nodes never promote"
 
     const prompt = await promptOf(step!);
     expect(prompt).toMatch(/Implementation Planning/);
-    expect(prompt).toMatch(/Traceability Errors From the Previous Attempt/);
+    // ARC-86b18f1b-2: referential integrity gate fires before (and subsumes) the
+    // traceability gate when references are to non-existent obligations.
+    expect(prompt).toMatch(/Referential Integrity Errors From the Previous Attempt|Traceability Errors From the Previous Attempt/);
     expect(prompt).toMatch(/CP-001/);
     // No extracted plan was produced and the bad DAG was archived.
     expect(existsSync(intakePaths(ARTIFACTS_DIR).extractedPlan)).toBe(false);
@@ -481,7 +495,9 @@ describe("traceability gate: untraceable implementation_dag nodes never promote"
     );
     const blocked = await buildNextContractPipelineStep(STEP_OPTIONS);
     expect(blocked?.status).toBe("blocked");
-    expect(await promptOf(blocked!)).toMatch(/Failed Traceability/);
+    // ARC-86b18f1b-2: referential integrity gate fires before and subsumes the
+    // traceability gate — both produce a blocked step; the message differs.
+    expect(await promptOf(blocked!)).toMatch(/Failed Referential Integrity|Failed Traceability/);
     expect(existsSync(intakePaths(ARTIFACTS_DIR).extractedPlan)).toBe(false);
   });
 

@@ -50,9 +50,7 @@
       "git diff*": "allow",
       "grep *": "allow",
       "Select-String *": "allow",
-      "rm *": "deny",
-      "node* .audit-code/install/run-mcp-server.mjs*": "allow",
-      "node* ./.audit-code/install/run-mcp-server.mjs*": "allow"
+      "rm *": "deny"
     }
   },
   "agent": {

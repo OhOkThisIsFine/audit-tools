@@ -88,11 +88,20 @@ export function deduplicateCrossLensFindings(
         const b = group[j];
         if (a.lens.toLowerCase() === b.lens.toLowerCase()) continue;
 
+        // Category is a hard merge-key discriminator, mirroring the stable-id
+        // signals (lens+category+title+files): two findings that share a
+        // file/lens-pair but were classified under different categories describe
+        // structurally different problems and must NEVER be collapsed — e.g.
+        // ARC-86b18f1b (inferred_contract_gap) vs ARC-86b18f1b-2
+        // (invariant_counterexample) stay distinct (OBL-C003-DEDUP /
+        // OBL-INV-RPS-07). A true duplicate keeps the same category and still
+        // collapses below.
+        if (a.category.toLowerCase() !== b.category.toLowerCase()) continue;
+
         const titleSim = wordJaccard(a.title, b.title);
-        const catMatch =
-          a.category.toLowerCase() === b.category.toLowerCase();
-        const threshold = catMatch ? 0.4 : 0.5;
-        if (titleSim < threshold) continue;
+        // Same-category cross-lens pair: a moderate title overlap is enough to
+        // treat them as the same defect surfaced through two lenses.
+        if (titleSim < 0.4) continue;
         if (filePathOverlap(a, b) < 0.5) continue;
 
         const aSev = SEVERITY_RANK[a.severity] ?? 0;

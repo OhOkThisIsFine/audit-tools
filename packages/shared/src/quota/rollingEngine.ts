@@ -13,9 +13,9 @@
  */
 
 import type { SessionConfig } from "../types/sessionConfig.js";
-import type { CapacityPool } from "./capacity.js";
+import type { CapacityPool, PartialCompletionTerminal } from "./capacity.js";
 import type { FreshSessionProvider } from "../providers/types.js";
-import { computeDispatchCapacity } from "./capacity.js";
+import { computeDispatchCapacity, buildEmptyPoolTerminal } from "./capacity.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -164,56 +164,105 @@ export function dropProvider(
 // reroutePackets
 // ---------------------------------------------------------------------------
 
+/** Result of {@link reroutePackets}. */
+export interface ReroutePacketsResult {
+  state: RollingEnginePoolState;
+  /** Dispatch allocation computed over the surviving active pools, or null. */
+  allocation: ReturnType<typeof computeDispatchCapacity> | null;
+  /**
+   * Set when surplus pending packets could not be reassigned to any surviving
+   * active pool — either because no active pool remains, or because pending
+   * demand exceeds the survivors' combined slot capacity. The stranded packet
+   * ids are surfaced here (and removed from `state.pending_tokens`) so the
+   * caller routes them through its consumer-specific terminal handler. `null`
+   * when every pending packet found a surviving active pool. (INV-QD-13)
+   */
+  terminal: PartialCompletionTerminal | null;
+}
+
 /**
  * Re-route pending packet tokens across the remaining active pools.
  *
- * Calls `computeDispatchCapacity` over the remaining active pools and the
- * pending token estimates, then returns an updated state that reflects the
- * new allocation. Packets are re-assigned to pools in proportion to each
- * pool's allocated slots (round-robin across pool allocations).
+ * The no-stranding guarantee (INV-QD-13 / SEAM-rolling-stranding): after ANY
+ * `dropProvider` — including simultaneous multi-pool drops where pending demand
+ * exceeds the survivors' slot capacity — this function leaves ZERO
+ * `pending_tokens` whose `assigned_pool_id` points at a dropped/exhausted (i.e.
+ * non-active) pool. Every pending packet is either reassigned to a pool still in
+ * `active_pools`, or removed from `pending_tokens` and surfaced in
+ * `terminal.stranded_ids`. `reroutePackets` is the SINGLE owner of this
+ * guarantee; consumers (audit-cli-commands, remediate-steps-dispatch) only
+ * consume `stranded_ids` and never implement their own reroute.
  *
- * Returns the updated `RollingEnginePoolState` with `pending_tokens` reassigned
- * across the surviving active pools. If `active_pools` is empty or there are
- * no pending tokens, the state is returned unchanged.
+ * Behaviour:
+ * - No pending tokens → state unchanged, `allocation` and `terminal` null.
+ * - `active_pools` empty but pending tokens exist → every pending packet is
+ *   stranded (state pending cleared) and an `empty_pool` terminal is returned.
+ * - Otherwise → `computeDispatchCapacity` sizes the surviving pools; the largest
+ *   pending packets are assigned to the surviving pools up to their slot counts,
+ *   and any surplus that does not fit is stranded.
  *
- * Also returns the `DispatchCapacity` computed by `computeDispatchCapacity`
- * so callers can inspect the allocation without re-computing it.
+ * Also returns the `DispatchCapacity` computed by `computeDispatchCapacity` so
+ * callers can inspect the allocation without re-computing it.
  */
 export function reroutePackets(
   state: RollingEnginePoolState,
   sessionConfig: SessionConfig,
-): { state: RollingEnginePoolState; allocation: ReturnType<typeof computeDispatchCapacity> | null } {
-  if (state.active_pools.length === 0 || state.pending_tokens.length === 0) {
-    return { state, allocation: null };
+): ReroutePacketsResult {
+  if (state.pending_tokens.length === 0) {
+    return { state, allocation: null, terminal: null };
+  }
+
+  // No surviving pool: every pending packet is stranded. Clearing pending here
+  // is what guarantees ZERO pending_tokens remain pointed at a dead pool.
+  if (state.active_pools.length === 0) {
+    const strandedIds = state.pending_tokens.map((t) => t.id);
+    return {
+      state: { ...state, pending_tokens: [] },
+      allocation: null,
+      terminal: buildEmptyPoolTerminal(strandedIds),
+    };
   }
 
   const pendingItemTokens = state.pending_tokens.map((t) => t.estimated_tokens);
   const pools = state.active_pools.map((e) => e.pool);
+  const activePoolIds = new Set(pools.map((p) => p.id));
 
   const allocation = computeDispatchCapacity({ pools, sessionConfig, pendingItemTokens });
 
-  // Re-assign pending tokens to pools based on slot counts (round-robin).
+  // Order pending packets largest-first so the survivors' slots carry the most
+  // expensive work, mirroring computeDispatchCapacity's own descending layout.
+  const ordered = [...state.pending_tokens].sort(
+    (a, b) => b.estimated_tokens - a.estimated_tokens,
+  );
+
+  // Re-assign pending tokens to surviving pools based on slot counts.
   const reassigned: EnginePacketToken[] = [];
   let tokenCursor = 0;
 
   for (const poolAlloc of allocation.pools) {
-    const assignCount = Math.min(poolAlloc.slots, state.pending_tokens.length - tokenCursor);
+    // Defensive: never assign to a pool that is not in the active set.
+    if (!activePoolIds.has(poolAlloc.pool_id)) continue;
+    const assignCount = Math.min(poolAlloc.slots, ordered.length - tokenCursor);
     for (let i = 0; i < assignCount; i++) {
-      const original = state.pending_tokens[tokenCursor + i]!;
+      const original = ordered[tokenCursor + i]!;
       reassigned.push({ ...original, assigned_pool_id: poolAlloc.pool_id });
     }
     tokenCursor += assignCount;
-    if (tokenCursor >= state.pending_tokens.length) break;
+    if (tokenCursor >= ordered.length) break;
   }
 
-  // Any tokens beyond the allocated slots remain with their current assignment
-  // (no active-pool assignment available yet — they stay pending).
-  for (let i = tokenCursor; i < state.pending_tokens.length; i++) {
-    reassigned.push(state.pending_tokens[i]!);
-  }
+  // Any packet beyond the survivors' combined slot capacity cannot be placed on
+  // an active pool. It MUST NOT stay assigned to a dropped/exhausted pool — it is
+  // removed from pending_tokens and surfaced as stranded (INV-QD-13).
+  const stranded = ordered.slice(tokenCursor);
+  const terminal =
+    stranded.length > 0
+      ? buildEmptyPoolTerminal(stranded.map((t) => t.id))
+      : null;
 
   return {
     state: { ...state, pending_tokens: reassigned },
     allocation,
+    terminal,
   };
 }

@@ -22,9 +22,9 @@ starting point:
 
 - If the argument is an existing path, pass it to the backend with
   `--input`.
-- If the argument is conversational feedback, write it verbatim to
-  `.audit-tools/remediation/intake/conversation-start.md`, then let the backend
-  continue from that artifact.
+- If the argument is conversational feedback, write it to a temporary file
+  and pass that file with `--guidance-file <path>` (single-step bootstrap:
+  the backend writes it to intake/conversation-start.md itself, idempotently).
 
 For Claude-style command expansion, the raw user arguments are:
 
@@ -37,6 +37,12 @@ use:
 
 ```bash
 remediate-code next-step --input <path>
+```
+
+If you have conversational guidance to pass as a file, use:
+
+```bash
+remediate-code next-step --guidance-file <path-to-guidance-file>
 ```
 
 Otherwise use:

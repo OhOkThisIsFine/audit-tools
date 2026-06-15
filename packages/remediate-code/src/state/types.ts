@@ -250,6 +250,56 @@ export interface OutcomeCoverageLedger extends Omit<CoverageLedger, "entries"> {
   entries: OutcomeCoverageEntry[];
 }
 
+// ── Per-finding / per-node coverage ledger (N-coverage-ledger) ───────────────
+
+/**
+ * How the denominator for this ledger was derived. Determines what counts as
+ * "complete" and drives the `assertLedgerComplete` gate (INV-CL-05).
+ *
+ * - `finding_enumeration`: structured_audit source — every finding-id from
+ *   `finding-enumeration.json` must appear exactly once among the items.
+ * - `dag_node`: document / non-enumerable source — every promoted
+ *   implementation-DAG node must reach a terminal disposition.
+ */
+export type PerFindingDenominatorKind = "finding_enumeration" | "dag_node";
+
+/**
+ * Disposition of a single finding or DAG-node within the per-finding ledger.
+ * Only terminal dispositions count toward coverage (INV-CL-05 fail-closed rule).
+ */
+export type PerFindingDisposition =
+  | "resolved"
+  | "resolved_no_change"
+  | "ignored"
+  | "deemed_inappropriate"
+  | "force_closed_unresolved";
+
+/** Single entry in `PerFindingCoverageLedger.entries`. */
+export interface PerFindingLedgerEntry {
+  /** Finding id (structured_audit) or promoted DAG-node id (document source). */
+  id: string;
+  disposition: PerFindingDisposition;
+}
+
+/**
+ * Per-finding / per-node coverage ledger — source_type-aware denominator.
+ *
+ * For `structured_audit` sources the denominator is the complete
+ * `finding-enumeration.json` set; for document / non-enumerable sources the
+ * denominator is the set of promoted implementation-DAG nodes.  A 0/0 ledger
+ * is INCOMPLETE (fail-closed) — zero denominator never counts as vacuously
+ * complete (INV-CL-05).
+ */
+export interface PerFindingCoverageLedger {
+  /** Discriminates structured vs. document/non-enumerable sources. */
+  denominator_kind: PerFindingDenominatorKind;
+  /** Total items expected (finding-enumeration count or promoted-node count). */
+  denominator: number;
+  /** Items that reached a terminal disposition (len(entries) after build). */
+  covered: number;
+  entries: PerFindingLedgerEntry[];
+}
+
 export interface RemediationItemState {
   finding_id: string;
   status:

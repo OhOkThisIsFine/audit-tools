@@ -5,11 +5,12 @@ import { OwnershipRegistry } from "../dispatch/ownershipRegistry.js";
 import { routeAmendmentRequest } from "../dispatch/amendmentClaim.js";
 import { spawnSync } from "node:child_process";
 import { StateStore, type RemediationState } from "../state/store.js";
-import type {
-  ClarificationRequest,
-  Finding,
-  ItemSpec,
-  RemediationBlock,
+import {
+  REMEDIATION_STEP,
+  type ClarificationRequest,
+  type Finding,
+  type ItemSpec,
+  type RemediationBlock,
 } from "../state/types.js";
 import type {
   SessionConfig,
@@ -56,7 +57,7 @@ import {
   classifyFindingRisk,
   specIndicatesNoChange,
   hasExecutableEvidence,
-  dependenciesSatisfied,
+  dependencyVerifiedComplete,
   isTerminalStatus,
 } from "./stepUtils.js";
 import { resnapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
@@ -463,6 +464,105 @@ export interface DispatchOptions {
   artifactsDir: string;
 }
 
+// ---------------------------------------------------------------------------
+// DAG-node field accessors (read promoted node metadata off a Finding)
+// ---------------------------------------------------------------------------
+
+/**
+ * The implementation-DAG node fields `promoteImplementationDagToExtractedPlan`
+ * writes onto each Finding (one node ↔ one finding ↔ one block in the contract
+ * pipeline). The shared `Finding` type does not declare these overlay fields, so
+ * they are read through this structural view rather than added to the shared
+ * contract. Every field is optional: a finding sourced from a plain
+ * `audit-findings.json` (not the contract pipeline) carries none of them and the
+ * seam degrades to the block-level behavior.
+ */
+export interface DagNodeFields {
+  /** Relative model rank for the node (small | standard | deep). Never a model name. */
+  model_tier?: "small" | "standard" | "deep";
+  /** Upstream contracts' declared outputs this node builds on. */
+  preconditions?: string[];
+  /** Human-readable description of the concrete changes the node is expected to produce. */
+  expected_changes?: string;
+  /** Human-readable verification checks beyond `targeted_commands`. */
+  verification?: string[];
+  /**
+   * Reconciliation expectations carried from seam reconciliation: what an
+   * upstream/neighbor contract agreed to provide this node, expressed either as
+   * a list of strings or, when richer, as the precondition list. Read tolerantly
+   * because the promotion shape can vary across pipeline versions.
+   */
+  reconciliation_expectations?: string[];
+}
+
+/** Read the promoted DAG-node overlay fields off a Finding (all optional). */
+function nodeFieldsOf(finding: Finding): DagNodeFields {
+  return finding as Finding & DagNodeFields;
+}
+
+/**
+ * The reconciliation expectations a node must honor (INV-DS-12): the explicit
+ * `reconciliation_expectations` when present, else the node's `preconditions`
+ * (upstream contracts' declared outputs). Returned as a deduped string list so
+ * the renderer can thread them and the disposition can record them.
+ */
+function reconciliationExpectationsOf(finding: Finding): string[] {
+  const node = nodeFieldsOf(finding);
+  const explicit = Array.isArray(node.reconciliation_expectations)
+    ? node.reconciliation_expectations
+    : [];
+  const preconditions = Array.isArray(node.preconditions) ? node.preconditions : [];
+  return [...new Set([...explicit, ...preconditions])].filter(
+    (s) => typeof s === "string" && s.trim().length > 0,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Build-free per-node verification commands (residual CE-001)
+// ---------------------------------------------------------------------------
+
+/**
+ * The host manages the build centrally; a per-node verify command that runs
+ * `npm run build` (or a `npm test` whose package script prepends a build) races
+ * the central build's dist/ and is therefore forbidden. A command is build-free
+ * only when it neither builds nor invokes a build-prepending test script.
+ *
+ * Forbidden (return false):
+ *  - `npm run build` / `npm run build -w ...` / `tsc` emit (`tsc -b`, `tsc --build`)
+ *  - bare `npm test` / `npm t` / `npm run test` (the package script prepends build)
+ *
+ * Allowed (return true):
+ *  - `npm run check` (no emit)
+ *  - `npx vitest run <path>` / `vitest run <path>`
+ *  - `node --test <path>`
+ */
+export function isBuildFreeVerifyCommand(cmd: string): boolean {
+  const c = cmd.trim().toLowerCase().replace(/\s+/g, " ");
+  if (c.length === 0) return false;
+  // Any explicit build step is forbidden.
+  if (/\bnpm\s+run\s+build\b/.test(c)) return false;
+  if (/\btsc\b.*(-b\b|--build\b)/.test(c)) return false;
+  if (/(^|\s)tsc(\s|$)/.test(c) && !/--noemit\b/.test(c)) {
+    // A bare `tsc` (or `tsc -p ...`) emits unless --noEmit is set.
+    return false;
+  }
+  // A build-prepending `npm test` / `npm t` / `npm run test` is forbidden; the
+  // build-free runner (vitest run / node --test) must be invoked directly.
+  if (/\bnpm\s+(test|t)\b/.test(c)) return false;
+  if (/\bnpm\s+run\s+test\b/.test(c)) return false;
+  return true;
+}
+
+/**
+ * Filter a node's `targeted_commands` to the build-free subset for the per-node
+ * verify section. Build-prepending or build commands are dropped (the host runs
+ * the build centrally) rather than emitted into the prompt.
+ */
+function buildFreeVerifyCommands(commands: string[] | undefined): string[] {
+  if (!Array.isArray(commands)) return [];
+  return commands.filter((c) => typeof c === "string" && isBuildFreeVerifyCommand(c));
+}
+
 function markStarted(item: { started_at?: string; completed_at?: string }): void {
   item.started_at ??= new Date().toISOString();
   delete item.completed_at;
@@ -736,6 +836,27 @@ export function buildImplementModelHint(
   block: RemediationBlock,
   state: RemediationState,
 ): DispatchModelHint {
+  // Prefer the node's own promoted `model_tier` (derived from contract-pipeline
+  // complexity signals) over a re-derived block heuristic. In the contract
+  // pipeline a block maps 1:1 to a DAG node, so the block's single finding
+  // carries the authoritative relative rank. Never collapse to a flat
+  // "standard" when the node declared a tier.
+  const nodeTiers = block.items
+    .map((findingId) => {
+      const finding = state.plan?.findings.find((f) => f.id === findingId);
+      return finding ? nodeFieldsOf(finding).model_tier : undefined;
+    })
+    .filter((t): t is "small" | "standard" | "deep" => t !== undefined);
+  if (nodeTiers.length > 0) {
+    // Take the most-capable declared rank across the block's nodes so a deep
+    // node is never under-provisioned by a sibling's smaller rank.
+    const rankOrder: Record<string, number> = { small: 0, standard: 1, deep: 2 };
+    const tier = nodeTiers.reduce((a, b) =>
+      (rankOrder[b] ?? 0) > (rankOrder[a] ?? 0) ? b : a,
+    );
+    return { tier, reasons: ["node_model_tier"] };
+  }
+
   const deepReasons: string[] = [];
   let allSafe = true;
   let maxSeverityRank = 0;
@@ -798,6 +919,11 @@ function contractPipelineTraceLines(finding: Finding): string[] {
     lines.push(`Verification obligations: ${finding.verification_obligation_ids.join(", ")}`);
   }
   if (finding.targeted_commands?.length) {
+    // Provenance only: the DAG's recorded targeted commands. This is the
+    // "Contract Pipeline Traceability" section (what the node's contract said),
+    // NOT a runnable directive. The runnable per-node verify commands the
+    // renderer emits are the build-free subset in `perNodeVerificationSection`
+    // (residual CE-001 is enforced there, where the worker is told to RUN them).
     lines.push(`Targeted commands: ${finding.targeted_commands.join(" | ")}`);
   }
   return lines;
@@ -876,33 +1002,99 @@ function infraModifyingSection(repoRoot: string): string {
 ## Infra-modifying block
 
 This block modifies the dispatch/orchestration engine that the current run
-executes. Before and after editing, follow these steps:
+executes. **The host builds the package centrally — do NOT run \`npm run build\`
+or \`npm test\` here** (a worker-side build races the central build's \`dist/\`).
+Verify build-free only and let the host re-exercise the live surface after its
+central build:
 
-1. **Snapshot dist (rollback artefact):** Before editing any file, copy
-   \`packages/remediate-code/dist/\` to a temporary path (e.g. append
-   \`.infra-snapshot-<timestamp>\` to the dist path). Record that snapshot
-   path in your result evidence so the run can roll back if needed. The
-   copy must be an atomic rename, not an overwrite-in-place.
+1. **Type-check (no emit):** After completing all edits, run:
+   \`\`\`
+   npm run check
+   \`\`\`
+   from \`${rootDisplay}\`. If type-check fails, mark the item blocked and record
+   the failure in \`failure_reason\`.
 
-2. **Build after editing:** After completing all edits, run:
+2. **Targeted build-free tests:** Run this package's build-free test runner
+   directly against the tests for your change — for remediate-code:
    \`\`\`
-   npm run build -w packages/remediate-code
+   npx vitest run <your-test-file>
    \`\`\`
-   from \`${rootDisplay}\`. If the build fails, **restore the snapshotted dist**
-   (rename the snapshot back to \`dist/\`) before writing your result, mark the
-   item blocked, and record the build failure in \`failure_reason\`.
+   from \`${rootDisplay}\`. Never invoke \`npm test\`/\`npm run build\`: those
+   prepend a build. If a targeted test fails, mark the item blocked and record
+   the failure in \`failure_reason\`.
 
-3. **Live-surface smoke:** After a successful build, run:
-   \`\`\`
-   npm test -w packages/remediate-code
-   \`\`\`
-   from \`${rootDisplay}\` to exercise the rebuilt dispatcher (not the stale
-   global bin). If any test fails, restore the dist snapshot, mark the item
-   blocked, and record the failure in \`failure_reason\`.
+3. **Rollback is the host's job.** Because you do not build or republish the
+   engine, you cannot brick the live dispatcher mid-run. The host owns the
+   central build and any dist rollback; record the files you changed in your
+   result evidence so the host can attribute a post-build failure.
+`;
+}
 
-4. **Dist swap is atomic:** If you need to restore the snapshot, use a rename
-   (atomic replace) rather than overwriting files in-place, so the live engine
-   is never in a partial state during the swap.
+/**
+ * Per-item bullets threading what upstream/neighbor nodes agreed to provide
+ * (INV-DS-12): the node's reconciliation_expectations / preconditions and its
+ * expected_changes. Rendered inside each item so a dependent node implements
+ * against the realized upstream surface rather than guessing.
+ */
+function upstreamExpectationsBullets(finding: Finding): string {
+  const node = nodeFieldsOf(finding);
+  const expectations = reconciliationExpectationsOf(finding);
+  const lines: string[] = [];
+  if (expectations.length > 0) {
+    lines.push(
+      `- Upstream/neighbor contract provides (implement against these, do not redefine them): ${expectations.join("; ")}`,
+    );
+  }
+  if (typeof node.expected_changes === "string" && node.expected_changes.trim().length > 0) {
+    lines.push(`- Expected changes: ${node.expected_changes.trim()}`);
+  }
+  if (Array.isArray(node.verification) && node.verification.length > 0) {
+    lines.push(`- Verification checks: ${node.verification.join("; ")}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * The build-free per-node verification section. Emits the node's own build-free
+ * targeted commands (build/build-prepending commands filtered out — residual
+ * CE-001) plus the standard build-free baseline (`npm run check` + the package's
+ * build-free test runner). NON-EMITTING: it instructs the worker to run these to
+ * gate its own result, never to emit further dispatch.
+ */
+function perNodeVerificationSection(
+  block: RemediationBlock,
+  state: RemediationState,
+  rootDisplay: string,
+): string {
+  const nodeCommands = uniquePaths(
+    block.items.flatMap((findingId) => {
+      const finding = state.plan?.findings.find((f) => f.id === findingId);
+      return finding ? buildFreeVerifyCommands(finding.targeted_commands) : [];
+    }),
+  );
+  const commandBlock =
+    nodeCommands.length > 0
+      ? `Run these node-targeted, build-free commands and record each command + result in the affected item's evidence:
+\`\`\`
+${nodeCommands.join("\n")}
+\`\`\`
+`
+      : "";
+  return `
+## Per-node verification (build-free)
+
+The host builds the package centrally; do NOT run \`npm run build\` or \`npm test\`
+(either races the central build's \`dist/\`). Verify build-free only, from
+\`${rootDisplay}\`:
+
+- Type-check with \`npm run check\` (no emit).
+- Run the package's build-free test runner directly against your change
+  (remediate-code: \`npx vitest run <your-test-file>\`; node-test packages:
+  \`node --test <your-test-file>\`).
+
+${commandBlock}A node is verified-complete only when its declared outputs exist and these
+build-free checks pass; otherwise mark the item blocked with the failure in
+\`failure_reason\`.
 `;
 }
 
@@ -977,11 +1169,12 @@ ${spec ? `- Concrete change: ${spec.concrete_change}
 - Tests to write: ${spec.tests_to_write
       .map((test) => `${test.name}: ${test.assertions.join("; ")}`)
       .join(" | ")}` : ""}
+${upstreamExpectationsBullets(finding)}
 ${contractPipelineTraceBullets(finding)}
 `,
   )
   .join("\n")}
-${conventions ? `\n${conventions}\n` : ""}${isInfraModifyingBlock(blockWriteFiles(block, state)) ? infraModifyingSection(repoRoot) : ""}
+${conventions ? `\n${conventions}\n` : ""}${perNodeVerificationSection(block, state, rootDisplay)}${isInfraModifyingBlock(blockWriteFiles(block, state)) ? infraModifyingSection(repoRoot) : ""}
 ## Verification
 ${worktreeNote}
 Run changed or newly created tests by name when possible, and record the focused
@@ -1001,16 +1194,26 @@ After editing and verifying the block, write JSON to exactly:
 
 \`${resultDisplay}\`
 
+Emit **exactly one \`item_results\` entry per node id below — no more, no fewer**.
+Each entry's \`finding_id\` MUST be one of the exact ids: ${items
+    .map(({ finding }) => `\`${finding.id}\``)
+    .join(", ")}. Do not substitute a title, an obligation id, or a block id for
+the node id, and do not emit duplicate entries for the same node.
+
 \`\`\`json
 {
   "contract_version": "${REMEDIATION_WORKER_RESULT_CONTRACT_VERSION}",
   "phase": "implement",
   "item_results": [
-    {
-      "finding_id": "FINDING-ID",
+${items
+    .map(
+      ({ finding }) => `    {
+      "finding_id": "${finding.id}",
       "status": "resolved",
       "evidence": ["test or verification evidence"]
-    }
+    }`,
+    )
+    .join(",\n")}
   ]
 }
 \`\`\`
@@ -1072,10 +1275,12 @@ export async function prepareImplementDispatch(
   const candidateBlocks = state.plan.blocks.filter((block) => {
     if (onlyBlockId && block.block_id !== onlyBlockId) return false;
     if (seenBlockIds.has(block.block_id)) return false;
-    // Honor block dependencies: a dependent block is not dispatched until every
-    // prerequisite block is fully resolved, so dependency-ordered work runs in
-    // separate waves rather than racing on the main tree.
-    if (!dependenciesSatisfied(block, state)) return false;
+    // Rolling eligibility (INV-RS-01): a dependent node is dispatched only once
+    // every prerequisite reached a VERIFIED-COMPLETE disposition
+    // (resolved / resolved_no_change). A skipped or blocked prerequisite never
+    // satisfies the edge, so the dependent is held back rather than racing the
+    // main tree against an upstream surface that never landed.
+    if (!dependencyVerifiedComplete(block, state)) return false;
     const hasWork = block.items.some((findingId) => {
       const item = state.items?.[findingId];
       return item?.status === "pending";
@@ -1133,9 +1338,9 @@ export async function prepareImplementDispatch(
 
     // No wave-time file-conflict deferral heuristic: parallel blocks with
     // overlapping files are both dispatched. Parallel safety comes from the planner
-    // (mergeBlocksSharingFiles) and dependency ordering (dependenciesSatisfied).
-    // Workers operate in isolated worktrees; verification prevents bad merges from
-    // dirtying the main tree.
+    // (mergeBlocksSharingFiles) and rolling verified-complete dependency ordering
+    // (dependencyVerifiedComplete). Workers operate in isolated worktrees;
+    // verification prevents bad merges from dirtying the main tree.
 
     await writeTextFile(
       item.prompt_path,
@@ -1196,6 +1401,377 @@ function assertImplementWorkerResult(value: unknown, path: string): asserts valu
   }
 }
 
+// ---------------------------------------------------------------------------
+// Merge-seam: git-diff write-scope enforcement (never trust amended_files)
+// ---------------------------------------------------------------------------
+
+/** Outcome of resolving the worker's ACTUAL edited files from git. */
+export type GitEditedFiles =
+  | { available: true; files: Set<string> }
+  /** git is present but a probe failed against a real repo → fail closed. */
+  | { available: false; reason: "probe_failed"; error: string }
+  /** root is not under version control at all → no ground truth, gate is skipped. */
+  | { available: false; reason: "not_a_repo"; error: string };
+
+/** True when `root` is inside a git work tree (the git tool is present and it's a repo). */
+function isGitWorkTree(root: string): boolean {
+  const probe = spawnSync(
+    "git",
+    ["rev-parse", "--is-inside-work-tree"],
+    { cwd: root, encoding: "utf8", shell: false },
+  );
+  return !probe.error && probe.status === 0 && /true/.test(probe.stdout ?? "");
+}
+
+/** True when `branch` resolves to a commit in the repo at `root`. */
+function gitBranchExists(root: string, branch: string): boolean {
+  const probe = spawnSync(
+    "git",
+    ["rev-parse", "--verify", "--quiet", `${branch}^{commit}`],
+    { cwd: root, encoding: "utf8", shell: false },
+  );
+  return !probe.error && probe.status === 0;
+}
+
+/**
+ * The set of repo-relative paths the worker ACTUALLY edited, read from git
+ * (tracked modifications + staged + untracked-not-ignored). This is the ground
+ * truth for write-scope enforcement; the worker's self-reported `amended_files`
+ * is advisory only and is never trusted for the scope gate.
+ *
+ * Fail-closed: when `root` IS a git repo but a probe errors, returns
+ * `{ available: false, reason: "probe_failed" }` so the caller blocks rather than
+ * silently trusting an unverifiable edit set. When `root` is not a git repo at
+ * all (no worktree workflow, no diff ground truth), returns
+ * `{ available: false, reason: "not_a_repo" }` so the caller skips the gate.
+ */
+export function gitEditedFiles(root: string): GitEditedFiles {
+  if (!isGitWorkTree(root)) {
+    return { available: false, reason: "not_a_repo", error: "root is not a git work tree" };
+  }
+  // `git diff --name-only HEAD` covers tracked working-tree + staged changes
+  // against the last commit; `ls-files --others --exclude-standard` adds new
+  // untracked files that aren't gitignored.
+  const diff = spawnSync(
+    "git",
+    ["diff", "--name-only", "HEAD"],
+    { cwd: root, encoding: "utf8", shell: false },
+  );
+  if (diff.error || typeof diff.status !== "number" || diff.status !== 0) {
+    const detail = (diff.stderr ?? diff.error?.message ?? "git diff failed").toString().trim();
+    return { available: false, reason: "probe_failed", error: detail };
+  }
+  const others = spawnSync(
+    "git",
+    ["ls-files", "--others", "--exclude-standard"],
+    { cwd: root, encoding: "utf8", shell: false },
+  );
+  if (others.error || typeof others.status !== "number" || others.status !== 0) {
+    const detail = (others.stderr ?? others.error?.message ?? "git ls-files failed").toString().trim();
+    return { available: false, reason: "probe_failed", error: detail };
+  }
+  const files = new Set<string>();
+  for (const line of `${diff.stdout}\n${others.stdout}`.split(/\r?\n/)) {
+    const p = line.trim();
+    if (p.length > 0) files.add(p.replace(/\\/g, "/"));
+  }
+  return { available: true, files };
+}
+
+/** Normalize a declared path (absolute, repo-relative, or back-slashed) to a repo-relative forward-slash string. */
+function toRepoRelative(p: string, root: string): string {
+  const normalizedRoot = root.replace(/\\/g, "/").replace(/\/$/, "");
+  let s = p.replace(/\\/g, "/");
+  if (s.startsWith(normalizedRoot + "/")) {
+    s = s.slice(normalizedRoot.length + 1);
+  }
+  return s;
+}
+
+/**
+ * Files the worker edited (from git) that fall OUTSIDE the block's declared
+ * write scope. Result-file artifacts and the agent-feedback file are excluded
+ * (they are sanctioned side outputs, never source edits). Returns the offending
+ * repo-relative paths (empty when the edits are fully within scope).
+ */
+export function writeScopeViolations(
+  declaredWritePaths: string[],
+  editedFiles: Set<string>,
+  root: string,
+): string[] {
+  const declared = new Set(declaredWritePaths.map((p) => toRepoRelative(p, root)));
+  const violations: string[] = [];
+  for (const edited of editedFiles) {
+    const rel = toRepoRelative(edited, root);
+    if (declared.has(rel)) continue;
+    // Sanctioned non-source outputs: result JSON files and the reflection file.
+    if (rel.endsWith(".result.json")) continue;
+    if (rel.endsWith(AGENT_FEEDBACK_FILENAME)) continue;
+    violations.push(rel);
+  }
+  return violations;
+}
+
+/** Branch name a block's isolated worktree is created on (mirrors `worktreePath`). */
+export function worktreeBranchForBlock(blockId: string, runId: string): string {
+  return `remediate-${blockId}-${runId}`;
+}
+
+/**
+ * The files a worker's worktree branch changed relative to HEAD — the ground
+ * truth for write-scope enforcement. Diffs `HEAD...<branch>` (the branch's own
+ * commits). Fail-closed / not-a-repo semantics mirror `gitEditedFiles`.
+ */
+export function gitEditedFilesForBranch(root: string, branch: string): GitEditedFiles {
+  if (!isGitWorkTree(root)) {
+    return { available: false, reason: "not_a_repo", error: "root is not a git work tree" };
+  }
+  const diff = spawnSync(
+    "git",
+    ["diff", "--name-only", `HEAD...${branch}`],
+    { cwd: root, encoding: "utf8", shell: false },
+  );
+  if (diff.error || typeof diff.status !== "number" || diff.status !== 0) {
+    const detail = (diff.stderr ?? diff.error?.message ?? "git diff failed").toString().trim();
+    return { available: false, reason: "probe_failed", error: detail };
+  }
+  const files = new Set<string>();
+  for (const line of (diff.stdout ?? "").split(/\r?\n/)) {
+    const p = line.trim();
+    if (p.length > 0) files.add(p.replace(/\\/g, "/"));
+  }
+  return { available: true, files };
+}
+
+/** The decision a write-scope gate makes given the resolved edit set. */
+export interface WriteScopeDecision {
+  blocked: boolean;
+  reason?: string;
+}
+
+/**
+ * Pure write-scope gate decision (OBL-DS-06). Given the block's declared write
+ * paths and the resolved git edit set:
+ *  - `not_a_repo`   → no ground truth (no worktree workflow) → not blocked.
+ *  - `probe_failed` → git is a repo but the diff failed → FAIL CLOSED (blocked).
+ *  - available      → block iff any edited file is outside declared scope.
+ * The worker's self-reported `amended_files` is never an input here.
+ */
+export function enforceWriteScope(
+  declaredWritePaths: string[],
+  edited: GitEditedFiles,
+  root: string,
+): WriteScopeDecision {
+  if (!edited.available) {
+    if (edited.reason === "not_a_repo") {
+      return { blocked: false };
+    }
+    // probe_failed: git is present but could not be queried → fail closed.
+    return {
+      blocked: true,
+      reason:
+        `Write-scope could not be verified: git probe failed (${edited.error}). ` +
+        `Failing closed rather than trusting self-reported edits.`,
+    };
+  }
+  const violations = writeScopeViolations(declaredWritePaths, edited.files, root);
+  if (violations.length === 0) return { blocked: false };
+  return {
+    blocked: true,
+    reason:
+      `Worker edited files outside its declared write scope: ${violations.join(", ")}. ` +
+      `Declared scope must be amended through the seam protocol; the self-reported ` +
+      `amended_files set is not trusted for this gate.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Merge-seam: obligation-id → node remap + multi-entry collapse (tolerance)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the map from a known obligation/node alias to the finding id that owns
+ * it, for one block. A worker that mislabels its `finding_id` as an obligation
+ * id it was assigned (or a CP-BLOCK-prefixed/unprefixed node alias) is remapped
+ * to the owning node's finding rather than dropped as an orphan — the tolerant
+ * seam (the host is a variable of any strength). The map only ever points at
+ * findings that belong to THIS block, so a mislabel can never resolve to an
+ * unrelated node.
+ */
+export function buildBlockAliasMap(
+  block: RemediationBlock,
+  state: RemediationState,
+): Map<string, string> {
+  const aliasToFinding = new Map<string, string>();
+  for (const findingId of block.items) {
+    const finding = state.plan?.findings.find((f) => f.id === findingId);
+    if (!finding) continue;
+    // The node id itself, and its block-prefixed / unprefixed aliases.
+    const register = (alias: string | undefined) => {
+      if (!alias || alias === findingId) return;
+      if (!aliasToFinding.has(alias)) aliasToFinding.set(alias, findingId);
+    };
+    register(`CP-BLOCK-${findingId}`);
+    register(block.block_id);
+    // The obligation ids the node satisfies/verifies — a worker may report one.
+    for (const obl of [
+      ...(finding.contract_obligation_ids ?? []),
+      ...(finding.verification_obligation_ids ?? []),
+    ]) {
+      register(obl);
+    }
+  }
+  return aliasToFinding;
+}
+
+/**
+ * Collapse a worker result's `item_results` to one entry per resolved finding
+ * id, applying the block alias map first (obligation/node-alias → finding). When
+ * several entries collapse onto the same finding, a single `blocked` entry wins
+ * over `resolved` (a node is not complete if any reported facet failed), and the
+ * union of evidence / first failure_reason is preserved. Entries whose id is
+ * neither a known finding nor a known alias are returned in `unresolved` so the
+ * caller can record them as orphans.
+ */
+export function collapseItemResults(
+  itemResults: ImplementWorkerResult["item_results"],
+  aliasMap: Map<string, string>,
+  knownFindingIds: Set<string>,
+): {
+  collapsed: ImplementWorkerResult["item_results"];
+  unresolved: ImplementWorkerResult["item_results"];
+} {
+  const byFinding = new Map<string, ImplementWorkerResult["item_results"][number]>();
+  const unresolved: ImplementWorkerResult["item_results"] = [];
+  for (const entry of itemResults) {
+    let targetId = entry.finding_id;
+    if (!knownFindingIds.has(targetId)) {
+      const remapped = aliasMap.get(targetId);
+      if (remapped) {
+        targetId = remapped;
+      } else {
+        unresolved.push(entry);
+        continue;
+      }
+    }
+    const normalized = { ...entry, finding_id: targetId };
+    const existing = byFinding.get(targetId);
+    if (!existing) {
+      byFinding.set(targetId, normalized);
+      continue;
+    }
+    // Collapse: blocked dominates; merge evidence; keep first failure_reason.
+    const mergedEvidence = [
+      ...new Set([...(existing.evidence ?? []), ...(normalized.evidence ?? [])]),
+    ];
+    const status =
+      existing.status === "blocked" || normalized.status === "blocked"
+        ? "blocked"
+        : "resolved";
+    byFinding.set(targetId, {
+      finding_id: targetId,
+      status,
+      evidence: mergedEvidence.length > 0 ? mergedEvidence : undefined,
+      failure_reason: existing.failure_reason ?? normalized.failure_reason,
+    });
+  }
+  return { collapsed: [...byFinding.values()], unresolved };
+}
+
+// ---------------------------------------------------------------------------
+// Merge-seam: per-node disposition (INV-DS-15) + sibling-red routing (INV-DS-14)
+// ---------------------------------------------------------------------------
+
+export type NodeDispositionStatus =
+  | "verified_complete"
+  | "blocked"
+  | "skipped"
+  | "missing_result";
+
+export interface NodeDisposition {
+  node_id: string;
+  block_id: string;
+  disposition: NodeDispositionStatus;
+  /** The state status the node's finding(s) ended in. */
+  finding_status: string;
+  /** Reconciliation expectations the node was responsible for honoring (INV-DS-12). */
+  reconciliation_expectations: string[];
+  /** Why the node landed in this disposition (failure_reason / skip reason). */
+  reason?: string;
+}
+
+/**
+ * Build the per-node disposition for a block (INV-DS-15). A SKIP disposition
+ * (user-skipped: `ignored` / `deemed_inappropriate`) is NEVER reported as
+ * `verified_complete`. Each block maps 1:1 to a node, so the disposition keys on
+ * the block's first finding (the node id).
+ */
+export function buildNodeDisposition(
+  block: RemediationBlock,
+  state: RemediationState,
+): NodeDisposition {
+  const nodeId = block.items[0] ?? block.block_id;
+  const finding = state.plan?.findings.find((f) => f.id === nodeId);
+  // Resolve the block's overall status from its items.
+  const statuses = block.items.map((id) => state.items?.[id]?.status ?? "pending");
+  const isSkip = statuses.some(
+    (s) => s === "ignored" || s === "deemed_inappropriate",
+  );
+  const allResolved =
+    statuses.length > 0 &&
+    statuses.every((s) => s === "resolved" || s === "resolved_no_change");
+  const anyBlocked = statuses.some((s) => s === "blocked");
+  let disposition: NodeDispositionStatus;
+  if (isSkip) {
+    // INV-DS-15: a skipped node is never verified_complete.
+    disposition = "skipped";
+  } else if (anyBlocked) {
+    disposition = "blocked";
+  } else if (allResolved) {
+    disposition = "verified_complete";
+  } else {
+    disposition = "missing_result";
+  }
+  const reason = block.items
+    .map((id) => state.items?.[id]?.failure_reason)
+    .find((r): r is string => typeof r === "string" && r.length > 0);
+  return {
+    node_id: nodeId,
+    block_id: block.block_id,
+    disposition,
+    finding_status: statuses.join(","),
+    reconciliation_expectations: finding ? reconciliationExpectationsOf(finding) : [],
+    reason,
+  };
+}
+
+/**
+ * Attribute a post-merge sibling-block failure (INV-DS-14). Given the repo-
+ * relative paths implicated by a red sibling and the merged blocks' declared
+ * write scopes, return the exactly-one block whose scope contains an implicated
+ * file (attributable → route THAT sibling to triage). When zero or more than one
+ * merged block could own the failure, the red is unattributable and is deferred
+ * to the rolling-scheduler's coarse backstop (return null).
+ */
+export function attributeSiblingRed(
+  implicatedFiles: string[],
+  mergedBlockScopes: Array<{ block_id: string; write_paths: string[] }>,
+  root: string,
+): string | null {
+  const implicated = new Set(implicatedFiles.map((p) => toRepoRelative(p, root)));
+  const owners = new Set<string>();
+  for (const { block_id, write_paths } of mergedBlockScopes) {
+    for (const wp of write_paths) {
+      if (implicated.has(toRepoRelative(wp, root))) {
+        owners.add(block_id);
+        break;
+      }
+    }
+  }
+  // Attributable only when a single merged block owns the implicated surface.
+  return owners.size === 1 ? [...owners][0] : null;
+}
+
 export async function mergeImplementResults(
   options: DispatchOptions,
   runId: string,
@@ -1211,11 +1787,46 @@ export async function mergeImplementResults(
   }
 
   const store = new StateStore(options.artifactsDir);
-  const state = await loadStateOrThrow(options.artifactsDir);
+
+  // OBL-INV-RSD-02 / OBL-SEAM-RSD-04: the entire read-modify-write of state.json
+  // is performed under a single held lock via StateStore.mutate, and committed
+  // exactly once after the full item loop. No partial state.json write happens
+  // mid-loop — a malformed/unknown finding_id no longer leaves a half-applied
+  // state (and never throws past the loop; see OBL-INV-RSD-01 below). Evidence
+  // artifacts (result_<id>_verify_code_against_documentation.json, the orphan
+  // diagnostic) are separate sidecar files, not state.json, so writing them
+  // inside the loop does not violate the single-state-commit invariant.
+  return store.mutate(async (loaded) => {
+    if (!loaded) {
+      throw new Error(
+        `No remediation state found at ${join(options.artifactsDir, "state.json")}.`,
+      );
+    }
+    const state = loaded;
+    if (!state.items) {
+      throw new Error("Cannot merge implement results without items.");
+    }
+
+    return mergeImplementResultsIntoState(options, runId, plan, state);
+  });
+}
+
+/**
+ * Apply every dispatched implement worker result to `state` (mutated in place)
+ * and return it. Runs inside the StateStore.mutate lock so the caller commits
+ * the result exactly once (OBL-INV-RSD-02 / OBL-SEAM-RSD-04). Pure with respect
+ * to state.json: it mutates the in-memory `state` and writes only sidecar
+ * evidence/diagnostic artifacts.
+ */
+async function mergeImplementResultsIntoState(
+  options: DispatchOptions,
+  runId: string,
+  plan: RemediationDispatchPlan,
+  state: RemediationState,
+): Promise<RemediationState> {
   if (!state.items) {
     throw new Error("Cannot merge implement results without items.");
   }
-
   const dir = runDir(options.artifactsDir, runId, "implement");
   const plannedBlockIds = new Set(
     plan.items.map((item) => item.block_id).filter((id): id is string => typeof id === "string"),
@@ -1255,6 +1866,20 @@ export async function mergeImplementResults(
     return [{ node_id: item.block_id, write_paths: item.access.write_paths }];
   });
   mergeRegistry.initialize(dagNodes);
+
+  // OBL-INV-RSD-01: a worker result whose finding_id is not in state.items is
+  // never silently dropped and never throws past the loop. Each such id is
+  // recorded here; if it belongs to a known block (via the result's owning
+  // task block_id) that block's non-terminal items are blocked, otherwise it is
+  // a true orphan recorded in the diagnostic artifact below. Either way the run
+  // cannot advance past an unaccounted result.
+  const orphanResults: Array<{
+    finding_id: string;
+    result_path: string;
+    owning_block_id: string | null;
+    disposition: "blocked_owning_block" | "orphan";
+    worker_status: string;
+  }> = [];
 
   for (const item of itemsToMerge) {
     if (!existsSync(item.result_path)) {
@@ -1319,11 +1944,65 @@ export async function mergeImplementResults(
       }
     }
 
-    for (const itemResult of result.item_results) {
-      const stateItem = state.items[itemResult.finding_id];
-      if (!stateItem) {
-        throw new Error(`Unknown finding_id in implement result: ${itemResult.finding_id}`);
+    // Tolerant seam: remap an obligation/node-alias finding_id to the owning
+    // node's finding, and collapse multi-entry results onto one entry per
+    // finding (blocked dominates), before applying any status. A mislabel can
+    // only ever resolve to a finding that belongs to THIS block.
+    const owningBlock = blockId
+      ? state.plan?.blocks.find((b) => b.block_id === blockId)
+      : undefined;
+    const aliasMap = owningBlock
+      ? buildBlockAliasMap(owningBlock, state)
+      : new Map<string, string>();
+    const knownFindingIds = new Set(Object.keys(state.items));
+    const { collapsed, unresolved } = collapseItemResults(
+      result.item_results,
+      aliasMap,
+      knownFindingIds,
+    );
+
+    // Track which findings in this block this worker flipped to a resolved
+    // status, so the write-scope gate below can re-block them if the worker's
+    // ACTUAL git edits fall outside the declared scope.
+    const resolvedFindingIds: string[] = [];
+
+    for (const itemResult of unresolved) {
+      // OBL-INV-RSD-01: do NOT throw on an unknown finding_id that did not remap
+      // to a known node alias. Block the owning block's non-terminal items so the
+      // run cannot advance past an unaccounted result; record a diagnostic.
+      if (owningBlock) {
+        for (const findingId of owningBlock.items) {
+          const owningItem = state.items[findingId];
+          if (!owningItem || isTerminalStatus(owningItem.status)) continue;
+          owningItem.status = "blocked";
+          markTerminal(owningItem);
+          owningItem.failure_reason =
+            `Implementation worker for block ${blockId} reported an unknown ` +
+            `finding_id "${itemResult.finding_id}" not present in this plan ` +
+            `(and not a known obligation/node alias of this block); blocking the ` +
+            `block's items so the run does not advance past an unaccounted result.`;
+        }
+        orphanResults.push({
+          finding_id: itemResult.finding_id,
+          result_path: item.result_path,
+          owning_block_id: blockId,
+          disposition: "blocked_owning_block",
+          worker_status: itemResult.status,
+        });
+      } else {
+        orphanResults.push({
+          finding_id: itemResult.finding_id,
+          result_path: item.result_path,
+          owning_block_id: null,
+          disposition: "orphan",
+          worker_status: itemResult.status,
+        });
       }
+    }
+
+    for (const itemResult of collapsed) {
+      const stateItem = state.items[itemResult.finding_id];
+      if (!stateItem) continue;
       // A worker may report a finding that is already terminal (user-skipped, or
       // resolved in a prior wave) — never let a result resurrect or overwrite it.
       if (isTerminalStatus(stateItem.status)) {
@@ -1345,7 +2024,16 @@ export async function mergeImplementResults(
         } else {
           stateItem.status = isNoChange ? "resolved_no_change" : "resolved";
           markTerminal(stateItem);
-          stateItem.last_successful_step = "Verify Code Against Documentation";
+          // A no-change closure makes no edits, so it is exempt from the
+          // git-diff write-scope gate; an actual fix is subject to it.
+          if (!isNoChange) {
+            resolvedFindingIds.push(itemResult.finding_id);
+          }
+          // OBL-INV-RSD-06 / OBL-SEAM-RSD-03: use the shared REMEDIATION_STEP
+          // constant, never the bare string literal, so this path and any other
+          // verify-against-documentation writer agree on one source of truth.
+          stateItem.last_successful_step =
+            REMEDIATION_STEP.VERIFY_AGAINST_DOCUMENTATION;
           if (itemResult.evidence?.length) {
             await writeJsonFile(
               join(
@@ -1368,8 +2056,63 @@ export async function mergeImplementResults(
       }
     }
 
+    // Write-scope enforcement against the worker's ACTUAL git edits
+    // (OBL-DS-06): never trust self-reported amended_files for the gate. The
+    // enforcement ground truth is the worker's worktree diff; it is applied when
+    // this block was dispatched into an isolated worktree (the rolling-dispatch
+    // flow). On the interim main-tree path there is no per-worker isolation to
+    // diff against, so the gate is skipped here rather than mistaking ambient
+    // working-tree state for this worker's edits. The decision is a pure function
+    // (`enforceWriteScope`) so it is unit-tested directly against a known edit
+    // set, and fail-closed semantics apply when git is a repo but the probe fails.
+    const worktreeBranch = worktreeBranchForBlock(blockId, runId);
+    // Activate the gate only when this block was actually dispatched through an
+    // isolated worktree (its branch exists). A missing branch means the interim
+    // main-tree path was used — there is no per-worker diff to enforce against,
+    // so the gate is skipped (NOT fail-closed: fail-closed is for a present repo
+    // whose diff genuinely errors).
+    if (
+      resolvedFindingIds.length > 0 &&
+      item.access &&
+      gitBranchExists(options.root, worktreeBranch)
+    ) {
+      const edited = gitEditedFilesForBranch(options.root, worktreeBranch);
+      const decision = enforceWriteScope(
+        item.access.write_paths,
+        edited,
+        options.root,
+      );
+      if (decision.blocked) {
+        for (const findingId of resolvedFindingIds) {
+          const stateItem = state.items[findingId];
+          if (!stateItem) continue;
+          stateItem.status = "blocked";
+          markTerminal(stateItem);
+          stateItem.failure_reason = decision.reason;
+        }
+      }
+    }
+
     // Release this block's amendment claims after it has been merged or blocked.
     mergeRegistry.releaseAmendments(blockId);
+  }
+
+  // OBL-INV-RSD-01: persist a deterministic diagnostic for every unmatched
+  // worker result so an orphan is auditable and never silently dropped. This is
+  // a sidecar artifact (not state.json), so it does not affect the single
+  // state-commit invariant (RSD-02).
+  if (orphanResults.length > 0) {
+    await writeJsonFile(join(dir, "orphaned-implement-results.json"), {
+      schema_version: "remediate-code-implement/orphaned-results/v1alpha1",
+      run_id: runId,
+      created_at: new Date().toISOString(),
+      orphans: orphanResults,
+    });
+    process.stderr.write(
+      `[remediate-code] dispatch: ${orphanResults.length} unmatched implement ` +
+        `result finding_id(s) recorded as orphan dispositions (not dropped): ` +
+        `${orphanResults.map((o) => o.finding_id).join(", ")}\n`,
+    );
   }
 
   // Re-baseline affected-file hashes: the implement phase legitimately rewrites
@@ -1377,6 +2120,59 @@ export async function mergeImplementResults(
   // a stale plan when re-attempting any remaining blocked findings.
   if (state.plan?.findings?.length) {
     resnapshotAffectedFileHashes(options.root, state.plan.findings);
+  }
+
+  // Per-node dispositions (INV-DS-15). One disposition per merged block/node; a
+  // SKIP disposition is never reported as verified_complete. This is a sidecar
+  // artifact (not state.json).
+  const mergedBlocks = itemsToMerge.flatMap((item) => {
+    if (!item.block_id) return [];
+    const block = state.plan?.blocks.find((b) => b.block_id === item.block_id);
+    return block ? [{ block, item }] : [];
+  });
+  const dispositions = mergedBlocks.map(({ block }) =>
+    buildNodeDisposition(block, state),
+  );
+
+  // Sibling-red routing (INV-DS-14). For each merged block that ended red
+  // (blocked), attribute the failure against the OTHER merged blocks' write
+  // scopes: an attributable red (exactly one sibling owns the implicated
+  // surface) routes that sibling to triage; an unattributable red is deferred to
+  // the rolling-scheduler's coarse backstop. The state already advances to
+  // triage below; this records the attribution decision deterministically.
+  const siblingRedRoutes: Array<{
+    red_block_id: string;
+    implicated_files: string[];
+    routed_to_triage_block_id: string | null;
+    backstop: "rolling_scheduler_coarse" | null;
+  }> = [];
+  for (const { block, item } of mergedBlocks) {
+    const disposition = dispositions.find((d) => d.block_id === block.block_id);
+    if (!disposition || disposition.disposition !== "blocked") continue;
+    // The files implicated by this red node = its declared write scope.
+    const implicatedFiles = item.access?.write_paths ?? [];
+    const siblingScopes = mergedBlocks
+      .filter((m) => m.block.block_id !== block.block_id)
+      .map((m) => ({
+        block_id: m.block.block_id,
+        write_paths: m.item.access?.write_paths ?? [],
+      }));
+    const attributed = attributeSiblingRed(implicatedFiles, siblingScopes, options.root);
+    siblingRedRoutes.push({
+      red_block_id: block.block_id,
+      implicated_files: implicatedFiles.map((p) => toRepoRelative(p, options.root)),
+      routed_to_triage_block_id: attributed,
+      backstop: attributed ? null : "rolling_scheduler_coarse",
+    });
+  }
+  if (dispositions.length > 0) {
+    await writeJsonFile(join(dir, "node-dispositions.json"), {
+      schema_version: "remediate-code-implement/node-dispositions/v1alpha1",
+      run_id: runId,
+      created_at: new Date().toISOString(),
+      dispositions,
+      sibling_red_routes: siblingRedRoutes,
+    });
   }
 
   const mergedFindingIds = new Set(
@@ -1406,7 +2202,8 @@ export async function mergeImplementResults(
     (it) => it.status === "pending",
   );
   state.status = moreToImplement ? "implementing" : "triage";
-  await store.saveState(state);
+  // Single commit: StateStore.mutate writes the returned state once, under the
+  // lock it already holds (OBL-INV-RSD-02 / OBL-SEAM-RSD-04). No saveState here.
   return state;
 }
 

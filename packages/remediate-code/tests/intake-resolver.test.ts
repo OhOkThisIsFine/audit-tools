@@ -163,7 +163,7 @@ describe("resolveIntakeStep", () => {
     await writeFile(
       auditFindingsPath,
       JSON.stringify({
-        contract_version: "audit-findings/v1alpha1",
+        contract_version: "audit-tools/audit-findings/v1alpha1",
         findings: [],
         work_blocks: [],
       }),

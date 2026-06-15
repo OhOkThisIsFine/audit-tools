@@ -175,7 +175,7 @@ async function writeStructuredAuditSource(): Promise<string> {
   await writeFile(
     sourcePath,
     JSON.stringify({
-      contract_version: "audit-code-findings/v1alpha1",
+      contract_version: "audit-tools/audit-findings/v1alpha1",
       findings: [F_FIX, F_FAIL, F_IGN, F_DUP, F_CHK],
       work_blocks: [],
     }),
