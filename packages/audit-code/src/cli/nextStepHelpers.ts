@@ -28,6 +28,7 @@ import {
 import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
+import { groundDesignFindings } from "../validation/designFindingGrounding.js";
 import { computeArtifactStateSignature } from "../orchestrator/artifactMetadata.js";
 import { decideNextStep } from "../orchestrator/nextStep.js";
 import { isHostDelegationExecutor } from "../orchestrator/executors.js";
@@ -287,7 +288,7 @@ export async function handleDesignReviewBranch(
   if (legacyIncoming) {
     await unlink(legacyIncoming.path).catch(() => {});
     if (Array.isArray(legacyIncoming.value) && existing) {
-      existing.review_findings = legacyIncoming.value;
+      existing.review_findings = groundDesignFindings(legacyIncoming.value, bundle.repo_manifest);
       existing.reviewed = true;
       await writeJsonFile(
         join(params.artifactsDir, "design_assessment.json"),
@@ -316,7 +317,7 @@ export async function handleDesignReviewBranch(
   if (contractIncoming) {
     await unlink(contractIncoming.path).catch(() => {});
     if (Array.isArray(contractIncoming.value) && existing) {
-      existing.contract_findings = contractIncoming.value;
+      existing.contract_findings = groundDesignFindings(contractIncoming.value, bundle.repo_manifest);
       existing.contract_reviewed = true;
       consumed = true;
     }
@@ -325,7 +326,7 @@ export async function handleDesignReviewBranch(
   if (conceptualIncoming) {
     await unlink(conceptualIncoming.path).catch(() => {});
     if (Array.isArray(conceptualIncoming.value) && existing) {
-      existing.conceptual_findings = conceptualIncoming.value;
+      existing.conceptual_findings = groundDesignFindings(conceptualIncoming.value, bundle.repo_manifest);
       existing.conceptual_reviewed = true;
       consumed = true;
     }

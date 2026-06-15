@@ -11,7 +11,7 @@ const { renderDesignReviewPrompt } = await import(
  * (which lists every unit) elsewhere in the prompt.
  */
 function readingList(prompt) {
-  const start = prompt.indexOf("### Prioritised reading list");
+  const start = prompt.indexOf("### Starting points (orient, then roam)");
   if (start === -1) return "";
   const rest = prompt.slice(start);
   const end = rest.indexOf("\n## "); // next top-level heading
@@ -105,19 +105,21 @@ test("default budget scales and clamps with repo size", () => {
   assert.match(renderDesignReviewPrompt(huge), /Top 20 highest-risk unit\(s\)/);
 });
 
-test("no longer contains the open-ended 'Read the project source' instruction", () => {
+test("uses the orient-then-roam reading directive (not the old open-ended one)", () => {
   const prompt = renderDesignReviewPrompt(bundleWithRisk(8));
   assert.ok(
     !prompt.includes(
       "Read the project source to understand what it does and how it works",
     ),
-    "open-ended instruction must be removed",
+    "old open-ended instruction must be removed",
   );
   assert.ok(
-    prompt.includes(
-      "highest-risk units listed below; you need not read the entire repository",
-    ),
-    "bounded directive must be present",
+    prompt.includes("to orient yourself, then follow the code wherever it leads"),
+    "orient-then-roam directive must be present",
+  );
+  assert.ok(
+    prompt.includes("need not read every file"),
+    "scoped reading directive must be present",
   );
 });
 
