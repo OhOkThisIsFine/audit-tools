@@ -9,6 +9,18 @@
 
 ## 0. TL;DR
 
+0. **MOST RECENT TURN — S7 is now COMPLETE.** S7 **tier-3** (surface quarantined/ungrounded findings:
+   `grounding_status_breakdown` + an "Ungrounded Findings (quarantined)" report section + inline ⚠
+   marks; plus a grounded-wins merge fix) and S7 **tier-2** (executable anchors: a finding's behavior
+   claim ships a read-only `executable_anchor` command the tool runs at ingest, refute→quarantine;
+   inspection-only allowlist + 60s timeout + env kill-switch) are IMPLEMENTED + SHIPPED →
+   **shared 0.19.0 / auditor-lambda 0.23.0 / remediator-lambda 0.22.0** (CI-green, global bins
+   reinstalled, verified live). A **latent S7 tier-1 schema drift** was also fixed
+   (`audit_findings.schema.json` lacked `grounding`/`quoted_text` under `additionalProperties:false`).
+   See §1e. Commits `3e7a47b` (tier-3) + `a9d6ac2` (tier-2). **Remaining determinism work: S5, S6
+   (remediate-code) + S8 (audit-code conceptual review). S8 is mapped and is the recommended next
+   deliverable.** Items 1–7 below are prior-turn context (still accurate).
+
 1. **Workflow-robustness remediation (`c6fae403`) is SHIPPED** (prior turn): shared 0.17.3 /
    auditor-lambda 0.21.4 / remediator-lambda 0.18.2, live in the global bins. See §1a.
 2. **Contract-authoring determinism S1 + S3 is now IMPLEMENTED + SHIPPED this turn**
@@ -148,12 +160,46 @@ S2 banner). Net: **S2 dropped, S4 implemented.**
   1525/0; build + check clean.** Shipped as remediator-lambda **0.21.0** (shared + audit-code
   unchanged). The design doc S2 section carries a verified SUPERSEDED banner.
 
+### 1e. Contract-authoring determinism S7 tier-2 + tier-3 (MOST RECENT turn — audit-code)
+
+Completes S7 (audit-code anti-hallucination). Tier-1 (quote-and-verify, prior turn) proves a finding
+*cites code that exists*; tier-2/3 ground *behavior* claims and *surface* what can't be confirmed.
+
+- **Tier-3 — surface quarantined findings (commit `3e7a47b`).** The per-finding `grounding` verdict
+  (set at ingest) now survives synthesis into a `grounding_status_breakdown` summary field and a
+  dedicated **"Ungrounded Findings (quarantined)"** section in `audit-report.md` + an inline ⚠ mark on
+  each ungrounded finding — visually separated, never silently confirmed (the explicit tier-1
+  residual). `mergeFindings` gains **grounded-wins** semantics: a grounded re-emission upgrades the
+  merged verdict so an ungrounded same-identity twin can't falsely quarantine a finding that
+  re-verified on another pass. **Fixed a latent tier-1 schema drift:** `audit_findings.schema.json`
+  inlined a finding shape that (under `additionalProperties:false`) lacked `grounding`/`quoted_text`,
+  so a grounded report would have failed the synthesis-narrative schema assertion once a fixture
+  exercised it — added both + `grounding_status_breakdown`.
+- **Tier-2 — executable anchors (commit `a9d6ac2`).** A finding making a *behavior* claim ("no cycle",
+  "unused symbol", "throws") may carry an `executable_anchor` `{command, confirm_if, claim?}`. At
+  ingest (and in the worker self-check) the tool **runs the read-only command** and folds the verdict
+  into `grounding`: a **refuting** run quarantines the finding, a **confirming** run grounds it, an
+  inconclusive/skipped run leaves tier-1 in place. The confirmed bit is the tool's run, not the
+  model's word — exactly what disproved the hallucinated cycle/const-compare findings in the
+  452-self-audit (`madge`/`grep`). **Safety (model-authored command exec is a new trust surface):**
+  `src/validation/anchorGrounding.ts` runs anchors only when the executable is on an **inspection-only
+  allowlist** (grep/rg/findstr/madge/ast-grep + read-only git subcommands — no node/npm/rm/bare-git,
+  nothing with a write/exec flag), under a **60s timeout**, env-stripped, never via a shell;
+  off-allowlist → skipped (recorded, not run); `AUDIT_CODE_DISABLE_ANCHORS=1` disables the pass.
+- **Tests:** `tests/grounding-surfacing.test.mjs` (4) + `tests/anchor-grounding.test.mjs` (8).
+  **Green: shared 550/0, audit-code 2141/0, remediate-code 1525/0.** Shipped as **shared 0.19.0 /
+  auditor-lambda 0.23.0 / remediator-lambda 0.22.0** (CI-green, global bins reinstalled, verified live).
+- **Residual:** anchors run sequentially at ingest (fine — few findings carry one; parallelize only if
+  it bites). The allowlist is deliberately tight (inspection-only): a "test fails" claim needing a test
+  run is *skipped* (falls back to tier-1 + the adversarial cross-check), per the proportionality caveat.
+
 ---
 
 ## 2. Forward work — remaining determinism strategies (HIGH PRIORITY)
 
 Doc: [`docs/contract-authoring-determinism-design.md`](contract-authoring-determinism-design.md).
-S1+S3 (§1b) are done. Remaining, prioritized:
+S1/S3/S4 (§1b/§1d) + **S7 all tiers** (§1c/§1e) are done; S2 dropped. **Remaining: S5, S6, S8**,
+prioritized:
 
 - **S2 — ⚠️ DROPPED (verified redundant via the S2/S4 dogfood, §1d).** Its headline mechanism ("wire
   the dead `repairDownstreamPhases`") was a **linear phase-slice**, an ad-hoc re-run authority that the
@@ -173,15 +219,13 @@ S1+S3 (§1b) are done. Remaining, prioritized:
 - **S6 — single-source the schema.** `schemas/contract_pipeline.schema.json` is stale drift; make it
   (or a regenerated equivalent) the one source the validators/derivers/scaffolds consume, or delete
   it; guard with a generator↔committed test.
-- **S7 — audit-code anti-hallucination by grounding the claim.** **Tier-1 (quote-and-verify) is DONE
-  (§1c).** Remaining: **tier-2** — executable anchors on behavior claims ("throws"/"test fails"/"no
-  cycle"/"unused"): the finding ships a command the tool runs (reuse the runtime-validation path);
-  and **tier-3** — traceability of synthesis/severity claims back to grounded tier-1/2 findings (the
-  adversarial cross-check already exists). Also a **synthesis-side display** of quarantined
-  (ungrounded) findings — today they are marked + warned at ingest but not yet visually separated in
-  the report. (Correction baked into §1c: `orchestrator/fileAnchors.ts` is NOT the proof-of-reading
-  remnant — it is dispatch-time navigation guidance and was left intact; the real gameable gate was
-  `total_lines`.)
+- **S7 — audit-code anti-hallucination by grounding the claim. ✅ COMPLETE (all tiers).** Tier-1
+  (quote-and-verify, §1c), tier-2 (executable anchors, §1e), and tier-3 (quarantine display +
+  grounded-wins merge, §1e) all shipped. Optional follow-ons (non-blocking): parallelize the
+  sequential ingest anchor runs; add flag-level filtering to widen the inspection-only anchor
+  allowlist if "test fails" anchors prove worth running. (`orchestrator/fileAnchors.ts` is
+  dispatch-time navigation guidance, left intact — the real gameable gate was `total_lines`, demoted
+  in tier-1.)
 - **S8 — audit-code conceptual-design-review fix** (repo-agnostic): general first-principles
   questions, orient-then-roam over real files, a judge that judges, evidence-grounded + gated output.
   Lean *into* judgment here, don't constrain it.
@@ -195,20 +239,27 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
 
 - **A — Ship `c6fae403`? → RESOLVED: SHIPPED** (prior turn).
 - **B — How to drive the determinism work? → RESOLVED: hand-implemented S1+S3 this turn.**
-- **C — How to drive S2/S4–S8?** *(open)* Now that S1/S3 are live, the cleanest options are
-  **dogfood** (`/remediate-code` on the determinism design doc, scoped to S2/S4/S5/S6 — the
-  improved pipeline implements its own next improvement) or continue **hand-implementing**. **S7+S8
-  are an independent audit-code track** and can start anytime (S7 quote-verify is the cheapest
-  first win). Recommended: S7 (independent, high-ROI) + dogfood S2/S4 next.
+- **C — How to drive the remaining strategies? → RESOLVED (standing directive).** Ethan (this turn):
+  *"We're eventually going to do all of them, and the order is irrelevant to me. Do whatever seems
+  most logical to you."* So the next instance has full discretion — just proceed. S2 dropped;
+  S1/S3/S4 + S7(all tiers) done. **Remaining: S8 (recommended next — mapped in §5, fixes a
+  demonstrated miss), then S5, S6 (remediate-code — natural dogfood candidates through the improved
+  pipeline).** Hand-implementing has been the proven path for the last four waves; dogfooding S5/S6 is
+  a good option since they harden the very pipeline that would implement them.
 
 ---
 
 ## 4. Operational traps (read before any remediate/audit run)
 
-- **The c6fae403 + S1/S3 fixes ARE live now.** Global bins are current (auditor-lambda 0.21.4 /
-  remediator-lambda ≥0.19.0). The old "not live until published" caveat is resolved: the tolerant
-  `finding_id` merge and `closing_action` honoring are in the live bin. **Confirm the live versions**
-  (`npm ls -g`) before assuming a fix is or isn't present.
+- **Global bins are current: auditor-lambda 0.23.0 / remediator-lambda 0.22.0 (shared 0.19.0).** All
+  shipped fixes (tolerant `finding_id` merge, `closing_action` honoring, S1/S3/S4, S7 all tiers) are
+  in the live bins. **Confirm the live versions** (`npm ls -g`) before assuming a fix is or isn't
+  present.
+- **Ingest now RUNS commands (S7 tier-2).** `merge-and-ingest` (and the worker `validate-result`
+  self-check) execute a finding's `executable_anchor` command when present, from the repo root. It is
+  bounded — inspection-only allowlist (grep/rg/findstr/madge/ast-grep + read-only git), 60s timeout,
+  env-stripped, no shell — and off-allowlist commands are skipped (not run). Set
+  `AUDIT_CODE_DISABLE_ANCHORS=1` to disable the pass entirely if a context must not execute anything.
 - **`obligation_ledger` is now tool-derived.** A fresh `/remediate-code` run will **not** dispatch an
   obligation-ledger authoring step — it is auto-written from `finalized_module_contracts`. The
   `test_validator_plan` and `implementation_planning` prompts now carry a **pre-filled skeleton**;
@@ -252,15 +303,39 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
   `src/validation/contractPipeline.ts` (`CONTRACT_PIPELINE_VALIDATORS`),
   `src/contractPipeline/artifactStore.ts` (envelope/hash/staleness DAG — the real downstream-re-run
   authority that superseded S2).
-- **audit-code S7 (tier-1 done):** `src/validation/quoteGrounding.ts` (verifier),
-  `src/validation/auditResults.ts` (demoted `total_lines`), `src/cli/mergeAndIngestCommand.ts`
-  (Phase 3.5 grounding pass), `src/cli/validateResultCommand.ts` (self-check),
-  `src/prompts/renderWorkerPrompt.ts` (quoted_text requirement), both `schemas/finding.schema.json`,
-  `tests/quote-grounding.test.mjs`. **Tier-2/3:** reuse the runtime-validation path
-  (`runtime_validation_report.json`) for executable anchors. (`fileAnchors.ts` is navigation
-  guidance — leave it.)
-- **audit-code S8 target:** `src/orchestrator/designReviewPrompt.ts` + `structureExecutors.ts`
-  (conceptual review), `src/cli/nextStepHelpers.ts` (conceptual-finding ingest).
+- **audit-code S7 (ALL tiers done):** tier-1 — `src/validation/quoteGrounding.ts` (verifier),
+  `src/validation/auditResults.ts` (demoted `total_lines`); tier-2 —
+  `src/validation/anchorGrounding.ts` (allowlist + bounded runner + `verifyFindingAnchor` +
+  `combineGroundingWithAnchor`); tier-3 — `src/reporting/synthesis.ts` (`groundingStatusBreakdown` +
+  quarantine render), `src/reporting/mergeFindings.ts` (`mergeGrounding` grounded-wins). Wiring:
+  `src/cli/mergeAndIngestCommand.ts` (`groundPassingFindings` runs tier-1+tier-2),
+  `src/cli/validateResultCommand.ts` (self-check), `src/prompts/renderWorkerPrompt.ts`
+  (quoted_text + executable_anchor guidance). Schemas: both `schemas/finding.schema.json` +
+  `audit_findings.schema.json` (grounding/quoted_text/executable_anchor/grounding_status_breakdown).
+  Tests: `tests/quote-grounding.test.mjs`, `tests/grounding-surfacing.test.mjs`,
+  `tests/anchor-grounding.test.mjs`. (`fileAnchors.ts` is navigation guidance — leave it.)
+- **audit-code S8 target (MAPPED this turn — verified against source):**
+  - *First-principles questions:* `src/orchestrator/designReviewPrompt.ts` `conceptualCritiqueInstructions()`
+    (~246-257) — today a narrow library/pattern/simplification checklist; replace with general
+    architectural questions (is the approach right? what core assumption? clean-sheet redesign?
+    deepest structural risk?). Keep REPO-AGNOSTIC — no project lenses.
+  - *Orient-then-roam:* `buildPrioritizedReadingList` (~69-110, takes top-N highest-RISK units,
+    summaries only) + `renderConceptualReviewPrompt` (~403-422) / `renderConceptualPerspectivePrompt`
+    (~431-459) / `renderSharedStructuralContext`. Add project docs + an /init-style overview + freedom
+    to roam real files (not a risk-truncated summary feed).
+  - *Judging judge:* `renderConceptualJudgePrompt` (~468-500) — line ~494 says "you are merging, not
+    reviewing"; restore evaluative role (assess merit/validity/severity, flag what's MISSING).
+  - *Ground + gate output:* `src/cli/nextStepHelpers.ts` `handleDesignReviewBranch` (~274-358) ingests
+    conceptual/contract findings on `Array.isArray()` ALONE (no evidence/schema) — require evidence +
+    validate; `src/orchestrator/structureExecutors.ts` `runDesignReviewAutoComplete` (~125-161) sets
+    `*_reviewed=true` with `[]` and no LLM call — gate so an empty auto-complete can't silently pass.
+    Obligation is the boolean `*_reviewed` flag (`src/orchestrator/state.ts` 149-161 — correctly
+    `? "satisfied" : "missing"`, NOT a bug; the gap is upstream in auto-complete/ingest).
+    `DesignAssessment` type: `src/types/designAssessment.ts` (3-18; `conceptual_findings`/`contract_findings`).
+  - *Tests:* `tests/design-review-parallel.test.mjs`, `tests/design-assessment.test.mjs`,
+    `tests/design-review-budget.test.mjs`, `tests/design-docs-declarative.test.mjs`.
+  - **Synthesis:** S8 is the one place to lean INTO judgment — enable + ground/gate, never constrain
+    with checklists or project lenses.
 - **Hooks:** `.claude/hooks/pre-commit-gate.mjs` (authoritative commit gate), `async-typecheck.mjs`
   (advisory only).
 - **Backlog:** [`docs/backlog.md`](backlog.md).
@@ -269,7 +344,14 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
 
 ## 6. Commit / ship state
 
-Three releases shipped this turn:
+**MOST RECENT release (this turn) — S7 tier-2 + tier-3** (audit-code anti-hallucination complete):
+commits `3e7a47b` (tier-3 surfacing + grounded-wins + tier-1 schema-drift fix) + `a9d6ac2` (tier-2
+anchors) → **shared 0.19.0 / auditor-lambda 0.23.0 / remediator-lambda 0.22.0**. Committed, pushed to
+`main` (release commits `34822d52` / `d14606ac` / `b632ab50`), published (all 3 publish-package CI runs
+green), global bins reinstalled + deferred postinstall run via `--allow-scripts` + smoke-verified
+(`audit-code 0.23.0` / `remediate-code 0.22.0`). Tree clean.
+
+Prior-turn releases (still accurate):
 - **S1+S3** (remediate-code: `derive.ts` + intercept/scaffold wiring + `validate-artifact` CLI +
   prompt self-check) → **remediator-lambda 0.19.0** (shared + audit-code unchanged).
 - **S7 tier-1** (shared `FindingLocation.quoted_text` + `FindingGrounding`; audit-code
