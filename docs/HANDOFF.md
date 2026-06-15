@@ -16,11 +16,15 @@
    phase); the test plan and implementation DAG are *skeleton-scaffolded* (the tool pre-fills
    structure/ids, the model fills only judgment slots); and a `validate-artifact` write-time
    validator CLI + a generic per-phase self-check reference land S3. See §1b.
-3. **Remaining determinism work:** S2, S4, S5, S6 (remediate-code contract-authoring) + S7, S8
-   (audit-code). All now **dogfoodable** through the improved pipeline. See §2.
-4. **Decision B is resolved** (hand-implemented S1+S3). The open question is now how to drive
-   **S2/S4–S8** — dogfood vs. hand-implement. See §3.
-5. Operational traps the next instance WILL hit are in §4 — read them before any remediate/audit run.
+3. **Contract-authoring determinism S7 tier-1 (audit-code) is also IMPLEMENTED + SHIPPED this turn**:
+   findings now carry a verbatim `quoted_text` span the tool re-reads from disk and content-matches;
+   ungrounded findings are surfaced (not silently admitted); the gameable `total_lines` proof gate is
+   demoted to advisory. See §1c.
+4. **Remaining determinism work:** S2, S4, S5, S6 (remediate-code contract-authoring) + S7 tier-2/3,
+   S8 (audit-code). All now **dogfoodable** through the improved pipeline. See §2.
+5. **Decisions B resolved** (hand-implemented S1+S3+S7). The open question is now how to drive
+   the rest — **S2/S4–S6, S7 tier-2/3, S8** — dogfood vs. hand-implement. See §3.
+6. Operational traps the next instance WILL hit are in §4 — read them before any remediate/audit run.
 
 ---
 
@@ -81,6 +85,38 @@ Implements the first wave of [`docs/contract-authoring-determinism-design.md`](c
     repair is honored; a `finalized_module_contracts` repair staleness-archives the ledger → it
     **re-derives** from the repaired contracts. This composition is intentional and correct.
 
+### 1c. Contract-authoring determinism S7 tier-1 (this turn — audit-code)
+
+Implements *grounding the claim, not attesting the read* (S7 tier-1) — the cheapest, ungameable,
+highest-ROI anti-hallucination win, landable on its own.
+
+- **Findings carry a verbatim span.** `FindingLocation` (shared) gains `quoted_text?` — a verbatim
+  span copied from the cited file. The worker prompt (`renderWorkerPrompt.ts`) now requires at least
+  one affected-file `quoted_text` per finding.
+- **The tool re-reads and content-matches.** New `src/validation/quoteGrounding.ts`
+  (`verifyFindingGrounding`): re-reads each cited span from disk and matches on **content**
+  (whitespace/CRLF-normalized), not line numbers — so edits that shift lines don't false-fail, but a
+  quote naming code that doesn't exist cannot match. Confirmed bit = the tool's re-check, never the
+  model's word.
+- **Ungrounded findings are surfaced, not admitted.** At ingest (`mergeAndIngestCommand.ts`, Phase
+  3.5, repo root = `workerTask.repo_root`) each finding is annotated `grounding: {status, reason}`
+  (shared `FindingGrounding`); ungrounded ones (quote not on disk, or no quote) are logged + carried
+  with the marker — never silently dropped, never silently confirmed. The worker self-check
+  (`validate-result`) runs the same pass (repo root = cwd) so workers fix it before submitting.
+- **The gameable gate is demoted.** `file_coverage[].total_lines == disk` (the proof-of-reading
+  attestation, `auditResults.ts`) is now an advisory **warning**, not a gating error — it attests
+  breadth, is gameable, and proves nothing about truth; quote-and-verify replaces it.
+- **Correction (verified in code):** `orchestrator/fileAnchors.ts` is NOT a proof-of-reading remnant
+  (the doc conflated it) — it is dispatch-time large-file navigation guidance (symbols/routes/
+  keywords), unrelated to grounding, and was **left intact**. The real gameable gate was `total_lines`.
+- **Schemas:** `quoted_text` + `grounding` added to **both** `finding.schema.json` (audit-code +
+  remediate-code) so grounded findings flow through the pipeline without rejection.
+- **Tests:** `tests/quote-grounding.test.mjs` (8) + updated `field-trial-remediation.test.mjs`.
+  **Green: audit-code 2129/0, shared 550/0, remediate-code 1521/0.** Shipped as shared **0.18.0** /
+  auditor-lambda **0.22.0** / remediator-lambda **0.20.0** (see latest `*-v*` tags).
+- **Residual:** ungrounded findings are marked + warned but not yet visually separated in synthesis/
+  report (tier-1 surfaces; the report-side quarantine section is the follow-up, see §2).
+
 ---
 
 ## 2. Forward work — remaining determinism strategies (HIGH PRIORITY)
@@ -101,10 +137,15 @@ S1+S3 (§1b) are done. Remaining, prioritized:
 - **S6 — single-source the schema.** `schemas/contract_pipeline.schema.json` is stale drift; make it
   (or a regenerated equivalent) the one source the validators/derivers/scaffolds consume, or delete
   it; guard with a generator↔committed test.
-- **S7 — audit-code anti-hallucination by grounding the claim** (independent track, cheap/high-ROI):
-  quote-and-verify on defect claims, executable anchor on behavior claims, traceability on judgment;
-  replaces the gameable `file_coverage[].total_lines` / `orchestrator/fileAnchors.ts` remnant. Can
-  land on its own (needs only the audit-code result schema + ingest).
+- **S7 — audit-code anti-hallucination by grounding the claim.** **Tier-1 (quote-and-verify) is DONE
+  (§1c).** Remaining: **tier-2** — executable anchors on behavior claims ("throws"/"test fails"/"no
+  cycle"/"unused"): the finding ships a command the tool runs (reuse the runtime-validation path);
+  and **tier-3** — traceability of synthesis/severity claims back to grounded tier-1/2 findings (the
+  adversarial cross-check already exists). Also a **synthesis-side display** of quarantined
+  (ungrounded) findings — today they are marked + warned at ingest but not yet visually separated in
+  the report. (Correction baked into §1c: `orchestrator/fileAnchors.ts` is NOT the proof-of-reading
+  remnant — it is dispatch-time navigation guidance and was left intact; the real gameable gate was
+  `total_lines`.)
 - **S8 — audit-code conceptual-design-review fix** (repo-agnostic): general first-principles
   questions, orient-then-roam over real files, a judge that judges, evidence-grounded + gated output.
   Lean *into* judgment here, don't constrain it.
@@ -171,9 +212,15 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
   `src/validation/contractPipeline.ts` (`CONTRACT_PIPELINE_VALIDATORS`),
   `src/contractPipeline/artifactStore.ts` (envelope/hash/staleness DAG), `src/steps/dispatch.ts`
   (merge seam — the S4 merge-trap consumers).
-- **audit-code (S7/S8 targets):** `schemas/audit_result.schema.json`, `src/validation/auditResults.ts`,
-  `src/orchestrator/resultIngestion.ts` + `fileAnchors.ts` (proof-of-reading remnant to replace),
-  `src/orchestrator/designReviewPrompt.ts` + `structureExecutors.ts` (conceptual review, S8).
+- **audit-code S7 (tier-1 done):** `src/validation/quoteGrounding.ts` (verifier),
+  `src/validation/auditResults.ts` (demoted `total_lines`), `src/cli/mergeAndIngestCommand.ts`
+  (Phase 3.5 grounding pass), `src/cli/validateResultCommand.ts` (self-check),
+  `src/prompts/renderWorkerPrompt.ts` (quoted_text requirement), both `schemas/finding.schema.json`,
+  `tests/quote-grounding.test.mjs`. **Tier-2/3:** reuse the runtime-validation path
+  (`runtime_validation_report.json`) for executable anchors. (`fileAnchors.ts` is navigation
+  guidance — leave it.)
+- **audit-code S8 target:** `src/orchestrator/designReviewPrompt.ts` + `structureExecutors.ts`
+  (conceptual review), `src/cli/nextStepHelpers.ts` (conceptual-finding ingest).
 - **Hooks:** `.claude/hooks/pre-commit-gate.mjs` (authoritative commit gate), `async-typecheck.mjs`
   (advisory only).
 - **Backlog:** [`docs/backlog.md`](backlog.md).
@@ -182,11 +229,15 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
 
 ## 6. Commit / ship state
 
-S1+S3 (the `derive.ts` module + step-builder intercept/scaffold wiring + `validate-artifact` CLI +
-prompt self-check + tests) plus these doc updates were committed, **pushed to `main`, and
-remediate-code published to npm this turn** (minor bump → 0.19.0; shared + audit-code unchanged, not
-re-published); the global `remediate-code` bin was reinstalled. Working tree should be clean. For the
-exact published version, see the latest `remediate-code-v*` git release tag / `npm view remediator-lambda`.
+Two releases shipped this turn:
+- **S1+S3** (remediate-code: `derive.ts` + intercept/scaffold wiring + `validate-artifact` CLI +
+  prompt self-check) → **remediator-lambda 0.19.0** (shared + audit-code unchanged).
+- **S7 tier-1** (shared `FindingLocation.quoted_text` + `FindingGrounding`; audit-code
+  `quoteGrounding.ts` + ingest/self-check wiring + `total_lines` demote + worker prompt; both
+  `finding.schema.json`) → **shared 0.18.0 / auditor-lambda 0.22.0 / remediator-lambda 0.20.0**.
+
+Both were committed, pushed to `main`, published to npm, and the global bins reinstalled. Working
+tree should be clean. For exact published versions, see the latest `*-v*` git release tags / `npm view`.
 
 ---
 

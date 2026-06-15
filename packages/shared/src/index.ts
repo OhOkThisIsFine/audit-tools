@@ -33,6 +33,7 @@ export type {
   FindingSeverity,
   FindingConfidence,
   FindingLocation,
+  FindingGrounding,
   Finding,
   FindingIdentity,
   WorkBlock,

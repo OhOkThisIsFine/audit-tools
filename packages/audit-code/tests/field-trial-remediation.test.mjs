@@ -72,7 +72,7 @@ test("validateAuditResults reports field-level evidence type errors instead of c
   );
 });
 
-test("validateAuditResults enforces total_lines and cited line spans mechanically", () => {
+test("validateAuditResults treats total_lines as advisory (S7) but still flags spans outside declared coverage", () => {
   const issues = validateAuditResults(
     [
       {
@@ -111,13 +111,17 @@ test("validateAuditResults enforces total_lines and cited line spans mechanicall
     },
   );
 
+  // S7: a total_lines mismatch is now an advisory WARNING, not a gating error —
+  // findings are grounded by quote-and-verify, not by attesting a line count.
   assert.ok(
     issues.some(
       (issue) =>
         issue.field === "file_coverage[0].total_lines" &&
-        /must match the current file line count/i.test(issue.message),
+        issue.severity === "warning" &&
+        /does not match the current line count/i.test(issue.message),
     ),
   );
+  // The cited-span-within-declared-coverage check is unchanged (still an error).
   assert.ok(
     issues.some(
       (issue) =>

@@ -13,8 +13,28 @@ export interface FindingLocation {
   line_start?: number;
   line_end?: number;
   symbol?: string;
+  /**
+   * Verbatim text copied from this span, exactly as it appears in the cited
+   * file. The tool re-reads the file and content-matches this quote
+   * (whitespace/CRLF-normalized, matched on content not line numbers) to ground
+   * the finding; a finding whose quote does not re-verify is marked ungrounded
+   * (S7 anti-hallucination — grounding the claim, not attesting the read).
+   */
+  quoted_text?: string;
   /** Content hash of the file when the finding was planned (remediator). */
   hash_at_plan_time?: string;
+}
+
+/**
+ * Result of re-verifying a finding's cited verbatim span against disk. Attached
+ * by the auditor's grounding pass at ingest; a hallucinated or stale finding
+ * (quote not found on disk, or no quote provided) is surfaced as `ungrounded`
+ * rather than silently admitted as a confirmed finding.
+ */
+export interface FindingGrounding {
+  status: "grounded" | "ungrounded";
+  /** When ungrounded, which cited span(s) failed to re-verify and why. */
+  reason?: string;
 }
 
 export interface Finding {
@@ -41,6 +61,12 @@ export interface Finding {
    * LLM-extracted findings; absent on auditor-produced findings (already grounded).
    */
   evidence_grounded?: boolean;
+  /**
+   * Result of the auditor's quote-and-verify grounding pass (S7): whether this
+   * finding's cited verbatim span re-verified against disk. Absent until the
+   * grounding pass runs at ingest.
+   */
+  grounding?: FindingGrounding;
   /** Contract-pipeline goal this generated remediation finding belongs to. */
   contract_goal_id?: string;
   /** Contract-pipeline obligation IDs this finding/task is intended to satisfy. */

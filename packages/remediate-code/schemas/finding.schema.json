@@ -51,6 +51,7 @@
           "line_start": { "type": "integer", "minimum": 1 },
           "line_end": { "type": "integer", "minimum": 1 },
           "symbol": { "type": "string" },
+          "quoted_text": { "type": "string" },
           "hash_at_plan_time": { "type": "string" }
         },
         "additionalProperties": false
@@ -75,6 +76,15 @@
       "items": { "type": "string" }
     },
     "theme_id": { "type": "string" },
+    "grounding": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["grounded", "ungrounded"] },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "contract_goal_id": { "type": "string" },
     "contract_obligation_ids": {
       "type": "array",

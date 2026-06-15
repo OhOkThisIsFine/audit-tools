@@ -677,11 +677,18 @@ function validateFileCoverageEntry(
   }
   const expectedLineCount = entryNorm.length > 0 ? normLineIndex.get(entryNorm) : undefined;
   if (Number.isInteger(entry.total_lines) && typeof expectedLineCount === "number" && Number(entry.total_lines) !== expectedLineCount) {
+    // Advisory only (S7 anti-hallucination): total_lines is a coverage stat, not
+    // a proof of reading. A matching line count attests breadth, is gameable
+    // (read the count from a listing, never open the body), and proves nothing
+    // about whether a finding is true — findings are now grounded by
+    // quote-and-verify (`quoteGrounding.ts`), so this mismatch is a warning, not
+    // a gate.
     pushIssue(issues, {
       result_index: resultIndex,
       task_id: taskId,
       field: `file_coverage[${j}].total_lines`,
-      message: `file_coverage[${j}].total_lines must match the current file line count for '${entry.path}' (expected ${expectedLineCount}, got ${entry.total_lines}).`,
+      message: `file_coverage[${j}].total_lines does not match the current line count for '${entry.path}' (expected ${expectedLineCount}, got ${entry.total_lines}). Advisory coverage stat — findings are grounded by quote-and-verify, not by this count.`,
+      severity: "warning",
     });
   }
 
