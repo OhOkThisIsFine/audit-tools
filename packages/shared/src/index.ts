@@ -154,6 +154,9 @@ export {
   resolveContextBudget,
 } from "./tokens.js";
 
+// Concurrency: bounded, order-preserving parallel map
+export { mapWithConcurrency } from "./concurrency.js";
+
 // Tooling: command execution
 export type { RunTrackedOptions, RunTrackedResult } from "./tooling/exec.js";
 export {

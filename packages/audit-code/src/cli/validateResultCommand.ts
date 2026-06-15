@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { readJsonFile, type Finding } from "@audit-tools/shared";
+import { mapWithConcurrency, readJsonFile, type Finding } from "@audit-tools/shared";
 import { validateAuditResults } from "../validation/auditResults.js";
 import { verifyFindingGrounding } from "../validation/quoteGrounding.js";
 import {
+  ANCHOR_GROUNDING_CONCURRENCY,
   combineGroundingWithAnchor,
   verifyFindingAnchor,
 } from "../validation/anchorGrounding.js";
@@ -67,21 +68,31 @@ export async function cmdValidateResult(argv: string[]): Promise<void> {
   // the cited verbatim span (tier-1) and run any executable anchor (tier-2), so
   // the worker fixes a hallucinated quote or a refuted behavior claim first.
   // Advisory — it does not change the valid/invalid exit code.
-  const groundingWarnings: string[] = [];
-  const findings = (obj as { findings?: unknown }).findings;
-  if (Array.isArray(findings)) {
-    for (const f of findings) {
-      if (!f || typeof f !== "object") continue;
-      const finding = f as Finding;
-      if (typeof finding.id !== "string") continue;
+  const rawFindings = (obj as { findings?: unknown }).findings;
+  const validFindings: Finding[] = Array.isArray(rawFindings)
+    ? rawFindings.filter(
+        (f): f is Finding =>
+          !!f && typeof f === "object" && typeof (f as Finding).id === "string",
+      )
+    : [];
+  // Same bounded-concurrency grounding pass as ingest: anchors spawn child
+  // processes, so a serial pass over a finding-heavy result is slow. Order is
+  // preserved, so the warnings list is stable.
+  const warningsPerFinding = await mapWithConcurrency(
+    validFindings,
+    ANCHOR_GROUNDING_CONCURRENCY,
+    async (finding) => {
       const tier1 = await verifyFindingGrounding(process.cwd(), finding);
       const anchor = await verifyFindingAnchor(process.cwd(), finding);
       const grounding = combineGroundingWithAnchor(tier1, anchor);
-      if (grounding.status === "ungrounded") {
-        groundingWarnings.push(`${finding.id}: ${grounding.reason ?? "ungrounded"}`);
-      }
-    }
-  }
+      return grounding.status === "ungrounded"
+        ? `${finding.id}: ${grounding.reason ?? "ungrounded"}`
+        : null;
+    },
+  );
+  const groundingWarnings = warningsPerFinding.filter(
+    (w): w is string => w !== null,
+  );
 
   if (errors.length === 0) {
     console.log(`✓ valid: ${taskId}`);

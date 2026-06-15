@@ -1,11 +1,12 @@
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { isFileMissingError, readJsonFile, writeJsonFile } from "@audit-tools/shared";
+import { isFileMissingError, mapWithConcurrency, readJsonFile, writeJsonFile } from "@audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { validateAuditResults } from "../validation/auditResults.js";
 import { verifyFindingGrounding } from "../validation/quoteGrounding.js";
 import {
+  ANCHOR_GROUNDING_CONCURRENCY,
   anchorEvidenceLine,
   combineGroundingWithAnchor,
   verifyFindingAnchor,
@@ -330,13 +331,29 @@ async function validateAndCollectResults(
  * rather than merged as fact. Mutates the findings in place and returns the
  * ungrounded references.
  */
-async function groundPassingFindings(
+export async function groundPassingFindings(
   repoRoot: string,
   passing: AuditResult[],
 ): Promise<Array<{ task_id: string; finding_id: string; path: string }>> {
-  const ungrounded: Array<{ task_id: string; finding_id: string; path: string }> = [];
+  // Flatten to a stable-ordered work list (one entry per finding, carrying its
+  // owning result for the task_id).
+  const work: Array<{ result: AuditResult; finding: AuditResult["findings"][number] }> = [];
   for (const result of passing) {
     for (const finding of result.findings) {
+      work.push({ result, finding });
+    }
+  }
+
+  // Ground each finding under a bounded concurrency pool: tier-2 anchors spawn
+  // child processes, so a serial pass costs the SUM of their runtimes (noticeably
+  // slow with many anchored findings); the pool turns that into ~N/cap batches.
+  // Each unit mutates only its own finding (no shared state), and
+  // mapWithConcurrency preserves input order, so the ungrounded list is
+  // deterministic regardless of which command finished first.
+  const perFinding = await mapWithConcurrency(
+    work,
+    ANCHOR_GROUNDING_CONCURRENCY,
+    async ({ result, finding }) => {
       const tier1 = await verifyFindingGrounding(repoRoot, finding);
       const anchor = await verifyFindingAnchor(repoRoot, finding);
       // Record the run (confirmed/refuted/inconclusive) as evidence; a skipped
@@ -347,16 +364,19 @@ async function groundPassingFindings(
         ];
       }
       finding.grounding = combineGroundingWithAnchor(tier1, anchor);
-      if (finding.grounding.status === "ungrounded") {
-        ungrounded.push({
-          task_id: result.task_id,
-          finding_id: finding.id,
-          path: finding.affected_files?.[0]?.path ?? "?",
-        });
-      }
-    }
-  }
-  return ungrounded;
+      return finding.grounding.status === "ungrounded"
+        ? {
+            task_id: result.task_id,
+            finding_id: finding.id,
+            path: finding.affected_files?.[0]?.path ?? "?",
+          }
+        : null;
+    },
+  );
+  return perFinding.filter(
+    (entry): entry is { task_id: string; finding_id: string; path: string } =>
+      entry !== null,
+  );
 }
 
 export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
