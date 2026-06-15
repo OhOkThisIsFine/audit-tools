@@ -17,9 +17,13 @@
    **shared 0.19.0 / auditor-lambda 0.23.0 / remediator-lambda 0.22.0** (CI-green, global bins
    reinstalled, verified live). A **latent S7 tier-1 schema drift** was also fixed
    (`audit_findings.schema.json` lacked `grounding`/`quoted_text` under `additionalProperties:false`).
-   See §1e. Commits `3e7a47b` (tier-3) + `a9d6ac2` (tier-2). **Remaining determinism work: S5, S6
-   (remediate-code) + S8 (audit-code conceptual review). S8 is mapped and is the recommended next
-   deliverable.** Items 1–7 below are prior-turn context (still accurate).
+   See §1e. Commits `3e7a47b` (tier-3) + `a9d6ac2` (tier-2). **S8 (conceptual design review fix) is
+   ALSO shipped this turn** → auditor-lambda **0.24.0**, commit `b431367` (§1f): repo-agnostic
+   first-principles questions + orient-then-roam + a judging judge + grounded conceptual findings.
+   **Remaining determinism work: S5, S6 (remediate-code), plus two small deferred follow-ons —
+   S8 fix 4b (make the headless empty-auto-complete review visible; low priority, the path is
+   largely vestigial) and parallelizing the S7 ingest anchor runs.** Items 1–7 below are prior-turn
+   context (still accurate).
 
 1. **Workflow-robustness remediation (`c6fae403`) is SHIPPED** (prior turn): shared 0.17.3 /
    auditor-lambda 0.21.4 / remediator-lambda 0.18.2, live in the global bins. See §1a.
@@ -193,13 +197,45 @@ Completes S7 (audit-code anti-hallucination). Tier-1 (quote-and-verify, prior tu
   it bites). The allowlist is deliberately tight (inspection-only): a "test fails" claim needing a test
   run is *skipped* (falls back to tier-1 + the adversarial cross-check), per the proportionality caveat.
 
+### 1f. Contract-authoring determinism S8 — conceptual design review fix (this turn — audit-code)
+
+The conceptual design review is the lens meant to catch deep architectural mistakes; it caught none in
+the 452-self-audit because the implementation had degraded it. Restored it **repo-agnostically**
+(general questions, never project lenses — the design's "lean INTO judgment" exception). Commit
+`b431367`; auditor-lambda **0.24.0** (shared/remediate unchanged).
+
+- **First-principles questions (fix 1).** `conceptualCritiqueInstructions()` (designReviewPrompt.ts)
+  replaces the narrow library/pattern/simplification checklist with general questions: is the
+  fundamental approach right; what core assumption does it rest on, is it sound; where is the deepest
+  structural risk; does the structure match the problem; what is it optimizing for; what is missing.
+- **Orient-then-roam (fix 2).** The conceptual instructions tell the reviewer to read the project's
+  own docs first, then roam the real code freely; the shared reading-list framing
+  (`renderSharedStructuralContext`) no longer says "focus only on the highest-risk units."
+- **Judging judge (fix 3).** `renderConceptualJudgePrompt` no longer says "you are merging, not
+  reviewing" — it evaluates on merit AND flags what every perspective collectively MISSED
+  (`(judge-added)`, same evidence + grounding bar).
+- **Ground the output (fix 4a).** New `src/validation/designFindingGrounding.ts` (= S7 applied to the
+  reviewer): a conceptual/contract finding must cite a real repo component (an `affected_files` path in
+  the manifest) or it is marked `ungrounded` and surfaced via the **S7 tier-3 quarantine machinery**.
+  Wired into `handleDesignReviewBranch` ingest (was `Array.isArray`-only). No-manifest → pass-through
+  (no false-quarantine).
+- **Deferred — fix 4b (low priority).** Make the headless `runDesignReviewAutoComplete` empty-skip
+  visible (it sets `*_reviewed=true` with `[]` and no LLM call). Deferred because the conversation-first
+  product flow ALWAYS runs the review via host_delegation (intercepted in `nextStepHelpers` before
+  auto-complete) and the run-to-completion batch loop is gone, so the empty-auto-complete path is
+  largely vestigial. If done: set a `*_review_skipped` flag in auto-complete, carry it forward, clear on
+  real ingest, and surface it in the report.
+- **Tests:** `tests/s8-conceptual-review.test.mjs` (new) + updated `tests/design-review-budget.test.mjs`.
+  **Green: audit-code 2146/0.**
+
 ---
 
 ## 2. Forward work — remaining determinism strategies (HIGH PRIORITY)
 
 Doc: [`docs/contract-authoring-determinism-design.md`](contract-authoring-determinism-design.md).
-S1/S3/S4 (§1b/§1d) + **S7 all tiers** (§1c/§1e) are done; S2 dropped. **Remaining: S5, S6, S8**,
-prioritized:
+S1/S3/S4 (§1b/§1d) + **S7 all tiers** (§1c/§1e) + **S8** (§1f) are done; S2 dropped. **Remaining:
+S5, S6 (remediate-code), plus two small deferred follow-ons (S8 fix 4b; parallelize the S7 ingest
+anchor runs).** Prioritized:
 
 - **S2 — ⚠️ DROPPED (verified redundant via the S2/S4 dogfood, §1d).** Its headline mechanism ("wire
   the dead `repairDownstreamPhases`") was a **linear phase-slice**, an ad-hoc re-run authority that the
@@ -226,9 +262,10 @@ prioritized:
   allowlist if "test fails" anchors prove worth running. (`orchestrator/fileAnchors.ts` is
   dispatch-time navigation guidance, left intact — the real gameable gate was `total_lines`, demoted
   in tier-1.)
-- **S8 — audit-code conceptual-design-review fix** (repo-agnostic): general first-principles
-  questions, orient-then-roam over real files, a judge that judges, evidence-grounded + gated output.
-  Lean *into* judgment here, don't constrain it.
+- **S8 — audit-code conceptual-design-review fix. ✅ DONE (§1f).** Repo-agnostic first-principles
+  questions, orient-then-roam over real files, a judging judge, and grounded conceptual findings all
+  shipped (auditor-lambda 0.24.0). Deferred: fix 4b (visible headless-skip gate — low priority, the
+  path is vestigial).
 
 **Virtuous cycle:** now that S1/S3 are live, each remaining strategy can be dogfooded through the
 improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent audit-code track.
@@ -251,9 +288,9 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
 
 ## 4. Operational traps (read before any remediate/audit run)
 
-- **Global bins are current: auditor-lambda 0.23.0 / remediator-lambda 0.22.0 (shared 0.19.0).** All
-  shipped fixes (tolerant `finding_id` merge, `closing_action` honoring, S1/S3/S4, S7 all tiers) are
-  in the live bins. **Confirm the live versions** (`npm ls -g`) before assuming a fix is or isn't
+- **Global bins are current: auditor-lambda 0.24.0 / remediator-lambda 0.22.0 (shared 0.19.0).** All
+  shipped fixes (tolerant `finding_id` merge, `closing_action` honoring, S1/S3/S4, S7 all tiers, S8)
+  are in the live bins. **Confirm the live versions** (`npm ls -g`) before assuming a fix is or isn't
   present.
 - **Ingest now RUNS commands (S7 tier-2).** `merge-and-ingest` (and the worker `validate-result`
   self-check) execute a finding's `executable_anchor` command when present, from the repo root. It is
@@ -314,7 +351,8 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
   `audit_findings.schema.json` (grounding/quoted_text/executable_anchor/grounding_status_breakdown).
   Tests: `tests/quote-grounding.test.mjs`, `tests/grounding-surfacing.test.mjs`,
   `tests/anchor-grounding.test.mjs`. (`fileAnchors.ts` is navigation guidance — leave it.)
-- **audit-code S8 target (MAPPED this turn — verified against source):**
+- **audit-code S8 (✅ DONE §1f — auditor-lambda 0.24.0; file locations below double as the map for the
+  deferred fix 4b):**
   - *First-principles questions:* `src/orchestrator/designReviewPrompt.ts` `conceptualCritiqueInstructions()`
     (~246-257) — today a narrow library/pattern/simplification checklist; replace with general
     architectural questions (is the approach right? what core assumption? clean-sheet redesign?
@@ -344,7 +382,10 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
 
 ## 6. Commit / ship state
 
-**MOST RECENT release (this turn) — S7 tier-2 + tier-3** (audit-code anti-hallucination complete):
+**THIS TURN shipped two releases.** **(1) MOST RECENT — S8 conceptual design review fix:** commit
+`b431367`, release `08aaf6c1` → **auditor-lambda 0.24.0** (shared/remediate unchanged); CI run
+`27529084396` green; bin reinstalled + `--allow-scripts` postinstall + smoke (`audit-code 0.24.0`).
+**(2) S7 tier-2 + tier-3** (audit-code anti-hallucination complete):
 commits `3e7a47b` (tier-3 surfacing + grounded-wins + tier-1 schema-drift fix) + `a9d6ac2` (tier-2
 anchors) → **shared 0.19.0 / auditor-lambda 0.23.0 / remediator-lambda 0.22.0**. Committed, pushed to
 `main` (release commits `34822d52` / `d14606ac` / `b632ab50`), published (all 3 publish-package CI runs
