@@ -192,37 +192,49 @@ Tier the grounding by claim type:
   day-to-day — but it costs almost nothing and is precisely the safety net for the weak-auditor case
   the project is built around. Don't over-tax; tier-3 hallucination is triangulated, never "proven."
 
-### S8 — Apply the same treatment to the design-review step itself (it's an unguarded LLM step too)
-The audit's **conceptual design review** is supposed to be the lens that catches deep architectural
-mistakes — including exactly the "LLM authors what's derivable / correctness is host-discretion /
-findings have no ground truth" class this whole doc is about. It caught none of it in the
-452-self-audit. Root cause (code-grounded): the conceptual review is itself a *single-pass,
-risk-scoped, improvement-framed, ungrounded, ungated LLM step* — the same green-but-wrong shape the
-rest of this work attacks, applied to the reviewer. Five concrete defects → five fixes:
-- **Wrong question (primary).** `conceptualCritiqueInstructions()` (`audit-code/src/orchestrator/
-  designReviewPrompt.ts:246-257`) asks only "what library / pattern / simplification / missing
-  capability." → **Fix:** add a first-principles/systemic block forcing: *is the fundamental
-  approach right? where is correctness left to LLM/host judgment that should be deterministic? what
-  breaks for a weak model? what output has no ground-truth anchor?* (+ a `systemic_architecture_risk`
-  category/perspective).
-- **Can't see emergence.** Scoped to ~20 highest-**risk** units, summaries only
-  (`renderConceptualReviewPrompt:407-409`, `buildPrioritizedReadingList`); a whole-pipeline,
-  cross-package property is invisible. → **Fix:** a dedicated whole-system topology input (the full
-  phase/executor/artifact list of *both* orchestrators), decoupled from `max_units`.
-- **No adversary over it.** The deep-path "judge" merges/dedups, doesn't attack
-  (`designReviewPrompt.ts:494` "you are merging, not reviewing"). → **Fix:** an independent
-  conceptual critic whose sole job is to name *missed classes/meta-properties* (mirrors the contract
-  counterexample stance + the remediate critic/judge; per the standing delegate-adversarial rule).
-- **No grounding.** Conceptual findings ingested on `Array.isArray()` alone
-  (`audit-code/src/cli/nextStepHelpers.ts:325-332`); no schema/evidence, unlike schema-gated
-  `AuditResult`. → **Fix:** S7 applied to the reviewer — require evidence (components/lines) +
-  validate on ingest.
-- **Gates nothing; folds to zero.** Obligation is a boolean (`state.ts:158-159`);
-  `runDesignReviewAutoComplete` (`structureExecutors.ts:142-144`) can mark it complete with `[]` and
-  no LLM call. → **Fix:** require a real (non-fallback) finding set, or block synthesis when the pass
-  auto-completed empty — "no systemic review happened" must not pass silently.
-- **Honest limit:** conceptual insight is irreducibly tier-3 (S7) — these fixes raise the odds
-  sharply but cannot *guarantee* the model sees a paradigm-level flaw. Triangulate, don't promise.
+### S8 — Fix the conceptual design review itself (restore the original design; don't constrain it)
+The audit's **conceptual design review** is the lens meant to catch deep architectural mistakes — and
+it caught *none* of this class in the 452-self-audit. But the fix is **not** to teach it this
+project's concerns: it is a **repo-agnostic** tool that audits any codebase, so it must ask
+**general** first-principles questions, never project-specific lenses. The real root cause is that
+the implementation **degraded the original design** into a narrow, constrained step. Restore it:
+- **Ask general first-principles questions (primary).** Today the prompt
+  (`audit-code/src/orchestrator/designReviewPrompt.ts:246-257`) asks only "what library / pattern /
+  simplification / missing capability" — a local improvement checklist. → **Fix:** ask the general
+  architectural questions — *"is the fundamental approach the right one? what core assumption
+  underlies this design, and is it sound? what would a clean-sheet redesign do differently? where is
+  the deepest structural risk?"* Repo-agnostic by construction. **Do NOT** bake in project-specific
+  lenses (determinism-vs-LLM, weak-model robustness, ground-truth anchors) — a general "is the
+  approach right?" asked against our actual pipeline surfaces our issue *as a consequence*, and that
+  generality is the entire point.
+- **Orient, then roam (restore the original scope intent).** The implementation degraded to ~20
+  highest-**risk** units, summaries only (`renderConceptualReviewPrompt:407-409`,
+  `buildPrioritizedReadingList`) — which is *why* it couldn't see a cross-cutting property. → **Fix:**
+  the intended design — give the reviewer a small **context package + the project docs + an
+  `/init`-style codebase overview**, then **let it roam the actual files freely** (read wherever the
+  code leads, not a risk-truncated summary feed). Free exploration of real code is what lets it
+  perceive emergent, whole-system structure in *any* repo.
+- **Make the judge judge.** The deep-path judge is a merge/dedup pass ("you are merging, not
+  reviewing", `designReviewPrompt.ts:494`). → **Fix:** restore its evaluative role — assess merit /
+  validity / severity, decide what is real, and flag what is *missing* — not just fold duplicates.
+- **Ground the output (general; = S7 applied to the reviewer).** Conceptual findings are ingested on
+  `Array.isArray()` alone (`audit-code/src/cli/nextStepHelpers.ts:325-332`) — no evidence, unlike
+  schema-gated `AuditResult`. → **Fix:** require each finding to carry evidence (components/lines) and
+  validate on ingest. (An output requirement, not a prompt lens — stays repo-agnostic.)
+- **Gate it.** The obligation is a boolean (`state.ts:158-159`); `runDesignReviewAutoComplete`
+  (`structureExecutors.ts:142-144`) can mark it complete with `[]` and no LLM call. → **Fix:** require
+  a real (non-fallback) finding set, or block synthesis when the pass auto-completed empty — "no
+  systemic review happened" must not pass silently.
+
+**Synthesis — why S8 is the exception to S1–S7.** The conceptual review is the **one place to lean
+*into* judgment, not toward determinism**. Architectural insight is irreducibly tier-3 (S7) — you
+cannot make it deterministic and should not try. So the tooling's job is to **enable** the judgment
+(general questions + orientation package + project docs + `/init` overview + freedom to roam) and to
+**ground/gate the output** (evidence required; cannot auto-complete empty) — **never to constrain**
+the judgment with checklists or project-specific lenses. Determinism for the mechanical (S1–S7);
+empowered, general, well-fed judgment for the architectural (S8). The self-audit missed our issue
+because the implementation did the opposite on all three axes — narrow questions, no roaming, a
+non-judging judge — not because the reviewer lacked our project's vocabulary.
 
 ## 4. Why this serves all three goals
 

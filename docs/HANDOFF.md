@@ -96,14 +96,20 @@ Strategies (prioritized; plug-in points in the doc):
   anchor on behavior claims (tool runs the command), adversarial cross-check + traceability on
   judgment. Replaces the gameable proof-of-reading remnant (`file_coverage[].total_lines`,
   `src/orchestrator/fileAnchors.ts`). Cheap + high-ROI; can land early on its own.
-- **S8** (audit-code) apply the same treatment to the **conceptual design review step itself** — it
-  caught *none* of this class in the 452-self-audit because it's a single-pass, risk-scoped,
-  improvement-framed, ungrounded, ungated LLM step (the same green-but-wrong shape). Fixes:
-  first-principles prompt framing (is-the-approach-right / where's-determinism-missing /
-  what-breaks-for-a-weak-model / what-lacks-ground-truth), whole-system topology scope (not
-  risk-truncated units), an independent adversarial critic for *missed classes*, grounding (S7)
-  + a gate so it can't auto-complete empty. Code-grounded reasons + plug-in points are in the
-  determinism doc S8. (Honest limit: conceptual insight is tier-3 — raise the odds, can't guarantee.)
+- **S8** (audit-code) fix the **conceptual design review step itself** — it caught *none* of this
+  class in the 452-self-audit, but the review is a **repo-agnostic** tool, so the fix is to restore
+  its degraded *general* design, NOT to teach it this project's concerns. Four fixes: (1) ask
+  **general** first-principles questions ("is the fundamental approach right? what core assumption
+  underlies this, is it sound? what would a clean-sheet redesign do? where's the deepest structural
+  risk?") — NOT project-specific lenses like determinism-vs-LLM / weak-model / ground-truth (a
+  general question against our actual code surfaces our issue as a consequence — that's the point);
+  (2) **orient then roam** — context package + project docs + an `/init`-style overview, then let it
+  read the actual files freely (today: ~20 risk-ranked units, summaries only); (3) make the **judge
+  judge** (merit/validity/what's-missing), not merge+dedup; (4) ground the output (evidence required,
+  = S7 applied) + gate it (can't auto-complete empty). Synthesis: the conceptual review is the one
+  place to **lean into judgment, not determinism** — tooling enables it (orientation + docs + `/init`
+  + freedom) and grounds/gates the output, but never constrains the judgment. Tier-3: raise the odds,
+  can't guarantee. Code-grounded reasons + plug-in points in the determinism doc S8.
 
 ---
 
