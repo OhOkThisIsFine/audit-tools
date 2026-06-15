@@ -242,16 +242,33 @@ export function selectPerspectives(count?: number): ConceptualPerspective[] {
   return CONCEPTUAL_PERSPECTIVES.slice(0, clampPerspectiveCount(count));
 }
 
-/** Shared "what to look for" block for any conceptual-review prompt. */
+/**
+ * Shared "how to think" block for the conceptual-review prompts. This is the
+ * lens meant to catch deep architectural mistakes, so it asks GENERAL,
+ * first-principles questions and tells the reviewer to orient then roam the real
+ * code — never a project-specific checklist (it must work on any repository).
+ */
 function conceptualCritiqueInstructions(): string[] {
   return [
-    "## Conceptual design critique instructions",
+    "## Orient, then roam",
     "",
-    "- **Tool and library opportunities**: third-party tools, libraries, or frameworks that would improve the project. Concrete suggestions with rationale, not generic advice.",
-    "- **Architecture pattern improvements**: structural changes that would improve extensibility, testability, or maintainability. Consider whether the current abstractions match the problem domain.",
-    "- **Design simplification**: areas where the design is over-engineered or where simpler alternatives would work. Conversely, areas that are under-designed for their importance.",
-    "- **Integration and generalization**: opportunities to make the project more portable, composable, or protocol-aligned (e.g., MCP, standard APIs, plugin architectures).",
-    "- **Missing capabilities**: gaps in the design that would become pain points as the project evolves.",
+    "The structural context above is a map to orient you — it is NOT your reading list, and it is not where the deep problems will be obvious. Before forming conclusions:",
+    "",
+    "- **Read the project's own documentation first** — its README, anything under `docs/`, design notes, and any `CLAUDE.md`/agent-instruction files — to learn what this project is *trying* to be and why. Understand the intent before you judge the execution.",
+    "- **Then roam the actual code freely.** Read whole files, follow imports and call paths wherever they lead, and build your own mental model the way a new senior engineer would. Do NOT confine yourself to the highest-risk units — emergent, whole-system problems live in the connections between ordinary-looking parts, which no per-unit risk score surfaces.",
+    "",
+    "## How to think — first principles, not a checklist",
+    "",
+    "Interrogate the design from the ground up. These are starting questions, not a form to fill — follow the ones that prove fruitful for THIS codebase:",
+    "",
+    "- **Is the fundamental approach the right one?** If you were starting clean today, knowing what this project must do, would you build it this way? What would a clean-sheet redesign do differently, and why?",
+    "- **What core assumption does this design rest on — and is it sound?** Name the load-bearing assumption (about the domain, the inputs, the scale, the consumers, the failure model). What breaks if it is wrong, and is anything relying on it without checking?",
+    "- **Where is the deepest structural risk?** Not the worst single line — the place where the *shape* of the system will hurt most as it grows, changes hands, or meets reality. What is fragile by construction?",
+    "- **Does the structure match the problem?** Where do the abstractions, boundaries, and responsibilities fit the problem, and where do they cut across it — forcing one change to ripple through many places, or one place to know too much?",
+    "- **What is the design optimizing for, and is that the right thing?** Every design trades simplicity, flexibility, performance, and clarity against each other. Is this project's implicit trade-off the one it should be making?",
+    "- **What is missing that the design will eventually need** — a capability, a seam, a constraint, an integration — that is cheap to add now and expensive later?",
+    "",
+    "Reason about the system as a whole. Prefer naming the single change that would most improve the design over a long list of small ones. If the approach is genuinely sound, say so — with the evidence that convinced you.",
     "",
   ];
 }
@@ -267,7 +284,7 @@ function conceptualOutputFormat(resultsPathNote: string): string[] {
     "{",
     '  "id": "DR-001",',
     '  "title": "short descriptive title",',
-    '  "category": "one of: tool_opportunity, architecture_pattern, design_simplification, integration, missing_capability",',
+    '  "category": "one of: fundamental_approach, core_assumption, structural_risk, architecture_pattern, design_simplification, tool_opportunity, integration, missing_capability",',
     '  "severity": "one of: critical, high, medium, low, info",',
     '  "confidence": "one of: high, medium, low",',
     '  "lens": "architecture",',
@@ -276,6 +293,8 @@ function conceptualOutputFormat(resultsPathNote: string): string[] {
     '  "systemic": true',
     "}",
     "```",
+    "",
+    "**Ground every finding.** Cite at least one real `affected_files` path that exists in this repository — the component your observation is actually about. A finding that cites no real component is surfaced as ungrounded (quarantined), not admitted as confirmed: point at the code, do not invent paths. A whole-system observation should anchor on the file(s) where the structure is clearest.",
     "",
     resultsPathNote,
     "",
@@ -329,9 +348,9 @@ export function renderSharedStructuralContext(
     "",
     formatDeterministicFindings(deterministicFindings),
     "",
-    "### Prioritised reading list",
+    "### Starting points (orient, then roam)",
     "",
-    `Focus on the ${maxUnits} highest-risk units listed below; you need not read the entire repository, though you may follow any thread that demands more context.`,
+    `Use the ${maxUnits} highest-risk units below to orient yourself, then follow the code wherever it leads. You need not read every file, but do NOT confine yourself to this list — the most important problems often live in the connections between ordinary-looking parts that no per-unit risk score flags.`,
     "",
     prioritizedReadingList,
     "",
@@ -475,7 +494,7 @@ export function renderConceptualJudgePrompt(
   return [
     "# Conceptual design review — judge / merge pass",
     "",
-    `You are an **independent judge**. Several reviewers each examined this project through a different value system and wrote their findings to separate files. You did **not** author any of them — your job is to merge them into one ranked, deduplicated conceptual-review result.`,
+    `You are an **independent judge and final reviewer**. Several reviewers each examined this project through a different value system and wrote their findings to separate files. You did **not** author any of them — your job is to evaluate them on merit, merge them into one ranked, deduplicated result, AND add anything significant they collectively missed.`,
     "",
     "## Perspective result files",
     "",
@@ -491,7 +510,7 @@ export function renderConceptualJudgePrompt(
     "- **Rank** by impact and actionability.",
     "- **Judge on merit, not consensus.** Evaluate each finding on its own evidence, impact, and actionability. Do NOT drop a finding solely because only one perspective raised it — a lone but well-reasoned or high-impact observation must survive. Cross-perspective corroboration only RAISES confidence; it is never a survival requirement.",
     "- **Drop only genuine noise:** vague, unactionable, unsupported, or out-of-scope assertions — regardless of how many perspectives raised them.",
-    "- Do not invent new findings; you are merging, not reviewing.",
+    "- **Flag what the perspectives MISSED.** You are the final reviewer, not only a merger. If, across every perspective, a significant whole-system issue went unraised — a shared assumption none of them questioned, a structural risk no lens covered, a doubt about whether the fundamental approach is even right — add it as a finding, mark its title with `(judge-added)`, and hold it to the same evidence and grounding bar as any other finding. Add only what genuinely matters and is genuinely absent; do not pad.",
     "",
     ...conceptualOutputFormat(
       "Write the merged, ranked JSON array to the conceptual review results path provided below. Renumber finding IDs sequentially from DR-001.",
@@ -530,11 +549,12 @@ export function renderDesignReviewPrompt(
     "",
     "### Conceptual design critique",
     "",
-    "- **Tool and library opportunities**: third-party tools, libraries, or frameworks that would improve the project. Concrete suggestions with rationale, not generic advice.",
-    "- **Architecture pattern improvements**: structural changes that would improve extensibility, testability, or maintainability. Consider whether the current abstractions match the problem domain.",
-    "- **Design simplification**: areas where the design is over-engineered or where simpler alternatives would work. Conversely, areas that are under-designed for their importance.",
-    "- **Integration and generalization**: opportunities to make the project more portable, composable, or protocol-aligned (e.g., MCP, standard APIs, plugin architectures).",
-    "- **Missing capabilities**: gaps in the design that would become pain points as the project evolves.",
+    "Ask general, first-principles questions (not a checklist) — read the project's own docs, then roam the real code:",
+    "- **Is the fundamental approach the right one?** What would a clean-sheet redesign do differently, and why?",
+    "- **What core assumption does the design rest on, and is it sound?** What breaks if it is wrong?",
+    "- **Where is the deepest structural risk** — the place the *shape* of the system will hurt most as it grows or changes hands?",
+    "- **Does the structure match the problem,** or do abstractions and boundaries cut across it?",
+    "- **What is the design optimizing for, and is that the right trade-off?** What is missing that it will eventually need?",
     "",
     "## Output format",
     "",
