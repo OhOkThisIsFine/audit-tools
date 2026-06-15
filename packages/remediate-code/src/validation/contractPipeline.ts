@@ -370,7 +370,6 @@ export {
   validateReconciliationDerivation,
   deriveNodeModelTier,
   deriveNodeModelTierFromNode,
-  repairDownstreamPhases,
   type NodeComplexitySignals,
 } from "./contractPipelineGates.js";
 

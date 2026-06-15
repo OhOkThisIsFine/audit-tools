@@ -17,7 +17,6 @@ import {
   validateReconciliationDerivation,
   deriveNodeModelTier,
   deriveNodeModelTierFromNode,
-  repairDownstreamPhases,
 } from "../src/validation/contractPipeline.js";
 import {
   evaluateContractObligationsPromotionGate,
@@ -467,35 +466,6 @@ describe("deriveNodeModelTier", () => {
       lens: "security",
     });
     expect(tier).toBe("deep");
-  });
-});
-
-// ── repairDownstreamPhases (downstream-only) ──────────────────────────────────
-
-describe("repairDownstreamPhases", () => {
-  it("returns only the phases strictly downstream of the repaired phase", () => {
-    const downstream = repairDownstreamPhases("obligation_ledger");
-    expect(downstream).not.toContain("obligation_ledger");
-    expect(downstream).not.toContain("goal_normalization");
-    expect(downstream).toContain("assessment");
-    expect(downstream).toContain("implementation_planning");
-    expect(downstream).toContain("closing");
-  });
-
-  it("accepts an artifact name and resolves it to its producing phase", () => {
-    const byArtifact = repairDownstreamPhases("finalized_module_contracts");
-    const byPhase = repairDownstreamPhases("contract_finalization");
-    expect(byArtifact).toEqual(byPhase);
-    expect(byArtifact).not.toContain("contract_finalization");
-    expect(byArtifact).toContain("critique");
-  });
-
-  it("returns nothing downstream of the terminal phase", () => {
-    expect(repairDownstreamPhases("closing")).toEqual([]);
-  });
-
-  it("returns an empty list for an unknown phase (fail-safe, never fail-open)", () => {
-    expect(repairDownstreamPhases("not_a_real_phase")).toEqual([]);
   });
 });
 

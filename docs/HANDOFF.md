@@ -20,11 +20,16 @@
    findings now carry a verbatim `quoted_text` span the tool re-reads from disk and content-matches;
    ungrounded findings are surfaced (not silently admitted); the gameable `total_lines` proof gate is
    demoted to advisory. See §1c.
-4. **Remaining determinism work:** S2, S4, S5, S6 (remediate-code contract-authoring) + S7 tier-2/3,
-   S8 (audit-code). All now **dogfoodable** through the improved pipeline. See §2.
-5. **Decisions B resolved** (hand-implemented S1+S3+S7). The open question is now how to drive
-   the rest — **S2/S4–S6, S7 tier-2/3, S8** — dogfood vs. hand-implement. See §3.
-6. Operational traps the next instance WILL hit are in §4 — read them before any remediate/audit run.
+4. **S4 (single ID authority) IMPLEMENTED + SHIPPED this turn, and S2 DROPPED** — found via a
+   **dogfood** of the 0.20.0 pipeline on the determinism work itself: its independent critique caught
+   (verified in code) that S2's "wire `repairDownstreamPhases`" premise is redundant with the existing
+   staleness DAG, so S2 was dropped + its dead code deleted; S4's id registry kills the merge trap.
+   remediator-lambda **0.21.0**. See §1d.
+5. **Remaining determinism work:** S5, S6 (remediate-code) + S7 tier-2/3, S8 (audit-code). S2 dropped;
+   S1/S3/S4 done. See §2.
+6. **Decisions resolved this turn** (hand-implemented S1+S3, S7, S4; dropped S2). The dogfood proved
+   the pipeline can improve itself *and* catch a bad plan. See §3.
+7. Operational traps the next instance WILL hit are in §4 — read them before any remediate/audit run.
 
 ---
 
@@ -117,6 +122,32 @@ highest-ROI anti-hallucination win, landable on its own.
 - **Residual:** ungrounded findings are marked + warned but not yet visually separated in synthesis/
   report (tier-1 surfaces; the report-side quarantine section is the follow-up, see §2).
 
+### 1d. S4 (single ID authority) + the S2/S4 dogfood finding (this turn — remediate-code)
+
+Ran `/remediate-code` (the just-shipped 0.20.0 pipeline) on a scoped S2+S4 brief — **dogfooding the
+S1+S3 improvements.** The pipeline ran cleanly through the contract phases (the obligation ledger
+auto-**derived**, the test/dag phases carried the **scaffold**, and `validate-artifact` self-checks
+appeared in every prompt — all three S1+S3 features confirmed live), and its **independent conceptual
+critique caught a blocking design flaw in S2** that a code re-read confirmed (see §2 / the design-doc
+S2 banner). Net: **S2 dropped, S4 implemented.**
+
+- **S4 implemented.** New `src/contractPipeline/idRegistry.ts` (`toBlockId` / `fromBlockId` /
+  `isBlockId` / `CP_BLOCK_PREFIX`) is the single authority for the `CP-BLOCK-`↔bare-node-id mapping —
+  the verified root of the recurring "Unknown finding_id" merge trap. Repointed the three inline
+  prefix sites (`promoteImplementationDagToExtractedPlan` ×2: node block_id + dependency edges;
+  `buildBlockAliasMap` ×1) to `toBlockId`, and made `collapseItemResults` **registry-first**
+  (`fromBlockId` resolves a reported block id deterministically *before* the alias map) — so a node id
+  round-trips dispatch→result→merge without the tolerant remap. The remap stays as defence-in-depth
+  for non-block aliases (mislabelled obligation ids) only.
+- **S2 dropped + dead code deleted.** `repairDownstreamPhases` (+ `CONTRACT_PHASE_SEQUENCE` /
+  `ARTIFACT_NAME_TO_PHASE`) in `validation/contractPipelineGates.ts` had **no production caller** and
+  was a linear-slice re-run authority inferior to the existing hash-based `DEPENDENCY_MAP` staleness —
+  deleted (with an in-code note so it isn't re-added) + its test removed.
+- **Tests:** `tests/id-registry.test.ts` (8: registry bijection + the falsifiable "block id resolves
+  via the registry with an EMPTY alias map" property the critique asked for). **Green: remediate-code
+  1525/0; build + check clean.** Shipped as remediator-lambda **0.21.0** (shared + audit-code
+  unchanged). The design doc S2 section carries a verified SUPERSEDED banner.
+
 ---
 
 ## 2. Forward work — remaining determinism strategies (HIGH PRIORITY)
@@ -124,13 +155,18 @@ highest-ROI anti-hallucination win, landable on its own.
 Doc: [`docs/contract-authoring-determinism-design.md`](contract-authoring-determinism-design.md).
 S1+S3 (§1b) are done. Remaining, prioritized:
 
-- **S2 — patch-based repair + deterministic downstream re-derivation.** On `needs_repair`, the LLM
-  emits a targeted *patch*, not a full rewrite; the tool re-derives downstream via the S1 derivers
-  and re-runs only the adversarial phases the **already-existing-but-unwired** `repairDownstreamPhases`
-  computes (`validation/contractPipelineGates.ts`). Biggest token saving on the expensive phase.
-- **S4 — single ID authority.** A tool-owned registry mints `goal_id`/module/obligation/node ids and
-  owns the `CP-BLOCK-`↔bare-node-id mapping — eliminates the recurring merge trap at the root
-  (the tolerant merge stays as defence-in-depth). New `contractPipeline/idRegistry.ts`.
+- **S2 — ⚠️ DROPPED (verified redundant via the S2/S4 dogfood, §1d).** Its headline mechanism ("wire
+  the dead `repairDownstreamPhases`") was a **linear phase-slice**, an ad-hoc re-run authority that the
+  hash-based `DEPENDENCY_MAP` staleness DAG **already supersedes** (and better) — so the dead
+  `repairDownstreamPhases` was **deleted**, not wired. The remaining half (patch-vs-rewrite repair
+  shape) is high-complexity/thin-ROI; deferred (an easy lever if repair-token cost ever bites — scope
+  to the repair *shape* only, keep the staleness DAG as the downstream authority). See the design doc
+  S2 banner.
+- **S4 — single ID authority. ✅ DONE (§1d).** New `contractPipeline/idRegistry.ts` owns the
+  `CP-BLOCK-`↔bare-node-id mapping (the merge-trap root); promote + dispatch repointed; the tolerant
+  remap is now non-load-bearing. (Scoped to the verified problem — the critique corrected the original
+  doc: `goal_id` is LLM-authored free-form so it's *adopted*, not minted; obligation ids stay
+  deterministic in `derive.ts`. Broader id-minting consolidation was over-reach and dropped.)
 - **S5 — structural linter before the adversarial phases.** Run fuller ID-integrity/dangling-ref/
   coverage-symmetry checks deterministically *before* critic/judge so the adversarial budget is spent
   on semantics.
@@ -207,11 +243,15 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
   + the dispatch branch), `src/steps/contractPipelinePrompts.ts` (generic self-check reference;
   vestigial `obligation_ledger` ROLE), `src/index.ts` (`validate-artifact` command),
   `tests/contract-pipeline-derive-obligations.test.ts`.
-- **remediate-code contract pipeline (for S2/S4/S5/S6):** `src/validation/contractPipelineGates.ts`
-  (validators to invert + the dead `repairDownstreamPhases` + `deriveNodeModelTier`),
+- **S4 (done):** `src/contractPipeline/idRegistry.ts` (the `CP-BLOCK-` authority),
+  `src/steps/contractPipeline.ts` (`promoteImplementationDagToExtractedPlan` → `toBlockId`),
+  `src/steps/dispatch.ts` (`buildBlockAliasMap` + `collapseItemResults` registry-first),
+  `tests/id-registry.test.ts`.
+- **remediate-code contract pipeline (for S5/S6):** `src/validation/contractPipelineGates.ts`
+  (validators to invert + `deriveNodeModelTier`; the dead `repairDownstreamPhases` was deleted),
   `src/validation/contractPipeline.ts` (`CONTRACT_PIPELINE_VALIDATORS`),
-  `src/contractPipeline/artifactStore.ts` (envelope/hash/staleness DAG), `src/steps/dispatch.ts`
-  (merge seam — the S4 merge-trap consumers).
+  `src/contractPipeline/artifactStore.ts` (envelope/hash/staleness DAG — the real downstream-re-run
+  authority that superseded S2).
 - **audit-code S7 (tier-1 done):** `src/validation/quoteGrounding.ts` (verifier),
   `src/validation/auditResults.ts` (demoted `total_lines`), `src/cli/mergeAndIngestCommand.ts`
   (Phase 3.5 grounding pass), `src/cli/validateResultCommand.ts` (self-check),
@@ -229,14 +269,17 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
 
 ## 6. Commit / ship state
 
-Two releases shipped this turn:
+Three releases shipped this turn:
 - **S1+S3** (remediate-code: `derive.ts` + intercept/scaffold wiring + `validate-artifact` CLI +
   prompt self-check) → **remediator-lambda 0.19.0** (shared + audit-code unchanged).
 - **S7 tier-1** (shared `FindingLocation.quoted_text` + `FindingGrounding`; audit-code
   `quoteGrounding.ts` + ingest/self-check wiring + `total_lines` demote + worker prompt; both
   `finding.schema.json`) → **shared 0.18.0 / auditor-lambda 0.22.0 / remediator-lambda 0.20.0**.
+- **S4 + S2-drop** (remediate-code: `idRegistry.ts` + promote/dispatch repointing + `collapseItemResults`
+  registry-first + deleted dead `repairDownstreamPhases`; design-doc S2 banner) → **remediator-lambda
+  0.21.0** (shared + audit-code unchanged).
 
-Both were committed, pushed to `main`, published to npm, and the global bins reinstalled. Working
+All were committed, pushed to `main`, published to npm, and the global bins reinstalled. Working
 tree should be clean. For exact published versions, see the latest `*-v*` git release tags / `npm view`.
 
 ---
