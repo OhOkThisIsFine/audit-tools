@@ -188,7 +188,10 @@ finding_id trap, `--host-can-dispatch-subagents`, conversation-start intake — 
 - **Result-shape errors impossible by construction.** `finding_id` / one-entry-per-node and
   field-type schema errors should be caught at write-time by a shared validator the worker runs,
   and `merge-implement-results` should be tolerant (map obligation→node, collapse multi-entry)
-  rather than throwing.
+  rather than throwing. *(Contract-pipeline half shipped 2026-06-15: `validate-artifact` CLI +
+  `CONTRACT_PIPELINE_VALIDATORS` give workers a write-time self-check for the contract artifacts,
+  referenced in every phase prompt. The implement-worker-result half — `finding_id` mapping +
+  tolerant merge — remains, tracked under the `finding_id` Known-friction bullets above.)*
 - **Mid-edit typecheck-hook false alarms.** The async PostToolUse hook fired on transient
   mid-edit states during concurrent waves (authoritative `check` was green each time). Enforce:
   debounce the hook / scope it to the final edit, and define the final-green node as the

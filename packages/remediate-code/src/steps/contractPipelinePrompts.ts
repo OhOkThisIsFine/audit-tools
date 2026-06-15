@@ -5,6 +5,7 @@
  * schema-grounded rather than embedding raw artifact content.
  */
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
+import { loaderCommand } from "./prompts.js";
 
 // ── Role definitions ──────────────────────────────────────────────────────────
 
@@ -157,6 +158,11 @@ const ROLES: Record<string, ContractPipelineRole> = {
     description:
       "Detect and resolve circular interface-definition obligations in the obligation ledger. If no cycles exist, record status=no_cycles and an empty cycles array. For each detected cycle, choose a sanctioned break strategy (mediator module or single authority) and record the resolution. Verify mentally that the break does not re-introduce a cycle before writing the output.",
   },
+  // NOTE: the obligation ledger is now DERIVED deterministically by the tool
+  // (S1, `contractPipeline/derive.ts` → the `obligation_ledger` intercept in
+  // `buildNextContractPipelineStep`), so this role is not dispatched on the
+  // normal path. It is retained for the judge-repair path (a judge may target
+  // `obligation_ledger`) and as the canonical shape documentation.
   obligation_ledger: {
     title: "Obligation Ledger",
     requiredInputKeys: ["goal_spec", "finalized_module_contracts"],
@@ -415,6 +421,12 @@ The output must conform to this JSON schema shape:
 \`\`\`json
 ${role.outputSchema}
 \`\`\`
+
+Before advancing, you can self-check the output against its contract:
+
+\`${loaderCommand(`validate-artifact --name ${role.outputKey} --file ${outputPath}`)}\`
+
+A \`status: "ok"\` result means the structure is valid; otherwise fix the reported issues before running next-step.
 
 **Stop after writing the output file.** Do not edit source files. Do not advance to the next pipeline step.
 `;
