@@ -100,7 +100,32 @@ deterministically**, not authored. The mapping logic already exists as the *inve
   them; they can never disagree with the validators. Where judgment remains (assertion text, node
   descriptions), emit a skeleton with only those blank (→ S3) and ask the model for just the slots.
 
-### S2 — Patch-based repair + deterministic downstream re-derivation
+### S2 — Patch-based repair + deterministic downstream re-derivation — ⚠️ SUPERSEDED / DROPPED
+> **CORRECTION (2026-06-15, verified in code via the S2/S4 dogfood — do NOT implement S2 as
+> originally written below).** The dogfood's independent conceptual critique caught, and a code
+> re-read confirmed, that S2's headline mechanism is **redundant and the wrong direction**:
+> - `repairDownstreamPhases` (`validation/contractPipelineGates.ts:976`) is a **linear slice** —
+>   `CONTRACT_PHASE_SEQUENCE.slice(index+1)`, i.e. "every phase after this one." It does not know the
+>   real dependency structure.
+> - The pipeline **already** re-derives only genuinely-affected downstream artifacts via the
+>   **hash-based `DEPENDENCY_MAP` staleness DAG** (`detectStaleArtifacts` → archive stale →
+>   re-emit/re-derive, `steps/contractPipeline.ts:723-726`), which runs on every step and *is* the
+>   "dependency DAG is truth, never ad-hoc freshness" invariant. Wiring the linear
+>   `repairDownstreamPhases` would **replace a precise mechanism with a coarser, ad-hoc one** — worse,
+>   and a direct invariant violation. So S2's "deterministic downstream re-derivation" is **already
+>   done, better.**
+> - The remaining half (patch-vs-rewrite repair shape, `renderContractRepairPrompt`) is real but
+>   **high-complexity / thin-ROI**: the full-rewrite path already validates fail-closed; a patch
+>   applier adds a patch schema + mutation engine + a new "valid patch, wrong target" failure surface.
+>   Note the repair loop is **hot** (Ethan: `needs_repair` fires on ~every remediation run), so the
+>   patch shape *would* save real repair tokens — but not enough to justify the new machinery now.
+>   It is an easy lever to revisit if repair-token cost ever bites; if so, scope it to the repair
+>   *shape* only and keep the staleness DAG as the downstream authority.
+>
+> **Decision: S2 dropped.** `repairDownstreamPhases` is dead code that should simply be **deleted**
+> (it has no correct caller — the staleness DAG supersedes it), not wired. S4 (below) is unaffected
+> and shipped. Original (flawed) S2 text retained below for the record:
+
 On `needs_repair`, the LLM emits a **targeted patch** ("add INV-X to module Y", "refine INV-Z
 text") — not a full rewrite. The tool applies the patch, re-derives downstream artifacts with the
 S1 derivers (no re-authoring), and re-runs **only the adversarial phases** the already-existing-but-

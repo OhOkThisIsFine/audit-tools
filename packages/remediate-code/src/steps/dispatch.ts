@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { OwnershipRegistry } from "../dispatch/ownershipRegistry.js";
 import { routeAmendmentRequest } from "../dispatch/amendmentClaim.js";
+import { toBlockId, fromBlockId } from "../contractPipeline/idRegistry.js";
 import { spawnSync } from "node:child_process";
 import { StateStore, type RemediationState } from "../state/store.js";
 import {
@@ -1611,7 +1612,9 @@ export function buildBlockAliasMap(
       if (!alias || alias === findingId) return;
       if (!aliasToFinding.has(alias)) aliasToFinding.set(alias, findingId);
     };
-    register(`CP-BLOCK-${findingId}`);
+    // CP-BLOCK- aliases are now resolved deterministically by the id registry in
+    // `collapseItemResults` (S4); registering them here is defence-in-depth only.
+    register(toBlockId(findingId));
     register(block.block_id);
     // The obligation ids the node satisfies/verifies — a worker may report one.
     for (const obl of [
@@ -1646,12 +1649,22 @@ export function collapseItemResults(
   for (const entry of itemResults) {
     let targetId = entry.finding_id;
     if (!knownFindingIds.has(targetId)) {
-      const remapped = aliasMap.get(targetId);
-      if (remapped) {
-        targetId = remapped;
+      // Registry-authoritative (S4): a CP-BLOCK- block id maps deterministically
+      // to its bare node id via the id registry, so the common "worker reported
+      // the block id" mislabel resolves here without the tolerant alias remap —
+      // the remap is defence-in-depth for non-block aliases (e.g. a mislabelled
+      // obligation id) only.
+      const nodeId = fromBlockId(targetId);
+      if (nodeId && knownFindingIds.has(nodeId)) {
+        targetId = nodeId;
       } else {
-        unresolved.push(entry);
-        continue;
+        const remapped = aliasMap.get(targetId);
+        if (remapped) {
+          targetId = remapped;
+        } else {
+          unresolved.push(entry);
+          continue;
+        }
       }
     }
     const normalized = { ...entry, finding_id: targetId };

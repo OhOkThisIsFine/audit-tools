@@ -56,6 +56,7 @@ import {
   buildImplementationDagScaffold,
   acceptedCounterexampleIds,
 } from "../contractPipeline/derive.js";
+import { toBlockId } from "../contractPipeline/idRegistry.js";
 import {
   renderContractPipelinePrompt,
   renderContractRepairPrompt,
@@ -1557,10 +1558,10 @@ export async function promoteImplementationDagToExtractedPlan(
 
   const blocks = nodes.map((node) => {
     const deps = ((node as { depends_on?: string[] }).depends_on ?? []).map(
-      (depId) => `CP-BLOCK-${depId}`,
+      (depId) => toBlockId(depId),
     );
     return {
-      block_id: `CP-BLOCK-${node.id}`,
+      block_id: toBlockId(node.id),
       items: [node.id],
       // INV-remediate-pipeline-02: a block with prerequisites is never
       // wave-dispatched as independent — parallel_safe derives from depends_on.

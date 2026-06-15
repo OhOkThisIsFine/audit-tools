@@ -423,7 +423,6 @@ export function validateImplementationDAGIntegrity(
 //             derivation gate: every reconciled seam mismatch is derived into
 //             the finalized module contracts.
 //   deriveNodeModelTier                    — relative complexity → relative rank.
-//   repairDownstreamPhases                 — downstream-only re-run set.
 
 const TESTABLE_OBLIGATION_KINDS = new Set(["invariant", "behavioral"]);
 
@@ -917,65 +916,13 @@ export function deriveNodeModelTierFromNode(nodePayload: unknown): DispatchModel
   });
 }
 
-// ── Downstream-only repair propagation ────────────────────────────────────────
-
-/**
- * Contract-pipeline phase order, lowest (earliest) → highest. Mirrors
- * CONTRACT_PIPELINE_PHASE_ORDER, kept here so the gate layer has no dependency
- * on the prompt layer. The mapping artifact → phase lets repairDownstreamPhases
- * accept either a phase name or the producing artifact's name.
- */
-const CONTRACT_PHASE_SEQUENCE: readonly string[] = [
-  "goal_normalization",
-  "context_collection",
-  "decomposition",
-  "module_contract_drafting",
-  "seam_reconciliation",
-  "contract_finalization",
-  "critique",
-  "obligation_ledger",
-  "cyclic_seam_resolution",
-  "test_validator_plan",
-  "assessment",
-  "critic",
-  "judge",
-  "implementation_planning",
-  "closing",
-];
-
-const ARTIFACT_NAME_TO_PHASE: Readonly<Record<string, string>> = {
-  goal_spec: "goal_normalization",
-  context_bundle: "context_collection",
-  module_decomposition: "decomposition",
-  module_contracts: "module_contract_drafting",
-  seam_reconciliation_report: "seam_reconciliation",
-  finalized_module_contracts: "contract_finalization",
-  conceptual_design_critique: "critique",
-  obligation_ledger: "obligation_ledger",
-  cyclic_seam_resolution: "cyclic_seam_resolution",
-  test_validator_plan: "test_validator_plan",
-  contract_assessment_report: "assessment",
-  counterexample: "critic",
-  judge_report: "judge",
-  implementation_dag: "implementation_planning",
-  verification_report: "closing",
-};
-
-/**
- * Given a repaired phase OR the producing artifact name of a repaired artifact,
- * return the phases that must be re-run because they depend on it — STRICTLY
- * downstream, never the repaired phase itself and never any upstream phase.
- *
- * This is the invariant a repair loop must satisfy: repairing an upstream
- * artifact invalidates only what was derived FROM it. Re-running the repaired
- * phase or an upstream phase would either loop forever or discard valid work.
- *
- * Unknown inputs return an empty list (nothing is downstream of an unknown
- * phase — fail-safe, not fail-open: an unknown name never triggers a re-run).
- */
-export function repairDownstreamPhases(repairedPhaseOrArtifact: string): string[] {
-  const phase = ARTIFACT_NAME_TO_PHASE[repairedPhaseOrArtifact] ?? repairedPhaseOrArtifact;
-  const index = CONTRACT_PHASE_SEQUENCE.indexOf(phase);
-  if (index < 0) return [];
-  return CONTRACT_PHASE_SEQUENCE.slice(index + 1);
-}
+// ── (removed) Downstream-only repair propagation — S2, dropped ─────────────────
+// The dead `repairDownstreamPhases` / `CONTRACT_PHASE_SEQUENCE` / `ARTIFACT_NAME_TO_PHASE`
+// were deleted (contract-authoring determinism design, S2). A linear phase-slice
+// ("every phase after the repaired one") is a coarser, AD-HOC re-run authority that
+// would conflict with the project's "dependency DAG is truth, never ad-hoc freshness"
+// invariant. The hash-based DEPENDENCY_MAP staleness DAG (`artifactStore` +
+// `detectStaleArtifacts`, consumed in `buildNextContractPipelineStep`) ALREADY
+// re-derives exactly the genuinely-affected downstream artifacts after a repair, so
+// this function had no correct caller. Verified via the S2/S4 dogfood (2026-06-15);
+// see `docs/contract-authoring-determinism-design.md` S2. Do not re-add it.
