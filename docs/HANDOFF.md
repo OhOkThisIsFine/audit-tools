@@ -20,10 +20,13 @@
    See §1e. Commits `3e7a47b` (tier-3) + `a9d6ac2` (tier-2). **S8 (conceptual design review fix) is
    ALSO shipped this turn** → auditor-lambda **0.24.0**, commit `b431367` (§1f): repo-agnostic
    first-principles questions + orient-then-roam + a judging judge + grounded conceptual findings.
-   **Remaining determinism work: S5, S6 (remediate-code), plus two small deferred follow-ons —
-   S8 fix 4b (make the headless empty-auto-complete review visible; low priority, the path is
-   largely vestigial) and parallelizing the S7 ingest anchor runs.** Items 1–7 below are prior-turn
-   context (still accurate).
+   **S5 + S6 (remediate-code) are ALSO shipped this turn** → remediator-lambda **0.23.0**, commits
+   `3b39377` (S5 — deterministic structural floor before the adversarial phases) + `94a2c33` (S6 —
+   single-source the contract-pipeline contract in the TS validators; deleted the stale JSON schema)
+   (§1g). **The contract-authoring determinism roadmap is now COMPLETE** (S1/S3/S4/S5/S6 + S7 all tiers
+   + S8 done; S2 dropped). Only two small, **low-priority deferred follow-ons** remain: S8 fix 4b (make
+   the headless empty-auto-complete review visible — the path is largely vestigial) and parallelizing
+   the S7 ingest anchor runs. Items 1–7 below are prior-turn context (still accurate).
 
 1. **Workflow-robustness remediation (`c6fae403`) is SHIPPED** (prior turn): shared 0.17.3 /
    auditor-lambda 0.21.4 / remediator-lambda 0.18.2, live in the global bins. See §1a.
@@ -228,14 +231,51 @@ the 452-self-audit because the implementation had degraded it. Restored it **rep
 - **Tests:** `tests/s8-conceptual-review.test.mjs` (new) + updated `tests/design-review-budget.test.mjs`.
   **Green: audit-code 2146/0.**
 
+### 1g. Contract-authoring determinism S5 + S6 (this turn — remediate-code)
+
+Closes the remediate-code contract-authoring track. Commits `3b39377` (S5) + `94a2c33` (S6);
+remediator-lambda **0.23.0** (shared/audit-code unchanged; CI-green, bin reinstalled + smoke).
+
+- **S5 — deterministic structural floor before the adversarial phases.** New
+  `evaluatePreCriticStructuralGate` (`src/steps/contractPipeline.ts`) runs the contract-obligation
+  structural checks whose inputs all exist by the critic phase — paired-obligation coverage
+  (`validatePairedObligations`), source-scoped digest coverage (`validateDigestCoverage`), seam
+  reconciliation derivation (`validateReconciliationDerivation`) — as a cheap deterministic floor at
+  the critic gate, so the LLM critic/judge only ever see structurally-sound obligations/tests/contracts.
+  A gap re-emits the **precise responsible phase** (`test_validator_plan` or `contract_finalization`)
+  instead of being discovered only at promotion (after the adversarial budget is spent) and re-emitted
+  to the wrong phase (`implementation_planning`, relying on host discretion). Ordering: the design-spec
+  gate runs first (its circular-obligation **warning** still reaches the critic as advisory); the floor
+  runs once the design artifact is clean. `evaluateContractObligationsPromotionGate` stays the
+  fail-closed backstop at promotion (it additionally runs `validateEvidenceThreaded`, which needs the
+  judge + DAG and so cannot run pre-critic), so the design-warning + floor-gap edge case is still caught.
+- **S6 — single-source the contract-pipeline contract; delete the drift.** `contract_pipeline.schema.json`
+  was unused at runtime (`CONTRACT_PIPELINE_VALIDATORS` in `src/validation/contractPipeline.ts` is the
+  canonical, runtime-enforced contract) and had drifted (stale `DesignSpec` def + ~6 missing modern
+  artifacts). Imperative validators can't be auto-generated into a JSON schema, so a second
+  hand-maintained source can only ever drift again → **deleted** the schema + its drift-prone
+  `schema-contracts.test.ts` assertions; added a guard test rejecting silent re-introduction. The one
+  invariant the schema test guarded (INV-remediate-infra-06: `JudgeRepairDirective.target` enum) is
+  already enforced + tested on the TS validator itself (`validation.test.ts`), so no coverage is lost.
+- **Tests:** +3 cases in `tests/contract-obligations-and-gates.test.ts` (S5 gate) + an S6 guard test.
+  **Green: remediate-code 1521/0.**
+
 ---
 
-## 2. Forward work — remaining determinism strategies (HIGH PRIORITY)
+## 2. Forward work — determinism roadmap COMPLETE; residual low-priority follow-ons
 
 Doc: [`docs/contract-authoring-determinism-design.md`](contract-authoring-determinism-design.md).
-S1/S3/S4 (§1b/§1d) + **S7 all tiers** (§1c/§1e) + **S8** (§1f) are done; S2 dropped. **Remaining:
-S5, S6 (remediate-code), plus two small deferred follow-ons (S8 fix 4b; parallelize the S7 ingest
-anchor runs).** Prioritized:
+**Every contract-authoring determinism strategy is now done: S1/S3/S4/S5/S6 + S7 (all tiers) + S8;
+S2 dropped (verified redundant).** Only two small, **low-priority deferred follow-ons** remain —
+neither blocks anything (both have a fail-closed or working fallback today):
+- **S8 fix 4b** — make the headless `runDesignReviewAutoComplete` empty-skip visible (set a
+  `*_review_skipped` flag; surface it in the report). Low value: the conversation-first flow always
+  runs the review via host_delegation (intercepted before auto-complete) and the batch loop is gone,
+  so the path is largely vestigial. Map in §1f / §5.
+- **S7 ingest anchor parallelization** — anchors run sequentially at ingest; parallelize only if the
+  per-finding spawn cost ever bites. See §1e.
+
+The per-strategy record (S2–S8) is below for reference:
 
 - **S2 — ⚠️ DROPPED (verified redundant via the S2/S4 dogfood, §1d).** Its headline mechanism ("wire
   the dead `repairDownstreamPhases`") was a **linear phase-slice**, an ad-hoc re-run authority that the
@@ -249,12 +289,13 @@ anchor runs).** Prioritized:
   remap is now non-load-bearing. (Scoped to the verified problem — the critique corrected the original
   doc: `goal_id` is LLM-authored free-form so it's *adopted*, not minted; obligation ids stay
   deterministic in `derive.ts`. Broader id-minting consolidation was over-reach and dropped.)
-- **S5 — structural linter before the adversarial phases.** Run fuller ID-integrity/dangling-ref/
-  coverage-symmetry checks deterministically *before* critic/judge so the adversarial budget is spent
-  on semantics.
-- **S6 — single-source the schema.** `schemas/contract_pipeline.schema.json` is stale drift; make it
-  (or a regenerated equivalent) the one source the validators/derivers/scaffolds consume, or delete
-  it; guard with a generator↔committed test.
+- **S5 — structural floor before the adversarial phases. ✅ DONE (§1g).**
+  `evaluatePreCriticStructuralGate` runs paired-obligation / digest-coverage / reconciliation-derivation
+  checks at the critic gate (after the design-spec gate); a gap re-emits the precise responsible phase
+  (`test_validator_plan` / `contract_finalization`). The promotion gate stays the fail-closed backstop.
+- **S6 — single-source the schema. ✅ DONE (§1g).** Deleted the stale, unused
+  `contract_pipeline.schema.json` (drift); the TS `CONTRACT_PIPELINE_VALIDATORS` are the single
+  canonical source; a guard test rejects re-introduction.
 - **S7 — audit-code anti-hallucination by grounding the claim. ✅ COMPLETE (all tiers).** Tier-1
   (quote-and-verify, §1c), tier-2 (executable anchors, §1e), and tier-3 (quarantine display +
   grounded-wins merge, §1e) all shipped. Optional follow-ons (non-blocking): parallelize the
@@ -288,8 +329,8 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
 
 ## 4. Operational traps (read before any remediate/audit run)
 
-- **Global bins are current: auditor-lambda 0.24.0 / remediator-lambda 0.22.0 (shared 0.19.0).** All
-  shipped fixes (tolerant `finding_id` merge, `closing_action` honoring, S1/S3/S4, S7 all tiers, S8)
+- **Global bins are current: auditor-lambda 0.24.0 / remediator-lambda 0.23.0 (shared 0.19.0).** All
+  shipped fixes (tolerant `finding_id` merge, `closing_action` honoring, S1/S3/S4/S5/S6, S7 all tiers, S8)
   are in the live bins. **Confirm the live versions** (`npm ls -g`) before assuming a fix is or isn't
   present.
 - **Ingest now RUNS commands (S7 tier-2).** `merge-and-ingest` (and the worker `validate-result`
@@ -335,11 +376,14 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
   `src/steps/contractPipeline.ts` (`promoteImplementationDagToExtractedPlan` → `toBlockId`),
   `src/steps/dispatch.ts` (`buildBlockAliasMap` + `collapseItemResults` registry-first),
   `tests/id-registry.test.ts`.
-- **remediate-code contract pipeline (for S5/S6):** `src/validation/contractPipelineGates.ts`
-  (validators to invert + `deriveNodeModelTier`; the dead `repairDownstreamPhases` was deleted),
-  `src/validation/contractPipeline.ts` (`CONTRACT_PIPELINE_VALIDATORS`),
-  `src/contractPipeline/artifactStore.ts` (envelope/hash/staleness DAG — the real downstream-re-run
-  authority that superseded S2).
+- **remediate-code contract pipeline S5/S6 (✅ DONE §1g):** S5 — `evaluatePreCriticStructuralGate` in
+  `src/steps/contractPipeline.ts` (called at the `nextPhase === "critic"` gate, after the design-spec
+  gate; reuses `validatePairedObligations` / `validateDigestCoverage` / `validateReconciliationDerivation`
+  from `src/validation/contractPipelineGates.ts`); `tests/contract-obligations-and-gates.test.ts`.
+  S6 — `schemas/contract_pipeline.schema.json` **deleted**; `src/validation/contractPipeline.ts`
+  (`CONTRACT_PIPELINE_VALIDATORS`) is the single canonical contract; guard + the repair-target invariant
+  in `tests/schema-contracts.test.ts` + `tests/validation.test.ts`. (`src/contractPipeline/artifactStore.ts`
+  envelope/hash/staleness DAG is the downstream-re-run authority that superseded S2.)
 - **audit-code S7 (ALL tiers done):** tier-1 — `src/validation/quoteGrounding.ts` (verifier),
   `src/validation/auditResults.ts` (demoted `total_lines`); tier-2 —
   `src/validation/anchorGrounding.ts` (allowlist + bounded runner + `verifyFindingAnchor` +
@@ -382,10 +426,13 @@ improved pipeline (cheaper, more weak-model-robust). S7/S8 are an independent au
 
 ## 6. Commit / ship state
 
-**THIS TURN shipped two releases.** **(1) MOST RECENT — S8 conceptual design review fix:** commit
+**THIS TURN shipped three releases.** **(1) MOST RECENT — S5 + S6 (remediate-code contract-authoring
+track):** commits `3b39377` (S5 pre-adversarial structural floor) + `94a2c33` (S6 single-source schema /
+delete drift), release `0250572e` → **remediator-lambda 0.23.0** (shared/audit-code unchanged); CI run
+`27530893683` green; bin reinstalled + smoke (`remediate-code 0.23.0`). **(2) S8 conceptual design review fix:** commit
 `b431367`, release `08aaf6c1` → **auditor-lambda 0.24.0** (shared/remediate unchanged); CI run
 `27529084396` green; bin reinstalled + `--allow-scripts` postinstall + smoke (`audit-code 0.24.0`).
-**(2) S7 tier-2 + tier-3** (audit-code anti-hallucination complete):
+**(3) S7 tier-2 + tier-3** (audit-code anti-hallucination complete):
 commits `3e7a47b` (tier-3 surfacing + grounded-wins + tier-1 schema-drift fix) + `a9d6ac2` (tier-2
 anchors) → **shared 0.19.0 / auditor-lambda 0.23.0 / remediator-lambda 0.22.0**. Committed, pushed to
 `main` (release commits `34822d52` / `d14606ac` / `b632ab50`), published (all 3 publish-package CI runs
