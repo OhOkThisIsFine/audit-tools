@@ -330,6 +330,26 @@ Remaining (deferred as `FINDING-020` — cross-package): per-packet provider
 assignment, host-model detection for additional pools, and building a real second
 pool such as an IDE model or another CLI provider.
 
+### Cross-IDE/provider quota detection — needs a concerted effort (+ CLI-agent dispatch)
+
+Quota/limit detection is still unreliable across the different host IDEs and providers
+(Claude Code, Codex, OpenCode, antigravity, VS Code tasks, …): per-model+provider limit
+discovery, learned-limit feedback, and the capability handshake don't yet produce a
+dependable capacity picture everywhere. This is a known deficiency, not a small bug — it
+wants a dedicated, end-to-end pass over the quota subsystem + the per-provider wiring,
+with real per-IDE/provider validation (not just unit fixtures). Target: a
+provider+IDE+model triple yields a *trustworthy* capacity/limit estimate dispatch can
+rely on, degrading safely (byte-estimate + 429/TPM learning + safety margin) when a
+source is silent — never a confidently-wrong number. (Ethan flagged 2026-06-15.)
+
+Part of the same push: **detect and dispatch to CLI agents as additional pools.** The
+heterogeneous-dispatch machinery (`computeDispatchCapacity`, `CapacityPool`) can already
+model multiple pools, but there is no real second pool. Detecting an available CLI agent
+(another `claude`/`codex`/`opencode` process, or an IDE model) and routing
+packets/blocks to it — each under its own provider+quota constraints — is the concrete
+next capability. Builds on *Heterogeneous multi-agent dispatch* above + the per-model
++provider quota vision (memory `quota-dispatch-vision`).
+
 ### Token savings and model routing — DECIDED 2026-06-11
 
 **Decision: headroom (https://github.com/chopratejas/headroom) replaces
@@ -377,3 +397,16 @@ ran end-to-end on the new architecture 2026-06-13 (97/97 remediated). Remaining 
 build: scheduled run (cloud routine or local headless `claude -p`) → audit →
 auto-remediate actionable findings behind green test gates → PR + findings
 report, escalating only ambiguity/low-confidence fixes to Ethan.
+
+### Single-package install/publish (`audit-tools`)
+
+Collapse the three published packages (`auditor-lambda` + `remediator-lambda` +
+`@audit-tools/shared`) into ONE published+installed package — provisionally **`audit-tools`**
+(name is free on npm as of 2026-06-15) — exposing both the `audit-code` and `remediate-code`
+bins, with the shared library internal. One install, one publish, one version line; removes
+the three-way naming mismatch (dir vs npm name vs bin) and the shared-built-first release
+ordering. Points to settle when picked up: whether `shared` stays an internal workspace or is
+inlined; collapsing the per-package `release:*` scripts + the GitHub-Release-tag publish
+workflow to one; keep the `audit-code`/`remediate-code` bin names; and deprecating/redirecting
+the old `auditor-lambda`/`remediator-lambda` package names. Deferred (Ethan, 2026-06-15) — for
+another time.
