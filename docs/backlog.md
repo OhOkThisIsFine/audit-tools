@@ -411,6 +411,40 @@ fully closed is R1 (wire the rolling engine), tracked above under *Self-audit 20
 
 ## Deferred fixes (product bugs)
 
+### Something keeps opening the OpenCode app/window unprompted (Windows) — find & fix
+
+**Symptom (Ethan, 2026-06-16):** the OpenCode app keeps launching unprompted during normal work.
+Unknown trigger — could be a test, a skill, an MCP server, or a bash invocation that hits the OpenCode
+*executable* (launches the GUI/TUI) instead of the headless `opencode` CLI.
+
+**Recon already done (don't redo — start from the prime suspect):**
+- **SAFE — not these:** provider detection probes PATH with `where`/`which opencode`, never spawns it
+  (`packages/shared/src/providers/providerConfirmation.ts:62-63`). Postinstall only *writes*
+  `~/.config/opencode/opencode.json` (global `/audit-code` command + `auditor` agent + permissions) — no
+  spawn (`packages/audit-code/scripts/postinstall.mjs:196-244`). All provider unit tests inject a stub
+  `launchCommand` that captures argv and returns `{accepted,exitCode}` without spawning
+  (`packages/remediate-code/tests/providers.test.ts:378-408`); `opencode-launch.test.mjs` only exercises
+  the pure `resolveOpenCodeSpawnCommand`. Skills don't invoke `opencode`.
+- **PRIME SUSPECT:** the *only* place the `opencode` binary is actually spawned is
+  `OpenCodeProvider.launch()` → `opencode run` (prompt via stdin), and on Windows that is wrapped as
+  `cmd.exe /d /s /c "opencode run …"` (`packages/shared/src/providers/opencodeProvider.ts:44-49` +
+  `opencodeLaunch.ts:25-29`). This fires whenever the orchestrator auto-resolves/selects `opencode` as a
+  *dispatch* provider for a real run. If the `opencode` on the user's PATH is the desktop/TUI launcher
+  (not a pure headless CLI), or if `opencode run` itself opens a window, every dispatch "opens OpenCode" —
+  exactly Ethan's "hitting the executable not the CLI" hypothesis.
+- **SECOND VECTOR:** provider auto-resolution may be *picking* opencode when it shouldn't (it's detected on
+  PATH). Conversation-first means claude-code/the host should be the default dispatch target — check the
+  resolution order in `packages/*/src/providers/index.ts` + `shared/src/providers/providerFactory.ts`.
+
+**Next steps to find & fix:**
+1. On the affected machine: `where opencode` — is it the headless CLI or the desktop-app launcher? Confirm
+   whether `opencode run` opens a window for the installed version.
+2. Check provider auto-resolution order — is `opencode` being selected for dispatch over claude-code? If so,
+   that's the real-run trigger; fix the ordering / don't auto-select opencode as a dispatch target.
+3. If `opencode run` is not reliably headless, gate it (headless flag) or stop auto-selecting opencode.
+4. Reconsider whether the postinstall should register the global OpenCode command/agent at all when OpenCode
+   isn't a desired host (the multi-host deploy writes to all 4 hosts unconditionally).
+
 ### Manual real-OpenCode validation of scoped permissions (user-owned)
 
 The project-scope OpenCode deploy was aligned with the shared scoped-permission
