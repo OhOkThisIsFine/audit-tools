@@ -61,20 +61,26 @@ in the shipped outcome (1c-2). One product-judgment refinement remains:
   the 5-count source reconciliation stays intact); `buildOutcomeCoverageLedger` recovers payloads at close
   from the UNFILTERED intake source. buildCoverageLedger + close enrichment tests added.
 
-**Remaining (NOT a correctness gap — needs product judgment, left for a deliberate pass):**
-- **Classic-preview convergence.** `classify_impl_risks` + `preview_implement` (`nextStep.ts` ~1490-1742,
-  `impl_preview_ack.json`) is a 2nd review surface at planning over node-level items. **A 1c side-effect:
-  Path A now hits BOTH gates (intake review + classic node-preview) = double review.** Path B has NO
-  intake gate (no pre-existing findings) so the classic preview is its ONLY surface — can't just delete
-  it. Options + the open product question (is Path A's intake finding-approval sufficient, or do users
-  still want the node-plan preview?) are written up in `.audit-tools/go-forward-progress.md`. Lean:
-  surgical skip of the classic preview on Path A when `review_decision.json` exists. Deferred pending a
-  deliberate decision — it changes a user-facing surface.
+**Remaining on item 1 — the convergence. DIRECTION LOCKED by Ethan 2026-06-16; GATES the publish.**
+Ethan wants ONE preview per run, tiered by review-necessity, over the DEDUPED/grounded survivor set (no
+items that will later be deduped/dropped). He chose the **"single filter pass up front (ideal)"** approach
+(over the smaller filter-at-the-gate-with-dup) and accepted that the separate node-level
+implementation-plan preview goes away. The classic impl-risk preview (`classify_impl_risks` +
+`preview_implement` + `classifyFindingRisk` + impl_risk_preliminary/reviewed + impl_preview_ack +
+renderTierSection) is to be REMOVED; both paths route through the review-necessity gate over their deduped
+survivors. **Full staged plan (chunks A–D, exact files/functions, the coverage-ledger model change, the
+recon) is in `.audit-tools/go-forward-progress.md`.** Correctness hazard: this is the finding-filtering
+core — a bug LOSES findings; build each chunk green + test hard. **Publish (Q2): HOLD until this is done.**
+Heads-up (no decision needed unless you object): the unified pass makes Path A start honoring intent-
+checkpoint filters — a no-op unless the Path-A checkpoint has filters set; honoring them is correct/consistent.
 
-**Next down the program (pick clean, well-scoped items; A8 is big/risky — the rolling-default atomic
-cutover — save it for a focused pass):** B8 (finding-merge location discriminator), B4 (hard-exclude
-tool-refuted findings), then A1 / A3+A4 / B1 / B2+B3 / A5+A11 / A6 / A12 / A7.
-Live working detail: `.audit-tools/go-forward-progress.md`.
+**After item 1 → continue the program (Ethan: order is mine, optimize for logical sequencing so one
+refactor doesn't undo another):** A8 (rolling-default atomic cutover; nightly-autonomy blocker), A1,
+A3+A4, B1, B2+B3, B4 (re-scoped — see backlog), B8 (re-scoped — premise was wrong, see backlog),
+A5+A11, A6, A12, A7. Live working detail: `.audit-tools/go-forward-progress.md`.
+
+**OpenCode bug:** left logged per Ethan; he's now UNINSTALLED OpenCode, so the trigger should surface as an
+`opencode`-not-found CLI error rather than opening the app — watch for that error to pinpoint the caller.
 
 ## Pointers
 - Live working checkpoint (more design detail, gitignored): `.audit-tools/go-forward-progress.md`.
