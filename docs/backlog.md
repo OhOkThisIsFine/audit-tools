@@ -40,6 +40,11 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   findings and free-form items must NOT be silently auto-dispositioned by quality-tail blocks. Enforce
   in the tool, never host discretion — the host driving it autonomously is exactly the failure mode that
   hid 30/42 design findings this run. (Ethan, 2026-06-15.)
+  **STATUS (2026-06-16):** engine + wiring (1c) + declines-in-outcome (1c-2) + convergence chunks A & B
+  SHIPPED green to `main` (NOT published; publish held until done). Single filter pass at intake, gate
+  previews the deduped survivor set tiered, coverage over the original findings. REMAINING: chunk C
+  (remove the classic impl-risk preview + route Path B through the gate at planning) then chunk D
+  (publish). Chunk-level detail in `docs/HANDOFF.md` + memory `review-gate-execution-status`.
 - **A1 — Fast path past the 15-phase pipeline.** Size/ambiguity/seam-gated lean path
   (`shouldEnterContractPipeline`) so a handful of concrete fixes don't pay full adversarial +
   3-repair-loop cost. Risk to design around: a mis-routed subtle change must not skip the safety net.
