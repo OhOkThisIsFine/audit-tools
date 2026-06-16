@@ -1,5 +1,5 @@
 import { mkdir, rename } from "node:fs/promises";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, symlinkSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { OwnershipRegistry } from "../dispatch/ownershipRegistry.js";
 import { routeAmendmentRequest } from "../dispatch/amendmentClaim.js";
@@ -530,6 +530,73 @@ export function mergeWorktree(
 /** Worktree path for a remediation block. */
 export function worktreePath(root: string, blockId: string, runId: string): string {
   return join(root, ".audit-tools", "worktrees", `remediate-${blockId}-${runId}`);
+}
+
+/**
+ * Stage and commit all of a worktree's edits onto its branch. The TOOL owns this
+ * commit (never the worker/host) so that the branch has a real commit for two
+ * downstream invariants: `gitEditedFilesForBranch` (the write-scope ground truth,
+ * `HEAD...<branch>`) and `mergeWorktree`'s cherry-pick both operate on the worker's
+ * changes rather than an empty diff against HEAD. Gitignored paths (node_modules,
+ * .audit-tools artifacts, the result file written to the main artifacts dir) are
+ * excluded by `git add -A` honoring .gitignore, so the commit captures exactly the
+ * source edits. Returns `committed:false` (not an error) when the worker made no
+ * tracked edits — there is then nothing to verify or merge.
+ */
+export function commitWorktree(
+  worktreeRoot: string,
+  message: string,
+): { committed: boolean; error?: string } {
+  const add = spawnSync("git", ["add", "-A"], {
+    cwd: worktreeRoot,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (add.status !== 0) {
+    return { committed: false, error: `git add failed: ${(add.stderr ?? "").trim()}` };
+  }
+  // `git diff --cached --quiet` exits 0 when nothing is staged → no worker edits.
+  const staged = spawnSync("git", ["diff", "--cached", "--quiet"], {
+    cwd: worktreeRoot,
+    shell: false,
+  });
+  if (staged.status === 0) {
+    return { committed: false };
+  }
+  const commit = spawnSync("git", ["commit", "-m", message], {
+    cwd: worktreeRoot,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (commit.status !== 0) {
+    return { committed: false, error: `git commit failed: ${(commit.stderr ?? "").trim()}` };
+  }
+  return { committed: true };
+}
+
+/**
+ * Make the main checkout's installed `node_modules` available to a worktree. A
+ * fresh `git worktree add` checks out only tracked files, and `node_modules` is
+ * gitignored, so per-node verify commands (`npm run check`, focused tests) would
+ * otherwise fail with missing dependencies. Best-effort junction/symlink to the
+ * main root's `node_modules`; on failure it logs and the verify step surfaces the
+ * missing-deps error rather than crashing the dispatch. NOTE: workspace package
+ * symlinks inside `node_modules/@audit-tools/*` point back into the MAIN checkout,
+ * so cross-package runtime resolution sees the main tree — the authoritative
+ * cross-package re-check is the central post-merge build/gate, not this fast
+ * per-node verify (which gates obvious breakage early).
+ */
+export function ensureWorktreeNodeModules(mainRoot: string, worktreeRoot: string): void {
+  const target = join(mainRoot, "node_modules");
+  const link = join(worktreeRoot, "node_modules");
+  if (!existsSync(target) || existsSync(link)) return;
+  try {
+    symlinkSync(target, link, "junction");
+  } catch (err) {
+    process.stderr.write(
+      `[remediate-code] worktree node_modules link failed (${worktreeRoot}): ${String(err)}\n`,
+    );
+  }
 }
 
 export interface DispatchOptions {
@@ -1339,6 +1406,13 @@ export async function prepareImplementDispatch(
     hostOutputTokens?: number | null;
     hostModels?: HostModelRosterEntry[] | null;
     hostModelId?: string | null;
+    /**
+     * Root each node's prompt at its isolated worktree (the deterministic
+     * `worktreePath(root, block_id, runId)`) rather than the main checkout. Set by
+     * the rolling engine (`driveRollingImplementDispatch`) so a worker told its
+     * repository root is the worktree edits there, not the shared main tree.
+     */
+    worktreeRootedPrompts?: boolean;
   },
 ): Promise<RemediationDispatchPlan> {
   const state = await loadStateOrThrow(options.artifactsDir);
@@ -1433,6 +1507,9 @@ export async function prepareImplementDispatch(
         conventions,
         options.root,
         toPromptPathToken(join(options.artifactsDir, AGENT_FEEDBACK_FILENAME)),
+        waveOptions?.worktreeRootedPrompts
+          ? worktreePath(options.root, block.block_id, runId)
+          : undefined,
       ),
     );
     items.push(item);

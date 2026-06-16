@@ -26,9 +26,12 @@ import {
   removeWorktree,
   mergeWorktree,
   verifyNodeInWorktree,
+  commitWorktree,
+  ensureWorktreeNodeModules,
   worktreePath,
   worktreeBranchForBlock,
 } from "./dispatch.js";
+import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
 import {
@@ -557,8 +560,13 @@ export interface DriveRollingImplementDispatchOptions {
   artifactsDir: string;
   runId: string;
   sessionConfig: SessionConfig | null;
-  /** Programmatic per-node dispatcher (provider-backed). Absence ⇒ caller must use host-wave. */
-  dispatchNode: ProgrammaticNodeDispatcher;
+  /**
+   * Programmatic per-node dispatcher. Defaults to the live provider-backed worker
+   * (`makeProviderNodeDispatcher`: resolves the configured provider and launches it
+   * with the node's worktree-rooted prompt). Tests inject a stub to exercise the
+   * engine without spawning a real worker.
+   */
+  dispatchNode?: ProgrammaticNodeDispatcher;
   /** Rebuild the upstream shared surface between dependency levels (single-flight). */
   rebuildSharedBetweenLevels: () => Promise<void>;
   /** Wave/host inputs used to size the quota-derived confirmed pools. */
@@ -617,6 +625,8 @@ export async function driveRollingImplementDispatch(
       hostOutputTokens: options.waveOptions?.hostOutputTokens,
       hostModels: options.waveOptions?.hostModels,
       hostModelId: options.waveOptions?.hostModelId,
+      // Each node runs in its own worktree, so its prompt is rooted there.
+      worktreeRootedPrompts: true,
     },
   );
   if (plan.items.length === 0) {
@@ -630,6 +640,26 @@ export async function driveRollingImplementDispatch(
       .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
       .map((i) => [i.block_id, i.result_path]),
   );
+  // Map each planned block id to its worktree-rooted prompt path so the
+  // provider-backed dispatcher launches the worker with the right prompt.
+  const promptPathByBlock = new Map(
+    plan.items
+      .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
+      .map((i) => [i.block_id, i.prompt_path]),
+  );
+
+  // The live per-node worker: the configured provider, launched with the node's
+  // worktree-rooted prompt and cwd = its worktree. Tests inject `options.dispatchNode`
+  // to exercise the engine without spawning a real worker.
+  const dispatchNode: ProgrammaticNodeDispatcher =
+    options.dispatchNode ??
+    makeProviderNodeDispatcher({
+      root,
+      artifactsDir,
+      runId,
+      sessionConfig: options.sessionConfig,
+      promptPathByBlock,
+    });
 
   // Confirmed pools: quota-derived concurrency, never the raw host flag (INV-QD-11).
   const confirmedPools = await buildConfirmedPools({
@@ -672,7 +702,10 @@ export async function driveRollingImplementDispatch(
       // wiring.
       removeWorktree(root, wt);
       createWorktree(root, wt, branch);
-      const result = await options.dispatchNode({
+      // A fresh worktree has no node_modules (gitignored); link the main checkout's
+      // so this node's verify commands can run.
+      ensureWorktreeNodeModules(root, wt);
+      const result = await dispatchNode({
         block,
         slot,
         worktreeRoot: wt,
@@ -680,29 +713,44 @@ export async function driveRollingImplementDispatch(
       });
       outcome = result.outcome;
       if (result.outcome === "success") {
-        // Per-node verify in the worktree BEFORE accepting the change. Targeted
-        // commands come from the block's findings; an empty set still verifies
-        // (the deterministic merge re-checks at the central build).
-        const targeted = uniqueStrings(
-          block.items.flatMap((id) => {
-            const finding = state.plan?.findings.find((f) => f.id === id);
-            return finding?.targeted_commands ?? [];
-          }),
-        );
-        const verify = targeted.length > 0
-          ? verifyNodeInWorktree(wt, targeted)
-          : { passed: true, output: "" };
-        verifyPassed = verify.passed;
-        if (verify.passed) {
-          const mergeRes = mergeWorktree(root, wt, branch);
-          merged = mergeRes.success;
-          if (!mergeRes.success) {
-            outcome = "error";
-          }
-        } else {
-          // Verify failed: do not merge; drop the worktree so the main tree stays clean.
+        // Commit the worker's edits onto the branch — TOOL-owned and deterministic
+        // (never the worker/host) — so the branch diff is the write-scope ground
+        // truth and `mergeWorktree` has a real commit to cherry-pick.
+        const commit = commitWorktree(wt, `remediate ${block.block_id} (${runId})`);
+        if (commit.error) {
+          // Could not commit the worker's edits → cannot safely land; drop it.
           removeWorktree(root, wt);
           outcome = "error";
+        } else if (!commit.committed) {
+          // Worker reported success but made no tracked edits — nothing to verify or
+          // merge. The deterministic merge reads the result file and adjudicates
+          // (e.g. a resolved_no_change claim must carry executable evidence).
+          removeWorktree(root, wt);
+        } else {
+          // Per-node verify in the worktree BEFORE accepting the change. Targeted
+          // commands come from the block's findings; an empty set still verifies
+          // (the deterministic merge re-checks at the central build).
+          const targeted = uniqueStrings(
+            block.items.flatMap((id) => {
+              const finding = state.plan?.findings.find((f) => f.id === id);
+              return finding?.targeted_commands ?? [];
+            }),
+          );
+          const verify = targeted.length > 0
+            ? verifyNodeInWorktree(wt, targeted)
+            : { passed: true, output: "" };
+          verifyPassed = verify.passed;
+          if (verify.passed) {
+            const mergeRes = mergeWorktree(root, wt, branch);
+            merged = mergeRes.success;
+            if (!mergeRes.success) {
+              outcome = "error";
+            }
+          } else {
+            // Verify failed: do not merge; drop the worktree so the main tree stays clean.
+            removeWorktree(root, wt);
+            outcome = "error";
+          }
         }
       } else {
         removeWorktree(root, wt);
