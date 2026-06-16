@@ -11,12 +11,12 @@
 
 - **Published + live:** `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0`.
   Global bins reinstalled (postinstall ran via `--allow-scripts`); host assets deployed across 4 hosts.
-- **`main` @ `918742a8`.** Clean tree, all pushed, all published.
-- **Program item 1 (review-necessity gate) is COMPLETE and shipped** in remediator-lambda 0.27.0. There is
-  now ONE review surface per run for both paths; the classic impl-risk preview is gone.
-- **Active work:** the go-forward program from the 2026-06-15 self-audit review (which exposed that 30 of
-  42 design-review findings had been auto-dispositioned without ever being shown). Program of record:
-  `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)". **Item 1 done → next is A8.**
+- **`main` @ `0fa13d35`.** Clean tree, all pushed. **NOT published** — two A8 commits sit on main
+  unreleased (mid-program; release when A8 lands + is validated). Last published: shared 0.22.0 /
+  auditor-lambda 0.27.0 / remediator-lambda 0.27.0.
+- **Program item 1 (review-necessity gate) shipped** in remediator-lambda 0.27.0 (one review surface per run).
+- **Active work: A8 — and it was REFRAMED this session (the framing below the fold is now wrong; see next
+  section).** Program of record: `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)".
 
 ## Standing directives (Ethan) — read before deciding anything
 
@@ -30,19 +30,31 @@
   `ask-on-ambiguity-dont-defer-silently`.)
 - **Order of program items is yours** — sequence logically so one refactor doesn't undo another.
 
-## Immediate next step: program item A8 (rolling-default atomic cutover)
+## Immediate next step: A8 step 4 — the host-subagent full-rolling driver
 
-Item 1 is done and shipped (remediator-lambda 0.27.0). Work down the rest of the go-forward program
-(order is yours; sequence to avoid rework). Next up:
+**A8 was reframed this session — read [`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md)
+and memory `conversation-first-subagent-dispatch-first-class` FIRST.** A8 is NOT "delete the host
+fallback / flip a flag." It is: **one shared rolling `acceptNode` core + two co-equal full-rolling
+drivers** (in-conversation subagent dispatch is first-class — subscription/no-API users depend on it).
 
-- **A8 — rolling-default atomic cutover (THE nightly-autonomy blocker).** Flip the in-process rolling
-  dispatch engine from opt-in to the live default and atomically delete the host-fanned wave fallback in
-  `buildImplementDispatchStep` (`src/steps/nextStep.ts`). The engine + write-scope/verify are already folded
-  into merge behind a flag (ARC-f378135d, shipped default-OFF); A8 = flip default-ON + remove the fallback +
-  validate a multi-worker rolling run. Single atomic replace (new mechanism + deletion in one commit).
-- Then: **A1** fast path, **A3+A4** unify obligation engines + `RemediationItem`, **B1** magic numbers,
-  **B2+B3** diff re-reviews + obligation-set staleness, **B4** hard-exclude tool-refuted findings (re-scoped),
-  **B8** finding-merge discriminator (re-scoped), **A5+A11**, **A6**, **A12**, **A7**. Deferred: A2, A9/A10.
+Done + pushed this session (both green, default-OFF, nothing broken):
+- `dc4d9c2` — the in-process / provider driver made functional (it was a dormant 0-caller engine):
+  `makeProviderNodeDispatcher` + tool-owned worktree commit + node_modules link + worktree-rooted prompts.
+- `0fa13d3` — codex provider made real (verified `codex exec --sandbox … --cd … --add-dir …` + stdin;
+  the old `--prompt` guess was wrong). Codex is a usable CLI-dispatch backend (no extra wiring).
+
+**Next build (the meaty one — start fresh):** the **host-subagent full-rolling driver** + extract the
+shared **`acceptNode`** core. Exact protocol in the plan doc ("Host-subagent driver protocol"):
+extract `acceptNodeWorktree` from `dispatchNodeWithWorktree` → add an `accept-node --id X` per-completion
+callback command → a dispatch step that pre-creates eligible worktrees and drives the host to spawn
+subagents + call `accept-node` as each finishes (dispatch-next-on-complete) → select driver by
+availability. **Validate it IN-SESSION** (the host instance spawns real Task-subagents via the Agent tool
+— no quota). Provider-path real validation is quota-blocked until **Jun 19** (codex usage limit).
+
+- Then the rest of the program: **A1** fast path, **A3+A4** unify obligation engines + `RemediationItem`,
+  **B1** magic numbers, **B2+B3** diff re-reviews + obligation-set staleness, **B4** hard-exclude
+  tool-refuted findings (re-scoped), **B8** finding-merge discriminator (re-scoped), **A5+A11**, **A6**,
+  **A12**, **A7**. Deferred: A2, A9/A10.
 
 **Review gate, as shipped (orientation):** Path A gates the ORIGINAL findings at intake (over the
 filter-pass survivors); Path B gates the deduped/grounded node findings at the planning point

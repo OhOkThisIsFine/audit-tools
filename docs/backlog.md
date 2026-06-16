@@ -49,11 +49,19 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   ~2835-line imperative switch → one shared declarative engine. Collapse the ~8 finding_id-keyed record
   types + 2 coverage ledgers into one canonical `RemediationItem` with typed projections. The redesign
   track. (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
-- **A8 — Make the rolling/isolation/verify engine the LIVE DEFAULT.** It shipped wired-but-default-OFF;
-  the live path is still host-fanned waves on the shared tree (host discretion). Sequence: validate a
-  real multi-worker dispatch → flip default-ON → wire audit-code symmetrically → harden worktree reuse.
-  **THE blocker for nightly autonomy.** Supersedes the drift-plan R1 item and links the "confirmed
-  dispatch bugs" section below. (ARC-f378135d family.)
+- **A8 — Rolling dispatch: one shared core + two co-equal full-rolling drivers (REFRAMED 2026-06-16).**
+  NO LONGER "flip a flag / delete the host fallback" — that reading was incoherent with conversation-first
+  (in-conversation subagent dispatch is FIRST-CLASS; subscription/no-API users depend on it — memory
+  `conversation-first-subagent-dispatch-first-class`). Target: ONE shared rolling `acceptNode` core
+  (per-node worktree → tool-owned commit → verify-in-worktree → cherry-pick merge → branch-diff write-scope)
+  fed by TWO full-rolling drivers selected by availability — (1) **host-subagent** (turn-based per-completion
+  `accept-node` callback; soft-isolation-by-detection since the host's subagent can't be cwd-confined) and
+  (2) **in-process provider** (codex/local-LLM/`claude -p`-when-not-nested; cwd-confined hard isolation).
+  **Progress (this session, on `main`, unpublished):** in-process driver made functional `dc4d9c2`; codex
+  provider made real `0fa13d3`. **Next:** extract `acceptNode` + build the host-subagent driver (validatable
+  in-session, no quota); provider-path real validation quota-blocked until Jun 19. Full plan +
+  protocol: `docs/a8-rolling-cutover-plan.md`. **THE blocker for nightly autonomy.** Supersedes drift-plan R1.
+  (ARC-f378135d family.)
 - **B1 / B2 / B3 — greenlit** (the magic-numbers, diff-based-re-review, and staleness-cascade friction
   items in *Known friction* below; now accepted work, not just logged friction).
 - **B4 — Hard-exclude tool-refuted findings.** A tier-2 REFUTED finding (e.g. madge-disproven cycle) is
