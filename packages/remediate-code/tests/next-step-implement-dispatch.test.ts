@@ -10,7 +10,7 @@ import {
 } from "./helpers/nextStepHarness.js";
 
 const harness = createNextStepHarness(".test-next-step-implement-dispatch");
-const { REPO_DIR, ARTIFACTS_DIR, saveState, resetTestRepo, acknowledgeImplementationPreview, acknowledgeResume, writeIntentCheckpoint } = harness;
+const { REPO_DIR, ARTIFACTS_DIR, saveState, resetTestRepo, acknowledgeResume, writeIntentCheckpoint } = harness;
 
 beforeEach(async () => {
   await harness.resetTestRepo();
@@ -20,8 +20,7 @@ afterEach(async () => {
   await harness.cleanupTestRepo();
 });
 describe("decideNextStep — implementation dispatch and intent gate", () => {
-  it("buildImplementDispatchStep: declined ack marks all pending items deemed_inappropriate and returns continueWithState", async () => {
-    // Set up a documenting state with two documented items
+  it("buildImplementDispatchStep: implementing state dispatches and leaves pending items untouched", async () => {
     const documentingState: RemediationState = makePlanningState({
       status: "implementing",
       items: {
@@ -56,148 +55,10 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     await saveState(documentingState);
     await acknowledgeResume();
     await writeIntentCheckpoint();
-
-    // Write a "declined" ack file
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "declined", skip: [] }),
-      "utf8",
-    );
-
-    let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    while (step.step_kind === "state_transition") {
-      step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    }
-
-    // Should not dispatch — all items are terminal so the run folds straight
-    // through closing to completion (which deletes the artifact dir, so the
-    // durable evidence is the report in .audit-tools/).
-    expect(["present_report", "run_close_action", "no_closing_actions"]).toContain(step.step_kind);
-
-    // Both pending items were marked deemed_inappropriate before closing; the
-    // completed run records them in outcomes with the declined rationale.
-    const report = JSON.parse(
-      await readFile(join(REPO_DIR, ".audit-tools", "remediation-outcomes.json"), "utf8"),
-    );
-    const outcomes = report.outcomes as Array<{
-      finding_id: string;
-      outcome: string;
-      reason?: string;
-    }>;
-    const f1 = outcomes.find((e) => e.finding_id === "F-001");
-    const f2 = outcomes.find((e) => e.finding_id === "F-002");
-    expect(f1?.outcome).toBe("inappropriate");
-    expect(f2?.outcome).toBe("inappropriate");
-    expect(f1?.reason).toMatch(/declined by the user/i);
-    expect(f2?.reason).toMatch(/declined by the user/i);
-  });
-
-  it("buildImplementDispatchStep: terminal items are not mutated when ack is declined", async () => {
-    const documentingState: RemediationState = makePlanningState({
-      status: "implementing",
-      items: {
-        "F-001": {
-          finding_id: "F-001",
-          status: "resolved",
-          block_id: "B-001",
-        },
-        "F-002": {
-          finding_id: "F-002",
-          status: "pending",
-          block_id: "B-002",
-          item_spec: {
-            finding_id: "F-002",
-            concrete_change: "fix b",
-            no_change: false,
-            touched_files: ["src/b.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-      },
-    });
-    await saveState(documentingState);
-    await acknowledgeResume();
-    await writeIntentCheckpoint();
-
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "declined", skip: [] }),
-      "utf8",
-    );
-
-    let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    while (step.step_kind === "state_transition") {
-      step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    }
-
-    // The run completes (deleting the artifact dir), so assert on the durable
-    // outcomes in .audit-tools/ rather than the now-removed state.json.
-    const report = JSON.parse(
-      await readFile(join(REPO_DIR, ".audit-tools", "remediation-outcomes.json"), "utf8"),
-    );
-    const outcomes = report.outcomes as Array<{ finding_id: string; outcome: string }>;
-    const resolvedIds = outcomes.filter((e) => e.outcome === "resolved").map((e) => e.finding_id);
-    const inappropriateIds = outcomes.filter((e) => e.outcome === "inappropriate").map((e) => e.finding_id);
-    // Already-resolved item must not be touched — it stays in the resolved bucket
-    // and never appears as deemed_inappropriate.
-    expect(resolvedIds).toContain("F-001");
-    expect(inappropriateIds).not.toContain("F-001");
-    // Non-terminal item is marked deemed_inappropriate.
-    expect(inappropriateIds).toContain("F-002");
-  });
-
-  it("buildImplementDispatchStep: confirmed ack with empty skip still dispatches implementation", async () => {
-    const documentingState: RemediationState = makePlanningState({
-      status: "implementing",
-      items: {
-        "F-001": {
-          finding_id: "F-001",
-          status: "pending",
-          block_id: "B-001",
-          item_spec: {
-            finding_id: "F-001",
-            concrete_change: "fix a",
-            no_change: false,
-            touched_files: ["src/a.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-        "F-002": {
-          finding_id: "F-002",
-          status: "pending",
-          block_id: "B-002",
-          item_spec: {
-            finding_id: "F-002",
-            concrete_change: "fix b",
-            no_change: false,
-            touched_files: ["src/b.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-      },
-    });
-    await saveState(documentingState);
-    await acknowledgeResume();
-    await writeIntentCheckpoint();
-
-    // Write a reviewed risk file so the preview step is skipped
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_risk_reviewed.json"),
-      JSON.stringify([]),
-      "utf8",
-    );
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed", skip: [] }),
-      "utf8",
-    );
 
     const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
 
-    // Items should NOT be marked deemed_inappropriate — dispatch proceeds
+    // Dispatch proceeds directly; pending items are not marked terminal.
     expect(step.step_kind).toMatch(/dispatch_implement/);
     const savedState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
@@ -206,196 +67,7 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     expect(savedState.items["F-002"].status).toBe("pending");
   });
 
-  it("emits classify_impl_risks before implementation preview when reviewed risks are missing", async () => {
-    const documentingState: RemediationState = makePlanningState({
-      status: "implementing",
-      items: {
-        "F-001": {
-          finding_id: "F-001",
-          status: "pending",
-          block_id: "B-001",
-          item_spec: {
-            finding_id: "F-001",
-            concrete_change: "fix a",
-            no_change: false,
-            touched_files: ["src/a.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-      },
-    });
-    await saveState(documentingState);
-    await acknowledgeResume();
-    await writeIntentCheckpoint();
-
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    const prompt = await readFile(step.prompt_path, "utf8");
-
-    expect(step.step_kind).toBe("classify_impl_risks");
-    expect(step.artifact_paths.reviewed).toMatch(/impl_risk_reviewed\.json$/);
-    expect(prompt).toMatch(/impl_risk_reviewed\.json/);
-    expect(prompt).not.toMatch(/remove.*risk-review hop/i);
-  });
-
-  it("renders preview decision labels with reviewed reasons, pros and cons, and excludes no-change choices", async () => {
-    const documentingState: RemediationState = makePlanningState({
-      status: "implementing",
-      items: {
-        "F-001": {
-          finding_id: "F-001",
-          status: "pending",
-          block_id: "B-001",
-          item_spec: {
-            finding_id: "F-001",
-            concrete_change: "fix a",
-            no_change: false,
-            touched_files: ["src/a.ts"],
-            tests_to_write: [{ name: "a.test", assertions: ["asserts a"] }],
-            not_applicable_steps: [],
-          },
-        },
-        "F-002": {
-          finding_id: "F-002",
-          status: "pending",
-          block_id: "B-002",
-          item_spec: {
-            finding_id: "F-002",
-            concrete_change: "already correct after prior change",
-            no_change: true,
-            touched_files: [],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-      },
-    });
-    await saveState(documentingState);
-    await acknowledgeResume();
-    await writeIntentCheckpoint();
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_risk_preliminary.json"),
-      JSON.stringify({
-        schema_version: "impl-risk-preliminary/v1",
-        findings: [
-          {
-            finding_id: "F-001",
-            title: "First",
-            summary: "Fix first.",
-            affected_files: ["src/a.ts"],
-            concrete_change: "fix a",
-            no_change: false,
-            tests_to_write: [{ name: "a.test", assertions: ["asserts a"] }],
-            preliminary_tier: "safe",
-            preliminary_reason: "low blast radius",
-          },
-          {
-            finding_id: "F-002",
-            title: "Second",
-            summary: "Already correct.",
-            affected_files: ["src/b.ts"],
-            concrete_change: "already correct after prior change",
-            no_change: true,
-            tests_to_write: [],
-            preliminary_tier: "context_dependent",
-            preliminary_reason: "no-op",
-          },
-        ],
-      }),
-      "utf8",
-    );
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_risk_reviewed.json"),
-      JSON.stringify({
-        schema_version: "impl-risk-reviewed/v1",
-        findings: [
-          { finding_id: "F-001", tier: "safe", reason: "reviewed safe reason" },
-          { finding_id: "F-002", tier: "context_dependent", reason: "reviewed no-op reason" },
-        ],
-      }),
-      "utf8",
-    );
-
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    const prompt = await readFile(step.prompt_path, "utf8");
-
-    expect(step.step_kind).toBe("preview_implement");
-    expect(prompt).toContain("Straightforward");
-    expect(prompt).toContain("Reviewed Reason");
-    expect(prompt).toContain("Pros");
-    expect(prompt).toContain("Cons");
-    expect(prompt).toContain("reviewed safe reason");
-    expect(prompt).toContain("Already Correct (no changes planned)");
-    expect(prompt).toContain("ignored_findings");
-    expect(prompt).not.toContain("Tier 1");
-    expect(prompt).not.toContain("Tier 2");
-    expect(prompt).not.toContain("Tier 3");
-    // The ## Ignore Choices section was removed (N-D01 #23) — the tiered tables
-    // already carry the full context; an extra duplicate list is noise.
-    expect(prompt).not.toContain("## Ignore Choices");
-    // F-001 appears in the Straightforward table (not in a separate Ignore Choices list)
-    expect(prompt).toContain("F-001");
-    expect(prompt).toContain("Straightforward");
-    // F-002 is no-op — excluded from tier tables, listed only under Already Correct
-    expect(prompt).toContain("F-002");
-  });
-
-  it("confirmed preview ack with ignored_findings marks only named items ignored and dispatches the rest", async () => {
-    const documentingState: RemediationState = makePlanningState({
-      status: "implementing",
-      items: {
-        "F-001": {
-          finding_id: "F-001",
-          status: "pending",
-          block_id: "B-001",
-          item_spec: {
-            finding_id: "F-001",
-            concrete_change: "fix a",
-            no_change: false,
-            touched_files: ["src/a.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-        "F-002": {
-          finding_id: "F-002",
-          status: "pending",
-          block_id: "B-002",
-          item_spec: {
-            finding_id: "F-002",
-            concrete_change: "fix b",
-            no_change: false,
-            touched_files: ["src/b.ts"],
-            tests_to_write: [],
-            not_applicable_steps: [],
-          },
-        },
-      },
-    });
-    await saveState(documentingState);
-    await acknowledgeResume();
-    await writeIntentCheckpoint();
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed", ignored_findings: ["F-002"] }),
-      "utf8",
-    );
-
-    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    const savedState = JSON.parse(
-      await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
-    );
-    const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
-
-    expect(step.step_kind).toBe("dispatch_implement");
-    expect(savedState.items["F-002"].status).toBe("ignored");
-    expect(savedState.items["F-002"].failure_reason).toMatch(/implementation preview/i);
-    expect(savedState.items["F-001"].status).toBe("pending");
-    expect(plan.items.map((item: { block_id: string }) => item.block_id)).toContain("B-001");
-    expect(plan.items.map((item: { block_id: string }) => item.block_id)).not.toContain("B-002");
-  });
-
-  it("implement phase dispatch sweep defaults to parallel after preview acknowledgment", async () => {
+  it("implement phase dispatch sweep defaults to parallel", async () => {
     const cases = [
       {
         options: { root: REPO_DIR },
@@ -430,7 +102,6 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
       await saveState(makeImplementingState());
       await acknowledgeResume();
       await writeIntentCheckpoint();
-      await acknowledgeImplementationPreview();
       if (scenario.sessionConfig) {
         await writeFile(
           join(REPO_DIR, "session-config.json"),
@@ -483,13 +154,6 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     await acknowledgeResume();
     await writeIntentCheckpoint();
 
-    // Write a confirmed ack to bypass the preview-ack gate
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed", skip: [] }),
-      "utf8",
-    );
-
     const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false });
     const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
 
@@ -537,13 +201,6 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     await saveState(documentingState);
     await acknowledgeResume();
     await writeIntentCheckpoint();
-
-    // Write a confirmed ack to bypass the preview-ack gate
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed", skip: [] }),
-      "utf8",
-    );
 
     // Write a completed implement result for B-001
     const implResultDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");

@@ -31,13 +31,17 @@ afterEach(async () => {
 });
 
 describe("runTriagePhase", () => {
-  it("returns waiting_for_triage when blocked items exist and no resolution file", async () => {
+  it("returns waiting_for_triage when blocked items have exhausted auto-retries and no resolution file", async () => {
     const state = makeState({
       F1: {
         finding_id: "F1",
         status: "blocked",
         failure_reason: "test",
         block_id: "B1",
+        // Both retry budgets exhausted → auto-retry is skipped, so the run
+        // escalates to human triage rather than re-attempting the item.
+        rework_count: 99,
+        infra_rework_count: 99,
         started_at: "2026-06-05T12:00:00.000Z",
         completed_at: "2026-06-05T12:01:00.000Z",
       },
@@ -243,7 +247,7 @@ describe("runTriagePhase", () => {
     );
   });
 
-  it("auto-retries blocked items when impl_preview_acknowledged.json exists and no resolution file", async () => {
+  it("auto-retries blocked items within budget when no resolution file exists", async () => {
     const state = makeState({
       F1: {
         finding_id: "F1",
@@ -264,13 +268,7 @@ describe("runTriagePhase", () => {
       },
     });
 
-    // No triage_resolution.json; the user approved at preview time instead.
-    await writeFile(
-      join(TEST_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ acknowledged: true }),
-      "utf8",
-    );
-
+    // No triage_resolution.json: blocked items auto-retry within budget.
     const next = await runTriagePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("implementing");
     // Every previously-blocked item is re-queued as pending.
@@ -395,12 +393,6 @@ describe("runTriagePhase", () => {
       },
     });
 
-    await writeFile(
-      join(TEST_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ acknowledged: true }),
-      "utf8",
-    );
-
     const next = await runTriagePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("implementing");
     expect(state.items!.F1.infra_rework_count).toBe(2);
@@ -419,18 +411,12 @@ describe("runTriagePhase", () => {
       },
     });
 
-    await writeFile(
-      join(TEST_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ acknowledged: true }),
-      "utf8",
-    );
-
     const next = await runTriagePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("waiting_for_triage");
     expect(state.items!.F1.status).toBe("blocked");
   });
 
-  it("logs cap exhaustion distinctly from auto-retry under preview-ack (OBS-df30208a)", async () => {
+  it("logs cap exhaustion distinctly from auto-retry (OBS-df30208a)", async () => {
     const errors: string[] = [];
     const logs: string[] = [];
     const origError = console.error;
@@ -460,12 +446,6 @@ describe("runTriagePhase", () => {
           rework_count: 0,
         },
       });
-      await writeFile(
-        join(TEST_DIR, "impl_preview_acknowledged.json"),
-        JSON.stringify({ acknowledged: true }),
-        "utf8",
-      );
-
       // A retryable item exists, so the run proceeds to implementing.
       const next = await runTriagePhase(state, BASE_OPTIONS);
       expect(next.status).toBe("implementing");
@@ -576,12 +556,6 @@ describe("runTriagePhase", () => {
       },
     });
 
-    await writeFile(
-      join(TEST_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ acknowledged: true }),
-      "utf8",
-    );
-
     await runTriagePhase(state, BASE_OPTIONS);
     const ctx = state.items!.F1.failure_context;
     expect(typeof ctx).toBe("string");
@@ -624,12 +598,6 @@ describe("runTriagePhase", () => {
         rework_count: 2,
       },
     });
-
-    await writeFile(
-      join(TEST_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed" }),
-      "utf8",
-    );
 
     const next = await runTriagePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("waiting_for_triage");

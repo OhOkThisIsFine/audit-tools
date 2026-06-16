@@ -191,42 +191,40 @@ export async function runTriagePhase(
         return { ...state, status: "implementing" };
       }
     } else {
-      // If the user approved findings in the preview, auto-retry those rather
-      // than asking the model to triage them. Preview-ignored items are terminal,
-      // so only still-blocked implementation attempts are considered here.
-      const previewAckPath = join(options.artifactsDir, "impl_preview_acknowledged.json");
-      if (existsSync(previewAckPath)) {
-        let autoRetried = false;
-        for (const item of blockedItems) {
-          // Stop auto-retrying an item that has already been retried the cap
-          // number of times for its failure class — leaves it `blocked` so the
-          // fall-through below routes the run to a human triage prompt.
-          const failureClass = classifyFailure(item.failure_reason);
-          const cap =
-            failureClass === "infra" ? MAX_AUTO_RETRIES_INFRA : MAX_AUTO_RETRIES_CONTRACT;
-          const usedCount =
-            failureClass === "infra"
-              ? (item.infra_rework_count ?? 0)
-              : (item.rework_count ?? 0);
-          if (usedCount >= cap) {
-            // OBS-df30208a: surface cap exhaustion. Without this the operator
-            // cannot distinguish an item that auto-retried from one that fell
-            // through to human triage because its retry budget is spent.
-            console.error(
-              `[triage] ${item.finding_id}: ${failureClass} retry budget exhausted (${usedCount}/${cap}) — routing to human triage.`,
-            );
-            continue;
-          }
-          console.log(
-            `[triage] ${item.finding_id}: auto-retrying (${failureClass} failure, attempt ${usedCount + 1}/${cap}).`,
+      // No triage resolution yet: auto-retry each blocked item within its
+      // per-failure-class retry budget before escalating to human triage. The run
+      // was approved at the review gate, so transient/contract failures retry
+      // autonomously; only budget-exhausted items fall through to a human prompt.
+      let autoRetried = false;
+      for (const item of blockedItems) {
+        // Stop auto-retrying an item that has already been retried the cap
+        // number of times for its failure class — leaves it `blocked` so the
+        // fall-through below routes the run to a human triage prompt.
+        const failureClass = classifyFailure(item.failure_reason);
+        const cap =
+          failureClass === "infra" ? MAX_AUTO_RETRIES_INFRA : MAX_AUTO_RETRIES_CONTRACT;
+        const usedCount =
+          failureClass === "infra"
+            ? (item.infra_rework_count ?? 0)
+            : (item.rework_count ?? 0);
+        if (usedCount >= cap) {
+          // OBS-df30208a: surface cap exhaustion. Without this the operator
+          // cannot distinguish an item that auto-retried from one that fell
+          // through to human triage because its retry budget is spent.
+          console.error(
+            `[triage] ${item.finding_id}: ${failureClass} retry budget exhausted (${usedCount}/${cap}) — routing to human triage.`,
           );
-          retryBlockedItem(item, failureClass);
-          autoRetried = true;
+          continue;
         }
-        if (autoRetried) {
-          console.log("User approved these items at preview — auto-retrying blocked findings.");
-          return { ...state, status: "implementing" };
-        }
+        console.log(
+          `[triage] ${item.finding_id}: auto-retrying (${failureClass} failure, attempt ${usedCount + 1}/${cap}).`,
+        );
+        retryBlockedItem(item, failureClass);
+        autoRetried = true;
+      }
+      if (autoRetried) {
+        console.log("Auto-retrying blocked findings within their retry budget.");
+        return { ...state, status: "implementing" };
       }
 
       const triageBatch: TriageBatch = {

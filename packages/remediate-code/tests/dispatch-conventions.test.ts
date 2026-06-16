@@ -94,14 +94,6 @@ function makeImplementingState(): RemediationState {
   return state;
 }
 
-async function acknowledgeImplementationPreview(): Promise<void> {
-  await writeFile(
-    join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-    JSON.stringify({ status: "confirmed", ignored_findings: [] }),
-    "utf8",
-  );
-}
-
 async function acknowledgeResume(): Promise<void> {
   await writeFile(
     join(ARTIFACTS_DIR, "confirm_resume_ack.json"),
@@ -216,7 +208,6 @@ describe("dispatch prompts invite opt-in agent reflections", () => {
 describe("dispatch step prompts carry DISPATCH_PROMPT_HANDOFF_NOTE", () => {
   it("dispatch_implement step prompt includes DISPATCH_PROMPT_HANDOFF_NOTE", async () => {
     await saveState(makeImplementingState());
-    await acknowledgeImplementationPreview();
     await acknowledgeResume();
     await writeIntentCheckpoint();
 

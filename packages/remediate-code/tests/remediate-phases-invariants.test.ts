@@ -345,11 +345,6 @@ describe("runTriagePhase — INV-remediate-phases-05: auto-retry cap per failure
   beforeEach(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });
     await mkdir(TEST_DIR, { recursive: true });
-    await writeFile(
-      join(TEST_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ acknowledged: true }),
-      "utf8",
-    );
   });
 
   afterEach(async () => {

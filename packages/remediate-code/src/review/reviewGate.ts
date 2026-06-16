@@ -1,13 +1,16 @@
-// Review-approval gate engine (review-gate chunk 2/3) — builds the tiered
-// item-set the user approves/disapproves, and consumes their verdict.
+// Review-approval gate engine — builds the tiered item-set the user
+// approves/disapproves, and consumes their verdict.
 //
-// Why this is separate from the existing `preview_implement` gate: the contract
-// pipeline collapses the N original findings into M implementation-DAG nodes, so
-// the block-level preview shows M node "findings" while the individual
-// design-review / free-form findings bundled inside a quality-tail node are
-// never surfaced — they get bulk-dispositioned ("direction recorded") inside the
-// node's worker, invisibly. This engine operates on the ORIGINAL finding set so
-// every judgment-heavy item is presented for an explicit decision before the
+// This is the single review surface for both paths. It replaced the classic
+// per-block implementation-risk preview, which fired AFTER the contract pipeline
+// collapsed the N original findings into M implementation-DAG nodes: the
+// block-level preview showed M node "findings" while the individual design-review
+// / free-form findings bundled inside a quality-tail node were never surfaced —
+// they got bulk-dispositioned ("direction recorded") inside the node's worker,
+// invisibly (the 2026-06-15 failure this gate exists to prevent). This engine
+// instead operates BEFORE that collapse: Path A gates the original findings at
+// intake; Path B gates the deduped/grounded node findings at the planning point.
+// Every judgment-heavy item is presented for an explicit decision before the
 // pipeline can mark it terminal-without-change.
 //
 // Tool owns the structure (tiering, rationale, cost, which items must be shown);

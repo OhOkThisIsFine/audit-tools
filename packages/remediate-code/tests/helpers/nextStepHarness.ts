@@ -153,7 +153,6 @@ export interface NextStepHarness {
   saveState(state: RemediationState): Promise<void>;
   resetTestRepo(): Promise<void>;
   cleanupTestRepo(): Promise<void>;
-  acknowledgeImplementationPreview(): Promise<void>;
   acknowledgeResume(): Promise<void>;
   writeIntentCheckpoint(): Promise<void>;
   writeReadyStructuredAuditIntake(inputPath: string): Promise<void>;
@@ -183,14 +182,6 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
 
   async function cleanupTestRepo(): Promise<void> {
     await rm(TEST_DIR, { recursive: true, force: true });
-  }
-
-  async function acknowledgeImplementationPreview(): Promise<void> {
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed", ignored_findings: [] }),
-      "utf8",
-    );
   }
 
   async function acknowledgeResume(): Promise<void> {
@@ -467,7 +458,6 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
     saveState,
     resetTestRepo,
     cleanupTestRepo,
-    acknowledgeImplementationPreview,
     acknowledgeResume,
     writeIntentCheckpoint,
     writeReadyStructuredAuditIntake,

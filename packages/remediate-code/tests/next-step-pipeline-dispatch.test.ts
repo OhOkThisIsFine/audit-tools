@@ -161,6 +161,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     await writeIntentCheckpoint();
     await acknowledgeResume();
     await writeCompleteContractPipelineDag();
+    await approveReviewGate();
 
     const step = await decideNextStep({
       root: REPO_DIR,
@@ -555,6 +556,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     await saveState(makePlanningState());
     await acknowledgeResume();
     await writeIntentCheckpoint();
+    await approveReviewGate();
 
     const step = await decideNextStep({
       root: REPO_DIR,
@@ -571,6 +573,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     await saveState(makePlanningState());
     await acknowledgeResume();
     await writeIntentCheckpoint();
+    await approveReviewGate();
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -582,6 +585,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     await saveState(makePlanningState());
     await acknowledgeResume();
     await writeIntentCheckpoint();
+    await approveReviewGate();
     const configPath = join(REPO_DIR, "session-config.json");
     await writeFile(configPath, JSON.stringify({ host_can_dispatch_subagents: true }), "utf8");
 
@@ -742,11 +746,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
       JSON.stringify(makePlanningState().plan),
       "utf8",
     );
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed", skip: [] }),
-      "utf8",
-    );
+    await approveReviewGate();
 
     const step = await decideNextStep({
       root: REPO_DIR,
@@ -822,6 +822,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     await saveState(makePlanningState());
     await acknowledgeResume();
     await writeIntentCheckpoint();
+    await approveReviewGate();
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -859,16 +860,10 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     );
     await acknowledgeResume();
     await writeIntentCheckpoint();
-    // Presence of the ack file triggers the auto-retry path inside runTriagePhase;
-    // rework_count >= 2 (MAX_AUTO_RETRIES) suppresses auto-retry and falls through
-    // to the waiting_for_triage exit.
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed", skip: [] }),
-      "utf8",
-    );
 
-    // Folded: implementing state runs triage and returns collect_triage in one call.
+    // Folded: implementing state runs triage and returns collect_triage in one
+    // call — rework_count >= 2 (MAX_AUTO_RETRIES) suppresses auto-retry, so the
+    // blocked item falls through to the waiting_for_triage exit.
     const step = await decideNextStep({ root: REPO_DIR });
     const prompt = await readFile(step.prompt_path, "utf8");
 
@@ -918,11 +913,6 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
           },
         ],
       }),
-      "utf8",
-    );
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed", ignored_findings: [] }),
       "utf8",
     );
     const implementDir = join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement");

@@ -116,8 +116,8 @@ describe("N-R13: planning transitions directly to implementing", () => {
     };
     await new StateStore(ARTIFACTS_DIR).saveState(state);
 
-    // Write resume ack and intent checkpoint so we skip confirm_resume and
-    // classify_impl_risks steps.
+    // Write resume ack, intent checkpoint, and an approve-all review decision so
+    // we skip confirm_resume and satisfy the Path-B planning review gate.
     await writeFile(
       join(ARTIFACTS_DIR, "confirm_resume_ack.json"),
       JSON.stringify({ choice: "resume" }),
@@ -129,13 +129,14 @@ describe("N-R13: planning transitions directly to implementing", () => {
       "utf8",
     );
     await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed", skip: [] }),
-      "utf8",
-    );
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_risks_reviewed.json"),
-      JSON.stringify({ risks: [], reviewed_at: new Date().toISOString() }),
+      join(ARTIFACTS_DIR, "review_decision.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-review-decision/v1",
+        plan_id: "path-a-review",
+        approved_ids: [],
+        declined: [],
+        created_at: new Date().toISOString(),
+      }),
       "utf8",
     );
 

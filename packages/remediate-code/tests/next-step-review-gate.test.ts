@@ -14,7 +14,7 @@ import { decideNextStep } from "../src/steps/nextStep.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 
 const harness = createNextStepHarness(".test-next-step-review-gate");
-const { REPO_DIR, ARTIFACTS_DIR, writeReadyStructuredAuditIntake } = harness;
+const { REPO_DIR, ARTIFACTS_DIR, writeReadyStructuredAuditIntake, acknowledgeResume } = harness;
 
 const STRATEGIC_ID = "ARC-design-001";
 const CONCRETE_ID = "SEC-fix-001";
@@ -280,6 +280,115 @@ describe("Path-A coverage is built over the original findings", () => {
     expect(byId["ORIG-DROP"].disposition).toBe("dropped_no_evidence");
     // The node id is NOT in the finding-coverage — coverage accounts for findings.
     expect(byId["CP-001"]).toBeUndefined();
+  });
+});
+
+describe("Path-B planning review gate", () => {
+  // Path B (document / conversation) has no pre-pipeline finding set — its
+  // findings are derived inside the pipeline — so the gate fires at the PLANNING
+  // point over the deduped/grounded node findings, gated on review_decision.json
+  // being absent (Path A's decision already exists → no double review).
+  const ARCH_NODE = "CP-ARCH-001";
+  const SEC_NODE = "CP-SEC-001";
+
+  async function writePathBPlan(): Promise<void> {
+    await mkdir(join(REPO_DIR, "src"), { recursive: true });
+    await writeFile(join(REPO_DIR, "src", "arch.ts"), "// arch\n", "utf8");
+    await writeFile(join(REPO_DIR, "src", "login.ts"), "// login\n", "utf8");
+    await writeFile(
+      join(ARTIFACTS_DIR, "extracted-plan.json"),
+      JSON.stringify({
+        plan_id: "PLAN-PATH-B",
+        source: "contract_pipeline",
+        findings: [
+          {
+            id: ARCH_NODE,
+            title: "Rework module boundaries",
+            category: "architecture",
+            severity: "medium",
+            confidence: "medium",
+            lens: "architecture",
+            summary: "Restructure the store/db seam.",
+            affected_files: [{ path: "src/arch.ts" }],
+            evidence: ["obligation O-ARCH"],
+          },
+          {
+            id: SEC_NODE,
+            title: "Escape login input",
+            category: "security",
+            severity: "high",
+            confidence: "high",
+            lens: "security",
+            summary: "Escape the email before the query.",
+            affected_files: [{ path: "src/login.ts" }],
+            evidence: ["obligation O-SEC"],
+          },
+        ],
+        blocks: [
+          { block_id: "B-ARCH", items: [ARCH_NODE], parallel_safe: true },
+          { block_id: "B-SEC", items: [SEC_NODE], parallel_safe: true },
+        ],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+      }),
+      "utf8",
+    );
+    await harness.writeIntentCheckpoint();
+    // The plan is built and persisted on the first next-step, so subsequent calls
+    // see existing state — ack the resume gate so it doesn't intercept the run.
+    await acknowledgeResume();
+  }
+
+  it("halts at collect_review_approval over the node findings when no decision exists", async () => {
+    await writePathBPlan();
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("collect_review_approval");
+    expect(step.step_kind).not.toBe("dispatch_implement");
+    const request = JSON.parse(await readFile(requestPath, "utf8"));
+    expect(request.total).toBe(2);
+    const ids = request.tiers.flatMap((t: { items: { finding_id: string }[] }) =>
+      t.items.map((i) => i.finding_id),
+    );
+    expect(ids).toEqual(expect.arrayContaining([ARCH_NODE, SEC_NODE]));
+  });
+
+  it("declining a node records it terminal (never silently closed) and the run proceeds", async () => {
+    await writePathBPlan();
+    await decideNextStep({ root: REPO_DIR }); // halt + write request
+
+    await writeFile(
+      resolutionPath,
+      JSON.stringify({ disapproved_findings: [ARCH_NODE] }),
+      "utf8",
+    );
+    const step = await decideNextStep({ root: REPO_DIR }); // consume + proceed
+
+    expect(step.step_kind).not.toBe("collect_review_approval");
+    // A Path-B decision record is written (distinct plan id from Path A).
+    const decision = JSON.parse(await readFile(decisionPath, "utf8"));
+    expect(decision.plan_id).toBe("path-b-review");
+    expect(decision.declined.map((d: { finding_id: string }) => d.finding_id)).toEqual([ARCH_NODE]);
+    // The declined node is a recorded terminal disposition, not a silent close.
+    const state = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"));
+    expect(state.items[ARCH_NODE].status).toBe("ignored");
+    expect(state.items[ARCH_NODE].failure_reason).toMatch(/disapproved/i);
+    expect(state.items[ARCH_NODE].completed_at).toBeTruthy();
+    // The approved node stays live for implementation.
+    expect(state.items[SEC_NODE].status).toBe("pending");
+  });
+
+  it("re-running after the decision does not re-halt (fires at most once)", async () => {
+    await writePathBPlan();
+    await decideNextStep({ root: REPO_DIR });
+    await writeFile(resolutionPath, JSON.stringify({}), "utf8");
+    await decideNextStep({ root: REPO_DIR });
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).not.toBe("collect_review_approval");
+    expect(existsSync(decisionPath)).toBe(true);
   });
 });
 
