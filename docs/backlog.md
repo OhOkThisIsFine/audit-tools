@@ -632,6 +632,24 @@ provider+IDE+model triple yields a *trustworthy* capacity/limit estimate dispatc
 rely on, degrading safely (byte-estimate + 429/TPM learning + safety margin) when a
 source is silent — never a confidently-wrong number. (Ethan flagged 2026-06-15.)
 
+**PROACTIVE signal found for Claude (2026-06-16) — the key unlock.** Claude exposes a
+real (undocumented) subscription-quota readout: `GET api.anthropic.com/api/oauth/usage`
+(Bearer `claudeAiOauth.accessToken` from `~/.claude/.credentials.json` + header
+`anthropic-beta: oauth-2025-04-20`) → `five_hour` / `seven_day` / `seven_day_opus` /
+`seven_day_sonnet` / `seven_day_cowork` each `{utilization%, resets_at}` + `extra_usage`
+credits; `/api/oauth/profile` → `rate_limit_tier`. `utilization%`+`resets_at` = remaining
+WITHOUT a hardcoded ceiling (agnostic-clean); per-model = strength-aware routing;
+`extra_usage` = cost-awareness. This makes the Claude (incl. subagent) pool proactively
+quota-aware, which is REQUIRED for cross-pool balancing (a host that thinks it has infinite
+subagent capacity never spills to CLI/other pools). Design: a per-provider `QuotaSource`
+(everything-agnostic) — Claude=this endpoint (cache ~30-60s, refresh token on 401, degrade
+on change); codex=reactive parse of its dated "usage limit… try again <date>" stderr →
+`exhausted-until`; local=unbounded. **The binding constraint is quota+rate, NOT a
+max-parallel-subagents `N`** (some IDEs cap subagent count, many don't — Ethan, 2026-06-16).
+Caveats: undocumented (defensive parse + degrade), read-only OAuth-token use (Bearer to
+api.anthropic.com only, never log), OS-portability (macOS may store creds in the keychain,
+not the file — discover). Full recipe: memory `claude-oauth-usage-quota-endpoint`.
+
 Part of the same push: **detect and dispatch to CLI agents as additional pools.** The
 heterogeneous-dispatch machinery (`computeDispatchCapacity`, `CapacityPool`) can already
 model multiple pools, but there is no real second pool. Detecting an available CLI agent
