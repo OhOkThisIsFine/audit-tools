@@ -650,6 +650,22 @@ Caveats: undocumented (defensive parse + degrade), read-only OAuth-token use (Be
 api.anthropic.com only, never log), OS-portability (macOS may store creds in the keychain,
 not the file — discover). Full recipe: memory `claude-oauth-usage-quota-endpoint`.
 
+**NEXT — hunt the same robust-as-possible quota signal for EVERY other model source (Ethan,
+2026-06-16).** Mirror the Claude discovery across the whole pool so each provider gets the
+best available `QuotaSource`, preferring **proactive endpoint > reactive dated-limit parse >
+local consumption-estimate**, always degrading safely:
+- **codex / OpenAI:** does the ChatGPT/codex backend expose an analogous usage endpoint
+  readable with codex's stored creds (`~/.codex/` auth)? If not, the reactive dated
+  "usage limit… try again `<date>`" stderr is the floor. (Codex creds/auth recon needed.)
+- **gemini (Google), opencode, antigravity, VS Code tasks:** find each one's usage/limit
+  readout (endpoint / file / CLI / reactive).
+- **Cursor & other IDEs:** Cursor has an org-level Admin API (admin key); most BYOK tools
+  delegate to the underlying provider's signal.
+- **local LLM:** effectively unbounded (local cost/latency model, not a remote quota).
+Deliverable: a per-provider QuotaSource matrix (signal type + recipe + degrade path) feeding
+the everything-agnostic `QuotaSource` interface. This is the generalization of the Claude
+unlock to the full pool — required for cost/quota/strength-aware cross-pool dispatch.
+
 Part of the same push: **detect and dispatch to CLI agents as additional pools.** The
 heterogeneous-dispatch machinery (`computeDispatchCapacity`, `CapacityPool`) can already
 model multiple pools, but there is no real second pool. Detecting an available CLI agent
