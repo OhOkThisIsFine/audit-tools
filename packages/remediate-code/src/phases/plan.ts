@@ -649,17 +649,21 @@ export function buildCoverageLedger(params: {
   /** Phantom paths stripped from findings that survived grounding. */
   phantomPathsRemoved?: Map<string, string[]>;
   /**
-   * Findings the user disapproved at the review-approval gate. These are NOT part
-   * of `sourceFindings` (they were excluded before the pipeline ran), so they are
-   * appended as extra `declined_by_review` entries and counted separately — never
-   * folded into the source-disposition reconciliation.
+   * Findings the user disapproved at the review-approval gate, with the recorded
+   * reason. These are IN `sourceFindings` (an approved/declined finding is a
+   * filter-pass survivor — folded/dropped findings never reach the gate), so they
+   * produce an in-source `declined_by_review` disposition exactly like
+   * `droppedByCheckpoint`, and they ARE part of the source reconciliation.
    */
-  declinedByReview?: Array<{ finding_id: string; reason: string; title?: string }>;
+  declinedByReview?: Array<{ finding_id: string; reason: string }>;
   mergeMap: Map<string, string>;
   items: Record<string, RemediationItemState>;
 }): CoverageLedger {
   const dropped = new Set(params.droppedNoEvidence);
   const byCheckpoint = new Set(params.droppedByCheckpoint);
+  const declinedReasons = new Map(
+    (params.declinedByReview ?? []).map((d) => [d.finding_id, d.reason] as const),
+  );
   const groundingAnnotations = (f: Finding): Partial<CoverageLedgerEntry> => {
     const phantoms = params.phantomPathsRemoved?.get(f.id);
     return {
@@ -710,6 +714,16 @@ export function buildCoverageLedger(params: {
           "Finding excluded by the intent checkpoint (filter or excluded scope).",
       };
     }
+    if (declinedReasons.has(f.id)) {
+      return {
+        finding_id: f.id,
+        title: f.title,
+        disposition: "declined_by_review",
+        rationale:
+          declinedReasons.get(f.id) ??
+          "Disapproved by the user at the review-approval gate.",
+      };
+    }
     return {
       finding_id: f.id,
       title: f.title,
@@ -718,22 +732,6 @@ export function buildCoverageLedger(params: {
       ...groundingAnnotations(f),
     };
   });
-  // Append the review-gate declines as extra entries. They are NOT in
-  // sourceFindings (excluded before the pipeline ran), so they never affect the
-  // source-disposition reconciliation; their full payload is recovered at close.
-  // Skip any id already present (defensive: declined ids and node ids never
-  // overlap, but guard against the legacy path where source IS the original set).
-  const presentIds = new Set(entries.map((e) => e.finding_id));
-  for (const declined of params.declinedByReview ?? []) {
-    if (presentIds.has(declined.finding_id)) continue;
-    presentIds.add(declined.finding_id);
-    entries.push({
-      finding_id: declined.finding_id,
-      ...(declined.title ? { title: declined.title } : {}),
-      disposition: "declined_by_review",
-      rationale: declined.reason,
-    });
-  }
   const count = (d: CoverageLedgerEntry["disposition"]): number =>
     entries.filter((e) => e.disposition === d).length;
   return {

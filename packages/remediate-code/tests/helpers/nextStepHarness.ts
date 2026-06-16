@@ -12,8 +12,8 @@
 // `resetTestRepo`/cleanup helpers operate only on that dir, so files running in
 // parallel under vitest never clobber each other's scratch state.
 
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateStore } from "../../src/state/store.js";
 import type { RemediationState } from "../../src/state/store.js";
@@ -254,6 +254,30 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
       "# Structured intake\n",
       "utf8",
     );
+    // Materialize every cited affected_files path as a stub in the test repo, the
+    // way the real audited repo contains them. The intake review-gate filter pass
+    // runs phantom-path grounding and drops findings whose cited paths don't exist
+    // on disk, so without these the findings would be filtered out before review.
+    try {
+      const report = JSON.parse(await readFile(inputPath, "utf8")) as {
+        findings?: Array<{ affected_files?: Array<{ path?: string }> }>;
+      };
+      const citedPaths = new Set<string>();
+      for (const finding of report.findings ?? []) {
+        for (const file of finding.affected_files ?? []) {
+          if (typeof file.path === "string" && file.path.length > 0) {
+            citedPaths.add(file.path);
+          }
+        }
+      }
+      for (const relOrAbs of citedPaths) {
+        const abs = isAbsolute(relOrAbs) ? relOrAbs : join(REPO_DIR, relOrAbs);
+        await mkdir(dirname(abs), { recursive: true });
+        await writeFile(abs, `// stub for ${relOrAbs}\n`, "utf8");
+      }
+    } catch {
+      // A non-JSON / unreadable input (e.g. a markdown brief) cites no paths.
+    }
     await writeIntentCheckpoint();
   }
 

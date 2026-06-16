@@ -7,7 +7,7 @@
 // disapprove, and disapproved findings are recorded (never silently closed).
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { readFile, writeFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { decideNextStep } from "../src/steps/nextStep.js";
@@ -192,6 +192,94 @@ describe("review-approval gate: disapproval is recorded and excluded", () => {
     const decision = JSON.parse(await readFile(decisionPath, "utf8"));
     expect(decision.declined.map((d: { finding_id: string }) => d.finding_id)).toEqual([STRATEGIC_ID]);
     expect(decision.declined[0].reason).toMatch(/tier/i);
+  });
+});
+
+describe("Path-A coverage is built over the original findings", () => {
+  it("records planned/declined/folded/dropped dispositions over originals, not nodes", async () => {
+    // A node source file so the promoted extracted-plan node survives grounding.
+    await mkdir(join(REPO_DIR, "src"), { recursive: true });
+    await writeFile(join(REPO_DIR, "src", "node.ts"), "// node\n", "utf8");
+
+    // The contract pipeline's promoted plan (node findings) — consumed via the
+    // early extracted-plan fast path in handlePendingExtractedPlan.
+    await writeFile(
+      join(ARTIFACTS_DIR, "extracted-plan.json"),
+      JSON.stringify({
+        plan_id: "PLAN-CP",
+        source: "contract_pipeline",
+        findings: [
+          {
+            id: "CP-001",
+            title: "Implement node",
+            category: "General",
+            severity: "high",
+            confidence: "high",
+            lens: "security",
+            summary: "do the work",
+            affected_files: [{ path: "src/node.ts" }],
+            evidence: ["obligation O-1"],
+          },
+        ],
+        blocks: [{ block_id: "B-001", items: ["CP-001"], parallel_safe: true }],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+      }),
+      "utf8",
+    );
+
+    // Persisted intake filter dispositions over the ORIGINAL findings.
+    const orig = (id: string) => ({
+      id,
+      title: id,
+      category: "General",
+      severity: "high",
+      confidence: "high",
+      lens: "security",
+      summary: "s",
+      affected_files: [{ path: "src/a.ts" }],
+      evidence: ["e"],
+    });
+    await writeFile(
+      join(ARTIFACTS_DIR, "review_filter_dispositions.json"),
+      JSON.stringify({
+        originals: [orig("ORIG-PLAN"), orig("ORIG-DECLINED"), orig("ORIG-FOLDED"), orig("ORIG-DROP")],
+        mergeMap: [["ORIG-FOLDED", "ORIG-PLAN"]],
+        droppedNoEvidence: ["ORIG-DROP"],
+        droppedPhantomPaths: [],
+        phantomPathsRemoved: [],
+        droppedByCheckpoint: [],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(ARTIFACTS_DIR, "review_decision.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-review-decision/v1",
+        plan_id: "path-a-review",
+        approved_ids: ["ORIG-PLAN"],
+        declined: [{ finding_id: "ORIG-DECLINED", reason: "user declined at gate" }],
+        created_at: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+    await harness.writeIntentCheckpoint();
+
+    await decideNextStep({ root: REPO_DIR });
+
+    const state = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"));
+    const cov = state.plan_coverage;
+    expect(cov).toBeDefined();
+    // Coverage source is the 4 ORIGINAL findings (not the single node).
+    expect(cov.source_finding_count).toBe(4);
+    const byId = Object.fromEntries(cov.entries.map((e: { finding_id: string }) => [e.finding_id, e]));
+    expect(byId["ORIG-PLAN"].disposition).toBe("planned");
+    expect(byId["ORIG-DECLINED"].disposition).toBe("declined_by_review");
+    expect(byId["ORIG-FOLDED"].disposition).toBe("folded_into");
+    expect(byId["ORIG-FOLDED"].folded_into).toBe("ORIG-PLAN");
+    expect(byId["ORIG-DROP"].disposition).toBe("dropped_no_evidence");
+    // The node id is NOT in the finding-coverage — coverage accounts for findings.
+    expect(byId["CP-001"]).toBeUndefined();
   });
 });
 

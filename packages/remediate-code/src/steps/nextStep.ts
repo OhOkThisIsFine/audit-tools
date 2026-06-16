@@ -63,6 +63,7 @@ import {
   type ReviewRequest,
   type ReviewResolution,
 } from "../review/reviewGate.js";
+import { runFindingFilterPass, type FindingFilterResult } from "../findingFilter.js";
 import {
   INTAKE_CLARIFICATION_SCHEMA_VERSION,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
@@ -1960,37 +1961,56 @@ async function handlePendingExtractedPlan(
     }
 
     const pipelined = await applyPlanPipeline(plan, { root, artifactsDir });
-    // Carry the review-gate declines into the coverage ledger so disapproved
-    // findings are recorded in the shipped outcome (never silently dropped). The
-    // declined set was excluded from the pipeline upstream; their full payloads
-    // are recovered at close from the (unfiltered) intake source.
     const reviewDecision = await readOptionalJsonFile<ReviewDecisionRecord>(
       reviewDecisionPath(artifactsDir),
     );
-    const coverage = buildCoverageLedger({
-      planId: pipelined.plan_id,
-      sourceFindings,
-      droppedNoEvidence: [],
-      droppedByCheckpoint: [],
-      declinedByReview: reviewDecision?.declined ?? [],
-      droppedPhantomPaths: new Map(
-        grounding.dropped.map((d) => [d.finding.id, d.phantomPaths]),
-      ),
-      phantomPathsRemoved: grounding.phantomPathsByFinding,
-      mergeMap,
-      items: Object.fromEntries(
-        pipelined.findings.map((finding) => [
-          finding.id,
-          {
-            finding_id: finding.id,
-            status: "pending" as const,
-            block_id:
-              pipelined.blocks.find((b) => b.items.includes(finding.id))
-                ?.block_id ?? "UNKNOWN",
-          },
-        ]),
-      ),
-    });
+    // Coverage ledger. Path A (structured_audit): the single filter pass ran at
+    // intake over the ORIGINAL findings and persisted its dispositions — build
+    // coverage over those originals so every audit finding gets exactly one
+    // disposition (planned / folded_into / dropped_* / dropped_by_checkpoint /
+    // declined_by_review), reconciling to the original count. Path B (no persisted
+    // dispositions): build over the post-pipeline node findings as before. Either
+    // way declined findings are recorded; their payloads recover at close from the
+    // unfiltered intake source.
+    const filterDisp = await readOptionalJsonFile<PersistedReviewFilterDispositions>(
+      reviewFilterDispositionsPath(artifactsDir),
+    );
+    const coverage = filterDisp
+      ? buildCoverageLedger({
+          planId: pipelined.plan_id,
+          sourceFindings: filterDisp.originals,
+          droppedNoEvidence: filterDisp.droppedNoEvidence,
+          droppedByCheckpoint: filterDisp.droppedByCheckpoint,
+          declinedByReview: reviewDecision?.declined ?? [],
+          droppedPhantomPaths: new Map(filterDisp.droppedPhantomPaths),
+          phantomPathsRemoved: new Map(filterDisp.phantomPathsRemoved),
+          mergeMap: new Map(filterDisp.mergeMap),
+          items: {}, // originals carry no node block_id; planned entries omit it
+        })
+      : buildCoverageLedger({
+          planId: pipelined.plan_id,
+          sourceFindings,
+          droppedNoEvidence: [],
+          droppedByCheckpoint: [],
+          declinedByReview: reviewDecision?.declined ?? [],
+          droppedPhantomPaths: new Map(
+            grounding.dropped.map((d) => [d.finding.id, d.phantomPaths]),
+          ),
+          phantomPathsRemoved: grounding.phantomPathsByFinding,
+          mergeMap,
+          items: Object.fromEntries(
+            pipelined.findings.map((finding) => [
+              finding.id,
+              {
+                finding_id: finding.id,
+                status: "pending" as const,
+                block_id:
+                  pipelined.blocks.find((b) => b.items.includes(finding.id))
+                    ?.block_id ?? "UNKNOWN",
+              },
+            ]),
+          ),
+        });
     return await saveStateForPlan(artifactsDir, existing, pipelined, coverage);
   } catch (error) {
     const paths = intakePaths(artifactsDir);
@@ -2075,12 +2095,10 @@ async function handleWaitingForReviewApproval(
 
 interface ReviewGateProceed {
   kind: "proceed";
-  /** The audit-findings payload filtered to non-declined findings (for the seed). */
-  filteredAuditFindings: unknown;
-  /** Audit source path the seed + sourcePaths should use (a filtered file when any finding was declined). */
-  seedSourcePath: string;
-  /** Original audit source path to swap OUT of sourcePaths when a filtered file replaced it. */
-  swappedFromPath?: string;
+  /** Survivors approved to seed the pipeline (declined excluded). */
+  approved: Finding[];
+  /** Declined survivors with the recorded reason — for the coverage ledger + the durable record. */
+  declined: Array<{ finding_id: string; reason: string }>;
 }
 interface ReviewGateHalt {
   kind: "halt";
@@ -2088,27 +2106,26 @@ interface ReviewGateHalt {
 }
 
 /**
- * Run the review-approval gate over the original audit findings. Returns a halt
- * step while awaiting the user's decision, or a `proceed` carrying the finding
- * set (declined excluded) the pipeline should be seeded with.
+ * Run the review-approval gate over the SURVIVOR finding set (already passed
+ * through the single filter pass: deduped, evidence-bearing, path-grounded,
+ * checkpoint-kept). Returns a halt step while awaiting the user's decision, or a
+ * `proceed` splitting the survivors into approved (seed the pipeline) and declined
+ * (recorded, never acted on).
  *
  * Idempotent across the many pipeline next-step calls: once review_decision.json
  * exists the gate consumes it directly and proceeds, so it fires (and halts) at
- * most once per run. A parse failure upstream (empty `allFindings`) opens nothing
- * and proceeds unchanged, so a malformed report degrades to the pre-gate path.
+ * most once per run. Empty survivors → nothing to review → approve-none/proceed.
  */
 async function runReviewApprovalGate(
   root: string,
   artifactsDir: string,
-  auditSourcePath: string,
-  auditFindings: unknown,
+  survivors: Finding[],
 ): Promise<ReviewGateProceed | ReviewGateHalt> {
-  const allFindings = extractAuditFindings(auditFindings);
   const decisionPath = reviewDecisionPath(artifactsDir);
 
   // First crossing only: no decision yet AND the pipeline has not started.
   const gateOpen =
-    allFindings.length > 0 &&
+    survivors.length > 0 &&
     !existsSync(decisionPath) &&
     !contractArtifactExists(artifactsDir, "goal_spec");
 
@@ -2116,8 +2133,8 @@ async function runReviewApprovalGate(
     const resolutionPath = reviewResolutionPath(artifactsDir);
     const requestPath = reviewRequestPath(artifactsDir);
     if (!existsSync(resolutionPath)) {
-      // Halt: present the tiered findings and wait for the user's decision.
-      const request = buildReviewRequest(allFindings, REVIEW_GATE_PLAN_ID);
+      // Halt: present the tiered survivors and wait for the user's decision.
+      const request = buildReviewRequest(survivors, REVIEW_GATE_PLAN_ID);
       await writeJsonFile(requestPath, request);
       return {
         kind: "halt",
@@ -2127,7 +2144,7 @@ async function runReviewApprovalGate(
     // Consume the resolution into a durable, reasoned decision record.
     const request =
       (await readOptionalJsonFile<ReviewRequest>(requestPath)) ??
-      buildReviewRequest(allFindings, REVIEW_GATE_PLAN_ID);
+      buildReviewRequest(survivors, REVIEW_GATE_PLAN_ID);
     const resolution = await readOptionalJsonFile<ReviewResolution>(resolutionPath);
     const decision = applyReviewResolution(request, resolution);
     const record: ReviewDecisionRecord = {
@@ -2146,33 +2163,53 @@ async function runReviewApprovalGate(
     }
   }
 
-  // Filter the pipeline's finding set by the recorded declined set (default-include).
+  // Decision recorded (now or on a prior call): split the survivors.
   const decision = await readOptionalJsonFile<ReviewDecisionRecord>(decisionPath);
-  const declinedIds = new Set((decision?.declined ?? []).map((d) => d.finding_id));
-  if (declinedIds.size === 0) {
-    // Nothing declined → byte-identical to the pre-gate behaviour.
-    return {
-      kind: "proceed",
-      filteredAuditFindings: auditFindings,
-      seedSourcePath: auditSourcePath,
-    };
-  }
-  const approvedFindings = allFindings.filter((f) => !declinedIds.has(f.id));
-  const filteredAuditFindings = isRecord(auditFindings)
-    ? { ...auditFindings, findings: approvedFindings }
-    : { findings: approvedFindings };
-  // Write a filtered findings file and route BOTH the seed and the pipeline's
-  // source inputs at it, so a declined finding can never re-enter via the raw
-  // audit-findings.json handed to the LLM phases (tool-enforced, not host-trusted).
-  await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
-  const filteredPath = join(contractPipelineDir(artifactsDir), "approved-findings.json");
-  await writeJsonFile(filteredPath, filteredAuditFindings);
+  const declined = decision?.declined ?? [];
+  const declinedIds = new Set(declined.map((d) => d.finding_id));
   return {
     kind: "proceed",
-    filteredAuditFindings,
-    seedSourcePath: filteredPath,
-    swappedFromPath: auditSourcePath,
+    approved: survivors.filter((f) => !declinedIds.has(f.id)),
+    declined,
   };
+}
+
+// ── Path-A filter dispositions (persisted for the coverage ledger) ──────────────
+// The single filter pass runs at intake over the ORIGINAL findings; its
+// dispositions are persisted here so handlePendingExtractedPlan can build the
+// coverage ledger over the originals (every audit finding → exactly one
+// disposition), even though it runs after the pipeline has collapsed the approved
+// survivors into DAG nodes. Maps are serialized as entry arrays for JSON.
+
+const REVIEW_FILTER_DISPOSITIONS_FILENAME = "review_filter_dispositions.json";
+
+interface PersistedReviewFilterDispositions {
+  originals: Finding[];
+  mergeMap: [string, string][];
+  droppedNoEvidence: string[];
+  droppedPhantomPaths: [string, string[]][];
+  phantomPathsRemoved: [string, string[]][];
+  droppedByCheckpoint: string[];
+}
+
+function reviewFilterDispositionsPath(artifactsDir: string): string {
+  return join(artifactsDir, REVIEW_FILTER_DISPOSITIONS_FILENAME);
+}
+
+async function persistReviewFilterDispositions(
+  artifactsDir: string,
+  originals: Finding[],
+  filter: FindingFilterResult,
+): Promise<void> {
+  const payload: PersistedReviewFilterDispositions = {
+    originals,
+    mergeMap: [...filter.mergeMap.entries()],
+    droppedNoEvidence: filter.droppedNoEvidence,
+    droppedPhantomPaths: [...filter.droppedPhantomPaths.entries()],
+    phantomPathsRemoved: [...filter.phantomPathsRemoved.entries()],
+    droppedByCheckpoint: filter.droppedByCheckpoint,
+  };
+  await writeJsonFile(reviewFilterDispositionsPath(artifactsDir), payload);
 }
 
 async function handleReadyIntakeContractPipeline(
@@ -2206,10 +2243,12 @@ async function handleReadyIntakeContractPipeline(
     return null;
   }
 
-  // Path A: review-approval gate, then write the seed so goal_normalization and
-  // context_collection frame the pipeline around the (approved) auditor findings.
-  // The gate may halt to collect the user's decision; declined findings are then
-  // excluded from both the seed and the pipeline's source inputs.
+  // Path A: run the single filter pass over the ORIGINAL findings, present the
+  // SURVIVORS at the review gate (deduped / evidence-bearing / path-grounded /
+  // checkpoint-kept, tiered by review-necessity), then seed the pipeline with the
+  // approved survivors. The filter dispositions are persisted so the coverage
+  // ledger is built over the originals (every audit finding → exactly one
+  // disposition). The gate may halt to collect the user's decision.
   let reviewSourceSwap: { from: string; to: string } | undefined;
   if (intake.summary.source_type === "structured_audit" && intake.manifest) {
     const auditSource = resolveManifestSources(root, intake.manifest).resolved.find(
@@ -2222,26 +2261,38 @@ async function handleReadyIntakeContractPipeline(
       } catch {
         auditFindings = undefined;
       }
-      if (auditFindings !== undefined) {
-        const gate = await runReviewApprovalGate(
-          root,
-          artifactsDir,
-          auditSource.path,
-          auditFindings,
+      const originals = extractAuditFindings(auditFindings);
+      if (originals.length > 0) {
+        const checkpoint = await readOptionalJsonFile<IntentCheckpoint>(
+          join(artifactsDir, "intent_checkpoint.json"),
         );
+        const filter = await runFindingFilterPass(originals, {
+          root,
+          checkpoint: checkpoint ?? undefined,
+          evidenceGrounding: true,
+        });
+        const gate = await runReviewApprovalGate(root, artifactsDir, filter.survivors);
         if (gate.kind === "halt") {
           return gate.step;
         }
-        if (gate.swappedFromPath) {
-          reviewSourceSwap = { from: gate.swappedFromPath, to: gate.seedSourcePath };
+        // Persist the filter dispositions so coverage is built over the originals.
+        await persistReviewFilterDispositions(artifactsDir, originals, filter);
+        // Seed the pipeline with the approved survivors only. When that set is
+        // narrower than the originals (anything filtered or declined), route the
+        // seed AND the pipeline's source inputs at a filtered file so a removed
+        // finding can never re-enter via the raw audit-findings.json (tool-enforced).
+        const approvedPayload = isRecord(auditFindings)
+          ? { ...auditFindings, findings: gate.approved }
+          : { findings: gate.approved };
+        let seedSourcePath = auditSource.path;
+        if (gate.approved.length < originals.length) {
+          await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
+          seedSourcePath = join(contractPipelineDir(artifactsDir), "approved-findings.json");
+          await writeJsonFile(seedSourcePath, approvedPayload);
+          reviewSourceSwap = { from: auditSource.path, to: seedSourcePath };
         }
-        // Best-effort seed write (declined findings already filtered out).
         try {
-          await writePathASeedFromFindings(
-            artifactsDir,
-            gate.seedSourcePath,
-            gate.filteredAuditFindings,
-          );
+          await writePathASeedFromFindings(artifactsDir, seedSourcePath, approvedPayload);
         } catch {
           // If the seed cannot be written, the pipeline still runs; the LLM
           // phases use the source files from sourcePaths.
