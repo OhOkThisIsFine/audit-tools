@@ -7,15 +7,16 @@ import type {
   ResolvedProviderName,
   SessionConfig,
 } from "@audit-tools/shared";
-import { ClaudeCodeProvider } from "./claudeCodeProvider.js";
-import { OpenCodeProvider } from "./opencodeProvider.js";
+import { createClaudeCodeProvider } from "./claudeCodeProvider.js";
+import { createOpenCodeProvider } from "./opencodeProvider.js";
 
 /**
  * Auto-resolution and provider wiring are single-sourced in `@audit-tools/shared`.
- * This module is a thin remediate-code-specific adapter: it injects
- * remediate-code's own `ClaudeCodeProvider`/`OpenCodeProvider` (which pipe the
- * prompt via stdin and default to skipping permission prompts) and attributes the
- * auto-fallback warning to `remediate-code`.
+ * The claude-code / opencode provider classes are shared too; this module only
+ * injects remediate-code's bound factories (the sole delta is the claude-code
+ * skip-permissions default — on, since the remediator runs unattended — and the
+ * nested-session guard message) and attributes the auto-fallback warning to
+ * `remediate-code`.
  */
 
 export function resolveFreshSessionProviderName(
@@ -35,9 +36,7 @@ export function createFreshSessionProvider(
 ): FreshSessionProvider {
   return createSharedFreshSessionProvider(name, sessionConfig, {
     orchestratorName: "remediate-code",
-    createClaudeCodeProvider: (config) =>
-      new ClaudeCodeProvider(config),
-    createOpenCodeProvider: (config) =>
-      new OpenCodeProvider(config),
+    createClaudeCodeProvider: (config) => createClaudeCodeProvider(config),
+    createOpenCodeProvider: (config) => createOpenCodeProvider(config),
   });
 }

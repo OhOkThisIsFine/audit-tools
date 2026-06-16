@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { severityRank, confidenceRank } = await import(
+// findingRanks.ts re-exports the single-source rank functions from
+// @audit-tools/shared; this test pins both the values and that the re-export
+// surface (including severityCompare) stays wired.
+const { severityRank, confidenceRank, severityCompare } = await import(
   "../src/reporting/findingRanks.ts"
 );
 
@@ -23,4 +26,9 @@ test("confidenceRank returns correct ordinal for each confidence level", () => {
   assert.equal(confidenceRank("low"), 1);
   assert.ok(confidenceRank("high") > confidenceRank("medium"));
   assert.ok(confidenceRank("medium") > confidenceRank("low"));
+});
+
+test("severityCompare (re-exported from shared) orders critical-first", () => {
+  const sorted = ["low", "critical", "info", "high", "medium"].sort(severityCompare);
+  assert.deepEqual(sorted, ["critical", "high", "medium", "low", "info"]);
 });

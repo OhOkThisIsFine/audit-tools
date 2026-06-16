@@ -10,9 +10,12 @@ if (runIdIdx === -1 || !process.argv[runIdIdx + 1]) {
 const runId = process.argv[runIdIdx + 1];
 
 const artifactsDirIdx = process.argv.indexOf("--artifacts-dir");
+// Default must match where the orchestrator/wrapper actually writes runs:
+// <root>/.audit-tools/audit (COR-bf5c7331). The prior `.audit-artifacts`
+// default resolved to a directory the pipeline never populates.
 const artifactsDir = artifactsDirIdx !== -1 && process.argv[artifactsDirIdx + 1]
   ? resolve(process.argv[artifactsDirIdx + 1])
-  : join(process.cwd(), ".audit-artifacts");
+  : join(process.cwd(), ".audit-tools", "audit");
 
 const taskResultsDir = join(artifactsDir, "runs", runId, "task-results");
 const auditResultsPath = join(artifactsDir, "runs", runId, "run-results.json");

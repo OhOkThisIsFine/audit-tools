@@ -74,16 +74,18 @@ test("MAX_ANCHORS cap limits anchors to 160 and sets omitted_anchor_count", () =
 
   assert.equal(summary.anchors.length, 160, "anchors must be capped at 160");
   assert.ok(summary.omitted_anchor_count > 0, "omitted_anchor_count must be > 0 when cap is hit");
-  // Conservation: file_start boundary + file_end boundary + 200 symbol anchors = 202 total.
-  // anchors.length + omitted = total collected (after dedup).
-  assert.equal(
-    summary.anchors.length + summary.omitted_anchor_count,
-    summary.anchors.length + summary.omitted_anchor_count, // always true, but compute below
-  );
-  // Verify conservation directly: the uncapped list size is tracked via omitted.
+  // Conservation: file_start boundary + file_end boundary + 200 symbol anchors
+  // = 202 total collected (after dedup). The kept anchors (capped at 160) plus
+  // the omitted count must equal that uncapped total — i.e. nothing is lost or
+  // double-counted by the cap (TST-8d6f7754: previously a self-comparison
+  // tautology that asserted nothing).
   const total = summary.anchors.length + summary.omitted_anchor_count;
-  assert.ok(total >= 160, "total collected must be at least 160");
-  assert.ok(total > 160, "total collected must exceed cap (conservation check)");
+  assert.equal(total, 202, "kept + omitted must equal the uncapped collected total (2 boundaries + 200 symbols)");
+  assert.equal(
+    summary.omitted_anchor_count,
+    total - 160,
+    "omitted_anchor_count must account for exactly the anchors dropped by the 160 cap",
+  );
 });
 
 test("omitted_anchor_count is 0 when total anchors are within cap", () => {

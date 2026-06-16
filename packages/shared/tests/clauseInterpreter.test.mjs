@@ -249,3 +249,30 @@ test("IntentCheckpoint constraint_clauses entries carry text, checkpoint_questio
   };
   assert.ok(!("host_answer" in entryNoAnswer), "host_answer should be optional");
 });
+
+// ---------------------------------------------------------------------------
+// LENS_KEYWORD_MAP integrity (MNT-0d8e3156)
+// ---------------------------------------------------------------------------
+
+test("LENS_KEYWORD_MAP — no entry repeats a keyword, and no keyword maps to two lenses", async () => {
+  const { LENS_KEYWORD_MAP } = await import("../src/intent/sharedIntentData.ts");
+  // Within a single entry, a keyword must not be listed twice (the maintainability
+  // entry previously listed "maintainability" twice — a dead copy-paste).
+  for (const { keywords, lens } of LENS_KEYWORD_MAP) {
+    const seen = new Set();
+    for (const kw of keywords) {
+      assert.ok(!seen.has(kw), `lens ${lens} lists keyword ${JSON.stringify(kw)} more than once`);
+      seen.add(kw);
+    }
+  }
+  // Across entries, a keyword must not be claimed by two different lenses (an
+  // ambiguous keyword would silently resolve to whichever entry is scanned first).
+  const owner = new Map();
+  for (const { keywords, lens } of LENS_KEYWORD_MAP) {
+    for (const kw of keywords) {
+      const prior = owner.get(kw);
+      assert.ok(prior === undefined, `keyword ${JSON.stringify(kw)} maps to both ${prior} and ${lens}`);
+      owner.set(kw, lens);
+    }
+  }
+});

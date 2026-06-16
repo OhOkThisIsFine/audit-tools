@@ -8,6 +8,7 @@ import {
   toPromptPathToken,
   quotePromptCommandArg,
   parseHostModelRoster,
+  auditArtifactsDir,
   type SessionConfig,
   type HostModelRosterEntry,
 } from "@audit-tools/shared";
@@ -15,6 +16,10 @@ import { resolveFreshSessionProviderName } from "../providers/index.js";
 
 export const DIRECT_CLI_DEFAULTS = {
   rootDir: ".",
+  // Sentinel marking "no explicit --artifacts-dir". When this is the resolved
+  // value, getArtifactsDir rebases the default onto --root via the shared
+  // auditArtifactsDir() helper rather than resolving the literal against CWD —
+  // so `--root <X>` with no --artifacts-dir lands under <X>/.audit-tools/audit.
   artifactsDir: ".audit-tools/audit",
   maxRuns: 1000,
   timeoutMs: 30 * 60 * 1000, // 30 minutes
@@ -206,16 +211,24 @@ export function parsePositiveIntegerFlag(
   return normalizePositiveInteger(Number(raw));
 }
 
-export function getArtifactsDir(argv: string[]): string {
-  return resolveFlagPath(
-    argv,
-    "--artifacts-dir",
-    DIRECT_CLI_DEFAULTS.artifactsDir,
-  );
-}
-
 export function getRootDir(argv: string[]): string {
   return resolveFlagPath(argv, "--root", DIRECT_CLI_DEFAULTS.rootDir);
+}
+
+/**
+ * Resolve the artifacts dir. An explicit `--artifacts-dir` is honored verbatim
+ * (resolved against CWD). With NO `--artifacts-dir`, the default rebases onto
+ * `--root` via the shared `auditArtifactsDir()` helper — so `--root <X>` lands
+ * the default under `<X>/.audit-tools/audit`. Previously the default resolved
+ * the `.audit-tools/audit` literal against CWD independently of `--root`, so a
+ * bare `--root <X>` silently ignored `<X>` (the latent bug fixed here).
+ */
+export function getArtifactsDir(argv: string[]): string {
+  const explicit = getFlag(argv, "--artifacts-dir");
+  if (explicit !== undefined) {
+    return resolve(explicit);
+  }
+  return auditArtifactsDir(getRootDir(argv));
 }
 
 export function warnIfNotGitRepo(root: string): void {

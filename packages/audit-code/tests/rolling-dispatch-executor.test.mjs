@@ -196,7 +196,7 @@ test("N-A06: buildPacketPrompt has no submit-packet command text", () => {
   assert.doesNotMatch(prompt, /submit-packet/, "prompt must NOT contain submit-packet command");
 });
 
-test("N-A06: buildPacketPrompt instructs worker to emit AuditResult[] inline", () => {
+test("N-worker-prompt-and-result-contract: buildPacketPrompt instructs the worker to WRITE AuditResult[] to result_path and never forbids writes", () => {
   const packet = makePacket("pkt1");
   const resultPath = "/artifacts/runs/r1/task-results/pkt1-inline-result.json";
   const prompt = buildPacketPrompt({
@@ -208,8 +208,23 @@ test("N-A06: buildPacketPrompt instructs worker to emit AuditResult[] inline", (
     resultPath,
   });
 
-  assert.match(prompt, /emit.*inline/i, "prompt must instruct worker to emit inline");
-  assert.match(prompt, /skill captures/i, "prompt must state skill captures the inline payload");
+  // The worker writes its results file (this is the bug the module fixes: the
+  // old prompt told the worker to emit inline and forbade writes, so reviewers
+  // wrote nothing and results were lost).
+  assert.match(
+    prompt,
+    /WRITE that array[\s\S]*to your result_path/i,
+    "prompt must instruct the worker to write the array to result_path",
+  );
+  assert.ok(prompt.includes(resultPath), "prompt must name the result_path value to write");
+  // It must NOT tell the worker to emit inline or forbid writing files.
+  assert.doesNotMatch(prompt, /emit it INLINE/i, "prompt must not instruct inline emission");
+  assert.doesNotMatch(prompt, /Do not write files/i, "prompt must not forbid file writes");
+  assert.doesNotMatch(
+    prompt,
+    /skill captures/i,
+    "prompt must not claim a skill captures an inline payload",
+  );
 });
 
 test("N-A06: buildPacketPrompt contains result_path so host knows where to write captured output", () => {

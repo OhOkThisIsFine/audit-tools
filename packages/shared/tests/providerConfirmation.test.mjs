@@ -157,6 +157,59 @@ test("queryProviderQuota returns the limits when queryLimits succeeds", async ()
   assert.deepEqual(result, limits);
 });
 
+test("OBS-9a9091ad: queryProviderQuota invokes the injected log on a swallowed query error", async () => {
+  const syntheticDiscovered = {
+    name: "codex",
+    capabilityTier: "capable",
+    detected: true,
+  };
+  const boom = new Error("rate-limit API unavailable");
+  const providerThatThrows = {
+    name: "codex",
+    launch: async () => ({ accepted: false }),
+    queryLimits: async (_model) => {
+      throw boom;
+    },
+  };
+
+  const logged = [];
+  const result = await queryProviderQuota(
+    syntheticDiscovered,
+    providerThatThrows,
+    (providerName, error) => logged.push({ providerName, error }),
+  );
+  // Contract unchanged: still swallows to null, still never throws.
+  assert.equal(result, null);
+  // ...but the failure is now surfaced through the injected channel with the
+  // provider name + the original error, so a persistently-failing provider is
+  // no longer invisible to operators.
+  assert.equal(logged.length, 1, "log must fire exactly once on a swallowed error");
+  assert.equal(logged[0].providerName, "codex");
+  assert.equal(logged[0].error, boom);
+});
+
+test("OBS-9a9091ad: queryProviderQuota does NOT invoke the injected log on success", async () => {
+  const syntheticDiscovered = {
+    name: "claude-code",
+    capabilityTier: "frontier",
+    detected: true,
+  };
+  const providerWithLimits = {
+    name: "claude-code",
+    launch: async () => ({ accepted: false }),
+    queryLimits: async (_model) => ({ requests_per_minute: 60 }),
+  };
+
+  const logged = [];
+  const result = await queryProviderQuota(
+    syntheticDiscovered,
+    providerWithLimits,
+    (providerName, error) => logged.push({ providerName, error }),
+  );
+  assert.deepEqual(result, { requests_per_minute: 60 });
+  assert.equal(logged.length, 0, "log must not fire when the query succeeds");
+});
+
 // ---------------------------------------------------------------------------
 // buildProviderConfirmationDisplay
 // ---------------------------------------------------------------------------

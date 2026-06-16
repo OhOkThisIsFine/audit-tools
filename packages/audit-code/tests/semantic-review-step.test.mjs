@@ -7,6 +7,8 @@ import os from "node:os";
 const { renderSemanticReviewStep } = await import(
   "../src/cli/semanticReviewStep.ts"
 );
+// Step contracts normalize host-facing paths to forward slashes (drift-plan R3).
+const { toPromptPathToken } = await import("@audit-tools/shared");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -76,10 +78,10 @@ await test("renderSemanticReviewStep hostCanDispatch=false returns a single_task
     );
   });
 
-  await t.test("artifactPaths.audit_results equals activeReviewRun.audit_results_path", () => {
+  await t.test("artifactPaths.audit_results equals normalized activeReviewRun.audit_results_path", () => {
     assert.strictEqual(
       result.artifact_paths.audit_results,
-      activeReviewRun.audit_results_path,
+      toPromptPathToken(activeReviewRun.audit_results_path),
     );
   });
 

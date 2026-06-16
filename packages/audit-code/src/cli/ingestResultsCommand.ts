@@ -1,13 +1,16 @@
 import { runAuditStep, ingestBatchAuditResults } from "./auditStep.js";
-import { getArtifactsDir, getBatchResultsDir, getFlag, getRootDir } from "./args.js";
+import { getArtifactsDir, getBatchResultsDir, getFlag, getRootDir, hasFlag } from "./args.js";
 
 export async function cmdIngestResults(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
   const batchResultsDir = getBatchResultsDir(argv);
   // Explicitly check both directions of the mutual-exclusion so the guard does
   // not silently short-circuit when --batch-results is absent (COR-d40e2710).
+  // Detect --results by TOKEN presence (hasFlag) rather than a resolved value,
+  // so a value-less `--batch-results <dir> --results` still trips the guard
+  // instead of silently running the batch path (COR-79283e3b).
   const hasBatchResults = batchResultsDir !== undefined;
-  const hasSingleResults = getFlag(argv, "--results") !== undefined;
+  const hasSingleResults = hasFlag(argv, "--results");
   if (hasBatchResults && hasSingleResults) {
     throw new Error("Use either --results <file> or --batch-results <dir>, not both.");
   }

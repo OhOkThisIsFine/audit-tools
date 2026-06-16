@@ -7,8 +7,8 @@ import { spawnLoggedCommand } from "@audit-tools/shared";
 import { resolveFreshSessionProviderName } from "../src/providers/index.js";
 import type { LaunchFreshSessionInput } from "../src/providers/types.js";
 import type { WriteStream } from "node:fs";
-import { ClaudeCodeProvider } from "../src/providers/claudeCodeProvider.js";
-import { OpenCodeProvider } from "../src/providers/opencodeProvider.js";
+import { createClaudeCodeProvider } from "../src/providers/claudeCodeProvider.js";
+import { createOpenCodeProvider } from "../src/providers/opencodeProvider.js";
 import {
   SubprocessTemplateProvider,
   LocalSubprocessProvider,
@@ -324,7 +324,7 @@ describe("provider launch methods", () => {
     try {
     await withProviderFiles(async ({ input, prompt }) => {
       const calls: any[] = [];
-      const provider = new ClaudeCodeProvider(
+      const provider = createClaudeCodeProvider(
         { command: "claude-test", extra_args: ["--json"] },
         async (command, args, launchInput) => {
           calls.push({ command, args, launchInput });
@@ -355,7 +355,7 @@ describe("provider launch methods", () => {
     try {
       await withProviderFiles(async ({ input }) => {
         const calls: any[] = [];
-        const provider = new ClaudeCodeProvider(
+        const provider = createClaudeCodeProvider(
           { command: "claude-test", dangerously_skip_permissions: false },
           async (command, args, launchInput) => {
             calls.push({ command, args, launchInput });
@@ -375,7 +375,7 @@ describe("provider launch methods", () => {
   it("OpenCodeProvider sends prompt through stdin and honors task timeout", async () => {
     await withProviderFiles(async ({ input, prompt }) => {
       const calls: any[] = [];
-      const provider = new OpenCodeProvider(
+      const provider = createOpenCodeProvider(
         { command: "opencode-test", extra_args: ["--model", "x"] },
         async (command, args, launchInput) => {
           calls.push({ command, args, launchInput });
@@ -399,7 +399,7 @@ describe("provider launch methods", () => {
     await withProviderFiles(async ({ input, prompt }) => {
       const calls: any[] = [];
       // No explicit command → defaults to "opencode", a recognized launcher.
-      const provider = new OpenCodeProvider(
+      const provider = createOpenCodeProvider(
         {},
         async (command, args, launchInput) => {
           calls.push({ command, args, launchInput });

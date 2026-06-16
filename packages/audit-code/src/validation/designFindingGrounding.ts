@@ -13,11 +13,8 @@
  * evidence requirement — unlike the schema-gated AuditResult path.
  */
 import type { Finding, FindingGrounding } from "@audit-tools/shared";
-
-/** Repo-relative, separator- and case-normalized path for matching. */
-function normalizeRepoPath(p: string): string {
-  return p.trim().replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
-}
+// Repo-relative path normalizer is single-sourced in shared (drift-plan P7).
+import { normalizeRepoPath } from "@audit-tools/shared";
 
 /**
  * Ground a single design finding against the set of real repository paths. The

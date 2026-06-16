@@ -104,17 +104,15 @@ describe("StateStore", () => {
     expect(loaded?.status).toBe("implementing");
   });
 
-  it("cleans up temp files when temp write fails", async () => {
-    const store = new StateStore(TEST_DIR, {
-      writeFile: async () => {
-        throw new Error("simulated write failure");
-      },
-    });
-
-    await expect(store.saveState({ status: "pending" })).rejects.toThrow(
-      /simulated write failure/,
-    );
-
+  it("leaves no .tmp residue after a successful save", async () => {
+    // The durable write now routes through the shared atomic writer
+    // (writeJsonFile: temp + atomic rename, cleaned up in its own finally), so
+    // the store carries no inline writer/fileOps seam. The temp-cleanup-on-write-
+    // failure guarantee is asserted at its single source in
+    // shared/tests/io-json-retry.test.mjs. Here we just confirm the store leaves
+    // no temp residue behind on the happy path.
+    const store = new StateStore(TEST_DIR);
+    await store.saveState({ status: "pending" });
     const files = await readdir(TEST_DIR);
     expect(files.filter((file) => file.endsWith(".tmp"))).toHaveLength(0);
   });

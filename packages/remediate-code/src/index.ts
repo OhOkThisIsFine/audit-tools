@@ -19,6 +19,7 @@ import {
 import {
   setQuotaStateDir,
   parseHostModelRoster,
+  remediationArtifactsDir,
   mergeOpenCodeAgentPermissionRule,
   mergeOpenCodeGlobalPermissionRule,
   migrateOpenCodeGlobalExternalDirectory,
@@ -394,13 +395,20 @@ async function withBackendLogsOnStderr<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-function resolveArtifactsDirOption(root: string, artifactsDir: string): string {
-  const resolvedRoot = resolve(root);
-  return resolve(
-    artifactsDir === ".audit-tools/remediation"
-      ? join(resolvedRoot, ".audit-tools", "remediation")
-      : artifactsDir,
-  );
+/**
+ * Resolve the remediation artifacts dir. An explicit `--artifacts-dir` is
+ * honored verbatim; the unchanged commander default (`.audit-tools/remediation`)
+ * rebases onto `--root` via the shared `remediationArtifactsDir()` helper, so
+ * `--root <X>` lands the default under `<X>/.audit-tools/remediation`. The
+ * `.audit-tools/...` join literal lives only in the shared path module.
+ */
+export function resolveArtifactsDirOption(
+  root: string,
+  artifactsDir: string,
+): string {
+  return artifactsDir === ".audit-tools/remediation"
+    ? remediationArtifactsDir(root)
+    : resolve(artifactsDir);
 }
 
 export function runValidateCommand(

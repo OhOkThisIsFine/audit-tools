@@ -300,9 +300,12 @@ export async function prepareDispatchArtifacts(params: {
       : { anchorPath: null, anchorSummary: null };
     const largeFileSection = buildLargeFileSection(largeFileMode, anchorSummary, anchorPath);
     const taskSections = buildTaskSections(packetTasks, lensDefs, lineIndex);
-    // Inline emit: the worker emits AuditResult[] in their response; the
-    // skill/host captures and writes to packetResultPath. Per-task result paths
-    // are kept in the result map for ingestion after capture.
+    // The worker writes its AuditResult[] array directly to this packet result
+    // file (its prompt's result_path == this entry's result_path); merge-and-
+    // ingest recovers each task_id from that one array file. Per-task result
+    // paths are kept in the result map as the canonical ingestion targets, but
+    // the on-disk artifact is this single per-packet array (filename keeps the
+    // historical "inline-result" stem the merge fallback already recognizes).
     const packetResultPath = join(taskResultsDir, artifactNameForId(packet.packet_id, "inline-result.json"));
     const complexity = buildDispatchComplexity(packet, largeFileMode);
     for (const task of packetTasks) {

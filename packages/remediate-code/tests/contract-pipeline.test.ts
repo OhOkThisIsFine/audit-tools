@@ -28,12 +28,13 @@ import {
   validateTestValidatorPlan,
   validateDesignSpecGates,
   CONTRACT_PIPELINE_VALIDATORS,
+  // MNT-7014a745: consume the single-sourced version constants rather than
+  // re-declaring them here (a bump must not require editing the tests too).
+  CP_MODULE_DECOMPOSITION_VERSION,
+  CP_MODULE_CONTRACTS_VERSION,
+  CP_SEAM_RECONCILIATION_REPORT_VERSION,
+  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
 } from "../src/validation/contractPipeline.js";
-
-const CP_MODULE_DECOMPOSITION_VERSION = "remediate-code-contract-pipeline/module-decomposition/v1alpha1" as const;
-const CP_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/module-contracts/v1alpha1" as const;
-const CP_SEAM_RECONCILIATION_REPORT_VERSION = "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1" as const;
-const CP_FINALIZED_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1" as const;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-contract-pipeline");
@@ -936,6 +937,45 @@ describe("validateDesignSpecGates Gate 3 — exact invariant id match", () => {
 
     const uncovered = issues.filter((i) => i.path.includes("invariants[INV-1]"));
     expect(uncovered).toHaveLength(1);
+  });
+});
+
+// MNT-86b18f1b: the per-validator envelope check (isRecord guard + contract_version
+// match) is single-sourced through validateEnvelope. Assert the shared behavior is
+// uniform across EVERY registered validator so the extraction can't silently drop a
+// guard for one artifact.
+describe("contract-pipeline validators — shared envelope guard (MNT-86b18f1b)", () => {
+  const artifactNames = Object.keys(
+    CONTRACT_PIPELINE_VALIDATORS,
+  ) as (keyof typeof CONTRACT_PIPELINE_VALIDATORS)[];
+
+  it("every validator rejects a non-record with a '<path> must be an object' issue and returns early", () => {
+    for (const name of artifactNames) {
+      const validate = CONTRACT_PIPELINE_VALIDATORS[name];
+      for (const nonRecord of [null, undefined, 42, "str", []]) {
+        const issues = validate(nonRecord, name);
+        // Exactly the envelope object-guard issue (one), nothing from the body.
+        expect(
+          issues,
+          `${name} must reject ${JSON.stringify(nonRecord)} with a single object-guard issue`,
+        ).toHaveLength(1);
+        expect(issues[0]).toMatchObject({
+          path: name,
+          message: `${name} must be an object.`,
+        });
+      }
+    }
+  });
+
+  it("every validator flags a contract_version mismatch on an otherwise-empty object", () => {
+    for (const name of artifactNames) {
+      const validate = CONTRACT_PIPELINE_VALIDATORS[name];
+      const issues = validate({ contract_version: "WRONG/v0" }, name);
+      expect(
+        issues.some((issue) => issue.path === `${name}.contract_version`),
+        `${name} must flag a contract_version mismatch`,
+      ).toBe(true);
+    }
   });
 });
 

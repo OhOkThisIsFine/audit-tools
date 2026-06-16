@@ -208,7 +208,18 @@ export async function runTriagePhase(
             failureClass === "infra"
               ? (item.infra_rework_count ?? 0)
               : (item.rework_count ?? 0);
-          if (usedCount >= cap) continue;
+          if (usedCount >= cap) {
+            // OBS-df30208a: surface cap exhaustion. Without this the operator
+            // cannot distinguish an item that auto-retried from one that fell
+            // through to human triage because its retry budget is spent.
+            console.error(
+              `[triage] ${item.finding_id}: ${failureClass} retry budget exhausted (${usedCount}/${cap}) — routing to human triage.`,
+            );
+            continue;
+          }
+          console.log(
+            `[triage] ${item.finding_id}: auto-retrying (${failureClass} failure, attempt ${usedCount + 1}/${cap}).`,
+          );
           retryBlockedItem(item, failureClass);
           autoRetried = true;
         }

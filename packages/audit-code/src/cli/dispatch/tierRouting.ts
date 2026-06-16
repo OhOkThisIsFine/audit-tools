@@ -1,4 +1,5 @@
 import type { DispatchModelHint, DispatchModelTier } from "@audit-tools/shared";
+import { DISPATCH_TIER_RANK, DISPATCH_TIER_ORDER } from "@audit-tools/shared";
 import type { DispatchComplexity } from "./types.js";
 import {
   DEFAULT_DEEP_ROUTING_RISK,
@@ -11,11 +12,11 @@ import type { DispatchFanout } from "./types.js";
 // Model-tier routing: risk-primary baseline with complexity escalators, tier
 // budget resolution, and dispatch fanout summary. No I/O.
 
-export const TIER_RANK: Record<DispatchModelTier, number> = {
-  small: 0,
-  standard: 1,
-  deep: 2,
-};
+// Re-export of the single shared tier-rank authority (P1). audit-code keeps the
+// `TIER_RANK` / `TIER_ORDER` names that its callers + seam tests reference, but
+// the values are now sourced from `@audit-tools/shared` so there is no second
+// copy of the {small,standard,deep} ordering to drift.
+export const TIER_RANK: Record<DispatchModelTier, number> = DISPATCH_TIER_RANK;
 
 const SENSITIVE_HINT_LENSES = new Set(["security", "data_integrity", "reliability"]);
 
@@ -98,7 +99,7 @@ export function resolveDispatchTier(params: {
   return { tier, reasons };
 }
 
-export const TIER_ORDER: DispatchModelTier[] = ["small", "standard", "deep"];
+export const TIER_ORDER: DispatchModelTier[] = DISPATCH_TIER_ORDER;
 
 /**
  * Fill per-tier budgets from the reported roster ranks. A tier the host did

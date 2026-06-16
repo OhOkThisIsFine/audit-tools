@@ -23,8 +23,8 @@ function generateOwnerToken(): string {
 
 // Returns the owner token of a stale lock (older than STALE_LOCK_MS), or null
 // when the lock is fresh or already gone. Returning the token lets stale removal
-// reuse releaseLock's token-checked delete, so a lock concurrently re-created
-// with a different token is never clobbered.
+// reuse a token-checked delete, so a lock concurrently re-created with a
+// different token is never clobbered.
 async function readStaleLockToken(lockPath: string): Promise<string | null> {
   try {
     const info = await stat(lockPath);
@@ -35,18 +35,81 @@ async function readStaleLockToken(lockPath: string): Promise<string | null> {
   }
 }
 
-// Delete a stale lock only if it still carries the token we observed as stale.
-// If a concurrent acquirer replaced it with a fresh lock (different token) in the
-// gap, leave that alone. Transient unlink failures are swallowed (ENOENT: already
-// gone; EPERM/EACCES: concurrent Windows contention) — the acquire loop retries
-// regardless. Distinct from releaseLock, which re-throws non-ENOENT errors on the
-// normal release path.
-async function removeStaleLock(lockPath: string, staleToken: string): Promise<void> {
+// Suffix for the per-lock exclusive "steal claim" sidecar. Acquiring this via an
+// atomic `wx` create is what serializes stale-lock removal (see stealStaleLock).
+const STEAL_CLAIM_SUFFIX = ".steal";
+
+// Best-effort unlink that swallows ENOENT and transient Windows contention
+// (EPERM/EACCES). Used for cleanup paths where a failure to delete is harmless
+// because the acquire loop will retry regardless.
+async function bestEffortUnlink(path: string): Promise<void> {
   try {
-    if ((await readFile(lockPath, "utf8")) !== staleToken) return;
-    await unlink(lockPath);
+    await unlink(path);
   } catch {
-    // best-effort stale cleanup
+    // best-effort: already gone or briefly contended on Windows
+  }
+}
+
+// Atomically (lease-style) steal a lock we observed as stale.
+//
+// The previous implementation did read-token-then-unlink as two non-atomic steps
+// directly on the lock file. That admitted a double-hold: stealer X reads the
+// stale token, stealer Y reads the same stale token, X unlinks and re-creates a
+// FRESH lock via `wx`, then Y — still acting on its earlier observation — unlinks
+// X's fresh lock and re-creates its own, so both X and Y believe they hold it.
+//
+// Fix: serialize the *removal right* through an exclusive sidecar claim. Only one
+// acquirer can `wx`-create `${lockPath}.steal`; that winner is the sole party that
+// may unlink the stale lock. Everyone else (EEXIST on the claim) backs off and
+// retries the normal acquire path. After the single winner removes the stale file,
+// the lock is gained by whoever wins the ordinary atomic `wx` create on lockPath —
+// and no acquirer ever unlinks a *fresh* lock, because (a) only the claim winner
+// unlinks at all and (b) it unlinks only while the content still equals the exact
+// stale token it set out to remove. Mutual exclusion therefore holds even under
+// concurrent steal.
+//
+// The claim sidecar is itself crash-tolerant: a winner that dies mid-steal would
+// orphan it, so a claim older than STALE_LOCK_MS is treated as abandoned and
+// reclaimed, mirroring the main lock's staleness recovery. The claim is always
+// removed in a finally on the happy path so it lives only for the brief
+// token-check + unlink window.
+async function stealStaleLock(lockPath: string, staleToken: string): Promise<void> {
+  const claimPath = `${lockPath}${STEAL_CLAIM_SUFFIX}`;
+  try {
+    await writeFile(claimPath, generateOwnerToken(), { flag: "wx" });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") {
+      // Another acquirer holds the steal claim. If that claim is itself stale, a
+      // stealer crashed mid-steal — reclaim it so the lock can never wedge
+      // permanently. Otherwise leave the in-progress steal alone and let the main
+      // loop retry the ordinary acquire path.
+      try {
+        const claimInfo = await stat(claimPath);
+        if (Date.now() - claimInfo.mtimeMs > STALE_LOCK_MS) {
+          await bestEffortUnlink(claimPath);
+        }
+      } catch {
+        // claim vanished between EEXIST and stat — nothing to reclaim
+      }
+      return;
+    }
+    if (code === "EPERM" || code === "EACCES") return; // transient Windows contention
+    throw err;
+  }
+
+  // We exclusively hold the steal claim: we are the only party permitted to remove
+  // the stale lock. Delete it only if it STILL carries the exact stale token we
+  // observed; if a prior steal already replaced it with a fresh lock (different
+  // token), leave that lock intact.
+  try {
+    if ((await readFile(lockPath, "utf8")) === staleToken) {
+      await unlink(lockPath);
+    }
+  } catch {
+    // best-effort: lock already gone or briefly contended on Windows
+  } finally {
+    await bestEffortUnlink(claimPath);
   }
 }
 
@@ -85,10 +148,12 @@ export async function acquireLock(
       lastStaleCheckAt = now;
       const staleToken = await readStaleLockToken(lockPath);
       if (staleToken !== null) {
-        // Remove only the exact stale lock we observed; a fresh lock created by
-        // another holder in the gap (different token) is preserved — closing the
-        // TOCTOU where blind stale removal could clobber a newly-acquired lock.
-        await removeStaleLock(lockPath, staleToken);
+        // Steal the exact stale lock we observed via a lease-style, mutually
+        // exclusive claim (see stealStaleLock). Only the single claim winner ever
+        // unlinks, and only while the lock still carries this stale token — so a
+        // fresh lock another holder created in the gap is never clobbered, and two
+        // concurrent stealers can never both end up holding the lock.
+        await stealStaleLock(lockPath, staleToken);
         logger?.event({ kind: "step", note: "stale_lock_removed", lock_path: lockPath } as never);
         // Progress was made (a slot may have opened); retry promptly and reset
         // the backoff window.

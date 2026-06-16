@@ -28,7 +28,6 @@ import {
   type IntakeSourceManifest,
 } from "../src/intake.js";
 import { resolveIntakeStep } from "../src/steps/intakeResolver.js";
-import { StateStore } from "../src/state/store.js";
 import { decideNextStep } from "../src/steps/nextStep.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -497,13 +496,11 @@ describe("resolveIntakeStep — N-R04: clarification validation", () => {
     // readOptionalJsonFile will return undefined for malformed JSON, which means
     // clarificationResolution will be undefined — resolveIntakeStep falls through
     // to collect_intake_clarifications. Verify it emits the clarifications step.
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
     const result = await resolveIntakeStep({
       root: dir,
       artifactsDir,
       inputResolution: { supplied: false, existing: [], missing: [], checked: [] },
-      store,
       ...stubs,
     });
 
@@ -522,13 +519,11 @@ describe("resolveIntakeStep — N-R04: clarification validation", () => {
       "utf8",
     );
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
     const result = await resolveIntakeStep({
       root: dir,
       artifactsDir,
       inputResolution: { supplied: false, existing: [], missing: [], checked: [] },
-      store,
       ...stubs,
     });
 
@@ -546,13 +541,11 @@ describe("resolveIntakeStep — N-R04: clarification validation", () => {
       "utf8",
     );
 
-    const store = new StateStore(artifactsDir);
     const stubs = makeStubs();
     const result = await resolveIntakeStep({
       root: dir,
       artifactsDir,
       inputResolution: { supplied: false, existing: [], missing: [], checked: [] },
-      store,
       ...stubs,
     });
 

@@ -371,6 +371,14 @@ test("COR-d528d2cd: 'error' outcome records failure weight but does NOT set rate
       null,
       "error outcome must not set cooldown_until (was collapased to timeout — COR-d528d2cd regression)",
     );
+
+    // last_429_at must NOT be stamped — an 'error' is not a rate-limit signal
+    // (COR-610ddf2c: the field meant "last 429" but was stamped on every failure).
+    assert.equal(
+      entry.last_429_at ?? null,
+      null,
+      "error outcome must not stamp last_429_at (COR-610ddf2c regression)",
+    );
   });
 });
 
@@ -383,6 +391,19 @@ test("COR-d528d2cd: 'timeout' outcome records failure weight and does NOT set ra
     assert.ok(entry.buckets["2"]?.failure_weight > 0, "timeout outcome must record failure_weight");
     assert.equal(entry.consecutive_429_count ?? 0, 0, "timeout must not increment consecutive_429_count");
     assert.equal(entry.cooldown_until, null, "timeout must not set cooldown_until");
+    // COR-610ddf2c: a timeout is not a 429 — last_429_at must stay null.
+    assert.equal(entry.last_429_at ?? null, null, "timeout outcome must not stamp last_429_at (COR-610ddf2c)");
+  });
+});
+
+test("COR-610ddf2c: only a 'rate_limited' outcome stamps last_429_at", async () => {
+  await withTempStateDir(async () => {
+    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "rate_limited" }, 24);
+    const entry = (await readQuotaState()).entries[KEY];
+    assert.ok(
+      typeof entry.last_429_at === "string" && entry.last_429_at.length > 0,
+      "a rate_limited outcome must stamp last_429_at with an ISO timestamp",
+    );
   });
 });
 
@@ -461,4 +482,34 @@ test("ARC-09b7ce76-2: clearing blocking failure unblocks computeMaxSafeConcurren
     const maxAfter = computeMaxSafeConcurrency(entryAfter, 24);
     assert.ok(maxAfter >= 2, `maxSafe must advance past the cleared bucket — got ${maxAfter}`);
   });
+});
+
+// ── default scan ceiling is MAX_BUCKET_LEVEL (MNT-ba639774 / COR-ba639774) ─────
+// computeMaxSafeConcurrency / computeRampUpConcurrency previously defaulted
+// `maxToCheck` to a bare literal 32 while MAX_BUCKET_LEVEL = 32 is the documented
+// write ceiling. They now default to the named constant so the scan range and the
+// persisted bucket range cannot silently drift apart.
+
+test("MNT-ba639774: computeMaxSafeConcurrency default scan ceiling tracks MAX_BUCKET_LEVEL", () => {
+  // Contiguous all-success buckets 1..MAX_BUCKET_LEVEL → the default scan must
+  // reach the ceiling (maxSafe === MAX_BUCKET_LEVEL). A scan capped below the
+  // write ceiling would stop short and under-report safe concurrency.
+  const buckets = {};
+  for (let n = 1; n <= MAX_BUCKET_LEVEL; n++) {
+    buckets[String(n)] = { success_weight: 1.0, failure_weight: 0 };
+  }
+  const entry = { updated_at: new Date().toISOString(), buckets, cooldown_until: null, last_429_at: null, consecutive_429_count: 0 };
+  // Default maxToCheck (= MAX_BUCKET_LEVEL): reaches the ceiling.
+  assert.equal(
+    computeMaxSafeConcurrency(entry, 24),
+    MAX_BUCKET_LEVEL,
+    "default scan must reach MAX_BUCKET_LEVEL when every bucket up to it is safe",
+  );
+  // An explicit lower ceiling stops earlier — proves the default is the cap, not
+  // a hidden internal constant.
+  assert.equal(
+    computeMaxSafeConcurrency(entry, 24, 5),
+    5,
+    "an explicit maxToCheck must override the default ceiling",
+  );
 });

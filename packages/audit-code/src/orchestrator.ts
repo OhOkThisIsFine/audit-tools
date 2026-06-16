@@ -2,18 +2,9 @@ import type { AuditTask, Lens, UnitManifest } from "./types.js";
 import { isLens } from "./types.js";
 import { coerceJsonObjectArg } from "@audit-tools/shared";
 
-const DEFAULT_LENS_ORDER: Lens[] = [
-  "correctness",
-  "architecture",
-  "maintainability",
-  "security",
-  "reliability",
-  "performance",
-  "data_integrity",
-  "tests",
-  "operability",
-  "config_deployment",
-];
+// (Removed dead DEFAULT_LENS_ORDER literal — MNT-94a2184f. It was unreferenced
+// and duplicated the registry-derived LENS_ORDER in auditTaskUtils.ts, which is
+// the single source of canonical lens ordering.)
 
 export interface TaskBuildOptions {
   pass_prefix?: string;

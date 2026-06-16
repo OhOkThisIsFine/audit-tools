@@ -27,6 +27,15 @@ import {
   writeContractArtifact,
   type ContractPipelineArtifactName,
 } from "../src/contractPipeline/artifactStore.js";
+import {
+  // MNT-7014a745: consume the single-sourced version constants from the
+  // validation module rather than re-declaring them (a bump touches one place).
+  CP_MODULE_DECOMPOSITION_VERSION,
+  CP_MODULE_CONTRACTS_VERSION,
+  CP_SEAM_RECONCILIATION_REPORT_VERSION,
+  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+  CP_CYCLIC_SEAM_RESOLUTION_VERSION,
+} from "../src/validation/contractPipeline.js";
 import { intakePaths } from "../src/intake.js";
 import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
@@ -39,13 +48,9 @@ import {
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
 } from "@audit-tools/shared";
 
-// Version constants for artifact types not yet exported from @audit-tools/shared.
-// These local consts ensure a single source of truth within this file.
-const CP_MODULE_DECOMPOSITION_VERSION = "remediate-code-contract-pipeline/module-decomposition/v1alpha1" as const;
-const CP_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/module-contracts/v1alpha1" as const;
-const CP_SEAM_RECONCILIATION_REPORT_VERSION = "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1" as const;
-const CP_FINALIZED_MODULE_CONTRACTS_VERSION = "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1" as const;
-const CP_CYCLIC_SEAM_RESOLUTION_VERSION = "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1" as const;
+// CP_TEST_VALIDATOR_PLAN_VERSION is not exported from the validation module
+// (the source uses the shared CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION);
+// keep this single local declaration for the raw-payload fixtures below.
 const CP_TEST_VALIDATOR_PLAN_VERSION = "remediate-code-contract-pipeline/test-validator-plan/v1alpha1" as const;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

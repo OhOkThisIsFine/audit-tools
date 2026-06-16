@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hashContent } from "@audit-tools/shared";
 import { readFile } from "node:fs/promises";
 import { join, isAbsolute } from "node:path";
 import { existsSync } from "node:fs";
@@ -13,7 +13,7 @@ export interface FileIntegrityResult {
 
 async function hashFile(absolutePath: string): Promise<string> {
   const content = await readFile(absolutePath);
-  return createHash("sha256").update(content).digest("hex");
+  return hashContent(content);
 }
 
 export async function checkFileIntegrity(

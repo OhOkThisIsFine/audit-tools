@@ -40,6 +40,10 @@ import {
   renderOpenCodePermissionConfig,
 } from "../audit-code-wrapper-opencode.mjs";
 const { isCanonicalResultFilename } = await import("../src/cli/args.ts");
+// Step contracts normalize host-facing paths to forward slashes (drift-plan
+// R3); compare step path fields against the normalized form so the assertions
+// hold on Windows as well as Linux CI.
+const { toPromptPathToken } = await import("@audit-tools/shared");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -535,8 +539,11 @@ test("next-step reaches a ready review dispatch step from repo root under local-
     assert.equal(step.status, "ready");
     assert.match(step.step_kind, /^(dispatch_review|single_task_fallback)$/);
     assert.ok(step.run_id);
-    assert.equal(step.repo_root, root);
-    assert.equal(step.artifacts_dir, join(root, ".audit-tools/audit"));
+    assert.equal(step.repo_root, toPromptPathToken(root));
+    assert.equal(
+      step.artifacts_dir,
+      toPromptPathToken(join(root, ".audit-tools/audit")),
+    );
 
     // The printed contract matches the persisted current-step.json, so the host
     // can act on steps/current-step.json without a second next-step round-trip.
@@ -1248,7 +1255,13 @@ const repoLocalHostCases = [
         /^---\nname: audit-code\ndescription: Autonomous local loop code auditing\nagent: auditor/m,
       );
       assert.match(await readFile(paths.vscodePromptPath, "utf8"), /\/audit-code/);
-      assert.match(await readFile(paths.vscodeAgentPath, "utf8"), /# Auditor Agent/);
+      // The VS Code agent file now derives from the one canonical loader body
+      // (E1 single-source), so it carries the next-step capability handshake
+      // including --host-models rather than bespoke abbreviated prose.
+      const vscodeAgent = await readFile(paths.vscodeAgentPath, "utf8");
+      assert.match(vscodeAgent, /# Audit Code Agent/);
+      assert.match(vscodeAgent, /--host-models/);
+      assert.match(vscodeAgent, /node packages\/audit-code\/audit-code\.mjs/);
       // The MCP surface was removed: install no longer writes .vscode/mcp.json.
       await assert.rejects(() => stat(join(root, ".vscode", "mcp.json")));
       assert.match(await readFile(paths.installGuidePath, "utf8"), /## VS Code/);

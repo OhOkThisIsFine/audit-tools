@@ -36,6 +36,23 @@ export interface ArtifactValidationResult {
   issues: string[];
 }
 
+/**
+ * Funnel a validator's ValidationIssue[] into the human issue log (MNT-19ac220e):
+ * keep only `error`-severity issues and, when any remain, push one formatted line
+ * (optionally prefixed, e.g. with the source path). Replaces the read-validate-
+ * filter-push idiom that was copy-pasted per artifact in validateArtifacts.
+ */
+function pushErrorIssues(
+  issues: string[],
+  validatorIssues: ValidationIssue[],
+  prefix?: string,
+): void {
+  const errors = validatorIssues.filter((issue) => issue.severity === "error");
+  if (errors.length === 0) return;
+  const formatted = formatValidationIssues(errors);
+  issues.push(prefix ? `${prefix}\n${formatted}` : formatted);
+}
+
 async function readJsonForValidation(
   path: string,
   issues: string[],
@@ -247,22 +264,14 @@ async function validateDispatchArtifacts(
     const plan = await readJsonForValidation(dispatchPlanPath, issues);
     if (!plan) continue;
     const { issues: planIssues, phase, resultPaths } = validateDispatchPlan(plan, dispatchPlanPath);
-    const errorPlanIssues = planIssues.filter((issue) => issue.severity === "error");
-    if (errorPlanIssues.length > 0) {
-      issues.push(formatValidationIssues(errorPlanIssues));
-    }
+    pushErrorIssues(issues, planIssues);
     if (!phase) continue;
     for (const resultPath of resultPaths) {
       referencedResults.set(resultPath, phase);
       if (!existsSync(resultPath)) continue;
       const result = await readJsonForValidation(resultPath, issues);
       if (!result) continue;
-      const implIssues = validateImplementWorkerResult(result, resultPath).filter(
-        (issue) => issue.severity === "error",
-      );
-      if (implIssues.length > 0) {
-        issues.push(formatValidationIssues(implIssues));
-      }
+      pushErrorIssues(issues, validateImplementWorkerResult(result, resultPath));
     }
   }
 
@@ -286,23 +295,13 @@ export async function validateArtifacts(
   }
 
   if (state?.plan) {
-    const planIssues = validateRemediationPlan(state.plan).filter(
-      (issue) => issue.severity === "error",
-    );
-    if (planIssues.length > 0) {
-      issues.push(formatValidationIssues(planIssues));
-    }
+    pushErrorIssues(issues, validateRemediationPlan(state.plan));
   }
 
   if (state?.items) {
     for (const item of Object.values(state.items)) {
       if (item.item_spec) {
-        const itemIssues = validateItemSpec(item.item_spec).filter(
-          (issue) => issue.severity === "error",
-        );
-        if (itemIssues.length > 0) {
-          issues.push(formatValidationIssues(itemIssues));
-        }
+        pushErrorIssues(issues, validateItemSpec(item.item_spec));
       }
     }
   }
@@ -310,24 +309,14 @@ export async function validateArtifacts(
   const planPath = join(artifactsDir, "remediation_plan.json");
   const persistedPlan = await readJsonForValidation(planPath, issues);
   if (persistedPlan) {
-    const planIssues = validateRemediationPlan(persistedPlan).filter(
-      (issue) => issue.severity === "error",
-    );
-    if (planIssues.length > 0) {
-      issues.push(formatValidationIssues(planIssues));
-    }
+    pushErrorIssues(issues, validateRemediationPlan(persistedPlan));
   }
 
   for (const file of await collectFiles(artifactsDir)) {
     if (/[/\\]item_spec_[^/\\]+\.json$/u.test(file)) {
       const spec = await readJsonForValidation(file, issues);
       if (!spec) continue;
-      const specIssues = validateItemSpec(spec).filter(
-        (issue) => issue.severity === "error",
-      );
-      if (specIssues.length > 0) {
-        issues.push(formatValidationIssues(specIssues));
-      }
+      pushErrorIssues(issues, validateItemSpec(spec));
     }
   }
 
@@ -340,13 +329,10 @@ export async function validateArtifacts(
       issues.push("clarification_request.json must be an array.");
     } else {
       for (const [index, request] of clarificationRequest.entries()) {
-        const requestIssues = validateClarificationRequest(
-          request,
-          `clarification_request[${index}]`,
-        ).filter((issue) => issue.severity === "error");
-        if (requestIssues.length > 0) {
-          issues.push(formatValidationIssues(requestIssues));
-        }
+        pushErrorIssues(
+          issues,
+          validateClarificationRequest(request, `clarification_request[${index}]`),
+        );
       }
     }
   }
@@ -366,12 +352,7 @@ export async function validateArtifacts(
     issues,
   );
   if (triageResolution) {
-    const triageIssues = validateTriageResolution(triageResolution).filter(
-      (issue) => issue.severity === "error",
-    );
-    if (triageIssues.length > 0) {
-      issues.push(formatValidationIssues(triageIssues));
-    }
+    pushErrorIssues(issues, validateTriageResolution(triageResolution));
   }
 
   const currentStep = await readJsonForValidation(
@@ -379,12 +360,7 @@ export async function validateArtifacts(
     issues,
   );
   if (currentStep) {
-    const stepIssues = validateCurrentStep(currentStep, "current-step.json").filter(
-      (issue) => issue.severity === "error",
-    );
-    if (stepIssues.length > 0) {
-      issues.push(formatValidationIssues(stepIssues));
-    }
+    pushErrorIssues(issues, validateCurrentStep(currentStep, "current-step.json"));
   }
 
   await validateDispatchArtifacts(artifactsDir, issues);
@@ -392,12 +368,10 @@ export async function validateArtifacts(
   const closingResultPath = join(artifactsDir, "remediation-closing-result.json");
   const closingResult = await readJsonForValidation(closingResultPath, issues);
   if (closingResult) {
-    const closingIssues = validateClosingResult(closingResult, "remediation-closing-result.json").filter(
-      (issue) => issue.severity === "error",
+    pushErrorIssues(
+      issues,
+      validateClosingResult(closingResult, "remediation-closing-result.json"),
     );
-    if (closingIssues.length > 0) {
-      issues.push(formatValidationIssues(closingIssues));
-    }
   }
 
   // Contract-pipeline artifact validation (optional — only checked when present).
@@ -408,20 +382,17 @@ export async function validateArtifacts(
     if (!cpRaw) continue;
     // The envelope wraps the payload — validate the payload field.
     const payload = isRecord(cpRaw) && "payload" in cpRaw ? cpRaw.payload : cpRaw;
-    const vIssues = CONTRACT_PIPELINE_VALIDATORS[name](payload, name).filter(
-      (issue) => issue.severity === "error",
-    );
-    if (vIssues.length > 0) issues.push(`${cpPath}:\n${formatValidationIssues(vIssues)}`);
+    pushErrorIssues(issues, CONTRACT_PIPELINE_VALIDATORS[name](payload, name), `${cpPath}:`);
   }
 
   // Verification report at the root artifacts dir (from FINDING-027).
   const verificationReportPath = join(root, ".audit-tools", "verification_report.json");
   const verificationReport = await readJsonForValidation(verificationReportPath, issues);
   if (verificationReport) {
-    const vrIssues = validateVerificationReport(verificationReport, "verification_report.json").filter(
-      (issue) => issue.severity === "error",
+    pushErrorIssues(
+      issues,
+      validateVerificationReport(verificationReport, "verification_report.json"),
     );
-    if (vrIssues.length > 0) issues.push(formatValidationIssues(vrIssues));
   }
 
   return {

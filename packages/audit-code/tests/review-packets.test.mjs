@@ -1144,9 +1144,16 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
     assert.match(prompt, /Do not use shell search commands/i);
     assert.match(prompt, /src-auth:security/);
     assert.match(prompt, /src-auth:correctness/);
-    // Inline emit: result_path is embedded in the prompt; no submit-packet command.
+    // result_path is embedded and the worker is told to WRITE it (no submit-packet
+    // command, no inline-only emission). This is the data-loss fix: the generated
+    // worker prompt must write its results, matching the rolling-dispatch step prompt.
     assert.match(prompt, /result_path:/);
+    assert.match(prompt, /WRITE that array[\s\S]*to your result_path/i);
+    assert.doesNotMatch(prompt, /Do not write files/i);
+    assert.doesNotMatch(prompt, /emit it INLINE/i);
     assert.doesNotMatch(prompt, /submit-packet/);
+    // quoted_text grounding is required in the generated prompt.
+    assert.match(prompt, /quoted_text/);
     // Case-insensitive match: old prompt had lowercase "reply", new has "Reply"
     assert.match(
       prompt,

@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import {
+  SEVERITIES,
+  CONFIDENCES,
+  severityRank,
+  confidenceRank,
+} from "@audit-tools/shared";
 import type { AuditResult, AuditTask, Finding, Lens } from "../../types.js";
 import type { ExternalAnalyzerResults } from "../../types/externalAnalyzer.js";
 
@@ -19,19 +25,20 @@ export const IMPORTANT_LENS_VERIFICATION_LENSES = new Set<Lens>([
   "reliability",
 ]);
 
-export const SEVERITY_RANK: Record<Finding["severity"], number> = {
-  critical: 5,
-  high: 4,
-  medium: 3,
-  low: 2,
-  info: 1,
-};
+// Derived from the shared single-source rank functions (no hand-copied table).
+// Kept as Record lookups because consumers index by severity/confidence AND
+// reference named levels (e.g. SEVERITY_RANK.high) as a priority threshold.
+export const SEVERITY_RANK: Record<Finding["severity"], number> =
+  Object.fromEntries(SEVERITIES.map((s) => [s, severityRank(s)])) as Record<
+    Finding["severity"],
+    number
+  >;
 
-export const CONFIDENCE_RANK: Record<Finding["confidence"], number> = {
-  high: 3,
-  medium: 2,
-  low: 1,
-};
+export const CONFIDENCE_RANK: Record<Finding["confidence"], number> =
+  Object.fromEntries(CONFIDENCES.map((c) => [c, confidenceRank(c)])) as Record<
+    Finding["confidence"],
+    number
+  >;
 
 export function priorityRank(priority: AuditTask["priority"]): number {
   switch (priority) {

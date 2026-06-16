@@ -291,6 +291,48 @@ describe("JSON schema field-level consistency", () => {
     });
   });
 
+  it("remediation_outcomes schema declares every top-level key runClosePhase writes (DAT-99284fb4)", async () => {
+    // runClosePhase writes remediation-outcomes.json as the RemediationOutcomesReport
+    // PLUS run-context keys. Because the schema is additionalProperties:false, every
+    // such key must be declared or the on-disk file fails validation against its own
+    // schema. Keep this list in lockstep with close.ts's `outcomesFile` literal.
+    const schema = JSON.parse(
+      await readFile(
+        join(SCHEMA_DIR, "remediation_outcomes.schema.json"),
+        "utf8",
+      ),
+    );
+    expect(schema.additionalProperties).toBe(false);
+    const writtenTopLevelKeys = [
+      "contract_version",
+      "total",
+      "by_outcome",
+      "by_lens",
+      "outcomes",
+      "started_at",
+      "ended_at",
+      "step_count",
+      "combined_test_result",
+      "e2e_result",
+      "closing_result",
+      "plan_coverage",
+    ];
+    for (const key of writtenTopLevelKeys) {
+      expect(
+        schema.properties,
+        `schema must declare top-level key '${key}' that runClosePhase writes (additionalProperties:false)`,
+      ).toHaveProperty(key);
+    }
+    // The nested run-context shapes mirror remediation_report.schema.json.
+    expect(schema.properties.combined_test_result.properties).toMatchObject({
+      passed: { type: "boolean" },
+      failure_summary: { type: "string" },
+    });
+    expect(schema.properties.closing_result.required).toEqual(
+      expect.arrayContaining(["action", "status"]),
+    );
+  });
+
   it("finding schema requires 'lens' field", async () => {
     const schema = JSON.parse(
       await readFile(join(SCHEMA_DIR, "finding.schema.json"), "utf8"),

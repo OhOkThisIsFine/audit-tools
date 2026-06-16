@@ -9,11 +9,10 @@
  * contract-pipeline subdirectory only and do not touch the remediation
  * state machine.
  */
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { readOptionalJsonFile, writeJsonFile } from "@audit-tools/shared";
+import { hashContent, readOptionalJsonFile, writeJsonFile } from "@audit-tools/shared";
 
 // ── Artifact names ────────────────────────────────────────────────────────────
 
@@ -108,10 +107,7 @@ export function contractArtifactFilePath(
 }
 
 function computeHash(value: unknown): string {
-  return createHash("sha256")
-    .update(JSON.stringify(value))
-    .digest("hex")
-    .slice(0, 32);
+  return hashContent(JSON.stringify(value), { length: 32 });
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

@@ -171,11 +171,18 @@ describe("INV-remediate-tests-08: ESM-correct __dirname derivation in .test.ts f
 
   for (const file of FILES_THAT_USE_DIRNAME) {
     it(`${file} derives __dirname from fileURLToPath(import.meta.url)`, () => {
+      // TST-f95f5162: FILES_THAT_USE_DIRNAME is a deliberate guard manifest. A
+      // listed file that has been renamed/removed must FAIL (so the manifest is
+      // updated), not pass vacuously via a silent catch-return — otherwise the
+      // structural invariant silently stops covering a file it claims to guard.
       let src: string;
       try {
         src = readTestFile(file);
       } catch {
-        return; // file not present — skip
+        throw new Error(
+          `${file} is listed in FILES_THAT_USE_DIRNAME but no longer exists — ` +
+            `update the manifest (a missing guarded file must not be skipped silently).`,
+        );
       }
       if (!src.includes("__dirname")) return; // no __dirname usage — OK
       // Must have the ESM-correct pattern

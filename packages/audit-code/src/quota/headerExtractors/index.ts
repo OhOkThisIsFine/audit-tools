@@ -5,6 +5,7 @@ export { ClaudeCodeHeaderExtractor } from "./claudeCodeHeaderExtractor.js";
 import type { HeaderExtractor } from "./genericHeaderExtractor.js";
 import { GenericHeaderExtractor } from "./genericHeaderExtractor.js";
 import { ClaudeCodeHeaderExtractor } from "./claudeCodeHeaderExtractor.js";
+import { makeProviderKeyedFactory } from "@audit-tools/shared";
 
 const PROVIDER_EXTRACTORS: Record<string, HeaderExtractor> = {
   "claude-code": new ClaudeCodeHeaderExtractor(),
@@ -12,7 +13,8 @@ const PROVIDER_EXTRACTORS: Record<string, HeaderExtractor> = {
 
 const genericExtractor = new GenericHeaderExtractor();
 
-export function getHeaderExtractorForProvider(providerName: string): HeaderExtractor {
-  const extractor = PROVIDER_EXTRACTORS[providerName];
-  return extractor ?? genericExtractor;
-}
+export const getHeaderExtractorForProvider =
+  makeProviderKeyedFactory<HeaderExtractor>(
+    PROVIDER_EXTRACTORS,
+    genericExtractor,
+  );

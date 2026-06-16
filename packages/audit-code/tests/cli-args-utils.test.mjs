@@ -1,8 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve, sep } from "node:path";
 
-const { summarizeLaunchExit, resolveHostDispatchCapability, optionalBooleanEnv } =
-  await import("../src/cli/args.ts");
+const {
+  summarizeLaunchExit,
+  resolveHostDispatchCapability,
+  optionalBooleanEnv,
+  getArtifactsDir,
+  getRootDir,
+} = await import("../src/cli/args.ts");
+
+const ARGS_SOURCE_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "src",
+  "cli",
+  "args.ts",
+);
 
 // ---------------------------------------------------------------------------
 // summarizeLaunchExit
@@ -172,4 +188,69 @@ test("optionalBooleanEnv: 'yes' → undefined", () => {
 
 test("optionalBooleanEnv: 'TRUE' (uppercase) → undefined", () => {
   assert.strictEqual(optionalBooleanEnv("TRUE"), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// getArtifactsDir / getRootDir — default rebases onto --root (latent bug fix)
+// ---------------------------------------------------------------------------
+
+test("getArtifactsDir: --root <X> with no --artifacts-dir resolves under <X>/.audit-tools/audit", () => {
+  const rootX = resolve(sep, "tmp", "some-target-root");
+  const argv = ["--root", rootX];
+  assert.strictEqual(getRootDir(argv), rootX);
+  // The default MUST rebase onto --root, not resolve `.audit-tools/audit`
+  // against the process CWD.
+  assert.strictEqual(
+    getArtifactsDir(argv),
+    join(rootX, ".audit-tools", "audit"),
+  );
+});
+
+test("getArtifactsDir: bare default (no flags) resolves under CWD/.audit-tools/audit", () => {
+  assert.strictEqual(
+    getArtifactsDir([]),
+    join(resolve("."), ".audit-tools", "audit"),
+  );
+});
+
+test("getArtifactsDir: explicit --artifacts-dir is honored verbatim (ignores --root)", () => {
+  const rootX = resolve(sep, "tmp", "some-target-root");
+  const explicit = resolve(sep, "var", "artifacts", "elsewhere");
+  const argv = ["--root", rootX, "--artifacts-dir", explicit];
+  assert.strictEqual(getArtifactsDir(argv), explicit);
+});
+
+// ---------------------------------------------------------------------------
+// Guard: no other `.audit-tools` path-join literal in CLI args code.
+// The single allowed `.audit-tools` literal is the DIRECT_CLI_DEFAULTS default
+// sentinel (which getArtifactsDir rebases through the shared auditToolsPaths
+// helper). Any other occurrence in code means a join literal was reintroduced
+// instead of routing through @audit-tools/shared — which is exactly the drift
+// this module exists to prevent.
+// ---------------------------------------------------------------------------
+
+/** Strip `//` line comments and `/* *\/` block comments so only code remains. */
+function stripComments(source) {
+  const withoutBlock = source.replace(/\/\*[\s\S]*?\*\//g, "");
+  return withoutBlock
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
+}
+
+test("CLI args code has no `.audit-tools` path-join literal beyond the single default sentinel", () => {
+  const code = stripComments(readFileSync(ARGS_SOURCE_PATH, "utf8"));
+  const occurrences = (code.match(/\.audit-tools/g) ?? []).length;
+  assert.strictEqual(
+    occurrences,
+    1,
+    `Expected exactly one '.audit-tools' literal (the DIRECT_CLI_DEFAULTS default) in ${ARGS_SOURCE_PATH}, found ${occurrences}. Route path construction through @audit-tools/shared auditToolsPaths instead of re-spelling the join literal.`,
+  );
+  // The one allowed occurrence is the default-value sentinel, not a join() arg.
+  assert.match(code, /artifactsDir:\s*"\.audit-tools\/audit"/);
+  assert.doesNotMatch(
+    code,
+    /(?:join|resolve)\([^)]*\.audit-tools/,
+    "No join()/resolve() call in CLI args code may take a '.audit-tools' literal — use the shared auditToolsPaths helpers.",
+  );
 });

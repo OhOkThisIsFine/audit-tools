@@ -16,6 +16,16 @@
  * Non-terminal item statuses (blocked, pending, tested, refactored, verified,
  *   tested_successfully) map to force_closed_unresolved so that the ledger is
  *   always fully populated after build.
+ *
+ * Identity (drift-plan R2): the ledger keys every entry off a finding/node id
+ * that is already the output of the single finding-identity authority —
+ * structured_audit denominator ids come from `assignStableFindingIds`
+ * (`<LENS>-<sha256(findingIdentitySignature)>`) and DAG-node denominator ids
+ * come from `ensureNodeId`. The ledger therefore performs no identity rule of
+ * its own; two findings the shared authority deems the same already collapse to
+ * one denominator id upstream (cross-lens dedup), so the ledger never
+ * double-counts one identity. The duplicate guard below catches the inverse —
+ * one identity id claimed by two entries (a merge/build defect).
  */
 
 import type {

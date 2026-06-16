@@ -23,6 +23,7 @@ import type {
   DispatchCapacityPoolSummary,
   DiscoveredRateLimitsInput,
   HostModelRosterEntry,
+  CapacityPool,
 } from "@audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
@@ -37,6 +38,10 @@ import {
   formatRepoConventions,
   toPromptPathToken,
   estimateTokensFromBytes,
+  severityRank,
+  findingNeedsVerificationBeforeFix,
+  compareTier,
+  mostCapableTier,
   type FindingTheme,
 } from "@audit-tools/shared";
 import {
@@ -160,15 +165,15 @@ function _capacityPoolSummary(
   };
 }
 
-/** Most-capable rank first, so the largest pending items land on the rank with the largest window. */
-const RANK_ORDER: Record<string, number> = { small: 0, standard: 1, deep: 2 };
-
+/**
+ * Most-capable rank first, so the largest pending items land on the rank with
+ * the largest window. Ordering comes from the single shared tier-rank authority
+ * (`compareTier`, negated for descending) — no local {small,standard,deep} copy.
+ */
 function sortRosterMostCapableFirst(
   roster: HostModelRosterEntry[],
 ): HostModelRosterEntry[] {
-  return [...roster].sort(
-    (a, b) => (RANK_ORDER[b.rank] ?? -1) - (RANK_ORDER[a.rank] ?? -1),
-  );
+  return [...roster].sort((a, b) => compareTier(b.rank, a.rank));
 }
 
 export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveScheduleResult> {
@@ -275,6 +280,73 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     ...capacity.primary.schedule,
     capacity_pools: summarizeDispatchCapacityPools(capacity),
   };
+}
+
+/**
+ * Build the confirmed `CapacityPool[]` for a dispatch — one pool per reported
+ * roster rank (each with its own discovered window + quota key), or a single
+ * conservative pool for the scalar/absent handshake. This is the same pool shape
+ * `scheduleWave` constructs internally; it is exposed so the rolling dispatch
+ * engine (which is fed `confirmedPools` directly) sizes concurrency from the
+ * identical quota inputs, never from a raw host flag. Reused by
+ * `driveRollingImplementDispatch`.
+ */
+export async function buildConfirmedPools(input: {
+  sessionConfig: SessionConfig | null;
+  hostMaxConcurrent?: number | null;
+  hostContextTokens?: number | null;
+  hostOutputTokens?: number | null;
+  hostModels?: HostModelRosterEntry[] | null;
+  hostModelId?: string | null;
+  env?: NodeJS.ProcessEnv;
+}): Promise<CapacityPool[]> {
+  const sessionConfig = input.sessionConfig ?? {};
+  const providerName =
+    (sessionConfig as { provider?: ResolvedProviderName }).provider ?? "claude-code";
+  const hostModel =
+    (sessionConfig as { block_quota?: { host_model?: string | null } }).block_quota
+      ?.host_model ?? null;
+  const quotaModelKeySegment = hostModel ?? input.hostModelId ?? null;
+  const roster = input.hostModels?.length
+    ? sortRosterMostCapableFirst(input.hostModels)
+    : null;
+  const hostLimit = resolveHostConcurrencyLimit({
+    hostMaxConcurrent: input.hostMaxConcurrent,
+    sessionConfig,
+    env: input.env,
+  });
+  const hostContextTokens = input.hostContextTokens ?? roster?.[0]?.context_tokens ?? null;
+  const hostOutputTokens = input.hostOutputTokens ?? roster?.[0]?.output_tokens ?? null;
+  const hostCapabilityLimits: DiscoveredRateLimitsInput | null =
+    hostContextTokens != null || hostOutputTokens != null
+      ? { context_tokens: hostContextTokens, output_tokens: hostOutputTokens }
+      : null;
+
+  let quotaEntries: Record<string, QuotaStateEntry> = {};
+  try {
+    const state = await readQuotaState();
+    quotaEntries = state.entries;
+  } catch {
+    // Non-fatal: a missing/locked quota state degrades to no learned entry.
+  }
+
+  return (roster ?? [null]).map((entry) => {
+    const poolKey = buildProviderModelKey(
+      providerName,
+      entry?.model_id ?? quotaModelKeySegment,
+    );
+    return {
+      id: poolKey,
+      providerName,
+      hostModel,
+      ...(entry ? { rank: entry.rank } : {}),
+      hostConcurrencyLimit: hostLimit,
+      quotaStateEntry: quotaEntries[poolKey] ?? null,
+      discoveredLimits: entry
+        ? { context_tokens: entry.context_tokens, output_tokens: entry.output_tokens }
+        : hostCapabilityLimits,
+    };
+  });
 }
 
 export function buildDispatchQuota(
@@ -850,30 +922,21 @@ export function buildImplementModelHint(
     .filter((t): t is "small" | "standard" | "deep" => t !== undefined);
   if (nodeTiers.length > 0) {
     // Take the most-capable declared rank across the block's nodes so a deep
-    // node is never under-provisioned by a sibling's smaller rank.
-    const rankOrder: Record<string, number> = { small: 0, standard: 1, deep: 2 };
-    const tier = nodeTiers.reduce((a, b) =>
-      (rankOrder[b] ?? 0) > (rankOrder[a] ?? 0) ? b : a,
-    );
+    // node is never under-provisioned by a sibling's smaller rank. Ordering is
+    // the single shared tier-rank authority (`mostCapableTier`).
+    const tier = mostCapableTier(nodeTiers) ?? "standard";
     return { tier, reasons: ["node_model_tier"] };
   }
 
   const deepReasons: string[] = [];
   let allSafe = true;
   let maxSeverityRank = 0;
-  const severityRanks: Record<string, number> = {
-    critical: 5,
-    high: 4,
-    medium: 3,
-    low: 2,
-    info: 1,
-  };
 
   for (const findingId of block.items) {
     const item = state.items?.[findingId];
     const finding = state.plan?.findings.find((f) => f.id === findingId);
     if (!finding) continue;
-    const rank = severityRanks[finding.severity] ?? 0;
+    const rank = severityRank(finding.severity);
     if (rank > maxSeverityRank) maxSeverityRank = rank;
     if (item?.item_spec) {
       const { tier } = classifyFindingRisk(
@@ -934,6 +997,23 @@ function contractPipelineTraceBullets(finding: Finding): string {
   const lines = contractPipelineTraceLines(finding);
   if (lines.length === 0) return "";
   return `\n## Contract Pipeline Traceability\n\n${lines.map((line) => `- ${line}`).join("\n")}\n`;
+}
+
+/**
+ * G1 + INV-GND-02: a finding that the auditor's grounding pass marked ungrounded
+ * — or that carries NO grounding verdict (undefined → treated as ungrounded) —
+ * has not been positively re-verified against the cited code. Instruct the
+ * worker to VERIFY the claim against the source first and only then fix it (or
+ * resolve_no_change if the claim does not hold), rather than blindly applying a
+ * fix to a possibly-stale/hallucinated finding. A positively-grounded finding
+ * adds no bullet (it was already re-verified at ingest).
+ */
+function groundingVerificationBullet(finding: Finding): string {
+  if (!findingNeedsVerificationBeforeFix(finding)) return "";
+  const reason = finding.grounding?.reason
+    ? ` (${finding.grounding.reason})`
+    : " (no grounding verdict was recorded for this finding)";
+  return `- VERIFY BEFORE FIX: this finding is not positively grounded${reason}. Confirm the claim against the cited code first; if it holds, fix it, otherwise mark the item \`resolved_no_change\` with evidence. Do not apply a fix to an unverified claim.`;
 }
 
 /**
@@ -1166,6 +1246,7 @@ ${items
 
 - Files: ${itemReadFiles(finding, spec).map(resolveFilePath).join(", ")}
 - Summary: ${finding.summary}
+${groundingVerificationBullet(finding)}
 ${spec ? `- Concrete change: ${spec.concrete_change}
 - Tests to write: ${spec.tests_to_write
       .map((test) => `${test.name}: ${test.assertions.join("; ")}`)
@@ -1785,6 +1866,63 @@ export function attributeSiblingRed(
   return owners.size === 1 ? [...owners][0] : null;
 }
 
+// ---------------------------------------------------------------------------
+// Merge-seam: lost-update / overlapping-edit detection (ARC-f378135d-2 / ARC-c1693139)
+// ---------------------------------------------------------------------------
+
+/** A merged block's ACTUAL edited file set (resolved from its worktree branch diff). */
+export interface BlockEditedFiles {
+  block_id: string;
+  /** Repo-relative forward-slash paths the block's worker actually changed. */
+  files: Set<string>;
+}
+
+/** One detected overlap: two merged blocks whose actual edits hit the same file. */
+export interface OverlappingEdit {
+  path: string;
+  block_ids: string[];
+}
+
+/**
+ * Detect lost-update hazards across concurrently-merged blocks (ARC-f378135d-2 /
+ * ARC-c1693139). When the rolling engine dispatches multiple nodes in flight and
+ * each worker edits in its own worktree, two workers can both modify the SAME
+ * file; cherry-picking both branches silently drops one worker's change to that
+ * file (lost update). This pure function returns every repo-relative path that
+ * appears in more than one merged block's ACTUAL edit set, with the owning block
+ * ids. The caller routes the involved blocks to triage so the conflict is
+ * reconciled rather than silently losing an edit. Result-file artifacts and the
+ * agent-feedback file are sanctioned side outputs and are never counted as
+ * overlaps.
+ */
+export function detectOverlappingEdits(
+  editedByBlock: BlockEditedFiles[],
+): OverlappingEdit[] {
+  const pathToBlocks = new Map<string, Set<string>>();
+  for (const { block_id, files } of editedByBlock) {
+    for (const file of files) {
+      const rel = file.replace(/\\/g, "/");
+      // Sanctioned non-source outputs never constitute a lost-update conflict.
+      if (rel.endsWith(".result.json")) continue;
+      if (rel.endsWith(AGENT_FEEDBACK_FILENAME)) continue;
+      let owners = pathToBlocks.get(rel);
+      if (!owners) {
+        owners = new Set<string>();
+        pathToBlocks.set(rel, owners);
+      }
+      owners.add(block_id);
+    }
+  }
+  const overlaps: OverlappingEdit[] = [];
+  for (const [path, owners] of pathToBlocks) {
+    if (owners.size > 1) {
+      overlaps.push({ path, block_ids: [...owners].sort() });
+    }
+  }
+  // Deterministic ordering so the diagnostic + tests are stable.
+  return overlaps.sort((a, b) => a.path.localeCompare(b.path));
+}
+
 export async function mergeImplementResults(
   options: DispatchOptions,
   runId: string,
@@ -1893,6 +2031,13 @@ async function mergeImplementResultsIntoState(
     disposition: "blocked_owning_block" | "orphan";
     worker_status: string;
   }> = [];
+
+  // Per-block ACTUAL edited file sets (resolved from each block's worktree
+  // branch), collected for post-loop lost-update / overlapping-edit detection
+  // (ARC-f378135d-2 / ARC-c1693139). Only blocks dispatched through an isolated
+  // worktree (their branch exists) contribute; the interim main-tree path has no
+  // per-worker diff to attribute, so it cannot be checked for cross-block overlap.
+  const editedByBlock: BlockEditedFiles[] = [];
 
   for (const item of itemsToMerge) {
     if (!existsSync(item.result_path)) {
@@ -2079,20 +2224,25 @@ async function mergeImplementResultsIntoState(
     // (`enforceWriteScope`) so it is unit-tested directly against a known edit
     // set, and fail-closed semantics apply when git is a repo but the probe fails.
     const worktreeBranch = worktreeBranchForBlock(blockId, runId);
-    // Activate the gate only when this block was actually dispatched through an
-    // isolated worktree (its branch exists). A missing branch means the interim
-    // main-tree path was used — there is no per-worker diff to enforce against,
-    // so the gate is skipped (NOT fail-closed: fail-closed is for a present repo
-    // whose diff genuinely errors).
-    if (
-      resolvedFindingIds.length > 0 &&
-      item.access &&
-      gitBranchExists(options.root, worktreeBranch)
-    ) {
-      const edited = gitEditedFilesForBranch(options.root, worktreeBranch);
+    // Resolve this block's ACTUAL worktree-branch edits ONCE when the branch
+    // exists — reused for the write-scope gate below AND the post-loop
+    // lost-update detection. A missing branch means the interim main-tree path
+    // was used (no per-worker diff): skip both checks for this block.
+    const branchEdited = gitBranchExists(options.root, worktreeBranch)
+      ? gitEditedFilesForBranch(options.root, worktreeBranch)
+      : null;
+    if (branchEdited?.available) {
+      editedByBlock.push({ block_id: blockId, files: branchEdited.files });
+    }
+    // Activate the write-scope gate only when this block was actually dispatched
+    // through an isolated worktree (its branch exists). A missing branch means
+    // the interim main-tree path was used — there is no per-worker diff to
+    // enforce against, so the gate is skipped (NOT fail-closed: fail-closed is
+    // for a present repo whose diff genuinely errors).
+    if (resolvedFindingIds.length > 0 && item.access && branchEdited) {
       const decision = enforceWriteScope(
         item.access.write_paths,
-        edited,
+        branchEdited,
         options.root,
       );
       if (decision.blocked) {
@@ -2125,6 +2275,49 @@ async function mergeImplementResultsIntoState(
       `[remediate-code] dispatch: ${orphanResults.length} unmatched implement ` +
         `result finding_id(s) recorded as orphan dispositions (not dropped): ` +
         `${orphanResults.map((o) => o.finding_id).join(", ")}\n`,
+    );
+  }
+
+  // Lost-update / overlapping-edit detection (ARC-f378135d-2 / ARC-c1693139):
+  // when the rolling engine had multiple nodes in flight, two workers can each
+  // edit the SAME file in their own worktree; cherry-picking both would silently
+  // drop one change. Any file edited by more than one merged block is a
+  // lost-update hazard — block every involved block's still-non-terminal items
+  // and route them to triage so the conflict is reconciled, never lost. Recorded
+  // as a sidecar diagnostic. Single-block runs (the proven host-wave path)
+  // produce zero overlaps, so this is inert on the current default path.
+  const overlappingEdits = detectOverlappingEdits(editedByBlock);
+  if (overlappingEdits.length > 0) {
+    const involvedBlockIds = new Set(
+      overlappingEdits.flatMap((o) => o.block_ids),
+    );
+    for (const blockId of involvedBlockIds) {
+      const block = state.plan?.blocks.find((b) => b.block_id === blockId);
+      const conflictPaths = overlappingEdits
+        .filter((o) => o.block_ids.includes(blockId))
+        .map((o) => o.path);
+      for (const findingId of block?.items ?? []) {
+        const stateItem = state.items[findingId];
+        if (!stateItem || isTerminalStatus(stateItem.status)) continue;
+        stateItem.status = "blocked";
+        markTerminal(stateItem);
+        stateItem.failure_reason =
+          `Lost-update hazard: this block's worker edited file(s) also edited by ` +
+          `another concurrently-dispatched block (${conflictPaths.join(", ")}). ` +
+          `Blocking both so the overlapping change is reconciled in triage rather ` +
+          `than silently dropped by a cherry-pick.`;
+      }
+    }
+    await writeJsonFile(join(dir, "overlapping-edits.json"), {
+      schema_version: "remediate-code-implement/overlapping-edits/v1alpha1",
+      run_id: runId,
+      created_at: new Date().toISOString(),
+      overlaps: overlappingEdits,
+    });
+    process.stderr.write(
+      `[remediate-code] dispatch: ${overlappingEdits.length} overlapping-edit ` +
+        `conflict(s) across concurrently-merged blocks; involved blocks routed to ` +
+        `triage: ${[...involvedBlockIds].join(", ")}\n`,
     );
   }
 

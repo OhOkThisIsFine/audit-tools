@@ -601,9 +601,10 @@ test("acquireLock uses exponential backoff — far fewer wakeups than a fixed 50
 });
 
 // ---------------------------------------------------------------------------
-// 20. TOCTOU: many acquirers racing one stale lock all succeed, none clobbered
+// 20. TOCTOU: many acquirers racing one stale lock all succeed, none clobbered,
+//     and mutual exclusion holds strictly THROUGH the stale-steal.
 // ---------------------------------------------------------------------------
-test("concurrent acquirers racing a stale lock each get a distinct token (FND-TST-a50db947)", async () => {
+test("concurrent acquirers racing a stale lock keep strict mutual exclusion (maxConcurrent===1) (FND-TST-a50db947)", async () => {
   await withTempDir(async (dir) => {
     const lockPath = tmpLockPath(dir);
     const { writeFile: wf, utimes: ut, rm: rmFs } = await import("node:fs/promises");
@@ -614,21 +615,30 @@ test("concurrent acquirers racing a stale lock each get a distinct token (FND-TS
     await ut(lockPath, past, past);
 
     const N = 5;
+    let concurrentHolders = 0;
+    let maxConcurrent = 0;
     const tokens = await Promise.all(
       Array.from({ length: N }, () =>
         (async () => {
           const t = await acquireLock(lockPath, 15_000);
-          await new Promise((r) => setTimeout(r, 5)); // brief hold
+          // Inside the critical section: at most one holder may ever be here at
+          // once. A double-hold from a non-atomic stale steal would push this >1.
+          concurrentHolders++;
+          if (concurrentHolders > maxConcurrent) maxConcurrent = concurrentHolders;
+          await new Promise((r) => setTimeout(r, 5)); // brief hold to widen any race
+          concurrentHolders--;
           await releaseLock(lockPath, t); // token-checked: only removes our own
           return t;
         })(),
       ),
     );
 
-    // The token-checked stale removal must never hand two acquirers the same
-    // identity: every acquirer obtains a distinct token. (Strict mutual exclusion
-    // THROUGH the stale-steal is a separate, narrow pre-existing race documented
-    // in docs/backlog.md — not asserted here, where it flaked ~1-in-3.)
+    // Lease-style atomic steal (stealStaleLock) makes the removal right mutually
+    // exclusive, so two stealers can never both end up holding the lock: strict
+    // mutual exclusion holds even THROUGH the concurrent stale-steal, not just
+    // distinct tokens. (Previously relaxed to distinct-tokens; re-strictened once
+    // the double-hold race in fileLock.ts was fixed — see docs/backlog.md.)
+    assert.equal(maxConcurrent, 1, "at most one holder at any instant, even through a concurrent stale-steal");
     assert.equal(new Set(tokens).size, N, "every acquirer must obtain a distinct token");
     await rmFs(lockPath, { force: true }); // best-effort cleanup
   });

@@ -1051,9 +1051,13 @@ describe("buildRemediationOutcomesReport — TST-cb981ad0: summarizeItemSpec and
           item_spec: {
             finding_id: "F1",
             concrete_change: "Fix the null dereference",
+            // TST-882697b6: ItemSpec.tests_to_write entries are { name, assertions }
+            // (state/types.ts). The fixture must model that real contract — not
+            // {name, description, acceptance_criteria} — so a regression in how
+            // summarizeItemSpec reads tests_to_write is actually caught.
             tests_to_write: [
-              { name: "test-auth-null", description: "desc", acceptance_criteria: [] },
-              { name: "test-auth-empty", description: "desc2", acceptance_criteria: [] },
+              { name: "test-auth-null", assertions: ["rejects null"] },
+              { name: "test-auth-empty", assertions: ["rejects empty"] },
             ],
             not_applicable_steps: [],
             touched_files: ["src/auth.ts", "src/util.ts"],

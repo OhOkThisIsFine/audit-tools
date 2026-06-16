@@ -190,3 +190,97 @@ test("discovered capability: absent context window leaves resolution unchanged",
   assert.equal(schedule.resolved_limits.context_tokens, 32_000);
   assert.notEqual(schedule.source, "discovered_capability");
 });
+
+// ── binding_cap precedence (TST-bf201bf7) ─────────────────────────────────────
+// The earlier tests pin each individual cap (rpm/tpm/learned/fallback/first_contact)
+// in isolation. These cover the *precedence* tail: the host-concurrency ceiling is
+// applied last and must override a looser quota cap, and an active cooldown short-
+// circuits all cap logic to a single slot.
+
+test("host_concurrency cap: a tighter host ceiling overrides a looser quota cap and binds last", () => {
+  // RPM would allow 8, but the host caps active_subagents at 2 → host wins.
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {
+      quota: {
+        enabled: true,
+        safety_margin: 1.0,
+        empirical_half_life_hours: 24,
+        models: { "test/model": { requests_per_minute: 8 } },
+      },
+    },
+    hostModel: "test/model",
+    requestedConcurrency: 8,
+    quotaStateEntry: null,
+    hostConcurrencyLimit: { active_subagents: 2 },
+  });
+  assert.equal(schedule.max_concurrent, 2, "host ceiling (2) must override the looser rpm cap (8)");
+  assert.equal(schedule.binding_cap, "host_concurrency");
+});
+
+test("host_concurrency cap: a looser host ceiling does NOT override a tighter quota cap", () => {
+  // RPM caps at 3; host allows 10 → rpm stays the binding cap, not host_concurrency.
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {
+      quota: {
+        enabled: true,
+        safety_margin: 1.0,
+        empirical_half_life_hours: 24,
+        models: { "test/model": { requests_per_minute: 3 } },
+      },
+    },
+    hostModel: "test/model",
+    requestedConcurrency: 20,
+    quotaStateEntry: null,
+    hostConcurrencyLimit: { active_subagents: 10 },
+  });
+  assert.equal(schedule.max_concurrent, 3, "rpm (3) is tighter than the host ceiling (10)");
+  assert.equal(schedule.binding_cap, "rpm");
+});
+
+test("cooldown cap: an active cooldown throttles to one slot and short-circuits cap logic", () => {
+  const future = new Date(Date.now() + 5 * 60_000).toISOString();
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {
+      quota: {
+        enabled: true,
+        safety_margin: 1.0,
+        empirical_half_life_hours: 24,
+        models: { "test/model": { requests_per_minute: 50 } },
+      },
+    },
+    hostModel: "test/model",
+    requestedConcurrency: 20,
+    quotaStateEntry: { updated_at: new Date().toISOString(), buckets: {}, cooldown_until: future, last_429_at: future },
+    hostConcurrencyLimit: null,
+  });
+  assert.equal(schedule.max_concurrent, 1, "an active cooldown caps the wave at a single slot");
+  assert.equal(schedule.binding_cap, "cooldown");
+  assert.equal(schedule.cooldown_until, future);
+});
+
+test("quota disabled: host ceiling still binds, otherwise binding_cap is 'none'", () => {
+  const capped = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: { quota: { enabled: false } },
+    hostModel: null,
+    requestedConcurrency: 6,
+    quotaStateEntry: null,
+    hostConcurrencyLimit: { active_subagents: 2 },
+  });
+  assert.equal(capped.max_concurrent, 2);
+  assert.equal(capped.binding_cap, "host_concurrency");
+
+  const uncapped = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: { quota: { enabled: false } },
+    hostModel: null,
+    requestedConcurrency: 6,
+    quotaStateEntry: null,
+    hostConcurrencyLimit: null,
+  });
+  assert.equal(uncapped.max_concurrent, 6);
+  assert.equal(uncapped.binding_cap, "none");
+});

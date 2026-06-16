@@ -7,6 +7,8 @@
 // JSONL. The channel is best-effort: a malformed line is skipped, never fatal,
 // and never competes with the actual audit/remediation obligation.
 
+import { severityRank } from "./types/lens.js";
+
 export type ReflectionClarity =
   | "clear"
   | "mostly_clear"
@@ -40,14 +42,6 @@ const SEVERITY_VALUES = new Set<ReflectionSeverity>([
   "high",
   "critical",
 ]);
-const SEVERITY_RANK: Record<ReflectionSeverity, number> = {
-  critical: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-  info: 0,
-};
-
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
@@ -146,7 +140,9 @@ export function aggregateReflections(
     for (const item of items ?? []) {
       const key = item.trim();
       if (key.length === 0) continue;
-      target.set(key, Math.max(target.get(key) ?? 0, SEVERITY_RANK[severity]));
+      // Canonical 1-based severity rank (shared single source); higher == more
+      // severe, so the most-impactful report of a duplicate note wins.
+      target.set(key, Math.max(target.get(key) ?? 0, severityRank(severity)));
     }
   };
 

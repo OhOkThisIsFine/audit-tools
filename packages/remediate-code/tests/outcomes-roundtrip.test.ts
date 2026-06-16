@@ -356,7 +356,40 @@ function summarizeSpec(spec: ItemSpec): ItemSpecSummary {
   };
 }
 
+/**
+ * Top-level keys declared in remediation_outcomes.schema.json. The schema is
+ * additionalProperties:false, so the on-disk file must not carry any key absent
+ * from this set (DAT-99284fb4). Kept in lockstep with the schema.
+ */
+const DECLARED_OUTCOMES_TOP_LEVEL_KEYS = new Set([
+  "contract_version",
+  "total",
+  "started_at",
+  "completed_at",
+  "duration_ms",
+  "by_outcome",
+  "by_lens",
+  "outcomes",
+  "ended_at",
+  "step_count",
+  "combined_test_result",
+  "e2e_result",
+  "closing_result",
+  "plan_coverage",
+]);
+
 describe("remediation-outcomes round-trip (OBL-018)", () => {
+  it("the written outcomes file carries no top-level key the schema rejects (DAT-99284fb4)", async () => {
+    const report = await completeRunAndDeleteState();
+    const undeclared = Object.keys(report).filter(
+      (key) => !DECLARED_OUTCOMES_TOP_LEVEL_KEYS.has(key),
+    );
+    expect(
+      undeclared,
+      `remediation-outcomes.json carries top-level keys not declared in remediation_outcomes.schema.json (additionalProperties:false): ${undeclared.join(", ")}`,
+    ).toEqual([]);
+  });
+
   it("a completed run writes an outcomes entry for every terminal disposition class", async () => {
     const report = await completeRunAndDeleteState();
 

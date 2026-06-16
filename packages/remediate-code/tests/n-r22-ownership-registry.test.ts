@@ -361,10 +361,15 @@ async function writeMinimalState(
         affected_files: [{ path: `src/${f.id}.ts` }],
         evidence: [],
       })),
+      // MNT-eefc3864: thread write_paths into the state block when a caller
+      // supplies it, so the shared `blocks` param means the same thing in both
+      // writeMinimalState and writeDispatchPlan (it was previously dropped here,
+      // silently diverging the two helpers).
       blocks: blocks.map((b) => ({
         block_id: b.block_id,
         items: b.items,
         parallel_safe: true,
+        ...(b.write_paths ? { write_paths: b.write_paths } : {}),
       })),
       project_type: "typescript",
       candidate_closing_actions: [],

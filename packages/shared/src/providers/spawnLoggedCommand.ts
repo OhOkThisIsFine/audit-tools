@@ -1,5 +1,6 @@
 import { createWriteStream, type WriteStream } from "node:fs";
 import { spawn } from "node:child_process";
+import { stripClaudeCodeEnv } from "../tooling/exec.js";
 import type {
   LaunchFreshSessionInput,
   LaunchFreshSessionResult,
@@ -110,6 +111,30 @@ class SpawnRunController {
     this.settle(() => this.reject(normalized));
   };
 
+  /**
+   * A failure on one of the per-run log WriteStreams (e.g. EACCES on the log
+   * dir, disk full). OBS-46d448f2: previously this routed straight to `fail`
+   * with the raw error, so a run that died purely because of log-file I/O was
+   * indistinguishable from a provider crash. Annotate the error with which
+   * stream/path failed so the rejection carries a durable, attributable signal.
+   */
+  private onLogStreamError = (
+    stream: "stdout" | "stderr",
+    path: string,
+  ): ((error: unknown) => void) => {
+    return (error: unknown): void => {
+      const cause = error instanceof Error ? error : new Error(String(error));
+      const annotated = new Error(
+        `Provider run ${this.input.runId} failed writing the ${stream} log (${path}): ${cause.message}`,
+        { cause },
+      );
+      if (this.input.uiMode === "visible") {
+        process.stderr.write(`[provider] ${annotated.message}\n`);
+      }
+      this.fail(annotated);
+    };
+  };
+
   private writeLog(write: WriteStream, chunk: Buffer | string): void {
     this.pendingLogWrites += 1;
     write.write(chunk, () => {
@@ -183,6 +208,31 @@ class SpawnRunController {
     }
   };
 
+  private emitOutputLine(line: string): void {
+    const trimmed = line.trim();
+    if (trimmed.length > 0 && this.input.onProgress) {
+      this.input.onProgress({
+        type: "output",
+        runId: this.input.runId,
+        obligationId: this.input.obligationId,
+        elapsedMs: Date.now() - this.startedAt,
+        message: trimmed,
+      });
+    }
+  }
+
+  /**
+   * Drain any trailing partial line (output with no terminating newline) as a
+   * final 'output' progress event. Without this, a worker whose last line lacks
+   * a trailing newline never surfaces that line (COR-64b4c9f5).
+   */
+  private flushStdoutLineBuf(): void {
+    if (this.stdoutLineBuf.length === 0) return;
+    const residual = this.stdoutLineBuf;
+    this.stdoutLineBuf = "";
+    this.emitOutputLine(residual);
+  }
+
   private onStdout = (chunk: Buffer): void => {
     this.writeLog(this.stdoutLog, chunk);
     if (this.input.uiMode === "visible") {
@@ -193,16 +243,7 @@ class SpawnRunController {
       const lines = this.stdoutLineBuf.split("\n");
       this.stdoutLineBuf = lines.pop() ?? "";
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.length > 0) {
-          this.input.onProgress({
-            type: "output",
-            runId: this.input.runId,
-            obligationId: this.input.obligationId,
-            elapsedMs: Date.now() - this.startedAt,
-            message: trimmed,
-          });
-        }
+        this.emitOutputLine(line);
       }
     }
   };
@@ -216,14 +257,21 @@ class SpawnRunController {
 
   /** Spawn the child and wire timers, heartbeat, and stream handlers. */
   start(): void {
-    this.stdoutLog.on("error", this.fail);
-    this.stderrLog.on("error", this.fail);
+    this.stdoutLog.on("error", this.onLogStreamError("stdout", this.input.stdoutPath));
+    this.stderrLog.on("error", this.onLogStreamError("stderr", this.input.stderrPath));
 
     let spawnedChild: ReturnType<typeof spawn>;
     try {
       spawnedChild = this.spawnProcess(this.command, this.args, {
         cwd: this.input.repoRoot,
-        env: { ...process.env, ...this.env },
+        // ARC-6d068334: scrub the host's interactive-session markers
+        // (CLAUDECODE / CLAUDE_CODE_*) from EVERY process the tool launches,
+        // including a provider session spawn — otherwise a worker session (and
+        // any test command it spawns) is graded against the host session state,
+        // the exact contamination the deterministic-command paths already scrub.
+        // Explicit per-run env overrides still win, then are scrubbed too so the
+        // trust boundary is uniform rather than holding only where remembered.
+        env: stripClaudeCodeEnv({ ...process.env, ...this.env }),
         stdio: [
           this.input.stdinText === undefined ? "ignore" : "pipe",
           "pipe",
@@ -277,6 +325,9 @@ class SpawnRunController {
       this.childClosed = true;
       this.closeCode = code;
       this.closeSignal = signal;
+      // Emit the final partial stdout line (no trailing newline) before settling
+      // so its 'output' progress event is not lost (COR-64b4c9f5).
+      this.flushStdoutLineBuf();
       this.maybeSettleFromClose();
     });
   }

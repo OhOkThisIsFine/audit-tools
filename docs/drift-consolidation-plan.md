@@ -6,12 +6,21 @@ programmatically connected (single-sourced in `shared`, or generated from one
 authority). Produced 2026-06-15 by a 6-way parallel recon sweep; every `file:line`
 and zero-importer claim was grep/Read-verified against current `src`.
 
-> **Status — landed 2026-06-15 (the "quick and easy" hand-batch):** the live merge-trap
-> bug (R2 bug part — `idRegistry.ensureNodeId`, +regression test), `AccessDeclaration`
-> dedup (P3), `mintUniqueId` extraction (P5), and the CLAUDE.md lock doc-fix. All green
-> (shared / remediate 1524 / audit). **Everything else below remains** for a later
-> session — the finding-identity *authority* (R2 authority part), R1/R3, E1–E5, G1, and
-> primitives P1/P2/P4/P6/P7/P8/P9.
+> **Status — consolidation COMPLETE 2026-06-15 (except R1 cutover).** The Wave-0
+> hand-batch landed the live merge-trap bug (R2 bug part — `idRegistry.ensureNodeId`,
+> +regression test), `AccessDeclaration` dedup (P3), `mintUniqueId` extraction (P5), and
+> the CLAUDE.md lock doc-fix. The 2026-06-15 self-remediation run then landed everything
+> else below: the finding-identity-signature **authority** (R2), the step-contract writer
+> (R3), the IDE host-asset renderers (E1), the allowlisted read-only command runner +
+> quote-verify grounding moved to `shared` (E2/E3) with remediate honoring
+> `finding.grounding` (G1), the shared provider classes (E4) +
+> `makeProviderKeyedFactory`/`collectClaudeCodeJsonLines` (E5), and primitives
+> P1/P2/P4/P6/P7/P8/P9 — each with a single-source guard test. **Only R1 (wire the
+> rolling engine) is not fully closed:** the engine is now wired into remediate's live
+> path behind a **default-OFF** flag with the host-wave fallback retained; the
+> atomic-replace cutover (flip the default + delete the fallback) + symmetric audit-code
+> wiring remain, gated on a validated real multi-worker dispatch (tracked in
+> `backlog.md` → *Self-audit 2026-06-15*, ARC-f378135d).
 
 This is the standing failure mode the repo keeps hitting: a concept gets extracted
 to `shared`, then a second copy is hand-written in an orchestrator and the two
@@ -168,10 +177,14 @@ What `@audit-tools/shared` *should* own after this plan, grouped by concern:
 
 ## Suggested sequencing
 
+This is the plan as executed; Waves 0–2 shipped 2026-06-15 and Wave 3 is partial (see
+the status note at the top). Kept as the durable record of how the consolidation was
+sequenced.
+
 1. **Wave 0 — mechanical, independent, low-risk (one session):** P3, P1, P2, P4, P5, P7, plus the R2 *bug* fix and the CLAUDE.md doc fix below. Pure extractions/fixes; each kills a latent divergence and has near-zero blast radius. Add a guard test per primitive (asserting the single source).
 2. **Wave 1 — identity & grounding authority:** R2 (finding-identity authority), E2 + E3 + G1 (grounding moves to shared and both ends consume it), P6, P9.
 3. **Wave 2 — product surfaces:** R3 (step writer), E1 (host renderers), E4 + E5 (providers), P8 (artifact paths).
-4. **Wave 3 — architectural:** R1 (wire the rolling engine; biggest, atomic-replace, owned by backlog).
+4. **Wave 3 — architectural:** R1 (wire the rolling engine; biggest, atomic-replace, owned by backlog). **Partial — wired behind a default-OFF flag; cutover remains.**
 
 Each wave ends green (`npm run build -w @audit-tools/shared && npm run build && npm run check`) per the green-at-every-commit hook.
 
@@ -180,7 +193,7 @@ Each wave ends green (`npm run build -w @audit-tools/shared && npm run build && 
 ## Cleared — legitimately separate (do NOT re-investigate)
 
 - **`providers/constants.ts` ×3 and `quota/hostLimits.ts` ×3** — already unified: re-export shims / 21-line adapters binding only a distinct `ENV_PREFIX` over a single shared definition. Seam-test-enforced. (`hostLimits` is *collapsible* to a `makeHostLimits(prefix)` factory but it's cosmetic, ~15 lines.)
-- **File locking** — already unified: `remediate-code/src/state/store.ts` uses shared `withFileLock`/`STALE_LOCK_MS`; no hand-rolled backoff remains. The known stale-lock-steal race is tracked separately in backlog. **Doc fix:** CLAUDE.md still describes store.ts's lock as "20ms initial backoff, 250ms max, 20 retries" — stale; the live code is the shared 50ms→500ms backoff / `STALE_LOCK_MS=30s`.
+- **File locking** — already unified: `remediate-code/src/state/store.ts` uses shared `withFileLock`/`STALE_LOCK_MS`; no hand-rolled backoff remains. The stale-lock-steal double-hold race was fixed 2026-06-15 (lease-style `stealStaleLock` via an exclusive `.steal` sidecar; strict `maxConcurrent===1` assertion restored). The CLAUDE.md doc-fix (now describing the shared 50ms→500ms backoff / `STALE_LOCK_MS=30s`, store.ts adding no backoff of its own) landed and is guarded by `packages/audit-code/tests/file-lock-doc-sync.test.mjs`.
 - **Token estimation** — single-sourced `estimateTokensFromBytes` + constants; no ad-hoc `/4` math, no tokenizer dep. (`reviewPacketSizing.ts` re-exports the shared constants.)
 - **Chunking** — `audit-code/src/orchestrator/chunking.ts` is audit-only line-range splitting; remediate operates on finding/block granularity. No second consumer → not worth pre-emptive hoisting.
 - **`mapWithConcurrency`** — correctly shared and used at ingest/grounding; dispatch correctly needs the richer rolling engine (R1), not this primitive.

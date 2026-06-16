@@ -28,6 +28,72 @@ rather than "where the code is today."
 
 ## Known friction (agent / dev experience)
 
+### Contract-pipeline friction surfaced during the 2026-06-15 self-remediation (systematic fixes wanted)
+
+Hit while driving the full `remediate-code` contract pipeline over the 227-finding
+audit + backlog + drift-plan. Ethan: find systematic fixes so this can't bite any
+agent (strong or weak), not "be careful" patches.
+
+- **Magic numbers, esp. the adversarial-pass count (=2) — audit ALL of them.** The
+  critic→judge→repair loop runs a fixed number of rounds; dispatch concurrency, the
+  60s anchor timeout, STALE_LOCK_MS=30s, hashContent slice lengths (8/16/32),
+  BLOCK_SAFETY_MARGIN, the `>=4`-token paired-keyword heuristic, etc. are all magic.
+  Investigate where each is *really* justified vs. should be derived/config/until-converged
+  (e.g. run adversarial rounds until a clean round, not a fixed 2). (Ethan, 2026-06-16.)
+- **Re-reviews are full passes over unchanged designs — make them diff-based.** When an
+  upstream artifact's content-hash changes, the conceptual critique / counterexample /
+  assessment re-run as *full* passes even when the change was cosmetic (e.g. adding
+  gate-satisfying verbatim text to `outputs` with no design change). A re-review should
+  diff against the prior-reviewed version (with file access for context) and only
+  re-examine what changed, returning "prior verdict still holds" cheaply. Today the host
+  must either burn another full critic subagent (~100-190k tokens) or hand-re-emit the
+  prior verdict. (Ethan, 2026-06-16.)
+- **Staleness cascade re-runs the whole downstream chain on every upstream edit.** Any
+  edit to finalized_module_contracts re-stales obligation_ledger → test_validator_plan →
+  contract_assessment (and the host must re-author each), even when the obligation set is
+  unchanged (stable ids). Cosmetic/text-only upstream changes shouldn't force full
+  downstream re-authoring. Pairs with the diff-review item: staleness should be
+  content/semantics-aware, or downstream artifacts keyed on the *obligation set* not the
+  raw upstream hash.
+- **Paired-obligation gate (OBL-CO-01) keyword regex is a hidden contract.** It scans each
+  obligation's assertions for a positive-signal word (`passes|returns|produces|valid|
+  matches|...`) AND a negative-signal word (`reject|throw|fail|never|not|...`); a `\b`
+  word boundary means "POSITIVE:"/"NEGATIVE:" prefixes and words like "reproduced"
+  (≠ `\bproduces\b`) DON'T satisfy it. Caused several rewrite loops. Fix: accept the
+  explicit POSITIVE/NEGATIVE labels the prompt implies, or state the required keyword set
+  in the prompt, or replace the regex heuristic with the explicit labels.
+- **S5 seam-derivation gate (INV-CO-12) ignores `seam_adjustments`.** It builds its corpus
+  from inputs/outputs/invariants/side_effects/validation_boundary only and requires every
+  ≥4-char token of each seam `agreed_interface` to appear there — but `seam_adjustments`
+  (the natural place to record a seam decision) is NOT scanned. Recording the decision
+  where it belongs fails the gate; you must duplicate the verbatim interface into
+  `outputs`. Fix: scan `seam_adjustments` too, or document the corpus + require the
+  reflection there.
+- **validate-artifact wants the plain payload; next-step wraps the file in a content-hash
+  envelope.** After next-step, every artifact on disk is `{artifact_name, content_hash,
+  dependency_hashes, payload}`; `validate-artifact` then rejects it (expects top-level
+  contract_version/...). To re-validate or re-edit you must unwrap `.payload` back to a
+  plain file. Non-obvious round-trip; either make validate-artifact accept the wrapped
+  form, or don't rewrap files the host may still edit.
+- **Async typecheck hook = stale-dist false alarm after shared edits.** After a worker
+  edits `@audit-tools/shared/src`, the PostToolUse hook runs a dependent package's `tsc`
+  against the not-yet-rebuilt `shared/dist` and reports phantom "no exported member"
+  errors. Authoritative fix is the central single-flight `npm run build -w
+  @audit-tools/shared`. Hook should rebuild shared first (or scope to the edited package
+  only / debounce to the final edit). (Recurrence of the known mid-edit-hook item.)
+- **Worker "build+check green" can be true for the worker yet stale for the next consumer.**
+  A worker that edits shared can pass its own check (it rebuilt shared/dist) but the value
+  to the *next* node depends on the central rebuild-between-levels actually running; a
+  worker's green claim alone isn't sufficient. The rolling-engine wire-in (N-rolling)
+  should own this; until then the host must run the central rebuild after each shared-
+  touching merge.
+- **Workers can't distinguish serial-prior edits from concurrent sessions.** Under serial
+  host dispatch, worker N sees workers 1..N-1's edits as a "dirty tree" and (citing the
+  memory note about concurrent sessions) assumed live concurrent writers. Harmless here
+  because write-scope was respected, but the worker should be told its declared
+  write-scope + that prior in-scope edits are expected — the rolling write-scope/ownership
+  enforcement (ARC-f378135d-2) is the real fix.
+
 - **`quota` command silently drops the capability-handshake flags.** The
   informational `quota` command parses neither the scalar
   `--host-context-tokens`/`--host-output-tokens` pair nor
@@ -151,74 +217,38 @@ rather than "where the code is today."
 ### Self-audit 2026-06-15 — confirmed dispatch / contract bugs (HIGH)
 
 Surfaced live during a self-audit run (and independently by a Codex Desktop run on
-another checkout). All three are grounded; the first two are the headline fixes.
+another checkout). **Remediated 2026-06-15 except the rolling-engine cutover:** the
+worker-prompt inline-vs-write contract mismatch (packet prompt now writes its
+`AuditResult[]` to `result_path`, drift guard test added), the `quoted_text`
+ungrounded root cause (a verbatim quote per finding is now effectively mandatory in
+the packet prompt + self-check), and the `.gemini`/IDE-renderer `--host-models`
+continuation drift (every IDE asset now derives from the one canonical body with a
+no-drift guard) all shipped this run. The one item still open is the rolling-engine
+cutover below.
 
-- **Worker-prompt inline-vs-write contract mismatch (data-loss / scale-defeating).**
-  The rolling-dispatch STEP prompt tells the host "each worker writes its own
-  `AuditResult[]` to its `result_path`," but the generated WORKER PACKET prompt
-  (rendered by `src/cli/dispatch/packetPrompt.ts` / `src/prompts/renderWorkerPrompt.ts`)
-  forbids writing files and tells the worker to return JSON **inline** for the host
-  to capture. So reviewers return valid JSON in chat and write nothing: a capable
-  host must hand-capture every payload (defeating the "keep worker payloads out of
-  host context" scaling goal), and a weaker host silently loses results. Confirmed
-  twice (Codex Desktop; this session — packets 1/3/4 wrote nothing until I
-  force-overrode the prompt). FIX: make the two agree — the worker packet prompt must
-  instruct writing the `AuditResult[]` to its `result_path` (merge-and-ingest already
-  recovers by `task_id`). Enforce-in-tooling: a contract test asserting the rendered
-  worker prompt contains the write-to-`result_path` instruction and does NOT forbid
-  writes, so the step prompt and packet prompt can never drift again.
-
-- **Dispatch is host-waved, not quota-driven rolling — the rolling engine is DORMANT.**
-  Despite ~a dozen refactors of the quota/concurrency math, runs still dispatch in
-  host-managed waves: the dispatch step computes a static N-packet plan with
-  `max_concurrent_agents` = the raw host-reported flag and hands it to the host to
-  pace. The 2026-06-15 conceptual design review found the root cause — the rolling
-  dispatch + worktree engine (`runRollingDispatch` / `driveRollingDispatch` /
-  `createWorktree`) has **zero non-test callers**: built, refactored repeatedly, never
-  wired into the live path. So "compute capacity from quota + dispatch rolling" exists
-  as code but is unused; every run falls back to the host waving packets. FIX
-  (headline; Ethan flagged hard 2026-06-15): wire the rolling engine into the live
-  dispatch path so concurrency derives from quota/capacity (not the raw flag) and
-  dispatch is rolling (dispatch-next-on-complete), atomic-replacing the host-wave
-  fallback (atomic-replace invariant). **DECISION 2026-06-15 (Ethan): WIRE THE ENGINE
-  IN — option (a), NOT delete. Make concurrency quota-derived + dispatch-next-on-complete
-  + move verify-before-accept/write-scope into the deterministic merge. Deferred to a
-  later session.** Before cutting, verify the dormant-caller claim
-  across `shared/src/quota/rollingEngine.ts`, `shared/src/dispatch/rollingDispatch.ts`,
-  `audit-code/src/orchestrator/rollingDispatch.ts`, and `remediate-code/src/steps/dispatch.ts`
-  + `nextStep.ts`. Note the architectural constraint: in conversation-first mode the
-  HOST spawns subagents (the CLI can't spawn Claude agents), so the tool must either
-  drive rolling via the local-subprocess provider, or own the dispatch-next-on-complete
-  bookkeeping the host executes — not just emit a static plan.
-
-- **`.gemini/commands/audit-code.toml` (+ skill loader) continuation drops `--host-models`.**
-  The initial next-step instructions document `--host-models`, but the continuation
-  instructions list only `--host-context-tokens` / `--host-output-tokens`, so a
-  multi-model audit silently reverts to conservative packet sizing after step 1. The
-  capability-flag block is also documented twice and the copies have drifted. (Found
-  by Codex Desktop; the source template lives in `packages/audit-code` and deploys to
-  host repos.) FIX: single-source the capability-flag block and include `--host-models`
-  in the continuation guidance everywhere (skill loader, `.gemini` toml, and the other
-  host command files the wrapper installs). **SHARPENED (Ethan 2026-06-15) — prompts are
-  UNIVERSAL, dispatched per IDE:** the real fix is one canonical prompt body
-  (`skills/audit-code/audit-code.prompt.md`) rendered to each IDE's required file, adapting
-  format only — never per-IDE authored prose. Root cause confirmed in
-  `audit-code-wrapper-install-renderers.mjs`: only `renderGeminiCommandToml(promptBody)`
-  renders from the canonical body; `renderVSCodeAgentFile` / `renderCodexAutomationRecipe` /
-  `renderAntigravityPlanningGuide` author bespoke per-IDE prose that drifts and omits the
-  next-step/capability handshake entirely. So: (1) state the flag block ONCE in the body,
-  continuation references it and MUST include `--host-models`; (2) drive every IDE target
-  from that one body; (3) add a no-drift guard test (committed rendered asset == freshly
-  rendered from source) so a stale render like COR-82a96420 cannot recur. See memory
-  `universal-host-prompts-single-source`.
-
-- **Most worker findings came back `ungrounded` (missing `quoted_text`).** This run:
-  136 of 140 findings marked ungrounded at ingest because workers populated
-  `affected_files` with line/symbol but omitted `quoted_text`, so S7 quote-grounding
-  could not verify them. They're surfaced/quarantined, not deleted, but the signal is
-  badly degraded. FIX: make `quoted_text` effectively mandatory for a finding to count
-  as grounded — the worker packet prompt should require a verbatim quote per
-  `affected_files` entry, and the renderer/self-check should warn when it's absent.
+- **Dispatch is host-waved, not quota-driven rolling — engine WIRED behind a flag; cutover remains.**
+  Root cause (2026-06-15 conceptual review): the rolling dispatch + worktree engine
+  (`runRollingDispatch` / `driveRollingDispatch` / `createWorktree`) had **zero
+  non-test callers** — built, refactored repeatedly, never wired into the live path,
+  so every run fell back to the host waving a static N-packet plan with
+  `max_concurrent_agents` = the raw host flag. **DECISION 2026-06-15 (Ethan): WIRE THE
+  ENGINE IN — option (a), NOT delete.** **Partial as of 2026-06-15:** remediate-code now
+  has `driveRollingImplementDispatch` driving the shared `createRollingDispatcher` over
+  quota-derived pools (`computeDispatchCapacity`, not the raw flag) with
+  dispatch-next-on-complete, per-node isolated worktree, and verify-before-accept +
+  write-scope/lost-update enforcement folded into the deterministic merge — but it is
+  gated behind a **default-OFF** flag (`dispatch.rolling_engine` /
+  `REMEDIATE_ROLLING_ENGINE`) and the host-fanned wave step is **retained as the
+  default fallback** (the conversation host has no programmatic per-node dispatcher, so
+  it still takes the fallback). **Remaining:** (1) the atomic-replace removal of the
+  host-wave fallback + flip the flag default ON, gated on a *validated* real
+  multi-worker rolling dispatch (don't force the cutover); (2) symmetric wiring of
+  audit-code's `runRollingDispatch` into the audit live path with the same flag-gated
+  pattern (still dormant); (3) harden worktree-branch reuse across a `rate_limited`
+  re-queue inside the in-process driver. Architectural constraint stands: in
+  conversation-first mode the HOST spawns subagents, so the tool must drive rolling via
+  the local-subprocess provider or own the dispatch-next-on-complete bookkeeping the
+  host executes — not just emit a static plan.
 
 ### Auditor-agnostic robustness — enforce-in-tooling fixes (2026-06-14)
 
@@ -294,53 +324,26 @@ finding_id trap, `--host-can-dispatch-subagents`, conversation-start intake — 
 
 ### Cross-package drift map — reinvented pieces to unite (2026-06-15)
 
-A 6-way recon sweep mapped code duplicated/reinvented across `shared` +
-the two orchestrators that should be single-sourced. Full plan with verified
-`file:line` evidence, fix sketches, and a suggested 4-wave sequence:
-[`drift-consolidation-plan.md`](drift-consolidation-plan.md). The big items
-already live above (dormant rolling engine; IDE-renderer drift; implement-worker
-`finding_id`). **New** items the sweep added, not otherwise tracked:
+A 6-way recon sweep mapped code duplicated/reinvented across `shared` + the two
+orchestrators that should be single-sourced. Full plan with verified `file:line`
+evidence: [`drift-consolidation-plan.md`](drift-consolidation-plan.md).
 
-- **Live merge-trap bug (S, do first):** `remediate-code/src/steps/contractPipeline.ts`
-  derives a DAG node's id with a `?? CP-NNN` fallback for the finding id (`:1579`) but
-  uses **raw** `node.id` for `block_id: toBlockId(node.id)` / `items` (`:1658-1659`);
-  a missing LLM-authored `node.id` → finding `CP-001` vs block `CP-BLOCK-undefined` →
-  result lands `unresolved`. Mint the node id once (or `idRegistry.ensureNodeId`).
-- **No shared finding-identity authority:** `shared` `findingIdentity()` is imported by
-  no orchestrator; three divergent "same finding" rules (audit signature-hash, remediate
-  Jaccard dedup, coverage bare-id). Promote audit's `findingIdentitySignature` to shared.
-- **Grounding lives only in audit-code:** the allowlisted read-only command runner
-  (`anchorGrounding.ts`, a tool-wide *security* policy) and quote-verify
-  (`quoteGrounding.ts`) should move to `shared`; and remediate ignores the auditor's
-  `finding.grounding`/quarantine verdict on the structured path (seam drift).
-- **Step-contract writer duplicated** with real Windows path-separator divergence (audit
-  skips remediate's `toPromptPathToken` normalization) → shared `writeStepContract`.
-- **Small primitives reinvented N×:** model-tier ordinal (3–5×), severity/confidence
-  rank tables (5×, two with *inverted/off-by-one* values — latent bug), `AccessDeclaration`
-  type (3× identical, shared export unused), atomic JSON write (inline in `store.ts`,
-  double-applied in `runLedger.ts`), `mintUniqueId` suffix loop, `sha256` content hash
-  (inconsistent slice lengths), repo-path normalizer (3×), `.audit-tools/<half>` path
-  resolution (audit default ignores `--root` — latent bug), and the provider classes /
-  `headerExtractors` family.
-- **Doc fix:** CLAUDE.md describes `store.ts`'s lock as "20ms backoff, 250ms max, 20
-  retries" — stale; the live code uses the shared `withFileLock` (50→500ms, 30s stale).
+**Status — consolidation shipped 2026-06-15 (this self-remediation run).** Every
+drift item the sweep found has landed: the live merge-trap bug (`ensureNodeId`), the
+shared finding-identity-signature authority (R2), the step-contract writer (R3), the
+IDE host-asset renderers (E1), the allowlisted read-only command runner + quote-verify
+grounding moved to shared (E2/E3) with remediate honoring `finding.grounding` (G1), the
+shared provider classes (E4) and `makeProviderKeyedFactory`/`collectClaudeCodeJsonLines`
+(E5), and the small primitives P1–P9 (model-tier ordinal, severity/confidence rank
+tables — fixing the inverted/off-by-one copies, `AccessDeclaration`, the single atomic
+JSON writer, `mintUniqueId`, `hashContent`, `normalizeRepoPath`, the `.audit-tools` path
+module, and the dispatch-tail/`model_hint.tier` prose) — each with a single-source guard
+test. The CLAUDE.md lock doc-fix landed in Wave-0 and is now guarded by
+`packages/audit-code/tests/file-lock-doc-sync.test.mjs`. **The only drift-plan item not
+fully closed is R1 (wire the rolling engine), tracked above under *Self-audit 2026-06-15*
+— wired behind a default-OFF flag this run, with the atomic cutover still remaining.**
 
 ## Deferred fixes (product bugs)
-
-### Narrow stale-lock-steal double-hold race in `withFileLock`
-
-`removeStaleLock` (`packages/shared/src/quota/fileLock.ts`) checks the stale token
-then unlinks in two non-atomic steps. When multiple acquirers race to steal the
-*same* >30s-stale lock, one can unlink a lock another just freshly re-created in the
-read→unlink gap, briefly admitting two holders (mutual exclusion violated for a
-window). Surfaced 2026-06-13 by a 5-way concurrent-steal test that asserted
-`maxConcurrent === 1` and flaked ~1-in-3 (`2 !== 1`); that assertion was relaxed to
-the in-scope property (distinct tokens / no token corruption, which the token-check
-*does* guarantee — FND-TST-a50db947). Impact is low: it only triggers on concurrent
-stealing of a crashed/hung holder's lock, and `state.json` acquisition is ~serial in
-the orchestrators. A correct fix needs lease-style ownership verification or a truly
-atomic claim (a rename-claim still has its own TOCTOU) — not a quick inline patch.
-Re-add the strict mutual-exclusion assertion to `fileLock.test.mjs` once fixed.
 
 ### Manual real-OpenCode validation of scoped permissions (user-owned)
 

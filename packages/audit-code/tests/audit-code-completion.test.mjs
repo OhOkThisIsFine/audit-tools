@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { countLines } from "./helpers/countLines.mjs";
 
+// Step contracts normalize host-facing paths to forward slashes (drift-plan R3).
+const { toPromptPathToken } = await import("@audit-tools/shared");
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
 const wrapperPath = join(repoRoot, "audit-code.mjs");
@@ -363,10 +366,11 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
 
     assert.ok(presented, "next-step must reach present_report");
     assert.equal(presented.status, "complete");
-    // Completion promotes the canonical report to .audit-tools/ (parent of the artifacts dir).
+    // Completion promotes the canonical report to .audit-tools/ (parent of the
+    // artifacts dir). The step contract normalizes the path to forward slashes.
     assert.equal(
       presented.artifact_paths.final_report,
-      join(root, ".audit-tools", "audit-report.md"),
+      toPromptPathToken(join(root, ".audit-tools", "audit-report.md")),
     );
     assert.match(
       await readFile(presented.artifact_paths.final_report, "utf8"),

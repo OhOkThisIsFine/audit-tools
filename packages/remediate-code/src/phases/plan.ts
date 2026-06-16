@@ -11,7 +11,10 @@ import {
 import { writeFile, readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import type { AuditFindingsReport, FindingTheme, IntentCheckpoint } from "@audit-tools/shared";
-import { isValidAuditFindingsReport } from "@audit-tools/shared";
+import {
+  isValidAuditFindingsReport,
+  findingNeedsVerificationBeforeFix,
+} from "@audit-tools/shared";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
@@ -909,6 +912,24 @@ export async function runPlanPhase(
       findings = parsed.findings;
       blocks = parsed.blocks;
       themes = parsed.themes;
+      // G1 + INV-GND-02: the auditor's grounding pass (S7) marks each finding
+      // grounded or ungrounded; a finding with NO grounding verdict is treated
+      // as ungrounded (verify-before-fix), never silently trusted. Surface the
+      // not-positively-grounded findings here so the operator sees them; the
+      // implement prompt additionally instructs the worker to verify such a
+      // finding against the cited code before applying any fix (see
+      // implementPrompt's grounding bullet). Findings are not dropped for being
+      // ungrounded — they are flagged for verification, not blindly fixed.
+      const needVerification = findings.filter((f) =>
+        findingNeedsVerificationBeforeFix(f),
+      );
+      if (needVerification.length > 0) {
+        console.warn(
+          `Plan: ${needVerification.length} of ${findings.length} audit finding(s) are ungrounded or carry no grounding verdict; they will be verified-before-fix, not blindly applied: ${needVerification
+            .map((f) => f.id)
+            .join(", ")}`,
+        );
+      }
     } else {
       console.log(`Extracting findings from input via LLM: ${options.input}`);
       const extracted = await (deps.extractFindings

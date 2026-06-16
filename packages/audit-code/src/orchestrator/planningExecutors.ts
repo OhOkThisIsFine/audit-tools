@@ -25,6 +25,7 @@ import { computeRiskEstimate } from "./auditTaskUtils.js";
 import { buildTaskAffinityGraph } from "./taskAffinityGraph.js";
 import { resolveEffectiveLenses } from "./lensSelection.js";
 import { autoCompleteTrivialCoverage } from "./trivialAudit.js";
+import { interpretFreeFormIntentForAudit } from "./intentInterpreter.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { AuditTask, Lens } from "../types.js";
 
@@ -32,31 +33,27 @@ import type { AuditTask, Lens } from "../types.js";
 // Free-form intent interpreter (keyword → lens boost, deterministic, no LLM)
 // ---------------------------------------------------------------------------
 
-const KEYWORD_LENS_MAP: Array<{ keywords: string[]; lens: Lens }> = [
-  { keywords: ["security", "auth", "authentication", "authorization", "secrets", "credentials"], lens: "security" },
-  { keywords: ["data", "integrity", "validation", "validate", "schema"], lens: "data_integrity" },
-  { keywords: ["perf", "performance", "speed", "latency", "throughput"], lens: "performance" },
-  { keywords: ["test", "tests", "testing", "coverage"], lens: "tests" },
-  { keywords: ["reliability", "resilience", "fault", "retry", "failover"], lens: "reliability" },
-  { keywords: ["observability", "logging", "metrics", "tracing", "monitoring"], lens: "observability" },
-  { keywords: ["config", "configuration", "deployment", "deploy", "environment"], lens: "config_deployment" },
-  { keywords: ["architecture", "design", "structure", "coupling", "dependency", "dependencies"], lens: "architecture" },
-  { keywords: ["maintainability", "maintainable", "readability", "readable", "lint", "style"], lens: "maintainability" },
-  { keywords: ["correctness", "bug", "bugs", "logic", "errors"], lens: "correctness" },
-];
-
 /**
  * Interpret a free-form intent string into lenses to priority-boost.
- * Deterministic keyword scan — no LLM call.
+ *
+ * Single authority: this delegates to the shared clause-aware interpreter via
+ * `interpretFreeFormIntentForAudit` (→ `@audit-tools/shared` `interpretIntent`).
+ * There is exactly one keyword/lens map in the codebase — the shared
+ * `LENS_KEYWORD_MAP`. Lens boosts are derived from the `lens_weight` encoded
+ * clauses; unencodable clauses are NOT silently dropped here — they are gated
+ * upstream as blocking checkpoint questions (see `state.ts`
+ * `intent_checkpoint_current` and `confirmIntentStep.ts`).
+ *
+ * Deterministic — no LLM call.
  * INV-S04: the verbatim intent string never appears in output fields.
  */
 export function interpretFreeFormIntent(text: string): Lens[] {
   if (!text || text.trim().length === 0) return [];
-  const lower = text.toLowerCase();
+  const interpretation = interpretFreeFormIntentForAudit(text);
   const boosts = new Set<Lens>();
-  for (const { keywords, lens } of KEYWORD_LENS_MAP) {
-    if (keywords.some((kw) => lower.includes(kw))) {
-      boosts.add(lens);
+  for (const clause of interpretation.encoded_clauses) {
+    if (clause.kind === "lens_weight" && clause.lens) {
+      boosts.add(clause.lens);
     }
   }
   return [...boosts];
@@ -166,26 +163,25 @@ export async function runPlanningExecutor(
         bundle.runtime_validation_report,
       )
     : undefined;
-  // Interpret free_form_intent into lens priority boosts (deterministic, no LLM).
+  // Interpret free_form_intent into lens priority boosts via the single shared
+  // clause-aware authority (deterministic, no LLM). Unencodable clauses are NOT
+  // dropped here — they are gated upstream as a blocking checkpoint question
+  // (state.ts intent_checkpoint_current), so by the time planning runs every
+  // clause is either an encoded signal or an explicitly host-answered constraint.
   const freeFormIntent = bundle.intent_checkpoint?.free_form_intent ?? "";
   const intentBoostLenses = interpretFreeFormIntent(freeFormIntent);
   if (freeFormIntent.trim().length > 0) {
-    const matchedKeywords: string[] = [];
-    const unmatchedKeywords: string[] = [];
-    const lowerIntent = freeFormIntent.toLowerCase();
-    for (const { keywords, lens } of KEYWORD_LENS_MAP) {
-      const matched = keywords.filter((kw) => lowerIntent.includes(kw));
-      if (matched.length > 0) {
-        matchedKeywords.push(...matched.map((kw) => `${kw}→${lens}`));
-      } else {
-        unmatchedKeywords.push(...keywords.slice(0, 1).map((kw) => kw));
-      }
-    }
+    const interpretation = interpretFreeFormIntentForAudit(freeFormIntent);
+    // INV-S04: derived signal only — never the verbatim free_form_intent. Each
+    // encoded clause's `detail` is a generated description, not the raw input.
+    const encodedSignals = interpretation.encoded_clauses.map(
+      (c) => `${c.kind}${c.lens ? `:${c.lens}` : ""}`,
+    );
     process.stderr.write(
       JSON.stringify({
         kind: "intent_keyword_interpretation",
         boosted_lenses: intentBoostLenses,
-        matched_keywords: matchedKeywords,
+        encoded_signals: encodedSignals,
         ts: new Date().toISOString(),
       }) + "\n",
     );

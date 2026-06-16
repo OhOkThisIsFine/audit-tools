@@ -9,28 +9,41 @@
  * command to such a claim, the tool runs it, and the confirmed bit is the tool's
  * run — never the model's word. A refuting run quarantines the finding.
  *
- * SAFETY. The command is model-authored, so it is run only when its executable
- * is on an **inspection-only allowlist** (no node/npm/rm/bare-git — nothing that
- * can mutate the repo or run arbitrary code), under a **timeout**, with the
- * host-signalling env stripped (shared `stripClaudeCodeEnv`), and never via a
- * shell. Anything off the allowlist is *skipped* (recorded, not run) and the
+ * SAFETY. The command is model-authored, so it runs only when both its
+ * executable AND its arguments pass the shared **default-deny allowlist**
+ * (`isAllowedAnchorCommand` — CRIT ARC-a06a3945: validates args, not just the
+ * executable, so `rg --pre`, `ast-grep --rewrite`, non-read-only git, etc. are
+ * refused). It runs under a timeout, with the host-signalling env stripped, and
+ * never via a shell — all owned by the shared `runAllowlistedReadOnlyCommand`
+ * runner. Anything off the allowlist is *skipped* (recorded, not run) and the
  * finding falls back to tier-1 grounding. The whole pass can be disabled with
  * `AUDIT_CODE_DISABLE_ANCHORS=1`.
  */
-import { spawn } from "node:child_process";
 import { availableParallelism } from "node:os";
-import { stripClaudeCodeEnv } from "@audit-tools/shared";
+import {
+  ALLOWLISTED_EXEC_TIMEOUT_MS,
+  ANCHOR_ALLOWLIST,
+  GIT_READONLY_SUBCOMMANDS,
+  isAllowedAnchorCommand,
+  normalizeForMatch,
+  runAllowlistedReadOnlyCommand,
+} from "@audit-tools/shared";
 import type {
+  AllowlistedExecOutcome,
+  AllowlistedExecRunner,
   AnchorExpectation,
   ExecutableAnchor,
   Finding,
   FindingGrounding,
 } from "@audit-tools/shared";
-import { resolveRuntimeValidationSpawnCommand } from "../orchestrator/runtimeCommand.js";
-import { normalizeForMatch } from "./quoteGrounding.js";
+
+// Re-export the allowlist authority so existing audit-code import sites
+// (`../validation/anchorGrounding.js`) keep working — the implementation is now
+// single-sourced in shared (drift-plan E2; CRIT arg-validation).
+export { isAllowedAnchorCommand, ANCHOR_ALLOWLIST, GIT_READONLY_SUBCOMMANDS };
 
 /** Per-anchor wall-clock budget; a slower command is killed and inconclusive. */
-export const ANCHOR_TIMEOUT_MS = 60_000;
+export const ANCHOR_TIMEOUT_MS = ALLOWLISTED_EXEC_TIMEOUT_MS;
 
 /**
  * Bounded concurrency for the ingest grounding pass. Anchors spawn child
@@ -44,116 +57,16 @@ export const ANCHOR_GROUNDING_CONCURRENCY = Math.max(
   Math.min(8, availableParallelism()),
 );
 
-/**
- * Inspection-only executables a model-authored anchor may invoke. Every entry is
- * read-only with no write/exec flag that could mutate the repo: searchers
- * (grep/ripgrep/findstr), structural search (ast-grep), and the dependency-cycle
- * analyzer (madge). Deliberately excludes node/npm/npx (arbitrary code), rm/del
- * (destructive), and bare git (mutating subcommands) — git is allowed only for
- * the read-only subcommands below.
- */
-export const ANCHOR_ALLOWLIST: ReadonlySet<string> = new Set([
-  "grep",
-  "rg",
-  "ripgrep",
-  "findstr",
-  "madge",
-  "ast-grep",
-  "sg",
-]);
-
-/** Read-only git subcommands an anchor may run (no checkout/reset/clean/push/…). */
-export const GIT_READONLY_SUBCOMMANDS: ReadonlySet<string> = new Set([
-  "grep",
-  "log",
-  "diff",
-  "show",
-  "ls-files",
-  "cat-file",
-  "blame",
-  "rev-parse",
-  "status",
-]);
-
-/** Bare executable name: strip any directory and a Windows .cmd/.bat/.exe suffix. */
-function executableBaseName(token: string): string {
-  return token
-    .trim()
-    .replace(/\\/g, "/")
-    .split("/")
-    .pop()!
-    .replace(/\.(cmd|bat|exe)$/i, "")
-    .toLowerCase();
-}
-
-/**
- * True when `command`'s executable is on the inspection-only allowlist (and, for
- * git, the subcommand is read-only). The single authority for what the tool will
- * auto-run on the model's behalf.
- */
-export function isAllowedAnchorCommand(command: string[]): boolean {
-  const exe = command[0];
-  if (typeof exe !== "string" || exe.trim() === "") return false;
-  const base = executableBaseName(exe);
-  if (base === "git") {
-    return GIT_READONLY_SUBCOMMANDS.has((command[1] ?? "").trim().toLowerCase());
-  }
-  return ANCHOR_ALLOWLIST.has(base);
-}
-
 /** Outcome of actually running an anchor command (injectable for tests). */
-export interface AnchorRunOutcome {
-  exit_code: number | null;
-  timed_out: boolean;
-  spawn_error?: string;
-  /** Full combined stdout+stderr (bounded), used to evaluate output_* matches. */
-  output: string;
-}
+export type AnchorRunOutcome = AllowlistedExecOutcome;
+export type AnchorRunner = AllowlistedExecRunner;
 
-export type AnchorRunner = (
-  command: string[],
-  cwd: string,
-  timeoutMs: number,
-) => Promise<AnchorRunOutcome>;
-
-const MAX_CAPTURED_OUTPUT = 256 * 1024;
-
-const defaultAnchorRunner: AnchorRunner = (command, cwd, timeoutMs) =>
-  new Promise((resolvePromise) => {
-    const spawnCommand = resolveRuntimeValidationSpawnCommand(command);
-    const child = spawn(spawnCommand.command, spawnCommand.args, {
-      cwd,
-      env: stripClaudeCodeEnv(),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let output = "";
-    const capture = (chunk: unknown) => {
-      if (output.length < MAX_CAPTURED_OUTPUT) output += String(chunk);
-    };
-    child.stdout.on("data", capture);
-    child.stderr.on("data", capture);
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      const hardKill = setTimeout(() => child.kill("SIGKILL"), 2_000);
-      hardKill.unref?.();
-    }, timeoutMs);
-    timer.unref?.();
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolvePromise({
-        exit_code: null,
-        timed_out: timedOut,
-        spawn_error: error.message,
-        output,
-      });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolvePromise({ exit_code: code, timed_out: timedOut, output });
-    });
-  });
+/**
+ * The single read-only command runner for anchor verification — the shared
+ * allowlisted runner (argv-only, env-stripped, timeout-killed). Exposed under
+ * the local name so injected test runners and callers are unchanged.
+ */
+const defaultAnchorRunner: AnchorRunner = runAllowlistedReadOnlyCommand;
 
 /** Verdict of an anchor run, folded into the finding's grounding by the caller. */
 export interface AnchorResult {
@@ -244,7 +157,7 @@ export async function verifyFindingAnchor(
   if (!isAllowedAnchorCommand(anchor.command)) {
     return {
       status: "skipped",
-      summary: `\`${anchor.command[0]}\` is not in the inspection-only anchor allowlist; not auto-run`,
+      summary: `\`${anchor.command.join(" ")}\` is not on the inspection-only anchor allowlist (executable or arguments refused); not auto-run`,
     };
   }
 

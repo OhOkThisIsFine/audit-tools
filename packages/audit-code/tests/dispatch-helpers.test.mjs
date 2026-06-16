@@ -8,6 +8,7 @@ const {
   collectOversizedWarnings,
   resolveTierBudgets,
 } = await import("../src/cli/dispatch.ts");
+const { renderRollingDispatchPrompt } = await import("../src/cli/prompts.ts");
 
 // ── filterPackets ─────────────────────────────────────────────────────────────
 
@@ -103,7 +104,7 @@ test("buildPacketPrompt — assembles expected prompt sections", () => {
   assert.match(prompt, /valid: abc, findings=/);
 });
 
-test("N-A06: buildPacketPrompt — instructs inline emit, includes result_path, no submit-packet command", () => {
+test("N-worker-prompt-and-result-contract: buildPacketPrompt — writes to result_path, requires quoted_text, no submit-packet command", () => {
   const packet = makePacket("abc");
   const packetTasks = [makeAuditTask("abc")];
   const fileList = "- src/abc.ts (100 lines)";
@@ -116,16 +117,83 @@ test("N-A06: buildPacketPrompt — instructs inline emit, includes result_path, 
   assert.doesNotMatch(prompt, /submit-packet/, "prompt must NOT contain submit-packet");
   assert.doesNotMatch(prompt, /Get-Content.*\|.*&/, "prompt must NOT contain PowerShell Get-Content pipe workaround");
 
-  // result_path is present
+  // result_path is present and the worker is told to WRITE it (not emit inline)
   assert.ok(prompt.includes(resultPath), "prompt must include the result_path value");
   assert.match(prompt, /result_path:/, "prompt must have result_path field in header");
+  assert.match(
+    prompt,
+    /WRITE that array[\s\S]*to your result_path/i,
+    "prompt must instruct the worker to write the array to result_path",
+  );
 
-  // Inline emit instruction
-  assert.match(prompt, /emit.*inline/i, "prompt must instruct worker to emit inline");
-  assert.match(prompt, /skill captures/i, "prompt must state skill captures the payload");
+  // Must NOT forbid writes or instruct inline-only emission (the data-loss bug)
+  assert.doesNotMatch(prompt, /Do not write files/i, "prompt must NOT forbid file writes");
+  assert.doesNotMatch(prompt, /emit it INLINE/i, "prompt must NOT instruct inline-only emission");
+  assert.doesNotMatch(prompt, /skill captures/i, "prompt must NOT defer capture to a skill");
 
-  // Still forbids ad-hoc writes
-  assert.match(prompt, /Do not write files/i, "prompt must still forbid ad-hoc file writes");
+  // quoted_text grounding is effectively mandatory (the 174-ungrounded root cause)
+  assert.match(prompt, /quoted_text/, "prompt must reference quoted_text in the finding schema");
+  assert.match(
+    prompt,
+    /Grounding \(required\)/i,
+    "prompt must include a required grounding instruction",
+  );
+});
+
+// ── step-prompt ↔ packet-prompt result contract (no drift) ─────────────────────
+
+test("N-worker-prompt-and-result-contract: rolling-dispatch step prompt and packet prompt agree the worker WRITES its result_path", () => {
+  // The headline self-audit bug was a drift: the rolling-dispatch step prompt
+  // told the host each worker writes its AuditResult[] to result_path, while the
+  // generated worker packet prompt forbade writes and demanded inline JSON — so
+  // reviewers wrote nothing and results were lost. This contract test fails if
+  // either side regresses to the inline-only / forbid-writes contract.
+  const stepPrompt = renderRollingDispatchPrompt({
+    root: "/repo",
+    artifactsDir: "/repo/.audit-tools/audit",
+    runId: "run-1",
+    dispatchPlanPath: "/repo/.audit-tools/audit/runs/run-1/dispatch-plan.json",
+    dispatchQuotaPath: "/repo/.audit-tools/audit/runs/run-1/dispatch-quota.json",
+    hostCanRestrictSubagentTools: true,
+    hostCanSelectSubagentModel: false,
+  });
+  const resultPath = "/repo/.audit-tools/audit/runs/run-1/task-results/abc-inline-result.json";
+  const packetPrompt = buildPacketPrompt({
+    packet: makePacket("abc"),
+    packetTasks: [makeAuditTask("abc")],
+    fileList: "- src/abc.ts (100 lines)",
+    largeFileSection: [],
+    taskSections: ["### task-abc"],
+    resultPath,
+  });
+
+  // Step prompt side: workers write their own result_path; pre-approval grants
+  // write to that path; no "they do not write files" contradiction.
+  assert.match(
+    stepPrompt,
+    /writes? its own AuditResult\[\] (JSON )?array to its assigned\s+`entry\.result_path`/i,
+    "step prompt must state workers write to entry.result_path",
+  );
+  assert.match(
+    stepPrompt,
+    /grant write access to that subagent's `entry\.result_path`/i,
+    "step prompt pre-approval must grant write to entry.result_path",
+  );
+  assert.doesNotMatch(
+    stepPrompt,
+    /read-only; they do not write files/i,
+    "step prompt must not say workers are read-only / do not write files",
+  );
+
+  // Packet prompt side: the worker is told to WRITE the same result_path and is
+  // never told to emit inline or forbidden from writing.
+  assert.match(
+    packetPrompt,
+    /WRITE that array[\s\S]*to your result_path/i,
+    "packet prompt must instruct the worker to write to result_path",
+  );
+  assert.doesNotMatch(packetPrompt, /emit it INLINE/i, "packet prompt must not instruct inline emission");
+  assert.doesNotMatch(packetPrompt, /Do not write files/i, "packet prompt must not forbid file writes");
 });
 
 // ── buildTaskSections ─────────────────────────────────────────────────────────

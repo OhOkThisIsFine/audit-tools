@@ -12,6 +12,7 @@ import {
   normalizeExtractorPath,
 } from "../extractors/pathPatterns.js";
 import { isMandatoryLens } from "./lensSelection.js";
+import { unresolvedConstraintClauses } from "./intentInterpreter.js";
 import { LENSES } from "@audit-tools/shared";
 
 /**
@@ -312,12 +313,51 @@ export function computeScopePreDigest(
  * `confirm_intent` host step (see `cli/confirmIntentStep.ts`); this runs only
  * when `advanceAudit` is driven headlessly with no host to confirm scope,
  * writing a default full-scope checkpoint so the pipeline can proceed.
+ *
+ * Idempotent over an existing checkpoint: an already-written checkpoint (e.g. a
+ * host-confirmed one with `free_form_intent`) is preserved, not clobbered. If
+ * such a checkpoint carries unencodable clauses, headless mode cannot pose a
+ * blocking question, so each unresolved clause is recorded as a
+ * `constraint_clauses` entry with an explicit headless default answer — the
+ * directive is escalated into the contract (never silently dropped) and the
+ * `intent_checkpoint_current` gate converges instead of looping.
  */
 export function runIntentCheckpointAutoComplete(
   bundle: ArtifactBundle,
   root: string,
   since?: string,
 ): ExecutorRunResult {
+  const existing = bundle.intent_checkpoint;
+  if (existing) {
+    const unresolved = unresolvedConstraintClauses(existing);
+    if (unresolved.length === 0) {
+      // Already current — nothing to do; do not overwrite a confirmed checkpoint.
+      return {
+        updated: bundle,
+        artifacts_written: [],
+        progress_summary:
+          "Scope/intent checkpoint already present and current; left unchanged (headless).",
+      };
+    }
+    // Record each unresolved unencodable clause as a host-answered constraint so
+    // it survives into planning rather than being silently dropped headlessly.
+    const recorded = unresolved.map((c) => ({
+      text: c.text,
+      checkpoint_question: c.checkpoint_question,
+      host_answer:
+        "Headless auto-resolution: no host available to clarify; clause recorded as a planning constraint with no extra weighting.",
+    }));
+    const intent: IntentCheckpoint = {
+      ...existing,
+      constraint_clauses: [...(existing.constraint_clauses ?? []), ...recorded],
+    };
+    return {
+      updated: { ...bundle, intent_checkpoint: intent },
+      artifacts_written: ["intent_checkpoint.json"],
+      progress_summary: `Auto-resolved ${recorded.length} unencodable free_form_intent clause(s) into recorded constraints (headless); none dropped.`,
+    };
+  }
+
   const preDigest = computeScopePreDigest(bundle, root, since);
   const intent: IntentCheckpoint = {
     schema_version: "intent-checkpoint/v1",

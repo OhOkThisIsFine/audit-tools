@@ -81,6 +81,38 @@ function requireOneOf(
   }
 }
 
+/**
+ * Shared envelope guard for every contract-pipeline validator (MNT-86b18f1b):
+ * the isRecord guard + contract_version match + optional goal_id check that each
+ * validator opened with verbatim. Returns the value narrowed to a record when it
+ * is one, or `undefined` when it is not (the caller returns its issues early).
+ * The trailing `created_at` check stays in each validator since it runs after
+ * the artifact-specific body.
+ */
+function validateEnvelope(
+  value: unknown,
+  path: string,
+  expectedVersion: string,
+  issues: ValidationIssue[],
+  opts: { goalId?: boolean } = { goalId: true },
+): Record<string, unknown> | undefined {
+  if (!isRecord(value)) {
+    pushValidationIssue(issues, path, `${path} must be an object.`);
+    return undefined;
+  }
+  if (value.contract_version !== expectedVersion) {
+    pushValidationIssue(
+      issues,
+      `${path}.contract_version`,
+      `${path}.contract_version must be "${expectedVersion}".`,
+    );
+  }
+  if (opts.goalId !== false) {
+    requireString(value.goal_id, `${path}.goal_id`, issues);
+  }
+  return value;
+}
+
 // ── GoalSpec ──────────────────────────────────────────────────────────────────
 
 export function validateGoalSpec(
@@ -88,28 +120,18 @@ export function validateGoalSpec(
   path = "goal_spec",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CONTRACT_PIPELINE_GOAL_SPEC_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CONTRACT_PIPELINE_GOAL_SPEC_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  requireString(value.objective, `${path}.objective`, issues);
-  requireStringArray(value.non_goals, `${path}.non_goals`, issues);
-  requireStringArray(value.success_criteria, `${path}.success_criteria`, issues);
+  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_GOAL_SPEC_VERSION, issues);
+  if (!v) return issues;
+  requireString(v.objective, `${path}.objective`, issues);
+  requireStringArray(v.non_goals, `${path}.non_goals`, issues);
+  requireStringArray(v.success_criteria, `${path}.success_criteria`, issues);
   requireOneOf(
-    value.source_type,
+    v.source_type,
     ["conversation", "document", "structured_audit", "mixed"],
     `${path}.source_type`,
     issues,
   );
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -120,22 +142,12 @@ export function validateContextBundle(
   path = "context_bundle",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.entries)) {
+  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.entries)) {
     pushValidationIssue(issues, `${path}.entries`, `${path}.entries must be an array.`);
   } else {
-    for (const [i, entry] of value.entries.entries()) {
+    for (const [i, entry] of v.entries.entries()) {
       if (!isRecord(entry)) {
         pushValidationIssue(issues, `${path}.entries[${i}]`, `${path}.entries[${i}] must be an object.`);
         continue;
@@ -145,8 +157,8 @@ export function validateContextBundle(
       requireString(entry.relevance_reason, `${path}.entries[${i}].relevance_reason`, issues);
     }
   }
-  requireString(value.context_summary, `${path}.context_summary`, issues);
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.context_summary, `${path}.context_summary`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -157,22 +169,12 @@ export function validateModuleDecomposition(
   path = "module_decomposition",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CP_MODULE_DECOMPOSITION_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CP_MODULE_DECOMPOSITION_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.modules)) {
+  const v = validateEnvelope(value, path, CP_MODULE_DECOMPOSITION_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.modules)) {
     pushValidationIssue(issues, `${path}.modules`, `${path}.modules must be an array.`);
   } else {
-    for (const [i, mod] of value.modules.entries()) {
+    for (const [i, mod] of v.modules.entries()) {
       if (!isRecord(mod)) {
         pushValidationIssue(issues, `${path}.modules[${i}]`, `${path}.modules[${i}] must be an object.`);
         continue;
@@ -182,7 +184,7 @@ export function validateModuleDecomposition(
       requireStringArray(mod.file_scope, `${path}.modules[${i}].file_scope`, issues);
     }
   }
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -203,22 +205,12 @@ export function validateModuleContracts(
   path = "module_contracts",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CP_MODULE_CONTRACTS_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CP_MODULE_CONTRACTS_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.module_contracts)) {
+  const v = validateEnvelope(value, path, CP_MODULE_CONTRACTS_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.module_contracts)) {
     pushValidationIssue(issues, `${path}.module_contracts`, `${path}.module_contracts must be an array.`);
   } else {
-    for (const [i, mod] of value.module_contracts.entries()) {
+    for (const [i, mod] of v.module_contracts.entries()) {
       if (!isRecord(mod)) {
         pushValidationIssue(issues, `${path}.module_contracts[${i}]`, `${path}.module_contracts[${i}] must be an object.`);
         continue;
@@ -226,7 +218,7 @@ export function validateModuleContracts(
       validateModuleContractEntry(mod, `${path}.module_contracts[${i}]`, issues);
     }
   }
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -237,22 +229,12 @@ export function validateSeamReconciliationReport(
   path = "seam_reconciliation_report",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CP_SEAM_RECONCILIATION_REPORT_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CP_SEAM_RECONCILIATION_REPORT_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.mismatches)) {
+  const v = validateEnvelope(value, path, CP_SEAM_RECONCILIATION_REPORT_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.mismatches)) {
     pushValidationIssue(issues, `${path}.mismatches`, `${path}.mismatches must be an array.`);
   } else {
-    for (const [i, mismatch] of value.mismatches.entries()) {
+    for (const [i, mismatch] of v.mismatches.entries()) {
       if (!isRecord(mismatch)) {
         pushValidationIssue(issues, `${path}.mismatches[${i}]`, `${path}.mismatches[${i}] must be an object.`);
         continue;
@@ -282,7 +264,7 @@ export function validateSeamReconciliationReport(
       }
     }
   }
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -293,22 +275,12 @@ export function validateFinalizedModuleContracts(
   path = "finalized_module_contracts",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CP_FINALIZED_MODULE_CONTRACTS_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CP_FINALIZED_MODULE_CONTRACTS_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.module_contracts)) {
+  const v = validateEnvelope(value, path, CP_FINALIZED_MODULE_CONTRACTS_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.module_contracts)) {
     pushValidationIssue(issues, `${path}.module_contracts`, `${path}.module_contracts must be an array.`);
   } else {
-    for (const [i, mod] of value.module_contracts.entries()) {
+    for (const [i, mod] of v.module_contracts.entries()) {
       if (!isRecord(mod)) {
         pushValidationIssue(issues, `${path}.module_contracts[${i}]`, `${path}.module_contracts[${i}] must be an object.`);
         continue;
@@ -316,7 +288,7 @@ export function validateFinalizedModuleContracts(
       validateModuleContractEntry(mod, `${path}.module_contracts[${i}]`, issues);
     }
   }
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -327,23 +299,13 @@ export function validateDesignSpec(
   path = "design_spec",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CONTRACT_PIPELINE_DESIGN_SPEC_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CONTRACT_PIPELINE_DESIGN_SPEC_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  requireString(value.design_narrative, `${path}.design_narrative`, issues);
-  if (!Array.isArray(value.invariants)) {
+  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_DESIGN_SPEC_VERSION, issues);
+  if (!v) return issues;
+  requireString(v.design_narrative, `${path}.design_narrative`, issues);
+  if (!Array.isArray(v.invariants)) {
     pushValidationIssue(issues, `${path}.invariants`, `${path}.invariants must be an array.`);
   } else {
-    for (const [i, inv] of value.invariants.entries()) {
+    for (const [i, inv] of v.invariants.entries()) {
       if (!isRecord(inv)) {
         pushValidationIssue(issues, `${path}.invariants[${i}]`, `${path}.invariants[${i}] must be an object.`);
         continue;
@@ -352,8 +314,8 @@ export function validateDesignSpec(
       requireString(inv.description, `${path}.invariants[${i}].description`, issues);
     }
   }
-  requireStringArray(value.affected_paths, `${path}.affected_paths`, issues);
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireStringArray(v.affected_paths, `${path}.affected_paths`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -380,22 +342,12 @@ export function validateConceptualDesignCritique(
   path = "conceptual_design_critique",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.items)) {
+  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.items)) {
     pushValidationIssue(issues, `${path}.items`, `${path}.items must be an array.`);
   } else {
-    for (const [i, item] of value.items.entries()) {
+    for (const [i, item] of v.items.entries()) {
       if (!isRecord(item)) {
         pushValidationIssue(issues, `${path}.items[${i}]`, `${path}.items[${i}] must be an object.`);
         continue;
@@ -406,8 +358,8 @@ export function validateConceptualDesignCritique(
       requireOneOf(item.severity, ["blocking", "advisory"], `${path}.items[${i}].severity`, issues);
     }
   }
-  requireOneOf(value.verdict, ["approved", "approved_with_concerns", "rejected"], `${path}.verdict`, issues);
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireOneOf(v.verdict, ["approved", "approved_with_concerns", "rejected"], `${path}.verdict`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -418,22 +370,12 @@ export function validateObligationLedger(
   path = "obligation_ledger",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.obligations)) {
+  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.obligations)) {
     pushValidationIssue(issues, `${path}.obligations`, `${path}.obligations must be an array.`);
   } else {
-    for (const [i, obl] of value.obligations.entries()) {
+    for (const [i, obl] of v.obligations.entries()) {
       if (!isRecord(obl)) {
         pushValidationIssue(issues, `${path}.obligations[${i}]`, `${path}.obligations[${i}] must be an object.`);
         continue;
@@ -445,7 +387,7 @@ export function validateObligationLedger(
       requireOneOf(obl.status, ["pending", "satisfied", "failed"], `${path}.obligations[${i}].status`, issues);
     }
   }
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -458,22 +400,12 @@ export function validateTestValidatorPlan(
   path = "test_validator_plan",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.test_specs)) {
+  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.test_specs)) {
     pushValidationIssue(issues, `${path}.test_specs`, `${path}.test_specs must be an array.`);
   } else {
-    for (const [i, spec] of value.test_specs.entries()) {
+    for (const [i, spec] of v.test_specs.entries()) {
       if (!isRecord(spec)) {
         pushValidationIssue(issues, `${path}.test_specs[${i}]`, `${path}.test_specs[${i}] must be an object.`);
         continue;
@@ -512,7 +444,7 @@ export function validateTestValidatorPlan(
       }
     }
   }
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -523,22 +455,12 @@ export function validateContractAssessmentReport(
   path = "contract_assessment_report",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.findings)) {
+  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.findings)) {
     pushValidationIssue(issues, `${path}.findings`, `${path}.findings must be an array.`);
   } else {
-    for (const [i, finding] of value.findings.entries()) {
+    for (const [i, finding] of v.findings.entries()) {
       if (!isRecord(finding)) {
         pushValidationIssue(issues, `${path}.findings[${i}]`, `${path}.findings[${i}] must be an object.`);
         continue;
@@ -549,8 +471,8 @@ export function validateContractAssessmentReport(
       requireString(finding.rationale, `${path}.findings[${i}].rationale`, issues);
     }
   }
-  requireOneOf(value.verdict, ["passed", "failed", "partial"], `${path}.verdict`, issues);
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireOneOf(v.verdict, ["passed", "failed", "partial"], `${path}.verdict`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -561,22 +483,12 @@ export function validateCounterexample(
   path = "counterexample",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.counterexamples)) {
+  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.counterexamples)) {
     pushValidationIssue(issues, `${path}.counterexamples`, `${path}.counterexamples must be an array.`);
   } else {
-    for (const [i, entry] of value.counterexamples.entries()) {
+    for (const [i, entry] of v.counterexamples.entries()) {
       if (!isRecord(entry)) {
         pushValidationIssue(issues, `${path}.counterexamples[${i}]`, `${path}.counterexamples[${i}] must be an object.`);
         continue;
@@ -589,7 +501,7 @@ export function validateCounterexample(
       requireStringArray(entry.violated_obligation_ids, `${path}.counterexamples[${i}].violated_obligation_ids`, issues);
     }
   }
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -616,23 +528,13 @@ export function validateJudgeReport(
   path = "judge_report",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CONTRACT_PIPELINE_JUDGE_REPORT_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CONTRACT_PIPELINE_JUDGE_REPORT_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  requireOneOf(value.verdict, ["approved", "needs_repair"], `${path}.verdict`, issues);
-  if (!Array.isArray(value.classifications)) {
+  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_JUDGE_REPORT_VERSION, issues);
+  if (!v) return issues;
+  requireOneOf(v.verdict, ["approved", "needs_repair"], `${path}.verdict`, issues);
+  if (!Array.isArray(v.classifications)) {
     pushValidationIssue(issues, `${path}.classifications`, `${path}.classifications must be an array.`);
   } else {
-    for (const [i, entry] of value.classifications.entries()) {
+    for (const [i, entry] of v.classifications.entries()) {
       if (!isRecord(entry)) {
         pushValidationIssue(issues, `${path}.classifications[${i}]`, `${path}.classifications[${i}] must be an object.`);
         continue;
@@ -642,8 +544,8 @@ export function validateJudgeReport(
       requireString(entry.rationale, `${path}.classifications[${i}].rationale`, issues);
     }
   }
-  if (value.verdict === "needs_repair") {
-    if (!isRecord(value.repair_directive)) {
+  if (v.verdict === "needs_repair") {
+    if (!isRecord(v.repair_directive)) {
       pushValidationIssue(
         issues,
         `${path}.repair_directive`,
@@ -651,15 +553,15 @@ export function validateJudgeReport(
       );
     }
   }
-  if (value.repair_directive !== undefined) {
-    if (!isRecord(value.repair_directive)) {
+  if (v.repair_directive !== undefined) {
+    if (!isRecord(v.repair_directive)) {
       pushValidationIssue(issues, `${path}.repair_directive`, `${path}.repair_directive must be an object.`);
     } else {
-      requireOneOf(value.repair_directive.target, JUDGE_REPAIR_TARGETS, `${path}.repair_directive.target`, issues);
-      requireString(value.repair_directive.instruction, `${path}.repair_directive.instruction`, issues);
+      requireOneOf(v.repair_directive.target, JUDGE_REPAIR_TARGETS, `${path}.repair_directive.target`, issues);
+      requireString(v.repair_directive.instruction, `${path}.repair_directive.instruction`, issues);
     }
   }
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -670,23 +572,13 @@ export function validateImplementationDAG(
   path = "implementation_dag",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.nodes)) {
+  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.nodes)) {
     pushValidationIssue(issues, `${path}.nodes`, `${path}.nodes must be an array.`);
   } else {
     const nodeIds = new Set<string>();
-    for (const [i, node] of value.nodes.entries()) {
+    for (const [i, node] of v.nodes.entries()) {
       if (!isRecord(node)) {
         pushValidationIssue(issues, `${path}.nodes[${i}]`, `${path}.nodes[${i}] must be an object.`);
         continue;
@@ -716,10 +608,10 @@ export function validateImplementationDAG(
       if (typeof node.id === "string") nodeIds.add(node.id);
     }
   }
-  if (!Array.isArray(value.edges)) {
+  if (!Array.isArray(v.edges)) {
     pushValidationIssue(issues, `${path}.edges`, `${path}.edges must be an array.`);
   } else {
-    for (const [i, edge] of value.edges.entries()) {
+    for (const [i, edge] of v.edges.entries()) {
       if (!isRecord(edge)) {
         pushValidationIssue(issues, `${path}.edges[${i}]`, `${path}.edges[${i}] must be an object.`);
         continue;
@@ -729,7 +621,7 @@ export function validateImplementationDAG(
       requireOneOf(edge.kind, ["dependency", "verification"], `${path}.edges[${i}].kind`, issues);
     }
   }
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -740,21 +632,16 @@ export function validateVerificationReport(
   path = "verification_report",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION}".`,
-    );
-  }
-  if (!Array.isArray(value.findings)) {
+  // VerificationReport has no goal_id at the top level (it carries an optional
+  // goal_id elsewhere); skip the goal_id envelope check for this artifact.
+  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION, issues, {
+    goalId: false,
+  });
+  if (!v) return issues;
+  if (!Array.isArray(v.findings)) {
     pushValidationIssue(issues, `${path}.findings`, `${path}.findings must be an array.`);
   } else {
-    for (const [i, finding] of value.findings.entries()) {
+    for (const [i, finding] of v.findings.entries()) {
       if (!isRecord(finding)) {
         pushValidationIssue(issues, `${path}.findings[${i}]`, `${path}.findings[${i}] must be an object.`);
         continue;
@@ -778,8 +665,8 @@ export function validateVerificationReport(
       requireOneOf(finding.overall_status, ["passed", "failed"], `${path}.findings[${i}].overall_status`, issues);
     }
   }
-  requireOneOf(value.overall_status, ["passed", "failed"], `${path}.overall_status`, issues);
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireOneOf(v.overall_status, ["passed", "failed"], `${path}.overall_status`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 
@@ -790,22 +677,12 @@ export function validateCyclicSeamResolution(
   path = "cyclic_seam_resolution",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!isRecord(value)) {
-    pushValidationIssue(issues, path, `${path} must be an object.`);
-    return issues;
-  }
-  if (value.contract_version !== CP_CYCLIC_SEAM_RESOLUTION_VERSION) {
-    pushValidationIssue(
-      issues,
-      `${path}.contract_version`,
-      `${path}.contract_version must be "${CP_CYCLIC_SEAM_RESOLUTION_VERSION}".`,
-    );
-  }
-  requireString(value.goal_id, `${path}.goal_id`, issues);
-  if (!Array.isArray(value.cycles)) {
+  const v = validateEnvelope(value, path, CP_CYCLIC_SEAM_RESOLUTION_VERSION, issues);
+  if (!v) return issues;
+  if (!Array.isArray(v.cycles)) {
     pushValidationIssue(issues, `${path}.cycles`, `${path}.cycles must be an array.`);
   } else {
-    for (const [i, cycle] of value.cycles.entries()) {
+    for (const [i, cycle] of v.cycles.entries()) {
       if (!isRecord(cycle)) {
         pushValidationIssue(issues, `${path}.cycles[${i}]`, `${path}.cycles[${i}] must be an object.`);
         continue;
@@ -820,12 +697,12 @@ export function validateCyclicSeamResolution(
     }
   }
   requireOneOf(
-    value.status,
+    v.status,
     CYCLIC_SEAM_RESOLUTION_STATUSES,
     `${path}.status`,
     issues,
   );
-  requireString(value.created_at, `${path}.created_at`, issues);
+  requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
 }
 

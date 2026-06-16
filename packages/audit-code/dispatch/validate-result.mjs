@@ -14,9 +14,11 @@ if (!runId || !taskId) {
   process.exit(1);
 }
 
+// Default must match where the orchestrator/wrapper actually writes runs:
+// <root>/.audit-tools/audit (COR-bf5c7331), not the legacy `.audit-artifacts`.
 const artifactsDir = artifactsDirIdx !== -1 && process.argv[artifactsDirIdx + 1]
   ? resolve(process.argv[artifactsDirIdx + 1])
-  : join(process.cwd(), ".audit-artifacts");
+  : join(process.cwd(), ".audit-tools", "audit");
 
 const sanitized = taskId.replace(/[^a-zA-Z0-9_-]/g, "_");
 const resultPath = join(artifactsDir, "runs", runId, "task-results", sanitized + ".json");

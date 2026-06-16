@@ -12,7 +12,7 @@ export const LENS_KEYWORD_MAP: Array<{ keywords: string[]; lens: Lens }> = [
   { keywords: ["data_integrity", "data integrity", "data quality", "integrity"], lens: "data_integrity" },
   { keywords: ["observability", "logging", "monitoring", "tracing", "metrics", "logs"], lens: "observability" },
   { keywords: ["operability", "ops", "runbook", "runbooks", "operations"], lens: "operability" },
-  { keywords: ["maintainability", "maintainability", "readability", "clean code", "debt", "technical debt", "refactor"], lens: "maintainability" },
+  { keywords: ["maintainability", "readability", "clean code", "debt", "technical debt", "refactor"], lens: "maintainability" },
   { keywords: ["architecture", "arch", "coupling", "cohesion", "design", "structure"], lens: "architecture" },
   { keywords: ["reliability", "resilience", "fault tolerance", "availability", "uptime"], lens: "reliability" },
   { keywords: ["performance", "perf", "latency", "throughput", "speed", "slow", "fast", "optimis", "optimiz"], lens: "performance" },

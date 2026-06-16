@@ -226,16 +226,83 @@ describe("hashFile / hashFileSync — INV-remediate-state-10: ENOENT returns und
 // (tested via the nextStep stripPlanTimeBookkeeping internals through a structural check)
 // ---------------------------------------------------------------------------
 
-describe("Finding identity — INV-remediate-state-11: plan-time bookkeeping fields are language-neutral and isolated", () => {
-  it("AffectedFile shape has hash_at_plan_time as an optional field (structural check)", () => {
-    // The type compiles: an AffectedFile without hash_at_plan_time is valid.
-    const af: Parameters<typeof hashFileSync>[0] extends string ? never : never = "" as never;
-    void af; // suppress unused variable
+describe("Finding identity — INV-remediate-state-11: plan-time bookkeeping fields are isolated from carry-forward identity", () => {
+  // The carry-forward identity (nextStep.ts `findingCarryForwardKey`) is a
+  // canonical JSON of the finding with the plan-time bookkeeping keys stripped,
+  // so a re-plan whose only delta is a recomputed file hash / grounding flag
+  // carries the prior item (and its item_spec) forward, while a real change to
+  // the finding does not. The keys stripped are documented in nextStep.ts.
+  // (`findingCarryForwardKey` is module-internal to the rolling-dispatch-engine
+  // module; this test pins the invariant contract the source must uphold rather
+  // than the tautology that an object literal lacks a field. Deep integration
+  // coverage through decideNextStep's re-plan path lives with that module.)
+  const PLAN_TIME_BOOKKEEPING_KEYS = new Set(["hash_at_plan_time", "evidence_grounded"]);
 
-    // Structural: an object with only path is a valid affected_files entry.
-    const minimalEntry = { path: "src/foo.ts" };
-    expect(minimalEntry.path).toBe("src/foo.ts");
-    expect("hash_at_plan_time" in minimalEntry).toBe(false);
-    expect("evidence_grounded" in minimalEntry).toBe(false);
+  function stripPlanTimeBookkeeping(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map((v) => stripPlanTimeBookkeeping(v));
+    if (!value || typeof value !== "object") return value;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      if (PLAN_TIME_BOOKKEEPING_KEYS.has(key)) continue;
+      out[key] = stripPlanTimeBookkeeping((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  const carryForwardKey = (finding: unknown): string =>
+    JSON.stringify(stripPlanTimeBookkeeping(finding));
+
+  const baseFinding = {
+    id: "F-001",
+    title: "First",
+    category: "correctness",
+    severity: "high",
+    confidence: "high",
+    lens: "correctness",
+    summary: "Fix first.",
+    affected_files: [{ path: "src/a.ts" }],
+    evidence: ["src/a.ts:1 evidence"],
+  };
+
+  it("two findings differing ONLY in plan-time bookkeeping share a carry-forward key", () => {
+    const planned = {
+      ...baseFinding,
+      affected_files: [
+        { path: "src/a.ts", hash_at_plan_time: "abc123", evidence_grounded: true },
+      ],
+    };
+    const replanned = {
+      ...baseFinding,
+      affected_files: [
+        // Same finding, re-read at a different time → new hash, re-evaluated flag.
+        { path: "src/a.ts", hash_at_plan_time: "def456", evidence_grounded: false },
+      ],
+    };
+    expect(carryForwardKey(planned)).toBe(carryForwardKey(replanned));
+  });
+
+  it("a finding differing in a real field does NOT share a carry-forward key", () => {
+    const planned = { ...baseFinding, affected_files: [{ path: "src/a.ts" }] };
+    const realChange = { ...baseFinding, severity: "low" };
+    expect(carryForwardKey(planned)).not.toBe(carryForwardKey(realChange));
+
+    // A different cited file is also a real change (not bookkeeping).
+    const movedFile = { ...baseFinding, affected_files: [{ path: "src/b.ts" }] };
+    expect(carryForwardKey(planned)).not.toBe(carryForwardKey(movedFile));
+  });
+
+  it("key derivation is order-insensitive for object keys (canonicalization)", () => {
+    const a = { ...baseFinding };
+    const b = {
+      evidence: baseFinding.evidence,
+      affected_files: baseFinding.affected_files,
+      summary: baseFinding.summary,
+      lens: baseFinding.lens,
+      confidence: baseFinding.confidence,
+      severity: baseFinding.severity,
+      category: baseFinding.category,
+      title: baseFinding.title,
+      id: baseFinding.id,
+    };
+    expect(carryForwardKey(a)).toBe(carryForwardKey(b));
   });
 });

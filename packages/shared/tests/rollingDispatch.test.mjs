@@ -39,13 +39,6 @@ function unlimitedSession() {
   return { quota: { enabled: false } };
 }
 
-// Session config with quota disabled but hostConcurrencyLimit=N
-function limitedSession(n) {
-  return {
-    quota: { enabled: false },
-  };
-}
-
 async function setupTmpQuotaDir() {
   const dir = await mkdtemp(join(tmpdir(), "rolling-dispatch-test-"));
   setQuotaStateDir(dir);
@@ -97,15 +90,15 @@ test("InFlightTokenTracker — records and releases tokens per pool", async (t) 
 // selectProvider
 // ---------------------------------------------------------------------------
 
-test("selectProvider — returns null when all pools are at quota capacity", async () => {
+test("selectProvider — a single pool nominally at RPM=0 still yields a slot (scheduleWave floors wave_size at 1)", async () => {
+  // The title used to read "returns null when all pools are at quota capacity",
+  // which contradicted the assertion below: scheduleWave clamps wave_size with
+  // Math.max(1, …) so a pool can never report zero headroom, and selectProvider
+  // therefore returns a slot, not null. The genuine all-exhausted negative case
+  // (every pool dropped after exhaustion) is covered by
+  // "selectProvider — returns null when every pool is exhausted".
   await setupTmpQuotaDir();
   const packet = makePacket("p1", { complexity: 0.5 });
-  // Pool with quota disabled AND host concurrency limit of 0 → wave_size = max(1, 0)=1
-  // We need a pool that genuinely returns wave_size=0. Use a pool with enabled:false
-  // and hostConcurrencyLimit={active_subagents: 0}. scheduleWave clamps to max(1,...)
-  // so we'll use a single pool with RPM=0 explicitly at 0 to force wave_size capped.
-  // Actually, to get wave_size=0 we need a pool with enabled:true and RPM=0.
-  // Let's use a discovered RPM limit of 0 with safety_margin 1.0.
   const pool = makePool("pool-a", {
     providerName: "claude-code",
     hostModel: "test-model",
@@ -121,10 +114,8 @@ test("selectProvider — returns null when all pools are at quota capacity", asy
   };
   const tracker = new InFlightTokenTracker();
   const result = selectProvider(packet, [pool], tracker, {}, session);
-  // RPM=0 means rpmCap = Math.max(1, floor(0*1.0)) = 1, wave_size stays >= 1.
-  // scheduleWave never returns wave_size=0 due to the Math.max(1,...) guard.
-  // This is intentional per scheduler design — always dispatch at least 1.
-  // So selectProvider should return a slot (not null) when there is only one pool.
+  // rpmCap = Math.max(1, floor(0 * 1.0)) = 1, so wave_size stays >= 1 by design
+  // (always dispatch at least one). A single eligible pool therefore yields a slot.
   assert.notEqual(result, null);
 });
 

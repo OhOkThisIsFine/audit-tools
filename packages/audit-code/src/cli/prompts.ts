@@ -270,7 +270,7 @@ export function renderRollingDispatchPrompt(params: {
     ? "When launching each subagent, map `entry.model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names."
     : null;
   const toolsLine = params.hostCanRestrictSubagentTools
-    ? "Restrict review subagents to read/search tools only — they do not run shell commands. Do not give them source edit/write tools."
+    ? "Restrict review subagents to read/search tools plus a Write tool scoped to their own `entry.result_path` (they write exactly that one results file and run no shell commands). Do not give them source edit tools."
     : "Do not ask the user about per-subagent tool restrictions; this host did not report a callable restriction facility.";
 
   const dispatchDataLines = buildDispatchDataLines(
@@ -301,7 +301,7 @@ export function renderRollingDispatchPrompt(params: {
     ...(modelLine ? [modelLine] : []),
     toolsLine,
     "",
-    "**File access pre-approval:** Each dispatch plan entry includes an `access` object. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` for each subagent (read-only; they do not write files).",
+    "**File access pre-approval:** Each dispatch plan entry includes an `access` object. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` for reading and grant write access to that subagent's `entry.result_path` (the one file it writes). Do not grant broader workspace or task-results directory write access.",
     "",
     "**After all packets complete:**",
     "",
