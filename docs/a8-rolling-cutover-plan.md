@@ -1,13 +1,23 @@
-# A8 — rolling-dispatch literal cutover (working build doc)
+# A8 — rolling dispatch: unified core, two drivers (working build doc)
 
 > Transient build/checkpoint doc. Delete + fold into HANDOFF/backlog at sprint end.
-> **Decision (Ethan, 2026-06-16):** *literal* cutover — the rolling/worktree/verify
-> engine becomes the **only** implement dispatch path; the host-fanned wave step and
-> the `implement_rolling_sequential` fallback are **deleted**; the opt-in flag is removed.
-> Accepted consequence: `/remediate-code` can no longer dispatch from inside a live
-> Claude session (claude-code provider throws on `CLAUDECODE`); remediate runs headless
-> or via a non-claude provider. This intentionally removes host-discretion dispatch
-> (the "enforce in tooling, never host discretion" invariant taken to its end).
+>
+> **REFRAMED (Ethan, 2026-06-16) — supersedes the earlier "literal cutover / delete the
+> fallback" reading.** Through discussion we converged on: do NOT delete the host-subagent
+> path. There is ONE rolling-dispatch system, not two — a shared rolling **core**
+> (eligibility, per-node worktree isolation, verify-before-accept, write-scope, quota
+> concurrency, merge) driven by one of two thin **drivers**, selected by what's available:
+> - **In-process / CLI-agent driver** — the orchestrator spawns a CLI agent (codex /
+>   claude / …) per node via the terminal and awaits it. This *is* the
+>   `driveRollingImplementDispatch` engine + `makeProviderNodeDispatcher` (step 1). Not
+>   deprecated — it was just never wired (0 callers). Ideal for autonomous/headless runs.
+> - **Host-subagent driver** — the conversation host spawns subagents (turn-based); the
+>   tool owns the rolling bookkeeping the host executes. This is the existing host path,
+>   to be HARDENED onto the same shared core (worktree/verify/write-scope), not deleted.
+>
+> What was actually dead is the old run-to-completion batch loop; the provider-spawn /
+> CLI-dispatch mechanism is dormant, not deprecated. "headless invocation" = that
+> CLI-dispatch path.
 
 ## Why this is a build, not a flag-flip — the engine was never run end-to-end
 
@@ -43,25 +53,34 @@ callers**; its tests inject stub dispatchers. Reading the path surfaced hard gap
 - **prepareImplementDispatch threads** the deterministic `worktreePath(root, block_id, runId)`
   into `implementPrompt` so every implement prompt is worktree-rooted. Fixes G4.
 
-## Sequencing (green at every commit + atomic-replace)
+## Sequencing (reframed; green at every commit)
 
-1. **Engine-functional (additive; fallback intact; flag still OFF). ✓ DONE — green.**
-   `makeProviderNodeDispatcher` (provider-direct, in `src/steps/providerNodeDispatch.ts`, wired as the
-   default `dispatchNode`) + `commitWorktree` (G2) + `ensureWorktreeNodeModules` (G3) +
-   `worktreeRootedPrompts` threading (G4). Tests: `tests/rolling-provider-dispatch.test.ts` (8, injected
-   provider/real-git). Full remediate suite 1610/0; typecheck clean.
-2. **Validate a real ≥2-worker rolling run** where a provider can spawn (headless / codex /
-   antigravity). If not runnable in-session, stand up a validation script + document the manual gate.
-3. **Atomic cutover commit:** wire dispatchNode-backed rolling as the **only** implement path in
-   `buildImplementDispatchStep`; delete `dispatch_implement` + `implement_rolling_sequential`;
-   remove the `rolling_engine` flag / `REMEDIATE_ROLLING_ENGINE` env + `resolveRollingEngineEnabled`.
-   Lands once the engine is validated (honors the backlog's "gate on validated dispatch; don't
-   force the cutover").
-4. **audit-code symmetric** wiring of `runRollingDispatch` into the audit live path.
-5. **Harden** worktree-branch reuse across a `rate_limited` re-queue.
+1. **In-process / CLI-agent driver made functional (additive; flag still OFF). ✓ DONE — green.**
+   `makeProviderNodeDispatcher` (`src/steps/providerNodeDispatch.ts`, wired as the default
+   `dispatchNode`) + `commitWorktree` (G2) + `ensureWorktreeNodeModules` (G3) + `worktreeRootedPrompts`
+   threading (G4). Tests: `tests/rolling-provider-dispatch.test.ts` (8, injected provider/real-git).
+   Remediate suite 1610/0. Committed `dc4d9c2`.
+2. **Make the codex provider real. ✓ DONE — green.** `codexProvider.ts` rewritten to the *verified*
+   invocation (smoke-tested vs codex-cli 0.140.0): `codex exec --sandbox <mode> --cd <worktree>
+   --add-dir <resultDir>` with the prompt on **stdin**; the old `--prompt`/`prompt_flag` guess removed.
+   `CodexConfig` redesigned (`sandbox_mode`, `model` — never defaulted, `extra_args`). Windows shim
+   single-sourced as `resolveWindowsShimSpawnCommand` (opencode delegates). Argv tests added; shared
+   631/0. Since `makeProviderNodeDispatcher` resolves the provider from config, codex is already a
+   usable CLI-dispatch backend — no extra wiring.
+3. **Validate a real ≥2-worker rolling run via codex. ⛔ BLOCKED — codex usage limit resets Jun 19, 2026.**
+   The smoke confirmed auth + the exact invocation (codex read stdin, selected gpt-5.5, started) — only
+   the usage cap stopped the edit. Re-run after Jun 19 (or via another spawnable provider): set
+   `sessionConfig.provider="codex"` + `dispatch.rolling_engine=true` on a small real remediation, confirm
+   ≥2 nodes land via worktree→verify→merge. NOTE the unverified-on-Windows detail: whether
+   `--sandbox workspace-write` is enforced on Windows is still unconfirmed (codex sandbox is historically
+   mac/Linux); the real run will show it — fall back to `danger-full-access` via config if needed.
+4. **Harden the host-subagent driver onto the shared core** (replaces "delete the fallback"): give the
+   host path per-node worktree isolation + verify-before-accept + write-scope, select driver by
+   availability. Keep BOTH; one rolling core.
+5. **audit-code symmetric** wiring of its rolling engine into the audit live path.
+6. **Harden** worktree-branch reuse across a `rate_limited` re-queue.
 
-## Open validation question (surface at the deletion boundary)
-The backlog program-of-record says A8 is "gated on a *validated* real multi-worker rolling
-dispatch (don't force the cutover)." In-session validation is blocked by G5. The irreversible
-deletion (step 3) is therefore held until a real multi-worker run is validated in a spawnable
-environment — or Ethan green-lights landing it on injected-provider tests alone.
+## Open items to surface
+- **Real-run validation (step 3) is the gate** before either driver is trusted in production; it's
+  quota-blocked until Jun 19. Everything to date is invocation-verified + unit/injected-provider green.
+- **Windows codex sandbox** enforcement unconfirmed (see step 3).

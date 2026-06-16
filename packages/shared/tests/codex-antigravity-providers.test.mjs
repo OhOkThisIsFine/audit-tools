@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const { PROVIDER_NAMES } = await import("@audit-tools/shared/types/sessionConfig");
 const { classifyProvider } = await import("@audit-tools/shared/quota/limits");
@@ -130,6 +133,76 @@ test("CodexProvider.queryLimits resolves to null (best-effort no-op)", async () 
   const provider = new CodexProvider(undefined);
   assert.equal(await provider.queryLimits(null), null);
   assert.equal(await provider.queryLimits("some-model"), null);
+});
+
+// ── CodexProvider.launch — verified invocation shape (codex-cli 0.140.0) ───────
+// The non-interactive entrypoint is `codex exec`, the prompt is delivered via
+// stdin, the sandbox is rooted at the worktree (--cd) and the result dir is
+// granted (--add-dir). Asserted on the flattened command so the Windows cmd.exe
+// shim wrap and the POSIX direct form both pass.
+
+function launchCodex(config, overrides = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "codex-prov-"));
+  const promptPath = join(dir, "node.md");
+  const taskPath = join(dir, "task.json");
+  writeFileSync(promptPath, "IMPLEMENT THIS NODE");
+  writeFileSync(taskPath, JSON.stringify({ timeout_ms: 1000 }));
+  let captured = null;
+  const stub = (command, args, input) => {
+    captured = { command, args, input };
+    return Promise.resolve({ accepted: true });
+  };
+  const provider = new CodexProvider(config, stub);
+  const input = {
+    repoRoot: join(dir, "worktree"),
+    runId: "RID",
+    obligationId: null,
+    promptPath,
+    taskPath,
+    resultPath: join(dir, "artifacts", "B1.result.json"),
+    stdoutPath: join(dir, "out.txt"),
+    stderrPath: join(dir, "err.txt"),
+    uiMode: "headless",
+    timeoutMs: 5000,
+    ...overrides,
+  };
+  return { promiseResult: provider.launch(input), getCaptured: () => captured, input };
+}
+
+test("CodexProvider.launch invokes `codex exec` with stdin prompt + worktree-rooted sandbox", async () => {
+  const h = launchCodex(undefined);
+  await h.promiseResult;
+  const c = h.getCaptured();
+  assert.ok(c, "launchCommand was called");
+  const flat = [c.command, ...c.args].join(" ");
+  assert.match(flat, /\bexec\b/);
+  assert.match(flat, /--sandbox/);
+  assert.match(flat, /workspace-write/);
+  assert.match(flat, /--cd/);
+  assert.match(flat, /--add-dir/);
+  // Prompt is delivered via stdin, never as an argv positional.
+  assert.equal(c.input.stdinText, "IMPLEMENT THIS NODE");
+  assert.ok(!flat.includes("IMPLEMENT THIS NODE"), "prompt body must not appear in argv");
+  // No bogus `--prompt`/`--ask-for-approval` (the old stub's unverified guesses).
+  assert.ok(!flat.includes("--prompt"), "no --prompt flag");
+  assert.ok(!flat.includes("--ask-for-approval"), "exec has no --ask-for-approval flag");
+});
+
+test("CodexProvider.launch honors sandbox_mode + model config (no hardcoded model)", async () => {
+  const h = launchCodex({ sandbox_mode: "danger-full-access", model: "some-model-id" });
+  await h.promiseResult;
+  const flat = [h.getCaptured().command, ...h.getCaptured().args].join(" ");
+  assert.match(flat, /danger-full-access/);
+  assert.ok(!flat.includes("workspace-write"), "explicit sandbox_mode overrides the default");
+  assert.match(flat, /--model/);
+  assert.match(flat, /some-model-id/);
+});
+
+test("CodexProvider.launch omits --model when unset (codex default applies)", async () => {
+  const h = launchCodex(undefined);
+  await h.promiseResult;
+  const flat = [h.getCaptured().command, ...h.getCaptured().args].join(" ");
+  assert.ok(!flat.includes("--model"), "no --model flag when config.model is unset");
 });
 
 test("classifyProvider maps codex to hosted and antigravity to unknown", () => {

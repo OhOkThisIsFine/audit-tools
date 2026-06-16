@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { readJsonFile } from "../io/json.js";
 import type {
   FreshSessionProvider,
@@ -7,27 +8,40 @@ import type {
 } from "./types.js";
 import type { CodexConfig } from "../types/sessionConfig.js";
 import { spawnLoggedCommand } from "./spawnLoggedCommand.js";
+import { resolveWindowsShimSpawnCommand } from "./opencodeLaunch.js";
 import {
   applyWorkerTaskLaunchSettings,
   type WorkerTaskWithCommand,
 } from "./workerTaskLaunch.js";
+import {
+  emitProviderLaunchDiagnostic,
+  emitProviderDoneDiagnostic,
+} from "./providerDiagnostics.js";
 
-// TODO(verify): the real Codex non-interactive / headless invocation. This is an
-// unverified assumption — Codex's exec/non-interactive subcommand and the flag
-// (or stdin convention) it reads the rendered prompt from must be confirmed
-// against the actual `codex` CLI. Until then we assume `codex exec --prompt
-// <text>` shape via `prompt_flag`; correct the binary name + flag once verified.
-const DEFAULT_CODEX_PROMPT_FLAG = "--prompt";
+export const CODEX_PROVIDER_NAME = "codex" as const;
+
+/** Default `codex exec --sandbox` policy: writes confined to the working root. */
+const DEFAULT_CODEX_SANDBOX = "workspace-write" as const;
 
 /**
  * Codex CLI backend. Codex is a headless coding CLI in the same family as
- * claude-code: a binary that is handed the rendered prompt on the command line
- * (or via a flag) and runs to completion. It is therefore driven the same way as
- * ClaudeCodeProvider — read the rendered prompt, build argv, spawn, and stream
- * stdout/stderr to the worker log paths — rather than through a command template.
+ * claude-code. The non-interactive entrypoint is `codex exec`, which reads the
+ * rendered prompt from STDIN (so very large prompts never hit the command-line
+ * length limit) and runs to completion editing files in its working root. The
+ * invocation shape is verified against codex-cli 0.140.0:
+ *
+ *   codex exec --sandbox <policy> --cd <root> --add-dir <resultDir> [--model M]
+ *
+ * `exec` is inherently non-interactive (it has no `--ask-for-approval` flag); the
+ * sandbox policy governs what it may write. `--cd` roots the agent (and its
+ * sandbox) at the node's isolated worktree; `--add-dir` grants write access to the
+ * result-file directory, which lives outside the worktree. On Windows the `codex`
+ * launcher is a `.cmd`/`.ps1` shim that `spawn` cannot run without a shell, so it
+ * is routed through cmd.exe (no-op on other OSes). Launch/done diagnostics match
+ * the other CLI providers.
  */
 export class CodexProvider implements FreshSessionProvider {
-  name = "codex";
+  name = CODEX_PROVIDER_NAME;
   private readonly config: CodexConfig;
   private readonly launchCommand: typeof spawnLoggedCommand;
 
@@ -43,26 +57,45 @@ export class CodexProvider implements FreshSessionProvider {
     const prompt = await readFile(input.promptPath, "utf8");
     const task = await readJsonFile<WorkerTaskWithCommand>(input.taskPath);
     const command = this.config.command ?? "codex";
-    const promptFlag = this.config.prompt_flag ?? DEFAULT_CODEX_PROMPT_FLAG;
-    // TODO(verify): confirm whether Codex reads the rendered prompt from this
-    // flag/arg or from stdin (input.stdinText). If it is stdin-driven, deliver
-    // the prompt via the spawn stdin path instead of an argv flag.
-    const args = [...(this.config.extra_args ?? []), promptFlag, prompt];
-    return await this.launchCommand(
+    const sandbox = this.config.sandbox_mode ?? DEFAULT_CODEX_SANDBOX;
+    // The prompt is delivered via stdin, so it is NOT appended to argv.
+    const baseArgs = [
+      "exec",
+      "--sandbox",
+      sandbox,
+      // Root the agent + its sandbox at the worker's working root (the node's
+      // isolated worktree); spawn cwd is set to the same path.
+      "--cd",
+      input.repoRoot,
+      // The result file lives outside the worktree (the main artifacts dir), so
+      // grant write access to its directory alongside the workspace.
+      "--add-dir",
+      dirname(input.resultPath),
+      ...(this.config.model ? ["--model", this.config.model] : []),
+      ...(this.config.extra_args ?? []),
+    ];
+    // On Windows the `codex` launcher is a `.cmd`/`.ps1` shim that `spawn` cannot
+    // run without a shell; route it through cmd.exe (no-op on other OSes).
+    const { command: spawnCmd, args } = resolveWindowsShimSpawnCommand(
       command,
-      args,
-      applyWorkerTaskLaunchSettings(input, task),
+      baseArgs,
+      ["codex", "npx"],
     );
+    emitProviderLaunchDiagnostic(this.name, input);
+    const result = await this.launchCommand(spawnCmd, args, {
+      ...applyWorkerTaskLaunchSettings(input, task),
+      stdinText: prompt,
+    });
+    emitProviderDoneDiagnostic(this.name, input, result);
+    return result;
   }
 
   /**
    * Best-effort, never-throwing. Codex is a hosted backend whose 429/RPM/TPM
-   * ceilings are not introspectable from a CLI, so this returns null today.
-   * When Codex begins surfacing rate-limit HTTP response headers (e.g.
-   * x-ratelimit-* / retry-after), parse them here and map to
-   * ProviderRateLimits { requests_per_minute, input_tokens_per_minute,
-   * output_tokens_per_minute }. Until then resolution falls back to
-   * classifyProvider("codex")=hosted defaults plus the learned-limits subsystem.
+   * ceilings are not introspectable from the CLI, so this returns null today.
+   * Resolution falls back to classifyProvider("codex")=hosted defaults plus the
+   * learned-limits subsystem (which absorbs the real usage-limit signal Codex
+   * surfaces on stderr when a quota is exhausted).
    */
   async queryLimits(_model: string | null): Promise<ProviderRateLimits | null> {
     return null;
