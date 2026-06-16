@@ -26,6 +26,63 @@ rather than "where the code is today."
 > remediate-code interpretation (audit-code no-verbatim + lens weighting already
 > shipped).
 
+## Accepted go-forward program (2026-06-15 review)
+
+After the 2026-06-15 self-remediation, Ethan was shown the design-review + free-form items that the
+run had auto-dispositioned without surfacing them (only 12 of 42 architecture findings got code; 30
+were silently "direction recorded" / "already true" inside `*-quality-tail` blocks). Full per-item
+pros/cons were captured in `.audit-tools/deferred-items-for-review.md` at decision time; the durable
+record of what was **greenlit** is here. Each is a target, not a status line — remove when shipped.
+
+- **Review-necessity approval gate (TOOL FIX — root cause of this whole thread).** `remediate-code`
+  must emit, between plan and implement, **item-sets tiered by how much review they need**, each with
+  pros/cons + impl cost, for the user to approve/disapprove. Design-review (architecture/conceptual)
+  findings and free-form items must NOT be silently auto-dispositioned by quality-tail blocks. Enforce
+  in the tool, never host discretion — the host driving it autonomously is exactly the failure mode that
+  hid 30/42 design findings this run. (Ethan, 2026-06-15.)
+- **A1 — Fast path past the 15-phase pipeline.** Size/ambiguity/seam-gated lean path
+  (`shouldEnterContractPipeline`) so a handful of concrete fixes don't pay full adversarial +
+  3-repair-loop cost. Risk to design around: a mis-routed subtle change must not skip the safety net.
+  (ARC-ad53dd0d.)
+- **A3+A4 — Move correctness into the tool; unify the two obligation engines.** audit-code expresses the
+  ordered-obligation engine declaratively (PRIORITY[] + registry); remediate re-derives it in a
+  ~2835-line imperative switch → one shared declarative engine. Collapse the ~8 finding_id-keyed record
+  types + 2 coverage ledgers into one canonical `RemediationItem` with typed projections. The redesign
+  track. (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
+- **A8 — Make the rolling/isolation/verify engine the LIVE DEFAULT.** It shipped wired-but-default-OFF;
+  the live path is still host-fanned waves on the shared tree (host discretion). Sequence: validate a
+  real multi-worker dispatch → flip default-ON → wire audit-code symmetrically → harden worktree reuse.
+  **THE blocker for nightly autonomy.** Supersedes the drift-plan R1 item and links the "confirmed
+  dispatch bugs" section below. (ARC-f378135d family.)
+- **B1 / B2 / B3 — greenlit** (the magic-numbers, diff-based-re-review, and staleness-cascade friction
+  items in *Known friction* below; now accepted work, not just logged friction).
+- **B4 — Hard-exclude tool-refuted findings.** A tier-2 REFUTED finding (e.g. madge-disproven cycle) is
+  only marked `grounding:'ungrounded'` and still merges as fact; promote refuted → quarantined-excluded
+  at ingest (quarantine, not delete). (ARC-48c05a13, ARC-48c05a13-2.)
+- **B8 — Finding-merge location discriminator.** `findingKey` excludes affected_files, so two distinct
+  defects sharing lens+category+generic-title union into one finding pointing at the wrong file. Add a
+  location discriminator. (ARC-1a497c28-2.)
+- **A5+A11 — Two-tier own-vs-import dependency policy + replace hand-rolled manifest parsers.** Write the
+  policy (import vetted libs for correctness-sensitive parsers/schema/lock; keep own for tiny domain
+  bits), then replace the hand-rolled TOML/YAML manifest scanners that silently drop dependency-graph
+  edges with vetted pure-JS parsers. (ARC-843ce274, ARC-4d950c7f.)
+- **A6 — Kill the schema dual-encoding.** 47 JSON schemas + parallel hand-written TS validators (already
+  drifted once); single-source one from the other so drift is impossible, and remove the dead-imported
+  `ajv`. (ARC-ad53dd0d-2.)
+- **A12 — Single-package collapse** (see *Single-package install/publish* below; Ethan reversed the
+  earlier same-day defer — now wanted).
+- **A7 (REFRAMED) — Validate the host machinery EVERYWHERE, don't cut it.** The multi-host vision is
+  alive: Ethan uses the package regularly in **Codex, OpenCode, and Antigravity**, not just Claude Code.
+  The finding flips from "delete the unvalidated 7-host install ceremony" to "build real
+  install/verify/integration validation across all hosts" — Claude Code is the only validated route
+  today. (ARC-32e49e65, reframed.)
+
+**Deferred this round (not greenlit now):** A2 — falsifiable finding-quality oracle (golden corpus,
+precision/recall, hallucination rate gated in CI). High value, own track; revisit. (ARC-fab14144.)
+A9 (single autonomy acceptance test) and A10 (multi-process coordination primitive) revisit when A8
+makes multi-process concrete. Tier-C cleanups + B5/B6/B7/B9/B10/B11 remain in the review doc, not yet
+triaged.
+
 ## Known friction (agent / dev experience)
 
 ### Contract-pipeline friction surfaced during the 2026-06-15 self-remediation (systematic fixes wanted)
@@ -555,5 +612,6 @@ the three-way naming mismatch (dir vs npm name vs bin) and the shared-built-firs
 ordering. Points to settle when picked up: whether `shared` stays an internal workspace or is
 inlined; collapsing the per-package `release:*` scripts + the GitHub-Release-tag publish
 workflow to one; keep the `audit-code`/`remediate-code` bin names; and deprecating/redirecting
-the old `auditor-lambda`/`remediator-lambda` package names. Deferred (Ethan, 2026-06-15) — for
-another time.
+the old `auditor-lambda`/`remediator-lambda` package names. **ACCEPTED (Ethan, 2026-06-15
+review) — now wanted; reverses the earlier same-day defer.** Tracked under the accepted
+go-forward program at the top of this file (A12).
