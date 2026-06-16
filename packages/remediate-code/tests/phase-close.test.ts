@@ -229,7 +229,16 @@ describe("runClosePhase", () => {
     // Must complete, not triage — ignored items stay ignored.
     expect(next.status).toBe("complete");
     expect(state.items!.F1.status).toBe("ignored");
-    expect(state.items!.F1.failure_reason).not.toMatch(/Retry requested/);
+    // TST-12d5b949: the load-bearing guarantee is that the settled user decision
+    // is NOT reinterpreted — the original rationale survives close verbatim and
+    // the item is not flipped back to a retry/blocked state. (The prior
+    // `/Retry requested/` regex pinned nothing: the removed
+    // reblockRetryableIgnoredItems never wrote that exact phrase.)
+    expect(state.items!.F1.failure_reason).toBe(
+      "Deferred - needs its own focused block and should be retried in a dedicated pass.",
+    );
+    expect(state.items!.F1.status).not.toBe("blocked");
+    expect(state.items!.F1.status).not.toBe("pending");
   });
 
   it("preserves quoted arguments in test_command", async () => {

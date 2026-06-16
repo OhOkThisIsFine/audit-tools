@@ -178,6 +178,67 @@ describe("deduplicateCrossLensFindings", () => {
     expect(mergeMap.get("TST-1fa005bb-2")).toBe("ARC-1fa005bb");
   });
 
+  // drift-plan R2 — exact-match layer: the shared finding-identity signature is
+  // the authority; the Jaccard/overlap heuristic is a fuzzy layer on top of it.
+  it("collapses a cross-lens pair that shares a discriminating identity even when titles slip under the Jaccard floor", () => {
+    // Same structural anchor (path + symbol) → identical shared identity
+    // signature, lens-independent. The titles are deliberately dissimilar
+    // (Jaccard < 0.4) so the OLD heuristic alone would NOT have merged them; the
+    // exact-match layer collapses them because they ARE the same defect.
+    const titleSim = wordJaccard(
+      "Token refresh never validates the expiry",
+      "Session keeps working after logout",
+    );
+    expect(titleSim).toBeLessThan(0.4); // guards the premise of this test
+
+    const { findings, mergeMap } = deduplicateCrossLensFindings([
+      makeFinding({
+        id: "SEC-aa",
+        title: "Token refresh never validates the expiry",
+        lens: "security",
+        category: "AuthZ",
+        affected_files: [{ path: "src/auth/session.ts", symbol: "refreshToken" }],
+        severity: "high",
+      }),
+      makeFinding({
+        id: "COR-bb",
+        title: "Session keeps working after logout",
+        lens: "correctness",
+        category: "AuthZ",
+        affected_files: [{ path: "src/auth/session.ts", symbol: "refreshToken" }],
+        severity: "low",
+      }),
+    ]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].id).toBe("SEC-aa");
+    expect(mergeMap.get("COR-bb")).toBe("SEC-aa");
+  });
+
+  it("does NOT collapse cross-lens findings that merely share a file (empty-scope anchor) with dissimilar titles", () => {
+    // No symbol → the identity signature degenerates to `anchor|<path>|`, which
+    // is non-discriminating ("same file" only). The exact-match layer must NOT
+    // fire; the fuzzy title/overlap layer governs, and dissimilar titles keep
+    // them distinct. (Guards against over-collapsing on the weak signature.)
+    const { findings, mergeMap } = deduplicateCrossLensFindings([
+      makeFinding({
+        id: "SEC-cc",
+        title: "SQL injection in the login handler",
+        lens: "security",
+        category: "General",
+        affected_files: [{ path: "src/foo.ts" }],
+      }),
+      makeFinding({
+        id: "TST-dd",
+        title: "Coverage below threshold for the module",
+        lens: "tests",
+        category: "General",
+        affected_files: [{ path: "src/foo.ts" }],
+      }),
+    ]);
+    expect(findings).toHaveLength(2);
+    expect(mergeMap.size).toBe(0);
+  });
+
   it("merges evidence from absorbed finding", () => {
     const { findings } = deduplicateCrossLensFindings([
       makeFinding({ id: "A-001", title: "Missing validation", lens: "security", evidence: ["ev-sec"] }),

@@ -5,6 +5,7 @@ export { ClaudeCodeErrorParser } from "./claudeCodeErrorParser.js";
 import type { ErrorParser } from "./genericErrorParser.js";
 import { GenericErrorParser } from "./genericErrorParser.js";
 import { ClaudeCodeErrorParser } from "./claudeCodeErrorParser.js";
+import { makeProviderKeyedFactory } from "../../providers/providerKeyedFactory.js";
 
 // Error parsers are stateless, so a single shared instance per provider is
 // enough — allocate each once at module scope rather than per call. (Previously
@@ -17,6 +18,7 @@ const PROVIDER_PARSERS: Record<string, ErrorParser> = {
   "claude-code": claudeCodeParser,
 };
 
-export function getErrorParserForProvider(providerName: string): ErrorParser {
-  return PROVIDER_PARSERS[providerName] ?? genericParser;
-}
+export const getErrorParserForProvider = makeProviderKeyedFactory<ErrorParser>(
+  PROVIDER_PARSERS,
+  genericParser,
+);

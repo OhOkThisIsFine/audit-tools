@@ -220,7 +220,10 @@ export async function finalizeDispatchQuota(params: {
   // items to the first pool, and the biggest packets belong on the rank with
   // the largest window. Unranked pools are the LEAST capable (conservative
   // fallback), so they sort last — not first (COR-eebbabf7: was TIER_ORDER.length
-  // which placed them before ranked pools in descending order).
+  // which placed them before ranked pools in descending order). The tier ordering
+  // is the single shared authority (`TIER_ORDER` === `DISPATCH_TIER_ORDER`); the
+  // `-1` unranked-last rule is local to this conservative-fallback sort and is
+  // intentionally distinct from rolling-dispatch's neutral-middle fallback.
   const rankOrder = (pool: CapacityPool): number =>
     pool.rank ? TIER_ORDER.indexOf(pool.rank) : -1;
   const pools = [...params.pools].sort((a, b) => rankOrder(b) - rankOrder(a));

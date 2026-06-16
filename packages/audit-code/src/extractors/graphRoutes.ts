@@ -552,7 +552,16 @@ export function extractFrameworkRouteEvidence(
 
 export function fallbackRouteEdge(filePath: string): RouteEdge | undefined {
   const normalized = filePath.toLowerCase();
-  if (normalized.includes("api/") || normalized.includes("route")) {
+  // Match an `api/` path segment, or a file/dir segment named exactly
+  // `route`/`routes` (the Next.js App Router convention). A bare "route"
+  // substring match over-fired on unrelated identifiers like `router.ts`,
+  // `graphRoutes.ts`, or `reroute-helper.ts` (COR-c5438ac1), fabricating GET
+  // route edges for non-route files.
+  const hasApiSegment = /(^|\/)api\//.test(normalized);
+  const hasRouteSegment = normalized
+    .split("/")
+    .some((segment) => /^routes?(\.[^.]+)?$/.test(segment));
+  if (hasApiSegment || hasRouteSegment) {
     return {
       path: `/${filePath.replaceAll("/", "_")}`,
       handler: filePath,

@@ -227,12 +227,23 @@ describe("N-CE301: partial_completion_terminal on RemediationState", () => {
       (it) => it.status === "blocked" && it.failure_reason?.includes("partial-completion terminal"),
     );
     expect(blockedByTerminal).toHaveLength(0);
-    // The step should not be a state_transition triggered by the terminal
-    // (it might be state_transition for other reasons, but not the terminal path)
-    // Just verify the documented item didn't get re-marked
-    // F-001 was documented — it should remain in a non-terminal-due-to-partial-completion state
-    // (either still documented or advanced through normal dispatch)
-    expect(step).toBeDefined();
+    // TST-5003421d: pin the normal-flow step kind rather than the vacuous
+    // toBeDefined(). Without a partial-completion terminal, this ready
+    // implementing state (no impl_risks_reviewed.json yet) advances through the
+    // normal pre-dispatch gate `classify_impl_risks` — a real workflow step,
+    // never a terminal/error kind produced by the partial-completion path.
+    // (toBeDefined() was true for any returned step and could not catch a
+    // regression in the non-terminal path.)
+    const TERMINAL_OR_ERROR_KINDS = [
+      "present_report",
+      "collect_triage",
+      "zero_documentable_findings",
+    ];
+    expect(
+      TERMINAL_OR_ERROR_KINDS,
+      `normal no-terminal flow must not produce a terminal/error step, got '${step.step_kind}'`,
+    ).not.toContain(step.step_kind);
+    expect(step.step_kind).toBe("classify_impl_risks");
   });
 });
 

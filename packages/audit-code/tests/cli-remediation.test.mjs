@@ -59,6 +59,28 @@ test("CLI flag parsing falls back when values are missing or malformed", () => {
   );
 });
 
+test("ingest-results rejects a value-less --results alongside --batch-results (COR-79283e3b)", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "ingest-mutex-"));
+  try {
+    // `--results` is present as a token but value-less (the next token is the
+    // end of argv). The mutual-exclusion guard must still fire rather than
+    // silently running the batch path. runCli catches the thrown Error, prints
+    // its message to stderr, and sets exitCode=1.
+    const { stderr, exitCode } = await captureRunCli([
+      "node",
+      "cli",
+      "ingest-results",
+      "--batch-results",
+      tempRoot,
+      "--results",
+    ]);
+    assert.match(stderr, /not both/i);
+    assert.equal(exitCode, 1);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("CLI numeric options prefer argv, then session config, then documented defaults", () => {
   const sessionConfig = {
     timeout_ms: 9_000,

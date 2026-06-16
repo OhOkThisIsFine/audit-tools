@@ -6,6 +6,9 @@ import type {
   ObligationState,
 } from "../types/auditState.js";
 import { computeStaleArtifacts } from "./staleness.js";
+import {
+  unresolvedConstraintClauses,
+} from "./intentInterpreter.js";
 
 function has(value: unknown): boolean {
   return value !== undefined && value !== null;
@@ -121,14 +124,28 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
     ),
   );
 
+  // The checkpoint is "current" only when it both exists/fresh AND every
+  // unencodable free_form_intent clause has been escalated to a host-answered
+  // constraint. An unanswered unencodable clause keeps this obligation unmet so
+  // the blocking `confirm_intent` step re-fires — the directive is never
+  // silently dropped at planning time (the single shared interpreter is the
+  // encodability authority; see intentInterpreter.unresolvedConstraintClauses).
+  const intentCheckpointBase = staleOrSatisfied(
+    staleArtifacts,
+    ["intent_checkpoint.json"],
+    has(bundle.intent_checkpoint),
+  );
+  const unresolvedClauses =
+    intentCheckpointBase === "satisfied"
+      ? unresolvedConstraintClauses(bundle.intent_checkpoint)
+      : [];
   obligations.push(
     obligation(
       "intent_checkpoint_current",
-      staleOrSatisfied(
-        staleArtifacts,
-        ["intent_checkpoint.json"],
-        has(bundle.intent_checkpoint),
-      ),
+      unresolvedClauses.length > 0 ? "missing" : intentCheckpointBase,
+      unresolvedClauses.length > 0
+        ? `${unresolvedClauses.length} free_form_intent clause(s) could not be encoded as planning signals and need a host answer in constraint_clauses before planning proceeds.`
+        : undefined,
     ),
   );
 

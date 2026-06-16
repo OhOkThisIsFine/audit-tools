@@ -83,6 +83,40 @@ export async function resolveIntakeStep(params: {
 }): Promise<IntakeResult> {
   const { root, artifactsDir, inputResolution } = params;
   const paths = intakePaths(artifactsDir);
+
+  // MNT-e6c289ae: every "collect_starting_point" branch emits the identical
+  // blocked step (same stepKind/allowedCommands/artifactPaths and prompt source),
+  // differing only by the missing-paths prompt argument and the stop condition.
+  // Funnel them through one builder so the step shape stays consistent.
+  const collectStartingPointStep = async (
+    missingPaths: string[],
+    stopCondition: string,
+  ): Promise<IntakeResult> => ({
+    kind: "step",
+    step: await writeCurrentStep({
+      stepKind: "collect_starting_point",
+      status: "blocked",
+      runId: params.randomRunId("INPUT"),
+      repoRoot: root,
+      artifactsDir,
+      prompt: params.collectStartingPointPrompt(
+        root,
+        inputResolution.checked,
+        missingPaths,
+        paths,
+      ),
+      allowedCommands: [
+        params.loaderCommand("next-step"),
+        params.loaderCommand("next-step --input <path>"),
+      ],
+      stopCondition,
+      artifactPaths: {
+        source_manifest: paths.sourceManifest,
+        conversation_start: paths.conversationStart,
+      },
+    }),
+  });
+
   let intake = await readIntakeArtifacts(artifactsDir);
   const previousManifest = intake.manifest;
   let manifest: IntakeSourceManifest | undefined = intake.manifest;
@@ -181,29 +215,10 @@ export async function resolveIntakeStep(params: {
   }
 
   if (inputResolution.supplied && inputResolution.missing.length > 0) {
-    return {
-      kind: "step",
-      step: await writeCurrentStep({
-        stepKind: "collect_starting_point",
-        status: "blocked",
-        runId: params.randomRunId("INPUT"),
-        repoRoot: root,
-        artifactsDir,
-        prompt: params.collectStartingPointPrompt(
-          root,
-          inputResolution.checked,
-          inputResolution.missing,
-          paths,
-        ),
-        allowedCommands: [params.loaderCommand("next-step"), params.loaderCommand("next-step --input <path>")],
-        stopCondition:
-          "Stop after collecting a valid remediation starting point and rerunning next-step.",
-        artifactPaths: {
-          source_manifest: paths.sourceManifest,
-          conversation_start: paths.conversationStart,
-        },
-      }),
-    };
+    return collectStartingPointStep(
+      inputResolution.missing,
+      "Stop after collecting a valid remediation starting point and rerunning next-step.",
+    );
   }
 
   if (
@@ -222,29 +237,10 @@ export async function resolveIntakeStep(params: {
       if (inputResolution.supplied) {
         const validation = validateSuppliedInput(singleInput, content);
         if (!validation.ok) {
-          return {
-            kind: "step",
-            step: await writeCurrentStep({
-              stepKind: "collect_starting_point",
-              status: "blocked",
-              runId: params.randomRunId("INPUT"),
-              repoRoot: root,
-              artifactsDir,
-              prompt: params.collectStartingPointPrompt(
-                root,
-                inputResolution.checked,
-                [singleInput],
-                paths,
-              ),
-              allowedCommands: [params.loaderCommand("next-step"), params.loaderCommand("next-step --input <path>")],
-              stopCondition:
-                `Stop after providing a valid remediation starting point. Error: ${validation.reason}`,
-              artifactPaths: {
-                source_manifest: paths.sourceManifest,
-                conversation_start: paths.conversationStart,
-              },
-            }),
-          };
+          return collectStartingPointStep(
+            [singleInput],
+            `Stop after providing a valid remediation starting point. Error: ${validation.reason}`,
+          );
         }
       }
       let parsed: unknown;
@@ -284,51 +280,18 @@ export async function resolveIntakeStep(params: {
   }
 
   if (!manifest) {
-    return {
-      kind: "step",
-      step: await writeCurrentStep({
-        stepKind: "collect_starting_point",
-        status: "blocked",
-        runId: params.randomRunId("INPUT"),
-        repoRoot: root,
-        artifactsDir,
-        prompt: params.collectStartingPointPrompt(root, inputResolution.checked, [], paths),
-        allowedCommands: [params.loaderCommand("next-step"), params.loaderCommand("next-step --input <path>")],
-        stopCondition:
-          "Stop after collecting a remediation starting point and rerunning next-step.",
-        artifactPaths: {
-          source_manifest: paths.sourceManifest,
-          conversation_start: paths.conversationStart,
-        },
-      }),
-    };
+    return collectStartingPointStep(
+      [],
+      "Stop after collecting a remediation starting point and rerunning next-step.",
+    );
   }
 
   const sourceResolution = resolveManifestSources(root, manifest);
   if (sourceResolution.missing.length > 0) {
-    return {
-      kind: "step",
-      step: await writeCurrentStep({
-        stepKind: "collect_starting_point",
-        status: "blocked",
-        runId: params.randomRunId("INPUT"),
-        repoRoot: root,
-        artifactsDir,
-        prompt: params.collectStartingPointPrompt(
-          root,
-          inputResolution.checked,
-          sourceResolution.missing.map((source) => source.path),
-          paths,
-        ),
-        allowedCommands: [params.loaderCommand("next-step"), params.loaderCommand("next-step --input <path>")],
-        stopCondition:
-          "Stop after collecting valid remediation source paths and rerunning next-step.",
-        artifactPaths: {
-          source_manifest: paths.sourceManifest,
-          conversation_start: paths.conversationStart,
-        },
-      }),
-    };
+    return collectStartingPointStep(
+      sourceResolution.missing.map((source) => source.path),
+      "Stop after collecting valid remediation source paths and rerunning next-step.",
+    );
   }
 
   if (manifestRefreshed) {

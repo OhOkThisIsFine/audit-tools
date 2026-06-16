@@ -23,7 +23,6 @@ import {
   renderCodexAutomationRecipe,
   renderAntigravityPlanningGuide,
   renderGeminiCommandToml as _renderGeminiCommandTomlImpl,
-  repoRelativePath as _repoRelativePath,
 } from './audit-code-wrapper-install-renderers.mjs';
 
 const repoRoot = dirname(fileURLToPath(import.meta.url));
@@ -115,9 +114,11 @@ function buildInstallDirective(relativePromptPath) {
   ].join('\n');
 }
 
-// render functions (renderVSCodeAgentFile, renderCodexAutomationRecipe,
-// renderAntigravityPlanningGuide) are imported from audit-code-wrapper-install-renderers.mjs.
-// renderGeminiCommandToml and toRepoRelativePath are aliased below.
+// Host-asset render functions (renderVSCodeAgentFile, renderCodexAutomationRecipe,
+// renderAntigravityPlanningGuide, renderGeminiCommandToml) are imported from
+// audit-code-wrapper-install-renderers.mjs. Each one is a thin wrapper that derives
+// its asset from the ONE canonical loader prompt body via the shared renderHostAsset
+// helper — no host re-authors loader prose, so no asset can drift from the body.
 const renderGeminiCommandToml = _renderGeminiCommandTomlImpl;
 
 // Exported for testing only — delegates to the canonical implementation in renderers.
@@ -287,11 +288,11 @@ export const INSTALL_HOST_DEFINITIONS = {
       });
       await collect(checks, 'antigravity_guide', async () => {
         const content = await readFile(assetPaths.antigravityPlanningGuidePath, 'utf8');
-        if (!content.includes(INSTALLED_PROMPT_FILENAME)) {
-          throw new Error(`Antigravity guide must reference ${INSTALLED_PROMPT_FILENAME}.`);
+        if (!content.includes('--host-models') || !content.includes('next-step')) {
+          throw new Error('Antigravity guide must embed the canonical loader body (next-step capability handshake including --host-models).');
         }
         return {
-          summary: 'Antigravity planning guide references the repo-local prompt asset.',
+          summary: 'Antigravity planning guide embeds the canonical loader body with the capability handshake.',
           path: assetPaths.antigravityPlanningGuidePath,
         };
       });
@@ -545,11 +546,11 @@ export async function writeCoreInstallAssets(root, assetPaths, promptSource, ski
   return results;
 }
 
-export async function writeCodexAssets(assetPaths, promptSource, skillSource) {
+export async function writeCodexAssets(assetPaths, promptSource, skillSource, promptBody) {
   return [
     await writeGeneratedMarkdown(assetPaths.codexSkillPath, skillSource),
     await writeGeneratedMarkdown(assetPaths.codexPromptPath, promptSource),
-    await writeGeneratedMarkdown(assetPaths.codexAutomationRecipePath, renderCodexAutomationRecipe()),
+    await writeGeneratedMarkdown(assetPaths.codexAutomationRecipePath, renderCodexAutomationRecipe(promptBody)),
   ];
 }
 
@@ -576,15 +577,15 @@ export async function writeVSCodeAssets(assetPaths, promptBody) {
         promptBody,
       ),
     ),
-    await writeGeneratedMarkdown(assetPaths.vscodeAgentPath, renderVSCodeAgentFile()),
+    await writeGeneratedMarkdown(assetPaths.vscodeAgentPath, renderVSCodeAgentFile(promptBody)),
   ];
 }
 
-export async function writeAntigravityAssets(assetPaths, promptBody, skillSource, root) {
+export async function writeAntigravityAssets(assetPaths, promptBody, skillSource) {
   return [
     await writeGeneratedMarkdown(
       assetPaths.antigravityPlanningGuidePath,
-      renderAntigravityPlanningGuide(root),
+      renderAntigravityPlanningGuide(promptBody),
     ),
     await writeGeneratedMarkdown(assetPaths.geminiCommandPath, renderGeminiCommandToml(promptBody)),
     await writeGeneratedMarkdown(assetPaths.antigravitySkillPath, skillSource),
@@ -611,7 +612,7 @@ export async function installBootstrap(argv, options = {}) {
   results.push(...await writeCoreInstallAssets(root, assetPaths, promptSource, skillSource));
 
   if (profile.writeCodex) {
-    results.push(...await writeCodexAssets(assetPaths, promptSource, skillSource));
+    results.push(...await writeCodexAssets(assetPaths, promptSource, skillSource, promptBody));
   }
   if (profile.writeOpenCode) {
     results.push(...await writeOpenCodeAssets(assetPaths, root));
@@ -620,7 +621,7 @@ export async function installBootstrap(argv, options = {}) {
     results.push(...await writeVSCodeAssets(assetPaths, promptBody));
   }
   if (profile.writeAntigravity) {
-    results.push(...await writeAntigravityAssets(assetPaths, promptBody, skillSource, root));
+    results.push(...await writeAntigravityAssets(assetPaths, promptBody, skillSource));
   }
 
   const hostGuidance = buildHostCatalog({

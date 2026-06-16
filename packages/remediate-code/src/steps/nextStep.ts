@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot } from "@audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot } from "@audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { runPlanPhase, applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -21,6 +21,13 @@ import {
   mergeImplementResults,
   prepareImplementDispatch,
   readExtractedPlanIfPresent,
+  buildConfirmedPools,
+  createWorktree,
+  removeWorktree,
+  mergeWorktree,
+  verifyNodeInWorktree,
+  worktreePath,
+  worktreeBranchForBlock,
 } from "./dispatch.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
@@ -84,6 +91,11 @@ export interface NextStepOptions {
   hostModelId?: string | null;
   finalizeClosing?: boolean;
   forceReplan?: boolean;
+  /**
+   * Opt IN to the in-process rolling dispatch engine for the implement phase.
+   * Defaults off (proven host-fanned wave path). See `resolveRollingEngineEnabled`.
+   */
+  rollingEngine?: boolean;
   sessionConfig?: SessionConfig | null;
   /**
    * Skip the tool-owned final completion gate (INV-RS-10) at the all-terminal
@@ -122,6 +134,27 @@ export function resolveHostDispatchCapability(options: {
   // genuinely cannot dispatch opts out via host_can_dispatch_subagents:false,
   // REMEDIATE_HOST_CAN_DISPATCH=false, or --host-can-dispatch-subagents=false.
   return true;
+}
+
+/**
+ * Whether the in-process rolling dispatch engine is opted IN for the implement
+ * phase. Defaults to FALSE — the proven host-fanned wave path is the default and
+ * the atomic removal of that fallback is GATED on a validated multi-worker
+ * rolling dispatch (CE-001 anti-wedge). Resolution order: explicit option →
+ * sessionConfig.dispatch.rolling_engine → REMEDIATE_ROLLING_ENGINE env → false.
+ */
+export function resolveRollingEngineEnabled(options: {
+  rollingEngine?: boolean;
+  sessionConfig?: SessionConfig | null;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  if (options.rollingEngine !== undefined) return options.rollingEngine;
+  const cfg = options.sessionConfig?.dispatch?.rolling_engine;
+  if (cfg !== undefined) return cfg;
+  const envValue = (options.env ?? process.env).REMEDIATE_ROLLING_ENGINE;
+  if (envValue === "true") return true;
+  if (envValue === "false") return false;
+  return false;
 }
 
 function randomRunId(prefix = "RUN"): string {
@@ -474,6 +507,232 @@ export async function driveRollingDispatch(
   }
 
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// In-process rolling implement dispatch (the live-path engine wiring)
+// ---------------------------------------------------------------------------
+//
+// CE-001 anti-wedge: this is the rolling-engine path that runs ALONGSIDE the
+// proven host-fanned wave step. It is engaged ONLY when (a) the rolling engine
+// is opted in (`resolveRollingEngineEnabled`) AND (b) a programmatic per-node
+// `dispatchNode` is supplied (a subprocess/CLI provider-backed worker). The
+// conversation host fans out its own subagents and never supplies a
+// `dispatchNode`, so it always takes the host-wave fallback. The atomic removal
+// of that fallback is a DOCUMENTED REMAINING STEP, gated on a validated
+// multi-worker rolling dispatch — it is intentionally NOT forced here.
+//
+// What this path adds over the host-wave step: concurrency is derived purely
+// from quota (`createRollingDispatcher` over `buildConfirmedPools`, no wave-size
+// cap — INV-S05); dispatch is rolling (a freed slot is filled the instant a node
+// completes — `createRollingDispatcher.run`); each node runs in an ISOLATED git
+// worktree whose branch diff is the write-scope ground truth; and a node's
+// branch is merged into the main tree ONLY after its per-node verify passes
+// (verify-before-accept). Results are then merged through the same deterministic
+// `mergeImplementResults` the wave path uses (tolerant finding_id remap,
+// write-scope + lost-update gates), so the contract output is identical.
+
+/** A programmatic per-node implement worker: edits within the node's worktree, writes its result file. */
+export type ProgrammaticNodeDispatcher = (args: {
+  block: RemediationBlock;
+  slot: ProviderSlot;
+  /** The isolated worktree root the worker must edit within. */
+  worktreeRoot: string;
+  /** The absolute path the worker must write its result JSON to. */
+  resultPath: string;
+}) => Promise<RollingDispatchResult<{ block_id: string }>>;
+
+export interface DriveRollingImplementDispatchOptions {
+  root: string;
+  artifactsDir: string;
+  runId: string;
+  sessionConfig: SessionConfig | null;
+  /** Programmatic per-node dispatcher (provider-backed). Absence ⇒ caller must use host-wave. */
+  dispatchNode: ProgrammaticNodeDispatcher;
+  /** Rebuild the upstream shared surface between dependency levels (single-flight). */
+  rebuildSharedBetweenLevels: () => Promise<void>;
+  /** Wave/host inputs used to size the quota-derived confirmed pools. */
+  waveOptions?: {
+    hostMaxConcurrent?: number;
+    hostContextTokens?: number | null;
+    hostOutputTokens?: number | null;
+    hostModels?: HostModelRosterEntry[] | null;
+    hostModelId?: string | null;
+  };
+}
+
+export interface DriveRollingImplementDispatchResult {
+  /** Per-node verify + merge outcome, in dispatch order. */
+  nodes: Array<{
+    block_id: string;
+    outcome: RollingDispatchResult<{ block_id: string }>["outcome"];
+    verify_passed: boolean;
+    merged: boolean;
+  }>;
+  /** Number of inter-level shared rebuilds performed. */
+  rebuilds: number;
+  /** The state status after the deterministic merge of all node results. */
+  state_status: RemediationState["status"];
+}
+
+/**
+ * Drive the implement phase through the in-process rolling engine. Engages the
+ * shared `createRollingDispatcher` (via `driveRollingDispatch`) over
+ * quota-derived `confirmedPools`, runs each node in an isolated worktree, gates
+ * acceptance on a per-node verify, and finally merges through the deterministic
+ * `mergeImplementResults`. Returns null when there is no eligible pending work.
+ *
+ * SAFETY: this never touches the main tree except through `mergeWorktree` (which
+ * cherry-picks a verified branch and aborts cleanly on conflict). A node whose
+ * verify fails is NOT merged; its worktree is removed and the deterministic merge
+ * marks it blocked (its result file is absent / unaccounted) so the run routes it
+ * to triage rather than landing an unverified change.
+ */
+export async function driveRollingImplementDispatch(
+  options: DriveRollingImplementDispatchOptions,
+): Promise<DriveRollingImplementDispatchResult | null> {
+  const { root, artifactsDir, runId } = options;
+
+  // Prepare the dispatch plan (eligible verified-complete frontier) with the SAME
+  // quota-derived sizing the wave path uses. This writes per-node prompts +
+  // dispatch-plan.json + dispatch-quota.json.
+  const plan = await prepareImplementDispatch(
+    { root, artifactsDir },
+    runId,
+    undefined,
+    {
+      hostMaxConcurrent: options.waveOptions?.hostMaxConcurrent,
+      sessionConfig: options.sessionConfig,
+      hostContextTokens: options.waveOptions?.hostContextTokens,
+      hostOutputTokens: options.waveOptions?.hostOutputTokens,
+      hostModels: options.waveOptions?.hostModels,
+      hostModelId: options.waveOptions?.hostModelId,
+    },
+  );
+  if (plan.items.length === 0) {
+    return null;
+  }
+
+  // Map each planned block id to its result path so the per-node dispatcher
+  // writes where the merge expects to read.
+  const resultPathByBlock = new Map(
+    plan.items
+      .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
+      .map((i) => [i.block_id, i.result_path]),
+  );
+
+  // Confirmed pools: quota-derived concurrency, never the raw host flag (INV-QD-11).
+  const confirmedPools = await buildConfirmedPools({
+    sessionConfig: options.sessionConfig,
+    hostMaxConcurrent: options.waveOptions?.hostMaxConcurrent,
+    hostContextTokens: options.waveOptions?.hostContextTokens,
+    hostOutputTokens: options.waveOptions?.hostOutputTokens,
+    hostModels: options.waveOptions?.hostModels,
+    hostModelId: options.waveOptions?.hostModelId,
+  });
+
+  // Load state to partition the eligible frontier into rolling dependency levels.
+  const state = await new StateStore(artifactsDir).loadState();
+  if (!state) return null;
+  const plannedBlockIds = new Set(resultPathByBlock.keys());
+  const allLevels = rollingDependencyLevels(state);
+  // Keep only the blocks that were actually planned this dispatch (eligible now).
+  const levels = allLevels
+    .map((level) => level.filter((b) => plannedBlockIds.has(b.block_id)))
+    .filter((level) => level.length > 0);
+
+  const nodeOutcomes: DriveRollingImplementDispatchResult["nodes"] = [];
+
+  // Per-node worktree dispatch + verify-before-accept, wrapped so the rolling
+  // engine's dispatchNode callback always RESOLVES (never rejects).
+  const dispatchNodeWithWorktree: RollingNodeDispatcher = async (block, slot) => {
+    const branch = worktreeBranchForBlock(block.block_id, runId);
+    const wt = worktreePath(root, block.block_id, runId);
+    const resultPath = resultPathByBlock.get(block.block_id)!;
+    let verifyPassed = false;
+    let merged = false;
+    let outcome: RollingDispatchResult<{ block_id: string }>["outcome"] = "error";
+    try {
+      // Best-effort clean of any stale worktree dir from a prior attempt before
+      // creating this node's isolated worktree. NOTE: a rate_limited re-queue can
+      // re-enter this dispatcher for the same block with the branch still present
+      // — `createWorktree` then throws and is caught below as an error outcome
+      // (never a crash, never a dirtied main tree). Robust branch reuse across a
+      // re-queue is part of the gated proven-dispatch cutover, not this default-off
+      // wiring.
+      removeWorktree(root, wt);
+      createWorktree(root, wt, branch);
+      const result = await options.dispatchNode({
+        block,
+        slot,
+        worktreeRoot: wt,
+        resultPath,
+      });
+      outcome = result.outcome;
+      if (result.outcome === "success") {
+        // Per-node verify in the worktree BEFORE accepting the change. Targeted
+        // commands come from the block's findings; an empty set still verifies
+        // (the deterministic merge re-checks at the central build).
+        const targeted = uniqueStrings(
+          block.items.flatMap((id) => {
+            const finding = state.plan?.findings.find((f) => f.id === id);
+            return finding?.targeted_commands ?? [];
+          }),
+        );
+        const verify = targeted.length > 0
+          ? verifyNodeInWorktree(wt, targeted)
+          : { passed: true, output: "" };
+        verifyPassed = verify.passed;
+        if (verify.passed) {
+          const mergeRes = mergeWorktree(root, wt, branch);
+          merged = mergeRes.success;
+          if (!mergeRes.success) {
+            outcome = "error";
+          }
+        } else {
+          // Verify failed: do not merge; drop the worktree so the main tree stays clean.
+          removeWorktree(root, wt);
+          outcome = "error";
+        }
+      } else {
+        removeWorktree(root, wt);
+      }
+      nodeOutcomes.push({ block_id: block.block_id, outcome, verify_passed: verifyPassed, merged });
+      return result;
+    } catch (err) {
+      removeWorktree(root, wt);
+      nodeOutcomes.push({ block_id: block.block_id, outcome: "error", verify_passed: false, merged: false });
+      return {
+        packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
+        outcome: "error",
+        error: err,
+      };
+    }
+  };
+
+  await driveRollingDispatch(levels, {
+    confirmedPools,
+    sessionConfig: options.sessionConfig ?? {},
+    dispatchNode: dispatchNodeWithWorktree,
+    rebuildSharedBetweenLevels: options.rebuildSharedBetweenLevels,
+    quotaStateDir: artifactsDir,
+  });
+
+  // Deterministic merge: same path the wave flow uses (tolerant remap, write-scope
+  // gate against each verified branch, lost-update detection). Worktrees are
+  // already removed; the merge reads each node's result file + branch diff.
+  const merged = await mergeImplementResults({ root, artifactsDir }, runId);
+
+  return {
+    nodes: nodeOutcomes,
+    rebuilds: Math.max(0, levels.length - 1),
+    state_status: merged.status,
+  };
+}
+
+/** Dedupe a string list preserving order (local helper for verify command sets). */
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter((v) => typeof v === "string" && v.length > 0))];
 }
 
 // ---------------------------------------------------------------------------
@@ -1492,6 +1751,27 @@ Then run:
       hostCanDispatchSubagents: options.hostCanDispatchSubagents,
       sessionConfig: sessionConfigImpl,
     });
+
+    // CE-001 anti-wedge: the in-process rolling engine is opt-in and is engaged
+    // by a provider-backed caller via `driveRollingImplementDispatch`, which
+    // supplies a programmatic per-node dispatcher. The CONVERSATION host fans out
+    // its own subagents and has no such dispatcher, so even when the flag is on
+    // it still follows the host-fanned wave step emitted below (the proven,
+    // default path). We only record that the engine is opted in for observability
+    // — flipping the default and atomically removing this fallback is a DOCUMENTED
+    // REMAINING STEP gated on a validated multi-worker rolling dispatch.
+    const rollingEngineEnabled = resolveRollingEngineEnabled({
+      rollingEngine: options.rollingEngine,
+      sessionConfig: sessionConfigImpl,
+    });
+    if (rollingEngineEnabled) {
+      process.stderr.write(
+        `[remediate-code] dispatch: rolling engine OPTED IN; the conversation host ` +
+          `path still uses the proven host-fanned wave step (no programmatic ` +
+          `per-node dispatcher here). A provider-backed caller engages the engine ` +
+          `via driveRollingImplementDispatch.\n`,
+      );
+    }
 
     const runId = stateRunId(state);
     const waveOptsImpl = {
@@ -2568,6 +2848,80 @@ Once the file is written, run:
   });
 }
 
+// ---------------------------------------------------------------------------
+// Deterministic free_form_intent interpretation at the call site (INV-S04)
+// ---------------------------------------------------------------------------
+//
+// The IntentCheckpoint contract states `free_form_intent` is "interpreted into
+// priority/lens/scope signals at planning time via freeFormIntentInterpreter.
+// Never threaded verbatim into worker or dispatch prompts (INV-S04)." This is
+// the call site that honours that: when a CONFIRMED checkpoint carries a
+// free_form_intent, we run the shared deterministic interpreter HERE — never
+// pass the raw string downstream — and persist the structured signals so
+// planning consumes the encoded lens-weights/priority/scope, and so the
+// unencodable clauses are surfaced (never silently dropped) rather than relying
+// on an LLM-authored free-text `intent_interpretation`.
+
+/** Sidecar artifact recording the deterministic interpretation of free_form_intent. */
+export const INTENT_INTERPRETATION_FILENAME = "intent-interpretation.json";
+export const INTENT_INTERPRETATION_SCHEMA_VERSION =
+  "remediate-code-intent-interpretation/v1alpha1";
+
+export interface PersistedIntentInterpretation {
+  schema_version: typeof INTENT_INTERPRETATION_SCHEMA_VERSION;
+  /** The interpreter's structured output (lens weights / priority / scope). */
+  interpreted: InterpretedIntent;
+  /**
+   * Clauses the interpreter could not encode as a lens weight, priority signal,
+   * or scope emphasis. Surfaced so the host can promote them to constraints —
+   * never silently dropped.
+   */
+  unencodable_clauses: string[];
+  created_at: string;
+}
+
+/**
+ * Interpret a confirmed checkpoint's `free_form_intent` via the shared
+ * deterministic interpreter and persist the structured signals to a sidecar
+ * artifact. Idempotent and best-effort: returns the persisted interpretation (or
+ * null when there is nothing to interpret / no confirmed checkpoint) and never
+ * throws into the decide loop. The raw `free_form_intent` string is NOT returned
+ * or threaded anywhere — only the structured `InterpretedIntent` is (INV-S04).
+ */
+export async function interpretConfirmedCheckpointIntent(
+  artifactsDir: string,
+  checkpoint: IntentCheckpoint | undefined,
+): Promise<PersistedIntentInterpretation | null> {
+  if (!checkpoint || checkpoint.confirmed_by !== "host") return null;
+  const raw = checkpoint.free_form_intent;
+  if (typeof raw !== "string" || raw.trim().length === 0) return null;
+
+  const interpreted = interpretFreeFormIntent(raw);
+  const persisted: PersistedIntentInterpretation = {
+    schema_version: INTENT_INTERPRETATION_SCHEMA_VERSION,
+    interpreted,
+    unencodable_clauses: interpreted.unencodableClauses,
+    created_at: new Date().toISOString(),
+  };
+  try {
+    await writeJsonFile(
+      join(artifactsDir, INTENT_INTERPRETATION_FILENAME),
+      persisted,
+    );
+  } catch {
+    // Best-effort sidecar: a write failure must never block the decide loop.
+  }
+  if (interpreted.unencodableClauses.length > 0) {
+    process.stderr.write(
+      `[remediate-code] free_form_intent: ${interpreted.unencodableClauses.length} ` +
+        `clause(s) could not be encoded as lens/priority/scope signals and are ` +
+        `surfaced for promotion to constraints: ` +
+        `${interpreted.unencodableClauses.join("; ")}\n`,
+    );
+  }
+  return persisted;
+}
+
 async function decideNextStepLoop(
   options: NextStepOptions,
   runLogger: RunLogger,
@@ -2658,6 +3012,20 @@ async function decideNextStepLoop(
   ) {
     await countStateStep();
     return buildConfirmIntentStep({ root, artifactsDir, state });
+  }
+
+  // The checkpoint is confirmed (past the intent gate): interpret its
+  // free_form_intent deterministically HERE via the shared interpreter and
+  // persist the structured signals (INV-S04). The raw string is never threaded
+  // downstream; unencodable clauses are surfaced rather than dropped. Skipped
+  // when the sidecar already exists so it runs once per confirmed checkpoint.
+  if (
+    existingCheckpoint?.confirmed_by === "host" &&
+    typeof existingCheckpoint.free_form_intent === "string" &&
+    existingCheckpoint.free_form_intent.trim().length > 0 &&
+    !existsSync(join(artifactsDir, INTENT_INTERPRETATION_FILENAME))
+  ) {
+    await interpretConfirmedCheckpointIntent(artifactsDir, existingCheckpoint);
   }
 
   // A finished run deletes .remediation-artifacts/ at close (state.json included),

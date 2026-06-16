@@ -151,17 +151,28 @@ export function discoverProviders(
 /**
  * Query the rate-limit state from a live provider if the `queryLimits` method
  * is available. Returns `null` on timeout/error — never throws.
+ *
+ * OBS-9a9091ad: a `queryLimits` rejection was previously swallowed with no
+ * signal, so a provider whose rate-limit query consistently fails was invisible
+ * to operators (the sibling CompositeQuotaSource logs the same swallow). Accept
+ * an optional injectable `log` (mirroring analyzerDeps' injectable-log pattern)
+ * that is invoked with the provider name + error on the swallowed-error path.
+ * The contract is unchanged — `log` is optional, the function still never throws
+ * and still returns null — so existing callers need no change while a caller
+ * that cares can route the diagnostic into its RunLogger.
  */
 export async function queryProviderQuota(
-  _provider: DiscoveredProvider,
+  provider: DiscoveredProvider,
   freshSessionProvider: FreshSessionProvider,
+  log?: (providerName: string, error: unknown) => void,
 ): Promise<ProviderRateLimits | null> {
   if (typeof freshSessionProvider.queryLimits !== "function") {
     return null;
   }
   try {
     return await freshSessionProvider.queryLimits(null);
-  } catch {
+  } catch (error) {
+    log?.(provider.name, error);
     return null;
   }
 }

@@ -32,6 +32,7 @@ import {
 } from "../quota/scheduler.js";
 import { recordWaveOutcome, readQuotaState } from "../quota/state.js";
 import { buildEmptyPoolTerminal } from "../quota/capacity.js";
+import { tierRank } from "./tierRank.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -208,19 +209,13 @@ export function scorePacketComplexity<TPacket>(
  * data), never from a hardcoded provider-name → tier lookup table. Absent
  * rank falls back to the middle tier ("standard"), not to a provider-name
  * switch, so new providers are neutral rather than silently mis-classified.
+ *
+ * The ordering is the single shared `tierRank` authority (P1) — this module no
+ * longer keeps its own copy of the {small,standard,deep} map.
  */
-const DISPATCH_TIER_RANK: Record<string, number> = {
-  deep: 3,
-  standard: 2,
-  small: 1,
-};
-
 function poolCapabilityRank(pool: CapacityPool): number {
-  if (pool.rank != null) {
-    return DISPATCH_TIER_RANK[pool.rank] ?? 2;
-  }
-  // No roster rank declared — treat as standard (neutral).
-  return DISPATCH_TIER_RANK["standard"]!;
+  // tierRank() already maps an absent/unknown rank to the neutral middle tier.
+  return tierRank(pool.rank);
 }
 
 // ---------------------------------------------------------------------------

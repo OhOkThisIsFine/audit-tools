@@ -1,13 +1,14 @@
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { AuditFindingsReport, Finding, WorkBlock, FindingSeverity } from "@audit-tools/shared";
 import {
+  hashContent,
   readOptionalJsonFile,
   readOptionalTextFile,
   writeJsonFile,
   isRecord,
+  severityCompare,
 } from "@audit-tools/shared";
 
 export const INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION =
@@ -133,7 +134,7 @@ export function buildConversationSourceManifest(
  * Used as the content-hash key for idempotent source registration (INV-ID-04).
  */
 export function computeContentHash(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex").slice(0, 16);
+  return hashContent(content, { length: 16 });
 }
 
 // ── Conversation source auto-registration ─────────────────────────────────────
@@ -297,13 +298,9 @@ export function buildFindingsDigest(report: AuditFindingsReport): FindingsDigest
     package_counts[pkg] = (package_counts[pkg] ?? 0) + 1;
   }
 
-  // Sort by severity priority for top-N selection.
-  const severityOrder: Record<string, number> = {
-    critical: 0, high: 1, medium: 2, low: 3, info: 4,
-  };
-  const sorted = [...findings].sort(
-    (a, b) => (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5),
-  );
+  // Sort by severity priority (most-severe-first) for top-N selection, using the
+  // shared single-source comparator instead of a local inverted rank table.
+  const sorted = [...findings].sort((a, b) => severityCompare(a.severity, b.severity));
 
   const top_findings: FindingDigestEntry[] = sorted.slice(0, DIGEST_TOP_N).map((f) => ({
     id: f.id,

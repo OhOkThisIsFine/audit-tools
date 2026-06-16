@@ -75,6 +75,9 @@ export {
   VALID_SEVERITIES,
   CONFIDENCES,
   VALID_CONFIDENCES,
+  severityRank,
+  confidenceRank,
+  severityCompare,
 } from "./types/lens.js";
 export type { RepoConventions } from "./tooling/repoConventions.js";
 export {
@@ -160,6 +163,24 @@ export { mapWithConcurrency } from "./concurrency.js";
 // Id primitives: shared collision-disambiguation convention
 export { mintUniqueId } from "./ids.js";
 
+// Finding identity: the single finding-identity-signature authority (drift-plan
+// R2). The auditor re-keys findings off this signature, the remediator's dedup
+// uses it as the exact-match collapse, and the coverage-ledger denominator key
+// derives from it. `findingIdentity()` (the FindingIdentity subset extractor)
+// stays distinct — it strips contract_* overlay fields, a different concern.
+export type { FindingIdentityFields } from "./findingIdentitySignature.js";
+export {
+  normalizeAnchorPath,
+  normalizeTitle,
+  findingIdentitySignature,
+  findingIdentityFields,
+  findingIdentityKey,
+} from "./findingIdentitySignature.js";
+
+// Content hashing: shared SHA-256 primitive (single source; explicit length)
+export type { HashContentOptions } from "./hash.js";
+export { hashContent } from "./hash.js";
+
 // Tooling: command execution
 export type { RunTrackedOptions, RunTrackedResult } from "./tooling/exec.js";
 export {
@@ -175,6 +196,22 @@ export {
   quoteForShellInterpreterCmd,
   stripClaudeCodeEnv,
 } from "./tooling/exec.js";
+
+// Tooling: allowlisted read-only command runner + default-deny arg allowlist
+// (single source for the auditor's executable-anchor grounding pass; CRIT
+// ARC-a06a3945 — validates arguments, not just the executable).
+export type {
+  AllowlistedExecOutcome,
+  AllowlistedExecRunner,
+} from "./tooling/allowlistedExec.js";
+export {
+  ALLOWLISTED_EXEC_TIMEOUT_MS,
+  ANCHOR_ALLOWLIST,
+  GIT_READONLY_SUBCOMMANDS,
+  executableBaseName,
+  isAllowedAnchorCommand,
+  runAllowlistedReadOnlyCommand,
+} from "./tooling/allowlistedExec.js";
 
 // Tooling: project command discovery
 export type { ProjectCommands } from "./tooling/testCommand.js";
@@ -224,6 +261,30 @@ export {
   writeTextFile,
 } from "./io/json.js";
 
+// IO: canonical `.audit-tools/` path layout (single source for both CLIs)
+export {
+  auditToolsDir,
+  auditArtifactsDir,
+  remediationArtifactsDir,
+  stepsDir,
+  incomingDir,
+} from "./io/auditToolsPaths.js";
+
+// IO: single-sourced step-contract object + writer (drift-plan R3). Owns the
+// steps/ filenames, mkdir + prompt write + atomic current-step.json write, the
+// toPromptPathToken normalization of ALL host-facing path fields, and the
+// canonical-paths-win merge. Both orchestrators extend BaseStepContract and
+// call writeStepContract; neither writes raw Windows paths.
+export type {
+  BaseStepContract,
+  WriteStepContractInput,
+} from "./io/stepContractWriter.js";
+export {
+  currentStepPath,
+  currentPromptPath,
+  writeStepContract,
+} from "./io/stepContractWriter.js";
+
 // Validation
 export type { ValidationSeverity, ValidationIssue } from "./validation/basic.js";
 export {
@@ -241,6 +302,19 @@ export {
   isValidAuditFindingsReport,
 } from "./validation/findingsReport.js";
 export { validateSessionConfig } from "./validation/sessionConfig.js";
+
+// Validation: finding grounding primitives (quote-and-verify + path normalizer;
+// single source for both orchestrators — drift-plan E3 + P7). INV-GND-02: a
+// finding with no grounding verdict is treated as ungrounded (verify-before-fix).
+export type { SourceReader } from "./validation/findingGrounding.js";
+export {
+  normalizeForMatch,
+  normalizeRepoPath,
+  quoteMatches,
+  verifyFindingGrounding,
+  findingIsGrounded,
+  findingNeedsVerificationBeforeFix,
+} from "./validation/findingGrounding.js";
 
 // Provider types
 export type {
@@ -273,14 +347,38 @@ export {
 } from "./providers/workerTaskLaunch.js";
 export { resolveOpenCodeSpawnCommand } from "./providers/opencodeLaunch.js";
 
-// Shared provider classes (claude-code / opencode stay per-package because their
-// prompt-delivery and skip-permissions semantics legitimately differ)
+// Shared structured provider launch/done diagnostics (single source so the
+// claude-code / opencode providers emit byte-identical stderr records).
+export {
+  emitProviderLaunchDiagnostic,
+  emitProviderDoneDiagnostic,
+} from "./providers/providerDiagnostics.js";
+
+// Provider-keyed strategy lookup primitive (unknown key → generic fallback).
+// Single-sources the quota error-parser + audit header-extractor factories.
+export { makeProviderKeyedFactory } from "./providers/providerKeyedFactory.js";
+
+// Shared provider classes. claude-code / opencode are now single-sourced here:
+// the principled default (prompt via stdin + launch/done diagnostics) is shared,
+// and the only per-orchestrator delta is the claude-code skip-permissions
+// default and the nested-session guard message (drift-plan E4). Each
+// orchestrator's providers/index.ts injects these via the factory deps.
 export { SubprocessTemplateProvider } from "./providers/subprocessTemplateProvider.js";
 export {
   LocalSubprocessProvider,
   MISSING_WORKER_COMMAND_MESSAGE,
 } from "./providers/localSubprocessProvider.js";
 export { CodexProvider } from "./providers/codexProvider.js";
+export type { ClaudeCodeProviderOptions } from "./providers/claudeCodeProvider.js";
+export {
+  ClaudeCodeProvider,
+  CLAUDE_CODE_PROVIDER_NAME,
+  buildActiveClaudeCodeSessionMessage,
+} from "./providers/claudeCodeProvider.js";
+export {
+  OpenCodeProvider,
+  OPENCODE_PROVIDER_NAME,
+} from "./providers/opencodeProvider.js";
 
 // Provider auto-resolution + factory (single source of truth for both orchestrators)
 export type {
@@ -355,6 +453,9 @@ export {
   detectRateLimitError,
   computeCooldownUntil,
 } from "./quota/errorParsing.js";
+// Shared claude-code stderr JSON-line scan (single source for the claude-code
+// error parser + audit header extractor).
+export { collectClaudeCodeJsonLines } from "./quota/claudeCodeJsonLines.js";
 export {
   detectHostActiveSubagentLimit,
   resolveHostActiveSubagentLimit,
@@ -406,6 +507,10 @@ export {
   DO_NOT_TOKEN_WRAP_NOTE,
   DISPATCH_PROMPT_HANDOFF_NOTE,
 } from "./prompts.js";
+
+// Host-asset renderers — every IDE asset derives from the one canonical prompt body.
+export type { HostAssetKind, RenderHostAssetOptions } from "./hostAssets.js";
+export { renderHostAsset } from "./hostAssets.js";
 
 // Contract-pipeline artifact types (shared across both orchestrators)
 export type {
@@ -496,6 +601,17 @@ export {
   checkLivelockGuard,
   advancePausedState,
 } from "./rolling/pausedState.js";
+
+// Single shared dispatch tier-rank authority (P1) — the ONE ordering of
+// DispatchModelTier, consolidating the previously-duplicated rank maps.
+export {
+  DISPATCH_TIER_RANK,
+  DISPATCH_TIER_ORDER,
+  DISPATCH_TIER_RANK_FALLBACK,
+  tierRank,
+  compareTier,
+  mostCapableTier,
+} from "./dispatch/tierRank.js";
 
 // Rolling dispatch engine (packet-type-agnostic, quota-only throttle)
 export type {

@@ -116,6 +116,28 @@ test("validate-result.mjs: exits 1 for a result file with invalid JSON", () => {
   });
 });
 
+test("validate-result.mjs: default --artifacts-dir resolves under .audit-tools/audit, not .audit-artifacts (COR-bf5c7331)", () => {
+  withTempDir("dispatch-scripts-default-dir-", (cwd) => {
+    // No --artifacts-dir: the script must default to <cwd>/.audit-tools/audit,
+    // matching where the orchestrator/wrapper actually writes runs. The
+    // file-not-found error names the resolved path.
+    const result = run(validateScript, ["--run-id", "run-x", "--task-id", "task-x"], cwd);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /[/\\]\.audit-tools[/\\]audit[/\\]runs[/\\]run-x[/\\]/);
+    assert.doesNotMatch(result.stderr, /\.audit-artifacts/);
+  });
+});
+
+test("merge-results.mjs: default --artifacts-dir resolves under .audit-tools/audit, not .audit-artifacts (COR-bf5c7331)", () => {
+  withTempDir("dispatch-scripts-default-dir-merge-", (cwd) => {
+    const result = run(mergeScript, ["--run-id", "run-y"], cwd);
+    assert.equal(result.status, 1);
+    // task-results-not-found error names the resolved default path.
+    assert.match(result.stderr, /[/\\]\.audit-tools[/\\]audit[/\\]runs[/\\]run-y[/\\]/);
+    assert.doesNotMatch(result.stderr, /\.audit-artifacts/);
+  });
+});
+
 // ── merge-results.mjs ────────────────────────────────────────────────────────
 
 test("merge-results.mjs: exits 1 with usage when --run-id is missing", () => {

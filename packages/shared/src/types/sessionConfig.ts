@@ -155,6 +155,18 @@ export interface DispatchConfig {
    * `model_hint.tier` from its `routing_risk` at dispatch.
    */
   routing_tiers?: DispatchRoutingTiers;
+  /**
+   * Opt IN to the in-process rolling dispatch engine for remediate's implement
+   * phase (quota-derived concurrency + dispatch-next-on-complete + worktree
+   * isolation + per-node verify into merge). Defaults to OFF: the proven
+   * host-fanned wave path remains the default until a real multi-worker rolling
+   * dispatch has been validated end-to-end (CE-001 anti-wedge — the atomic
+   * removal of the host-wave fallback is gated on that proof). Also enabled via
+   * the `REMEDIATE_ROLLING_ENGINE=true` env var. Honoured only when a
+   * programmatic per-node dispatcher is available (a subprocess/CLI provider);
+   * the conversation host, which fans out its own subagents, never engages it.
+   */
+  rolling_engine?: boolean;
 }
 
 export interface GraphConfig {

@@ -7,9 +7,9 @@ import { PassThrough } from "node:stream";
 
 const {
   ACTIVE_CLAUDE_CODE_SESSION_MESSAGE,
-  ClaudeCodeProvider,
+  createClaudeCodeProvider,
 } = await import("../src/providers/claudeCodeProvider.ts");
-const { OpenCodeProvider } = await import("../src/providers/opencodeProvider.ts");
+const { createOpenCodeProvider } = await import("../src/providers/opencodeProvider.ts");
 const {
   LocalSubprocessProvider,
   MISSING_WORKER_COMMAND_MESSAGE,
@@ -79,7 +79,7 @@ class FakeChildProcess extends EventEmitter {
 
 test("ClaudeCodeProvider rejects nested Claude Code sessions with the shared guidance message", async () => {
   await withEnv("CLAUDECODE", "1", async () => {
-    const provider = new ClaudeCodeProvider();
+    const provider = createClaudeCodeProvider();
     await assert.rejects(
       () => provider.launch(buildLaunchInput(process.cwd())),
       new RegExp(ACTIVE_CLAUDE_CODE_SESSION_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
@@ -99,7 +99,7 @@ test("ClaudeCodeProvider reads the prompt and forwards the expected command argu
       );
 
       const launches = [];
-      const provider = new ClaudeCodeProvider(
+      const provider = createClaudeCodeProvider(
         { command: "claude-bin", extra_args: ["--model", "sonnet"] },
         async (command, args, passedInput) => {
           launches.push({ command, args, passedInput });
@@ -111,12 +111,15 @@ test("ClaudeCodeProvider reads the prompt and forwards the expected command argu
       assert.equal(result.accepted, true);
       assert.equal(launches.length, 1);
       assert.equal(launches[0].command, "claude-bin");
+      // Unified behavior (drift-plan E4): the prompt is delivered via stdin, not
+      // as a `-p <prompt>` argv value, so it no longer appears in args.
       assert.deepEqual(launches[0].args, [
         "-p",
-        "Audit this repo",
         "--model",
         "sonnet",
       ]);
+      assert.ok(!launches[0].args.includes("Audit this repo"));
+      assert.equal(launches[0].passedInput.stdinText, "Audit this repo");
       // The launch input is forwarded with the task's per-task timeout applied.
       assert.equal(launches[0].passedInput.promptPath, input.promptPath);
       assert.equal(launches[0].passedInput.timeoutMs, 12345);
@@ -124,7 +127,7 @@ test("ClaudeCodeProvider reads the prompt and forwards the expected command argu
   });
 });
 
-test("ClaudeCodeProvider only skips permissions when explicitly configured", async () => {
+test("ClaudeCodeProvider (audit-code) only skips permissions when explicitly configured", async () => {
   await withEnv("CLAUDECODE", undefined, async () => {
     await withTempDir("audit-code-claude-provider-permissions-", async (root) => {
       const input = buildLaunchInput(root);
@@ -136,7 +139,9 @@ test("ClaudeCodeProvider only skips permissions when explicitly configured", asy
       );
 
       const launches = [];
-      const provider = new ClaudeCodeProvider(
+      // audit-code's skipPermissionsDefault is false; the flag appears only
+      // because dangerously_skip_permissions is set explicitly here.
+      const provider = createClaudeCodeProvider(
         { command: "claude-bin", dangerously_skip_permissions: true },
         async (command, args, passedInput) => {
           launches.push({ command, args, passedInput });
@@ -147,9 +152,36 @@ test("ClaudeCodeProvider only skips permissions when explicitly configured", asy
       await provider.launch(input);
       assert.deepEqual(launches[0].args, [
         "-p",
-        "Audit this repo",
         "--dangerously-skip-permissions",
       ]);
+      assert.equal(launches[0].passedInput.stdinText, "Audit this repo");
+    });
+  });
+});
+
+test("ClaudeCodeProvider (audit-code) does not skip permissions by default", async () => {
+  await withEnv("CLAUDECODE", undefined, async () => {
+    await withTempDir("audit-code-claude-provider-default-perms-", async (root) => {
+      const input = buildLaunchInput(root);
+      await writeFile(input.promptPath, "Audit this repo", "utf8");
+      await writeFile(
+        input.taskPath,
+        JSON.stringify({ worker_command: ["claude"] }),
+        "utf8",
+      );
+
+      const launches = [];
+      // No dangerously_skip_permissions set → audit-code default (off).
+      const provider = createClaudeCodeProvider(
+        { command: "claude-bin" },
+        async (command, args, passedInput) => {
+          launches.push({ command, args, passedInput });
+          return { accepted: true, exitCode: 0, signal: null };
+        },
+      );
+
+      await provider.launch(input);
+      assert.ok(!launches[0].args.includes("--dangerously-skip-permissions"));
     });
   });
 });
@@ -312,7 +344,7 @@ test("ClaudeCodeProvider.launch emits pre-launch and post-launch diagnostics to 
       };
 
       try {
-        const provider = new ClaudeCodeProvider(
+        const provider = createClaudeCodeProvider(
           {},
           async (_command, _args, _passedInput) => ({ accepted: true, exitCode: 0, signal: null }),
         );
@@ -360,36 +392,22 @@ test("OpenCodeProvider.launch emits pre-launch and post-launch diagnostics to st
       return originalWrite(chunk, ...rest);
     };
 
-    // Stub spawnLoggedCommand at the module level by constructing a provider
-    // that uses a fake spawn. OpenCodeProvider doesn't accept an injected launcher,
-    // so we verify behavior by checking what reaches stderr before the real spawn
-    // would be called. We'll abort the actual spawn by using a very short timeout.
-    // Instead, we monkey-patch the imported spawnLoggedCommand via a subclass.
+    // The shared OpenCodeProvider accepts an injectable launcher, so we stub it
+    // with a fast accept and verify both the pre-launch and post-launch records.
     let launchRecord;
     let doneRecord;
     try {
-      // We can only intercept via stderr since OpenCodeProvider doesn't accept a
-      // mock launcher. Exercise the stderr path directly with a real-but-fast launch.
-      // Use the already-captured stderrWrites to verify the provider_launch record
-      // is written before the command runs.
-      //
-      // Since we can't easily mock spawnLoggedCommand inside OpenCodeProvider,
-      // we verify that the pre-launch record is written by checking writes before
-      // any error is thrown.
-      const provider = new OpenCodeProvider({ command: "node" });
-      // Launch will fail because "node" with opencode args won't succeed,
-      // but the pre-launch diagnostic must be written first.
-      try {
-        await provider.launch(input);
-      } catch {
-        // Ignore the launch error — we're only checking the stderr diagnostic.
-      }
+      const provider = createOpenCodeProvider(
+        { command: "node" },
+        async () => ({ accepted: true, exitCode: 0, signal: null }),
+      );
+      await provider.launch(input);
     } finally {
       process.stderr.write = originalWrite;
     }
 
     // The provider_launch record must have been written.
-    assert.ok(stderrWrites.length >= 1, "should emit at least one stderr write (provider_launch)");
+    assert.ok(stderrWrites.length >= 2, "should emit provider_launch and provider_done");
     launchRecord = JSON.parse(stderrWrites[0]);
     assert.equal(launchRecord.event, "provider_launch");
     assert.equal(launchRecord.provider, "opencode");
@@ -397,6 +415,14 @@ test("OpenCodeProvider.launch emits pre-launch and post-launch diagnostics to st
     assert.equal(launchRecord.obligationId, input.obligationId);
     assert.equal(launchRecord.promptPath, input.promptPath);
     assert.equal(launchRecord.taskPath, input.taskPath);
+
+    doneRecord = JSON.parse(stderrWrites[1]);
+    assert.equal(doneRecord.event, "provider_done");
+    assert.equal(doneRecord.provider, "opencode");
+    assert.equal(doneRecord.runId, input.runId);
+    assert.equal(doneRecord.obligationId, input.obligationId);
+    assert.ok("accepted" in doneRecord, "provider_done should include accepted");
+    assert.ok("exitCode" in doneRecord, "provider_done should include exitCode");
   });
 });
 

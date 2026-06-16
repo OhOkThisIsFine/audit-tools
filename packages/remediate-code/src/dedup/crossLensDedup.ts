@@ -1,3 +1,8 @@
+import {
+  severityRank,
+  confidenceRank,
+  findingIdentityKey,
+} from "@audit-tools/shared";
 import type { Finding, RemediationBlock } from "../state/types.js";
 
 function wordSet(text: string): Set<string> {
@@ -32,22 +37,25 @@ function filePathOverlap(a: Finding, b: Finding): number {
   return union === 0 ? 0 : intersection / union;
 }
 
-const SEVERITY_RANK: Record<string, number> = {
-  critical: 5,
-  high: 4,
-  medium: 3,
-  low: 2,
-  info: 1,
-};
-
-const CONFIDENCE_RANK: Record<string, number> = {
-  high: 3,
-  medium: 2,
-  low: 1,
-};
-
 function primaryPath(finding: Finding): string {
   return finding.affected_files[0]?.path ?? "";
+}
+
+/**
+ * The shared finding-identity signature of a finding, but only when it is
+ * *discriminating* enough to stand on its own as an exact-match key for
+ * cross-lens dedup. A structural-anchor signature with an empty scope
+ * (`anchor|<path>|`) means nothing more than "same file" — too coarse to
+ * collapse two findings by itself, so the fuzzy title/overlap layer must refine
+ * it. We return `null` in that case so it never short-circuits the heuristic.
+ * Anchored-with-scope and normalized-title signatures are discriminating and are
+ * returned verbatim; the rule/category tier embeds the lens, so two cross-lens
+ * findings never share it (they fall through to the fuzzy layer by design).
+ */
+function discriminatingIdentityKey(finding: Finding): string | null {
+  const key = findingIdentityKey(finding);
+  if (key.startsWith("anchor|") && key.endsWith("|")) return null;
+  return key;
 }
 
 export interface CrossLensDedupResult {
@@ -88,26 +96,38 @@ export function deduplicateCrossLensFindings(
         const b = group[j];
         if (a.lens.toLowerCase() === b.lens.toLowerCase()) continue;
 
-        // Category is a hard merge-key discriminator, mirroring the stable-id
-        // signals (lens+category+title+files): two findings that share a
-        // file/lens-pair but were classified under different categories describe
-        // structurally different problems and must NEVER be collapsed — e.g.
-        // ARC-86b18f1b (inferred_contract_gap) vs ARC-86b18f1b-2
-        // (invariant_counterexample) stay distinct (OBL-C003-DEDUP /
-        // OBL-INV-RPS-07). A true duplicate keeps the same category and still
-        // collapses below.
+        // Category is a hard merge-key discriminator, applied ahead of BOTH the
+        // exact-match and fuzzy layers: two findings that share a file/lens-pair
+        // but were classified under different categories describe structurally
+        // different problems and must NEVER be collapsed — e.g. ARC-86b18f1b
+        // (inferred_contract_gap) vs ARC-86b18f1b-2 (invariant_counterexample)
+        // stay distinct (OBL-C003-DEDUP / OBL-INV-RPS-07). Category is
+        // orthogonal to the structural-anchor identity signature (which ignores
+        // it), so it remains an independent hard gate. A true duplicate keeps the
+        // same category and still collapses below.
         if (a.category.toLowerCase() !== b.category.toLowerCase()) continue;
 
-        const titleSim = wordJaccard(a.title, b.title);
-        // Same-category cross-lens pair: a moderate title overlap is enough to
-        // treat them as the same defect surfaced through two lenses.
-        if (titleSim < 0.4) continue;
-        if (filePathOverlap(a, b) < 0.5) continue;
+        // Exact-match layer (drift-plan R2): within a matching category, the
+        // shared finding-identity signature is the one authority for "is this the
+        // same finding?". When two cross-lens findings share a DISCRIMINATING
+        // signature they ARE the same defect — collapse even if their titles
+        // diverged enough to slip under the Jaccard floor (the signature is
+        // lens-independent at the structural-anchor-with-scope and
+        // normalized-title tiers). Otherwise fall back to the fuzzy heuristic: a
+        // moderate title overlap plus a real file overlap.
+        const keyA = discriminatingIdentityKey(a);
+        const keyB = discriminatingIdentityKey(b);
+        const exactIdentityMatch = keyA !== null && keyA === keyB;
+        if (!exactIdentityMatch) {
+          const titleSim = wordJaccard(a.title, b.title);
+          if (titleSim < 0.4) continue;
+          if (filePathOverlap(a, b) < 0.5) continue;
+        }
 
-        const aSev = SEVERITY_RANK[a.severity] ?? 0;
-        const bSev = SEVERITY_RANK[b.severity] ?? 0;
-        const aConf = CONFIDENCE_RANK[a.confidence] ?? 0;
-        const bConf = CONFIDENCE_RANK[b.confidence] ?? 0;
+        const aSev = severityRank(a.severity);
+        const bSev = severityRank(b.severity);
+        const aConf = confidenceRank(a.confidence);
+        const bConf = confidenceRank(b.confidence);
         const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
         // originalSurvivor is one of the source Finding objects (a or b).
         // absorbed is the other source Finding.

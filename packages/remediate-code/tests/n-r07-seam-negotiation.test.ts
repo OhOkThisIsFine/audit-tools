@@ -138,15 +138,9 @@ function makeFinalizedModuleContracts() {
   };
 }
 
-const FULL_SEAM_CHAIN: ContractPipelineArtifactName[] = [
-  "goal_spec",
-  "context_bundle",
-  "module_decomposition",
-  "module_contracts",
-  "seam_reconciliation_report",
-  "finalized_module_contracts",
-];
-
+// MNT-74af66b4: the explicit `writeSeamChain` helper below is the seam-chain
+// authority used throughout; a parallel FULL_SEAM_CHAIN constant was dead (never
+// referenced) and has been removed to avoid a reader reconciling two encodings.
 async function writeSeamChain(): Promise<void> {
   await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", makeGoalSpec());
   await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", makeContextBundle());

@@ -1181,11 +1181,14 @@ describe("infra-node live-surface verification: isInfraModifyingBlock", () => {
       step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
     }
 
-    if (step.step_kind !== "dispatch_implement") {
-      // The infra block test is inconclusive if we never get to dispatch — skip with a note.
-      // This can happen if classify_impl_risks requires additional processing.
-      return;
-    }
+    // TST-9730c3bc: the loop MUST reach dispatch_implement for this fixture (an
+    // infra-touching block with every ack written). A regression that prevents
+    // the infra block from ever reaching dispatch must FAIL here, not pass
+    // vacuously via an early return.
+    expect(
+      step.step_kind,
+      `infra block never reached dispatch_implement (stuck at '${step.step_kind}')`,
+    ).toBe("dispatch_implement");
 
     // Read the dispatch plan and check the infra-node prompt contains verification instructions.
     const dispatchPlan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));

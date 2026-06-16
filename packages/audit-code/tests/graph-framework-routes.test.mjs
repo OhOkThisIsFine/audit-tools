@@ -250,13 +250,21 @@ test("fallbackRouteEdge returns a GET edge for api/route paths and undefined oth
     handler: "src/api/users.ts",
     path: "/src_api_users.ts",
   });
-  // A path containing 'route' also produces a defined fallback edge.
+  // A path whose final segment is exactly `route.ts` (Next.js App Router
+  // convention) produces a defined fallback edge.
   const routeEdge = fallbackRouteEdge("app/dashboard/route.ts");
   assert.ok(routeEdge);
   assert.equal(routeEdge.method, "GET");
   assert.equal(routeEdge.handler, "app/dashboard/route.ts");
   // An unrelated path yields no fallback edge.
   assert.equal(fallbackRouteEdge("src/lib/util.ts"), undefined);
+  // COR-c5438ac1: a bare "route" substring inside an identifier must NOT
+  // fabricate a route edge — only `api/` segments or `route`/`routes` segments.
+  assert.equal(fallbackRouteEdge("src/router.ts"), undefined);
+  assert.equal(fallbackRouteEdge("src/extractors/graphRoutes.ts"), undefined);
+  assert.equal(fallbackRouteEdge("src/reroute-helper.ts"), undefined);
+  // A `routes` directory segment still matches.
+  assert.ok(fallbackRouteEdge("app/routes/users.ts"));
 });
 
 // ---- extractConventionalRouteEvidence ----

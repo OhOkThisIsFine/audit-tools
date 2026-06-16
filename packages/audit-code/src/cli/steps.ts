@@ -1,6 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { writeJsonFile } from "@audit-tools/shared";
+import { writeStepContract } from "@audit-tools/shared";
 import type { StepStatus } from "@audit-tools/shared";
 import type { AccessDeclaration } from "../types/workerSession.js";
 
@@ -71,6 +69,17 @@ export interface StepArtifact {
   access?: AccessDeclaration;
 }
 
+/**
+ * Write the audit step contract. Delegates to the shared `writeStepContract`
+ * (drift-plan R3) — the single source for the steps/ filenames, mkdir, prompt
+ * write, atomic current-step.json write, the forward-slash normalization of ALL
+ * host-facing path fields, and the canonical-paths-win merge. Promoting the
+ * writer to shared is what fixed audit-code's Windows path-separator drift: it
+ * previously wrote `prompt_path` / `repo_root` / `artifacts_dir` /
+ * `artifact_paths` with raw backslashes, while remediate-code normalized them.
+ * Audit's optional fields (progress, allowed_mcp_tools, access) ride through
+ * `extraFields` with the same conditional-omission semantics as before.
+ */
 export async function writeCurrentStep(params: {
   artifactsDir: string;
   stepKind: StepKind;
@@ -85,35 +94,25 @@ export async function writeCurrentStep(params: {
   prompt: string;
   access?: AccessDeclaration;
 }): Promise<StepArtifact> {
-  const stepsDir = join(params.artifactsDir, "steps");
-  await mkdir(stepsDir, { recursive: true });
-  const promptPath = join(stepsDir, "current-prompt.md");
-  const stepPath = join(stepsDir, "current-step.json");
-  await writeFile(promptPath, params.prompt, "utf8");
-  const step: StepArtifact = {
-    contract_version: STEP_CONTRACT_VERSION,
-    step_kind: params.stepKind,
-    prompt_path: promptPath,
+  return writeStepContract<StepArtifact, StepKind, string | null>({
+    contractVersion: STEP_CONTRACT_VERSION,
+    stepKind: params.stepKind,
     status: params.status,
-    run_id: params.runId,
-    ...(params.progress ? { progress: params.progress } : {}),
-    allowed_commands: params.allowedCommands,
-    ...(params.allowedMcpTools && params.allowedMcpTools.length > 0
-      ? { allowed_mcp_tools: params.allowedMcpTools }
-      : {}),
-    stop_condition: params.stopCondition,
-    repo_root: params.repoRoot,
-    artifacts_dir: params.artifactsDir,
-    artifact_paths: {
-      // Caller-supplied paths are merged first so the canonical, computed
-      // step/prompt locations always win — a caller (or step config) must not be
-      // able to repoint the host at a different current-step.json / -prompt.md.
-      ...params.artifactPaths,
-      current_step: stepPath,
-      current_prompt: promptPath,
+    runId: params.runId,
+    allowedCommands: params.allowedCommands,
+    stopCondition: params.stopCondition,
+    repoRoot: params.repoRoot,
+    artifactsDir: params.artifactsDir,
+    prompt: params.prompt,
+    artifactPaths: params.artifactPaths,
+    extraFields: {
+      // Optional audit fields keep their conditional-omission semantics; they
+      // ride before the canonical path fields so they can never clobber them.
+      ...(params.progress ? { progress: params.progress } : {}),
+      ...(params.allowedMcpTools && params.allowedMcpTools.length > 0
+        ? { allowed_mcp_tools: params.allowedMcpTools }
+        : {}),
+      ...(params.access ? { access: params.access } : {}),
     },
-    ...(params.access ? { access: params.access } : {}),
-  };
-  await writeJsonFile(stepPath, step);
-  return step;
+  });
 }

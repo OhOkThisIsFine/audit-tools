@@ -13,7 +13,9 @@ import {
   program,
   applyGuidanceFile,
   normalizeBooleanFlagArgv,
+  resolveArtifactsDirOption,
 } from "../src/index.js";
+import { remediationArtifactsDir } from "@audit-tools/shared";
 
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 
@@ -274,6 +276,35 @@ describe("applyGuidanceFile — sole, idempotent-on-target writer of conversatio
   });
 });
 
+// --- artifacts-dir resolution (default rebases onto --root) ----------------
+
+describe("resolveArtifactsDirOption — default rebases onto --root", () => {
+  it("--root <X> with the unchanged default lands under <X>/.audit-tools/remediation", () => {
+    const rootX = resolve("/tmp", "some-target-root");
+    expect(resolveArtifactsDirOption(rootX, ".audit-tools/remediation")).toBe(
+      remediationArtifactsDir(rootX),
+    );
+    expect(resolveArtifactsDirOption(rootX, ".audit-tools/remediation")).toBe(
+      join(rootX, ".audit-tools", "remediation"),
+    );
+  });
+
+  it("routes the default through the shared remediationArtifactsDir helper", () => {
+    const rootX = resolve("/tmp", "another-root");
+    // Equivalence with the shared helper is the single-source guarantee: the
+    // CLI resolver must not re-spell the `.audit-tools/remediation` join.
+    expect(resolveArtifactsDirOption(rootX, ".audit-tools/remediation")).toBe(
+      remediationArtifactsDir(rootX),
+    );
+  });
+
+  it("honors an explicit --artifacts-dir verbatim (ignores --root)", () => {
+    const rootX = resolve("/tmp", "some-target-root");
+    const explicit = resolve("/var", "artifacts", "elsewhere");
+    expect(resolveArtifactsDirOption(rootX, explicit)).toBe(explicit);
+  });
+});
+
 // --- doc ↔ CLI parity (INV-CC-05) ------------------------------------------
 
 describe("doc ↔ CLI parity for host capability flags (INV-CC-05)", () => {
@@ -308,20 +339,15 @@ describe("doc ↔ CLI parity for host capability flags (INV-CC-05)", () => {
   });
 
   it("no loader doc carries two-step bootstrap phrasing", () => {
+    // The loader docs instruct the single-step `--guidance-file` bootstrap rather
+    // than a manual write-then-call. This assertion is unconditional: a doc that
+    // regresses to two-step phrasing must FAIL the suite, never be skipped. (An
+    // earlier early-return gate let this pass green in exactly its failure
+    // condition — TST-b3b7b26b — and is removed.)
     const offenders = docsWithTwoStepBootstrap();
-    // NOTE: the loader docs are rewritten by the later `host-loader-docs` block
-    // to instruct `--guidance-file` instead of a manual write-then-call. Until
-    // that block lands, this assertion would fail on stale wording, so it is
-    // gated here so it does not block THIS block's verification. The assertion
-    // logic is intact and goes live (green) the moment the docs are updated.
-    if (offenders.length > 0) {
-      console.warn(
-        `[cli-host-capability-flags] two-step bootstrap phrasing still present in: ${offenders.join(
-          ", ",
-        )} — expected to clear after the host-loader-docs block. Skipping the hard assertion until then.`,
-      );
-      return;
-    }
-    expect(offenders).toEqual([]);
+    expect(
+      offenders,
+      `loader docs carry legacy two-step bootstrap phrasing (manual write-then-continue instead of --guidance-file): ${offenders.join(", ")}`,
+    ).toEqual([]);
   });
 });

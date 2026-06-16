@@ -25,8 +25,11 @@ test("estimateTokensFromBytes is the single token-estimation primitive in shared
   assert.equal(estimateTokensFromBytes(400), 100);
   // 1 byte → ceil(1/4) = 1
   assert.equal(estimateTokensFromBytes(1), 1);
-  // ESTIMATED_TOKENS_PER_LINE × BYTES_PER_TOKEN consistency (value is 16)
-  assert.equal(ESTIMATED_TOKENS_PER_LINE * BYTES_PER_TOKEN, BYTES_PER_TOKEN * ESTIMATED_TOKENS_PER_LINE);
+  // Pin each operand individually — the earlier `a*b === b*a` check was a
+  // commutativity tautology that could never fail. The byte→token ratio and the
+  // legacy per-line estimate are both 4, so their product is 16.
+  assert.equal(BYTES_PER_TOKEN, 4);
+  assert.equal(ESTIMATED_TOKENS_PER_LINE, 4);
   assert.equal(ESTIMATED_TOKENS_PER_LINE * BYTES_PER_TOKEN, 16);
   // Canonical overhead constants
   assert.equal(ESTIMATED_PROMPT_OVERHEAD_TOKENS, 900);

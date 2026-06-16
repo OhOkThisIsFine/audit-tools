@@ -1,9 +1,8 @@
-import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import {
   isFileMissingError,
-  withFsRetry,
+  writeJsonFile,
   withFileLock,
   STALE_LOCK_MS,
 } from "@audit-tools/shared";
@@ -98,27 +97,12 @@ function lockPath(artifactsDir: string): string {
   return join(artifactsDir, LOCK_FILENAME);
 }
 
-function tempStatePath(artifactsDir: string): string {
-  return join(artifactsDir, `${STATE_FILENAME}.${randomUUID()}.tmp`);
-}
-
-interface StateStoreFileOps {
-  writeFile: typeof writeFile;
-  rename: typeof rename;
-  rm: typeof rm;
-}
-
 export class StateStore {
-  private readonly fileOps: StateStoreFileOps;
-
   constructor(
     private artifactsDir: string,
-    fileOps: Partial<StateStoreFileOps> = {},
     // correlationId retained for API compatibility; no longer used in lock body
     private readonly _correlationId?: string,
-  ) {
-    this.fileOps = { writeFile, rename, rm, ...fileOps };
-  }
+  ) {}
 
   async init(): Promise<void> {
     await mkdir(this.artifactsDir, { recursive: true });
@@ -194,7 +178,8 @@ export class StateStore {
    * Save state.json unconditionally (no TOCTOU protection). Prefer `mutate`
    * for transitions; use this only when the caller holds an external guarantee
    * that no concurrent writer exists (e.g. single-agent close phase).
-   * INV-remediate-state-04: write to temp then atomic rename.
+   * INV-remediate-state-04: the durable write goes through the shared atomic
+   * writer (temp + atomic rename), the single source for atomic JSON writes.
    */
   async saveState(state: RemediationState): Promise<void> {
     await mkdir(this.artifactsDir, { recursive: true });
@@ -208,15 +193,13 @@ export class StateStore {
     );
   }
 
-  /** Write temp + atomic rename while the caller already holds the lock. */
+  /**
+   * Persist state.json while the caller already holds the lock. Delegates to the
+   * shared `writeJsonFile` (temp + atomic rename) — the lock-agnostic single
+   * source for atomic JSON writes — so this store carries no inline writer of
+   * its own.
+   */
   private async _writeStateLocked(state: RemediationState): Promise<void> {
-    const path = statePath(this.artifactsDir);
-    const temp = tempStatePath(this.artifactsDir);
-    try {
-      await this.fileOps.writeFile(temp, JSON.stringify(state, null, 2), "utf8");
-      await withFsRetry(() => this.fileOps.rename(temp, path));
-    } finally {
-      await this.fileOps.rm(temp, { force: true }).catch(() => undefined);
-    }
+    await writeJsonFile(statePath(this.artifactsDir), state);
   }
 }

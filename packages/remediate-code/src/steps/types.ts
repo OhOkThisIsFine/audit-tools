@@ -34,6 +34,12 @@ import type {
   AccessDeclaration,
 } from "@audit-tools/shared";
 
+// AccessDeclaration is single-sourced in @audit-tools/shared; re-exported here
+// (from the single import above) so existing importers of this module are
+// unchanged. No local re-declaration / second `from "@audit-tools/shared"`
+// listing — that was the duplicate this consolidates.
+export type { AccessDeclaration };
+
 export type RemediationStepStatus = StepStatus;
 
 export interface RemediationStep {
@@ -55,7 +61,6 @@ export type DispatchPhase = "document" | "implement";
 export type {
   DispatchModelTier,
   DispatchModelHint,
-  AccessDeclaration,
 } from "@audit-tools/shared";
 
 export interface DispatchPlanItem {

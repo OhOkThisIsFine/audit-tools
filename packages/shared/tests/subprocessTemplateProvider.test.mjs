@@ -190,7 +190,20 @@ test("SubprocessTemplateProvider: unknown placeholder routes to RunLogger, not c
     "test-provider",
     async (command, args, launchInput) => {
       calls.push({ command, args });
-      return { exitCode: 0, durationMs: 0, stdout: "", stderr: "" };
+      // TST-cb380b8b: return a real LaunchFreshSessionResult-shaped value
+      // (accepted/exitCode/signal/command/args) — the launchCommand contract is
+      // `typeof spawnLoggedCommand`, NOT { exitCode, durationMs, stdout, stderr }.
+      // A correct stub means a result-shape regression in the provider would be
+      // catchable here rather than silently absorbed by a divergent fake.
+      return {
+        accepted: true,
+        exitCode: 0,
+        signal: null,
+        command,
+        args,
+        stdoutPath: launchInput.stdoutPath,
+        stderrPath: launchInput.stderrPath,
+      };
     },
     logger,
   );
@@ -243,7 +256,8 @@ test("SubprocessTemplateProvider: no error thrown when no runLogger and unknown 
   const provider = new SubprocessTemplateProvider(
     { command_template: ["{unknownKey}"] },
     "test-provider",
-    async () => ({ exitCode: 0, durationMs: 0, stdout: "", stderr: "" }),
+    // TST-cb380b8b: LaunchFreshSessionResult shape, not the divergent fake.
+    async () => ({ accepted: true, exitCode: 0, signal: null }),
   );
 
   // Must complete without throwing; placeholder resolves to empty string.

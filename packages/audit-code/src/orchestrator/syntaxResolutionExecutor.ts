@@ -102,7 +102,10 @@ function runTsc(root: string): {
       results.push({
         id: `tsc-${results.length}`,
         category: "correctness",
-        severity: "error",
+        // Canonical severity vocabulary required by
+        // external_analyzer_results.schema.json is critical|high|medium|low|info
+        // — a tsc error maps to "high" (COR-5d9f2421), not the raw "error".
+        severity: "high",
         path: match[1].replace(/\\/g, "/"),
         line_start: parseInt(match[2], 10),
         summary: match[3],
@@ -208,7 +211,11 @@ function runEslint(root: string): {
         results.push({
           id: `eslint-${results.length}`,
           category: "maintainability",
-          severity: msg.severity === 2 ? "error" : "warning",
+          // Canonical severity vocabulary (critical|high|medium|low|info) —
+          // eslint error (2) -> "high", warning (1) -> "medium" (COR-5d9f2421),
+          // mirroring normalizeExternalSeverity rather than persisting raw
+          // "error"/"warning" out-of-vocabulary values.
+          severity: msg.severity === 2 ? "high" : "medium",
           path: fileResult.filePath
             .replace(/\\/g, "/")
             .replace(root.replace(/\\/g, "/") + "/", ""),

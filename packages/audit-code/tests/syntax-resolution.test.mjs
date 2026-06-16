@@ -89,7 +89,9 @@ test("syntax resolution runs ESLint when repo-local ESLint config exists", async
       {
         id: "eslint-0",
         category: "maintainability",
-        severity: "error",
+        // Canonical severity vocabulary: eslint error (severity 2) -> "high"
+        // (COR-5d9f2421), never the out-of-vocabulary "error".
+        severity: "high",
         path: "src/app.js",
         line_start: 1,
         summary: "fixture lint error",
@@ -103,6 +105,39 @@ test("syntax resolution runs ESLint when repo-local ESLint config exists", async
       ]),
       [["eslint", "findings"]],
     );
+  });
+});
+
+test("syntax resolution maps ESLint severities to the canonical vocabulary (COR-5d9f2421)", async () => {
+  await withTempRepo(async (root) => {
+    await writeFile(join(root, "eslint.config.js"), "module.exports = [];\n");
+    // Fake eslint emitting one error (severity 2) and one warning (severity 1).
+    await writeFile(
+      join(root, "node_modules", "eslint", "bin", "eslint.js"),
+      [
+        "const { writeFileSync } = require('node:fs');",
+        "const path = require('node:path');",
+        "process.stdout.write(JSON.stringify([{",
+        "  filePath: path.join(process.cwd(), 'src', 'app.js'),",
+        "  messages: [",
+        "    { severity: 2, line: 1, message: 'an error', ruleId: 'r/err' },",
+        "    { severity: 1, line: 2, message: 'a warning', ruleId: 'r/warn' }",
+        "  ]",
+        "}]));",
+        "",
+      ].join("\n"),
+    );
+
+    const result = runSyntaxResolutionExecutor(createBundle(), root);
+    const severities = result.updated.external_analyzer_results.results.map(
+      (r) => r.severity,
+    );
+    assert.deepEqual(severities, ["high", "medium"]);
+    // No persisted result may carry an out-of-vocabulary severity.
+    const canonical = new Set(["critical", "high", "medium", "low", "info"]);
+    for (const sev of severities) {
+      assert.ok(canonical.has(sev), `severity ${sev} must be canonical`);
+    }
   });
 });
 

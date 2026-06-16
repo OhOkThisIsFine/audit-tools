@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { hashContent } from "@audit-tools/shared";
 import { join, relative, resolve } from "node:path";
 import type { RepoManifest } from "../types.js";
 import { buildRepoManifest } from "./fileInventory.js";
@@ -49,7 +49,7 @@ async function maybeHashFile(
 ): Promise<string | undefined> {
   if (!enabled) return undefined;
   const content = await readFile(path);
-  return createHash("sha256").update(content).digest("hex");
+  return hashContent(content);
 }
 
 interface WalkContext {

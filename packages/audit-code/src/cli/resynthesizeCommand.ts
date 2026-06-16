@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { getRootDir } from "./args.js";
+import { getFlag, getRootDir } from "./args.js";
 import {
   normalizeExistingFindingsReport,
   renderAuditReportMarkdown,
@@ -17,16 +17,14 @@ const AUDIT_TOOLS_DIR = ".audit-tools";
 const FINDINGS_FILENAME = "audit-findings.json";
 const REPORT_FILENAME = "audit-report.md";
 
-function getFlagValue(argv: string[], flag: string): string | undefined {
-  const idx = argv.indexOf(flag);
-  return idx >= 0 && idx + 1 < argv.length ? argv[idx + 1] : undefined;
-}
-
 export async function cmdResynthesize(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
   const auditToolsDir = join(root, AUDIT_TOOLS_DIR);
   const defaultInput = join(auditToolsDir, FINDINGS_FILENAME);
-  const inputPath = getFlagValue(argv, "--input") ?? defaultInput;
+  // Use the shared flag parser, which rejects a flag-shaped next token so an
+  // invocation like `--input --root foo` falls back to the default instead of
+  // mis-resolving the input path to "--root" (COR-bc35a171).
+  const inputPath = getFlag(argv, "--input") ?? defaultInput;
 
   if (!existsSync(inputPath)) {
     console.error(

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { isInfraModifyingBlock } from "../src/steps/dispatch.js";
 import type { RemediationBlock } from "../src/state/types.js";
 import type { RemediationState } from "../src/state/store.js";
@@ -131,7 +131,7 @@ describe("isInfraModifyingBlock returns false for non-infra files", () => {
 // prepareImplementDispatch with an infra-touching block. We import the
 // relevant filesystem helpers inline.
 
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { readFileSync } from "node:fs";
@@ -190,10 +190,24 @@ async function makeMinimalState(
 }
 
 describe("implementPrompt includes live-surface verification section for infra-modifying blocks", () => {
-  it("rendered prompt contains 'Infra-modifying block' heading when isInfraModifyingBlock is true", async () => {
-    const dir = join(tmpdir(), `infra-block-test-${Date.now()}`);
-    const artifactsDir = join(dir, ".audit-tools", "remediation");
+  // TST-b08cda90: use a per-test mkdtemp scratch dir created/removed via
+  // beforeEach/afterEach. mkdtemp guarantees a unique path (no Date.now()
+  // collision when two cases run in the same millisecond), and afterEach removes
+  // it even when an assertion throws mid-test (the prior inline `rm` leaked).
+  let dir: string;
+  let artifactsDir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "infra-block-test-"));
+    artifactsDir = join(dir, ".audit-tools", "remediation");
     await mkdir(artifactsDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("rendered prompt contains 'Infra-modifying block' heading when isInfraModifyingBlock is true", async () => {
     await makeMinimalState(artifactsDir, [
       "packages/remediate-code/src/steps/dispatch.ts",
     ]);
@@ -207,17 +221,12 @@ describe("implementPrompt includes live-surface verification section for infra-m
     const promptPath = plan.items[0].prompt_path;
     const promptText = readFileSync(promptPath, "utf8");
     expect(promptText).toContain("Infra-modifying block");
-
-    await rm(dir, { recursive: true, force: true });
   });
 
   it("infra section is BUILD-FREE: instructs npm run check, never a worker-side build (CE-001)", async () => {
     // The host builds the package centrally; an infra-modifying node must verify
     // build-free (no worker-side `npm run build`) to avoid racing the central
     // build's dist/. (Replaces the prior rebuild-instruction expectation.)
-    const dir = join(tmpdir(), `infra-block-test-build-${Date.now()}`);
-    const artifactsDir = join(dir, ".audit-tools", "remediation");
-    await mkdir(artifactsDir, { recursive: true });
     await makeMinimalState(artifactsDir, [
       "packages/remediate-code/src/steps/dispatch.ts",
     ]);
@@ -230,14 +239,9 @@ describe("implementPrompt includes live-surface verification section for infra-m
     const promptText = readFileSync(plan.items[0].prompt_path, "utf8");
     expect(promptText).toContain("npm run check");
     expect(promptText).not.toContain("npm run build -w packages/remediate-code");
-
-    await rm(dir, { recursive: true, force: true });
   });
 
   it("infra section does NOT instruct npm test -w (build-prepending) — uses a build-free runner", async () => {
-    const dir = join(tmpdir(), `infra-block-test-smoke-${Date.now()}`);
-    const artifactsDir = join(dir, ".audit-tools", "remediation");
-    await mkdir(artifactsDir, { recursive: true });
     await makeMinimalState(artifactsDir, [
       "packages/remediate-code/src/steps/dispatch.ts",
     ]);
@@ -251,17 +255,12 @@ describe("implementPrompt includes live-surface verification section for infra-m
     expect(promptText).not.toContain("npm test -w packages/remediate-code");
     // The build-free runner is what the worker is pointed at instead.
     expect(promptText).toContain("npx vitest run");
-
-    await rm(dir, { recursive: true, force: true });
   });
 
   it("infra section delegates the central build + rollback to the host (no dist snapshot directive)", async () => {
     // Because the worker no longer builds/republishes the engine, it cannot
     // brick the live dispatcher; the host owns the central build and any dist
     // rollback. (Replaces the prior 'Snapshot dist' expectation.)
-    const dir = join(tmpdir(), `infra-block-test-rollback-${Date.now()}`);
-    const artifactsDir = join(dir, ".audit-tools", "remediation");
-    await mkdir(artifactsDir, { recursive: true });
     await makeMinimalState(artifactsDir, [
       "packages/remediate-code/src/steps/dispatch.ts",
     ]);
@@ -274,14 +273,9 @@ describe("implementPrompt includes live-surface verification section for infra-m
     const promptText = readFileSync(plan.items[0].prompt_path, "utf8");
     expect(promptText).not.toContain("Snapshot dist");
     expect(promptText).toMatch(/host (builds the package centrally|owns the central build)/i);
-
-    await rm(dir, { recursive: true, force: true });
   });
 
   it("rendered prompt does NOT contain infra section when isInfraModifyingBlock is false", async () => {
-    const dir = join(tmpdir(), `infra-block-test-noinfra-${Date.now()}`);
-    const artifactsDir = join(dir, ".audit-tools", "remediation");
-    await mkdir(artifactsDir, { recursive: true });
     await makeMinimalState(artifactsDir, [
       "packages/remediate-code/src/phases/plan.ts",
     ]);
@@ -294,7 +288,5 @@ describe("implementPrompt includes live-surface verification section for infra-m
     expect(plan.items.length).toBe(1);
     const promptText = readFileSync(plan.items[0].prompt_path, "utf8");
     expect(promptText).not.toContain("Infra-modifying block");
-
-    await rm(dir, { recursive: true, force: true });
   });
 });

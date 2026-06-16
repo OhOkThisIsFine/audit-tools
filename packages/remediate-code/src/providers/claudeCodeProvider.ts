@@ -1,46 +1,39 @@
-import { readFile } from "node:fs/promises";
-import type { FreshSessionProvider, LaunchFreshSessionInput, ClaudeCodeConfig, WorkerTaskWithCommand } from "@audit-tools/shared";
-import { readJsonFile, spawnLoggedCommand, applyWorkerTaskLaunchSettings } from "@audit-tools/shared";
+import type { ClaudeCodeConfig, spawnLoggedCommand } from "@audit-tools/shared";
+import {
+  ClaudeCodeProvider,
+  buildActiveClaudeCodeSessionMessage,
+} from "@audit-tools/shared";
+
+// The claude-code provider class is single-sourced in @audit-tools/shared
+// (drift-plan E4). This module only carries remediate-code's two intended
+// deltas — the skip-permissions default and the session-config path quoted in
+// the nested-session guard message — and binds them via a factory; it defines
+// no provider class body of its own.
 
 export const ACTIVE_CLAUDE_CODE_SESSION_MESSAGE =
-  "claude-code provider cannot be used inside an active Claude Code session. " +
-  'Set provider to "local-subprocess" in .audit-tools/remediation/session-config.json, ' +
-  "then run /remediate-code conversationally and follow the dispatch prompts manually.";
+  buildActiveClaudeCodeSessionMessage({
+    sessionConfigPath: ".audit-tools/remediation/session-config.json",
+    slashCommand: "/remediate-code",
+  });
 
-export class ClaudeCodeProvider implements FreshSessionProvider {
-  name = "claude-code";
-  private readonly config: ClaudeCodeConfig;
-  private readonly launchCommand: typeof spawnLoggedCommand;
-
-  constructor(
-    config: ClaudeCodeConfig = {},
-    launchCommand: typeof spawnLoggedCommand = spawnLoggedCommand,
-  ) {
-    this.config = config;
-    this.launchCommand = launchCommand;
-  }
-
-  async launch(input: LaunchFreshSessionInput) {
-    if (process.env.CLAUDECODE) {
-      throw new Error(ACTIVE_CLAUDE_CODE_SESSION_MESSAGE);
-    }
-    const prompt = await readFile(input.promptPath, "utf8");
-    const task = await readJsonFile<WorkerTaskWithCommand>(input.taskPath);
-    const command = this.config.command ?? "claude";
-    const promptFlag = this.config.prompt_flag ?? "-p";
-    const args = [
-      promptFlag,
-      ...(this.config.extra_args ?? []),
-      // The autonomous remediator skips permission prompts by default (it
-      // applies changes unattended and cannot pause mid-run), but this is now
-      // overrideable: set dangerously_skip_permissions: false to opt out.
-      ...(this.config.dangerously_skip_permissions !== false
-        ? ["--dangerously-skip-permissions"]
-        : []),
-    ];
-    return await this.launchCommand(command, args, {
-      ...applyWorkerTaskLaunchSettings(input, task),
-      stdinText: prompt,
-    });
-  }
+/**
+ * Construct the shared ClaudeCodeProvider with remediate-code's options. The
+ * autonomous remediator skips permission prompts by default (it applies changes
+ * unattended and cannot pause mid-run); an explicit
+ * `dangerously_skip_permissions: false` in the config still opts out.
+ */
+export function createClaudeCodeProvider(
+  config: ClaudeCodeConfig = {},
+  launchCommand?: typeof spawnLoggedCommand,
+): ClaudeCodeProvider {
+  return new ClaudeCodeProvider(
+    config,
+    {
+      skipPermissionsDefault: true,
+      activeSessionMessage: ACTIVE_CLAUDE_CODE_SESSION_MESSAGE,
+    },
+    launchCommand,
+  );
 }
+
+export { ClaudeCodeProvider } from "@audit-tools/shared";

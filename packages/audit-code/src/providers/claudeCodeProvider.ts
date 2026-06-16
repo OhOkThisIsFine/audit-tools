@@ -1,48 +1,38 @@
-import { readFile } from "node:fs/promises";
-import type { FreshSessionProvider, LaunchFreshSessionInput, ClaudeCodeConfig, WorkerTaskWithCommand } from "@audit-tools/shared";
-import { readJsonFile, spawnLoggedCommand, applyWorkerTaskLaunchSettings } from "@audit-tools/shared";
+import type { ClaudeCodeConfig, spawnLoggedCommand } from "@audit-tools/shared";
+import {
+  ClaudeCodeProvider,
+  buildActiveClaudeCodeSessionMessage,
+} from "@audit-tools/shared";
+
+// The claude-code provider class is single-sourced in @audit-tools/shared
+// (drift-plan E4). This module only carries audit-code's intended delta — the
+// session-config path quoted in the nested-session guard message — and binds it
+// via a factory; it defines no provider class body of its own. audit-code keeps
+// the safe skip-permissions default (off unless explicitly configured).
 
 export const ACTIVE_CLAUDE_CODE_SESSION_MESSAGE =
-  "claude-code provider cannot be used inside an active Claude Code session. " +
-  'Set provider to "local-subprocess" in .audit-tools/audit/session-config.json, ' +
-  "then run /audit-code conversationally and follow the dispatch prompts manually.";
+  buildActiveClaudeCodeSessionMessage({
+    sessionConfigPath: ".audit-tools/audit/session-config.json",
+    slashCommand: "/audit-code",
+  });
 
-export class ClaudeCodeProvider implements FreshSessionProvider {
-  name = "claude-code";
-  private readonly config: ClaudeCodeConfig;
-  private readonly launchCommand: typeof spawnLoggedCommand;
-
-  constructor(
-    config: ClaudeCodeConfig = {},
-    launchCommand: typeof spawnLoggedCommand = spawnLoggedCommand,
-  ) {
-    this.config = config;
-    this.launchCommand = launchCommand;
-  }
-
-  async launch(input: LaunchFreshSessionInput) {
-    if (process.env.CLAUDECODE) {
-      throw new Error(ACTIVE_CLAUDE_CODE_SESSION_MESSAGE);
-    }
-    const prompt = await readFile(input.promptPath, "utf8");
-    const task = await readJsonFile<WorkerTaskWithCommand>(input.taskPath);
-    const command = this.config.command ?? "claude";
-    const promptFlag = this.config.prompt_flag ?? "-p";
-    const args = [
-      promptFlag,
-      prompt,
-      ...(this.config.extra_args ?? []),
-      ...(this.config.dangerously_skip_permissions
-        ? ["--dangerously-skip-permissions"]
-        : []),
-    ];
-    process.stderr.write(JSON.stringify({ event: "provider_launch", provider: this.name, runId: input.runId, obligationId: input.obligationId, promptPath: input.promptPath, taskPath: input.taskPath }) + "\n");
-    const result = await this.launchCommand(
-      command,
-      args,
-      applyWorkerTaskLaunchSettings(input, task),
-    );
-    process.stderr.write(JSON.stringify({ event: "provider_done", provider: this.name, runId: input.runId, obligationId: input.obligationId, accepted: result.accepted, exitCode: result.exitCode ?? null }) + "\n");
-    return result;
-  }
+/**
+ * Construct the shared ClaudeCodeProvider with audit-code's options. The
+ * auditor only skips permissions when `dangerously_skip_permissions: true` is
+ * set explicitly (skipPermissionsDefault stays false).
+ */
+export function createClaudeCodeProvider(
+  config: ClaudeCodeConfig = {},
+  launchCommand?: typeof spawnLoggedCommand,
+): ClaudeCodeProvider {
+  return new ClaudeCodeProvider(
+    config,
+    {
+      skipPermissionsDefault: false,
+      activeSessionMessage: ACTIVE_CLAUDE_CODE_SESSION_MESSAGE,
+    },
+    launchCommand,
+  );
 }
+
+export { ClaudeCodeProvider } from "@audit-tools/shared";

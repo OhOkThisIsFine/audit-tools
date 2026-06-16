@@ -126,9 +126,15 @@ function getRemoteName() {
   throw new Error("No git remotes found.");
 }
 
+// Escape RegExp metacharacters so a remote name containing one (e.g. a
+// `+`/`*`/`(`/`[`) is matched literally rather than breaking the prefix-strip.
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function getDefaultBranch(remoteName) {
   const symref = maybeRun("git", ["symbolic-ref", `refs/remotes/${remoteName}/HEAD`]);
-  if (symref) return symref.replace(new RegExp(`^refs/remotes/${remoteName}/`), "");
+  if (symref) return symref.replace(new RegExp(`^refs/remotes/${escapeRegExp(remoteName)}/`), "");
 
   const lsRemote = maybeRun("git", ["ls-remote", "--symref", remoteName, "HEAD"]);
   const match = lsRemote?.match(/^ref: refs\/heads\/(\S+)\s+HEAD/m);
@@ -316,11 +322,35 @@ const publishEnv = { ...process.env, AUDIT_TOOLS_RELEASE_GATE_VERIFIED: "1" };
 // arrived during the gate phase will be detected here.
 ensureInSyncWithRemote(remoteName, branch);
 
-for (const pkg of changed) {
+// The per-package publish (bump + commit + tag + push + GitHub Release) is NOT
+// atomic across packages: a failure after the first leaves earlier packages
+// published while later ones are not, and npm has no rollback. There is therefore
+// no compensation step — the only safe recovery is *resume*. To make that
+// resumable rather than a confusing dead end, report exactly which packages
+// already published and which remain on failure, with the resume command, so a
+// re-run continues from the failure point instead of starting over.
+const published = [];
+for (let i = 0; i < changed.length; i++) {
+  const pkg = changed[i];
   console.log(`Publishing ${pkg.label} with ${bump} bump...`);
-  run(npm, ["--workspace", pkg.workspace, "run", `release:${bump}:publish`], {
-    env: publishEnv,
-  });
+  try {
+    run(npm, ["--workspace", pkg.workspace, "run", `release:${bump}:publish`], {
+      env: publishEnv,
+    });
+  } catch (err) {
+    const remaining = changed.slice(i).map((p) => p.label);
+    console.error(
+      `\nRelease is non-atomic and npm has no rollback. ${pkg.label} failed to publish.\n` +
+        (published.length > 0
+          ? `Already published this run (do NOT re-bump): ${published.join(", ")}.\n`
+          : "No packages were published this run.\n") +
+        `Not yet published: ${remaining.join(", ")}.\n` +
+        `Resume: fix the cause, then 'git pull --ff-only ${remoteName} ${branch}' and re-run this command — ` +
+        `change detection skips the already-published packages and continues with ${remaining.join(", ")}.`,
+    );
+    throw err;
+  }
+  published.push(pkg.label);
 }
 const elapsed = Math.round((Date.now() - startTime) / 1000);
 console.log(`Release complete. ${changed.map(pkg => pkg.label).join(", ")} published in ${elapsed}s.`);

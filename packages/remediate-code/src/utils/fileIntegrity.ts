@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hashContent } from "@audit-tools/shared";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, isAbsolute, relative, sep } from "node:path";
 import {
@@ -35,7 +35,7 @@ export function hashFileSync(absolutePath: string): string | undefined {
   if (!existsSync(absolutePath)) return undefined;
   try {
     const content = readFileSync(absolutePath);
-    return createHash("sha256").update(content).digest("hex");
+    return hashContent(content);
   } catch (err) {
     reportHashIoError(absolutePath, err);
     return undefined;
@@ -46,7 +46,7 @@ export async function hashFile(absolutePath: string): Promise<string | undefined
   if (!existsSync(absolutePath)) return undefined;
   try {
     const content = await readFile(absolutePath);
-    return createHash("sha256").update(content).digest("hex");
+    return hashContent(content);
   } catch (err) {
     reportHashIoError(absolutePath, err);
     return undefined;
@@ -61,9 +61,12 @@ function sortDirents(a: Dirent, b: Dirent): number {
   return a.name.localeCompare(b.name);
 }
 
+// Directory digest: build a canonical "directory\n" + (relpath \0 file-hash \0)
+// manifest string from a depth-first, name-sorted walk, then hash it once via
+// the shared primitive. Per-file content hashes also route through hashContent —
+// no inline createHash remains.
 function hashDirectorySync(root: string, absolutePath: string): string {
-  const digest = createHash("sha256");
-  digest.update("directory\n");
+  const parts: string[] = ["directory\n"];
 
   const visit = (dir: string): void => {
     const entries = readdirSync(dir, { withFileTypes: true }).sort(sortDirents);
@@ -75,21 +78,16 @@ function hashDirectorySync(root: string, absolutePath: string): string {
       }
       if (!entry.isFile()) continue;
       const content = readFileSync(child);
-      digest
-        .update(toDisplayRelativePath(root, child))
-        .update("\0")
-        .update(createHash("sha256").update(content).digest("hex"))
-        .update("\0");
+      parts.push(toDisplayRelativePath(root, child), "\0", hashContent(content), "\0");
     }
   };
 
   visit(absolutePath);
-  return digest.digest("hex");
+  return hashContent(parts.join(""));
 }
 
 async function hashDirectory(root: string, absolutePath: string): Promise<string> {
-  const digest = createHash("sha256");
-  digest.update("directory\n");
+  const parts: string[] = ["directory\n"];
 
   const visit = async (dir: string): Promise<void> => {
     const entries = (await readdir(dir, { withFileTypes: true })).sort(sortDirents);
@@ -101,16 +99,12 @@ async function hashDirectory(root: string, absolutePath: string): Promise<string
       }
       if (!entry.isFile()) continue;
       const content = await readFile(child);
-      digest
-        .update(toDisplayRelativePath(root, child))
-        .update("\0")
-        .update(createHash("sha256").update(content).digest("hex"))
-        .update("\0");
+      parts.push(toDisplayRelativePath(root, child), "\0", hashContent(content), "\0");
     }
   };
 
   await visit(absolutePath);
-  return digest.digest("hex");
+  return hashContent(parts.join(""));
 }
 
 export function resolveAffectedPath(root: string, affectedPath: string): string {

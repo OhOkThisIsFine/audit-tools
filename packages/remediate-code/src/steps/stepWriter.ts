@@ -1,31 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  writeStepContract,
+  stepsDir as sharedStepsDir,
+  currentStepPath as sharedCurrentStepPath,
+  currentPromptPath as sharedCurrentPromptPath,
+} from "@audit-tools/shared";
 import {
   REMEDIATION_STEP_CONTRACT_VERSION,
   type RemediationStep,
   type RemediationStepKind,
   type RemediationStepStatus,
 } from "./types.js";
-import { writeJsonFile, toPromptPathToken } from "@audit-tools/shared";
-
-/**
- * Normalize a filesystem path for inclusion in host-facing step contract JSON.
- * The step contract is read by hosts and workers that may execute commands in
- * bash-like shells on Windows, where backslashes are escape characters. Forward
- * slashes are accepted by Node on Windows and survive bash, PowerShell, and cmd
- * alike, so all host-facing path fields in the step JSON use forward slashes.
- */
-function normalizeStepPath(value: string): string {
-  return toPromptPathToken(value);
-}
-
-function normalizePathRecord(record: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(record)) {
-    out[k] = normalizeStepPath(v);
-  }
-  return out;
-}
 
 export interface WriteStepInput {
   stepKind: RemediationStepKind;
@@ -39,18 +23,28 @@ export interface WriteStepInput {
   artifactPaths?: Record<string, string>;
 }
 
+/** `<artifactsDir>/steps` — re-exported from the shared path authority. */
 export function stepsDir(artifactsDir: string): string {
-  return join(artifactsDir, "steps");
+  return sharedStepsDir(artifactsDir);
 }
 
 export function currentStepPath(artifactsDir: string): string {
-  return join(stepsDir(artifactsDir), "current-step.json");
+  return sharedCurrentStepPath(artifactsDir);
 }
 
 export function currentPromptPath(artifactsDir: string): string {
-  return join(stepsDir(artifactsDir), "current-prompt.md");
+  return sharedCurrentPromptPath(artifactsDir);
 }
 
+/**
+ * Write the remediation step contract. Delegates to the shared
+ * `writeStepContract` (drift-plan R3) which owns the steps/ filenames, mkdir,
+ * prompt write, atomic current-step.json write, the forward-slash normalization
+ * of ALL host-facing path fields, and the canonical-paths-win merge. This
+ * wrapper only supplies the remediation contract version, the remediation
+ * `step_kind` enum, and the trim-leading-whitespace behaviour remediation
+ * prompts rely on.
+ */
 export async function writeCurrentStep({
   stepKind,
   status,
@@ -62,26 +56,17 @@ export async function writeCurrentStep({
   stopCondition,
   artifactPaths = {},
 }: WriteStepInput): Promise<RemediationStep> {
-  await mkdir(stepsDir(artifactsDir), { recursive: true });
-  const promptPath = currentPromptPath(artifactsDir);
-  await writeFile(promptPath, prompt.trimStart(), "utf8");
-
-  const step: RemediationStep = {
-    contract_version: REMEDIATION_STEP_CONTRACT_VERSION,
-    step_kind: stepKind,
+  return writeStepContract<RemediationStep, RemediationStepKind, string>({
+    contractVersion: REMEDIATION_STEP_CONTRACT_VERSION,
+    stepKind,
     status,
-    prompt_path: normalizeStepPath(promptPath),
-    run_id: runId,
-    repo_root: normalizeStepPath(repoRoot),
-    artifacts_dir: normalizeStepPath(artifactsDir),
-    allowed_commands: allowedCommands,
-    stop_condition: stopCondition,
-    artifact_paths: normalizePathRecord({
-      current_prompt: promptPath,
-      ...artifactPaths,
-    }),
-  };
-
-  await writeJsonFile(currentStepPath(artifactsDir), step);
-  return step;
+    runId,
+    repoRoot,
+    artifactsDir,
+    prompt,
+    allowedCommands,
+    stopCondition,
+    artifactPaths,
+    trimPromptStart: true,
+  });
 }

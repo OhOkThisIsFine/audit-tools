@@ -98,7 +98,7 @@ export async function writeQuotaState(state: QuotaState): Promise<void> {
 export function computeMaxSafeConcurrency(
   entry: QuotaStateEntry,
   halfLifeHours: number,
-  maxToCheck = 32,
+  maxToCheck = MAX_BUCKET_LEVEL,
 ): number {
   const decayed = applyDecayToEntry(entry, halfLifeHours);
   let maxSafe = 1;
@@ -122,7 +122,7 @@ const RAMP_UP_MIN_SUCCESSES = 2;
 export function computeRampUpConcurrency(
   entry: QuotaStateEntry,
   halfLifeHours: number,
-  maxToCheck = 32,
+  maxToCheck = MAX_BUCKET_LEVEL,
 ): number {
   const maxSafe = computeMaxSafeConcurrency(entry, halfLifeHours, maxToCheck);
   const decayed = applyDecayToEntry(entry, halfLifeHours);
@@ -214,7 +214,13 @@ async function recordWaveOutcomeUnsafe(
     const prev429Count = entry.consecutive_429_count ?? 0;
     const new429Count = outcome.outcome === "rate_limited" ? prev429Count + 1 : prev429Count;
     entry.consecutive_429_count = new429Count;
-    entry.last_429_at = new Date().toISOString();
+    // last_429_at records a rate-limit/quota signal only. A 'timeout' or generic
+    // 'error' outcome is explicitly distinguished from 'rate_limited' by the
+    // ObservedWaveOutcome contract and must NOT stamp a 429 timestamp, or the
+    // field's meaning (and any consumer keying off it) is corrupted.
+    if (outcome.outcome === "rate_limited") {
+      entry.last_429_at = new Date().toISOString();
+    }
 
     if (outcome.outcome === "rate_limited" && new429Count > 0) {
       const backoffMs = computeBackoffCooldownMs(new429Count);

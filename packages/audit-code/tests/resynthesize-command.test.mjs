@@ -178,6 +178,28 @@ test("resynthesize does not require the .audit-tools/audit working directory", a
   });
 });
 
+test("resynthesize: a dangling --input followed by another flag falls back to the default (COR-bc35a171)", async () => {
+  await withTempRoot(async (root) => {
+    const auditToolsDir = join(root, ".audit-tools");
+    await mkdir(auditToolsDir, { recursive: true });
+    await writeFile(
+      join(auditToolsDir, "audit-findings.json"),
+      JSON.stringify(makeReport(), null, 2),
+      "utf8",
+    );
+
+    // `--input` with no value, immediately followed by `--root`, must NOT
+    // resolve the input path to the literal "--root"; the shared getFlag guard
+    // makes it fall back to the default <root>/.audit-tools/audit-findings.json.
+    const argv = [process.execPath, "cli.ts", "resynthesize", "--input", "--root", root];
+    const { stdout, exitCode, stderr } = await runResynthesize(argv);
+
+    assert.equal(exitCode, 0, `Unexpected exit code. stderr: ${stderr}`);
+    const parsed = JSON.parse(stdout);
+    assert.equal(parsed.source, join(auditToolsDir, "audit-findings.json"));
+  });
+});
+
 test("resynthesize exits with code 1 and names the missing file when audit-findings.json is absent", async () => {
   await withTempRoot(async (root) => {
     const argv = [process.execPath, "cli.ts", "resynthesize", "--root", root];

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -75,6 +75,33 @@ test("writeJsonFile round-trips and survives concurrent writers", async () => {
     assert.equal(typeof parsed.i, "number");
     const raw = await readFile(path, "utf8");
     assert.match(raw, /\n$/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// Single-source guarantee: writeJsonFile (the ONLY atomic JSON writer) must clean
+// up its temp file even when the durable rename fails. Both orchestrators' state
+// stores / ledgers depend on this — they hold the lock and delegate the write
+// here, carrying no temp/rename of their own. Forcing the rename to fail by
+// pointing the destination at an existing directory.
+test("writeJsonFile removes its temp file when the durable write fails", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "audit-json-fail-"));
+  try {
+    // Make the destination path an existing directory so the temp→dest rename
+    // cannot succeed (EISDIR/EPERM/ENOTEMPTY across platforms).
+    const path = join(dir, "occupied");
+    await mkdir(path, { recursive: true });
+
+    await assert.rejects(writeJsonFile(path, { a: 1 }), /Failed to write/);
+
+    // No `.tmp` residue may linger in the temp's parent directory.
+    const leftovers = (await readdir(dir)).filter((name) => name.endsWith(".tmp"));
+    assert.deepEqual(
+      leftovers,
+      [],
+      `writeJsonFile must clean up its temp file on failure; found: ${leftovers.join(", ")}`,
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

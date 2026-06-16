@@ -36,7 +36,18 @@ const LENS_DESCRIPTIONS: Record<string, string> = {
  */
 export function renderConfirmIntentPrompt(
   preDigest: ScopePreDigest,
-  opts: { intentCheckpointPath: string; continueCommand: string },
+  opts: {
+    intentCheckpointPath: string;
+    continueCommand: string;
+    /**
+     * Blocking checkpoint questions raised by unencodable `free_form_intent`
+     * clauses that the host has not yet answered. When non-empty, the audit
+     * cannot proceed past planning until each is answered via
+     * `constraint_clauses` — so the prompt leads with them. Computed
+     * deterministically from the single shared intent interpreter.
+     */
+    unresolvedConstraintClauses?: Array<{ text: string; checkpoint_question: string }>;
+  },
 ): string {
   const dirLines =
     preDigest.scope_dirs
@@ -74,10 +85,35 @@ export function renderConfirmIntentPrompt(
 
   const hasOverrideProposals = preDigest.disposition_override_proposals.length > 0;
   const hasLensProposals = preDigest.lens_proposals.length > 0;
+  // Derive the mandatory-lens prose from the authoritative MANDATORY_LENSES
+  // constant so the rendered guidance can never drift from the enforced set
+  // (MNT-df8c4551).
+  const mandatoryLensList = MANDATORY_LENSES.join(", ");
+  const unresolvedClauses = opts.unresolvedConstraintClauses ?? [];
+  const hasBlockingClauses = unresolvedClauses.length > 0;
 
   return [
     "# Confirm Audit Scope and Intent",
     "",
+    ...(hasBlockingClauses
+      ? [
+          "## ⚠ Blocking: unencodable intent clauses",
+          "",
+          "Your `free_form_intent` contains directive(s) that could NOT be encoded",
+          "as a lens weight, priority signal, or scope emphasis. They will be",
+          "**silently lost** unless you resolve them here — the audit will not",
+          "proceed past planning until each is answered. For every question below,",
+          "add a `constraint_clauses` entry (with the exact `checkpoint_question`",
+          "text and a concrete `host_answer`) to `intent_checkpoint.json`, or remove",
+          "the clause from `free_form_intent`:",
+          "",
+          ...unresolvedClauses.map(
+            (c, i) =>
+              `${i + 1}. Clause: \`${c.text}\`\n   Question: ${c.checkpoint_question}`,
+          ),
+          "",
+        ]
+      : []),
     "Before planning, confirm what this audit should cover. The scope below was",
     "discovered deterministically from intake. Your job is to **confirm it** and,",
     "if needed, **prune scope pollution** the automatic disposition missed (build",
@@ -109,8 +145,8 @@ export function renderConfirmIntentPrompt(
       ? [
           "## Lens proposals",
           "",
-          "Based on codebase character. Mandatory lenses (security, correctness,",
-          "reliability, data_integrity) cannot be excluded regardless of selection.",
+          `Based on codebase character. Mandatory lenses (${mandatoryLensList})`,
+          "cannot be excluded regardless of selection.",
           "",
           lensProposalLines,
           "",
@@ -126,7 +162,7 @@ export function renderConfirmIntentPrompt(
       return `- **${lens}**${isMandatory ? " *(mandatory)*" : ""}${desc ? ` — ${desc}` : ""}`;
     }),
     "",
-    "Mandatory lenses (security, correctness, reliability, data_integrity) are",
+    `Mandatory lenses (${mandatoryLensList}) are`,
     "always included regardless of selection.",
     "",
     "**Custom lenses are also accepted.** You may define any additional review",
@@ -179,6 +215,7 @@ export function renderConfirmIntentPrompt(
     '  "scope_summary": "<what is in scope>",',
     '  "intent_summary": "<the goal, e.g. full-audit / security-focused>",',
     '  "free_form_intent": "<optional: what to focus on; interpreted into lens/priority signals at planning, never threaded verbatim into worker prompts>",',
+    '  "constraint_clauses": [{ "text": "<unencodable clause>", "checkpoint_question": "<the question above>", "host_answer": "<how to apply it>" }],',
     '  "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],',
     '  "must_not_touch": ["<glob>"],',
     '  "disposition_overrides": [{ "path": "<path>", "status": "<generated|vendor|excluded|...>", "reason": "<why>" }],',
@@ -187,6 +224,10 @@ export function renderConfirmIntentPrompt(
     "}",
     "```",
     "",
+    "- `constraint_clauses` resolves the blocking questions above: each unencodable",
+    "  `free_form_intent` clause needs one entry with a concrete `host_answer`.",
+    "  Until every blocking question is answered (or its clause removed from",
+    "  `free_form_intent`), this confirm-intent step re-fires and planning is held.",
     "- `excluded_scope` entries are pruned from planning so excluded files never",
     "  become audit tasks, and they are listed in the final report under",
     '  "Excluded / Out-of-Scope".',

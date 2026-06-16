@@ -145,16 +145,19 @@ describe("N-R13: planning transitions directly to implementing", () => {
     expect(step.step_kind).not.toBe("dispatch_document");
     expect(step.step_kind).not.toBe("document_single_item");
 
-    // Should be dispatch_implement or implement_rolling_sequential (implementing family)
-    const implementingKinds = [
-      "dispatch_implement",
-      "implement_rolling_sequential",
-      "collect_starting_point",
-      "present_report",
-      "collect_triage",
-      "zero_documentable_findings",
-    ];
-    expect(implementingKinds).toContain(step.step_kind);
+    // TST-4a7b1751: this fixture is a fully-ready implementing state (planning +
+    // a pending item with an item_spec + every ack written). The N-R13 contract
+    // is that planning goes DIRECTLY to implementing — so the only acceptable
+    // kinds are the implementing dispatch family. Terminal/error kinds
+    // (collect_starting_point, present_report, collect_triage,
+    // zero_documentable_findings) must NOT be accepted here: admitting them would
+    // let a regression that derails the planning→implementing transition pass
+    // vacuously.
+    const implementingKinds = ["dispatch_implement", "implement_rolling_sequential"];
+    expect(
+      implementingKinds,
+      `expected an implementing-family step kind, got '${step.step_kind}'`,
+    ).toContain(step.step_kind);
   });
 });
 

@@ -430,6 +430,73 @@ describe("runTriagePhase", () => {
     expect(state.items!.F1.status).toBe("blocked");
   });
 
+  it("logs cap exhaustion distinctly from auto-retry under preview-ack (OBS-df30208a)", async () => {
+    const errors: string[] = [];
+    const logs: string[] = [];
+    const origError = console.error;
+    const origLog = console.log;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    };
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    try {
+      const state = makeState({
+        // Exhausted contract budget → must log "budget exhausted", not retry.
+        EXHAUSTED: {
+          finding_id: "EXHAUSTED",
+          status: "blocked",
+          failure_reason: "test assertion failed",
+          block_id: "B1",
+          rework_count: 2,
+        },
+        // Below budget → must log an "auto-retrying" line instead.
+        RETRYABLE: {
+          finding_id: "RETRYABLE",
+          status: "blocked",
+          failure_reason: "test assertion failed",
+          block_id: "B1",
+          rework_count: 0,
+        },
+      });
+      await writeFile(
+        join(TEST_DIR, "impl_preview_acknowledged.json"),
+        JSON.stringify({ acknowledged: true }),
+        "utf8",
+      );
+
+      // A retryable item exists, so the run proceeds to implementing.
+      const next = await runTriagePhase(state, BASE_OPTIONS);
+      expect(next.status).toBe("implementing");
+
+      // The exhausted item is surfaced as cap-exhausted (operator-visible), and
+      // the retryable item is surfaced as an auto-retry — the two are NOT
+      // conflated into a single silent skip.
+      expect(
+        errors.some(
+          (line) =>
+            line.includes("EXHAUSTED") &&
+            /budget exhausted/i.test(line) &&
+            /2\/2/.test(line),
+        ),
+        `expected a cap-exhaustion log for EXHAUSTED; got: ${errors.join(" | ")}`,
+      ).toBe(true);
+      expect(
+        logs.some(
+          (line) => line.includes("RETRYABLE") && /auto-retrying/i.test(line),
+        ),
+        `expected an auto-retry log for RETRYABLE; got: ${logs.join(" | ")}`,
+      ).toBe(true);
+      // The exhausted item must remain blocked (not retried).
+      expect(state.items!.EXHAUSTED.status).toBe("blocked");
+      expect(state.items!.RETRYABLE.status).toBe("pending");
+    } finally {
+      console.error = origError;
+      console.log = origLog;
+    }
+  });
+
   it("triage-outcome.json is written after consuming resolution", async () => {
     const { readFile } = await import("node:fs/promises");
     const state = makeState({

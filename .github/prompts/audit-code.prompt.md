@@ -104,7 +104,8 @@ Use MCP tools only as a compatibility adapter when direct shell access to
 separate orchestration path.
 
 When a step prompt tells you to continue, run `audit-code next-step` again with
-the same capability flags (`--host-max-active-subagents`, `--host-context-tokens`,
-`--host-output-tokens`) and follow only the newly returned `prompt_path`.
+the same capability flags (`--host-max-active-subagents`, `--host-models`,
+`--host-context-tokens`, `--host-output-tokens`) and follow only the newly
+returned `prompt_path`.
 
 Stop when the current step prompt tells you to stop.

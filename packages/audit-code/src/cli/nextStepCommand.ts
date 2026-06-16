@@ -22,6 +22,7 @@ import {
   resolveConceptualReviewSettings,
 } from "./conceptualDispatch.js";
 import { computeScopePreDigest } from "../orchestrator/intentCheckpointExecutor.js";
+import { unresolvedConstraintClauses } from "../orchestrator/intentInterpreter.js";
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
 import {
   loadSessionConfig,
@@ -407,6 +408,9 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       prompt: renderConfirmIntentPrompt(preDigest, {
         intentCheckpointPath,
         continueCommand,
+        unresolvedConstraintClauses: unresolvedConstraintClauses(
+          result.bundle.intent_checkpoint,
+        ),
       }),
     });
     console.log(JSON.stringify(step, null, 2));

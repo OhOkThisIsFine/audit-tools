@@ -189,8 +189,12 @@ export function buildTaskSections(
 
 /**
  * Wraps the array-join block and returns the assembled prompt string.
- * Workers emit AuditResult[] inline in their response; the skill/host captures
- * and writes the JSON to `result_path` on their behalf. No shell submit command.
+ * The worker writes its own AuditResult[] JSON array to `result_path` (the same
+ * path the rolling-dispatch step prompt pre-approves and ingests). The two
+ * prompts must agree on this — a worker-prompt-and-result-contract regression
+ * test asserts this prompt instructs the write and never forbids it (the prior
+ * "emit inline, do not write files" wording silently dropped every result). No
+ * shell submit command.
  */
 export function buildPacketPrompt(params: {
   packet: ReviewPacket;
@@ -230,10 +234,11 @@ export function buildPacketPrompt(params: {
     "## Tasks",
     ...taskSections,
     "## Output",
-    "Do not write files, run shell commands, or edit source files. Do not use a Write tool or",
-    "create temp files. Produce one JSON array containing exactly one AuditResult object for",
-    "each listed task and emit it INLINE in your response (do NOT write files yourself —",
-    "the skill captures your inline payload and writes it to result_path on your behalf).",
+    "Produce one JSON array containing exactly one AuditResult object for each listed task,",
+    `and WRITE that array (and nothing else) to your result_path: ${resultPath}`,
+    "Use your Write tool to write that one file. Do not edit source files, run shell commands,",
+    "or write any other file. After writing, reply with the one-line confirmation below — do not",
+    "paste the JSON array into your reply.",
     "Windows PowerShell: do not pipe an inline foreach statement directly into ConvertTo-Json.",
     "Assign the foreach output to a variable first, then pipe that variable to ConvertTo-Json.",
     "PowerShell also unwraps single-element arrays: @(@{...}) collapses to one object, so a",
@@ -267,8 +272,16 @@ export function buildPacketPrompt(params: {
     "  confidence    high|medium|low",
     "  lens          must match the task lens exactly",
     "  summary       1-2 sentence description",
-    "  affected_files  [{path, line_start?, line_end?, symbol?}] - objects, not strings; min 1 entry",
+    "  affected_files  [{path, line_start?, line_end?, symbol?, quoted_text}] - objects, not strings; min 1 entry",
     "  evidence     [\"path/to/file.ts:42 - description of what you see there\"] - min 1 entry",
+    "",
+    "Grounding (required): at least one affected_files entry per finding MUST include quoted_text —",
+    "  a short verbatim span copied EXACTLY from that file at the cited lines. The tool re-reads it",
+    "  and content-matches against disk; a finding whose quoted_text is not found on disk (or is",
+    "  omitted entirely) is marked ungrounded and surfaced for review, not silently confirmed.",
+    "  Quote real code that exists; never paraphrase. Matching is on content (whitespace-normalized),",
+    "  so exact line numbers may safely drift. Add a quoted_text span to every affected_files entry",
+    "  you can — a finding with no verbatim quote will not survive grounding.",
     "",
     "Constraints:",
     "1. line_end must not exceed the file's actual line count.",
@@ -277,7 +290,7 @@ export function buildPacketPrompt(params: {
     "4. findings: [] is correct when you find nothing genuine.",
     "",
     "## Final response",
-    `Emit the JSON array inline. Reply exactly: valid: ${packet.packet_id}, findings=<total finding count>`,
+    `After writing the JSON array to ${resultPath}, reply exactly: valid: ${packet.packet_id}, findings=<total finding count>`,
   ].join("\n");
 }
 

@@ -46,7 +46,55 @@
     "outcomes": {
       "type": "array",
       "items": { "$ref": "#/$defs/remediation_outcome" }
-    }
+    },
+    "ended_at": { "type": "string" },
+    "step_count": { "type": "integer", "minimum": 0 },
+    "combined_test_result": {
+      "type": "object",
+      "required": ["passed"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "suite_name": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "failure_summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "e2e_result": {
+      "type": "object",
+      "required": ["passed"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "suite_name": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "failure_summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "closing_result": {
+      "type": "object",
+      "required": ["action", "status"],
+      "properties": {
+        "action": { "$ref": "shared.schema.json#/$defs/closing_action" },
+        "status": { "type": "string", "enum": ["success", "skipped", "failed"] },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["command", "exit_code"],
+            "properties": {
+              "command": { "type": "array", "items": { "type": "string" } },
+              "exit_code": { "type": ["integer", "null"] },
+              "stdout": { "type": "string" },
+              "stderr": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "plan_coverage": { "type": "object" }
   },
   "additionalProperties": false,
   "$defs": {

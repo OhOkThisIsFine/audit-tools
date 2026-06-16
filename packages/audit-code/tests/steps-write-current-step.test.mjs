@@ -1,12 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, rm, readdir } from "node:fs/promises";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import os from "node:os";
 
 const { writeCurrentStep, STEP_CONTRACT_VERSION } = await import(
   "../src/cli/steps.ts"
 );
+// The writer now normalizes host-facing paths to forward slashes (drift-plan
+// R3); assert against the normalized form, not the raw input.
+const { toPromptPathToken } = await import("@audit-tools/shared");
+
+const here = dirname(fileURLToPath(import.meta.url));
+const srcDir = join(here, "..", "src");
 
 /**
  * Create a temporary directory for a test, return the directory path and a
@@ -76,12 +83,12 @@ test("writeCurrentStep writes prompt to current-prompt.md and returns correct St
       assert.strictEqual(step.stop_condition, params.stopCondition);
     });
 
-    await t.test("repo_root matches input", () => {
-      assert.strictEqual(step.repo_root, params.repoRoot);
+    await t.test("repo_root matches normalized input (R3)", () => {
+      assert.strictEqual(step.repo_root, toPromptPathToken(params.repoRoot));
     });
 
-    await t.test("artifacts_dir matches input", () => {
-      assert.strictEqual(step.artifacts_dir, params.artifactsDir);
+    await t.test("artifacts_dir matches normalized input (R3)", () => {
+      assert.strictEqual(step.artifacts_dir, toPromptPathToken(params.artifactsDir));
     });
 
     await t.test("prompt_path file contains exact prompt string", async () => {
@@ -243,4 +250,150 @@ test("writeCurrentStep artifact_paths merges current_step and current_prompt wit
   } finally {
     await cleanup();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Windows path-separator normalization (drift-plan R3)
+//
+// The audit step writer previously emitted RAW Windows paths (backslashes),
+// while remediate-code normalized them. After promoting the writer to shared,
+// audit's step JSON must carry NO backslash separators in any host-facing path
+// field — backslashes break the bash-like shells a host may use to run the
+// step's commands. This test simulates Windows-style absolute paths regardless
+// of the host OS so it fails if the normalization regresses on any platform.
+// ---------------------------------------------------------------------------
+
+test("writeCurrentStep emits no backslash separators in any path field (R3 fix)", async () => {
+  const { dir, cleanup } = await makeTempDir();
+  try {
+    const artifactsDir = join(dir, "artifacts");
+    await mkdir(artifactsDir, { recursive: true });
+    const step = await writeCurrentStep({
+      ...baseParams(artifactsDir),
+      // Windows-style inputs, exercised on every platform.
+      repoRoot: "C:\\Code\\my-repo",
+      artifactPaths: {
+        unit_manifest: "C:\\Code\\my-repo\\.audit-tools\\audit\\unit_manifest.json",
+        not_yet: null,
+      },
+    });
+
+    assert.ok(!step.prompt_path.includes("\\"), "prompt_path must have no backslash");
+    assert.ok(!step.repo_root.includes("\\"), "repo_root must have no backslash");
+    assert.ok(!step.artifacts_dir.includes("\\"), "artifacts_dir must have no backslash");
+    assert.strictEqual(step.repo_root, "C:/Code/my-repo");
+    assert.strictEqual(
+      step.artifact_paths.unit_manifest,
+      "C:/Code/my-repo/.audit-tools/audit/unit_manifest.json",
+    );
+    // null artifact entries (not-yet-materialized) survive normalization.
+    assert.strictEqual(step.artifact_paths.not_yet, null);
+    for (const value of Object.values(step.artifact_paths)) {
+      if (value !== null) {
+        assert.ok(!value.includes("\\"), `artifact_paths value must have no backslash: ${value}`);
+      }
+    }
+
+    // The persisted JSON file likewise carries no backslash separators.
+    const raw = await readFile(step.artifact_paths.current_step, "utf8");
+    const parsed = JSON.parse(raw);
+    for (const field of ["prompt_path", "repo_root", "artifacts_dir"]) {
+      assert.ok(!parsed[field].includes("\\"), `persisted ${field} must have no backslash`);
+    }
+  } finally {
+    await cleanup();
+  }
+});
+
+test("writeCurrentStep canonical paths win even with Windows-style attacker overrides (R3)", async () => {
+  const { dir, cleanup } = await makeTempDir();
+  try {
+    const artifactsDir = join(dir, "artifacts");
+    await mkdir(artifactsDir, { recursive: true });
+    const step = await writeCurrentStep({
+      ...baseParams(artifactsDir),
+      artifactPaths: {
+        current_step: "C:\\attacker\\evil.json",
+        current_prompt: "C:\\attacker\\evil.md",
+      },
+    });
+    assert.ok(step.artifact_paths.current_step.endsWith("current-step.json"));
+    assert.ok(step.artifact_paths.current_prompt.endsWith("current-prompt.md"));
+    assert.ok(!step.artifact_paths.current_step.includes("attacker"));
+    assert.ok(!step.artifact_paths.current_prompt.includes("attacker"));
+    assert.ok(!step.artifact_paths.current_step.includes("\\"));
+    assert.ok(!step.artifact_paths.current_prompt.includes("\\"));
+  } finally {
+    await cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Single-sourced writer guard (drift-plan R3)
+//
+// There must be exactly ONE step-contract writer body. After consolidation the
+// audit `writeCurrentStep` is a thin wrapper that DELEGATES to the shared
+// `writeStepContract`; no source file under audit-code/src may define its own
+// `writeCurrentStep` body that re-spells the steps/ filenames + raw-path writes.
+// We assert: (a) the audit writer imports `writeStepContract` from shared, and
+// (b) no audit source file constructs the steps dir / current-step.json by hand
+// outside steps.ts.
+// ---------------------------------------------------------------------------
+
+async function collectTsFiles(rootDir) {
+  const out = [];
+  async function walk(d) {
+    const entries = await readdir(d, { withFileTypes: true });
+    for (const e of entries) {
+      const full = join(d, e.name);
+      if (e.isDirectory()) await walk(full);
+      else if (e.isFile() && full.endsWith(".ts")) out.push(full);
+    }
+  }
+  await walk(rootDir);
+  return out;
+}
+
+test("R3: audit writeCurrentStep delegates to the shared single-sourced writer", async () => {
+  const stepsSrc = await readFile(join(srcDir, "cli", "steps.ts"), "utf8");
+  assert.match(
+    stepsSrc,
+    /writeStepContract/,
+    "audit steps.ts must delegate to the shared writeStepContract",
+  );
+  assert.match(
+    stepsSrc,
+    /from "@audit-tools\/shared"/,
+    "audit steps.ts must import the writer from @audit-tools/shared",
+  );
+  // The raw-path writer body is gone: steps.ts must no longer write the prompt
+  // or the step JSON itself (those moved into shared).
+  assert.doesNotMatch(
+    stepsSrc,
+    /writeFile\s*\(/,
+    "audit steps.ts must not write current-prompt.md itself (moved to shared)",
+  );
+  assert.doesNotMatch(
+    stepsSrc,
+    /writeJsonFile\s*\(/,
+    "audit steps.ts must not write current-step.json itself (moved to shared)",
+  );
+});
+
+test("R3: no audit source file outside steps.ts hand-builds the steps/current-step.json writer", async () => {
+  const files = await collectTsFiles(srcDir);
+  const offenders = [];
+  for (const file of files) {
+    if (file.endsWith(join("cli", "steps.ts"))) continue;
+    const text = await readFile(file, "utf8");
+    // A second writer would join the steps dir to current-step.json by hand.
+    if (/["']steps["']\s*\)/.test(text) && /current-step\.json/.test(text)) {
+      offenders.push(file);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `only steps.ts (delegating to shared) may own the step-writer path joins; offenders: ${offenders.join(", ")}`,
+  );
 });

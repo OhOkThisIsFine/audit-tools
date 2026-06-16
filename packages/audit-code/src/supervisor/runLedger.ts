@@ -1,12 +1,11 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, rename, rm, stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   RUN_LEDGER_STATUSES,
   type RunLedger,
   type RunLedgerEntry,
 } from "@audit-tools/shared";
-import { isFileMissingError, readJsonFile, writeJsonFile, withFileLock, withFsRetry } from "@audit-tools/shared";
+import { isFileMissingError, readJsonFile, writeJsonFile, withFileLock } from "@audit-tools/shared";
 
 const RUN_LEDGER_FILENAME = "run-ledger.json";
 const RUN_LEDGER_LOCK_FILENAME = "run-ledger.lock";
@@ -39,13 +38,6 @@ async function withLedgerLock<T>(lockPath: string, fn: () => Promise<T>): Promis
 
 function ledgerLockPath(artifactsDir: string): string {
   return join(artifactsDir, RUN_LEDGER_LOCK_FILENAME);
-}
-
-function buildTempLedgerPath(artifactsDir: string): string {
-  return join(
-    artifactsDir,
-    `${RUN_LEDGER_FILENAME}.${process.pid}.${randomUUID()}.tmp`,
-  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -141,7 +133,6 @@ export async function appendRunLedgerEntry(
 ): Promise<void> {
   const path = ledgerPath(artifactsDir);
   const lockPath = ledgerLockPath(artifactsDir);
-  const tempPath = buildTempLedgerPath(artifactsDir);
   await mkdir(artifactsDir, { recursive: true });
   // Emit a structured event so run outcomes are observable without reading the ledger file.
   process.stderr.write(
@@ -159,8 +150,8 @@ export async function appendRunLedgerEntry(
   await withLedgerLock(lockPath, async () => {
     const ledger = await loadRunLedger(artifactsDir);
     ledger.runs.push(entry);
-    await writeJsonFile(tempPath, ledger);
-    await withFsRetry(() => rename(tempPath, path));
-    await rm(tempPath, { force: true }).catch(() => undefined);
+    // Single atomic write through the shared writer (temp + atomic rename); the
+    // prior local temp-then-rename on top of it was a redundant double rename.
+    await writeJsonFile(path, ledger);
   });
 }
