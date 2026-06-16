@@ -53,27 +53,27 @@ A9/A10 (pending A8).
   — tool-enforced, not host-trusted. Approve-all is byte-identical to pre-gate. 8 wiring tests; harness
   `approveReviewGate()`.
 
-**Two loose ends remain on item 1 (do these next — small, build on ce8d790):**
-1. **1c-2: surface declined findings in the SHIPPED outcome.** Today declined items are recorded in
-   `review_decision.json` (on disk, reasoned) but NOT in `remediation-outcomes.json`. **RECON DONE — the
-   path is clean:** `handlePendingExtractedPlan` (`nextStep.ts:1963`) builds `plan_coverage` via
-   `buildCoverageLedger({...})`, which ALREADY takes a `droppedByCheckpoint` list → `dropped_by_checkpoint`
-   disposition (findings filtered before planning, not in the node set). Mirror it: (a) add
-   `declined_by_review` to `CoverageLedgerEntry["disposition"]` (state/types.ts); (b) add a `review_gate`
-   `NeverPlannedDropReason` + map `declined_by_review → review_gate` in `DROP_REASON_BY_DISPOSITION`
-   (`close.ts:259-266`); (c) add a `declinedByReview` param to `buildCoverageLedger` (plan.ts ~642) that
-   emits one entry per declined id (template = the droppedByCheckpoint branch); (d) in
-   `handlePendingExtractedPlan`, read `review_decision.json` and pass `declined.map(d=>d.finding_id)`.
-   **Payloads recover for free at close:** the gate only swaps the filtered `approved-findings.json` into
-   `sourcePaths`, NOT the intake source-manifest, so `loadStructuredSourceFindingsById` (close.ts:277)
-   still reads the ORIGINAL audit-findings.json (with declined findings) → `buildOutcomeCoverageLedger`
-   enriches each `declined_by_review` entry with its full Finding payload. Extend the buildCoverageLedger +
-   outcome-contract tests. Completes the never-silently-closed guarantee end-to-end.
-2. **Converge the classic preview onto this gate.** `classify_impl_risks` + `preview_implement`
-   (`nextStep.ts` ~1490-1742, `impl_preview_ack.json`) is a SECOND review surface at the planning phase
-   over node-level items. Collapse it onto the one review-necessity gate so there's a single surface.
+**Item 1 status: CORRECTNESS COMPLETE.** Findings are surfaced (1c) and declines are recorded end-to-end
+in the shipped outcome (1c-2). One product-judgment refinement remains:
+- `072f4d6` — **1c-2 SHIPPED.** Declined findings surface in `remediation-outcomes.json` as a
+  `declined_by_review` coverage disposition + `review_gate` drop_reason (never-planned analog of
+  `dropped_by_checkpoint`). `buildCoverageLedger` appends them (separate optional `declined_review_count`,
+  the 5-count source reconciliation stays intact); `buildOutcomeCoverageLedger` recovers payloads at close
+  from the UNFILTERED intake source. buildCoverageLedger + close enrichment tests added.
 
-Then continue down the program (next: **A8** rolling engine → live default, the nightly-autonomy blocker).
+**Remaining (NOT a correctness gap — needs product judgment, left for a deliberate pass):**
+- **Classic-preview convergence.** `classify_impl_risks` + `preview_implement` (`nextStep.ts` ~1490-1742,
+  `impl_preview_ack.json`) is a 2nd review surface at planning over node-level items. **A 1c side-effect:
+  Path A now hits BOTH gates (intake review + classic node-preview) = double review.** Path B has NO
+  intake gate (no pre-existing findings) so the classic preview is its ONLY surface — can't just delete
+  it. Options + the open product question (is Path A's intake finding-approval sufficient, or do users
+  still want the node-plan preview?) are written up in `.audit-tools/go-forward-progress.md`. Lean:
+  surgical skip of the classic preview on Path A when `review_decision.json` exists. Deferred pending a
+  deliberate decision — it changes a user-facing surface.
+
+**Next down the program (pick clean, well-scoped items; A8 is big/risky — the rolling-default atomic
+cutover — save it for a focused pass):** B8 (finding-merge location discriminator), B4 (hard-exclude
+tool-refuted findings), then A1 / A3+A4 / B1 / B2+B3 / A5+A11 / A6 / A12 / A7.
 Live working detail: `.audit-tools/go-forward-progress.md`.
 
 ## Pointers
