@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { runClosePhase, collectStagingFiles } from "../src/phases/close.js";
+import { runClosePhase, collectStagingFiles, buildOutcomeCoverageLedger } from "../src/phases/close.js";
 import { readFile, rm, mkdir, writeFile as writeFileAsync } from "node:fs/promises";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -1004,5 +1004,91 @@ describe("collectStagingFiles", () => {
   it("returns empty array when no files changed", () => {
     const files = collectStagingFiles(GIT_DIR);
     expect(files).toEqual([]);
+  });
+});
+
+describe("buildOutcomeCoverageLedger — review-gate declines (1c-2)", () => {
+  const OUTCOME_DIR = join(__dirname, ".test-close-outcome");
+  const OUTCOME_ARTIFACTS = join(OUTCOME_DIR, ".audit-tools", "remediation");
+  const AUDIT_PATH = join(OUTCOME_DIR, "audit-findings.json");
+
+  beforeEach(async () => {
+    await rm(OUTCOME_DIR, { recursive: true, force: true });
+    await mkdir(join(OUTCOME_ARTIFACTS, "intake"), { recursive: true });
+    // The intake source manifest still points at the UNFILTERED original report
+    // (the gate only swaps the filtered copy into the pipeline's sourcePaths), so
+    // close-time payload recovery can find the declined finding.
+    await writeFileAsync(
+      AUDIT_PATH,
+      JSON.stringify({
+        contract_version: "audit-tools/audit-findings/v1alpha1",
+        findings: [
+          {
+            id: "ARC-001",
+            title: "Module boundaries leak persistence concerns",
+            category: "architecture",
+            severity: "medium",
+            confidence: "medium",
+            lens: "architecture",
+            summary: "The store layer reaches across module seams.",
+            affected_files: [{ path: "src/store.ts" }],
+            evidence: ["src/store.ts:1 evidence"],
+          },
+        ],
+        work_blocks: [],
+      }),
+      "utf8",
+    );
+    await writeFileAsync(
+      join(OUTCOME_ARTIFACTS, "intake", "source-manifest.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-source-manifest/v1alpha1",
+        created_from: "input",
+        sources: [{ type: "structured_audit", path: AUDIT_PATH, label: "audit" }],
+      }),
+      "utf8",
+    );
+  });
+
+  afterEach(async () => {
+    await rm(OUTCOME_DIR, { recursive: true, force: true });
+  });
+
+  it("enriches a declined_by_review entry with the review_gate drop_reason and recovered payload", async () => {
+    const state = makeState({
+      plan: { plan_id: "P1", findings: [], blocks: [], project_type: "unknown", candidate_closing_actions: ["none"] },
+      plan_coverage: {
+        contract_version: "remediate-code-coverage/v1alpha1",
+        plan_id: "P1",
+        source_finding_count: 0,
+        planned_count: 0,
+        folded_count: 0,
+        dropped_count: 0,
+        checkpoint_dropped_count: 0,
+        phantom_dropped_count: 0,
+        declined_review_count: 1,
+        entries: [
+          {
+            finding_id: "ARC-001",
+            disposition: "declined_by_review",
+            rationale: "Disapproved by the user at the review gate (review-necessity: strategic).",
+          },
+        ],
+      },
+    });
+
+    const outcome = await buildOutcomeCoverageLedger(state, {
+      root: OUTCOME_DIR,
+      artifactsDir: OUTCOME_ARTIFACTS,
+    } as any);
+
+    expect(outcome).toBeDefined();
+    const entry = outcome!.entries.find((e) => e.finding_id === "ARC-001")!;
+    expect(entry.drop_reason).toBe("review_gate");
+    expect(entry.disposition).toBe("declined_by_review");
+    // The full Finding payload is recovered from the unfiltered intake source.
+    expect(entry.finding).toBeDefined();
+    expect(entry.finding!.title).toBe("Module boundaries leak persistence concerns");
+    expect(entry.rationale).toMatch(/review gate/i);
   });
 });

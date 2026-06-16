@@ -1960,11 +1960,19 @@ async function handlePendingExtractedPlan(
     }
 
     const pipelined = await applyPlanPipeline(plan, { root, artifactsDir });
+    // Carry the review-gate declines into the coverage ledger so disapproved
+    // findings are recorded in the shipped outcome (never silently dropped). The
+    // declined set was excluded from the pipeline upstream; their full payloads
+    // are recovered at close from the (unfiltered) intake source.
+    const reviewDecision = await readOptionalJsonFile<ReviewDecisionRecord>(
+      reviewDecisionPath(artifactsDir),
+    );
     const coverage = buildCoverageLedger({
       planId: pipelined.plan_id,
       sourceFindings,
       droppedNoEvidence: [],
       droppedByCheckpoint: [],
+      declinedByReview: reviewDecision?.declined ?? [],
       droppedPhantomPaths: new Map(
         grounding.dropped.map((d) => [d.finding.id, d.phantomPaths]),
       ),
