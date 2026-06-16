@@ -9,14 +9,14 @@
 
 ## Where things stand
 
-- **Published + live:** `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.26.0`.
-  Global bins reinstalled; host assets deployed across 4 hosts (Claude Code/Codex/OpenCode/Antigravity).
-- **`main` @ `5a820a4`.** Clean tree, all pushed. Unpublished commits ahead of the live npm versions = the
-  review-gate work (`caea93c`, `4815ae3`, `ce8d790`, `072f4d6`, `86b4621`, `5a820a4`).
-  **PUBLISH IS HELD until program item 1 is fully done** (Ethan).
+- **Published + live:** `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0`.
+  Global bins reinstalled (postinstall ran via `--allow-scripts`); host assets deployed across 4 hosts.
+- **`main` @ `918742a8`.** Clean tree, all pushed, all published.
+- **Program item 1 (review-necessity gate) is COMPLETE and shipped** in remediator-lambda 0.27.0. There is
+  now ONE review surface per run for both paths; the classic impl-risk preview is gone.
 - **Active work:** the go-forward program from the 2026-06-15 self-audit review (which exposed that 30 of
   42 design-review findings had been auto-dispositioned without ever being shown). Program of record:
-  `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)".
+  `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)". **Item 1 done → next is A8.**
 
 ## Standing directives (Ethan) — read before deciding anything
 
@@ -30,54 +30,38 @@
   `ask-on-ambiguity-dont-defer-silently`.)
 - **Order of program items is yours** — sequence logically so one refactor doesn't undo another.
 
-## Immediate next step: finish program item 1 (the review-necessity gate), then move down the program
+## Immediate next step: program item A8 (rolling-default atomic cutover)
 
-**Item 1 goal:** ONE review preview per run, tiered by review-necessity, over the DEDUPED/grounded
-survivor set (never showing findings that will later be deduped/dropped). **Shipped so far (all green, pushed):**
-- Engine: `caea93c` (`classifyReviewNecessity`) + `4815ae3` (`buildReviewRequest`/`applyReviewResolution`),
-  in `src/review/`.
-- `ce8d790` + `072f4d6`: Path-A intake review gate; declines recorded in `remediation-outcomes.json`.
-- `86b4621` (**chunk A**): `src/findingFilter.ts` `runFindingFilterPass` — the single filter pass
-  (no-evidence → cross-lens dedup → phantom-grounding → intent-checkpoint).
-- `5a820a4` (**chunk B**): Path A runs the filter pass at INTAKE over the ORIGINAL findings; the gate
-  previews the deduped/grounded SURVIVORS tiered; approved survivors seed the pipeline; coverage rebuilt
-  over the originals (every audit finding → exactly one disposition; `declinedByReview` now in-source).
-  Path A also now honors intent-checkpoint filters (no-op unless the checkpoint has filters set).
+Item 1 is done and shipped (remediator-lambda 0.27.0). Work down the rest of the go-forward program
+(order is yours; sequence to avoid rework). Next up:
 
-**CURRENT INTERMEDIATE STATE (know this before editing):** Path A now has TWO review surfaces — the new
-intake gate AND the still-present classic impl-risk preview at the planning phase = a temporary double
-review. Functionally correct and green; just redundant. **Chunk C removes it.** This is the only "untidy"
-spot and it is deliberate/known, not a bug.
+- **A8 — rolling-default atomic cutover (THE nightly-autonomy blocker).** Flip the in-process rolling
+  dispatch engine from opt-in to the live default and atomically delete the host-fanned wave fallback in
+  `buildImplementDispatchStep` (`src/steps/nextStep.ts`). The engine + write-scope/verify are already folded
+  into merge behind a flag (ARC-f378135d, shipped default-OFF); A8 = flip default-ON + remove the fallback +
+  validate a multi-worker rolling run. Single atomic replace (new mechanism + deletion in one commit).
+- Then: **A1** fast path, **A3+A4** unify obligation engines + `RemediationItem`, **B1** magic numbers,
+  **B2+B3** diff re-reviews + obligation-set staleness, **B4** hard-exclude tool-refuted findings (re-scoped),
+  **B8** finding-merge discriminator (re-scoped), **A5+A11**, **A6**, **A12**, **A7**. Deferred: A2, A9/A10.
 
-**REMAINING for item 1:**
-- **Chunk C** (one atomic delete-and-replace): remove the classic impl-risk preview machinery —
-  `classify_impl_risks` + `preview_implement` steps inside `buildImplementDispatchStep`
-  (`src/steps/nextStep.ts` ~1443-1700), `classifyFindingRisk`/`FindingRiskTier` (`src/steps/stepUtils.ts`),
-  `impl_risk_preliminary.json`/`impl_risk_reviewed.json`/`impl_preview_acknowledged.json`,
-  `renderTierSection`/`renderNoOpSection` — and route **Path B** (document/conversation; findings are
-  derived as DAG nodes, already deduped/grounded by `handlePendingExtractedPlan`) through the
-  review-necessity gate at the planning point, firing ONLY when `review_decision.json` is ABSENT (Path A
-  already gated at intake → its decision exists → no double review). The planning gate previews the nodes
-  tiered, halts → collects → applies (declined nodes → terminal disposition). Rework the
-  `next-step-preview-ack` tests. **Full design + exact steps in `.audit-tools/go-forward-progress.md`.**
-- **Chunk D**: publish item 1 (shared/auditor/remediator version bumps → npm → reinstall global bins) via
-  the `/ship` skill. Held until C is done.
+**Review gate, as shipped (orientation):** Path A gates the ORIGINAL findings at intake (over the
+filter-pass survivors); Path B gates the deduped/grounded node findings at the planning point
+(`runPlanningReviewGate` in `nextStep.ts`, fires only when `review_decision.json` is absent → plan_id
+`path-b-review`). Declined items become a recorded terminal disposition, never a silent close. The classic
+impl-risk preview is gone. Triage auto-retry is now unconditional (capped), no longer keyed on the removed
+preview ack. `classifyFindingRisk`/`FindingRiskTier` were KEPT (dispatch model-tier consumer, orthogonal to
+the review surface).
 
-**After item 1 → continue the program** (order is yours, sequence to avoid rework): **A8** rolling-default
-atomic cutover (THE nightly-autonomy blocker), **A1** fast path, **A3+A4** unify obligation engines +
-`RemediationItem`, **B1** magic numbers, **B2+B3** diff re-reviews + obligation-set staleness, **B4**
-hard-exclude tool-refuted findings (re-scoped — see backlog), **B8** finding-merge discriminator
-(re-scoped — original premise was wrong, see backlog), **A5+A11**, **A6**, **A12**, **A7**.
-
-**OpenCode bug** (logged in backlog "Deferred fixes"): Ethan has UNINSTALLED OpenCode, so the trigger should
-now surface as an `opencode`-not-found CLI error rather than opening the app — watch for that error; it
-pinpoints the caller. Prime suspect: `opencode run` via the OpenCode provider when it's auto-resolved.
+**Provider-hang trap (logged in backlog "Deferred fixes"):** in a provider-less env (e.g. CLAUDECODE unset,
+as in the release gate) `createFreshSessionProvider` auto-resolves a CLI backend whose subprocess hangs —
+Ethan UNINSTALLED OpenCode, so `opencode run` auto-resolution is the prime suspect. It surfaced as a 30s
+hang in `phase-plan.test.ts` under the release gate; that test was made hermetic (`b8c8c30a`, injects the
+`extractFindings` seam), but the underlying auto-resolution hang is still OPEN — watch for it.
 
 ## Pointers
-- Live working checkpoint (detailed chunk A–D design + recon, gitignored): `.audit-tools/go-forward-progress.md`.
 - Memory: `review-gate-execution-status`, `prefer-ideal-code-no-backcompat`,
   `ask-on-ambiguity-dont-defer-silently`, `remediation-review-gate-must-be-tool-enforced`.
-- New review-gate artifacts (under `.audit-tools/remediation/`): `review_request.json` /
+- Review-gate artifacts (under `.audit-tools/remediation/`): `review_request.json` /
   `review_resolution.json` / `review_decision.json` / `review_filter_dispositions.json`.
 
 ## Working constraints
