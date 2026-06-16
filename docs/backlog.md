@@ -441,6 +441,11 @@ fully closed is R1 (wire the rolling engine), tracked above under *Self-audit 20
 Unknown trigger — could be a test, a skill, an MCP server, or a bash invocation that hits the OpenCode
 *executable* (launches the GUI/TUI) instead of the headless `opencode` CLI.
 
+**Update (Ethan, 2026-06-16):** OpenCode is now UNINSTALLED on his machine. So the same trigger will now
+likely surface as a command-line ERROR (`opencode` not found / non-zero exit) instead of opening the app —
+which is itself a useful signal: watch for an `opencode`-not-found error in CLI output, that pinpoints the
+exact caller. Deferred per Ethan (leave logged); revisit in a dedicated pass.
+
 **Recon already done (don't redo — start from the prime suspect):**
 - **SAFE — not these:** provider detection probes PATH with `where`/`which opencode`, never spawns it
   (`packages/shared/src/providers/providerConfirmation.ts:62-63`). Postinstall only *writes*
