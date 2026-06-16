@@ -743,10 +743,15 @@ describe("buildCoverageLedger", () => {
     expect(byId.C.rationale).toBeTruthy();
   });
 
-  it("appends review-gate declines as extra entries without breaking source reconciliation", () => {
-    // sourceFindings are the planned (node) set; declines are an upstream
-    // exclusion that is NOT part of source_finding_count.
-    const sourceFindings = [mkFinding("NODE-1", "Planned node", { files: ["a.ts"] })];
+  it("records review-gate declines as in-source declined_by_review entries (part of reconciliation)", () => {
+    // On Path A the coverage source IS the original findings; a declined finding
+    // is a filter-pass survivor the user disapproved, so it is an in-source
+    // disposition (like dropped_by_checkpoint) and counts toward the source total.
+    const sourceFindings = [
+      mkFinding("NODE-1", "Planned", { files: ["a.ts"] }),
+      mkFinding("ARC-001", "Declined one", { files: ["b.ts"] }),
+      mkFinding("ARC-002", "Declined two", { files: ["c.ts"] }),
+    ];
     const ledger = buildCoverageLedger({
       planId: "PLAN-DECL",
       sourceFindings: sourceFindings as any,
@@ -760,19 +765,18 @@ describe("buildCoverageLedger", () => {
       items: { "NODE-1": { finding_id: "NODE-1", status: "pending", block_id: "B-001" } },
     });
 
-    // Source accounting is unchanged: declines are NOT source findings.
-    expect(ledger.source_finding_count).toBe(1);
+    expect(ledger.source_finding_count).toBe(3);
     expect(ledger.planned_count).toBe(1);
     expect(ledger.declined_review_count).toBe(2);
-    // The 5 source dispositions still reconcile to source_finding_count.
-    const sourceTotal =
+    // Every original finding gets exactly one disposition — declines included.
+    const total =
       ledger.planned_count +
       ledger.folded_count +
       ledger.dropped_count +
       ledger.checkpoint_dropped_count +
-      ledger.phantom_dropped_count;
-    expect(sourceTotal).toBe(ledger.source_finding_count);
-    // Declines appear as extra entries with the recorded reason.
+      ledger.phantom_dropped_count +
+      (ledger.declined_review_count ?? 0);
+    expect(total).toBe(ledger.source_finding_count);
     const byId = Object.fromEntries(ledger.entries.map((e) => [e.finding_id, e]));
     expect(byId["ARC-001"].disposition).toBe("declined_by_review");
     expect(byId["ARC-001"].rationale).toMatch(/review gate/i);
