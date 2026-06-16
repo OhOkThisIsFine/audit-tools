@@ -11,7 +11,8 @@
 
 - **Published + live:** `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.26.0`.
   Global bins reinstalled; host assets deployed across 4 hosts (Claude Code/Codex/OpenCode/Antigravity).
-- **`main` @ `4815ae3`.** Clean tree.
+- **`main` @ `ce8d790`.** Clean tree. Unpublished commits ahead of the live npm versions: the
+  review-gate program (`caea93c`, `4815ae3`, `ce8d790`). Publish when program item 1 is fully done.
 - The 2026-06-15 self-audit (227 findings) was remediated + shipped. A review of that run exposed that
   **30 of 42 design-review findings were auto-dispositioned without ever being shown to Ethan** (the
   contract pipeline's quality-tail blocks bulk-closed them). Ethan reviewed the surfaced items and
@@ -24,7 +25,7 @@ per-item pros/cons in `.audit-tools/deferred-items-for-review.md`, gitignored). 
 Ethan's standing directive: do them all, most-logical order, **small green-committed chunks** (quota
 near cap). Execute each, build green, commit, push.
 
-Items: **review-necessity approval gate** (item 1, in progress) · **A8** rolling engine → live default
+Items: **review-necessity approval gate** (item 1, core SHIPPED `ce8d790`; 2 loose ends below) · **A8** rolling engine → live default
 (THE nightly-autonomy blocker) · **A1** fast path past the 15-phase pipeline · **A3+A4** unify the two
 obligation engines + collapse the ~8 finding-keyed record types into one `RemediationItem` · **B1**
 audit magic numbers · **B2+B3** diff-based re-reviews + obligation-set-keyed staleness · **B4**
@@ -34,30 +35,46 @@ schemas + hand TS validators; dead `ajv`) · **A12** single-package collapse · 
 machinery on all 4 hosts (NOT cut — the multi-host vision is alive). Deferred: A2 (quality oracle),
 A9/A10 (pending A8).
 
-## Immediate next step: finish the review-necessity gate (chunk 1c)
+## Immediate next step: finish program item 1's loose ends, then move down the program
 
-**Done (green, pushed):** the gate ENGINE.
-- `caea93c` — `src/review/reviewNecessity.ts`: deterministic `classifyReviewNecessity(finding)` →
-  strategic | concrete | mechanical (architecture lens is ALWAYS strategic). + `partitionByReviewNecessity`.
-- `4815ae3` — `src/review/reviewGate.ts`: `buildReviewRequest(findings, planId)` (tiered request,
-  deterministic rationale + blast-radius cost, pros/cons = host slots) + `applyReviewResolution`
-  (default-approve; decline-by-id/tier; declined items carry a recorded reason → never a silent close).
-- 20 vitest green.
+**Review-necessity gate (program item 1) — core SHIPPED to main (commit + push, NOT published):**
+- `caea93c` — `src/review/reviewNecessity.ts`: `classifyReviewNecessity` (architecture lens ALWAYS
+  strategic) + `partitionByReviewNecessity`.
+- `4815ae3` — `src/review/reviewGate.ts`: `buildReviewRequest` + `applyReviewResolution` (default-approve;
+  decline-by-id/tier; declined carry a recorded reason).
+- `ce8d790` — **WIRING (chunk 1c).** `runReviewApprovalGate` in `nextStep.ts` fires on the Path-A
+  (structured_audit) intake INSIDE `handleReadyIntakeContractPipeline`, BEFORE the pipeline collapses the
+  findings into ~17 DAG nodes (no node→original-finding provenance exists, so the gate MUST run
+  pre-collapse — that collapse is what hid 30/42 design findings). File-driven + pre-state (NO new
+  RemediationState status — mirrors the intake-clarification gate). Halt = `collect_review_approval` step
+  + `review_request.json`; resume consumes `review_resolution.json` → durable `review_decision.json`
+  {approved_ids, declined[{finding_id,reason}]}; idempotent (fires once). Declined findings are excluded
+  from BOTH the path-A seed AND the pipeline source inputs (filtered `approved-findings.json` swapped in)
+  — tool-enforced, not host-trusted. Approve-all is byte-identical to pre-gate. 8 wiring tests; harness
+  `approveReviewGate()`.
 
-**Left: wire the engine into the state machine.** READ THIS RECON — do not re-derive it:
-- The classic gate `classify_impl_risks` + `preview_implement` (`src/steps/nextStep.ts` ~1490-1742) is
-  **NOT bypassed** — `handlePendingExtractedPlan` → `saveStateForPlan` sets `status:"planning"`
-  (`nextStep.ts:1140`), so the contract-pipeline extracted plan DOES reach preview.
-- **The real gap is granularity.** The DAG→extracted-plan conversion (`src/steps/contractPipeline.ts`
-  ~1536-1680) collapses the 227 original findings into ~17 NODE "findings" (`source:"contract_pipeline"`).
-  Preview shows node-level items; the design-review findings bundled inside the quality-tail nodes are
-  bulk-dispositioned ("direction recorded") invisibly inside each node's worker.
-- **Fix (option A):** gate the ORIGINAL findings BEFORE the pipeline collapses them — fire after
-  intake-ready (`handlePendingIntake`, before `shouldEnterContractPipeline` kicks the first phase), over
-  the `audit-findings.json` / `path_a_seed` finding set. Only approved findings seed the pipeline;
-  declined → recorded declined disposition. Mirror `waiting_for_clarification` for halt/resume (handler
-  ~3077, resolution-consume ~2225, collect step ~2279) via `review_request.json` / `review_resolution.json`.
-- After 1c: converge the classic risk-tier preview onto this one review-necessity gate (separate task).
+**Two loose ends remain on item 1 (do these next — small, build on ce8d790):**
+1. **1c-2: surface declined findings in the SHIPPED outcome.** Today declined items are recorded in
+   `review_decision.json` (on disk, reasoned) but NOT in `remediation-outcomes.json`. **RECON DONE — the
+   path is clean:** `handlePendingExtractedPlan` (`nextStep.ts:1963`) builds `plan_coverage` via
+   `buildCoverageLedger({...})`, which ALREADY takes a `droppedByCheckpoint` list → `dropped_by_checkpoint`
+   disposition (findings filtered before planning, not in the node set). Mirror it: (a) add
+   `declined_by_review` to `CoverageLedgerEntry["disposition"]` (state/types.ts); (b) add a `review_gate`
+   `NeverPlannedDropReason` + map `declined_by_review → review_gate` in `DROP_REASON_BY_DISPOSITION`
+   (`close.ts:259-266`); (c) add a `declinedByReview` param to `buildCoverageLedger` (plan.ts ~642) that
+   emits one entry per declined id (template = the droppedByCheckpoint branch); (d) in
+   `handlePendingExtractedPlan`, read `review_decision.json` and pass `declined.map(d=>d.finding_id)`.
+   **Payloads recover for free at close:** the gate only swaps the filtered `approved-findings.json` into
+   `sourcePaths`, NOT the intake source-manifest, so `loadStructuredSourceFindingsById` (close.ts:277)
+   still reads the ORIGINAL audit-findings.json (with declined findings) → `buildOutcomeCoverageLedger`
+   enriches each `declined_by_review` entry with its full Finding payload. Extend the buildCoverageLedger +
+   outcome-contract tests. Completes the never-silently-closed guarantee end-to-end.
+2. **Converge the classic preview onto this gate.** `classify_impl_risks` + `preview_implement`
+   (`nextStep.ts` ~1490-1742, `impl_preview_ack.json`) is a SECOND review surface at the planning phase
+   over node-level items. Collapse it onto the one review-necessity gate so there's a single surface.
+
+Then continue down the program (next: **A8** rolling engine → live default, the nightly-autonomy blocker).
+Live working detail: `.audit-tools/go-forward-progress.md`.
 
 ## Pointers
 - Live working checkpoint (more design detail, gitignored): `.audit-tools/go-forward-progress.md`.
