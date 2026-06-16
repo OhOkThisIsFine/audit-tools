@@ -59,7 +59,7 @@ const defaultSleep = (ms: number): Promise<void> =>
 
 /**
  * Retry a filesystem operation on transient Windows lock errors with bounded
- * exponential backoff (mirrors the quota file lock's 20ms→250ms convention).
+ * exponential backoff (mirrors the quota file lock's 50ms→500ms convention).
  * Non-transient errors propagate immediately.
  */
 export async function withFsRetry<T>(
