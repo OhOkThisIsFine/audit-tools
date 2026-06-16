@@ -157,6 +157,7 @@ export interface NextStepHarness {
   acknowledgeResume(): Promise<void>;
   writeIntentCheckpoint(): Promise<void>;
   writeReadyStructuredAuditIntake(inputPath: string): Promise<void>;
+  approveReviewGate(): Promise<void>;
   writeCompleteContractPipelineDag(): Promise<void>;
 }
 
@@ -254,6 +255,26 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
       "utf8",
     );
     await writeIntentCheckpoint();
+  }
+
+  /**
+   * Satisfy the Path-A review-approval gate with an approve-all decision so a
+   * structured-audit run proceeds straight into the contract pipeline. Writing
+   * `declined: []` leaves every finding included (the gate filters by the
+   * declined set), so the downstream behaves exactly as a fully-approved run.
+   */
+  async function approveReviewGate(): Promise<void> {
+    await writeFile(
+      join(ARTIFACTS_DIR, "review_decision.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-review-decision/v1",
+        plan_id: "path-a-review",
+        approved_ids: [],
+        declined: [],
+        created_at: new Date().toISOString(),
+      }),
+      "utf8",
+    );
   }
 
   async function writeCompleteContractPipelineDag(): Promise<void> {
@@ -426,6 +447,7 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
     acknowledgeResume,
     writeIntentCheckpoint,
     writeReadyStructuredAuditIntake,
+    approveReviewGate,
     writeCompleteContractPipelineDag,
   };
 }
