@@ -400,6 +400,15 @@ test. The CLAUDE.md lock doc-fix landed in Wave-0 and is now guarded by
 fully closed is R1 (wire the rolling engine), tracked above under *Self-audit 2026-06-15*
 — wired behind a default-OFF flag this run, with the atomic cutover still remaining.**
 
+- **Intermittent hermeticity flake: `phase-plan.test.ts` "non-audit JSON file falls through
+  to the LLM extractor path".** Fails ~1-in-N full-suite runs, passes in isolation and most
+  full runs (observed 2026-06-16 while adding the review-gate tests — unrelated code path).
+  The two `runPlanPhase` describe blocks share module-level `currentRoot`/`currentOptions`/
+  `baseState`, and the test asserts the LLM-extractor path *rejects* (ENOENT on a missing
+  `result_plan.json`) — both are concurrency/global-state sensitive. Fix: scope the
+  shared `let`s per-describe (or use the unique-dir-per-test pattern consistently) and make
+  the "falls through → throws" assertion not depend on dispatch global state.
+
 ## Deferred fixes (product bugs)
 
 ### Manual real-OpenCode validation of scoped permissions (user-owned)

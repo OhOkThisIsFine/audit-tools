@@ -16,7 +16,7 @@ import {
 } from "./helpers/nextStepHarness.js";
 
 const harness = createNextStepHarness(".test-next-step-pipeline-dispatch");
-const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint, writeReadyStructuredAuditIntake, writeCompleteContractPipelineDag } = harness;
+const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint, writeReadyStructuredAuditIntake, approveReviewGate, writeCompleteContractPipelineDag } = harness;
 
 beforeEach(async () => {
   await harness.resetTestRepo();
@@ -296,6 +296,8 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     );
     await writeFile(join(intakeDir, "remediation-brief.md"), "# Structured intake\n", "utf8");
     await writeIntentCheckpoint();
+    // Past the review-approval gate (approve-all) so the run reaches the pipeline.
+    await approveReviewGate();
 
     const step = await decideNextStep({
       root: REPO_DIR,
@@ -376,6 +378,8 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
       }),
       "utf8",
     );
+    // Past the review-approval gate (approve-all) so the run reaches the pipeline.
+    await approveReviewGate();
 
     const step = await decideNextStep({
       root: REPO_DIR,
@@ -446,6 +450,8 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     expect(first.step_kind).toBe("synthesize_intake");
 
     await writeReadyStructuredAuditIntake(AUDITOR_CONTRACT_FIXTURE);
+    // Past the review-approval gate (approve-all) so the run reaches the pipeline.
+    await approveReviewGate();
 
     const step = await decideNextStep({
       root: REPO_DIR,
@@ -629,6 +635,8 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     // After N-R06: structured-audit enters the contract pipeline, not runPlanPhase.
     // The output is still valid JSON with the step contract.
     await writeReadyStructuredAuditIntake(AUDIT_FIXTURE);
+    // Past the review-approval gate (approve-all) so the run reaches the pipeline.
+    await approveReviewGate();
 
     const result = spawnSync(
       process.execPath,

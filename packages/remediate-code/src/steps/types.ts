@@ -16,6 +16,7 @@ export type RemediationStepKind =
   | "synthesize_intake"
   | "collect_intake_clarifications"
   | "contract_pipeline"
+  | "collect_review_approval"
   | "collect_clarifications"
   | "classify_impl_risks"
   | "preview_implement"

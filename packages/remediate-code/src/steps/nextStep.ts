@@ -53,6 +53,17 @@ import {
   writePathASeedFromFindings,
 } from "./contractPipeline.js";
 import {
+  contractArtifactExists,
+  contractPipelineDir,
+} from "../contractPipeline/artifactStore.js";
+import {
+  buildReviewRequest,
+  applyReviewResolution,
+  REVIEW_REQUEST_SCHEMA_VERSION,
+  type ReviewRequest,
+  type ReviewResolution,
+} from "../review/reviewGate.js";
+import {
   INTAKE_CLARIFICATION_SCHEMA_VERSION,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
   INTAKE_SUMMARY_SCHEMA_VERSION,
@@ -73,6 +84,7 @@ import {
   collectIntakeClarificationsPrompt,
   collectStartingPointPrompt,
   loaderCommand,
+  reviewApprovalPrompt,
   synthesizeIntakePrompt,
   triagePrompt,
 } from "./prompts.js";
@@ -1985,6 +1997,176 @@ async function handlePendingExtractedPlan(
   }
 }
 
+// ── Review-approval gate (go-forward program item 1) ───────────────────────────
+//
+// Between the audit findings and the contract pipeline, every ORIGINAL finding is
+// presented to the user bucketed by review-necessity (src/review/reviewGate.ts).
+// Approved findings seed the pipeline; disapproved findings are excluded from it
+// AND recorded as a declined disposition (review_decision.json) — never silently
+// swept to a terminal status inside a quality-tail node, the 2026-06-15 failure
+// this gate exists to prevent.
+//
+// Fires only on Path A (structured_audit) — the only intake path with a
+// pre-existing finding set; document/conversation runs derive findings inside the
+// pipeline. File-driven and pre-state (no RemediationState exists at intake yet),
+// mirroring the intake-clarification gate rather than waiting_for_clarification.
+
+const REVIEW_DECISION_SCHEMA_VERSION = "remediate-code-review-decision/v1" as const;
+/** Stable, informational plan id for the pre-plan review request/decision pair. */
+const REVIEW_GATE_PLAN_ID = "path-a-review";
+
+interface ReviewDecisionRecord {
+  schema_version: typeof REVIEW_DECISION_SCHEMA_VERSION;
+  plan_id: string;
+  approved_ids: string[];
+  declined: Array<{ finding_id: string; reason: string }>;
+  created_at: string;
+}
+
+function reviewRequestPath(artifactsDir: string): string {
+  return join(artifactsDir, "review_request.json");
+}
+function reviewResolutionPath(artifactsDir: string): string {
+  return join(artifactsDir, "review_resolution.json");
+}
+function reviewDecisionPath(artifactsDir: string): string {
+  return join(artifactsDir, "review_decision.json");
+}
+
+/** Pull the Finding[] out of a parsed audit-findings.json payload. */
+function extractAuditFindings(parsed: unknown): Finding[] {
+  if (isRecord(parsed) && Array.isArray(parsed.findings)) {
+    return (parsed.findings as unknown[]).filter(
+      (f): f is Finding => isRecord(f) && typeof f.id === "string",
+    );
+  }
+  return [];
+}
+
+async function handleWaitingForReviewApproval(
+  root: string,
+  artifactsDir: string,
+  request: ReviewRequest,
+): Promise<RemediationStep> {
+  return writeCurrentStep({
+    stepKind: "collect_review_approval",
+    status: "blocked",
+    runId: randomRunId("REVIEW"),
+    repoRoot: root,
+    artifactsDir,
+    prompt: reviewApprovalPrompt(request, reviewResolutionPath(artifactsDir)),
+    allowedCommands: [loaderCommand("next-step")],
+    stopCondition:
+      "Stop after presenting the findings for approval and collecting the user's approve/disapprove decision, unless the decision is already recorded and the prompt told you to continue.",
+    artifactPaths: {
+      review_request: reviewRequestPath(artifactsDir),
+      review_resolution: reviewResolutionPath(artifactsDir),
+    },
+  });
+}
+
+interface ReviewGateProceed {
+  kind: "proceed";
+  /** The audit-findings payload filtered to non-declined findings (for the seed). */
+  filteredAuditFindings: unknown;
+  /** Audit source path the seed + sourcePaths should use (a filtered file when any finding was declined). */
+  seedSourcePath: string;
+  /** Original audit source path to swap OUT of sourcePaths when a filtered file replaced it. */
+  swappedFromPath?: string;
+}
+interface ReviewGateHalt {
+  kind: "halt";
+  step: RemediationStep;
+}
+
+/**
+ * Run the review-approval gate over the original audit findings. Returns a halt
+ * step while awaiting the user's decision, or a `proceed` carrying the finding
+ * set (declined excluded) the pipeline should be seeded with.
+ *
+ * Idempotent across the many pipeline next-step calls: once review_decision.json
+ * exists the gate consumes it directly and proceeds, so it fires (and halts) at
+ * most once per run. A parse failure upstream (empty `allFindings`) opens nothing
+ * and proceeds unchanged, so a malformed report degrades to the pre-gate path.
+ */
+async function runReviewApprovalGate(
+  root: string,
+  artifactsDir: string,
+  auditSourcePath: string,
+  auditFindings: unknown,
+): Promise<ReviewGateProceed | ReviewGateHalt> {
+  const allFindings = extractAuditFindings(auditFindings);
+  const decisionPath = reviewDecisionPath(artifactsDir);
+
+  // First crossing only: no decision yet AND the pipeline has not started.
+  const gateOpen =
+    allFindings.length > 0 &&
+    !existsSync(decisionPath) &&
+    !contractArtifactExists(artifactsDir, "goal_spec");
+
+  if (gateOpen) {
+    const resolutionPath = reviewResolutionPath(artifactsDir);
+    const requestPath = reviewRequestPath(artifactsDir);
+    if (!existsSync(resolutionPath)) {
+      // Halt: present the tiered findings and wait for the user's decision.
+      const request = buildReviewRequest(allFindings, REVIEW_GATE_PLAN_ID);
+      await writeJsonFile(requestPath, request);
+      return {
+        kind: "halt",
+        step: await handleWaitingForReviewApproval(root, artifactsDir, request),
+      };
+    }
+    // Consume the resolution into a durable, reasoned decision record.
+    const request =
+      (await readOptionalJsonFile<ReviewRequest>(requestPath)) ??
+      buildReviewRequest(allFindings, REVIEW_GATE_PLAN_ID);
+    const resolution = await readOptionalJsonFile<ReviewResolution>(resolutionPath);
+    const decision = applyReviewResolution(request, resolution);
+    const record: ReviewDecisionRecord = {
+      schema_version: REVIEW_DECISION_SCHEMA_VERSION,
+      plan_id: REVIEW_GATE_PLAN_ID,
+      approved_ids: decision.approved_ids,
+      declined: decision.declined,
+      created_at: new Date().toISOString(),
+    };
+    await writeJsonFile(decisionPath, record);
+    // Archive the consumed inputs so the gate cannot re-halt.
+    for (const p of [resolutionPath, requestPath]) {
+      if (existsSync(p)) {
+        await withFsRetry(() => rename(p, `${p}.consumed-${Date.now()}`));
+      }
+    }
+  }
+
+  // Filter the pipeline's finding set by the recorded declined set (default-include).
+  const decision = await readOptionalJsonFile<ReviewDecisionRecord>(decisionPath);
+  const declinedIds = new Set((decision?.declined ?? []).map((d) => d.finding_id));
+  if (declinedIds.size === 0) {
+    // Nothing declined → byte-identical to the pre-gate behaviour.
+    return {
+      kind: "proceed",
+      filteredAuditFindings: auditFindings,
+      seedSourcePath: auditSourcePath,
+    };
+  }
+  const approvedFindings = allFindings.filter((f) => !declinedIds.has(f.id));
+  const filteredAuditFindings = isRecord(auditFindings)
+    ? { ...auditFindings, findings: approvedFindings }
+    : { findings: approvedFindings };
+  // Write a filtered findings file and route BOTH the seed and the pipeline's
+  // source inputs at it, so a declined finding can never re-enter via the raw
+  // audit-findings.json handed to the LLM phases (tool-enforced, not host-trusted).
+  await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
+  const filteredPath = join(contractPipelineDir(artifactsDir), "approved-findings.json");
+  await writeJsonFile(filteredPath, filteredAuditFindings);
+  return {
+    kind: "proceed",
+    filteredAuditFindings,
+    seedSourcePath: filteredPath,
+    swappedFromPath: auditSourcePath,
+  };
+}
+
 async function handleReadyIntakeContractPipeline(
   root: string,
   artifactsDir: string,
@@ -2016,20 +2198,46 @@ async function handleReadyIntakeContractPipeline(
     return null;
   }
 
-  // Path A: write the seed file so goal_normalization and context_collection
-  // prompts can frame the pipeline around the auditor findings.
+  // Path A: review-approval gate, then write the seed so goal_normalization and
+  // context_collection frame the pipeline around the (approved) auditor findings.
+  // The gate may halt to collect the user's decision; declined findings are then
+  // excluded from both the seed and the pipeline's source inputs.
+  let reviewSourceSwap: { from: string; to: string } | undefined;
   if (intake.summary.source_type === "structured_audit" && intake.manifest) {
     const auditSource = resolveManifestSources(root, intake.manifest).resolved.find(
       (s) => s.type === "structured_audit",
     );
     if (auditSource) {
+      let auditFindings: unknown;
       try {
-        const content = await readFile(auditSource.path, "utf8");
-        const auditFindings = JSON.parse(content) as unknown;
-        await writePathASeedFromFindings(artifactsDir, auditSource.path, auditFindings);
+        auditFindings = JSON.parse(await readFile(auditSource.path, "utf8")) as unknown;
       } catch {
-        // Best-effort: if the seed cannot be written, the pipeline still runs;
-        // goal_normalization will use the source files from sourcePaths.
+        auditFindings = undefined;
+      }
+      if (auditFindings !== undefined) {
+        const gate = await runReviewApprovalGate(
+          root,
+          artifactsDir,
+          auditSource.path,
+          auditFindings,
+        );
+        if (gate.kind === "halt") {
+          return gate.step;
+        }
+        if (gate.swappedFromPath) {
+          reviewSourceSwap = { from: gate.swappedFromPath, to: gate.seedSourcePath };
+        }
+        // Best-effort seed write (declined findings already filtered out).
+        try {
+          await writePathASeedFromFindings(
+            artifactsDir,
+            gate.seedSourcePath,
+            gate.filteredAuditFindings,
+          );
+        } catch {
+          // If the seed cannot be written, the pipeline still runs; the LLM
+          // phases use the source files from sourcePaths.
+        }
       }
     }
   }
@@ -2041,7 +2249,13 @@ async function handleReadyIntakeContractPipeline(
   }
   if (intake.manifest) {
     for (const source of resolveManifestSources(root, intake.manifest).resolved) {
-      sourcePaths.add(source.path);
+      // Swap the raw audit-findings.json for the approved-only filtered file so a
+      // declined finding can never re-enter the pipeline as a source input.
+      sourcePaths.add(
+        reviewSourceSwap && source.path === reviewSourceSwap.from
+          ? reviewSourceSwap.to
+          : source.path,
+      );
     }
   }
 

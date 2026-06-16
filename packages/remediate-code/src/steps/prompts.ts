@@ -3,6 +3,7 @@ import type {
   RemediationItemState,
 } from "../state/types.js";
 import type { RemediationState } from "../state/store.js";
+import type { ReviewRequest } from "../review/reviewGate.js";
 import { renderPromptCommand } from "@audit-tools/shared";
 import {
   INTAKE_CLARIFICATION_SCHEMA_VERSION,
@@ -62,6 +63,81 @@ After the user answers, write JSON to exactly:
 
 Use \`"action": "deemed_inappropriate"\` for out-of-scope items. Then run
 \`${loaderCommand("next-step")}\`.
+`;
+}
+
+/**
+ * Render the review-approval gate prompt. The tool has already done the
+ * deterministic work — bucketed every original finding by review-necessity,
+ * with a rationale and a coarse implementation cost. The host's job is the
+ * semantic slot the tool cannot fill: present each item to the user with the
+ * pros/cons of acting vs. not, and collect approve/disapprove. The gate exists
+ * because design-review (strategic) findings were previously swept to a terminal
+ * disposition inside quality-tail blocks without ever being shown — so the
+ * strategic tier MUST be presented item-by-item, never rubber-stamped.
+ *
+ * Default is approve-all: an empty/absent resolution proceeds with every
+ * finding. Disapproved items are RECORDED with a reason, never silently closed.
+ */
+export function reviewApprovalPrompt(
+  request: ReviewRequest,
+  resolutionPath: string,
+): string {
+  const tierSections = request.tiers
+    .map((tier) => {
+      const items = tier.items
+        .map(
+          (item) => `
+### ${item.finding_id} — ${item.title}
+
+- Lens / severity / confidence: \`${item.lens}\` / \`${item.severity}\` / \`${item.confidence}\`
+- Why this tier: ${item.rationale}
+- Implementation cost (blast radius): \`${item.implementation_cost}\`
+- Affected files: ${item.affected_files.length ? item.affected_files.map((f) => `\`${f}\``).join(", ") : "_none cited_"}
+- Summary: ${item.summary}
+- **Present to the user with the pros/cons of acting vs. not acting, then record their decision.**`,
+        )
+        .join("\n");
+      return `## ${tier.label} — ${tier.items.length} item(s)\n\n${tier.description}\n${items}`;
+    })
+    .join("\n\n");
+
+  return `
+# Review-Approval Gate — approve or disapprove before implementation
+
+Before any code changes, every audit finding is presented below, bucketed by how
+much of **your** judgment it needs. This gate exists so that strategic
+(design/architecture) findings are never quietly closed without your sight — so
+walk the user through them, especially the **Strategic** tier, with the trade-offs
+of acting vs. leaving each as-is.
+
+- Total findings: **${request.total}**
+- Strategic: **${request.counts.strategic}** · Concrete: **${request.counts.concrete}** · Mechanical: **${request.counts.mechanical}**
+
+${tierSections}
+
+---
+
+## Record the user's decision
+
+The default is to **proceed with every finding**. You only need to record the
+items the user wants to **disapprove** (skip). Write JSON to exactly:
+
+\`${resolutionPath}\`
+
+\`\`\`json
+{
+  "disapproved_findings": ["FINDING-ID-the-user-declined"],
+  "disapproved_tiers": []
+}
+\`\`\`
+
+- Leave \`disapproved_findings\` empty (\`[]\`) to approve everything.
+- Use \`disapproved_tiers\` (e.g. \`["mechanical"]\`) to decline an entire tier at once.
+- Disapproved findings are recorded as a declined disposition with a reason —
+  they are not acted on, and they are not silently dropped.
+
+Then run \`${loaderCommand("next-step")}\`.
 `;
 }
 
