@@ -34,15 +34,25 @@ export interface OpenCodeConfig {
 }
 
 /**
- * Codex CLI backend config. Codex is a headless CLI (like claude-code), so it is
- * driven by a binary + flags rather than a command template. `prompt_flag` is the
- * non-interactive prompt-delivery flag (see CodexProvider; the default is a
- * TODO(verify) assumption until confirmed against the real Codex CLI).
+ * Codex CLI backend config. Codex is a headless coding CLI (like claude-code):
+ * the non-interactive entrypoint is `codex exec`, which reads the rendered prompt
+ * from stdin and runs to completion editing files (verified against codex-cli
+ * 0.140.0). The provider manages the invocation; these fields tune it.
  */
 export interface CodexConfig {
+  /** Launcher on PATH (default "codex"; on Windows resolved through cmd.exe). */
   command?: string;
+  /**
+   * `codex exec --sandbox` policy. Default "workspace-write" — writes confined to
+   * the working root (the node's worktree) plus the result dir (granted via
+   * `--add-dir`), which reinforces worktree isolation. "danger-full-access" drops
+   * the sandbox (use only when the run is already externally isolated).
+   */
+  sandbox_mode?: "read-only" | "workspace-write" | "danger-full-access";
+  /** Model the agent should use (`codex exec --model`). Never defaulted here — codex's own default applies when unset (no hardcoded model identity). */
+  model?: string;
+  /** Extra argv appended after the managed `codex exec` flags. */
   extra_args?: string[];
-  prompt_flag?: string;
 }
 
 export interface VSCodeTaskConfig {
