@@ -58,7 +58,21 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   items in *Known friction* below; now accepted work, not just logged friction).
 - **B4 — Hard-exclude tool-refuted findings.** A tier-2 REFUTED finding (e.g. madge-disproven cycle) is
   only marked `grounding:'ungrounded'` and still merges as fact; promote refuted → quarantined-excluded
-  at ingest (quarantine, not delete). (ARC-48c05a13, ARC-48c05a13-2.)
+  at ingest (quarantine, not delete). (ARC-48c05a13, ARC-48c05a13-2.) **Recon 2026-06-16 — scope + a
+  philosophy reversal to confirm:** `combineGroundingWithAnchor` (`audit-code/src/validation/
+  anchorGrounding.ts:213`) maps a refuted anchor → `{status:"ungrounded"}`, collapsing "tool DISPROVED
+  it" into the same bucket as "couldn't verify it." `groundPassingFindings`
+  (`cli/mergeAndIngestCommand.ts:334`) only ANNOTATES `finding.grounding` + returns the ungrounded
+  refs — it never removes findings; the explicit design comment (lines 327-331) is "marked ungrounded
+  and surfaced — never silently dropped … advisory, does not fail a result." B4 reverses that *for
+  refuted only*. Surface to touch: (1) add a distinct `"refuted"` to the `FindingGrounding` status +
+  the `audit_findings` schema enum; (2) `combineGroundingWithAnchor` returns it; (3) a NEW ingest filter
+  that moves refuted findings out of the admitted `passing` set into a quarantine list (the
+  "quarantine, not delete"); (4) `reporting/synthesis.ts` (~422-455) render refuted in its own
+  quarantined section + `grounding_status_breakdown`; (5) `reporting/mergeFindings.ts` `mergeGrounding`
+  precedence (does a refuted verdict on one pass override a grounded one on another? — likely no:
+  grounded-wins stays, refuted only excludes when nothing grounded it); (6) tests. Medium chunk, sensitive
+  (the S7 grounding contract). NOT a quick flag flip.
 - **B8 — Finding-merge location discriminator.** (ARC-1a497c28-2.) **Recon 2026-06-16 — the original
   framing was inaccurate, re-scope before fixing.** The `findingKey` in
   `audit-code/src/cli/mergeAndIngestCommand.ts:37` ALREADY includes `affected_files[0].path` and is only
