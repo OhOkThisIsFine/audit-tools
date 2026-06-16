@@ -59,9 +59,19 @@ record of what was **greenlit** is here. Each is a target, not a status line —
 - **B4 — Hard-exclude tool-refuted findings.** A tier-2 REFUTED finding (e.g. madge-disproven cycle) is
   only marked `grounding:'ungrounded'` and still merges as fact; promote refuted → quarantined-excluded
   at ingest (quarantine, not delete). (ARC-48c05a13, ARC-48c05a13-2.)
-- **B8 — Finding-merge location discriminator.** `findingKey` excludes affected_files, so two distinct
-  defects sharing lens+category+generic-title union into one finding pointing at the wrong file. Add a
-  location discriminator. (ARC-1a497c28-2.)
+- **B8 — Finding-merge location discriminator.** (ARC-1a497c28-2.) **Recon 2026-06-16 — the original
+  framing was inaccurate, re-scope before fixing.** The `findingKey` in
+  `audit-code/src/cli/mergeAndIngestCommand.ts:37` ALREADY includes `affected_files[0].path` and is only
+  used for a duplicate *warning*, not the actual union. The real identity authority is
+  `shared/src/findingIdentitySignature.ts` (`findingIdentitySignature`, drift-plan R2 single source). Its
+  tier-1 (`anchor|path|scope`) already discriminates by location; the only location-free collapse is
+  **tier 2 (`rule|lens|category`)**, which fires only for findings with NO `affected_files` at all — so
+  two distinct *fileless* findings of the same lens+category collapse to one identity. Title is
+  DELIBERATELY tier 3 (weakest) because titles are volatile, so "add title to the key" contradicts the
+  design. This is a judgment call on a sensitive single-source authority (guarded by
+  `finding-identity-single-source.test.mjs`), not a quick key tweak: decide whether fileless same-category
+  findings SHOULD collapse (probably acceptable — no location exists to tell them apart) or need a
+  non-title tier-2 discriminator. Reproduce ARC-1a497c28-2's actual case first.
 - **A5+A11 — Two-tier own-vs-import dependency policy + replace hand-rolled manifest parsers.** Write the
   policy (import vetted libs for correctness-sensitive parsers/schema/lock; keep own for tiny domain
   bits), then replace the hand-rolled TOML/YAML manifest scanners that silently drop dependency-graph
