@@ -1173,12 +1173,26 @@ describe("runPlanPhase — content-driven structured-audit report parsing", () =
     const jsonPath = join(currentRoot, "not-findings.json");
     await writeFile(jsonPath, JSON.stringify({ hello: "world" }), "utf8");
 
+    // Inject the extractor seam rather than letting runPlanPhase auto-resolve a
+    // real provider: a provider-less env (no CLAUDECODE) would auto-resolve a CLI
+    // backend whose subprocess hangs, making this test env-dependent. The seam
+    // being invoked is itself the assertion — the structured-audit fast-path parses
+    // findings directly and never calls the extractor, so reaching it proves the
+    // non-audit JSON fell through to the extractor path.
+    let extractorReached = false;
     await expect(
-      runPlanPhase(baseState, {
-        ...currentOptions,
-        input: jsonPath,
-      }),
-    ).rejects.toThrow();
+      runPlanPhase(
+        baseState,
+        { ...currentOptions, input: jsonPath },
+        {
+          extractFindings: async () => {
+            extractorReached = true;
+            throw new Error("extractor reached");
+          },
+        },
+      ),
+    ).rejects.toThrow(/extractor reached/);
+    expect(extractorReached).toBe(true);
   });
 });
 
