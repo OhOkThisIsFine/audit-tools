@@ -74,13 +74,40 @@ callers**; its tests inject stub dispatchers. Reading the path surfaced hard gap
    ≥2 nodes land via worktree→verify→merge. NOTE the unverified-on-Windows detail: whether
    `--sandbox workspace-write` is enforced on Windows is still unconfirmed (codex sandbox is historically
    mac/Linux); the real run will show it — fall back to `danger-full-access` via config if needed.
-4. **Harden the host-subagent driver onto the shared core** (replaces "delete the fallback"): give the
-   host path per-node worktree isolation + verify-before-accept + write-scope, select driver by
-   availability. Keep BOTH; one rolling core.
+4. **Build the host-subagent driver as a FIRST-CLASS, full-rolling co-equal** (Ethan, 2026-06-16,
+   decision (ii) — NOT a fallback; subscription-only/no-API-credit users depend on in-conversation
+   subagent dispatch). This is the next big chunk; protocol below. **Validatable in-session** (the host
+   instance spawns real Task-subagents via the Agent tool — no quota needed).
 5. **audit-code symmetric** wiring of its rolling engine into the audit live path.
 6. **Harden** worktree-branch reuse across a `rate_limited` re-queue.
 
+## Host-subagent driver protocol (step 4 — the next build)
+
+One-shot-CLI orchestrator + host-as-executor ⇒ rolling via a **per-completion callback** the tool owns:
+
+- **Extract the shared `acceptNode` core** first: pull the post-worker lifecycle (commit → verify-in-worktree
+  → cherry-pick merge → write-scope-from-branch-diff) out of `dispatchNodeWithWorktree` into a reusable
+  fn (`acceptNodeWorktree(root, runId, block, state, worktreeRoot, branch, workerOutcome) → {outcome, verifyPassed, merged}`).
+  The in-process provider loop calls it inline; the host driver calls it from a new command.
+- **`accept-node --id X` command** (the per-completion callback): runs `acceptNode(X)` + recomputes
+  eligibility + JIT-creates the next eligible node's worktree + worktree-rooted prompt → prints
+  "dispatch Y" or "done."
+- **Dispatch step**: pre-creates the currently-eligible nodes' worktrees + prompts and tells the host:
+  "spawn up to N subagents (N = quota slots) into these worktrees; as EACH finishes run
+  `accept-node --id <node>`; keep N slots full from what it returns; when none remain, run `next-step`."
+  → dispatch-next-on-complete (full JIT), tool-owns-correctness, host-executes-spawn.
+- **Selection by availability**: host-subagent driver when the host can dispatch (the conversation-first
+  default); in-process provider driver when a spawnable provider (codex/local-LLM/`claude -p`-when-not-nested)
+  is configured.
+- **Isolation**: each node in its OWN worktree (hard inter-node, both drivers). Binding a Task-subagent to
+  its worktree is SOFT (orchestrator can't cwd-confine the host's subagent) → enforced by detection:
+  worktree-rooted prompt + a "main tree must stay clean" guard + branch-diff write-scope ⇒ a strayed
+  subagent's node just FAILS, never silent corruption. Provider workers get hard cwd-confinement.
+
 ## Open items to surface
-- **Real-run validation (step 3) is the gate** before either driver is trusted in production; it's
-  quota-blocked until Jun 19. Everything to date is invocation-verified + unit/injected-provider green.
-- **Windows codex sandbox** enforcement unconfirmed (see step 3).
+- **Step 4 (host-subagent full-rolling driver) is the next build** — sizable + touches the live host
+  path; start it fresh. Validate in-session with real Task-subagents (no quota).
+- **Provider-path real-run validation** is quota-blocked until Jun 19 (codex). Invocation verified; the
+  in-process driver is unit/injected-provider green.
+- **Windows codex sandbox** enforcement unconfirmed (whether `--sandbox workspace-write` is enforced on
+  Windows; the real run settles it — fall back to `danger-full-access` via config if not).
