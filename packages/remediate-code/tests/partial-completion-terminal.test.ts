@@ -229,9 +229,9 @@ describe("N-CE301: partial_completion_terminal on RemediationState", () => {
     expect(blockedByTerminal).toHaveLength(0);
     // TST-5003421d: pin the normal-flow step kind rather than the vacuous
     // toBeDefined(). Without a partial-completion terminal, this ready
-    // implementing state (no impl_risks_reviewed.json yet) advances through the
-    // normal pre-dispatch gate `classify_impl_risks` — a real workflow step,
-    // never a terminal/error kind produced by the partial-completion path.
+    // implementing state advances straight to the rolling implement dispatch
+    // (host cannot dispatch subagents → sequential frontier) — a real workflow
+    // step, never a terminal/error kind produced by the partial-completion path.
     // (toBeDefined() was true for any returned step and could not catch a
     // regression in the non-terminal path.)
     const TERMINAL_OR_ERROR_KINDS = [
@@ -243,7 +243,7 @@ describe("N-CE301: partial_completion_terminal on RemediationState", () => {
       TERMINAL_OR_ERROR_KINDS,
       `normal no-terminal flow must not produce a terminal/error step, got '${step.step_kind}'`,
     ).not.toContain(step.step_kind);
-    expect(step.step_kind).toBe("classify_impl_risks");
+    expect(step.step_kind).toBe("implement_rolling_sequential");
   });
 });
 

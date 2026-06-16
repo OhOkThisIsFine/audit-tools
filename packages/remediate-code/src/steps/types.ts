@@ -18,8 +18,6 @@ export type RemediationStepKind =
   | "contract_pipeline"
   | "collect_review_approval"
   | "collect_clarifications"
-  | "classify_impl_risks"
-  | "preview_implement"
   | "dispatch_implement"
   | "implement_rolling_sequential"
   | "collect_triage"

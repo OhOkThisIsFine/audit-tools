@@ -335,6 +335,19 @@ describe("zero-findings planning state: presents user question instead of fallin
     await saveState(makePlanningState());
     await acknowledgeResume();
     await writeIntentCheckpoint();
+    // Satisfy the Path-B planning review gate (approve-all) so the run proceeds
+    // straight to dispatch rather than halting to collect a review decision.
+    await writeFile(
+      join(ARTIFACTS_DIR, "review_decision.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-review-decision/v1",
+        plan_id: "path-a-review",
+        approved_ids: [],
+        declined: [],
+        created_at: new Date().toISOString(),
+      }),
+      "utf8",
+    );
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -1162,24 +1175,8 @@ describe("infra-node live-surface verification: isInfraModifyingBlock", () => {
     await acknowledgeResume();
     await writeIntentCheckpoint();
 
-    // Allow for an intermediate classify_impl_risks or preview step before dispatch_implement.
-    let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    let maxIter = 5;
-    while (
-      step.step_kind !== "dispatch_implement" &&
-      ["classify_impl_risks", "impl_preview", "state_transition"].includes(step.step_kind) &&
-      maxIter-- > 0
-    ) {
-      // Write ack for any preview step.
-      if (step.step_kind === "impl_preview" || step.step_kind === "classify_impl_risks") {
-        await writeFile(
-          join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-          JSON.stringify({ status: "confirmed", skip: [] }),
-          "utf8",
-        );
-      }
-      step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
-    }
+    // Implementing state dispatches directly — no intermediate preview hop.
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
 
     // TST-9730c3bc: the loop MUST reach dispatch_implement for this fixture (an
     // infra-touching block with every ack written). A regression that prevents
@@ -1271,12 +1268,6 @@ describe("context-carrying triage retries", () => {
       }),
       "utf8",
     );
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed", ignored_findings: [] }),
-      "utf8",
-    );
-
     let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
     // Consume any state_transition steps.
     let maxIter = 5;
@@ -1334,11 +1325,6 @@ describe("context-carrying triage retries", () => {
     } as RemediationState);
     await acknowledgeResume();
     await writeIntentCheckpoint();
-    await writeFile(
-      join(ARTIFACTS_DIR, "impl_preview_acknowledged.json"),
-      JSON.stringify({ status: "confirmed", skip: [] }),
-      "utf8",
-    );
 
     const step = await decideNextStep({ root: REPO_DIR });
     expect(step.step_kind).toBe("collect_triage");

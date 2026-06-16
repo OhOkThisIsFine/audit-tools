@@ -550,7 +550,6 @@ describe("INV-RS-01 (orchestrator): a node whose dependency was SKIPPED is dead-
     await harness.saveState(st);
     await harness.acknowledgeResume();
     await harness.writeIntentCheckpoint();
-    await harness.acknowledgeImplementationPreview();
 
     // Drive to a terminal step; must converge (no infinite loop) — the bounded
     // guard below is the livelock assertion (a true loop would exhaust it).

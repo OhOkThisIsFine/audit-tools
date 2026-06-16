@@ -36,9 +36,6 @@ import {
   dependencyVerifiedComplete,
   isTerminalStatus,
   isVerifiedCompleteStatus,
-  specIndicatesNoChange,
-  classifyFindingRisk,
-  type FindingRiskTier,
 } from "./stepUtils.js";
 import {
   deduplicateCrossLensFindings,
@@ -1311,126 +1308,6 @@ Stop after presenting the summary.
   });
 }
 
-// Shapes of the reviewed / preliminary risk-classification entries that drive
-// the implement-preview tables. Module-scoped so the render helpers below can be
-// hoisted out of the state-machine loop rather than re-created per invocation.
-type ReviewedEntry = { finding_id: string; tier: string; reason: string };
-type PrelimEntry = {
-  finding_id: string;
-  title: string;
-  severity?: string;
-  confidence?: string;
-  lens?: string;
-  summary?: string;
-  evidence?: string[];
-  concrete_change: string;
-  no_change?: boolean;
-  affected_files: string[];
-  tests_to_write?: { name: string; assertions: string[] }[];
-  preliminary_tier: string;
-  preliminary_reason: string;
-};
-
-const PREVIEW_TIER_LABELS: Record<string, string> = {
-  safe: "Straightforward",
-  substantive: "Substantive",
-  context_dependent: "Operator Context",
-};
-
-function previewTierLabel(tier: string): string {
-  return PREVIEW_TIER_LABELS[tier] ?? tier;
-}
-
-function markdownCell(value: string): string {
-  return value.replaceAll("|", "\\|").replace(/\s+/g, " ").trim() || "-";
-}
-
-function previewPros(prelim: PrelimEntry | undefined): string {
-  if (!prelim) return "-";
-  const pros = [
-    prelim.summary ? `Addresses: ${prelim.summary}` : undefined,
-    prelim.tests_to_write && prelim.tests_to_write.length > 0
-      ? `Planned tests: ${prelim.tests_to_write.map((test) => test.name).join(", ")}`
-      : undefined,
-  ].filter((entry): entry is string => Boolean(entry));
-  return pros.length > 0 ? pros.join("; ") : "Implements the documented remediation change.";
-}
-
-function previewCons(
-  prelim: PrelimEntry | undefined,
-  reviewed: ReviewedEntry,
-): string {
-  const cons = [
-    reviewed.reason ? `Reviewed risk: ${reviewed.reason}` : undefined,
-    prelim?.affected_files && prelim.affected_files.length > 0
-      ? `Touches ${prelim.affected_files.length} file(s): ${prelim.affected_files.join(", ")}`
-      : undefined,
-    prelim?.tests_to_write && prelim.tests_to_write.length === 0
-      ? "No additional tests listed in the item spec."
-      : undefined,
-  ].filter((entry): entry is string => Boolean(entry));
-  return cons.length > 0 ? cons.join("; ") : "No specific downside recorded beyond normal implementation risk.";
-}
-
-function isNoOpFinding(
-  prelimMap: Map<string, PrelimEntry>,
-  findingId: string,
-): boolean {
-  return specIndicatesNoChange(prelimMap.get(findingId));
-}
-
-function renderTierSection(
-  reviewedMap: Map<string, ReviewedEntry>,
-  prelimMap: Map<string, PrelimEntry>,
-  tier: string,
-): string {
-  const matches = [...reviewedMap.values()].filter(
-    (e) => e.tier === tier && !isNoOpFinding(prelimMap, e.finding_id),
-  );
-  if (matches.length === 0) return "";
-  const header = "| ID | Decision Label | Title | Planned Change | Files | Reviewed Reason | Pros | Cons |";
-  const sep = "|---|---|---|---|---|---|---|---|";
-  const rows = matches.map((reviewed) => {
-    const prelim = prelimMap.get(reviewed.finding_id);
-    const files = prelim?.affected_files.join(", ") ?? "-";
-    const change = prelim?.concrete_change ?? "-";
-    const title = prelim?.title ?? "-";
-    return [
-      reviewed.finding_id,
-      previewTierLabel(reviewed.tier),
-      title,
-      change,
-      files,
-      reviewed.reason,
-      previewPros(prelim),
-      previewCons(prelim, reviewed),
-    ].map(markdownCell).join(" | ");
-  });
-  return `## ${previewTierLabel(tier)}\n\n${header}\n${sep}\n${rows.map((row) => `| ${row} |`).join("\n")}`;
-}
-
-function renderNoOpSection(
-  reviewedMap: Map<string, ReviewedEntry>,
-  prelimMap: Map<string, PrelimEntry>,
-): string {
-  const noOps = [...reviewedMap.values()].filter((e) =>
-    isNoOpFinding(prelimMap, e.finding_id),
-  );
-  if (noOps.length === 0) return "";
-  const rows = noOps.map((e) => {
-    const title = (prelimMap.get(e.finding_id)?.title ?? "—").replaceAll("|", "\\|");
-    return `- **${e.finding_id}**: ${title}`;
-  });
-  return `## Already Correct (no changes planned)\n\n${rows.join("\n")}`;
-}
-
-
-function previewAckIds(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((id): id is string => typeof id === "string")
-    : [];
-}
-
 async function buildImplementDispatchStep(ctx: {
   root: string;
   artifactsDir: string;
@@ -1440,319 +1317,6 @@ async function buildImplementDispatchStep(ctx: {
   runLogger: RunLogger;
 }): Promise<RemediationStep> {
   const { root, artifactsDir, state, options, implementBlocks, runLogger } = ctx;
-    const preliminaryPath = join(artifactsDir, "impl_risk_preliminary.json");
-    const reviewedPath = join(artifactsDir, "impl_risk_reviewed.json");
-    const previewAckPath = join(artifactsDir, "impl_preview_acknowledged.json");
-
-    // When no items have item_spec (document phase dissolved — N-R13), there is
-    // nothing to classify or preview. Auto-acknowledge and skip straight to dispatch.
-    const hasAnyItemSpec = (state.plan?.blocks ?? []).some((block) =>
-      block.items.some((id) => !!state.items?.[id]?.item_spec),
-    );
-    if (!hasAnyItemSpec && !existsSync(previewAckPath)) {
-      await writeJsonFile(previewAckPath, {
-        status: "confirmed",
-        ignored_findings: [],
-        auto_ack: true,
-        reason: "No item_spec entries; risk classify/preview skipped (document phase dissolved).",
-      });
-    }
-
-    // Plan-identity check: if the ack file exists but carries a different plan_id
-    // than the current plan, it was written for a stale plan (replan occurred after
-    // the user confirmed). Delete the ack and re-emit the preview so the user
-    // reviews the updated plan before implementation begins.
-    if (existsSync(previewAckPath)) {
-      const existingAck = await readOptionalJsonFile<{ plan_id?: string; status?: string }>(previewAckPath);
-      const ackPlanId = typeof existingAck?.plan_id === "string" ? existingAck.plan_id : undefined;
-      const currentPlanId = state.plan?.plan_id;
-      if (ackPlanId !== undefined && currentPlanId !== undefined && ackPlanId !== currentPlanId) {
-        process.stderr.write(
-          `[remediate-code] impl_preview_acknowledged.json plan_id mismatch (ack=${ackPlanId}, current=${currentPlanId}); treating as absent and re-emitting preview.\n`,
-        );
-        try {
-          const { unlink } = await import("node:fs/promises");
-          await unlink(previewAckPath);
-        } catch { /* already gone */ }
-      }
-    }
-
-    if (!existsSync(previewAckPath)) {
-      const nextCommand = loaderCommand("next-step");
-
-      if (!existsSync(reviewedPath)) {
-        // Write preliminary JSON and dispatch a bounded, model-agnostic review task.
-        type PreliminaryEntry = {
-          finding_id: string;
-          title: string;
-          severity: string;
-          confidence: string;
-          lens: string;
-          affected_files: string[];
-          summary: string;
-          evidence: string[];
-          concrete_change: string;
-          no_change?: boolean;
-          tests_to_write: { name: string; assertions: string[] }[];
-          block_id: string;
-          preliminary_tier: FindingRiskTier;
-          preliminary_reason: string;
-        };
-
-        const entries: PreliminaryEntry[] = [];
-        // Build the risk preview from EVERY block with documented work, not just
-        // the dependency-ready wave-1 subset (implementableBlocks is now
-        // dependency-gated). The preview/ack is one-shot, so a later dependency
-        // wave would otherwise bypass the user's risk review entirely.
-        for (const block of state.plan?.blocks ?? []) {
-          for (const id of block.items) {
-            const item = state.items?.[id];
-            const finding = state.plan?.findings.find((f) => f.id === id);
-            if (!item?.item_spec || !finding) continue;
-            const spec = item.item_spec as ItemSpec;
-            const { tier, reason } = classifyFindingRisk(finding, spec);
-            entries.push({
-              finding_id: finding.id,
-              title: finding.title,
-              severity: finding.severity,
-              confidence: finding.confidence,
-              lens: finding.lens,
-              affected_files: finding.affected_files.map((f) => f.path),
-              summary: finding.summary,
-              evidence: finding.evidence ?? [],
-              concrete_change: spec.concrete_change,
-              no_change: spec.no_change,
-              tests_to_write: spec.tests_to_write,
-              block_id: block.block_id,
-              preliminary_tier: tier,
-              preliminary_reason: reason,
-            });
-          }
-        }
-
-        await writeJsonFile(preliminaryPath, {
-            schema_version: "impl-risk-preliminary/v1",
-            tier_definitions: {
-              safe: "Style, formatting, config, or clearly correct bug-fixes that are unambiguously good regardless of project context.",
-              substantive: "Changes that meaningfully affect correctness, security, or runtime behaviour.",
-              context_dependent: "Changes whose appropriateness depends on project scope, user base, or deployment constraints. Covers low-confidence findings and anything that removes or disables existing behaviour.",
-            },
-            findings: entries,
-          });
-
-          return writeCurrentStep({
-          stepKind: "classify_impl_risks",
-          status: "ready",
-          runId: stateRunId(state),
-          repoRoot: root,
-          artifactsDir,
-          prompt: `
-# Review Implementation Risk Classifications
-
-A rule-based classifier has produced preliminary risk tiers for all planned
-implementation changes. Read the preliminary classifications, review each one
-against the full finding context, and write a reviewed result.
-
-## Input
-
-\`${preliminaryPath}\`
-
-Read only that file. Do not read source code files.
-
-## Tier definitions
-
-- **safe**: Style, formatting, config, or clearly correct bug-fixes that are
-  unambiguously good regardless of project context.
-- **substantive**: Changes that meaningfully affect correctness, security,
-  or runtime behaviour.
-- **context_dependent**: Changes whose appropriateness depends on project
-  scope, user base, or deployment constraints. Covers low-confidence findings
-  and anything that removes or disables existing behaviour.
-
-## Task
-
-For each entry in \`findings\`:
-1. Read \`preliminary_tier\` and \`preliminary_reason\`.
-2. Check \`summary\`, \`evidence\`, \`concrete_change\`, and \`lens\` for signals the
-   rule missed or misread.
-3. Keep or adjust the tier. If you adjust, explain why in \`reason\`.
-
-## Output
-
-Write to exactly:
-
-\`${reviewedPath}\`
-
-\`\`\`json
-{
-  "schema_version": "impl-risk-reviewed/v1",
-  "findings": [
-    {
-      "finding_id": "...",
-      "tier": "safe | substantive | context_dependent",
-      "reason": "one-line explanation"
-    }
-  ]
-}
-\`\`\`
-
-Include every \`finding_id\` from the input. Then run:
-
-\`${nextCommand}\`
-`,
-          allowedCommands: [nextCommand],
-          stopCondition:
-            "Stop after writing impl_risk_reviewed.json and running next-step.",
-          artifactPaths: {
-            preliminary: preliminaryPath,
-            reviewed: reviewedPath,
-          },
-        });
-      }
-
-      // Reviewed classifications exist. Build the tiered display in the backend
-      // so the preview step is pure present-and-confirm — no reasoning required.
-      const reviewedFile = await readOptionalJsonFile<{ findings: ReviewedEntry[] }>(reviewedPath);
-      const prelimFile = await readOptionalJsonFile<{ findings: PrelimEntry[] }>(preliminaryPath);
-
-      const reviewedMap = new Map(
-        (reviewedFile?.findings ?? []).map((e) => [e.finding_id, e]),
-      );
-      const prelimMap = new Map(
-        (prelimFile?.findings ?? []).map((e) => [e.finding_id, e]),
-      );
-
-      // Fall back to preliminary tier for any finding the reviewer omitted.
-      for (const [id, prelim] of prelimMap) {
-        if (!reviewedMap.has(id)) {
-          reviewedMap.set(id, {
-            finding_id: id,
-            tier: prelim.preliminary_tier,
-            reason: prelim.preliminary_reason,
-          });
-        }
-      }
-
-      const sections = [
-        renderTierSection(reviewedMap, prelimMap, "safe"),
-        renderTierSection(reviewedMap, prelimMap, "substantive"),
-        renderTierSection(reviewedMap, prelimMap, "context_dependent"),
-        renderNoOpSection(reviewedMap, prelimMap),
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-
-      return writeCurrentStep({
-        stepKind: "preview_implement",
-        status: "blocked",
-        runId: stateRunId(state),
-        repoRoot: root,
-        artifactsDir,
-        prompt: `
-# Implementation Plan Preview
-
-Show the tables below to the user exactly as written — every row, every column.
-Do not summarise, abbreviate, or list only IDs. The user needs the title and
-planned-change, reviewed-reason, Pros, and Cons columns to make an informed
-decision.
-
-${sections}
-
----
-
-The LLM-assisted \`classify_impl_risks\` review has already written
-\`impl_risk_reviewed.json\`; use those reviewed classifications as the source of
-truth for this preview.
-
-Ask the user to list any findings they want to ignore. They may ignore any
-implementable finding below; an empty list means "implement everything."
-Already-correct findings are excluded from this choice.
-
-If the user confirms the preview, write the ack to exactly:
-
-\`${previewAckPath}\`
-
-\`\`\`json
-{ "status": "confirmed", "ignored_findings": ["FINDING-ID-TO-IGNORE"], "plan_id": "${state.plan?.plan_id ?? ""}" }
-\`\`\`
-
-Use an empty \`ignored_findings\` array (\`[]\`) when the user approves
-everything; otherwise list the exact finding IDs they chose to ignore. If the
-user explicitly declines all implementation work, write:
-
-\`\`\`json
-{ "status": "declined", "ignored_findings": [], "plan_id": "${state.plan?.plan_id ?? ""}" }
-\`\`\`
-
-Then run:
-
-\`${nextCommand}\`
-`,
-        allowedCommands: [nextCommand],
-        stopCondition:
-          "Present the plan to the user, get their decision. Write the ack file and run next-step only if approved.",
-        artifactPaths: {
-          preliminary: preliminaryPath,
-          reviewed: reviewedPath,
-          impl_preview_ack: previewAckPath,
-        },
-      });
-    }
-
-    // The preview ack may approve only part of the plan: honor ignored findings
-    // by marking them terminal before dispatch so workers cannot resurrect them.
-    const previewAck = await readOptionalJsonFile<{
-      status?: string;
-      ignored_findings?: unknown;
-      skip?: unknown;
-    }>(
-      previewAckPath,
-    );
-    const ignoredIds = [
-      ...previewAckIds(previewAck?.ignored_findings),
-      // Legacy ack compatibility: older generated prompts used `skip`.
-      ...previewAckIds(previewAck?.skip),
-    ];
-    const ackPrelimFile =
-      ignoredIds.length > 0
-        ? await readOptionalJsonFile<{ findings: PrelimEntry[] }>(preliminaryPath)
-        : null;
-    const ignoreableIds = new Set(
-      (ackPrelimFile?.findings ?? [])
-        .filter((entry) => !specIndicatesNoChange(entry))
-        .map((entry) => entry.finding_id),
-    );
-    if (previewAck?.status === "declined") {
-      let changed = false;
-      for (const it of Object.values(state.items ?? {})) {
-        if (!isTerminalStatus(it.status)) {
-          it.status = "deemed_inappropriate";
-          it.failure_reason = "Implementation declined by the user at the preview step.";
-          it.started_at ??= new Date().toISOString();
-          it.completed_at = new Date().toISOString();
-          changed = true;
-        }
-      }
-      if (changed) await new StateStore(artifactsDir).saveState(state);
-      return decideNextStepLoop(options, runLogger, true);
-    }
-    if (ignoredIds.length > 0) {
-      let changed = false;
-      for (const id of ignoredIds) {
-        const it = state.items?.[id];
-        const isAllowedIgnore =
-          ignoreableIds.size === 0 || ignoreableIds.has(id);
-        if (it && it.status === "pending" && isAllowedIgnore) {
-          const now = new Date().toISOString();
-          it.status = "ignored";
-          it.failure_reason = "Ignored by the user at the implementation preview.";
-          it.started_at ??= now;
-          it.completed_at = now;
-          changed = true;
-        }
-      }
-      if (changed) await new StateStore(artifactsDir).saveState(state);
-    }
 
     const sessionConfigImpl = options.sessionConfig ??
       await readOptionalJsonFile<SessionConfig>(
@@ -2588,6 +2152,83 @@ async function handleWaitingForTriage(
   });
 }
 
+/** Stable, informational plan id for the Path-B (planning-point) review pair. */
+const REVIEW_GATE_PLAN_ID_PATH_B = "path-b-review";
+
+/**
+ * Path-B (document / conversation) review-necessity gate, fired at the PLANNING
+ * point over the deduped/grounded node findings. Path A records its review
+ * decision at intake over the ORIGINAL findings — before the contract pipeline
+ * collapses them into DAG nodes (`runReviewApprovalGate`). Path B has no
+ * pre-pipeline finding set (its findings are DERIVED inside the pipeline), so it
+ * is gated here instead. The decision is applied to the existing plan state:
+ * declined nodes become a RECORDED terminal disposition (`ignored`) rather than
+ * being silently bulk-dispositioned inside a quality-tail node — the 2026-06-15
+ * failure this gate exists to prevent.
+ *
+ * The caller fires this only when `review_decision.json` is ABSENT, so Path A
+ * (decision already written at intake) never reaches it — no double review.
+ * Returns a halt step while awaiting the user's decision, or null to proceed
+ * (decision recorded, any declined nodes marked terminal).
+ */
+async function runPlanningReviewGate(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+  store: StateStore,
+): Promise<RemediationStep | null> {
+  const findings = state.plan?.findings ?? [];
+  if (findings.length === 0) return null;
+
+  const requestPath = reviewRequestPath(artifactsDir);
+  const resolutionPath = reviewResolutionPath(artifactsDir);
+  const decisionPath = reviewDecisionPath(artifactsDir);
+
+  if (!existsSync(resolutionPath)) {
+    // Halt: present the tiered node findings and wait for the user's decision.
+    const request = buildReviewRequest(findings, REVIEW_GATE_PLAN_ID_PATH_B);
+    await writeJsonFile(requestPath, request);
+    return handleWaitingForReviewApproval(root, artifactsDir, request);
+  }
+
+  // Resolution present: consume it into a durable, reasoned decision record.
+  const request =
+    (await readOptionalJsonFile<ReviewRequest>(requestPath)) ??
+    buildReviewRequest(findings, REVIEW_GATE_PLAN_ID_PATH_B);
+  const resolution = await readOptionalJsonFile<ReviewResolution>(resolutionPath);
+  const decision = applyReviewResolution(request, resolution);
+  const record: ReviewDecisionRecord = {
+    schema_version: REVIEW_DECISION_SCHEMA_VERSION,
+    plan_id: REVIEW_GATE_PLAN_ID_PATH_B,
+    approved_ids: decision.approved_ids,
+    declined: decision.declined,
+    created_at: new Date().toISOString(),
+  };
+  await writeJsonFile(decisionPath, record);
+  // Archive the consumed inputs so the gate cannot re-halt.
+  for (const p of [resolutionPath, requestPath]) {
+    if (existsSync(p)) {
+      await withFsRetry(() => rename(p, `${p}.consumed-${Date.now()}`));
+    }
+  }
+
+  // Declined nodes → recorded terminal disposition (never a silent close).
+  let changed = false;
+  for (const { finding_id, reason } of decision.declined) {
+    const it = state.items?.[finding_id];
+    if (it && !isTerminalStatus(it.status)) {
+      const now = new Date().toISOString();
+      it.status = "ignored";
+      it.failure_reason = reason;
+      it.started_at ??= now;
+      it.completed_at = now;
+      changed = true;
+    }
+  }
+  if (changed) await store.saveState(state);
+  return null;
+}
+
 async function handlePlanning(
   root: string,
   artifactsDir: string,
@@ -2596,6 +2237,18 @@ async function handlePlanning(
   store: StateStore,
   runLogger: RunLogger,
 ): Promise<RemediationStep> {
+  // Review-necessity gate (Path B). Path A records its review decision at intake,
+  // over the ORIGINAL findings, before the contract pipeline collapses them into
+  // DAG nodes; Path B (document / conversation) derives findings INSIDE the
+  // pipeline, so it is gated here, at the planning point, over the deduped/
+  // grounded node findings. Fires only when no decision exists yet, so Path A
+  // (decision already written) never double-reviews. Declined nodes get a
+  // recorded terminal disposition.
+  if (state.plan && !existsSync(reviewDecisionPath(artifactsDir))) {
+    const halt = await runPlanningReviewGate(root, artifactsDir, state, store);
+    if (halt) return halt;
+  }
+
   // Document phase dissolved: planning transitions directly to implementing.
   // The rolling implement dispatch reads item_spec from the plan DAG node when
   // present, or uses finding context directly when absent.

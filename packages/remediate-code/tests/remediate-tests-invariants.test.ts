@@ -295,11 +295,10 @@ describe("INV-remediate-tests-04: no either-or set-membership assertions for det
       }
     }
     // Only the known debt files are allowed; any new file is a violation. The
-    // next-step closing-phase either-or assertion now lives in the
-    // implementation-dispatch shard after the monolith split (MNT-86449ec9).
+    // next-step-implement-dispatch either-or assertion was retired when the
+    // classic impl-risk preview was removed (review-gate convergence, chunk C).
     const KNOWN_DEBT = [
       "integration-pipeline.test.ts",
-      "next-step-implement-dispatch.test.ts",
     ].sort();
     expect(violations.sort()).toEqual(KNOWN_DEBT);
   });
