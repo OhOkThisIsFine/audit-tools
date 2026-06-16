@@ -9,14 +9,18 @@
 
 ## Where things stand
 
-- **Published + live:** `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0`.
-  Global bins reinstalled (postinstall ran via `--allow-scripts`); host assets deployed across 4 hosts.
-- **`main` @ `0fa13d35`.** Clean tree, all pushed. **NOT published** — two A8 commits sit on main
-  unreleased (mid-program; release when A8 lands + is validated). Last published: shared 0.22.0 /
-  auditor-lambda 0.27.0 / remediator-lambda 0.27.0.
-- **Program item 1 (review-necessity gate) shipped** in remediator-lambda 0.27.0 (one review surface per run).
-- **Active work: A8 — and it was REFRAMED this session (the framing below the fold is now wrong; see next
-  section).** Program of record: `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)".
+- **`main` @ `c45d1b0f`.** Clean tree, all pushed. **NOT published** — this session's commits sit on main
+  unreleased (mid-program; release when A8 lands + is validated). Last published: `@audit-tools/shared 0.22.0`
+  / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
+- **This session's commits (all green):** `dc4d9c2` A8 step-1 (rolling engine made functional, default-OFF) ·
+  `0fa13d3` codex provider made real · `5518f31` A8 reframe docs · `76604a3` everything-agnostic invariant ·
+  `c45d1b0` quota-signal finding. Green at HEAD: shared 631/0, remediate 1610/0, build+check clean.
+- **A8 was REFRAMED this session** → one shared rolling `acceptNode` core + two co-equal full-rolling drivers
+  (in-conversation subagent dispatch is FIRST-CLASS). And **the proactive Claude quota signal was found.**
+- **Deliberate intermediate state (NOT bugs):** the rolling engine is functional but **default-OFF** (host-fanned
+  wave path intact, nothing broken); codex provider is real but its real agentic run is unvalidated (codex quota
+  resets **Jun 19**); the `acceptNode` extraction + host-subagent driver + the `QuotaSource` are **designed, not
+  yet built**. Program of record: `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)".
 
 ## Standing directives (Ethan) — read before deciding anything
 
@@ -30,26 +34,39 @@
   `ask-on-ambiguity-dont-defer-silently`.)
 - **Order of program items is yours** — sequence logically so one refactor doesn't undo another.
 
-## Immediate next step: A8 step 4 — the host-subagent full-rolling driver
+## Immediate next: (1) quota detection, THEN (2) the A8 host-subagent driver
 
-**A8 was reframed this session — read [`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md)
-and memory `conversation-first-subagent-dispatch-first-class` FIRST.** A8 is NOT "delete the host
-fallback / flip a flag." It is: **one shared rolling `acceptNode` core + two co-equal full-rolling
-drivers** (in-conversation subagent dispatch is first-class — subscription/no-API users depend on it).
+Ethan's directive: **sort out quota detection before resuming the A8 build.** Read these FIRST —
+[`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md), memory
+`conversation-first-subagent-dispatch-first-class`, memory `claude-oauth-usage-quota-endpoint`.
 
-Done + pushed this session (both green, default-OFF, nothing broken):
-- `dc4d9c2` — the in-process / provider driver made functional (it was a dormant 0-caller engine):
-  `makeProviderNodeDispatcher` + tool-owned worktree commit + node_modules link + worktree-rooted prompts.
-- `0fa13d3` — codex provider made real (verified `codex exec --sandbox … --cd … --add-dir …` + stdin;
-  the old `--prompt` guess was wrong). Codex is a usable CLI-dispatch backend (no extra wiring).
+### 1. Quota detection — per-provider `QuotaSource` (everything-agnostic)
+**The proactive Claude quota signal was FOUND this session** (full recipe in memory
+`claude-oauth-usage-quota-endpoint`): `GET https://api.anthropic.com/api/oauth/usage` (Bearer
+`claudeAiOauth.accessToken` from `~/.claude/.credentials.json`, header `anthropic-beta: oauth-2025-04-20`)
+→ `five_hour` / `seven_day` / per-model `seven_day_opus|sonnet` each `{utilization%, resets_at}` +
+`extra_usage`; companion `/api/oauth/profile` → `rate_limit_tier`. `utilization%`+`resets_at` = remaining
+**without a hardcoded ceiling**; per-model = strength-aware routing; `extra_usage` = cost-awareness.
+- **(quick first, needs Ethan's OK to touch the token)** a live confirmation GET on this machine to prove
+  it end-to-end + see current utilization.
+- Build a per-provider **`QuotaSource`** interface: Claude = the endpoint (cache ~30–60s; refresh token on
+  401; degrade on schema change); codex = reactive parse of its dated *"usage limit… try again `<date>`"*
+  stderr → `exhausted-until`; local = unbounded. Wire **utilization-driven spill across pools** +
+  per-model/cost routing into the scheduler. **The binding constraint is quota+rate, NOT max-parallel-`N`**
+  (some IDEs cap subagent count, many don't).
+- **NEW (Ethan, this session): hunt the same robust-as-possible quota signal for EVERY other model source** —
+  codex/OpenAI, gemini, opencode, antigravity, local LLM, other IDEs (Cursor has an org admin API). Mirror the
+  Claude discovery: prefer a proactive endpoint > reactive dated-limit parse > consumption-estimate; document a
+  per-provider QuotaSource matrix; robust-as-possible per source, graceful degrade. (Backlog: *Cross-IDE/provider
+  quota detection*.)
 
-**Next build (the meaty one — start fresh):** the **host-subagent full-rolling driver** + extract the
-shared **`acceptNode`** core. Exact protocol in the plan doc ("Host-subagent driver protocol"):
-extract `acceptNodeWorktree` from `dispatchNodeWithWorktree` → add an `accept-node --id X` per-completion
-callback command → a dispatch step that pre-creates eligible worktrees and drives the host to spawn
-subagents + call `accept-node` as each finishes (dispatch-next-on-complete) → select driver by
-availability. **Validate it IN-SESSION** (the host instance spawns real Task-subagents via the Agent tool
-— no quota). Provider-path real validation is quota-blocked until **Jun 19** (codex usage limit).
+### 2. THEN the A8 host-subagent full-rolling driver (the meaty build — start fresh)
+Extract the shared **`acceptNode`** core (`acceptNodeWorktree` out of `dispatchNodeWithWorktree`) → add an
+`accept-node --id X` per-completion callback command → a dispatch step that pre-creates eligible worktrees and
+drives the host to spawn subagents + call `accept-node` as each finishes (dispatch-next-on-complete) → select
+driver by availability. Protocol detail: plan doc "Host-subagent driver protocol." **Validate IN-SESSION** (the
+host instance spawns real Task-subagents via the Agent tool — no quota). codex/provider-path real validation is
+quota-blocked until **Jun 19**.
 
 - Then the rest of the program: **A1** fast path, **A3+A4** unify obligation engines + `RemediationItem`,
   **B1** magic numbers, **B2+B3** diff re-reviews + obligation-set staleness, **B4** hard-exclude
@@ -71,8 +88,13 @@ hang in `phase-plan.test.ts` under the release gate; that test was made hermetic
 `extractFindings` seam), but the underlying auto-resolution hang is still OPEN — watch for it.
 
 ## Pointers
-- Memory: `review-gate-execution-status`, `prefer-ideal-code-no-backcompat`,
-  `ask-on-ambiguity-dont-defer-silently`, `remediation-review-gate-must-be-tool-enforced`.
+- Working doc for A8: [`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md) (design + protocol +
+  open items). Fold + delete it into here/backlog when A8 fully lands.
+- Memory (this session): `conversation-first-subagent-dispatch-first-class`, `claude-oauth-usage-quota-endpoint`.
+  Also: `review-gate-execution-status`, `prefer-ideal-code-no-backcompat`, `ask-on-ambiguity-dont-defer-silently`,
+  `remediation-review-gate-must-be-tool-enforced`.
+- **`MEMORY.md` is over its size limit** — a `consolidate-memory` pass is due (merge/trim verbose index lines);
+  not blocking, but do it before adding many more entries.
 - Review-gate artifacts (under `.audit-tools/remediation/`): `review_request.json` /
   `review_resolution.json` / `review_decision.json` / `review_filter_dispositions.json`.
 
