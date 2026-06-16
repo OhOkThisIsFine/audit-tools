@@ -34,17 +34,12 @@ were silently "direction recorded" / "already true" inside `*-quality-tail` bloc
 pros/cons were captured in `.audit-tools/deferred-items-for-review.md` at decision time; the durable
 record of what was **greenlit** is here. Each is a target, not a status line — remove when shipped.
 
-- **Review-necessity approval gate (TOOL FIX — root cause of this whole thread).** `remediate-code`
-  must emit, between plan and implement, **item-sets tiered by how much review they need**, each with
-  pros/cons + impl cost, for the user to approve/disapprove. Design-review (architecture/conceptual)
-  findings and free-form items must NOT be silently auto-dispositioned by quality-tail blocks. Enforce
-  in the tool, never host discretion — the host driving it autonomously is exactly the failure mode that
-  hid 30/42 design findings this run. (Ethan, 2026-06-15.)
-  **STATUS (2026-06-16):** engine + wiring (1c) + declines-in-outcome (1c-2) + convergence chunks A & B
-  SHIPPED green to `main` (NOT published; publish held until done). Single filter pass at intake, gate
-  previews the deduped survivor set tiered, coverage over the original findings. REMAINING: chunk C
-  (remove the classic impl-risk preview + route Path B through the gate at planning) then chunk D
-  (publish). Chunk-level detail in `docs/HANDOFF.md` + memory `review-gate-execution-status`.
+- **Review-necessity approval gate (root cause of this whole thread) — ✓ COMPLETE + SHIPPED**
+  (remediator-lambda 0.27.0, 2026-06-16). ONE review surface per run for both paths; design-review /
+  free-form findings can no longer be silently auto-dispositioned by quality-tail blocks (enforced in the
+  tool, not host discretion). Path A gates the original findings at intake; Path B gates the deduped/grounded
+  node findings at the planning point. The classic impl-risk preview is removed. Detail in memory
+  `review-gate-execution-status`. (Kept here as the program's anchor; everything below was downstream of it.)
 - **A1 — Fast path past the 15-phase pipeline.** Size/ambiguity/seam-gated lean path
   (`shouldEnterContractPipeline`) so a handful of concrete fixes don't pay full adversarial +
   3-repair-loop cost. Risk to design around: a mis-routed subtle change must not skip the safety net.
@@ -469,6 +464,12 @@ exact caller. Deferred per Ethan (leave logged); revisit in a dedicated pass.
 - **SECOND VECTOR:** provider auto-resolution may be *picking* opencode when it shouldn't (it's detected on
   PATH). Conversation-first means claude-code/the host should be the default dispatch target — check the
   resolution order in `packages/*/src/providers/index.ts` + `shared/src/providers/providerFactory.ts`.
+- **CONFIRMED REPRO (2026-06-16):** with `CLAUDECODE` unset (the release-gate env), `runPlanPhase`'s
+  free-form extractor → `createFreshSessionProvider` → `provider.launch` auto-resolved a CLI backend whose
+  subprocess HUNG (30s) rather than fast-failing — surfaced as a hang in `phase-plan.test.ts` under
+  `verify:release`. That test was made hermetic (commit `b8c8c30a`, injects the `extractFindings` seam), but
+  the underlying hang remains: a provider-less / OpenCode-uninstalled env should fast-fail, not block. Strong
+  evidence the auto-resolver picks a non-headless/missing `opencode` and `opencode run` hangs on stdin.
 
 **Next steps to find & fix:**
 1. On the affected machine: `where opencode` — is it the headless CLI or the desktop-app launcher? Confirm
