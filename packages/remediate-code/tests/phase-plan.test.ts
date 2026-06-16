@@ -742,6 +742,43 @@ describe("buildCoverageLedger", () => {
     expect(byId.C.disposition).toBe("dropped_no_evidence");
     expect(byId.C.rationale).toBeTruthy();
   });
+
+  it("appends review-gate declines as extra entries without breaking source reconciliation", () => {
+    // sourceFindings are the planned (node) set; declines are an upstream
+    // exclusion that is NOT part of source_finding_count.
+    const sourceFindings = [mkFinding("NODE-1", "Planned node", { files: ["a.ts"] })];
+    const ledger = buildCoverageLedger({
+      planId: "PLAN-DECL",
+      sourceFindings: sourceFindings as any,
+      droppedNoEvidence: [],
+      droppedByCheckpoint: [],
+      declinedByReview: [
+        { finding_id: "ARC-001", reason: "Disapproved by the user at the review gate." },
+        { finding_id: "ARC-002", reason: "Disapproved by the user at the review gate." },
+      ],
+      mergeMap: new Map(),
+      items: { "NODE-1": { finding_id: "NODE-1", status: "pending", block_id: "B-001" } },
+    });
+
+    // Source accounting is unchanged: declines are NOT source findings.
+    expect(ledger.source_finding_count).toBe(1);
+    expect(ledger.planned_count).toBe(1);
+    expect(ledger.declined_review_count).toBe(2);
+    // The 5 source dispositions still reconcile to source_finding_count.
+    const sourceTotal =
+      ledger.planned_count +
+      ledger.folded_count +
+      ledger.dropped_count +
+      ledger.checkpoint_dropped_count +
+      ledger.phantom_dropped_count;
+    expect(sourceTotal).toBe(ledger.source_finding_count);
+    // Declines appear as extra entries with the recorded reason.
+    const byId = Object.fromEntries(ledger.entries.map((e) => [e.finding_id, e]));
+    expect(byId["ARC-001"].disposition).toBe("declined_by_review");
+    expect(byId["ARC-001"].rationale).toMatch(/review gate/i);
+    expect(byId["ARC-002"].disposition).toBe("declined_by_review");
+    expect(ledger.entries).toHaveLength(3);
+  });
 });
 
 // ── MNT-1905694f: applyPlanPipeline ──────────────────────────────────────────

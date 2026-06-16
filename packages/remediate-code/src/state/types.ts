@@ -146,7 +146,8 @@ export interface CoverageLedgerEntry {
     | "folded_into"
     | "dropped_no_evidence"
     | "dropped_by_checkpoint"
-    | "dropped_phantom_paths";
+    | "dropped_phantom_paths"
+    | "declined_by_review";
   block_id?: string;
   folded_into?: string;
   rationale?: string;
@@ -173,6 +174,14 @@ export interface CoverageLedger {
   checkpoint_dropped_count: number;
   /** Findings dropped because every cited path was phantom (after one repair attempt). */
   phantom_dropped_count: number;
+  /**
+   * Findings the user disapproved at the review-approval gate (excluded from the
+   * pipeline before planning). Optional + kept SEPARATE from the source-disposition
+   * reconciliation (planned+folded+dropped+checkpoint+phantom === source_finding_count):
+   * declined findings are never part of the planned source/node set, they are an
+   * upstream exclusion, so they are counted here and appended as extra entries.
+   */
+  declined_review_count?: number;
   entries: CoverageLedgerEntry[];
 }
 
@@ -233,7 +242,8 @@ export type NeverPlannedDropReason =
   | "cross_lens_dedup"
   | "intent_checkpoint"
   | "no_evidence"
-  | "phantom_paths";
+  | "phantom_paths"
+  | "review_gate";
 
 /**
  * Coverage-ledger entry as written into `remediation-outcomes.json`: the plan's

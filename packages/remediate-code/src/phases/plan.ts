@@ -648,6 +648,13 @@ export function buildCoverageLedger(params: {
   droppedPhantomPaths?: Map<string, string[]>;
   /** Phantom paths stripped from findings that survived grounding. */
   phantomPathsRemoved?: Map<string, string[]>;
+  /**
+   * Findings the user disapproved at the review-approval gate. These are NOT part
+   * of `sourceFindings` (they were excluded before the pipeline ran), so they are
+   * appended as extra `declined_by_review` entries and counted separately — never
+   * folded into the source-disposition reconciliation.
+   */
+  declinedByReview?: Array<{ finding_id: string; reason: string; title?: string }>;
   mergeMap: Map<string, string>;
   items: Record<string, RemediationItemState>;
 }): CoverageLedger {
@@ -711,6 +718,22 @@ export function buildCoverageLedger(params: {
       ...groundingAnnotations(f),
     };
   });
+  // Append the review-gate declines as extra entries. They are NOT in
+  // sourceFindings (excluded before the pipeline ran), so they never affect the
+  // source-disposition reconciliation; their full payload is recovered at close.
+  // Skip any id already present (defensive: declined ids and node ids never
+  // overlap, but guard against the legacy path where source IS the original set).
+  const presentIds = new Set(entries.map((e) => e.finding_id));
+  for (const declined of params.declinedByReview ?? []) {
+    if (presentIds.has(declined.finding_id)) continue;
+    presentIds.add(declined.finding_id);
+    entries.push({
+      finding_id: declined.finding_id,
+      ...(declined.title ? { title: declined.title } : {}),
+      disposition: "declined_by_review",
+      rationale: declined.reason,
+    });
+  }
   const count = (d: CoverageLedgerEntry["disposition"]): number =>
     entries.filter((e) => e.disposition === d).length;
   return {
@@ -722,6 +745,7 @@ export function buildCoverageLedger(params: {
     dropped_count: count("dropped_no_evidence"),
     checkpoint_dropped_count: count("dropped_by_checkpoint"),
     phantom_dropped_count: count("dropped_phantom_paths"),
+    declined_review_count: count("declined_by_review"),
     entries,
   };
 }

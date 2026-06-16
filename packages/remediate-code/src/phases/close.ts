@@ -263,6 +263,7 @@ const DROP_REASON_BY_DISPOSITION: Partial<
   dropped_by_checkpoint: "intent_checkpoint",
   dropped_no_evidence: "no_evidence",
   dropped_phantom_paths: "phantom_paths",
+  declined_by_review: "review_gate",
 };
 
 /**
