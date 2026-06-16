@@ -700,7 +700,7 @@ async function main() {
       await readFile(vscodePromptPath, "utf8"),
       /^---\nname: audit-code\ndescription: Autonomous local loop code auditing\nagent: auditor/m,
     );
-    assert.match(await readFile(vscodeAgentPath, "utf8"), /# Auditor Agent/);
+    assert.match(await readFile(vscodeAgentPath, "utf8"), /# Audit Code Agent/);
     const opencodeConfig = JSON.parse(await readFile(opencodeConfigPath, "utf8"));
     assert.equal(opencodeConfig.command?.["audit-code"], undefined, "project opencode.json must not define the global /audit-code command");
     assert.equal(opencodeConfig.mcp?.auditor, undefined, "project opencode.json must not define mcp.auditor (global config owns it)");
