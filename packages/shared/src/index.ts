@@ -566,7 +566,14 @@ export { LearnedQuotaSource } from "./quota/learnedQuotaSource.js";
 // Parsing utilities
 export type { QuoteChar, StringAwareScannerOptions } from "./parsing/stringAwareScanner.js";
 export { scanStringAware } from "./parsing/stringAwareScanner.js";
-export { CompositeQuotaSource } from "./quota/compositeQuotaSource.js";
+export { CompositeQuotaSource, buildQuotaSource } from "./quota/compositeQuotaSource.js";
+export type { BuildQuotaSourceOptions } from "./quota/compositeQuotaSource.js";
+export {
+  ClaudeOAuthQuotaSource,
+  parseProviderModelKey,
+  mapUsageToSnapshot,
+} from "./quota/claudeOAuthQuotaSource.js";
+export type { ClaudeOAuthQuotaSourceOptions } from "./quota/claudeOAuthQuotaSource.js";
 export type { ErrorParser } from "./quota/errorParsers/index.js";
 export {
   GenericErrorParser,
