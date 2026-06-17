@@ -1,6 +1,5 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
-import { TriageBatch } from "../state/types.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { rename } from "node:fs/promises";
@@ -13,6 +12,19 @@ interface TriageResolution {
     finding_id: string;
     action: "retry" | "ignore" | "halt";
     rationale?: string;
+  }[];
+}
+
+/**
+ * Host-facing batch written to `triage_batch.json` — a projection over the
+ * blocked items asking the host to write a {@link TriageResolution}. Local to
+ * this phase (its only producer); the wire contract is `triage_batch.schema.json`.
+ */
+interface TriageBatch {
+  items: {
+    finding_id: string;
+    failure_reason: string;
+    last_successful_step: string;
   }[];
 }
 
