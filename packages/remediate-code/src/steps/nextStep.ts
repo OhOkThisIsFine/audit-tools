@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot } from "@audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, type ObligationDef, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot } from "@audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { runPlanPhase, applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -3048,6 +3048,267 @@ export async function interpretConfirmedCheckpointIntent(
   return persisted;
 }
 
+/** Execution dependencies threaded to every remediate obligation executor. */
+interface RemediateCtx {
+  root: string;
+  artifactsDir: string;
+  options: NextStepOptions;
+  runLogger: RunLogger;
+  store: StateStore;
+  inputResolution: InputResolution;
+  /** Increment step_count once per host call (guarded; no-ops on re-entry). */
+  countStep: (state: RemediationState | null) => Promise<void>;
+}
+
+/** The once-async-read signals the pre-intake derive()s consume synchronously. */
+interface PreIntakeSnapshot {
+  existingCheckpoint: IntentCheckpoint | undefined;
+  resumeAck: { choice?: string } | undefined;
+  /**
+   * The state as loaded at advance-entry (post-forceReplan, pre-intake). The
+   * resume/conflict/leftover-report gates are about a *pre-existing* run, so they
+   * derive from this frozen value — never from a state that `pending_intake`
+   * creates mid-call (the original cascade evaluated them before intake and never
+   * re-checked, so a re-scan must not resurrect them against an intake-built state).
+   */
+  entryState: RemediationState | null;
+}
+
+type RemediateObligation = ObligationDef<
+  RemediationState | null,
+  RemediateCtx,
+  RemediationStep
+>;
+
+/**
+ * Narrow a nullable engine state to non-null inside an executor whose `derive`
+ * only marks it actionable when the state is present — a violation is an engine
+ * contract bug, not a runtime condition.
+ */
+function requireState(state: RemediationState | null): RemediationState {
+  if (!state) {
+    throw new Error(
+      "remediate obligation executor reached with a null state — derive() contract violated",
+    );
+  }
+  return state;
+}
+
+/**
+ * Priority order for the pre-intake obligations — mirrors the original cascade's
+ * top-down guard order exactly so selection cannot drift.
+ */
+const PRE_INTAKE_PRIORITY: readonly string[] = [
+  "input_conflict",
+  "confirm_resume",
+  "confirm_intent",
+  "interpret_intent",
+  "complete_redelivery",
+  "report_warning",
+  "complete",
+  "pending_intake",
+];
+
+/**
+ * The linear pre-intake gates as declarative obligations (A3 slice 1). Built per
+ * call so each `derive` can close over `ctx` paths + the pre-read `snapshot` and
+ * read the remaining signals (existsSync, status, inputResolution) synchronously.
+ * The matching executors are the original cascade handlers, classified emit vs
+ * transition; the host-facing behaviour is unchanged.
+ */
+function buildPreIntakeObligations(
+  ctx: RemediateCtx,
+  snapshot: PreIntakeSnapshot,
+): RemediateObligation[] {
+  const { artifactsDir, inputResolution } = ctx;
+  const { existingCheckpoint, resumeAck, entryState } = snapshot;
+  const ip = intakePaths(artifactsDir);
+  const checkpointPath = join(artifactsDir, "intent_checkpoint.json");
+  const ackPath = join(artifactsDir, "confirm_resume_ack.json");
+  const interpretationPath = join(artifactsDir, INTENT_INTERPRETATION_FILENAME);
+  const reportPath = join(dirname(artifactsDir), "remediation-report.md");
+  // Fires at most once per host call; gates the leftover-report warning so a
+  // re-scan after a transition cannot re-print it (mirrors the cascade's
+  // single fall-through hit).
+  const warned = { value: false };
+
+  return [
+    {
+      // A new --input against a run already past intake must not silently resume
+      // the old plan; require an explicit resume-vs-restart choice. Derives from
+      // the frozen entry state — never an intake-created one.
+      id: "input_conflict",
+      derive: () =>
+        inputResolution.supplied &&
+        entryState != null &&
+        entryState.status !== "pending"
+          ? "missing"
+          : "satisfied",
+      execute: async (_state, c) => {
+        const s = requireState(entryState);
+        await c.countStep(s);
+        return {
+          kind: "emit",
+          step: await handleInputConflict(c.root, c.artifactsDir, s, c.inputResolution),
+        };
+      },
+    },
+    {
+      // Bare re-invocation of an in-progress run: present resume/restart/merge
+      // once (gated on the ack file) rather than silently resuming. An ack of
+      // choice==='resume' is satisfied — fall through to normal dispatch. Derives
+      // from the frozen entry state (a resume is of a *pre-existing* run).
+      id: "confirm_resume",
+      derive: () => {
+        if (
+          inputResolution.supplied ||
+          entryState == null ||
+          entryState.status === "complete" ||
+          entryState.status === "pending"
+        ) {
+          return "satisfied";
+        }
+        return !resumeAck || resumeAck.choice !== "resume" ? "missing" : "satisfied";
+      },
+      execute: async (_state, c) => {
+        const s = requireState(entryState);
+        await c.countStep(s);
+        return {
+          kind: "emit",
+          step: await buildConfirmResumeOrRestartStep({
+            root: c.root,
+            artifactsDir: c.artifactsDir,
+            state: s,
+            ackPath,
+          }),
+        };
+      },
+    },
+    {
+      // Intent gate: fire when no confirmed checkpoint exists (no checkpoint + any
+      // intake artifact or an active run, or a draft checkpoint). Never for
+      // complete/closing — those already confirmed their checkpoint.
+      id: "confirm_intent",
+      derive: (state) => {
+        const checkpointIsDraft = existingCheckpoint?.confirmed_by === "draft";
+        const activeRunState =
+          state != null &&
+          state.status !== "pending" &&
+          state.status !== "complete" &&
+          state.status !== "closing";
+        const fires =
+          checkpointIsDraft ||
+          (!existsSync(checkpointPath) &&
+            (existsSync(ip.summary) ||
+              existsSync(ip.extractedPlan) ||
+              activeRunState));
+        return fires ? "missing" : "satisfied";
+      },
+      execute: async (state, c) => {
+        await c.countStep(state);
+        return {
+          kind: "emit",
+          step: await buildConfirmIntentStep({
+            root: c.root,
+            artifactsDir: c.artifactsDir,
+            state,
+          }),
+        };
+      },
+    },
+    {
+      // Past the intent gate: interpret the confirmed checkpoint's
+      // free_form_intent once (INV-S04) and persist the structured signals. A
+      // transition (state unchanged) — the re-scan skips it once the sidecar
+      // exists.
+      id: "interpret_intent",
+      derive: () =>
+        existingCheckpoint?.confirmed_by === "host" &&
+        typeof existingCheckpoint.free_form_intent === "string" &&
+        existingCheckpoint.free_form_intent.trim().length > 0 &&
+        !existsSync(interpretationPath)
+          ? "missing"
+          : "satisfied",
+      execute: async (state) => {
+        await interpretConfirmedCheckpointIntent(artifactsDir, existingCheckpoint);
+        return { kind: "transition", state };
+      },
+    },
+    {
+      // Finished runs delete the artifact dir but leave the root report. A bare
+      // re-invocation with no fresh intent re-presents that report instead of
+      // asking for a new starting point.
+      id: "complete_redelivery",
+      derive: (state) => {
+        if (state != null || inputResolution.supplied || !existsSync(reportPath)) {
+          return "satisfied";
+        }
+        const freshIntent =
+          existsSync(ip.conversationStart) || existsSync(ip.extractedPlan);
+        return freshIntent ? "satisfied" : "missing";
+      },
+      execute: async (state, c) => ({
+        kind: "emit",
+        step: await handleComplete(c.root, c.artifactsDir, state),
+      }),
+    },
+    {
+      // Diagnostic (not a gate): a leftover root report will be overwritten when a
+      // fresh/active run completes. A transition (prints once, state unchanged);
+      // its priority slot — after complete_redelivery, before complete — means a
+      // re-presented/complete run never reaches it, exactly as the cascade's
+      // fall-through ordering did.
+      id: "report_warning",
+      derive: (state) =>
+        !warned.value &&
+        existsSync(reportPath) &&
+        state?.status !== "complete"
+          ? "missing"
+          : "satisfied",
+      execute: async (state) => {
+        warned.value = true;
+        process.stderr.write(
+          "[remediate-code] A previous remediation-report.md exists in .audit-tools/; it will be overwritten when this run completes.\n",
+        );
+        return { kind: "transition", state };
+      },
+    },
+    {
+      id: "complete",
+      derive: (state) => (state?.status === "complete" ? "missing" : "satisfied"),
+      execute: async (state, c) => {
+        await c.countStep(state);
+        return {
+          kind: "emit",
+          step: await handleComplete(c.root, c.artifactsDir, state),
+        };
+      },
+    },
+    {
+      // No state yet: resolve intake. A produced step is emitted; a produced state
+      // transitions (the re-scan falls through to the inline tail); a null result
+      // emits the collect-starting-point step (the folded old no-state branch).
+      id: "pending_intake",
+      derive: (state) => (state == null ? "missing" : "satisfied"),
+      execute: async (_state, c) => {
+        const outcome = await handlePendingIntake(
+          c.root,
+          c.artifactsDir,
+          c.options,
+          c.store,
+        );
+        if (outcome && "step_kind" in outcome) {
+          return { kind: "emit", step: outcome };
+        }
+        if (outcome) {
+          return { kind: "transition", state: outcome };
+        }
+        return { kind: "emit", step: await handleNoState(c.root, c.artifactsDir) };
+      },
+    },
+  ];
+}
+
 async function decideNextStepLoop(
   options: NextStepOptions,
   runLogger: RunLogger,
@@ -3063,142 +3324,77 @@ async function decideNextStepLoop(
     kind: "state",
     obligation: state?.status ?? "pending",
   });
-  let countedStateStep = skipCount;
-  const countStateStep = async (): Promise<void> => {
-    if (!state || countedStateStep) return;
-    if (!state.started_at) {
-      state.started_at = new Date().toISOString();
-    }
-    state.step_count = (state.step_count ?? 0) + 1;
-    countedStateStep = true;
-    await store.saveState(state);
+  // step_count is incremented once per host invocation. The shared `counted`
+  // flag (seeded from skipCount so recursive re-entries never re-count) plus
+  // `countStep` is reused by both the pre-intake obligation executors and the
+  // inline tail below, so it can never double-count. step_count is not embedded
+  // in the emitted step, so the count-vs-build ordering is unobservable.
+  const counted = { value: skipCount };
+  const countStep = async (current: RemediationState | null): Promise<void> => {
+    if (!current || counted.value) return;
+    if (!current.started_at) current.started_at = new Date().toISOString();
+    current.step_count = (current.step_count ?? 0) + 1;
+    counted.value = true;
+    await store.saveState(current);
   };
 
   const inputResolution = resolveInputPaths(root, options.input);
 
-  // forceReplan runs only on the first (non-recursive) call — skipCount is true
-  // on every recursive decideNextStepLoop call, so this guard prevents an
-  // infinite replan loop when the loop folds through planning → implementing.
+  // Preamble — runs once on the first (non-recursive) entry. forceReplan
+  // re-grounds from existing intake; skipCount is true on every recursive entry
+  // so it cannot loop when the engine folds through planning → implementing.
   if (options.forceReplan && !skipCount && state != null) {
-    await countStateStep();
+    await countStep(state);
     state = await forceReplanFromExistingIntake(root, artifactsDir, state, store);
   }
 
-  // A new --input against a run that already advanced past intake must not
-  // silently resume the old plan (nor silently complete on a stale report).
-  // Require the caller to choose resume-vs-restart explicitly.
-  if (inputResolution.supplied && state != null && state.status !== "pending") {
-    await countStateStep();
-    return handleInputConflict(root, artifactsDir, state, inputResolution);
-  }
-
-  // Bare re-invocation (no --input) with an in-progress run: require an explicit
-  // resume/restart/merge choice rather than silently resuming. Gate on
-  // confirm_resume_ack.json so the choice is only presented once per run.
-  if (
-    !inputResolution.supplied &&
-    state != null &&
-    state.status !== "complete" &&
-    state.status !== "pending"
-  ) {
-    const ackPath = join(artifactsDir, "confirm_resume_ack.json");
-    const ack = await readOptionalJsonFile<{ choice?: string }>(ackPath);
-    if (!ack || !ack.choice) {
-      await countStateStep();
-      return buildConfirmResumeOrRestartStep({ root, artifactsDir, state, ackPath });
-    }
-    // choice === 'resume': fall through to normal dispatch
-    // choice === 'restart' or 'merge': the caller handles the file deletion / new
-    // --input; if state still exists here it means they haven't acted yet, so
-    // present the choice again until they do.
-    if (ack.choice !== "resume") {
-      await countStateStep();
-      return buildConfirmResumeOrRestartStep({ root, artifactsDir, state, ackPath });
-    }
-  }
-
-  const ip = intakePaths(artifactsDir);
+  // Pre-read the once-async signals the pre-intake derive()s consume
+  // synchronously (no transition inside this advance call rewrites either file).
   const checkpointPath = join(artifactsDir, "intent_checkpoint.json");
-  // Read the checkpoint (if it exists) to check whether it is a draft sentinel.
   const existingCheckpoint = existsSync(checkpointPath)
     ? await readOptionalJsonFile<IntentCheckpoint>(checkpointPath)
     : undefined;
-  const checkpointIsDraft = existingCheckpoint?.confirmed_by === "draft";
+  const resumeAck = await readOptionalJsonFile<{ choice?: string }>(
+    join(artifactsDir, "confirm_resume_ack.json"),
+  );
 
-  // Intent gate: fire when no confirmed checkpoint exists. This covers:
-  // - No checkpoint at all and any intake artifact exists (summary, extracted plan, or active state)
-  // - A draft checkpoint exists (confirmed_by: "draft") even if extracted-plan.json is present
-  // Do NOT fire for complete/closing states — those runs already had their checkpoint confirmed.
-  const activeRunState =
-    state != null && state.status !== "pending" && state.status !== "complete" && state.status !== "closing";
-  if (
-    checkpointIsDraft ||
-    (!existsSync(checkpointPath) &&
-      (existsSync(ip.summary) || existsSync(ip.extractedPlan) || activeRunState))
-  ) {
-    await countStateStep();
-    return buildConfirmIntentStep({ root, artifactsDir, state });
-  }
+  // Slice 1 (strangler): the linear pre-intake gates run as obligations through
+  // the shared advance loop. An emit returns to the host; a transition re-scans
+  // within this call; exhausting them (step === null) means the run is past
+  // intake and falls through to the inline tail below (the un-migrated back-edge
+  // cluster).
+  const ctx: RemediateCtx = {
+    root,
+    artifactsDir,
+    options,
+    runLogger,
+    store,
+    inputResolution,
+    countStep,
+  };
+  const preIntake = await advance(
+    {
+      priority: PRE_INTAKE_PRIORITY,
+      obligations: buildPreIntakeObligations(ctx, {
+        existingCheckpoint,
+        resumeAck,
+        entryState: state,
+      }),
+    },
+    state,
+    ctx,
+  );
+  if (preIntake.step) return preIntake.step;
+  state = preIntake.state;
 
-  // The checkpoint is confirmed (past the intent gate): interpret its
-  // free_form_intent deterministically HERE via the shared interpreter and
-  // persist the structured signals (INV-S04). The raw string is never threaded
-  // downstream; unencodable clauses are surfaced rather than dropped. Skipped
-  // when the sidecar already exists so it runs once per confirmed checkpoint.
-  if (
-    existingCheckpoint?.confirmed_by === "host" &&
-    typeof existingCheckpoint.free_form_intent === "string" &&
-    existingCheckpoint.free_form_intent.trim().length > 0 &&
-    !existsSync(join(artifactsDir, INTENT_INTERPRETATION_FILENAME))
-  ) {
-    await interpretConfirmedCheckpointIntent(artifactsDir, existingCheckpoint);
-  }
-
-  // A finished run deletes .remediation-artifacts/ at close (state.json included),
-  // leaving durable root outputs. On a bare re-invocation with NO fresh-run intent
-  // (no --input, no conversation brief, no extracted plan), re-present the report
-  // instead of asking for a new starting point. Any fresh intent falls through and
-  // starts a new run, ignoring the stale report.
-  if (
-    state == null &&
-    !inputResolution.supplied &&
-    existsSync(join(dirname(artifactsDir), "remediation-report.md"))
-  ) {
-    const ip = intakePaths(artifactsDir);
-    const freshIntent =
-      existsSync(ip.conversationStart) || existsSync(ip.extractedPlan);
-    if (!freshIntent) {
-      return handleComplete(root, artifactsDir, state);
-    }
-  }
-
-  // A leftover remediation-report.md while a fresh run IS being started will be
-  // overwritten at close — warn rather than treating it as "done".
-  if (
-    existsSync(join(dirname(artifactsDir), "remediation-report.md")) &&
-    state?.status !== "complete"
-  ) {
-    process.stderr.write(
-      "[remediate-code] A previous remediation-report.md exists in .audit-tools/; it will be overwritten when this run completes.\n",
-    );
-  }
-
-  if (state?.status === "complete") {
-    await countStateStep();
-    return handleComplete(root, artifactsDir, state);
-  }
-
-  if (!state) {
-    const intakeOutcome = await handlePendingIntake(root, artifactsDir, options, store);
-    if (intakeOutcome && "step_kind" in intakeOutcome) return intakeOutcome;
-    state = intakeOutcome;
-  }
-
+  // pending_intake folds the old no-state branch (it emits handleNoState on a
+  // null intake), so advance only falls through here with a non-null state; keep
+  // the guard as the type narrowing + a defensive fallback.
   if (!state) {
     return handleNoState(root, artifactsDir);
   }
 
-  await countStateStep();
+  await countStep(state);
 
   if (state.status === "waiting_for_clarification") {
     const clarResolutionPath = join(artifactsDir, "clarification_resolution.json");
