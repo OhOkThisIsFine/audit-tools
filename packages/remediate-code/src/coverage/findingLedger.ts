@@ -35,28 +35,12 @@ import type {
   PerFindingLedgerEntry,
   RemediationItemState,
 } from "../state/types.js";
+import { statusToDisposition } from "../state/itemStatus.js";
 
-// ── Terminal status map ───────────────────────────────────────────────────────
-
-/**
- * Exhaustive mapping from every known RemediationItemState.status value to
- * a PerFindingDisposition.  Non-terminal statuses map to
- * `force_closed_unresolved` so a finding/node that never reached a terminal
- * status is surfaced in the ledger rather than silently dropped.
- */
-const STATUS_TO_DISPOSITION: Record<string, PerFindingDisposition> = {
-  resolved: "resolved",
-  resolved_no_change: "resolved_no_change",
-  ignored: "ignored",
-  deemed_inappropriate: "deemed_inappropriate",
-  // Non-terminal statuses — all map to force_closed_unresolved
-  blocked: "force_closed_unresolved",
-  pending: "force_closed_unresolved",
-  tested: "force_closed_unresolved",
-  tested_successfully: "force_closed_unresolved",
-  refactored: "force_closed_unresolved",
-  verified: "force_closed_unresolved",
-};
+// ── Disposition terminality ─────────────────────────────────────────────────
+// The status→disposition map is single-sourced in state/itemStatus.ts; this
+// module owns only PerFindingDisposition terminality (which dispositions count
+// toward coverage).
 
 /** Whether a PerFindingDisposition is terminal (contributes to coverage). */
 const TERMINAL_DISPOSITIONS = new Set<PerFindingDisposition>([
@@ -69,10 +53,6 @@ const TERMINAL_DISPOSITIONS = new Set<PerFindingDisposition>([
 
 function dispositionIsTerminal(d: PerFindingDisposition): boolean {
   return TERMINAL_DISPOSITIONS.has(d);
-}
-
-function statusToDisposition(status: string): PerFindingDisposition {
-  return STATUS_TO_DISPOSITION[status] ?? "force_closed_unresolved";
 }
 
 // ── Build ─────────────────────────────────────────────────────────────────────
