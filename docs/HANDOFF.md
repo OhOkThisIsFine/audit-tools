@@ -51,15 +51,17 @@ build. Order is yours. Read FIRST — [`docs/a8-rolling-cutover-plan.md`](a8-rol
 `conversation-first-subagent-dispatch-first-class`, memory `claude-oauth-usage-quota-endpoint`.
 
 ### 1. Finish quota detection — the cross-provider `QuotaSource` matrix (everything-agnostic)
-The Claude proactive source is DONE + wired (details: `docs/quota-detection-build.md`). REMAINING — hunt the same
-robust-as-possible quota signal for EVERY other model source: codex/OpenAI, gemini, opencode, antigravity, local
-LLM, other IDEs (Cursor has an org admin API). Mirror the Claude discovery: prefer a **proactive endpoint >
-reactive dated-limit parse > consumption-estimate**; add each as a `QuotaSource` (slot into `buildQuotaSource`
-`additionalSources`, or as a provider-gated default like the Claude one); document a per-provider matrix;
-robust-as-possible per source, graceful degrade. codex's reactive *"usage limit… try again `<date>`"* stderr →
-`exhausted-until` is mostly already in `errorParsing.ts` + the learned cooldown — wrap it as a `QuotaSource`.
-Then wire **utilization-driven spill across pools** + per-model/cost routing into the scheduler. **The binding
-constraint is quota+rate, NOT max-parallel-`N`.** (Backlog: *Cross-IDE/provider quota detection*.)
+The Claude proactive source is DONE + wired. **The cross-provider RESEARCH is now DONE too** →
+[`docs/cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md) (signal tier + recipe + token source +
+degrade + citations per backend, read mostly from each tool's open source). Verdicts: **codex** = proactive GET
+`chatgpt.com/backend-api/wham/usage` (HIGH); **opencode** = federates (token broker → delegate to the underlying
+source); **antigravity** = proactive POST `cloudcode-pa…v1internal:fetchAvailableModels` / local LS (MED) + dated
+error (HIGH); **VS Code Copilot** = proactive GET `api.github.com/copilot_internal/user` (HIGH; token DPAPI-locked
+→ `gh`/`copilot` CLI). **REMAINING = implementation**: one `QuotaSource` per backend (mirror
+`claudeOAuthQuotaSource.ts` — same hermeticity guard + no-refresh-in-source degrade), an opencode token-broker
+that delegates, then wire **utilization-driven spill across pools** + per-model/cost routing into the scheduler.
+**The binding constraint is quota+rate, NOT max-parallel-`N`.** Security: rotate the Antigravity token (a research
+subagent decoded a fragment — see the doc). (Backlog: *Cross-IDE/provider quota detection*.)
 
 ### 2. A8 host-subagent driver — BUILT; validate + flip default-ON
 The driver is built + unit/integration-green + flag-gated (`rolling_engine`, default-OFF). REMAINING:
