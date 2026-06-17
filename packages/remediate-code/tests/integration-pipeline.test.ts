@@ -348,6 +348,7 @@ describe("zero-findings planning state: presents user question instead of fallin
       }),
       "utf8",
     );
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -1174,6 +1175,7 @@ describe("infra-node live-surface verification: isInfraModifyingBlock", () => {
     } as RemediationState);
     await acknowledgeResume();
     await writeIntentCheckpoint();
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     // Implementing state dispatches directly — no intermediate preview hop.
     const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });

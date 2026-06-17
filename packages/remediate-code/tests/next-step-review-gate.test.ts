@@ -356,6 +356,7 @@ describe("Path-B planning review gate", () => {
 
   it("declining a node records it terminal (never silently closed) and the run proceeds", async () => {
     await writePathBPlan();
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
     await decideNextStep({ root: REPO_DIR }); // halt + write request
 
     await writeFile(
@@ -381,6 +382,7 @@ describe("Path-B planning review gate", () => {
 
   it("re-running after the decision does not re-halt (fires at most once)", async () => {
     await writePathBPlan();
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
     await decideNextStep({ root: REPO_DIR });
     await writeFile(resolutionPath, JSON.stringify({}), "utf8");
     await decideNextStep({ root: REPO_DIR });

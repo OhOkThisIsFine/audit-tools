@@ -485,10 +485,10 @@ describe("fail-4: verify-before-accept in a worktree", () => {
 // fail-5: the host-fanned wave fallback is RETAINED + DEFAULT (CE-001)
 // ===========================================================================
 
-describe("fail-5: host-wave fallback retained, rolling engine opt-in defaults off", () => {
-  it("resolveRollingEngineEnabled defaults to FALSE (proven host-wave path is the default)", () => {
-    expect(resolveRollingEngineEnabled({ env: {} })).toBe(false);
-    expect(resolveRollingEngineEnabled({ sessionConfig: {}, env: {} })).toBe(false);
+describe("fail-5: host-wave fallback retained as opt-out; rolling engine defaults ON", () => {
+  it("resolveRollingEngineEnabled defaults to TRUE (rolling is the default; wave is opt-out)", () => {
+    expect(resolveRollingEngineEnabled({ env: {} })).toBe(true);
+    expect(resolveRollingEngineEnabled({ sessionConfig: {}, env: {} })).toBe(true);
   });
 
   it("opts in only via explicit option, sessionConfig.dispatch.rolling_engine, or REMEDIATE_ROLLING_ENGINE", () => {
@@ -497,6 +497,9 @@ describe("fail-5: host-wave fallback retained, rolling engine opt-in defaults of
       resolveRollingEngineEnabled({ sessionConfig: { dispatch: { rolling_engine: true } }, env: {} }),
     ).toBe(true);
     expect(resolveRollingEngineEnabled({ env: { REMEDIATE_ROLLING_ENGINE: "true" } })).toBe(true);
+    // Opt OUT via sessionConfig.dispatch.rolling_engine=false or REMEDIATE_ROLLING_ENGINE=false.
+    expect(resolveRollingEngineEnabled({ sessionConfig: { dispatch: { rolling_engine: false } }, env: {} })).toBe(false);
+    expect(resolveRollingEngineEnabled({ env: { REMEDIATE_ROLLING_ENGINE: "false" } })).toBe(false);
     // Explicit option wins over env.
     expect(
       resolveRollingEngineEnabled({ rollingEngine: false, env: { REMEDIATE_ROLLING_ENGINE: "true" } }),

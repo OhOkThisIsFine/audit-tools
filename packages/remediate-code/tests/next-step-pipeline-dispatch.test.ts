@@ -162,6 +162,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     await acknowledgeResume();
     await writeCompleteContractPipelineDag();
     await approveReviewGate();
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     const step = await decideNextStep({
       root: REPO_DIR,
@@ -518,6 +519,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
       ]),
       "utf8",
     );
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     // Folded: clarification resolution is applied and the run advances to dispatch
     // in a single decideNextStep call (no state_transition bounce).
@@ -557,6 +559,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     await acknowledgeResume();
     await writeIntentCheckpoint();
     await approveReviewGate();
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     const step = await decideNextStep({
       root: REPO_DIR,
@@ -574,6 +577,8 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     await acknowledgeResume();
     await writeIntentCheckpoint();
     await approveReviewGate();
+    // default-rolling routing is covered in next-step-implement-dispatch.test.ts; this pins the wave opt-out
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -587,7 +592,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     await writeIntentCheckpoint();
     await approveReviewGate();
     const configPath = join(REPO_DIR, "session-config.json");
-    await writeFile(configPath, JSON.stringify({ host_can_dispatch_subagents: true }), "utf8");
+    await writeFile(configPath, JSON.stringify({ host_can_dispatch_subagents: true, dispatch: { rolling_engine: false } }), "utf8");
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -747,6 +752,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
       "utf8",
     );
     await approveReviewGate();
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     const step = await decideNextStep({
       root: REPO_DIR,
@@ -823,6 +829,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     await acknowledgeResume();
     await writeIntentCheckpoint();
     await approveReviewGate();
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -933,6 +940,8 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
       }),
       "utf8",
     );
+
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     let step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
     while (step.step_kind === "state_transition") {

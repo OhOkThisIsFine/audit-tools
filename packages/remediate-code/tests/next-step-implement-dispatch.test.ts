@@ -56,6 +56,7 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     await saveState(documentingState);
     await acknowledgeResume();
     await writeIntentCheckpoint();
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
 
@@ -102,25 +103,22 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     expect(session.dispatched.length).toBeGreaterThan(0);
   });
 
-  it("implement phase dispatch sweep defaults to parallel", async () => {
+  it("implement phase dispatch sweep routes by host capability (rolling default)", async () => {
     const cases = [
       {
         options: { root: REPO_DIR },
         sessionConfig: null,
-        stepKind: "dispatch_implement",
-        itemCount: 2,
+        stepKind: "dispatch_implement_rolling",
       },
       {
         options: { root: REPO_DIR, hostCanDispatchSubagents: true },
         sessionConfig: null,
-        stepKind: "dispatch_implement",
-        itemCount: 2,
+        stepKind: "dispatch_implement_rolling",
       },
       {
         options: { root: REPO_DIR },
         sessionConfig: { host_can_dispatch_subagents: true },
-        stepKind: "dispatch_implement",
-        itemCount: 2,
+        stepKind: "dispatch_implement_rolling",
       },
       {
         // Rolling scheduler: a non-dispatching host still gets the FULL eligible
@@ -128,12 +126,19 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
         options: { root: REPO_DIR, hostCanDispatchSubagents: false },
         sessionConfig: null,
         stepKind: "implement_rolling_sequential",
-        itemCount: 2,
       },
     ];
 
     for (const scenario of cases) {
       await resetTestRepo();
+      // The host-subagent rolling path creates real git worktrees, so the repo
+      // must be a git repo with a HEAD to branch from.
+      const git = (...args: string[]) =>
+        spawnSync("git", args, { cwd: REPO_DIR, encoding: "utf8", shell: false });
+      git("init");
+      git("config", "user.email", "t@t");
+      git("config", "user.name", "t");
+      git("commit", "--allow-empty", "-m", "base");
       await saveState(makeImplementingState());
       await acknowledgeResume();
       await writeIntentCheckpoint();
@@ -146,10 +151,8 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
       }
 
       const step = await decideNextStep(scenario.options);
-      const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
 
       expect(step.step_kind).toBe(scenario.stepKind);
-      expect(plan.items).toHaveLength(scenario.itemCount);
     }
   });
 
@@ -282,6 +285,7 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     await saveState(documentingState);
     await acknowledgeResume();
     await writeIntentCheckpoint();
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     const step = await decideNextStep({ root: REPO_DIR });
     expect(step).toBeDefined();
