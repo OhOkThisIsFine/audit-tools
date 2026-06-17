@@ -159,6 +159,32 @@ test("launch fails when the model returns files but omits the result", async () 
   assert.match(res.error ?? "", /result/);
 });
 
+test("launch skips control-plane (.audit-tools) paths echoed into files[]", async () => {
+  const { repoRoot, input } = makeCtx();
+  // Models frequently echo the result file into files[] (the prompt says "write
+  // your result to <path>"). Those must be skipped, not committed into the worktree.
+  const content = JSON.stringify({
+    files: [
+      { path: "src/real.ts", content: "export const x = 1;" },
+      {
+        path: ".audit-tools/remediation/runs/R/implement/B.result.json",
+        content: "{}",
+      },
+    ],
+    result: { ok: true },
+  });
+  const fetchFn = fakeFetchReturning(content);
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  const res = await provider.launch(input);
+  assert.equal(res.accepted, true);
+  assert.equal(readFileSync(join(repoRoot, "src/real.ts"), "utf8"), "export const x = 1;");
+  assert.equal(
+    existsSync(join(repoRoot, ".audit-tools")),
+    false,
+    "a .audit-tools/ control-plane path must never be written into the worktree",
+  );
+});
+
 test("launch inlines current contents of prompt-referenced files", async () => {
   const { repoRoot, input } = makeCtx("Modify config.json to add a field.");
   writeFileSync(join(repoRoot, "config.json"), '{"existing":true}');
