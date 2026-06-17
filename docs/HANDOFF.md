@@ -10,17 +10,16 @@
 ## Where things stand
 
 - **`main` (pushed, NOT published): the go-forward program keeps accumulating.** Latest =
-  **A1 lean fast path** `b47d189` (this session). Green at every commit; suites green on the committed
-  tree (shared 704 / audit ~2200 / remediate **1640**, +1 documented skip each). **Publish HELD per Ethan
-  (2026-06-17)** — last published: `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` /
-  `remediator-lambda 0.27.0` (global bins lag this run's work).
-  - Prior run (9 items, `git log` for detail): A5+A11 vetted TOML/YAML parsers `e3561c6`; B1 anchor-timeout
-    config; B4 quarantine-exclude refuted findings; B8 (fileless collapse is correct-by-design); A8 loose
-    ends ×3 (worktree walk-up guard, openai-compatible surfaced as a 2nd pool, rate_limited re-queue reset).
-  - True-green caveats: shared `codex-antigravity-providers` auto-resolve flake is FIXED (`953bb51`).
-    Remaining known flake: audit-code's `phase-plan.test.ts` intermittent hermeticity (backlog). CLAUDECODE
-    must be unset for gates. A5+A11 added audit-code's first third-party runtime deps (`smol-toml`, `yaml`)
-    — a fresh clone needs `npm install`.
+  **A3 step 1 (shared obligation scan) + A4 dead-type cleanup** `ee3431e` (this session). Green at every
+  commit; suites green on the committed tree (shared **712** / audit ~2200 / remediate **1640**, +1
+  documented skip each). **Publish HELD per Ethan (2026-06-17)** — last published:
+  `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins lag).
+  - Prior runs (`git log` for detail): A1 lean fast path `b47d189`; A5+A11 vetted TOML/YAML parsers
+    `e3561c6`; B1 anchor-timeout config; B4 quarantine-exclude refuted findings; B8 (fileless collapse
+    correct-by-design); A8 loose ends ×3.
+  - True-green caveats: CLAUDECODE must be unset for gates. Known flake: audit-code's `phase-plan.test.ts`
+    intermittent hermeticity (backlog). audit-code's third-party runtime deps (`smol-toml`, `yaml`) — a
+    fresh clone needs `npm install`.
 
 - **A8 — the rolling cutover is effectively DONE for remediate.** Both rolling drivers on the shared
   `acceptNodeWorktree` core are validated end-to-end + are the DEFAULT now:
@@ -52,35 +51,40 @@
 
 ## Immediate next: the go-forward program
 
-**A1 ✓ DONE this session** (`b47d189`) — conservative lean fast path past the contract pipeline.
-`evaluateFastPath` (`packages/remediate-code/src/steps/leanFastPath.ts`) fast-paths ONLY a handful (≤5) of
-S7-grounded (`grounding.status==="grounded"`), high-confidence, ≤5-file, non-systemic / non-related-coupled /
-non-architecture-lens structured-audit findings; defaults to the full pipeline on ANY doubt (so a subtle
-change can't skip the net). `buildLeanExtractedPlan` emits the SAME `extracted-plan.json` the contract
-pipeline promotes → rejoins the existing plan→implement machinery; retained safety net = the deterministic
-grounding re-pass + `applyPlanPipeline`'s affected-file hash snapshot + per-node verify-before-merge + the
-final whole-repo gate. Only the adversarial critic→judge→repair + obligation derivation are dropped. Wired
-in `handleReadyIntakeContractPipeline` right AFTER the Path-A review gate (over `gate.approved`), so coverage
-is still built over the originals and declined findings keep their dispositions. Both existing structured-audit
-fixtures lack the S7 verdict → every prior pipeline test stays on the pipeline path; new grounded fixture +
-unit/integration tests (`tests/lean-fast-path.test.ts`) cover both the fast path and the decline.
+**A3+A4 IN PROGRESS this session** — the obligation-engine unification. Recon + design landed first:
+**read [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md)** — it is the working
+plan (ground-truth map of both engines, the shared-engine contract, the honest A4 re-scoping, and the
+green-at-every-commit decomposition). Two commits landed: **(1)** `4a041d0` extracted audit-code's
+obligation-selection scan into `@audit-tools/shared` (`findFirstActionableObligation` + the
+`Obligation`/`ObligationState` vocabulary); audit binds `PRIORITY` to it, `AuditObligation`/`ObligationState`
+alias/re-export it (atomic replace, surface unchanged; +7 shared unit tests). **(2)** `ee3431e` deleted the
+dead `TestSpec` type (first A4 cleanup).
 
-**Remaining, suggested order (yours to change):** **A3+A4** (unify the two obligation engines + canonical
-`RemediationItem` — the big foundational refactor) → **B2+B3** (diff re-reviews + obligation-set staleness;
-do AFTER A3+A4 so they build on the unified engine) → **A6** (kill schema dual-encoding) → **A8(a)**
-(audit-code symmetric rolling wiring) → **A12** (single-package collapse — do LAST; it reorganizes packaging)
-→ **A7** (validate host machinery across hosts). Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md`
-→ "Accepted go-forward program".
+**Recon corrected two backlog framings (durable — in the plan doc):** (a) the two engines are structurally
+divergent — audit = stateless staleness-scan / emit-only / one-unit-per-call; remediate = persisted state
+machine with back-edges + internal recursion — so the shared engine needs a transition/emit `advance` loop,
+**deferred to the remediate rewire so it's proven by its real consumer** (not built consumer-less). (b)
+**A4's "8 types + 2 ledgers → 1" is over-specced:** `RemediationItemState` already IS the canonical hub,
+`TestSpec` was dead (deleted), `VerificationResult`/`TriageBatch` are thin transients, and
+`CoverageLedgerEntry`/`RemediationOutcomeItem` are genuinely distinct domains. Real A4 = formalize the hub +
+fold the transients + single-source the disposition vocab; the `RemediationItemState`→`RemediationItem`
+rename is likely NOT worth the ~10-file churn (the name is already accurate) — skip unless a concrete reason.
 
-**START-HERE next session.** Recommended next is **A3+A4**, but it's large/multi-session: audit-code expresses
-the ordered-obligation engine declaratively (PRIORITY[] + registry) while remediate re-derives it in a
-~2835-line imperative switch → collapse to ONE shared declarative engine; and fold the ~8 finding_id-keyed
-record types + 2 coverage ledgers into one canonical `RemediationItem` with typed projections. If a more
-self-contained bite is wanted first: **A6** (47 JSON schemas + parallel hand-written TS validators →
-single-source one from the other, drop the dead-imported `ajv`) or **A8(a)** (wire audit-code's dormant
-`runRollingDispatch` into the live path — the mirror of remediate's; note audit dispatch is read-only review
-packets → AuditResult, NOT worktree edits, so it needs a provider-backed packet dispatcher + routing, not the
-worktree engine).
+**START-HERE next session — two clean entry points (decomposition in the plan doc):**
+- **A4 finish (self-contained):** fold `VerificationResult`/`TriageBatch` into derived views (read
+  `phases/triage.ts`); single-source the disposition vocab (`coverage/findingLedger.ts` `statusToDisposition`
+  ↔ `CoverageLedgerEntry.disposition` / `PerFindingDisposition`).
+- **A3 bulk (multi-session):** rewire remediate's `decideNextStepLoop` (`steps/nextStep.ts:3051-3329`) onto
+  the shared engine — design + add the `advance` transition/emit loop there (proven by remediate), then
+  re-express the guard cascade as a declarative obligation list, in atomic green chunks (linear pre-intake
+  gates first, then the implementing/triage back-edge cluster). The handlers become the executors.
+
+**After A3+A4 (suggested order, yours to change):** **B2+B3** (diff re-reviews + obligation-set staleness —
+build on the unified engine) → **A6** (kill schema dual-encoding; drop dead-imported `ajv`) → **A8(a)**
+(audit-code symmetric rolling wiring — its dormant `runRollingDispatch`; audit dispatch is read-only review
+packets → AuditResult, NOT worktree edits, so it needs a provider-backed packet dispatcher + routing) →
+**A12** (single-package collapse — LAST) → **A7** (host machinery across hosts). Deferred: A2, A9/A10. Full
+specs + recon: `docs/backlog.md` → "Accepted go-forward program".
 
 ### A8 remaining loose ends
 - **REMAINING — audit-code symmetric wiring (= A8(a) above)** — `runRollingDispatch` is still dormant (0 live
