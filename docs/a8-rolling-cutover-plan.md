@@ -80,8 +80,8 @@ callers**; its tests inject stub dispatchers. Reading the path surfaced hard gap
    bounded JIT worktrees) landed (`73424050` + `414e302e`). When `rolling_engine` is enabled AND the host can
    dispatch, next-step emits the worktree-per-node rolling step; the host spawns a subagent per node and calls
    `accept-node` on each completion (dispatch/wait/done). Tests: `host-rolling-dispatch.test.ts` (7) + a
-   `decideNextStep` emission test. **REMAINING: a real-subagent end-to-end smoke** (spawn actual Task-subagents
-   into worktrees on a live remediation) + the eventual flip to default-ON.
+   `decideNextStep` emission test. **✓ real-subagent end-to-end smoke DONE + a false-resolve bug found & fixed
+   (`f18138fe`) — see "Open items" below.** REMAINING: the provider-path real-run (Jun 19) + flip to default-ON.
 5. **audit-code symmetric** wiring of its rolling engine into the audit live path.
 6. **Harden** worktree-branch reuse across a `rate_limited` re-queue.
 
@@ -109,11 +109,21 @@ One-shot-CLI orchestrator + host-as-executor ⇒ rolling via a **per-completion 
   subagent's node just FAILS, never silent corruption. Provider workers get hard cwd-confinement.
 
 ## Open items to surface
-- **Host-subagent driver real-subagent smoke** — the driver is built + unit/integration-green + flag-gated;
-  the remaining validation is spawning ACTUAL Task-subagents into worktrees on a live remediation (needs a
-  staged remediation at the implement-dispatch point). No quota needed.
-- **Flip `rolling_engine` default-ON** once both drivers are real-run validated (the nightly-autonomy gate).
-- **Provider-path real-run validation** is quota-blocked until Jun 19 (codex). Invocation verified; the
-  in-process driver is unit/injected-provider green.
+- **Host-subagent driver real-subagent smoke — ✓ DONE (this session).** Drove the real machine to
+  `dispatch_implement_rolling` in an isolated repo (3 disjoint nodes, slots capped to 2), spawned ACTUAL Task
+  subagents into the worktrees, called `accept-node` per completion: dispatch→wait→done all confirmed, real
+  worktree commit→verify→merge (2 landed on main), JIT worktree creation, finalize via
+  merge-implement-results→next-step, failing node routed to triage. No quota needed.
+- **False-resolve bug found by the smoke — ✓ FIXED (`f18138fe`).** Both rolling drivers discarded
+  `acceptNodeWorktree`'s `{merged}` outcome, so a node that fails tool-owned verify with IN-SCOPE edits was
+  marked `resolved` from its self-reported result while its fix never landed (silent false-close). Fix: a
+  per-node `accept-outcome-<block>.json` sidecar written by BOTH drivers + a merge-state gate in
+  `mergeImplementResults` that blocks any self-reported-resolved node whose recorded outcome is `merged:false`.
+  Red→green regression (`dispatch-merge-tolerance.test.ts`) + real-git wiring test (`host-rolling-dispatch.test.ts`).
+- **Provider-path real-run validation** is quota-blocked until Jun 19 (codex) — the LAST gate before the flip.
+  Invocation verified; in-process driver unit/injected-provider green AND now covered by the false-resolve fix.
+  The real run must confirm ≥2 nodes land via worktree→verify→merge AND that a verify-fail routes to triage
+  (not false-resolve) on the provider path.
+- **Flip `rolling_engine` default-ON** once the provider path is real-run validated (the nightly-autonomy gate).
 - **Windows codex sandbox** enforcement unconfirmed (whether `--sandbox workspace-write` is enforced on
   Windows; the real run settles it — fall back to `danger-full-access` via config if not).

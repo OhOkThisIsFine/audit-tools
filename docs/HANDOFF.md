@@ -9,9 +9,21 @@
 
 ## Where things stand
 
-- **`main` @ `a2cb6220`.** Clean tree, all pushed. **NOT published** — commits sit on main unreleased
+- **`main` @ `f18138fe`.** Clean tree, all pushed. **NOT published** — commits sit on main unreleased
   (mid-program; release when A8 lands + is validated). Last published: `@audit-tools/shared 0.22.0`
   / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
+- **A8 host-subagent rolling driver — VALIDATED end-to-end this session via a real-subagent smoke, and a
+  latent false-resolve bug found + fixed (`f18138fe`, green).** Drove the REAL machine in an isolated repo
+  (`C:\Code\_a8-smoke`, deleted) to `dispatch_implement_rolling` (3 disjoint nodes, slots capped to 2),
+  spawned REAL Task subagents into the worktrees, called `accept-node` per completion: confirmed all three
+  directives **dispatch→wait→done**, real worktree commit→verify→merge (2 nodes landed on main), JIT worktree
+  creation, finalization via `merge-implement-results`→`next-step`, and a failing node routed to triage (not
+  silently closed). **Bug:** both rolling drivers discarded `acceptNodeWorktree`'s `{merged}` outcome, so a
+  node that fails tool-owned verify with IN-SCOPE edits was marked `resolved` from its self-reported result
+  while its fix never landed (silent false-close — worst case for autonomy). **Fix:** per-node
+  `accept-outcome-<block>.json` sidecar written by both drivers + a merge-state gate in `mergeImplementResults`
+  that blocks any self-reported-resolved node with `merged:false`. Red→green regression + real-git wiring test;
+  remediate suite green (1622).
 - **Quota detection — Claude PROACTIVE source SHIPPED to the tree (`a7eef160`, green).** The signal was confirmed
   live end-to-end (200 on this machine) and `ClaudeOAuthQuotaSource` (`packages/shared/src/quota/`) built + wired
   into BOTH orchestrators' dispatch: audit's `buildDispatchPool` already fed the cascade (so it got it for free via
@@ -31,9 +43,11 @@
   step; the host spawns a subagent per node + calls `accept-node` on each completion. Unit + integration green
   (8 tests). Working doc: `docs/a8-rolling-cutover-plan.md`.
 - **Deliberate intermediate state (NOT bugs):** the rolling engine + host-subagent driver are functional but
-  **default-OFF** (host-fanned wave path intact, nothing broken); codex provider real but its agentic run
-  unvalidated (codex quota resets **Jun 19**); the A8 drivers still lack a **real-subagent / real-provider
-  end-to-end smoke** (unit + integration only). The cross-provider quota sources are **fixture-tested +
+  **default-OFF** (host-fanned wave path intact, nothing broken). The host-subagent driver is now
+  **real-subagent validated + hardened** (this session); the remaining gate before flipping `rolling_engine`
+  default-ON is the **in-process PROVIDER path real-run** — codex agentic run still unvalidated (codex quota
+  resets **Jun 19**; the false-resolve fix `f18138fe` covers the provider path too via the shared seam, but it
+  wants a real ≥2-node provider run + the Windows codex-sandbox check). The cross-provider quota sources are **fixture-tested +
   source-verified-shape, but only Claude is LIVE-confirmed (200)** — Codex/Copilot/Antigravity each want a
   one-shot live confirmation GET (like the Claude probe) when you OK touching that token; their token-extraction
   degrades cleanly where unavailable (Copilot needs the `gh`/`copilot` CLI token; Antigravity is opt-in). Program
@@ -51,7 +65,7 @@
   `ask-on-ambiguity-dont-defer-silently`.)
 - **Order of program items is yours** — sequence logically so one refactor doesn't undo another.
 
-## Immediate next: A8 real-subagent validation + flip default-ON, then the rest of the go-forward program
+## Immediate next: A8 provider-path real-run (Jun 19) + flip default-ON, then the rest of the go-forward program
 
 **Quota detection is now COMPLETE** (research + all sources): Claude (`a7eef160`, live-confirmed + wired) and the
 cross-provider sources (`a2cb6220`: Codex/Copilot/Antigravity + an OpenCode broker, on `BaseHttpQuotaSource`,
@@ -68,15 +82,20 @@ half — bigger than the sources; the binding constraint is quota+rate, NOT max-
 your OK to touch that token. Security: rotate the Antigravity token (a research subagent decoded a fragment — see
 `docs/cross-provider-quota-matrix.md`).
 
-### 2. A8 host-subagent driver — BUILT; validate + flip default-ON
-The driver is built + unit/integration-green + flag-gated (`rolling_engine`, default-OFF). REMAINING:
-(a) a **real-subagent end-to-end smoke** — stage a small real remediation to the implement-dispatch point, set
-`dispatch.rolling_engine: true` + a dispatching host, then actually spawn Task-subagents into the worktrees the
-step lists and call `accept-node --id <block>` per completion (dispatch/wait/done); confirm each node
-commits→verifies→merges and the run finalizes via merge-implement-results → next-step (no quota needed).
-(b) Then **flip `rolling_engine` default-ON** (the nightly-autonomy gate) once both this and the provider path
-(codex, quota-blocked until **Jun 19**) are real-run validated. Protocol + status:
-`docs/a8-rolling-cutover-plan.md`.
+### 2. A8 host-subagent driver — ✓ VALIDATED + hardened this session; provider real-run + flip remain
+(a) **DONE — real-subagent end-to-end smoke.** Drove the real machine to `dispatch_implement_rolling` in an
+isolated repo (3 disjoint nodes, slots capped to 2 via `--host-max-concurrent 2`), spawned REAL Task subagents
+into the worktrees, called `accept-node` per completion: confirmed dispatch→wait→done, real worktree
+commit→verify→merge (2 landed), JIT worktree creation, and finalize via merge-implement-results→next-step. The
+smoke surfaced a **false-resolve bug** (both rolling drivers discarded `acceptNodeWorktree`'s `merged` outcome →
+a verify-failed, in-scope node was marked resolved with its fix never landing) — **FIXED `f18138fe`** (per-node
+accept-outcome sidecar + merge-state gate in `mergeImplementResults`; red→green + real-git tests; suite 1622).
+(b) **REMAINING before flip:** the in-process **PROVIDER path real-run** (codex, quota-blocked until **Jun 19**)
+— set `sessionConfig.provider="codex"` + `dispatch.rolling_engine=true`, confirm ≥2 nodes land via
+worktree→verify→merge AND that the false-resolve fix routes a verify-fail to triage on the provider path; also
+settle the Windows codex-sandbox enforcement question. (c) **Then flip `rolling_engine` default-ON** (the
+nightly-autonomy gate). Holding the flip per this plan since nightly autonomy runs headless → the provider path,
+which isn't real-run-validated yet. Protocol: `docs/a8-rolling-cutover-plan.md`.
 
 - Then the rest of the program: **A1** fast path, **A3+A4** unify obligation engines + `RemediationItem`,
   **B1** magic numbers, **B2+B3** diff re-reviews + obligation-set staleness, **B4** hard-exclude
