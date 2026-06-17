@@ -19,6 +19,7 @@ export type RemediationStepKind =
   | "collect_review_approval"
   | "collect_clarifications"
   | "dispatch_implement"
+  | "dispatch_implement_rolling"
   | "implement_rolling_sequential"
   | "collect_triage"
   | "close_run"
