@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { decideNextStep } from "../src/steps/nextStep.js";
 import type { RemediationState } from "../src/state/store.js";
 import {
@@ -65,6 +66,40 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     );
     expect(savedState.items["F-001"].status).toBe("pending");
     expect(savedState.items["F-002"].status).toBe("pending");
+  });
+
+  it("rolling engine + dispatching host emits the worktree-isolated rolling step + session", async () => {
+    // The host-subagent rolling driver creates real git worktrees, so the repo
+    // must be a git repo with a HEAD to branch from.
+    const git = (...args: string[]) =>
+      spawnSync("git", args, { cwd: REPO_DIR, encoding: "utf8", shell: false });
+    if (git("init").status !== 0) return; // git unavailable → skip
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    git("commit", "--allow-empty", "-m", "base");
+
+    await saveState(makeImplementingState());
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+    await writeFile(
+      join(REPO_DIR, "session-config.json"),
+      JSON.stringify({ host_can_dispatch_subagents: true, dispatch: { rolling_engine: true } }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+
+    expect(step.step_kind).toBe("dispatch_implement_rolling");
+    expect(step.allowed_commands.some((c) => c.includes("accept-node"))).toBe(true);
+    // A rolling session was persisted with a non-empty frontier and ≥1 worktree dispatched.
+    const session = JSON.parse(
+      await readFile(
+        join(ARTIFACTS_DIR, "runs", step.run_id, "implement", "rolling-session.json"),
+        "utf8",
+      ),
+    );
+    expect(session.frontier.length).toBeGreaterThan(0);
+    expect(session.dispatched.length).toBeGreaterThan(0);
   });
 
   it("implement phase dispatch sweep defaults to parallel", async () => {
