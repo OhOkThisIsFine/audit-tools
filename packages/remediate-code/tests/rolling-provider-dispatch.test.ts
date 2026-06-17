@@ -187,6 +187,45 @@ describe("G1: makeProviderNodeDispatcher", () => {
     expect(existsSync(join(artifactsDir, "B1.task.json"))).toBe(true);
   });
 
+  it("resolves the provider the SLOT selected (per-pool spill routing), not a fixed config provider", async () => {
+    const artifactsDir = mkdtempSync(join(tmpdir(), "roll-pd-slot-"));
+    const worktreeRoot = mkdtempSync(join(tmpdir(), "roll-pd-slot-wt-"));
+    const promptPath = join(artifactsDir, "implement-B1.md");
+    writeFileSync(promptPath, "# node prompt\n");
+    const resultPath = join(artifactsDir, "implement-B1.result.json");
+
+    const requestedNames: (string | undefined)[] = [];
+    const dispatch = makeProviderNodeDispatcher({
+      root: artifactsDir,
+      artifactsDir,
+      runId: "RID",
+      // The configured provider is claude-code, but the slot selected an
+      // openai-compatible pool — the dispatcher must honor the SLOT.
+      sessionConfig: { provider: "claude-code" },
+      promptPathByBlock: new Map([["B1", promptPath]]),
+      createProvider: (name) => {
+        requestedNames.push(name);
+        return {
+          name: name ?? "stub",
+          async launch(input) {
+            await writeFile(input.resultPath, dummyResult("F1"), "utf8");
+            return { accepted: true };
+          },
+        };
+      },
+    });
+
+    const res = await dispatch({
+      block: block("B1", ["F1"]),
+      slot: { providerName: "openai-compatible", hostModel: "vendor/model-x", poolId: "openai-compatible/vendor/model-x" },
+      worktreeRoot,
+      resultPath,
+    });
+
+    expect(res.outcome).toBe("success");
+    expect(requestedNames).toEqual(["openai-compatible"]);
+  });
+
   it("returns error when the provider rejects the launch", async () => {
     const artifactsDir = mkdtempSync(join(tmpdir(), "roll-pd-art2-"));
     const promptPath = join(artifactsDir, "p.md");

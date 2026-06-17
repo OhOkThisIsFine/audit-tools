@@ -395,6 +395,7 @@ export type {
 export {
   resolveFreshSessionProviderName,
   createFreshSessionProvider,
+  hasConfiguredOpenAiCompatible,
 } from "./providers/providerFactory.js";
 
 // Provider confirmation (Gate-0 pool discovery + selection)

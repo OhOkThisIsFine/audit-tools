@@ -44,6 +44,7 @@ import {
   compareTier,
   mostCapableTier,
   normalizeRepoPath,
+  hasConfiguredOpenAiCompatible,
   type FindingTheme,
 } from "@audit-tools/shared";
 import {
@@ -347,7 +348,7 @@ export async function buildConfirmedPools(input: {
       ?.empirical_half_life_hours,
   });
 
-  return await Promise.all((roster ?? [null]).map(async (entry) => {
+  const primaryPools: CapacityPool[] = await Promise.all((roster ?? [null]).map(async (entry) => {
     const poolKey = buildProviderModelKey(
       providerName,
       entry?.model_id ?? quotaModelKeySegment,
@@ -366,6 +367,34 @@ export async function buildConfirmedPools(input: {
       quotaSourceSnapshot,
     };
   }));
+
+  // A configured openai-compatible endpoint (NIM/vLLM/…) is a real, always-available
+  // API pool — surface it as a SECOND CapacityPool alongside the primary so the
+  // scheduler's proactive cross-pool spill (INV-QD-14, selectProvider) can route a
+  // node here when the primary pool is quota-degraded. Only when it isn't already
+  // the primary provider (no duplicate pool key). It's an independent API pool, so
+  // hostConcurrencyLimit is null (it doesn't draw on the host subagent budget) and
+  // it has no proactive quota source / capability handshake (discoveredLimits null;
+  // concurrency is governed by learned 429/RPM state).
+  if (
+    providerName !== "openai-compatible" &&
+    hasConfiguredOpenAiCompatible(sessionConfig.openai_compatible)
+  ) {
+    const apiModel = sessionConfig.openai_compatible?.model ?? null;
+    const apiPoolKey = buildProviderModelKey("openai-compatible", apiModel);
+    const apiSnapshot = await quotaSource.queryCurrentUsage(apiPoolKey).catch(() => null);
+    primaryPools.push({
+      id: apiPoolKey,
+      providerName: "openai-compatible",
+      hostModel: apiModel,
+      hostConcurrencyLimit: null,
+      quotaStateEntry: quotaEntries[apiPoolKey] ?? null,
+      discoveredLimits: null,
+      quotaSourceSnapshot: apiSnapshot,
+    });
+  }
+
+  return primaryPools;
 }
 
 export function buildDispatchQuota(

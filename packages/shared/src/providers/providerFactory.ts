@@ -42,7 +42,7 @@ function hasConfiguredCodex(config: CodexConfig | undefined): boolean {
  * not probed here, mirroring how the agentic providers don't read credentials
  * during resolution.
  */
-function hasConfiguredOpenAiCompatible(
+export function hasConfiguredOpenAiCompatible(
   config: SessionConfig["openai_compatible"],
 ): boolean {
   return Boolean(config?.base_url?.trim()) && Boolean(config?.model?.trim());
