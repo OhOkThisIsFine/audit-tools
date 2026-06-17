@@ -97,6 +97,7 @@ export type {
   ClaudeCodeConfig,
   CodexConfig,
   OpenCodeConfig,
+  OpenAiCompatibleConfig,
   VSCodeTaskConfig,
   AntigravityConfig,
   BlockQuotaConfig,
@@ -369,6 +370,12 @@ export {
   MISSING_WORKER_COMMAND_MESSAGE,
 } from "./providers/localSubprocessProvider.js";
 export { CodexProvider } from "./providers/codexProvider.js";
+export {
+  OpenAiCompatibleProvider,
+  OPENAI_COMPATIBLE_PROVIDER_NAME,
+  parseJsonLoose,
+} from "./providers/openAiCompatibleProvider.js";
+export type { OpenAiCompatibleProviderDeps } from "./providers/openAiCompatibleProvider.js";
 export type { ClaudeCodeProviderOptions } from "./providers/claudeCodeProvider.js";
 export {
   ClaudeCodeProvider,
