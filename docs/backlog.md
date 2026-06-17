@@ -719,6 +719,19 @@ Copilot token is file-reachable). Claude was already live-confirmed. Read-only t
 2026-06-16.) The Copilot run also surfaced + FIXED an OS-portability bug (gh hosts path hardcoded to
 `~/.config/gh` → `resolveGhHostsPath` now OS-agnostic).
 
+**ASSESSED 2026-06-17 — Gemini CLI + NVIDIA NIM (matrix §6 / §5); NEITHER warrants a new proactive source.**
+- **Gemini CLI:** HAS a clean proactive signal (`cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` →
+  `buckets[].{remainingFraction,resetTime}`; token `~/.gemini/oauth_creds.json` — cleaner than Antigravity's
+  SQLite scrape). BUT its individual/free/Pro/Ultra tiers **stop serving on gemini-cli 2026-06-18** (VERIFIED
+  vs Google's deprecation page); survivors are Std/Ent only, on the SAME cloudcode-pa family the existing
+  `AntigravityQuotaSource` already covers (Google steers consumers to Antigravity). → **don't build** unless a
+  Std/Ent gemini-cli pool becomes a real dispatch target.
+- **NVIDIA NIM:** OpenAI-compatible; **no proactive quota in either mode**. Hosted (`integrate.api.nvidia.com`)
+  = reactive 429 + `Retry-After` (no `X-RateLimit-*`, no credits GET); self-hosted = unbounded local pool
+  (`/v1/metrics` is vLLM perf telemetry, not quota). → no `QuotaSource`; slot as a reactive-hosted /
+  unbounded-local **pool**. NIM is a strong candidate for the a-residual "real 2nd pool to spill into"
+  (OpenAI-compatible, free credits or local GPU — exercises INV-QD-14 e2e without a new proactive source).
+
 Part of the same push: **detect and dispatch to CLI agents as additional pools.** The
 heterogeneous-dispatch machinery (`computeDispatchCapacity`, `CapacityPool`) can already
 model multiple pools, but there is no real second pool. Detecting an available CLI agent

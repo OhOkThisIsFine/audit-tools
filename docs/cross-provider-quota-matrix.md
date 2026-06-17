@@ -22,8 +22,11 @@ already consumes `remaining_pct` (thresholds 0.1/0.3) to throttle/cool-down befo
 | **Codex** (ChatGPT OAuth) | **proactive GET** | `chatgpt.com/backend-api/wham/usage` | `~/.codex/auth.json` | HIGH (LIVE-confirmed 2026-06-17 — 200, shape matches) |
 | **OpenCode** | **federates** (no own quota) | per-provider, via its stored tokens | `~/.local/share/opencode/auth.json` | HIGH |
 | **Antigravity** (Gemini) | proactive POST (med) / dated-error (high) | `cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels` (or LS over localhost) | `%APPDATA%/Antigravity/User/globalStorage/state.vscdb` | MED proactive / HIGH reactive |
+| **Gemini CLI** (OAuth/Code-Assist) | **proactive POST** | `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` → `buckets[].{remainingFraction,resetTime}` | `~/.gemini/oauth_creds.json` | HIGH shape — but individual tiers **deprecated on gemini-cli 2026-06-18**; Std/Ent only (see §6) |
 | **VS Code Copilot** | **proactive GET** | `api.github.com/copilot_internal/user` | DPAPI SecretStorage (`state.vscdb`) / `gh`/`copilot` CLI | HIGH endpoint / MED token (live-shape PENDING — see §4 note) |
 | Gemini raw API | reactive only | 429 `RESOURCE_EXHAUSTED` + `RetryInfo` | API key | HIGH (Google staff: no proactive header) |
+| **NVIDIA NIM — hosted** | reactive only | 429 + `Retry-After` on `/v1/chat/completions` (no `X-RateLimit-*`, no credits GET) | `NVIDIA_API_KEY` env (`nvapi-…`) | HIGH (no proactive surface — official API ref documents none) |
+| **NVIDIA NIM — self-hosted** | **unbounded-local** | none (local GPU pool; `/v1/metrics` is perf telemetry, not quota) | `NVIDIA_API_KEY` / none | HIGH (vLLM-passthrough metrics carry no quota) |
 
 ---
 
@@ -229,3 +232,158 @@ GitHub Docs billing/usage + copilot-cli config-dir; community #178117 (stability
   copilot_internal/user.
 - The binding constraint stays **quota+rate, not max-parallel-N**; per-window snapshots (5h/weekly)
   + per-model where exposed enable utilization-driven spill + strength/cost routing across pools.
+
+---
+
+## 5. NVIDIA NIM (NVIDIA Inference Microservices) — research 2026-06-17
+
+OpenAI-compatible across both modes (drop-in `base_url` + Bearer key), so it slots into the
+pool model exactly like the matrix's other OpenAI-compatible providers. **No proactive quota
+surface exists in either mode** — verdict below is verified against NVIDIA's own docs, not memory.
+
+### 5a. Hosted (build.nvidia.com / API catalog) — REACTIVE ONLY (HIGH)
+
+The hosted catalog at `integrate.api.nvidia.com` is a free-credit trial tier. Auth is a static
+API key, NOT OAuth — there is no rotating credential and no per-account usage endpoint.
+
+- **Signal tier:** reactive 429 + `Retry-After` only. **No proactive credits/usage GET; no
+  `X-RateLimit-*` / `RateLimit-Remaining` response headers** documented on `/v1/chat/completions`.
+  Credit balance is **dashboard-UI-only** (profile → "Request More"); not queryable via API.
+- **Probe (there is none proactive).** Reactive recipe:
+  ```
+  POST https://integrate.api.nvidia.com/v1/chat/completions
+    Authorization: Bearer <NVIDIA_API_KEY>     # nvapi-… , static key
+  → 200 normal | 429 Too Many Requests + (honor) Retry-After: <seconds>
+  ```
+- **Token source:** `NVIDIA_API_KEY` env var (`nvapi-…`). No first-party on-disk store — the key
+  is user-provided env/config; OpenAI-compatible hosts (OpenCode et al.) keep it as a generic
+  `{ type: "api", key: "nvapi-…" }` cred. (NOTE: a static key is fundamentally weaker signal
+  than the Claude/Codex OAuth analogs — there is nothing to GET.)
+- **Documented limits (tier, not queryable):** free tier ~**40 RPM** baseline (raisable to ~200
+  RPM by dashboard request); credits = 1,000 on signup (→ up to 5,000 on request). Browser use
+  on build.nvidia.com does not consume credits; remote API calls do. Limits are RPM-based; no
+  documented TPM ceiling. **NVIDIA staff note increases are not always granted on request** —
+  client-side backoff is the expected mitigation.
+- **Mapping:** no live `remaining_pct` obtainable. On 429 → `remaining_pct = 0`,
+  `reset_at = now + Retry-After` (if present, else short backoff). `requests_remaining` /
+  `tokens_remaining` = null (never exposed). Optionally learn the 40/200 RPM ceiling into the
+  existing learned-limits subsystem and estimate a sliding-window `remaining_pct` locally.
+- **Degrade chain:** (no proactive GET exists) → reactive 429 + `Retry-After` at call time →
+  local RPM sliding-window estimate vs learned 40/200 cap → null.
+- **Citations:** NVIDIA NIM LLM API reference (endpoints `/v1/chat/completions`, `/v1/completions`,
+  `/v1/responses`, `/v1/models`, `/v1/health/{live,ready}`, `/v1/metadata`, `/v1/license`,
+  `/v1/metrics`; **zero mention of rate-limit headers, 429, quotas, or credits**)
+  `docs.nvidia.com/nim/large-language-models/latest/reference/api-reference.html`; base URL +
+  `NVIDIA_API_KEY` + `nvapi-` + OpenAI-compat: `decodethefuture.org/en/nvidia-nim-api-explained`,
+  OpenCode generic-OpenAI-compat gist (`gist.github.com/syntaxhacker/bd3014c383bf7247bb982acb91d732d2`);
+  40→200 RPM + 1,000-credit trial + UI-only balance: NVIDIA Developer Forums
+  (`/t/api-credits-for-build-nvidia-com/306633`, the many "40→200 RPM" rate-limit-increase threads,
+  `/t/what-is-a-credit/305579`). **Could NOT verify:** any private/internal credits-balance API
+  (none found in docs or forums — treat as nonexistent for our purposes).
+
+### 5b. Self-hosted NIM container — UNBOUNDED-LOCAL (HIGH)
+
+A NIM container on local/on-prem GPU (`http://localhost:8000/v1`, OpenAI-compatible) has **no
+account-quota concept**. Like the matrix's stance on local LLMs, treat it as effectively
+unbounded — the real ceiling is GPU throughput/VRAM, modeled as a local dispatch pool with no
+proactive quota source.
+
+- **Signal tier:** unbounded-local. No quota endpoint; no rate-limit headers. `/v1/metrics` is
+  Prometheus **performance** telemetry, NOT quota.
+- **`/v1/metrics` (what's actually there):** NIM passes through the inference backend's native
+  vLLM metrics unmodified — `vllm:num_requests_running`, `vllm:num_requests_waiting`,
+  `vllm:kv_cache_usage_perc` (1.0 = 100% KV cache), `vllm:prompt_tokens`,
+  `vllm:generation_tokens`, latency/throughput histograms. **None is an account RPM/TPM/credits
+  metric.** `curl -s http://localhost:8000/v1/metrics`.
+- **Capacity limits are physical, not quota:** `NIM_MAX_MODEL_LEN` / `--max-model-len`, KV-cache
+  VRAM (OOM if exceeded), in-flight concurrency bounded by KV cache. These are saturation signals,
+  not entitlement — fits the "no proactive quota, local pool" model.
+- **Token source:** `NVIDIA_API_KEY` if the container is started with auth, else none. Base URL
+  is operator-configured (`localhost:8000` default).
+- **Mapping:** `remaining_pct` ≈ 1 (unbounded). If a backpressure signal is ever wanted, derive a
+  *soft* pressure proxy from `kv_cache_usage_perc` / `num_requests_waiting` scraped off
+  `/v1/metrics` — but that is concurrency backpressure, not a quota snapshot; keep it out of the
+  `remaining_pct` quota contract unless deliberately repurposed.
+- **Degrade chain:** unbounded-local (return null / treat as a fixed-concurrency pool) → optional
+  `/v1/metrics` KV-pressure proxy if backpressure routing is later desired.
+- **Citations:** NIM logging & observability (`/v1/metrics` = unmodified vLLM passthrough)
+  `docs.nvidia.com/nim/large-language-models/latest/reference/logging-and-observability.html`;
+  vLLM metric names `docs.vllm.ai/en/stable/usage/metrics/`; advanced config / `NIM_MAX_MODEL_LEN`
+  + KV-cache VRAM `docs.nvidia.com/nim/large-language-models/latest/reference/advanced-configuration.html`.
+
+### 5c. Pool fit + BUILD recommendation
+
+- **Pool fit:** provider name `nvidia-nim` (or split `nvidia-nim` / `nvidia-nim-local`), opaque
+  model id (catalog id string, e.g. a Nemotron/Llama id — never hardcode a model table, per the
+  agnostic invariant), `base_url` config (`integrate.api.nvidia.com/v1` hosted | `localhost:8000/v1`
+  self-hosted), Bearer `NVIDIA_API_KEY` auth. Both are generic OpenAI-compatible pools — the
+  dispatcher needs no NIM-specific logic.
+- **Is a proactive `QuotaSource` warranted? NO.** Unlike Claude/Codex/Copilot (which have real
+  proactive GETs), NIM exposes **no proactive credits/usage/limits endpoint in either mode** —
+  confirmed absent in the official API reference. So:
+  - **Hosted:** do NOT build a proactive `BaseHttpQuotaSource` subclass — there is nothing to GET.
+    Handle as **reactive-429 + `Retry-After`** at dispatch, and (optionally) feed the documented
+    40/200 RPM ceiling into the existing **learned-limits / sliding-window** subsystem for a local
+    `remaining_pct` estimate. This is the matrix's "reactive dated-limit / local estimate" rung,
+    not a new proactive source.
+  - **Self-hosted:** register as an **unbounded local pool** (no `QuotaSource`), exactly like other
+    local LLMs. Optional later: a `/v1/metrics` KV-pressure backpressure proxy — explicitly NOT a
+    quota source.
+- **ToS / caveats:** hosted catalog is a **free trial** (credits + business-email AI-Enterprise
+  unlock); not a production SLA tier — design for hard 429s. Static `nvapi-` key = treat as a
+  secret (env/config only; never log). **Flagged unverified:** no programmatic credit-balance API
+  was found in any NVIDIA doc or forum thread — asserting its nonexistence is a *negative* finding
+  from absence-in-docs, not a positive confirmation from NVIDIA that one will never exist.
+
+---
+
+## 6. Gemini CLI (Google, `google-gemini/gemini-cli`) — research 2026-06-17 — proactive POST (HIGH shape) — individual tiers DEPRECATED 2026-06-18
+
+Same `cloudcode-pa` family as §3 Antigravity, but a CLEANER signal: gemini-cli's OAuth/Code-Assist
+tier calls a purpose-built quota RPC (vs Antigravity's model-list scrape), and its token is a plain
+JSON file (vs Antigravity's SQLite) — OS-portability is just `os.homedir()`.
+
+**Routing (`core/contentGenerator.ts`):** only `oauth-personal` (LOGIN_WITH_GOOGLE) + compute-ADC
+route through `CodeAssistServer` → cloudcode-pa (HAS quota). `gemini-api-key` / `vertex-ai`
+construct a plain `GoogleGenAI` → raw API, NO quota endpoint (reactive-only = the Gemini-raw-API row).
+
+**Token source (OS-agnostic):** `${GEMINI_CLI_HOME || os.homedir()}/.gemini/oauth_creds.json` →
+`{ access_token, refresh_token, id_token, expiry_date }`. Encrypted-storage variant (FORCE_ENCRYPTED_FILE
+flag) → unreadable → degrade. Secondary path: `$GOOGLE_APPLICATION_CREDENTIALS`.
+
+**Probe (proactive — shape source-verified, NOT live-probed here):**
+```
+POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota
+  Authorization: Bearer <access_token>;  body {"project":"<id>"}   # or {} if unknown
+→ RetrieveUserQuotaResponse { buckets[]: { remainingAmount?, remainingFraction? (0–1),
+    resetTime? (ISO), tokenType?, modelId? } }
+```
+**Mapping:** `remaining_pct = min remainingFraction across buckets` (least-remaining binds);
+`reset_at` = that bucket's `resetTime`; `requests_remaining` = parse(`remainingAmount`). Free cap
+documented 60 rpm + 1,000 model-req/day. Refresh (host-owned, on 401): `oauth2.googleapis.com/token`.
+
+**Degrade:** retrieveUserQuota → `loadCodeAssist` tier+cap only (no live remaining) → 429
+`RESOURCE_EXHAUSTED` + `RetryInfo.retryDelay`. API-key/Vertex tiers: reactive from the start.
+
+**⛔ DEPRECATION (VERIFIED 2026-06-17 against Google's primary source):** *"Starting June 18, 2026,
+Gemini Code Assist IDE extensions will stop serving requests for the Gemini Code Assist for
+individuals, Google AI Pro, and Google AI Ultra tiers."* — both IDE extensions AND the Gemini CLI are
+affected; Standard/Enterprise subscriptions are unaffected; consumers are migrated to the **Antigravity
+family** (already covered by §3).
+
+**BUILD RECOMMENDATION: do NOT build a dedicated `GeminiCliQuotaSource` now.** The high-value
+free/Pro/Ultra signal disappears 2026-06-18, and the surviving Standard/Enterprise case is the SAME
+cloudcode-pa family the §3 Antigravity source already covers — Google explicitly steers consumers there.
+If a Std/Ent gemini-cli pool ever becomes a real dispatch target, build it then as a thin
+`BaseHttpQuotaSource` sibling (`fetchGeminiCliUsage` + `mapGeminiCliUsage`, provider gate
+`{"gemini","gemini-cli"}`, the creds path above) — cleaner than the Antigravity source, but redundant
+today. The OpenCode broker's `google` row stays reactive unless an OAuth (not API-key) cred is present.
+
+**Citations:** `google-gemini/gemini-cli` `packages/core/src/code_assist/{types.ts,server.ts,codeAssist.ts,oauth2.ts}`
+(`retrieveUserQuota`, `RetrieveUserQuotaResponse/BucketInfo`, `CODE_ASSIST_ENDPOINT`, OAuth client id),
+`config/storage.ts` + `utils/paths.ts` (`~/.gemini/oauth_creds.json`, `GEMINI_CLI_HOME`),
+`core/contentGenerator.ts` (auth-mode routing); deprecation **verified** at
+`developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals`; API-key
+reactive-only `ai.google.dev/gemini-api/docs/rate-limits`; shape corroboration `steipete/CodexBar`
+`docs/gemini.md`. **Could NOT live-probe** the real `retrieveUserQuota` 200 here — mark fixture/source-
+shape only (several issues report `cloudcode-pa` 403/SERVICE_DISABLED for project-ineligible accounts → degrade cleanly).
