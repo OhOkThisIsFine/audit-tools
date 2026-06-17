@@ -55,11 +55,23 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   the heavy pipeline was only ever ONE producer of `extracted-plan.json`; the lean path is a second producer,
   so it needs no new join point. New grounded fixture + unit/integration tests; both existing structured-audit
   fixtures lack the S7 verdict, so every prior pipeline test stays on the pipeline path. (ARC-ad53dd0d.)
-- **A3+A4 — Move correctness into the tool; unify the two obligation engines.** audit-code expresses the
-  ordered-obligation engine declaratively (PRIORITY[] + registry); remediate re-derives it in a
-  ~2835-line imperative switch → one shared declarative engine. Collapse the ~8 finding_id-keyed record
-  types + 2 coverage ledgers into one canonical `RemediationItem` with typed projections. The redesign
-  track. (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
+- **A3+A4 — Unify the two obligation engines + canonical remediation item. IN PROGRESS** (plan +
+  decomposition: [`a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md)). audit-code is
+  already declarative (a `PRIORITY[]` linear scan over a content-hash staleness DAG); remediate re-derives
+  selection in an imperative guard cascade (`steps/nextStep.ts` `decideNextStepLoop`) with back-edges +
+  internal recursion → collapse to ONE shared declarative engine. **Step 1 DONE** (`4a041d0`): the
+  ordered-selection scan + the `Obligation`/`ObligationState` vocabulary are single-sourced in
+  `@audit-tools/shared` (`findFirstActionableObligation`); audit binds `PRIORITY` onto it.
+  **Scope corrections from recon (durable):** (a) the engines are structurally divergent — audit
+  emit-only / one-unit-per-call vs remediate transition+emit / recursive — so the shared engine grows a
+  transition/emit `advance` loop at the remediate-rewire step (proven by its real consumer, not built
+  consumer-less). (b) A4's "8 finding_id types + 2 ledgers → 1" is **over-specced**: `RemediationItemState`
+  already IS the canonical hub, `TestSpec` was dead (deleted `ee3431e`), `VerificationResult`/`TriageBatch`
+  are thin transients, and `CoverageLedgerEntry`/`RemediationOutcomeItem` are genuinely distinct domains —
+  real A4 = formalize the hub + fold the transients + single-source the disposition vocab; the
+  `RemediationItemState`→`RemediationItem` rename is likely unnecessary ~10-file churn (the name is already
+  accurate). **Remaining:** A4 finish (transients + disposition vocab) + A3 bulk (rewire remediate's cascade
+  onto the shared engine). The redesign track. (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
 - **A8 — Rolling dispatch: one shared core + two co-equal full-rolling drivers (REFRAMED 2026-06-16).**
   NO LONGER "flip a flag / delete the host fallback" — that reading was incoherent with conversation-first
   (in-conversation subagent dispatch is FIRST-CLASS; subscription/no-API users depend on it — memory
