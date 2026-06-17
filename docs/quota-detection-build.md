@@ -49,15 +49,16 @@ Body: `five_hour`/`seven_day` `{utilization, resets_at}`; a normalized **`limits
   `mapUsageToSnapshot`, types). Tests: `tests/claudeOAuthQuotaSource.test.mjs` (13) +
   `compositeQuotaSource.test.mjs` (claudeOAuth default/disable).
 
-## Step C — wire the snapshot into pool construction — NEXT (makes it live)
+## Step C — wire the snapshot into pool construction — ✅ DONE (commit a7eef160)
 
-Find where `CapacityPool[]` is built in each live path and set `quotaSourceSnapshot` by awaiting
-`buildQuotaSource().queryCurrentUsage(buildProviderModelKey(provider, hostModel))`:
-- audit-code: `prepareDispatchArtifacts` / capacity build site.
-- remediate-code: `waveScheduler` / `scheduleWave` capacity build site.
-- `computeDispatchCapacity` (`capacity.ts:254`) and `rollingDispatch.ts:273` already thread
-  `pool.quotaSourceSnapshot` → consumed in `scheduleWave`.
-- Cache in the source means many pool builds in one burst → one probe. Pass a shared instance.
+- **audit-code: already wired.** `buildDispatchPool` (`src/cli/dispatch/quotaPool.ts`) already builds
+  `buildQuotaSource()` and awaits `queryCurrentUsage(poolKey)` into `quotaSourceSnapshot` — so it picked up the
+  Claude proactive source for free via the `buildQuotaSource` default. No edit needed.
+- **remediate-code: wired (parity fix).** `scheduleWave` + `buildConfirmedPools` (`src/steps/dispatch.ts`)
+  previously built pools WITHOUT a snapshot; now build one `buildQuotaSource(...)` per call and `await`
+  `queryCurrentUsage(poolKey)` per pool (async `Promise.all` map) → `quotaSourceSnapshot` populated.
+- `computeDispatchCapacity` (`capacity.ts`) + `scheduler.ts applyQuotaSourceAdjustment` already consume it.
+- The source's ~45s/key cache means many pool builds in one burst → one probe.
 
 ## Step D — cross-provider QuotaSource matrix (the bigger follow-on)
 

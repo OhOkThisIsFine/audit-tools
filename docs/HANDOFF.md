@@ -9,18 +9,21 @@
 
 ## Where things stand
 
-- **`main` @ `c45d1b0f`.** Clean tree, all pushed. **NOT published** — this session's commits sit on main
-  unreleased (mid-program; release when A8 lands + is validated). Last published: `@audit-tools/shared 0.22.0`
+- **`main` @ `a7eef160`.** Clean tree, all pushed. **NOT published** — commits sit on main unreleased
+  (mid-program; release when A8 lands + is validated). Last published: `@audit-tools/shared 0.22.0`
   / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
-- **This session's commits (all green):** `dc4d9c2` A8 step-1 (rolling engine made functional, default-OFF) ·
-  `0fa13d3` codex provider made real · `5518f31` A8 reframe docs · `76604a3` everything-agnostic invariant ·
-  `c45d1b0` quota-signal finding. Green at HEAD: shared 631/0, remediate 1610/0, build+check clean.
-- **A8 was REFRAMED this session** → one shared rolling `acceptNode` core + two co-equal full-rolling drivers
-  (in-conversation subagent dispatch is FIRST-CLASS). And **the proactive Claude quota signal was found.**
-- **Deliberate intermediate state (NOT bugs):** the rolling engine is functional but **default-OFF** (host-fanned
-  wave path intact, nothing broken); codex provider is real but its real agentic run is unvalidated (codex quota
-  resets **Jun 19**); the `acceptNode` extraction + host-subagent driver + the `QuotaSource` are **designed, not
-  yet built**. Program of record: `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)".
+- **Quota detection — Claude PROACTIVE source SHIPPED to the tree (`a7eef160`, green).** The signal was confirmed
+  live end-to-end (200 on this machine) and `ClaudeOAuthQuotaSource` (`packages/shared/src/quota/`) built + wired
+  into BOTH orchestrators' dispatch: audit's `buildDispatchPool` already fed the cascade (so it got it for free via
+  the `buildQuotaSource` default); remediate's `scheduleWave` + `buildConfirmedPools` now populate
+  `quotaSourceSnapshot` too → the scheduler throttles/cools-down from live remaining quota BEFORE a 429. Working
+  doc: `docs/quota-detection-build.md`. Green: shared 648, remediate 1610, audit 2192/1skip, build+check clean.
+- **A8 (reframed earlier this program):** one shared rolling `acceptNode` core + two co-equal full-rolling drivers
+  (in-conversation subagent dispatch is FIRST-CLASS). Engine functional but **default-OFF**.
+- **Deliberate intermediate state (NOT bugs):** rolling engine functional but **default-OFF** (host-fanned wave
+  path intact, nothing broken); codex provider real but its agentic run unvalidated (codex quota resets **Jun 19**);
+  the `acceptNode` extraction + host-subagent driver are **designed, not yet built**. Program of record:
+  `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)".
 
 ## Standing directives (Ethan) — read before deciding anything
 
@@ -34,31 +37,24 @@
   `ask-on-ambiguity-dont-defer-silently`.)
 - **Order of program items is yours** — sequence logically so one refactor doesn't undo another.
 
-## Immediate next: (1) quota detection, THEN (2) the A8 host-subagent driver
+## Immediate next: (1) finish quota detection (cross-provider matrix), or (2) the A8 host-subagent driver
 
-Ethan's directive: **sort out quota detection before resuming the A8 build.** Read these FIRST —
+Ethan's directive was **sort out quota detection before resuming the A8 build** — the **Claude core is now done**
+(`a7eef160`): live-confirmed + `ClaudeOAuthQuotaSource` built + wired into both orchestrators. Two large chunks
+remain; order is yours. Read FIRST — [`docs/quota-detection-build.md`](quota-detection-build.md),
 [`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md), memory
 `conversation-first-subagent-dispatch-first-class`, memory `claude-oauth-usage-quota-endpoint`.
 
-### 1. Quota detection — per-provider `QuotaSource` (everything-agnostic)
-**The proactive Claude quota signal was FOUND this session** (full recipe in memory
-`claude-oauth-usage-quota-endpoint`): `GET https://api.anthropic.com/api/oauth/usage` (Bearer
-`claudeAiOauth.accessToken` from `~/.claude/.credentials.json`, header `anthropic-beta: oauth-2025-04-20`)
-→ `five_hour` / `seven_day` / per-model `seven_day_opus|sonnet` each `{utilization%, resets_at}` +
-`extra_usage`; companion `/api/oauth/profile` → `rate_limit_tier`. `utilization%`+`resets_at` = remaining
-**without a hardcoded ceiling**; per-model = strength-aware routing; `extra_usage` = cost-awareness.
-- **(quick first, needs Ethan's OK to touch the token)** a live confirmation GET on this machine to prove
-  it end-to-end + see current utilization.
-- Build a per-provider **`QuotaSource`** interface: Claude = the endpoint (cache ~30–60s; refresh token on
-  401; degrade on schema change); codex = reactive parse of its dated *"usage limit… try again `<date>`"*
-  stderr → `exhausted-until`; local = unbounded. Wire **utilization-driven spill across pools** +
-  per-model/cost routing into the scheduler. **The binding constraint is quota+rate, NOT max-parallel-`N`**
-  (some IDEs cap subagent count, many don't).
-- **NEW (Ethan, this session): hunt the same robust-as-possible quota signal for EVERY other model source** —
-  codex/OpenAI, gemini, opencode, antigravity, local LLM, other IDEs (Cursor has an org admin API). Mirror the
-  Claude discovery: prefer a proactive endpoint > reactive dated-limit parse > consumption-estimate; document a
-  per-provider QuotaSource matrix; robust-as-possible per source, graceful degrade. (Backlog: *Cross-IDE/provider
-  quota detection*.)
+### 1. Finish quota detection — the cross-provider `QuotaSource` matrix (everything-agnostic)
+The Claude proactive source is DONE + wired (details: `docs/quota-detection-build.md`). REMAINING — hunt the same
+robust-as-possible quota signal for EVERY other model source: codex/OpenAI, gemini, opencode, antigravity, local
+LLM, other IDEs (Cursor has an org admin API). Mirror the Claude discovery: prefer a **proactive endpoint >
+reactive dated-limit parse > consumption-estimate**; add each as a `QuotaSource` (slot into `buildQuotaSource`
+`additionalSources`, or as a provider-gated default like the Claude one); document a per-provider matrix;
+robust-as-possible per source, graceful degrade. codex's reactive *"usage limit… try again `<date>`"* stderr →
+`exhausted-until` is mostly already in `errorParsing.ts` + the learned cooldown — wrap it as a `QuotaSource`.
+Then wire **utilization-driven spill across pools** + per-model/cost routing into the scheduler. **The binding
+constraint is quota+rate, NOT max-parallel-`N`.** (Backlog: *Cross-IDE/provider quota detection*.)
 
 ### 2. THEN the A8 host-subagent full-rolling driver (the meaty build — start fresh)
 Extract the shared **`acceptNode`** core (`acceptNodeWorktree` out of `dispatchNodeWithWorktree`) → add an
