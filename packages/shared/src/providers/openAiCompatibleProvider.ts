@@ -19,6 +19,16 @@ const DEFAULT_REFERENCED_FILES_MAX = 24;
 /** Default completion token budget when the config does not set one. */
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
 
+/**
+ * The orchestrator's reserved control-plane / artifact root. A worker edits CODE,
+ * never the tool's own artifact tree. Models frequently echo the result file (and
+ * occasionally other artifacts) into files[] because the embedded prompt says
+ * "write your result to <path>"; committing those into the worktree collides with
+ * the live artifacts on merge. Any files[] entry under this dir is skipped — the
+ * result still lands via the `result` channel / resultPath.
+ */
+const CONTROL_PLANE_DIR = ".audit-tools";
+
 /** The single-shot worker output contract the model must return. */
 interface WorkerOutput {
   files?: Array<{ path?: unknown; content?: unknown }>;
@@ -180,6 +190,14 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       if (typeof file?.path !== "string" || typeof file?.content !== "string") {
         return fail("openai-compatible response files[] entries must be { path: string, content: string }.");
       }
+      // Never let a worker write into the orchestrator's control plane via files[]
+      // (the result has its own channel). This keeps the worktree commit to genuine
+      // code edits, so the cherry-pick merge doesn't collide with the live artifacts.
+      const relPath = file.path.replace(/\\/g, "/").replace(/^\.\//, "");
+      if (relPath === CONTROL_PLANE_DIR || relPath.startsWith(`${CONTROL_PLANE_DIR}/`)) {
+        await this.appendStderr(input.stderrPath, `skipped control-plane path in files[]: ${file.path}`);
+        continue;
+      }
       const abs = safeResolveInRepo(input.repoRoot, file.path);
       if (!abs) {
         return fail(`openai-compatible response tried to write outside the worktree: ${file.path}`);
@@ -292,7 +310,9 @@ const SINGLE_SHOT_SYSTEM_PROMPT =
   "repository root and `content` is the COMPLETE new contents of that file; and " +
   '"result" — the exact JSON value the task instructions tell you to write to ' +
   "the result file (the run's result artifact / item results). Include every " +
-  "file you change in `files`. Output only the JSON object.";
+  "file you change in `files`, but do NOT put the result artifact, the result " +
+  "file, or any .audit-tools/ path in `files` — the result belongs ONLY in the " +
+  "`result` key. Output only the JSON object.";
 
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
