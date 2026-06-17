@@ -654,21 +654,29 @@ quota+rate, NOT a max-parallel-subagents `N`** (Ethan, 2026-06-16). Caveats: und
 may store creds in the keychain, not the file — degrade if absent). Full recipe + confirmed shape: memory
 `claude-oauth-usage-quota-endpoint`; build doc: `docs/quota-detection-build.md`.
 
-**NEXT — hunt the same robust-as-possible quota signal for EVERY other model source (Ethan,
-2026-06-16).** Mirror the Claude discovery across the whole pool so each provider gets the
-best available `QuotaSource`, preferring **proactive endpoint > reactive dated-limit parse >
-local consumption-estimate**, always degrading safely:
-- **codex / OpenAI:** does the ChatGPT/codex backend expose an analogous usage endpoint
-  readable with codex's stored creds (`~/.codex/` auth)? If not, the reactive dated
-  "usage limit… try again `<date>`" stderr is the floor. (Codex creds/auth recon needed.)
-- **gemini (Google), opencode, antigravity, VS Code tasks:** find each one's usage/limit
-  readout (endpoint / file / CLI / reactive).
-- **Cursor & other IDEs:** Cursor has an org-level Admin API (admin key); most BYOK tools
-  delegate to the underlying provider's signal.
-- **local LLM:** effectively unbounded (local cost/latency model, not a remote quota).
-Deliverable: a per-provider QuotaSource matrix (signal type + recipe + degrade path) feeding
-the everything-agnostic `QuotaSource` interface. This is the generalization of the Claude
-unlock to the full pool — required for cost/quota/strength-aware cross-pool dispatch.
+**RESEARCH DONE (2026-06-16) → [`docs/cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md)**
+— the per-provider QuotaSource matrix (signal tier + recipe + token source + degrade + citations),
+mostly read straight from each tool's open source (the way the Claude endpoint was found). Verdicts:
+- **codex / OpenAI: PROACTIVE GET `chatgpt.com/backend-api/wham/usage`** (Bearer + `ChatGPT-Account-Id`
+  from `~/.codex/auth.json`) → primary(5h)/secondary(weekly) `used_percent`+`reset_at`. HIGH (codex Rust
+  source + URL-pin test + 5 tools). Even better than Claude (proactive GET *and* `x-codex-*` headers).
+- **opencode: FEDERATES** — no own quota; a token broker. Resolve active provider from
+  `~/.local/share/opencode/auth.json` + `account.json`, delegate to the underlying source (anthropic→reuse
+  Claude usage; openai→reuse codex wham; copilot→copilot_internal/user; google→reactive).
+- **antigravity (Gemini): proactive POST `cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels`**
+  (or the local Language-Server-over-localhost, lower ToS risk) → `remainingFraction`+`resetTime`; token in
+  `%APPDATA%/Antigravity/User/globalStorage/state.vscdb`. MED proactive / HIGH dated-error. Raw Gemini API =
+  reactive-only (Google staff: no proactive header).
+- **VS Code Copilot: PROACTIVE GET `api.github.com/copilot_internal/user`** → `quota_snapshots.premium_interactions`
+  `{percent_remaining, unlimited}` + `quota_reset_date`. HIGH endpoint; token is DPAPI-encrypted in `state.vscdb`
+  (extract via the `gh`/`copilot` CLI token on Windows).
+- **Cursor / other IDEs / local LLM:** Cursor = org Admin API; most BYOK = delegate to provider; local = unbounded.
+
+**REMAINING = implementation:** build one `QuotaSource` per backend (like `claudeOAuthQuotaSource.ts`, same
+hermeticity guard + no-refresh-in-source degrade), an opencode token-broker that delegates, and wire
+utilization-driven cross-pool spill + per-model/cost routing into the scheduler. **Security:** rotate the
+Antigravity token (a research subagent decoded a fragment); read-only token use only; ToS caveats (Antigravity,
+Anthropic-via-OpenCode) noted in the doc.
 
 Part of the same push: **detect and dispatch to CLI agents as additional pools.** The
 heterogeneous-dispatch machinery (`computeDispatchCapacity`, `CapacityPool`) can already
