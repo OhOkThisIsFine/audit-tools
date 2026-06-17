@@ -17,7 +17,8 @@
  * never via a shell — all owned by the shared `runAllowlistedReadOnlyCommand`
  * runner. Anything off the allowlist is *skipped* (recorded, not run) and the
  * finding falls back to tier-1 grounding. The whole pass can be disabled with
- * `AUDIT_CODE_DISABLE_ANCHORS=1`.
+ * `AUDIT_CODE_DISABLE_ANCHORS=1`; the per-anchor timeout (60s default) can be
+ * raised with `AUDIT_CODE_ANCHOR_TIMEOUT_MS` for slow checks on large repos.
  */
 import { availableParallelism } from "node:os";
 import {
@@ -42,8 +43,22 @@ import type {
 // single-sourced in shared (drift-plan E2; CRIT arg-validation).
 export { isAllowedAnchorCommand, ANCHOR_ALLOWLIST, GIT_READONLY_SUBCOMMANDS };
 
-/** Per-anchor wall-clock budget; a slower command is killed and inconclusive. */
+/** Default per-anchor wall-clock budget; a slower command is killed and inconclusive. */
 export const ANCHOR_TIMEOUT_MS = ALLOWLISTED_EXEC_TIMEOUT_MS;
+
+/**
+ * The effective per-anchor timeout. The 60s default suits the common anchors
+ * (madge/grep/rg/git) but a legitimately slow check on a large repo would be
+ * silently killed → `inconclusive`; `AUDIT_CODE_ANCHOR_TIMEOUT_MS` (a positive
+ * integer in ms) lets an operator raise it per run without code changes. Read
+ * per-call to mirror `AUDIT_CODE_DISABLE_ANCHORS` (no import-time capture).
+ */
+export function resolveAnchorTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const override = Number(env.AUDIT_CODE_ANCHOR_TIMEOUT_MS);
+  return Number.isFinite(override) && override > 0 ? override : ANCHOR_TIMEOUT_MS;
+}
 
 /**
  * Bounded concurrency for the ingest grounding pass. Anchors spawn child
@@ -161,7 +176,8 @@ export async function verifyFindingAnchor(
     };
   }
 
-  const outcome = await run(anchor.command, repoRoot, ANCHOR_TIMEOUT_MS);
+  const timeoutMs = resolveAnchorTimeoutMs();
+  const outcome = await run(anchor.command, repoRoot, timeoutMs);
   const display = anchor.command.join(" ");
   if (outcome.spawn_error) {
     return {
@@ -173,7 +189,7 @@ export async function verifyFindingAnchor(
   if (outcome.timed_out) {
     return {
       status: "inconclusive",
-      summary: `anchor \`${display}\` timed out after ${ANCHOR_TIMEOUT_MS}ms`,
+      summary: `anchor \`${display}\` timed out after ${timeoutMs}ms`,
       evidence: tailEvidence(outcome.output),
     };
   }
