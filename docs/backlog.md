@@ -72,9 +72,9 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   `namespace` tools). **`rolling_engine` flipped default-ON `8819713`** — rolling is the implement default;
   the wave is opt-out (`rolling_engine:false`). **Remaining:** (a) audit-code symmetric wiring of
   `runRollingDispatch` (still dormant); (b) surface `openai-compatible` as a confirmed pool so INV-QD-14
-  cross-pool spill fires e2e (see *Cross-IDE/provider quota detection* below); (c) the
-  worktree-walks-up-to-parent-repo bug (*Deferred fixes* below); (d) harden worktree-branch reuse across a
-  `rate_limited` re-queue. Plan: `docs/a8-rolling-cutover-plan.md`. (ARC-f378135d family.)
+  cross-pool spill fires e2e (see *Cross-IDE/provider quota detection* below); (c) harden worktree-branch
+  reuse across a `rate_limited` re-queue. *(The worktree-walks-up-to-parent-repo foot-gun is FIXED: `createWorktree`
+  now asserts `git rev-parse --show-toplevel` == the target root and refuses rather than escaping to an ancestor.)* Plan: `docs/a8-rolling-cutover-plan.md`. (ARC-f378135d family.)
 - **B1 / B2 / B3 — greenlit** (the magic-numbers, diff-based-re-review, and staleness-cascade friction
   items in *Known friction* below; now accepted work, not just logged friction).
 - **B4 — Hard-exclude tool-refuted findings.** A tier-2 REFUTED finding (e.g. madge-disproven cycle) is
@@ -463,18 +463,6 @@ fully closed is R1 (wire the rolling engine), tracked above under *Self-audit 20
   the "falls through → throws" assertion not depend on dispatch global state.
 
 ## Deferred fixes (product bugs)
-
-### Rolling worktree creation walks UP to the parent git repo when the target root isn't a git repo
-
-**Symptom (surfaced 2026-06-17 during the `rolling_engine` default-ON flip's test sweep):** the host-subagent
-rolling path (`prepareHostRollingDispatch` → `createNodeWorktree` → `createWorktree` → `git worktree add`)
-runs in the target repo root; when that root is NOT itself a git repo, `git` walks UP to the nearest
-enclosing repo and creates the worktree/branch THERE. In the test sweep this polluted the monorepo
-(`C:\Code\audit-tools`) with leaked `remediate-*` branches/worktrees (and then collided on re-run). Real
-remediation targets are always git repos, so it doesn't bite in production — but it's a latent foot-gun.
-**Fix:** before creating worktrees, assert the resolved git top-level (`git rev-parse --show-toplevel`)
-equals the intended repo root and refuse/error if it escapes, rather than silently operating on an ancestor
-repo. (The flip's tests now pin `rolling_engine:false` to avoid the path — a workaround, not the fix.)
 
 ### Something keeps opening the OpenCode app/window unprompted (Windows) — find & fix
 
