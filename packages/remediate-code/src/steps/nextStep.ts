@@ -24,9 +24,7 @@ import {
   buildConfirmedPools,
   createWorktree,
   removeWorktree,
-  mergeWorktree,
-  verifyNodeInWorktree,
-  commitWorktree,
+  acceptNodeWorktree,
   ensureWorktreeNodeModules,
   worktreePath,
   worktreeBranchForBlock,
@@ -689,9 +687,6 @@ export async function driveRollingImplementDispatch(
     const branch = worktreeBranchForBlock(block.block_id, runId);
     const wt = worktreePath(root, block.block_id, runId);
     const resultPath = resultPathByBlock.get(block.block_id)!;
-    let verifyPassed = false;
-    let merged = false;
-    let outcome: RollingDispatchResult<{ block_id: string }>["outcome"] = "error";
     try {
       // Best-effort clean of any stale worktree dir from a prior attempt before
       // creating this node's isolated worktree. NOTE: a rate_limited re-queue can
@@ -711,51 +706,31 @@ export async function driveRollingImplementDispatch(
         worktreeRoot: wt,
         resultPath,
       });
-      outcome = result.outcome;
-      if (result.outcome === "success") {
-        // Commit the worker's edits onto the branch — TOOL-owned and deterministic
-        // (never the worker/host) — so the branch diff is the write-scope ground
-        // truth and `mergeWorktree` has a real commit to cherry-pick.
-        const commit = commitWorktree(wt, `remediate ${block.block_id} (${runId})`);
-        if (commit.error) {
-          // Could not commit the worker's edits → cannot safely land; drop it.
-          removeWorktree(root, wt);
-          outcome = "error";
-        } else if (!commit.committed) {
-          // Worker reported success but made no tracked edits — nothing to verify or
-          // merge. The deterministic merge reads the result file and adjudicates
-          // (e.g. a resolved_no_change claim must carry executable evidence).
-          removeWorktree(root, wt);
-        } else {
-          // Per-node verify in the worktree BEFORE accepting the change. Targeted
-          // commands come from the block's findings; an empty set still verifies
-          // (the deterministic merge re-checks at the central build).
-          const targeted = uniqueStrings(
-            block.items.flatMap((id) => {
-              const finding = state.plan?.findings.find((f) => f.id === id);
-              return finding?.targeted_commands ?? [];
-            }),
-          );
-          const verify = targeted.length > 0
-            ? verifyNodeInWorktree(wt, targeted)
-            : { passed: true, output: "" };
-          verifyPassed = verify.passed;
-          if (verify.passed) {
-            const mergeRes = mergeWorktree(root, wt, branch);
-            merged = mergeRes.success;
-            if (!mergeRes.success) {
-              outcome = "error";
-            }
-          } else {
-            // Verify failed: do not merge; drop the worktree so the main tree stays clean.
-            removeWorktree(root, wt);
-            outcome = "error";
-          }
-        }
-      } else {
-        removeWorktree(root, wt);
-      }
-      nodeOutcomes.push({ block_id: block.block_id, outcome, verify_passed: verifyPassed, merged });
+      // Shared post-worker lifecycle (commit → verify → merge), identical to the
+      // host-subagent driver's `accept-node` callback. Records the LIFECYCLE
+      // outcome but returns the worker's TRANSPORT result to the engine (so a
+      // rate_limited worker re-queues; a verify-failure routes to triage via merge).
+      const targeted = uniqueStrings(
+        block.items.flatMap((id) => {
+          const finding = state.plan?.findings.find((f) => f.id === id);
+          return finding?.targeted_commands ?? [];
+        }),
+      );
+      const accept = acceptNodeWorktree({
+        root,
+        runId,
+        blockId: block.block_id,
+        worktreeRoot: wt,
+        branch,
+        workerOutcome: result.outcome,
+        targetedCommands: targeted,
+      });
+      nodeOutcomes.push({
+        block_id: block.block_id,
+        outcome: accept.outcome,
+        verify_passed: accept.verifyPassed,
+        merged: accept.merged,
+      });
       return result;
     } catch (err) {
       removeWorktree(root, wt);
