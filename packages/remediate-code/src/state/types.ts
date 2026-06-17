@@ -116,20 +116,6 @@ export interface ClosingPlan {
   closing_action_preview?: ClosingActionPreview;
 }
 
-export interface VerificationResult {
-  finding_id: string;
-  passed: boolean;
-  reason?: string[];
-}
-
-export interface TriageBatch {
-  items: {
-    finding_id: string;
-    failure_reason: string;
-    last_successful_step: string;
-  }[];
-}
-
 export interface CoverageLedgerEntry {
   finding_id: string;
   title?: string;
