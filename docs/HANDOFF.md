@@ -9,13 +9,17 @@
 
 ## Where things stand
 
-- **`main`: latest = rolling_engine default-ON flip `8819713` (+ docs on top; `git log` for HEAD).**
-  This sprint landed, green at every commit: the **`openai-compatible` provider** `f74c53c` (+ control-plane
-  guard `2613c7c`), the **in-process provider engine wired into `decideNextStep`** `d108e90`, and the
-  **`rolling_engine` default-ON flip + fixture sweep** `8819713`. Clean tree, build+check green, all three
-  suites green (shared 702 / audit 2192·1skip / remediate 1622·1skip). **NOT published — publish HELD per
-  Ethan (2026-06-17).** Last published: `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` /
-  `remediator-lambda 0.27.0` (global bins current to that — they DON'T yet have this sprint's work).
+- **`main`: go-forward-program run in progress (`git log` for HEAD; latest = B1 `c81d4a3`).**
+  Green at every commit. This run landed, in order: worktree walk-up guard `9484e60`; **openai-compatible
+  surfaced as a real 2nd pool** + per-slot dispatcher routing `f92ed1b`; rate_limited re-queue worktree reset
+  `8ba3722`; **B4 quarantine-exclude tool-REFUTED findings** `56e80bf`; shared auto-resolve flake guard
+  `953bb51`; **B8 resolved** (fileless same-category collapse is correct-by-design — doc + guard) `0a8cf35`;
+  **B1 anchor-timeout config + magic-numbers audit** `c81d4a3`. **NOT published — publish HELD per Ethan
+  (2026-06-17).** Last published: `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` /
+  `remediator-lambda 0.27.0` (global bins lag this run's work).
+  - **Verify true-green:** the shared `codex-antigravity-providers.test.mjs` auto-resolve flake is FIXED
+    (`953bb51` — skips for ANY agent CLI on PATH). The remaining known flake: audit-code's
+    `phase-plan.test.ts` intermittent hermeticity (backlog). CLAUDECODE must still be unset for gates.
 
 - **A8 — the rolling cutover is effectively DONE for remediate.** Both rolling drivers on the shared
   `acceptNodeWorktree` core are validated end-to-end + are the DEFAULT now:
@@ -45,31 +49,30 @@
 - **Order of program items is yours** — sequence so one refactor doesn't undo another.
 - **Publish is HELD** (2026-06-17) — accumulate on main; do not `release:*`/publish until Ethan says.
 
-## Immediate next: the go-forward program (A8 remediate side is done)
+## Immediate next: the go-forward program (DONE this run: A8 loose ends ×3, B1, B4, B8)
 
-Order is yours. Suggested: **A1** fast path → **A3+A4** unify the two obligation engines + canonical
-`RemediationItem` (the big foundational refactor) → **B1** magic numbers → **B2+B3** diff re-reviews +
-obligation-set staleness → **B4** hard-exclude tool-refuted findings → **B8** finding-merge discriminator →
-**A5+A11** dependency policy + vetted manifest parsers → **A6** kill schema dual-encoding → **A12**
-single-package collapse (do LAST — it reorganizes packaging) → **A7** validate host machinery across hosts.
-Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md` → "Accepted go-forward program".
+Order is yours. **Remaining, suggested order:** **A1** fast path → **A3+A4** unify the two obligation
+engines + canonical `RemediationItem` (the big foundational refactor) → **B2+B3** diff re-reviews +
+obligation-set staleness (do AFTER A3+A4 so they build on the unified engine) → **A5+A11** dependency policy
++ vetted manifest parsers → **A6** kill schema dual-encoding → **A8(a)** audit-code symmetric rolling wiring
+→ **A12** single-package collapse (do LAST — it reorganizes packaging) → **A7** validate host machinery
+across hosts. Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md` → "Accepted go-forward program".
 
-### A8 remaining loose ends (smaller; fold in opportunistically)
-- **audit-code symmetric wiring** — audit-code's `runRollingDispatch` is still dormant (0 live callers),
-  the mirror of what was just done for remediate. Wire it into the audit live path with the same flag-gated
-  pattern. (Cutover plan step 5.)
-- **NIM as the real 2nd pool for INV-QD-14 cross-pool spill (a-residual).** The provider now EXISTS, so a
-  real second pool is finally buildable. Remaining: surface `openai-compatible` as a *confirmed pool* in
-  `buildConfirmedPools` / provider-confirmation (it's config-gated, NOT PATH-probed, so `discoverProviders`
-  doesn't surface it today) so the proactive spill (`selectProvider`) can fire end-to-end alongside the
-  Claude pool. Ties to FINDING-020 / "dispatch to CLI/API agents as additional pools".
-- **Worktree walks up to the parent repo when run in a non-git dir (latent bug).** Surfaced in the flip's
-  test sweep: the host-subagent rolling path runs `git worktree add` and, with no git repo at the target
-  root, git walks UP and pollutes the parent repo (`C:\Code\audit-tools`) with leaked `remediate-*`
-  branches/worktrees. Real targets are always git repos, but the rolling path should assert the worktree's
-  git root == the intended repo root (or refuse) rather than escape. Logged in backlog.
-- **Harden worktree-branch reuse across a `rate_limited` re-queue** in the in-process driver (cutover plan
-  step 6).
+**Done this run (committed, green):** B1 (anchor-timeout config + full magic-numbers audit), B4
+(quarantine-exclude refuted findings), B8 (resolved — collapse correct-by-design). A8 loose ends below are
+3/4 done.
+
+### A8 remaining loose ends
+- **DONE:** worktree walk-up guard (`9484e60`); `openai-compatible` surfaced as a confirmed 2nd pool +
+  per-slot dispatcher routing (`f92ed1b`); rate_limited re-queue worktree+branch reset (`8ba3722`).
+- **REMAINING — audit-code symmetric wiring** — audit-code's `runRollingDispatch` is still dormant (0 live
+  callers), the mirror of remediate's. Wire it into the audit live path with the same flag-gated pattern.
+  (Cutover plan step 5. Note: audit dispatch is read-only review packets → AuditResult, NOT worktree edits,
+  so it does NOT need the worktree engine — just a provider-backed packet dispatcher + routing.)
+- **REMAINING — INV-QD-14 b-residual:** the {host-subagent (Claude) + NIM} HYBRID topology (host-subagent
+  driver offloading spilled nodes to the in-process NIM pool) + a live cross-provider spill run. The
+  in-process-driver spill path is now mechanically wired (see `f92ed1b`); the host-subagent hybrid is the
+  larger FINDING-020 capstone.
 
 ## Pointers
 - A8 working docs: [`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md) (remaining = steps 5–6 +
