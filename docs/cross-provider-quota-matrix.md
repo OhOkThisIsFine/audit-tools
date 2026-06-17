@@ -158,6 +158,17 @@ Settings→Models bar is a documented-unreliable oracle (shows 100% while limite
 discuss.ai.google.dev/t/40576 (no proactive header), /t/134004 (dated error), /t/125971 (bar unreliable);
 `ink1ing/anti-api` (ToS prohibition).
 
+**Antigravity CLI is the unified migration target (2026-06-17) + community has already solved its quota.**
+Google is folding gemini-cli's individual tiers AND the IDE consumers into **Antigravity CLI** (`agy`,
+`google-antigravity/antigravity-cli`) by 2026-06-18. Antigravity uses the SAME dual-limit shape as
+Codex/Claude (5h rolling + weekly hard-cap, per-model). Multiple community tools already poll its quota
+proactively — **`skainguyen1412/antigravity-usage`** (its README states a "Dual-Fetch": local Antigravity
+**Language Server** first, then the Google **Cloud Code API** fallback — i.e. exactly the two routes above),
+**`fuelcheck`** ("Gemini 3.1 Pro: 62% remaining (resets in 3h 14m)"), **Antigravity Cockpit**, and
+**`steipete/CodexBar` #1178**. So the future-proof Gemini-family `QuotaSource` is **Antigravity (CLI)**, not
+gemini-cli — reuse the §3 local-LS/cloudcode-pa recipe. BUILD CAVEAT: the CLI's token store likely differs
+from the IDE's `state.vscdb` (separate app) — resolve `agy`'s credential path before building.
+
 ---
 
 ## 4. VS Code — GitHub Copilot — PROACTIVE (HIGH endpoint / MED token)
@@ -334,6 +345,14 @@ proactive quota source.
   secret (env/config only; never log). **Flagged unverified:** no programmatic credit-balance API
   was found in any NVIDIA doc or forum thread — asserting its nonexistence is a *negative* finding
   from absence-in-docs, not a positive confirmation from NVIDIA that one will never exist.
+- **Community cross-check (2026-06-17 — "did anyone else solve it?"): NO.** The negative finding is
+  now corroborated by users actively asking for it and getting no answer: forum *"Cannot find the
+  amount of credits left on NIM API"* (t/337051) and *"Usage tracking in nvidia nim api"* (t/367730,
+  Apr 2026 — *"no way to monitor total token consumption, per-model usage, or usage over time"*). The
+  **NGC** Python SDK only exposes **storage** quota (per-ACE), not inference/credits. No third-party
+  tool polls a proactive NIM usage endpoint (GitHub "NIM monitor" hits are all GPU/Prometheus infra
+  exporters). LiteLLM **does** confirm NIM returns a `Retry-After` on its upstream 429 (issue #21553)
+  — so the reactive rung is real; the proactive rung genuinely does not exist.
 
 ---
 
@@ -361,6 +380,12 @@ POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota
 **Mapping:** `remaining_pct = min remainingFraction across buckets` (least-remaining binds);
 `reset_at` = that bucket's `resetTime`; `requests_remaining` = parse(`remainingAmount`). Free cap
 documented 60 rpm + 1,000 model-req/day. Refresh (host-owned, on 401): `oauth2.googleapis.com/token`.
+
+**Community-confirmed (2026-06-17):** `/usage` IS backed by `retrieveUserQuota` (gemini-cli issue
+#27363). **Important parse caveat from that bug:** when a bucket is at 100% the API **OMITS
+`remainingAmount`** and returns `remainingFraction: 1` alone — gemini-cli's own parser gates on
+`bucket.remainingAmount` truthy and so breaks at full quota. Our mapping keys on `remainingFraction`
+(treat `remainingAmount` as optional/absent-at-100%), so it sidesteps that bug by construction.
 
 **Degrade:** retrieveUserQuota → `loadCodeAssist` tier+cap only (no live remaining) → 429
 `RESOURCE_EXHAUSTED` + `RetryInfo.retryDelay`. API-key/Vertex tiers: reactive from the start.

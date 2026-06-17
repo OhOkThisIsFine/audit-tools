@@ -725,8 +725,13 @@ Copilot token is file-reachable). Claude was already live-confirmed. Read-only t
   SQLite scrape). BUT its individual/free/Pro/Ultra tiers **stop serving on gemini-cli 2026-06-18** (VERIFIED
   vs Google's deprecation page); survivors are Std/Ent only, on the SAME cloudcode-pa family the existing
   `AntigravityQuotaSource` already covers (Google steers consumers to Antigravity). → **don't build** unless a
-  Std/Ent gemini-cli pool becomes a real dispatch target.
-- **NVIDIA NIM:** OpenAI-compatible; **no proactive quota in either mode**. Hosted (`integrate.api.nvidia.com`)
+  Std/Ent gemini-cli pool becomes a real dispatch target. **Community cross-check (2026-06-17): the
+  future-proof Gemini-family target is Antigravity CLI (`agy`)** — folds in gemini-cli + IDE consumers by
+  2026-06-18, same 5h+weekly dual-limit as Codex/Claude; community tools (`skainguyen1412/antigravity-usage`,
+  `fuelcheck`, Antigravity Cockpit, CodexBar #1178) already poll it via the local-LS / cloudcode-pa dual route
+  our `AntigravityQuotaSource` uses. Build caveat: `agy`'s token store likely ≠ the IDE's `state.vscdb`.
+- **NVIDIA NIM:** OpenAI-compatible; **no proactive quota in either mode** (community-confirmed: forum
+  threads explicitly ask for a credits/usage API and get none; NGC SDK exposes only *storage* quota). Hosted (`integrate.api.nvidia.com`)
   = reactive 429 + `Retry-After` (no `X-RateLimit-*`, no credits GET); self-hosted = unbounded local pool
   (`/v1/metrics` is vLLM perf telemetry, not quota). → no `QuotaSource`; slot as a reactive-hosted /
   unbounded-local **pool**. NIM is a strong candidate for the a-residual "real 2nd pool to spill into"
