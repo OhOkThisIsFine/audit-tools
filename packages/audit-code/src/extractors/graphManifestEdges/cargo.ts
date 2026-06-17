@@ -1,79 +1,32 @@
 import type { GraphEdge } from "@audit-tools/shared";
 import { graphEdge, isCargoManifestPath } from "../graphPathUtils.js";
 import { WorkspacePattern, addWorkspacePattern, normalizeWorkspacePattern, workspacePatternMatchesManifest } from "./workspace.js";
-import { stripTomlComment, tomlArrayIsClosed, tomlStringArrayValues } from "./toml.js";
+import { tomlTable, tomlStringArray } from "./toml.js";
 
 const CARGO_WORKSPACE_MEMBER_EDGE_CONFIDENCE = 0.87;
 
+/**
+ * Cargo `[workspace]` member/exclude globs. Parsed with a vetted TOML parser
+ * (`smol-toml`) rather than a line scanner, so every spelling of the table
+ * resolves to the same shape — `[workspace]` headers, the dotted
+ * `workspace.members = [...]`, and the inline `workspace = { members = [...] }`
+ * form all yield `workspace.members` — instead of silently dropping the dotted
+ * and inline forms (the dropped-edge bug). `exclude` entries are emitted as
+ * `!`-prefixed negation patterns. Malformed TOML degrades to `[]` (the graph
+ * builder never throws on a bad manifest).
+ */
 export function cargoWorkspacePatterns(content: string): WorkspacePattern[] {
+  const workspace = tomlTable(content, "workspace");
+  if (!workspace) {
+    return [];
+  }
   const patterns: WorkspacePattern[] = [];
-  let currentSection: string | undefined;
-  let collectingKey: "members" | "exclude" | undefined;
-  let collectedValue = "";
-
-  const flushCollectedValue = (): void => {
-    if (!collectingKey) {
-      return;
-    }
-    for (const value of tomlStringArrayValues(collectedValue)) {
-      addWorkspacePattern(
-        patterns,
-        collectingKey === "exclude" ? `!${value}` : value,
-      );
-    }
-    collectingKey = undefined;
-    collectedValue = "";
-  };
-
-  for (const rawLine of content.split(/\r?\n/)) {
-    const withoutComment = stripTomlComment(rawLine);
-    const trimmed = withoutComment.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-
-    const sectionMatch = /^\[([^\]]+)\]\s*$/.exec(trimmed);
-    if (sectionMatch?.[1]) {
-      if (collectingKey) {
-        flushCollectedValue();
-      }
-      currentSection = sectionMatch[1].trim();
-      continue;
-    }
-
-    if (collectingKey) {
-      collectedValue = `${collectedValue}\n${trimmed}`;
-      if (tomlArrayIsClosed(collectedValue)) {
-        flushCollectedValue();
-      }
-      continue;
-    }
-
-    if (currentSection !== "workspace") {
-      continue;
-    }
-
-    const arrayMatch = /^(members|exclude)\s*=\s*(.+)$/.exec(trimmed);
-    if (!arrayMatch?.[1] || !arrayMatch[2]) {
-      continue;
-    }
-
-    const value = arrayMatch[2].trim();
-    if (!value.startsWith("[")) {
-      continue;
-    }
-
-    collectingKey = arrayMatch[1] as "members" | "exclude";
-    collectedValue = value;
-    if (tomlArrayIsClosed(collectedValue)) {
-      flushCollectedValue();
-    }
+  for (const member of tomlStringArray(workspace.members)) {
+    addWorkspacePattern(patterns, member);
   }
-
-  if (collectingKey) {
-    flushCollectedValue();
+  for (const excluded of tomlStringArray(workspace.exclude)) {
+    addWorkspacePattern(patterns, `!${excluded}`);
   }
-
   return patterns;
 }
 

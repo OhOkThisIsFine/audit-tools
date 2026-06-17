@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 
 const { stripJsonComments, removeTrailingJsonCommas, parseJsoncObject } =
   await import("../src/extractors/graphManifestEdges/jsonc.ts");
-const { stripYamlComment, unquoteYamlScalar, splitYamlInlineList } =
+const { parseYamlSafe, yamlStringArray, collectYamlStringScalars } =
   await import("../src/extractors/graphManifestEdges/yaml.ts");
-const { stripTomlComment, tomlArrayIsClosed, tomlStringArrayValues } =
+const { parseTomlSafe, tomlStringArray } =
   await import("../src/extractors/graphManifestEdges/toml.ts");
 const { stripGoLineComment, splitGoWorkspaceSpecifiers } =
   await import("../src/extractors/graphManifestEdges/go.ts");
@@ -46,46 +46,39 @@ test("parseJsoncObject parses JSONC with trailing commas and comments", () => {
   assert.deepEqual(result, { a: 1, b: 2 });
 });
 
-// ── TOML parser ──────────────────────────────────────────────────────────────
+// ── TOML parser (vetted: smol-toml) ──────────────────────────────────────────
 
-test("tomlStringArrayValues returns array elements from a quoted string array", () => {
-  const result = tomlStringArrayValues('["crates/a", "crates/b"]');
-  assert.deepEqual(result, ["crates/a", "crates/b"]);
+test("parseTomlSafe parses a table and degrades to {} on malformed input", () => {
+  assert.deepEqual(parseTomlSafe('[workspace]\nmembers = ["a", "b"]\n').workspace, {
+    members: ["a", "b"],
+  });
+  // Malformed TOML must never throw — the graph builder treats it as no edges.
+  assert.deepEqual(parseTomlSafe("this is = = not toml ["), {});
 });
 
-test("tomlStringArrayValues handles single-quoted values", () => {
-  const result = tomlStringArrayValues("['a', 'b']");
-  assert.deepEqual(result, ["a", "b"]);
+test("tomlStringArray coerces a scalar, an array, and rejects non-strings", () => {
+  assert.deepEqual(tomlStringArray("tests"), ["tests"]); // bare scalar → [s]
+  assert.deepEqual(tomlStringArray([" a ", "b", 3, null]), ["a", "b"]); // trims, drops non-strings
+  assert.deepEqual(tomlStringArray(undefined), []);
 });
 
-test("tomlArrayIsClosed returns true for a closed array", () => {
-  assert.equal(tomlArrayIsClosed("[a, b]"), true);
+// ── YAML utilities (vetted: yaml) ────────────────────────────────────────────
+
+test("parseYamlSafe parses a document and degrades to undefined on malformed input", () => {
+  assert.deepEqual(parseYamlSafe("packages:\n  - packages/a\n").packages, ["packages/a"]);
+  // A tab-indented block is invalid YAML; must degrade, never throw.
+  assert.equal(parseYamlSafe("packages:\n\t- bad-tab-indent"), undefined);
 });
 
-test("tomlArrayIsClosed returns false for an open array", () => {
-  assert.equal(tomlArrayIsClosed("[a, b"), false);
+test("yamlStringArray coerces a scalar, a sequence, and rejects non-strings", () => {
+  assert.deepEqual(yamlStringArray("packages/*"), ["packages/*"]);
+  assert.deepEqual(yamlStringArray([" a ", "b", 3]), ["a", "b"]);
+  assert.deepEqual(yamlStringArray(undefined), []);
 });
 
-// ── YAML utilities ───────────────────────────────────────────────────────────
-
-test("splitYamlInlineList parses unquoted items", () => {
-  const result = splitYamlInlineList("[packages/a, packages/b]");
-  assert.deepEqual(result, ["packages/a", "packages/b"]);
-});
-
-test("splitYamlInlineList parses quoted items", () => {
-  const result = splitYamlInlineList('[packages/a, "packages/b"]');
-  assert.deepEqual(result, ["packages/a", "packages/b"]);
-});
-
-test("stripYamlComment strips hash comment from a plain line", () => {
-  const result = stripYamlComment("key: value # comment");
-  assert.equal(result, "key: value ");
-});
-
-test("stripYamlComment leaves hash inside a quoted string", () => {
-  const result = stripYamlComment('key: "val # not comment"');
-  assert.equal(result, 'key: "val # not comment"');
+test("collectYamlStringScalars walks maps and sequences depth-first (values only)", () => {
+  const root = parseYamlSafe("a: top\nb:\n  - one\n  - nested: deep\nc: { d: flow }\n");
+  assert.deepEqual(collectYamlStringScalars(root).sort(), ["deep", "flow", "one", "top"]);
 });
 
 // ── Format modules: each extract function returns [] for non-matching fromPath ─
@@ -191,47 +184,48 @@ test("removeTrailingJsonCommas (TST-b29c9d4f) — trailing comma in deeply neste
   assert.deepEqual(parsed, { a: { b: { c: 1 } } });
 });
 
-// stripTomlComment regressions
-test("stripTomlComment (via scanStringAware) — # outside a string truncates the line", () => {
-  const result = stripTomlComment('key = "value" # comment');
-  assert.ok(!result.includes("comment"), "comment after # should be stripped");
-  assert.ok(result.startsWith('key = "value"'), "value before # should be preserved");
+// A5+A11 dropped-edge regressions: the vetted parser recovers Cargo/pyproject
+// edges the old line scanner silently dropped (dotted keys, inline tables,
+// quoted segments, scalar testpaths). Each asserts the structured value the
+// extractor reads, then that an edge is produced.
+test("cargo: dotted-key `workspace.members` is recovered (old scanner needed a [workspace] header)", () => {
+  const edges = extractCargoWorkspaceMemberEdges(
+    "Cargo.toml",
+    'workspace.members = ["crates/a"]\n',
+    new Map([["crates/a/Cargo.toml", "crates/a/Cargo.toml"]]),
+  );
+  assert.equal(edges.length, 1);
+  assert.equal(edges[0].to, "crates/a/Cargo.toml");
 });
 
-test("stripTomlComment (via scanStringAware) — # inside a double-quoted TOML string is preserved", () => {
-  const result = stripTomlComment('key = "val#ue"');
-  assert.equal(result, 'key = "val#ue"');
+test("cargo: inline-table `workspace = { members, exclude }` is parsed and exclude is honored", () => {
+  const edges = extractCargoWorkspaceMemberEdges(
+    "Cargo.toml",
+    'workspace = { members = ["crates/*"], exclude = ["crates/y"] }\n',
+    new Map([
+      ["crates/x/Cargo.toml", "crates/x/Cargo.toml"],
+      ["crates/y/Cargo.toml", "crates/y/Cargo.toml"],
+    ]),
+  );
+  const targets = edges.map((e) => e.to);
+  assert.ok(targets.includes("crates/x/Cargo.toml"), "included member resolves");
+  assert.ok(!targets.includes("crates/y/Cargo.toml"), "excluded member is dropped");
 });
 
-test("stripTomlComment (via scanStringAware) — # inside a single-quoted TOML string is preserved", () => {
-  const result = stripTomlComment("key = 'val#ue'");
-  assert.equal(result, "key = 'val#ue'");
+test("pyproject: scalar `testpaths = \"tests\"` and dotted header both resolve", () => {
+  const lookup = new Map([["tests/conftest.py", "tests/conftest.py"]]);
+  const scalar = extractPyprojectTestpathLinks("pyproject.toml", '[tool.pytest.ini_options]\ntestpaths = "tests"\n', lookup);
+  assert.equal(scalar.length, 1);
+  assert.equal(scalar[0].to, "tests/conftest.py");
+  // Dotted-key form (no explicit section header) resolves to the same path.
+  const dotted = extractPyprojectTestpathLinks("pyproject.toml", 'tool.pytest.ini_options.testpaths = ["tests"]\n', lookup);
+  assert.equal(dotted.length, 1);
+  assert.equal(dotted[0].to, "tests/conftest.py");
 });
 
-// tomlArrayIsClosed regressions
-test("tomlArrayIsClosed (via scanStringAware) — returns true when the outermost ] is found outside any string", () => {
-  assert.equal(tomlArrayIsClosed('["a", "b"]'), true);
-});
-
-test("tomlArrayIsClosed (via scanStringAware) — returns false when input ends before the outermost ] is found", () => {
-  assert.equal(tomlArrayIsClosed('["a", "b"'), false);
-});
-
-test("tomlArrayIsClosed (via scanStringAware) — ] inside a string literal does not decrement depth", () => {
-  assert.equal(tomlArrayIsClosed('["a]b"]'), true);
-});
-
-// tomlStringArrayValues regressions
-test("tomlStringArrayValues (via scanStringAware) — extracts each quoted string value from a TOML inline array", () => {
-  assert.deepEqual(tomlStringArrayValues('["one", "two", "three"]'), ["one", "two", "three"]);
-});
-
-test("tomlStringArrayValues (via scanStringAware) — handles mixed single- and double-quoted values", () => {
-  assert.deepEqual(tomlStringArrayValues('["double", \'single\']'), ["double", "single"]);
-});
-
-test("tomlStringArrayValues (via scanStringAware) — handles backslash-escaped double quotes inside double-quoted values", () => {
-  assert.deepEqual(tomlStringArrayValues('["a\\"b"]'), ['a"b']);
+test("toml extractors degrade to [] on malformed TOML (never throw)", () => {
+  assert.deepEqual(extractCargoWorkspaceMemberEdges("Cargo.toml", "not [valid toml = =", new Map()), []);
+  assert.deepEqual(extractPyprojectTestpathLinks("pyproject.toml", "not [valid toml = =", new Map()), []);
 });
 
 // stripGoLineComment regressions
@@ -345,6 +339,40 @@ test("graphManifestEdges/index.ts: extractWorkspacePackageEdges returns correct 
   const edges = allFromIndex.extractWorkspacePackageEdges("pnpm-workspace.yaml", content, lookup);
   assert.ok(edges.length >= 1, "expected at least one workspace-package edge");
   assert.ok(edges.every((e) => e.kind === "workspace-package-link"));
+});
+
+// A5+A11 YAML dropped-edge regressions: the vetted parser recovers pnpm/YAML
+// edges the old line scanner missed (inline-flow `packages: [...]`, and path
+// references nested under maps/sequences rather than on a top-level line).
+test("pnpm: inline-flow `packages: [a, b]` is recovered (old scanner only had the block form)", () => {
+  const lookup = new Map([
+    ["packages/a/package.json", "packages/a/package.json"],
+    ["packages/b/package.json", "packages/b/package.json"],
+  ]);
+  const edges = allFromIndex.extractWorkspacePackageEdges(
+    "pnpm-workspace.yaml",
+    "packages: [packages/a, packages/b]\n",
+    lookup,
+  );
+  assert.ok(edges.length >= 1, "inline-flow packages list must yield workspace edges");
+  assert.ok(edges.every((e) => e.kind === "workspace-package-link"));
+});
+
+test("yamlPaths: a path reference nested under a map is recovered (not just top-level lines)", () => {
+  const lookup = new Map([["ci/shared.yml", "ci/shared.yml"]]);
+  const edges = allFromIndex.extractYamlPathReferenceEdges(
+    "config.yaml",
+    "jobs:\n  build:\n    uses: ci/shared.yml\n",
+    lookup,
+  );
+  assert.equal(edges.length, 1);
+  assert.equal(edges[0].to, "ci/shared.yml");
+});
+
+test("yaml extractors degrade to [] on malformed YAML (never throw)", () => {
+  const bad = "packages:\n\t- tab-indented-is-invalid";
+  assert.deepEqual(allFromIndex.extractWorkspacePackageEdges("pnpm-workspace.yaml", bad, new Map()), []);
+  assert.deepEqual(allFromIndex.extractYamlPathReferenceEdges("config.yaml", bad, new Map()), []);
 });
 
 // toml submodule exports Cargo and pyproject extractors

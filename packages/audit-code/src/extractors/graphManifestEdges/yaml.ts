@@ -1,62 +1,57 @@
-export function stripYamlComment(line: string): string {
-  let quote: '"' | "'" | undefined;
-  for (let index = 0; index < line.length; index++) {
-    const char = line[index];
-    if (quote) {
-      if (char === quote) {
-        quote = undefined;
-      }
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === "#") {
-      return line.slice(0, index);
-    }
+import { parse as parseYaml } from "yaml";
+
+/**
+ * Vetted-parser YAML helpers for the manifest-edge extractors. Replaces the
+ * prior line scanner, which understood only `key: value` / `- item` lines and a
+ * single-line flow list, silently missing block sequences nested under maps,
+ * flow collections, multi-line scalars, and anchors — dropping the path edges
+ * those YAML configs declare (A5+A11). `yaml` (eemeli) is a pure-JS,
+ * spec-compliant parser. All helpers degrade to empty on malformed input: the
+ * graph builder treats an unparseable manifest as declaring no edges, never
+ * throwing.
+ */
+
+/** Parse YAML, degrading to `undefined` on malformed input (never throws). */
+export function parseYamlSafe(content: string): unknown {
+  try {
+    return parseYaml(content);
+  } catch {
+    return undefined;
   }
-  return line;
 }
 
-export function unquoteYamlScalar(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length < 2) {
-    return trimmed;
-  }
-  const quote = trimmed[0];
-  if ((quote === '"' || quote === "'") && trimmed.at(-1) === quote) {
-    return trimmed.slice(1, -1).trim();
-  }
-  return trimmed;
+/** The top-level object value of a parsed YAML document, or undefined. */
+export function yamlRootObject(content: string): Record<string, unknown> | undefined {
+  const root = parseYamlSafe(content);
+  return root && typeof root === "object" && !Array.isArray(root)
+    ? (root as Record<string, unknown>)
+    : undefined;
 }
 
-export function splitYamlInlineList(value: string): string[] {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
-    return [];
-  }
+/** Coerce a YAML value to a string[]: a scalar → `[s]`, a sequence → its strings. */
+export function yamlStringArray(value: unknown): string[] {
+  const raw =
+    typeof value === "string"
+      ? [value]
+      : Array.isArray(value)
+        ? value.filter((v): v is string => typeof v === "string")
+        : [];
+  return raw.map((s) => s.trim()).filter((s) => s.length > 0);
+}
 
-  const values: string[] = [];
-  let quote: '"' | "'" | undefined;
-  let start = 1;
-  for (let index = 1; index < trimmed.length - 1; index++) {
-    const char = trimmed[index];
-    if (quote) {
-      if (char === quote) {
-        quote = undefined;
-      }
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === ",") {
-      values.push(unquoteYamlScalar(trimmed.slice(start, index)));
-      start = index + 1;
-    }
+/**
+ * Every string SCALAR VALUE reachable in a parsed YAML value, walked depth-first
+ * through maps and sequences (map keys are not collected — only values, matching
+ * the prior extractor that read the value side of `key: value` and list items).
+ * Nested structures the line scanner could not reach are now included.
+ */
+export function collectYamlStringScalars(value: unknown, out: string[] = []): string[] {
+  if (typeof value === "string") {
+    out.push(value);
+  } else if (Array.isArray(value)) {
+    for (const item of value) collectYamlStringScalars(item, out);
+  } else if (value && typeof value === "object") {
+    for (const v of Object.values(value)) collectYamlStringScalars(v, out);
   }
-  values.push(unquoteYamlScalar(trimmed.slice(start, -1)));
-  return values.filter((item) => item.length > 0);
+  return out;
 }

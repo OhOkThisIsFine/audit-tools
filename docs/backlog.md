@@ -102,10 +102,15 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   findings would re-introduce exactly the over-splitting the single-source authority exists to prevent — a
   genuinely different fileless defect must differ by CATEGORY (the auditor's discriminator). Documented in the
   tier-2 comment + an explicit `B8 decision` guard test in `finding-identity.test.mjs`. (ARC-1a497c28-2.)
-- **A5+A11 — Two-tier own-vs-import dependency policy + replace hand-rolled manifest parsers.** Write the
-  policy (import vetted libs for correctness-sensitive parsers/schema/lock; keep own for tiny domain
-  bits), then replace the hand-rolled TOML/YAML manifest scanners that silently drop dependency-graph
-  edges with vetted pure-JS parsers. (ARC-843ce274, ARC-4d950c7f.)
+- **A5+A11 — Two-tier dependency policy + vetted manifest parsers — ✓ DONE.** Policy written (CLAUDE.md
+  *Preferences*: import vetted pure-JS libs for correctness-sensitive parsing/schema/lock; own only tiny
+  fully-owned domain bits). Replaced the hand-rolled TOML scanner (`toml.ts` → `smol-toml`) and YAML scanner
+  (`yaml.ts` → `yaml`) — both now parse properly, so Cargo `workspace.members` (dotted-key + inline-table),
+  pyproject `[tool.pytest.ini_options].testpaths` (dotted + scalar), pnpm `packages:` (inline-flow), and
+  nested YAML path refs are recovered instead of silently dropped. `cargo.ts`/`pyproject.ts`/`pnpm.ts`/
+  `yamlPaths.ts` rewritten to walk the parsed object; all degrade to empty on malformed input (never throw).
+  audit-code's first third-party runtime deps (`smol-toml`, `yaml`) — both pure-JS / OS-agnostic. Dropped-edge
+  regression tests added. (ARC-843ce274, ARC-4d950c7f.)
 - **A6 — Kill the schema dual-encoding.** 47 JSON schemas + parallel hand-written TS validators (already
   drifted once); single-source one from the other so drift is impossible, and remove the dead-imported
   `ajv`. (ARC-ad53dd0d-2.)

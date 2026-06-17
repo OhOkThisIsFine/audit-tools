@@ -184,6 +184,7 @@ Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + comm
 - **Token/context policy lives in `~/.claude/CLAUDE.md`.** Don't duplicate here.
 - **Headroom over opentoken (2026-06-11).** Host MCP swapped in at user scope; orchestrator swap rides redesign as library-mode npm `headroom-ai` step (deletes `wrapForOpenToken` et al.).
 - **Token estimates stay local and deterministic (2026-06-11).** Never API-call token counting in planning/dispatch. No tokenizer dep — shared `estimateTokensFromBytes` primitive is the standard. Learned RPM/TPM limits authoritative; headroom proxy stats supply measured usage.
+- **Two-tier dependency policy — import vetted libs for correctness-sensitive parsing/schema/lock; own only tiny domain bits (2026-06-17, A5).** A format whose grammar we don't fully own (TOML, YAML, lockfiles, schema validation) is *correctness-sensitive*: a hand-rolled scanner silently drops what it doesn't understand (e.g. the TOML line scanner missed inline-table / dotted-key / quoted forms → dropped dependency-graph edges). Import a vetted, pure-JS, well-maintained parser there (`smol-toml`, `yaml`) — pure-JS so OS-agnostic, no native build. Keep hand-rolled only for *tiny, fully-owned* domain bits (e.g. our `.audit-tools` path tokens, the work-block id grammar). When importing: wrap the parser so malformed input degrades to empty (the graph/extractors never throw on a bad manifest), and single-source the parse + safe accessors in one module.
 
 ## Known friction & deferred fixes
 

@@ -67,7 +67,9 @@
     "agents"
   ],
   "dependencies": {
-    "@audit-tools/shared": "*"
+    "@audit-tools/shared": "*",
+    "smol-toml": "^1.6.1",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
