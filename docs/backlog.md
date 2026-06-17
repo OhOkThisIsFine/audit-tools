@@ -62,12 +62,19 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   **host-subagent driver VALIDATED via real-subagent end-to-end smoke + a false-resolve bug found & fixed
   (`f18138fe`) — both rolling drivers discarded `acceptNodeWorktree`'s `merged` outcome, so a verify-failed
   in-scope node was marked `resolved` while its fix never landed; fix = per-node accept-outcome sidecar +
-  merge-state gate in `mergeImplementResults`, red→green + real-git tests, suite 1622.** **Next:** (a) the
-  in-process PROVIDER path real-run (codex, quota-blocked until Jun 19) — confirm ≥2 nodes land AND a
-  verify-fail routes to triage (not false-resolve) on the provider path + settle Windows codex-sandbox;
-  (b) THEN flip `rolling_engine` default-ON. Full plan + protocol: `docs/a8-rolling-cutover-plan.md`.
-  **THE blocker for nightly autonomy.** Supersedes drift-plan R1.
-  (ARC-f378135d family.)
+  merge-state gate in `mergeImplementResults`, red→green + real-git tests, suite 1622.** **DONE
+  (2026-06-17):** the in-process PROVIDER path is built, WIRED into `decideNextStep` (routes there when
+  `rolling_engine` ON + an explicit backend provider is configured — precedence over host-subagent), and
+  validated end-to-end through the REAL next-step path over live NVIDIA NIM (`tests/nim-rolling-e2e.test.ts`,
+  gated `RUN_NIM_E2E=1`): ≥2 nodes land via worktree→verify→merge, a verify-fail auto-retries (capped) then
+  routes to triage (`blocked`), never false-resolved. The `openai-compatible` provider was built to make NIM
+  usable (codex+NIM is a dead end — codex 0.140 dropped `wire_api=chat`; NIM's Responses API rejects codex's
+  `namespace` tools). **`rolling_engine` flipped default-ON `8819713`** — rolling is the implement default;
+  the wave is opt-out (`rolling_engine:false`). **Remaining:** (a) audit-code symmetric wiring of
+  `runRollingDispatch` (still dormant); (b) surface `openai-compatible` as a confirmed pool so INV-QD-14
+  cross-pool spill fires e2e (see *Cross-IDE/provider quota detection* below); (c) the
+  worktree-walks-up-to-parent-repo bug (*Deferred fixes* below); (d) harden worktree-branch reuse across a
+  `rate_limited` re-queue. Plan: `docs/a8-rolling-cutover-plan.md`. (ARC-f378135d family.)
 - **B1 / B2 / B3 — greenlit** (the magic-numbers, diff-based-re-review, and staleness-cascade friction
   items in *Known friction* below; now accepted work, not just logged friction).
 - **B4 — Hard-exclude tool-refuted findings.** A tier-2 REFUTED finding (e.g. madge-disproven cycle) is
@@ -321,23 +328,19 @@ continuation drift (every IDE asset now derives from the one canonical body with
 no-drift guard) all shipped this run. The one item still open is the rolling-engine
 cutover below.
 
-- **Dispatch is host-waved, not quota-driven rolling — engine WIRED behind a flag; cutover remains.**
+- **Dispatch is host-waved, not quota-driven rolling — engine wired + flipped default-ON (2026-06-17).**
   Root cause (2026-06-15 conceptual review): the rolling dispatch + worktree engine
   (`runRollingDispatch` / `driveRollingDispatch` / `createWorktree`) had **zero
   non-test callers** — built, refactored repeatedly, never wired into the live path,
   so every run fell back to the host waving a static N-packet plan with
   `max_concurrent_agents` = the raw host flag. **DECISION 2026-06-15 (Ethan): WIRE THE
-  ENGINE IN — option (a), NOT delete.** **Partial as of 2026-06-15:** remediate-code now
-  has `driveRollingImplementDispatch` driving the shared `createRollingDispatcher` over
-  quota-derived pools (`computeDispatchCapacity`, not the raw flag) with
-  dispatch-next-on-complete, per-node isolated worktree, and verify-before-accept +
-  write-scope/lost-update enforcement folded into the deterministic merge — but it is
-  gated behind a **default-OFF** flag (`dispatch.rolling_engine` /
-  `REMEDIATE_ROLLING_ENGINE`) and the host-fanned wave step is **retained as the
-  default fallback** (the conversation host has no programmatic per-node dispatcher, so
-  it still takes the fallback). **Remaining:** (1) the atomic-replace removal of the
-  host-wave fallback + flip the flag default ON, gated on a *validated* real
-  multi-worker rolling dispatch (don't force the cutover); (2) symmetric wiring of
+  ENGINE IN — option (a), NOT delete.** **DONE 2026-06-17 (cutover for remediate; see A8 above):** the flag is
+  flipped **default-ON** (`8819713`) and the in-process provider engine (`driveRollingImplementDispatch`,
+  over quota-derived pools with dispatch-next-on-complete + per-node worktree + verify-before-accept +
+  write-scope/lost-update merge) is now WIRED into `decideNextStep` and validated end-to-end over live NIM
+  through the real next-step path. The host-fanned wave is **RETAINED as an explicit opt-out**
+  (`rolling_engine:false`), NOT removed — conversation-first subagent dispatch is first-class, so deleting it
+  was never the right reading. **Remaining:** (2) symmetric wiring of
   audit-code's `runRollingDispatch` into the audit live path with the same flag-gated
   pattern (still dormant); (3) harden worktree-branch reuse across a `rate_limited`
   re-queue inside the in-process driver. Architectural constraint stands: in
@@ -460,6 +463,18 @@ fully closed is R1 (wire the rolling engine), tracked above under *Self-audit 20
   the "falls through → throws" assertion not depend on dispatch global state.
 
 ## Deferred fixes (product bugs)
+
+### Rolling worktree creation walks UP to the parent git repo when the target root isn't a git repo
+
+**Symptom (surfaced 2026-06-17 during the `rolling_engine` default-ON flip's test sweep):** the host-subagent
+rolling path (`prepareHostRollingDispatch` → `createNodeWorktree` → `createWorktree` → `git worktree add`)
+runs in the target repo root; when that root is NOT itself a git repo, `git` walks UP to the nearest
+enclosing repo and creates the worktree/branch THERE. In the test sweep this polluted the monorepo
+(`C:\Code\audit-tools`) with leaked `remediate-*` branches/worktrees (and then collided on re-run). Real
+remediation targets are always git repos, so it doesn't bite in production — but it's a latent foot-gun.
+**Fix:** before creating worktrees, assert the resolved git top-level (`git rev-parse --show-toplevel`)
+equals the intended repo root and refuse/error if it escapes, rather than silently operating on an ancestor
+repo. (The flip's tests now pin `rolling_engine:false` to avoid the path — a workaround, not the fix.)
 
 ### Something keeps opening the OpenCode app/window unprompted (Windows) — find & fix
 
@@ -705,12 +720,14 @@ active cooldown) so load spills to a peer with headroom BEFORE a 429; capability
 health group; degraded pools stay a fallback (no stall); inert when quota disabled. One shared seam → both
 orchestrators. 4 new INV-QD-14 tests; shared rolling 27/27, remediate 1622, audit 2192/1skip.
 
-**REMAINING:** (a-residual) **a real SECOND pool to spill INTO.** Spill logic is complete + unit-proven, but a
-single-provider session has only one pool, so it can't fire end-to-end. The concrete next capability is
-detecting/building an actual second pool (another CLI agent — `claude`/`codex`/`opencode` — or an IDE model)
-under its own provider+quota constraints; this is the *Heterogeneous multi-agent dispatch* item (FINDING-020) +
-"detect and dispatch to CLI agents as additional pools" below. The binding constraint is quota+rate, NOT
-max-parallel-`N`. (b) **live confirmation — Codex ✓ DONE (2026-06-17, live 200: production class path +
+**REMAINING:** (a-residual) **surface `openai-compatible` (NIM) as a real SECOND pool to spill INTO.** Spill
+logic is complete + unit-proven, and as of 2026-06-17 the `openai-compatible` provider EXISTS (NIM is a real,
+free, always-available OpenAI-compatible backend — see A8) so a genuine second pool is finally buildable. The
+concrete remaining step: surface `openai-compatible` as a *confirmed pool* in `buildConfirmedPools` /
+provider-confirmation — it is config-gated (base_url+model), NOT PATH-probed, so `discoverProviders` doesn't
+surface it today. Once it sits alongside the Claude pool, the proactive `selectProvider` spill (INV-QD-14) can
+fire end-to-end. This is the *Heterogeneous multi-agent dispatch* item (FINDING-020) + "detect and dispatch to
+CLI/API agents as additional pools" below. The binding constraint is quota+rate, NOT max-parallel-`N`. (b) **live confirmation — Codex ✓ DONE (2026-06-17, live 200: production class path +
 raw `rate_limit.{primary,secondary}_window` shape matches the parser); Copilot still pending** (no
 file-reachable credential on the test machine — gh uses the OS keyring + the gh token lacks `copilot` scope;
 the degrade path is confirmed, the response-shape mapping stays fixture-tested only — re-confirm where a

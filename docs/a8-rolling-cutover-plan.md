@@ -120,10 +120,21 @@ One-shot-CLI orchestrator + host-as-executor ⇒ rolling via a **per-completion 
   per-node `accept-outcome-<block>.json` sidecar written by BOTH drivers + a merge-state gate in
   `mergeImplementResults` that blocks any self-reported-resolved node whose recorded outcome is `merged:false`.
   Red→green regression (`dispatch-merge-tolerance.test.ts`) + real-git wiring test (`host-rolling-dispatch.test.ts`).
-- **Provider-path real-run validation** is quota-blocked until Jun 19 (codex) — the LAST gate before the flip.
-  Invocation verified; in-process driver unit/injected-provider green AND now covered by the false-resolve fix.
-  The real run must confirm ≥2 nodes land via worktree→verify→merge AND that a verify-fail routes to triage
-  (not false-resolve) on the provider path.
-- **Flip `rolling_engine` default-ON** once the provider path is real-run validated (the nightly-autonomy gate).
-- **Windows codex sandbox** enforcement unconfirmed (whether `--sandbox workspace-write` is enforced on
-  Windows; the real run settles it — fall back to `danger-full-access` via config if not).
+- **Provider-path real-run validation — ✓ DONE 2026-06-17 via NVIDIA NIM (NOT codex).** codex+NIM is a dead
+  end (codex 0.140 dropped `wire_api=chat`; NIM's Responses API rejects codex's `namespace` tools), so we
+  built the `openai-compatible` provider (the `llm write` pattern as a provider) + WIRED
+  `driveRollingImplementDispatch` into `decideNextStep` (routes there when rolling_engine ON + an explicit
+  backend provider is configured — precedence over host-subagent), then validated through the REAL next-step
+  path over live NIM (`tests/nim-rolling-e2e.test.ts`, gated `RUN_NIM_E2E=1`): ≥2 nodes land via
+  worktree→verify→merge, a verify-fail routes to triage (`blocked`), never false-resolved.
+- **Flip `rolling_engine` default-ON — ✓ DONE (`8819713`).** Rolling is the implement default; the wave is an
+  explicit opt-out (`rolling_engine:false`). Fixtures swept for the new default.
+- **Windows codex sandbox** — moot for the validation (we used NIM, not codex). Revisit only if codex is later
+  used as a spawnable in-process backend on Windows.
+
+## Remaining to fully land A8 (then fold + delete this doc)
+- **Step 5 — audit-code symmetric wiring** of `runRollingDispatch` into the audit live path (still dormant).
+- **Step 6 — harden worktree-branch reuse** across a `rate_limited` re-queue in the in-process driver.
+- **Worktree walks UP to the parent repo** when the target root isn't a git repo (latent foot-gun; backlog
+  *Deferred fixes*). Assert `git rev-parse --show-toplevel` == repo root before creating worktrees.
+- **Surface `openai-compatible` as a confirmed pool** so INV-QD-14 cross-pool spill fires e2e (backlog quota).
