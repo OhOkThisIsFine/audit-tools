@@ -1,48 +1,18 @@
 import { WorkspacePattern, addWorkspacePattern } from "./workspace.js";
-import { stripYamlComment, unquoteYamlScalar, splitYamlInlineList } from "./yaml.js";
+import { yamlRootObject, yamlStringArray } from "./yaml.js";
 
+/**
+ * pnpm workspace globs from `pnpm-workspace.yaml`'s top-level `packages:` list.
+ * Parsed with a vetted YAML parser (`yaml`) so both the block-sequence and
+ * inline-flow (`packages: [a, b]`) forms — and any quoting/anchoring — resolve
+ * to the same `packages` string array, instead of the prior line scanner that
+ * handled only the two it special-cased. Malformed YAML degrades to `[]`.
+ */
 export function pnpmWorkspacePatterns(content: string): WorkspacePattern[] {
+  const root = yamlRootObject(content);
   const patterns: WorkspacePattern[] = [];
-  const lines = content.split(/\r?\n/);
-  let inPackagesList = false;
-  let packagesIndent = 0;
-
-  for (const line of lines) {
-    const withoutComment = stripYamlComment(line);
-    if (withoutComment.trim().length === 0) {
-      continue;
-    }
-
-    const indent = withoutComment.match(/^\s*/)?.[0].length ?? 0;
-    const trimmed = withoutComment.trim();
-    if (inPackagesList) {
-      if (indent <= packagesIndent) {
-        inPackagesList = false;
-      } else {
-        const itemMatch = /^-\s+(.+)$/.exec(trimmed);
-        if (itemMatch?.[1]) {
-          addWorkspacePattern(patterns, unquoteYamlScalar(itemMatch[1]));
-        }
-        continue;
-      }
-    }
-
-    const packagesMatch = /^packages\s*:\s*(.*)$/.exec(trimmed);
-    if (!packagesMatch || indent !== 0) {
-      continue;
-    }
-
-    const inlineValue = packagesMatch[1]?.trim() ?? "";
-    if (inlineValue.length === 0) {
-      inPackagesList = true;
-      packagesIndent = indent;
-      continue;
-    }
-
-    for (const pattern of splitYamlInlineList(inlineValue)) {
-      addWorkspacePattern(patterns, pattern);
-    }
+  for (const pattern of yamlStringArray(root?.packages)) {
+    addWorkspacePattern(patterns, pattern);
   }
-
   return patterns;
 }

@@ -1,7 +1,7 @@
 import { posix } from "node:path";
 import type { GraphEdge } from "@audit-tools/shared";
 import { graphEdge, normalizeGraphPath, resolveCandidate } from "../graphPathUtils.js";
-import { stripYamlComment, unquoteYamlScalar } from "./yaml.js";
+import { parseYamlSafe, collectYamlStringScalars } from "./yaml.js";
 
 export const YAML_PATH_REFERENCE_LINK_CONFIDENCE = 0.8;
 export const YAML_CONFIG_EXTENSIONS = [".yaml", ".yml", ".json", ".toml"] as const;
@@ -19,34 +19,18 @@ function looksLikeConfigFilePath(value: string): boolean {
   return YAML_CONFIG_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
+/**
+ * Every config-path-looking string anywhere in the YAML document. Parsing with
+ * a vetted parser then walking ALL string scalars (vs the prior line regex that
+ * saw only top-level `key: value` and `- item` lines) recovers path references
+ * nested inside maps, block sequences, and flow collections the scanner missed.
+ */
 function extractYamlScalarValues(content: string): string[] {
-  const values: string[] = [];
-  for (const rawLine of content.split(/\r?\n/)) {
-    const withoutComment = stripYamlComment(rawLine);
-    const trimmed = withoutComment.trim();
-    if (trimmed.length === 0) continue;
-
-    let rawValue: string | undefined;
-
-    // key: value
-    const keyValueMatch = /^[^:[\]{}]+:\s+(.+)$/.exec(trimmed);
-    if (keyValueMatch?.[1]) {
-      rawValue = keyValueMatch[1].trim();
-    } else {
-      // - value (list item)
-      const listItemMatch = /^-\s+(.+)$/.exec(trimmed);
-      if (listItemMatch?.[1]) {
-        rawValue = listItemMatch[1].trim();
-      }
-    }
-
-    if (!rawValue) continue;
-    const value = unquoteYamlScalar(rawValue);
-    if (looksLikeConfigFilePath(value)) {
-      values.push(value);
-    }
-  }
-  return values;
+  const root = parseYamlSafe(content);
+  if (root === undefined) return [];
+  return collectYamlStringScalars(root)
+    .map((s) => s.trim())
+    .filter((value) => looksLikeConfigFilePath(value));
 }
 
 function resolveYamlPathReference(
