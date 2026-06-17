@@ -19,10 +19,10 @@ already consumes `remaining_pct` (thresholds 0.1/0.3) to throttle/cool-down befo
 | Backend | Best signal | Endpoint / source | Token source | Confidence |
 |---|---|---|---|---|
 | **Claude** (shipped) | proactive GET | `api.anthropic.com/api/oauth/usage` | `~/.claude/.credentials.json` | HIGH (live-confirmed) |
-| **Codex** (ChatGPT OAuth) | **proactive GET** | `chatgpt.com/backend-api/wham/usage` | `~/.codex/auth.json` | HIGH (source + URL-pin test) |
+| **Codex** (ChatGPT OAuth) | **proactive GET** | `chatgpt.com/backend-api/wham/usage` | `~/.codex/auth.json` | HIGH (LIVE-confirmed 2026-06-17 — 200, shape matches) |
 | **OpenCode** | **federates** (no own quota) | per-provider, via its stored tokens | `~/.local/share/opencode/auth.json` | HIGH |
 | **Antigravity** (Gemini) | proactive POST (med) / dated-error (high) | `cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels` (or LS over localhost) | `%APPDATA%/Antigravity/User/globalStorage/state.vscdb` | MED proactive / HIGH reactive |
-| **VS Code Copilot** | **proactive GET** | `api.github.com/copilot_internal/user` | DPAPI SecretStorage (`state.vscdb`) / `gh`/`copilot` CLI | HIGH endpoint / MED token-extraction |
+| **VS Code Copilot** | **proactive GET** | `api.github.com/copilot_internal/user` | DPAPI SecretStorage (`state.vscdb`) / `gh`/`copilot` CLI | HIGH endpoint / MED token (live-shape PENDING — see §4 note) |
 | Gemini raw API | reactive only | 429 `RESOURCE_EXHAUSTED` + `RetryInfo` | API key | HIGH (Google staff: no proactive header) |
 
 ---
@@ -44,6 +44,13 @@ GET https://chatgpt.com/backend-api/wham/usage
 primary_window (5h), secondary_window (weekly) }, credits, additional_rate_limits[] }`.
 Each window (`RateLimitWindowSnapshot`): `{ used_percent (0–100), limit_window_seconds,
 reset_after_seconds, reset_at (unix sec) }`. (Codex-API-key auth instead → `{base}/api/codex/usage`.)
+
+**✓ LIVE-CONFIRMED 2026-06-17** (Ethan OK'd; `CodexQuotaSource` production path + raw probe): real 200,
+top-level keys `[user_id, account_id, email, plan_type, rate_limit, code_review_rate_limit,
+additional_rate_limits, credits, spend_control, rate_limit_reached_type, promo, referral_beacon,
+rate_limit_reset_credits]`; `rate_limit.{primary,secondary}_window` carried `used_percent / reset_at /
+reset_after_seconds / limit_window_seconds` exactly as parsed; most-constraining-window pick worked
+(`secondary used_percent:100` → `remaining_pct:0`, `reset_at` Jun 19). The mapping is validated against reality.
 
 **Local tier (no call):** `~/.codex/auth.json tokens.id_token` (JWT) → claim
 `https://api.openai.com/auth.chatgpt_plan_type` (= "plus" here) + `chatgpt_account_id`,
@@ -171,9 +178,17 @@ GET https://api.github.com/copilot_internal/user
 **Token source (Windows = the hard part):** VS Code stores the GitHub token in **SecretStorage
 = DPAPI/`safeStorage`-encrypted inside `state.vscdb`** — not plaintext-extractable. Fallbacks:
 the **Copilot CLI** `~/.copilot/config.json` (plaintext `gho_/ghu_` when keychain unavailable;
-`COPILOT_HOME` override) or **`gh` CLI** `~/.config/gh/hosts.yml`. (On THIS machine: Copilot Chat
-ext not installed — only leftover globalStorage; no `~/.config/github-copilot/` — so a CLI token
-is the extractable source.)
+`COPILOT_HOME` override) or **`gh` CLI** hosts file. The gh config dir is **OS-specific**:
+`%AppData%\GitHub CLI` on Windows, `~/.config/gh` on macOS/Linux, `$GH_CONFIG_DIR` override — the code now
+resolves this via `resolveGhHostsPath` (was hardcoded to `~/.config/gh`, an OS-portability bug fixed
+2026-06-17).
+
+**Live-confirm 2026-06-17 — PENDING (no file-reachable token here).** On this machine: no Copilot CLI
+(`~/.copilot` absent); `gh` is authed but stores its token in the **OS keyring** (`hosts.yml` has none) **and
+the gh token lacks `copilot` scope** (`gist, read:org, repo, workflow`). So `CopilotQuotaSource` correctly
+degraded to null (degrade path ✓). The response-shape mapping stays fixture-tested only — re-confirm where a
+Copilot token is file-reachable: `GH_COPILOT_TOKEN`/`GH_TOKEN` env, the Copilot CLI config, or `gh` with
+file/insecure storage. (The keyring itself is out of scope for a read-only probe.)
 
 **Degrade:** `copilot_internal/user` → reuse the token-exchange envelope
 `GET copilot_internal/v2/token` → `limited_user_quotas.chat` + `chat_enabled` (coarse, free-tier)
