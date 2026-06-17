@@ -69,9 +69,18 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   already IS the canonical hub, `TestSpec` was dead (deleted `ee3431e`), `VerificationResult`/`TriageBatch`
   are thin transients, and `CoverageLedgerEntry`/`RemediationOutcomeItem` are genuinely distinct domains —
   real A4 = formalize the hub + fold the transients + single-source the disposition vocab; the
-  `RemediationItemState`→`RemediationItem` rename is likely unnecessary ~10-file churn (the name is already
-  accurate). **Remaining:** A4 finish (transients + disposition vocab) + A3 bulk (rewire remediate's cascade
-  onto the shared engine). The redesign track. (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
+  `RemediationItemState`→`RemediationItem` rename is unnecessary ~10-file churn (the name is already
+  accurate — skipped). **A4 DONE** (`ed6ad2a` / `6283a34` / `6fea584`): dead `VerificationResult` deleted +
+  `TriageBatch` localized to `triage.ts`; new `state/itemStatus.ts` is the single authority for the
+  `RemediationItem` status enum + every classification of it — the `statusToDisposition` /
+  `dispositionToOutcomeStatus` maps (exhaustive `Record<RemediationItemStatus,…>`) and the
+  `isTerminal` / `isVerifiedComplete` / `isSkip` / `isInProgress` predicates — retiring the duplicated
+  `OUTCOME_BY_STATUS` map, the 3× `isSkip` open-codings, and the 7× `resolved||resolved_no_change` ones. The
+  extracted status enum is the formalized hub; recon also corrected the plan's ambiguous "merge the two
+  disposition unions" — `PerFindingDisposition` (terminal outcome) and `CoverageLedgerEntry.disposition`
+  (planning fate) are disjoint domains and stay separate; only the status→vocab *mapping* was single-sourced.
+  **Remaining:** A3 bulk (rewire remediate's `decideNextStepLoop` cascade onto the shared engine — add the
+  `advance` transition/emit loop there). The redesign track. (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
 - **A8 — Rolling dispatch: one shared core + two co-equal full-rolling drivers (REFRAMED 2026-06-16).**
   NO LONGER "flip a flag / delete the host fallback" — that reading was incoherent with conversation-first
   (in-conversation subagent dispatch is FIRST-CLASS; subscription/no-API users depend on it — memory

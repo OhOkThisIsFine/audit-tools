@@ -122,9 +122,20 @@ is the atomic replace.
    audit-code's `findObligation` binds `PRIORITY` to it and `AuditObligation`/`ObligationState`
    alias/re-export the shared types (atomic replace of the inline scan). Validated by audit's suite +
    7 new shared unit tests. *(Lowest risk: ship the working one, don't invent.)*
-2. **A4 cleanup** (independent of the engine work, can go next): delete dead `TestSpec`; formalize
-   `RemediationItem`; fold the `VerificationResult`/`TriageBatch` transients; single-source the
-   disposition vocab. One atomic rename+delete.
+2. **✓ DONE — A4 cleanup** (`ed6ad2a` / `6283a34` / `6fea584`). Dead `VerificationResult` deleted +
+   `TriageBatch` localized to `triage.ts` (`ed6ad2a`); new `state/itemStatus.ts` single-sources the
+   `RemediationItem` status enum + the status→disposition→outcome mapping (`6283a34`) + every
+   status-classification predicate (`6fea584`), retiring `OUTCOME_BY_STATUS`, the 3× `isSkip`, and the
+   7× `resolved||resolved_no_change` open-codings. **Two resolutions vs the original framing:**
+   (a) "single-source the disposition vocab" = single-source the status→vocab *mapping*, NOT merge the
+   two disposition unions — `PerFindingDisposition` (terminal outcome) and `CoverageLedgerEntry.disposition`
+   (planning fate) are disjoint domains and stay separate (ground truth corrected the plan's ambiguous
+   "draw from one vocabulary"). (b) Scope was broader than the one-liner: status classification was
+   scattered across 5 files (findingLedger/close/nextStep/dispatch/stepUtils), so the authority owns the
+   predicates too. The `RemediationItemState`→`RemediationItem` rename stays skipped (name is accurate; the
+   extracted status enum is the formalization). The four predicates provably partition the enum (coherence
+   test). One remaining minor drift point: `RemediationOutcomeStatus`'s `OUTCOME_KEYS` re-list in shared —
+   deferred to A6 (it's the shared outcomes contract, needs a shared const-tuple).
 3. **Rewire remediate onto the shared engine** — the multi-session bulk. The `advance`
    transition/emit loop is **designed and added to the shared engine as part of THIS step**, so the
    richer API is proven by its real consumer (remediate) rather than built consumer-less. Then
@@ -146,6 +157,9 @@ is the atomic replace.
 
 ## Status
 
-- Recon complete (this doc). Decomposition step 1 (shared scan) **landed**.
-- **Next:** decomposition step 2 (A4 cleanup — self-contained) or step 3 (remediate engine rewire —
-  the bulk; add the `advance` loop there). Either is a clean place to resume.
+- Recon complete (this doc). Decomposition steps 1 (shared scan) + 2 (A4 cleanup) **landed**.
+- **Next:** decomposition step 3 — the remediate engine rewire (the multi-session bulk). Design + add the
+  `advance` transition/emit loop in the shared engine THERE (proven by its real consumer), then re-express
+  `decideNextStepLoop`'s guard cascade (`steps/nextStep.ts`) as a declarative obligation list running on
+  `advance`, in atomic green chunks: linear pre-intake gates first, then the implementing/triage back-edge
+  cluster. The handlers become the executors.

@@ -10,8 +10,8 @@
 ## Where things stand
 
 - **`main` (pushed, NOT published): the go-forward program keeps accumulating.** Latest =
-  **A3 step 1 (shared obligation scan) + A4 dead-type cleanup** `ee3431e` (this session). Green at every
-  commit; suites green on the committed tree (shared **712** / audit ~2200 / remediate **1640**, +1
+  **A4 finish — status/disposition vocabulary single-sourced** `6fea584` (this session). Green at every
+  commit; suites green on the committed tree (shared **712** / audit ~2200 / remediate **1667**, +1
   documented skip each). **Publish HELD per Ethan (2026-06-17)** — last published:
   `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins lag).
   - Prior runs (`git log` for detail): A1 lean fast path `b47d189`; A5+A11 vetted TOML/YAML parsers
@@ -51,40 +51,36 @@
 
 ## Immediate next: the go-forward program
 
-**A3+A4 IN PROGRESS this session** — the obligation-engine unification. Recon + design landed first:
-**read [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md)** — it is the working
-plan (ground-truth map of both engines, the shared-engine contract, the honest A4 re-scoping, and the
-green-at-every-commit decomposition). Two commits landed: **(1)** `4a041d0` extracted audit-code's
-obligation-selection scan into `@audit-tools/shared` (`findFirstActionableObligation` + the
-`Obligation`/`ObligationState` vocabulary); audit binds `PRIORITY` to it, `AuditObligation`/`ObligationState`
-alias/re-export it (atomic replace, surface unchanged; +7 shared unit tests). **(2)** `ee3431e` deleted the
-dead `TestSpec` type (first A4 cleanup).
+**A3+A4 IN PROGRESS — A4 is now DONE; A3 (the keystone) remains.** Working plan:
+**read [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md)** (ground-truth map of
+both engines, the shared-engine contract, the green-at-every-commit decomposition; steps 1+2 marked done).
 
-**Recon corrected two backlog framings (durable — in the plan doc):** (a) the two engines are structurally
-divergent — audit = stateless staleness-scan / emit-only / one-unit-per-call; remediate = persisted state
-machine with back-edges + internal recursion — so the shared engine needs a transition/emit `advance` loop,
-**deferred to the remediate rewire so it's proven by its real consumer** (not built consumer-less). (b)
-**A4's "8 types + 2 ledgers → 1" is over-specced:** `RemediationItemState` already IS the canonical hub,
-`TestSpec` was dead (deleted), `VerificationResult`/`TriageBatch` are thin transients, and
-`CoverageLedgerEntry`/`RemediationOutcomeItem` are genuinely distinct domains. Real A4 = formalize the hub +
-fold the transients + single-source the disposition vocab; the `RemediationItemState`→`RemediationItem`
-rename is likely NOT worth the ~10-file churn (the name is already accurate) — skip unless a concrete reason.
+**A4 DONE this session** (`ed6ad2a` / `6283a34` / `6fea584`): dead `VerificationResult` deleted +
+`TriageBatch` localized to `triage.ts`; new `src/state/itemStatus.ts` is the single authority for the
+`RemediationItem` status enum and every classification of it — the `statusToDisposition` /
+`dispositionToOutcomeStatus` maps (exhaustive `Record<RemediationItemStatus,…>`) and the
+`isTerminal`/`isVerifiedComplete`/`isSkip`/`isInProgress` predicates — retiring `OUTCOME_BY_STATUS`, the 3×
+`isSkip`, and the 7× `resolved||resolved_no_change` open-codings across close/dispatch/nextStep/stepUtils.
+The extracted enum is the formalized hub; the `RemediationItemState`→`RemediationItem` rename stays skipped
+(name accurate). Recon resolution (in the plan doc): the two disposition *unions* (`PerFindingDisposition` =
+terminal outcome; `CoverageLedgerEntry.disposition` = planning fate) are disjoint domains and were NOT
+merged — only the status→vocab *mapping* was single-sourced. (Prior: A3 step 1 `4a041d0` single-sourced the
+obligation scan in `@audit-tools/shared`; `TestSpec` deleted `ee3431e`. See `git log`.)
 
-**START-HERE next session — two clean entry points (decomposition in the plan doc):**
-- **A4 finish (self-contained):** fold `VerificationResult`/`TriageBatch` into derived views (read
-  `phases/triage.ts`); single-source the disposition vocab (`coverage/findingLedger.ts` `statusToDisposition`
-  ↔ `CoverageLedgerEntry.disposition` / `PerFindingDisposition`).
-- **A3 bulk (multi-session):** rewire remediate's `decideNextStepLoop` (`steps/nextStep.ts:3051-3329`) onto
-  the shared engine — design + add the `advance` transition/emit loop there (proven by remediate), then
-  re-express the guard cascade as a declarative obligation list, in atomic green chunks (linear pre-intake
-  gates first, then the implementing/triage back-edge cluster). The handlers become the executors.
+**START-HERE next session — A3 bulk (multi-session):** rewire remediate's `decideNextStepLoop`
+(`steps/nextStep.ts:3051-3329`) onto the shared engine — design + ADD the `advance` transition/emit loop in
+`@audit-tools/shared/src/engine/` THERE (proven by its real consumer remediate, not built consumer-less),
+then re-express the guard cascade as a declarative obligation list running on `advance`, in atomic green
+chunks (linear pre-intake gates first, then the implementing/triage back-edge cluster). The handlers become
+the executors. A4's `itemStatus.ts` already gives the rewire a clean status vocabulary to read.
 
-**After A3+A4 (suggested order, yours to change):** **B2+B3** (diff re-reviews + obligation-set staleness —
-build on the unified engine) → **A6** (kill schema dual-encoding; drop dead-imported `ajv`) → **A8(a)**
-(audit-code symmetric rolling wiring — its dormant `runRollingDispatch`; audit dispatch is read-only review
-packets → AuditResult, NOT worktree edits, so it needs a provider-backed packet dispatcher + routing) →
-**A12** (single-package collapse — LAST) → **A7** (host machinery across hosts). Deferred: A2, A9/A10. Full
-specs + recon: `docs/backlog.md` → "Accepted go-forward program".
+**After A3 (suggested order, yours to change):** **B2+B3** (diff re-reviews + obligation-set staleness —
+build on the unified engine) → **A6** (kill schema dual-encoding; drop dead-imported `ajv`; also fold the
+minor `OUTCOME_KEYS` re-list noted in the plan doc) → **A8(a)** (audit-code symmetric rolling wiring — its
+dormant `runRollingDispatch`; audit dispatch is read-only review packets → AuditResult, NOT worktree edits,
+so it needs a provider-backed packet dispatcher + routing) → **A12** (single-package collapse — LAST) →
+**A7** (host machinery across hosts). Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md` →
+"Accepted go-forward program".
 
 ### A8 remaining loose ends
 - **REMAINING — audit-code symmetric wiring (= A8(a) above)** — `runRollingDispatch` is still dormant (0 live
