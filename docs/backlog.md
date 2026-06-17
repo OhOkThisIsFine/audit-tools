@@ -440,18 +440,6 @@ test. The CLAUDE.md lock doc-fix landed in Wave-0 and is now guarded by
 fully closed is R1 (wire the rolling engine), tracked above under *Self-audit 2026-06-15*
 — wired behind a default-OFF flag this run, with the atomic cutover still remaining.**
 
-- **`codex-antigravity-providers.test.mjs` "auto path writes a structured stderr diagnostic"
-  fails when the `claude` CLI is on PATH.** The test stubs `createClaudeCodeProvider`/
-  `createOpenCodeProvider` to throw, asserting `createFreshSessionProvider(undefined, …)`
-  auto-resolves to a *non-agent* provider (local-subprocess). It skips when `opencode` is on
-  PATH (`opencodeOnPath()`), but NOT when `claude` is on PATH — so on any dev machine with the
-  Claude Code CLI installed, auto-resolution picks claude-code and the stub throws
-  ("unexpected: createClaudeCodeProvider called in auto test"). Deterministic, env-dependent,
-  **not a regression** (proven 2026-06-16 by stashing unrelated changes — fails identically on a
-  clean tree). It's the inverse of the CLAUDECODE-set gotcha and bites the CLAUDECODE-unset
-  "true green" run. Fix: extend the skip guard to ANY auto-resolvable agent CLI (add a
-  `claude`/`codex`-on-PATH check mirroring `opencodeOnPath()`), since the test's premise only
-  holds when no agent CLI is detectable.
 - **Intermittent hermeticity flake: `phase-plan.test.ts` "non-audit JSON file falls through
   to the LLM extractor path".** Fails ~1-in-N full-suite runs, passes in isolation and most
   full runs (observed 2026-06-16 while adding the review-gate tests — unrelated code path).

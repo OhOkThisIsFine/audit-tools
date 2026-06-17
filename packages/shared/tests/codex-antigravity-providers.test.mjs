@@ -249,18 +249,23 @@ const autoDeps = {
   },
 };
 
-// Detect whether opencode is on PATH — if so, auto-resolution will pick it up
-// and call createOpenCodeProvider, which this test intentionally stubs as a
-// throw. Skip rather than fail in those environments.
-function opencodeOnPath() {
-  const r = spawnSync(process.platform === "win32" ? "where" : "which", ["opencode"], {
-    encoding: "utf8",
-    stdio: "pipe",
-  });
-  return r.status === 0;
+// The test's premise is that auto-resolution falls through to a NON-agent
+// provider (local-subprocess), which only holds when NO agent CLI is detectable.
+// If ANY auto-resolvable agent CLI is on PATH (claude / codex / opencode),
+// auto-resolution picks it instead — claude/opencode hit the stubbed-throw deps,
+// codex constructs a real provider and no "no capable agent" diagnostic is
+// written — so skip rather than fail. (Generalises the old opencode-only guard
+// that left the claude-on-PATH / codex-on-PATH true-green run red.)
+function anyAgentCliOnPath() {
+  const probe = (cmd) =>
+    spawnSync(process.platform === "win32" ? "where" : "which", [cmd], {
+      encoding: "utf8",
+      stdio: "pipe",
+    }).status === 0;
+  return probe("claude") || probe("codex") || probe("opencode");
 }
 
-test("createFreshSessionProvider auto path writes a structured stderr diagnostic", { skip: opencodeOnPath() ? "opencode is on PATH in this environment" : false }, () => {
+test("createFreshSessionProvider auto path writes a structured stderr diagnostic", { skip: anyAgentCliOnPath() ? "an auto-resolvable agent CLI (claude/codex/opencode) is on PATH in this environment" : false }, () => {
   const captured = [];
   const originalWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = (chunk, ...rest) => {
