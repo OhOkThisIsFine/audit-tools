@@ -632,23 +632,24 @@ provider+IDE+model triple yields a *trustworthy* capacity/limit estimate dispatc
 rely on, degrading safely (byte-estimate + 429/TPM learning + safety margin) when a
 source is silent — never a confidently-wrong number. (Ethan flagged 2026-06-15.)
 
-**PROACTIVE signal found for Claude (2026-06-16) — the key unlock.** Claude exposes a
-real (undocumented) subscription-quota readout: `GET api.anthropic.com/api/oauth/usage`
-(Bearer `claudeAiOauth.accessToken` from `~/.claude/.credentials.json` + header
-`anthropic-beta: oauth-2025-04-20`) → `five_hour` / `seven_day` / `seven_day_opus` /
-`seven_day_sonnet` / `seven_day_cowork` each `{utilization%, resets_at}` + `extra_usage`
-credits; `/api/oauth/profile` → `rate_limit_tier`. `utilization%`+`resets_at` = remaining
-WITHOUT a hardcoded ceiling (agnostic-clean); per-model = strength-aware routing;
-`extra_usage` = cost-awareness. This makes the Claude (incl. subagent) pool proactively
-quota-aware, which is REQUIRED for cross-pool balancing (a host that thinks it has infinite
-subagent capacity never spills to CLI/other pools). Design: a per-provider `QuotaSource`
-(everything-agnostic) — Claude=this endpoint (cache ~30-60s, refresh token on 401, degrade
-on change); codex=reactive parse of its dated "usage limit… try again <date>" stderr →
-`exhausted-until`; local=unbounded. **The binding constraint is quota+rate, NOT a
-max-parallel-subagents `N`** (some IDEs cap subagent count, many don't — Ethan, 2026-06-16).
-Caveats: undocumented (defensive parse + degrade), read-only OAuth-token use (Bearer to
-api.anthropic.com only, never log), OS-portability (macOS may store creds in the keychain,
-not the file — discover). Full recipe: memory `claude-oauth-usage-quota-endpoint`.
+**PROACTIVE signal for Claude — SHIPPED + WIRED (2026-06-16, commit `a7eef160`; the key unlock).**
+Confirmed live (200 on this machine) and implemented as `ClaudeOAuthQuotaSource`
+(`packages/shared/src/quota/claudeOAuthQuotaSource.ts`): reads `claudeAiOauth.accessToken` from
+`~/.claude/.credentials.json`, GETs `api.anthropic.com/api/oauth/usage`
+(`anthropic-beta: oauth-2025-04-20`), maps the most-constraining window (normalized `limits[]` +
+`five_hour`/`seven_day`) → `QuotaUsageSnapshot.remaining_pct` (a 0–1 fraction) so the scheduler
+throttles/cools-down BEFORE a 429. Default member of `buildQuotaSource` (ahead of learned); wired into
+audit's `buildDispatchPool` (already fed the cascade — got it for free) + remediate's
+`scheduleWave`/`buildConfirmedPools`. Per-model = data-driven via `limits[].scope.model` (NO hardcoded
+model names — INV-QD-04); tier is in local creds (`/profile` optional); cache ~45s/key; degrade→null on
+missing-creds/expired/non-200/network; **no token refresh** (host CLI owns the rotating creds);
+hermeticity guard skips the live endpoint under test runners + an `AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA`
+kill-switch. This makes the Claude (incl. subagent) pool proactively quota-aware — REQUIRED for cross-pool
+balancing (a host that thinks it has infinite subagent capacity never spills). **The binding constraint is
+quota+rate, NOT a max-parallel-subagents `N`** (Ethan, 2026-06-16). Caveats: undocumented (defensive parse
++ degrade); read-only OAuth-token use (Bearer to api.anthropic.com only, never log); OS-portability (macOS
+may store creds in the keychain, not the file — degrade if absent). Full recipe + confirmed shape: memory
+`claude-oauth-usage-quota-endpoint`; build doc: `docs/quota-detection-build.md`.
 
 **NEXT — hunt the same robust-as-possible quota signal for EVERY other model source (Ethan,
 2026-06-16).** Mirror the Claude discovery across the whole pool so each provider gets the
