@@ -67,8 +67,12 @@ import {
   specIndicatesNoChange,
   hasExecutableEvidence,
   dependencyVerifiedComplete,
-  isTerminalStatus,
 } from "./stepUtils.js";
+import {
+  isTerminalStatus,
+  isVerifiedCompleteStatus,
+  isSkipStatus,
+} from "../state/itemStatus.js";
 import { resnapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
   computeDispatchCapacity,
@@ -2150,12 +2154,9 @@ export function buildNodeDisposition(
   const finding = state.plan?.findings.find((f) => f.id === nodeId);
   // Resolve the block's overall status from its items.
   const statuses = block.items.map((id) => state.items?.[id]?.status ?? "pending");
-  const isSkip = statuses.some(
-    (s) => s === "ignored" || s === "deemed_inappropriate",
-  );
+  const isSkip = statuses.some((s) => isSkipStatus(s));
   const allResolved =
-    statuses.length > 0 &&
-    statuses.every((s) => s === "resolved" || s === "resolved_no_change");
+    statuses.length > 0 && statuses.every((s) => isVerifiedCompleteStatus(s));
   const anyBlocked = statuses.some((s) => s === "blocked");
   let disposition: NodeDispositionStatus;
   if (isSkip) {
@@ -2760,7 +2761,7 @@ async function mergeImplementResultsIntoState(
   let implementRejected = 0;
   for (const findingId of mergedFindingIds) {
     const status = state.items[findingId]?.status;
-    if (status === "resolved" || status === "resolved_no_change") implementResolved++;
+    if (isVerifiedCompleteStatus(status)) implementResolved++;
     else if (status === "blocked") implementRejected++;
   }
   process.stderr.write(

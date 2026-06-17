@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   ITEM_STATUSES,
   isInProgressStatus,
+  isTerminalStatus,
+  isVerifiedCompleteStatus,
+  isSkipStatus,
   statusToDisposition,
   dispositionToOutcomeStatus,
   type RemediationItemStatus,
@@ -86,6 +89,80 @@ describe("itemStatus — isInProgressStatus", () => {
       "ignored",
     ]) {
       expect(isInProgressStatus(s)).toBe(false);
+    }
+  });
+});
+
+describe("itemStatus — isTerminalStatus", () => {
+  it("terminal = the two success + two skip states; blocked and in-progress are NOT", () => {
+    for (const s of [
+      "resolved",
+      "resolved_no_change",
+      "ignored",
+      "deemed_inappropriate",
+    ]) {
+      expect(isTerminalStatus(s)).toBe(true);
+    }
+    for (const s of [
+      "blocked",
+      "pending",
+      "tested",
+      "tested_successfully",
+      "refactored",
+      "verified",
+    ]) {
+      expect(isTerminalStatus(s)).toBe(false);
+    }
+  });
+});
+
+describe("itemStatus — isVerifiedCompleteStatus", () => {
+  it("only resolved / resolved_no_change are verified-complete (INV-RS-01)", () => {
+    expect(isVerifiedCompleteStatus("resolved")).toBe(true);
+    expect(isVerifiedCompleteStatus("resolved_no_change")).toBe(true);
+    for (const s of ["ignored", "deemed_inappropriate", "blocked", "pending"]) {
+      expect(isVerifiedCompleteStatus(s)).toBe(false);
+    }
+    expect(isVerifiedCompleteStatus(undefined)).toBe(false);
+  });
+});
+
+describe("itemStatus — isSkipStatus", () => {
+  it("skip = ignored / deemed_inappropriate only", () => {
+    expect(isSkipStatus("ignored")).toBe(true);
+    expect(isSkipStatus("deemed_inappropriate")).toBe(true);
+    for (const s of [
+      "resolved",
+      "resolved_no_change",
+      "blocked",
+      "pending",
+      "verified",
+    ]) {
+      expect(isSkipStatus(s)).toBe(false);
+    }
+  });
+});
+
+// Structural invariant: the four predicates partition the status enum, and
+// terminal is exactly verified-complete ∪ skip. Adding a status without
+// classifying it (or mis-bucketing one) fails here.
+describe("itemStatus — partition coherence", () => {
+  it("every status is in exactly one of {in-progress, verified-complete, skip, blocked}", () => {
+    for (const status of ITEM_STATUSES) {
+      const buckets = [
+        isInProgressStatus(status),
+        isVerifiedCompleteStatus(status),
+        isSkipStatus(status),
+        status === "blocked",
+      ].filter(Boolean).length;
+      expect(buckets, `status ${status} must be in exactly one bucket`).toBe(1);
+    }
+  });
+  it("terminal is exactly verified-complete ∪ skip", () => {
+    for (const status of ITEM_STATUSES) {
+      expect(isTerminalStatus(status)).toBe(
+        isVerifiedCompleteStatus(status) || isSkipStatus(status),
+      );
     }
   });
 });
