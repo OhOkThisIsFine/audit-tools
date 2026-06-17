@@ -93,19 +93,15 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   counts `refuted`; (5) `mergeGrounding` precedence is grounded > refuted > ungrounded (a grounded pass still
   wins — "refuted only excludes when nothing grounded it"); (6) tests in `grounding-surfacing.test.mjs` +
   `anchor-grounding.test.mjs`. (ARC-48c05a13, ARC-48c05a13-2.)
-- **B8 — Finding-merge location discriminator.** (ARC-1a497c28-2.) **Recon 2026-06-16 — the original
-  framing was inaccurate, re-scope before fixing.** The `findingKey` in
-  `audit-code/src/cli/mergeAndIngestCommand.ts:37` ALREADY includes `affected_files[0].path` and is only
-  used for a duplicate *warning*, not the actual union. The real identity authority is
-  `shared/src/findingIdentitySignature.ts` (`findingIdentitySignature`, drift-plan R2 single source). Its
-  tier-1 (`anchor|path|scope`) already discriminates by location; the only location-free collapse is
-  **tier 2 (`rule|lens|category`)**, which fires only for findings with NO `affected_files` at all — so
-  two distinct *fileless* findings of the same lens+category collapse to one identity. Title is
-  DELIBERATELY tier 3 (weakest) because titles are volatile, so "add title to the key" contradicts the
-  design. This is a judgment call on a sensitive single-source authority (guarded by
-  `finding-identity-single-source.test.mjs`), not a quick key tweak: decide whether fileless same-category
-  findings SHOULD collapse (probably acceptable — no location exists to tell them apart) or need a
-  non-title tier-2 discriminator. Reproduce ARC-1a497c28-2's actual case first.
+- **B8 — Finding-merge location discriminator — ✓ RESOLVED (no code change; decision + guard).** Recon
+  confirmed the real authority is `shared/src/findingIdentitySignature.ts` (drift-plan R2). Its tier-1
+  (`anchor|path|scope`) already discriminates by location; the only location-free collapse is tier 2
+  (`rule|lens|category`), which fires solely for FILELESS findings. **Decision (2026-06-17): the collapse is
+  CORRECT, not a bug.** A fileless finding's only stable identity is lens+category; the title is deliberately
+  tier 3 (volatile, so reworded re-emissions still collapse). Adding the title to tier 2 to split such
+  findings would re-introduce exactly the over-splitting the single-source authority exists to prevent — a
+  genuinely different fileless defect must differ by CATEGORY (the auditor's discriminator). Documented in the
+  tier-2 comment + an explicit `B8 decision` guard test in `finding-identity.test.mjs`. (ARC-1a497c28-2.)
 - **A5+A11 — Two-tier own-vs-import dependency policy + replace hand-rolled manifest parsers.** Write the
   policy (import vetted libs for correctness-sensitive parsers/schema/lock; keep own for tiny domain
   bits), then replace the hand-rolled TOML/YAML manifest scanners that silently drop dependency-graph

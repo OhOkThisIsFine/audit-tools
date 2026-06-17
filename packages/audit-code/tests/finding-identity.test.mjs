@@ -288,6 +288,25 @@ test("fallback ladder ordering is explicit and deterministic", () => {
   assert.equal(idOf(input), idOf(input), "derivation must be deterministic");
 });
 
+test("B8 decision: fileless same-lens+category findings collapse; the volatile title never splits them", () => {
+  // The B8 question was whether two distinct FILELESS findings of the same
+  // lens+category should collapse (they do) or need a discriminator. Decision:
+  // collapse is correct — lens+category is a fileless finding's only stable
+  // identity, and the title is deliberately tier 3 (volatile). Splitting on the
+  // title would re-introduce over-splitting (a reworded re-emission becoming two
+  // findings). A genuinely different defect must differ by CATEGORY.
+  assert.equal(
+    idOf({ affected_files: [], lens: "operability", category: "ci", title: "No CI pipeline configured" }),
+    idOf({ affected_files: [], lens: "operability", category: "ci", title: "CI is entirely absent from the repo" }),
+    "same lens+category fileless findings collapse regardless of how differently the title is worded",
+  );
+  assert.notEqual(
+    idOf({ affected_files: [], lens: "operability", category: "ci", title: "same title" }),
+    idOf({ affected_files: [], lens: "operability", category: "release", title: "same title" }),
+    "a genuinely different fileless defect must differ by category (the auditor's discriminator)",
+  );
+});
+
 test("id is stable across affected-file composition (merged file unions never move it)", () => {
   // mergeFindings unions re-emitted files into one finding and sorts them by
   // path; the id hashes the stable structural anchor only — never the merged
