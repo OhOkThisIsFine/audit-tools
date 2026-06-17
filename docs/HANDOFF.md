@@ -60,10 +60,10 @@
   default-ON is the **in-process PROVIDER path real-run** — codex agentic run still unvalidated (codex quota
   resets **Jun 19**; the false-resolve fix `f18138fe` covers the provider path too via the shared seam, but it
   wants a real ≥2-node provider run + the Windows codex-sandbox check). The cross-provider quota sources are **fixture-tested +
-  source-verified-shape, but only Claude is LIVE-confirmed (200)** — Codex/Copilot/Antigravity each want a
-  one-shot live confirmation GET (like the Claude probe) when you OK touching that token; their token-extraction
-  degrades cleanly where unavailable (Copilot needs the `gh`/`copilot` CLI token; Antigravity is opt-in). Program
-  of record: `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)".
+  source-verified-shape; Claude + Codex are now LIVE-confirmed (200, shape matches), Copilot/Antigravity are
+  not** — Copilot has no file-reachable credential on this machine (gh keyring + no copilot scope; degrade path
+  confirmed) and Antigravity is excluded per Ethan. Their token-extraction degrades cleanly where unavailable.
+  Program of record: `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)".
 
 ## Standing directives (Ethan) — read before deciding anything
 
@@ -95,9 +95,19 @@ rank preserved within health groups. STILL OPEN:
   is detecting/building an actual second pool — another CLI agent (`claude`/`codex`/`opencode`) or an IDE model
   — under its own provider+quota constraints. This is the *Heterogeneous multi-agent dispatch* backlog item
   (FINDING-020) + "detect and dispatch to CLI agents as additional pools." Bigger than spill itself.
-- (b) a one-shot **live confirmation GET per provider** (Codex/Copilot — only Claude is live-confirmed; mappings
-  are fixture-tested + source-verified-shape), each gated on your OK to touch that token. (Antigravity excluded
-  per Ethan this turn; token rotation also dropped per Ethan.)
+- (b) **live confirmation — DONE for Codex; Copilot has no reachable credential here.** Ran the real production
+  class paths against the live endpoints (2026-06-17, Ethan OK'd):
+  - **Codex ✓ LIVE-CONFIRMED (200).** `CodexQuotaSource.queryCurrentUsage('codex/*')` → valid snapshot; raw
+    `rate_limit.{primary,secondary}_window` shape matches the `CodexWindow` parser exactly; most-constraining
+    window selection works (weekly `used_percent:100` → `remaining_pct:0`). Bonus: independently corroborates
+    the A8 block — Codex WEEKLY window is exhausted, `reset_at 2026-06-19T18:17Z` (the Jun 19 date).
+  - **Copilot — degrade path confirmed; live-shape still pending.** No reachable credential on this machine
+    (no Copilot CLI; `gh` stores its token in the OS keyring, not a file, AND that gh token lacks `copilot`
+    scope). Source correctly degraded to null. Mapping stays fixture-tested only — re-confirm where a Copilot
+    token is file-reachable (`GH_COPILOT_TOKEN` env, Copilot CLI config, or `gh` insecure/file storage).
+  - Surfaced + FIXED an OS-portability bug: gh hosts path was hardcoded to `~/.config/gh` → missed
+    `%AppData%\GitHub CLI` on Windows. Now `resolveGhHostsPath` is OS-agnostic (`GH_CONFIG_DIR` → AppData →
+    ~/.config). (Antigravity excluded + token rotation dropped per Ethan.)
 
 ### 2. A8 host-subagent driver — ✓ VALIDATED + hardened this session; provider real-run + flip remain
 (a) **DONE — real-subagent end-to-end smoke.** Drove the real machine to `dispatch_implement_rolling` in an

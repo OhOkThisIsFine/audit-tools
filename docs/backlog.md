@@ -710,10 +710,14 @@ single-provider session has only one pool, so it can't fire end-to-end. The conc
 detecting/building an actual second pool (another CLI agent — `claude`/`codex`/`opencode` — or an IDE model)
 under its own provider+quota constraints; this is the *Heterogeneous multi-agent dispatch* item (FINDING-020) +
 "detect and dispatch to CLI agents as additional pools" below. The binding constraint is quota+rate, NOT
-max-parallel-`N`. (b) A one-shot **live confirmation GET per provider** (Codex/Copilot — only Claude is
-live-confirmed; mappings are fixture-tested + source-verified-shape), each gated on the user's OK to touch that
-token. Read-only token use only; ToS caveats (Antigravity, Anthropic-via-OpenCode) in the doc. (Antigravity
-excluded + token rotation dropped per Ethan 2026-06-16.)
+max-parallel-`N`. (b) **live confirmation — Codex ✓ DONE (2026-06-17, live 200: production class path +
+raw `rate_limit.{primary,secondary}_window` shape matches the parser); Copilot still pending** (no
+file-reachable credential on the test machine — gh uses the OS keyring + the gh token lacks `copilot` scope;
+the degrade path is confirmed, the response-shape mapping stays fixture-tested only — re-confirm where a
+Copilot token is file-reachable). Claude was already live-confirmed. Read-only token use only; ToS caveats
+(Antigravity, Anthropic-via-OpenCode) in the doc. (Antigravity excluded + token rotation dropped per Ethan
+2026-06-16.) The Copilot run also surfaced + FIXED an OS-portability bug (gh hosts path hardcoded to
+`~/.config/gh` → `resolveGhHostsPath` now OS-agnostic).
 
 Part of the same push: **detect and dispatch to CLI agents as additional pools.** The
 heterogeneous-dispatch machinery (`computeDispatchCapacity`, `CapacityPool`) can already
