@@ -617,6 +617,93 @@ export function ensureWorktreeNodeModules(mainRoot: string, worktreeRoot: string
   }
 }
 
+/** Worker transport outcome (mirrors shared `RollingDispatchResult["outcome"]`). */
+export type NodeWorkerOutcome = "success" | "error" | "rate_limited" | "timeout";
+
+export interface AcceptNodeWorktreeParams {
+  root: string;
+  runId: string;
+  blockId: string;
+  /** The node's isolated worktree directory. */
+  worktreeRoot: string;
+  /** The node's worktree branch (`worktreeBranchForBlock`). */
+  branch: string;
+  /** The worker's transport outcome from the node dispatcher. */
+  workerOutcome: NodeWorkerOutcome;
+  /** Deduped per-node verify commands (from the block's findings). */
+  targetedCommands: string[];
+}
+
+export interface AcceptNodeWorktreeResult {
+  /** The LIFECYCLE outcome (verify/merge applied), distinct from the worker transport outcome. */
+  outcome: NodeWorkerOutcome;
+  verifyPassed: boolean;
+  merged: boolean;
+}
+
+/**
+ * The shared post-worker "accept node" lifecycle, extracted so BOTH rolling
+ * drivers reuse identical correctness: the in-process provider engine
+ * (`driveRollingImplementDispatch`) calls it inline once the worker returns; the
+ * host-subagent driver calls it from the `accept-node` callback once a host
+ * subagent finishes.
+ *
+ * Given a completed worker run in an isolated worktree, this: (1) TOOL-commits
+ * the worker's edits onto the branch (deterministic, never the worker/host) so
+ * the branch diff is the write-scope ground truth; (2) runs the per-node verify
+ * IN the worktree BEFORE accepting; (3) merges via cherry-pick only on a passing
+ * verify; and (4) drops the worktree on any failure so the main tree is never
+ * dirtied by an unverified change. It returns the LIFECYCLE outcome (which the
+ * caller records for the deterministic merge); the caller still returns the
+ * worker's TRANSPORT outcome to the rolling engine (so a `rate_limited` worker
+ * re-queues, while a verify-failure is adjudicated by the merge → triage).
+ *
+ * SAFETY: the main tree is touched only through `mergeWorktree` (cherry-pick of a
+ * verified branch, aborts cleanly on conflict). No state mutation here — the
+ * caller persists via `mergeImplementResults`.
+ */
+export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNodeWorktreeResult {
+  const { root, runId, blockId, worktreeRoot: wt, branch, workerOutcome, targetedCommands } = params;
+  let verifyPassed = false;
+  let merged = false;
+
+  if (workerOutcome !== "success") {
+    // Worker failed / rate-limited: nothing to land; drop the worktree, preserve outcome.
+    removeWorktree(root, wt);
+    return { outcome: workerOutcome, verifyPassed, merged };
+  }
+
+  const commit = commitWorktree(wt, `remediate ${blockId} (${runId})`);
+  if (commit.error) {
+    // Could not commit the worker's edits → cannot safely land; drop it.
+    removeWorktree(root, wt);
+    return { outcome: "error", verifyPassed, merged };
+  }
+  if (!commit.committed) {
+    // Worker reported success but made no tracked edits — nothing to verify or merge.
+    // The deterministic merge adjudicates the result file (resolved_no_change needs evidence).
+    removeWorktree(root, wt);
+    return { outcome: "success", verifyPassed, merged };
+  }
+
+  const verify =
+    targetedCommands.length > 0
+      ? verifyNodeInWorktree(wt, targetedCommands)
+      : { passed: true, output: "" };
+  verifyPassed = verify.passed;
+  if (!verify.passed) {
+    // Verify failed: do not merge; drop the worktree so the main tree stays clean.
+    removeWorktree(root, wt);
+    return { outcome: "error", verifyPassed, merged };
+  }
+
+  // mergeWorktree cherry-picks the verified branch and removes the worktree (on
+  // success AND on conflict-abort), so no explicit cleanup is needed afterwards.
+  const mergeRes = mergeWorktree(root, wt, branch);
+  merged = mergeRes.success;
+  return { outcome: mergeRes.success ? "success" : "error", verifyPassed, merged };
+}
+
 export interface DispatchOptions {
   root: string;
   artifactsDir: string;
