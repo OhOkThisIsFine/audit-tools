@@ -24,6 +24,7 @@ import {
   mergeImplementResults,
   buildBlockAliasMap,
   collapseItemResults,
+  recordNodeAcceptOutcome,
 } from "../src/steps/dispatch.js";
 import {
   REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
@@ -269,5 +270,54 @@ describe("mergeImplementResults — tolerance end-to-end", () => {
     const disp = JSON.parse(await readFile(dispPath, "utf8"));
     const entry = disp.dispositions.find((d: { node_id: string }) => d.node_id === "N-x");
     expect(entry.disposition).toBe("verified_complete");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Merge-state gate: a self-reported "resolved" node whose tool-owned verify/merge
+// did NOT land its edits must be routed to triage, never left resolved. Regression
+// for the rolling-driver gap where acceptNodeWorktree's {merged} outcome was
+// discarded, so a verify-failed-but-in-scope node could be falsely resolved.
+// ---------------------------------------------------------------------------
+
+describe("mergeImplementResults — merge-state gate (verify/merge must actually land)", () => {
+  async function writeAcceptOutcome(outcome: {
+    outcome: "success" | "error" | "rate_limited" | "timeout";
+    verifyPassed: boolean;
+    merged: boolean;
+  }): Promise<void> {
+    await mkdir(join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement"), { recursive: true });
+    await recordNodeAcceptOutcome(ARTIFACTS_DIR, "PLAN-1", "CP-BLOCK-N-x", outcome);
+  }
+
+  it("blocks a self-reported-resolved node whose accept-outcome shows it never merged", async () => {
+    await saveState(makeNodeState());
+    // The worker self-reports resolved, but the tool-owned verify/merge failed: the
+    // fix never landed on the main tree. The recorded outcome is the ground truth.
+    await writeAcceptOutcome({ outcome: "error", verifyPassed: false, merged: false });
+    const merged = await mergeWith([
+      { finding_id: "N-x", status: "resolved", evidence: ["claimed resolved but verify failed"] },
+    ]);
+    expect(merged.items!["N-x"].status).toBe("blocked");
+    expect(merged.items!["N-x"].failure_reason).toMatch(/did not land|not in.*main tree/i);
+  });
+
+  it("keeps a resolved node resolved when its accept-outcome shows it merged", async () => {
+    await saveState(makeNodeState());
+    await writeAcceptOutcome({ outcome: "success", verifyPassed: true, merged: true });
+    const merged = await mergeWith([
+      { finding_id: "N-x", status: "resolved", evidence: ["landed: vitest run -> 3 pass"] },
+    ]);
+    expect(merged.items!["N-x"].status).toBe("resolved");
+  });
+
+  it("stays inert (no sidecar) so the interim main-tree path is unaffected", async () => {
+    // No accept-outcome recorded → the gate must not fire; the worker's resolved
+    // result stands exactly as before the gate existed.
+    await saveState(makeNodeState());
+    const merged = await mergeWith([
+      { finding_id: "N-x", status: "resolved", evidence: ["main-tree path, no worktree record"] },
+    ]);
+    expect(merged.items!["N-x"].status).toBe("resolved");
   });
 });

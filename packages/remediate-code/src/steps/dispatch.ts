@@ -704,6 +704,58 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
   return { outcome: mergeRes.success ? "success" : "error", verifyPassed, merged };
 }
 
+/**
+ * Sidecar path for a node's tool-owned accept (verify/merge) outcome. Written by
+ * BOTH rolling drivers as each node is accepted, read by `mergeImplementResults`.
+ * Block ids here follow the same filename-safe convention as the per-node result
+ * files in the same dir.
+ */
+export function nodeAcceptOutcomePath(
+  artifactsDir: string,
+  runId: string,
+  blockId: string,
+): string {
+  return join(runDir(artifactsDir, runId, "implement"), `accept-outcome-${blockId}.json`);
+}
+
+/**
+ * Persist a node's `acceptNodeWorktree` lifecycle outcome so finalization can tell
+ * a node whose edits actually LANDED (merged) from one that self-reported "resolved"
+ * but failed tool-owned verify / merge (OBL-DS-06: never trust the worker's self
+ * report). Both rolling drivers (host-subagent `advanceHostRolling` and in-process
+ * `driveRollingImplementDispatch`) call this; the interim main-tree path writes none,
+ * so the merge-state gate is inert there.
+ */
+export async function recordNodeAcceptOutcome(
+  artifactsDir: string,
+  runId: string,
+  blockId: string,
+  result: AcceptNodeWorktreeResult,
+): Promise<void> {
+  await writeJsonFile(nodeAcceptOutcomePath(artifactsDir, runId, blockId), {
+    schema_version: "remediate-code-implement/node-accept-outcome/v1alpha1",
+    block_id: blockId,
+    outcome: result.outcome,
+    verify_passed: result.verifyPassed,
+    merged: result.merged,
+  });
+}
+
+/** Load a node's recorded accept outcome, or null when none was written. */
+export async function loadNodeAcceptOutcome(
+  artifactsDir: string,
+  runId: string,
+  blockId: string,
+): Promise<AcceptNodeWorktreeResult | null> {
+  const raw = await readOptionalJsonFile<{
+    outcome: NodeWorkerOutcome;
+    verify_passed: boolean;
+    merged: boolean;
+  }>(nodeAcceptOutcomePath(artifactsDir, runId, blockId));
+  if (!raw) return null;
+  return { outcome: raw.outcome, verifyPassed: raw.verify_passed, merged: raw.merged };
+}
+
 export interface DispatchOptions {
   root: string;
   artifactsDir: string;
@@ -2434,6 +2486,32 @@ async function mergeImplementResultsIntoState(
           stateItem.status = "blocked";
           markTerminal(stateItem);
           stateItem.failure_reason = decision.reason;
+        }
+      }
+    }
+
+    // Merge-state gate (authoritative, OBL-DS-06): a node that self-reported a
+    // finding "resolved" but whose tool-owned verify/merge did NOT land its edits
+    // (acceptNodeWorktree returned merged:false — verify failed, a cherry-pick
+    // conflict, or no actual edit) must never stand as resolved: its fix is not in
+    // the main tree. The recorded per-node accept outcome is the ground truth, never
+    // the worker's result file. Keyed on resolvedFindingIds, so a legitimate
+    // no-change closure (which makes no edits by design, and is not in that set)
+    // stays exempt. Worktree-dispatched blocks have a record; the interim main-tree
+    // path writes none, so this gate is inert there.
+    if (resolvedFindingIds.length > 0) {
+      const acceptOutcome = await loadNodeAcceptOutcome(options.artifactsDir, runId, blockId);
+      if (acceptOutcome && !acceptOutcome.merged) {
+        for (const findingId of resolvedFindingIds) {
+          const stateItem = state.items[findingId];
+          if (!stateItem) continue;
+          stateItem.status = "blocked";
+          markTerminal(stateItem);
+          stateItem.failure_reason =
+            `Node ${blockId} reported finding ${findingId} resolved, but its tool-owned ` +
+            `verify/merge did not land the edits (outcome=${acceptOutcome.outcome}, ` +
+            `verify_passed=${acceptOutcome.verifyPassed}, merged=false); the fix is not in ` +
+            `the main tree. Routed to triage.`;
         }
       }
     }

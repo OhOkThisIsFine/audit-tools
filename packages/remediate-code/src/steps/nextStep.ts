@@ -25,6 +25,7 @@ import {
   createWorktree,
   removeWorktree,
   acceptNodeWorktree,
+  recordNodeAcceptOutcome,
   ensureWorktreeNodeModules,
   worktreePath,
   worktreeBranchForBlock,
@@ -726,6 +727,10 @@ export async function driveRollingImplementDispatch(
         workerOutcome: result.outcome,
         targetedCommands: targeted,
       });
+      // Persist the tool-owned verify/merge outcome so finalization blocks a node
+      // that self-reported resolved but never actually landed (OBL-DS-06). Parity
+      // with the host-subagent driver's `accept-node` callback.
+      await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept);
       nodeOutcomes.push({
         block_id: block.block_id,
         outcome: accept.outcome,
@@ -735,6 +740,11 @@ export async function driveRollingImplementDispatch(
       return result;
     } catch (err) {
       removeWorktree(root, wt);
+      await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, {
+        outcome: "error",
+        verifyPassed: false,
+        merged: false,
+      });
       nodeOutcomes.push({ block_id: block.block_id, outcome: "error", verify_passed: false, merged: false });
       return {
         packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },

@@ -10,6 +10,7 @@ import {
   mkdtempSync,
   mkdirSync,
   writeFileSync,
+  readFileSync,
   existsSync,
   realpathSync,
 } from "node:fs";
@@ -219,5 +220,28 @@ describe("advanceHostRolling", () => {
     await expect(
       advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "ZZZ" }),
     ).rejects.toThrow(/not in the rolling frontier/);
+  });
+
+  it("records each accepted node's verify/merge outcome to the sidecar mergeImplementResults reads", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const artifactsDir = seedSession(repo, ["B1"], 1);
+    // seedSession created B1's worktree without edits; add a real edit so the accept
+    // lifecycle commits → verifies (no targeted cmds → auto-pass) → merges (merged:true).
+    const wt = worktreePath(repo, "B1", RID);
+    mkdirSync(join(wt, "src"), { recursive: true });
+    writeFileSync(join(wt, "src", "b1.ts"), 'export const x = "B1";\n');
+
+    const d = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
+    expect(d.kind).toBe("done");
+
+    // The accept-outcome sidecar is the merge-state ground truth (OBL-DS-06).
+    const sidecar = join(artifactsDir, "runs", RID, "implement", "accept-outcome-B1.json");
+    expect(existsSync(sidecar)).toBe(true);
+    const rec = JSON.parse(readFileSync(sidecar, "utf8"));
+    expect(rec.block_id).toBe("B1");
+    expect(rec.merged).toBe(true);
+    expect(rec.verify_passed).toBe(true);
+    expect(rec.outcome).toBe("success");
   });
 });

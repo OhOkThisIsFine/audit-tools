@@ -9,6 +9,7 @@ import {
   worktreePath,
   worktreeBranchForBlock,
   acceptNodeWorktree,
+  recordNodeAcceptOutcome,
   type DispatchOptions,
 } from "./dispatch.js";
 import type {
@@ -198,7 +199,7 @@ export async function advanceHostRolling(opts: {
 
     if (!session.accepted.includes(opts.blockId)) {
       const state = await new StateStore(opts.artifactsDir).loadState();
-      acceptNodeWorktree({
+      const accept = acceptNodeWorktree({
         root: opts.root,
         runId: opts.runId,
         blockId: opts.blockId,
@@ -207,6 +208,9 @@ export async function advanceHostRolling(opts: {
         workerOutcome: await resultOutcome(node.result_path),
         targetedCommands: computeTargeted(state, opts.blockId),
       });
+      // Persist the tool-owned verify/merge outcome so finalization (mergeImplementResults)
+      // blocks a node that self-reported resolved but never actually landed (OBL-DS-06).
+      await recordNodeAcceptOutcome(opts.artifactsDir, opts.runId, opts.blockId, accept);
       session.accepted.push(opts.blockId);
     }
 
