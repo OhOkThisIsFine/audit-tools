@@ -20,15 +20,25 @@
  *   stranded_ids}` (read via `getTerminal()`); the consumer routes the stranded
  *   ids (audit → synthesis/uncovered, remediate → blocked → close). Dispatch
  *   callbacks always resolve, never reject.
+ * - Proactive cross-pool spill (INV-QD-14): selection deprioritises a pool that
+ *   is quota-degraded (live `remaining_pct` below the LOW band, or in an active
+ *   cooldown) so load spills onto a peer WITH headroom BEFORE a 429 — the
+ *   proactive complement to the reactive exhausted-pool re-route above. The
+ *   capability order is preserved WITHIN the healthy and degraded groups; a
+ *   degraded pool stays a fallback so a run never stalls when every pool is
+ *   degraded. Inert when quota management is disabled (selection stays pure
+ *   capability order). This is what makes the real-time quota sources actually
+ *   redistribute load instead of merely throttling a single chosen pool.
  */
 
 import type { SessionConfig } from "../types/sessionConfig.js";
 import type { CapacityPool, PartialCompletionTerminal } from "../quota/capacity.js";
-import type { QuotaStateEntry, QuotaState } from "../quota/types.js";
+import type { QuotaStateEntry, QuotaState, WaveSchedule } from "../quota/types.js";
 import {
   scheduleWave,
   buildProviderModelKey,
   DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
+  QUOTA_REMAINING_PCT_LOW,
 } from "../quota/scheduler.js";
 import { recordWaveOutcome, readQuotaState } from "../quota/state.js";
 import { buildEmptyPoolTerminal } from "../quota/capacity.js";
@@ -223,11 +233,42 @@ function poolCapabilityRank(pool: CapacityPool): number {
 // ---------------------------------------------------------------------------
 
 /**
+ * Classify a pool as quota-degraded from its live signals: an active cooldown
+ * (learned 429 backoff, or a critical proactive reset folded in by
+ * `scheduleWave`) or a real-time `remaining_pct` below the LOW band. A degraded
+ * pool is still dispatchable — `scheduleWave` floors the wave at 1 — but it is
+ * deprioritised so load spills to a healthier peer first (INV-QD-14).
+ *
+ * Reads the same `QUOTA_REMAINING_PCT_LOW` threshold the scheduler uses to halve
+ * a wave, so "degraded enough to halve" and "degraded enough to spill off" stay
+ * defined by one constant rather than a second magic number.
+ */
+function isPoolQuotaDegraded(
+  pool: CapacityPool,
+  schedule: WaveSchedule,
+): boolean {
+  if (schedule.cooldown_until) return true;
+  const remainingPct = pool.quotaSourceSnapshot?.remaining_pct;
+  return remainingPct != null && remainingPct < QUOTA_REMAINING_PCT_LOW;
+}
+
+/**
  * Select the best available provider slot for a packet.
  *
- * High-complexity packets (complexity >= 0.5) prefer the most-capable pool;
- * low-complexity packets prefer the least-capable pool (preserving expensive
- * capacity for harder work).
+ * Two ordering axes, applied in priority order:
+ *  1. **Quota health (INV-QD-14, proactive spill).** When quota management is
+ *     active, pools that are NOT quota-degraded are tried before degraded ones,
+ *     so load spills off a throttled pool (low `remaining_pct` / in cooldown)
+ *     onto a peer with headroom BEFORE a 429. This is the proactive complement to
+ *     the reactive exhausted-pool re-route (INV-QD-07) and is what lets the
+ *     real-time quota sources actually redistribute load across heterogeneous
+ *     pools rather than merely throttling one chosen pool. Degraded pools remain
+ *     a fallback so a run never stalls when every pool is degraded.
+ *  2. **Capability rank.** WITHIN each health group, high-complexity packets
+ *     (complexity >= 0.5) prefer the most-capable pool; low-complexity packets
+ *     prefer the least-capable pool (preserving expensive capacity for harder
+ *     work — the per-model/cost axis). Pool rank comes from `pool.rank`, never a
+ *     provider-name table (INV-shared-core-02).
  *
  * Pools whose id is in `exhaustedPoolIds` are skipped — this is how the
  * transient-429 recovery re-routes a re-queued packet to a pool still within
@@ -246,7 +287,7 @@ export function selectProvider<TPacket>(
   const complexity = scorePacketComplexity(packet);
   const highComplexity = complexity >= 0.5;
 
-  // Sort pools by capability rank: high-complexity → descending, low-complexity → ascending.
+  // Capability ordering: high-complexity → descending rank, low-complexity → ascending.
   const sorted = [...confirmedPools]
     .filter((p) => !exhaustedPoolIds.has(p.id))
     .sort((a, b) => {
@@ -254,14 +295,15 @@ export function selectProvider<TPacket>(
       return highComplexity ? diff : -diff;
     });
 
-  for (const pool of sorted) {
+  // Ask scheduleWave whether each pool can accept one more slot, accounting for
+  // in-flight tokens as additional estimated slot cost. The schedule already
+  // folds in the real-time quota snapshot, learned limits, and any active
+  // cooldown, so it doubles as the health signal for the spill ordering below.
+  const scheduleForPool = (pool: CapacityPool): WaveSchedule => {
     const poolKey = buildProviderModelKey(pool.providerName, pool.hostModel);
     const quotaStateEntry = pool.quotaStateEntry ?? quotaStateEntries[poolKey] ?? null;
     const inFlightTokens = inFlightTracker.getInFlightTokens(pool.id);
-
-    // Ask scheduleWave whether this pool can accept one more slot, accounting
-    // for in-flight tokens as additional estimated slot cost.
-    const schedule = scheduleWave({
+    return scheduleWave({
       providerName: pool.providerName,
       sessionConfig,
       hostModel: pool.hostModel,
@@ -272,7 +314,23 @@ export function selectProvider<TPacket>(
       discoveredLimits: pool.discoveredLimits ?? null,
       quotaSourceSnapshot: pool.quotaSourceSnapshot ?? null,
     });
+  };
 
+  const evaluated = sorted.map((pool) => ({ pool, schedule: scheduleForPool(pool) }));
+
+  // Proactive cross-pool spill (INV-QD-14): healthy pools first, then degraded,
+  // each group keeping the capability order above (a stable partition). When
+  // quota management is disabled the subsystem is inert — selection stays pure
+  // capability order.
+  const quotaManaged = sessionConfig.quota?.enabled !== false;
+  const ordered = quotaManaged
+    ? [
+        ...evaluated.filter((e) => !isPoolQuotaDegraded(e.pool, e.schedule)),
+        ...evaluated.filter((e) => isPoolQuotaDegraded(e.pool, e.schedule)),
+      ]
+    : evaluated;
+
+  for (const { pool, schedule } of ordered) {
     if (schedule.max_concurrent > 0) {
       return {
         providerName: pool.providerName,
