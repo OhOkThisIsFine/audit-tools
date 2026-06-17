@@ -574,6 +574,20 @@ export {
   mapUsageToSnapshot,
 } from "./quota/claudeOAuthQuotaSource.js";
 export type { ClaudeOAuthQuotaSourceOptions } from "./quota/claudeOAuthQuotaSource.js";
+export { fetchClaudeUsage } from "./quota/claudeOAuthQuotaSource.js";
+export {
+  BaseHttpQuotaSource,
+  fetchJsonOrNull,
+  clampFraction,
+  remainingFromUsedPercent,
+} from "./quota/httpQuotaSource.js";
+export type {
+  HttpQuotaSourceOptions,
+  UsageFetchContext,
+  FetchLike,
+} from "./quota/httpQuotaSource.js";
+export { CodexQuotaSource, fetchCodexUsage, mapCodexUsage } from "./quota/codexQuotaSource.js";
+export type { CodexQuotaSourceOptions } from "./quota/codexQuotaSource.js";
 export type { ErrorParser } from "./quota/errorParsers/index.js";
 export {
   GenericErrorParser,

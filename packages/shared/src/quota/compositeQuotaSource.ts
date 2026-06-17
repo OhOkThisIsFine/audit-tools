@@ -1,6 +1,7 @@
 import type { QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
 import { LearnedQuotaSource } from "./learnedQuotaSource.js";
 import { ClaudeOAuthQuotaSource } from "./claudeOAuthQuotaSource.js";
+import { CodexQuotaSource } from "./codexQuotaSource.js";
 import { RunLogger } from "../observability/runLog.js";
 
 export interface BuildQuotaSourceOptions {
@@ -56,6 +57,10 @@ export function buildQuotaSource(options: BuildQuotaSourceOptions = {}): QuotaSo
   if (options.claudeOAuth !== false) {
     proactive.push(options.claudeOAuth ?? new ClaudeOAuthQuotaSource());
   }
+  // Each proactive source gates by provider name (returns null with no I/O for a
+  // non-matching key), so registering all of them is safe: whichever provider's
+  // pool is dispatched, the matching source answers, the rest pass through.
+  proactive.push(new CodexQuotaSource());
   return new CompositeQuotaSource([
     ...proactive,
     ...(options.additionalSources ?? []),
