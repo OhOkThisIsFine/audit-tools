@@ -55,6 +55,33 @@ test("discoverProviders assigns correct capability tiers for well-known names", 
   assert.equal(tierMap["local-subprocess"],  "unknown");
 });
 
+test("discoverProviders surfaces openai-compatible when configured (config-gated, not PATH-probed)", () => {
+  // openai-compatible is an API pool with no CLI to probe; it must be surfaced
+  // from session config so it can join the confirmed pool as a spill target.
+  const configured = discoverProviders(
+    { openai_compatible: { base_url: "https://example/v1", model: "vendor/model-x" } },
+    {},
+  );
+  const entry = configured.find((p) => p.name === "openai-compatible");
+  assert.ok(entry, "openai-compatible should be surfaced when base_url + model are set");
+  assert.equal(entry.detected, true);
+  assert.equal(entry.capabilityTier, "capable");
+
+  // Absent config → not surfaced; partial config (model missing) → not surfaced.
+  assert.equal(
+    discoverProviders({}, {}).some((p) => p.name === "openai-compatible"),
+    false,
+    "openai-compatible must NOT appear without configuration",
+  );
+  assert.equal(
+    discoverProviders({ openai_compatible: { base_url: "https://example/v1" } }, {}).some(
+      (p) => p.name === "openai-compatible",
+    ),
+    false,
+    "openai-compatible needs both base_url AND model",
+  );
+});
+
 // ---------------------------------------------------------------------------
 // applyProviderConfirmationSelections
 // ---------------------------------------------------------------------------

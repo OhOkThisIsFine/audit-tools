@@ -1,7 +1,10 @@
 import { spawnSync } from "node:child_process";
 import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type { FreshSessionProvider, ProviderRateLimits } from "./types.js";
-import { resolveFreshSessionProviderName } from "./providerFactory.js";
+import {
+  resolveFreshSessionProviderName,
+  hasConfiguredOpenAiCompatible,
+} from "./providerFactory.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -143,6 +146,20 @@ export function discoverProviders(
         : resolvedName === probe.providerName
           ? undefined
           : `detected on PATH; auto-resolution may prefer a higher-priority provider`,
+    });
+  }
+
+  // openai-compatible (NIM / vLLM / LM Studio / …) is an API pool, not a CLI: it
+  // is config-gated (base_url + model), never PATH-probed, so the CLI loop above
+  // can't surface it. Surface it here when configured so it joins the confirmed
+  // pool as a real spill target (INV-QD-14) alongside the PATH-detected CLIs.
+  if (hasConfiguredOpenAiCompatible(sessionConfig.openai_compatible)) {
+    discovered.push({
+      name: "openai-compatible",
+      command: sessionConfig.openai_compatible?.model,
+      capabilityTier: defaultCapabilityTier("openai-compatible"),
+      detected: true,
+      reason: "configured background API pool (base_url + model); not PATH-probed",
     });
   }
 

@@ -62,7 +62,7 @@ export function makeProviderNodeDispatcher(
     root: params.root,
     artifactsDir: params.artifactsDir,
   };
-  return async ({ block, worktreeRoot, resultPath }) => {
+  return async ({ block, slot, worktreeRoot, resultPath }) => {
     const packet = {
       id: block.block_id,
       payload: { block_id: block.block_id },
@@ -78,9 +78,14 @@ export function makeProviderNodeDispatcher(
       };
     }
 
+    // Resolve the provider the scheduler SELECTED for this slot, not a fixed
+    // configured one: that is what makes cross-pool spill (INV-QD-14) actually
+    // route a node to a peer pool's backend (e.g. an openai-compatible/NIM pool
+    // when the primary pool is quota-degraded). Falls back to the configured
+    // provider when no slot provider is present.
     const resolveProvider = params.createProvider ?? createFreshSessionProvider;
     const provider = resolveProvider(
-      params.sessionConfig?.provider,
+      slot?.providerName || params.sessionConfig?.provider,
       params.sessionConfig ?? {},
     );
     const dir = dirname(resultPath);

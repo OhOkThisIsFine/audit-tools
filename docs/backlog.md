@@ -71,10 +71,14 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   usable (codex+NIM is a dead end — codex 0.140 dropped `wire_api=chat`; NIM's Responses API rejects codex's
   `namespace` tools). **`rolling_engine` flipped default-ON `8819713`** — rolling is the implement default;
   the wave is opt-out (`rolling_engine:false`). **Remaining:** (a) audit-code symmetric wiring of
-  `runRollingDispatch` (still dormant); (b) surface `openai-compatible` as a confirmed pool so INV-QD-14
-  cross-pool spill fires e2e (see *Cross-IDE/provider quota detection* below); (c) harden worktree-branch
-  reuse across a `rate_limited` re-queue. *(The worktree-walks-up-to-parent-repo foot-gun is FIXED: `createWorktree`
-  now asserts `git rev-parse --show-toplevel` == the target root and refuses rather than escaping to an ancestor.)* Plan: `docs/a8-rolling-cutover-plan.md`. (ARC-f378135d family.)
+  `runRollingDispatch` (still dormant); (b-residual) the {host-subagent (Claude) + NIM} HYBRID topology + a
+  live cross-provider spill run (see *Cross-IDE/provider quota detection* below); (c) harden worktree-branch
+  reuse across a `rate_limited` re-queue. *(FIXED: the worktree-walks-up-to-parent-repo foot-gun — `createWorktree`
+  now asserts `git rev-parse --show-toplevel` == the target root and refuses rather than escaping to an ancestor.
+  FIXED: `openai-compatible` is now surfaced as a confirmed pool — `discoverProviders` config-gates it,
+  `buildConfirmedPools` emits it as a 2nd CapacityPool alongside the primary, and `makeProviderNodeDispatcher`
+  resolves the provider PER-SLOT so the INV-QD-14 spill mechanically routes a node to the openai-compatible pool
+  in the in-process driver.)* Plan: `docs/a8-rolling-cutover-plan.md`. (ARC-f378135d family.)
 - **B1 / B2 / B3 — greenlit** (the magic-numbers, diff-based-re-review, and staleness-cascade friction
   items in *Known friction* below; now accepted work, not just logged friction).
 - **B4 — Hard-exclude tool-refuted findings.** A tier-2 REFUTED finding (e.g. madge-disproven cycle) is

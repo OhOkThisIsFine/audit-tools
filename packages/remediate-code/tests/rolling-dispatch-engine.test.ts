@@ -164,6 +164,37 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     expect(cap.total_slots).toBeGreaterThanOrEqual(1);
     expect(cap.pools.length).toBe(pools.length);
   });
+
+  it("appends a configured openai-compatible pool alongside the primary (INV-QD-14 spill target)", async () => {
+    const pools = await buildConfirmedPools({
+      sessionConfig: {
+        provider: "claude-code",
+        quota: { enabled: true },
+        openai_compatible: { base_url: "https://example/v1", model: "vendor/model-x" },
+      },
+    });
+    expect(pools.length).toBe(2);
+    const api = pools.find((p) => p.providerName === "openai-compatible");
+    expect(api).toBeTruthy();
+    // Independent API pool: not bound by the host subagent budget, no proactive
+    // capability handshake; its model is the quota-key segment.
+    expect(api!.hostConcurrencyLimit).toBeNull();
+    expect(api!.discoveredLimits).toBeNull();
+    expect(api!.hostModel).toBe("vendor/model-x");
+    expect(api!.id).not.toBe(pools.find((p) => p.providerName === "claude-code")!.id);
+  });
+
+  it("does NOT duplicate the openai-compatible pool when it is the primary provider", async () => {
+    const pools = await buildConfirmedPools({
+      sessionConfig: {
+        provider: "openai-compatible",
+        quota: { enabled: true },
+        openai_compatible: { base_url: "https://example/v1", model: "vendor/model-x" },
+      },
+    });
+    expect(pools.length).toBe(1);
+    expect(pools[0].providerName).toBe("openai-compatible");
+  });
 });
 
 // ===========================================================================
