@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 
-const { CopilotQuotaSource, mapCopilotUsage, fetchCopilotUsage } = await import(
+const { CopilotQuotaSource, mapCopilotUsage, fetchCopilotUsage, resolveGhHostsPath } = await import(
   "../src/quota/copilotQuotaSource.ts"
 );
 
@@ -57,6 +57,32 @@ test("mapCopilotUsage treats unlimited as full and falls back to entitlement rat
   assert.equal(mapCopilotUsage({ quota_snapshots: { premium_interactions: { entitlement: 300, remaining: 75 } } }, NOW).remaining_pct, 0.25);
   assert.equal(mapCopilotUsage({ quota_snapshots: { chat: { percent_remaining: 50 } } }, NOW).remaining_pct, 0.5);
   assert.equal(mapCopilotUsage({ quota_snapshots: {} }, NOW), null);
+});
+
+// ---- resolveGhHostsPath (OS-agnostic gh config dir) ----
+
+test("resolveGhHostsPath is OS-agnostic: Windows AppData, Unix ~/.config, GH_CONFIG_DIR override", () => {
+  const norm = (s) => s.replace(/\\/g, "/");
+  // Unix default → ~/.config/gh/hosts.yml
+  assert.match(
+    norm(resolveGhHostsPath({}, "linux", "/home/u")),
+    /^\/home\/u\/\.config\/gh\/hosts\.yml$/,
+  );
+  // Windows default → %AppData%\GitHub CLI\hosts.yml (this is the bug the live probe found)
+  assert.match(
+    norm(resolveGhHostsPath({ APPDATA: "C:\\Users\\u\\AppData\\Roaming" }, "win32", "C:\\Users\\u")),
+    /AppData\/Roaming\/GitHub CLI\/hosts\.yml$/,
+  );
+  // Windows with no APPDATA env still derives a GitHub CLI dir under the home tree
+  assert.match(
+    norm(resolveGhHostsPath({}, "win32", "C:\\Users\\u")),
+    /GitHub CLI\/hosts\.yml$/,
+  );
+  // GH_CONFIG_DIR wins on any platform
+  assert.match(
+    norm(resolveGhHostsPath({ GH_CONFIG_DIR: "/custom/gh" }, "linux", "/home/u")),
+    /^\/custom\/gh\/hosts\.yml$/,
+  );
 });
 
 // ---- queryCurrentUsage ----
