@@ -594,6 +594,33 @@ export interface DriveRollingImplementDispatchResult {
 }
 
 /**
+ * Backends the orchestrator can drive IN-PROCESS as the per-node implement worker
+ * via `driveRollingImplementDispatch` (it resolves + launches the provider with each
+ * node's worktree-rooted prompt, cwd-confined to that worktree). The conversation
+ * host (claude-code) and IDE-bound providers (vscode-task / antigravity) are
+ * excluded: claude-code self-blocks inside a session, and the IDE providers have no
+ * headless invocation. "auto" is intentionally absent — auto-resolution stays on the
+ * conversation host-subagent default, so the in-process driver is opt-in via an
+ * EXPLICIT backend provider in session config. When one is set, it takes precedence
+ * over the host-subagent driver: an operator who configured a backend (e.g. a NIM
+ * pool for headless autonomy) wants it to do the implement work, not the host.
+ */
+const IN_PROCESS_DISPATCH_PROVIDERS: ReadonlySet<string> = new Set([
+  "openai-compatible",
+  "codex",
+  "opencode",
+  "subprocess-template",
+  "local-subprocess",
+]);
+
+function resolvesToInProcessDispatchProvider(
+  sessionConfig: SessionConfig | null | undefined,
+): boolean {
+  const provider = sessionConfig?.provider;
+  return provider !== undefined && IN_PROCESS_DISPATCH_PROVIDERS.has(provider);
+}
+
+/**
  * Drive the implement phase through the in-process rolling engine. Engages the
  * shared `createRollingDispatcher` (via `driveRollingDispatch`) over
  * quota-derived `confirmedPools`, runs each node in an isolated worktree, gates
@@ -1383,6 +1410,41 @@ async function buildImplementDispatchStep(ctx: {
       hostModels: options.hostModels,
       hostModelId: options.hostModelId,
     };
+
+    // A8 in-process provider driver: when the rolling engine is enabled AND the
+    // operator EXPLICITLY configured a programmatic backend provider (openai-compatible
+    // / codex / opencode / …), the orchestrator drives the FULL rolling implement
+    // dispatch ITSELF — the configured provider is the per-node worker, cwd-confined to
+    // each node's worktree, sharing the same `acceptNodeWorktree` core (commit → verify
+    // → merge, verify-fail → triage) as the host-subagent driver. Checked BEFORE the
+    // host-subagent branch so an explicit backend (e.g. a NIM pool for headless
+    // autonomy) drives the work rather than the conversation host's subagents.
+    if (rollingEngineEnabled && resolvesToInProcessDispatchProvider(sessionConfigImpl)) {
+      const driven = await driveRollingImplementDispatch({
+        root,
+        artifactsDir,
+        runId,
+        sessionConfig: sessionConfigImpl ?? null,
+        // Per-node verify (targeted_commands) owns each node's build/test; an
+        // inter-level "shared surface" rebuild is a monorepo-self-remediation concern
+        // the host-driven paths handle, not a generic target-repo step → no-op here.
+        rebuildSharedBetweenLevels: async () => {},
+        waveOptions: {
+          hostMaxConcurrent: options.hostMaxConcurrent,
+          hostContextTokens: options.hostContextTokens,
+          hostOutputTokens: options.hostOutputTokens,
+          hostModels: options.hostModels,
+          hostModelId: options.hostModelId,
+        },
+      });
+      // null = no eligible pending work this pass; the engine merges internally once
+      // it has run, so only the empty-frontier case needs a merge here. Either way the
+      // implement frontier is resolved — re-enter to advance (triage / closing).
+      if (driven === null) {
+        await mergeImplementResults({ root, artifactsDir }, runId);
+      }
+      return decideNextStepLoop(options, runLogger, true);
+    }
 
     if (rollingEngineEnabled && canDispatchImpl) {
       const rolling = await prepareHostRollingDispatch({ root, artifactsDir }, runId, waveOptsImpl);
