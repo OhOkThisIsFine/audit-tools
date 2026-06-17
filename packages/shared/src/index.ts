@@ -590,6 +590,14 @@ export { CodexQuotaSource, fetchCodexUsage, mapCodexUsage } from "./quota/codexQ
 export type { CodexQuotaSourceOptions } from "./quota/codexQuotaSource.js";
 export { CopilotQuotaSource, fetchCopilotUsage, mapCopilotUsage } from "./quota/copilotQuotaSource.js";
 export type { CopilotQuotaSourceOptions } from "./quota/copilotQuotaSource.js";
+export {
+  AntigravityQuotaSource,
+  fetchAntigravityUsage,
+  mapAntigravityUsage,
+} from "./quota/antigravityQuotaSource.js";
+export type { AntigravityQuotaSourceOptions } from "./quota/antigravityQuotaSource.js";
+export { OpenCodeQuotaSource } from "./quota/openCodeQuotaSource.js";
+export type { OpenCodeQuotaSourceOptions } from "./quota/openCodeQuotaSource.js";
 export type { ErrorParser } from "./quota/errorParsers/index.js";
 export {
   GenericErrorParser,
