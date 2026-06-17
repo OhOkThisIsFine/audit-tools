@@ -39,6 +39,13 @@ function unlimitedSession() {
   return { quota: { enabled: false } };
 }
 
+// Session config with quota management active — required to exercise the
+// proactive cross-pool spill ordering (INV-QD-14), which is inert when quota is
+// disabled (selection then stays pure capability order).
+function enabledSession() {
+  return { quota: { enabled: true, safety_margin: 1.0, empirical_half_life_hours: 24 } };
+}
+
 async function setupTmpQuotaDir() {
   const dir = await mkdtemp(join(tmpdir(), "rolling-dispatch-test-"));
   setQuotaStateDir(dir);
@@ -484,6 +491,65 @@ test("selectProvider — returns null when every pool is exhausted", async () =>
     new Set(["a", "b"]),
   );
   assert.equal(slot, null, "no eligible pool → null");
+});
+
+// ---------------------------------------------------------------------------
+// selectProvider — proactive cross-pool spill (INV-QD-14)
+//
+// The reactive re-route (INV-QD-07) only fires AFTER a 429. These cover the
+// proactive complement: a pool whose live remaining_pct is below the LOW band,
+// or that is in an active cooldown, is deprioritised so load spills to a peer
+// with headroom BEFORE it 429s.
+// ---------------------------------------------------------------------------
+
+test("selectProvider — spills off a quota-degraded pool to a healthy peer (INV-QD-14)", async () => {
+  await setupTmpQuotaDir();
+  const packet = makePacket("p1", { complexity: 0.5 });
+  // Same (absent) rank → capability is a tie, so health is the sole differentiator.
+  // The degraded pool is FIRST in the array: only the spill reorder can make the
+  // healthy peer win, so this isolates the new behaviour.
+  const degraded = makePool("degraded-pool", { quotaSourceSnapshot: { remaining_pct: 0.05 } });
+  const healthy = makePool("healthy-pool", { quotaSourceSnapshot: { remaining_pct: 0.95 } });
+  const tracker = new InFlightTokenTracker();
+  const slot = selectProvider(packet, [degraded, healthy], tracker, {}, enabledSession());
+  assert.ok(slot !== null);
+  assert.equal(slot.poolId, "healthy-pool", "load must spill off the degraded pool to the healthy peer");
+});
+
+test("selectProvider — spills off a pool in active cooldown to a peer with headroom (INV-QD-14)", async () => {
+  await setupTmpQuotaDir();
+  const packet = makePacket("p1", { complexity: 0.5 });
+  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  // cooling-pool has an active learned cooldown → scheduleWave reports cooldown_until → degraded.
+  const cooling = makePool("cooling-pool", { quotaStateEntry: { cooldown_until: future } });
+  const healthy = makePool("healthy-pool");
+  const tracker = new InFlightTokenTracker();
+  const slot = selectProvider(packet, [cooling, healthy], tracker, {}, enabledSession());
+  assert.ok(slot !== null);
+  assert.equal(slot.poolId, "healthy-pool", "a pool in active cooldown is spilled over for a healthy peer");
+});
+
+test("selectProvider — all pools degraded still yields a slot; capability order applies within the fallback group (INV-QD-14)", async () => {
+  await setupTmpQuotaDir();
+  const packet = makePacket("p1", { complexity: 1.0 });
+  const deep = makePool("deep-pool", { rank: "deep", quotaSourceSnapshot: { remaining_pct: 0.04 } });
+  const small = makePool("small-pool", { rank: "small", quotaSourceSnapshot: { remaining_pct: 0.04 } });
+  const tracker = new InFlightTokenTracker();
+  // small-pool first in array; a degraded pool is a usable fallback, never a stall.
+  const slot = selectProvider(packet, [small, deep], tracker, {}, enabledSession());
+  assert.ok(slot !== null, "a degraded pool is still a usable fallback — never a stall");
+  assert.equal(slot.poolId, "deep-pool", "within the all-degraded group, high-complexity still prefers deep");
+});
+
+test("selectProvider — among healthy pools, capability still decides; health never overrides rank within a group (INV-QD-14)", async () => {
+  await setupTmpQuotaDir();
+  const packet = makePacket("p1", { complexity: 1.0 });
+  const deep = makePool("deep-pool", { rank: "deep", quotaSourceSnapshot: { remaining_pct: 0.9 } });
+  const small = makePool("small-pool", { rank: "small", quotaSourceSnapshot: { remaining_pct: 0.9 } });
+  const tracker = new InFlightTokenTracker();
+  const slot = selectProvider(packet, [small, deep], tracker, {}, enabledSession());
+  assert.ok(slot !== null);
+  assert.equal(slot.poolId, "deep-pool", "both healthy → high-complexity prefers deep (capability, not health, decides)");
 });
 
 // ---------------------------------------------------------------------------
