@@ -9,7 +9,7 @@
 
 ## Where things stand
 
-- **`main` @ `414e302e`.** Clean tree, all pushed. **NOT published** — commits sit on main unreleased
+- **`main` @ `a2cb6220`.** Clean tree, all pushed. **NOT published** — commits sit on main unreleased
   (mid-program; release when A8 lands + is validated). Last published: `@audit-tools/shared 0.22.0`
   / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
 - **Quota detection — Claude PROACTIVE source SHIPPED to the tree (`a7eef160`, green).** The signal was confirmed
@@ -18,6 +18,12 @@
   the `buildQuotaSource` default); remediate's `scheduleWave` + `buildConfirmedPools` now populate
   `quotaSourceSnapshot` too → the scheduler throttles/cools-down from live remaining quota BEFORE a 429. Working
   doc: `docs/quota-detection-build.md`. Green: shared 648, remediate 1610, audit 2192/1skip, build+check clean.
+- **Quota detection — the CROSS-PROVIDER sources are now BUILT too (`a2cb6220`, green).** Extracted
+  `BaseHttpQuotaSource` (cache/guard/degrade) + per-provider `fetchXxxUsage` fns, then built `CodexQuotaSource`
+  (wham/usage), `CopilotQuotaSource` (copilot_internal/user), `AntigravityQuotaSource` (cloudcode-pa
+  fetchAvailableModels), and an `OpenCodeQuotaSource` broker (delegates to the underlying provider by model
+  namespace). All register in `buildQuotaSource` (provider-gated) → audit + remediate dispatch consume them for
+  free. Fixture-tested + source-verified shapes. Matrix: `docs/cross-provider-quota-matrix.md`.
 - **A8 host-subagent rolling driver — BUILT this session (`414e302e`, green, flag-gated default-OFF).** Shared
   `acceptNodeWorktree` core extracted (both drivers reuse it); `accept-node` callback + `dispatch_implement_rolling`
   step + the lock-guarded `rollingSession` machine (`prepareHostRollingDispatch`/`advanceHostRolling`, bounded JIT
@@ -27,8 +33,11 @@
 - **Deliberate intermediate state (NOT bugs):** the rolling engine + host-subagent driver are functional but
   **default-OFF** (host-fanned wave path intact, nothing broken); codex provider real but its agentic run
   unvalidated (codex quota resets **Jun 19**); the A8 drivers still lack a **real-subagent / real-provider
-  end-to-end smoke** (unit + integration only). Program of record: `docs/backlog.md` → "Accepted go-forward
-  program (2026-06-15 review)".
+  end-to-end smoke** (unit + integration only). The cross-provider quota sources are **fixture-tested +
+  source-verified-shape, but only Claude is LIVE-confirmed (200)** — Codex/Copilot/Antigravity each want a
+  one-shot live confirmation GET (like the Claude probe) when you OK touching that token; their token-extraction
+  degrades cleanly where unavailable (Copilot needs the `gh`/`copilot` CLI token; Antigravity is opt-in). Program
+  of record: `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)".
 
 ## Standing directives (Ethan) — read before deciding anything
 
@@ -42,26 +51,22 @@
   `ask-on-ambiguity-dont-defer-silently`.)
 - **Order of program items is yours** — sequence logically so one refactor doesn't undo another.
 
-## Immediate next: (1) A8 real-subagent validation + flip default-ON, or (2) the cross-provider quota matrix
+## Immediate next: A8 real-subagent validation + flip default-ON, then the rest of the go-forward program
 
-This session SHIPPED (to the tree, unreleased): Claude proactive quota detection (`a7eef160`) AND the A8
-host-subagent rolling driver (`414e302e`) — both green, flag-gated. The remaining A8 work is *validation*, not
-build. Order is yours. Read FIRST — [`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md),
-[`docs/quota-detection-build.md`](quota-detection-build.md), memory
-`conversation-first-subagent-dispatch-first-class`, memory `claude-oauth-usage-quota-endpoint`.
+**Quota detection is now COMPLETE** (research + all sources): Claude (`a7eef160`, live-confirmed + wired) and the
+cross-provider sources (`a2cb6220`: Codex/Copilot/Antigravity + an OpenCode broker, on `BaseHttpQuotaSource`,
+registered in `buildQuotaSource`). The A8 host-subagent rolling driver (`414e302e`) is built + flag-gated. All on
+main, unreleased. Read FIRST — [`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md),
+[`docs/cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md), memory
+`conversation-first-subagent-dispatch-first-class`, memory `cross-provider-quota-matrix`.
 
-### 1. Finish quota detection — the cross-provider `QuotaSource` matrix (everything-agnostic)
-The Claude proactive source is DONE + wired. **The cross-provider RESEARCH is now DONE too** →
-[`docs/cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md) (signal tier + recipe + token source +
-degrade + citations per backend, read mostly from each tool's open source). Verdicts: **codex** = proactive GET
-`chatgpt.com/backend-api/wham/usage` (HIGH); **opencode** = federates (token broker → delegate to the underlying
-source); **antigravity** = proactive POST `cloudcode-pa…v1internal:fetchAvailableModels` / local LS (MED) + dated
-error (HIGH); **VS Code Copilot** = proactive GET `api.github.com/copilot_internal/user` (HIGH; token DPAPI-locked
-→ `gh`/`copilot` CLI). **REMAINING = implementation**: one `QuotaSource` per backend (mirror
-`claudeOAuthQuotaSource.ts` — same hermeticity guard + no-refresh-in-source degrade), an opencode token-broker
-that delegates, then wire **utilization-driven spill across pools** + per-model/cost routing into the scheduler.
-**The binding constraint is quota+rate, NOT max-parallel-`N`.** Security: rotate the Antigravity token (a research
-subagent decoded a fragment — see the doc). (Backlog: *Cross-IDE/provider quota detection*.)
+### 1. Quota detection — DONE; remaining = cross-pool spill + live confirmation
+The sources PRODUCE per-pool snapshots and the scheduler already consumes `remaining_pct` per pool. STILL OPEN:
+(a) **utilization-driven spill ACROSS heterogeneous pools** + per-model/cost routing (the multi-pool dispatch
+half — bigger than the sources; the binding constraint is quota+rate, NOT max-parallel-`N`); (b) a one-shot
+**live confirmation GET per provider** (Codex/Copilot/Antigravity — only Claude is live-confirmed), each gated on
+your OK to touch that token. Security: rotate the Antigravity token (a research subagent decoded a fragment — see
+`docs/cross-provider-quota-matrix.md`).
 
 ### 2. A8 host-subagent driver — BUILT; validate + flip default-ON
 The driver is built + unit/integration-green + flag-gated (`rolling_engine`, default-OFF). REMAINING:

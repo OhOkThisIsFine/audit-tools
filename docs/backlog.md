@@ -672,11 +672,21 @@ mostly read straight from each tool's open source (the way the Claude endpoint w
   (extract via the `gh`/`copilot` CLI token on Windows).
 - **Cursor / other IDEs / local LLM:** Cursor = org Admin API; most BYOK = delegate to provider; local = unbounded.
 
-**REMAINING = implementation:** build one `QuotaSource` per backend (like `claudeOAuthQuotaSource.ts`, same
-hermeticity guard + no-refresh-in-source degrade), an opencode token-broker that delegates, and wire
-utilization-driven cross-pool spill + per-model/cost routing into the scheduler. **Security:** rotate the
-Antigravity token (a research subagent decoded a fragment); read-only token use only; ToS caveats (Antigravity,
-Anthropic-via-OpenCode) noted in the doc.
+**SOURCES BUILT (2026-06-16, `a2cb6220`, green):** extracted `BaseHttpQuotaSource` (cache/guard/degrade) +
+per-provider `fetchXxxUsage` fns, then `CodexQuotaSource` (wham/usage), `CopilotQuotaSource`
+(copilot_internal/user; gho token from the `gh`/`copilot` CLI), `AntigravityQuotaSource` (cloudcode-pa
+fetchAvailableModels; opt-in/degrade-heavy token), and an `OpenCodeQuotaSource` broker (routes by model
+provider-namespace → the underlying `fetchXxxUsage` with OpenCode's own token). All on `BaseHttpQuotaSource`,
+registered in `buildQuotaSource` (provider-gated) → audit + remediate dispatch consume them for free. Tests:
+codex(10)/copilot(10)/antigravity(9)/opencode(8) + the base/Claude refactor. Each gates by provider + skips the
+live endpoint under test runners / `AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA`.
+
+**REMAINING:** (a) **utilization-driven spill ACROSS heterogeneous pools** + per-model/cost routing in the
+scheduler — the multi-pool dispatch half (bigger than the sources; the sources only PRODUCE per-pool snapshots,
+which the scheduler already consumes per-pool). (b) A one-shot **live confirmation GET per provider**
+(Codex/Copilot/Antigravity — only Claude is live-confirmed; mappings are fixture-tested + source-verified-shape),
+each gated on the user's OK to touch that token. **Security:** rotate the Antigravity token (a research subagent
+decoded a fragment); read-only token use only; ToS caveats (Antigravity, Anthropic-via-OpenCode) in the doc.
 
 Part of the same push: **detect and dispatch to CLI agents as additional pools.** The
 heterogeneous-dispatch machinery (`computeDispatchCapacity`, `CapacityPool`) can already
