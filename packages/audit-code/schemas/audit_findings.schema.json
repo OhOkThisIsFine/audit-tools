@@ -97,7 +97,7 @@
             "type": "object",
             "required": ["status"],
             "properties": {
-              "status": { "type": "string", "enum": ["grounded", "ungrounded"] },
+              "status": { "type": "string", "enum": ["grounded", "ungrounded", "refuted"] },
               "reason": { "type": "string" }
             },
             "additionalProperties": false
@@ -139,6 +139,11 @@
         },
         "additionalProperties": false
       }
+    },
+    "quarantined_findings": {
+      "type": "array",
+      "description": "Findings a tool-executable anchor REFUTED (S7 tier-2 disproof, e.g. a madge-disproven cycle). Quarantined-excluded: recorded here but kept out of `findings` and `work_blocks` so a disproven claim never merges as actionable fact (quarantine, not delete).",
+      "items": { "$ref": "#/properties/findings/items" }
     },
     "work_blocks": {
       "type": "array",

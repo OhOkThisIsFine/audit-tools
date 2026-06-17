@@ -103,17 +103,26 @@ function mergeAffectedFiles(existing: Finding, incoming: Finding): void {
 }
 
 /**
- * Grounded-wins (S7): a grounded re-emission upgrades the survivor's verdict; an
- * ungrounded or absent verdict never downgrades a survivor that was already
- * grounded (or never graded). Without this, merging a same-identity re-emission
- * that happened to carry no matching quote into a verified survivor would falsely
- * quarantine a finding that DID re-verify against disk on another pass.
+ * Merge two grounding verdicts by precedence: grounded > refuted > ungrounded >
+ * absent (S7). Grounded-wins (a verified span/anchor on ANY pass upgrades the
+ * survivor — an ungrounded or absent verdict never downgrades it). A refutation
+ * (anchor DISPROOF) outranks ungrounded/absent, so a finding refuted on any pass
+ * is quarantined UNLESS another pass grounded it (grounded still wins over
+ * refuted — B4: "refuted only excludes when nothing grounded it"). Without the
+ * grounded-wins rule, merging a same-identity re-emission that carried no matching
+ * quote into a verified survivor would falsely quarantine a finding that DID
+ * re-verify on another pass.
  */
 function mergeGrounding(
   existing: Finding["grounding"],
   incoming: Finding["grounding"],
 ): Finding["grounding"] {
-  return incoming?.status === "grounded" ? { status: "grounded" } : existing;
+  const rank = (g: Finding["grounding"]): number =>
+    g?.status === "grounded" ? 3 : g?.status === "refuted" ? 2 : g?.status === "ungrounded" ? 1 : 0;
+  const winner = rank(incoming) > rank(existing) ? incoming : existing;
+  // Normalize a grounded winner to the bare verdict (grounded carries no reason),
+  // preserving the prior contract; refuted/ungrounded keep their reason.
+  return winner?.status === "grounded" ? { status: "grounded" } : winner;
 }
 
 function absorbFinding(survivor: Finding, absorbed: Finding): void {
