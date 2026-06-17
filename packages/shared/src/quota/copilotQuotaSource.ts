@@ -18,10 +18,18 @@ import {
  * Token sourcing on Windows is the hard part: VS Code stores the GitHub token in
  * DPAPI-encrypted SecretStorage (`state.vscdb`), NOT a readable file. So this
  * source extracts a `gho_/ghu_` token from the **CLI** credential stores instead
- * (Copilot CLI `~/.copilot/config.json`, then `gh` CLI `~/.config/gh/hosts.yml`),
- * or an explicit `GH_COPILOT_TOKEN`/`GH_TOKEN` env. When none is available it
- * degrades to null (the scheduler falls back to reactive 429 handling) — the
- * conservative, never-confidently-wrong default.
+ * (Copilot CLI `~/.copilot/config.json`, then the `gh` CLI hosts file —
+ * OS-resolved by {@link resolveGhHostsPath}: `%AppData%\GitHub CLI` on Windows,
+ * `~/.config/gh` on macOS/Linux, or `$GH_CONFIG_DIR` anywhere), or an explicit
+ * `GH_COPILOT_TOKEN`/`GH_TOKEN` env. When none is available it degrades to null
+ * (the scheduler falls back to reactive 429 handling) — the conservative,
+ * never-confidently-wrong default.
+ *
+ * Caveat (confirmed live 2026-06-17): modern `gh` defaults to OS-keyring token
+ * storage, where `hosts.yml` holds NO token — file-based discovery only finds it
+ * under `gh`'s insecure/file storage or an older `gh`. The env-var route and the
+ * Copilot CLI config are the reliable file-based sources; the keyring is out of
+ * scope for a read-only quota probe.
  */
 
 const COPILOT_PROVIDER_NAMES = new Set(["copilot", "github-copilot"]);
@@ -54,6 +62,28 @@ export interface CopilotQuotaSourceOptions extends HttpQuotaSourceOptions {
   copilotProviderNames?: Iterable<string>;
 }
 
+/**
+ * Resolve the `gh` CLI `hosts.yml` path OS-agnostically. `gh` honors
+ * `GH_CONFIG_DIR` on every platform; absent that, its config dir is
+ * `%AppData%\GitHub CLI` on Windows and `~/.config/gh` on macOS/Linux. The prior
+ * hardcoded `~/.config/gh` missed the token on Windows (OS-agnostic invariant).
+ * Parameterized by `platform` + `home` (not read from the process) so it is a
+ * pure, cross-platform-testable function.
+ */
+export function resolveGhHostsPath(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  home: string,
+): string {
+  const p = platform === "win32" ? path.win32 : path.posix;
+  const ghConfigDir = env.GH_CONFIG_DIR?.trim()
+    ? env.GH_CONFIG_DIR
+    : platform === "win32"
+      ? p.join(env.APPDATA ?? p.join(home, "AppData", "Roaming"), "GitHub CLI")
+      : p.join(home, ".config", "gh");
+  return p.join(ghConfigDir, "hosts.yml");
+}
+
 export class CopilotQuotaSource extends BaseHttpQuotaSource {
   readonly name = "copilot";
   private readonly copilotConfigPath: string;
@@ -67,7 +97,7 @@ export class CopilotQuotaSource extends BaseHttpQuotaSource {
     const copilotHome = this.env.COPILOT_HOME ?? path.join(homedir(), ".copilot");
     this.copilotConfigPath = options.copilotConfigPath ?? path.join(copilotHome, "config.json");
     this.ghHostsPath =
-      options.ghHostsPath ?? path.join(homedir(), ".config", "gh", "hosts.yml");
+      options.ghHostsPath ?? resolveGhHostsPath(this.env, process.platform, homedir());
     this.providerNames = new Set(options.copilotProviderNames ?? COPILOT_PROVIDER_NAMES);
   }
 
