@@ -95,6 +95,14 @@ rank preserved within health groups. STILL OPEN:
   is detecting/building an actual second pool — another CLI agent (`claude`/`codex`/`opencode`) or an IDE model
   — under its own provider+quota constraints. This is the *Heterogeneous multi-agent dispatch* backlog item
   (FINDING-020) + "detect and dispatch to CLI agents as additional pools." Bigger than spill itself.
+  **Candidate 2nd pool: NVIDIA NIM** (OpenAI-compatible; hosted free-credits or self-hosted/local GPU) — clean
+  because it needs NO new proactive source (hosted=reactive-429, self-hosted=unbounded-local), so it exercises
+  INV-QD-14 e2e without more quota plumbing.
+- **Gemini CLI + NVIDIA NIM ASSESSED 2026-06-17** (matrix [§5](cross-provider-quota-matrix.md)/§6): neither
+  warrants a new proactive `QuotaSource`. Gemini CLI HAS a clean signal (`cloudcode-pa retrieveUserQuota`) but
+  its individual tiers are **deprecated on gemini-cli 2026-06-18** (verified) and survivors (Std/Ent) ride the
+  same cloudcode-pa family the existing Antigravity source covers → don't build. NIM = reactive/local pool, no
+  source.
 - (b) **live confirmation — DONE for Codex; Copilot has no reachable credential here.** Ran the real production
   class paths against the live endpoints (2026-06-17, Ethan OK'd):
   - **Codex ✓ LIVE-CONFIRMED (200).** `CodexQuotaSource.queryCurrentUsage('codex/*')` → valid snapshot; raw
