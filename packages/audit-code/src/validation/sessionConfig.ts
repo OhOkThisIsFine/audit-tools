@@ -173,6 +173,81 @@ function validateAgentProviderSection(
   }
 }
 
+/**
+ * Validate the `openai_compatible` provider section. Unlike the agentic CLI
+ * sections, this one has no `command`/PATH semantics — it is an HTTP endpoint, so
+ * we type-check the URL/model/key/tuning fields and, when this provider is the
+ * selected one, require the endpoint + model (the API key is resolved from the
+ * environment at launch, so its presence is not validated here).
+ */
+function validateOpenAiCompatibleSection(
+  value: unknown,
+  path: string,
+  issues: ValidationIssue[],
+  required: boolean,
+): void {
+  if (value === undefined) {
+    if (required) {
+      pushIssue(
+        issues,
+        path,
+        "Provider requires this config section with base_url and model.",
+      );
+    }
+    return;
+  }
+  if (!isRecord(value)) {
+    pushIssue(issues, path, "Provider config must be a JSON object.");
+    return;
+  }
+  for (const key of ["base_url", "model", "api_key_env", "api_key"] as const) {
+    const entry = value[key];
+    if (
+      entry !== undefined &&
+      (typeof entry !== "string" || entry.trim().length === 0)
+    ) {
+      pushIssue(
+        issues,
+        `${path}.${key}`,
+        `${key} must be a non-empty string when provided.`,
+      );
+    }
+  }
+  if (required) {
+    for (const key of ["base_url", "model"] as const) {
+      if (value[key] === undefined) {
+        pushIssue(
+          issues,
+          `${path}.${key}`,
+          `${key} is required for the openai-compatible provider.`,
+        );
+      }
+    }
+  }
+  if (value.headers !== undefined) {
+    validateEnvOverlay(value.headers, `${path}.headers`, issues);
+  }
+  for (const key of ["temperature", "max_output_tokens"] as const) {
+    const entry = value[key];
+    if (entry !== undefined && (typeof entry !== "number" || !Number.isFinite(entry))) {
+      pushIssue(
+        issues,
+        `${path}.${key}`,
+        `${key} must be a finite number when provided.`,
+      );
+    }
+  }
+  for (const key of ["response_format_json", "include_referenced_files"] as const) {
+    if (value[key] !== undefined && typeof value[key] !== "boolean") {
+      pushIssue(
+        issues,
+        `${path}.${key}`,
+        `${key} must be a boolean when provided.`,
+      );
+    }
+  }
+}
+
 // Maximum wall-clock time for a PATH probe (where/which). 5 s is generous
 // even on slow NFS mounts; prevents validation from hanging indefinitely on
 // broken PATH entries or stalled DNS lookups.
@@ -358,6 +433,12 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
   validateAgentProviderSection(value.claude_code, "claude_code", issues);
   validateAgentProviderSection(value.codex, "codex", issues);
   validateAgentProviderSection(value.opencode, "opencode", issues);
+  validateOpenAiCompatibleSection(
+    value.openai_compatible,
+    "openai_compatible",
+    issues,
+    provider === "openai-compatible",
+  );
 
   if (value.synthesis !== undefined) {
     if (!isRecord(value.synthesis)) {

@@ -10,6 +10,7 @@ import type {
 import { LocalSubprocessProvider } from "./localSubprocessProvider.js";
 import { SubprocessTemplateProvider } from "./subprocessTemplateProvider.js";
 import { CodexProvider } from "./codexProvider.js";
+import { OpenAiCompatibleProvider } from "./openAiCompatibleProvider.js";
 import { RunLogger } from "../observability/runLog.js";
 
 function hasEntries(values: string[] | undefined): boolean {
@@ -35,6 +36,18 @@ function hasConfiguredCodex(config: CodexConfig | undefined): boolean {
   return Boolean(config?.command?.trim()) || hasEntries(config?.extra_args);
 }
 
+/**
+ * openai-compatible is configured when both an endpoint and a model are set. The
+ * API key is resolved (and degrades) at launch — env presence is intentionally
+ * not probed here, mirroring how the agentic providers don't read credentials
+ * during resolution.
+ */
+function hasConfiguredOpenAiCompatible(
+  config: SessionConfig["openai_compatible"],
+): boolean {
+  return Boolean(config?.base_url?.trim()) && Boolean(config?.model?.trim());
+}
+
 function commandExists(command: string): boolean {
   const lookupCommand = process.platform === "win32" ? "where" : "which";
   const result = spawnSync(lookupCommand, [command], { stdio: "ignore" });
@@ -57,6 +70,7 @@ export interface AutoProviderContext {
   hasClaudeCodeConfig: boolean;
   hasOpenCodeConfig: boolean;
   hasCodexConfig: boolean;
+  hasOpenAiCompatibleConfig: boolean;
   claudeAvailable: boolean;
   opencodeAvailable: boolean;
   codexAvailable: boolean;
@@ -102,6 +116,9 @@ function getAutoProviderContext(
     hasClaudeCodeConfig: hasConfiguredClaudeCode(sessionConfig),
     hasOpenCodeConfig: hasConfiguredOpenCode(sessionConfig),
     hasCodexConfig: hasConfiguredCodex(sessionConfig.codex),
+    hasOpenAiCompatibleConfig: hasConfiguredOpenAiCompatible(
+      sessionConfig.openai_compatible,
+    ),
     claudeAvailable: !insideClaudeCode && lookupCommand(claudeCommand),
     opencodeAvailable: lookupCommand(opencodeCommand),
     // Self-spawn guard mirrors claudeAvailable: a fresh `codex` subprocess
@@ -182,6 +199,16 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
     name: "opencode",
     comment: "Tie-break: opencode is available but claude is not — prefer opencode.",
     predicate: (ctx) => ctx.opencodeAvailable && !ctx.claudeAvailable,
+  },
+  {
+    name: "openai-compatible",
+    comment:
+      "Configured background pool: an OpenAI-compatible endpoint (base_url + model) is an API, " +
+      "not a CLI, so there is no PATH probe. Ranked below the available agentic CLIs (which " +
+      "produce stronger edits when truly present) but ABOVE the codex last-resort, so an " +
+      "explicitly-configured endpoint is preferred over a fallback codex pick — notably inside a " +
+      "CLAUDECODE session, where claude can't self-spawn and this becomes the automatic worker.",
+    predicate: (ctx) => ctx.hasOpenAiCompatibleConfig,
   },
   {
     name: "codex",
@@ -318,6 +345,10 @@ export function createFreshSessionProvider(
     case "codex":
       // Codex needs no required config — the command defaults to "codex".
       return new CodexProvider(sessionConfig.codex);
+    case "openai-compatible":
+      // OpenAI-compatible endpoint (NIM/vLLM/…). No required config at
+      // construction; base_url/model/key are validated (and degrade) at launch.
+      return new OpenAiCompatibleProvider(sessionConfig.openai_compatible);
     case "opencode":
       return deps.createOpenCodeProvider(sessionConfig.opencode);
     case "vscode-task":

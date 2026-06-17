@@ -35,6 +35,10 @@ test("PROVIDER_NAMES contains the expected provider strings", async (t) => {
     assert.ok(PROVIDER_NAMES.includes("opencode"));
   });
 
+  await t.test("contains 'openai-compatible'", () => {
+    assert.ok(PROVIDER_NAMES.includes("openai-compatible"));
+  });
+
   await t.test("contains 'vscode-task'", () => {
     assert.ok(PROVIDER_NAMES.includes("vscode-task"));
   });
@@ -43,8 +47,8 @@ test("PROVIDER_NAMES contains the expected provider strings", async (t) => {
     assert.ok(PROVIDER_NAMES.includes("antigravity"));
   });
 
-  await t.test("has exactly 8 entries", () => {
-    assert.equal(PROVIDER_NAMES.length, 8);
+  await t.test("has exactly 9 entries", () => {
+    assert.equal(PROVIDER_NAMES.length, 9);
   });
 });
 

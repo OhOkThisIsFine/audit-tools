@@ -7,6 +7,7 @@ export const PROVIDER_NAMES = [
   "claude-code",
   "codex",
   "opencode",
+  "openai-compatible",
   "vscode-task",
   "antigravity",
 ] as const;
@@ -55,6 +56,38 @@ export interface CodexConfig {
   extra_args?: string[];
 }
 
+/**
+ * OpenAI-compatible chat-completions backend config (NVIDIA NIM, vLLM, LM Studio,
+ * OpenRouter, any `/chat/completions` endpoint). Unlike the agentic-CLI providers,
+ * this needs no installed agent — the provider itself is a single-shot worker that
+ * calls the endpoint and applies the returned edits to the worktree. Because it
+ * only needs an API key + URL, it is a portable, always-available background
+ * dispatch pool. The endpoint, model id, and key source are all operator-supplied
+ * (no hardcoded model identity); NIM is just one instance:
+ * `{ base_url: "https://integrate.api.nvidia.com/v1", model: "openai/gpt-oss-120b",
+ *    api_key_env: "NVIDIA_API_KEY" }`.
+ */
+export interface OpenAiCompatibleConfig {
+  /** Base URL of the OpenAI-compatible API, e.g. `https://integrate.api.nvidia.com/v1`. */
+  base_url?: string;
+  /** Model id (e.g. `openai/gpt-oss-120b`). Never defaulted — no hardcoded model identity. */
+  model?: string;
+  /** Name of the env var holding the API key (e.g. `NVIDIA_API_KEY`). Preferred over `api_key`. */
+  api_key_env?: string;
+  /** Inline API key. Discouraged (prefer `api_key_env` so the key never lands in config files). */
+  api_key?: string;
+  /** Extra HTTP headers merged into the request. */
+  headers?: Record<string, string>;
+  /** Sampling temperature (default 0 for deterministic edits). */
+  temperature?: number;
+  /** Completion token budget (`max_tokens`). Defaults to a generous value so full files fit. */
+  max_output_tokens?: number;
+  /** Send `response_format: {type:"json_object"}`. Off by default (not all endpoints accept it). */
+  response_format_json?: boolean;
+  /** Inline current contents of prompt-referenced files so edits are grounded. Default true. */
+  include_referenced_files?: boolean;
+}
+
 export interface VSCodeTaskConfig {
   command_template: string[];
   env?: Record<string, string>;
@@ -75,6 +108,7 @@ export const PROVIDER_SECTION_KEYS = {
   "claude-code": "claude_code",
   codex: "codex",
   opencode: "opencode",
+  "openai-compatible": "openai_compatible",
   "vscode-task": "vscode_task",
   antigravity: "antigravity",
 } as const;
@@ -269,6 +303,7 @@ export interface SessionConfig {
   claude_code?: ClaudeCodeConfig;
   codex?: CodexConfig;
   opencode?: OpenCodeConfig;
+  openai_compatible?: OpenAiCompatibleConfig;
   vscode_task?: VSCodeTaskConfig;
   antigravity?: AntigravityConfig;
   agent_task_batch_size?: number;

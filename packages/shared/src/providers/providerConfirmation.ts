@@ -48,6 +48,7 @@ function defaultCapabilityTier(name: ResolvedProviderName): CapabilityTier {
       return "frontier";
     case "opencode":
     case "codex":
+    case "openai-compatible":
     case "subprocess-template":
     case "vscode-task":
     case "antigravity":
