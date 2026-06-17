@@ -1,11 +1,18 @@
 import type { QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
 import { LearnedQuotaSource } from "./learnedQuotaSource.js";
+import { ClaudeOAuthQuotaSource } from "./claudeOAuthQuotaSource.js";
 import { RunLogger } from "../observability/runLog.js";
 
 export interface BuildQuotaSourceOptions {
   halfLifeHours?: number;
   additionalSources?: QuotaSource[];
   runLogger?: RunLogger;
+  /**
+   * The proactive Claude-subscription source, consulted ahead of all others.
+   * Defaults to a fresh {@link ClaudeOAuthQuotaSource}; pass `false` to disable
+   * it (e.g. tests) or a stub to inject one.
+   */
+  claudeOAuth?: QuotaSource | false;
 }
 
 export class CompositeQuotaSource implements QuotaSource {
@@ -40,11 +47,17 @@ export class CompositeQuotaSource implements QuotaSource {
 /**
  * Builds the standard runtime quota snapshot cascade.
  *
- * Order: provider/additional sources first, then the learned reactive source.
+ * Order: proactive sources first (the Claude OAuth source, then any additional
+ * provider sources), then the learned reactive source as the fallback.
  * CompositeQuotaSource skips throwing sources and returns the first snapshot.
  */
 export function buildQuotaSource(options: BuildQuotaSourceOptions = {}): QuotaSource {
+  const proactive: QuotaSource[] = [];
+  if (options.claudeOAuth !== false) {
+    proactive.push(options.claudeOAuth ?? new ClaudeOAuthQuotaSource());
+  }
   return new CompositeQuotaSource([
+    ...proactive,
     ...(options.additionalSources ?? []),
     new LearnedQuotaSource(options.halfLifeHours ?? 24),
   ], options.runLogger);

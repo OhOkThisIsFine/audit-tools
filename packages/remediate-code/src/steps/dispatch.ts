@@ -38,6 +38,7 @@ import {
   formatRepoConventions,
   toPromptPathToken,
   estimateTokensFromBytes,
+  buildQuotaSource,
   severityRank,
   findingNeedsVerificationBeforeFix,
   compareTier,
@@ -247,14 +248,23 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     process.stderr.write(`[waveScheduler] readQuotaState failed; falling back to default wave size. ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
+  // The proactive quota snapshot (Claude OAuth source, then learned) so the
+  // scheduler can throttle/cooldown from live remaining quota — mirrors
+  // audit-code's buildDispatchPool. Cached per key, so one probe per burst.
+  const quotaSource = buildQuotaSource({
+    halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
+      ?.empirical_half_life_hours,
+  });
+
   // One capacity pool per reported roster rank (most capable first), each with
   // its own discovered window and quota key; a single pool for the scalar/
   // absent handshake. A rank's opaque `model_id` keys that pool's quota.
-  const pools = (roster ?? [null]).map((entry) => {
+  const pools = await Promise.all((roster ?? [null]).map(async (entry) => {
     const poolKey = buildProviderModelKey(
       providerName,
       entry?.model_id ?? quotaModelKeySegment,
     );
+    const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(poolKey).catch(() => null);
     return {
       id: poolKey,
       providerName,
@@ -268,8 +278,9 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
             output_tokens: entry.output_tokens,
           }
         : hostCapabilityLimits,
+      quotaSourceSnapshot,
     };
-  });
+  }));
   const capacity = computeDispatchCapacity({
     pools,
     sessionConfig,
@@ -330,11 +341,17 @@ export async function buildConfirmedPools(input: {
     // Non-fatal: a missing/locked quota state degrades to no learned entry.
   }
 
-  return (roster ?? [null]).map((entry) => {
+  const quotaSource = buildQuotaSource({
+    halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
+      ?.empirical_half_life_hours,
+  });
+
+  return await Promise.all((roster ?? [null]).map(async (entry) => {
     const poolKey = buildProviderModelKey(
       providerName,
       entry?.model_id ?? quotaModelKeySegment,
     );
+    const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(poolKey).catch(() => null);
     return {
       id: poolKey,
       providerName,
@@ -345,8 +362,9 @@ export async function buildConfirmedPools(input: {
       discoveredLimits: entry
         ? { context_tokens: entry.context_tokens, output_tokens: entry.output_tokens }
         : hostCapabilityLimits,
+      quotaSourceSnapshot,
     };
-  });
+  }));
 }
 
 export function buildDispatchQuota(

@@ -125,6 +125,26 @@ test("buildQuotaSource consults additional sources ahead of the learned source",
   assert.equal(result, snap);
 });
 
+test("buildQuotaSource consults the injected claudeOAuth source first", async () => {
+  const snap = makeSnapshot("claude-oauth");
+  const source = buildQuotaSource({
+    claudeOAuth: snapshotSource("claude-oauth", snap),
+    additionalSources: [snapshotSource("other", makeSnapshot("other"))],
+  });
+  const result = await source.queryCurrentUsage("claude-code/x");
+  assert.equal(result, snap); // proactive Claude source wins over additional + learned
+});
+
+test("buildQuotaSource omits the claude source when claudeOAuth is false", async () => {
+  const snap = makeSnapshot("other");
+  const source = buildQuotaSource({
+    claudeOAuth: false,
+    additionalSources: [snapshotSource("other", snap)],
+  });
+  const result = await source.queryCurrentUsage("claude-code/x");
+  assert.equal(result, snap); // no claude source intercepts; additional source answers
+});
+
 test("logs a structured error event via RunLogger when a quota source throws", async () => {
   const dir = mkdtempSync(join(tmpdir(), "composite-quota-test-"));
   const logPath = join(dir, "run.log");
