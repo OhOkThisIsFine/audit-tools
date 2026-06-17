@@ -166,7 +166,7 @@ is the atomic replace.
   cascade's guards into an `ObligationDef` list run through `advance`; the un-migrated remainder stays inline
   as the fall-through tail and shrinks each slice. Green at each commit (the vitest suite is the equivalence
   oracle).
-- **Slice 1 DONE** (`<this commit>`): the linear pre-intake gates run through `advance`; the inline tail
+- **Slice 1 DONE** (`79e2dcd`): the linear pre-intake gates run through `advance`; the inline tail
   (from `waiting_for_clarification`) is unchanged. 1667→1669 (+2 teeth-verified regression tests), green.
   Two faithfulness subtleties the naive translation gets wrong (both fixed + regression-locked):
   1. **Entry-gate freeze.** `input_conflict`/`confirm_resume` are about a *pre-existing* run, so they derive
