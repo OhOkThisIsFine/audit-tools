@@ -40,20 +40,21 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   tool, not host discretion). Path A gates the original findings at intake; Path B gates the deduped/grounded
   node findings at the planning point. The classic impl-risk preview is removed. Detail in memory
   `review-gate-execution-status`. (Kept here as the program's anchor; everything below was downstream of it.)
-- **A1 — Fast path past the 15-phase pipeline.** Size/ambiguity/seam-gated lean path
-  (`shouldEnterContractPipeline`) so a handful of concrete fixes don't pay full adversarial +
-  3-repair-loop cost. Risk to design around: a mis-routed subtle change must not skip the safety net.
-  (ARC-ad53dd0d.) **Recon 2026-06-17 — bigger than a gate tweak; scope before building.**
-  `shouldEnterContractPipeline` (`steps/contractPipeline.ts:354`) today ALWAYS enters the pipeline (only
-  returns false once the pipeline has completed), and `handlePendingIntake` (`steps/nextStep.ts:2097`)
-  routes **both** ready-intake paths through `handleReadyIntakeContractPipeline` — there is **no lean
-  fallback wired**. So A1 = (a) a CONSERVATIVE gate (fast-path ONLY when all simplicity signals hold:
-  small finding/file count + all findings grounded + high confidence + no shared-contract/cross-module
-  seam + structured (non-free-form) source; default to the full pipeline on any doubt — that is how "a
-  subtle change must not skip the net" is enforced), PLUS (b) a real lean plan→document→implement path the
-  gate routes to (it must still produce the `extracted-plan.json` document/implement consume and still run
-  the implement-phase test/verify — it only drops the adversarial critic→judge→repair + obligation
-  derivation). Without (b), a gate that returns false would route ready-intake to `null` and stall the run.
+- **A1 — Fast path past the contract pipeline — ✓ DONE (2026-06-17, `b47d189`).** A conservative lean
+  fast path: `evaluateFastPath` (`remediate-code/src/steps/leanFastPath.ts`) admits ONLY a handful (≤5) of
+  S7-grounded (`grounding.status==="grounded"`), high-confidence, ≤5-file, non-systemic / non-related-coupled
+  / non-architecture-lens structured-audit findings, and defaults to the full pipeline on ANY doubt — that is
+  how "a mis-routed subtle change must not skip the safety net" is enforced (a misclassified complex change
+  costs extra pipeline work, never a skipped design review). `buildLeanExtractedPlan` emits the SAME
+  `extracted-plan.json` the contract pipeline promotes, so the lean path rejoins the existing
+  plan→implement→close machinery untouched; the RETAINED safety net is the deterministic grounding re-pass +
+  `applyPlanPipeline`'s affected-file hash snapshot + per-node verify-before-merge + the final whole-repo gate.
+  Only the adversarial critic→judge→repair + obligation derivation are dropped. Wired into
+  `handleReadyIntakeContractPipeline` right after the Path-A review gate (over `gate.approved`) so coverage is
+  still built over the originals and declined findings keep their dispositions. The insight that kept it small:
+  the heavy pipeline was only ever ONE producer of `extracted-plan.json`; the lean path is a second producer,
+  so it needs no new join point. New grounded fixture + unit/integration tests; both existing structured-audit
+  fixtures lack the S7 verdict, so every prior pipeline test stays on the pipeline path. (ARC-ad53dd0d.)
 - **A3+A4 — Move correctness into the tool; unify the two obligation engines.** audit-code expresses the
   ordered-obligation engine declaratively (PRIORITY[] + registry); remediate re-derives it in a
   ~2835-line imperative switch → one shared declarative engine. Collapse the ~8 finding_id-keyed record
