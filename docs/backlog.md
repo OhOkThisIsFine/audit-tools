@@ -438,6 +438,18 @@ test. The CLAUDE.md lock doc-fix landed in Wave-0 and is now guarded by
 fully closed is R1 (wire the rolling engine), tracked above under *Self-audit 2026-06-15*
 — wired behind a default-OFF flag this run, with the atomic cutover still remaining.**
 
+- **`codex-antigravity-providers.test.mjs` "auto path writes a structured stderr diagnostic"
+  fails when the `claude` CLI is on PATH.** The test stubs `createClaudeCodeProvider`/
+  `createOpenCodeProvider` to throw, asserting `createFreshSessionProvider(undefined, …)`
+  auto-resolves to a *non-agent* provider (local-subprocess). It skips when `opencode` is on
+  PATH (`opencodeOnPath()`), but NOT when `claude` is on PATH — so on any dev machine with the
+  Claude Code CLI installed, auto-resolution picks claude-code and the stub throws
+  ("unexpected: createClaudeCodeProvider called in auto test"). Deterministic, env-dependent,
+  **not a regression** (proven 2026-06-16 by stashing unrelated changes — fails identically on a
+  clean tree). It's the inverse of the CLAUDECODE-set gotcha and bites the CLAUDECODE-unset
+  "true green" run. Fix: extend the skip guard to ANY auto-resolvable agent CLI (add a
+  `claude`/`codex`-on-PATH check mirroring `opencodeOnPath()`), since the test's premise only
+  holds when no agent CLI is detectable.
 - **Intermittent hermeticity flake: `phase-plan.test.ts` "non-audit JSON file falls through
   to the LLM extractor path".** Fails ~1-in-N full-suite runs, passes in isolation and most
   full runs (observed 2026-06-16 while adding the review-gate tests — unrelated code path).
@@ -684,12 +696,24 @@ registered in `buildQuotaSource` (provider-gated) → audit + remediate dispatch
 codex(10)/copilot(10)/antigravity(9)/opencode(8) + the base/Claude refactor. Each gates by provider + skips the
 live endpoint under test runners / `AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA`.
 
-**REMAINING:** (a) **utilization-driven spill ACROSS heterogeneous pools** + per-model/cost routing in the
-scheduler — the multi-pool dispatch half (bigger than the sources; the sources only PRODUCE per-pool snapshots,
-which the scheduler already consumes per-pool). (b) A one-shot **live confirmation GET per provider**
-(Codex/Copilot/Antigravity — only Claude is live-confirmed; mappings are fixture-tested + source-verified-shape),
-each gated on the user's OK to touch that token. **Security:** rotate the Antigravity token (a research subagent
-decoded a fragment); read-only token use only; ToS caveats (Antigravity, Anthropic-via-OpenCode) in the doc.
+**SPILL BUILT (2026-06-16, `0a620bf8`, green) — item (a) done.** Proactive utilization-driven cross-pool spill
+landed as INV-QD-14 in the shared `selectProvider` (`dispatch/rollingDispatch.ts`). Root gap: `scheduleWave`
+floors `max_concurrent` at 1, so the old selection always returned the top capability-ranked non-exhausted pool
+*regardless of live utilization* — the proactive `remaining_pct` only throttled the chosen pool, never spilled.
+Now selection deprioritises a quota-degraded pool (live `remaining_pct` < `QUOTA_REMAINING_PCT_LOW`, or in an
+active cooldown) so load spills to a peer with headroom BEFORE a 429; capability/cost rank preserved within each
+health group; degraded pools stay a fallback (no stall); inert when quota disabled. One shared seam → both
+orchestrators. 4 new INV-QD-14 tests; shared rolling 27/27, remediate 1622, audit 2192/1skip.
+
+**REMAINING:** (a-residual) **a real SECOND pool to spill INTO.** Spill logic is complete + unit-proven, but a
+single-provider session has only one pool, so it can't fire end-to-end. The concrete next capability is
+detecting/building an actual second pool (another CLI agent — `claude`/`codex`/`opencode` — or an IDE model)
+under its own provider+quota constraints; this is the *Heterogeneous multi-agent dispatch* item (FINDING-020) +
+"detect and dispatch to CLI agents as additional pools" below. The binding constraint is quota+rate, NOT
+max-parallel-`N`. (b) A one-shot **live confirmation GET per provider** (Codex/Copilot — only Claude is
+live-confirmed; mappings are fixture-tested + source-verified-shape), each gated on the user's OK to touch that
+token. Read-only token use only; ToS caveats (Antigravity, Anthropic-via-OpenCode) in the doc. (Antigravity
+excluded + token rotation dropped per Ethan 2026-06-16.)
 
 Part of the same push: **detect and dispatch to CLI agents as additional pools.** The
 heterogeneous-dispatch machinery (`computeDispatchCapacity`, `CapacityPool`) can already

@@ -9,10 +9,11 @@
 
 ## Where things stand
 
-- **`main`: sprint's substantive change is the rolling false-resolve fix `f18138fe` (docs syncs on top; `git log`
-  for HEAD).** Clean tree, all pushed (synced with `audit-tools/main`). **NOT published** — commits sit on main
-  unreleased (mid-program; release when A8 lands + is validated). Last published: `@audit-tools/shared 0.22.0`
-  / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
+- **`main`: latest substantive change is the proactive cross-pool spill `0a620bf8` (INV-QD-14); prior was the
+  rolling false-resolve fix `f18138fe` (docs syncs on top; `git log` for HEAD).** Clean tree, all pushed
+  (synced with `audit-tools/main`). **NOT published** — commits sit on main unreleased (mid-program; release
+  when A8 lands + is validated). Last published: `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` /
+  `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
 - **A8 host-subagent rolling driver — VALIDATED end-to-end this session via a real-subagent smoke, and a
   latent false-resolve bug found + fixed (`f18138fe`, green).** Drove the REAL machine in an isolated repo
   (`C:\Code\_a8-smoke`, deleted) to `dispatch_implement_rolling` (3 disjoint nodes, slots capped to 2),
@@ -37,6 +38,16 @@
   fetchAvailableModels), and an `OpenCodeQuotaSource` broker (delegates to the underlying provider by model
   namespace). All register in `buildQuotaSource` (provider-gated) → audit + remediate dispatch consume them for
   free. Fixture-tested + source-verified shapes. Matrix: `docs/cross-provider-quota-matrix.md`.
+- **Quota detection — proactive CROSS-POOL SPILL now BUILT (`0a620bf8`, green) — closes remaining item (a).**
+  Root gap found this session: `scheduleWave` floors `max_concurrent` at 1, so the old `selectProvider` always
+  returned the top capability-ranked non-exhausted pool *regardless of live utilization* — the proactive
+  `remaining_pct` only slowed the chosen pool, never redistributed. Now `selectProvider` (shared
+  `dispatch/rollingDispatch.ts`) deprioritises a quota-degraded pool (live `remaining_pct` < LOW band, or in an
+  active cooldown) so load spills to a peer WITH headroom BEFORE a 429 — the proactive complement to the
+  reactive exhausted-pool re-route (INV-QD-07). Capability/cost rank preserved WITHIN each health group; a
+  degraded pool stays a fallback (never a stall); inert when quota disabled. ONE shared seam → both
+  orchestrators (audit `runRollingDispatch` + remediate `driveRollingImplementDispatch` wrap the same
+  `createRollingDispatcher`). 4 new INV-QD-14 tests; shared rolling 27/27, remediate 1622, audit 2192/1skip.
 - **Cross-IDE quota concern — RAISED + RESOLVED this session, no code change.** Confirmed the shipped quota code
   only ever queries the conversation's OWN provider (each source gates on `handlesProvider` before any I/O;
   `buildQuotaSource` registers all but non-matching sources are inert). Cross-provider **CLI** dispatch is the
@@ -75,13 +86,18 @@ main, unreleased. Read FIRST — [`docs/a8-rolling-cutover-plan.md`](a8-rolling-
 [`docs/cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md), memory
 `conversation-first-subagent-dispatch-first-class`, memory `cross-provider-quota-matrix`.
 
-### 1. Quota detection — DONE; remaining = cross-pool spill + live confirmation
-The sources PRODUCE per-pool snapshots and the scheduler already consumes `remaining_pct` per pool. STILL OPEN:
-(a) **utilization-driven spill ACROSS heterogeneous pools** + per-model/cost routing (the multi-pool dispatch
-half — bigger than the sources; the binding constraint is quota+rate, NOT max-parallel-`N`); (b) a one-shot
-**live confirmation GET per provider** (Codex/Copilot/Antigravity — only Claude is live-confirmed), each gated on
-your OK to touch that token. Security: rotate the Antigravity token (a research subagent decoded a fragment — see
-`docs/cross-provider-quota-matrix.md`).
+### 1. Quota detection — sources DONE; spill DONE (`0a620bf8`); remaining = a real 2nd pool + live confirmation
+Item (a) **utilization-driven cross-pool spill is now BUILT** (INV-QD-14, `selectProvider`): the per-node
+dispatch seam deprioritises quota-degraded pools so load spills to a healthy peer before a 429, capability/cost
+rank preserved within health groups. STILL OPEN:
+- (a-residual) **A real SECOND pool to spill INTO.** The spill *logic* is complete and unit-proven, but in a
+  single-provider session there is only one pool, so it can't fire end-to-end yet. The concrete next capability
+  is detecting/building an actual second pool — another CLI agent (`claude`/`codex`/`opencode`) or an IDE model
+  — under its own provider+quota constraints. This is the *Heterogeneous multi-agent dispatch* backlog item
+  (FINDING-020) + "detect and dispatch to CLI agents as additional pools." Bigger than spill itself.
+- (b) a one-shot **live confirmation GET per provider** (Codex/Copilot — only Claude is live-confirmed; mappings
+  are fixture-tested + source-verified-shape), each gated on your OK to touch that token. (Antigravity excluded
+  per Ethan this turn; token rotation also dropped per Ethan.)
 
 ### 2. A8 host-subagent driver — ✓ VALIDATED + hardened this session; provider real-run + flip remain
 (a) **DONE — real-subagent end-to-end smoke.** Drove the real machine to `dispatch_implement_rolling` in an
@@ -123,8 +139,10 @@ hang in `phase-plan.test.ts` under the release gate; that test was made hermetic
 - Memory (this session): `conversation-first-subagent-dispatch-first-class`, `claude-oauth-usage-quota-endpoint`.
   Also: `review-gate-execution-status`, `prefer-ideal-code-no-backcompat`, `ask-on-ambiguity-dont-defer-silently`,
   `remediation-review-gate-must-be-tool-enforced`.
-- **`MEMORY.md` is over its size limit** — a `consolidate-memory` pass is due (merge/trim verbose index lines);
-  not blocking, but do it before adding many more entries.
+- **`MEMORY.md` consolidation IN PROGRESS by a concurrent agent (2026-06-16)** — do NOT edit memory files
+  while that runs. PENDING fold once it settles: the INV-QD-14 cross-pool spill (root cause: `scheduleWave`
+  floors `max_concurrent` at 1, so the pre-spill `selectProvider` never redistributed) belongs in memory
+  `cross-provider-quota-matrix` / `quota-dispatch-vision`.
 - Review-gate artifacts (under `.audit-tools/remediation/`): `review_request.json` /
   `review_resolution.json` / `review_decision.json` / `review_filter_dispositions.json`.
 
