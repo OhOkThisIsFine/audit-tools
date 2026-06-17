@@ -81,8 +81,8 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   `buildConfirmedPools` emits it as a 2nd CapacityPool alongside the primary, and `makeProviderNodeDispatcher`
   resolves the provider PER-SLOT so the INV-QD-14 spill mechanically routes a node to the openai-compatible pool
   in the in-process driver.)* Plan: `docs/a8-rolling-cutover-plan.md`. (ARC-f378135d family.)
-- **B1 / B2 / B3 — greenlit** (the magic-numbers, diff-based-re-review, and staleness-cascade friction
-  items in *Known friction* below; now accepted work, not just logged friction).
+- **B1 ✓ DONE / B2 / B3 — greenlit** (magic-numbers audit [done — see *Known friction* below],
+  diff-based-re-review, and staleness-cascade; B2/B3 are accepted work, not just logged friction).
 - **B4 — Hard-exclude tool-refuted findings — ✓ DONE.** A tier-2 REFUTED finding (e.g. a madge-disproven
   cycle) is now a distinct `grounding:'refuted'` status, quarantined-EXCLUDED from the admitted contract
   rather than collapsed into `ungrounded` (still-merged-as-fact). Shipped: (1) `FindingGrounding.status`
@@ -131,12 +131,24 @@ Hit while driving the full `remediate-code` contract pipeline over the 227-findi
 audit + backlog + drift-plan. Ethan: find systematic fixes so this can't bite any
 agent (strong or weak), not "be careful" patches.
 
-- **Magic numbers, esp. the adversarial-pass count (=2) — audit ALL of them.** The
-  critic→judge→repair loop runs a fixed number of rounds; dispatch concurrency, the
-  60s anchor timeout, STALE_LOCK_MS=30s, hashContent slice lengths (8/16/32),
-  BLOCK_SAFETY_MARGIN, the `>=4`-token paired-keyword heuristic, etc. are all magic.
-  Investigate where each is *really* justified vs. should be derived/config/until-converged
-  (e.g. run adversarial rounds until a clean round, not a fixed 2). (Ethan, 2026-06-16.)
+- **B1 — Magic numbers audit — ✓ DONE (audited; one config knob added, rest verdicted).** Investigated
+  every named constant; verdicts:
+  - **Adversarial critic→judge→repair caps** (`MAX_CONTRACT_REPAIR_ITERATIONS` / `MAX_DAG_REGENERATION_ATTEMPTS`
+    / `MAX_CYCLIC_SEAM_RESOLUTION_ATTEMPTS` = 2, `contractPipeline.ts`): **JUSTIFIED as-is.** The premise that it
+    "runs a fixed 2 rounds" was inaccurate — the loop already runs UNTIL the judge approves (a clean round) OR
+    the cap, then proceeds with residual risks. The 2 is an anti-oscillation safety valve, not a fixed count.
+    Config-ifying would add `sessionConfig` coupling to a deliberately config-free module + a footgun (raise it
+    and a non-converging judge runs unboundedly) for marginal gain. Left as-is.
+  - **Anchor command timeout (60s)** → **CONFIG (shipped).** A legitimately-slow check on a large repo was
+    silently killed → `inconclusive`; now `AUDIT_CODE_ANCHOR_TIMEOUT_MS` overrides it per-run (default 60s),
+    mirroring the existing `AUDIT_CODE_DISABLE_ANCHORS` env pattern. `resolveAnchorTimeoutMs` + test.
+  - **JUSTIFIED, no change:** `STALE_LOCK_MS`=30s (local crash-recovery timeout — correct), `hashContent`
+    slice lengths (not magic — caller-supplied, single-source primitive), `BLOCK_SAFETY_MARGIN`=0.7 (structural
+    host-prompt headroom invariant), the `>=4`-token paired-keyword filter (linguistic noise filter — sound),
+    `ANCHOR_GROUNDING_CONCURRENCY` (already CPU-derived, clamped [2,8]).
+  - **`DEFAULT_WAVE_SIZE`=5** (`dispatch.ts`): a legacy fallback that fires only when the host reports no
+    concurrency limit; rolling dispatch now derives concurrency from quota, so it rarely matters. Low-priority;
+    left (would be env-derivable if it ever bites). (Ethan, 2026-06-16.)
 - **Re-reviews are full passes over unchanged designs — make them diff-based.** When an
   upstream artifact's content-hash changes, the conceptual critique / counterexample /
   assessment re-run as *full* passes even when the change was cosmetic (e.g. adding

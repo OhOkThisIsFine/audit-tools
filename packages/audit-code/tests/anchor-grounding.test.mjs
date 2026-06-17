@@ -11,8 +11,17 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const packageDir = join(here, "..");
 
-const { verifyFindingAnchor, combineGroundingWithAnchor, isAllowedAnchorCommand } =
+const { verifyFindingAnchor, combineGroundingWithAnchor, isAllowedAnchorCommand, resolveAnchorTimeoutMs, ANCHOR_TIMEOUT_MS } =
   await import("../src/validation/anchorGrounding.ts");
+
+test("resolveAnchorTimeoutMs honors AUDIT_CODE_ANCHOR_TIMEOUT_MS and falls back to the default (B1)", () => {
+  assert.equal(resolveAnchorTimeoutMs({}), ANCHOR_TIMEOUT_MS, "no override → default");
+  assert.equal(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "120000" }), 120000, "positive int override is used");
+  // Non-positive / non-numeric overrides fall back to the default (never 0/NaN).
+  assert.equal(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "0" }), ANCHOR_TIMEOUT_MS);
+  assert.equal(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "-5" }), ANCHOR_TIMEOUT_MS);
+  assert.equal(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "abc" }), ANCHOR_TIMEOUT_MS);
+});
 
 function findingWithAnchor(anchor) {
   return {
