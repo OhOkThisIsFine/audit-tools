@@ -102,6 +102,17 @@ export function findingIdentitySignature(
   }
 
   // Tier 2: rule/category (+ lens, the existing category convention).
+  //
+  // B8 decision (2026-06-17): two DISTINCT fileless findings of the same
+  // lens+category collapse to one identity here — and that is correct, not a bug.
+  // A fileless finding has no structural anchor, so its only stable identity is
+  // lens+category; the title is deliberately tier 3 (volatile — reworded
+  // re-emissions must still collapse, see normalizeTitle). Adding the title to
+  // this tier to split such findings would re-introduce the volatility-driven
+  // OVER-splitting (the same defect re-emitted with a reworded title becoming two
+  // findings) that the single-source authority exists to prevent. If two fileless
+  // findings are genuinely different defects, their CATEGORY must differ — that is
+  // the auditor's discriminator, not the signature's.
   const category = (fields.category ?? "").trim().toLowerCase();
   if (category !== "") {
     const lens = (fields.lens ?? "").trim().toLowerCase();
