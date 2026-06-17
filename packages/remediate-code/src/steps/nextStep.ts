@@ -3309,6 +3309,277 @@ function buildPreIntakeObligations(
   ];
 }
 
+/**
+ * Priority order for the main (post-intake) obligations — mirrors the original
+ * cascade tail's guard order exactly so selection cannot drift.
+ */
+const MAIN_PRIORITY: readonly string[] = [
+  "waiting_for_clarification",
+  "waiting_for_triage",
+  "planning_documentable",
+  "partial_terminal",
+  "implementing",
+  "triage",
+  "planning_zero",
+  "all_terminal",
+  "closing",
+  "unhandled",
+];
+
+/**
+ * The post-intake cascade tail as declarative obligations (A3 slice 2). Runs on a
+ * non-null state (pre-intake resolved it). The resolution-file branches and the
+ * implementing dead-end become `transition` outcomes — the engine re-scans,
+ * replacing the cascade's internal recursion at those three sites. The phase
+ * handlers remain the emit executors (their own internal recursion is unwound in
+ * a follow-up; until then it re-enters `advance`, which is sound).
+ */
+function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
+  const { root, artifactsDir, options, runLogger, store } = ctx;
+  const clarificationResolutionPath = join(
+    artifactsDir,
+    "clarification_resolution.json",
+  );
+  const triageResolutionPath = join(artifactsDir, "triage_resolution.json");
+
+  return [
+    {
+      // Plan-phase clarification wait: apply a resolution if present (transition →
+      // re-scan), else surface the wait step.
+      id: "waiting_for_clarification",
+      derive: (state) =>
+        state?.status === "waiting_for_clarification" ? "missing" : "satisfied",
+      execute: async (state) => {
+        const s = requireState(state);
+        if (existsSync(clarificationResolutionPath)) {
+          const next = await applyPlanClarificationResolution(artifactsDir, s, store);
+          return { kind: "transition", state: next };
+        }
+        return {
+          kind: "emit",
+          step: await handleWaitingForClarification(root, artifactsDir, s),
+        };
+      },
+    },
+    {
+      // Triage wait: apply a resolution (→ triage, transition) if present, else
+      // surface the wait step.
+      id: "waiting_for_triage",
+      derive: (state) =>
+        state?.status === "waiting_for_triage" ? "missing" : "satisfied",
+      execute: async (state) => {
+        const s = requireState(state);
+        if (existsSync(triageResolutionPath)) {
+          s.status = "triage";
+          await store.saveState(s);
+          return { kind: "transition", state: s };
+        }
+        return {
+          kind: "emit",
+          step: await handleWaitingForTriage(root, artifactsDir, s),
+        };
+      },
+    },
+    {
+      id: "planning_documentable",
+      derive: (state) =>
+        state != null &&
+        state.status === "planning" &&
+        documentableFindings(state).length > 0
+          ? "missing"
+          : "satisfied",
+      execute: async (state) => ({
+        kind: "emit",
+        step: await handlePlanning(
+          root,
+          artifactsDir,
+          requireState(state),
+          options,
+          store,
+          runLogger,
+        ),
+      }),
+    },
+    {
+      // Partial-completion terminal consume (OBL-S09 / INV-X06): block the
+      // precisely-named stranded ids + every other non-terminal item (the
+      // no-livelock guarantee), clear the flag, then force the close transition
+      // via handleAllTerminalTransition (blocked is non-terminal, so all_terminal
+      // would not otherwise fire).
+      id: "partial_terminal",
+      derive: (state) =>
+        state != null &&
+        state.partial_completion_terminal != null &&
+        !allItemsTerminal(state)
+          ? "missing"
+          : "satisfied",
+      execute: async (state) => {
+        const s = requireState(state);
+        const terminal = s.partial_completion_terminal;
+        if (!terminal) return { kind: "transition", state: s };
+        const strandedSet = new Set(terminal.stranded_ids ?? []);
+        for (const it of Object.values(s.items ?? {})) {
+          if (isTerminalStatus(it.status)) continue;
+          it.status = "blocked";
+          const stranded = strandedSet.has(it.finding_id);
+          it.failure_reason =
+            it.failure_reason ??
+            (stranded
+              ? `Stranded by partial-completion terminal (${terminal.reason}): the provider pool was exhausted before this item could be dispatched (no pool survived re-routing).`
+              : `Blocked after partial-completion terminal (${terminal.reason}): no provider pool remained to dispatch this item.`);
+        }
+        delete s.partial_completion_terminal;
+        await store.saveState(s);
+        return {
+          kind: "emit",
+          step: await handleAllTerminalTransition(
+            root,
+            artifactsDir,
+            s,
+            store,
+            options,
+            runLogger,
+          ),
+        };
+      },
+    },
+    {
+      id: "implementing",
+      derive: (state) =>
+        state?.status === "implementing" ? "missing" : "satisfied",
+      execute: async (state) => {
+        const s = requireState(state);
+        // Pending implementable blocks dispatch; triage only runs once every item
+        // has left "pending".
+        const pendingBlocks = implementableBlocks(s);
+        if (pendingBlocks.length > 0) {
+          return {
+            kind: "emit",
+            step: await buildImplementDispatchStep({
+              root,
+              artifactsDir,
+              state: s,
+              options,
+              implementBlocks: pendingBlocks,
+              runLogger,
+            }),
+          };
+        }
+        // Dead-end pending nodes whose dependency never reached verified-complete
+        // (INV-RS-01) so the implementing→triage loop can't livelock; transition
+        // so the engine re-scans on the updated state.
+        const deadEnded = blockedByUnsatisfiedDependency(s);
+        if (deadEnded.length > 0) {
+          const now = new Date().toISOString();
+          let changed = false;
+          for (const block of deadEnded) {
+            for (const findingId of block.items) {
+              const it = s.items?.[findingId];
+              if (!it || it.status !== "pending") continue;
+              it.status = "blocked";
+              it.started_at ??= now;
+              it.completed_at = now;
+              it.failure_reason =
+                it.failure_reason ??
+                "A dependency node did not reach a verified-complete disposition " +
+                "(a prerequisite was skipped, blocked, or the dependencies are cyclic); " +
+                "the rolling scheduler will not dispatch this node (INV-RS-01).";
+              changed = true;
+            }
+          }
+          if (changed) {
+            await store.saveState(s);
+            return { kind: "transition", state: s };
+          }
+        }
+        return {
+          kind: "emit",
+          step: await handleImplementing(root, artifactsDir, s, runLogger, store, options),
+        };
+      },
+    },
+    {
+      id: "triage",
+      derive: (state) => (state?.status === "triage" ? "missing" : "satisfied"),
+      execute: async (state) => ({
+        kind: "emit",
+        step: await handleImplementing(
+          root,
+          artifactsDir,
+          requireState(state),
+          runLogger,
+          store,
+          options,
+        ),
+      }),
+    },
+    {
+      // planning with zero documentable findings is a user question, not a
+      // dead-end — must fire BEFORE all_terminal so an all-resolved planning state
+      // doesn't silently advance to close.
+      id: "planning_zero",
+      derive: (state) =>
+        state != null &&
+        state.status === "planning" &&
+        documentableFindings(state).length === 0
+          ? "missing"
+          : "satisfied",
+      execute: async (state) => ({
+        kind: "emit",
+        step: await handleZeroDocumentableFindings(
+          root,
+          artifactsDir,
+          requireState(state),
+        ),
+      }),
+    },
+    {
+      id: "all_terminal",
+      derive: (state) =>
+        state != null && allItemsTerminal(state) && state.status !== "closing"
+          ? "missing"
+          : "satisfied",
+      execute: async (state) => ({
+        kind: "emit",
+        step: await handleAllTerminalTransition(
+          root,
+          artifactsDir,
+          requireState(state),
+          store,
+          options,
+          runLogger,
+        ),
+      }),
+    },
+    {
+      id: "closing",
+      derive: (state) => (state?.status === "closing" ? "missing" : "satisfied"),
+      execute: async (state) => ({
+        kind: "emit",
+        step: await handleClosing(
+          root,
+          artifactsDir,
+          requireState(state),
+          runLogger,
+          store,
+          options,
+        ),
+      }),
+    },
+    {
+      // Catch-all: reached only when no specific obligation matched. Always
+      // actionable on a non-null state (the lowest-priority slot), so `advance`
+      // surfaces the diagnostic rather than returning a null step.
+      id: "unhandled",
+      derive: (state) => (state != null ? "missing" : "satisfied"),
+      execute: async (state) => ({
+        kind: "emit",
+        step: await handleUnhandledState(root, artifactsDir, requireState(state)),
+      }),
+    },
+  ];
+}
+
 async function decideNextStepLoop(
   options: NextStepOptions,
   runLogger: RunLogger,
@@ -3396,130 +3667,13 @@ async function decideNextStepLoop(
 
   await countStep(state);
 
-  if (state.status === "waiting_for_clarification") {
-    const clarResolutionPath = join(artifactsDir, "clarification_resolution.json");
-    if (existsSync(clarResolutionPath)) {
-      await applyPlanClarificationResolution(artifactsDir, state, store);
-      return decideNextStepLoop(options, runLogger, true);
-    }
-    return handleWaitingForClarification(root, artifactsDir, state);
-  }
-
-  if (state.status === "waiting_for_triage") {
-    const resolutionPath = join(artifactsDir, "triage_resolution.json");
-    if (existsSync(resolutionPath)) {
-      state.status = "triage";
-      await store.saveState(state);
-      return decideNextStepLoop(options, runLogger, true);
-    }
-    return handleWaitingForTriage(root, artifactsDir, state);
-  }
-
-  if (state.status === "planning" && documentableFindings(state).length > 0) {
-    return handlePlanning(root, artifactsDir, state, options, store, runLogger);
-  }
-
-  // Partial-completion terminal hook (OBL-S09 / INV-X06 / OBL-SEAM-RSD-01):
-  // Workstream-C consume side. The shared rolling-dispatch engine
-  // (createRollingDispatcher) re-queues a transient rate_limited/exhausted
-  // packet and re-selects a pool within headroom on the next pass; only when no
-  // pool survives does it surface a PartialCompletionTerminal{reason:'empty_pool',
-  // stranded_ids} (via getTerminal()). remediate-code consumes that terminal
-  // here: the precisely-named stranded ids get a stranded disposition, any other
-  // still-non-terminal item is blocked too (the pool is exhausted, so it cannot
-  // proceed either — this is the no-livelock guarantee), then the run advances
-  // to close. The host-driven dispatch path writes the same terminal shape onto
-  // state, so both producers funnel through this one consumer.
-  if (
-    state.partial_completion_terminal &&
-    !allItemsTerminal(state)
-  ) {
-    const terminal = state.partial_completion_terminal;
-    const strandedSet = new Set(terminal.stranded_ids ?? []);
-    for (const it of Object.values(state.items ?? {})) {
-      if (isTerminalStatus(it.status)) continue;
-      it.status = "blocked";
-      const stranded = strandedSet.has(it.finding_id);
-      it.failure_reason =
-        it.failure_reason ??
-        (stranded
-          ? `Stranded by partial-completion terminal (${terminal.reason}): the provider pool was exhausted before this item could be dispatched (no pool survived re-routing).`
-          : `Blocked after partial-completion terminal (${terminal.reason}): no provider pool remained to dispatch this item.`);
-    }
-    // Clear the terminal flag so the recursive fold doesn't re-enter this branch:
-    // 'blocked' is not a terminal status, so without clearing, the check would
-    // re-fire on the recursive call and loop indefinitely.
-    delete state.partial_completion_terminal;
-    await store.saveState(state);
-    return handleAllTerminalTransition(root, artifactsDir, state, store, options, runLogger);
-  }
-
-  if (state.status === "implementing") {
-    // If there are pending implementable blocks, dispatch them — triage only
-    // runs after all items have left the "pending" state.
-    const pendingBlocks = implementableBlocks(state);
-    if (pendingBlocks.length > 0) {
-      return buildImplementDispatchStep({
-        root,
-        artifactsDir,
-        state,
-        options,
-        implementBlocks: pendingBlocks,
-        runLogger,
-      });
-    }
-    // No eligible block remains, but pending nodes whose dependency never reached
-    // verified-complete (a prerequisite was skipped/blocked) would otherwise loop
-    // forever in implementing → triage (triage only acts on `blocked`, not
-    // `pending`). Dead-end them deterministically (INV-RS-01): a node whose
-    // upstream surface never landed is blocked, not dispatched. Without this the
-    // stricter verified-complete gate could livelock the implementing phase.
-    const deadEnded = blockedByUnsatisfiedDependency(state);
-    if (deadEnded.length > 0) {
-      const now = new Date().toISOString();
-      let changed = false;
-      for (const block of deadEnded) {
-        for (const findingId of block.items) {
-          const it = state.items?.[findingId];
-          if (!it || it.status !== "pending") continue;
-          it.status = "blocked";
-          it.started_at ??= now;
-          it.completed_at = now;
-          it.failure_reason =
-            it.failure_reason ??
-            "A dependency node did not reach a verified-complete disposition " +
-            "(a prerequisite was skipped, blocked, or the dependencies are cyclic); " +
-            "the rolling scheduler will not dispatch this node (INV-RS-01).";
-          changed = true;
-        }
-      }
-      if (changed) {
-        await store.saveState(state);
-        return decideNextStepLoop(options, runLogger, true);
-      }
-    }
-    return handleImplementing(root, artifactsDir, state, runLogger, store, options);
-  }
-
-  if (state.status === "triage") {
-    return handleImplementing(root, artifactsDir, state, runLogger, store, options);
-  }
-
-  // Early guard: planning with zero documentable findings is a user question,
-  // not a diagnostic dead-end. Present explicit choices so the user can adjust
-  // scope, supply different input, or stop. Must fire BEFORE allItemsTerminal
-  // so a planning state with all-resolved items doesn't silently advance to close.
-  if (state.status === "planning" && documentableFindings(state).length === 0) {
-    return handleZeroDocumentableFindings(root, artifactsDir, state);
-  }
-
-  if (allItemsTerminal(state) && state.status !== "closing") {
-    return handleAllTerminalTransition(root, artifactsDir, state, store, options, runLogger);
-  }
-
-  if (state.status === "closing") {
-    return handleClosing(root, artifactsDir, state, runLogger, store, options);
-  }
-
+  const main = await advance(
+    { priority: MAIN_PRIORITY, obligations: buildMainObligations(ctx) },
+    state,
+    ctx,
+  );
+  if (main.step) return main.step;
+  // The unhandled catch-all always emits on a non-null state, so a null step here
+  // is unreachable; keep an explicit fallback rather than a non-null assertion.
   return handleUnhandledState(root, artifactsDir, state);
 }
