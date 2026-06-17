@@ -9,17 +9,21 @@
 
 ## Where things stand
 
-- **`main`: go-forward-program run in progress (`git log` for HEAD; latest = B1 `c81d4a3`).**
-  Green at every commit. This run landed, in order: worktree walk-up guard `9484e60`; **openai-compatible
-  surfaced as a real 2nd pool** + per-slot dispatcher routing `f92ed1b`; rate_limited re-queue worktree reset
-  `8ba3722`; **B4 quarantine-exclude tool-REFUTED findings** `56e80bf`; shared auto-resolve flake guard
-  `953bb51`; **B8 resolved** (fileless same-category collapse is correct-by-design — doc + guard) `0a8cf35`;
-  **B1 anchor-timeout config + magic-numbers audit** `c81d4a3`. **NOT published — publish HELD per Ethan
-  (2026-06-17).** Last published: `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` /
-  `remediator-lambda 0.27.0` (global bins lag this run's work).
+- **`main`: go-forward-program run landed 9 items (`git log` for HEAD; latest = A5+A11 `e3561c6`).**
+  Green at every commit; all three suites verified green on the committed tree (shared 704 / audit ~2200 /
+  remediate 1628, +1 documented skip each). This run, in order: worktree walk-up guard `9484e60`;
+  **openai-compatible surfaced as a real 2nd pool** + per-slot dispatcher routing `f92ed1b`; rate_limited
+  re-queue worktree+branch reset `8ba3722`; **B4 quarantine-exclude tool-REFUTED findings** `56e80bf`;
+  shared auto-resolve flake guard `953bb51`; **B8 resolved** (fileless same-category collapse is
+  correct-by-design — doc + guard) `0a8cf35`; **B1 anchor-timeout config + magic-numbers audit** `c81d4a3`;
+  HANDOFF checkpoint `649fc8f`; **A5+A11 vetted TOML/YAML manifest parsers** (smol-toml + yaml; recovers
+  dropped dependency-graph edges) `e3561c6`. **NOT published — publish HELD per Ethan (2026-06-17).** Last
+  published: `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins
+  lag this run's work).
   - **Verify true-green:** the shared `codex-antigravity-providers.test.mjs` auto-resolve flake is FIXED
-    (`953bb51` — skips for ANY agent CLI on PATH). The remaining known flake: audit-code's
-    `phase-plan.test.ts` intermittent hermeticity (backlog). CLAUDECODE must still be unset for gates.
+    (`953bb51` — skips for ANY agent CLI on PATH). Remaining known flake: audit-code's `phase-plan.test.ts`
+    intermittent hermeticity (backlog). CLAUDECODE must still be unset for gates. Note: A5+A11 added
+    audit-code's first third-party runtime deps (`smol-toml`, `yaml`) — a fresh clone needs `npm install`.
 
 - **A8 — the rolling cutover is effectively DONE for remediate.** Both rolling drivers on the shared
   `acceptNodeWorktree` core are validated end-to-end + are the DEFAULT now:
@@ -49,18 +53,26 @@
 - **Order of program items is yours** — sequence so one refactor doesn't undo another.
 - **Publish is HELD** (2026-06-17) — accumulate on main; do not `release:*`/publish until Ethan says.
 
-## Immediate next: the go-forward program (DONE this run: A8 loose ends ×3, B1, B4, B8)
+## Immediate next: the go-forward program (DONE this run: A8 loose ends ×3, B1, B4, B8, A5+A11)
 
 Order is yours. **Remaining, suggested order:** **A1** fast path → **A3+A4** unify the two obligation
 engines + canonical `RemediationItem` (the big foundational refactor) → **B2+B3** diff re-reviews +
-obligation-set staleness (do AFTER A3+A4 so they build on the unified engine) → **A5+A11** dependency policy
-+ vetted manifest parsers → **A6** kill schema dual-encoding → **A8(a)** audit-code symmetric rolling wiring
-→ **A12** single-package collapse (do LAST — it reorganizes packaging) → **A7** validate host machinery
-across hosts. Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md` → "Accepted go-forward program".
+obligation-set staleness (do AFTER A3+A4 so they build on the unified engine) → **A6** kill schema
+dual-encoding → **A8(a)** audit-code symmetric rolling wiring → **A12** single-package collapse (do LAST —
+it reorganizes packaging) → **A7** validate host machinery across hosts. Deferred: A2, A9/A10. Full specs +
+recon: `docs/backlog.md` → "Accepted go-forward program".
 
 **Done this run (committed, green):** B1 (anchor-timeout config + full magic-numbers audit), B4
-(quarantine-exclude refuted findings), B8 (resolved — collapse correct-by-design). A8 loose ends below are
-3/4 done.
+(quarantine-exclude refuted findings), B8 (resolved — collapse correct-by-design), A5+A11 (vetted TOML/YAML
+parsers). A8 loose ends 3/4 done (below).
+
+**START-HERE for the next session — A1 is the cheapest remaining win, but it's bigger than a gate tweak.**
+`shouldEnterContractPipeline` always enters the pipeline and `handlePendingIntake` (`nextStep.ts:2097`)
+routes BOTH ready-intake paths through it — there is NO lean fallback. A1 = a CONSERVATIVE gate (fast-path
+only when ALL simplicity signals hold; default to the full pipeline on doubt) PLUS a real lean
+plan→document→implement path the gate routes to (must still emit `extracted-plan.json` + run implement-phase
+verify; only drops the adversarial critic→judge→repair). Full recon in `docs/backlog.md` → A1. A3+A4, A6,
+A12, A7 are each large (multi-session); B2+B3 are coupled to A3+A4 (do after).
 
 ### A8 remaining loose ends
 - **DONE:** worktree walk-up guard (`9484e60`); `openai-compatible` surfaced as a confirmed 2nd pool +

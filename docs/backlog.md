@@ -43,7 +43,17 @@ record of what was **greenlit** is here. Each is a target, not a status line —
 - **A1 — Fast path past the 15-phase pipeline.** Size/ambiguity/seam-gated lean path
   (`shouldEnterContractPipeline`) so a handful of concrete fixes don't pay full adversarial +
   3-repair-loop cost. Risk to design around: a mis-routed subtle change must not skip the safety net.
-  (ARC-ad53dd0d.)
+  (ARC-ad53dd0d.) **Recon 2026-06-17 — bigger than a gate tweak; scope before building.**
+  `shouldEnterContractPipeline` (`steps/contractPipeline.ts:354`) today ALWAYS enters the pipeline (only
+  returns false once the pipeline has completed), and `handlePendingIntake` (`steps/nextStep.ts:2097`)
+  routes **both** ready-intake paths through `handleReadyIntakeContractPipeline` — there is **no lean
+  fallback wired**. So A1 = (a) a CONSERVATIVE gate (fast-path ONLY when all simplicity signals hold:
+  small finding/file count + all findings grounded + high confidence + no shared-contract/cross-module
+  seam + structured (non-free-form) source; default to the full pipeline on any doubt — that is how "a
+  subtle change must not skip the net" is enforced), PLUS (b) a real lean plan→document→implement path the
+  gate routes to (it must still produce the `extracted-plan.json` document/implement consume and still run
+  the implement-phase test/verify — it only drops the adversarial critic→judge→repair + obligation
+  derivation). Without (b), a gate that returns false would route ready-intake to `null` and stall the run.
 - **A3+A4 — Move correctness into the tool; unify the two obligation engines.** audit-code expresses the
   ordered-obligation engine declaratively (PRIORITY[] + registry); remediate re-derives it in a
   ~2835-line imperative switch → one shared declarative engine. Collapse the ~8 finding_id-keyed record
