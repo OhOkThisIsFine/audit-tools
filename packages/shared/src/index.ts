@@ -588,6 +588,8 @@ export type {
 } from "./quota/httpQuotaSource.js";
 export { CodexQuotaSource, fetchCodexUsage, mapCodexUsage } from "./quota/codexQuotaSource.js";
 export type { CodexQuotaSourceOptions } from "./quota/codexQuotaSource.js";
+export { CopilotQuotaSource, fetchCopilotUsage, mapCopilotUsage } from "./quota/copilotQuotaSource.js";
+export type { CopilotQuotaSourceOptions } from "./quota/copilotQuotaSource.js";
 export type { ErrorParser } from "./quota/errorParsers/index.js";
 export {
   GenericErrorParser,
