@@ -30,6 +30,7 @@ import {
   worktreeBranchForBlock,
 } from "./dispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
+import { prepareHostRollingDispatch } from "./rollingSession.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
 import {
@@ -1352,26 +1353,16 @@ async function buildImplementDispatchStep(ctx: {
       sessionConfig: sessionConfigImpl,
     });
 
-    // CE-001 anti-wedge: the in-process rolling engine is opt-in and is engaged
-    // by a provider-backed caller via `driveRollingImplementDispatch`, which
-    // supplies a programmatic per-node dispatcher. The CONVERSATION host fans out
-    // its own subagents and has no such dispatcher, so even when the flag is on
-    // it still follows the host-fanned wave step emitted below (the proven,
-    // default path). We only record that the engine is opted in for observability
-    // — flipping the default and atomically removing this fallback is a DOCUMENTED
-    // REMAINING STEP gated on a validated multi-worker rolling dispatch.
+    // A8 host-subagent rolling driver: when the rolling engine is enabled AND the
+    // host can dispatch subagents, drive a FULL-ROLLING, worktree-isolated flow via
+    // the `accept-node` per-completion callback — the conversation-first co-equal of
+    // the in-process provider engine (`driveRollingImplementDispatch`), sharing the
+    // same `acceptNodeWorktree` core. Gated behind the flag so the default stays the
+    // proven host-fanned wave step until the rolling path is validated end-to-end.
     const rollingEngineEnabled = resolveRollingEngineEnabled({
       rollingEngine: options.rollingEngine,
       sessionConfig: sessionConfigImpl,
     });
-    if (rollingEngineEnabled) {
-      process.stderr.write(
-        `[remediate-code] dispatch: rolling engine OPTED IN; the conversation host ` +
-          `path still uses the proven host-fanned wave step (no programmatic ` +
-          `per-node dispatcher here). A provider-backed caller engages the engine ` +
-          `via driveRollingImplementDispatch.\n`,
-      );
-    }
 
     const runId = stateRunId(state);
     const waveOptsImpl = {
@@ -1382,6 +1373,76 @@ async function buildImplementDispatchStep(ctx: {
       hostModels: options.hostModels,
       hostModelId: options.hostModelId,
     };
+
+    if (rollingEngineEnabled && canDispatchImpl) {
+      const rolling = await prepareHostRollingDispatch({ root, artifactsDir }, runId, waveOptsImpl);
+      // Everything eligible may already be done/skipped — fold straight to merge
+      // rather than emitting a dispatch step with zero nodes.
+      if (rolling.session.frontier.length === 0) {
+        await mergeImplementResults({ root, artifactsDir }, runId);
+        return decideNextStepLoop(options, runLogger, true);
+      }
+      const rollMerge = loaderCommand(`merge-implement-results --run-id ${runId}`);
+      const rollNext = loaderCommand("next-step");
+      const acceptCmd = loaderCommand("accept-node --id <BLOCK_ID>");
+      const nodeLines = rolling.initial
+        .map(
+          (n) =>
+            `- \`${n.block_id}\` — prompt: \`${n.prompt_path}\` — worktree (subagent cwd): \`${n.worktree_root}\``,
+        )
+        .join("\n");
+      return writeCurrentStep({
+        stepKind: "dispatch_implement_rolling",
+        status: "ready",
+        runId,
+        repoRoot: root,
+        artifactsDir,
+        prompt: `
+# Dispatch Implementation Work (host-subagent rolling, worktree-isolated)
+
+Each eligible node runs in its OWN git worktree (hard isolation between nodes). The
+TOOL owns commit -> verify -> merge + write-scope; you only spawn a subagent per
+node and call \`accept-node\` as each finishes.
+
+Concurrency target: **${rolling.session.slots}** subagents at once (the quota
+scheduler's \`max_concurrent_agents\`), NOT a wave cap.
+
+Spawn ONE subagent for EACH initial node below. Give the subagent that node's
+\`prompt\`, and set its working directory to the node's **worktree** path. The
+subagent edits source files INSIDE that worktree and writes ONLY its result file.
+Do NOT let any subagent edit the main repository tree.
+
+Initial nodes (worktrees already created):
+${nodeLines}
+
+As EACH subagent finishes, run (substituting the finished node's block id):
+
+\`${acceptCmd}\`
+
+It runs the commit -> verify -> merge lifecycle for that node and prints a JSON
+directive on stdout:
+- \`{"directive":"dispatch","node":{...},"worktree_root":"..."}\` — spawn a subagent
+  for that next node (its worktree is already created), keeping up to
+  ${rolling.session.slots} running.
+- \`{"directive":"wait",...}\` — other nodes are still in flight; do not spawn more yet.
+- \`{"directive":"done",...}\` — every node has been accepted. Then run:
+
+${DO_NOT_TOKEN_WRAP_NOTE}
+
+\`${rollMerge}\`
+
+Then run:
+
+\`${rollNext}\`
+
+${DISPATCH_PROMPT_HANDOFF_NOTE}
+`,
+        allowedCommands: [acceptCmd, rollMerge, rollNext],
+        stopCondition:
+          "Stop after every node has been accepted (accept-node returns done), results merged, and next-step has been run.",
+        artifactPaths: { dispatch_plan: rolling.planPath, dispatch_quota: rolling.quotaPath },
+      });
+    }
     // Rolling per-node dispatch: prepare EVERY currently-eligible node (deps all
     // verified-complete), never a single artificially-serialized block. There is
     // no wave-size cap — concurrency is owned by the quota scheduler

@@ -10,6 +10,7 @@ import {
   mergeImplementResults,
   prepareImplementDispatch,
 } from "./steps/dispatch.js";
+import { advanceHostRolling } from "./steps/rollingSession.js";
 import { validateArtifacts } from "./validation/artifacts.js";
 import { CONTRACT_PIPELINE_VALIDATORS } from "./validation/contractPipeline.js";
 import {
@@ -192,6 +193,32 @@ program
       options.runId,
     );
     console.log(JSON.stringify({ status: "ok", state_status: state.status }, null, 2));
+  });
+
+program
+  .command("accept-node")
+  .description(
+    "Host-subagent rolling callback: accept a finished node (commit/verify/merge) and get the next node to dispatch",
+  )
+  .requiredOption("--id <blockId>", "Block id of the node that just finished")
+  .requiredOption("--run-id <id>", "Run id")
+  .option("--root <path>", "Repository root", ".")
+  .option(
+    "--artifacts-dir <path>",
+    "Artifacts directory",
+    ".audit-tools/remediation",
+  )
+  .action(async (options) => {
+    const directive = await withBackendLogsOnStderr(() =>
+      advanceHostRolling({
+        root: resolve(options.root),
+        artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
+        runId: options.runId,
+        blockId: options.id,
+      }),
+    );
+    const { kind, ...rest } = directive;
+    console.log(JSON.stringify({ directive: kind, ...rest }, null, 2));
   });
 
 program
