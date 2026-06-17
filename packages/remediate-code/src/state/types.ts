@@ -1,4 +1,5 @@
 import type { ClosingAction } from "./closingActions.js";
+import type { RemediationItemStatus } from "./itemStatus.js";
 
 // `Finding` is the canonical machine contract owned by @audit-tools/shared.
 // The remediator consumes the auditor's `audit-findings.json` directly, so it
@@ -290,17 +291,7 @@ export interface PerFindingCoverageLedger {
 
 export interface RemediationItemState {
   finding_id: string;
-  status:
-    | "pending"
-    | "tested"
-    | "tested_successfully"
-    | "refactored"
-    | "verified"
-    | "resolved"
-    | "resolved_no_change"
-    | "blocked"
-    | "deemed_inappropriate"
-    | "ignored";
+  status: RemediationItemStatus;
   block_id: string;
   item_spec?: ItemSpec;
   last_successful_step?: string;

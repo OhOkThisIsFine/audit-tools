@@ -40,14 +40,11 @@ import type {
 } from "../state/types.js";
 import { intakePaths, type IntakeSourceManifest } from "../intake.js";
 import { isAuditFindingsReport } from "./plan.js";
-
-const OUTCOME_BY_STATUS: Record<string, RemediationOutcomeStatus> = {
-  resolved: "resolved",
-  resolved_no_change: "verified_no_change",
-  deemed_inappropriate: "inappropriate",
-  ignored: "ignored",
-  blocked: "blocked",
-};
+import {
+  dispositionToOutcomeStatus,
+  isInProgressStatus,
+  statusToDisposition,
+} from "../state/itemStatus.js";
 
 const OUTCOME_KEYS: RemediationOutcomeStatus[] = [
   "resolved",
@@ -134,14 +131,17 @@ export function buildRemediationOutcomesReport(
   const outcomes: RemediationOutcome[] = [];
   const closeReason = closingStatusReason(closingResult);
   for (const item of Object.values(state.items ?? {})) {
-    let outcome = OUTCOME_BY_STATUS[item.status];
+    // Derive the outcome from the single status→disposition→outcome authority.
+    // An in-progress status means the run was force-closed while the item was
+    // still mid-flight: record it as a failed (`blocked`) outcome — never drop
+    // it — and preserve the original state so a retry sees where it stood.
+    let outcome: RemediationOutcomeStatus;
     let originalState: RemediationItemState["status"] | undefined;
-    if (!outcome) {
-      // Force-close: the run was closed while this item was still non-terminal.
-      // Record it as failed (never drop it) and preserve the original state so a
-      // retry can see exactly where the item stood.
+    if (isInProgressStatus(item.status)) {
       outcome = "blocked";
       originalState = item.status;
+    } else {
+      outcome = dispositionToOutcomeStatus(statusToDisposition(item.status));
     }
     const finding = findingsById.get(item.finding_id);
     const fileExts = [
