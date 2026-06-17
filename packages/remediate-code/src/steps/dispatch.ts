@@ -569,6 +569,32 @@ export function removeWorktree(root: string, worktreePath: string): void {
   }
 }
 
+/**
+ * Fully reset a node's isolated worktree + branch so a fresh `createWorktree -b`
+ * can run, even when a prior attempt left either behind. This is the idempotent
+ * cleanup the in-process driver needs across a `rate_limited` re-queue: the
+ * engine re-enters the dispatcher for the SAME block while its branch (and maybe
+ * a stale worktree admin entry) still exist, and `git worktree add -b <branch>`
+ * would otherwise fail with "branch already exists". Removing the worktree,
+ * pruning stale admin records, then force-deleting the branch makes every
+ * (re-)dispatch start clean from HEAD. All steps are best-effort (a missing
+ * worktree/branch is the expected first-attempt case, not an error). Any partial
+ * edits from a throttled prior attempt are intentionally discarded — the
+ * re-dispatch redoes the node from HEAD.
+ */
+export function resetNodeWorktreeAndBranch(
+  root: string,
+  worktreePath: string,
+  branchName: string,
+): void {
+  removeWorktree(root, worktreePath);
+  // Prune stale worktree admin entries (e.g. a dir deleted out from under git),
+  // otherwise `git worktree add` can refuse a path it still thinks is registered.
+  spawnSync("git", ["worktree", "prune"], { cwd: root, shell: false });
+  // Force-delete the leftover branch from a prior attempt so `-b` recreates it.
+  spawnSync("git", ["branch", "-D", branchName], { cwd: root, shell: false });
+}
+
 /** Run each targeted command in the worktree directory. Returns pass/fail and combined output. */
 export function verifyNodeInWorktree(
   worktreePath: string,

@@ -22,6 +22,8 @@ import { writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import {
   createWorktree,
+  removeWorktree,
+  resetNodeWorktreeAndBranch,
   commitWorktree,
   mergeWorktree,
   ensureWorktreeNodeModules,
@@ -53,6 +55,36 @@ function initRepo(): { repo: string; ok: boolean } {
   git("commit", "--allow-empty", "-m", "base");
   return { repo, ok: true };
 }
+
+// ===========================================================================
+// rate_limited re-queue: worktree+branch reuse is idempotent
+// ===========================================================================
+
+describe("resetNodeWorktreeAndBranch: idempotent reuse across a re-queue", () => {
+  it("lets a second createWorktree on the SAME branch succeed after a reset", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return; // git unavailable → skip
+
+    const branch = worktreeBranchForBlock("B1", "RID");
+    const wt = join(repo, ".wt-B1");
+
+    // First dispatch attempt: worktree + branch created.
+    createWorktree(repo, wt, branch);
+
+    // Simulate the partial prior attempt: the worktree dir is gone but the branch
+    // ref remains (what a rate_limited re-queue leaves behind).
+    removeWorktree(repo, wt);
+
+    // Without a reset, recreating on the same branch fails ("branch already exists").
+    expect(() => createWorktree(repo, wt, branch)).toThrow(/git worktree add failed/);
+
+    // The reset clears the leftover branch (+ prunes admin entries); recreation now
+    // starts clean from HEAD.
+    resetNodeWorktreeAndBranch(repo, wt, branch);
+    expect(() => createWorktree(repo, wt, branch)).not.toThrow();
+    expect(existsSync(wt)).toBe(true);
+  });
+});
 
 // ===========================================================================
 // G2: the tool commits the worktree → branch diff + cherry-pick are real

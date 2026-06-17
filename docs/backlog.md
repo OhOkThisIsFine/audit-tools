@@ -72,8 +72,10 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   `namespace` tools). **`rolling_engine` flipped default-ON `8819713`** — rolling is the implement default;
   the wave is opt-out (`rolling_engine:false`). **Remaining:** (a) audit-code symmetric wiring of
   `runRollingDispatch` (still dormant); (b-residual) the {host-subagent (Claude) + NIM} HYBRID topology + a
-  live cross-provider spill run (see *Cross-IDE/provider quota detection* below); (c) harden worktree-branch
-  reuse across a `rate_limited` re-queue. *(FIXED: the worktree-walks-up-to-parent-repo foot-gun — `createWorktree`
+  live cross-provider spill run (see *Cross-IDE/provider quota detection* below). *(FIXED: worktree-branch reuse
+  across a `rate_limited` re-queue — `resetNodeWorktreeAndBranch` removes the worktree, prunes stale admin
+  entries, and force-deletes the leftover branch so every re-dispatch starts clean from HEAD.
+  FIXED: the worktree-walks-up-to-parent-repo foot-gun — `createWorktree`
   now asserts `git rev-parse --show-toplevel` == the target root and refuses rather than escaping to an ancestor.
   FIXED: `openai-compatible` is now surfaced as a confirmed pool — `discoverProviders` config-gates it,
   `buildConfirmedPools` emits it as a 2nd CapacityPool alongside the primary, and `makeProviderNodeDispatcher`
