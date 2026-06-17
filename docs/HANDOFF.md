@@ -9,152 +9,88 @@
 
 ## Where things stand
 
-- **`main`: latest code = Copilot OS-path fix `6ed03db3` + cross-pool spill `0a620bf8` (INV-QD-14); prior
-  substantive = rolling false-resolve fix `f18138fe` (docs syncs on top; `git log` for HEAD = `508b0b38`).**
-  Clean tree, all pushed (synced with `audit-tools/main`), build+check green. **NOT published** — commits sit
-  on main unreleased (mid-program; release when A8 lands + is validated). Last published:
-  `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host
-  assets on 4 hosts current to that).
-- **A8 host-subagent rolling driver — VALIDATED end-to-end this session via a real-subagent smoke, and a
-  latent false-resolve bug found + fixed (`f18138fe`, green).** Drove the REAL machine in an isolated repo
-  (`C:\Code\_a8-smoke`, deleted) to `dispatch_implement_rolling` (3 disjoint nodes, slots capped to 2),
-  spawned REAL Task subagents into the worktrees, called `accept-node` per completion: confirmed all three
-  directives **dispatch→wait→done**, real worktree commit→verify→merge (2 nodes landed on main), JIT worktree
-  creation, finalization via `merge-implement-results`→`next-step`, and a failing node routed to triage (not
-  silently closed). **Bug:** both rolling drivers discarded `acceptNodeWorktree`'s `{merged}` outcome, so a
-  node that fails tool-owned verify with IN-SCOPE edits was marked `resolved` from its self-reported result
-  while its fix never landed (silent false-close — worst case for autonomy). **Fix:** per-node
-  `accept-outcome-<block>.json` sidecar written by both drivers + a merge-state gate in `mergeImplementResults`
-  that blocks any self-reported-resolved node with `merged:false`. Red→green regression + real-git wiring test;
-  remediate suite green (1622).
-- **Quota detection — Claude PROACTIVE source SHIPPED to the tree (`a7eef160`, green).** The signal was confirmed
-  live end-to-end (200 on this machine) and `ClaudeOAuthQuotaSource` (`packages/shared/src/quota/`) built + wired
-  into BOTH orchestrators' dispatch: audit's `buildDispatchPool` already fed the cascade (so it got it for free via
-  the `buildQuotaSource` default); remediate's `scheduleWave` + `buildConfirmedPools` now populate
-  `quotaSourceSnapshot` too → the scheduler throttles/cools-down from live remaining quota BEFORE a 429. Working
-  doc: `docs/quota-detection-build.md`. Green: shared 648, remediate 1610, audit 2192/1skip, build+check clean.
-- **Quota detection — the CROSS-PROVIDER sources are now BUILT too (`a2cb6220`, green).** Extracted
-  `BaseHttpQuotaSource` (cache/guard/degrade) + per-provider `fetchXxxUsage` fns, then built `CodexQuotaSource`
-  (wham/usage), `CopilotQuotaSource` (copilot_internal/user), `AntigravityQuotaSource` (cloudcode-pa
-  fetchAvailableModels), and an `OpenCodeQuotaSource` broker (delegates to the underlying provider by model
-  namespace). All register in `buildQuotaSource` (provider-gated) → audit + remediate dispatch consume them for
-  free. Fixture-tested + source-verified shapes. Matrix: `docs/cross-provider-quota-matrix.md`.
-- **Quota detection — proactive CROSS-POOL SPILL now BUILT (`0a620bf8`, green) — closes remaining item (a).**
-  Root gap found this session: `scheduleWave` floors `max_concurrent` at 1, so the old `selectProvider` always
-  returned the top capability-ranked non-exhausted pool *regardless of live utilization* — the proactive
-  `remaining_pct` only slowed the chosen pool, never redistributed. Now `selectProvider` (shared
-  `dispatch/rollingDispatch.ts`) deprioritises a quota-degraded pool (live `remaining_pct` < LOW band, or in an
-  active cooldown) so load spills to a peer WITH headroom BEFORE a 429 — the proactive complement to the
-  reactive exhausted-pool re-route (INV-QD-07). Capability/cost rank preserved WITHIN each health group; a
-  degraded pool stays a fallback (never a stall); inert when quota disabled. ONE shared seam → both
-  orchestrators (audit `runRollingDispatch` + remediate `driveRollingImplementDispatch` wrap the same
-  `createRollingDispatcher`). 4 new INV-QD-14 tests; shared rolling 27/27, remediate 1622, audit 2192/1skip.
-- **Cross-IDE quota concern — RAISED + RESOLVED this session, no code change.** Confirmed the shipped quota code
-  only ever queries the conversation's OWN provider (each source gates on `handlesProvider` before any I/O;
-  `buildQuotaSource` registers all but non-matching sources are inert). Cross-provider **CLI** dispatch is the
-  intended goal; the one red line is **IDE GUI automation, which is absent** (no keystroke/click/screenshot/
-  computer-use code; `vscode-task`/`antigravity` are operator-configured command templates, not GUI driving).
-  Don't re-audit — see memory `quota-dispatch-vision`.
-- **Deliberate intermediate state (NOT bugs):** the rolling engine + host-subagent driver are functional but
-  **default-OFF** (host-fanned wave path intact, nothing broken). The host-subagent driver is now
-  **real-subagent validated + hardened** (this session); the remaining gate before flipping `rolling_engine`
-  default-ON is the **in-process PROVIDER path real-run** — codex agentic run still unvalidated (codex quota
-  resets **Jun 19**; the false-resolve fix `f18138fe` covers the provider path too via the shared seam, but it
-  wants a real ≥2-node provider run + the Windows codex-sandbox check). The cross-provider quota sources are **fixture-tested +
-  source-verified-shape; Claude + Codex are now LIVE-confirmed (200, shape matches), Copilot/Antigravity are
-  not** — Copilot has no file-reachable credential on this machine (gh keyring + no copilot scope; degrade path
-  confirmed) and Antigravity is excluded per Ethan. Their token-extraction degrades cleanly where unavailable.
-  Program of record: `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)".
+- **`main`: latest = rolling_engine default-ON flip `8819713` (+ docs on top; `git log` for HEAD).**
+  This sprint landed, green at every commit: the **`openai-compatible` provider** `f74c53c` (+ control-plane
+  guard `2613c7c`), the **in-process provider engine wired into `decideNextStep`** `d108e90`, and the
+  **`rolling_engine` default-ON flip + fixture sweep** `8819713`. Clean tree, build+check green, all three
+  suites green (shared 702 / audit 2192·1skip / remediate 1622·1skip). **NOT published — publish HELD per
+  Ethan (2026-06-17).** Last published: `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` /
+  `remediator-lambda 0.27.0` (global bins current to that — they DON'T yet have this sprint's work).
+
+- **A8 — the rolling cutover is effectively DONE for remediate.** Both rolling drivers on the shared
+  `acceptNodeWorktree` core are validated end-to-end + are the DEFAULT now:
+  - *host-subagent driver* (`dispatch_implement_rolling`): real-subagent smoke + false-resolve fix `f18138fe`.
+  - *in-process provider driver* (`driveRollingImplementDispatch`): now WIRED into `decideNextStep` (routes
+    here when `rolling_engine` ON + an EXPLICIT backend provider is set; precedence over host-subagent) and
+    validated through the REAL next-step path over live NIM (`tests/nim-rolling-e2e.test.ts`, gated
+    `RUN_NIM_E2E=1`): 2 nodes land via worktree→verify→merge, a verify-fail auto-retries (capped) then routes
+    to triage (`blocked`) — never false-resolved.
+  - The legacy host-fanned wave (`dispatch_implement`) is RETAINED as an explicit opt-OUT
+    (`rolling_engine:false`), not deleted.
+
+- **NIM as a real provider/pool.** `OpenAiCompatibleProvider` (`packages/shared/src/providers/`) is the
+  `llm write` pattern as a provider: POST node prompt → OpenAI-compatible `/chat/completions` → apply
+  `{files,result}` into the worktree → write result. Config-only, no hardcoded model; NIM is one instance
+  (`openai_compatible:{base_url:"https://integrate.api.nvidia.com/v1", model:"openai/gpt-oss-120b",
+  api_key_env:"NVIDIA_API_KEY"}`). `NVIDIA_API_KEY` is set in Ethan's env. codex+NIM is a DEAD END (codex
+  0.140 dropped `wire_api=chat`; NIM's Responses API rejects codex's `namespace` tools) — don't retry it.
 
 ## Standing directives (Ethan) — read before deciding anything
 
-- **Effort/complexity/refactor-size is NOT a cost.** Only the cleanest/most-efficient/most-robust *endpoint*
-  matters. Never defer, stage-to-avoid-work, or pick a lighter half-measure because something is big or a
-  large atomic change. The ONLY thing that gates pace is **correctness** — green at every commit, no
-  broken/lossy intermediate states. (CLAUDE.md "Ideal code over compatibility"; memory
-  `prefer-ideal-code-no-backcompat`.)
-- **Ask on genuine ambiguity; never defer merely because something is big.** When a decision is genuinely
-  Ethan's and his preference is unclear, ASK (batch the questions) — don't guess or silently defer. (memory
-  `ask-on-ambiguity-dont-defer-silently`.)
-- **Order of program items is yours** — sequence logically so one refactor doesn't undo another.
+- **Effort/complexity/refactor-size is NOT a cost.** Only the cleanest/most-robust *endpoint* matters; never
+  defer or half-measure because something is big. The ONLY gate on pace is **correctness** — green at every
+  commit, no broken/lossy intermediate states. (memory `prefer-ideal-code-no-backcompat`.)
+- **Ask on genuine ambiguity; never defer merely because something is big.** Genuine Ethan-call + unclear
+  preference → ASK (batch). (memory `ask-on-ambiguity-dont-defer-silently`.)
+- **Order of program items is yours** — sequence so one refactor doesn't undo another.
+- **Publish is HELD** (2026-06-17) — accumulate on main; do not `release:*`/publish until Ethan says.
 
-## Immediate next: A8 provider-path real-run (Jun 19) + flip default-ON, then the rest of the go-forward program
+## Immediate next: the go-forward program (A8 remediate side is done)
 
-**Quota detection is now COMPLETE** (research + all sources): Claude (`a7eef160`, live-confirmed + wired) and the
-cross-provider sources (`a2cb6220`: Codex/Copilot/Antigravity + an OpenCode broker, on `BaseHttpQuotaSource`,
-registered in `buildQuotaSource`). The A8 host-subagent rolling driver (`414e302e`) is built + flag-gated. All on
-main, unreleased. Read FIRST — [`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md),
-[`docs/cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md), memory
-`conversation-first-subagent-dispatch-first-class`, memory `cross-provider-quota-matrix`.
+Order is yours. Suggested: **A1** fast path → **A3+A4** unify the two obligation engines + canonical
+`RemediationItem` (the big foundational refactor) → **B1** magic numbers → **B2+B3** diff re-reviews +
+obligation-set staleness → **B4** hard-exclude tool-refuted findings → **B8** finding-merge discriminator →
+**A5+A11** dependency policy + vetted manifest parsers → **A6** kill schema dual-encoding → **A12**
+single-package collapse (do LAST — it reorganizes packaging) → **A7** validate host machinery across hosts.
+Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md` → "Accepted go-forward program".
 
-### 1. Quota detection — sources DONE, spill DONE, Codex live-confirmed this sprint. Remaining ↓
-- **Cross-pool spill BUILT** (INV-QD-14, `0a620bf8`, shared `selectProvider`): deprioritises quota-degraded
-  pools (live `remaining_pct` < LOW, or in cooldown) so load spills to a healthy peer BEFORE a 429;
-  capability/cost rank preserved within each health group; one shared seam → both orchestrators. Don't redo.
-- **Live-confirm (Ethan OK'd 2026-06-17):** Codex ✓ 200 (production path + raw shape match; corroborated the
-  A8 `reset_at 2026-06-19T18:17Z`). Copilot pending a file-reachable token (gh keyring here). Fixed a
-  gh-hosts-path OS bug → `resolveGhHostsPath` (`6ed03db3`).
-- **Gemini CLI + NVIDIA NIM assessed** (matrix §3/§5/§6) — neither adds a proactive `QuotaSource`. Gemini
-  family's future-proof target = **Antigravity CLI** (`agy`; gemini-cli individual tiers die 2026-06-18;
-  community already polls `agy` via our §3 local-LS/cloudcode-pa route — build caveat: `agy` token store ≠ IDE
-  `state.vscdb`). NIM = reactive-hosted / unbounded-local **pool**, no source.
-- **STILL OPEN:** (a-residual) a real **2nd pool to spill INTO** so INV-QD-14 fires end-to-end — **NVIDIA NIM
-  is the clean candidate** (OpenAI-compatible, no new quota plumbing). Ties to FINDING-020 / "dispatch to CLI
-  agents as additional pools." (b) Copilot live-shape when a token is file-reachable.
-
-### 2. A8 host-subagent driver — ✓ VALIDATED + hardened this session; provider real-run + flip remain
-(a) **DONE — real-subagent end-to-end smoke.** Drove the real machine to `dispatch_implement_rolling` in an
-isolated repo (3 disjoint nodes, slots capped to 2 via `--host-max-concurrent 2`), spawned REAL Task subagents
-into the worktrees, called `accept-node` per completion: confirmed dispatch→wait→done, real worktree
-commit→verify→merge (2 landed), JIT worktree creation, and finalize via merge-implement-results→next-step. The
-smoke surfaced a **false-resolve bug** (both rolling drivers discarded `acceptNodeWorktree`'s `merged` outcome →
-a verify-failed, in-scope node was marked resolved with its fix never landing) — **FIXED `f18138fe`** (per-node
-accept-outcome sidecar + merge-state gate in `mergeImplementResults`; red→green + real-git tests; suite 1622).
-(b) **REMAINING before flip:** the in-process **PROVIDER path real-run** (codex, quota-blocked until **Jun 19**)
-— set `sessionConfig.provider="codex"` + `dispatch.rolling_engine=true`, confirm ≥2 nodes land via
-worktree→verify→merge AND that the false-resolve fix routes a verify-fail to triage on the provider path; also
-settle the Windows codex-sandbox enforcement question. (c) **Then flip `rolling_engine` default-ON** (the
-nightly-autonomy gate). Holding the flip per this plan since nightly autonomy runs headless → the provider path,
-which isn't real-run-validated yet. Protocol: `docs/a8-rolling-cutover-plan.md`.
-
-- Then the rest of the program: **A1** fast path, **A3+A4** unify obligation engines + `RemediationItem`,
-  **B1** magic numbers, **B2+B3** diff re-reviews + obligation-set staleness, **B4** hard-exclude
-  tool-refuted findings (re-scoped), **B8** finding-merge discriminator (re-scoped), **A5+A11**, **A6**,
-  **A12**, **A7**. Deferred: A2, A9/A10.
-
-**Review gate, as shipped (orientation):** Path A gates the ORIGINAL findings at intake (over the
-filter-pass survivors); Path B gates the deduped/grounded node findings at the planning point
-(`runPlanningReviewGate` in `nextStep.ts`, fires only when `review_decision.json` is absent → plan_id
-`path-b-review`). Declined items become a recorded terminal disposition, never a silent close. The classic
-impl-risk preview is gone. Triage auto-retry is now unconditional (capped), no longer keyed on the removed
-preview ack. `classifyFindingRisk`/`FindingRiskTier` were KEPT (dispatch model-tier consumer, orthogonal to
-the review surface).
-
-**Provider-hang trap (logged in backlog "Deferred fixes"):** in a provider-less env (e.g. CLAUDECODE unset,
-as in the release gate) `createFreshSessionProvider` auto-resolves a CLI backend whose subprocess hangs —
-Ethan UNINSTALLED OpenCode, so `opencode run` auto-resolution is the prime suspect. It surfaced as a 30s
-hang in `phase-plan.test.ts` under the release gate; that test was made hermetic (`b8c8c30a`, injects the
-`extractFindings` seam), but the underlying auto-resolution hang is still OPEN — watch for it.
+### A8 remaining loose ends (smaller; fold in opportunistically)
+- **audit-code symmetric wiring** — audit-code's `runRollingDispatch` is still dormant (0 live callers),
+  the mirror of what was just done for remediate. Wire it into the audit live path with the same flag-gated
+  pattern. (Cutover plan step 5.)
+- **NIM as the real 2nd pool for INV-QD-14 cross-pool spill (a-residual).** The provider now EXISTS, so a
+  real second pool is finally buildable. Remaining: surface `openai-compatible` as a *confirmed pool* in
+  `buildConfirmedPools` / provider-confirmation (it's config-gated, NOT PATH-probed, so `discoverProviders`
+  doesn't surface it today) so the proactive spill (`selectProvider`) can fire end-to-end alongside the
+  Claude pool. Ties to FINDING-020 / "dispatch to CLI/API agents as additional pools".
+- **Worktree walks up to the parent repo when run in a non-git dir (latent bug).** Surfaced in the flip's
+  test sweep: the host-subagent rolling path runs `git worktree add` and, with no git repo at the target
+  root, git walks UP and pollutes the parent repo (`C:\Code\audit-tools`) with leaked `remediate-*`
+  branches/worktrees. Real targets are always git repos, but the rolling path should assert the worktree's
+  git root == the intended repo root (or refuse) rather than escape. Logged in backlog.
+- **Harden worktree-branch reuse across a `rate_limited` re-queue** in the in-process driver (cutover plan
+  step 6).
 
 ## Pointers
-- Working doc for A8: [`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md) (design + protocol +
-  open items). Fold + delete it into here/backlog when A8 fully lands.
-- Memory (this session): `conversation-first-subagent-dispatch-first-class`, `claude-oauth-usage-quota-endpoint`.
-  Also: `review-gate-execution-status`, `prefer-ideal-code-no-backcompat`, `ask-on-ambiguity-dont-defer-silently`,
-  `remediation-review-gate-must-be-tool-enforced`.
-- **`MEMORY.md` consolidation IN PROGRESS by a concurrent agent (2026-06-16)** — do NOT edit memory files
-  while that runs. PENDING fold once it settles: the INV-QD-14 cross-pool spill (root cause: `scheduleWave`
-  floors `max_concurrent` at 1, so the pre-spill `selectProvider` never redistributed) belongs in memory
-  `cross-provider-quota-matrix` / `quota-dispatch-vision`.
-- Review-gate artifacts (under `.audit-tools/remediation/`): `review_request.json` /
-  `review_resolution.json` / `review_decision.json` / `review_filter_dispositions.json`.
+- A8 working docs: [`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md) (remaining = steps 5–6 +
+  the walk-up bug; trim/delete once audit-code symmetric lands). The transient NIM-validation doc was folded
+  here + into backlog and deleted.
+- Review gate (orientation): Path A gates original findings at intake; Path B gates deduped/grounded node
+  findings at planning (`runPlanningReviewGate`, fires when `review_decision.json` absent → plan_id
+  `path-b-review`). Declined items → recorded terminal disposition, never silent close. Triage auto-retry is
+  unconditional (capped 2/2). memory `review-gate-execution-status`.
+- Provider-hang trap (backlog "Deferred fixes"): provider-less env (CLAUDECODE unset, e.g. release gate)
+  auto-resolves a CLI backend whose subprocess can hang; OpenCode uninstalled is the prime suspect. Pinning
+  an explicit provider avoids the auto-resolve hang.
 
 ## Working constraints
-- **Green at every commit:** `npm run build -w @audit-tools/shared && npm run build && npm run check` →
-  zero errors (shared first). The commit hook enforces it.
-- **Run remediate vitest FROM `packages/remediate-code`** (`cd` there first). Running `vitest` from the repo
-  root globs shared's `node:test` `.mjs` files and reports a wall of false failures — they are NOT real.
-- **CLAUDECODE** is set in-session; UNSET only for release gates (`env -u CLAUDECODE …` via Bash).
-- The async typecheck hook can false-alarm on stale `shared/dist` or a mid-edit snapshot — a central
-  `npm run build -w @audit-tools/shared` + the commit gate are authoritative; re-run `check` yourself to confirm.
-- Ship via the `/ship` skill (encodes the publish-flow traps). Don't park at the push/publish boundary.
+- **Green at every commit:** `npm run build -w @audit-tools/shared && npm run build && npm run check` → zero
+  errors (shared first). Commit hook enforces it.
+- **Run remediate vitest FROM `packages/remediate-code`** (`Push-Location` there). From the repo root vitest
+  globs shared's `node:test` `.mjs` files → a wall of false failures.
+- **CLAUDECODE** is set in-session; UNSET it for true-green test runs (`$env:CLAUDECODE=$null`) — one shared
+  provider test + audit-code's auto-resolve test fail with it set (documented env flakes, not regressions).
+- **The NIM e2e is gated** behind `RUN_NIM_E2E=1` (+ `NVIDIA_API_KEY`); it hits the live endpoint, so it's
+  skipped in the normal suite. Re-validate the provider path anytime with
+  `RUN_NIM_E2E=1 npx vitest run tests/nim-rolling-e2e.test.ts` from `packages/remediate-code`.
+- Ship via the `/ship` skill when Ethan lifts the publish hold.
