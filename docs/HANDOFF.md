@@ -9,11 +9,12 @@
 
 ## Where things stand
 
-- **`main`: latest substantive change is the proactive cross-pool spill `0a620bf8` (INV-QD-14); prior was the
-  rolling false-resolve fix `f18138fe` (docs syncs on top; `git log` for HEAD).** Clean tree, all pushed
-  (synced with `audit-tools/main`). **NOT published** — commits sit on main unreleased (mid-program; release
-  when A8 lands + is validated). Last published: `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` /
-  `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
+- **`main`: latest code = Copilot OS-path fix `6ed03db3` + cross-pool spill `0a620bf8` (INV-QD-14); prior
+  substantive = rolling false-resolve fix `f18138fe` (docs syncs on top; `git log` for HEAD = `508b0b38`).**
+  Clean tree, all pushed (synced with `audit-tools/main`), build+check green. **NOT published** — commits sit
+  on main unreleased (mid-program; release when A8 lands + is validated). Last published:
+  `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host
+  assets on 4 hosts current to that).
 - **A8 host-subagent rolling driver — VALIDATED end-to-end this session via a real-subagent smoke, and a
   latent false-resolve bug found + fixed (`f18138fe`, green).** Drove the REAL machine in an isolated repo
   (`C:\Code\_a8-smoke`, deleted) to `dispatch_implement_rolling` (3 disjoint nodes, slots capped to 2),
@@ -86,36 +87,20 @@ main, unreleased. Read FIRST — [`docs/a8-rolling-cutover-plan.md`](a8-rolling-
 [`docs/cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md), memory
 `conversation-first-subagent-dispatch-first-class`, memory `cross-provider-quota-matrix`.
 
-### 1. Quota detection — sources DONE; spill DONE (`0a620bf8`); remaining = a real 2nd pool + live confirmation
-Item (a) **utilization-driven cross-pool spill is now BUILT** (INV-QD-14, `selectProvider`): the per-node
-dispatch seam deprioritises quota-degraded pools so load spills to a healthy peer before a 429, capability/cost
-rank preserved within health groups. STILL OPEN:
-- (a-residual) **A real SECOND pool to spill INTO.** The spill *logic* is complete and unit-proven, but in a
-  single-provider session there is only one pool, so it can't fire end-to-end yet. The concrete next capability
-  is detecting/building an actual second pool — another CLI agent (`claude`/`codex`/`opencode`) or an IDE model
-  — under its own provider+quota constraints. This is the *Heterogeneous multi-agent dispatch* backlog item
-  (FINDING-020) + "detect and dispatch to CLI agents as additional pools." Bigger than spill itself.
-  **Candidate 2nd pool: NVIDIA NIM** (OpenAI-compatible; hosted free-credits or self-hosted/local GPU) — clean
-  because it needs NO new proactive source (hosted=reactive-429, self-hosted=unbounded-local), so it exercises
-  INV-QD-14 e2e without more quota plumbing.
-- **Gemini CLI + NVIDIA NIM ASSESSED 2026-06-17** (matrix [§5](cross-provider-quota-matrix.md)/§6): neither
-  warrants a new proactive `QuotaSource`. Gemini CLI HAS a clean signal (`cloudcode-pa retrieveUserQuota`) but
-  its individual tiers are **deprecated on gemini-cli 2026-06-18** (verified) and survivors (Std/Ent) ride the
-  same cloudcode-pa family the existing Antigravity source covers → don't build. NIM = reactive/local pool, no
-  source.
-- (b) **live confirmation — DONE for Codex; Copilot has no reachable credential here.** Ran the real production
-  class paths against the live endpoints (2026-06-17, Ethan OK'd):
-  - **Codex ✓ LIVE-CONFIRMED (200).** `CodexQuotaSource.queryCurrentUsage('codex/*')` → valid snapshot; raw
-    `rate_limit.{primary,secondary}_window` shape matches the `CodexWindow` parser exactly; most-constraining
-    window selection works (weekly `used_percent:100` → `remaining_pct:0`). Bonus: independently corroborates
-    the A8 block — Codex WEEKLY window is exhausted, `reset_at 2026-06-19T18:17Z` (the Jun 19 date).
-  - **Copilot — degrade path confirmed; live-shape still pending.** No reachable credential on this machine
-    (no Copilot CLI; `gh` stores its token in the OS keyring, not a file, AND that gh token lacks `copilot`
-    scope). Source correctly degraded to null. Mapping stays fixture-tested only — re-confirm where a Copilot
-    token is file-reachable (`GH_COPILOT_TOKEN` env, Copilot CLI config, or `gh` insecure/file storage).
-  - Surfaced + FIXED an OS-portability bug: gh hosts path was hardcoded to `~/.config/gh` → missed
-    `%AppData%\GitHub CLI` on Windows. Now `resolveGhHostsPath` is OS-agnostic (`GH_CONFIG_DIR` → AppData →
-    ~/.config). (Antigravity excluded + token rotation dropped per Ethan.)
+### 1. Quota detection — sources DONE, spill DONE, Codex live-confirmed this sprint. Remaining ↓
+- **Cross-pool spill BUILT** (INV-QD-14, `0a620bf8`, shared `selectProvider`): deprioritises quota-degraded
+  pools (live `remaining_pct` < LOW, or in cooldown) so load spills to a healthy peer BEFORE a 429;
+  capability/cost rank preserved within each health group; one shared seam → both orchestrators. Don't redo.
+- **Live-confirm (Ethan OK'd 2026-06-17):** Codex ✓ 200 (production path + raw shape match; corroborated the
+  A8 `reset_at 2026-06-19T18:17Z`). Copilot pending a file-reachable token (gh keyring here). Fixed a
+  gh-hosts-path OS bug → `resolveGhHostsPath` (`6ed03db3`).
+- **Gemini CLI + NVIDIA NIM assessed** (matrix §3/§5/§6) — neither adds a proactive `QuotaSource`. Gemini
+  family's future-proof target = **Antigravity CLI** (`agy`; gemini-cli individual tiers die 2026-06-18;
+  community already polls `agy` via our §3 local-LS/cloudcode-pa route — build caveat: `agy` token store ≠ IDE
+  `state.vscdb`). NIM = reactive-hosted / unbounded-local **pool**, no source.
+- **STILL OPEN:** (a-residual) a real **2nd pool to spill INTO** so INV-QD-14 fires end-to-end — **NVIDIA NIM
+  is the clean candidate** (OpenAI-compatible, no new quota plumbing). Ties to FINDING-020 / "dispatch to CLI
+  agents as additional pools." (b) Copilot live-shape when a token is file-reachable.
 
 ### 2. A8 host-subagent driver — ✓ VALIDATED + hardened this session; provider real-run + flip remain
 (a) **DONE — real-subagent end-to-end smoke.** Drove the real machine to `dispatch_implement_rolling` in an
