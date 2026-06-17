@@ -24,6 +24,7 @@ import {
   buildConfirmedPools,
   createWorktree,
   removeWorktree,
+  resetNodeWorktreeAndBranch,
   acceptNodeWorktree,
   recordNodeAcceptOutcome,
   ensureWorktreeNodeModules,
@@ -721,14 +722,13 @@ export async function driveRollingImplementDispatch(
     const wt = worktreePath(root, block.block_id, runId);
     const resultPath = resultPathByBlock.get(block.block_id)!;
     try {
-      // Best-effort clean of any stale worktree dir from a prior attempt before
-      // creating this node's isolated worktree. NOTE: a rate_limited re-queue can
-      // re-enter this dispatcher for the same block with the branch still present
-      // — `createWorktree` then throws and is caught below as an error outcome
-      // (never a crash, never a dirtied main tree). Robust branch reuse across a
-      // re-queue is part of the gated proven-dispatch cutover, not this default-off
-      // wiring.
-      removeWorktree(root, wt);
+      // Idempotent reset of any worktree dir AND leftover branch from a prior
+      // attempt before creating this node's isolated worktree. A `rate_limited`
+      // re-queue re-enters this dispatcher for the same block with the branch
+      // still present; a bare `createWorktree -b` would then fail with "branch
+      // already exists". `resetNodeWorktreeAndBranch` clears both (+ prunes stale
+      // admin entries) so every (re-)dispatch starts clean from HEAD.
+      resetNodeWorktreeAndBranch(root, wt, branch);
       createWorktree(root, wt, branch);
       // A fresh worktree has no node_modules (gitignored); link the main checkout's
       // so this node's verify commands can run.

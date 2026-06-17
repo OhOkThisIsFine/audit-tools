@@ -134,7 +134,11 @@ One-shot-CLI orchestrator + host-as-executor ⇒ rolling via a **per-completion 
 
 ## Remaining to fully land A8 (then fold + delete this doc)
 - **Step 5 — audit-code symmetric wiring** of `runRollingDispatch` into the audit live path (still dormant).
-- **Step 6 — harden worktree-branch reuse** across a `rate_limited` re-queue in the in-process driver.
-- **Worktree walks UP to the parent repo** when the target root isn't a git repo (latent foot-gun; backlog
-  *Deferred fixes*). Assert `git rev-parse --show-toplevel` == repo root before creating worktrees.
-- **Surface `openai-compatible` as a confirmed pool** so INV-QD-14 cross-pool spill fires e2e (backlog quota).
+- ✓ **Step 6 — worktree-branch reuse across a `rate_limited` re-queue** — DONE. `resetNodeWorktreeAndBranch`
+  (remove worktree → prune → force-delete branch) makes every (re-)dispatch start clean from HEAD; the
+  in-process driver calls it before `createWorktree`. Real-git regression test in `rolling-provider-dispatch.test.ts`.
+- ✓ **Worktree walks UP to the parent repo** — DONE. `createWorktree` asserts `git rev-parse --show-toplevel`
+  canonicalizes to the target root and refuses otherwise (covers both drivers).
+- **Surface `openai-compatible` as a confirmed pool** — DONE for the in-process driver (config-gated discovery
+  + 2nd CapacityPool + per-slot provider resolution); the {host-subagent + NIM} hybrid + live cross-provider
+  spill run remain (backlog quota *a-residual*).
