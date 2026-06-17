@@ -37,7 +37,11 @@ afterEach(() => {
 
 describe("createWorktree", () => {
   it("calls 'git worktree add -b <branch> <path> HEAD' in the repo root", () => {
-    spawnSyncMock.mockReturnValue(makeSpawnResult(0));
+    // First spawnSync is the `git rev-parse --show-toplevel` guard → returns the
+    // target root itself; the second is the worktree add.
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, "/repo\n"))
+      .mockReturnValueOnce(makeSpawnResult(0));
 
     createWorktree("/repo", "/repo/.audit-tools/worktrees/remediate-BLK-001-RUN-1", "remediate-BLK-001-RUN-1");
 
@@ -49,15 +53,46 @@ describe("createWorktree", () => {
   });
 
   it("throws when git exits non-zero", () => {
-    spawnSyncMock.mockReturnValue(makeSpawnResult(1, "", "fatal: branch already exists"));
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, "/repo\n")) // rev-parse guard passes
+      .mockReturnValueOnce(makeSpawnResult(1, "", "fatal: branch already exists"));
 
     expect(() =>
-      createWorktree("/repo", "/some/path", "my-branch"),
+      createWorktree("/repo", "/repo/some/path", "my-branch"),
     ).toThrow(/git worktree add failed/);
   });
 
+  it("refuses when the target root is not inside a git repository", () => {
+    spawnSyncMock.mockReturnValue(makeSpawnResult(128, "", "fatal: not a git repository"));
+
+    expect(() =>
+      createWorktree("/not-a-repo", "/not-a-repo/wt", "br"),
+    ).toThrow(/not inside a git repository/);
+    // The worktree add must never run when the guard refuses.
+    const addCall = spawnSyncMock.mock.calls.find(
+      (call) => call[0] === "git" && (call[1] as string[])[0] === "worktree",
+    );
+    expect(addCall).toBeUndefined();
+  });
+
+  it("refuses (does not walk up) when the git top-level is an ancestor repo", () => {
+    // The target root is a non-git subdir whose enclosing repo is the parent;
+    // a bare `git worktree add` would escape upward. The guard must refuse.
+    spawnSyncMock.mockReturnValue(makeSpawnResult(0, "/parent\n"));
+
+    expect(() =>
+      createWorktree("/parent/child", "/parent/child/wt", "br"),
+    ).toThrow(/escape to an ancestor repo/);
+    const addCall = spawnSyncMock.mock.calls.find(
+      (call) => call[0] === "git" && (call[1] as string[])[0] === "worktree",
+    );
+    expect(addCall).toBeUndefined();
+  });
+
   it("uses shell: false", () => {
-    spawnSyncMock.mockReturnValue(makeSpawnResult(0));
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(0, "/repo\n"))
+      .mockReturnValueOnce(makeSpawnResult(0));
     createWorktree("/repo", "/repo/wt", "br");
     expect(spawnSyncMock).toHaveBeenCalledWith(
       expect.anything(),

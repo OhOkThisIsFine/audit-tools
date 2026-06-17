@@ -1,6 +1,6 @@
 import { mkdir, rename } from "node:fs/promises";
-import { existsSync, readdirSync, readFileSync, statSync, symlinkSync } from "node:fs";
-import { join, relative, dirname } from "node:path";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync } from "node:fs";
+import { join, relative, dirname, resolve } from "node:path";
 import { OwnershipRegistry } from "../dispatch/ownershipRegistry.js";
 import { routeAmendmentRequest } from "../dispatch/amendmentClaim.js";
 import { toBlockId, fromBlockId } from "../contractPipeline/idRegistry.js";
@@ -43,6 +43,7 @@ import {
   findingNeedsVerificationBeforeFix,
   compareTier,
   mostCapableTier,
+  normalizeRepoPath,
   type FindingTheme,
 } from "@audit-tools/shared";
 import {
@@ -456,8 +457,60 @@ export interface WorktreeVerifyResult {
   output: string;
 }
 
-/** Create an isolated git worktree on a fresh branch at HEAD. Throws on non-zero exit. */
+/**
+ * The git top-level directory containing `cwd`, or `null` when `cwd` is not
+ * inside a git working tree (or git is unavailable). `git rev-parse
+ * --show-toplevel` emits a forward-slash absolute path on every platform.
+ */
+export function gitTopLevel(cwd: string): string | null {
+  const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (result.status !== 0) return null;
+  const top = (result.stdout ?? "").trim();
+  return top.length > 0 ? top : null;
+}
+
+/**
+ * Canonical comparison key for a filesystem path. `realpathSync` resolves
+ * symlinks and platform short-names so it matches git's `--show-toplevel`
+ * output (macOS TMPDIR `/var`→`/private/var`, Windows 8.3 names); falls back to
+ * `resolve` for paths that don't exist on disk (e.g. mocked unit tests).
+ */
+function canonicalPathKey(p: string): string {
+  try {
+    return normalizeRepoPath(realpathSync(p));
+  } catch {
+    return normalizeRepoPath(resolve(p));
+  }
+}
+
+/**
+ * Create an isolated git worktree on a fresh branch at HEAD. Throws on non-zero exit.
+ *
+ * Refuses when `root` is not ITSELF a git top-level: a bare `git worktree add`
+ * with `cwd: root` walks UP to the nearest enclosing repo and silently creates
+ * the worktree/branch in that ancestor (observed polluting the monorepo with
+ * leaked `remediate-*` branches during the rolling_engine flip). The resolved
+ * top-level must equal the target root, or we refuse rather than escape.
+ */
 export function createWorktree(root: string, worktreePath: string, branchName: string): void {
+  const top = gitTopLevel(root);
+  if (top === null) {
+    throw new Error(
+      `Refusing to create a worktree: ${root} is not inside a git repository ` +
+        `(git rev-parse --show-toplevel failed). Rolling dispatch requires the target root to be a git repo.`,
+    );
+  }
+  if (canonicalPathKey(top) !== canonicalPathKey(root)) {
+    throw new Error(
+      `Refusing to create a worktree: the git top-level for ${root} is ${top}, not the target root ` +
+        `itself, so 'git worktree add' would escape to an ancestor repo. Initialize a git repo at the ` +
+        `target root before rolling dispatch.`,
+    );
+  }
   const result = spawnSync(
     "git",
     ["worktree", "add", "-b", branchName, worktreePath, "HEAD"],
