@@ -116,14 +116,6 @@ export interface ClosingPlan {
   closing_action_preview?: ClosingActionPreview;
 }
 
-export interface TestSpec {
-  finding_id: string;
-  test_file: string;
-  test_name: string;
-  assertions: string[];
-  status: "pending" | "written" | "failing" | "passing";
-}
-
 export interface VerificationResult {
   finding_id: string;
   passed: boolean;
