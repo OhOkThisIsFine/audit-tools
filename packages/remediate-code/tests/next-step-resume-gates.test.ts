@@ -135,6 +135,78 @@ describe("N-R01: extracted-plan fast-path does not bypass confirm_intent", () =>
   });
 });
 
+describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-built state)", () => {
+  // When pending_intake builds a planning state from a promoted extracted-plan,
+  // the shared advance loop re-scans on that fresh state. The resume/conflict
+  // gates are about a *pre-existing* run, so they must stay frozen at the
+  // call-entry state (null here) and NOT re-fire against the intake-built plan —
+  // otherwise the run wrongly bounces to a resume/conflict prompt instead of
+  // dispatching. (Pre-fix these derived from the threaded state and resurrected.)
+  async function seedPromotedPlanWithIntake(): Promise<void> {
+    const intakeDir = join(ARTIFACTS_DIR, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    await writeFile(
+      join(intakeDir, "source-manifest.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-source-manifest/v1alpha1",
+        created_from: "input",
+        sources: [
+          { type: "document", path: join(REPO_DIR, "notes.md"), label: "input-01" },
+        ],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(intakeDir, "intake-summary.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-summary/v1alpha1",
+        ready: true,
+        source_type: "documents",
+        goals: ["Fix all bugs"],
+        non_goals: [],
+        constraints: [],
+        affected_files: [],
+        open_questions: [],
+      }),
+      "utf8",
+    );
+    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\n", "utf8");
+    await writeFile(join(REPO_DIR, "notes.md"), "# notes", "utf8");
+    // Materialize the findings' cited paths so phantom-path grounding KEEPS them
+    // and handlePendingExtractedPlan yields a planning *state* (the transition that
+    // triggers the advance re-scan we are testing) rather than re-emitting an
+    // extraction step.
+    await mkdir(join(REPO_DIR, "src"), { recursive: true });
+    await writeFile(join(REPO_DIR, "src", "a.ts"), "// a\n", "utf8");
+    await writeFile(join(REPO_DIR, "src", "b.ts"), "// b\n", "utf8");
+    await writeFile(
+      join(ARTIFACTS_DIR, "extracted-plan.json"),
+      JSON.stringify(makePlanningState().plan),
+      "utf8",
+    );
+    await writeIntentCheckpoint();
+  }
+
+  it("bare re-invocation (no pre-existing state) does not resurrect confirm_resume_or_restart after intake builds a plan", async () => {
+    await seedPromotedPlanWithIntake();
+    // No state.json (entry state is null) and no --input.
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).not.toBe("confirm_resume_or_restart");
+    expect(step.step_kind).not.toBe("confirm_intent");
+  });
+
+  it("--input against a fresh run (no pre-existing state) does not resurrect input_conflict after intake builds a plan", async () => {
+    await seedPromotedPlanWithIntake();
+    await writeFile(join(REPO_DIR, "audit-report.md"), "# audit\n", "utf8");
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      input: join(REPO_DIR, "audit-report.md"),
+    });
+    expect(step.step_kind).not.toBe("input_conflict");
+    expect(step.step_kind).not.toBe("confirm_intent");
+  });
+});
+
 describe("resolveHostDispatchCapability", () => {
   it("returns the explicit flag when provided", () => {
     expect(resolveHostDispatchCapability({ hostCanDispatchSubagents: true })).toBe(true);

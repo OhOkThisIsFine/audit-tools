@@ -158,8 +158,57 @@ is the atomic replace.
 ## Status
 
 - Recon complete (this doc). Decomposition steps 1 (shared scan) + 2 (A4 cleanup) **landed**.
-- **Next:** decomposition step 3 — the remediate engine rewire (the multi-session bulk). Design + add the
-  `advance` transition/emit loop in the shared engine THERE (proven by its real consumer), then re-express
-  `decideNextStepLoop`'s guard cascade (`steps/nextStep.ts`) as a declarative obligation list running on
-  `advance`, in atomic green chunks: linear pre-intake gates first, then the implementing/triage back-edge
-  cluster. The handlers become the executors.
+- **Step 3a DONE** (`8250aab`): the `advance` transition/emit loop + function-based `ObligationDef<S,Ctx,Step>`
+  (`derive`+`execute`) + `findNextObligation` are in the shared engine. `advance` is a strict generalization
+  of the bare scan (emit-only ⇒ one bounded unit; `transition` ⇒ in-call re-scan) with a `maxTransitions`
+  cycle backstop. 10 unit tests pin the mechanics. Pure addition; remediate adopts it next (the real consumer).
+- **In progress: step 3 — remediate engine rewire (multi-session bulk).** Staged as a *strangler*: move the
+  cascade's guards into an `ObligationDef` list run through `advance`; the un-migrated remainder stays inline
+  as the fall-through tail and shrinks each slice. Green at each commit (the vitest suite is the equivalence
+  oracle).
+- **Slice 1 DONE** (`<this commit>`): the linear pre-intake gates run through `advance`; the inline tail
+  (from `waiting_for_clarification`) is unchanged. 1667→1669 (+2 teeth-verified regression tests), green.
+  Two faithfulness subtleties the naive translation gets wrong (both fixed + regression-locked):
+  1. **Entry-gate freeze.** `input_conflict`/`confirm_resume` are about a *pre-existing* run, so they derive
+     from the frozen call-entry state — NOT the threaded state. The original cascade evaluated them once
+     before intake and never re-checked; `advance` re-scans after `pending_intake` builds a planning state
+     from a promoted extracted-plan, and a threaded-state derive would *resurrect* these gates against that
+     fresh state (wrongly bouncing a dispatchable run to a resume/conflict prompt). The
+     derive/execute split makes the bug loud: the executor's `requireState(entryState)` throws when a
+     threaded-state derive selects the gate for a fresh (entryState===null) run.
+  2. **Cascade-ordered side effects.** The leftover-`remediation-report.md` warning is not a preamble — the
+     cascade only reaches it when no earlier gate emitted. It is an `ObligationDef` slotted between
+     `complete_redelivery` and `complete` (a one-shot `transition` gated by a closure `warned` flag), so
+     `advance`'s priority scan reproduces the exact "fires only on fall-through" semantics; an unconditional
+     preamble would over-fire.
+
+### Step 3 — execution design (trim as slices land)
+
+**Engine binding for remediate:** `S = RemediationState | null` (the live persisted state; null pre-intake).
+`Ctx = { root, artifactsDir, options, runLogger, store, inputResolution, countStep }`. Obligations are built
+per call (`buildPreIntakeObligations(ctx, existingCheckpoint)`) so each `derive` closes over `ctx` paths +
+the once-async-read `existingCheckpoint` and reads **sync** signals (`existsSync`, `state.status`,
+`inputResolution.supplied`). Anything needing an async read (the checkpoint JSON) is pre-read into a snapshot
+before `advance` and is call-stable (no transition rewrites it mid-call).
+
+**Slice 1 = the linear pre-intake gates** (cascade order preserved in the priority list):
+`input_conflict` (emit) → `confirm_resume` (emit; satisfied when `ack.choice==='resume'`) → `confirm_intent`
+(emit) → `interpret_intent` (transition: writes the interpretation sidecar, state unchanged → re-scan skips it
+once the sidecar exists) → `complete_redelivery` (emit) → `complete` (emit) → `pending_intake` (returns
+step⇒emit / new state⇒transition / null⇒emit `handleNoState`, folding the old no-state branch in). Preambles
+kept inline *before* `advance`: `forceReplan` (one-shot, `!skipCount`) and the leftover-report stderr warning
+(diagnostic, not a gate). The inline tail (from `waiting_for_clarification` down) is unchanged.
+
+**Count semantics:** `step_count` is incremented once per host call by a shared `countStep(state)` closure
+(guarded by a `counted` flag seeded from `skipCount`); the pre-intake emit executors call it where the cascade
+did, and the inline tail reuses the *same* closure, so it can never double-count. `step_count` is not embedded
+in the emitted step, so count-vs-build ordering is unobservable.
+
+**Re-entry safety:** `decideNextStepLoop` recurses (skipCount=true) from ~10 sites that re-enter the top; on
+re-entry every pre-intake gate is already satisfied so `advance` falls straight through to the tail, and
+`countStep` no-ops (counted seeded true). Slice 2 replaces that recursion with `transition` outcomes.
+
+**Slice 2 = the back-edge cluster:** `waiting_for_clarification`/`waiting_for_triage` (resolution-file ⇒
+transition, else emit), `planning`, `partial_completion_terminal`, `implementing` (+ deadEnd transition),
+`triage`, zero-documentable, all-terminal, `closing`, unhandled. Deletes the inline tail + the internal
+recursion; the cluster's `decideNextStepLoop(...true)` calls become `transition` outcomes.
