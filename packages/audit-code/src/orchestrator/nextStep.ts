@@ -1,3 +1,4 @@
+import { findFirstActionableObligation } from "@audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditObligation, AuditState } from "../types/auditState.js";
 import { EXECUTOR_REGISTRY } from "./executors.js";
@@ -30,16 +31,14 @@ export const PRIORITY: string[] = [
   "synthesis_narrative_current",
 ];
 
+// audit-code binds its PRIORITY ordering to the shared scan; the selection
+// mechanism is single-sourced in `@audit-tools/shared` (A3) so it cannot drift
+// from remediate-code's. The domain signature (PRIORITY-bound) is kept for the
+// existing call sites in advance.ts + decideNextStep.
 export function findObligation(
   obligations: AuditObligation[],
 ): AuditObligation | undefined {
-  for (const id of PRIORITY) {
-    const item = obligations.find((o) => o.id === id);
-    if (item && (item.state === "missing" || item.state === "stale")) {
-      return item;
-    }
-  }
-  return undefined;
+  return findFirstActionableObligation(PRIORITY, obligations);
 }
 
 export function decideNextStep(bundle: ArtifactBundle): NextStepDecision {
