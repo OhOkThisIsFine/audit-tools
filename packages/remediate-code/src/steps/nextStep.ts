@@ -150,11 +150,15 @@ export function resolveHostDispatchCapability(options: {
 }
 
 /**
- * Whether the in-process rolling dispatch engine is opted IN for the implement
- * phase. Defaults to FALSE — the proven host-fanned wave path is the default and
- * the atomic removal of that fallback is GATED on a validated multi-worker
- * rolling dispatch (CE-001 anti-wedge). Resolution order: explicit option →
- * sessionConfig.dispatch.rolling_engine → REMEDIATE_ROLLING_ENGINE env → false.
+ * Whether the rolling dispatch engine drives the implement phase. Defaults to TRUE:
+ * both rolling drivers on the shared `acceptNodeWorktree` core (per-node worktree →
+ * tool-owned commit → verify → cherry-pick merge; verify-fail → triage) are now
+ * validated end-to-end — the host-subagent driver via a real-subagent smoke
+ * (f18138fe) and the in-process provider driver via a live-NIM run THROUGH
+ * decideNextStep (2026-06-17, tests/nim-rolling-e2e.test.ts). The legacy host-fanned
+ * wave (`dispatch_implement`) is retained as an explicit opt-OUT (rolling_engine:false
+ * / REMEDIATE_ROLLING_ENGINE=false), not deleted. Resolution order: explicit option →
+ * sessionConfig.dispatch.rolling_engine → REMEDIATE_ROLLING_ENGINE env → true.
  */
 export function resolveRollingEngineEnabled(options: {
   rollingEngine?: boolean;
@@ -167,7 +171,7 @@ export function resolveRollingEngineEnabled(options: {
   const envValue = (options.env ?? process.env).REMEDIATE_ROLLING_ENGINE;
   if (envValue === "true") return true;
   if (envValue === "false") return false;
-  return false;
+  return true;
 }
 
 function randomRunId(prefix = "RUN"): string {

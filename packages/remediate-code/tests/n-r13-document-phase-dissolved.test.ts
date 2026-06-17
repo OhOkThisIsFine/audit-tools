@@ -139,6 +139,7 @@ describe("N-R13: planning transitions directly to implementing", () => {
       }),
       "utf8",
     );
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     const step = await decideNextStep({ root: REPO_DIR });
 

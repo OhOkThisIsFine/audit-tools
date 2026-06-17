@@ -663,6 +663,7 @@ describe("INV-remediate-pipeline-07: resume/restart/merge ack choices reach dist
       JSON.stringify({ choice: "resume" }),
       "utf8",
     );
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     // Must NOT emit confirm_resume_or_restart — it must advance to actual implementing
     const { decideNextStep } = await import("../src/steps/nextStep.js");

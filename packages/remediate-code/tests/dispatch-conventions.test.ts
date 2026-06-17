@@ -210,6 +210,7 @@ describe("dispatch step prompts carry DISPATCH_PROMPT_HANDOFF_NOTE", () => {
     await saveState(makeImplementingState());
     await acknowledgeResume();
     await writeIntentCheckpoint();
+    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
 
     const step = await decideNextStep({
       root: REPO_DIR,
