@@ -32,8 +32,18 @@ export interface FindingLocation {
  * rather than silently admitted as a confirmed finding.
  */
 export interface FindingGrounding {
-  status: "grounded" | "ungrounded";
-  /** When ungrounded, which cited span(s) failed to re-verify and why. */
+  /**
+   * - `grounded`: the cited verbatim span re-verified against disk (S7 tier-1) or
+   *   an executable anchor CONFIRMED the behavior claim (tier-2). Admitted as fact.
+   * - `ungrounded`: the cited span did not re-verify, or no span was provided —
+   *   surfaced-but-not-confirmed. Stays in the admitted findings, flagged.
+   * - `refuted`: an executable anchor DISPROVED the claim (tier-2; e.g. a
+   *   madge-disproven cycle). Distinct from `ungrounded` ("couldn't verify"):
+   *   the tool actively disproved it, so it is quarantined-EXCLUDED from the
+   *   admitted contract (see `AuditFindingsReport.quarantined_findings`).
+   */
+  status: "grounded" | "ungrounded" | "refuted";
+  /** When ungrounded/refuted, which cited span(s) failed and why. */
   reason?: string;
 }
 
@@ -194,12 +204,12 @@ export interface AuditFindingsSummary {
   runtime_validation_status_breakdown: Record<string, number>;
   lens_breakdown?: Record<string, number>;
   /**
-   * Per-status counts of the auditor's quote-and-verify grounding pass (S7):
-   * how many findings re-verified against disk (`grounded`) vs. were quarantined
-   * as unverifiable (`ungrounded`). Absent when no finding carried a grounding
-   * verdict (the grounding pass did not run on this report). A non-zero
-   * `ungrounded` count means some findings are surfaced-but-not-confirmed — see
-   * the report's "Ungrounded Findings (quarantined)" section.
+   * Per-status counts of the auditor's grounding pass (S7): `grounded`
+   * (re-verified against disk or anchor-confirmed), `ungrounded`
+   * (surfaced-but-not-confirmed), `refuted` (anchor-DISPROVED →
+   * quarantined-excluded). Counted over ALL findings incl. the
+   * quarantined-refuted ones, so a non-zero `refuted` reflects findings that were
+   * dropped from the admitted set. Absent when no finding carried a verdict.
    */
   grounding_status_breakdown?: Record<string, number>;
   /**
@@ -222,6 +232,12 @@ export interface AuditFindingsReport {
   summary: AuditFindingsSummary;
   findings: Finding[];
   work_blocks: WorkBlock[];
+  /**
+   * Findings a tool-executable anchor REFUTED (S7 tier-2 disproof). Recorded here
+   * but kept OUT of `findings`/`work_blocks` so a disproven claim never merges as
+   * actionable fact — quarantine, not delete. Absent when nothing was refuted.
+   */
+  quarantined_findings?: Finding[];
   /** Paths excluded from the audit per the intent checkpoint, with reasons. */
   excluded_scope?: Array<{ path: string; reason: string }>;
   themes?: FindingTheme[];

@@ -131,9 +131,10 @@ test("combineGroundingWithAnchor: the anchor verdict overrides tier-1 correctly"
 
   // A confirming run grounds a finding even if its quote was missing.
   assert.deepEqual(combineGroundingWithAnchor(ungrounded, { status: "confirmed", summary: "x" }), { status: "grounded" });
-  // A refuting run quarantines a finding even if its quote matched.
+  // A refuting run DISPROVES a finding even if its quote matched — distinct
+  // `refuted` status (B4: quarantined-excluded, not merely ungrounded).
   const refuted = combineGroundingWithAnchor(grounded, { status: "refuted", summary: "REFUTED by `madge`" });
-  assert.equal(refuted.status, "ungrounded");
+  assert.equal(refuted.status, "refuted");
   assert.match(refuted.reason, /refuted the claim/);
   // Inconclusive / skipped / absent leave tier-1 in place.
   assert.deepEqual(combineGroundingWithAnchor(grounded, { status: "inconclusive", summary: "x" }), grounded);

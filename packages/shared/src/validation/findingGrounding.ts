@@ -113,10 +113,10 @@ export function findingIsGrounded(finding: Pick<Finding, "grounding">): boolean 
 
 /**
  * True when a finding must be verified-before-fix because it was NOT positively
- * grounded: either explicitly `ungrounded` (quote/anchor refuted) or carrying no
- * grounding verdict at all (undefined → treated as ungrounded, INV-GND-02). The
- * remediator uses this to flag such findings for a verify-first pass rather than
- * blindly applying the fix.
+ * grounded: `ungrounded` (quote didn't re-verify), `refuted` (anchor disproved —
+ * normally already quarantined-excluded upstream), or no verdict at all
+ * (undefined → treated as ungrounded, INV-GND-02). The remediator uses this to
+ * flag such findings for a verify-first pass rather than blindly applying the fix.
  */
 export function findingNeedsVerificationBeforeFix(
   finding: Pick<Finding, "grounding">,

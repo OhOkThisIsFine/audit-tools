@@ -211,8 +211,11 @@ export function combineGroundingWithAnchor(
   if (!anchor) return tier1;
   if (anchor.status === "confirmed") return { status: "grounded" };
   if (anchor.status === "refuted") {
+    // A refuting run DISPROVED the claim — distinct from tier-1 `ungrounded`
+    // ("couldn't verify"). It is quarantined-EXCLUDED at synthesis, not merely
+    // surfaced, so it can never merge as actionable fact.
     return {
-      status: "ungrounded",
+      status: "refuted",
       reason: `executable anchor refuted the claim: ${anchor.summary}`,
     };
   }

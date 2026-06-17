@@ -322,10 +322,11 @@ async function validateAndCollectResults(
  * Grounding pass (S7): re-verify each finding against disk before it is admitted
  * as fact. Tier-1 (quote-and-verify) re-reads the cited verbatim span and
  * content-matches it; tier-2 (executable anchor) runs the finding's read-only
- * behavior-check command and lets a refuting run quarantine the claim. The
- * combined verdict annotates `finding.grounding`; a finding that does not
- * re-verify is marked `ungrounded` and surfaced — never silently dropped, never
- * silently admitted as confirmed. The confirmed bit is always the tool's
+ * behavior-check command. The combined verdict annotates `finding.grounding`: a
+ * finding that does not re-verify is `ungrounded` (surfaced, not confirmed), and
+ * one a tool-anchor actively DISPROVED is `refuted` (a distinct status that
+ * synthesis quarantines-EXCLUDES from the admitted contract — B4). Neither is
+ * silently dropped here nor silently admitted as confirmed. The confirmed bit is always the tool's
  * re-check, never the model's word. Advisory metadata: this does not fail a
  * result, so a weaker auditor's confident-but-fake finding is flagged for review
  * rather than merged as fact. Mutates the findings in place and returns the

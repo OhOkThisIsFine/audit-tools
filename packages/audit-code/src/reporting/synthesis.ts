@@ -47,6 +47,8 @@ export interface RenderableAuditReport {
   // narrowed to Lens) and the canonical AuditFindingsReport render unchanged.
   findings: SharedFinding[];
   work_blocks: WorkBlock[];
+  /** Tool-REFUTED findings excluded from the admitted set (B4); rendered separately. */
+  quarantined_findings?: SharedFinding[];
   themes?: FindingTheme[];
   executive_summary?: string;
   top_risks?: string[];
@@ -86,6 +88,8 @@ export interface AuditReportModel {
   summary: AuditReportSummary;
   findings: Finding[];
   work_blocks: WorkBlock[];
+  /** Tool-REFUTED findings (S7 tier-2 disproof) excluded from the admitted set. */
+  quarantined_findings?: Finding[];
 }
 
 function countBy<T>(
@@ -188,7 +192,7 @@ export function buildAuditReportModel(params: {
   // re-syntheses. buildWorkBlocks keys its union-find on finding.id, so the
   // locally-scoped, collision-prone ids worker packets emit must be replaced
   // here or unrelated findings fuse into one block.
-  const findings = assignStableFindingIds(
+  const allFindings = assignStableFindingIds(
     mergeFindings(
       params.results,
       params.runtimeValidationReport,
@@ -196,6 +200,15 @@ export function buildAuditReportModel(params: {
       params.designAssessment,
     ),
   );
+  // B4: a tool-executable anchor that REFUTED a claim (status `refuted`, distinct
+  // from `ungrounded`) is quarantined-EXCLUDED — kept out of the admitted findings
+  // AND the work blocks so a disproven claim never merges as actionable fact. The
+  // refuted findings are preserved in `quarantined_findings` (quarantine, not
+  // delete) and rendered in their own report section. The exclusion happens AFTER
+  // merge so a finding grounded on another pass (grounded-wins in mergeGrounding)
+  // is never quarantined.
+  const findings = allFindings.filter((f) => f.grounding?.status !== "refuted");
+  const quarantinedRefuted = allFindings.filter((f) => f.grounding?.status === "refuted");
   const workBlocks = buildWorkBlocks({
     findings,
     unitManifest: params.unitManifest,
@@ -205,7 +218,9 @@ export function buildAuditReportModel(params: {
   const coverage = coverageSummary(params.coverageMatrix);
   const strandedUnitCount =
     params.activeDispatch?.partial_completion_terminal?.stranded_ids?.length ?? 0;
-  const groundingBreakdown = groundingStatusBreakdown(findings);
+  // Count grounding over ALL findings (incl. quarantined-refuted) so the `refuted`
+  // tally reflects findings dropped from the admitted set.
+  const groundingBreakdown = groundingStatusBreakdown(allFindings);
   const model: AuditReportModel = {
     summary: {
       finding_count: findings.length,
@@ -226,6 +241,7 @@ export function buildAuditReportModel(params: {
     },
     findings,
     work_blocks: workBlocks,
+    ...(quarantinedRefuted.length > 0 ? { quarantined_findings: quarantinedRefuted } : {}),
   };
   return model;
 }
@@ -243,6 +259,9 @@ export function buildAuditFindingsReport(
     summary: { ...model.summary },
     findings: model.findings,
     work_blocks: model.work_blocks,
+    ...(model.quarantined_findings && model.quarantined_findings.length > 0
+      ? { quarantined_findings: model.quarantined_findings }
+      : {}),
   };
   return report;
 }
@@ -341,9 +360,16 @@ export function renderAuditReportMarkdown(
     Object.keys(report.summary.grounding_status_breakdown).length > 0
       ? [
           `- Grounding (S7): ${formatCountList(report.summary.grounding_status_breakdown)}` +
-            ((report.summary.grounding_status_breakdown.ungrounded ?? 0) > 0
-              ? " — ungrounded findings are quarantined below"
-              : ""),
+            [
+              (report.summary.grounding_status_breakdown.ungrounded ?? 0) > 0
+                ? "ungrounded findings are surfaced-not-confirmed below"
+                : null,
+              (report.summary.grounding_status_breakdown.refuted ?? 0) > 0
+                ? "refuted findings are quarantined-excluded below"
+                : null,
+            ]
+              .filter(Boolean)
+              .reduce((acc, note, i) => acc + (i === 0 ? " — " : "; ") + note, ""),
         ]
       : []),
     `- Fully audited files: ${report.summary.audited_file_count}`,
@@ -434,15 +460,15 @@ export function renderAuditReportMarkdown(
     }
   }
 
-  // S7 tier-3 surfacing: list the findings the grounding pass could not
-  // re-verify against disk in a dedicated, visually-separated section so they
-  // are never silently confirmed. They remain in the main findings list (and in
-  // the machine contract / work blocks) but are explicitly marked not-confirmed.
+  // S7 surfacing: list the findings the grounding pass could not re-verify
+  // against disk in a dedicated, visually-separated section so they are never
+  // silently confirmed. They remain in the main findings list (and in the machine
+  // contract / work blocks) but are explicitly marked not-confirmed.
   const ungroundedFindings = report.findings.filter(
     (finding) => finding.grounding?.status === "ungrounded",
   );
   if (ungroundedFindings.length > 0) {
-    lines.push("## Ungrounded Findings (quarantined)", "");
+    lines.push("## Ungrounded Findings (not confirmed)", "");
     lines.push(
       `${ungroundedFindings.length} finding(s) could not be re-verified against the source on disk (S7 grounding: the cited verbatim span was not found, or no span was provided). They appear above with the other findings but are **not confirmed** — treat them with skepticism and check the code before acting.`,
       "",
@@ -453,6 +479,28 @@ export function renderAuditReportMarkdown(
       );
       if (finding.grounding?.reason) {
         lines.push(`  - Reason: ${finding.grounding.reason}`);
+      }
+    }
+    lines.push("");
+  }
+
+  // B4: tool-REFUTED findings — an executable anchor actively DISPROVED the claim.
+  // Unlike ungrounded findings, these are EXCLUDED from the admitted findings and
+  // work blocks (never actionable), but recorded here (quarantine, not delete) so
+  // the disproof is auditable.
+  const refutedFindings = report.quarantined_findings ?? [];
+  if (refutedFindings.length > 0) {
+    lines.push("## Refuted Findings (quarantined — excluded)", "");
+    lines.push(
+      `${refutedFindings.length} finding(s) were DISPROVED by a tool-executable anchor (S7 tier-2). They are **excluded** from the findings and work blocks above — a disproven claim is never actionable — and are listed here only for auditability.`,
+      "",
+    );
+    for (const finding of refutedFindings) {
+      lines.push(
+        `- **${finding.id}** — ${finding.title} (${finding.severity}, ${finding.lens})`,
+      );
+      if (finding.grounding?.reason) {
+        lines.push(`  - Refuted: ${finding.grounding.reason}`);
       }
     }
     lines.push("");
