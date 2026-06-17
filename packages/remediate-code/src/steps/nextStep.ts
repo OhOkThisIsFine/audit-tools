@@ -54,6 +54,10 @@ import {
   writePathASeedFromFindings,
 } from "./contractPipeline.js";
 import {
+  evaluateFastPath,
+  buildLeanExtractedPlan,
+} from "./leanFastPath.js";
+import {
   contractArtifactExists,
   contractPipelineDir,
 } from "../contractPipeline/artifactStore.js";
@@ -2001,6 +2005,42 @@ async function handleReadyIntakeContractPipeline(
         }
         // Persist the filter dispositions so coverage is built over the originals.
         await persistReviewFilterDispositions(artifactsDir, originals, filter);
+
+        // A1 — conservative lean fast path. When the approved set is a handful
+        // of grounded, high-confidence, localized, non-cross-cutting findings,
+        // skip the contract pipeline and synthesize the extracted plan directly;
+        // the plan→implement→close machinery (per-node verify-before-merge + the
+        // final whole-repo gate) is the retained safety net. Any doubt routes to
+        // the full pipeline below. Runs only here — on Path A (structured_audit),
+        // the only intake with a pre-existing finding set to judge.
+        const fast = evaluateFastPath(gate.approved);
+        if (fast.eligible) {
+          const leanPlan = buildLeanExtractedPlan(
+            gate.approved,
+            randomRunId("LEAN"),
+          );
+          await writeJsonFile(intakePaths(artifactsDir).extractedPlan, leanPlan);
+          process.stderr.write(
+            `[remediate-code] Lean fast path: ${fast.reason}. Skipping the contract pipeline; routing straight to plan→implement.\n`,
+          );
+          const planned = await handlePendingExtractedPlan(
+            root,
+            artifactsDir,
+            { status: "pending" },
+            leanPlan,
+          );
+          if (planned) {
+            return planned;
+          }
+          // Defensive: a deterministically-built lean plan should always
+          // normalize. If it somehow didn't, handlePendingExtractedPlan removed
+          // the file; fall through to the full pipeline (the safety net) rather
+          // than stalling the run.
+          process.stderr.write(
+            "[remediate-code] Lean fast-path plan failed to materialize; falling back to the contract pipeline.\n",
+          );
+        }
+
         // Seed the pipeline with the approved survivors only. When that set is
         // narrower than the originals (anything filtered or declined), route the
         // seed AND the pipeline's source inputs at a filtered file so a removed

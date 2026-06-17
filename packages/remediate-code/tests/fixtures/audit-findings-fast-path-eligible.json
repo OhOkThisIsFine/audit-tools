@@ -1,0 +1,57 @@
+{
+  "contract_version": "audit-tools/audit-findings/v1alpha1",
+  "summary": {
+    "finding_count": 2,
+    "work_block_count": 2,
+    "severity_breakdown": { "high": 1, "medium": 1 },
+    "audited_file_count": 2,
+    "excluded_file_count": 0,
+    "runtime_validation_status_breakdown": {}
+  },
+  "findings": [
+    {
+      "id": "FP-001",
+      "title": "Finalized record can be reverted by generic status update",
+      "category": "correctness",
+      "severity": "high",
+      "confidence": "high",
+      "lens": "correctness",
+      "summary": "updateStatus does not guard finalized records, so a generic update reopens them.",
+      "affected_files": [{ "path": "src/fastpath/alpha.ts" }],
+      "evidence": ["src/fastpath/alpha.ts omits the finalized-record guard in updateStatus"],
+      "grounding": { "status": "grounded" }
+    },
+    {
+      "id": "FP-002",
+      "title": "Reset endpoint trusts an unvalidated token field",
+      "category": "security",
+      "severity": "medium",
+      "confidence": "high",
+      "lens": "security",
+      "summary": "The reset handler reads token without validating its shape before use.",
+      "affected_files": [{ "path": "src/fastpath/beta.ts" }],
+      "evidence": ["src/fastpath/beta.ts reads the token field without validation"],
+      "grounding": { "status": "grounded" }
+    }
+  ],
+  "work_blocks": [
+    {
+      "id": "B-001",
+      "finding_ids": ["FP-001"],
+      "unit_ids": [],
+      "owned_files": ["src/fastpath/alpha.ts"],
+      "max_severity": "high",
+      "rationale": "Isolated correctness finding.",
+      "depends_on": []
+    },
+    {
+      "id": "B-002",
+      "finding_ids": ["FP-002"],
+      "unit_ids": [],
+      "owned_files": ["src/fastpath/beta.ts"],
+      "max_severity": "medium",
+      "rationale": "Isolated security finding.",
+      "depends_on": []
+    }
+  ]
+}
