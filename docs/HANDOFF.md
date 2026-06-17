@@ -9,9 +9,10 @@
 
 ## Where things stand
 
-- **`main` @ `e4b82bae`.** Clean tree, all pushed (synced with `audit-tools/main`). **NOT published** — commits
-  sit on main unreleased (mid-program; release when A8 lands + is validated). Last published: `@audit-tools/shared
-  0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
+- **`main`: sprint's substantive change is the rolling false-resolve fix `f18138fe` (docs syncs on top; `git log`
+  for HEAD).** Clean tree, all pushed (synced with `audit-tools/main`). **NOT published** — commits sit on main
+  unreleased (mid-program; release when A8 lands + is validated). Last published: `@audit-tools/shared 0.22.0`
+  / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
 - **A8 host-subagent rolling driver — VALIDATED end-to-end this session via a real-subagent smoke, and a
   latent false-resolve bug found + fixed (`f18138fe`, green).** Drove the REAL machine in an isolated repo
   (`C:\Code\_a8-smoke`, deleted) to `dispatch_implement_rolling` (3 disjoint nodes, slots capped to 2),
