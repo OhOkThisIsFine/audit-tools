@@ -38,9 +38,12 @@ import type { RemediationStep } from "./types.js";
 import {
   dependenciesSatisfied,
   dependencyVerifiedComplete,
+} from "./stepUtils.js";
+import {
   isTerminalStatus,
   isVerifiedCompleteStatus,
-} from "./stepUtils.js";
+  isSkipStatus,
+} from "../state/itemStatus.js";
 import {
   deduplicateCrossLensFindings,
   fixupBlocksAfterDedup,
@@ -281,13 +284,12 @@ export type {
 } from "./stepUtils.js";
 export {
   NO_CHANGE_RE,
-  isTerminalStatus,
-  isVerifiedCompleteStatus,
   dependenciesSatisfied,
   dependencyVerifiedComplete,
   specIndicatesNoChange,
   classifyFindingRisk,
 } from "./stepUtils.js";
+export { isTerminalStatus, isVerifiedCompleteStatus };
 
 function documentableFindings(state: RemediationState): Finding[] {
   if (!state.plan || !state.items) return [];
@@ -1080,14 +1082,12 @@ export function applyCoarseReblock(
   bound: number = COARSE_REBLOCK_BOUND,
 ): CoarseReblockDecision {
   const now = new Date().toISOString();
-  const isSkip = (s: string): boolean =>
-    s === "ignored" || s === "deemed_inappropriate";
 
   if (currentCount >= bound) {
     // Bounded auto-terminate: converge DETERMINISTICALLY to a terminal `blocked`
     // close for a no-human host — never livelock, never a triage prompt, never green.
     for (const it of Object.values(state.items ?? {})) {
-      if (isSkip(it.status)) continue; // settled user decision — never overturn
+      if (isSkipStatus(it.status)) continue; // settled user decision — never overturn
       it.status = "blocked";
       it.started_at ??= now;
       it.completed_at = now;
@@ -1101,7 +1101,7 @@ export function applyCoarseReblock(
   // Below the bound: re-open every non-skip item to `pending` and re-attempt the
   // whole repo via the rolling scheduler (NOT the human triage prompt).
   for (const it of Object.values(state.items ?? {})) {
-    if (isSkip(it.status)) continue;
+    if (isSkipStatus(it.status)) continue;
     it.status = "pending";
     it.failure_context =
       `Re-attempted by the coarse final-gate backstop (unattributable whole-repo red). ${gateSummary}`;
@@ -2535,8 +2535,8 @@ async function handleImplementing(
 }
 
 function hasResolvedItems(state: RemediationState): boolean {
-  return Object.values(state.items ?? {}).some(
-    (it) => it.status === "resolved" || it.status === "resolved_no_change",
+  return Object.values(state.items ?? {}).some((it) =>
+    isVerifiedCompleteStatus(it.status),
   );
 }
 

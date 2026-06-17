@@ -43,6 +43,8 @@ import { isAuditFindingsReport } from "./plan.js";
 import {
   dispositionToOutcomeStatus,
   isInProgressStatus,
+  isSkipStatus,
+  isVerifiedCompleteStatus,
   statusToDisposition,
 } from "../state/itemStatus.js";
 
@@ -418,7 +420,7 @@ function generateCommitMessage(state: RemediationState): string {
   const items = Object.values(state.items ?? {});
   const resolvedFindingIds = new Set(
     items
-      .filter((i) => i.status === "resolved" || i.status === "resolved_no_change")
+      .filter((i) => isVerifiedCompleteStatus(i.status))
       .map((i) => i.finding_id),
   );
   const resolved = findings.filter((f) => resolvedFindingIds.has(f.id));
@@ -593,7 +595,7 @@ function blockResolvedItemsOnCombinedFailure(
   testOutput: string,
 ): boolean {
   const resolvedItems = Object.values(state.items ?? {}).filter(
-    (i) => i.status === "resolved" || i.status === "resolved_no_change",
+    (i) => isVerifiedCompleteStatus(i.status),
   );
   if (resolvedItems.length === 0) return false;
 
@@ -702,7 +704,7 @@ function collectReportEntries(
     blocked: [],
   };
   for (const item of Object.values(state.items ?? {})) {
-    if (item.status === "resolved" || item.status === "resolved_no_change") {
+    if (isVerifiedCompleteStatus(item.status)) {
       const finding = state.plan?.findings.find((f) => f.id === item.finding_id);
       const title = finding?.title ?? "Unknown";
       let verificationEvidence: string[] | undefined;
@@ -1000,13 +1002,10 @@ function buildVerificationReport(
     (state.plan?.findings ?? []).map((f) => [f.id, f]),
   );
 
-  const isSkippedStatus = (status: string): boolean =>
-    status === "ignored" || status === "deemed_inappropriate";
-
   for (const item of Object.values(state.items ?? {})) {
     const finding = findingsById.get(item.finding_id);
-    const isResolved = item.status === "resolved" || item.status === "resolved_no_change";
-    const isSkipped = isSkippedStatus(item.status);
+    const isResolved = isVerifiedCompleteStatus(item.status);
+    const isSkipped = isSkipStatus(item.status);
     const traces: VerificationTraceEntry[] = [];
     const itemPassed = isResolved && combinedTest.passed;
 

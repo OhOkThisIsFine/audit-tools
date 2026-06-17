@@ -3,7 +3,6 @@ import type { Finding } from "@audit-tools/shared";
 import type { ItemSpec, RemediationBlock } from "../src/state/types.js";
 import type { RemediationState } from "../src/state/store.js";
 import {
-  isTerminalStatus,
   specIndicatesNoChange,
   hasExecutableEvidence,
   classifyFindingRisk,
@@ -80,32 +79,6 @@ function makeState(
 }
 
 describe("stepUtils exports are stable after extraction", () => {
-  describe("isTerminalStatus", () => {
-    it("returns true for 'resolved'", () => {
-      expect(isTerminalStatus("resolved")).toBe(true);
-    });
-
-    it("returns false for 'blocked'", () => {
-      expect(isTerminalStatus("blocked")).toBe(false);
-    });
-
-    it("returns true for 'resolved_no_change'", () => {
-      expect(isTerminalStatus("resolved_no_change")).toBe(true);
-    });
-
-    it("returns true for 'ignored'", () => {
-      expect(isTerminalStatus("ignored")).toBe(true);
-    });
-
-    it("returns true for 'deemed_inappropriate'", () => {
-      expect(isTerminalStatus("deemed_inappropriate")).toBe(true);
-    });
-
-    it("returns false for 'pending'", () => {
-      expect(isTerminalStatus("pending")).toBe(false);
-    });
-  });
-
   describe("specIndicatesNoChange", () => {
     it("returns true when no_change is explicitly true", () => {
       expect(

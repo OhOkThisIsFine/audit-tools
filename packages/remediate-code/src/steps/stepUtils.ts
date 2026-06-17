@@ -1,5 +1,6 @@
 import type { Finding, ItemSpec, RemediationBlock } from "../state/types.js";
 import type { RemediationState } from "../state/store.js";
+import { isTerminalStatus, isVerifiedCompleteStatus } from "../state/itemStatus.js";
 
 export type FindingRiskTier = "safe" | "substantive" | "context_dependent";
 
@@ -10,32 +11,6 @@ export interface FindingClassification {
 }
 
 export const NO_CHANGE_RE = /\b(already correct|no.?op|no change|nothing to (change|do|fix)|code is correct)\b/i;
-
-const TERMINAL_STATUSES = ["resolved", "resolved_no_change", "ignored", "deemed_inappropriate"];
-
-/**
- * The subset of terminal statuses that count as a node having actually produced
- * and verified its declared output. A SKIP (`ignored` / `deemed_inappropriate`)
- * is terminal but is NOT verified-complete: the node's work never landed, so a
- * dependent must NOT build on it (INV-RS-01). `blocked` is not terminal at all.
- */
-const VERIFIED_COMPLETE_STATUSES = ["resolved", "resolved_no_change"];
-
-/** Whether an item status is terminal — no further implement work, and a worker result must never resurrect it. */
-export function isTerminalStatus(status: string): boolean {
-  return TERMINAL_STATUSES.includes(status);
-}
-
-/**
- * Whether an item status is VERIFIED-COMPLETE: the node produced and verified its
- * declared output (`resolved` / `resolved_no_change`). A skipped node
- * (`ignored` / `deemed_inappropriate`) and a `blocked` node are explicitly NOT
- * verified-complete — INV-RS-01: a SKIP disposition never satisfies a dependency
- * edge, so a dependent of a skipped/blocked node stays ineligible.
- */
-export function isVerifiedCompleteStatus(status: string | undefined): boolean {
-  return status !== undefined && VERIFIED_COMPLETE_STATUSES.includes(status);
-}
 
 /**
  * A block is ready to implement only once every dependency block is fully
@@ -54,7 +29,7 @@ export function dependenciesSatisfied(
     if (!depBlock) continue; // unknown dependency: don't wait on it forever
     for (const findingId of depBlock.items) {
       const status = state.items?.[findingId]?.status;
-      if (!status || !TERMINAL_STATUSES.includes(status)) return false;
+      if (!status || !isTerminalStatus(status)) return false;
     }
   }
   return true;

@@ -57,6 +57,63 @@ export function isInProgressStatus(status: string): boolean {
   return IN_PROGRESS_STATUSES.has(status as RemediationItemStatus);
 }
 
+// ── Terminal / verified-complete / skip partitions ───────────────────────────
+
+/**
+ * Statuses that legitimately END a run with no further implement work: the two
+ * success states plus the two settled-no-act (SKIP) states. `blocked` is
+ * deliberately NOT terminal — triage retries it — so a blocked item leaves the
+ * run non-terminal and routes to triage rather than closing.
+ */
+const TERMINAL_STATUSES = new Set<RemediationItemStatus>([
+  "resolved",
+  "resolved_no_change",
+  "ignored",
+  "deemed_inappropriate",
+]);
+
+/**
+ * The subset of terminal statuses where the node produced AND verified its
+ * declared output (`resolved` / `resolved_no_change`). A SKIP
+ * (`ignored` / `deemed_inappropriate`) and a `blocked` node are explicitly NOT
+ * verified-complete — INV-RS-01: a SKIP disposition never satisfies a dependency
+ * edge, so a dependent of a skipped/blocked node stays ineligible.
+ */
+const VERIFIED_COMPLETE_STATUSES = new Set<RemediationItemStatus>([
+  "resolved",
+  "resolved_no_change",
+]);
+
+/** Settled decisions not to act on a finding (`ignored` / `deemed_inappropriate`). */
+const SKIP_STATUSES = new Set<RemediationItemStatus>([
+  "ignored",
+  "deemed_inappropriate",
+]);
+
+/** Whether a status is terminal — no further implement work, and a worker result must never resurrect it. `blocked` is NOT terminal. */
+export function isTerminalStatus(status: string): boolean {
+  return TERMINAL_STATUSES.has(status as RemediationItemStatus);
+}
+
+/**
+ * Whether a status is VERIFIED-COMPLETE: the node produced and verified its
+ * declared output (`resolved` / `resolved_no_change`). A skipped node
+ * (`ignored` / `deemed_inappropriate`) and a `blocked` node are explicitly NOT
+ * verified-complete — INV-RS-01: a SKIP disposition never satisfies a dependency
+ * edge, so a dependent of a skipped/blocked node stays ineligible.
+ */
+export function isVerifiedCompleteStatus(status: string | undefined): boolean {
+  return (
+    status !== undefined &&
+    VERIFIED_COMPLETE_STATUSES.has(status as RemediationItemStatus)
+  );
+}
+
+/** Whether a status is a SKIP — a settled decision not to act (terminal but never verified-complete, INV-RS-01). */
+export function isSkipStatus(status: string): boolean {
+  return SKIP_STATUSES.has(status as RemediationItemStatus);
+}
+
 // ── Status → coverage disposition (PerFindingDisposition) ────────────────────
 
 /**
