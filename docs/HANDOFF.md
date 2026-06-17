@@ -9,9 +9,9 @@
 
 ## Where things stand
 
-- **`main` @ `f18138fe`.** Clean tree, all pushed. **NOT published** — commits sit on main unreleased
-  (mid-program; release when A8 lands + is validated). Last published: `@audit-tools/shared 0.22.0`
-  / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
+- **`main` @ `e4b82bae`.** Clean tree, all pushed (synced with `audit-tools/main`). **NOT published** — commits
+  sit on main unreleased (mid-program; release when A8 lands + is validated). Last published: `@audit-tools/shared
+  0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
 - **A8 host-subagent rolling driver — VALIDATED end-to-end this session via a real-subagent smoke, and a
   latent false-resolve bug found + fixed (`f18138fe`, green).** Drove the REAL machine in an isolated repo
   (`C:\Code\_a8-smoke`, deleted) to `dispatch_implement_rolling` (3 disjoint nodes, slots capped to 2),
@@ -36,12 +36,12 @@
   fetchAvailableModels), and an `OpenCodeQuotaSource` broker (delegates to the underlying provider by model
   namespace). All register in `buildQuotaSource` (provider-gated) → audit + remediate dispatch consume them for
   free. Fixture-tested + source-verified shapes. Matrix: `docs/cross-provider-quota-matrix.md`.
-- **A8 host-subagent rolling driver — BUILT this session (`414e302e`, green, flag-gated default-OFF).** Shared
-  `acceptNodeWorktree` core extracted (both drivers reuse it); `accept-node` callback + `dispatch_implement_rolling`
-  step + the lock-guarded `rollingSession` machine (`prepareHostRollingDispatch`/`advanceHostRolling`, bounded JIT
-  worktrees). When `rolling_engine` is on AND the host can dispatch, next-step emits the worktree-per-node rolling
-  step; the host spawns a subagent per node + calls `accept-node` on each completion. Unit + integration green
-  (8 tests). Working doc: `docs/a8-rolling-cutover-plan.md`.
+- **Cross-IDE quota concern — RAISED + RESOLVED this session, no code change.** Confirmed the shipped quota code
+  only ever queries the conversation's OWN provider (each source gates on `handlesProvider` before any I/O;
+  `buildQuotaSource` registers all but non-matching sources are inert). Cross-provider **CLI** dispatch is the
+  intended goal; the one red line is **IDE GUI automation, which is absent** (no keystroke/click/screenshot/
+  computer-use code; `vscode-task`/`antigravity` are operator-configured command templates, not GUI driving).
+  Don't re-audit — see memory `quota-dispatch-vision`.
 - **Deliberate intermediate state (NOT bugs):** the rolling engine + host-subagent driver are functional but
   **default-OFF** (host-fanned wave path intact, nothing broken). The host-subagent driver is now
   **real-subagent validated + hardened** (this session); the remaining gate before flipping `rolling_engine`
