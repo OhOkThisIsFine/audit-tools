@@ -57,10 +57,13 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   fed by TWO full-rolling drivers selected by availability — (1) **host-subagent** (turn-based per-completion
   `accept-node` callback; soft-isolation-by-detection since the host's subagent can't be cwd-confined) and
   (2) **in-process provider** (codex/local-LLM/`claude -p`-when-not-nested; cwd-confined hard isolation).
-  **Progress (this session, on `main`, unpublished):** in-process driver made functional `dc4d9c2`; codex
-  provider made real `0fa13d3`. **Next:** extract `acceptNode` + build the host-subagent driver (validatable
-  in-session, no quota); provider-path real validation quota-blocked until Jun 19. Full plan +
-  protocol: `docs/a8-rolling-cutover-plan.md`. **THE blocker for nightly autonomy.** Supersedes drift-plan R1.
+  **Progress (on `main`, unpublished):** in-process driver functional `dc4d9c2`; codex provider real `0fa13d3`;
+  **shared `acceptNodeWorktree` core extracted `d2003313`; host-subagent driver BUILT — `accept-node` callback +
+  `dispatch_implement_rolling` step + lock-guarded `rollingSession` machine, flag-gated default-OFF, unit +
+  integration green (`73424050`/`414e302e`).** **Next:** (a) real-subagent end-to-end smoke on a staged
+  remediation (no quota); (b) flip `rolling_engine` default-ON once both drivers are real-run validated
+  (provider path quota-blocked until Jun 19). Full plan + protocol: `docs/a8-rolling-cutover-plan.md`.
+  **THE blocker for nightly autonomy.** Supersedes drift-plan R1.
   (ARC-f378135d family.)
 - **B1 / B2 / B3 — greenlit** (the magic-numbers, diff-based-re-review, and staleness-cascade friction
   items in *Known friction* below; now accepted work, not just logged friction).

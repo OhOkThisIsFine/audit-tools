@@ -9,7 +9,7 @@
 
 ## Where things stand
 
-- **`main` @ `a7eef160`.** Clean tree, all pushed. **NOT published** — commits sit on main unreleased
+- **`main` @ `414e302e`.** Clean tree, all pushed. **NOT published** — commits sit on main unreleased
   (mid-program; release when A8 lands + is validated). Last published: `@audit-tools/shared 0.22.0`
   / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins + host assets on 4 hosts current to that).
 - **Quota detection — Claude PROACTIVE source SHIPPED to the tree (`a7eef160`, green).** The signal was confirmed
@@ -18,12 +18,17 @@
   the `buildQuotaSource` default); remediate's `scheduleWave` + `buildConfirmedPools` now populate
   `quotaSourceSnapshot` too → the scheduler throttles/cools-down from live remaining quota BEFORE a 429. Working
   doc: `docs/quota-detection-build.md`. Green: shared 648, remediate 1610, audit 2192/1skip, build+check clean.
-- **A8 (reframed earlier this program):** one shared rolling `acceptNode` core + two co-equal full-rolling drivers
-  (in-conversation subagent dispatch is FIRST-CLASS). Engine functional but **default-OFF**.
-- **Deliberate intermediate state (NOT bugs):** rolling engine functional but **default-OFF** (host-fanned wave
-  path intact, nothing broken); codex provider real but its agentic run unvalidated (codex quota resets **Jun 19**);
-  the `acceptNode` extraction + host-subagent driver are **designed, not yet built**. Program of record:
-  `docs/backlog.md` → "Accepted go-forward program (2026-06-15 review)".
+- **A8 host-subagent rolling driver — BUILT this session (`414e302e`, green, flag-gated default-OFF).** Shared
+  `acceptNodeWorktree` core extracted (both drivers reuse it); `accept-node` callback + `dispatch_implement_rolling`
+  step + the lock-guarded `rollingSession` machine (`prepareHostRollingDispatch`/`advanceHostRolling`, bounded JIT
+  worktrees). When `rolling_engine` is on AND the host can dispatch, next-step emits the worktree-per-node rolling
+  step; the host spawns a subagent per node + calls `accept-node` on each completion. Unit + integration green
+  (8 tests). Working doc: `docs/a8-rolling-cutover-plan.md`.
+- **Deliberate intermediate state (NOT bugs):** the rolling engine + host-subagent driver are functional but
+  **default-OFF** (host-fanned wave path intact, nothing broken); codex provider real but its agentic run
+  unvalidated (codex quota resets **Jun 19**); the A8 drivers still lack a **real-subagent / real-provider
+  end-to-end smoke** (unit + integration only). Program of record: `docs/backlog.md` → "Accepted go-forward
+  program (2026-06-15 review)".
 
 ## Standing directives (Ethan) — read before deciding anything
 
@@ -37,12 +42,12 @@
   `ask-on-ambiguity-dont-defer-silently`.)
 - **Order of program items is yours** — sequence logically so one refactor doesn't undo another.
 
-## Immediate next: (1) finish quota detection (cross-provider matrix), or (2) the A8 host-subagent driver
+## Immediate next: (1) A8 real-subagent validation + flip default-ON, or (2) the cross-provider quota matrix
 
-Ethan's directive was **sort out quota detection before resuming the A8 build** — the **Claude core is now done**
-(`a7eef160`): live-confirmed + `ClaudeOAuthQuotaSource` built + wired into both orchestrators. Two large chunks
-remain; order is yours. Read FIRST — [`docs/quota-detection-build.md`](quota-detection-build.md),
-[`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md), memory
+This session SHIPPED (to the tree, unreleased): Claude proactive quota detection (`a7eef160`) AND the A8
+host-subagent rolling driver (`414e302e`) — both green, flag-gated. The remaining A8 work is *validation*, not
+build. Order is yours. Read FIRST — [`docs/a8-rolling-cutover-plan.md`](a8-rolling-cutover-plan.md),
+[`docs/quota-detection-build.md`](quota-detection-build.md), memory
 `conversation-first-subagent-dispatch-first-class`, memory `claude-oauth-usage-quota-endpoint`.
 
 ### 1. Finish quota detection — the cross-provider `QuotaSource` matrix (everything-agnostic)
@@ -56,13 +61,15 @@ robust-as-possible per source, graceful degrade. codex's reactive *"usage limit�
 Then wire **utilization-driven spill across pools** + per-model/cost routing into the scheduler. **The binding
 constraint is quota+rate, NOT max-parallel-`N`.** (Backlog: *Cross-IDE/provider quota detection*.)
 
-### 2. THEN the A8 host-subagent full-rolling driver (the meaty build — start fresh)
-Extract the shared **`acceptNode`** core (`acceptNodeWorktree` out of `dispatchNodeWithWorktree`) → add an
-`accept-node --id X` per-completion callback command → a dispatch step that pre-creates eligible worktrees and
-drives the host to spawn subagents + call `accept-node` as each finishes (dispatch-next-on-complete) → select
-driver by availability. Protocol detail: plan doc "Host-subagent driver protocol." **Validate IN-SESSION** (the
-host instance spawns real Task-subagents via the Agent tool — no quota). codex/provider-path real validation is
-quota-blocked until **Jun 19**.
+### 2. A8 host-subagent driver — BUILT; validate + flip default-ON
+The driver is built + unit/integration-green + flag-gated (`rolling_engine`, default-OFF). REMAINING:
+(a) a **real-subagent end-to-end smoke** — stage a small real remediation to the implement-dispatch point, set
+`dispatch.rolling_engine: true` + a dispatching host, then actually spawn Task-subagents into the worktrees the
+step lists and call `accept-node --id <block>` per completion (dispatch/wait/done); confirm each node
+commits→verifies→merges and the run finalizes via merge-implement-results → next-step (no quota needed).
+(b) Then **flip `rolling_engine` default-ON** (the nightly-autonomy gate) once both this and the provider path
+(codex, quota-blocked until **Jun 19**) are real-run validated. Protocol + status:
+`docs/a8-rolling-cutover-plan.md`.
 
 - Then the rest of the program: **A1** fast path, **A3+A4** unify obligation engines + `RemediationItem`,
   **B1** magic numbers, **B2+B3** diff re-reviews + obligation-set staleness, **B4** hard-exclude

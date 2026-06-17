@@ -74,10 +74,14 @@ callers**; its tests inject stub dispatchers. Reading the path surfaced hard gap
    ≥2 nodes land via worktree→verify→merge. NOTE the unverified-on-Windows detail: whether
    `--sandbox workspace-write` is enforced on Windows is still unconfirmed (codex sandbox is historically
    mac/Linux); the real run will show it — fall back to `danger-full-access` via config if needed.
-4. **Build the host-subagent driver as a FIRST-CLASS, full-rolling co-equal** (Ethan, 2026-06-16,
-   decision (ii) — NOT a fallback; subscription-only/no-API-credit users depend on in-conversation
-   subagent dispatch). This is the next big chunk; protocol below. **Validatable in-session** (the host
-   instance spawns real Task-subagents via the Agent tool — no quota needed).
+4. **Host-subagent driver — ✓ BUILT (flag-gated, default-OFF), green.** `acceptNodeWorktree` extracted as
+   the shared core (commit `d2003313`); `accept-node --id X` callback + the `dispatch_implement_rolling`
+   step + the lock-guarded `rollingSession` state machine (`prepareHostRollingDispatch`/`advanceHostRolling`,
+   bounded JIT worktrees) landed (`73424050` + `414e302e`). When `rolling_engine` is enabled AND the host can
+   dispatch, next-step emits the worktree-per-node rolling step; the host spawns a subagent per node and calls
+   `accept-node` on each completion (dispatch/wait/done). Tests: `host-rolling-dispatch.test.ts` (7) + a
+   `decideNextStep` emission test. **REMAINING: a real-subagent end-to-end smoke** (spawn actual Task-subagents
+   into worktrees on a live remediation) + the eventual flip to default-ON.
 5. **audit-code symmetric** wiring of its rolling engine into the audit live path.
 6. **Harden** worktree-branch reuse across a `rate_limited` re-queue.
 
@@ -105,8 +109,10 @@ One-shot-CLI orchestrator + host-as-executor ⇒ rolling via a **per-completion 
   subagent's node just FAILS, never silent corruption. Provider workers get hard cwd-confinement.
 
 ## Open items to surface
-- **Step 4 (host-subagent full-rolling driver) is the next build** — sizable + touches the live host
-  path; start it fresh. Validate in-session with real Task-subagents (no quota).
+- **Host-subagent driver real-subagent smoke** — the driver is built + unit/integration-green + flag-gated;
+  the remaining validation is spawning ACTUAL Task-subagents into worktrees on a live remediation (needs a
+  staged remediation at the implement-dispatch point). No quota needed.
+- **Flip `rolling_engine` default-ON** once both drivers are real-run validated (the nightly-autonomy gate).
 - **Provider-path real-run validation** is quota-blocked until Jun 19 (codex). Invocation verified; the
   in-process driver is unit/injected-provider green.
 - **Windows codex sandbox** enforcement unconfirmed (whether `--sandbox workspace-write` is enforced on
