@@ -191,6 +191,16 @@ triaged.
 
 ## Known friction (agent / dev experience)
 
+- **Release `waitForRunCompletion` matches a publish run by tag display name, not run identity (2026-06-18).**
+  Hit shipping `auditor-lambda 0.27.2`: 0.27.2 had been tagged+burned during the reverted A3 ATTEMPT-1, so a
+  STALE failed `publish-package` run carried the same `audit-code-v0.27.2` display name in history. After
+  pushing the new tag, the wait logic (`packages/audit-code/scripts/release-and-publish.mjs`
+  `waitForRunCompletion`) matched the OLD failed run "after 1s" and threw a false publish failure — the NEW
+  run (`27774138156`) actually succeeded and 0.27.2 went live. Fix: select the run by `databaseId`/`createdAt`
+  strictly AFTER the tag-push time (or by the tag-push commit sha), never the most-recent run sharing the tag
+  display name. Only bites when a version is reused after a revert, but it's a real false-negative in the
+  ship gate. (Tooling-side robustness — not a "remember to check" patch.)
+
 ### Contract-pipeline friction surfaced during the 2026-06-15 self-remediation (systematic fixes wanted)
 
 Hit while driving the full `remediate-code` contract pipeline over the 227-finding
