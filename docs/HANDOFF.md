@@ -10,14 +10,15 @@
 ## Where things stand
 
 - **`main` (pushed, NOT published): the go-forward program keeps accumulating.** Latest =
-  **A3 slice 2a — post-intake cascade tail runs on `advance`** `ae0326c` (this session). Green at every
-  commit; suites green on the committed tree (shared **722** / audit ~2200 / remediate **1669**, +1
-  documented skip each). **Publish HELD per Ethan (2026-06-17)** — last published:
+  **A3 slice 2b — phase handlers return transition/emit, zero recursion** `838a0ae` (this session).
+  Green at every commit; suites green on the committed tree (shared **722** / audit ~2200 / remediate
+  **1671**, +1 documented skip each). **Publish HELD per Ethan (2026-06-17)** — last published:
   `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins lag).
-  - This session (`git log` for detail): **A3 step 3 keystone, 3 commits** — shared `advance` transition/emit
-    loop `8250aab`; remediate pre-intake gates on `advance` (slice 1) `79e2dcd`; post-intake tail on `advance`
-    (slice 2a) `ae0326c`. Prior: A4 finish `6fea584`; A1 lean fast path `b47d189`; A5+A11 vetted TOML/YAML
-    parsers `e3561c6`; A8 loose ends ×3.
+  - This session (`git log` for detail): **A3 slice 2b — DONE, 2 commits** — handler-recursion unwind
+    `719e276` (every phase handler returns a `RemediateOutcome`; `advance` drives every fold with zero
+    recursion; boundary-case-1 reload teeth) + dead-param cleanup `838a0ae`. **A3 step 3 (remediate rewire) is
+    now fully DONE** across slices 1/2a/2b. Prior sessions: shared `advance` loop `8250aab`; slice 1 `79e2dcd`;
+    slice 2a `ae0326c`; A4 finish `6fea584`; A1 `b47d189`; A5+A11 `e3561c6`.
   - True-green caveats: CLAUDECODE must be unset for gates. Known flake: audit-code's `phase-plan.test.ts`
     intermittent hermeticity (backlog). audit-code's third-party runtime deps (`smol-toml`, `yaml`) — a
     fresh clone needs `npm install`.
@@ -52,36 +53,33 @@
 
 ## Immediate next: the go-forward program
 
-**A3 (the keystone) IN PROGRESS — 3a + slice 1 + slice 2a DONE; slice 2b remains.** Working plan:
-**read [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md)** (ground-truth map of both
-engines, the shared-engine contract, the green-at-every-commit decomposition; the Status section has the
-slice-by-slice landing log + the slice-2b boundary cases below in full).
+**A3 (the keystone) — step 3 (remediate rewire) DONE across slices 1/2a/2b; only step-4 reconcile remains.**
+Working plan: **read [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md)** (ground-truth
+map of both engines, the shared-engine contract, the green-at-every-commit decomposition; the Status section
+has the full slice-by-slice landing log, the 3 resolved slice-2b boundary cases, and the confirm_resume
+faithfulness finding).
 
-**Done this session (A3 step 3):** `decideNextStepLoop` (`steps/nextStep.ts`) is now
-**preamble → `advance(pre-intake)` → `countStep` → `advance(main)`**. The whole guard cascade is a declarative
-`ObligationDef` list on the shared `advance` loop (`8250aab` added `advance`/`ObligationDef`/`findNextObligation`
-to `@audit-tools/shared/src/engine/`). Pre-intake gates = `buildPreIntakeObligations` (slice 1, `79e2dcd`);
-post-intake tail = `buildMainObligations` (slice 2a, `ae0326c`). The 3 **tail** recursion sites (clar-apply,
-triage-apply, implementing dead-end) are now `transition` outcomes. Two faithfulness traps fixed + regression-
-locked: (1) `input_conflict`/`confirm_resume` derive from the **frozen call-entry state** (a re-scan after
-`pending_intake` builds a plan must not resurrect them); (2) the leftover-report warning is a cascade-ordered
-one-shot `transition` obligation, not a preamble.
+**Done this session (A3 slice 2b — the keystone bulk):** every phase handler (`handlePlanning` /
+`handleImplementing` / `handleAllTerminalTransition` / `handleClosing` / `buildImplementDispatchStep`) now
+returns a `RemediateOutcome` (`transition` | `emit`); the shared `advance` loop drives every fold with **zero
+recursion** (`719e276` core + `838a0ae` cleanup). `decideNextStepLoop` is preamble → `advance(pre-intake)` →
+`countStep` → `advance(main)` with no recursive re-entry anywhere. `skipCount` + dead handler params dropped.
+Boundary case 1 (`handleClosing` → `complete`) resolved by **emit `handleComplete(…, await store.loadState())`**
+— the reload reproduces the original recursion exactly (fully-green close → dir deleted → `null` → randomRunId;
+not-green → preserved → complete state → plan_id), teeth-locked by run_id assertions. **Faithfulness finding
+(a fix, not a regression):** removing the recursion stopped `confirm_resume` from spuriously re-firing against a
+freshly-built `implementing` state — restoring slice-1 entry-gate-freeze semantics; `confirm_resume` still fires
+for a genuinely pre-existing in-progress run. One test (`next-step-review-gate` Path-A coverage) relied on the
+spurious halt and now folds to dispatch (asserted).
 
-**START-HERE next session — A3 slice 2b: unwind the phase-handler recursion.** The phase handlers still
-`return decideNextStepLoop(...true)` (a **deliberate** working intermediate — that recursion re-enters
-`advance`, sound but not the endpoint). Convert `handlePlanning` / `handleImplementing` /
-`handleAllTerminalTransition` / `handleClosing` / `buildImplementDispatchStep` to return `transition`/`emit`
-outcomes so the engine drives everything with zero recursion. **Three boundary cases need individual care +
-teeth-verified regression tests — a green suite alone is NOT enough (the slice-1 entry-gate-freeze bug slipped
-past all 1667 tests):**
-1. **`handleClosing` → `complete` crosses the engine boundary** (`complete` is a *pre-intake* obligation, so a
-   *main* transition can't reach it). Cleanest: close-complete ⇒ **emit `handleComplete` directly**; not-complete
-   ⇒ transition. (Verify `presentReportStep` behaves the same given the closed state vs `null` — the original
-   reloads `null` after the artifact dir is deleted at close.)
-2. **`buildImplementDispatchStep` recurses at 3 merge-then-reenter sites** (`~1454/1463/1543`) + has many emit
-   paths → convert to the outcome union (merge-reenter ⇒ transition; dispatch steps ⇒ emit).
-3. **`forceReplan` + count** — keep the two-advance split so `countStep` placement is unchanged. After 2b,
-   `skipCount` is vestigial (only the public entry passes `false`) → drop it in the step-4 cleanup.
+**START-HERE next session — A3 step 4 (final reconcile, small) then B2+B3.** skipCount + dead params are already
+dropped. Left for step 4: (1) a quick **orphaned-helper sweep** of `steps/nextStep.ts`; (2) **parity-check audit
+vs remediate obligation shapes**; (3) the optional-but-ideal **audit-code adopts `advance` emit-only** —
+audit is already on the shared `findFirstActionableObligation` scan, and `advance` with only-emit obligations is
+a strict generalization, so wiring `advanceAudit`/`decideNextStep` (audit-code `src/orchestrator/`) onto
+`advance` unifies the *mechanism* fully and completes the A3 north star ("one declarative engine both tools run
+on"). It is a bounded change to a *different package* (audit-code) with its own `node:test` suite — treat as its
+own slice. After step 4, A3 is done.
 
 **After A3 (suggested order, yours to change):** **B2+B3** (diff re-reviews + obligation-set staleness —
 build on the unified engine) → **A6** (kill schema dual-encoding; drop dead-imported `ajv`; also fold the
