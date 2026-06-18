@@ -197,11 +197,12 @@ A3 is shipped (`auditor-lambda 0.27.2`); B2+B3 (remediate) and the B2 audit-code
 on `main` (unpublished, see *Where things stand*). Candidate next: **A6**.
 
 **Next program items (suggested order, yours to change):**
-**A6** (zod single-source migration — landed on `main`; verify shipped) → ~~**A8(a)**~~ **DONE** (audit-code
-symmetric rolling wiring — see *A8 remaining loose ends* below; re-based onto the A3-`advance` engine + A6 zod
-types, routing now lives in `runHostDelegationObligation`) → **A12** (single-package collapse — LAST)
-→ **A7** (host machinery across hosts). Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md` →
-"Accepted go-forward program".
+**A6** (zod single-source migration — PARTIALLY landed on `main`, merged in-progress: 12 artifacts done,
+`dispatch_quota` / `step_contract` / `blind_spot_register` + the JSON-schema-deletion linchpin still to do —
+see *Where things stand* above) → ~~**A8(a)**~~ **DONE** (audit-code symmetric rolling wiring — see *A8
+remaining loose ends* below; re-based onto the A3-`advance` engine + A6 zod types, routing now lives in
+`runHostDelegationObligation`) → **A12** (single-package collapse — LAST) → **A7** (host machinery across
+hosts). Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md` → "Accepted go-forward program".
 
 ### A8 remaining loose ends
 - **A8(a) audit-code symmetric wiring — ✓ DONE (branch `a8a-audit-rolling-wiring`, merged with A6/A3 `main`).**
