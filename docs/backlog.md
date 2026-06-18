@@ -104,8 +104,11 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   `0903a000`, preserved on `slice-2b-wip`. Approach B keeps both guards (`checkNoProgressBeforeDispatch` +
   `checkFinalizationCycle`) in audit's `Ctx` and runs `advance` with NO `stateSignature` (its `maxTransitions` =
   pure runaway backstop); the floor-only failure is now reproduced on any OS by
-  `tests/linux-cycle-regression.test.mjs` (`6a036ce`) and green. Retired `maxRuns`. **START-HERE = slice 2c**
-  (reconcile + dead-`description` removal — see `docs/HANDOFF.md`). After 2c, A3 is done. The redesign track.
+  `tests/linux-cycle-regression.test.mjs` (`6a036ce`) and green. Retired `maxRuns`. **Slice 2c DONE**
+  (reconcile): stripped dead `maxRuns` params from the guard tests, deleted the read-nowhere
+  `description` field off `EXECUTOR_REGISTRY` (`kind`/`obligation_ids` stay), confirmed
+  `runDeterministicForNextStep` is purely the `advance`-driven coordinator, reconciled plan/backlog/memory.
+  **A3 is DONE** — both orchestrators run the same shared `advance` fold engine. Next: B2+B3. The redesign track.
   (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
 - **A8 — Rolling dispatch: one shared core + two co-equal full-rolling drivers (REFRAMED 2026-06-16).**
   NO LONGER "flip a flag / delete the host fallback" — that reading was incoherent with conversation-first
