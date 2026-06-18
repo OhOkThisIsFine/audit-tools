@@ -2,7 +2,7 @@ import { existsSync, createReadStream } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
   renderPromptCommand,
   toPromptPathToken,
