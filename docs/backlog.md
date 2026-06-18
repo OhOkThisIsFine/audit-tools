@@ -125,8 +125,16 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   routes to triage (`blocked`), never false-resolved. The `openai-compatible` provider was built to make NIM
   usable (codex+NIM is a dead end — codex 0.140 dropped `wire_api=chat`; NIM's Responses API rejects codex's
   `namespace` tools). **`rolling_engine` flipped default-ON `8819713`** — rolling is the implement default;
-  the wave is opt-out (`rolling_engine:false`). **Remaining:** (a) audit-code symmetric wiring of
-  `runRollingDispatch` (still dormant); (b-residual) the {host-subagent (Claude) + NIM} HYBRID topology + a
+  the wave is opt-out (`rolling_engine:false`). **Remaining:** (a) ~~audit-code symmetric wiring of
+  `runRollingDispatch`~~ **DONE (branch `a8a-audit-rolling-wiring`)** — `driveRollingAuditDispatch` +
+  `makeAuditProviderPacketDispatcher` (read-only review: provider launched against the real repo root, NO
+  worktree/commit/merge; the "merge" is the deterministic `mergeAndIngest`) wired into
+  `runDeterministicForNextStep`'s host-delegation branch with the SAME flag-gated pattern as remediate
+  (`rolling_engine` ON + explicit in-process provider → route to in-process; default host-subagent dispatch
+  step otherwise). Full strand records the partial-completion terminal + skips ingestion; an all-error pass
+  converges to `blocked` via a no-progress guard. Tests: `tests/rolling-audit-dispatch.test.mjs`. STILL TODO:
+  an audit NIM e2e (mirror of remediate's `nim-rolling-e2e`) for live-provider validation through next-step.
+  (b-residual) the {host-subagent (Claude) + NIM} HYBRID topology + a
   live cross-provider spill run (see *Cross-IDE/provider quota detection* below). *(FIXED: worktree-branch reuse
   across a `rate_limited` re-queue — `resetNodeWorktreeAndBranch` removes the worktree, prunes stale admin
   entries, and force-deletes the leftover branch so every re-dispatch starts clean from HEAD.
@@ -407,10 +415,11 @@ cutover below.
   write-scope/lost-update merge) is now WIRED into `decideNextStep` and validated end-to-end over live NIM
   through the real next-step path. The host-fanned wave is **RETAINED as an explicit opt-out**
   (`rolling_engine:false`), NOT removed — conversation-first subagent dispatch is first-class, so deleting it
-  was never the right reading. **Remaining:** (2) symmetric wiring of
-  audit-code's `runRollingDispatch` into the audit live path with the same flag-gated
-  pattern (still dormant); (3) harden worktree-branch reuse across a `rate_limited`
-  re-queue inside the in-process driver. Architectural constraint stands: in
+  was never the right reading. **Remaining:** (2) ~~symmetric wiring of
+  audit-code's `runRollingDispatch`~~ **DONE (branch `a8a-audit-rolling-wiring`)** — `driveRollingAuditDispatch`
+  wired into the audit live path with the same flag-gated pattern; audit dispatch is read-only review so it has
+  NO worktree/merge (the "merge" is `mergeAndIngest`); see the A8 entry above for detail; (3) harden
+  worktree-branch reuse across a `rate_limited` re-queue inside the in-process driver. Architectural constraint stands: in
   conversation-first mode the HOST spawns subagents, so the tool must drive rolling via
   the local-subprocess provider or own the dispatch-next-on-complete bookkeeping the
   host executes — not just emit a static plan.

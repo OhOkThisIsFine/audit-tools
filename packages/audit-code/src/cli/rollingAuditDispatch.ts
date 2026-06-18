@@ -45,6 +45,63 @@ import { prepareDispatchArtifacts, type DispatchPlanEntry } from "./dispatch.js"
 import { mergeAndIngest, type MergeAndIngestResult } from "./mergeAndIngestCommand.js";
 import { packageRoot } from "./paths.js";
 
+/**
+ * Backends the orchestrator can drive IN-PROCESS as the per-packet review worker
+ * via `driveRollingAuditDispatch` (it resolves + launches the provider headless
+ * against the repo root). Restricted to the SELF-CONTAINED headless backends whose
+ * launch needs only the packet prompt: the API-driven `openai-compatible` (the
+ * validated NIM path) and the headless CLIs `codex` / `opencode` (which build their
+ * own invocation from the prompt). Deliberately NARROWER than remediate's set:
+ * `local-subprocess` / `subprocess-template` are excluded because they require a
+ * per-worker `worker_command` that a read-only review packet does not carry, and
+ * `local-subprocess` is audit's conventional host-dispatch default provider (so
+ * routing it in-process would hijack the host-subagent `dispatch_review` path). The
+ * conversation host (claude-code) and IDE backends (vscode-task / antigravity) are
+ * excluded for the same reasons as remediate. "auto" is intentionally absent, so
+ * the in-process driver is opt-in via an EXPLICIT headless backend in session
+ * config; when one is set it takes precedence over the host-subagent dispatch step.
+ */
+const IN_PROCESS_DISPATCH_PROVIDERS: ReadonlySet<string> = new Set([
+  "openai-compatible",
+  "codex",
+  "opencode",
+]);
+
+/**
+ * Whether session config names an EXPLICIT backend provider the orchestrator can
+ * drive in-process as the per-packet review worker. The mirror of remediate's
+ * `resolvesToInProcessDispatchProvider`.
+ */
+export function resolvesToInProcessDispatchProvider(
+  sessionConfig: SessionConfig | null | undefined,
+): boolean {
+  const provider = sessionConfig?.provider;
+  return provider !== undefined && IN_PROCESS_DISPATCH_PROVIDERS.has(provider);
+}
+
+/**
+ * Whether the in-process rolling engine drives audit's semantic-review dispatch.
+ * Mirrors remediate's `resolveRollingEngineEnabled` resolution order: explicit
+ * option → `sessionConfig.dispatch.rolling_engine` → `AUDIT_CODE_ROLLING_ENGINE`
+ * env → default true (the rolling drivers are validated end-to-end and are the
+ * default; the host-subagent dispatch step is the opt-OUT). Honoured only when an
+ * explicit in-process backend provider is also configured (the conversation host,
+ * which fans out its own subagents, keeps using the host-subagent dispatch step).
+ */
+export function resolveAuditRollingEngineEnabled(options: {
+  rollingEngine?: boolean;
+  sessionConfig?: SessionConfig | null;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  if (options.rollingEngine !== undefined) return options.rollingEngine;
+  const cfg = options.sessionConfig?.dispatch?.rolling_engine;
+  if (cfg !== undefined) return cfg;
+  const envValue = (options.env ?? process.env).AUDIT_CODE_ROLLING_ENGINE;
+  if (envValue === "true") return true;
+  if (envValue === "false") return false;
+  return true;
+}
+
 /** Per-packet provider dispatcher — packet → launched provider → AuditResult[] file. */
 export type AuditPacketDispatcher = (
   packet: RollingDispatchPacket<DispatchPlanEntry>,

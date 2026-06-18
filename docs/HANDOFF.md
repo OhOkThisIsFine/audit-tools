@@ -118,15 +118,24 @@ decide in slice 2c.
 
 **After A3 (suggested order, yours to change):** **B2+B3** (diff re-reviews + obligation-set staleness —
 build on the unified engine) → **A6** (kill schema dual-encoding; drop dead-imported `ajv`; also fold the
-minor `OUTCOME_KEYS` re-list noted in the plan doc) → **A8(a)** (audit-code symmetric rolling wiring — its
-dormant `runRollingDispatch`; audit dispatch is read-only review packets → AuditResult, NOT worktree edits,
-so it needs a provider-backed packet dispatcher + routing) → **A12** (single-package collapse — LAST) →
+minor `OUTCOME_KEYS` re-list noted in the plan doc) → ~~**A8(a)**~~ (DONE — see *A8 remaining loose ends*
+below; branch `a8a-audit-rolling-wiring`, ships with A6) → **A12** (single-package collapse — LAST) →
 **A7** (host machinery across hosts). Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md` →
 "Accepted go-forward program".
 
 ### A8 remaining loose ends
-- **REMAINING — audit-code symmetric wiring (= A8(a) above)** — `runRollingDispatch` is still dormant (0 live
-  callers), the mirror of remediate's. Wire it into the audit live path with the same flag-gated pattern.
+- **A8(a) audit-code symmetric wiring — ✓ DONE (branch `a8a-audit-rolling-wiring`, NOT yet merged/published).**
+  `driveRollingAuditDispatch` + `makeAuditProviderPacketDispatcher` (`src/cli/rollingAuditDispatch.ts`) wire the
+  in-process provider driver into `runDeterministicForNextStep`'s host-delegation branch with the SAME
+  flag-gated pattern as remediate (`rolling_engine` ON + explicit in-process provider → drive in-process +
+  `continue`; else the host-subagent dispatch step). **KEY DIFFERENCE from remediate:** audit dispatch is
+  READ-ONLY review (packet → `AuditResult[]`), so there is NO per-node worktree / commit / cherry-pick — every
+  worker launches against the real repo root and writes only its result file; the "merge" is the deterministic
+  `mergeAndIngest` (extracted as a callable from `cmdMergeAndIngest`). Full strand → records the
+  partial-completion terminal + skips ingestion; an all-error pass → converges to `blocked` via a no-progress
+  guard. Commits: `0e0d70c4` (mergeAndIngest extract) → `4227c2fe` (driver, dormant) → routing (this slice).
+  Tests `tests/rolling-audit-dispatch.test.mjs` (7). **STILL TODO:** an audit NIM e2e (mirror of remediate's
+  `nim-rolling-e2e`) for live-provider validation through next-step; A8(a) ships together with A6 (coordinate).
 - **REMAINING — INV-QD-14 b-residual:** the {host-subagent (Claude) + NIM} HYBRID topology (host-subagent
   driver offloading spilled nodes to the in-process NIM pool) + a live cross-provider spill run. The
   in-process-driver spill path is mechanically wired (`f92ed1b`); the host-subagent hybrid is the larger

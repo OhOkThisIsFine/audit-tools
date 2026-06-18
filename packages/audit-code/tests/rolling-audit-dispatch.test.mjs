@@ -21,8 +21,40 @@ import { join } from "node:path";
 const {
   makeAuditProviderPacketDispatcher,
   driveRollingAuditDispatch,
+  resolveAuditRollingEngineEnabled,
+  resolvesToInProcessDispatchProvider,
 } = await import("../src/cli/rollingAuditDispatch.ts");
 const { ACTIVE_DISPATCH_FILENAME } = await import("../src/cli/dispatch.ts");
+
+// ── 0. Routing predicates ─────────────────────────────────────────────────────
+
+test("A8a: resolvesToInProcessDispatchProvider is true only for explicit programmatic backends", () => {
+  assert.equal(resolvesToInProcessDispatchProvider({ provider: "openai-compatible" }), true);
+  assert.equal(resolvesToInProcessDispatchProvider({ provider: "codex" }), true);
+  assert.equal(resolvesToInProcessDispatchProvider({ provider: "opencode" }), true);
+  // The conversation host + IDE backends never engage the in-process driver.
+  assert.equal(resolvesToInProcessDispatchProvider({ provider: "claude-code" }), false);
+  assert.equal(resolvesToInProcessDispatchProvider({ provider: "vscode-task" }), false);
+  assert.equal(resolvesToInProcessDispatchProvider({ provider: "antigravity" }), false);
+  // local-subprocess / subprocess-template are NOT in-process for audit: they need a
+  // per-worker command a read-only review packet lacks, and local-subprocess is the
+  // conventional host-dispatch default (routing it in-process would hijack the
+  // host-subagent dispatch_review path).
+  assert.equal(resolvesToInProcessDispatchProvider({ provider: "local-subprocess" }), false);
+  assert.equal(resolvesToInProcessDispatchProvider({ provider: "subprocess-template" }), false);
+  // No explicit provider → host-subagent default (auto-resolution is NOT in-process).
+  assert.equal(resolvesToInProcessDispatchProvider({}), false);
+  assert.equal(resolvesToInProcessDispatchProvider(undefined), false);
+});
+
+test("A8a: resolveAuditRollingEngineEnabled resolution order — explicit > session > env > default true", () => {
+  assert.equal(resolveAuditRollingEngineEnabled({ rollingEngine: false, sessionConfig: { dispatch: { rolling_engine: true } } }), false);
+  assert.equal(resolveAuditRollingEngineEnabled({ sessionConfig: { dispatch: { rolling_engine: false } } }), false);
+  assert.equal(resolveAuditRollingEngineEnabled({ sessionConfig: { dispatch: { rolling_engine: true } } }), true);
+  assert.equal(resolveAuditRollingEngineEnabled({ env: { AUDIT_CODE_ROLLING_ENGINE: "false" } }), false);
+  assert.equal(resolveAuditRollingEngineEnabled({ env: { AUDIT_CODE_ROLLING_ENGINE: "true" } }), true);
+  assert.equal(resolveAuditRollingEngineEnabled({ env: {} }), true);
+});
 
 const RUN_ID = "rolling-audit-run";
 
