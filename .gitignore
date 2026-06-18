@@ -3,6 +3,7 @@ dist/
 *.tsbuildinfo
 .tmp/
 .audit-tools/
+.audit-artifacts/
 .audit-code/
 # Ignore local Claude state, but track the shared web SessionStart hook + its
 # registration (settings.local.json and caches stay local).

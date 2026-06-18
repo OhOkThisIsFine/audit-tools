@@ -96,14 +96,20 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   visited-state-signature cycle detection — the precise primitive `maxTransitions` approximated — subsuming
   audit's two hand guards; remediate untouched, return type a superset). **Slice 2a** `0886d06` (audit
   dispatch `switch` → `EXECUTOR_RUNNERS` map; absence of a runner = the no-progress handoff). Plus remediate
-  orphaned-helper sweep `33f568f` + parity-check doc `6bfae53`. **Slice 2b+2c were ATTEMPTED, merged, then
-  REVERTED** (`0903a000`; work on branch `slice-2b-wip`): the audit-fold rewrite broke on **Linux CI only**
-  (green on Windows + passed review — only the release publish CI caught it). Root cause: the rewrite collapsed
-  the hand loop's TWO cycle guards into one 0-tolerance visited-set, which is too strict (the old guards skip
-  `no-metadata` states + tolerate 16 content-signature revisits). **START-HERE = slice 2b re-attempt** — restore
-  the old no-metadata-skip + tolerance semantics AND land a Linux-reproducing test FIRST (see `docs/HANDOFF.md`
-  ⚠️ block), then slice 2c (dead-`description` removal). The redesign track. (ARC-f5a5612b, ARC-f5a5612b-3,
-  ARC-b85edf3f.)
+  orphaned-helper sweep `33f568f` + parity-check doc `6bfae53`. **Slice 2b DONE** (`0f3f203`, **approach B**,
+  Linux-CI-green): `runDeterministicForNextStep`'s hand `for`-loop replaced by shared `advance` over audit
+  `ObligationDef`s in `PRIORITY` order. ATTEMPT 1 (approach A: collapse both guards onto `advance.stateSignature`)
+  broke on **Linux CI only** — the 0-tolerance visited-set is too strict for the fresh-Linux floor-only chain
+  (the old guards skip `no-metadata` states + tolerate `FINALIZATION_CYCLE_TOLERANCE`=16 revisits); reverted
+  `0903a000`, preserved on `slice-2b-wip`. Approach B keeps both guards (`checkNoProgressBeforeDispatch` +
+  `checkFinalizationCycle`) in audit's `Ctx` and runs `advance` with NO `stateSignature` (its `maxTransitions` =
+  pure runaway backstop); the floor-only failure is now reproduced on any OS by
+  `tests/linux-cycle-regression.test.mjs` (`6a036ce`) and green. Retired `maxRuns`. **Slice 2c DONE**
+  (reconcile): stripped dead `maxRuns` params from the guard tests, deleted the read-nowhere
+  `description` field off `EXECUTOR_REGISTRY` (`kind`/`obligation_ids` stay), confirmed
+  `runDeterministicForNextStep` is purely the `advance`-driven coordinator, reconciled plan/backlog/memory.
+  **A3 is DONE** — both orchestrators run the same shared `advance` fold engine. Next: B2+B3. The redesign track.
+  (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
 - **A8 — Rolling dispatch: one shared core + two co-equal full-rolling drivers (REFRAMED 2026-06-16).**
   NO LONGER "flip a flag / delete the host fallback" — that reading was incoherent with conversation-first
   (in-conversation subagent dispatch is FIRST-CLASS; subscription/no-API users depend on it — memory
@@ -144,8 +150,32 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   `buildConfirmedPools` emits it as a 2nd CapacityPool alongside the primary, and `makeProviderNodeDispatcher`
   resolves the provider PER-SLOT so the INV-QD-14 spill mechanically routes a node to the openai-compatible pool
   in the in-process driver.)* Plan: `docs/a8-rolling-cutover-plan.md`. (ARC-f378135d family.)
-- **B1 ✓ DONE / B2 / B3 — greenlit** (magic-numbers audit [done — see *Known friction* below],
-  diff-based-re-review, and staleness-cascade; B2/B3 are accepted work, not just logged friction).
+- **B1 ✓ DONE / B2 ✓ DONE / B3 ✓ DONE** (magic-numbers audit [done — see *Known friction* below],
+  diff-based-re-review, and staleness-cascade). **B3 (`f5cea40`):** contract-pipeline staleness
+  is now content/semantics-aware — `semanticProjection.ts` strips provenance (created_at/generated_at)
+  universally and narrows each finalized module-contract entry to its derivable fields (the set
+  `deriveObligationLedger` consumes); the envelope gained `semantic_hash`, and `dependency_hashes` +
+  `detectStaleArtifacts` record/compare the dep's *semantic* hash, so a cosmetic upstream edit no
+  longer re-stales the obligation-bearing chain (`content_hash` stays raw-payload for judge/ledger
+  repair-state identity). **B2 (next commit):** verdict-bearing review phases (critique / assessment /
+  critic / judge) snapshot their verdict + the upstream semantic projections they reviewed
+  (`reviewSnapshot.ts`, captured at ingest); a staleness re-emit appends the prior verdict + the
+  changed-since-last-review delta and instructs re-affirm-or-revise-only-affected, so a re-review is
+  diff-scoped not a blind full re-run. Mirrors audit-code's `normalizeForMetadataHash` (semantic-
+  projection staleness). **B2 audit-code parity port ✓ DONE (2026-06-18).** Audit-code's
+  design-review passes (contract-assessment + conceptual-design-critique) now do the same: a new
+  `designReviewProjection.ts` projects each structural input the review reads (repo_manifest /
+  unit_manifest / graph_bundle / surface_manifest / critical_flows / risk_register /
+  design_assessment.findings) to its load-bearing fields (provenance + per-file metrics stripped,
+  collections canonically ordered — the finalized-style structural projection for B3);
+  `designReviewSnapshot.ts` snapshots each completed pass's verdict + those projections, keys the
+  `design_review_*_completed` obligation on snapshot freshness (replacing the old unconditional
+  carry-forward that never re-fired on real change), and on a re-stale appends the prior verdict +
+  diff to the re-emit prompt (contract + shallow-conceptual prompts; the deep-conceptual JUDGE
+  prompt — perspectives stay independent, the merge becomes diff-aware). The generic diff +
+  re-review-render machinery (`stableStringifyProjection`, `diffProjections`,
+  `renderDiffReReviewSection`) is single-sourced in `@audit-tools/shared/reReview`; each
+  orchestrator owns only its projection table. (ARC-B2B3.)
 - **B4 — Hard-exclude tool-refuted findings — ✓ DONE.** A tier-2 REFUTED finding (e.g. a madge-disproven
   cycle) is now a distinct `grounding:'refuted'` status, quarantined-EXCLUDED from the admitted contract
   rather than collapsed into `ungrounded` (still-merged-as-fact). Shipped: (1) `FindingGrounding.status`
@@ -193,6 +223,16 @@ triaged.
 
 ## Known friction (agent / dev experience)
 
+- **Release `waitForRunCompletion` matches a publish run by tag display name, not run identity (2026-06-18).**
+  Hit shipping `auditor-lambda 0.27.2`: 0.27.2 had been tagged+burned during the reverted A3 ATTEMPT-1, so a
+  STALE failed `publish-package` run carried the same `audit-code-v0.27.2` display name in history. After
+  pushing the new tag, the wait logic (`packages/audit-code/scripts/release-and-publish.mjs`
+  `waitForRunCompletion`) matched the OLD failed run "after 1s" and threw a false publish failure — the NEW
+  run (`27774138156`) actually succeeded and 0.27.2 went live. Fix: select the run by `databaseId`/`createdAt`
+  strictly AFTER the tag-push time (or by the tag-push commit sha), never the most-recent run sharing the tag
+  display name. Only bites when a version is reused after a revert, but it's a real false-negative in the
+  ship gate. (Tooling-side robustness — not a "remember to check" patch.)
+
 ### Contract-pipeline friction surfaced during the 2026-06-15 self-remediation (systematic fixes wanted)
 
 Hit while driving the full `remediate-code` contract pipeline over the 227-finding
@@ -217,21 +257,15 @@ agent (strong or weak), not "be careful" patches.
   - **`DEFAULT_WAVE_SIZE`=5** (`dispatch.ts`): a legacy fallback that fires only when the host reports no
     concurrency limit; rolling dispatch now derives concurrency from quota, so it rarely matters. Low-priority;
     left (would be env-derivable if it ever bites). (Ethan, 2026-06-16.)
-- **Re-reviews are full passes over unchanged designs — make them diff-based.** When an
-  upstream artifact's content-hash changes, the conceptual critique / counterexample /
-  assessment re-run as *full* passes even when the change was cosmetic (e.g. adding
-  gate-satisfying verbatim text to `outputs` with no design change). A re-review should
-  diff against the prior-reviewed version (with file access for context) and only
-  re-examine what changed, returning "prior verdict still holds" cheaply. Today the host
-  must either burn another full critic subagent (~100-190k tokens) or hand-re-emit the
-  prior verdict. (Ethan, 2026-06-16.)
-- **Staleness cascade re-runs the whole downstream chain on every upstream edit.** Any
-  edit to finalized_module_contracts re-stales obligation_ledger → test_validator_plan →
-  contract_assessment (and the host must re-author each), even when the obligation set is
-  unchanged (stable ids). Cosmetic/text-only upstream changes shouldn't force full
-  downstream re-authoring. Pairs with the diff-review item: staleness should be
-  content/semantics-aware, or downstream artifacts keyed on the *obligation set* not the
-  raw upstream hash.
+- **Re-reviews are full passes over unchanged designs — make them diff-based. ✓ DONE (B2).**
+  Verdict-bearing review phases now snapshot their verdict + the upstream semantic projections
+  they reviewed and, on a staleness re-emit, get the prior verdict + the changed-since-last-review
+  delta with a re-affirm-or-revise-only-affected instruction (`reviewSnapshot.ts`). (Ethan, 2026-06-16.)
+- **Staleness cascade re-runs the whole downstream chain on every upstream edit. ✓ DONE (B3).**
+  Staleness is now keyed on each dependency's *semantic projection* (provenance stripped; finalized
+  contracts narrowed to the obligation-bearing derivable fields), so a cosmetic/text-only upstream
+  edit no longer re-stales obligation_ledger → test_validator_plan → contract_assessment
+  (`semanticProjection.ts` + `semantic_hash` in the envelope).
 - **Paired-obligation gate (OBL-CO-01) keyword regex is a hidden contract.** It scans each
   obligation's assertions for a positive-signal word (`passes|returns|produces|valid|
   matches|...`) AND a negative-signal word (`reject|throw|fail|never|not|...`); a `\b`

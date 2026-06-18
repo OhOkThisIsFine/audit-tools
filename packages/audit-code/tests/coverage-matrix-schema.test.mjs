@@ -1,17 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  SCHEMA_REGISTRY,
-  assertMatchesJsonSchema,
-} from "./helpers/auditSchemaRegistry.mjs";
+import { CoverageMatrixSchema, ClassificationStatusSchema } from "../src/types.ts";
 
 // ---------------------------------------------------------------------------
-// TASK-003: coverage_matrix classification_status enum covers every value the
-// TypeScript code writes (scope.ts writes out_of_scope_delta and
-// out_of_scope_intent; trivialAudit.ts writes excluded_trivial).
+// TASK-003 (A6): coverage_matrix is validated against its zod single source
+// (CoverageMatrixSchema). The classification_status enum is ClassificationStatus
+// — the same source scope.ts / trivialAudit.ts write — so the enum can never
+// drift from the values the code emits (the former TS↔schema drift guard is now
+// structurally impossible and was removed).
 // ---------------------------------------------------------------------------
-
-const schema = SCHEMA_REGISTRY["coverage_matrix.schema.json"];
 
 function coverageMatrixWith(classificationStatus) {
   return {
@@ -30,9 +27,7 @@ function coverageMatrixWith(classificationStatus) {
 
 test("coverage_matrix schema accepts all classification_status values written by code", async (t) => {
   await t.test("classification_status enum includes the statuses written by scope and trivial-audit code", () => {
-    const enumValues =
-      schema.properties.files.items.properties.classification_status.enum;
-    assert.ok(Array.isArray(enumValues), "classification_status enum must be an array");
+    const enumValues = ClassificationStatusSchema.options;
     for (const value of ["out_of_scope_delta", "excluded_trivial", "out_of_scope_intent"]) {
       assert.ok(
         enumValues.includes(value),
@@ -41,45 +36,15 @@ test("coverage_matrix schema accepts all classification_status values written by
     }
   });
 
-  await t.test("a coverage_matrix document using out_of_scope_delta validates", () => {
-    assert.doesNotThrow(() =>
-      assertMatchesJsonSchema(
-        schema,
-        coverageMatrixWith("out_of_scope_delta"),
-        "coverage_matrix",
-      ),
-    );
-  });
-
-  await t.test("a coverage_matrix document using excluded_trivial validates", () => {
-    assert.doesNotThrow(() =>
-      assertMatchesJsonSchema(
-        schema,
-        coverageMatrixWith("excluded_trivial"),
-        "coverage_matrix",
-      ),
-    );
-  });
-
-  await t.test("a coverage_matrix document using out_of_scope_intent validates", () => {
-    assert.doesNotThrow(() =>
-      assertMatchesJsonSchema(
-        schema,
-        coverageMatrixWith("out_of_scope_intent"),
-        "coverage_matrix",
-      ),
-    );
+  await t.test("documents using the scope/trivial statuses validate", () => {
+    for (const value of ["out_of_scope_delta", "excluded_trivial", "out_of_scope_intent"]) {
+      assert.doesNotThrow(() => CoverageMatrixSchema.parse(coverageMatrixWith(value)));
+    }
   });
 
   await t.test("an unknown classification_status value still fails validation", () => {
-    assert.throws(
-      () =>
-        assertMatchesJsonSchema(
-          schema,
-          coverageMatrixWith("definitely_not_a_status"),
-          "coverage_matrix",
-        ),
-      /classification_status must be one of/,
+    assert.throws(() =>
+      CoverageMatrixSchema.parse(coverageMatrixWith("definitely_not_a_status")),
     );
   });
 
@@ -95,12 +60,7 @@ test("coverage_matrix schema accepts all classification_status values written by
     ];
     for (const value of preexisting) {
       assert.doesNotThrow(
-        () =>
-          assertMatchesJsonSchema(
-            schema,
-            coverageMatrixWith(value),
-            "coverage_matrix",
-          ),
+        () => CoverageMatrixSchema.parse(coverageMatrixWith(value)),
         `pre-existing classification_status "${value}" must remain valid`,
       );
     }

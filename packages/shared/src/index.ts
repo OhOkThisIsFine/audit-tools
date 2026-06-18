@@ -4,19 +4,35 @@ export type {
   FileDispositionItem,
   FileDisposition,
 } from "./types/disposition.js";
+export {
+  FileDispositionStatusSchema,
+  FileDispositionItemSchema,
+  FileDispositionSchema,
+} from "./types/disposition.js";
 export type { RiskItem, RiskRegister } from "./types/risk.js";
+export { RiskItemSchema, RiskRegisterSchema } from "./types/risk.js";
 export type {
   FlowConfidenceLevel,
   CriticalFlow,
   CriticalFlowManifest,
 } from "./types/flows.js";
-export { FLOW_CONFIDENCE_LEVELS } from "./types/flows.js";
+export {
+  FLOW_CONFIDENCE_LEVELS,
+  FlowConfidenceLevelSchema,
+  CriticalFlowSchema,
+  CriticalFlowManifestSchema,
+} from "./types/flows.js";
 export type {
   SurfaceKind,
   SurfaceRecord,
   SurfaceManifest,
 } from "./types/surfaces.js";
-export { SURFACE_KINDS } from "./types/surfaces.js";
+export {
+  SURFACE_KINDS,
+  SurfaceKindSchema,
+  SurfaceRecordSchema,
+  SurfaceManifestSchema,
+} from "./types/surfaces.js";
 export type {
   RunLedgerStatus,
   RunLedgerEntry,
@@ -27,6 +43,11 @@ export type {
   GraphEdge,
   RouteEdge,
   GraphBundle,
+} from "./types/graph.js";
+export {
+  GraphEdgeSchema,
+  RouteEdgeSchema,
+  GraphBundleSchema,
 } from "./types/graph.js";
 export type { AccessDeclaration } from "./types/accessDeclaration.js";
 export type {
@@ -45,6 +66,21 @@ export type {
   AuditFindingsReport,
 } from "./types/finding.js";
 export { findingIdentity } from "./types/finding.js";
+// Zod schemas (A6 single source) — type inferred above, JSON schema generated.
+export {
+  FindingSeveritySchema,
+  FindingConfidenceSchema,
+  FindingLocationSchema,
+  FindingGroundingSchema,
+  AnchorExpectationSchema,
+  ExecutableAnchorSchema,
+  FindingSchema,
+  WorkBlockSchema,
+  FindingThemeSchema,
+  SynthesisNarrativeSchema,
+  AuditFindingsSummarySchema,
+  AuditFindingsReportSchema,
+} from "./types/finding.js";
 export type { IntentCheckpoint } from "./types/intentCheckpoint.js";
 export type { InterpretedIntent } from "./intent/freeFormIntentInterpreter.js";
 export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
@@ -68,6 +104,7 @@ export type {
 // Canonical lens vocabulary + the runtime validation Sets derived from it.
 export type { Lens } from "./types/lens.js";
 export {
+  LensSchema,
   LENSES,
   VALID_LENSES,
   isLens,
@@ -181,6 +218,19 @@ export {
 // Content hashing: shared SHA-256 primitive (single source; explicit length)
 export type { HashContentOptions } from "./hash.js";
 export { hashContent } from "./hash.js";
+
+// Diff-based re-review (B2/B3): generic projection serialization, leaf-level
+// projection diff, and the re-review prompt section. Each orchestrator owns its
+// own projection table; this single-sources the diff algorithm + prompt shape.
+export type {
+  ProjectionDiffEntry,
+  ReReviewSectionInput,
+} from "./reReview/projectionDiff.js";
+export {
+  stableStringifyProjection,
+  diffProjections,
+  renderDiffReReviewSection,
+} from "./reReview/projectionDiff.js";
 
 // Tooling: command execution
 export type { RunTrackedOptions, RunTrackedResult } from "./tooling/exec.js";

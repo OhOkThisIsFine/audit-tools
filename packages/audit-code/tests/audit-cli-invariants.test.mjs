@@ -237,9 +237,10 @@ test("INV-audit-cli-08: handleGraphEnrichmentBranch accepts the trimmed params s
 
 test("INV-audit-cli-08: handleSynthesisNarrativeBranch accepts the trimmed params shape", async () => {
   const params = { root: ".", artifactsDir: "/nonexistent-dir-abc", narrativeEnabled: false };
-  // narrativeEnabled false + no incoming file → continue
+  // narrativeEnabled false + no incoming file → run_omit (run the deterministic
+  // status:omitted executor so synthesis_narrative_current is satisfied).
   const result = await hsnb(params, {}, { status: "active", obligations: [], blockers: [] });
-  assert.equal(result.action, "continue", "disabled narrative with no incoming file → continue");
+  assert.equal(result.action, "run_omit", "disabled narrative with no incoming file → run_omit");
 });
 
 // ── INV-audit-cli-09: ExternalAnalyzerResults null guard (COR-df0bf37c) ────────

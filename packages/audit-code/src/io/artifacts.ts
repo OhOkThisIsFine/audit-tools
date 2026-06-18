@@ -27,6 +27,10 @@ import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { ToolingManifest } from "../types/toolingManifest.js";
 import type { ActiveDispatchState } from "../types/activeDispatch.js";
 import {
+  loadDesignReviewSnapshots,
+  type DesignReviewSnapshotBundle,
+} from "../orchestrator/designReviewSnapshot.js";
+import {
   AGENT_FEEDBACK_FILENAME,
   isFileMissingError,
   parseReflectionsNdjson,
@@ -148,6 +152,14 @@ type ArtifactPayloadMap = {
 export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
   active_dispatch?: ActiveDispatchState;
   agent_reflections?: AgentReflection[];
+  /**
+   * The design-review pass snapshots (B2 parity port), keyed by pass. Loaded
+   * specially like `active_dispatch` — they live under
+   * `design-review-snapshots/` rather than as standard pruned artifacts — so the
+   * synchronous `deriveAuditState` can key each pass's staleness on the semantic
+   * projection of the structural inputs it reviewed. Absent until first review.
+   */
+  design_review_snapshots?: DesignReviewSnapshotBundle;
 };
 export type ArtifactBundleKey = keyof ArtifactPayloadMap;
 type ArtifactPhase =
@@ -305,6 +317,15 @@ export async function loadArtifactBundle(
   );
   if (activeDispatch !== undefined) {
     bundle.active_dispatch = activeDispatch;
+  }
+
+  // Design-review snapshots (B2 parity port): loaded specially like
+  // active-dispatch so deriveAuditState can key each pass's staleness on the
+  // semantic projection of the structural inputs it reviewed. Absent on a fresh
+  // run / before the first design review completes.
+  const designReviewSnapshots = await loadDesignReviewSnapshots(root);
+  if (Object.keys(designReviewSnapshots).length > 0) {
+    bundle.design_review_snapshots = designReviewSnapshots;
   }
 
   // Schema-version guards (ARC-dd468422): versioned artifacts must carry the

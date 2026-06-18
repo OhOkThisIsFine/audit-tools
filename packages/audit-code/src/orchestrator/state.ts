@@ -9,6 +9,10 @@ import { computeStaleArtifacts } from "./staleness.js";
 import {
   unresolvedConstraintClauses,
 } from "./intentInterpreter.js";
+import {
+  isDesignReviewStale,
+  type DesignReviewPass,
+} from "./designReviewSnapshot.js";
 
 function has(value: unknown): boolean {
   return value !== undefined && value !== null;
@@ -29,6 +33,25 @@ function staleOrSatisfied(
 ): ObligationState {
   if (!present) return "missing";
   return deps.some((dep) => staleArtifacts.has(dep)) ? "stale" : "satisfied";
+}
+
+/**
+ * Satisfaction state of a design-review pass (B2 parity port). A pass that has
+ * not completed is `missing`. A completed pass is `stale` when a snapshot exists
+ * and the semantic projection of any structural input it reviewed has changed —
+ * which triggers a *diff-based* re-review, not a blind full re-run — otherwise
+ * `satisfied`. The legacy path (only the old `reviewed` flag, no snapshot) has no
+ * snapshot, so it stays `satisfied` (never spuriously re-fires).
+ */
+function designReviewPassState(
+  bundle: ArtifactBundle,
+  pass: DesignReviewPass,
+  completed: boolean,
+): ObligationState {
+  if (!completed) return "missing";
+  const snapshot = bundle.design_review_snapshots?.[pass];
+  if (snapshot && isDesignReviewStale(snapshot, bundle)) return "stale";
+  return "satisfied";
 }
 
 export function deriveAuditState(bundle: ArtifactBundle): AuditState {
@@ -166,14 +189,22 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
   obligations.push(
     obligation(
       "design_review_contract_completed",
-      (bundle.design_assessment?.contract_reviewed === true || legacyReviewed) ? "satisfied" : "missing",
+      designReviewPassState(
+        bundle,
+        "contract",
+        bundle.design_assessment?.contract_reviewed === true || legacyReviewed,
+      ),
     ),
   );
 
   obligations.push(
     obligation(
       "design_review_conceptual_completed",
-      (bundle.design_assessment?.conceptual_reviewed === true || legacyReviewed) ? "satisfied" : "missing",
+      designReviewPassState(
+        bundle,
+        "conceptual",
+        bundle.design_assessment?.conceptual_reviewed === true || legacyReviewed,
+      ),
     ),
   );
 
