@@ -88,10 +88,18 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   **slice 2b** `719e276`+`838a0ae` (every phase handler returns a `RemediateOutcome`; the 3 boundary cases —
   `handleClosing`→`complete` cross-engine via emit+reload, `buildImplementDispatchStep` merge-reenter reload,
   forceReplan/count two-advance — resolved + teeth-locked; `skipCount` + dead params dropped; the recursion
-  removal also restored slice-1 entry-gate-freeze for `confirm_resume`). **Remaining — step 4 (small):**
-  orphaned-helper sweep; parity-check audit vs remediate obligation shapes; optional-but-ideal **audit-code
-  adopts `advance` emit-only** (completes the one-engine north star). The redesign track. (ARC-f5a5612b,
-  ARC-f5a5612b-3, ARC-b85edf3f.)
+  removal also restored slice-1 entry-gate-freeze for `confirm_resume`). **Step 4 RESCOPED to "C" + IN
+  PROGRESS** — recon found audit ALREADY folds its deterministic chain into one host round-trip via
+  `runDeterministicForNextStep` (a hand-rolled `advance`: `continue`≡transition, `return`≡emit, + bespoke
+  cycle guards), so audit *adopts* shared `advance` — NOT the earlier "emit-only ceremony" framing (which
+  assumed audit doesn't fold). **Slice 1** `68d2c17b` (shared `advance` gains opt-in `opts.stateSignature` →
+  visited-state-signature cycle detection — the precise primitive `maxTransitions` approximated — subsuming
+  audit's two hand guards; remediate untouched, return type a superset). **Slice 2a** `0886d06` (audit
+  dispatch `switch` → `EXECUTOR_RUNNERS` map; absence of a runner = the no-progress handoff). Plus remediate
+  orphaned-helper sweep `33f568f` + parity-check doc `6bfae53`. **START-HERE = slice 2b** (rewire
+  `runDeterministicForNextStep` onto `advance`: deterministic→transition, host-delegation/dispatch→emit,
+  reusing the slice-2a runners; retire the bespoke guards), then slice 2c (reconcile + dead-`description`
+  decision). The redesign track. (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
 - **A8 — Rolling dispatch: one shared core + two co-equal full-rolling drivers (REFRAMED 2026-06-16).**
   NO LONGER "flip a flag / delete the host fallback" — that reading was incoherent with conversation-first
   (in-conversation subagent dispatch is FIRST-CLASS; subscription/no-API users depend on it — memory
