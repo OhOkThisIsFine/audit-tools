@@ -32,6 +32,11 @@ import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
 import { groundDesignFindings } from "../validation/designFindingGrounding.js";
+import {
+  captureDesignReviewSnapshot,
+  isDesignReviewStale,
+  type DesignReviewPass,
+} from "../orchestrator/designReviewSnapshot.js";
 import { computeArtifactStateSignature } from "../orchestrator/artifactMetadata.js";
 import { decideNextStep, PRIORITY } from "../orchestrator/nextStep.js";
 import { isHostDelegationExecutor } from "../orchestrator/executors.js";
@@ -305,6 +310,12 @@ type BranchActionResult =
  *
  * Also handles legacy `design-review-findings.json` for backward compatibility.
  */
+/** Whether a completed design-review pass has gone stale vs. its snapshot. */
+function passIsStale(bundle: ArtifactBundle, pass: DesignReviewPass): boolean {
+  const snapshot = bundle.design_review_snapshots?.[pass];
+  return snapshot ? isDesignReviewStale(snapshot, bundle) : false;
+}
+
 export async function handleDesignReviewBranch(
   params: Pick<NextStepParams, "artifactsDir">,
   bundle: ArtifactBundle,
@@ -370,12 +381,41 @@ export async function handleDesignReviewBranch(
       join(params.artifactsDir, "design_assessment.json"),
       existing,
     );
+    // Snapshot each just-completed pass (B2 parity port): record the verdict +
+    // the semantic projection of the structural inputs it reviewed, so a later
+    // upstream change re-stales the pass and the re-emit can be diff-scoped
+    // rather than a blind full re-run. Capture after the design_assessment write
+    // so the projection reflects the persisted findings.
+    const reviewedAt = new Date().toISOString();
+    if (contractIncoming) {
+      await captureDesignReviewSnapshot(
+        params.artifactsDir,
+        "contract",
+        existing.contract_findings ?? [],
+        bundle,
+        reviewedAt,
+      );
+    }
+    if (conceptualIncoming) {
+      await captureDesignReviewSnapshot(
+        params.artifactsDir,
+        "conceptual",
+        existing.conceptual_findings ?? [],
+        bundle,
+        reviewedAt,
+      );
+    }
     return { action: "continue" };
   }
 
-  // Determine which passes still need to run.
-  const contractDone = existing?.contract_reviewed === true;
-  const conceptualDone = existing?.conceptual_reviewed === true;
+  // Determine which passes still need to run. A completed pass whose snapshot has
+  // gone stale (a structural input changed in projection) is NOT done — it must
+  // re-run as a diff-based re-review. This mirrors the obligation staleness in
+  // `designReviewPassState`.
+  const contractDone =
+    existing?.contract_reviewed === true && !passIsStale(bundle, "contract");
+  const conceptualDone =
+    existing?.conceptual_reviewed === true && !passIsStale(bundle, "conceptual");
 
   if (!contractDone && !conceptualDone) {
     return { action: "return", result: { kind: "design_review_parallel", state, bundle } };

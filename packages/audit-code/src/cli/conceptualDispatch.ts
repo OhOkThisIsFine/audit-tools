@@ -88,8 +88,20 @@ export async function prepareConceptualDispatch(opts: {
    * stay inert metadata on `modelHints`, mirroring the packet-dispatch path.
    */
   hostCanSelectSubagentModel?: boolean;
+  /**
+   * Diff-based re-review section (B2 parity port). Present only when the
+   * conceptual pass is being re-emitted after staleness. Appended to the single
+   * reviewer's prompt when shallow, and to the JUDGE's prompt when deep — the
+   * judge holds the prior merged verdict and produces the ingested result, so
+   * the merge becomes diff-aware while the perspectives stay independent (each
+   * still reviews fresh through its own lens, never seeing the prior verdict).
+   */
+  reReviewSection?: string;
 }): Promise<ConceptualDispatch> {
   const { artifactsDir, bundle, settings } = opts;
+  const reReviewSuffix = opts.reReviewSection
+    ? `\n\n${opts.reReviewSection}`
+    : "";
   const incoming = join(artifactsDir, "incoming");
   await mkdir(incoming, { recursive: true });
   const conceptualResultsPath = join(
@@ -105,7 +117,7 @@ export async function prepareConceptualDispatch(opts: {
     );
     await writeFile(
       conceptualPromptPath,
-      renderConceptualReviewPrompt(bundle, reviewOptions),
+      renderConceptualReviewPrompt(bundle, reviewOptions) + reReviewSuffix,
       "utf8",
     );
     return {
@@ -169,7 +181,7 @@ export async function prepareConceptualDispatch(opts: {
     judgePromptPath,
     renderConceptualJudgePrompt(
       perspectiveFiles.map((f) => ({ name: f.name, path: f.resultsPath })),
-    ),
+    ) + reReviewSuffix,
     "utf8",
   );
 
