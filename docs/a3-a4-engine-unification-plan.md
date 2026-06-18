@@ -346,11 +346,16 @@ untouched (the return type went `{state,step}` → `{state,step,stopped?}`, a su
 1. **✓ DONE — shared engine: visited-state-signature cycle detection** (this session). The
    `stateSignature` option + `AdvanceResult.stopped` + the visited-set loop. Consumer-less pure
    addition (exempt from atomic-replace).
-2. **Slice 2a — fold the `switch` into executor runners (B).** Each executor becomes a
-   `run(bundle, ctx) => ExecutorRunResult`; `advanceAudit`'s scan path AND the `preferredExecutor`
-   path dispatch via the runner map. Atomic replace: `switch` → runner map. Deletes
-   `executor-registry-sync` (no switch to sync) + the dead `description`. `runDeterministicForNextStep`
-   unchanged; audit `node:test` suite is the oracle.
+2. **✓ DONE — Slice 2a — fold the `switch` into executor runners (B).** New `executorRunners.ts`
+   holds `EXECUTOR_RUNNERS: Record<id, (bundle, ctx) => Promise<ExecutorRunResult>>`; `advanceAudit`
+   dispatches via it, and the **absence** of a runner is the single source of "not deterministically
+   dispatchable" (the no-progress handoff for `agent` / `rolling_dispatch_executor`). The hand `switch`
+   is gone and the switch⇄registry invariant test now asserts **runner-map** coverage instead.
+   `AdvanceAuditOptions` / `AdvanceAuditResult` moved to a leaf `advanceTypes.ts` so the runners can type
+   their ctx without a back-import (madge cycle guard, ARC-1fa005bb). `runDeterministicForNextStep`
+   unchanged. Full audit suite 2193 pass / 1 skip. *(The dead `description` field on the registry is
+   retained for now — it is human-readable executor documentation, not behavioural dead code; decide
+   keep-as-docs vs delete in 2c.)*
 3. **Slice 2b — `advance` drives the deterministic fold.** Audit `ObligationDef`s (`derive` = lookup
    into `deriveAuditState`'s precomputed obligation states; `execute` = run the executor → `transition`
    for deterministic, `emit` for host-delegation/dispatch/terminal). Replace
