@@ -9,9 +9,12 @@
 import { unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  advance,
   isFileMissingError,
   readJsonFile,
   writeJsonFile,
+  type ObligationDef,
+  type ObligationOutcome,
 } from "@audit-tools/shared";
 import type {
   AnalyzerSetting,
@@ -30,7 +33,7 @@ import type { Finding } from "../types.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
 import { groundDesignFindings } from "../validation/designFindingGrounding.js";
 import { computeArtifactStateSignature } from "../orchestrator/artifactMetadata.js";
-import { decideNextStep } from "../orchestrator/nextStep.js";
+import { decideNextStep, PRIORITY } from "../orchestrator/nextStep.js";
 import { isHostDelegationExecutor } from "../orchestrator/executors.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
@@ -87,7 +90,6 @@ export type NextStepParams = {
   artifactsDir: string;
   selfCliPath: string;
   timeoutMs: number;
-  maxRuns: number;
   narrativeEnabled?: boolean;
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
@@ -98,13 +100,44 @@ export type TerminalStepResult =
   | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
   | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string };
 
+/**
+ * The host-actionable outcome of one `next-step` deterministic fold — the
+ * discriminated union `runDeterministicForNextStep` returns and `cmdNextStep`
+ * renders (one branch per kind). Each audit `ObligationDef.execute` returns this
+ * inside an `emit` outcome (or a `transition` carrying the reloaded bundle when
+ * the fold continues).
+ */
+export type NextStepResult =
+  | { kind: "semantic_review"; state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun; selectedExecutor?: string | null }
+  | { kind: "design_review"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
+  | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
+  | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
+  | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string };
+
+/**
+ * Finalization thrashing tolerance (ARC-b8fed771 / the finalization-cycle guard).
+ * The deterministic fold may legitimately revisit a prior artifact state a bounded
+ * number of times (e.g. a runtime_validation <-> synthesis ping-pong, or
+ * filesystem-retry revision churn) before the canonical report is rendered; only
+ * outrunning distinct states by THIS many revisits is a non-converging cycle. Kept
+ * a single named constant — never inline the literal (HANDOFF approach-B mandate:
+ * no magic numbers).
+ */
+export const FINALIZATION_CYCLE_TOLERANCE = 16;
+
 // ── Extracted helpers ─────────────────────────────────────────────────────────
 
 /**
- * Build the terminal step for a deterministic loop that has stopped advancing
- * (hit the run backstop or the finalization cycle guard). A rendered report is
- * the deliverable: if synthesis already produced one — or the state is formally
- * complete — present it instead of reporting the stopped loop as a bare
+ * Build the terminal step for a deterministic fold that has stopped advancing
+ * (no actionable obligation, or a cycle guard fired). A rendered report is the
+ * deliverable: if synthesis already produced one — or the state is formally
+ * complete — present it instead of reporting the stopped fold as a bare
  * "blocked" failure. A completed audit must never surface as blocked just
  * because finalization kept churning (e.g. a runtime_validation <-> synthesis
  * ping-pong, or revision churn from filesystem retries) after the report was
@@ -155,9 +188,9 @@ type GraphEnrichmentBranchResult =
  * Handle the `graph_enrichment_executor` incoming-artifact polling block.
  * Checks for pending analyzer install decisions and edge-reasoning results.
  * Returns an action object:
- *   - `continue`    → caller should `continue` the for-loop (already consumed an artifact).
- *   - `return`      → caller should return the embedded result to cmdNextStep.
- *   - `fallthrough` → no incoming artifacts; fall through to the deterministic executor.
+ *   - `continue`    → caller should keep folding (already consumed an artifact).
+ *   - `return`      → caller should emit the embedded result to cmdNextStep.
+ *   - `fallthrough` → no incoming artifacts; run the deterministic executor.
  */
 export async function handleGraphEnrichmentBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since">,
@@ -265,7 +298,7 @@ type BranchActionResult =
  * polling blocks. Checks for contract and/or conceptual findings files independently.
  *
  * Returns:
- *   - `continue`               → one or both incoming files were consumed; advance loop.
+ *   - `continue`               → one or both incoming files were consumed; keep folding.
  *   - `design_review_parallel` → both passes still needed; dispatch two subagents.
  *   - `design_review_contract` → only contract pass still needed.
  *   - `design_review_conceptual` → only conceptual pass still needed.
@@ -296,7 +329,7 @@ export async function handleDesignReviewBranch(
       );
       return { action: "continue" };
     }
-    // File consumed (deleted) but no target to merge into — loop again.
+    // File consumed (deleted) but no target to merge into — keep folding.
     return { action: "continue" };
   }
 
@@ -360,14 +393,20 @@ export async function handleDesignReviewBranch(
 
 type SynthesisNarrativeBranchResult =
   | { action: "continue" }
+  | { action: "run_omit" }
   | { action: "return"; result: { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle } };
 
 /**
  * Handle the `synthesis_narrative_executor` incoming-artifact polling block.
- * Returns `continue` if an incoming narrative file was consumed, or `return`
- * with a synthesis_narrative kind when the host turn is still needed (and
- * narrative is enabled), or `continue` when narrative is disabled (so the
- * deterministic omit runs below).
+ * Returns:
+ *   - `continue`  → an incoming narrative file was consumed + applied (progress
+ *     made); re-scan on the reloaded bundle.
+ *   - `return`    → a host turn is still needed (narrative enabled, none supplied
+ *     yet); emit the synthesis_narrative step.
+ *   - `run_omit`  → narrative disabled; run the deterministic omit executor (it
+ *     writes the `status:omitted` marker, satisfying synthesis_narrative_current).
+ *     This MUST make progress, never a no-op reload — otherwise the obligation
+ *     stays actionable and the fold spins (the guards do not cover this branch).
  */
 export async function handleSynthesisNarrativeBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir" | "narrativeEnabled">,
@@ -391,16 +430,19 @@ export async function handleSynthesisNarrativeBranch(
   if (params.narrativeEnabled) {
     return { action: "return", result: { kind: "synthesis_narrative", state, bundle } };
   }
-  // Narrative disabled: fall through so the deterministic omit runs below.
-  return { action: "continue" };
+  // Narrative disabled: run the deterministic omit executor below.
+  return { action: "run_omit" };
 }
 
 /**
  * Execute one deterministic audit step and record its progress. Throws (with
  * cause) if the executor fails, preserving the existing throw-with-cause pattern.
+ * `index` is the 0-based fold position (the transition counter), surfaced as the
+ * 1-based `iteration` in the `deterministic-progress.json` marker a
+ * filesystem-watching host reads.
  */
 export async function executeAndRecord(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since" | "maxRuns">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since">,
   analyzers: Record<string, AnalyzerSetting> | undefined,
   decision: ReturnType<typeof decideNextStep>,
   index: number,
@@ -412,7 +454,6 @@ export async function executeAndRecord(
     const startedAt = new Date().toISOString();
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
-      max_runs: params.maxRuns,
       executor: decision.selected_executor,
       obligation: decision.selected_obligation,
       status: "running",
@@ -427,7 +468,6 @@ export async function executeAndRecord(
     });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
-      max_runs: params.maxRuns,
       last_executor: result.selected_executor,
       last_obligation: decision.selected_obligation,
       progress_made: result.progress_made,
@@ -445,7 +485,6 @@ export async function executeAndRecord(
     await writeCoreArtifacts(params.artifactsDir, { ...current, audit_state: currentState });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
-      max_runs: params.maxRuns,
       last_executor: decision.selected_executor,
       last_obligation: decision.selected_obligation,
       prior_summary: lastSummary || null,
@@ -454,69 +493,32 @@ export async function executeAndRecord(
     });
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Deterministic executor ${decision.selected_executor} failed on obligation ${decision.selected_obligation} (iteration ${index + 1}/${params.maxRuns}, prior progress: ${lastSummary || "none"}): ${detail}`,
+      `Deterministic executor ${decision.selected_executor} failed on obligation ${decision.selected_obligation} (iteration ${index + 1}, prior progress: ${lastSummary || "none"}): ${detail}`,
       { cause: error instanceof Error ? error : undefined },
     );
   }
 }
 
-/**
- * Check for a finalization cycle: when iterations outrun distinct artifact
- * states by FINALIZATION_CYCLE_TOLERANCE, the deterministic executors are
- * revisiting states rather than progressing. Returns a terminal-step result
- * when a cycle is detected, or undefined when the run is still progressing.
- */
-export async function checkFinalizationCycle(ctx: {
-  index: number;
-  obligationTrail: string[];
-  seenStateSignatures: Set<string>;
-  tolerance: number;
-  params: Pick<NextStepParams, "artifactsDir" | "maxRuns" | "root">;
-  bundle: ArtifactBundle;
-  state: AuditState;
-  result: AdvanceAuditResult;
-  selectedObligation: string | null | undefined;
-}): Promise<TerminalStepResult | undefined> {
-  ctx.obligationTrail.push(ctx.selectedObligation ?? "unknown");
-  ctx.seenStateSignatures.add(computeArtifactStateSignature(ctx.result.updated_bundle));
-  if (ctx.index + 1 - ctx.seenStateSignatures.size < ctx.tolerance) {
-    return undefined;
-  }
-  const cycle = Array.from(
-    new Set(ctx.obligationTrail.slice(-ctx.tolerance)),
-  );
-  await writeJsonFile(
-    join(ctx.params.artifactsDir, "steps", "deterministic-progress.json"),
-    {
-      iteration: ctx.index + 1,
-      max_runs: ctx.params.maxRuns,
-      cycle_detected: true,
-      cycling_obligations: cycle,
-      summary:
-        "Finalization kept revisiting prior artifact states without net " +
-        `progress; stopping. Cycling obligations: ${cycle.join(" -> ")}.`,
-      timestamp: new Date().toISOString(),
-    },
-  );
-  return buildTerminalStep(
-    ctx.params,
-    ctx.result.updated_bundle,
-    ctx.result.audit_state,
-    "Finalization is not converging: deterministic executors kept revisiting " +
-      `prior artifact states (${cycle.join(" -> ")}). Review whether these ` +
-      "obligations are erroneously invalidating each other.",
-  );
-}
+// ── Cycle guards (kept in audit's Ctx; NOT routed through advance) ─────────────
+//
+// HANDOFF approach-B: the shared `advance` engine is inherently 0-tolerance (it
+// signs `current` at the top of every loop and stops on the FIRST revisit), so it
+// cannot express the finalization-cycle tolerance window or the no-metadata-skip
+// the hand loop relied on. Approach A collapsed both guards into advance's
+// `stateSignature` and false-tripped on a fresh-Linux floor-only chain. So the two
+// guards stay HERE, invoked from inside the deterministic-executor obligation, and
+// `advance` runs with no `stateSignature` (its `maxTransitions` is the pure
+// runaway backstop only).
 
 /**
  * Pre-dispatch no-progress guard (ARC-b8fed771).
  *
- * Runs BEFORE a deterministic executor is dispatched. If the loop is about to
+ * Runs BEFORE a deterministic executor is dispatched. If the fold is about to
  * re-dispatch the SAME executor for the SAME obligation from an artifact-state
  * signature it has ALREADY dispatched that exact (executor, obligation) pair
  * from this run, the prior dispatch left the content-state unchanged (same
  * signature) — so dispatching it again cannot make progress and would spin.
- * Stop the loop with a terminal step instead of re-dispatching.
+ * Stop the fold with a terminal step instead of re-dispatching.
  *
  * The dispatch IDENTITY (signature + executor + obligation), not the signature
  * alone, is the recurrence key. A recurring signature across DIFFERENT executors
@@ -539,7 +541,7 @@ export async function checkFinalizationCycle(ctx: {
 export async function checkNoProgressBeforeDispatch(ctx: {
   index: number;
   dispatchedSignatures: Set<string>;
-  params: Pick<NextStepParams, "artifactsDir" | "maxRuns" | "root">;
+  params: Pick<NextStepParams, "artifactsDir" | "root">;
   bundle: ArtifactBundle;
   state: AuditState;
   selectedObligation: string | null | undefined;
@@ -558,7 +560,6 @@ export async function checkNoProgressBeforeDispatch(ctx: {
       join(ctx.params.artifactsDir, "steps", "deterministic-progress.json"),
       {
         iteration: ctx.index + 1,
-        max_runs: ctx.params.maxRuns,
         no_progress_detected: true,
         repeated_obligation: ctx.selectedObligation ?? "unknown",
         repeated_executor: ctx.selectedExecutor ?? "unknown",
@@ -585,66 +586,434 @@ export async function checkNoProgressBeforeDispatch(ctx: {
   return undefined;
 }
 
+/**
+ * Check for a finalization cycle: when fold transitions outrun distinct artifact
+ * states by FINALIZATION_CYCLE_TOLERANCE, the deterministic executors are
+ * revisiting states rather than progressing. Returns a terminal-step result
+ * when a cycle is detected, or undefined when the run is still progressing.
+ */
+export async function checkFinalizationCycle(ctx: {
+  index: number;
+  obligationTrail: string[];
+  seenStateSignatures: Set<string>;
+  tolerance: number;
+  params: Pick<NextStepParams, "artifactsDir" | "root">;
+  bundle: ArtifactBundle;
+  state: AuditState;
+  result: AdvanceAuditResult;
+  selectedObligation: string | null | undefined;
+}): Promise<TerminalStepResult | undefined> {
+  ctx.obligationTrail.push(ctx.selectedObligation ?? "unknown");
+  ctx.seenStateSignatures.add(computeArtifactStateSignature(ctx.result.updated_bundle));
+  if (ctx.index + 1 - ctx.seenStateSignatures.size < ctx.tolerance) {
+    return undefined;
+  }
+  const cycle = Array.from(
+    new Set(ctx.obligationTrail.slice(-ctx.tolerance)),
+  );
+  await writeJsonFile(
+    join(ctx.params.artifactsDir, "steps", "deterministic-progress.json"),
+    {
+      iteration: ctx.index + 1,
+      cycle_detected: true,
+      cycling_obligations: cycle,
+      summary:
+        "Finalization kept revisiting prior artifact states without net " +
+        `progress; stopping. Cycling obligations: ${cycle.join(" -> ")}.`,
+      timestamp: new Date().toISOString(),
+    },
+  );
+  return buildTerminalStep(
+    ctx.params,
+    ctx.result.updated_bundle,
+    ctx.result.audit_state,
+    "Finalization is not converging: deterministic executors kept revisiting " +
+      `prior artifact states (${cycle.join(" -> ")}). Review whether these ` +
+      "obligations are erroneously invalidating each other.",
+  );
+}
+
+// ── advance engine binding ────────────────────────────────────────────────────
+
+/**
+ * Per-call execution dependencies threaded to every audit obligation executor.
+ * Mirrors remediate-code's `RemediateCtx`: the shared engine stays agnostic;
+ * audit-code picks its own `Ctx`. The refs carry the fold-local mutable state the
+ * hand-rolled `for` loop kept in closures — the analyzer settings a decisions
+ * file can update mid-fold, the last progress summary surfaced in the terminal
+ * block, and the cycle-guard bookkeeping (transition counter + the no-progress /
+ * finalization-cycle sets the two guards mutate).
+ */
+interface AuditNextStepCtx {
+  params: NextStepParams;
+  analyzersRef: { value: Record<string, AnalyzerSetting> | undefined };
+  lastSummaryRef: { value: string };
+  /**
+   * 0-based fold position == the hand loop's `index`. Incremented AFTER each
+   * `transition` outcome (see `countTransitions`), so during any `execute` it
+   * holds the index of the current iteration. The two guards read it as `index`.
+   */
+  iterationRef: { value: number };
+  /** Pre-dispatch no-progress guard state (ARC-b8fed771): dispatched identities. */
+  dispatchedSignatures: Set<string>;
+  /** Finalization-cycle guard state: distinct post-execute artifact signatures. */
+  seenStateSignatures: Set<string>;
+  /** Finalization-cycle guard state: obligation order, for the cycle report. */
+  obligationTrail: string[];
+}
+
+/** The engine state audit folds on: the in-memory bundle (reloaded per transition). */
+type AuditEngineState = ArtifactBundle;
+
+type AuditObligationDef = ObligationDef<
+  AuditEngineState,
+  AuditNextStepCtx,
+  NextStepResult
+>;
+
+type AuditOutcome = ObligationOutcome<AuditEngineState, NextStepResult>;
+
+/**
+ * A deterministic-executor `emit` of a blocked step — the `!progress_made`
+ * dead-end the hand loop returned directly from `executeAndRecord`.
+ */
+function blockedFromResult(result: AdvanceAuditResult): AuditOutcome {
+  return {
+    kind: "emit",
+    step: {
+      kind: "blocked",
+      state: result.audit_state,
+      bundle: result.updated_bundle,
+      reason: result.progress_summary,
+    },
+  };
+}
+
+/**
+ * Run one deterministic executor for the selected obligation, reproducing the
+ * hand loop's normal-path arm: the pre-dispatch no-progress guard, then
+ * record + dispatch, then the post-dispatch finalization-cycle guard. A guard
+ * that fires `emit`s its terminal step (so `advance` returns it); a
+ * `!progress_made` dead-end emits a blocked step; otherwise clear dispatch
+ * staging and `transition` on the reloaded bundle so the fold continues.
+ *
+ * The two guards stay HERE (not in `advance.opts.stateSignature`) so the
+ * no-metadata-skip and the FINALIZATION_CYCLE_TOLERANCE window are preserved —
+ * see the cycle-guard section comment.
+ */
+async function runDeterministicExecutor(
+  bundle: ArtifactBundle,
+  ctx: AuditNextStepCtx,
+): Promise<AuditOutcome> {
+  const decision = decideNextStep(bundle);
+
+  const noProgress = await checkNoProgressBeforeDispatch({
+    index: ctx.iterationRef.value,
+    dispatchedSignatures: ctx.dispatchedSignatures,
+    params: ctx.params,
+    bundle,
+    state: decision.state,
+    selectedObligation: decision.selected_obligation,
+    selectedExecutor: decision.selected_executor,
+  });
+  if (noProgress !== undefined) return { kind: "emit", step: noProgress };
+
+  const result = await executeAndRecord(
+    ctx.params,
+    ctx.analyzersRef.value,
+    decision,
+    ctx.iterationRef.value,
+    ctx.lastSummaryRef.value,
+  );
+  ctx.lastSummaryRef.value = result.progress_summary;
+  if (!isHostDelegationExecutor(result.selected_executor ?? "")) {
+    await clearDispatchFiles(ctx.params.artifactsDir);
+  }
+  if (!result.progress_made) {
+    return blockedFromResult(result);
+  }
+
+  const cycle = await checkFinalizationCycle({
+    index: ctx.iterationRef.value,
+    obligationTrail: ctx.obligationTrail,
+    seenStateSignatures: ctx.seenStateSignatures,
+    tolerance: FINALIZATION_CYCLE_TOLERANCE,
+    params: ctx.params,
+    bundle,
+    state: decision.state,
+    result,
+    selectedObligation: decision.selected_obligation,
+  });
+  if (cycle !== undefined) return { kind: "emit", step: cycle };
+
+  return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+}
+
+/**
+ * `derive` for an audit obligation: look up its precomputed satisfaction state
+ * from `deriveAuditState` — the holistic content-hash staleness pass that
+ * computes EVERY obligation's state in one scan (`state.ts`). A pruned/absent
+ * obligation is satisfied. `decideNextStep`'s persisted-`complete` short-circuit
+ * yields an all-satisfied scan (no actionable obligation), which `advance`
+ * surfaces as `step === null` → the post-fold terminal.
+ */
+function deriveObligationState(
+  id: string,
+): (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied" {
+  return (bundle) => {
+    if (bundle.audit_state?.status === "complete") return "satisfied";
+    const state = deriveAuditState(bundle);
+    const found = state.obligations.find((o) => o.id === id);
+    if (!found) return "satisfied";
+    return found.state === "missing" || found.state === "stale"
+      ? found.state
+      : "satisfied";
+  };
+}
+
+/**
+ * Build the audit obligation definitions in `PRIORITY` order. Each `execute`
+ * relocates the corresponding arm of the hand-rolled `for` loop:
+ * deterministic executors `transition` (fold), host-delegation / dispatch /
+ * terminal points `emit` the host-actionable step. Selection stays single-sourced
+ * (`deriveObligationState` reads `deriveAuditState`, and `decideNextStep` resolves
+ * the executor for the selected id), so the obligation list cannot drift from the
+ * priority scan it mirrors.
+ */
+function buildAuditObligations(): AuditObligationDef[] {
+  const deterministic = (id: string): AuditObligationDef => ({
+    id,
+    derive: deriveObligationState(id),
+    execute: (bundle, ctx) => runDeterministicExecutor(bundle, ctx),
+  });
+
+  return [
+    // Provider confirmation gate: a session-level deterministic auto-complete
+    // (writes a default provider_confirmation.json) — folds on like any other
+    // deterministic executor.
+    deterministic("provider_confirmation"),
+    deterministic("repo_manifest"),
+    deterministic("file_disposition"),
+    deterministic("auto_fixes_applied"),
+    deterministic("syntax_resolved"),
+    deterministic("structure_artifacts"),
+    {
+      // Graph enrichment: poll the analyzer-decision / edge-reasoning incoming
+      // artifacts first (emit a host step when one is needed), otherwise run the
+      // deterministic enrichment executor.
+      id: "graph_enrichment_current",
+      derive: deriveObligationState("graph_enrichment_current"),
+      execute: async (bundle, ctx): Promise<AuditOutcome> => {
+        const state = deriveAuditState(bundle);
+        const branch = await handleGraphEnrichmentBranch(
+          ctx.params,
+          bundle,
+          state,
+          ctx.analyzersRef,
+        );
+        if (branch.action === "return") {
+          return { kind: "emit", step: branch.result };
+        }
+        if (branch.action === "continue") {
+          // A decisions/edge file was consumed (and possibly applied): re-scan on
+          // the reloaded bundle without running the executor this turn.
+          return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+        }
+        // fallthrough: run the deterministic enrichment executor.
+        return runDeterministicExecutor(bundle, ctx);
+      },
+    },
+    deterministic("design_assessment_current"),
+    {
+      // Confirm-intent host step: the host writes intent_checkpoint.json (read by
+      // deriveAuditState on re-invocation), so there is no incoming artifact to
+      // consume — emit the step directly.
+      id: "intent_checkpoint_current",
+      derive: deriveObligationState("intent_checkpoint_current"),
+      execute: async (bundle): Promise<AuditOutcome> => ({
+        kind: "emit",
+        step: { kind: "confirm_intent", state: deriveAuditState(bundle), bundle },
+      }),
+    },
+    {
+      // Contract design-review pass: poll incoming contract/conceptual findings;
+      // emit the dispatch step when a pass still needs to run.
+      id: "design_review_contract_completed",
+      derive: deriveObligationState("design_review_contract_completed"),
+      execute: (bundle, ctx) => runDesignReviewObligation(bundle, ctx),
+    },
+    {
+      // Conceptual design-review pass: same incoming-poll handler (it resolves
+      // which pass remains).
+      id: "design_review_conceptual_completed",
+      derive: deriveObligationState("design_review_conceptual_completed"),
+      execute: (bundle, ctx) => runDesignReviewObligation(bundle, ctx),
+    },
+    deterministic("planning_artifacts"),
+    {
+      // The audit-task dispatch obligation maps to the host-delegation
+      // rolling_dispatch_executor (no deterministic runner) → semantic review.
+      id: "audit_tasks_completed",
+      derive: deriveObligationState("audit_tasks_completed"),
+      execute: (bundle, ctx) => runHostDelegationObligation(bundle, ctx),
+    },
+    deterministic("audit_results_ingested"),
+    deterministic("runtime_validation_current"),
+    deterministic("synthesis_current"),
+    {
+      // Synthesis narrative: poll the incoming narrative; emit the host step when
+      // narrative is enabled and not yet supplied, otherwise the deterministic
+      // omit runs (fold on).
+      id: "synthesis_narrative_current",
+      derive: deriveObligationState("synthesis_narrative_current"),
+      execute: async (bundle, ctx): Promise<AuditOutcome> => {
+        const state = deriveAuditState(bundle);
+        const branch = await handleSynthesisNarrativeBranch(ctx.params, bundle, state);
+        if (branch.action === "return") {
+          return { kind: "emit", step: branch.result };
+        }
+        if (branch.action === "run_omit") {
+          // Narrative disabled: run the deterministic omit executor so the
+          // status:omitted marker is written and the obligation is satisfied.
+          // (A bare reload here would leave it actionable and spin the fold.)
+          return runDeterministicExecutor(bundle, ctx);
+        }
+        // continue: an incoming narrative was consumed + applied — re-scan.
+        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+      },
+    },
+  ];
+}
+
+/** Shared design-review-pass executor (both pass obligations route here). */
+async function runDesignReviewObligation(
+  bundle: ArtifactBundle,
+  ctx: AuditNextStepCtx,
+): Promise<AuditOutcome> {
+  const state = deriveAuditState(bundle);
+  const branch = await handleDesignReviewBranch(ctx.params, bundle, state);
+  if (branch.action === "return") {
+    return { kind: "emit", step: branch.result };
+  }
+  return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+}
+
+/**
+ * Host-delegation dispatch obligation (`audit_tasks_completed` →
+ * rolling_dispatch_executor, no deterministic runner): materialize the semantic
+ * review run and emit it. Guards on the executor actually being host-delegation,
+ * mirroring the hand loop's `isHostDelegationExecutor` branch; a missing/non-
+ * delegation executor emits the same blocked step the no-executor branch did.
+ */
+async function runHostDelegationObligation(
+  bundle: ArtifactBundle,
+  ctx: AuditNextStepCtx,
+): Promise<AuditOutcome> {
+  const decision = decideNextStep(bundle);
+  const state = decision.state;
+  if (!decision.selected_executor) {
+    return emitNoExecutorBlocked(bundle, ctx, decision);
+  }
+  if (!isHostDelegationExecutor(decision.selected_executor)) {
+    // Not host-delegation and no deterministic graph_enrichment/design-review
+    // handler claimed it: fall back to the deterministic executor path (which
+    // emits blocked when the runner is absent / makes no progress).
+    return runDeterministicExecutor(bundle, ctx);
+  }
+  const review = await ensureSemanticReviewRun({
+    root: ctx.params.root,
+    artifactsDir: ctx.params.artifactsDir,
+    bundle,
+    state,
+    obligationId: decision.selected_obligation,
+    selfCliPath: ctx.params.selfCliPath,
+    timeoutMs: ctx.params.timeoutMs,
+  });
+  return {
+    kind: "emit",
+    step: {
+      kind: "semantic_review",
+      selectedExecutor: decision.selected_executor,
+      ...review,
+    },
+  };
+}
+
+/** Emit the no-executor blocked step (the hand loop's `!selected_executor` arm). */
+async function emitNoExecutorBlocked(
+  bundle: ArtifactBundle,
+  ctx: AuditNextStepCtx,
+  decision: ReturnType<typeof decideNextStep>,
+): Promise<AuditOutcome> {
+  const state = decision.state;
+  const reason = ctx.lastSummaryRef.value || decision.reason;
+  await writeHandoffOnly({
+    root: ctx.params.root,
+    artifactsDir: ctx.params.artifactsDir,
+    bundle,
+    audit_state: state,
+    progress_summary: reason,
+    providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+  });
+  return { kind: "emit", step: { kind: "blocked", state, bundle, reason } };
+}
+
+/**
+ * Wrap each obligation so the transition counter advances exactly once per fold
+ * iteration — the analog of the hand loop's `index++`. Incrementing AFTER a
+ * `transition` (and never on an `emit`, which exits the fold) means during any
+ * `execute` the counter holds the current iteration's 0-based index, which the
+ * two cycle guards read as `index`. Single point of truth so a new obligation
+ * cannot forget to count.
+ */
+function countTransitions(obligations: AuditObligationDef[]): AuditObligationDef[] {
+  return obligations.map((obligation) => ({
+    ...obligation,
+    execute: async (bundle: ArtifactBundle, ctx: AuditNextStepCtx) => {
+      const outcome = await obligation.execute(bundle, ctx);
+      if (outcome.kind === "transition") ctx.iterationRef.value += 1;
+      return outcome;
+    },
+  }));
+}
+
 // ── Coordinator ───────────────────────────────────────────────────────────────
 
-export async function runDeterministicForNextStep(params: NextStepParams): Promise<
-  | { kind: "semantic_review"; state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun; selectedExecutor?: string | null }
-  | { kind: "design_review"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
-  | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
-  | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
-  | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string }
-> {
-  let lastSummary = "";
+/**
+ * Drive the deterministic fold for one `next-step` call.
+ *
+ * Structure mirrors remediate-code's `decideNextStepLoop` (the proven engine
+ * consumer): a PREAMBLE (the `index===0` file-integrity re-intake, the analog of
+ * remediate's `forceReplan`) then the shared `advance` running audit's `PRIORITY`
+ * obligations. Each deterministic executor `transition`s (folding the whole chain
+ * into one host round-trip); host-delegation / dispatch / terminal obligations
+ * `emit` the host-actionable step.
+ *
+ * Cycle detection stays in audit's `Ctx` (the pre-dispatch no-progress guard +
+ * the FINALIZATION_CYCLE_TOLERANCE finalization-cycle guard, both invoked from
+ * inside `runDeterministicExecutor`), NOT in `advance.opts.stateSignature` — the
+ * shared engine is inherently 0-tolerance and cannot express the tolerance window
+ * or the no-metadata-skip (HANDOFF approach B). `advance`'s `maxTransitions` is
+ * left as its pure runaway backstop. A `step === null` result (no actionable
+ * obligation, e.g. synthesis flipped the state to complete) resolves to the
+ * terminal step (present_report when a report is rendered, else blocked).
+ */
+export async function runDeterministicForNextStep(
+  params: NextStepParams,
+): Promise<NextStepResult> {
   const analyzersRef: { value: Record<string, AnalyzerSetting> | undefined } = {
     value: params.analyzers,
   };
-  // Finalization thrashing guard — see checkFinalizationCycle for details.
-  const FINALIZATION_CYCLE_TOLERANCE = 16;
-  const seenStateSignatures = new Set<string>();
-  const obligationTrail: string[] = [];
-  // Pre-dispatch no-progress guard (ARC-b8fed771): dispatch identities
-  // (signature|executor|obligation) already dispatched this run. Re-entering the
-  // SAME executor+obligation on the SAME unchanged state means the prior
-  // dispatch made no net progress — stop, don't dispatch again. A recurring
-  // signature across DIFFERENT executors (no-op-but-satisfying steps) is fine.
-  const dispatchedSignatures = new Set<string>();
 
-  for (let index = 0; index < params.maxRuns; index++) {
+  // PREAMBLE — file-integrity re-intake (runs once, like remediate's
+  // forceReplan). When pending audit-task files have changed/vanished since the
+  // manifest was built, re-run intake so planning re-grounds. advanceAudit does
+  // not persist (only runAuditStep does), so this is the same diagnostic-then-
+  // reload the hand loop performed on its first iteration: the warning fires and
+  // the fold below starts from the freshly-loaded disk bundle.
+  {
     const bundle = await loadArtifactBundle(params.artifactsDir);
-    const decision = decideNextStep(bundle);
-    const state = decision.state;
-
-    if (state.status === "complete") {
-      await writeHandoffOnly({
-        root: params.root,
-        artifactsDir: params.artifactsDir,
-        bundle,
-        audit_state: state,
-        progress_summary: decision.reason,
-        providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
-      });
-      const promoted = await promoteFinalAuditReport({
-        artifactsDir: params.artifactsDir,
-      });
-      return {
-        kind: "complete",
-        state,
-        bundle,
-        // Promotion copies the report to the artifacts dir's PARENT
-        // (.audit-tools/audit-report.md), not the repo root.
-        finalReportPath: promoted.promoted
-          ? join(dirname(params.artifactsDir), AUDIT_REPORT_FILENAME)
-          : join(params.artifactsDir, AUDIT_REPORT_FILENAME),
-      };
-    }
-
-    if (index === 0 && bundle.repo_manifest) {
+    if (bundle.audit_state?.status !== "complete" && bundle.repo_manifest) {
       const pendingTasks = buildPendingAuditTasks(bundle);
       const taskFiles = new Set<string>();
       for (const task of pendingTasks) {
@@ -661,143 +1030,66 @@ export async function runDeterministicForNextStep(params: NextStepParams): Promi
               `${integrity.missing_files.length} missing, ${integrity.io_errors.length} io-error(s); re-running intake.\n`,
           );
           await advanceAudit(bundle, { root: params.root, preferredExecutor: "intake_executor" });
-          continue;
         }
       }
     }
-
-    if (decision.selected_executor === "graph_enrichment_executor") {
-      const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef);
-      if (branch.action === "continue") continue;
-      if (branch.action === "return") return branch.result;
-      // fallthrough: run the executor below
-    }
-
-    // Host-delegation executors (design_review_contract, design_review_conceptual,
-    // agent) exit the deterministic loop entirely — they pause the pipeline and
-    // hand control to the LLM agent.
-    if (
-      decision.selected_executor === "design_review_contract" ||
-      decision.selected_executor === "design_review_conceptual" ||
-      decision.selected_executor === "design_review"
-    ) {
-      const branch = await handleDesignReviewBranch(params, bundle, state);
-      if (branch.action === "continue") continue;
-      return branch.result;
-    }
-
-    if (decision.selected_executor === "synthesis_narrative_executor") {
-      const branch = await handleSynthesisNarrativeBranch(params, bundle, state);
-      if (branch.action === "continue") continue;
-      return branch.result;
-    }
-
-    // Provider confirmation gate: auto-complete headlessly and continue the loop.
-    // The provider gate is session-level; it fires once at the start of a run and
-    // writes a default provider_confirmation.json immediately — no host step needed.
-    if (decision.selected_executor === "provider_confirmation_executor") {
-      const provResult = await executeAndRecord(params, analyzersRef.value, decision, index, lastSummary);
-      lastSummary = provResult.progress_summary;
-      await clearDispatchFiles(params.artifactsDir);
-      continue;
-    }
-
-    // Confirm-intent host step: when the checkpoint is missing, hand control to
-    // the host to confirm scope/intent. The host writes intent_checkpoint.json
-    // (detected by deriveAuditState on re-invocation), so there is no incoming
-    // artifact to consume — emit the step directly.
-    if (decision.selected_executor === "intent_checkpoint_executor") {
-      return { kind: "confirm_intent", state, bundle };
-    }
-
-    if (isHostDelegationExecutor(decision.selected_executor ?? "")) {
-      return {
-        kind: "semantic_review",
-        selectedExecutor: decision.selected_executor,
-        ...(await ensureSemanticReviewRun({
-          root: params.root,
-          artifactsDir: params.artifactsDir,
-          bundle,
-          state,
-          obligationId: decision.selected_obligation,
-          selfCliPath: params.selfCliPath,
-          timeoutMs: params.timeoutMs,
-        })),
-      };
-    }
-
-    if (!decision.selected_executor) {
-      await writeHandoffOnly({
-        root: params.root,
-        artifactsDir: params.artifactsDir,
-        bundle,
-        audit_state: state,
-        progress_summary: lastSummary || decision.reason,
-        providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
-      });
-      return {
-        kind: "blocked",
-        state,
-        bundle,
-        reason: lastSummary || decision.reason,
-      };
-    }
-
-    // Pre-dispatch no-progress guard (ARC-b8fed771): refuse to re-dispatch a
-    // deterministic executor on an artifact state already processed this run
-    // without net progress — a content-unchanged signature recurring means
-    // looping, not progressing. Stop here BEFORE dispatch rather than letting
-    // the post-dispatch tolerance window fill.
-    const noProgress = await checkNoProgressBeforeDispatch({
-      index,
-      dispatchedSignatures,
-      params,
-      bundle,
-      state,
-      selectedObligation: decision.selected_obligation,
-      selectedExecutor: decision.selected_executor,
-    });
-    if (noProgress !== undefined) return noProgress;
-
-    const result = await executeAndRecord(params, analyzersRef.value, decision, index, lastSummary);
-    lastSummary = result.progress_summary;
-    if (!isHostDelegationExecutor(result.selected_executor ?? "")) {
-      await clearDispatchFiles(params.artifactsDir);
-    }
-    if (!result.progress_made) {
-      return {
-        kind: "blocked",
-        state: result.audit_state,
-        bundle: result.updated_bundle,
-        reason: result.progress_summary,
-      };
-    }
-
-    // Finalization cycle guard. If this iteration returned the audit to an
-    // artifact state already produced this run, the deterministic loop is
-    // thrashing (no net progress) rather than converging. The canonical outputs
-    // are already rendered, so stop and surface the cycling obligations instead
-    // of spinning to maxRuns and crashing.
-    const cycleResult = await checkFinalizationCycle({
-      index,
-      obligationTrail,
-      seenStateSignatures,
-      tolerance: FINALIZATION_CYCLE_TOLERANCE,
-      params,
-      bundle,
-      state,
-      result,
-      selectedObligation: decision.selected_obligation,
-    });
-    if (cycleResult !== undefined) return cycleResult;
   }
 
+  const ctx: AuditNextStepCtx = {
+    params,
+    analyzersRef,
+    lastSummaryRef: { value: "" },
+    iterationRef: { value: 0 },
+    dispatchedSignatures: new Set<string>(),
+    seenStateSignatures: new Set<string>(),
+    obligationTrail: [],
+  };
+
+  const startBundle = await loadArtifactBundle(params.artifactsDir);
+  const outcome = await advance(
+    { priority: PRIORITY, obligations: countTransitions(buildAuditObligations()) },
+    startBundle,
+    ctx,
+  );
+
+  if (outcome.step) return outcome.step;
+
+  // No actionable obligation: the fold reached completion (e.g. synthesis flipped
+  // the state to complete and every obligation is now satisfied). Build the
+  // terminal: present_report when the state is complete / a report is rendered,
+  // else blocked.
   const bundle = await loadArtifactBundle(params.artifactsDir);
-  const state = deriveAuditState(bundle);
+  const decision = decideNextStep(bundle);
+  const state = decision.state;
+
+  if (state.status === "complete") {
+    await writeHandoffOnly({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      bundle,
+      audit_state: state,
+      progress_summary: decision.reason,
+      providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+    });
+    const promoted = await promoteFinalAuditReport({
+      artifactsDir: params.artifactsDir,
+    });
+    return {
+      kind: "complete",
+      state,
+      bundle,
+      // Promotion copies the report to the artifacts dir's PARENT
+      // (.audit-tools/audit-report.md), not the repo root.
+      finalReportPath: promoted.promoted
+        ? join(dirname(params.artifactsDir), AUDIT_REPORT_FILENAME)
+        : join(params.artifactsDir, AUDIT_REPORT_FILENAME),
+    };
+  }
+
   return buildTerminalStep(
     params,
     bundle,
     state,
-    `Reached max run limit (${params.maxRuns}) before a review, report, or blocker step was ready.`,
+    ctx.lastSummaryRef.value || decision.reason,
   );
 }
