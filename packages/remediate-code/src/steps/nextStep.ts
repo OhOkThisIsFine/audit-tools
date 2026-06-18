@@ -2435,9 +2435,7 @@ async function handlePlanning(
   root: string,
   artifactsDir: string,
   state: RemediationState,
-  options: NextStepOptions,
   store: StateStore,
-  runLogger: RunLogger,
 ): Promise<RemediateOutcome> {
   // Review-necessity gate (Path B). Path A records its review decision at intake,
   // over the ORIGINAL findings, before the contract pipeline collapses them into
@@ -2497,7 +2495,6 @@ async function handlePlanning(
   // advances to close rather than looping forever. A node that is merely
   // waiting on a still-running prerequisite is NOT here (it would appear in a
   // later eligible pass); only nodes with a permanently-unsatisfiable edge are.
-  let changed = false;
   if (implementBlocks.length === 0) {
     for (const block of blockedByUnsatisfiedDependency(state)) {
       for (const findingId of block.items) {
@@ -2510,7 +2507,6 @@ async function handlePlanning(
           "(a prerequisite was skipped, blocked, or the dependencies are cyclic); " +
           "the rolling scheduler will not dispatch this node against an upstream " +
           "surface that never landed (INV-RS-01).";
-        changed = true;
       }
     }
   }
@@ -2526,7 +2522,6 @@ async function handleImplementing(
   state: RemediationState,
   runLogger: RunLogger,
   store: StateStore,
-  options: NextStepOptions,
 ): Promise<RemediateOutcome> {
   const triageStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
@@ -2621,7 +2616,6 @@ async function handleClosing(
   state: RemediationState,
   runLogger: RunLogger,
   store: StateStore,
-  options: NextStepOptions,
 ): Promise<RemediateOutcome> {
   const closeStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "close" });
@@ -3414,14 +3408,7 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
           ? "missing"
           : "satisfied",
       execute: async (state) =>
-        handlePlanning(
-          root,
-          artifactsDir,
-          requireState(state),
-          options,
-          store,
-          runLogger,
-        ),
+        handlePlanning(root, artifactsDir, requireState(state), store),
     },
     {
       // Partial-completion terminal consume (OBL-S09 / INV-X06): block the
@@ -3510,21 +3497,14 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
             return { kind: "transition", state: s };
           }
         }
-        return handleImplementing(root, artifactsDir, s, runLogger, store, options);
+        return handleImplementing(root, artifactsDir, s, runLogger, store);
       },
     },
     {
       id: "triage",
       derive: (state) => (state?.status === "triage" ? "missing" : "satisfied"),
       execute: async (state) =>
-        handleImplementing(
-          root,
-          artifactsDir,
-          requireState(state),
-          runLogger,
-          store,
-          options,
-        ),
+        handleImplementing(root, artifactsDir, requireState(state), runLogger, store),
     },
     {
       // planning with zero documentable findings is a user question, not a
@@ -3566,14 +3546,7 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
       id: "closing",
       derive: (state) => (state?.status === "closing" ? "missing" : "satisfied"),
       execute: async (state) =>
-        handleClosing(
-          root,
-          artifactsDir,
-          requireState(state),
-          runLogger,
-          store,
-          options,
-        ),
+        handleClosing(root, artifactsDir, requireState(state), runLogger, store),
     },
     {
       // Catch-all: reached only when no specific obligation matched. Always
