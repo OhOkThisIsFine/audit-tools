@@ -426,3 +426,57 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     expect(nextStep.step_kind).not.toBe("confirm_intent");
   });
 });
+
+describe("A3 slice 2b: handleClosing → complete crosses the engine boundary", () => {
+  // `complete` is a PRE-INTAKE obligation, so a main-engine transition can never
+  // select it. handleClosing therefore EMITs the report directly, passing exactly
+  // what the original recursion reloaded after close. These two cases pin that
+  // reload with teeth: a not-green close PRESERVES the artifact dir (reload → the
+  // saved complete state → run_id is the plan_id); a fully-green close DELETES it
+  // (reload → null → run_id is a fresh randomRunId). Passing the wrong value
+  // (always-null or always-closed) — or transitioning instead of emitting, which
+  // would fall through to unhandled_state — fails one of these.
+  it("not-green close preserves artifacts → present_report carries the run's plan_id (reload → complete state)", async () => {
+    await saveState(
+      makePlanningState({
+        status: "closing",
+        items: {
+          "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
+          "F-002": {
+            finding_id: "F-002",
+            status: "blocked",
+            block_id: "B-002",
+            failure_reason: "Provider failed after retries.",
+          },
+        },
+      }),
+    );
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("present_report");
+    // A blocked item makes the close not-fully-green → artifacts preserved → the
+    // reload yields the saved complete state, so the report carries its plan_id.
+    expect(step.run_id).toBe("PLAN-1");
+  });
+
+  it("fully-green close deletes artifacts → present_report carries a fresh run id (reload → null)", async () => {
+    await saveState(
+      makePlanningState({
+        status: "closing",
+        items: {
+          "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
+          "F-002": { finding_id: "F-002", status: "resolved", block_id: "B-002" },
+        },
+      }),
+    );
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("present_report");
+    // Fully green → artifact dir deleted → the reload is null → randomRunId.
+    expect(step.run_id).toMatch(/^REMEDIATE-/);
+  });
+});

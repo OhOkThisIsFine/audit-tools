@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, type ObligationDef, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot } from "@audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot } from "@audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { runPlanPhase, applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -1384,8 +1384,9 @@ async function buildImplementDispatchStep(ctx: {
   options: NextStepOptions;
   implementBlocks: RemediationBlock[];
   runLogger: RunLogger;
-}): Promise<RemediationStep> {
-  const { root, artifactsDir, state, options, implementBlocks, runLogger } = ctx;
+  store: StateStore;
+}): Promise<RemediateOutcome> {
+  const { root, artifactsDir, state, options, implementBlocks, runLogger, store } = ctx;
 
     const sessionConfigImpl = options.sessionConfig ??
       await readOptionalJsonFile<SessionConfig>(
@@ -1447,11 +1448,12 @@ async function buildImplementDispatchStep(ctx: {
       });
       // null = no eligible pending work this pass; the engine merges internally once
       // it has run, so only the empty-frontier case needs a merge here. Either way the
-      // implement frontier is resolved — re-enter to advance (triage / closing).
+      // implement frontier is resolved — transition on the freshly-merged state so the
+      // engine re-scans (triage / closing) without recursion.
       if (driven === null) {
         await mergeImplementResults({ root, artifactsDir }, runId);
       }
-      return decideNextStepLoop(options, runLogger, true);
+      return { kind: "transition", state: await store.loadState() };
     }
 
     if (rollingEngineEnabled && canDispatchImpl) {
@@ -1460,7 +1462,7 @@ async function buildImplementDispatchStep(ctx: {
       // rather than emitting a dispatch step with zero nodes.
       if (rolling.session.frontier.length === 0) {
         await mergeImplementResults({ root, artifactsDir }, runId);
-        return decideNextStepLoop(options, runLogger, true);
+        return { kind: "transition", state: await store.loadState() };
       }
       const rollMerge = loaderCommand(`merge-implement-results --run-id ${runId}`);
       const rollNext = loaderCommand("next-step");
@@ -1471,7 +1473,7 @@ async function buildImplementDispatchStep(ctx: {
             `- \`${n.block_id}\` — prompt: \`${n.prompt_path}\` — worktree (subagent cwd): \`${n.worktree_root}\``,
         )
         .join("\n");
-      return writeCurrentStep({
+      return { kind: "emit", step: await writeCurrentStep({
         stepKind: "dispatch_implement_rolling",
         status: "ready",
         runId,
@@ -1521,7 +1523,7 @@ ${DISPATCH_PROMPT_HANDOFF_NOTE}
         stopCondition:
           "Stop after every node has been accepted (accept-node returns done), results merged, and next-step has been run.",
         artifactPaths: { dispatch_plan: rolling.planPath, dispatch_quota: rolling.quotaPath },
-      });
+      }) };
     }
     // Rolling per-node dispatch: prepare EVERY currently-eligible node (deps all
     // verified-complete), never a single artificially-serialized block. There is
@@ -1540,7 +1542,7 @@ ${DISPATCH_PROMPT_HANDOFF_NOTE}
     // of zero workers.
     if (dispatchPlan.items.length === 0) {
       await mergeImplementResults({ root, artifactsDir }, runId);
-      return decideNextStepLoop(options, runLogger, true);
+      return { kind: "transition", state: await store.loadState() };
     }
     const planPath = join(artifactsDir, "runs", runId, "implement", "dispatch-plan.json");
     const mergeCommand = loaderCommand(`merge-implement-results --run-id ${runId}`);
@@ -1554,7 +1556,7 @@ ${DISPATCH_PROMPT_HANDOFF_NOTE}
       // dependency levels happens naturally on the next next-step pass: this
       // level's results are merged, and the next pass emits the now-eligible
       // downstream level after the host rebuilds the shared surface.
-      return writeCurrentStep({
+      return { kind: "emit", step: await writeCurrentStep({
         stepKind: "implement_rolling_sequential",
         status: "ready",
         runId,
@@ -1588,10 +1590,10 @@ Then run:
           dispatch_plan: planPath,
           dispatch_quota: implQuotaPath,
         },
-      });
+      }) };
     }
 
-    return writeCurrentStep({
+    return { kind: "emit", step: await writeCurrentStep({
       stepKind: "dispatch_implement",
       status: "ready",
       runId,
@@ -1634,7 +1636,7 @@ Then run:
       stopCondition:
         "Stop after all implementation results have been merged and next-step has been run.",
       artifactPaths: { dispatch_plan: planPath, dispatch_quota: implQuotaPath },
-    });
+    }) };
 }
 
 // --- Per-state handlers -----------------------------------------------------
@@ -2436,7 +2438,7 @@ async function handlePlanning(
   options: NextStepOptions,
   store: StateStore,
   runLogger: RunLogger,
-): Promise<RemediationStep> {
+): Promise<RemediateOutcome> {
   // Review-necessity gate (Path B). Path A records its review decision at intake,
   // over the ORIGINAL findings, before the contract pipeline collapses them into
   // DAG nodes; Path B (document / conversation) derives findings INSIDE the
@@ -2446,7 +2448,7 @@ async function handlePlanning(
   // recorded terminal disposition.
   if (state.plan && !existsSync(reviewDecisionPath(artifactsDir))) {
     const halt = await runPlanningReviewGate(root, artifactsDir, state, store);
-    if (halt) return halt;
+    if (halt) return { kind: "emit", step: halt };
   }
 
   // Document phase dissolved: planning transitions directly to implementing.
@@ -2463,7 +2465,7 @@ async function handlePlanning(
           ...integrity.io_errors.map((p) => `io-error: ${p}`),
         ];
         const replanCommand = loaderCommand("next-step --force-replan");
-        return writeCurrentStep({
+        return { kind: "emit", step: await writeCurrentStep({
           stepKind: "collect_starting_point",
           status: "blocked",
           runId: stateRunId(state),
@@ -2482,7 +2484,7 @@ async function handlePlanning(
           ].join("\n"),
           allowedCommands: [replanCommand],
           stopCondition: "Stop after re-planning completes.",
-        });
+        }) };
       }
     }
   }
@@ -2515,7 +2517,7 @@ async function handlePlanning(
 
   state.status = "implementing";
   await store.saveState(state);
-  return decideNextStepLoop(options, runLogger, true);
+  return { kind: "transition", state };
 }
 
 async function handleImplementing(
@@ -2525,13 +2527,13 @@ async function handleImplementing(
   runLogger: RunLogger,
   store: StateStore,
   options: NextStepOptions,
-): Promise<RemediationStep> {
+): Promise<RemediateOutcome> {
   const triageStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
   const triaged = await runTriagePhase(state, { root, artifactsDir });
   runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "triage", duration_ms: Date.now() - triageStart });
   await store.saveState(triaged);
-  return decideNextStepLoop(options, runLogger, true);
+  return { kind: "transition", state: triaged };
 }
 
 function hasResolvedItems(state: RemediationState): boolean {
@@ -2547,7 +2549,7 @@ async function handleAllTerminalTransition(
   store: StateStore,
   options: NextStepOptions,
   runLogger: RunLogger,
-): Promise<RemediationStep> {
+): Promise<RemediateOutcome> {
   const gateDisabled =
     options.skipFinalGate === true ||
     process.env.REMEDIATE_SKIP_FINAL_GATE === "1" ||
@@ -2604,13 +2606,13 @@ async function handleAllTerminalTransition(
       decision.state.status =
         decision.action === "reattempt_all" ? "implementing" : "closing";
       await store.saveState(decision.state);
-      return decideNextStepLoop(options, runLogger, true);
+      return { kind: "transition", state: decision.state };
     }
   }
 
   state.status = "closing";
   await store.saveState(state);
-  return decideNextStepLoop(options, runLogger, true);
+  return { kind: "transition", state };
 }
 
 async function handleClosing(
@@ -2620,15 +2622,27 @@ async function handleClosing(
   runLogger: RunLogger,
   store: StateStore,
   options: NextStepOptions,
-): Promise<RemediationStep> {
+): Promise<RemediateOutcome> {
   const closeStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "close" });
   const closed = await runClosePhase(state, { root, artifactsDir }, runLogger);
   runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "close", duration_ms: Date.now() - closeStart });
   if (closed.status !== "complete") {
+    // Not done (preview / re-blocked to triage): persist and re-scan.
     await store.saveState(closed);
+    return { kind: "transition", state: closed };
   }
-  return decideNextStepLoop(options, runLogger, true);
+  // Close-complete CROSSES the engine boundary: `complete` is a pre-intake
+  // obligation, unreachable from a main-engine transition. Emit the durable
+  // report directly, passing exactly what the original recursion reloaded — the
+  // artifact dir is DELETED on a fully-green close (reload → null → randomRunId)
+  // and PRESERVED on a not-green complete (reload → the saved complete state →
+  // its plan_id). `store.loadState()` reproduces both, so present_report is
+  // identical to the cascade. (Regression-locked in next-step-implement-dispatch.)
+  return {
+    kind: "emit",
+    step: await handleComplete(root, artifactsDir, await store.loadState()),
+  };
 }
 
 async function handleZeroDocumentableFindings(
@@ -2731,7 +2745,7 @@ export async function decideNextStep(
   });
   const startedAt = Date.now();
   try {
-    const step = await decideNextStepLoop(normalizedOptions, runLogger, false);
+    const step = await decideNextStepLoop(normalizedOptions, runLogger);
     runLogger.event({
       phase: "next-step",
       kind: "step",
@@ -3081,6 +3095,15 @@ type RemediateObligation = ObligationDef<
 >;
 
 /**
+ * What a remediate phase handler / dispatch builder returns to the engine: a
+ * `transition` (state advanced; `advance` re-scans within the same call) or an
+ * `emit` (a host-actionable step; `advance` returns it). Replaces the handlers'
+ * former internal `return decideNextStepLoop(...true)` recursion (A3 slice 2b) so
+ * the engine drives every fold with zero recursion.
+ */
+type RemediateOutcome = ObligationOutcome<RemediationState | null, RemediationStep>;
+
+/**
  * Narrow a nullable engine state to non-null inside an executor whose `derive`
  * only marks it actionable when the state is present — a violation is an engine
  * contract bug, not a runtime condition.
@@ -3328,11 +3351,13 @@ const MAIN_PRIORITY: readonly string[] = [
 
 /**
  * The post-intake cascade tail as declarative obligations (A3 slice 2). Runs on a
- * non-null state (pre-intake resolved it). The resolution-file branches and the
- * implementing dead-end become `transition` outcomes — the engine re-scans,
- * replacing the cascade's internal recursion at those three sites. The phase
- * handlers remain the emit executors (their own internal recursion is unwound in
- * a follow-up; until then it re-enters `advance`, which is sound).
+ * non-null state (pre-intake resolved it). Every phase handler returns a
+ * `RemediateOutcome` — a `transition` (planning→implementing, triage, the
+ * re-block/close funnel, the dispatch merge-then-reenter folds) or an `emit` (a
+ * host-actionable step). `advance` drives the whole fold with ZERO recursion
+ * (slice 2b). The one cross-engine case — `handleClosing` reaching `complete`,
+ * which lives in the pre-intake engine — emits the report directly rather than
+ * transitioning (a main transition could never select it).
  */
 function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
   const { root, artifactsDir, options, runLogger, store } = ctx;
@@ -3388,9 +3413,8 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         documentableFindings(state).length > 0
           ? "missing"
           : "satisfied",
-      execute: async (state) => ({
-        kind: "emit",
-        step: await handlePlanning(
+      execute: async (state) =>
+        handlePlanning(
           root,
           artifactsDir,
           requireState(state),
@@ -3398,7 +3422,6 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
           store,
           runLogger,
         ),
-      }),
     },
     {
       // Partial-completion terminal consume (OBL-S09 / INV-X06): block the
@@ -3430,17 +3453,14 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         }
         delete s.partial_completion_terminal;
         await store.saveState(s);
-        return {
-          kind: "emit",
-          step: await handleAllTerminalTransition(
-            root,
-            artifactsDir,
-            s,
-            store,
-            options,
-            runLogger,
-          ),
-        };
+        return handleAllTerminalTransition(
+          root,
+          artifactsDir,
+          s,
+          store,
+          options,
+          runLogger,
+        );
       },
     },
     {
@@ -3453,17 +3473,15 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         // has left "pending".
         const pendingBlocks = implementableBlocks(s);
         if (pendingBlocks.length > 0) {
-          return {
-            kind: "emit",
-            step: await buildImplementDispatchStep({
-              root,
-              artifactsDir,
-              state: s,
-              options,
-              implementBlocks: pendingBlocks,
-              runLogger,
-            }),
-          };
+          return buildImplementDispatchStep({
+            root,
+            artifactsDir,
+            state: s,
+            options,
+            implementBlocks: pendingBlocks,
+            runLogger,
+            store,
+          });
         }
         // Dead-end pending nodes whose dependency never reached verified-complete
         // (INV-RS-01) so the implementing→triage loop can't livelock; transition
@@ -3492,18 +3510,14 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
             return { kind: "transition", state: s };
           }
         }
-        return {
-          kind: "emit",
-          step: await handleImplementing(root, artifactsDir, s, runLogger, store, options),
-        };
+        return handleImplementing(root, artifactsDir, s, runLogger, store, options);
       },
     },
     {
       id: "triage",
       derive: (state) => (state?.status === "triage" ? "missing" : "satisfied"),
-      execute: async (state) => ({
-        kind: "emit",
-        step: await handleImplementing(
+      execute: async (state) =>
+        handleImplementing(
           root,
           artifactsDir,
           requireState(state),
@@ -3511,7 +3525,6 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
           store,
           options,
         ),
-      }),
     },
     {
       // planning with zero documentable findings is a user question, not a
@@ -3539,9 +3552,8 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         state != null && allItemsTerminal(state) && state.status !== "closing"
           ? "missing"
           : "satisfied",
-      execute: async (state) => ({
-        kind: "emit",
-        step: await handleAllTerminalTransition(
+      execute: async (state) =>
+        handleAllTerminalTransition(
           root,
           artifactsDir,
           requireState(state),
@@ -3549,14 +3561,12 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
           options,
           runLogger,
         ),
-      }),
     },
     {
       id: "closing",
       derive: (state) => (state?.status === "closing" ? "missing" : "satisfied"),
-      execute: async (state) => ({
-        kind: "emit",
-        step: await handleClosing(
+      execute: async (state) =>
+        handleClosing(
           root,
           artifactsDir,
           requireState(state),
@@ -3564,7 +3574,6 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
           store,
           options,
         ),
-      }),
     },
     {
       // Catch-all: reached only when no specific obligation matched. Always
@@ -3583,7 +3592,6 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
 async function decideNextStepLoop(
   options: NextStepOptions,
   runLogger: RunLogger,
-  skipCount: boolean,
 ): Promise<RemediationStep> {
   const root = resolveRoot(options.root);
   const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
@@ -3595,12 +3603,14 @@ async function decideNextStepLoop(
     kind: "state",
     obligation: state?.status ?? "pending",
   });
-  // step_count is incremented once per host invocation. The shared `counted`
-  // flag (seeded from skipCount so recursive re-entries never re-count) plus
-  // `countStep` is reused by both the pre-intake obligation executors and the
-  // inline tail below, so it can never double-count. step_count is not embedded
-  // in the emitted step, so the count-vs-build ordering is unobservable.
-  const counted = { value: skipCount };
+  // step_count is incremented once per host invocation. The `counted` flag guards
+  // the shared `countStep` closure so the forceReplan preamble, the pre-intake
+  // obligation executors, and the post-intake count point can never double-count
+  // within a call. step_count is not embedded in the emitted step, so the
+  // count-vs-build ordering is unobservable. (Every phase handler now returns a
+  // transition/emit outcome, so `advance` drives the whole fold in ONE call —
+  // there is no recursive re-entry to guard against.)
+  const counted = { value: false };
   const countStep = async (current: RemediationState | null): Promise<void> => {
     if (!current || counted.value) return;
     if (!current.started_at) current.started_at = new Date().toISOString();
@@ -3611,10 +3621,10 @@ async function decideNextStepLoop(
 
   const inputResolution = resolveInputPaths(root, options.input);
 
-  // Preamble — runs once on the first (non-recursive) entry. forceReplan
-  // re-grounds from existing intake; skipCount is true on every recursive entry
-  // so it cannot loop when the engine folds through planning → implementing.
-  if (options.forceReplan && !skipCount && state != null) {
+  // Preamble — forceReplan re-grounds from existing intake. The whole decide loop
+  // runs once per host call (the engine folds planning → implementing → … through
+  // transitions, never a recursive decideNextStepLoop), so this fires at most once.
+  if (options.forceReplan && state != null) {
     await countStep(state);
     state = await forceReplanFromExistingIntake(root, artifactsDir, state, store);
   }
@@ -3629,11 +3639,10 @@ async function decideNextStepLoop(
     join(artifactsDir, "confirm_resume_ack.json"),
   );
 
-  // Slice 1 (strangler): the linear pre-intake gates run as obligations through
-  // the shared advance loop. An emit returns to the host; a transition re-scans
-  // within this call; exhausting them (step === null) means the run is past
-  // intake and falls through to the inline tail below (the un-migrated back-edge
-  // cluster).
+  // The linear pre-intake gates run as obligations through the shared advance
+  // loop. An emit returns to the host; a transition re-scans within this call;
+  // exhausting them (step === null) means the run is past intake and falls
+  // through to the post-intake `advance` (MAIN_PRIORITY) below.
   const ctx: RemediateCtx = {
     root,
     artifactsDir,
