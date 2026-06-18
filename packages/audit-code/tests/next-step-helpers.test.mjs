@@ -10,7 +10,6 @@ const {
   buildTerminalStep,
   handleGraphEnrichmentBranch,
   handleDesignReviewBranch,
-  checkFinalizationCycle,
   tryConsumeIncoming,
 } = await import("../src/cli/nextStepCommand.ts");
 
@@ -321,86 +320,13 @@ await test("handleDesignReviewBranch returns continue after merging a valid lega
   });
 });
 
-// ── checkFinalizationCycle ────────────────────────────────────────────────────
-
-await test("checkFinalizationCycle returns undefined when distinct state count is within tolerance", async () => {
-  await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "steps"), { recursive: true });
-
-    const obligationTrail = [];
-    const seenStateSignatures = new Set();
-    const tolerance = 4;
-    const params = { artifactsDir, maxRuns: 100, root: artifactsDir };
-
-    // Add 3 distinct signatures — well within tolerance of 4
-    for (let i = 0; i < 3; i++) {
-      seenStateSignatures.add(`sig-${i}`);
-    }
-
-    const result = await checkFinalizationCycle({
-      index: 4, // index 4, 5 distinct sigs → 5-5=0 < 4 → no cycle
-      obligationTrail,
-      seenStateSignatures,
-      tolerance,
-      params,
-      bundle: {},
-      state: { status: "planning" },
-      result: {
-        updated_bundle: {},
-        audit_state: { status: "planning" },
-        progress_made: true,
-        progress_summary: "ok",
-        selected_executor: "test",
-        selected_obligation: "test",
-      },
-      selectedObligation: "synthesis_current",
-    });
-
-    // index=4, seenStateSignatures.size=3 → 4+1-3=2 < 4 → no cycle yet
-    assert.equal(result, undefined);
-  });
-});
-
-await test("checkFinalizationCycle triggers terminal step after TOLERANCE repeated states", async () => {
-  await withTempDir(async (artifactsDir) => {
-    await mkdir(join(artifactsDir, "steps"), { recursive: true });
-    await writeFile(
-      join(artifactsDir, "operator-handoff.json"),
-      JSON.stringify({ progress_summary: "" }),
-      "utf8",
-    );
-
-    const tolerance = 4;
-    const params = { artifactsDir, maxRuns: 100, root: artifactsDir };
-
-    // Simulate 10 iterations that have only produced 2 distinct states
-    const obligationTrail = Array(10).fill("synthesis_current");
-    const seenStateSignatures = new Set(["sig-a", "sig-b"]);
-
-    const result = await checkFinalizationCycle({
-      index: 9, // index=9, size=2 → 10-2=8 >= 4 → cycle detected
-      obligationTrail,
-      seenStateSignatures,
-      tolerance,
-      params,
-      bundle: {},
-      state: { status: "planning" },
-      result: {
-        updated_bundle: {},
-        audit_state: { status: "planning", obligations: [] },
-        progress_made: true,
-        progress_summary: "ok",
-        selected_executor: "synthesis_executor",
-        selected_obligation: "synthesis_current",
-      },
-      selectedObligation: "synthesis_current",
-    });
-
-    // Should return a terminal result (blocked or complete)
-    assert.ok(result !== undefined);
-    assert.ok(result.kind === "blocked" || result.kind === "complete");
-  });
-});
+// Cycle detection moved into the shared `advance` engine's visited-state
+// signature (A3 step 4 slice 2b) — `checkFinalizationCycle` /
+// `checkNoProgressBeforeDispatch` were deleted. The mechanism is unit-tested in
+// `@audit-tools/shared` (obligation-engine.test.mjs: no-progress stop, A→B→A
+// cycle, non-monotonic deepening, graceful stopped:"cycle"); the audit-specific
+// dispatch-identity key + cycle→terminal routing is covered by
+// `advance-fold-equivalence.test.mjs` and `audit-code-completion.test.mjs`.
 
 // ── tryConsumeIncoming ────────────────────────────────────────────────────────
 
