@@ -1,23 +1,104 @@
 {
-  "private": true,
-  "workspaces": [
-    "packages/*"
+  "name": "audit-tools",
+  "version": "0.28.0",
+  "private": false,
+  "description": "Portable hybrid code auditing + remediation orchestrators for arbitrary repositories.",
+  "type": "module",
+  "bin": {
+    "audit-code": "audit-code.mjs",
+    "remediate-code": "remediate-code.mjs"
+  },
+  "exports": {
+    "./shared": {
+      "types": "./dist/shared/index.d.ts",
+      "default": "./dist/shared/index.js"
+    },
+    "./shared/*": {
+      "types": "./dist/shared/*.d.ts",
+      "default": "./dist/shared/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "audit-code.mjs",
+    "audit-code-wrapper-*.mjs",
+    "remediate-code.mjs",
+    "dispatch/**",
+    "schemas/**",
+    "templates/**",
+    "skills/**",
+    "scripts/postinstall.mjs",
+    "scripts/audit/postinstall.mjs",
+    "scripts/remediate/postinstall.mjs",
+    "opencode.json",
+    "README.md",
+    "docs/audit-pkg/**"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
-    "check": "npm run check --workspaces",
-    "test": "npm run test --workspaces",
-    "release:changed:patch:publish": "node scripts/release-changed.mjs --bump=patch",
-    "release:changed:minor:publish": "node scripts/release-changed.mjs --bump=minor",
-    "release:changed:major:publish": "node scripts/release-changed.mjs --bump=major",
-    "release:changed:dry-run": "node scripts/release-changed.mjs --dry-run",
-    "submit": "audit-code submit-packet"
+    "postinstall": "node scripts/postinstall.mjs",
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && npm run test:node && npm run test:remediate",
+    "test:node": "node --import tsx/esm --test tests/shared/*.test.mjs tests/audit/*.test.mjs",
+    "test:audit": "npm run build && node --import tsx/esm --test tests/audit/*.test.mjs",
+    "test:shared": "npm run build && node --import tsx/esm --test tests/shared/*.test.mjs",
+    "test:remediate": "vitest run",
+    "test:single": "npm run build && node --import tsx/esm --test",
+    "verify:release": "npm run check && npm test && npm run smoke:linked-audit-code && npm run smoke:packaged-audit-code && npm run smoke:linked-remediate-code && npm run smoke:packaged-remediate-code",
+    "smoke:linked-audit-code": "node scripts/audit/smoke-linked-audit-code.mjs",
+    "smoke:packaged-audit-code": "node scripts/audit/smoke-packaged-audit-code.mjs",
+    "smoke:linked-remediate-code": "node scripts/remediate/smoke-linked-remediate-code.mjs",
+    "smoke:packaged-remediate-code": "node scripts/remediate/smoke-packaged-remediate-code.mjs",
+    "update-languages": "node scripts/audit/update-languages.mjs",
+    "generate-schemas": "node scripts/audit/generate-schemas.mjs",
+    "fixtures:auditor-contract": "node scripts/remediate/generate-auditor-contract-fixture.mjs",
+    "release:patch:publish": "node scripts/release-and-publish.mjs patch",
+    "release:minor:publish": "node scripts/release-and-publish.mjs minor",
+    "release:major:publish": "node scripts/release-and-publish.mjs major",
+    "release:patch": "node scripts/release-and-publish.mjs patch --bump-only",
+    "release:minor": "node scripts/release-and-publish.mjs minor --bump-only",
+    "release:major": "node scripts/release-and-publish.mjs major --bump-only",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run verify:release"
   },
   "engines": {
     "node": ">=20"
   },
+  "dependencies": {
+    "commander": "^13.0.0",
+    "smol-toml": "^1.6.1",
+    "yaml": "^2.9.0",
+    "zod": "^3.25.76"
+  },
   "devDependencies": {
-    "@types/node": "^22.19.19",
-    "typescript": "~5.8"
+    "@types/node": "^24.3.0",
+    "linguist-languages": "^9.3.2",
+    "tree-sitter-wasms": "^0.1.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.0.0",
+    "web-tree-sitter": "^0.25.10",
+    "zod-to-json-schema": "^3.24.6"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OhOkThisIsFine/audit-tools.git"
+  },
+  "homepage": "https://github.com/OhOkThisIsFine/audit-tools#readme",
+  "bugs": {
+    "url": "https://github.com/OhOkThisIsFine/audit-tools/issues"
+  },
+  "keywords": [
+    "audit",
+    "remediation",
+    "cli",
+    "code-audit",
+    "static-analysis",
+    "orchestration",
+    "agents"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -5,15 +5,15 @@ on:
     branches:
       - main
     paths:
-      - packages/audit-code/**
-      - packages/shared/**
+      - src/**
+      - tests/**
       - package-lock.json
   pull_request:
     branches:
       - main
     paths:
-      - packages/audit-code/**
-      - packages/shared/**
+      - src/**
+      - tests/**
       - package-lock.json
 
 concurrency:
@@ -61,17 +61,10 @@ jobs:
           set -euo pipefail
           trap 'echo "::error::npm ci failed. Inspect the uploaded audit-code-test-suite npm logs artifact and rerun npm ci locally."' ERR
           npm ci
-      - name: Build @audit-tools/shared
-        timeout-minutes: 5
-        shell: bash
-        working-directory: packages/shared
-        run: |
-          set -euo pipefail
-          npm run build
       - name: Type-check
         timeout-minutes: 10
         shell: bash
-        working-directory: packages/audit-code
+        working-directory: .
         run: |
           set -euo pipefail
           trap 'echo "::error::npm run check failed. Review the uploaded audit-code-test-suite npm logs artifact and confirm the TypeScript build is green locally."' ERR
@@ -79,7 +72,7 @@ jobs:
       - name: Build
         timeout-minutes: 10
         shell: bash
-        working-directory: packages/audit-code
+        working-directory: .
         run: |
           set -euo pipefail
           trap 'echo "::error::npm run build failed. Review the uploaded audit-code-test-suite npm logs artifact and rerun npm run build locally."' ERR
@@ -87,7 +80,7 @@ jobs:
       - name: Run tests
         timeout-minutes: 15
         shell: bash
-        working-directory: packages/audit-code
+        working-directory: .
         run: |
           set -euo pipefail
           trap 'echo "::error::npm test failed. Review the uploaded audit-code-test-suite npm logs artifact and compare the failing Node line shown in this job name."' ERR
@@ -106,4 +99,4 @@ jobs:
         shell: bash
         working-directory: .
         run: |
-          echo "::error::audit-code test-suite workflow failed on Node ${{ matrix.node-version }}. Review the uploaded npm logs artifact and rerun npm ci && npm test -w packages/audit-code locally on the same Node line."
+          echo "::error::audit-code test-suite workflow failed on Node ${{ matrix.node-version }}. Review the uploaded npm logs artifact and rerun npm ci && npm test locally on the same Node line."

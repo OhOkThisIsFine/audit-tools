@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "audit-tools/shared": ["./src/shared/index.ts"],
+      "audit-tools/shared/*": ["./src/shared/*.ts"]
+    }
+  },
+  "include": ["src"]
+}
