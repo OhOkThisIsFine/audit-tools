@@ -381,11 +381,14 @@ describe("DEPENDENCY_MAP staleness propagates through new phases", () => {
       goal_id: "G1", obligations: [], created_at: CREATED_AT,
     });
 
-    // Rewrite seam_reconciliation_report with new content.
-    await writeContractArtifact(ARTIFACTS_DIR, "seam_reconciliation_report", {
-      ...makeSeamReconciliationReport(),
-      created_at: "2026-06-01T00:00:00.000Z", // different timestamp = different hash
-    });
+    // Rewrite seam_reconciliation_report with a LOAD-BEARING change (a new
+    // mismatch entry). A timestamp-only change would NOT re-stale under
+    // semantic-projection staleness (B3) — provenance stamps are stripped.
+    await writeContractArtifact(
+      ARTIFACTS_DIR,
+      "seam_reconciliation_report",
+      makeSeamReconciliationReport([{ id: "M1", note: "new mismatch" }]),
+    );
 
     const result = await detectStaleArtifacts(ARTIFACTS_DIR);
     expect(result.stale).not.toContain("module_decomposition");
