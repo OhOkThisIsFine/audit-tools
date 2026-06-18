@@ -204,9 +204,21 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   `yamlPaths.ts` rewritten to walk the parsed object; all degrade to empty on malformed input (never throw).
   audit-code's first third-party runtime deps (`smol-toml`, `yaml`) — both pure-JS / OS-agnostic. Dropped-edge
   regression tests added. (ARC-843ce274, ARC-4d950c7f.)
-- **A6 — Kill the schema dual-encoding.** 47 JSON schemas + parallel hand-written TS validators (already
-  drifted once); single-source one from the other so drift is impossible, and remove the dead-imported
-  `ajv`. (ARC-ad53dd0d-2.)
+- **A6 — Kill the schema dual-encoding — ✓ DONE (branch `a6-zod-finish`, 2026-06-18).** Every artifact
+  contract is single-sourced as a zod schema (TS types `z.infer`red); the parallel JSON-schema encoding +
+  hand validators are gone, so drift is structurally impossible. **audit-code:** all internal JSON schemas
+  deleted except the 5 worker-facing ones (lens/finding/audit_task/audit_result/audit_results), which are
+  GENERATED from zod + drift-guarded; the hand validator (`jsonSchemaAssert.mjs`) + registry + self-tests
+  deleted; `schema-contracts.test.mjs` rewritten to `Schema.parse`/`safeParse`; the CLI response envelope
+  ported to `AuditCodeResponseSchema`; quota leaf types / `dispatch_quota` / `step_contract` / shared
+  `AgentReflection` converted; recovered bounds the type-conversion had dropped (e.g. `AuditUnitSchema`
+  strict + `risk_score` 0..10). **remediate:** the `PUBLIC_CONTRACT_SCHEMA_COMPANIONS` hack removed; all 18
+  JSON schemas + the structural drift-guard test deleted (verified none were runtime-read / worker-fetched /
+  validated — contracts are enforced by the hand-coded TS validators); the artifact-contract types
+  (RemediationPlan/Block, ItemSpec, ClarificationRequest, ClosingPlan/Preview) converted to zod. Never-
+  validated internal-state types (RemediationItemState, coverage ledgers, the outcome family) left as
+  interfaces by design (inert to convert; decision Ethan 2026-06-18). `ajv` was never imported (no-op).
+  (ARC-ad53dd0d-2.)
 - **A12 — Single-package collapse** (see *Single-package install/publish* below; Ethan reversed the
   earlier same-day defer — now wanted).
 - **A7 (REFRAMED) — Validate the host machinery EVERYWHERE, don't cut it.** The multi-host vision is
