@@ -9,12 +9,15 @@
 
 ## Where things stand
 
-- **`main`: A3 IS DONE.** **A3 step 4 slice 2c DONE** (commit `819dda7`, this session) — the final reconcile.
-  Both orchestrators now run the **same** shared `advance` fold engine. Local `main` is 1 ahead of origin
-  (`819dda7`); push for CI is the immediate next action. Effective published code tip = slice 2a `0886d06`.
-  Earlier **shipped 2026-06-18** (`dd0e296`/`06ed90e`/`8224c8e`): `@audit-tools/shared 0.22.1` /
-  `auditor-lambda 0.27.1` / `remediator-lambda 0.27.1`, all CI-green on npm — so a re-publish is due once
-  slice-2b+2c land on origin (or when Ethan asks).
+- **`main`: A3 IS DONE + PUBLISHED.** **A3 step 4 slice 2c DONE** (`819dda7`) — the final reconcile; both
+  orchestrators now run the **same** shared `advance` fold engine. **Shipped 2026-06-18:** `auditor-lambda
+  0.27.2` (slice 2b+2c, release commit `1067b27`, publish CI run `27774138156` green, live on npm latest);
+  global bins reinstalled + postinstall host-assets redeployed (7/7). `@audit-tools/shared 0.22.1` /
+  `remediator-lambda 0.27.1` correctly UNCHANGED (no src changes since their tags). `main` in sync with origin.
+  - **Publish trap hit (logged to backlog):** the release script's `waitForRunCompletion` matched a STALE
+    failed `audit-code-v0.27.2` publish run from the reverted ATTEMPT-1 era (0.27.2 was burned then reverted,
+    so the version was reused) and reported a false failure — the NEW run actually succeeded. Verify the publish
+    run's `databaseId`/start-time, not just the tag display name, when a version is reused after a revert.
   - **Slice 2c (this session, `819dda7`):** deleted the read-nowhere `description` field off
     `ExecutorDefinition` + all `EXECUTOR_REGISTRY` entries (`kind`/`obligation_ids` stay — they ARE read;
     `description` reached no user interaction: not the step prompt/contract, handoff, stderr, or report).
@@ -75,14 +78,10 @@ orchestrators run the same shared `advance` fold engine; the parallel hand-rolle
 non-parity is erased. Working plan (now history-of-decision, still ground truth for *why*):
 [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md).
 
-**START-HERE next session.**
-1. **Push `main` → origin** (1 ahead: `819dda7`) so `ci.yml` + `audit-code-test-suite.yml` run the suite on
-   **Linux** — the signal that caught ATTEMPT 1. Watch both runs green. (Slice 2c is docs + a dead-field
-   deletion + test-param cleanup; low risk, but Linux CI is the real signal.) Slice 2b is already
-   origin-green at `1689334`; this push validates 2c on top.
-2. **Consider a re-publish** (`/ship`) — the published code tip is still slice 2a `0886d06`; 2b+2c are
-   unpublished. Ship when Ethan wants it, or roll it into the next milestone.
-3. **Start B2+B3** (see below).
+**START-HERE next session — A3 is done, pushed, and published. Begin B2+B3.**
+Everything through A3 is landed, Linux-CI-green (`c6cccb2`), and shipped (`auditor-lambda 0.27.2`). Nothing
+to finish on A3. Start the next program item: **B2+B3** (diff re-reviews + obligation-set staleness, built on
+the unified engine).
 
 **Next program items (suggested order, yours to change):** **B2+B3** (diff re-reviews + obligation-set
 staleness — build on the unified engine) → **A6** (kill schema dual-encoding; drop dead-imported `ajv`; also
