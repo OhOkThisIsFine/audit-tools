@@ -55,7 +55,7 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   the heavy pipeline was only ever ONE producer of `extracted-plan.json`; the lean path is a second producer,
   so it needs no new join point. New grounded fixture + unit/integration tests; both existing structured-audit
   fixtures lack the S7 verdict, so every prior pipeline test stays on the pipeline path. (ARC-ad53dd0d.)
-- **A3+A4 — Unify the two obligation engines + canonical remediation item. IN PROGRESS** (plan +
+- **A3+A4 — Unify the two obligation engines + canonical remediation item. DONE** (plan +
   decomposition: [`a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md)). audit-code is
   already declarative (a `PRIORITY[]` linear scan over a content-hash staleness DAG); remediate re-derives
   selection in an imperative guard cascade (`steps/nextStep.ts` `decideNextStepLoop`) with back-edges +
@@ -96,10 +96,15 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   visited-state-signature cycle detection — the precise primitive `maxTransitions` approximated — subsuming
   audit's two hand guards; remediate untouched, return type a superset). **Slice 2a** `0886d06` (audit
   dispatch `switch` → `EXECUTOR_RUNNERS` map; absence of a runner = the no-progress handoff). Plus remediate
-  orphaned-helper sweep `33f568f` + parity-check doc `6bfae53`. **START-HERE = slice 2b** (rewire
-  `runDeterministicForNextStep` onto `advance`: deterministic→transition, host-delegation/dispatch→emit,
-  reusing the slice-2a runners; retire the bespoke guards), then slice 2c (reconcile + dead-`description`
-  decision). The redesign track. (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
+  orphaned-helper sweep `33f568f` + parity-check doc `6bfae53`. **Slice 2b** `5df1c6e`+`07510eb` rewired
+  `runDeterministicForNextStep` onto `advance` (deterministic→transition, host-delegation/dispatch→emit,
+  reusing the slice-2a runners; the 3 bespoke guards + `--max-runs` deleted). KEY finding: audit's
+  `stateSignature` must be the dispatch identity `artifact-sig|obligation|executor`, not the bare hash
+  (non-injective over the obligation chain → false cycle). Built by a worktree agent, reviewed-before-merge
+  + teeth follow-up. **Slice 2c** `88eb3c4`+ deleted the dead `EXECUTOR_REGISTRY.description` field + reconcile.
+  **A3 DONE — both orchestrators now run their next-step fold on the SAME shared `advance` engine** (the
+  north star: one declarative engine both tools run on). → B2+B3 build on it next. (ARC-f5a5612b,
+  ARC-f5a5612b-3, ARC-b85edf3f.)
 - **A8 — Rolling dispatch: one shared core + two co-equal full-rolling drivers (REFRAMED 2026-06-16).**
   NO LONGER "flip a flag / delete the host fallback" — that reading was incoherent with conversation-first
   (in-conversation subagent dispatch is FIRST-CLASS; subscription/no-API users depend on it — memory

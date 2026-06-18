@@ -243,19 +243,23 @@ no-ops (counted seeded true). The handler recursion that remains after 2a re-ent
     relied on the spurious halt (`next-step-review-gate` Path-A coverage, which never asserted the step kind);
     it now folds to the implement dispatch under a non-dispatching host (asserted as the no-refire teeth).
 
-**Remaining = step 4 slice 2c (final reconcile), small.** Step 4 was rescoped to "C" (unify audit's
-hand-rolled fold onto `advance` — see "Decision: C" + "C decomposition" below); slices 1, 2a, **and 2b**
-are done. The "audit adopts `advance`" symmetry the original step-4 framing called *optional* turned out
-to be the substance (audit was already folding by hand — the parity gap A3 exists to erase) and is now
-landed: `runDeterministicForNextStep` runs on the shared `advance` (slice 2b). Left is **2c**: the
-`EXECUTOR_REGISTRY.description` keep-vs-delete decision (user's call) + final parity-check + memory/backlog
-sync. After 2c, A3 is done → B2+B3.
+**A3 step 4 COMPLETE → A3 DONE (A4 was done earlier).** Step 4 was rescoped to "C" (unify audit's
+hand-rolled fold onto `advance` — see "Decision: C" + "C decomposition" below); slices 1, 2a, 2b, **and 2c**
+all landed. The "audit adopts `advance`" symmetry the original step-4 framing called *optional* turned out
+to be the substance (audit was already folding by hand — the parity gap A3 exists to erase). **Both
+orchestrators now run their next-step fold on the same shared `advance` engine** — the A3 north star ("one
+declarative engine both tools run on") is reached. Slice 2c deleted the dead `EXECUTOR_REGISTRY.description`
+field (non-obvious context kept as `//` comments) + this reconcile. Next: B2+B3 (build on the unified
+engine). This working doc can be archived/trimmed once 2b+2c ship.
 
 ## A3 step 4 — parity check (the deliverable)
 
-> Done this session. Orphaned-helper sweep landed (`33f568f`). This section is the
-> **parity-check of audit vs remediate obligation shapes** + the resulting decision on the
-> "audit adopts `advance`" symmetry. Recon dates 2026-06-17 against HEAD.
+> This section is the **parity-check of audit vs remediate obligation shapes** + the resulting
+> decision on the "audit adopts `advance`" symmetry. Recon dates 2026-06-17. It describes the
+> **pre-C state** that motivated the decision — the tables below show audit on the *bare scan* and
+> remediate on *`advance`*. **RESOLVED (slice 2c):** that gap is now closed — slice 2b put audit's
+> deterministic fold on the shared `advance` too, so both tools run the same engine. Kept as the
+> historical decision record.
 
 ### The two engines, side by side
 
@@ -391,6 +395,7 @@ untouched (the return type went `{state,step}` → `{state,step,stopped?}`, a su
    - **Deferred to 2c (unchanged):** the dead `description` field on `EXECUTOR_REGISTRY` (keep-as-docs vs
      delete — **the user's call**). Also a pre-existing (not slice-2b) unused `basename` import in
      `src/cli/args.ts` (only caught under `--noUnusedLocals`; flagged as a separate task).
-4. **Slice 2c — reconcile + clean.** Resolve the `EXECUTOR_REGISTRY.description` keep-vs-delete question
-   (user's call); retire any other now-dead CLI helpers; final parity-check; update memory/backlog.
-   After this, both tools run the *same* fold engine and A3 is done.
+4. **✓ DONE — Slice 2c — reconcile + clean.** Deleted the dead `EXECUTOR_REGISTRY.description` field
+   (interface + all 19 entries; the `agent` legacy note, the rolling-dispatch loop behaviour, and the two
+   forced-only executors kept as `//` comments). Final parity-check below; memory/backlog/HANDOFF synced.
+   **Both tools now run the same `advance` fold engine — A3 is done.**
