@@ -45,6 +45,21 @@ export type {
   AuditFindingsReport,
 } from "./types/finding.js";
 export { findingIdentity } from "./types/finding.js";
+// Zod schemas (A6 single source) — type inferred above, JSON schema generated.
+export {
+  FindingSeveritySchema,
+  FindingConfidenceSchema,
+  FindingLocationSchema,
+  FindingGroundingSchema,
+  AnchorExpectationSchema,
+  ExecutableAnchorSchema,
+  FindingSchema,
+  WorkBlockSchema,
+  FindingThemeSchema,
+  SynthesisNarrativeSchema,
+  AuditFindingsSummarySchema,
+  AuditFindingsReportSchema,
+} from "./types/finding.js";
 export type { IntentCheckpoint } from "./types/intentCheckpoint.js";
 export type { InterpretedIntent } from "./intent/freeFormIntentInterpreter.js";
 export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
@@ -68,6 +83,7 @@ export type {
 // Canonical lens vocabulary + the runtime validation Sets derived from it.
 export type { Lens } from "./types/lens.js";
 export {
+  LensSchema,
   LENSES,
   VALID_LENSES,
   isLens,
