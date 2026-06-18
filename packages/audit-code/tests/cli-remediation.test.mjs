@@ -86,6 +86,16 @@ test("CLI numeric options prefer argv, then session config, then documented defa
     timeout_ms: 9_000,
   };
 
+  assert.equal(cliTestUtils.getMaxRuns(["node", "cli", "--max-runs", "7"]), 7);
+  assert.equal(
+    cliTestUtils.getMaxRuns(["node", "cli", "--max-runs", "0"]),
+    cliTestUtils.defaults.maxRuns,
+  );
+  assert.equal(
+    cliTestUtils.getMaxRuns(["node", "cli", "--max-runs", "NaN"]),
+    cliTestUtils.defaults.maxRuns,
+  );
+
   assert.equal(
     cliTestUtils.getTimeoutMs(["node", "cli", "--timeout", "1200"], sessionConfig),
     1200,
