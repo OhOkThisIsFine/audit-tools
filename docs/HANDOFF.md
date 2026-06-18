@@ -9,13 +9,13 @@
 
 ## Where things stand
 
-- **`main` (pushed): A3 IS DONE — both orchestrators now run their next-step fold on the SAME shared
-  `advance` engine** (the A3 north star: one declarative engine both tools run on). Code tip = **A3 step 4
-  slice 2c** (deleted the dead `EXECUTOR_REGISTRY.description` field + reconcile), atop slice 2b
-  (`5df1c6e`+`07510eb`, audit's deterministic fold rewired onto `advance`). Green at every commit; audit
-  suite **2191 / 1 skip**, shared **726**, remediate **1671** (+1 skip each). **Published state (2026-06-18,
-  through slice 2a): `@audit-tools/shared 0.22.1` / `auditor-lambda 0.27.1` / `remediator-lambda 0.27.1`.**
-  Slice 2b+2c are audit-code-only; **being shipped this session (auditor-lambda 0.27.1 → 0.27.2).**
+- **`main` (pushed + PUBLISHED): the go-forward program keeps accumulating.** Code tip =
+  **A3 step 4 slice 2a — fold the dispatch switch into an executor-runner map** `0886d06`; then **shipped
+  2026-06-18** (release-bump commits `dd0e296`/`06ed90e`/`8224c8e`). Green at every commit; suites green on
+  the committed tree (shared **726** / audit **2193** / remediate **1671**, +1 documented skip each).
+  **PUBLISHED 2026-06-18 — publish hold lifted for Ethan's cross-machine usage:** `@audit-tools/shared 0.22.1`
+  / `auditor-lambda 0.27.1` / `remediator-lambda 0.27.1` — all three CI-green on npm (runs 27731143814 /
+  27731177158 / 27731386835); global bins reinstalled + postinstall run + `--version` smoke green.
   - This session (`git log` for detail) — **A3 step 4, RESCOPED mid-session to "C"** (unify audit's fold onto
     shared `advance` — see Immediate next): (1) remediate orphaned-helper + dead-import/param sweep `33f568f`;
     (2) parity-check doc `6bfae53`; (3) **slice 1** — visited-state-signature cycle detection in shared `advance`
@@ -58,24 +58,40 @@
 
 ## Immediate next: the go-forward program
 
-**A3 — DONE.** Both orchestrators now run their next-step fold on the SAME shared `advance` engine (the A3
-north star: one declarative engine both tools run on). The full story — the rescope (audit was already folding
-by hand via `runDeterministicForNextStep`), the slice-by-slice landing (1/2a/2b/2c), "Decision: C", and the
-parity check — lives in [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md) + memory
-`a3-a4-engine-unification`.
+**A3 (the keystone) — step 3 (remediate rewire) DONE; step 4 RESCOPED to "C" and IN PROGRESS (slices 1+2a done).**
+Working plan: **read [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md)** — the "C
+decomposition", "Cycle-guard resolution", and "decisive finding" sections are the ground truth for step 4.
 
-**One durable caution if you ever touch audit's cycle detection:** audit's `advance` `stateSignature` must be
-the **dispatch identity** `artifact-signature | obligation | executor` (`nextStepStateSignature`), NOT the bare
-`computeArtifactStateSignature` — the bare hash is *non-injective over the obligation chain* (no-op-but-satisfying
-steps like auto-fix/syntax-resolution-with-nothing-to-do recur it across *different* obligations → false cycle
-before `confirm_intent`). The generic engine-level visited-state-signature primitive is unit-tested in
-`@audit-tools/shared` (`obligation-engine.test.mjs`); audit's dispatch-identity signature is teeth-tested in
-`finalization-cycle-guard.test.mjs`.
+**The rescope (why step 4 grew from "small reconcile" to the real keystone):** recon this session found audit
+**already folds** its deterministic executor chain into one host round-trip via `runDeterministicForNextStep`
+(`src/cli/nextStepHelpers.ts:590`) — a *hand-rolled `advance`* (`continue`≡transition, `return`≡emit,
+`maxRuns`≡maxTransitions, + bespoke no-progress / finalization-cycle guards). That parallel fold mechanism IS the
+genuine non-parity A3 must erase (Ethan steered here: "isn't roundtrip-avoidance a concern for the auditor too?").
+So audit adopts shared `advance` — NOT the earlier-considered "emit-only ceremony" framing, which was premised on
+the false belief that audit doesn't fold.
 
-**START-HERE next session — A3 is done; the next program item is B2+B3** (diff re-reviews + obligation-set
-staleness — they build directly on the now-unified `advance` engine). See "After A3" just below for the full
-suggested order. (Slice 2c resolved the `EXECUTOR_REGISTRY.description` question by DELETING the dead field —
-non-obvious context kept as `//` comments.)
+**Done this session:** orphaned-helper sweep `33f568f`; parity-check doc `6bfae53`; **slice 1** `68d2c17b`
+(shared `advance` gains opt-in `opts.stateSignature` → visited-state-signature cycle detection returning a
+graceful `AdvanceResult.stopped:"cycle"`, subsuming audit's two hand guards; non-monotonic-deepening safe;
+remediate untouched — return type is a superset); **slice 2a** `0886d06` (audit dispatch `switch` →
+`EXECUTOR_RUNNERS` map in new `executorRunners.ts`; **absence of a runner** = the no-progress handoff for
+`agent`/`rolling_dispatch_executor`; `AdvanceAuditOptions/Result` → leaf `advanceTypes.ts` for the madge acyclic
+guard; switch⇄registry invariant test → runner-map coverage invariant).
+
+**START-HERE next session — A3 step 4 slice 2b (the big one, the audit fold rewire).** Replace
+`runDeterministicForNextStep`'s `for`-loop with shared `advance`: audit obligations become `ObligationDef`s
+(`derive` = lookup into `deriveAuditState`'s precomputed obligation states; `execute` = call the **slice-2a
+runner** → `transition` for deterministic, `emit` for host-delegation/dispatch/terminal). Pass `opts.stateSignature`
+(lift audit's existing signature from `checkFinalizationCycle`). Retire `checkNoProgressBeforeDispatch` +
+`checkFinalizationCycle` + `maxRuns`; `preferredExecutor`/integrity-check become a preamble (like remediate's
+`forceReplan`). The typed host-step branches (`handleGraphEnrichmentBranch` / `handleDesignReviewBranch` /
+`handleSynthesisNarrativeBranch` / `ensureSemanticReviewRun`) relocate into the obligations' `emit` payloads.
+Atomic replace: hand-loop → `advance`. The audit `node:test` suite (2193) is the equivalence oracle. Then
+**slice 2c** (reconcile + the dead-`description` decision below). After 2c, A3 is done → B2+B3.
+
+**OPEN Q for Ethan (non-blocking):** the `description` field on `EXECUTOR_REGISTRY` is read nowhere (dead as
+*behaviour*) but is human-readable per-executor documentation. Keep as inline docs, or delete? Retained for now;
+decide in slice 2c.
 
 **After A3 (suggested order, yours to change):** **B2+B3** (diff re-reviews + obligation-set staleness —
 build on the unified engine) → **A6** (kill schema dual-encoding; drop dead-imported `ajv`; also fold the

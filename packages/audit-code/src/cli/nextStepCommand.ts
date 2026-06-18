@@ -50,6 +50,7 @@ import {
   getHostModelId,
   getHostModelRoster,
   getHostOutputTokens,
+  getMaxRuns,
   getOptionalBooleanFlag,
   getRootDir,
   getTimeoutMs,
@@ -65,7 +66,8 @@ export {
   handleDesignReviewBranch,
   handleSynthesisNarrativeBranch,
   executeAndRecord,
-  nextStepStateSignature,
+  checkFinalizationCycle,
+  checkNoProgressBeforeDispatch,
   runDeterministicForNextStep,
 } from "./nextStepHelpers.js";
 
@@ -137,6 +139,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     artifactsDir,
     selfCliPath: resolve(argv[1] ?? process.argv[1] ?? ""),
     timeoutMs: getTimeoutMs(argv, sessionConfig),
+    maxRuns: getMaxRuns(argv),
     narrativeEnabled: sessionConfig.synthesis?.narrative !== false,
     analyzers: sessionConfig.analyzers,
     graphLlmEdgeReasoning: sessionConfig.graph?.llm_edge_reasoning,

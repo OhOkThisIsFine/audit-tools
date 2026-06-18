@@ -2,7 +2,7 @@ import { existsSync, createReadStream } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import {
   renderPromptCommand,
   toPromptPathToken,
@@ -21,6 +21,7 @@ export const DIRECT_CLI_DEFAULTS = {
   // auditArtifactsDir() helper rather than resolving the literal against CWD —
   // so `--root <X>` with no --artifacts-dir lands under <X>/.audit-tools/audit.
   artifactsDir: ".audit-tools/audit",
+  maxRuns: 1000,
   timeoutMs: 30 * 60 * 1000, // 30 minutes
 };
 
@@ -242,6 +243,10 @@ export function warnIfNotGitRepo(root: string): void {
 export function getBatchResultsDir(argv: string[]): string | undefined {
   const value = getFlag(argv, "--batch-results");
   return value ? resolve(value) : undefined;
+}
+
+export function getMaxRuns(argv: string[]): number {
+  return parsePositiveIntegerFlag(argv, "--max-runs") ?? DIRECT_CLI_DEFAULTS.maxRuns;
 }
 
 export function getTimeoutMs(argv: string[], sessionConfig: SessionConfig): number {
