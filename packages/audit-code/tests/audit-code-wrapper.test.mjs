@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { assertMatchesJsonSchema } from "./helpers/jsonSchemaAssert.mjs";
+import { AuditCodeResponseSchema } from "../src/contracts/wrapperResponse.ts";
 import {
   shouldBuildDistForPaths,
   assertWorkspaceInstalled,
@@ -48,9 +48,16 @@ const { toPromptPathToken } = await import("@audit-tools/shared");
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
 const wrapperPath = join(repoRoot, "audit-code.mjs");
-const schemaPath = join(repoRoot, "schemas", "audit-code-v1alpha1.schema.json");
 const packageJsonPath = join(repoRoot, "package.json");
-const responseSchema = JSON.parse(await readFile(schemaPath, "utf8"));
+function assertMatchesResponseSchema(value, label) {
+  const result = AuditCodeResponseSchema.safeParse(value);
+  assert.ok(
+    result.success,
+    `${label} should satisfy AuditCodeResponseSchema: ${
+      result.success ? "" : JSON.stringify(result.error.issues)
+    }`,
+  );
+}
 const packageVersion = JSON.parse(
   await readFile(packageJsonPath, "utf8"),
 ).version;
@@ -493,7 +500,7 @@ test("audit-code wrapper advance-audit runs one bounded deterministic advance an
 
     const info = await stat(artifactsDir);
     assert.equal(info.isDirectory(), true);
-    assertMatchesJsonSchema(responseSchema, step0, "auditCodeResponse");
+    assertMatchesResponseSchema(step0, "auditCodeResponse");
     assert.equal(step0.contract_version, "audit-code/v1alpha1");
     assert.equal(step0.selected_executor, "provider_confirmation_executor");
     assert.equal(step0.progress_made, true);
@@ -504,7 +511,7 @@ test("audit-code wrapper advance-audit runs one bounded deterministic advance an
     const { stdout: stdout1 } = await runWrapper(["advance-audit"], { cwd: root });
     const step1 = JSON.parse(stdout1);
 
-    assertMatchesJsonSchema(responseSchema, step1, "auditCodeResponse");
+    assertMatchesResponseSchema(step1, "auditCodeResponse");
     assert.equal(step1.selected_executor, "intake_executor");
     assert.equal(step1.progress_made, true);
     assert.equal(step1.next_likely_step, "auto_fixes_applied");

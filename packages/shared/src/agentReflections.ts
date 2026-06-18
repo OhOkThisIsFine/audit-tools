@@ -1,47 +1,50 @@
 // Agent meta-audit reflections: a canonical, opt-in feedback channel shared by
 // both orchestrators. Workers may append one reflection per task/item (NDJSON)
-// to `agent-feedback.jsonl` in the run's artifacts dir — schema
-// `schemas/agent_reflection.schema.json` (published per-package). Each
+// to `agent-feedback.jsonl` in the run's artifacts dir — shape single-sourced by
+// `AgentReflectionSchema` below (parsed via `parseReflectionsNdjson`). Each
 // orchestrator aggregates them into a "Process Feedback" section of its final
 // report so recurring operational friction is visible without hand-reading the
 // JSONL. The channel is best-effort: a malformed line is skipped, never fatal,
 // and never competes with the actual audit/remediation obligation.
 
+import { z } from "zod";
 import { severityRank } from "./types/lens.js";
 
-export type ReflectionClarity =
-  | "clear"
-  | "mostly_clear"
-  | "ambiguous"
-  | "unclear";
-export type ReflectionSeverity = "info" | "low" | "medium" | "high" | "critical";
-
-export interface AgentReflection {
-  task_id: string;
-  lens?: string;
-  instruction_clarity: ReflectionClarity;
-  ambiguities?: string[];
-  tool_friction?: string[];
-  suggestions?: string[];
-  severity: ReflectionSeverity;
-}
-
-/** Canonical worker-appended feedback file name, relative to an artifacts dir. */
-export const AGENT_FEEDBACK_FILENAME = "agent-feedback.jsonl";
-
-const CLARITY_VALUES = new Set<ReflectionClarity>([
+export const ReflectionClaritySchema = z.enum([
   "clear",
   "mostly_clear",
   "ambiguous",
   "unclear",
 ]);
-const SEVERITY_VALUES = new Set<ReflectionSeverity>([
+export type ReflectionClarity = z.infer<typeof ReflectionClaritySchema>;
+
+export const ReflectionSeveritySchema = z.enum([
   "info",
   "low",
   "medium",
   "high",
   "critical",
 ]);
+export type ReflectionSeverity = z.infer<typeof ReflectionSeveritySchema>;
+
+export const AgentReflectionSchema = z
+  .object({
+    task_id: z.string(),
+    lens: z.string().optional(),
+    instruction_clarity: ReflectionClaritySchema,
+    ambiguities: z.array(z.string()).optional(),
+    tool_friction: z.array(z.string()).optional(),
+    suggestions: z.array(z.string()).optional(),
+    severity: ReflectionSeveritySchema,
+  })
+  .strict();
+export type AgentReflection = z.infer<typeof AgentReflectionSchema>;
+
+/** Canonical worker-appended feedback file name, relative to an artifacts dir. */
+export const AGENT_FEEDBACK_FILENAME = "agent-feedback.jsonl";
+
+const CLARITY_VALUES = new Set<ReflectionClarity>(ReflectionClaritySchema.options);
+const SEVERITY_VALUES = new Set<ReflectionSeverity>(ReflectionSeveritySchema.options);
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
@@ -190,7 +193,7 @@ export function renderProcessFeedbackSection(
     "## Process Feedback",
     "",
     `Aggregated from ${aggregate.total} agent reflection(s) appended during the run ` +
-      `(opt-in; schema: agent_reflection.schema.json).`,
+      `(opt-in agent-feedback.jsonl channel).`,
     "",
     `- Instruction clarity: ${formatCounts(aggregate.clarity_breakdown)}`,
     `- Reported impact: ${formatCounts(aggregate.severity_breakdown)}`,

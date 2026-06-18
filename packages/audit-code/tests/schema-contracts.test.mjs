@@ -1,9 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertMatchesJsonSchema as assertMatchesJsonSchemaRaw } from "./helpers/jsonSchemaAssert.mjs";
+import {
+  LensSchema,
+  SurfaceManifestSchema,
+  GraphBundleSchema,
+  GraphEdgeSchema,
+  RiskRegisterSchema,
+} from "@audit-tools/shared";
+import { RepoManifestSchema, UnitManifestSchema } from "../src/types.ts";
+import { AuditPlanMetricsSchema } from "../src/types/reviewPlanning.ts";
+import { RuntimeValidationTaskManifestSchema } from "../src/types/runtimeValidation.ts";
+import { ExternalAnalyzerResultsSchema } from "../src/types/externalAnalyzer.ts";
+import {
+  WorkerAuditResultSchema,
+  WorkerAuditResultsSchema,
+  WorkerAuditTaskSchema,
+} from "../src/contracts/workerSchemas.ts";
+import { DispatchQuotaSchema } from "../src/quota/index.ts";
+import { StepArtifactSchema } from "../src/cli/steps.ts";
 import { buildUnitManifest } from "../src/orchestrator/unitBuilder.ts";
 import { buildRiskRegister } from "../src/extractors/risk.ts";
 import { buildSurfaceManifest } from "../src/extractors/surfaces.ts";
@@ -11,548 +28,270 @@ import { buildGraphBundle } from "../src/extractors/graph.ts";
 import { buildRuntimeValidationTasks } from "../src/orchestrator/runtimeValidation.ts";
 import { buildAuditPlanMetrics } from "../src/orchestrator/reviewPackets.ts";
 
+// A6: every artifact contract is single-sourced as a zod schema. These tests
+// validate real builder output (and hand-crafted edge cases) against the zod
+// schema directly via `.parse` / `.safeParse` — there is no separate JSON-schema
+// document or hand-rolled validator any more. The 5 worker-facing JSON schemas
+// are GENERATED from the same zod sources (see worker-schema-generation.test.mjs);
+// the lens-vocabulary drift guard at the bottom covers those.
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
 
-async function loadSchema(name) {
-  return JSON.parse(
-    await readFile(join(repoRoot, "schemas", name), "utf8"),
+/** Assert `value` satisfies `schema`; surface the zod issues on failure. */
+function accepts(schema, value, label) {
+  const result = schema.safeParse(value);
+  assert.ok(
+    result.success,
+    `${label} should satisfy schema but did not: ${
+      result.success ? "" : JSON.stringify(result.error.issues)
+    }`,
   );
 }
 
-// Published schemas cross-reference sibling files (e.g. the shared
-// lens.schema.json enum, pulled in via {"$ref":"lens.schema.json"}). The
-// validator resolves external refs through a registry, so load every schema
-// file once and inject it into all assertions below. Individual callers can
-// still add or override registry entries.
-async function loadAllSchemas() {
-  const { readdir } = await import("node:fs/promises");
-  const schemasDir = join(repoRoot, "schemas");
-  const files = (await readdir(schemasDir)).filter((f) =>
-    f.endsWith(".schema.json"),
+/** Assert `value` is rejected by `schema`. */
+function rejects(schema, value, label) {
+  assert.equal(
+    schema.safeParse(value).success,
+    false,
+    `${label} should have been rejected by schema`,
   );
-  const registry = {};
-  for (const file of files) {
-    registry[file] = JSON.parse(
-      await readFile(join(schemasDir, file), "utf8"),
-    );
-  }
-  return registry;
 }
 
-const SCHEMA_REGISTRY = await loadAllSchemas();
+// ---------------------------------------------------------------------------
+// Worker-facing audit result / finding / task contracts.
+// ---------------------------------------------------------------------------
 
-function assertMatchesJsonSchema(schema, value, rootName, options = {}) {
-  return assertMatchesJsonSchemaRaw(schema, value, rootName, {
-    ...options,
-    schemaRegistry: { ...SCHEMA_REGISTRY, ...(options.schemaRegistry ?? {}) },
-  });
-}
-
-test("jsonSchemaAssert rejects invalid enum via $ref resolution", async () => {
-  const auditResultSchema = await loadSchema("audit_result.schema.json");
-  const findingSchema = await loadSchema("finding.schema.json");
-  const auditTaskSchema = await loadSchema("audit_task.schema.json");
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        auditResultSchema,
+test("worker audit result rejects a non-canonical finding lens", () => {
+  rejects(
+    WorkerAuditResultSchema,
+    {
+      task_id: "task-1",
+      unit_id: "unit-1",
+      pass_id: "pass:security",
+      lens: "security",
+      file_coverage: [{ path: "src/api/auth.ts", total_lines: 12 }],
+      findings: [
         {
-          task_id: "task-1",
-          unit_id: "unit-1",
-          pass_id: "pass:security",
-          lens: "security",
-          file_coverage: [{ path: "src/api/auth.ts", total_lines: 12 }],
-          findings: [
-            {
-              id: "finding-1",
-              title: "Bad finding",
-              category: "security",
-              severity: "high",
-              confidence: "high",
-              lens: "bogus",
-              summary: "Should fail through $ref resolution.",
-              affected_files: [{ path: "src/api/auth.ts" }],
-              evidence: ["src/api/auth.ts:1 - detail"],
-            },
-          ],
+          id: "finding-1",
+          title: "Bad finding",
+          category: "security",
+          severity: "high",
+          confidence: "high",
+          lens: "bogus",
+          summary: "Should fail through the canonical lens enum.",
+          affected_files: [{ path: "src/api/auth.ts" }],
+          evidence: ["src/api/auth.ts:1 - detail"],
         },
-        "auditResult",
-        {
-          schemaRegistry: {
-            "finding.schema.json": findingSchema,
-            "audit_task.schema.json": auditTaskSchema,
-          },
-        },
-      ),
-    /auditResult\.findings\[0\]\.lens must be one of/i,
+      ],
+    },
+    "auditResult with bogus finding lens",
   );
 });
 
-test("jsonSchemaAssert accepts empty findings array", async () => {
-  const auditResultSchema = await loadSchema("audit_result.schema.json");
-  const findingSchema = await loadSchema("finding.schema.json");
-  const auditTaskSchema = await loadSchema("audit_task.schema.json");
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      auditResultSchema,
-      {
-        task_id: "task-empty",
-        unit_id: "unit-empty",
-        pass_id: "pass:reliability",
-        lens: "reliability",
-        file_coverage: [{ path: "src/empty.ts", total_lines: 0 }],
-        findings: [],
-      },
-      "auditResult",
-      {
-        schemaRegistry: {
-          "finding.schema.json": findingSchema,
-          "audit_task.schema.json": auditTaskSchema,
-        },
-      },
-    ),
+test("worker audit result accepts an empty findings array", () => {
+  accepts(
+    WorkerAuditResultSchema,
+    {
+      task_id: "task-empty",
+      unit_id: "unit-empty",
+      pass_id: "pass:reliability",
+      lens: "reliability",
+      file_coverage: [{ path: "src/empty.ts", total_lines: 0 }],
+      findings: [],
+    },
+    "auditResult with empty findings",
   );
 });
 
-test("jsonSchemaAssert accepts result with verification shape", async () => {
-  const auditResultSchema = await loadSchema("audit_result.schema.json");
-  const findingSchema = await loadSchema("finding.schema.json");
-  const auditTaskSchema = await loadSchema("audit_task.schema.json");
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      auditResultSchema,
-      {
-        task_id: "deepening:steward:security",
-        unit_id: "lens-steward:security",
-        pass_id: "lens-steward:security",
-        lens: "security",
-        file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
-        findings: [],
-        verification: {
-          verified: false,
-          needs_followup: true,
-          concerns: ["High-risk clean result needs a targeted re-check."],
-          coverage_concerns: ["External analyzer signal was not clearly resolved."],
-          confidence_concerns: ["Severity confidence varied across related packets."],
-          followup_tasks: [
-            {
-              task_id: "suggested-auth-recheck",
-              unit_id: "src-api-auth",
-              pass_id: "deepening:security",
-              lens: "security",
-              file_paths: ["src/api/auth.ts"],
-              rationale: "Re-check token boundary handling.",
-              priority: "high",
-              tags: ["suggested"],
-            },
-          ],
-        },
-      },
-      "auditResultVerification",
-      {
-        schemaRegistry: {
-          "finding.schema.json": findingSchema,
-          "audit_task.schema.json": auditTaskSchema,
-        },
-      },
-    ),
-  );
-});
-
-test("jsonSchemaAssert accepts finding with category more specific than lens", async () => {
-  const auditResultSchema = await loadSchema("audit_result.schema.json");
-  const findingSchema = await loadSchema("finding.schema.json");
-  const auditTaskSchema = await loadSchema("audit_task.schema.json");
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      auditResultSchema,
-      {
-        task_id: "task-specific-category",
-        unit_id: "unit-category",
-        pass_id: "pass:security",
-        lens: "security",
-        file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
-        findings: [
+test("worker audit result accepts a verification shape", () => {
+  accepts(
+    WorkerAuditResultSchema,
+    {
+      task_id: "deepening:steward:security",
+      unit_id: "lens-steward:security",
+      pass_id: "lens-steward:security",
+      lens: "security",
+      file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+      findings: [],
+      verification: {
+        verified: false,
+        needs_followup: true,
+        concerns: ["High-risk clean result needs a targeted re-check."],
+        coverage_concerns: ["External analyzer signal was not clearly resolved."],
+        confidence_concerns: ["Severity confidence varied across related packets."],
+        followup_tasks: [
           {
-            id: "finding-category",
-            title: "Specific category is allowed",
-            category: "command-execution",
-            severity: "high",
-            confidence: "high",
+            task_id: "suggested-auth-recheck",
+            unit_id: "src-api-auth",
+            pass_id: "deepening:security",
             lens: "security",
-            summary: "The category field can be more specific than the lens.",
-            affected_files: [{ path: "src/api/auth.ts", line_start: 1 }],
-            evidence: ["src/api/auth.ts:1 - command boundary"],
+            file_paths: ["src/api/auth.ts"],
+            rationale: "Re-check token boundary handling.",
+            priority: "high",
+            tags: ["suggested"],
           },
         ],
       },
-      "auditResultSpecificCategory",
-      {
-        schemaRegistry: {
-          "finding.schema.json": findingSchema,
-          "audit_task.schema.json": auditTaskSchema,
-        },
-      },
-    ),
+    },
+    "auditResult with verification",
   );
 });
 
-test("jsonSchemaAssert enforces array type for auditResults and rejects plain object", async () => {
-  const auditResultSchema = await loadSchema("audit_result.schema.json");
-  const auditResultsSchema = await loadSchema("audit_results.schema.json");
-  const findingSchema = await loadSchema("finding.schema.json");
-  const auditTaskSchema = await loadSchema("audit_task.schema.json");
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      auditResultsSchema,
-      [
+test("worker audit result accepts a category more specific than its lens", () => {
+  accepts(
+    WorkerAuditResultSchema,
+    {
+      task_id: "task-specific-category",
+      unit_id: "unit-category",
+      pass_id: "pass:security",
+      lens: "security",
+      file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+      findings: [
         {
-          task_id: "task-array",
-          unit_id: "unit-array",
-          pass_id: "pass:correctness",
-          lens: "correctness",
-          file_coverage: [{ path: "src/index.ts", total_lines: 1 }],
-          findings: [],
+          id: "finding-category",
+          title: "Specific category is allowed",
+          category: "command-execution",
+          severity: "high",
+          confidence: "high",
+          lens: "security",
+          summary: "The category field can be more specific than the lens.",
+          affected_files: [{ path: "src/api/auth.ts", line_start: 1 }],
+          evidence: ["src/api/auth.ts:1 - command boundary"],
         },
       ],
-      "auditResults",
-      {
-        schemaRegistry: {
-          "audit_result.schema.json": auditResultSchema,
-          "finding.schema.json": findingSchema,
-          "audit_task.schema.json": auditTaskSchema,
-        },
-      },
-    ),
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        auditResultsSchema,
-        {
-          task_id: "task-object",
-          unit_id: "unit-object",
-          pass_id: "pass:correctness",
-          lens: "correctness",
-          file_coverage: [{ path: "src/index.ts", total_lines: 1 }],
-          findings: [],
-        },
-        "auditResults",
-        {
-          schemaRegistry: {
-            "audit_result.schema.json": auditResultSchema,
-            "finding.schema.json": findingSchema,
-            "audit_task.schema.json": auditTaskSchema,
-          },
-        },
-      ),
-    /auditResults must be of type array/i,
+    },
+    "auditResult with specific category",
   );
 });
 
-test("jsonSchemaAssert enforces strict property constraints (pattern, bounds, additionalProperties)", () => {
-  const strictSchema = {
-    $id: "strict-test.schema.json",
-    type: "object",
-    required: ["id", "count", "tags", "extras"],
-    properties: {
-      id: {
-        type: "string",
-        pattern: "^[a-z]+$",
-      },
-      count: {
-        type: "integer",
-        minimum: 1,
-        maximum: 2,
-      },
-      tags: {
-        type: "array",
-        minItems: 1,
-        maxItems: 2,
-        items: { type: "string" },
-      },
-      extras: {
-        type: "object",
-        additionalProperties: { type: "string" },
-      },
-    },
-    additionalProperties: false,
-  };
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(strictSchema, {
-      id: "ok",
-      count: 2,
-      tags: ["one"],
-      extras: { note: "allowed" },
-    }),
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(strictSchema, {
-        id: "BAD",
-        count: 3,
-        tags: [],
-        extras: { note: 7 },
-      }),
-    /must match pattern|must be <= 2|must have at least 1 item|must be of type string/i,
-  );
-});
-
-test("jsonSchemaAssert validates allOf and oneOf combinators", () => {
-  const combinatorSchema = {
-    type: "object",
-    required: ["mode"],
-    properties: {
-      mode: { type: "string" },
-      value: {},
-    },
-    allOf: [
+test("worker audit results require an array, not a single object", () => {
+  accepts(
+    WorkerAuditResultsSchema,
+    [
       {
-        properties: {
-          mode: { const: "bounded" },
-          value: { type: "integer", minimum: 1, maximum: 3 },
-        },
+        task_id: "task-array",
+        unit_id: "unit-array",
+        pass_id: "pass:correctness",
+        lens: "correctness",
+        file_coverage: [{ path: "src/index.ts", total_lines: 1 }],
+        findings: [],
       },
     ],
-    oneOf: [
+    "auditResults array",
+  );
+
+  rejects(
+    WorkerAuditResultsSchema,
+    {
+      task_id: "task-object",
+      unit_id: "unit-object",
+      pass_id: "pass:correctness",
+      lens: "correctness",
+      file_coverage: [{ path: "src/index.ts", total_lines: 1 }],
+      findings: [],
+    },
+    "auditResults as a plain object",
+  );
+});
+
+test("worker audit task enforces lens, priority, tags, inputs, and strict keys", () => {
+  accepts(
+    WorkerAuditTaskSchema,
+    {
+      task_id: "task-1",
+      unit_id: "unit-1",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/api/auth.ts"],
+      file_line_counts: { "src/api/auth.ts": 12 },
+      inputs: { unit_manifest_ref: "unit_manifest.json", custom_ref: "custom.json" },
+      rationale: "Review the auth path.",
+      priority: "high",
+      tags: ["auth", "critical-flow"],
+      status: "pending",
+    },
+    "valid audit task",
+  );
+
+  const base = {
+    task_id: "task-1",
+    unit_id: "unit-1",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    rationale: "Review the auth path.",
+  };
+
+  rejects(WorkerAuditTaskSchema, { ...base, lens: "bogus" }, "bad lens");
+  rejects(WorkerAuditTaskSchema, { ...base, priority: "urgent" }, "bad priority");
+  rejects(WorkerAuditTaskSchema, { ...base, tags: [] }, "empty tags");
+  rejects(
+    WorkerAuditTaskSchema,
+    { ...base, inputs: { unit_manifest_ref: "unit_manifest.json", custom_ref: 7 } },
+    "non-string input ref",
+  );
+  rejects(WorkerAuditTaskSchema, { ...base, unexpected: true }, "extra key");
+});
+
+test("worker audit task rejects nonpositive line range bounds", () => {
+  const validTask = {
+    task_id: "task-1",
+    unit_id: "unit-1",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    line_ranges: [{ path: "src/api/auth.ts", start: 1, end: 1 }],
+    rationale: "Review the auth path.",
+  };
+  accepts(WorkerAuditTaskSchema, validTask, "valid line ranges");
+  for (const [field, value] of [
+    ["start", 0],
+    ["start", -1],
+    ["end", 0],
+    ["end", -1],
+  ]) {
+    rejects(
+      WorkerAuditTaskSchema,
       {
-        properties: {
-          value: { const: 1 },
-        },
+        ...validTask,
+        line_ranges: [{ path: "src/api/auth.ts", start: 1, end: 1, [field]: value }],
       },
-      {
-        properties: {
-          value: { const: 2 },
-        },
-      },
-    ],
-    additionalProperties: false,
-  };
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(combinatorSchema, {
-      mode: "bounded",
-      value: 2,
-    }),
-  );
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(combinatorSchema, {
-        mode: "bounded",
-        value: 3,
-      }),
-    /exactly one oneOf branch/i,
-  );
+      `line range ${field}=${value}`,
+    );
+  }
 });
 
-test("jsonSchemaAssert preserves object and additionalProperties behavior after validator extraction", () => {
-  const schema = {
-    type: "object",
-    required: ["id"],
-    properties: {
-      id: { type: "string" },
-      metadata: {
-        type: "object",
-        additionalProperties: { type: "string" },
+// ---------------------------------------------------------------------------
+// dispatch_quota.
+// ---------------------------------------------------------------------------
+
+test("dispatch quota accepts a single-pool schedule", () => {
+  accepts(
+    DispatchQuotaSchema,
+    {
+      contract_version: "audit-code-dispatch-quota/v1alpha1",
+      run_id: "PLAN-1",
+      model: "test-model",
+      resolved_limits: {
+        context_tokens: 128000,
+        output_tokens: 8192,
+        requests_per_minute: null,
+        input_tokens_per_minute: null,
+        output_tokens_per_minute: null,
       },
+      confidence: "medium",
+      source: "default",
+      host_concurrency_limit: null,
+      max_concurrent_agents: 2,
+      cooldown_until: "2026-05-20T16:45:30Z",
     },
-    additionalProperties: false,
-  };
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      schema,
-      { id: "worker-1", metadata: { note: "ok" } },
-      "worker",
-    ),
-  );
-
-  assert.throws(
-    () => assertMatchesJsonSchema(schema, { metadata: {} }, "worker"),
-    /worker\.id is required/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        schema,
-        { id: "worker-1", extra: true },
-        "worker",
-      ),
-    /worker\.extra is not allowed by schema/i,
+    "single-pool dispatch quota",
   );
 });
 
-test("jsonSchemaAssert preserves array, string, and number constraint behavior after validator extraction", () => {
-  const schema = {
-    type: "object",
-    required: ["items", "name", "score"],
-    properties: {
-      items: {
-        type: "array",
-        minItems: 1,
-        items: { type: "integer", minimum: 1 },
-      },
-      name: {
-        type: "string",
-        minLength: 2,
-        maxLength: 4,
-        pattern: "^[a-z]+$",
-      },
-      score: {
-        type: "number",
-        minimum: 1,
-        maximum: 3,
-      },
-    },
-    additionalProperties: false,
-  };
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      schema,
-      { items: [1, 2], name: "ok", score: 2 },
-      "sample",
-    ),
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        schema,
-        { items: [0], name: "ok", score: 2 },
-        "sample",
-      ),
-    /sample\.items\[0\] must be >= 1/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        schema,
-        { items: [1], name: "BAD", score: 2 },
-        "sample",
-      ),
-    /sample\.name must match pattern/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        schema,
-        { items: [1], name: "ok", score: 4 },
-        "sample",
-      ),
-    /sample\.score must be <= 3/i,
-  );
-});
-
-test("jsonSchemaAssert preserves refs, combiners, const, and enum behavior after validator extraction", () => {
-  const referencedSchema = {
-    $id: "ref-target.schema.json",
-    type: "object",
-    required: ["kind", "mode", "value"],
-    properties: {
-      kind: { const: "target" },
-      mode: { enum: ["one", "two"] },
-      value: {},
-    },
-    allOf: [{ properties: { value: { type: "integer", minimum: 1 } } }],
-    anyOf: [
-      { properties: { value: { const: 1 } } },
-      { properties: { mode: { const: "two" } } },
-    ],
-    oneOf: [
-      { properties: { value: { const: 1 } } },
-      { properties: { value: { const: 2 } } },
-    ],
-    additionalProperties: false,
-  };
-  const schema = { $ref: "ref-target.schema.json" };
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      schema,
-      { kind: "target", mode: "one", value: 1 },
-      "target",
-      { schemaRegistry: { "ref-target.schema.json": referencedSchema } },
-    ),
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        schema,
-        { kind: "other", mode: "one", value: 1 },
-        "target",
-        { schemaRegistry: { "ref-target.schema.json": referencedSchema } },
-      ),
-    /target\.kind must equal "target"/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        schema,
-        { kind: "target", mode: "three", value: 1 },
-        "target",
-        { schemaRegistry: { "ref-target.schema.json": referencedSchema } },
-      ),
-    /target\.mode must be one of one, two/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        schema,
-        { kind: "target", mode: "one", value: 3 },
-        "target",
-        { schemaRegistry: { "ref-target.schema.json": referencedSchema } },
-      ),
-    /target must satisfy at least one anyOf branch/i,
-  );
-});
-
-test("jsonSchemaAssert rejects invalid date-time strings", () => {
-  const schema = { type: "string", format: "date-time" };
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(schema, "2026-05-20T16:45:30Z", "timestamp"),
-  );
-
-  assert.throws(
-    () => assertMatchesJsonSchema(schema, "not a date", "timestamp"),
-    /timestamp must match date-time format/i,
-  );
-
-  assert.throws(
-    () => assertMatchesJsonSchema(schema, "2026-02-31T10:00:00Z", "timestamp"),
-    /timestamp must match date-time format/i,
-  );
-});
-
-test("jsonSchemaAssert intentionally skips unsupported string formats", () => {
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      { type: "string", format: "email" },
-      "not an email",
-      "email",
-    ),
-  );
-});
-
-test("dispatch quota schema enforces cooldown_until date-time format through helper", async () => {
-  const dispatchQuotaSchema = await loadSchema("dispatch_quota.schema.json");
-  const dispatchQuota = {
+test("dispatch quota accepts a null cooldown and rejects a bad enum", () => {
+  const base = {
     contract_version: "audit-code-dispatch-quota/v1alpha1",
     run_id: "PLAN-1",
     model: "test-model",
@@ -567,143 +306,94 @@ test("dispatch quota schema enforces cooldown_until date-time format through hel
     source: "default",
     host_concurrency_limit: null,
     max_concurrent_agents: 2,
-    cooldown_until: "2026-05-20T16:45:30Z",
-  };
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(dispatchQuotaSchema, dispatchQuota, "dispatchQuota"),
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        dispatchQuotaSchema,
-        { ...dispatchQuota, cooldown_until: "soon-ish" },
-        "dispatchQuota",
-      ),
-    /dispatchQuota\.cooldown_until must match date-time format/i,
-  );
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      dispatchQuotaSchema,
-      { ...dispatchQuota, cooldown_until: null },
-      "dispatchQuota",
-    ),
-  );
-});
-
-test("dispatch quota schema accepts multi-pool capacity summaries", async () => {
-  const dispatchQuotaSchema = await loadSchema("dispatch_quota.schema.json");
-  const dispatchQuota = {
-    contract_version: "audit-code-dispatch-quota/v1alpha2",
-    run_id: "PLAN-1",
-    model: "primary-model",
-    resolved_limits: {
-      context_tokens: 128000,
-      output_tokens: 8192,
-      requests_per_minute: null,
-      input_tokens_per_minute: null,
-      output_tokens_per_minute: null,
-    },
-    confidence: "medium",
-    source: "provider_default",
-    host_concurrency_limit: null,
-    max_concurrent_agents: 5,
     cooldown_until: null,
-    binding_cap: "host_concurrency",
-    capacity_pools: [
-      {
-        pool_id: "claude-code/*",
-        slots: 2,
-        model: null,
-        confidence: "medium",
-        source: "provider_default",
-        resolved_limits: {
-          context_tokens: 128000,
-          output_tokens: 8192,
-          requests_per_minute: null,
-          input_tokens_per_minute: null,
-          output_tokens_per_minute: null,
-        },
-        host_concurrency_limit: {
-          active_subagents: 2,
-          source: "host_reported",
-          description: "test host limit",
-        },
-        cooldown_until: null,
-        estimated_wave_tokens: 2000,
-        binding_cap: "host_concurrency",
-        quota_source_snapshot: null,
-      },
-      {
-        pool_id: "codex/o4-mini",
-        slots: 3,
-        model: "o4-mini",
-        confidence: "high",
-        source: "explicit_config",
-        resolved_limits: {
-          context_tokens: 200000,
-          output_tokens: 8192,
-          requests_per_minute: 100,
-          input_tokens_per_minute: 1000000,
-          output_tokens_per_minute: null,
-        },
-        host_concurrency_limit: null,
-        cooldown_until: null,
-        estimated_wave_tokens: 3000,
-        binding_cap: "none",
-      },
-    ],
   };
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(dispatchQuotaSchema, dispatchQuota, "dispatchQuota"),
-  );
+  accepts(DispatchQuotaSchema, base, "null cooldown");
+  rejects(DispatchQuotaSchema, { ...base, confidence: "very-high" }, "bad confidence enum");
+  rejects(DispatchQuotaSchema, { ...base, max_concurrent_agents: 0 }, "zero concurrency");
 });
 
-test("repo_manifest schema enforces date-time format on generated_at", async () => {
-  const repoManifestSchema = await loadSchema("repo_manifest.schema.json");
-
-  assert.equal(repoManifestSchema.properties.generated_at.format, "date-time");
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      repoManifestSchema,
-      {
-        repository: { name: "t" },
-        generated_at: "2026-04-22T00:00:00.000Z",
-        files: [],
+test("dispatch quota accepts multi-pool capacity summaries", () => {
+  accepts(
+    DispatchQuotaSchema,
+    {
+      contract_version: "audit-code-dispatch-quota/v1alpha2",
+      run_id: "PLAN-1",
+      model: "primary-model",
+      resolved_limits: {
+        context_tokens: 128000,
+        output_tokens: 8192,
+        requests_per_minute: null,
+        input_tokens_per_minute: null,
+        output_tokens_per_minute: null,
       },
-      "repoManifest",
-    ),
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        repoManifestSchema,
+      confidence: "medium",
+      source: "provider_default",
+      host_concurrency_limit: null,
+      max_concurrent_agents: 5,
+      cooldown_until: null,
+      binding_cap: "host_concurrency",
+      capacity_pools: [
         {
-          repository: { name: "t" },
-          generated_at: "not-a-timestamp",
-          files: [],
+          pool_id: "claude-code/*",
+          slots: 2,
+          model: null,
+          confidence: "medium",
+          source: "provider_default",
+          resolved_limits: {
+            context_tokens: 128000,
+            output_tokens: 8192,
+            requests_per_minute: null,
+            input_tokens_per_minute: null,
+            output_tokens_per_minute: null,
+          },
+          host_concurrency_limit: {
+            active_subagents: 2,
+            source: "host_reported",
+            description: "test host limit",
+          },
+          cooldown_until: null,
+          estimated_wave_tokens: 2000,
+          binding_cap: "host_concurrency",
+          quota_source_snapshot: null,
         },
-        "repoManifest",
-      ),
-    /repoManifest\.generated_at must match date-time format/i,
+        {
+          pool_id: "codex/o4-mini",
+          slots: 3,
+          model: "o4-mini",
+          confidence: "high",
+          source: "explicit_config",
+          resolved_limits: {
+            context_tokens: 200000,
+            output_tokens: 8192,
+            requests_per_minute: 100,
+            input_tokens_per_minute: 1000000,
+            output_tokens_per_minute: null,
+          },
+          host_concurrency_limit: null,
+          cooldown_until: null,
+          estimated_wave_tokens: 3000,
+          binding_cap: "none",
+        },
+      ],
+    },
+    "multi-pool dispatch quota",
   );
 });
 
-test("strict schema contracts accept real builder output and reject unexpected fields", async () => {
-  const unitManifestSchema = await loadSchema("unit_manifest.schema.json");
-  const surfaceManifestSchema = await loadSchema("surface_manifest.schema.json");
-  const graphBundleSchema = await loadSchema("graph_bundle.schema.json");
-  const auditPlanMetricsSchema = await loadSchema(
-    "audit_plan_metrics.schema.json",
+// ---------------------------------------------------------------------------
+// repo_manifest + builder-output contracts.
+// ---------------------------------------------------------------------------
+
+test("repo_manifest accepts a minimal manifest", () => {
+  accepts(
+    RepoManifestSchema,
+    { repository: { name: "t" }, generated_at: "2026-04-22T00:00:00.000Z", files: [] },
+    "minimal repo manifest",
   );
-  const runtimeValidationSchema = await loadSchema(
-    "runtime_validation_tasks.schema.json",
-  );
+});
+
+test("strict schema contracts accept real builder output and reject unexpected fields", () => {
   const repoManifest = {
     repository: { name: "fixture" },
     generated_at: "2026-04-22T00:00:00Z",
@@ -720,30 +410,24 @@ test("strict schema contracts accept real builder output and reject unexpected f
   };
 
   const unitManifest = buildUnitManifest(repoManifest, disposition);
-  assertMatchesJsonSchema(unitManifestSchema, unitManifest, "unitManifest");
+  accepts(UnitManifestSchema, unitManifest, "unitManifest builder output");
 
   const surfaceManifest = buildSurfaceManifest(repoManifest, disposition);
-  assertMatchesJsonSchema(
-    surfaceManifestSchema,
-    surfaceManifest,
-    "surfaceManifest",
-  );
+  accepts(SurfaceManifestSchema, surfaceManifest, "surfaceManifest builder output");
 
   const graphBundle = buildGraphBundle(repoManifest, disposition, {
-    fileContents: {
-      "src/api/auth.ts": "const deploy = 'infra/deploy.yml';",
-    },
+    fileContents: { "src/api/auth.ts": "const deploy = 'infra/deploy.yml';" },
   });
-  assertMatchesJsonSchema(graphBundleSchema, graphBundle, "graphBundle");
+  accepts(GraphBundleSchema, graphBundle, "graphBundle builder output");
 
   const runtimeValidationTasks = buildRuntimeValidationTasks({
     unitManifest,
     command: ["npm", "test"],
   });
-  assertMatchesJsonSchema(
-    runtimeValidationSchema,
+  accepts(
+    RuntimeValidationTaskManifestSchema,
     runtimeValidationTasks,
-    "runtimeValidationTasks",
+    "runtimeValidationTasks builder output",
   );
 
   const auditTasks = [
@@ -776,107 +460,75 @@ test("strict schema contracts accept real builder output and reject unexpected f
       }),
     ),
   );
-  assertMatchesJsonSchema(
-    auditPlanMetricsSchema,
-    auditPlanMetrics,
-    "auditPlanMetrics",
-  );
+  accepts(AuditPlanMetricsSchema, auditPlanMetrics, "auditPlanMetrics builder output");
 
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(unitManifestSchema, {
-        units: [
-          {
-            unit_id: "src-api-auth",
-            name: "src-api-auth",
-            files: ["src/api/auth.ts"],
-            required_lenses: ["security"],
-            unexpected: true,
-          },
-        ],
-      }),
-    /unexpected is not allowed by schema/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(surfaceManifestSchema, {
-        surfaces: [
-          {
-            id: "surface:src/api/auth.ts",
-            kind: "interface",
-            entrypoint: "src/api/auth.ts",
-            exposure: "public",
-          },
-        ],
-      }),
-    /exposure must be one of network, local/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(graphBundleSchema, {
-        graphs: {
-          imports: [
-            {
-              from: "src/api/auth.ts",
-              to: "src/lib/session.ts",
-              confidence: 2,
-            },
-          ],
+  // Strict object schemas reject unexpected keys / out-of-vocabulary values.
+  rejects(
+    UnitManifestSchema,
+    {
+      units: [
+        {
+          unit_id: "src-api-auth",
+          name: "src-api-auth",
+          files: ["src/api/auth.ts"],
+          required_lenses: ["security"],
+          unexpected: true,
         },
-      }),
-    /graphs\.imports\[0\]\.confidence must be <= 1/i,
+      ],
+    },
+    "unit with extra key",
   );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(runtimeValidationSchema, {
-        tasks: [
-          {
-            id: "runtime:unit:src-api-auth",
-            kind: "unit-risk-check",
-            target_paths: [],
-            reason: "Should fail",
-            priority: "high",
-          },
-        ],
-      }),
-    /target_paths must have at least 1 item/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(auditPlanMetricsSchema, {
-        ...auditPlanMetrics,
-        packet_quality: {
-          ...auditPlanMetrics.packet_quality,
-          average_cohesion_score: 2,
+  rejects(
+    SurfaceManifestSchema,
+    {
+      surfaces: [
+        {
+          id: "surface:src/api/auth.ts",
+          kind: "interface",
+          entrypoint: "src/api/auth.ts",
+          exposure: "public",
         },
-      }),
-    /packet_quality\.average_cohesion_score must be <= 1/i,
+      ],
+    },
+    "surface with out-of-vocabulary exposure",
+  );
+  rejects(GraphEdgeSchema, { from: "a.ts", to: "b.ts", confidence: 2 }, "edge confidence > 1");
+  accepts(GraphEdgeSchema, { from: "a.ts", to: "b.ts", confidence: 1 }, "edge confidence == 1");
+  rejects(
+    RuntimeValidationTaskManifestSchema,
+    {
+      tasks: [
+        {
+          id: "runtime:unit:src-api-auth",
+          kind: "unit-risk-check",
+          target_paths: [],
+          reason: "Should fail",
+          priority: "high",
+        },
+      ],
+    },
+    "runtime task with empty target_paths",
+  );
+  rejects(
+    AuditPlanMetricsSchema,
+    {
+      ...auditPlanMetrics,
+      packet_quality: { ...auditPlanMetrics.packet_quality, average_cohesion_score: 2 },
+    },
+    "plan metrics cohesion > 1",
   );
 });
 
-test("planning artifact examples match published schemas", async () => {
-  const riskRegisterSchema = await loadSchema("risk_register.schema.json");
-  const auditPlanMetricsSchema = await loadSchema(
-    "audit_plan_metrics.schema.json",
-  );
-  const externalAnalyzerResultsSchema = await loadSchema(
-    "external_analyzer_results.schema.json",
-  );
+// ---------------------------------------------------------------------------
+// Example fixtures + risk register bounds.
+// ---------------------------------------------------------------------------
+
+test("planning artifact example fixtures satisfy their schemas", async () => {
   const riskRegisterExample = JSON.parse(
-    await readFile(
-      join(repoRoot, "examples", "risk_register.example.json"),
-      "utf8",
-    ),
+    await readFile(join(repoRoot, "examples", "risk_register.example.json"), "utf8"),
   );
   const auditPlanMetricsExample = JSON.parse(
-    await readFile(
-      join(repoRoot, "examples", "audit_plan_metrics.example.json"),
-      "utf8",
-    ),
+    await readFile(join(repoRoot, "examples", "audit_plan_metrics.example.json"), "utf8"),
   );
   const externalAnalyzerResultsExample = JSON.parse(
     await readFile(
@@ -884,34 +536,19 @@ test("planning artifact examples match published schemas", async () => {
       "utf8",
     ),
   );
-
-  assertMatchesJsonSchema(
-    riskRegisterSchema,
-    riskRegisterExample,
-    "riskRegisterExample",
-  );
-  assertMatchesJsonSchema(
-    auditPlanMetricsSchema,
-    auditPlanMetricsExample,
-    "auditPlanMetricsExample",
-  );
-  assertMatchesJsonSchema(
-    externalAnalyzerResultsSchema,
+  accepts(RiskRegisterSchema, riskRegisterExample, "risk register example");
+  accepts(AuditPlanMetricsSchema, auditPlanMetricsExample, "audit plan metrics example");
+  accepts(
+    ExternalAnalyzerResultsSchema,
     externalAnalyzerResultsExample,
-    "externalAnalyzerResultsExample",
+    "external analyzer results example",
   );
 });
 
 test("risk_register example keys match live buildRiskRegister output shape", async () => {
-  const riskRegisterSchema = await loadSchema("risk_register.schema.json");
   const riskRegisterExample = JSON.parse(
-    await readFile(
-      join(repoRoot, "examples", "risk_register.example.json"),
-      "utf8",
-    ),
+    await readFile(join(repoRoot, "examples", "risk_register.example.json"), "utf8"),
   );
-
-  // Call the live builder with a minimal unit manifest matching the example's unit_id.
   const liveOutput = buildRiskRegister(
     {
       units: [
@@ -927,11 +564,7 @@ test("risk_register example keys match live buildRiskRegister output shape", asy
     undefined,
     undefined,
   );
-
-  // Live builder output must satisfy the schema (guards against builder/schema drift).
-  assertMatchesJsonSchema(riskRegisterSchema, liveOutput, "liveRiskRegister");
-
-  // Structural key parity: top-level keys and per-item keys must match example.
+  accepts(RiskRegisterSchema, liveOutput, "live risk register");
   assert.deepEqual(
     Object.keys(liveOutput).sort(),
     Object.keys(riskRegisterExample).sort(),
@@ -946,110 +579,46 @@ test("risk_register example keys match live buildRiskRegister output shape", asy
   }
 });
 
-test("risk register schema accepts planner-scale scores and rejects out-of-scale values", async () => {
-  const riskRegisterSchema = await loadSchema("risk_register.schema.json");
-  const unitManifestSchema = await loadSchema("unit_manifest.schema.json");
-  const plannerScaleRiskRegister = {
-    items: [
-      {
-        unit_id: "api-auth",
-        risk_score: 9,
-        signals: ["security_relevant"],
-      },
-    ],
-  };
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      riskRegisterSchema,
-      plannerScaleRiskRegister,
-      "riskRegister",
-    ),
+test("risk register accepts planner-scale scores and rejects out-of-scale values", () => {
+  accepts(
+    RiskRegisterSchema,
+    { items: [{ unit_id: "api-auth", risk_score: 9, signals: ["security_relevant"] }] },
+    "risk score 9",
   );
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      riskRegisterSchema,
-      {
-        items: [
-          {
-            unit_id: "api-auth",
-            risk_score: 10,
-            signals: ["security_relevant"],
-          },
-        ],
-      },
-      "riskRegister",
-    ),
+  accepts(
+    RiskRegisterSchema,
+    { items: [{ unit_id: "api-auth", risk_score: 10, signals: ["security_relevant"] }] },
+    "risk score 10",
   );
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        riskRegisterSchema,
+  rejects(
+    RiskRegisterSchema,
+    { items: [{ unit_id: "api-auth", risk_score: -1, signals: ["security_relevant"] }] },
+    "risk score -1",
+  );
+  rejects(
+    RiskRegisterSchema,
+    { items: [{ unit_id: "api-auth", risk_score: 11, signals: ["security_relevant"] }] },
+    "risk score 11",
+  );
+  rejects(
+    RiskRegisterSchema,
+    { items: [{ unit_id: "api-auth", risk_score: "9", signals: ["security_relevant"] }] },
+    "risk score as string",
+  );
+  rejects(
+    UnitManifestSchema,
+    {
+      units: [
         {
-          items: [
-            {
-              unit_id: "api-auth",
-              risk_score: -1,
-              signals: ["security_relevant"],
-            },
-          ],
+          unit_id: "api-auth",
+          name: "api-auth",
+          files: ["src/api/auth.ts"],
+          risk_score: 11,
+          required_lenses: ["security"],
         },
-        "riskRegister",
-      ),
-    /riskRegister\.items\[0\]\.risk_score must be >= 0/i,
-  );
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        riskRegisterSchema,
-        {
-          items: [
-            {
-              unit_id: "api-auth",
-              risk_score: 11,
-              signals: ["security_relevant"],
-            },
-          ],
-        },
-        "riskRegister",
-      ),
-    /riskRegister\.items\[0\]\.risk_score must be <= 10/i,
-  );
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        riskRegisterSchema,
-        {
-          items: [
-            {
-              unit_id: "api-auth",
-              risk_score: "9",
-              signals: ["security_relevant"],
-            },
-          ],
-        },
-        "riskRegister",
-      ),
-    /riskRegister\.items\[0\]\.risk_score must be of type number/i,
-  );
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        unitManifestSchema,
-        {
-          units: [
-            {
-              unit_id: "api-auth",
-              name: "api-auth",
-              files: ["src/api/auth.ts"],
-              risk_score: 11,
-              required_lenses: ["security"],
-            },
-          ],
-        },
-        "unitManifest",
-      ),
-    /unitManifest\.units\[0\]\.risk_score must be <= 10/i,
+      ],
+    },
+    "unit risk score 11",
   );
 });
 
@@ -1090,182 +659,14 @@ test("risk register builder caps additive scores at the shared 0..10 scale", () 
       ],
     },
   );
-
   assert.equal(riskRegister.items[0].risk_score, 10);
 });
 
-test("audit task schema enforces lens, priority, tags, and strict additionalProperties", async () => {
-  const auditTaskSchema = await loadSchema("audit_task.schema.json");
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      auditTaskSchema,
-      {
-        task_id: "task-1",
-        unit_id: "unit-1",
-        pass_id: "pass:security",
-        lens: "security",
-        file_paths: ["src/api/auth.ts"],
-        file_line_counts: {
-          "src/api/auth.ts": 12,
-        },
-        inputs: {
-          unit_manifest_ref: "unit_manifest.json",
-          custom_ref: "custom.json",
-        },
-        rationale: "Review the auth path.",
-        priority: "high",
-        tags: ["auth", "critical-flow"],
-        status: "pending",
-      },
-      "auditTask",
-    ),
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        auditTaskSchema,
-        {
-          task_id: "task-1",
-          unit_id: "unit-1",
-          pass_id: "pass:security",
-          lens: "bogus",
-          file_paths: ["src/api/auth.ts"],
-          rationale: "Review the auth path.",
-        },
-        "auditTask",
-      ),
-    /auditTask\.lens must be one of/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        auditTaskSchema,
-        {
-          task_id: "task-1",
-          unit_id: "unit-1",
-          pass_id: "pass:security",
-          lens: "security",
-          file_paths: ["src/api/auth.ts"],
-          rationale: "Review the auth path.",
-          priority: "urgent",
-        },
-        "auditTask",
-      ),
-    /auditTask\.priority must be one of/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        auditTaskSchema,
-        {
-          task_id: "task-1",
-          unit_id: "unit-1",
-          pass_id: "pass:security",
-          lens: "security",
-          file_paths: ["src/api/auth.ts"],
-          rationale: "Review the auth path.",
-          tags: [],
-        },
-        "auditTask",
-      ),
-    /auditTask\.tags must have at least 1 item/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        auditTaskSchema,
-        {
-          task_id: "task-1",
-          unit_id: "unit-1",
-          pass_id: "pass:security",
-          lens: "security",
-          file_paths: ["src/api/auth.ts"],
-          inputs: {
-            unit_manifest_ref: "unit_manifest.json",
-            custom_ref: 7,
-          },
-          rationale: "Review the auth path.",
-        },
-        "auditTask",
-      ),
-    /auditTask\.inputs\.custom_ref must be of type string/i,
-  );
-
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        auditTaskSchema,
-        {
-          task_id: "task-1",
-          unit_id: "unit-1",
-          pass_id: "pass:security",
-          lens: "security",
-          file_paths: ["src/api/auth.ts"],
-          rationale: "Review the auth path.",
-          unexpected: true,
-        },
-        "auditTask",
-      ),
-    /auditTask\.unexpected is not allowed by schema/i,
-  );
-});
-
-test("audit task schema rejects nonpositive line range bounds", async () => {
-  const auditTaskSchema = await loadSchema("audit_task.schema.json");
-  const validTask = {
-    task_id: "task-1",
-    unit_id: "unit-1",
-    pass_id: "pass:security",
-    lens: "security",
-    file_paths: ["src/api/auth.ts"],
-    line_ranges: [{ path: "src/api/auth.ts", start: 1, end: 1 }],
-    rationale: "Review the auth path.",
-  };
-
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(auditTaskSchema, validTask, "auditTask"),
-  );
-  for (const [field, value] of [
-    ["start", 0],
-    ["start", -1],
-    ["end", 0],
-    ["end", -1],
-  ]) {
-    assert.throws(
-      () =>
-        assertMatchesJsonSchema(
-          auditTaskSchema,
-          {
-            ...validTask,
-            line_ranges: [
-              {
-                path: "src/api/auth.ts",
-                start: 1,
-                end: 1,
-                [field]: value,
-              },
-            ],
-          },
-          "auditTask",
-        ),
-      new RegExp(`auditTask\\.line_ranges\\[0\\]\\.${field} must be >= 1`, "i"),
-    );
-  }
-});
-
 // ---------------------------------------------------------------------------
-// ARC-ebbd5420: step_contract schema progress sub-object must accept all
-// StepProgress fields that the TypeScript interface defines.
+// step_contract progress sub-object (ARC-ebbd5420).
 // ---------------------------------------------------------------------------
 
-test("step_contract schema validates progress with all StepProgress fields (ARC-ebbd5420)", async () => {
-  const stepContractSchema = await loadSchema("step_contract.schema.json");
-
+test("step_contract validates progress with all StepProgress fields (ARC-ebbd5420)", () => {
   const baseStep = {
     contract_version: "audit-code-step/v1alpha1",
     step_kind: "dispatch_review",
@@ -1279,72 +680,42 @@ test("step_contract schema validates progress with all StepProgress fields (ARC-
     artifact_paths: {},
   };
 
-  assert.doesNotThrow(
-    () =>
-      assertMatchesJsonSchema(
-        stepContractSchema,
-        {
-          ...baseStep,
-          progress: {
-            summary: "Dispatch in progress",
-            agent_count: 8,
-            max_concurrent_agents: 4,
-            confirmation_recommended: false,
-            dispatch_summary: "8 agents, max 4 concurrent (rolling)",
-          },
-        },
-        "stepDispatch",
-      ),
-    "progress with all fan-out fields should pass schema",
+  accepts(
+    StepArtifactSchema,
+    {
+      ...baseStep,
+      progress: {
+        summary: "Dispatch in progress",
+        agent_count: 8,
+        max_concurrent_agents: 4,
+        confirmation_recommended: false,
+        dispatch_summary: "8 agents, max 4 concurrent (rolling)",
+      },
+    },
+    "step with all fan-out progress fields",
   );
 
-  assert.doesNotThrow(
-    () =>
-      assertMatchesJsonSchema(
-        stepContractSchema,
-        {
-          ...baseStep,
-          progress: { summary: "Pending" },
-        },
-        "stepMinimalProgress",
-      ),
-    "progress with only the required summary field should pass schema",
+  accepts(
+    StepArtifactSchema,
+    { ...baseStep, progress: { summary: "Pending" } },
+    "step with minimal progress",
   );
 
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        stepContractSchema,
-        {
-          ...baseStep,
-          progress: {
-            summary: "Bad progress",
-            unrecognized_field: true,
-          },
-        },
-        "stepBadProgress",
-      ),
-    /unrecognized_field is not allowed by schema/i,
-    "unrecognized progress field should be rejected (additionalProperties: false)",
+  rejects(
+    StepArtifactSchema,
+    { ...baseStep, progress: { summary: "Bad progress", unrecognized_field: true } },
+    "step with unrecognized progress field",
   );
 });
 
 // ---------------------------------------------------------------------------
-// DAT-3fb8a01d: blind_spot_register schema must reject invalid lens names in
-// suggested_lenses, accepting only the canonical 11-value set.
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // DAT-db770721 (A6): the lens vocabulary has ONE source — the `LensSchema` zod
-// enum. The worker-facing JSON schemas inline it (generated from that source),
-// so inline lens enums are allowed, but every one of them must EQUAL the source
-// — a hand-copied / drifted lens list can never slip in.
+// enum. The generated worker-facing JSON schemas inline it; every inline lens
+// enum must EQUAL the source so a hand-copied / drifted lens list can't slip in.
 // ---------------------------------------------------------------------------
 
-test("every inline lens enum across schemas equals the LensSchema source (DAT-db770721)", async () => {
-  const { LensSchema } = await import("@audit-tools/shared");
+test("every inline lens enum across generated schemas equals the LensSchema source (DAT-db770721)", async () => {
   const CANONICAL = LensSchema.options;
-  const { readdir } = await import("node:fs/promises");
   const schemasDir = join(repoRoot, "schemas");
   const schemaFiles = (await readdir(schemasDir)).filter((f) =>
     f.endsWith(".schema.json"),
@@ -1360,8 +731,6 @@ test("every inline lens enum across schemas equals the LensSchema source (DAT-db
     "lens.schema.json must contain exactly the canonical lens values",
   );
 
-  // Any inline lens enum (array containing "correctness") anywhere must match the
-  // single source — proving it was derived from LensSchema, not hand-copied.
   const offenders = [];
   function checkInlineLensEnums(obj, file) {
     if (typeof obj !== "object" || obj === null) return;
@@ -1383,83 +752,5 @@ test("every inline lens enum across schemas equals the LensSchema source (DAT-db
     offenders,
     [],
     `these schemas contain a lens enum that drifted from LensSchema: ${offenders.join(", ")}`,
-  );
-});
-
-test("blind_spot_register schema rejects invalid lens names in suggested_lenses (DAT-3fb8a01d)", async () => {
-  const blindSpotSchema = await loadSchema("blind_spot_register.schema.json");
-
-  const baseEntry = {
-    id: "bs-1",
-    title: "Unobserved queue flush",
-    kind: "dynamic-behavior",
-    summary: "Queue flush behavior is not observable under static analysis.",
-    evidence: ["No metrics emitted on flush path."],
-  };
-
-  // All 11 canonical lens values pass
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      blindSpotSchema,
-      {
-        items: [
-          {
-            ...baseEntry,
-            suggested_lenses: [
-              "correctness",
-              "architecture",
-              "maintainability",
-              "security",
-              "reliability",
-              "performance",
-              "data_integrity",
-              "tests",
-              "operability",
-              "config_deployment",
-              "observability",
-            ],
-          },
-        ],
-      },
-      "blindSpotRegister",
-    ),
-  );
-
-  // Empty suggested_lenses array passes (field is optional; empty array is valid)
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      blindSpotSchema,
-      {
-        items: [{ ...baseEntry, suggested_lenses: [] }],
-      },
-      "blindSpotRegister",
-    ),
-  );
-
-  // suggested_lenses omitted entirely passes (field is optional)
-  assert.doesNotThrow(() =>
-    assertMatchesJsonSchema(
-      blindSpotSchema,
-      { items: [{ ...baseEntry }] },
-      "blindSpotRegister",
-    ),
-  );
-
-  // Unrecognized lens name fails
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        blindSpotSchema,
-        {
-          items: [
-            {
-              ...baseEntry,
-              suggested_lenses: ["nonexistent_lens"],
-            },
-          ],
-        },
-        "blindSpotRegister",
-      ),
-    /blindSpotRegister\.items\[0\]\.suggested_lenses\[0\] must be one of/i,
   );
 });

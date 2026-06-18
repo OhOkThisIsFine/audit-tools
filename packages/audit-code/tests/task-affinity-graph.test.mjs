@@ -1,18 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { assertMatchesJsonSchema } from "./helpers/auditSchemaRegistry.mjs";
 
-const { buildTaskAffinityGraph } = await import(
+const { buildTaskAffinityGraph, TaskAffinityGraphSchema } = await import(
   "../src/orchestrator/taskAffinityGraph.ts"
 );
-
-const here = dirname(fileURLToPath(import.meta.url));
-async function loadSchema(name) {
-  return JSON.parse(await readFile(join(here, "..", "schemas", name), "utf8"));
-}
 
 const task = (over) => ({
   task_id: "t",
@@ -145,8 +136,13 @@ test("tasks with fully disjoint file sets and different units/dirs have no affin
   assert.equal(e, undefined, "fully disjoint tasks with different dirs must have no edge");
 });
 
-test("graph validates against task_affinity_graph.schema.json", async () => {
-  const schema = await loadSchema("task_affinity_graph.schema.json");
+test("graph validates against TaskAffinityGraphSchema", () => {
   const graph = buildTaskAffinityGraph(TASKS);
-  assertMatchesJsonSchema(schema, graph, "task_affinity_graph");
+  const result = TaskAffinityGraphSchema.safeParse(graph);
+  assert.ok(
+    result.success,
+    `task affinity graph should satisfy schema: ${
+      result.success ? "" : JSON.stringify(result.error.issues)
+    }`,
+  );
 });

@@ -173,14 +173,12 @@ test("renderAntigravityAssets text does not reference removed MCP tools (INV-aud
 
 // ── INV-audit-infra-10: agent_reflection.schema.json severity enum ───────────
 
-test("agent_reflection.schema.json severity enum includes 'critical' (INV-audit-infra-10)", () => {
-  const schemaPath = join(repoRoot, "schemas", "agent_reflection.schema.json");
-  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
-  const severityEnum = schema?.properties?.severity?.enum;
-  assert.ok(Array.isArray(severityEnum), "severity must have an enum in agent_reflection.schema.json");
+test("AgentReflection severity enum includes 'critical' (INV-audit-infra-10)", async () => {
+  const { ReflectionSeveritySchema } = await import("@audit-tools/shared");
+  const severityEnum = ReflectionSeveritySchema.options;
   assert.ok(
     severityEnum.includes("critical"),
-    `agent_reflection.schema.json severity enum must include 'critical' to match finding severity; got: ${JSON.stringify(severityEnum)}`,
+    `AgentReflection severity enum must include 'critical' to match finding severity; got: ${JSON.stringify(severityEnum)}`,
   );
   // All expected severity levels must be present.
   for (const level of ["info", "low", "medium", "high", "critical"]) {

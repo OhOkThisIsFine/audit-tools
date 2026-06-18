@@ -185,6 +185,9 @@ export {
   parseReflectionsNdjson,
   aggregateReflections,
   renderProcessFeedbackSection,
+  ReflectionClaritySchema,
+  ReflectionSeveritySchema,
+  AgentReflectionSchema,
 } from "./agentReflections.js";
 
 // Tokens
