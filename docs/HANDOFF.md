@@ -9,11 +9,13 @@
 
 ## Where things stand
 
-- **`main` (pushed, NOT published): the go-forward program keeps accumulating.** Latest =
-  **A3 step 4 slice 2a — fold the dispatch switch into an executor-runner map** `0886d06` (this session).
-  Green at every commit; suites green on the committed tree (shared **726** / audit **2193** / remediate
-  **1671**, +1 documented skip each). **Publish HELD per Ethan (2026-06-17)** — last published:
-  `@audit-tools/shared 0.22.0` / `auditor-lambda 0.27.0` / `remediator-lambda 0.27.0` (global bins lag).
+- **`main` (pushed + PUBLISHED): the go-forward program keeps accumulating.** Code tip =
+  **A3 step 4 slice 2a — fold the dispatch switch into an executor-runner map** `0886d06`; then **shipped
+  2026-06-18** (release-bump commits `dd0e296`/`06ed90e`/`8224c8e`). Green at every commit; suites green on
+  the committed tree (shared **726** / audit **2193** / remediate **1671**, +1 documented skip each).
+  **PUBLISHED 2026-06-18 — publish hold lifted for Ethan's cross-machine usage:** `@audit-tools/shared 0.22.1`
+  / `auditor-lambda 0.27.1` / `remediator-lambda 0.27.1` — all three CI-green on npm (runs 27731143814 /
+  27731177158 / 27731386835); global bins reinstalled + postinstall run + `--version` smoke green.
   - This session (`git log` for detail) — **A3 step 4, RESCOPED mid-session to "C"** (unify audit's fold onto
     shared `advance` — see Immediate next): (1) remediate orphaned-helper + dead-import/param sweep `33f568f`;
     (2) parity-check doc `6bfae53`; (3) **slice 1** — visited-state-signature cycle detection in shared `advance`
@@ -50,7 +52,9 @@
 - **Ask on genuine ambiguity; never defer merely because something is big.** Genuine Ethan-call + unclear
   preference → ASK (batch). (memory `ask-on-ambiguity-dont-defer-silently`.)
 - **Order of program items is yours** — sequence so one refactor doesn't undo another.
-- **Publish is HELD** (2026-06-17) — accumulate on main; do not `release:*`/publish until Ethan says.
+- **Publish hold LIFTED + shipped 2026-06-18** (0.22.1 / 0.27.1 / 0.27.1, for Ethan's cross-machine usage).
+  Resume accumulating on main; ship again via the `/ship` skill when the next milestone lands (e.g. slice 2b)
+  or when Ethan asks.
 
 ## Immediate next: the go-forward program
 
