@@ -5,14 +5,13 @@ import { StateStore, type RemediationState } from "../state/store.js";
 import type {
   ClarificationRequest,
   Finding,
-  ItemSpec,
   RemediationBlock,
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
 import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot } from "@audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
-import { runPlanPhase, applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
+import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
 import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
@@ -35,10 +34,7 @@ import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
 import { prepareHostRollingDispatch } from "./rollingSession.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
-import {
-  dependenciesSatisfied,
-  dependencyVerifiedComplete,
-} from "./stepUtils.js";
+import { dependencyVerifiedComplete } from "./stepUtils.js";
 import {
   isTerminalStatus,
   isVerifiedCompleteStatus,
@@ -67,25 +63,15 @@ import {
 import {
   buildReviewRequest,
   applyReviewResolution,
-  REVIEW_REQUEST_SCHEMA_VERSION,
   type ReviewRequest,
   type ReviewResolution,
 } from "../review/reviewGate.js";
 import { runFindingFilterPass, type FindingFilterResult } from "../findingFilter.js";
 import {
-  INTAKE_CLARIFICATION_SCHEMA_VERSION,
-  INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
-  INTAKE_SUMMARY_SCHEMA_VERSION,
-  blockingIntakeQuestions,
-  buildConversationSourceManifest,
-  buildDocumentSourceManifest,
   intakePaths,
   isIntakeReady,
   readIntakeArtifacts,
   resolveManifestSources,
-  type IntakeSource,
-  type IntakeSourceManifest,
-  type IntakeSummary,
 } from "../intake.js";
 import type { IntentCheckpoint } from "@audit-tools/shared";
 import {
@@ -272,10 +258,6 @@ function resolveInputPaths(
     missing: [],
     checked,
   };
-}
-
-function formatAllowed(command: string): string {
-  return `- \`${command}\``;
 }
 
 export type {
@@ -1382,11 +1364,9 @@ async function buildImplementDispatchStep(ctx: {
   artifactsDir: string;
   state: RemediationState;
   options: NextStepOptions;
-  implementBlocks: RemediationBlock[];
-  runLogger: RunLogger;
   store: StateStore;
 }): Promise<RemediateOutcome> {
-  const { root, artifactsDir, state, options, implementBlocks, runLogger, store } = ctx;
+  const { root, artifactsDir, state, options, store } = ctx;
 
     const sessionConfigImpl = options.sessionConfig ??
       await readOptionalJsonFile<SessionConfig>(
@@ -2110,7 +2090,6 @@ async function handlePendingIntake(
   root: string,
   artifactsDir: string,
   options: NextStepOptions,
-  store: StateStore,
 ): Promise<RemediationStep | RemediationState | null> {
   // Short-circuit: if an extracted-plan.json already exists (promoted from the
   // contract pipeline), consume it directly without requiring intake artifacts.
@@ -3312,7 +3291,6 @@ function buildPreIntakeObligations(
           c.root,
           c.artifactsDir,
           c.options,
-          c.store,
         );
         if (outcome && "step_kind" in outcome) {
           return { kind: "emit", step: outcome };
@@ -3465,8 +3443,6 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
             artifactsDir,
             state: s,
             options,
-            implementBlocks: pendingBlocks,
-            runLogger,
             store,
           });
         }
