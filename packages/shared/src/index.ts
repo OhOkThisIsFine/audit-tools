@@ -700,6 +700,7 @@ export type {
   ObligationDef,
   ObligationOutcome,
   ObligationEngine,
+  AdvanceResult,
 } from "./engine/obligationEngine.js";
 export {
   findFirstActionableObligation,

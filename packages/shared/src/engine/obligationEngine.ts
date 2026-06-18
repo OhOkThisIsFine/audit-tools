@@ -135,31 +135,75 @@ export function findNextObligation<S, Ctx, Step>(
 export const DEFAULT_MAX_TRANSITIONS = 100;
 
 /**
+ * The outcome of an `advance` run.
+ *
+ * - `step` non-null → an obligation emitted a host-actionable step; `state` is the
+ *   state to persist alongside it.
+ * - `step` null, `stopped` undefined → no obligation is actionable: the run is
+ *   complete.
+ * - `step` null, `stopped: "cycle"` → a transition revisited an already-seen state
+ *   signature, so the fold is not converging; the caller surfaces a graceful
+ *   terminal rather than looping. Only possible when `opts.stateSignature` is
+ *   supplied (otherwise a runaway fold hits the `maxTransitions` throw instead).
+ */
+export interface AdvanceResult<S, Step> {
+  state: S;
+  step: Step | null;
+  stopped?: "cycle";
+}
+
+/**
  * Drive the engine from `state`: repeatedly select the highest-priority actionable
  * obligation and execute it. A `transition` outcome advances the state and the
  * loop re-scans within the same call (one host round-trip can fold through several
  * transitions); an `emit` outcome stops the loop and returns the host-actionable
  * step. When no obligation is actionable the run is complete and `step` is `null`.
  *
- * `maxTransitions` bounds consecutive transitions before throwing — a cycle
- * backstop the hand-rolled recursion this replaces never had. `emit` and
- * completion both terminate the loop and are never bounded.
+ * **Cycle termination.** A transition obligation that never clears its own
+ * actionable state would loop forever. Two backstops:
+ * - `opts.stateSignature(state)` (preferred) records the signature of every state
+ *   the loop scans from; a transition landing on an already-seen signature —
+ *   including a *no-progress* transition that leaves the signature unchanged, or a
+ *   multi-obligation A→B→A state cycle — stops the loop with `stopped: "cycle"`.
+ *   This is the precise cycle condition ("a transition revisited a state already
+ *   scanned this run") that the blunt count only approximates, and it terminates
+ *   *gracefully* (the caller renders a terminal) instead of throwing. It also
+ *   handles non-monotonic folds (e.g. audit-code's selective deepening grows the
+ *   work-set before it shrinks): each distinct round is a new signature, so only a
+ *   genuine revisit stops it.
+ * - `maxTransitions` is the absolute backstop for callers that supply no
+ *   signature — it *throws* after that many consecutive transitions.
+ *
+ * `emit` and natural completion both terminate the loop and are never bounded.
  *
  * This is a strict generalization of the bare scan: an engine whose obligations
  * only ever `emit` stops after exactly one unit (audit-code's emit-only,
- * host-looped contract); `transition` outcomes add remediate-code's in-call
- * folding.
+ * host-looped contract); `transition` outcomes add the in-call folding both
+ * orchestrators use to avoid host round-trips on deterministic pass-throughs.
  */
 export async function advance<S, Ctx, Step>(
   engine: ObligationEngine<S, Ctx, Step>,
   state: S,
   ctx: Ctx,
-  opts?: { maxTransitions?: number },
-): Promise<{ state: S; step: Step | null }> {
+  opts?: { maxTransitions?: number; stateSignature?: (state: S) => string },
+): Promise<AdvanceResult<S, Step>> {
   const maxTransitions = opts?.maxTransitions ?? DEFAULT_MAX_TRANSITIONS;
+  const stateSignature = opts?.stateSignature;
+  const visited = stateSignature ? new Set<string>() : null;
   let current = state;
   let transitions = 0;
   for (;;) {
+    if (visited) {
+      const signature = stateSignature!(current);
+      if (visited.has(signature)) {
+        // A transition revisited a state already scanned this run — the fold is
+        // not converging (a no-progress step that left the signature unchanged,
+        // or a multi-obligation state cycle). Stop gracefully; the caller renders
+        // a terminal rather than throwing.
+        return { state: current, step: null, stopped: "cycle" };
+      }
+      visited.add(signature);
+    }
     const obligation = findNextObligation(
       engine.priority,
       engine.obligations,
@@ -176,7 +220,8 @@ export async function advance<S, Ctx, Step>(
         `advance: exceeded maxTransitions (${maxTransitions}) without reaching ` +
           `an emit or completion. The last selected obligation was ` +
           `"${obligation.id}" — a transition obligation is likely not clearing ` +
-          `its own actionable state (cycle).`,
+          `its own actionable state (cycle). Supply opts.stateSignature for ` +
+          `graceful cycle detection.`,
       );
     }
   }
