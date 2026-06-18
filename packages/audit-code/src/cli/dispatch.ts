@@ -432,5 +432,7 @@ export async function prepareDispatchArtifacts(params: {
       : null,
     warning_count: warnings.length,
     dispatch_warnings_path: warningsPath,
+    plan,
+    pools: dispatchPool.pools,
   };
 }
