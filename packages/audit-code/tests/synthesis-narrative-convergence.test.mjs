@@ -259,7 +259,7 @@ test("CE-005 convergence: no-progress guard fires when a stable narrative signat
     const dispatchedSignatures = new Set();
     const baseCtx = {
       dispatchedSignatures,
-      params: { artifactsDir: artDir, maxRuns: 1000, root: dir },
+      params: { artifactsDir: artDir, root: dir },
       bundle,
       state,
       selectedObligation: "synthesis_narrative_current",
@@ -313,7 +313,7 @@ test("CE-005: no-progress guard records no_progress_detected and stays blocked w
     const dispatchedSignatures = new Set();
     const baseCtx = {
       dispatchedSignatures,
-      params: { artifactsDir: artDir, maxRuns: 1000, root: dir },
+      params: { artifactsDir: artDir, root: dir },
       bundle,
       state,
       selectedObligation: "synthesis_narrative_current",
@@ -349,7 +349,7 @@ test("ARC-b8fed771: no-progress guard does NOT fire on the bootstrap no-metadata
     const dispatchedSignatures = new Set();
     const ctx = {
       dispatchedSignatures,
-      params: { artifactsDir: artDir, maxRuns: 1000, root: dir },
+      params: { artifactsDir: artDir, root: dir },
       bundle,
       state,
       selectedObligation: "repo_manifest",
