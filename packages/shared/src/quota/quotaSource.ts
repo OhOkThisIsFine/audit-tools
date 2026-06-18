@@ -1,11 +1,16 @@
-export interface QuotaUsageSnapshot {
-  remaining_pct: number | null;
-  reset_at: string | null;
-  requests_remaining: number | null;
-  tokens_remaining: number | null;
-  captured_at: string;
-  source: string;
-}
+import { z } from "zod";
+
+export const QuotaUsageSnapshotSchema = z
+  .object({
+    remaining_pct: z.number().nullable(),
+    reset_at: z.string().nullable(),
+    requests_remaining: z.number().int().nullable(),
+    tokens_remaining: z.number().int().nullable(),
+    captured_at: z.string(),
+    source: z.string(),
+  })
+  .strict();
+export type QuotaUsageSnapshot = z.infer<typeof QuotaUsageSnapshotSchema>;
 
 export interface QuotaSource {
   readonly name: string;

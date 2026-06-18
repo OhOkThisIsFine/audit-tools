@@ -1,5 +1,7 @@
+import { z } from "zod";
 import type { QuotaConfig, ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type { DispatchModelTier } from "../types/stepContract.js";
+import { DispatchModelTierSchema } from "../types/stepContract.js";
 import type {
   HostConcurrencyLimit,
   QuotaStateEntry,
@@ -45,20 +47,23 @@ export interface DiscoveredRateLimitsInput {
  * `model_hint.tier`; the windows are discovered, never assumed. The host still
  * never names a model to the backend (no-hardcoded-models invariant).
  */
-export interface HostModelRosterEntry {
-  rank: DispatchModelTier;
-  /** Context window (input tokens) of the model serving this rank. */
-  context_tokens: number;
-  /** Output-token cap of the model serving this rank. */
-  output_tokens: number;
-  /**
-   * Optional OPAQUE identity for the model serving this rank, used ONLY as a
-   * quota-key segment (`provider/<model_id>`) so quota learning stays
-   * per-model. Never a window authority and never compared against a name
-   * table — the no-hardcoded-models invariant holds.
-   */
-  model_id?: string;
-}
+export const HostModelRosterEntrySchema = z
+  .object({
+    rank: DispatchModelTierSchema,
+    /** Context window (input tokens) of the model serving this rank. */
+    context_tokens: z.number().int().min(1),
+    /** Output-token cap of the model serving this rank. */
+    output_tokens: z.number().int().min(1),
+    /**
+     * Optional OPAQUE identity for the model serving this rank, used ONLY as a
+     * quota-key segment (`provider/<model_id>`) so quota learning stays
+     * per-model. Never a window authority and never compared against a name
+     * table — the no-hardcoded-models invariant holds.
+     */
+    model_id: z.string().optional(),
+  })
+  .strict();
+export type HostModelRosterEntry = z.infer<typeof HostModelRosterEntrySchema>;
 
 const HOST_MODEL_RANKS = new Set<string>(["small", "standard", "deep"]);
 

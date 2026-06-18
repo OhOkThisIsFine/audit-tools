@@ -1,32 +1,47 @@
-export type LimitSource =
-  | "explicit_config"
-  | "discovered_capability"
-  | "cli_flags"
-  | "provider_default"
-  | "learned"
-  | "default";
+import { z } from "zod";
 
-export type LimitConfidence = "high" | "medium" | "low";
+export const LimitSourceSchema = z.enum([
+  "explicit_config",
+  "discovered_capability",
+  "cli_flags",
+  "provider_default",
+  "learned",
+  "default",
+]);
+export type LimitSource = z.infer<typeof LimitSourceSchema>;
 
-export type HostConcurrencyLimitSource =
-  | "cli_flags"
-  | "host_reported"
-  | "session_config"
-  | "environment";
+export const LimitConfidenceSchema = z.enum(["high", "medium", "low"]);
+export type LimitConfidence = z.infer<typeof LimitConfidenceSchema>;
 
-export interface HostConcurrencyLimit {
-  active_subagents: number;
-  source: HostConcurrencyLimitSource;
-  description: string;
-}
+export const HostConcurrencyLimitSourceSchema = z.enum([
+  "cli_flags",
+  "host_reported",
+  "session_config",
+  "environment",
+]);
+export type HostConcurrencyLimitSource = z.infer<
+  typeof HostConcurrencyLimitSourceSchema
+>;
 
-export interface ResolvedLimits {
-  context_tokens: number;
-  output_tokens: number;
-  requests_per_minute: number | null;
-  input_tokens_per_minute: number | null;
-  output_tokens_per_minute: number | null;
-}
+export const HostConcurrencyLimitSchema = z
+  .object({
+    active_subagents: z.number().int().min(1),
+    source: HostConcurrencyLimitSourceSchema,
+    description: z.string().min(1),
+  })
+  .strict();
+export type HostConcurrencyLimit = z.infer<typeof HostConcurrencyLimitSchema>;
+
+export const ResolvedLimitsSchema = z
+  .object({
+    context_tokens: z.number().int().min(1),
+    output_tokens: z.number().int().min(1),
+    requests_per_minute: z.number().int().min(1).nullable(),
+    input_tokens_per_minute: z.number().int().min(1).nullable(),
+    output_tokens_per_minute: z.number().int().min(1).nullable(),
+  })
+  .strict();
+export type ResolvedLimits = z.infer<typeof ResolvedLimitsSchema>;
 
 export interface ConcurrencyBucket {
   success_weight: number;
@@ -52,15 +67,17 @@ export interface QuotaState {
  * re-deriving the decision. Set by `scheduleWave`; logged by callers that hold a
  * RunLogger as a `kind:"scope"` event.
  */
-export type WaveBindingCap =
-  | "rpm"
-  | "tpm"
-  | "learned"
-  | "fallback"
-  | "first_contact"
-  | "cooldown"
-  | "host_concurrency"
-  | "none";
+export const WaveBindingCapSchema = z.enum([
+  "rpm",
+  "tpm",
+  "learned",
+  "fallback",
+  "first_contact",
+  "cooldown",
+  "host_concurrency",
+  "none",
+]);
+export type WaveBindingCap = z.infer<typeof WaveBindingCapSchema>;
 
 export interface WaveSchedule {
   max_concurrent: number;
@@ -79,11 +96,14 @@ export interface WaveSchedule {
   binding_cap?: WaveBindingCap;
 }
 
-export interface BackoffState {
-  consecutive_429_count: number;
-  current_cooldown_ms: number;
-  current_failure_weight: number;
-}
+export const BackoffStateSchema = z
+  .object({
+    consecutive_429_count: z.number().int().min(0),
+    current_cooldown_ms: z.number().int().min(0),
+    current_failure_weight: z.number().min(0),
+  })
+  .strict();
+export type BackoffState = z.infer<typeof BackoffStateSchema>;
 
 export interface ObservedWaveOutcome {
   concurrency: number;
