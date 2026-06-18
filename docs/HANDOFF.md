@@ -9,8 +9,34 @@
 
 ## Where things stand
 
-- **`main`: B2+B3 DONE (unpublished).** Contract-pipeline staleness is now content/semantics-aware and
-  re-reviews are diff-based. Two commits on `main` after the published A3:
+- **`main`: B2 audit-code parity port DONE (unpublished, 2026-06-18).** Audit-code's design-review
+  passes now do diff-based re-review on a semantic-projection staleness key — the cross-orchestrator
+  gap B2/B3 opened is closed. Three commits on `main`:
+  - **Shared refactor:** factored the generic B2/B3 machinery into `@audit-tools/shared/reReview/
+    projectionDiff.ts` (`stableStringifyProjection`, `diffProjections`, `renderDiffReReviewSection`).
+    Each orchestrator keeps its own *projection table*; the diff algorithm + prompt shape are
+    single-sourced so the two halves stay in lockstep. remediate's `semanticProjection.ts` /
+    `reviewSnapshot.ts` re-export the shared primitives (behavior-preserving).
+  - **audit-code port:** `orchestrator/designReviewProjection.ts` (B3 — projects repo_manifest /
+    unit_manifest / graph_bundle / surface_manifest / critical_flows / risk_register /
+    design_assessment.findings to load-bearing fields, provenance+metrics stripped, collections
+    canonically ordered) + `orchestrator/designReviewSnapshot.ts` (B2 — capture verdict+projections
+    on pass completion; `isDesignReviewStale` / `computeDesignReReviewDelta` /
+    `buildDesignReReviewSection`). `state.ts` keys `design_review_*_completed` on snapshot
+    freshness (replacing the old unconditional flag carry-forward that *never* re-fired on real
+    change → that was the actual gap). Snapshots load into the bundle (special-loaded like
+    `active_dispatch`) so the sync `deriveAuditState` can check staleness. `handleDesignReviewBranch`
+    captures snapshots on consume + treats a stale pass as needing re-run; `nextStepCommand` /
+    `conceptualDispatch` append the re-review section (contract + shallow-conceptual prompts; the
+    **deep-conceptual JUDGE** prompt — perspectives stay independent, the merge becomes diff-aware).
+    Import-cycle avoided via a narrow local `DesignReviewBundle` interface (madge zero cycles).
+  - **Tests:** `tests/design-review-diff-rereview.test.mjs` (13). **Verified green (CLAUDECODE unset):**
+    shared build + `npm run check` zero errors; audit suite **2207** pass / 0 fail / 1 skip;
+    remediate **1687** pass (shared refactor behavior-preserving).
+  - **Publish:** unpublished. Ship via `/ship` when Ethan asks or the next milestone lands.
+
+- **`main`: B2+B3 (remediate) DONE (unpublished).** Contract-pipeline staleness is content/semantics-
+  aware and re-reviews are diff-based. Two earlier commits on `main` after the published A3:
   - **B3 (`f5cea40`):** `semanticProjection.ts` — staleness records/compares each dependency by the hash
     of its SEMANTIC projection (provenance fields stripped universally; finalized module-contract entries
     narrowed to the derivable fields `deriveObligationLedger` consumes), not raw payload bytes. Envelope
@@ -26,10 +52,7 @@
     **1687** pass / 0 fail / 1 skip. New tests: `contract-pipeline-semantic-staleness.test.ts` (B3),
     `contract-pipeline-diff-review.test.ts` (B2). One obsolete `n-r07` assertion (perturbed only
     `created_at` to force a re-stale — the old raw-hash behavior) updated to perturb a load-bearing field.
-  - **Parity follow-up (NOT done):** audit-code's design-review passes re-run as full passes on staleness
-    too — port B2's diff-based-re-review + a finalized-style structural projection to audit-code. Logged
-    in backlog under the B-track item.
-  - **Publish:** unpublished. Ship via `/ship` when Ethan asks or the next milestone lands.
+  - **Parity follow-up:** DONE — see the B2 audit-code parity port above.
 
 - **A3 IS DONE + PUBLISHED.** **A3 step 4 slice 2c DONE** (`819dda7`) — the final reconcile; both
   orchestrators now run the **same** shared `advance` fold engine. **Shipped 2026-06-18:** `auditor-lambda
@@ -100,13 +123,11 @@ orchestrators run the same shared `advance` fold engine; the parallel hand-rolle
 non-parity is erased. Working plan (now history-of-decision, still ground truth for *why*):
 [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md).
 
-**START-HERE next session — A3 + B2 + B3 are done. Pick the next program item.**
-A3 is shipped (`auditor-lambda 0.27.2`); B2+B3 are landed on `main` (unpublished, see *Where things stand*).
-Candidate next: the **B2 audit-code parity port** (diff-based re-review + finalized-style structural
-projection for audit-code's design-review passes — small, closes the cross-orchestrator gap B2/B3 opened),
-or jump to **A6**.
+**START-HERE next session — A3, B2/B3, and the B2 audit-code parity port are done. Pick the next item.**
+A3 is shipped (`auditor-lambda 0.27.2`); B2+B3 (remediate) and the B2 audit-code parity port are landed
+on `main` (unpublished, see *Where things stand*). Candidate next: **A6**.
 
-**Next program items (suggested order, yours to change):** **B2 audit-code parity port** (above) →
+**Next program items (suggested order, yours to change):**
 **A6** (kill schema dual-encoding; drop dead-imported `ajv`; also
 fold the minor `OUTCOME_KEYS` re-list noted in the plan doc) → **A8(a)** (audit-code symmetric rolling wiring
 — its dormant `runRollingDispatch`; audit dispatch is read-only review packets → AuditResult, NOT worktree
