@@ -1,0 +1,295 @@
+/**
+ * S1 (contract-authoring determinism): the obligation ledger is derived
+ * deterministically from the finalized module contracts by the tool, not
+ * authored by an LLM phase. These tests cover the pure deriver, the step-builder
+ * intercept that writes it and advances, and the `validate-artifact` write-time
+ * validator CLI (S3).
+ */
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  buildNextContractPipelineStep,
+} from "../../src/remediate/steps/contractPipeline.js";
+import {
+  writeContractArtifact,
+  contractArtifactFilePath,
+  readContractArtifact,
+} from "../../src/remediate/contractPipeline/artifactStore.js";
+import {
+  deriveObligationLedger,
+  buildTestValidatorPlanScaffold,
+  buildImplementationDagScaffold,
+  acceptedCounterexampleIds,
+} from "../../src/remediate/contractPipeline/derive.js";
+import {
+  validateObligationLedger,
+  CP_MODULE_DECOMPOSITION_VERSION,
+  CP_MODULE_CONTRACTS_VERSION,
+  CP_SEAM_RECONCILIATION_REPORT_VERSION,
+  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+} from "../../src/remediate/validation/contractPipeline.js";
+import {
+  CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
+  CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
+  CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
+  CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
+  type ObligationLedger,
+} from "audit-tools/shared";
+import { program } from "../../src/remediate/index.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const TEST_DIR = join(__dirname, ".test-cp-derive-obligations");
+const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
+const CREATED_AT = "2026-01-01T00:00:00.000Z";
+
+const STEP_OPTIONS = {
+  root: TEST_DIR,
+  artifactsDir: ARTIFACTS_DIR,
+  runId: "CONTRACT-TEST",
+};
+
+/** A finalized-module-contracts payload with one rich module and one bare one. */
+function finalizedContracts() {
+  return {
+    contract_version: CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+    goal_id: "G1",
+    module_contracts: [
+      {
+        name: "auth-module",
+        inputs: ["credentials"],
+        outputs: ["session"],
+        invariants: [
+          "A session is issued only for validated credentials.",
+          "Sessions expire after the configured TTL.",
+        ],
+        side_effects: ["writes session store"],
+        validation_boundary: "validates credentials at the boundary",
+        failure_modes: ["malformed credentials are rejected"],
+      },
+      {
+        name: "logging-module",
+        inputs: ["event"],
+        outputs: ["log line"],
+        invariants: [],
+        side_effects: [],
+        validation_boundary: "n/a",
+        failure_modes: [],
+      },
+    ],
+    created_at: CREATED_AT,
+  };
+}
+
+/** Write every contract-pipeline artifact up to (but not including) the ledger. */
+async function writeUpstreamThroughCritique(): Promise<void> {
+  await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", {
+    contract_version: CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
+    goal_id: "G1",
+    objective: "Harden the auth flow.",
+    non_goals: [],
+    success_criteria: ["Auth flow is hardened."],
+    source_type: "documents",
+    created_at: CREATED_AT,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", {
+    contract_version: CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
+    goal_id: "G1",
+    entries: [],
+    context_summary: "Auth context.",
+    created_at: CREATED_AT,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "module_decomposition", {
+    contract_version: CP_MODULE_DECOMPOSITION_VERSION,
+    goal_id: "G1",
+    modules: [
+      { name: "auth-module", responsibilities: "Auth.", file_scope: ["src/auth.ts"] },
+      { name: "logging-module", responsibilities: "Logs.", file_scope: ["src/log.ts"] },
+    ],
+    created_at: CREATED_AT,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "module_contracts", {
+    ...finalizedContracts(),
+    contract_version: CP_MODULE_CONTRACTS_VERSION,
+  });
+  await writeContractArtifact(ARTIFACTS_DIR, "seam_reconciliation_report", {
+    contract_version: CP_SEAM_RECONCILIATION_REPORT_VERSION,
+    goal_id: "G1",
+    mismatches: [],
+    created_at: CREATED_AT,
+  });
+  await writeContractArtifact(
+    ARTIFACTS_DIR,
+    "finalized_module_contracts",
+    finalizedContracts(),
+  );
+  await writeContractArtifact(ARTIFACTS_DIR, "conceptual_design_critique", {
+    contract_version: CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
+    goal_id: "G1",
+    items: [],
+    verdict: "approved",
+    created_at: CREATED_AT,
+  });
+}
+
+beforeEach(async () => {
+  await rm(TEST_DIR, { recursive: true, force: true });
+  await mkdir(ARTIFACTS_DIR, { recursive: true });
+});
+
+afterEach(async () => {
+  await rm(TEST_DIR, { recursive: true, force: true });
+});
+
+describe("deriveObligationLedger (S1 deterministic derivation)", () => {
+  it("maps module invariants, failure modes, and modules to obligations", () => {
+    const ledger = deriveObligationLedger(finalizedContracts(), {
+      created_at: CREATED_AT,
+    });
+
+    expect(ledger.contract_version).toBe(CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION);
+    expect(ledger.goal_id).toBe("G1");
+
+    const byKind = (kind: string) =>
+      ledger.obligations.filter((o) => o.kind === kind);
+    // 2 modules → 2 structural; auth has 2 invariants + 1 failure mode.
+    expect(byKind("structural")).toHaveLength(2);
+    expect(byKind("invariant")).toHaveLength(2);
+    expect(byKind("behavioral")).toHaveLength(1);
+
+    // Invariant text is carried verbatim into the obligation description.
+    expect(byKind("invariant").map((o) => o.description)).toContain(
+      "A session is issued only for validated credentials.",
+    );
+    // Failure-mode obligations name the failure they must handle.
+    expect(byKind("behavioral")[0].description).toContain(
+      "malformed credentials are rejected",
+    );
+
+    // Every obligation has a unique id, no dependencies, pending status.
+    const ids = ledger.obligations.map((o) => o.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ledger.obligations.every((o) => o.depends_on.length === 0)).toBe(true);
+    expect(ledger.obligations.every((o) => o.status === "pending")).toBe(true);
+  });
+
+  it("represents a module with no invariants/failure modes via a structural obligation", () => {
+    const ledger = deriveObligationLedger(finalizedContracts(), {
+      created_at: CREATED_AT,
+    });
+    const logging = ledger.obligations.filter((o) => o.id.includes("logging-module"));
+    expect(logging).toHaveLength(1);
+    expect(logging[0].kind).toBe("structural");
+  });
+
+  it("is deterministic and produces a ledger that passes validateObligationLedger", () => {
+    const a = deriveObligationLedger(finalizedContracts(), { created_at: CREATED_AT });
+    const b = deriveObligationLedger(finalizedContracts(), { created_at: CREATED_AT });
+    expect(a).toEqual(b);
+
+    const issues = validateObligationLedger(a).filter((i) => i.severity === "error");
+    expect(issues).toEqual([]);
+  });
+});
+
+describe("obligation_ledger is derived by the tool, not dispatched as an LLM phase", () => {
+  it("writes the derived ledger and advances past obligation_ledger in one next-step", async () => {
+    await writeUpstreamThroughCritique();
+
+    const ledgerPath = contractArtifactFilePath(ARTIFACTS_DIR, "obligation_ledger");
+    expect(existsSync(ledgerPath)).toBe(false);
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+
+    // The ledger was written by the tool, not handed to a worker to author.
+    expect(existsSync(ledgerPath)).toBe(true);
+    const envelope = await readContractArtifact(ARTIFACTS_DIR, "obligation_ledger");
+    const written = envelope?.payload as ObligationLedger;
+    const reference = deriveObligationLedger(finalizedContracts());
+    expect(written.obligations.map((o) => o.id)).toEqual(
+      reference.obligations.map((o) => o.id),
+    );
+
+    // The returned step advanced to the next LLM phase — it is NOT an
+    // obligation-ledger authoring step.
+    const prompt = await readFile((step as { prompt_path: string }).prompt_path, "utf8");
+    expect(prompt).not.toMatch(/# Obligation Ledger/);
+    expect(prompt).toMatch(/Test and Validator Plan/);
+
+    // S3: the test-plan phase is scaffolded with the derived skeleton and the
+    // write-time self-check is referenced.
+    expect(prompt).toMatch(/Pre-filled Skeleton/);
+    expect(prompt).toContain("validate-artifact");
+    // The skeleton enumerates a testable obligation derived from the contracts.
+    const aTestableId = reference.obligations.find(
+      (o) => o.kind === "invariant" || o.kind === "behavioral",
+    )!.id;
+    expect(prompt).toContain(aTestableId);
+  });
+});
+
+describe("artifact scaffolds (S3 skeletons for the partially-derivable phases)", () => {
+  it("test-plan scaffold has one blank-assertion spec per testable obligation", () => {
+    const ledger = deriveObligationLedger(finalizedContracts(), { created_at: CREATED_AT });
+    const scaffold = buildTestValidatorPlanScaffold(ledger);
+
+    const testable = ledger.obligations.filter(
+      (o) => o.kind === "invariant" || o.kind === "behavioral",
+    );
+    expect(scaffold.test_specs).toHaveLength(testable.length);
+    // Structural obligations are NOT given test specs.
+    expect(scaffold.test_specs.length).toBeLessThan(ledger.obligations.length);
+    // Every spec references a real obligation and leaves assertions blank.
+    for (const spec of scaffold.test_specs) {
+      expect(testable.some((o) => o.id === spec.obligation_id)).toBe(true);
+      expect(spec.assertions).toEqual([]);
+      expect(spec.name.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("implementation-DAG scaffold covers every obligation and attaches accepted counterexamples", () => {
+    const ledger = deriveObligationLedger(finalizedContracts(), { created_at: CREATED_AT });
+    const scaffold = buildImplementationDagScaffold(ledger, ["CE-001"]);
+
+    // One node per obligation, each covering its obligation, blank judgment slots.
+    expect(scaffold.nodes).toHaveLength(ledger.obligations.length);
+    const coveredObligations = new Set(
+      scaffold.nodes.flatMap((n) => n.satisfies_obligations),
+    );
+    for (const obl of ledger.obligations) {
+      expect(coveredObligations.has(obl.id)).toBe(true);
+    }
+    expect(scaffold.nodes.every((n) => n.title === "" && n.targeted_commands.length === 0)).toBe(true);
+    // The accepted counterexample is covered by some node.
+    expect(
+      scaffold.nodes.some((n) => n.addresses_counterexamples.includes("CE-001")),
+    ).toBe(true);
+    expect(scaffold.edges).toEqual([]);
+  });
+
+  it("acceptedCounterexampleIds extracts only judge-accepted ids", () => {
+    const ids = acceptedCounterexampleIds({
+      classifications: [
+        { counterexample_id: "CE-1", classification: "accepted" },
+        { counterexample_id: "CE-2", classification: "invalid" },
+        { counterexample_id: "CE-3", classification: "accepted" },
+      ],
+    });
+    expect(ids).toEqual(["CE-1", "CE-3"]);
+    expect(acceptedCounterexampleIds(undefined)).toEqual([]);
+  });
+});
+
+describe("validate-artifact CLI (S3 write-time validator)", () => {
+  it("registers a validate-artifact command requiring --name with an optional --file", () => {
+    const cmd = program.commands.find((c) => c.name() === "validate-artifact");
+    expect(cmd, "validate-artifact command is registered").toBeTruthy();
+    const optionFlags = cmd!.options.map((o) => o.long);
+    expect(optionFlags).toContain("--name");
+    expect(optionFlags).toContain("--file");
+    const nameOption = cmd!.options.find((o) => o.long === "--name");
+    expect(nameOption?.required).toBe(true);
+  });
+});

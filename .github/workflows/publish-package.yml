@@ -3,14 +3,6 @@ name: publish-package
 on:
   workflow_dispatch:
     inputs:
-      package:
-        description: "Package to publish"
-        required: true
-        type: choice
-        options:
-          - audit-code
-          - remediate-code
-          - shared
       dry_run:
         description: "Dry run (skip actual publish)"
         required: false
@@ -42,24 +34,21 @@ env:
   NPM_CONFIG_LOGLEVEL: notice
 
 jobs:
-  publish-audit-code:
+  publish:
+    # Single package `audit-tools`: release tags are plain `vX.Y.Z`.
     if: |
-      (github.event_name == 'release' && startsWith(github.ref_name, 'audit-code-v')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.package == 'audit-code')
+      (github.event_name == 'release' && startsWith(github.ref_name, 'v')) ||
+      (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
-    defaults:
-      run:
-        working-directory: packages/audit-code
     steps:
       - name: Gate release to default branch
         if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false')
         timeout-minutes: 1
         shell: bash
-        working-directory: .
         run: |
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -84,7 +73,6 @@ jobs:
       - name: Validate package-lock.json
         timeout-minutes: 2
         shell: bash
-        working-directory: .
         run: |
           set -euo pipefail
           trap 'echo "::error::package-lock.json is missing or malformed."' ERR
@@ -92,26 +80,17 @@ jobs:
       - name: Upgrade npm for trusted publishing
         timeout-minutes: 5
         shell: bash
-        working-directory: .
         run: |
           set -euo pipefail
           npm install -g npm@11.5.1 --ignore-scripts
-      - name: Install monorepo dependencies
+      - name: Install dependencies
         timeout-minutes: 10
         shell: bash
-        working-directory: .
         run: |
           set -euo pipefail
           npm ci
-      - name: Build @audit-tools/shared
-        timeout-minutes: 5
-        shell: bash
-        working-directory: packages/shared
-        run: |
-          set -euo pipefail
-          npm run build
       - name: Verify release gate
-        timeout-minutes: 20
+        timeout-minutes: 25
         shell: bash
         run: |
           set -euo pipefail
@@ -176,13 +155,11 @@ jobs:
               exit 0
             fi
             echo "$output"
-            # Idempotency: a transient failure AFTER the registry already accepted
-            # the tarball (e.g. a network drop on the response) leaves the version
-            # published; the next attempt then fails with "cannot publish over".
-            # On a retry (attempt > 1) that means our earlier attempt succeeded, so
-            # treat it as success rather than a hard failure. On the FIRST attempt
-            # the same message means a real prior publish of this version (a genuine
-            # conflict) and still falls through to the permanent-error path below.
+            # Idempotency: a transient failure AFTER the registry accepted the tarball
+            # leaves the version published; a retry then fails with "cannot publish
+            # over". On attempt > 1 that means our earlier attempt landed — treat as
+            # success. On the FIRST attempt the same message is a genuine conflict and
+            # falls through to the permanent-error path below.
             if [[ "$attempt" -gt 1 ]] && echo "$output" | grep -qiE '(cannot publish over|previously published|EPUBLISHCONFLICT|cannot modify pre-existing version)'; then
               echo "Version already on the registry after attempt ${attempt} — an earlier attempt's upload landed. Treating as published (idempotent)."
               {
@@ -243,8 +220,7 @@ jobs:
           set -euo pipefail
           PACKAGE_NAME="${{ steps.publish_meta.outputs.package_name }}"
           PACKAGE_VERSION="${{ steps.publish_meta.outputs.package_version }}"
-          PUBLISH_TAG="${{ steps.publish_meta.outputs.publish_tag }}"
-          echo "Verifying ${PACKAGE_NAME}@${PACKAGE_VERSION} (tag: ${PUBLISH_TAG})..."
+          echo "Verifying ${PACKAGE_NAME}@${PACKAGE_VERSION}..."
           START_TIME=$(date +%s)
           for attempt in {1..24}; do
             if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version; then
@@ -266,11 +242,9 @@ jobs:
           done
           ELAPSED=$(( $(date +%s) - START_TIME ))
           # The publish step already succeeded; npm has no rollback, so the package
-          # IS live even though it has not yet propagated to the read replica we
-          # poll. Failing the job here would misrepresent a successful release as
-          # failed (and there is nothing to recover). Warn loudly instead of exit 1
-          # so slow propagation never turns a live publish red.
-          echo "::warning::${PACKAGE_NAME}@${PACKAGE_VERSION} published successfully but was not yet visible via 'npm view' after ${attempt} attempt(s) (${ELAPSED}s). This is registry-propagation lag, not a publish failure — the version is live and has no rollback. Verify manually with 'npm view ${PACKAGE_NAME}@${PACKAGE_VERSION} version'."
+          # IS live even if not yet visible on the replica we poll. Warn rather than
+          # fail so slow propagation never turns a live publish red.
+          echo "::warning::${PACKAGE_NAME}@${PACKAGE_VERSION} published successfully but was not yet visible via 'npm view' after ${attempt} attempt(s) (${ELAPSED}s). This is registry-propagation lag, not a publish failure."
           {
             echo "### Registry propagation"
             echo "- status: published, propagation-verify timed out (treated as success — npm has no rollback)"
@@ -282,517 +256,8 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: publish-npm-logs-audit-code
+          name: publish-npm-logs
           path: |
             ~/.npm/_logs
             npm-debug.log*
           if-no-files-found: ignore
-      - name: Emit troubleshooting guidance
-        if: ${{ failure() }}
-        shell: bash
-        working-directory: .
-        run: |
-          echo "::error::audit-code publish failed. Review the publish-npm-logs-audit-code artifact and confirm npm Trusted Publishing is configured for OhOkThisIsFine/audit-tools."
-
-  publish-remediate-code:
-    if: |
-      (github.event_name == 'release' && startsWith(github.ref_name, 'remediate-code-v')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.package == 'remediate-code')
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
-    defaults:
-      run:
-        working-directory: packages/remediate-code
-    steps:
-      - name: Gate release to default branch
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false')
-        timeout-minutes: 1
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            TARGET="${{ github.ref_name }}"
-          else
-            TARGET="${{ github.event.release.target_commitish }}"
-          fi
-          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
-          if [[ "$TARGET" != "$DEFAULT_BRANCH" ]]; then
-            echo "::error::Live publish must run from the default branch ('${DEFAULT_BRANCH}'), but this run targets '${TARGET}'. Publish aborted. (Re-run workflow_dispatch with dry_run=true to validate from a non-default branch.)"
-            exit 1
-          fi
-          echo "Publish targets '${TARGET}' — branch gate passed."
-      - name: Checkout
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
-      - name: Set up Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: ${{ env.RELEASE_NODE_VERSION }}
-          cache: npm
-          registry-url: https://registry.npmjs.org
-      - name: Validate package-lock.json
-        timeout-minutes: 2
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::package-lock.json is missing or malformed."' ERR
-          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('lockfileVersion missing'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('name missing'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
-      - name: Upgrade npm for trusted publishing
-        timeout-minutes: 5
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          npm install -g npm@11.5.1 --ignore-scripts
-      - name: Install monorepo dependencies
-        timeout-minutes: 10
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          npm ci
-      - name: Build @audit-tools/shared
-        timeout-minutes: 5
-        shell: bash
-        working-directory: packages/shared
-        run: |
-          set -euo pipefail
-          npm run build
-      - name: Verify release gate
-        timeout-minutes: 20
-        shell: bash
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::npm run verify:release failed."' ERR
-          npm run verify:release
-      - name: Resolve publish metadata
-        id: publish_meta
-        timeout-minutes: 2
-        shell: bash
-        env:
-          INPUT_PUBLISH_TAG: ${{ inputs.publish_tag }}
-        run: |
-          set -euo pipefail
-          PACKAGE_NAME=$(node -e "process.stdout.write(require('./package.json').name)")
-          PACKAGE_VERSION=$(node -e "process.stdout.write(require('./package.json').version)")
-          if [[ -n "$INPUT_PUBLISH_TAG" && "$INPUT_PUBLISH_TAG" != "auto" ]]; then
-            PUBLISH_TAG="$INPUT_PUBLISH_TAG"
-          elif [[ "$PACKAGE_VERSION" == *-* ]]; then
-            PUBLISH_TAG="next"
-          else
-            PUBLISH_TAG="latest"
-          fi
-          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
-          echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "publish_tag=$PUBLISH_TAG" >> "$GITHUB_OUTPUT"
-          echo "Resolved: ${PACKAGE_NAME}@${PACKAGE_VERSION} -> ${PUBLISH_TAG}"
-          MODE="live"
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
-            MODE="dry-run"
-          fi
-          {
-            echo "### Publish plan"
-            echo "- package: ${PACKAGE_NAME}@${PACKAGE_VERSION}"
-            echo "- dist-tag: ${PUBLISH_TAG}"
-            echo "- mode: ${MODE}"
-            echo "- Node: ${{ env.RELEASE_NODE_VERSION }}"
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Preview packed tarball contents
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm pack --dry-run
-      - name: Publish to npm (trusted publishing / tokenless OIDC)
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::npm publish failed. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."' ERR
-          BACKOFF_SECONDS=(5 15)
-          for attempt in 1 2 3; do
-            if output=$(npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}" 2>&1); then
-              echo "$output"
-              echo "Publish succeeded on attempt ${attempt}."
-              {
-                echo "### Publish outcome"
-                echo "- status: published"
-                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-              } >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            echo "$output"
-            # Idempotency: a transient failure AFTER the registry already accepted
-            # the tarball (e.g. a network drop on the response) leaves the version
-            # published; the next attempt then fails with "cannot publish over".
-            # On a retry (attempt > 1) that means our earlier attempt succeeded, so
-            # treat it as success rather than a hard failure. On the FIRST attempt
-            # the same message means a real prior publish of this version (a genuine
-            # conflict) and still falls through to the permanent-error path below.
-            if [[ "$attempt" -gt 1 ]] && echo "$output" | grep -qiE '(cannot publish over|previously published|EPUBLISHCONFLICT|cannot modify pre-existing version)'; then
-              echo "Version already on the registry after attempt ${attempt} — an earlier attempt's upload landed. Treating as published (idempotent)."
-              {
-                echo "### Publish outcome"
-                echo "- status: published (idempotent — earlier attempt's upload landed)"
-                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-                echo "- attempts: ${attempt}"
-              } >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            if echo "$output" | grep -qiE '(forbidden|cannot publish over|E403|you do not have permission)'; then
-              echo "::error::npm publish failed with a permanent error (attempt ${attempt}). Not retrying."
-              {
-                echo "### Publish outcome"
-                echo "- status: failed"
-                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-                echo "- attempts: ${attempt}"
-                echo "- reason: permanent npm publish error"
-              } >> "$GITHUB_STEP_SUMMARY"
-              exit 1
-            fi
-            if [[ "$attempt" -lt 3 ]]; then
-              SLEEP="${BACKOFF_SECONDS[$(( attempt - 1 ))]}"
-              echo "::warning::npm publish failed on attempt ${attempt} (transient). Retrying in ${SLEEP}s..."
-              sleep "$SLEEP"
-            fi
-          done
-          echo "::error::npm publish failed after 3 attempts. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."
-          {
-            echo "### Publish outcome"
-            echo "- status: failed"
-            echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-            echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-            echo "- attempts: 3"
-            echo "- reason: exhausted npm publish retries"
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit 1
-      - name: Dry run publish (no upload)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm publish --dry-run --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
-          {
-            echo "### Publish outcome"
-            echo "- status: dry-run (no upload)"
-            echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-            echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Verify published package is installable
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
-        timeout-minutes: 8
-        shell: bash
-        run: |
-          set -euo pipefail
-          PACKAGE_NAME="${{ steps.publish_meta.outputs.package_name }}"
-          PACKAGE_VERSION="${{ steps.publish_meta.outputs.package_version }}"
-          PUBLISH_TAG="${{ steps.publish_meta.outputs.publish_tag }}"
-          echo "Verifying ${PACKAGE_NAME}@${PACKAGE_VERSION} (tag: ${PUBLISH_TAG})..."
-          START_TIME=$(date +%s)
-          for attempt in {1..24}; do
-            if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version; then
-              ELAPSED=$(( $(date +%s) - START_TIME ))
-              echo "Registry propagation succeeded after ${attempt} attempt(s) (${ELAPSED}s)."
-              {
-                echo "### Registry propagation"
-                echo "- status: verified"
-                echo "- attempts: ${attempt}"
-                echo "- elapsed: ${ELAPSED}s"
-              } >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            ELAPSED=$(( $(date +%s) - START_TIME ))
-            if [[ "$attempt" -lt 24 ]]; then
-              echo "Pending after attempt ${attempt} (${ELAPSED}s); retrying in 10s..."
-              sleep 10
-            fi
-          done
-          ELAPSED=$(( $(date +%s) - START_TIME ))
-          # The publish step already succeeded; npm has no rollback, so the package
-          # IS live even though it has not yet propagated to the read replica we
-          # poll. Failing the job here would misrepresent a successful release as
-          # failed (and there is nothing to recover). Warn loudly instead of exit 1
-          # so slow propagation never turns a live publish red.
-          echo "::warning::${PACKAGE_NAME}@${PACKAGE_VERSION} published successfully but was not yet visible via 'npm view' after ${attempt} attempt(s) (${ELAPSED}s). This is registry-propagation lag, not a publish failure — the version is live and has no rollback. Verify manually with 'npm view ${PACKAGE_NAME}@${PACKAGE_VERSION} version'."
-          {
-            echo "### Registry propagation"
-            echo "- status: published, propagation-verify timed out (treated as success — npm has no rollback)"
-            echo "- attempts: ${attempt}"
-            echo "- elapsed: ${ELAPSED}s"
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit 0
-      - name: Upload npm debug logs
-        if: ${{ failure() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: publish-npm-logs-remediate-code
-          path: |
-            ~/.npm/_logs
-            npm-debug.log*
-          if-no-files-found: ignore
-      - name: Emit troubleshooting guidance
-        if: ${{ failure() }}
-        shell: bash
-        working-directory: .
-        run: |
-          echo "::error::remediate-code publish failed. Review the publish-npm-logs-remediate-code artifact and confirm npm Trusted Publishing is configured for OhOkThisIsFine/audit-tools."
-
-  publish-shared:
-    if: |
-      (github.event_name == 'release' && startsWith(github.ref_name, 'shared-v')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.package == 'shared')
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
-    defaults:
-      run:
-        working-directory: packages/shared
-    steps:
-      - name: Gate release to default branch
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false')
-        timeout-minutes: 1
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            TARGET="${{ github.ref_name }}"
-          else
-            TARGET="${{ github.event.release.target_commitish }}"
-          fi
-          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
-          if [[ "$TARGET" != "$DEFAULT_BRANCH" ]]; then
-            echo "::error::Live publish must run from the default branch ('${DEFAULT_BRANCH}'), but this run targets '${TARGET}'. Publish aborted. (Re-run workflow_dispatch with dry_run=true to validate from a non-default branch.)"
-            exit 1
-          fi
-          echo "Publish targets '${TARGET}' — branch gate passed."
-      - name: Checkout
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
-      - name: Set up Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: ${{ env.RELEASE_NODE_VERSION }}
-          cache: npm
-          registry-url: https://registry.npmjs.org
-      - name: Validate package-lock.json
-        timeout-minutes: 2
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::package-lock.json is missing or malformed."' ERR
-          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('lockfileVersion missing'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('name missing'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
-      - name: Upgrade npm for trusted publishing
-        timeout-minutes: 5
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          npm install -g npm@11.5.1 --ignore-scripts
-      - name: Install monorepo dependencies
-        timeout-minutes: 10
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          npm ci
-      - name: Build
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm run build
-      - name: Verify release gate
-        timeout-minutes: 20
-        shell: bash
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::npm run verify:release failed."' ERR
-          npm run verify:release
-      - name: Resolve publish metadata
-        id: publish_meta
-        timeout-minutes: 2
-        shell: bash
-        env:
-          INPUT_PUBLISH_TAG: ${{ inputs.publish_tag }}
-        run: |
-          set -euo pipefail
-          PACKAGE_NAME=$(node -e "process.stdout.write(require('./package.json').name)")
-          PACKAGE_VERSION=$(node -e "process.stdout.write(require('./package.json').version)")
-          if [[ -n "$INPUT_PUBLISH_TAG" && "$INPUT_PUBLISH_TAG" != "auto" ]]; then
-            PUBLISH_TAG="$INPUT_PUBLISH_TAG"
-          elif [[ "$PACKAGE_VERSION" == *-* ]]; then
-            PUBLISH_TAG="next"
-          else
-            PUBLISH_TAG="latest"
-          fi
-          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
-          echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "publish_tag=$PUBLISH_TAG" >> "$GITHUB_OUTPUT"
-          echo "Resolved: ${PACKAGE_NAME}@${PACKAGE_VERSION} -> ${PUBLISH_TAG}"
-          MODE="live"
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
-            MODE="dry-run"
-          fi
-          {
-            echo "### Publish plan"
-            echo "- package: ${PACKAGE_NAME}@${PACKAGE_VERSION}"
-            echo "- dist-tag: ${PUBLISH_TAG}"
-            echo "- mode: ${MODE}"
-            echo "- Node: ${{ env.RELEASE_NODE_VERSION }}"
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Preview packed tarball contents
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm pack --dry-run
-      - name: Publish to npm (trusted publishing / tokenless OIDC)
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::npm publish failed. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."' ERR
-          BACKOFF_SECONDS=(5 15)
-          for attempt in 1 2 3; do
-            if output=$(npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}" 2>&1); then
-              echo "$output"
-              echo "Publish succeeded on attempt ${attempt}."
-              {
-                echo "### Publish outcome"
-                echo "- status: published"
-                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-              } >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            echo "$output"
-            # Idempotency: a transient failure AFTER the registry already accepted
-            # the tarball (e.g. a network drop on the response) leaves the version
-            # published; the next attempt then fails with "cannot publish over".
-            # On a retry (attempt > 1) that means our earlier attempt succeeded, so
-            # treat it as success rather than a hard failure. On the FIRST attempt
-            # the same message means a real prior publish of this version (a genuine
-            # conflict) and still falls through to the permanent-error path below.
-            if [[ "$attempt" -gt 1 ]] && echo "$output" | grep -qiE '(cannot publish over|previously published|EPUBLISHCONFLICT|cannot modify pre-existing version)'; then
-              echo "Version already on the registry after attempt ${attempt} — an earlier attempt's upload landed. Treating as published (idempotent)."
-              {
-                echo "### Publish outcome"
-                echo "- status: published (idempotent — earlier attempt's upload landed)"
-                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-                echo "- attempts: ${attempt}"
-              } >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            if echo "$output" | grep -qiE '(forbidden|cannot publish over|E403|you do not have permission)'; then
-              echo "::error::npm publish failed with a permanent error (attempt ${attempt}). Not retrying."
-              {
-                echo "### Publish outcome"
-                echo "- status: failed"
-                echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-                echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-                echo "- attempts: ${attempt}"
-                echo "- reason: permanent npm publish error"
-              } >> "$GITHUB_STEP_SUMMARY"
-              exit 1
-            fi
-            if [[ "$attempt" -lt 3 ]]; then
-              SLEEP="${BACKOFF_SECONDS[$(( attempt - 1 ))]}"
-              echo "::warning::npm publish failed on attempt ${attempt} (transient). Retrying in ${SLEEP}s..."
-              sleep "$SLEEP"
-            fi
-          done
-          echo "::error::npm publish failed after 3 attempts. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."
-          {
-            echo "### Publish outcome"
-            echo "- status: failed"
-            echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-            echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-            echo "- attempts: 3"
-            echo "- reason: exhausted npm publish retries"
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit 1
-      - name: Dry run publish (no upload)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm publish --dry-run --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
-          {
-            echo "### Publish outcome"
-            echo "- status: dry-run (no upload)"
-            echo "- package: ${{ steps.publish_meta.outputs.package_name }}@${{ steps.publish_meta.outputs.package_version }}"
-            echo "- dist-tag: ${{ steps.publish_meta.outputs.publish_tag }}"
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Verify published package is installable
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
-        timeout-minutes: 8
-        shell: bash
-        run: |
-          set -euo pipefail
-          PACKAGE_NAME="${{ steps.publish_meta.outputs.package_name }}"
-          PACKAGE_VERSION="${{ steps.publish_meta.outputs.package_version }}"
-          PUBLISH_TAG="${{ steps.publish_meta.outputs.publish_tag }}"
-          echo "Verifying ${PACKAGE_NAME}@${PACKAGE_VERSION} (tag: ${PUBLISH_TAG})..."
-          START_TIME=$(date +%s)
-          for attempt in {1..24}; do
-            if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version; then
-              ELAPSED=$(( $(date +%s) - START_TIME ))
-              echo "Registry propagation succeeded after ${attempt} attempt(s) (${ELAPSED}s)."
-              {
-                echo "### Registry propagation"
-                echo "- status: verified"
-                echo "- attempts: ${attempt}"
-                echo "- elapsed: ${ELAPSED}s"
-              } >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            ELAPSED=$(( $(date +%s) - START_TIME ))
-            if [[ "$attempt" -lt 24 ]]; then
-              echo "Pending after attempt ${attempt} (${ELAPSED}s); retrying in 10s..."
-              sleep 10
-            fi
-          done
-          ELAPSED=$(( $(date +%s) - START_TIME ))
-          # The publish step already succeeded; npm has no rollback, so the package
-          # IS live even though it has not yet propagated to the read replica we
-          # poll. Failing the job here would misrepresent a successful release as
-          # failed (and there is nothing to recover). Warn loudly instead of exit 1
-          # so slow propagation never turns a live publish red.
-          echo "::warning::${PACKAGE_NAME}@${PACKAGE_VERSION} published successfully but was not yet visible via 'npm view' after ${attempt} attempt(s) (${ELAPSED}s). This is registry-propagation lag, not a publish failure — the version is live and has no rollback. Verify manually with 'npm view ${PACKAGE_NAME}@${PACKAGE_VERSION} version'."
-          {
-            echo "### Registry propagation"
-            echo "- status: published, propagation-verify timed out (treated as success — npm has no rollback)"
-            echo "- attempts: ${attempt}"
-            echo "- elapsed: ${ELAPSED}s"
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit 0
-      - name: Upload npm debug logs
-        if: ${{ failure() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: publish-npm-logs-shared
-          path: |
-            ~/.npm/_logs
-            npm-debug.log*
-          if-no-files-found: ignore
-      - name: Emit troubleshooting guidance
-        if: ${{ failure() }}
-        shell: bash
-        working-directory: .
-        run: |
-          echo "::error::shared publish failed. Review the publish-npm-logs-shared artifact and confirm npm Trusted Publishing is configured for OhOkThisIsFine/audit-tools."
