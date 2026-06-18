@@ -154,10 +154,20 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   (`reviewSnapshot.ts`, captured at ingest); a staleness re-emit appends the prior verdict + the
   changed-since-last-review delta and instructs re-affirm-or-revise-only-affected, so a re-review is
   diff-scoped not a blind full re-run. Mirrors audit-code's `normalizeForMetadataHash` (semantic-
-  projection staleness). **Parity follow-up (NOT yet done):** audit-code's design-review passes
-  (`design_assessment` / `design_review_*`) re-run as full passes on staleness too — port B2's
-  diff-based-re-review (and the finalized-style structural projection for B3) to audit-code for
-  cross-orchestrator parity. (ARC-B2B3.)
+  projection staleness). **B2 audit-code parity port ✓ DONE (2026-06-18).** Audit-code's
+  design-review passes (contract-assessment + conceptual-design-critique) now do the same: a new
+  `designReviewProjection.ts` projects each structural input the review reads (repo_manifest /
+  unit_manifest / graph_bundle / surface_manifest / critical_flows / risk_register /
+  design_assessment.findings) to its load-bearing fields (provenance + per-file metrics stripped,
+  collections canonically ordered — the finalized-style structural projection for B3);
+  `designReviewSnapshot.ts` snapshots each completed pass's verdict + those projections, keys the
+  `design_review_*_completed` obligation on snapshot freshness (replacing the old unconditional
+  carry-forward that never re-fired on real change), and on a re-stale appends the prior verdict +
+  diff to the re-emit prompt (contract + shallow-conceptual prompts; the deep-conceptual JUDGE
+  prompt — perspectives stay independent, the merge becomes diff-aware). The generic diff +
+  re-review-render machinery (`stableStringifyProjection`, `diffProjections`,
+  `renderDiffReReviewSection`) is single-sourced in `@audit-tools/shared/reReview`; each
+  orchestrator owns only its projection table. (ARC-B2B3.)
 - **B4 — Hard-exclude tool-refuted findings — ✓ DONE.** A tier-2 REFUTED finding (e.g. a madge-disproven
   cycle) is now a distinct `grounding:'refuted'` status, quarantined-EXCLUDED from the admitted contract
   rather than collapsed into `ungrounded` (still-merged-as-fact). Shipped: (1) `FindingGrounding.status`
