@@ -9,26 +9,31 @@
 
 ## Where things stand
 
-- **`main` (PUBLISHED): the go-forward program keeps accumulating.** **A3 step 4 slice 2b is DONE (approach
-  B)** on branch `a3-step4-slice2b-retry` (commit `0f3f203`, off `main`) — about to merge to `main` + push so
-  Linux CI (`ci.yml` + `audit-code-test-suite.yml`, push-to-main only) validates the exact failure mode that
-  reverted ATTEMPT 1. Effective published code tip = slice 2a `0886d06`; main local is 2 ahead of origin
-  (`6a036ce` repro test + `a964976` handoff). Earlier **shipped 2026-06-18** (`dd0e296`/`06ed90e`/`8224c8e`):
-  `@audit-tools/shared 0.22.1` / `auditor-lambda 0.27.1` / `remediator-lambda 0.27.1`, all CI-green on npm.
-  - **Slice 2b (this session, `0f3f203`):** replaced `runDeterministicForNextStep`'s hand `for`-loop with the
-    shared `advance` engine. Audit obligations → `ObligationDef`s in `PRIORITY` order (deterministic executors
-    `transition`, host-delegation/dispatch/terminal `emit`). **Approach B:** the two cycle guards
-    (`checkNoProgressBeforeDispatch` + `checkFinalizationCycle`, tolerance = named `FINALIZATION_CYCLE_TOLERANCE`)
-    stay in audit's `Ctx`, invoked from inside the deterministic-executor obligation; `advance` runs with NO
-    `stateSignature` (its `maxTransitions` = pure runaway backstop). A per-transition counter feeds the guards as
-    the old `index`. Retired `maxRuns` / `--max-runs` / `getMaxRuns`. Disabled-narrative now RUNS the
-    deterministic `status:omitted` omit (new `run_omit` branch action) instead of spinning. The three guard test
-    files stay GREEN UNCHANGED (approach B keeps the guards — only the deleted-guard approach A had to rewrite
-    them). **Verified:** `linux-cycle-regression` guard green; full audit suite **2194** pass / 0 fail / 1 skip;
-    build + check green.
+- **`main`: A3 IS DONE.** **A3 step 4 slice 2c DONE** (commit `819dda7`, this session) — the final reconcile.
+  Both orchestrators now run the **same** shared `advance` fold engine. Local `main` is 1 ahead of origin
+  (`819dda7`); push for CI is the immediate next action. Effective published code tip = slice 2a `0886d06`.
+  Earlier **shipped 2026-06-18** (`dd0e296`/`06ed90e`/`8224c8e`): `@audit-tools/shared 0.22.1` /
+  `auditor-lambda 0.27.1` / `remediator-lambda 0.27.1`, all CI-green on npm — so a re-publish is due once
+  slice-2b+2c land on origin (or when Ethan asks).
+  - **Slice 2c (this session, `819dda7`):** deleted the read-nowhere `description` field off
+    `ExecutorDefinition` + all `EXECUTOR_REGISTRY` entries (`kind`/`obligation_ids` stay — they ARE read;
+    `description` reached no user interaction: not the step prompt/contract, handoff, stderr, or report).
+    Kept terse `//` notes on the non-obvious entries (legacy `agent`, the two empty-`obligation_ids`
+    preferredExecutor-only runners). Stripped dead `maxRuns` params from the guard tests. Reconciled the plan
+    doc (slices 2b/2c + cycle-guard section now describe landed approach B) + backlog. **Verified green
+    (CLAUDECODE unset):** build + check zero errors; audit suite **2194** pass / 0 fail / 1 skip; orphan
+    `dist/cli/runToCompletion.*` cleared by a local clean rebuild (gitignored, CI-clean regardless).
+  - **Slice 2b (`0f3f203`, Linux-CI-green):** `runDeterministicForNextStep`'s hand `for`-loop → shared
+    `advance` over audit `ObligationDef`s in `PRIORITY` order. **Approach B:** the two cycle guards
+    (`checkNoProgressBeforeDispatch` + `checkFinalizationCycle`, tolerance `FINALIZATION_CYCLE_TOLERANCE`) stay
+    in audit's `Ctx`; `advance` runs with NO `stateSignature` (its `maxTransitions` = pure runaway backstop); a
+    per-transition counter feeds the guards as the old `index`. Retired `maxRuns`/`--max-runs`/`getMaxRuns`.
+    ATTEMPT 1 (approach A: collapse both guards onto `advance.stateSignature`) broke Linux-CI-only and was
+    reverted (`0903a000`, preserved on `slice-2b-wip`); `tests/linux-cycle-regression.test.mjs` reproduces it
+    on any OS.
   - Prior session commits — slice 2a `0886d06`; slice 1 `68d2c17b`; orphan sweep `33f568f`; parity doc `6bfae53`.
     A3 step 3 (remediate rewire, DONE): `719e276`/`838a0ae`/`ae0326c`/`79e2dcd`/`8250aab`; A4 `6fea584`; A1
-    `b47d189`; A5+A11 `e3561c6`. ATTEMPT-1 work preserved on branch `slice-2b-wip` (reverted `0903a000`).
+    `b47d189`; A5+A11 `e3561c6`.
   - True-green caveats: CLAUDECODE must be unset for gates. Known flake: audit-code's `phase-plan.test.ts`
     intermittent hermeticity (backlog). audit-code's third-party runtime deps (`smol-toml`, `yaml`) — a
     fresh clone needs `npm install`.
@@ -65,36 +70,26 @@
 
 ## Immediate next: the go-forward program
 
-**A3 (the keystone) — step 3 (remediate rewire) DONE; step 4 slices 1+2a+2b DONE; slice 2c is the immediate next.**
-Working plan: **read [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md)** — the "C
-decomposition", "Cycle-guard resolution", and "decisive finding" sections are the ground truth for step 4.
+**A3 (the keystone) is DONE** — step 3 (remediate rewire) + step 4 slices 1/2a/2b/2c all landed. Both
+orchestrators run the same shared `advance` fold engine; the parallel hand-rolled fold that was the genuine
+non-parity is erased. Working plan (now history-of-decision, still ground truth for *why*):
+[`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md).
 
-**Why step 4 is the real keystone:** audit **already folds** its deterministic executor chain into one host
-round-trip — slice 2b just swapped that hand-rolled fold onto shared `advance`, erasing the parallel fold
-mechanism that was the genuine non-parity A3 targets. Slice 2b is **landed + green** (see "Where things stand";
-commit `0f3f203`, approach B). ATTEMPT 1 (approach A: collapse both guards onto `advance.stateSignature`) broke on
-Linux-only and was reverted (`0903a000`, preserved on `slice-2b-wip`); approach B keeps the guards in audit's
-`Ctx` and is locally Linux-repro-green via `tests/linux-cycle-regression.test.mjs`.
+**START-HERE next session.**
+1. **Push `main` → origin** (1 ahead: `819dda7`) so `ci.yml` + `audit-code-test-suite.yml` run the suite on
+   **Linux** — the signal that caught ATTEMPT 1. Watch both runs green. (Slice 2c is docs + a dead-field
+   deletion + test-param cleanup; low risk, but Linux CI is the real signal.) Slice 2b is already
+   origin-green at `1689334`; this push validates 2c on top.
+2. **Consider a re-publish** (`/ship`) — the published code tip is still slice 2a `0886d06`; 2b+2c are
+   unpublished. Ship when Ethan wants it, or roll it into the next milestone.
+3. **Start B2+B3** (see below).
 
-**START-HERE next session — push slice 2b for CI, then slice 2c.**
-1. **Merge `a3-step4-slice2b-retry` → `main` + push** (if not already done) so `ci.yml` +
-   `audit-code-test-suite.yml` run the suite on **Linux** — the signal that caught ATTEMPT 1. Watch both runs
-   green before building 2c on top. The `linux-cycle-regression` guard reproduces the exact failure mode locally,
-   so high confidence, but Linux CI is the real signal.
-2. **Slice 2c — reconcile.** Sweep for anything left referring to the old hand `for`-loop / `maxRuns` framing
-   (docs, comments, the plan doc). Confirm `runDeterministicForNextStep` is now purely the `advance`-driven
-   coordinator. Then resolve the dead-`description` decision below. After 2c, A3 is done → B2+B3.
-
-**OPEN Q for Ethan (slice 2c):** the `description` field on `EXECUTOR_REGISTRY`
-([executors.ts](../packages/audit-code/src/orchestrator/executors.ts)) is read nowhere (dead as *behaviour*) but
-is human-readable per-executor documentation. Keep as inline docs, or delete? Retained for now; decide in 2c.
-
-**After A3 (suggested order, yours to change):** **B2+B3** (diff re-reviews + obligation-set staleness —
-build on the unified engine) → **A6** (kill schema dual-encoding; drop dead-imported `ajv`; also fold the
-minor `OUTCOME_KEYS` re-list noted in the plan doc) → **A8(a)** (audit-code symmetric rolling wiring — its
-dormant `runRollingDispatch`; audit dispatch is read-only review packets → AuditResult, NOT worktree edits,
-so it needs a provider-backed packet dispatcher + routing) → **A12** (single-package collapse — LAST) →
-**A7** (host machinery across hosts). Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md` →
+**Next program items (suggested order, yours to change):** **B2+B3** (diff re-reviews + obligation-set
+staleness — build on the unified engine) → **A6** (kill schema dual-encoding; drop dead-imported `ajv`; also
+fold the minor `OUTCOME_KEYS` re-list noted in the plan doc) → **A8(a)** (audit-code symmetric rolling wiring
+— its dormant `runRollingDispatch`; audit dispatch is read-only review packets → AuditResult, NOT worktree
+edits, so it needs a provider-backed packet dispatcher + routing) → **A12** (single-package collapse — LAST)
+→ **A7** (host machinery across hosts). Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md` →
 "Accepted go-forward program".
 
 ### A8 remaining loose ends
