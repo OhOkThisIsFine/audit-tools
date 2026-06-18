@@ -25,7 +25,7 @@ const requiredPackagedPaths = [
   "dist/index.js",
   "dist/cli.js",
   "dispatch/lens-definitions.json",
-  "schemas/audit-code-v1alpha1.schema.json",
+  "schemas/audit_result.schema.json",
   "skills/audit-code/SKILL.md",
   "skills/audit-code/agents/openai.yaml",
   "skills/audit-code/audit-code.prompt.md",
