@@ -1,12 +1,22 @@
+import { z } from "zod";
 import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type { DispatchModelTier } from "../types/stepContract.js";
+import { DispatchModelTierSchema } from "../types/stepContract.js";
 import type {
   HostConcurrencyLimit,
   QuotaStateEntry,
   WaveBindingCap,
   WaveSchedule,
 } from "./types.js";
+import {
+  HostConcurrencyLimitSchema,
+  LimitConfidenceSchema,
+  LimitSourceSchema,
+  ResolvedLimitsSchema,
+  WaveBindingCapSchema,
+} from "./types.js";
 import type { QuotaUsageSnapshot } from "./quotaSource.js";
+import { QuotaUsageSnapshotSchema } from "./quotaSource.js";
 import { scheduleWave, type DiscoveredRateLimitsInput } from "./scheduler.js";
 
 /**
@@ -128,20 +138,25 @@ export interface PoolDispatchAllocation {
 }
 
 /** Compact, serializable view of one pool allocation for dispatch-quota files. */
-export interface DispatchCapacityPoolSummary {
-  pool_id: string;
-  rank?: DispatchModelTier;
-  slots: number;
-  model: string | null;
-  confidence: WaveSchedule["confidence"];
-  source: WaveSchedule["source"];
-  resolved_limits: WaveSchedule["resolved_limits"];
-  host_concurrency_limit: HostConcurrencyLimit | null;
-  cooldown_until: string | null;
-  estimated_wave_tokens: number;
-  binding_cap: WaveBindingCap;
-  quota_source_snapshot?: QuotaUsageSnapshot | null;
-}
+export const DispatchCapacityPoolSummarySchema = z
+  .object({
+    pool_id: z.string().min(1),
+    rank: DispatchModelTierSchema.optional(),
+    slots: z.number().int().min(1),
+    model: z.string().nullable(),
+    confidence: LimitConfidenceSchema,
+    source: LimitSourceSchema,
+    resolved_limits: ResolvedLimitsSchema,
+    host_concurrency_limit: HostConcurrencyLimitSchema.nullable(),
+    cooldown_until: z.string().nullable(),
+    estimated_wave_tokens: z.number().int().min(0),
+    binding_cap: WaveBindingCapSchema,
+    quota_source_snapshot: QuotaUsageSnapshotSchema.nullable().optional(),
+  })
+  .strict();
+export type DispatchCapacityPoolSummary = z.infer<
+  typeof DispatchCapacityPoolSummarySchema
+>;
 
 /**
  * The just-in-time dispatch capacity: how many pending items can be dispatched

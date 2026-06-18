@@ -50,6 +50,7 @@ export {
   GraphBundleSchema,
 } from "./types/graph.js";
 export type { AccessDeclaration } from "./types/accessDeclaration.js";
+export { AccessDeclarationSchema } from "./types/accessDeclaration.js";
 export type {
   FindingSeverity,
   FindingConfidence,
@@ -125,6 +126,10 @@ export type {
   StepStatus,
   DispatchModelTier,
   DispatchModelHint,
+} from "./types/stepContract.js";
+export {
+  StepStatusSchema,
+  DispatchModelTierSchema,
 } from "./types/stepContract.js";
 export type {
   ProviderName,
@@ -476,7 +481,17 @@ export type {
   BackoffState,
   ObservedWaveOutcome,
 } from "./quota/types.js";
+export {
+  LimitSourceSchema,
+  LimitConfidenceSchema,
+  HostConcurrencyLimitSourceSchema,
+  HostConcurrencyLimitSchema,
+  ResolvedLimitsSchema,
+  WaveBindingCapSchema,
+  BackoffStateSchema,
+} from "./quota/types.js";
 export type { QuotaSource, QuotaUsageSnapshot } from "./quota/quotaSource.js";
+export { QuotaUsageSnapshotSchema } from "./quota/quotaSource.js";
 export {
   resolveLimits,
   classifyProvider,
@@ -544,6 +559,7 @@ export type {
   DiscoveredRateLimitsInput,
   HostModelRosterEntry,
 } from "./quota/scheduler.js";
+export { HostModelRosterEntrySchema } from "./quota/scheduler.js";
 export {
   computeDispatchCapacity,
   summarizeDispatchCapacityPools,
@@ -559,6 +575,7 @@ export type {
   PartialCompletionReason,
   PartialCompletionTerminal,
 } from "./quota/capacity.js";
+export { DispatchCapacityPoolSummarySchema } from "./quota/capacity.js";
 export type { CacheablePromptParts } from "./prompts.js";
 export {
   buildCacheablePrompt,
