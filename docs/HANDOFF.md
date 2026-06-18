@@ -9,6 +9,11 @@
 
 ## Where things stand
 
+- **Slice 2b is on branch `a3-step4-slice-2b` (pushed for review, NOT merged to `main`, NOT published).**
+  Commits `5df1c6e` (atomic loop→`advance`) + `07510eb` (dead `--max-runs` cleanup). Audit suite on the
+  branch: **2191 / 1 skip** (net −2 vs `main`'s 2193 — the deleted guards' unit tests, re-expressed). Merge
+  this branch (or fold 2c on top) before the next ship. See "Immediate next" for the slice-2b detail.
+
 - **`main` (pushed + PUBLISHED): the go-forward program keeps accumulating.** Code tip =
   **A3 step 4 slice 2a — fold the dispatch switch into an executor-runner map** `0886d06`; then **shipped
   2026-06-18** (release-bump commits `dd0e296`/`06ed90e`/`8224c8e`). Green at every commit; suites green on
@@ -70,24 +75,37 @@ genuine non-parity A3 must erase (Ethan steered here: "isn't roundtrip-avoidance
 So audit adopts shared `advance` — NOT the earlier-considered "emit-only ceremony" framing, which was premised on
 the false belief that audit doesn't fold.
 
-**Done this session:** orphaned-helper sweep `33f568f`; parity-check doc `6bfae53`; **slice 1** `68d2c17b`
-(shared `advance` gains opt-in `opts.stateSignature` → visited-state-signature cycle detection returning a
-graceful `AdvanceResult.stopped:"cycle"`, subsuming audit's two hand guards; non-monotonic-deepening safe;
-remediate untouched — return type is a superset); **slice 2a** `0886d06` (audit dispatch `switch` →
-`EXECUTOR_RUNNERS` map in new `executorRunners.ts`; **absence of a runner** = the no-progress handoff for
-`agent`/`rolling_dispatch_executor`; `AdvanceAuditOptions/Result` → leaf `advanceTypes.ts` for the madge acyclic
-guard; switch⇄registry invariant test → runner-map coverage invariant).
+**Prior-session work (A3 step 4 slices 1+2a, on `main`):** orphaned-helper sweep `33f568f`; parity-check doc
+`6bfae53`; **slice 1** `68d2c17b` (shared `advance` gains `opts.stateSignature` → visited-state-signature
+cycle detection returning graceful `AdvanceResult.stopped:"cycle"`); **slice 2a** `0886d06` (audit dispatch
+`switch` → `EXECUTOR_RUNNERS` map; **absence of a runner** = the no-progress handoff for
+`agent`/`rolling_dispatch_executor`).
 
-**START-HERE next session — A3 step 4 slice 2b (the big one, the audit fold rewire).** Replace
-`runDeterministicForNextStep`'s `for`-loop with shared `advance`: audit obligations become `ObligationDef`s
-(`derive` = lookup into `deriveAuditState`'s precomputed obligation states; `execute` = call the **slice-2a
-runner** → `transition` for deterministic, `emit` for host-delegation/dispatch/terminal). Pass `opts.stateSignature`
-(lift audit's existing signature from `checkFinalizationCycle`). Retire `checkNoProgressBeforeDispatch` +
-`checkFinalizationCycle` + `maxRuns`; `preferredExecutor`/integrity-check become a preamble (like remediate's
-`forceReplan`). The typed host-step branches (`handleGraphEnrichmentBranch` / `handleDesignReviewBranch` /
-`handleSynthesisNarrativeBranch` / `ensureSemanticReviewRun`) relocate into the obligations' `emit` payloads.
-Atomic replace: hand-loop → `advance`. The audit `node:test` suite (2193) is the equivalence oracle. Then
-**slice 2c** (reconcile + the dead-`description` decision below). After 2c, A3 is done → B2+B3.
+**THIS session — A3 step 4 slice 2b DONE (branch `a3-step4-slice-2b`, NOT yet merged/published).** Two
+commits: **`5df1c6e`** (atomic loop→`advance` replace) + **`07510eb`** (dead `--max-runs` cleanup).
+`runDeterministicForNextStep`'s `for (index < maxRuns)` loop is gone; the deterministic fold runs on the
+shared `advance` over audit's `PRIORITY` `ObligationDef`s (PREAMBLE = the `index===0` file-integrity
+re-intake, mirroring remediate's `forceReplan`). `derive` = lookup into `deriveAuditState`; `execute` =
+slice-2a `EXECUTOR_RUNNERS` via `runAuditStep` → `transition` (deterministic + provider/intent
+auto-complete) / `emit` (confirm_intent, design-review, analyzer/edge, narrative, semantic_review, blocked).
+`checkNoProgressBeforeDispatch` + `checkFinalizationCycle` + `maxRuns` + `getMaxRuns` + the `--max-runs` flag
+**deleted**. Audit suite **2191 / 1 skip**, green. Plan doc updated (`docs/a3-a4-engine-unification-plan.md` →
+"C decomposition" item 3).
+  - **KEY faithfulness finding (read this):** `advance`'s cycle `opts.stateSignature` for audit must be the
+    **dispatch identity** `artifact-signature | obligation | executor` (`nextStepStateSignature`), NOT the
+    bare `computeArtifactStateSignature`. The early deterministic chain has *no-op-but-satisfying* steps
+    (auto-fix/syntax-resolution with nothing to do) that advance the obligation chain while leaving artifact
+    content unchanged → the bare hash recurs across different obligations and false-trips a cycle before
+    `confirm_intent`. Folding obligation+executor into the key reproduces the old
+    `checkNoProgressBeforeDispatch` recurrence key exactly; `no-metadata` bootstrap is salted with the
+    transition counter. (Verified: with the bare hash the batch-deterministic oracle returns `blocked`; with
+    the dispatch-identity key it correctly folds to `confirm_intent`.)
+
+**START-HERE next session — A3 step 4 slice 2c (final reconcile, small).** (1) Resolve the OPEN Q below
+(`EXECUTOR_REGISTRY.description` keep-vs-delete) — **Ethan's call**. (2) Final parity-check audit vs
+remediate obligation shapes (the bulk of "step 4 parity" is already in the plan doc's "A3 step 4 — parity
+check" section). (3) Sync memory + backlog. (4) Then ship slice 2b+2c via `/ship` (the 2b branch is not yet
+merged — merge it to `main` first, or fold 2c on top and ship together). After 2c, A3 is done → B2+B3.
 
 **OPEN Q for Ethan (non-blocking):** the `description` field on `EXECUTOR_REGISTRY` is read nowhere (dead as
 *behaviour*) but is human-readable per-executor documentation. Keep as inline docs, or delete? Retained for now;

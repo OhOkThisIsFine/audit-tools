@@ -243,11 +243,13 @@ no-ops (counted seeded true). The handler recursion that remains after 2a re-ent
     relied on the spurious halt (`next-step-review-gate` Path-A coverage, which never asserted the step kind);
     it now folds to the implement dispatch under a non-dispatching host (asserted as the no-refire teeth).
 
-**Remaining = step 4 (final reconcile), small.** skipCount + dead params already dropped (above). Left: a
-quick orphaned-helper sweep; **parity-check audit vs remediate obligation shapes**; and the optional-but-ideal
-symmetry of **audit-code adopting `advance` emit-only** (it is already on the shared `findFirstActionableObligation`
-scan — `advance` with only-emit obligations is a strict generalization, so this unifies the *mechanism* fully and
-completes the A3 north star "one declarative engine both tools run on"). After step 4, A3 is done → B2+B3.
+**Remaining = step 4 slice 2c (final reconcile), small.** Step 4 was rescoped to "C" (unify audit's
+hand-rolled fold onto `advance` — see "Decision: C" + "C decomposition" below); slices 1, 2a, **and 2b**
+are done. The "audit adopts `advance`" symmetry the original step-4 framing called *optional* turned out
+to be the substance (audit was already folding by hand — the parity gap A3 exists to erase) and is now
+landed: `runDeterministicForNextStep` runs on the shared `advance` (slice 2b). Left is **2c**: the
+`EXECUTOR_REGISTRY.description` keep-vs-delete decision (user's call) + final parity-check + memory/backlog
+sync. After 2c, A3 is done → B2+B3.
 
 ## A3 step 4 — parity check (the deliverable)
 
@@ -356,14 +358,39 @@ untouched (the return type went `{state,step}` → `{state,step,stopped?}`, a su
    unchanged. Full audit suite 2193 pass / 1 skip. *(The dead `description` field on the registry is
    retained for now — it is human-readable executor documentation, not behavioural dead code; decide
    keep-as-docs vs delete in 2c.)*
-3. **Slice 2b — `advance` drives the deterministic fold.** Audit `ObligationDef`s (`derive` = lookup
-   into `deriveAuditState`'s precomputed obligation states; `execute` = run the executor → `transition`
-   for deterministic, `emit` for host-delegation/dispatch/terminal). Replace
-   `runDeterministicForNextStep`'s for-loop with `advance` + `stateSignature` (lift audit's existing
-   state-signature). Retire `checkNoProgressBeforeDispatch` + `checkFinalizationCycle` + `maxRuns`;
-   `preferredExecutor`/integrity-check become a preamble. The typed host-step branches
-   (`handleGraphEnrichmentBranch` / `handleDesignReviewBranch` / `handleSynthesisNarrativeBranch` /
-   `ensureSemanticReviewRun`) move into the obligations' `emit` payloads. Atomic replace: hand-loop →
-   `advance`.
-4. **Slice 2c — reconcile + clean.** Retire any now-dead CLI helpers; final parity-check; update
-   memory/backlog. After this, both tools run the *same* fold engine and A3 is done.
+3. **✓ DONE — Slice 2b — `advance` drives the deterministic fold** (`5df1c6e` core + `07510eb`
+   cleanup). `runDeterministicForNextStep`'s `for (index < maxRuns)` loop is gone; the deterministic
+   fold runs on the shared `advance` over audit's `PRIORITY` `ObligationDef`s. Structure mirrors
+   remediate's proven `decideNextStepLoop`: a PREAMBLE (the `index===0` file-integrity re-intake = the
+   analog of `forceReplan`) → `advance`. `derive(bundle)` = a LOOKUP of the obligation's precomputed
+   state from `deriveAuditState` (selection stays single-sourced through the shared scan). `execute` =
+   run the slice-2a `EXECUTOR_RUNNERS` via `runAuditStep` and `transition` (deterministic + the
+   provider/intent auto-complete pass-throughs that used to `continue`), or `emit` the host step
+   (confirm_intent, design-review dispatch, analyzer_install/edge_reasoning, synthesis_narrative,
+   semantic_review, blocked). The typed host-step branches (`handleGraphEnrichmentBranch` /
+   `handleDesignReviewBranch` / `handleSynthesisNarrativeBranch` / `ensureSemanticReviewRun`) relocated
+   into the obligations' `execute`. `checkNoProgressBeforeDispatch` + `checkFinalizationCycle` + the
+   `maxRuns` loop (and the now-inert `--max-runs` flag + `getMaxRuns`) **deleted**. Atomic replace.
+   Audit suite **2191 / 1 skip** (net −2: the deleted guards' unit tests; mechanics covered in
+   shared/obligation-engine.test.mjs, audit-specifics re-pinned via the public surface).
+   - **Faithfulness finding — the cycle `stateSignature` must be a *dispatch identity*, not the bare
+     artifact signature.** `advance`'s slice-1 cycle detection keys on `opts.stateSignature(state)`. A
+     naive `stateSignature = computeArtifactStateSignature(bundle)` **false-trips immediately**: the
+     early deterministic chain has *no-op-but-satisfying* steps (auto-fix with nothing to fix,
+     syntax-resolution with no errors) that advance the obligation chain while leaving artifact content
+     **unchanged** — so two consecutive scans share a signature and `advance` stops as "cycle" before
+     reaching `confirm_intent`. The fix (`nextStepStateSignature`) folds the *selected
+     obligation+executor* into the key — `artifact-signature | obligation | executor` — reproducing the
+     old `checkNoProgressBeforeDispatch`'s recurrence key exactly (same content + **same** selection =
+     a genuine revisit; same content + **different** selection = progress). The `no-metadata` bootstrap
+     signature is salted with the transition counter (the analog of the old guard's explicit bootstrap
+     skip). This single key subsumes **both** former guards (immediate no-progress AND finalization
+     thrash). *(Slice 1's "the signature subsumes both guards" claim was right in spirit but understated
+     this: audit's signature input is the dispatch identity, not the artifact hash alone — the bare hash
+     is non-injective over the obligation chain.)*
+   - **Deferred to 2c (unchanged):** the dead `description` field on `EXECUTOR_REGISTRY` (keep-as-docs vs
+     delete — **the user's call**). Also a pre-existing (not slice-2b) unused `basename` import in
+     `src/cli/args.ts` (only caught under `--noUnusedLocals`; flagged as a separate task).
+4. **Slice 2c — reconcile + clean.** Resolve the `EXECUTOR_REGISTRY.description` keep-vs-delete question
+   (user's call); retire any other now-dead CLI helpers; final parity-check; update memory/backlog.
+   After this, both tools run the *same* fold engine and A3 is done.
