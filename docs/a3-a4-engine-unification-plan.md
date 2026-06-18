@@ -248,3 +248,66 @@ quick orphaned-helper sweep; **parity-check audit vs remediate obligation shapes
 symmetry of **audit-code adopting `advance` emit-only** (it is already on the shared `findFirstActionableObligation`
 scan — `advance` with only-emit obligations is a strict generalization, so this unifies the *mechanism* fully and
 completes the A3 north star "one declarative engine both tools run on"). After step 4, A3 is done → B2+B3.
+
+## A3 step 4 — parity check (the deliverable)
+
+> Done this session. Orphaned-helper sweep landed (`33f568f`). This section is the
+> **parity-check of audit vs remediate obligation shapes** + the resulting decision on the
+> "audit adopts `advance`" symmetry. Recon dates 2026-06-17 against HEAD.
+
+### The two engines, side by side
+
+| Axis | audit-code (`src/orchestrator/`) | remediate-code (`src/steps/nextStep.ts`) |
+|---|---|---|
+| Obligation type | `AuditObligation` = shared **`Obligation`** *value* `{id, state, reason?}` (state precomputed) | `RemediateObligation` = shared **`ObligationDef`** *function* `{id, derive, execute}` |
+| Where `derive` lives | **Holistic + external**: `deriveAuditState(bundle)` computes EVERY obligation's state in one content-hash DAG pass (`state.ts`), via `staleOrSatisfied` over the dependency map | **Per-obligation closures** built per call; each `derive(state)` reads `state.status` + `existsSync(sidecar)` + frozen entry snapshot |
+| `ObligationState` range used | `missing` / `stale` / `satisfied` (genuine `stale` via the staleness DAG) | `missing` / `satisfied` only (binary; no `stale`/`present`/`blocked`) |
+| Selection | shared `findFirstActionableObligation(PRIORITY, obligations)` (**bare scan**) | shared **`advance`** (scan + transition/emit loop), run twice (pre-intake, main) |
+| Dispatch shape | **Two-level, N:1**: obligation → `EXECUTOR_REGISTRY` (`obligation_ids` map) → executor_id → hand `switch` in `advanceAudit` | **One-level, 1:1**: obligation `execute` *is* the work; no separate executor catalog |
+| Transitions | **None** — emit-only, exactly one bounded unit per host call (host re-invokes) | `transition` (re-scan in-call) + `emit`; folds planning→implementing→… in one call |
+| Host-delegation marker | executor-level `kind: deterministic\|host_delegation` (consumed by `isHostDelegationExecutor` → CLI pauses for the LLM) | encoded in the emitted *step kind* (a wait/dispatch step); no obligation-level `kind` |
+| Out-of-band dispatch | `preferredExecutor` forces a specific **executor** (3 CLI sites), bypassing the scan | none — every path goes through obligation selection |
+
+### Which differences are drift vs legitimate
+
+- **Shared already (the real anti-drift win):** the *vocabulary* (`Obligation`/`ObligationState`)
+  and the *ordered selection* (`findFirstActionableObligation`) are single-sourced. This is the
+  thing that could silently drift between two hand-rolled scans — and it cannot anymore. A3's
+  core ("one engine owns selection + the obligation vocabulary, both tools bind to it") **is met.**
+- **Legitimate domain differences, NOT drift:** transitions (remediate is a persisted state machine
+  that folds; audit is a stateless staleness-scan that emits one unit), holistic-vs-incremental
+  `derive` (audit's DAG hash is one pass by construction), and the N:1 executor layer with
+  `kind` + `preferredExecutor` (audit's work-unit genuinely is an *executor* addressable
+  independently of any single obligation; remediate's is the obligation itself). These reflect the
+  two halves' real shapes, established in the ground-truth recon at the top of this doc.
+
+### Decision: the "audit adopts `advance`" symmetry — three options
+
+**A — stop here.** Selection + vocabulary already shared; declare A3 met; leave audit dispatch as-is.
+- *Against:* leaves audit's known cruft — the `EXECUTOR_REGISTRY`⇄`switch` duality (kept honest only
+  by the `executor-registry-sync` invariant test) and the **dead `description` field** (recon: read
+  nowhere). Violates *cleanest endpoint*.
+
+**B — fold the `switch` into the registry (recommended).** Give each `EXECUTOR_REGISTRY` entry its own
+`run(bundle, ctx)`; both the scan path and the `preferredExecutor` path dispatch via `entry.run`.
+- Deletes the `switch` in `advance.ts` **and** the `executor-registry-sync` invariant (no two-places-
+  to-sync) **and** the dead `description`. Keeps audit's genuine executor model (N:1, `kind`,
+  forced dispatch all stay natural). Does **not** call `advance` — correct, because audit has no
+  transitions, so `advance`'s loop provably runs exactly once (ceremony over the bare scan).
+
+**C — wire audit onto `advance` with obligation-keyed `ObligationDef`s (the plan's stated "ideal").**
+Literally "both tools call `advance`."
+- *Cost (why I now read this as false parity, not ideal):* (1) audit is emit-only, so `advance`'s
+  loop **never iterates** — it is provably equivalent to `findFirstActionableObligation` + one
+  `execute`; the only delta over today is "calls the function named `advance`." (2) `ObligationDef`
+  has no slot for audit's executor-level **`kind`** → either pollute the *shared* contract with an
+  audit-only field or keep an audit-local side table (re-introducing a second catalog). (3) The
+  `preferredExecutor` path is **executor-addressed**; obligation selection can't express it (for
+  `intake_executor` it maps to *two* obligations), so a parallel forced-dispatch path survives →
+  two dispatch mechanisms. C fights audit's grain to buy a cosmetic "same function name."
+
+**Recommendation: B.** The genuinely-shared logic (selection + vocabulary) is *already* shared; the
+dispatch loop legitimately differs because the work-unit models differ. B removes audit's real cruft
+(switch/sync-invariant/dead-`description`) without forcing a false symmetry; C adds ceremony and
+either pollutes the shared contract or keeps a second catalog anyway. Pending Ethan's call (this is
+an architecture-philosophy fork that diverges from the plan's earlier "C = ideal" framing).
