@@ -9,18 +9,15 @@
 
 ## Where things stand
 
-- **Slice 2b is on branch `a3-step4-slice-2b` (pushed for review, NOT merged to `main`, NOT published).**
-  Commits `5df1c6e` (atomic loop→`advance`) + `07510eb` (dead `--max-runs` cleanup). Audit suite on the
-  branch: **2191 / 1 skip** (net −2 vs `main`'s 2193 — the deleted guards' unit tests, re-expressed). Merge
-  this branch (or fold 2c on top) before the next ship. See "Immediate next" for the slice-2b detail.
-
-- **`main` (pushed + PUBLISHED): the go-forward program keeps accumulating.** Code tip =
-  **A3 step 4 slice 2a — fold the dispatch switch into an executor-runner map** `0886d06`; then **shipped
-  2026-06-18** (release-bump commits `dd0e296`/`06ed90e`/`8224c8e`). Green at every commit; suites green on
-  the committed tree (shared **726** / audit **2193** / remediate **1671**, +1 documented skip each).
-  **PUBLISHED 2026-06-18 — publish hold lifted for Ethan's cross-machine usage:** `@audit-tools/shared 0.22.1`
-  / `auditor-lambda 0.27.1` / `remediator-lambda 0.27.1` — all three CI-green on npm (runs 27731143814 /
-  27731177158 / 27731386835); global bins reinstalled + postinstall run + `--version` smoke green.
+- **`main` (pushed; PUBLISHED through slice 2a): the go-forward program keeps accumulating.** Code tip =
+  **A3 step 4 slice 2b — `advance` drives the audit deterministic fold**, merged from branch
+  `a3-step4-slice-2b` (`5df1c6e` atomic loop→`advance` + `07510eb` dead `--max-runs` cleanup) + a teeth
+  follow-up hardening the dispatch-identity signature test. Green at every commit; audit suite **2191 / 1 skip**
+  (net −2 vs the pre-2b 2193 — deleted guard unit tests, re-expressed), shared **726**, remediate **1671**
+  (+1 skip each). **Published state (shipped 2026-06-18, through slice 2a):** `@audit-tools/shared 0.22.1` /
+  `auditor-lambda 0.27.1` / `remediator-lambda 0.27.1` — all CI-green on npm (runs 27731143814 / 27731177158
+  / 27731386835); global bins reinstalled + smoke green. **Slice 2b + the teeth follow-up are NOT yet
+  published** — ship when 2c lands or Ethan asks.
   - This session (`git log` for detail) — **A3 step 4, RESCOPED mid-session to "C"** (unify audit's fold onto
     shared `advance` — see Immediate next): (1) remediate orphaned-helper + dead-import/param sweep `33f568f`;
     (2) parity-check doc `6bfae53`; (3) **slice 1** — visited-state-signature cycle detection in shared `advance`
@@ -81,8 +78,9 @@ cycle detection returning graceful `AdvanceResult.stopped:"cycle"`); **slice 2a*
 `switch` → `EXECUTOR_RUNNERS` map; **absence of a runner** = the no-progress handoff for
 `agent`/`rolling_dispatch_executor`).
 
-**THIS session — A3 step 4 slice 2b DONE (branch `a3-step4-slice-2b`, NOT yet merged/published).** Two
-commits: **`5df1c6e`** (atomic loop→`advance` replace) + **`07510eb`** (dead `--max-runs` cleanup).
+**A3 step 4 slice 2b DONE — merged to `main` (NOT yet published).** Commits **`5df1c6e`** (atomic
+loop→`advance` replace) + **`07510eb`** (dead `--max-runs` cleanup) + a teeth follow-up (exact dispatch-identity
+composition assertion on `nextStepStateSignature`).
 `runDeterministicForNextStep`'s `for (index < maxRuns)` loop is gone; the deterministic fold runs on the
 shared `advance` over audit's `PRIORITY` `ObligationDef`s (PREAMBLE = the `index===0` file-integrity
 re-intake, mirroring remediate's `forceReplan`). `derive` = lookup into `deriveAuditState`; `execute` =
@@ -104,8 +102,8 @@ auto-complete) / `emit` (confirm_intent, design-review, analyzer/edge, narrative
 **START-HERE next session — A3 step 4 slice 2c (final reconcile, small).** (1) Resolve the OPEN Q below
 (`EXECUTOR_REGISTRY.description` keep-vs-delete) — **Ethan's call**. (2) Final parity-check audit vs
 remediate obligation shapes (the bulk of "step 4 parity" is already in the plan doc's "A3 step 4 — parity
-check" section). (3) Sync memory + backlog. (4) Then ship slice 2b+2c via `/ship` (the 2b branch is not yet
-merged — merge it to `main` first, or fold 2c on top and ship together). After 2c, A3 is done → B2+B3.
+check" section). (3) Sync memory + backlog. (4) Then ship slice 2b+2c via `/ship` (slice 2b is already on
+`main`; just fold 2c on top and ship). After 2c, A3 is done → B2+B3.
 
 **OPEN Q for Ethan (non-blocking):** the `description` field on `EXECUTOR_REGISTRY` is read nowhere (dead as
 *behaviour*) but is human-readable per-executor documentation. Keep as inline docs, or delete? Retained for now;

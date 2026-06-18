@@ -38,6 +38,10 @@ const { nextStepStateSignature, buildTerminalStep } = await import(
   "../src/cli/nextStepCommand.ts"
 );
 const { deriveAuditState } = await import("../src/orchestrator/state.ts");
+const { computeArtifactStateSignature } = await import(
+  "../src/orchestrator/artifactMetadata.ts"
+);
+const { decideNextStep } = await import("../src/orchestrator/nextStep.ts");
 const {
   loadArtifactBundle,
   writeCoreArtifacts,
@@ -118,9 +122,28 @@ test("nextStepStateSignature folds the selected obligation+executor into the key
       nextStepStateSignature(bundle, iterationRef),
       "same content + same selection must yield the same key (revisit = cycle)",
     );
-    // The key embeds the selected obligation, so it is NOT the bare artifact
-    // signature — different selections on the same content are distinct.
-    assert.ok(sig.includes("|"), "signature must encode obligation/executor identity");
+    // Teeth: the key is EXACTLY `artifact-signature | obligation | executor` — it
+    // embeds the live selection, NOT just the bare artifact hash. So a no-op-but-
+    // satisfying step (same artifact content, but the obligation chain advanced to
+    // a different selection) yields a DISTINCT key = progress, never a false cycle.
+    // Reverting `nextStepStateSignature` to the bare `computeArtifactStateSignature`
+    // drops the suffix and fails this assertion (the regression the fix prevents).
+    const artSig = computeArtifactStateSignature(bundle);
+    const decision = decideNextStep(bundle);
+    assert.notEqual(
+      artSig,
+      "no-metadata",
+      "fixture must carry a real (non-bootstrap) signature",
+    );
+    assert.equal(
+      sig,
+      `${artSig}|${decision.selected_obligation ?? ""}|${decision.selected_executor ?? ""}`,
+      "key must be the dispatch identity artifact-sig|obligation|executor",
+    );
+    assert.ok(
+      decision.selected_obligation && sig.includes(decision.selected_obligation),
+      "key must embed the actually-selected obligation (distinct selections → distinct keys)",
+    );
   });
 });
 
