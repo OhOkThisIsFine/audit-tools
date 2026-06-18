@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// PostToolUse (async) typecheck: after an Edit/Write to a workspace .ts file,
-// typecheck just that package.
+// PostToolUse (async) typecheck: after an Edit/Write to a source .ts file,
+// typecheck the (single) package.
 //
 // ADVISORY ONLY — this hook surfaces early type-error hints to the agent;
 // it is NOT an authoritative correctness verdict. The PreToolUse commit gate
@@ -35,12 +35,14 @@ try {
   process.exit(0);
 }
 
-// ── 2. Guard: only .ts files in known packages ───────────────────────────────
+// ── 2. Guard: only .ts files in a source subsystem ───────────────────────────
 if (!filePath || !/\.(ts|mts|cts|tsx)$/i.test(filePath)) process.exit(0);
 
+// Single-package layout: src/(shared|audit|remediate). Any one of them edited →
+// run the whole-package typecheck (one tsc project compiles all three together).
 const m = filePath
   .replace(/\\/g, '/')
-  .match(/packages\/(shared|audit-code|remediate-code)\//);
+  .match(/\/src\/(shared|audit|remediate)\//);
 if (!m) process.exit(0);
 const pkg = m[1];
 
@@ -87,7 +89,7 @@ if (currentToken !== token) {
 
 // ── 4. Run typecheck — ADVISORY hint only ────────────────────────────────────
 try {
-  execSync(`npm run check -w packages/${pkg}`, {
+  execSync(`npm run check`, {
     cwd: root,
     shell: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -101,7 +103,7 @@ try {
     .slice(-30)
     .join('\n');
   console.error(
-    `[ADVISORY] async typecheck hint: packages/${pkg} has type errors after your last edit.\n` +
+    `[ADVISORY] async typecheck hint: src/${pkg} edit triggered type errors after your last edit.\n` +
     `This is an early hint only — the commit gate (pre-commit-gate.mjs) is the authority.\n${tail}`,
   );
   process.exit(2);

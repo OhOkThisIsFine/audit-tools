@@ -5,22 +5,38 @@ on:
     branches:
       - main
     paths:
-      - packages/audit-code/**
-      - packages/remediate-code/**
-      - packages/shared/**
+      - src/**
+      - tests/**
+      - schemas/**
+      - dispatch/**
+      - templates/**
+      - skills/**
+      - scripts/**
+      - "*.mjs"
       - .github/workflows/**
       - package.json
       - package-lock.json
+      - tsconfig.json
+      - tsconfig.base.json
+      - vitest.config.ts
   pull_request:
     branches:
       - main
     paths:
-      - packages/audit-code/**
-      - packages/remediate-code/**
-      - packages/shared/**
+      - src/**
+      - tests/**
+      - schemas/**
+      - dispatch/**
+      - templates/**
+      - skills/**
+      - scripts/**
+      - "*.mjs"
       - .github/workflows/**
       - package.json
       - package-lock.json
+      - tsconfig.json
+      - tsconfig.base.json
+      - vitest.config.ts
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -34,12 +50,9 @@ env:
   NPM_CONFIG_LOGLEVEL: notice
 
 jobs:
-  contract-audit-code:
+  contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: packages/audit-code
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
@@ -51,28 +64,19 @@ jobs:
       - name: Validate package-lock.json
         timeout-minutes: 2
         shell: bash
-        working-directory: .
         run: |
           set -euo pipefail
           trap 'echo "::error::package-lock.json is missing or malformed. Regenerate it with npm install and commit the updated lockfile before retrying CI."' ERR
           node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('package-lock.json is missing lockfileVersion'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('package-lock.json is missing package name'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
-      - name: Install monorepo dependencies
+      - name: Install dependencies
         timeout-minutes: 10
         shell: bash
-        working-directory: .
         run: |
           set -euo pipefail
           trap 'echo "::error::npm ci failed. Inspect the uploaded ci-npm-logs artifact and rerun npm ci locally to reproduce."' ERR
           npm ci
-      - name: Build @audit-tools/shared
-        timeout-minutes: 5
-        shell: bash
-        working-directory: packages/shared
-        run: |
-          set -euo pipefail
-          npm run build
       - name: Verify release contract
-        timeout-minutes: 15
+        timeout-minutes: 25
         shell: bash
         run: |
           set -euo pipefail
@@ -82,7 +86,7 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ci-npm-logs-audit-code
+          name: ci-npm-logs
           path: |
             ~/.npm/_logs
             npm-debug.log*
@@ -90,66 +94,5 @@ jobs:
       - name: Emit troubleshooting guidance
         if: ${{ failure() }}
         shell: bash
-        working-directory: .
         run: |
-          echo "::error::audit-code CI contract failed. Review the ci-npm-logs-audit-code artifact, confirm package-lock.json is committed, and rerun npm ci && npm run verify:release -w packages/audit-code locally."
-
-  contract-remediate-code:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: packages/remediate-code
-    steps:
-      - name: Checkout
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
-      - name: Set up Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: ${{ env.CI_NODE_VERSION }}
-          cache: npm
-      - name: Validate package-lock.json
-        timeout-minutes: 2
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::package-lock.json is missing or malformed. Regenerate it with npm install and commit the updated lockfile before retrying CI."' ERR
-          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('package-lock.json is missing lockfileVersion'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('package-lock.json is missing package name'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
-      - name: Install monorepo dependencies
-        timeout-minutes: 10
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::npm ci failed. Inspect the uploaded ci-npm-logs artifact and rerun npm ci locally to reproduce."' ERR
-          npm ci
-      - name: Build @audit-tools/shared
-        timeout-minutes: 5
-        shell: bash
-        working-directory: packages/shared
-        run: |
-          set -euo pipefail
-          npm run build
-      - name: Verify release contract
-        timeout-minutes: 15
-        shell: bash
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::npm run verify:release failed. Download the ci-npm-logs artifact and rerun npm run verify:release locally before retrying."' ERR
-          npm run verify:release
-      - name: Upload npm debug logs
-        if: ${{ failure() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ci-npm-logs-remediate-code
-          path: |
-            ~/.npm/_logs
-            npm-debug.log*
-          if-no-files-found: ignore
-      - name: Emit troubleshooting guidance
-        if: ${{ failure() }}
-        shell: bash
-        working-directory: .
-        run: |
-          echo "::error::remediate-code CI contract failed. Review the ci-npm-logs-remediate-code artifact, confirm package-lock.json is committed, and rerun npm ci && npm run verify:release -w packages/remediate-code locally."
+          echo "::error::audit-tools CI contract failed. Review the ci-npm-logs artifact, confirm package-lock.json is committed, and rerun npm ci && npm run verify:release locally."

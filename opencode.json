@@ -1,6 +1,13 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "command": {},
+  "command": {
+    "remediate-code": {
+      "template": "Run `remediate-code ensure --quiet`, then `remediate-code next-step`, read only the returned prompt_path, and follow that prompt.",
+      "description": "Conversation-first code remediation",
+      "agent": "remediator",
+      "subtask": false
+    }
+  },
   "mcp": {},
   "permission": {
     "read": "allow",
@@ -109,6 +116,43 @@
         "auditor_*": "allow",
         "question": "allow",
         "task": "allow"
+      }
+    },
+    "remediator": {
+      "description": "Bounded remediation orchestration agent for the /remediate-code workflow.",
+      "permission": {
+        "edit": {
+          "*": "ask",
+          ".remediation-artifacts/**": "allow",
+          "remediation-report.md": "allow",
+          "remediation-report.json": "allow",
+          "remediation-closing-result.json": "allow"
+        },
+        "bash": {
+          "*": "ask",
+          "remediate-code": "allow",
+          "remediate-code ensure*": "allow",
+          "remediate-code next-step*": "allow",
+          "remediate-code prepare-document-dispatch*": "allow",
+          "remediate-code merge-document-results*": "allow",
+          "remediate-code prepare-implement-dispatch*": "allow",
+          "remediate-code merge-implement-results*": "allow",
+          "remediate-code validate-artifacts*": "allow",
+          "*remediate-code.mjs": "allow",
+          "*remediate-code.mjs* ensure*": "allow",
+          "*remediate-code.mjs* next-step*": "allow",
+          "*remediate-code.mjs* prepare-document-dispatch*": "allow",
+          "*remediate-code.mjs* merge-document-results*": "allow",
+          "*remediate-code.mjs* prepare-implement-dispatch*": "allow",
+          "*remediate-code.mjs* merge-implement-results*": "allow",
+          "*remediate-code.mjs* validate-artifacts*": "allow",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "grep *": "allow",
+          "Select-String *": "allow",
+          "rm *": "deny"
+        },
+        "question": "allow"
       }
     }
   }
