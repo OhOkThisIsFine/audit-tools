@@ -58,6 +58,14 @@ import {
 } from "../contractPipeline/derive.js";
 import { ensureNodeId, toBlockId } from "../contractPipeline/idRegistry.js";
 import {
+  captureReviewSnapshot,
+  computeReReviewDelta,
+  isReviewArtifact,
+  readReviewSnapshot,
+  renderReReviewSection,
+  reviewSnapshotExists,
+} from "../contractPipeline/reviewSnapshot.js";
+import {
   renderContractPipelinePrompt,
   renderContractRepairPrompt,
   CONTRACT_PIPELINE_PHASE_ORDER,
@@ -329,6 +337,13 @@ export async function ingestContractArtifacts(
     }
     await writeContractArtifact(artifactsDir, name, raw);
     ingested.push(name);
+    // Snapshot a freshly-produced review verdict + the upstreams it reviewed, so
+    // a later staleness re-emit can be diff-based (B2). No-op for non-review
+    // artifacts. Captured at ingest, when the upstreams are in the exact state
+    // the worker reviewed.
+    if (isReviewArtifact(name)) {
+      await captureReviewSnapshot(artifactsDir, name, raw, new Date().toISOString());
+    }
   }
 
   return { ingested, invalid };
@@ -1483,7 +1498,31 @@ ${preCriticGate.errorLines.join("\n")}
     return buildPhaseStep(nextPhase, scaffold);
   }
 
-  return buildPhaseStep(nextPhase);
+  // Diff-based re-review (B2): when a verdict-bearing review phase is re-emitted
+  // because an upstream changed, hand the worker its prior verdict + the precise
+  // changed-since-last-review delta so it re-affirms cheaply or revises only the
+  // affected items — never a blind full re-run. The section appears only when a
+  // prior snapshot exists (i.e. this is a re-review, not first authoring).
+  const reReviewSection = await buildReReviewSection(nextPhase, artifactsDir);
+  return buildPhaseStep(nextPhase, reReviewSection);
+}
+
+/**
+ * Build the diff-based re-review section for a review phase being re-emitted after
+ * staleness, or undefined when this is not a re-review (non-review phase, or no
+ * prior snapshot). See `reviewSnapshot.ts`.
+ */
+async function buildReReviewSection(
+  phase: string,
+  artifactsDir: string,
+): Promise<string | undefined> {
+  const artifact = PHASE_TO_ARTIFACT[phase];
+  if (!artifact || !isReviewArtifact(artifact)) return undefined;
+  if (!reviewSnapshotExists(artifactsDir, artifact)) return undefined;
+  const snapshot = await readReviewSnapshot(artifactsDir, artifact);
+  if (!snapshot) return undefined;
+  const delta = await computeReReviewDelta(artifactsDir, artifact, snapshot);
+  return renderReReviewSection(artifact, snapshot, delta);
 }
 
 // ── DAG → extracted plan conversion ──────────────────────────────────────────
