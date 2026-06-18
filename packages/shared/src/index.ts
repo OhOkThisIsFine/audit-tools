@@ -182,6 +182,19 @@ export {
 export type { HashContentOptions } from "./hash.js";
 export { hashContent } from "./hash.js";
 
+// Diff-based re-review (B2/B3): generic projection serialization, leaf-level
+// projection diff, and the re-review prompt section. Each orchestrator owns its
+// own projection table; this single-sources the diff algorithm + prompt shape.
+export type {
+  ProjectionDiffEntry,
+  ReReviewSectionInput,
+} from "./reReview/projectionDiff.js";
+export {
+  stableStringifyProjection,
+  diffProjections,
+  renderDiffReReviewSection,
+} from "./reReview/projectionDiff.js";
+
 // Tooling: command execution
 export type { RunTrackedOptions, RunTrackedResult } from "./tooling/exec.js";
 export {
