@@ -49,13 +49,6 @@ import {
   createRemediationWorkerTask,
 } from "./workerTasks.js";
 
-const PUBLIC_CONTRACT_SCHEMA_COMPANIONS = new Map<string, string[]>([
-  [
-    "packages/shared/src/types/finding.ts",
-    ["packages/audit-code/schemas/audit_findings.schema.json"],
-  ],
-]);
-
 function enumerateTestFiles(root: string): string[] {
   if (!existsSync(join(root, "package.json"))) {
     return [];
@@ -154,26 +147,6 @@ function tryParseFindingsReport(
   } catch {
     return undefined;
   }
-}
-
-function appendPublicContractSchemaCompanions(findings: Finding[]): Finding[] {
-  for (const finding of findings) {
-    const seen = new Set(finding.affected_files.map((file) => file.path));
-    const companionPaths: string[] = [];
-    for (const affectedFile of finding.affected_files) {
-      for (const companion of PUBLIC_CONTRACT_SCHEMA_COMPANIONS.get(
-        affectedFile.path,
-      ) ?? []) {
-        if (seen.has(companion)) continue;
-        seen.add(companion);
-        companionPaths.push(companion);
-      }
-    }
-    for (const companion of companionPaths) {
-      finding.affected_files.push({ path: companion });
-    }
-  }
-  return findings;
 }
 
 interface PlanPhaseDeps {
@@ -873,9 +846,8 @@ export async function applyPlanPipeline(
   plan: RemediationPlan,
   options: { root: string; artifactsDir?: string },
 ): Promise<RemediationPlan> {
-  let { blocks, findings } = plan;
-
-  findings = appendPublicContractSchemaCompanions(findings);
+  const { findings } = plan;
+  let { blocks } = plan;
 
   // Merge blocks whose findings touch a shared file.
   blocks = mergeBlocksSharingFiles(blocks, findings, options.root);
