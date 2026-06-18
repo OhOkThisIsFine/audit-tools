@@ -16,8 +16,12 @@
  *      whose narrative-bearing artifacts differ only in non-semantic ways.
  *   3. applyNarrative output: the same narrative supplied in different array
  *      order produces the same canonical content hash for audit-findings.json.
- *   4. checkNoProgressBeforeDispatch FIRES on the second recurrence of a stable
- *      narrative signature (the convergence guarantee).
+ *   4. nextStepStateSignature (the dispatch-identity key the shared `advance`
+ *      engine keys cycle detection on) is STABLE across a semantically-equivalent
+ *      narrative re-render, so a recurrence is detected → the synthesis<->narrative
+ *      fold converges (stops) instead of spinning. buildTerminalStep then routes
+ *      the stop to complete (report rendered) / blocked (no report). This is the
+ *      audit-specific composition the deleted no-progress guard used to provide.
  */
 
 import test from "node:test";
@@ -33,11 +37,13 @@ const { computeArtifactStateSignature } = await import(
   "../src/orchestrator/artifactMetadata.ts"
 );
 const { applyNarrative } = await import("../src/reporting/synthesis.ts");
-const { checkNoProgressBeforeDispatch } = await import(
+const { nextStepStateSignature, buildTerminalStep } = await import(
   "../src/cli/nextStepCommand.ts"
 );
 const { deriveAuditState } = await import("../src/orchestrator/state.ts");
-const { writeCoreArtifacts } = await import("../src/io/artifacts.ts");
+const { writeCoreArtifacts, loadArtifactBundle } = await import(
+  "../src/io/artifacts.ts"
+);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -211,16 +217,19 @@ test("OBL-C006: synthesis-narrative marker hash strips non-semantic fields", () 
   );
 });
 
-// ── 4. no-progress guard fires on a recurring stable signature ────────────────
+// ── 4. convergence: the dispatch-identity signature is stable, so a recurring ──
+//      stable-narrative state is detected as a cycle and routed to a terminal.
 
-test("CE-005 convergence: no-progress guard fires when a stable narrative signature recurs", async () => {
+test("CE-005 convergence: nextStepStateSignature is stable across a semantically-equivalent narrative re-render", async () => {
   await withTempDir(async (dir) => {
     const artDir = join(dir, ".audit-tools/audit");
     await mkdir(join(artDir, "steps"), { recursive: true });
 
     // A bundle whose state signature is driven by the (canonicalized) narrative
-    // artifacts. We seed a metadata manifest so computeArtifactStateSignature is
-    // a real, metadata-bearing signature (not the "no-metadata" bootstrap).
+    // artifacts. Seed a metadata manifest so computeArtifactStateSignature is a
+    // real, metadata-bearing signature (not the "no-metadata" bootstrap). The
+    // narrative is in "applied" form, so synthesis_narrative_current is satisfied
+    // and the selected obligation is deterministic.
     const enriched = applyNarrative(baseFindingsReport(), narrative("forward"));
     const metadata = {
       artifacts: {
@@ -242,123 +251,111 @@ test("CE-005 convergence: no-progress guard fires when a stable narrative signat
       },
     };
     const bundle = {
-      repo_manifest: {
-        repository: { name: "converge" },
-        generated_at: "t",
-        files: [],
-      },
-      // A rendered report so the terminal step resolves to a present-report
-      // (complete) rather than a bare block — convergence after the contract is
-      // already written is success, not failure.
+      repo_manifest: { repository: { name: "converge" }, generated_at: "t", files: [] },
       audit_report: "# Audit Report\n\n## Work blocks\n\n- Done\n",
       artifact_metadata: metadata,
     };
     await writeCoreArtifacts(artDir, bundle);
-    const state = deriveAuditState(bundle);
+    const loaded = await loadArtifactBundle(artDir);
 
-    const dispatchedSignatures = new Set();
-    const baseCtx = {
-      dispatchedSignatures,
-      params: { artifactsDir: artDir, maxRuns: 1000, root: dir },
-      bundle,
-      state,
-      selectedObligation: "synthesis_narrative_current",
-      selectedExecutor: "synthesis_narrative_executor",
-    };
-
-    // First encounter: records the signature, does NOT fire (legitimate first
-    // dispatch from this state).
-    const first = await checkNoProgressBeforeDispatch({ index: 0, ...baseCtx });
-    assert.equal(first, undefined, "first dispatch from a fresh state must proceed");
-
-    // The state signature did not change (a byte-varying-but-semantically-stable
-    // re-render of the same narrative leaves the canonical hash unchanged), so on
-    // the SECOND encounter of the same signature the guard must fire and stop the
-    // loop instead of re-dispatching.
-    const second = await checkNoProgressBeforeDispatch({ index: 1, ...baseCtx });
-    assert.ok(second !== undefined, "guard must fire on the recurring stable signature");
-    assert.equal(
-      second.kind,
-      "complete",
-      "with the report already rendered, convergence resolves to complete (report promoted, working dir cleaned)",
-    );
+    // The dispatch-identity signature the shared `advance` engine keys on must be
+    // STABLE for the same (semantically-stable) narrative state — so a recurrence
+    // is a detectable cycle and the synthesis<->narrative fold converges (stops)
+    // rather than spinning. (The bare-artifact hash stability is covered by case 2;
+    // this asserts the audit-level key composed on top of it is stable too.)
+    const ref = { value: 5 };
+    const sig1 = nextStepStateSignature(loaded, ref);
+    const sig2 = nextStepStateSignature(loaded, ref);
+    assert.equal(sig1, sig2, "a stable narrative state must yield a stable dispatch-identity key");
+    // It is NOT the bootstrap state (so it is not salted distinct) — a real
+    // metadata-bearing signature, which means a revisit IS caught by advance.
+    assert.ok(!sig1.includes("no-metadata"), "a metadata-bearing state is not the salted bootstrap key");
   });
 });
 
-test("CE-005: no-progress guard records no_progress_detected and stays blocked when no report exists", async () => {
+test("CE-005 convergence: the terminal routes to complete when the report is rendered, blocked otherwise", async () => {
   await withTempDir(async (dir) => {
     const artDir = join(dir, ".audit-tools/audit");
     await mkdir(join(artDir, "steps"), { recursive: true });
 
-    // Same stable-narrative signature, but NO rendered report → the terminal step
-    // routes to "blocked" and the working dir is NOT promoted/cleaned, so the
-    // deterministic-progress.json the guard wrote survives for inspection.
+    // With the report already rendered, convergence resolves to complete (the
+    // report is promoted, working dir cleaned) — never a bare block.
     const enriched = applyNarrative(baseFindingsReport(), narrative("forward"));
-    const metadata = {
-      artifacts: {
-        "audit-findings.json": {
-          revision: 1,
-          content_hash: hashArtifactValue("audit-findings.json", enriched),
-          dependency_revisions: {},
+    const reportedBundle = {
+      repo_manifest: { repository: { name: "converge" }, generated_at: "t", files: [] },
+      audit_report: "# Audit Report\n\n## Work blocks\n\n- Done\n",
+      artifact_metadata: {
+        artifacts: {
+          "audit-findings.json": {
+            revision: 1,
+            content_hash: hashArtifactValue("audit-findings.json", enriched),
+            dependency_revisions: {},
+          },
         },
       },
     };
-    const bundle = {
-      repo_manifest: { repository: { name: "converge2" }, generated_at: "t", files: [] },
-      artifact_metadata: metadata,
-    };
-    await writeCoreArtifacts(artDir, bundle);
-    const state = deriveAuditState(bundle);
-
-    const dispatchedSignatures = new Set();
-    const baseCtx = {
-      dispatchedSignatures,
-      params: { artifactsDir: artDir, maxRuns: 1000, root: dir },
-      bundle,
-      state,
-      selectedObligation: "synthesis_narrative_current",
-      selectedExecutor: "synthesis_narrative_executor",
-    };
-
-    assert.equal(
-      await checkNoProgressBeforeDispatch({ index: 0, ...baseCtx }),
-      undefined,
-      "first dispatch proceeds",
+    await writeCoreArtifacts(artDir, reportedBundle);
+    const loaded = await loadArtifactBundle(artDir);
+    const complete = await buildTerminalStep(
+      { root: dir, artifactsDir: artDir },
+      loaded,
+      deriveAuditState(loaded),
+      "Finalization is not converging.",
     );
-    const fired = await checkNoProgressBeforeDispatch({ index: 1, ...baseCtx });
-    assert.ok(fired !== undefined, "guard fires on recurrence");
-    assert.equal(fired.kind, "blocked", "no report → blocked terminal step");
-
-    const progress = JSON.parse(
-      await readFile(join(artDir, "steps", "deterministic-progress.json"), "utf8"),
-    );
-    assert.equal(progress.no_progress_detected, true, "no_progress_detected must be recorded");
-    assert.equal(progress.repeated_executor, "synthesis_narrative_executor");
-    assert.equal(progress.repeated_obligation, "synthesis_narrative_current");
+    assert.equal(complete.kind, "complete", "rendered report → complete");
   });
 });
 
-test("ARC-b8fed771: no-progress guard does NOT fire on the bootstrap no-metadata state", async () => {
+test("CE-005: convergence stays blocked when no report exists", async () => {
+  await withTempDir(async (dir) => {
+    const artDir = join(dir, ".audit-tools/audit");
+    await mkdir(join(artDir, "steps"), { recursive: true });
+
+    // Same stable-narrative signature, but NO rendered report → blocked terminal.
+    const enriched = applyNarrative(baseFindingsReport(), narrative("forward"));
+    const bundle = {
+      repo_manifest: { repository: { name: "converge2" }, generated_at: "t", files: [] },
+      artifact_metadata: {
+        artifacts: {
+          "audit-findings.json": {
+            revision: 1,
+            content_hash: hashArtifactValue("audit-findings.json", enriched),
+            dependency_revisions: {},
+          },
+        },
+      },
+    };
+    await writeCoreArtifacts(artDir, bundle);
+    const loaded = await loadArtifactBundle(artDir);
+    const blocked = await buildTerminalStep(
+      { root: dir, artifactsDir: artDir },
+      loaded,
+      deriveAuditState(loaded),
+      "Finalization is not converging.",
+    );
+    assert.equal(blocked.kind, "blocked", "no report → blocked terminal step");
+  });
+});
+
+test("ARC-b8fed771: the bootstrap no-metadata state is salted distinct (never a false cycle)", async () => {
   await withTempDir(async (dir) => {
     const artDir = join(dir, ".audit-tools/audit");
     await mkdir(join(artDir, "steps"), { recursive: true });
     // No artifact_metadata → computeArtifactStateSignature returns "no-metadata".
     const bundle = { repo_manifest: { repository: { name: "boot" }, generated_at: "t", files: [] } };
     await writeCoreArtifacts(artDir, bundle);
-    const state = deriveAuditState(bundle);
-    const dispatchedSignatures = new Set();
-    const ctx = {
-      dispatchedSignatures,
-      params: { artifactsDir: artDir, maxRuns: 1000, root: dir },
-      bundle,
-      state,
-      selectedObligation: "repo_manifest",
-      selectedExecutor: "intake_executor",
-    };
+    const loaded = await loadArtifactBundle(artDir);
     // The bootstrap "no-metadata" signature is legitimately revisited by many
-    // early deterministic steps; the guard must never fire on it.
-    assert.equal(await checkNoProgressBeforeDispatch({ index: 0, ...ctx }), undefined);
-    assert.equal(await checkNoProgressBeforeDispatch({ index: 1, ...ctx }), undefined);
-    assert.equal(await checkNoProgressBeforeDispatch({ index: 2, ...ctx }), undefined);
+    // early deterministic steps; salting it with the transition counter keeps
+    // each scan distinct so `advance` never false-trips a cycle on it.
+    const ref = { value: 0 };
+    const s0 = nextStepStateSignature(loaded, ref);
+    ref.value = 1;
+    const s1 = nextStepStateSignature(loaded, ref);
+    ref.value = 2;
+    const s2 = nextStepStateSignature(loaded, ref);
+    assert.match(s0, /no-metadata/);
+    assert.notEqual(s0, s1);
+    assert.notEqual(s1, s2);
   });
 });
