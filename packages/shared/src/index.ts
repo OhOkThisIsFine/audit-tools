@@ -16,7 +16,12 @@ export type {
   CriticalFlow,
   CriticalFlowManifest,
 } from "./types/flows.js";
-export { FLOW_CONFIDENCE_LEVELS } from "./types/flows.js";
+export {
+  FLOW_CONFIDENCE_LEVELS,
+  FlowConfidenceLevelSchema,
+  CriticalFlowSchema,
+  CriticalFlowManifestSchema,
+} from "./types/flows.js";
 export type {
   SurfaceKind,
   SurfaceRecord,
