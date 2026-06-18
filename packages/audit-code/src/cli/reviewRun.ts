@@ -81,55 +81,28 @@ export async function writeHandoffOnly(params: {
   await writeAuditCodeHandoffArtifacts(handoff);
 }
 
-export async function ensureSemanticReviewRun(params: {
+/** Inputs needed to materialize a semantic-review run's on-disk artifacts. */
+export interface MaterializeReviewRunParams {
   root: string;
   artifactsDir: string;
   bundle: ArtifactBundle;
-  state: AuditState;
   obligationId: string | null;
   selfCliPath: string;
   timeoutMs: number;
-}): Promise<{ state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun }> {
-  const existingRun = await loadCurrentActiveReviewRun(params.artifactsDir);
-  if (existingRun) {
-    const blockedState =
-      params.bundle.audit_state?.status === "blocked"
-        ? params.bundle.audit_state
-        : buildBlockedAuditState({
-            state: params.state,
-            obligationId: params.obligationId,
-            executor: "agent",
-            blocker: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
-          });
-    const blockedBundle = { ...params.bundle, audit_state: blockedState };
-    await writeCoreArtifacts(params.artifactsDir, blockedBundle);
-    await writeHandoffOnly({
-      root: params.root,
-      artifactsDir: params.artifactsDir,
-      bundle: blockedBundle,
-      audit_state: blockedState,
-      progress_summary: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
-      providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
-      activeReviewRun: existingRun,
-    });
-    return {
-      state: blockedState,
-      bundle: blockedBundle,
-      activeReviewRun: existingRun,
-    };
-  }
+}
 
-  const blockedState = buildBlockedAuditState({
-    state: params.state,
-    obligationId: params.obligationId,
-    executor: "agent",
-    blocker: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
-  });
-  await writeCoreArtifacts(params.artifactsDir, {
-    ...params.bundle,
-    audit_state: blockedState,
-  });
-
+/**
+ * Materialize a semantic-review run's on-disk artifacts — the deterministic run id
+ * (`buildRunId(obligationId, 1)`), pending-audit-tasks.json, task.json, and the
+ * worker prompt — and return the active review run. This is the pure run-setup the
+ * host-subagent path (`ensureSemanticReviewRun`) and the in-process rolling path
+ * (`driveRollingAuditDispatch`) share; it writes NO blocked state and NO handoff,
+ * so the in-process driver doesn't have to first stamp a misleading "manual review"
+ * block it immediately drives past.
+ */
+export async function materializeReviewRun(
+  params: MaterializeReviewRunParams,
+): Promise<{ task: WorkerTask; activeReviewRun: ActiveReviewRun }> {
   const runId = buildRunId(params.obligationId, 1);
   const paths = getRunPaths(params.artifactsDir, runId);
   const pendingTasks = await addFileLineCountHints(
@@ -180,6 +153,59 @@ export async function ensureSemanticReviewRun(params: {
   if (!activeReviewRun) {
     throw new Error("Internal error: failed to materialize active review run.");
   }
+  return { task, activeReviewRun };
+}
+
+export async function ensureSemanticReviewRun(params: {
+  root: string;
+  artifactsDir: string;
+  bundle: ArtifactBundle;
+  state: AuditState;
+  obligationId: string | null;
+  selfCliPath: string;
+  timeoutMs: number;
+}): Promise<{ state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun }> {
+  const existingRun = await loadCurrentActiveReviewRun(params.artifactsDir);
+  if (existingRun) {
+    const blockedState =
+      params.bundle.audit_state?.status === "blocked"
+        ? params.bundle.audit_state
+        : buildBlockedAuditState({
+            state: params.state,
+            obligationId: params.obligationId,
+            executor: "agent",
+            blocker: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
+          });
+    const blockedBundle = { ...params.bundle, audit_state: blockedState };
+    await writeCoreArtifacts(params.artifactsDir, blockedBundle);
+    await writeHandoffOnly({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      bundle: blockedBundle,
+      audit_state: blockedState,
+      progress_summary: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
+      providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+      activeReviewRun: existingRun,
+    });
+    return {
+      state: blockedState,
+      bundle: blockedBundle,
+      activeReviewRun: existingRun,
+    };
+  }
+
+  const blockedState = buildBlockedAuditState({
+    state: params.state,
+    obligationId: params.obligationId,
+    executor: "agent",
+    blocker: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
+  });
+  await writeCoreArtifacts(params.artifactsDir, {
+    ...params.bundle,
+    audit_state: blockedState,
+  });
+
+  const { activeReviewRun } = await materializeReviewRun(params);
   const blockedBundle = {
     ...params.bundle,
     audit_state: blockedState,

@@ -144,6 +144,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     analyzers: sessionConfig.analyzers,
     graphLlmEdgeReasoning: sessionConfig.graph?.llm_edge_reasoning,
     since: getFlag(argv, "--since"),
+    sessionConfig,
   });
 
   if (result.kind === "complete") {

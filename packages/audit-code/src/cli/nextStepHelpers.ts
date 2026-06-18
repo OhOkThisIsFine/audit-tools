@@ -16,6 +16,7 @@ import {
 import type {
   AnalyzerSetting,
   GraphEdge,
+  SessionConfig,
   SynthesisNarrative,
 } from "@audit-tools/shared";
 import {
@@ -55,8 +56,14 @@ import { runAuditStep } from "./auditStep.js";
 import {
   writeHandoffOnly,
   ensureSemanticReviewRun,
+  materializeReviewRun,
 } from "./reviewRun.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
+import {
+  driveRollingAuditDispatch,
+  resolveAuditRollingEngineEnabled,
+  resolvesToInProcessDispatchProvider,
+} from "./rollingAuditDispatch.js";
 
 // ── Incoming-artifact helper ──────────────────────────────────────────────────
 
@@ -92,6 +99,12 @@ export type NextStepParams = {
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
   since?: string;
+  /**
+   * Active session config. Threaded so the semantic-review dispatch obligation can
+   * route to the in-process rolling driver (A8(a)) when the rolling engine is
+   * enabled AND an explicit backend provider is configured.
+   */
+  sessionConfig?: SessionConfig;
 };
 
 export type TerminalStepResult =
@@ -711,6 +724,52 @@ export async function runDeterministicForNextStep(params: NextStepParams): Promi
     }
 
     if (isHostDelegationExecutor(decision.selected_executor ?? "")) {
+      // A8(a) in-process provider driver: when the rolling engine is enabled AND
+      // the operator EXPLICITLY configured a programmatic backend provider
+      // (openai-compatible / codex / …), the orchestrator drives the WHOLE
+      // semantic-review dispatch ITSELF — the provider is the per-packet worker —
+      // instead of emitting a host-subagent dispatch step. The deterministic loop
+      // then continues, re-deriving state once the results are ingested (mirrors
+      // remediate's decideNextStep transition after driveRollingImplementDispatch).
+      const sessionConfig = params.sessionConfig;
+      if (
+        resolveAuditRollingEngineEnabled({ sessionConfig }) &&
+        resolvesToInProcessDispatchProvider(sessionConfig)
+      ) {
+        const { activeReviewRun } = await materializeReviewRun({
+          root: params.root,
+          artifactsDir: params.artifactsDir,
+          bundle,
+          obligationId: decision.selected_obligation,
+          selfCliPath: params.selfCliPath,
+          timeoutMs: params.timeoutMs,
+        });
+        const driven = await driveRollingAuditDispatch({
+          root: params.root,
+          artifactsDir: params.artifactsDir,
+          activeReviewRun,
+          sessionConfig: sessionConfig!,
+          timeoutMs: params.timeoutMs,
+        });
+        await clearDispatchFiles(params.artifactsDir);
+        // Convergence guard: a pass that ingested NO new results and stranded
+        // nothing (every packet errored at the provider) made no net progress and
+        // re-dispatching the same unchanged state would loop to maxRuns. Stop and
+        // surface the block rather than spin. Progress (ingest ran, or a strand
+        // terminal was recorded) re-derives state and continues normally.
+        if (!driven.ingest && driven.stranded_ids.length === 0) {
+          return {
+            kind: "blocked",
+            state,
+            bundle,
+            reason:
+              `In-process rolling dispatch produced no results for ${driven.packet_count} ` +
+              `review packet(s) (provider '${sessionConfig?.provider}' errored on every packet); ` +
+              "stopping to avoid a no-progress loop.",
+          };
+        }
+        continue;
+      }
       return {
         kind: "semantic_review",
         selectedExecutor: decision.selected_executor,
