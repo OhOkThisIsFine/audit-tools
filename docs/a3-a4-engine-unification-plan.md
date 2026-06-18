@@ -322,24 +322,35 @@ the same engine — the A3 north star, properly reached.
   `switch` arm) so the obligation `execute` closures are trivial *is* part of getting onto `advance`,
   and it still kills the `switch` + the `executor-registry-sync` invariant + the dead `description`.
 
-### Cycle-guard resolution (the design question) — DONE, slice 1
+### Cycle-guard resolution (the design question) — slice 1 landed the primitive; audit ultimately kept its own guards (approach B)
 
 Audit's guards are richer than `advance`'s blunt `maxTransitions` throw: they detect *no-net-progress*
 (an executor that ran but left artifacts unchanged) and *finalization thrashing* (a return to an
 already-seen artifact state), and surface a **graceful terminal** naming the cycling obligations.
 
-**Resolution: visited-state-signature cycle detection** — the precise primitive `maxTransitions` only
-approximated. `advance` gained an optional `opts.stateSignature(state) => string`; it records the
-signature of every state it scans from, and a transition landing on an already-seen signature stops
-the loop with a discriminated `stopped: "cycle"` (not a throw), so the caller renders the terminal.
-This single primitive **subsumes both audit guards** (no-progress = the signature didn't change →
-immediate revisit; finalization-cycle = a later revisit) and is *general* (remediate's blunt
-`maxTransitions` is strictly improved by it), so it belongs in shared, not as an audit special-case.
-It handles audit's **non-monotonic** deepening correctly (each round is a new signature → keep
-folding; converge → natural completion; genuine thrash → revisit → stop). `maxTransitions` remains the
-absolute backstop when no signature is supplied (remediate, for now). Landed in
+**Primitive (slice 1): visited-state-signature cycle detection.** `advance` gained an optional
+`opts.stateSignature(state) => string`; it records the signature of every state it scans from, and a
+transition landing on an already-seen signature stops the loop with a discriminated `stopped: "cycle"`
+(not a throw), so the caller renders the terminal. This is *general* — remediate's blunt
+`maxTransitions` is strictly improved by it — so it belongs in shared. Landed in
 `@audit-tools/shared/src/engine/obligationEngine.ts` + 5 unit tests; pure addition, remediate
 untouched (the return type went `{state,step}` → `{state,step,stopped?}`, a superset).
+
+**Outcome for audit: the primitive did NOT subsume audit's two guards (slice 2b, approach B).** The
+draft above expected `stateSignature` to fold both audit guards into the shared engine (no-progress =
+unchanged signature → immediate revisit; finalization-cycle = a later revisit). **Approach A built
+exactly that** — collapsed both guards onto `advance.stateSignature` — and it **broke on Linux CI
+only**: the visited-set is 0-tolerance and signs *every* scanned state, so a fresh-Linux floor-only
+analyzer chain (empty analyzer cache → many legitimate same-signature scans, plus pre-metadata
+`no-metadata` bootstrap states) false-tripped as a cycle. Audit's hand guards are deliberately *not*
+0-tolerance: they **skip `no-metadata` states** and **tolerate `FINALIZATION_CYCLE_TOLERANCE`=16
+revisits** before declaring a cycle. **Approach B (landed)** therefore keeps both guards
+(`checkNoProgressBeforeDispatch` + `checkFinalizationCycle`) in audit's own `Ctx`, invoked from inside
+the deterministic-executor obligation, and runs `advance` with **no** `stateSignature` — so
+`advance.maxTransitions` is left as the pure runaway backstop. The slice-1 `stateSignature` primitive
+remains in shared as the general improvement to `maxTransitions` (available to remediate); audit just
+doesn't route its richer, tolerance-bearing guards through it. The Linux-only failure is now
+reproduced on any OS by `tests/linux-cycle-regression.test.mjs`.
 
 ### C decomposition (slices, green at each — mirrors remediate's 1→2a→2b)
 
@@ -353,17 +364,23 @@ untouched (the return type went `{state,step}` → `{state,step,stopped?}`, a su
    is gone and the switch⇄registry invariant test now asserts **runner-map** coverage instead.
    `AdvanceAuditOptions` / `AdvanceAuditResult` moved to a leaf `advanceTypes.ts` so the runners can type
    their ctx without a back-import (madge cycle guard, ARC-1fa005bb). `runDeterministicForNextStep`
-   unchanged. Full audit suite 2193 pass / 1 skip. *(The dead `description` field on the registry is
-   retained for now — it is human-readable executor documentation, not behavioural dead code; decide
-   keep-as-docs vs delete in 2c.)*
-3. **Slice 2b — `advance` drives the deterministic fold.** Audit `ObligationDef`s (`derive` = lookup
-   into `deriveAuditState`'s precomputed obligation states; `execute` = run the executor → `transition`
-   for deterministic, `emit` for host-delegation/dispatch/terminal). Replace
-   `runDeterministicForNextStep`'s for-loop with `advance` + `stateSignature` (lift audit's existing
-   state-signature). Retire `checkNoProgressBeforeDispatch` + `checkFinalizationCycle` + `maxRuns`;
-   `preferredExecutor`/integrity-check become a preamble. The typed host-step branches
-   (`handleGraphEnrichmentBranch` / `handleDesignReviewBranch` / `handleSynthesisNarrativeBranch` /
-   `ensureSemanticReviewRun`) move into the obligations' `emit` payloads. Atomic replace: hand-loop →
-   `advance`.
-4. **Slice 2c — reconcile + clean.** Retire any now-dead CLI helpers; final parity-check; update
-   memory/backlog. After this, both tools run the *same* fold engine and A3 is done.
+   unchanged. Full audit suite 2193 pass / 1 skip. *(The dead `description` field on the registry was
+   carried here and DELETED in slice 2c — it was read nowhere, not even in host-facing output.)*
+3. **✓ DONE — Slice 2b — `advance` drives the deterministic fold (`0f3f203`, approach B,
+   Linux-CI-green).** Audit `ObligationDef`s (`derive` = lookup into `deriveAuditState`'s precomputed
+   obligation states; `execute` = run the executor → `transition` for deterministic, `emit` for
+   host-delegation/dispatch/terminal) in `PRIORITY` order; `runDeterministicForNextStep`'s hand
+   `for`-loop replaced by shared `advance`; `preferredExecutor`/integrity-check became a preamble; the
+   typed host-step branches (`handleGraphEnrichmentBranch` / `handleDesignReviewBranch` /
+   `handleSynthesisNarrativeBranch` / `ensureSemanticReviewRun`) moved into the obligations' `emit`
+   payloads; retired `maxRuns` / `--max-runs` / `getMaxRuns`. **Approach B, not A:** the two cycle
+   guards stay in audit's `Ctx` (a per-transition counter feeds them as the old `index`), `advance`
+   runs with **no** `stateSignature` — see "Cycle-guard resolution" above for why approach A (collapse
+   onto `stateSignature`) was tried, broke Linux-only, and was reverted (`0903a000`,
+   `slice-2b-wip`). Disabled-narrative now runs the deterministic `status:omitted` omit (a `run_omit`
+   branch) instead of spinning. Atomic replace: hand-loop → `advance`.
+4. **✓ DONE — Slice 2c — reconcile + clean.** Stripped dead `maxRuns` params from the guard tests;
+   deleted the dead `description` field off `EXECUTOR_REGISTRY` (`kind`/`obligation_ids` stay — it was
+   read nowhere, not even in host-facing output); confirmed `runDeterministicForNextStep` is now purely
+   the `advance`-driven coordinator (hand-`for`-loop referenced only as historical analog in comments);
+   reconciled this plan doc + backlog + memory. Both tools now run the *same* fold engine — **A3 is done.**

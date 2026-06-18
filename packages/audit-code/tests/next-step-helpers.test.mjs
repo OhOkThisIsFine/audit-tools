@@ -330,7 +330,7 @@ await test("checkFinalizationCycle returns undefined when distinct state count i
     const obligationTrail = [];
     const seenStateSignatures = new Set();
     const tolerance = 4;
-    const params = { artifactsDir, maxRuns: 100, root: artifactsDir };
+    const params = { artifactsDir, root: artifactsDir };
 
     // Add 3 distinct signatures — well within tolerance of 4
     for (let i = 0; i < 3; i++) {
@@ -371,7 +371,7 @@ await test("checkFinalizationCycle triggers terminal step after TOLERANCE repeat
     );
 
     const tolerance = 4;
-    const params = { artifactsDir, maxRuns: 100, root: artifactsDir };
+    const params = { artifactsDir, root: artifactsDir };
 
     // Simulate 10 iterations that have only produced 2 distinct states
     const obligationTrail = Array(10).fill("synthesis_current");

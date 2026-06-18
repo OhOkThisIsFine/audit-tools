@@ -1,55 +1,76 @@
-export const RUNTIME_VALIDATION_KINDS = [
+import { z } from "zod";
+
+export const RuntimeValidationKindSchema = z.enum([
   "unit-risk-check",
   "critical-flow-check",
-] as const;
-export type RuntimeValidationKind =
-  (typeof RUNTIME_VALIDATION_KINDS)[number];
+]);
+export const RUNTIME_VALIDATION_KINDS = RuntimeValidationKindSchema.options;
+export type RuntimeValidationKind = z.infer<typeof RuntimeValidationKindSchema>;
 
-export const RUNTIME_VALIDATION_PRIORITIES = [
-  "high",
-  "medium",
-  "low",
-] as const;
-export type RuntimeValidationPriority =
-  (typeof RUNTIME_VALIDATION_PRIORITIES)[number];
+export const RuntimeValidationPrioritySchema = z.enum(["high", "medium", "low"]);
+export const RUNTIME_VALIDATION_PRIORITIES =
+  RuntimeValidationPrioritySchema.options;
+export type RuntimeValidationPriority = z.infer<
+  typeof RuntimeValidationPrioritySchema
+>;
 
-export const RUNTIME_VALIDATION_STATUSES = [
+export const RuntimeValidationStatusSchema = z.enum([
   "pending",
   "confirmed",
   "not_confirmed",
   "inconclusive",
   "not_required",
-] as const;
-export type RuntimeValidationStatus =
-  (typeof RUNTIME_VALIDATION_STATUSES)[number];
+]);
+export const RUNTIME_VALIDATION_STATUSES = RuntimeValidationStatusSchema.options;
+export type RuntimeValidationStatus = z.infer<
+  typeof RuntimeValidationStatusSchema
+>;
 
 /** A deterministic runtime check queued after static review highlights risk. */
-export interface RuntimeValidationTask {
-  id: string;
-  kind: RuntimeValidationKind;
-  target_paths: string[];
-  reason: string;
-  priority: RuntimeValidationPriority;
-  command?: string[];
-  suggested_checks?: string[];
-  source_artifacts?: string[];
-}
+export const RuntimeValidationTaskSchema = z
+  .object({
+    id: z.string(),
+    kind: RuntimeValidationKindSchema,
+    target_paths: z.array(z.string()).min(1),
+    reason: z.string(),
+    priority: RuntimeValidationPrioritySchema,
+    command: z.array(z.string()).optional(),
+    suggested_checks: z.array(z.string()).optional(),
+    source_artifacts: z.array(z.string()).optional(),
+  })
+  .strict();
+export type RuntimeValidationTask = z.infer<typeof RuntimeValidationTaskSchema>;
 
 /** Planner output for the runtime validation stage. */
-export interface RuntimeValidationTaskManifest {
-  tasks: RuntimeValidationTask[];
-}
+export const RuntimeValidationTaskManifestSchema = z
+  .object({
+    tasks: z.array(RuntimeValidationTaskSchema),
+  })
+  .strict();
+export type RuntimeValidationTaskManifest = z.infer<
+  typeof RuntimeValidationTaskManifestSchema
+>;
 
 /** Result recorded after a runtime validation task runs or is intentionally skipped. */
-export interface RuntimeValidationResult {
-  task_id: string;
-  status: RuntimeValidationStatus;
-  summary: string;
-  evidence?: string[];
-  notes?: string[];
-}
+export const RuntimeValidationResultSchema = z
+  .object({
+    task_id: z.string(),
+    status: RuntimeValidationStatusSchema,
+    summary: z.string(),
+    evidence: z.array(z.string()).optional(),
+    notes: z.array(z.string()).optional(),
+  })
+  .strict();
+export type RuntimeValidationResult = z.infer<
+  typeof RuntimeValidationResultSchema
+>;
 
 /** Persisted runtime validation outcomes keyed by generated task id. */
-export interface RuntimeValidationReport {
-  results: RuntimeValidationResult[];
-}
+export const RuntimeValidationReportSchema = z
+  .object({
+    results: z.array(RuntimeValidationResultSchema),
+  })
+  .strict();
+export type RuntimeValidationReport = z.infer<
+  typeof RuntimeValidationReportSchema
+>;

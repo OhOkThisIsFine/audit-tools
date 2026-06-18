@@ -21,6 +21,7 @@ import {
   prepareConceptualDispatch,
   resolveConceptualReviewSettings,
 } from "./conceptualDispatch.js";
+import { buildDesignReReviewSection } from "../orchestrator/designReviewSnapshot.js";
 import { computeScopePreDigest } from "../orchestrator/intentCheckpointExecutor.js";
 import { unresolvedConstraintClauses } from "../orchestrator/intentInterpreter.js";
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
@@ -50,7 +51,6 @@ import {
   getHostModelId,
   getHostModelRoster,
   getHostOutputTokens,
-  getMaxRuns,
   getOptionalBooleanFlag,
   getRootDir,
   getTimeoutMs,
@@ -139,7 +139,6 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     artifactsDir,
     selfCliPath: resolve(argv[1] ?? process.argv[1] ?? ""),
     timeoutMs: getTimeoutMs(argv, sessionConfig),
-    maxRuns: getMaxRuns(argv),
     narrativeEnabled: sessionConfig.synthesis?.narrative !== false,
     analyzers: sessionConfig.analyzers,
     graphLlmEdgeReasoning: sessionConfig.graph?.llm_edge_reasoning,
@@ -238,11 +237,22 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       result.bundle,
       sessionConfig,
     );
+    const contractReReview = await buildDesignReReviewSection(
+      artifactsDir,
+      result.bundle,
+      "contract",
+    );
+    const conceptualReReview = await buildDesignReReviewSection(
+      artifactsDir,
+      result.bundle,
+      "conceptual",
+    );
     const conceptual = await prepareConceptualDispatch({
       artifactsDir,
       bundle: result.bundle,
       settings: conceptualSettings,
       hostCanSelectSubagentModel,
+      reReviewSection: conceptualReReview,
     });
 
     const contractPromptText = [
@@ -257,6 +267,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "",
       `Then run: ${continueCommand}`,
       "",
+      ...(contractReReview ? ["", contractReReview] : []),
     ].join("\n");
 
     const contractPromptPath = join(artifactsDir, "incoming", "design-review-contract-prompt.md");
@@ -305,6 +316,11 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir);
     const contractResultsPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
+    const contractReReview = await buildDesignReReviewSection(
+      artifactsDir,
+      result.bundle,
+      "contract",
+    );
     const prompt = [
       renderContractReviewPrompt(result.bundle, { max_units: sessionConfig.design_review?.max_units }),
       "## Results path",
@@ -315,6 +331,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "",
       `Then run: ${continueCommand}`,
       "",
+      ...(contractReReview ? ["", contractReReview] : []),
     ].join("\n");
     const step = await writeCurrentStep({
       artifactsDir,
@@ -344,11 +361,17 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       result.bundle,
       sessionConfig,
     );
+    const conceptualReReview = await buildDesignReReviewSection(
+      artifactsDir,
+      result.bundle,
+      "conceptual",
+    );
     const conceptual = await prepareConceptualDispatch({
       artifactsDir,
       bundle: result.bundle,
       settings: conceptualSettings,
       hostCanSelectSubagentModel,
+      reReviewSection: conceptualReReview,
     });
 
     const prompt = [
