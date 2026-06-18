@@ -1,14 +1,15 @@
-import type {
-  ResolvedLimits as _ResolvedLimits,
-  LimitConfidence as _LimitConfidence,
-  LimitSource as _LimitSource,
-  HostConcurrencyLimit as _HostConcurrencyLimit,
-  QuotaUsageSnapshot as _QuotaUsageSnapshot,
-  BackoffState as _BackoffState,
-  WaveBindingCap as _WaveBindingCap,
-  DispatchCapacityPoolSummary as _DispatchCapacityPoolSummary,
-  DispatchModelTier as _DispatchModelTier,
-  HostModelRosterEntry as _HostModelRosterEntry,
+import { z } from "zod";
+import {
+  ResolvedLimitsSchema,
+  LimitConfidenceSchema,
+  LimitSourceSchema,
+  HostConcurrencyLimitSchema,
+  QuotaUsageSnapshotSchema,
+  BackoffStateSchema,
+  WaveBindingCapSchema,
+  DispatchCapacityPoolSummarySchema,
+  DispatchModelTierSchema,
+  HostModelRosterEntrySchema,
 } from "@audit-tools/shared";
 
 // Re-exported from @audit-tools/shared
@@ -106,22 +107,28 @@ export { GenericHeaderExtractor, ClaudeCodeHeaderExtractor, getHeaderExtractorFo
 export const DISPATCH_QUOTA_V1ALPHA1 = "audit-code-dispatch-quota/v1alpha1" as const;
 export const DISPATCH_QUOTA_V1ALPHA2 = "audit-code-dispatch-quota/v1alpha2" as const;
 
-export interface DispatchQuota {
-  contract_version: typeof DISPATCH_QUOTA_V1ALPHA1 | typeof DISPATCH_QUOTA_V1ALPHA2;
-  run_id: string;
-  model: string | null;
-  resolved_limits: _ResolvedLimits;
-  confidence: _LimitConfidence;
-  source: _LimitSource;
-  host_concurrency_limit: _HostConcurrencyLimit | null;
-  max_concurrent_agents: number;
-  cooldown_until: string | null;
-  binding_cap?: _WaveBindingCap;
-  capacity_pools?: _DispatchCapacityPoolSummary[];
-  /** Echo of the host-reported model roster (lowest rank first), when given. */
-  host_model_roster?: _HostModelRosterEntry[];
-  /** Per-tier packet input budgets (context − output) derived from the roster. */
-  tier_budgets?: Record<_DispatchModelTier, number>;
-  quota_source_snapshot?: _QuotaUsageSnapshot | null;
-  backoff_state?: _BackoffState | null;
-}
+export const DispatchQuotaSchema = z
+  .object({
+    contract_version: z.enum([
+      DISPATCH_QUOTA_V1ALPHA1,
+      DISPATCH_QUOTA_V1ALPHA2,
+    ]),
+    run_id: z.string(),
+    model: z.string().nullable(),
+    resolved_limits: ResolvedLimitsSchema,
+    confidence: LimitConfidenceSchema,
+    source: LimitSourceSchema,
+    host_concurrency_limit: HostConcurrencyLimitSchema.nullable(),
+    max_concurrent_agents: z.number().int().min(1),
+    cooldown_until: z.string().nullable(),
+    binding_cap: WaveBindingCapSchema.optional(),
+    capacity_pools: z.array(DispatchCapacityPoolSummarySchema).optional(),
+    /** Echo of the host-reported model roster (lowest rank first), when given. */
+    host_model_roster: z.array(HostModelRosterEntrySchema).optional(),
+    /** Per-tier packet input budgets (context − output) derived from the roster. */
+    tier_budgets: z.record(DispatchModelTierSchema, z.number()).optional(),
+    quota_source_snapshot: QuotaUsageSnapshotSchema.nullable().optional(),
+    backoff_state: BackoffStateSchema.nullable().optional(),
+  })
+  .strict();
+export type DispatchQuota = z.infer<typeof DispatchQuotaSchema>;
