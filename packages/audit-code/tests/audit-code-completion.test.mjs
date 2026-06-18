@@ -339,14 +339,17 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
     const reportExists = async () =>
       access(reportPath).then(() => true).catch(() => false);
 
-    // Starve each next-step call to a single internal run so it repeatedly lands
-    // on the run-limit backstop while finalization is still in flight. The
-    // invariant: once the report is rendered, the backstop must present it
-    // (present_report) — it must never surface a completed audit as `blocked`.
+    // Drive next-step repeatedly while finalization is still in flight. The
+    // invariant: once the report is rendered, the terminal must present it
+    // (present_report) — it must never surface a completed audit as `blocked`,
+    // whether the fold reaches completion in one call or stops at the cycle
+    // terminal. (The fold now runs to completion per call via the shared
+    // `advance` engine; the loop tolerates either a direct present_report or an
+    // interim blocked step with no report yet.)
     let presented = null;
     for (let i = 0; i < 15 && !presented; i++) {
       const step = JSON.parse(
-        (await runWrapper(["next-step", "--max-runs", "1"], { cwd: root })).stdout,
+        (await runWrapper(["next-step"], { cwd: root })).stdout,
       );
       if (step.step_kind === "present_report") {
         presented = step;
