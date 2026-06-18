@@ -4,7 +4,13 @@ export type {
   FileDispositionItem,
   FileDisposition,
 } from "./types/disposition.js";
+export {
+  FileDispositionStatusSchema,
+  FileDispositionItemSchema,
+  FileDispositionSchema,
+} from "./types/disposition.js";
 export type { RiskItem, RiskRegister } from "./types/risk.js";
+export { RiskItemSchema, RiskRegisterSchema } from "./types/risk.js";
 export type {
   FlowConfidenceLevel,
   CriticalFlow,
@@ -16,7 +22,12 @@ export type {
   SurfaceRecord,
   SurfaceManifest,
 } from "./types/surfaces.js";
-export { SURFACE_KINDS } from "./types/surfaces.js";
+export {
+  SURFACE_KINDS,
+  SurfaceKindSchema,
+  SurfaceRecordSchema,
+  SurfaceManifestSchema,
+} from "./types/surfaces.js";
 export type {
   RunLedgerStatus,
   RunLedgerEntry,
@@ -27,6 +38,11 @@ export type {
   GraphEdge,
   RouteEdge,
   GraphBundle,
+} from "./types/graph.js";
+export {
+  GraphEdgeSchema,
+  RouteEdgeSchema,
+  GraphBundleSchema,
 } from "./types/graph.js";
 export type { AccessDeclaration } from "./types/accessDeclaration.js";
 export type {
