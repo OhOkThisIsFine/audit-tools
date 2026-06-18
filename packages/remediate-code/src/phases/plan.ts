@@ -1196,7 +1196,7 @@ async function extractFindingsWithProvider(
       buildPrompt: ({ taskPath, resultPath }) =>
         `
 You are the Remediation Assistant. Your task is to extract findings and work blocks from the provided document.
-Produce a JSON output matching the remediation_plan.schema.json structure (specifically the findings and blocks arrays).
+Produce a JSON output matching the remediation plan structure (specifically the findings and blocks arrays).
 
 Grounding requirements (a deterministic validator checks every path you cite):
 - Each \`affected_files[].path\` must be a repo-relative path that exists on disk. Verify before citing; never guess paths from prose.

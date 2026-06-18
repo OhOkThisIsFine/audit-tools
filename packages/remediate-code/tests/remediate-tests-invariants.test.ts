@@ -5,7 +5,7 @@
  * INV-remediate-tests-03: duplicated scaffold helpers extracted to a shared module (structural check)
  * INV-remediate-tests-04: no either-or set-membership assertions where a single deterministic outcome is expected
  * INV-remediate-tests-05: quota-scheduler.test.ts covers dispatch.ts scheduleWave (not only shared scheduleWave)
- * INV-remediate-tests-06: schema-contracts EXPECTED_SCHEMAS covers all on-disk schemas bidirectionally
+ * INV-remediate-tests-06: retired (A6 — contracts single-sourced as zod; no JSON schema files)
  * INV-remediate-tests-07: validation.test.ts covers all contract-pipeline validators
  * INV-remediate-tests-08: ESM-correct __dirname derivation (fileURLToPath(import.meta.url))
  * INV-remediate-tests-09: no vacuous/placeholder tests (expect(true).toBe(true))
@@ -319,25 +319,10 @@ describe("INV-remediate-tests-05: quota-scheduler.test.ts covers dispatch.ts sch
   });
 });
 
-// ── INV-remediate-tests-06 ─────────────────────────────────────────────────
-
-describe("INV-remediate-tests-06: schema-contracts EXPECTED_SCHEMAS has bidirectional disk coverage", () => {
-  it("schema-contracts.test.ts declares EXPECTED_SCHEMAS array", () => {
-    const src = readTestFile("schema-contracts.test.ts");
-    expect(src).toMatch(/const EXPECTED_SCHEMAS\s*=/);
-  });
-
-  it("schema-contracts.test.ts includes the bidirectional reverse-check test", () => {
-    const src = readTestFile("schema-contracts.test.ts");
-    // The reverse check test must exist
-    expect(src).toMatch(/no schema files exist on disk that are missing from EXPECTED_SCHEMAS/);
-  });
-
-  it("schema-contracts.test.ts verifies worker_result schema", () => {
-    const src = readTestFile("schema-contracts.test.ts");
-    expect(src).toContain("worker_result.schema.json");
-  });
-});
+// INV-remediate-tests-06 retired (A6): the schema-contracts.test.ts structural
+// drift-guard it policed is gone — every contract is single-sourced as a zod
+// schema now, so there are no hand-authored JSON schema files to bidirectionally
+// cover.
 
 // ── INV-remediate-tests-07 ─────────────────────────────────────────────────
 
