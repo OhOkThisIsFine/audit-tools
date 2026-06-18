@@ -29,7 +29,6 @@
     "dist/**",
     "remediate-code.mjs",
     "opencode.json",
-    "schemas/**",
     "skills/remediate-code/**",
     "templates/**",
     "scripts/postinstall.mjs",

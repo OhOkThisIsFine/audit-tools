@@ -357,9 +357,9 @@ function summarizeSpec(spec: ItemSpec): ItemSpecSummary {
 }
 
 /**
- * Top-level keys declared in remediation_outcomes.schema.json. The schema is
- * additionalProperties:false, so the on-disk file must not carry any key absent
- * from this set (DAT-99284fb4). Kept in lockstep with the schema.
+ * Top-level keys the remediation-outcomes contract admits. This set is the
+ * single source for the closed-shape invariant: the on-disk file must not carry
+ * any key absent from it (DAT-99284fb4).
  */
 const DECLARED_OUTCOMES_TOP_LEVEL_KEYS = new Set([
   "contract_version",
@@ -386,7 +386,7 @@ describe("remediation-outcomes round-trip (OBL-018)", () => {
     );
     expect(
       undeclared,
-      `remediation-outcomes.json carries top-level keys not declared in remediation_outcomes.schema.json (additionalProperties:false): ${undeclared.join(", ")}`,
+      `remediation-outcomes.json carries top-level keys absent from the declared outcomes contract: ${undeclared.join(", ")}`,
     ).toEqual([]);
   });
 

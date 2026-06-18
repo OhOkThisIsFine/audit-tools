@@ -18,7 +18,7 @@ interface TriageResolution {
 /**
  * Host-facing batch written to `triage_batch.json` — a projection over the
  * blocked items asking the host to write a {@link TriageResolution}. Local to
- * this phase (its only producer); the wire contract is `triage_batch.schema.json`.
+ * this phase (its only producer); the wire contract is the `TriageBatch` type below.
  */
 interface TriageBatch {
   items: {

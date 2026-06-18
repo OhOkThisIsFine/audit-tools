@@ -1355,7 +1355,7 @@ function groundingVerificationBullet(finding: Finding): string {
 /**
  * Opt-in meta-audit reflection invitation (parity with audit-code's worker
  * prompt). Rendered after the file-access section because it carves out one
- * extra append-only path. Schema: schemas/agent_reflection.schema.json;
+ * extra append-only path. Shape: the shared `AgentReflectionSchema`;
  * the close phase aggregates the file into the report's "Process Feedback"
  * section. Best-effort by design — it must never compete with the obligation.
  */
