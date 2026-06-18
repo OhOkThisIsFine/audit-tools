@@ -1,4 +1,6 @@
+import { z } from "zod";
 import type { ClosingAction } from "./closingActions.js";
+import { CLOSING_ACTIONS } from "./closingActions.js";
 import type { RemediationItemStatus } from "./itemStatus.js";
 
 // `Finding` is the canonical machine contract owned by @audit-tools/shared.
@@ -6,41 +8,50 @@ import type { RemediationItemStatus } from "./itemStatus.js";
 // uses the shared shape verbatim rather than a divergent local copy. Imported
 // (so it is in scope for the types below) and re-exported for existing callers.
 import type { Finding, FindingTheme, RemediationOutcome } from "@audit-tools/shared";
+import { FindingSchema, FindingThemeSchema } from "@audit-tools/shared";
 export type { Finding };
 
-export interface RemediationBlock {
-  block_id: string;
-  items: string[];
-  parallel_safe: boolean;
-  dependencies?: string[];
-  /**
-   * Commands to run as a post-merge verification gate after this block's
-   * worktree branch is merged into the main tree. When present, these are
-   * preferred over `RemediationPlan.test_command` for the gate check.
-   */
-  targeted_commands?: string[];
-  /**
-   * Repo-relative paths that this block's implementation is expected to touch.
-   * Used by `attributePostMergeFailure` to identify which merged blocks share
-   * an implicated surface when the post-merge gate fails.
-   */
-  touched_files?: string[];
-}
+export const RemediationBlockSchema = z
+  .object({
+    block_id: z.string(),
+    items: z.array(z.string()),
+    parallel_safe: z.boolean(),
+    dependencies: z.array(z.string()).optional(),
+    /**
+     * Commands to run as a post-merge verification gate after this block's
+     * worktree branch is merged into the main tree. When present, these are
+     * preferred over `RemediationPlan.test_command` for the gate check.
+     */
+    targeted_commands: z.array(z.string()).optional(),
+    /**
+     * Repo-relative paths that this block's implementation is expected to touch.
+     * Used by `attributePostMergeFailure` to identify which merged blocks share
+     * an implicated surface when the post-merge gate fails.
+     */
+    touched_files: z.array(z.string()).optional(),
+  })
+  .strict();
+export type RemediationBlock = z.infer<typeof RemediationBlockSchema>;
 
-export interface RemediationPlan {
-  plan_id: string;
-  goal_id?: string;
-  source?: string;
-  findings: Finding[];
-  blocks: RemediationBlock[];
-  project_type: string;
-  test_command?: string;
-  e2e_command?: string;
-  candidate_closing_actions: ClosingAction[];
-  block_strategy?: "test_graph" | "git_cocommit" | "file_overlap" | "manual";
-  /** Synthesis themes carried from audit-findings.json (Phase 6/7 fix hints). */
-  themes?: FindingTheme[];
-}
+export const RemediationPlanSchema = z
+  .object({
+    plan_id: z.string(),
+    goal_id: z.string().optional(),
+    source: z.string().optional(),
+    findings: z.array(FindingSchema),
+    blocks: z.array(RemediationBlockSchema),
+    project_type: z.string(),
+    test_command: z.string().optional(),
+    e2e_command: z.string().optional(),
+    candidate_closing_actions: z.array(z.enum(CLOSING_ACTIONS)),
+    block_strategy: z
+      .enum(["test_graph", "git_cocommit", "file_overlap", "manual"])
+      .optional(),
+    /** Synthesis themes carried from audit-findings.json (Phase 6/7 fix hints). */
+    themes: z.array(FindingThemeSchema).optional(),
+  })
+  .strict();
+export type RemediationPlan = z.infer<typeof RemediationPlanSchema>;
 
 /**
  * Canonical names of the bounded remediation steps. Defined as named constants
@@ -58,64 +69,85 @@ export const REMEDIATION_STEP = {
 export type RemediationStepName =
   (typeof REMEDIATION_STEP)[keyof typeof REMEDIATION_STEP];
 
-export interface ItemSpec {
-  finding_id: string;
-  concrete_change: string;
-  no_change?: boolean;
-  /**
-   * Repo-relative paths the fix will create or modify, as declared by the
-   * document worker. The document phase can correct or extend the finding's
-   * pre-document affected_files (e.g. when the real fix lives elsewhere); block
-   * access is recomputed from this union so the implementer may write them.
-   */
-  touched_files?: string[];
-  tests_to_write: {
-    name: string;
-    assertions: string[];
-  }[];
-  not_applicable_steps: {
-    step: RemediationStepName;
-    rationale: string;
-  }[];
-}
+export const ItemSpecSchema = z
+  .object({
+    finding_id: z.string(),
+    concrete_change: z.string(),
+    no_change: z.boolean().optional(),
+    /**
+     * Repo-relative paths the fix will create or modify, as declared by the
+     * document worker. The document phase can correct or extend the finding's
+     * pre-document affected_files (e.g. when the real fix lives elsewhere); block
+     * access is recomputed from this union so the implementer may write them.
+     */
+    touched_files: z.array(z.string()).optional(),
+    tests_to_write: z.array(
+      z.object({ name: z.string(), assertions: z.array(z.string()) }).strict(),
+    ),
+    not_applicable_steps: z.array(
+      z
+        .object({
+          step: z.enum([
+            REMEDIATION_STEP.WRITE_TESTS,
+            REMEDIATION_STEP.REFACTOR_CODE,
+            REMEDIATION_STEP.VERIFY_AGAINST_TESTS,
+            REMEDIATION_STEP.VERIFY_AGAINST_DOCUMENTATION,
+          ]),
+          rationale: z.string(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type ItemSpec = z.infer<typeof ItemSpecSchema>;
 
-export interface ClarificationRequest {
-  finding_id: string;
-  category:
-    | "public_contract"
-    | "behavioral_semantics"
-    | "scope_of_fix"
-    | "dependency_introduction"
-    | "compatibility_policy"
-    | "intent_vs_symptom"
-    | "issue_appropriateness";
-  description: string;
-  options?: string[];
-}
+export const ClarificationRequestSchema = z
+  .object({
+    finding_id: z.string(),
+    category: z.enum([
+      "public_contract",
+      "behavioral_semantics",
+      "scope_of_fix",
+      "dependency_introduction",
+      "compatibility_policy",
+      "intent_vs_symptom",
+      "issue_appropriateness",
+    ]),
+    description: z.string(),
+    options: z.array(z.string()).optional(),
+  })
+  .strict();
+export type ClarificationRequest = z.infer<typeof ClarificationRequestSchema>;
 
-export interface ClosingActionPreview {
-  /** Repo-relative paths that would be staged for the commit. */
-  files: string[];
-  /** Generated commit message derived from item summaries / finding titles. */
-  commit_message: string;
-}
+export const ClosingActionPreviewSchema = z
+  .object({
+    /** Repo-relative paths that would be staged for the commit. */
+    files: z.array(z.string()),
+    /** Generated commit message derived from item summaries / finding titles. */
+    commit_message: z.string(),
+  })
+  .strict();
+export type ClosingActionPreview = z.infer<typeof ClosingActionPreviewSchema>;
 
-export interface ClosingPlan {
-  action: ClosingAction;
-  custom_command?: string[];
-  /**
-   * When true, the host has explicitly confirmed the closing action preview and
-   * the close phase may proceed to execute git/publish commands without an
-   * additional confirmation prompt.
-   */
-  pre_authorized?: boolean;
-  /**
-   * Set by the close phase before executing actions that require user
-   * confirmation. Contains the staged file list and generated commit message so
-   * the host can present them to the user. Cleared once the action executes.
-   */
-  closing_action_preview?: ClosingActionPreview;
-}
+export const ClosingPlanSchema = z
+  .object({
+    action: z.enum(CLOSING_ACTIONS),
+    custom_command: z.array(z.string()).optional(),
+    /**
+     * When true, the host has explicitly confirmed the closing action preview and
+     * the close phase may proceed to execute git/publish commands without an
+     * additional confirmation prompt.
+     */
+    pre_authorized: z.boolean().optional(),
+    /**
+     * Set by the close phase before executing actions that require user
+     * confirmation. Contains the staged file list and generated commit message so
+     * the host can present them to the user. Cleared once the action executes.
+     */
+    closing_action_preview: ClosingActionPreviewSchema.optional(),
+  })
+  .strict();
+export type ClosingPlan = z.infer<typeof ClosingPlanSchema>;
 
 export interface CoverageLedgerEntry {
   finding_id: string;
