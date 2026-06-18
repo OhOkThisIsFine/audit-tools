@@ -3,5 +3,17 @@
   "$id": "lens.schema.json",
   "title": "Lens",
   "type": "string",
-  "enum": ["correctness", "architecture", "maintainability", "security", "reliability", "performance", "data_integrity", "tests", "operability", "config_deployment", "observability"]
+  "enum": [
+    "correctness",
+    "architecture",
+    "maintainability",
+    "security",
+    "reliability",
+    "performance",
+    "data_integrity",
+    "tests",
+    "operability",
+    "config_deployment",
+    "observability"
+  ]
 }
