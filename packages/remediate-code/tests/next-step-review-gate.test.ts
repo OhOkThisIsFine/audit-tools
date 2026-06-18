@@ -265,7 +265,23 @@ describe("Path-A coverage is built over the original findings", () => {
     );
     await harness.writeIntentCheckpoint();
 
-    await decideNextStep({ root: REPO_DIR });
+    // This fresh run (no state.json at entry) folds intake → plan → implementing
+    // → implement dispatch in ONE call: with the checkpoint confirmed and the
+    // review decided, no pre-intake gate halts it. (`confirm_resume` is for a
+    // *pre-existing* in-progress run; here the entry state is null, so it derives
+    // satisfied and never fires — A3 slice 2b removed the handler recursion that
+    // used to re-run the pre-intake gates against the freshly-built implementing
+    // state and spuriously halt here.) The assertions below are about the
+    // plan_coverage written during plan build, which precedes dispatch; run with a
+    // non-dispatching host so the implement frontier renders the worktree-free
+    // sequential step rather than the rolling worktree path (REPO_DIR is not its
+    // own git repo).
+    const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false });
+    // Teeth for A3 slice 2b: the fold reaches the implement dispatch in ONE call.
+    // If a handler still recursed into decideNextStepLoop (re-running the pre-intake
+    // gates), `confirm_resume` would re-fire against the freshly-built implementing
+    // state (there is no resume-ack here) and halt with a confirm_resume step.
+    expect(step.step_kind).toBe("implement_rolling_sequential");
 
     const state = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"));
     const cov = state.plan_coverage;
