@@ -1,88 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditState } from "../types/auditState.js";
-import type { AuditResult } from "../types.js";
-import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import { decideNextStep, findObligation } from "./nextStep.js";
 import { deriveAuditState } from "./state.js";
 import { computeArtifactMetadata } from "./artifactMetadata.js";
-import { runIntakeExecutor, runProviderConfirmationAutoComplete } from "./intakeExecutors.js";
-import { runIntentCheckpointAutoComplete } from "./intentCheckpointExecutor.js";
-import {
-  runStructureExecutor,
-  runDesignAssessmentExecutor,
-  runDesignReviewAutoComplete,
-} from "./structureExecutors.js";
-import { runPlanningExecutor } from "./planningExecutors.js";
-import {
-  runResultIngestionExecutor,
-  runRuntimeValidationExecutor,
-  runRuntimeValidationUpdateExecutor,
-  runExternalAnalyzerImportExecutor,
-} from "./ingestionExecutors.js";
-import {
-  runSynthesisExecutor,
-  runSynthesisNarrativeExecutor,
-} from "./synthesisExecutors.js";
-import { runAutoFixExecutor } from "./autoFixExecutor.js";
-import { runSyntaxResolutionExecutor } from "./syntaxResolutionExecutor.js";
-import { runGraphEnrichmentExecutor } from "./graphEnrichmentExecutor.js";
-import { resolveAuditScope } from "./scope.js";
-import type { AuditScopeManifest } from "../types/auditScope.js";
+import { EXECUTOR_RUNNERS } from "./executorRunners.js";
+import type { ExecutorRunResult } from "./executorResult.js";
 import { AGENT_FEEDBACK_FILENAME, RunLogger } from "@audit-tools/shared";
-import type { AnalyzerSetting, SynthesisNarrative } from "@audit-tools/shared";
-import type { EdgeReasoningResults } from "./edgeReasoning.js";
+import type { AdvanceAuditOptions, AdvanceAuditResult } from "./advanceTypes.js";
 
-export interface AdvanceAuditOptions {
-  root?: string;
-  lineIndex?: Record<string, number>;
-  /** Path → size_bytes (from the repo manifest); drives byte-based packet token sizing. */
-  sizeIndex?: Record<string, number>;
-  auditResults?: AuditResult[];
-  runtimeValidationUpdates?: RuntimeValidationReport;
-  externalAnalyzerResults?: ExternalAnalyzerResults;
-  /** Host/provider-supplied synthesis narrative; merged by synthesis_narrative_executor. */
-  narrativeResults?: SynthesisNarrative;
-  /** Per-analyzer resolution policy for the optional graph-enrichment pass. */
-  analyzers?: Record<string, AnalyzerSetting>;
-  /** Phase 4B gate (session-config `graph.llm_edge_reasoning`); default off. */
-  graphLlmEdgeReasoning?: boolean;
-  /** Phase 4B host-supplied reason rewrites for low-confidence graph edges. */
-  edgeReasoningResults?: EdgeReasoningResults;
-  /**
-   * Git ref for Phase 3 delta mode (the `--since` flag). When set and resolvable
-   * against a git repo, planning scopes coverage to the changed files and their
-   * graph neighbours; otherwise the run is a full audit.
-   */
-  since?: string;
-  preferredExecutor?: string;
-  runLogger?: RunLogger;
-}
-
-export interface AdvanceAuditResult {
-  audit_state: AuditState;
-  selected_obligation: string | null;
-  selected_executor: string | null;
-  progress_made: boolean;
-  artifacts_written: string[];
-  progress_summary: string;
-  next_likely_step: string | null;
-  updated_bundle: ArtifactBundle;
-}
-
-/**
- * Narrow an optional root to a definite string for an executor that requires
- * it, throwing the canonical "advanceAudit <executor> requires root" error
- * otherwise. Replaces the guard previously copy-pasted across every
- * root-dependent executor branch below.
- */
-function requireRoot(root: string | undefined, executorName: string): string {
-  if (!root) {
-    throw new Error(`advanceAudit ${executorName} requires root`);
-  }
-  return root;
-}
+export type { AdvanceAuditOptions, AdvanceAuditResult } from "./advanceTypes.js";
 
 function cloneState(state: AuditState): AuditState {
   return {
@@ -151,8 +78,6 @@ export async function advanceAudit(
     };
   }
 
-  let run;
-  let plannedScope: AuditScopeManifest | undefined;
   const executorStartedAt = Date.now();
   log.event({
     phase: "advance",
@@ -161,152 +86,53 @@ export async function advanceAudit(
     obligation: selectedObligation ?? undefined,
     note: selectedExecutor,
   });
+
+  const runner = EXECUTOR_RUNNERS[selectedExecutor];
+  if (!runner) {
+    // No deterministic runner. The host-delegation dispatch executors (`agent`,
+    // `rolling_dispatch_executor`) are routed through host delegation before
+    // reaching advanceAudit; dispatched directly they return a no-progress
+    // "selected but not yet dispatched" handoff rather than throwing — the
+    // absence of a runner is the single source of truth for "not deterministically
+    // dispatchable" (replaces the old default-branch + registry⇄switch invariant).
+    log.event({
+      phase: "advance",
+      kind: "error",
+      correlationId,
+      obligation: selectedObligation ?? undefined,
+      note: `Unrecognized executor: ${selectedExecutor}`,
+    });
+    log.event({
+      phase: "advance",
+      kind: "executor_end",
+      correlationId,
+      obligation: selectedObligation ?? undefined,
+      note: selectedExecutor,
+      duration_ms: Date.now() - executorStartedAt,
+    });
+    const state = deriveAuditState(bundle);
+    state.last_executor = selectedExecutor;
+    state.last_obligation = selectedObligation ?? undefined;
+    return {
+      audit_state: state,
+      selected_obligation: selectedObligation,
+      selected_executor: selectedExecutor,
+      progress_made: false,
+      artifacts_written: ["audit_state.json"],
+      progress_summary: `Executor ${selectedExecutor} is selected but not yet dispatched through advance-audit.`,
+      next_likely_step: selectedObligation,
+      updated_bundle: { ...bundle, audit_state: state },
+    };
+  }
+
+  let run: ExecutorRunResult;
   try {
-    switch (selectedExecutor) {
-      case "provider_confirmation_executor": {
-        run = runProviderConfirmationAutoComplete(bundle);
-        break;
-      }
-      case "intake_executor": {
-        const root = requireRoot(options.root, "intake_executor");
-        run = await runIntakeExecutor(bundle, root);
-        break;
-      }
-      case "intent_checkpoint_executor": {
-        const root = requireRoot(options.root, "intent_checkpoint_executor");
-        run = runIntentCheckpointAutoComplete(bundle, root, options.since);
-        break;
-      }
-      case "structure_executor":
-        // root is intentionally optional: present → buildGraphBundleFromFs, absent → manifest-only buildGraphBundle
-        run = await runStructureExecutor(bundle, options.root);
-        break;
-      case "graph_enrichment_executor":
-        run = await runGraphEnrichmentExecutor(bundle, {
-          root: options.root,
-          analyzers: options.analyzers,
-          llmEdgeReasoning: options.graphLlmEdgeReasoning,
-          edgeReasoning: options.edgeReasoningResults,
-        });
-        break;
-      case "design_assessment_executor":
-        run = runDesignAssessmentExecutor(bundle);
-        break;
-      case "design_review_contract":
-        run = runDesignReviewAutoComplete(bundle, "contract");
-        break;
-      case "design_review_conceptual":
-        run = runDesignReviewAutoComplete(bundle, "conceptual");
-        break;
-      case "design_review":
-        // Legacy: auto-complete both passes.
-        run = runDesignReviewAutoComplete(bundle, "both");
-        break;
-      case "planning_executor": {
-        const root = requireRoot(options.root, "planning_executor");
-        plannedScope = resolveAuditScope({
-          root,
-          since: options.since,
-          bundle,
-        });
-        run = await runPlanningExecutor(
-          bundle,
-          root,
-          options.lineIndex ?? {},
-          options.sizeIndex,
-          plannedScope,
-        );
-        break;
-      }
-      case "result_ingestion_executor":
-        run = runResultIngestionExecutor(
-          bundle,
-          options.auditResults ?? bundle.audit_results ?? [],
-        );
-        break;
-      case "runtime_validation_executor": {
-        const root = requireRoot(options.root, "runtime_validation_executor");
-        run = await runRuntimeValidationExecutor(bundle, root);
-        break;
-      }
-      case "synthesis_executor":
-        run = runSynthesisExecutor(bundle, options.auditResults);
-        break;
-      case "synthesis_narrative_executor":
-        run = runSynthesisNarrativeExecutor(bundle, options.narrativeResults);
-        break;
-      case "runtime_validation_update_executor":
-        if (!options.runtimeValidationUpdates)
-          throw new Error(
-            "advanceAudit runtime_validation_update_executor requires runtimeValidationUpdates",
-          );
-        run = runRuntimeValidationUpdateExecutor(
-          bundle,
-          options.runtimeValidationUpdates,
-        );
-        break;
-      case "external_analyzer_import_executor":
-        if (!options.externalAnalyzerResults)
-          throw new Error(
-            "advanceAudit external_analyzer_import_executor requires externalAnalyzerResults",
-          );
-        run = runExternalAnalyzerImportExecutor(
-          bundle,
-          options.externalAnalyzerResults,
-        );
-        break;
-      case "auto_fix_executor": {
-        const root = requireRoot(options.root, "auto_fix_executor");
-        run = await runAutoFixExecutor(bundle, root);
-        break;
-      }
-      case "syntax_resolution_executor": {
-        const root = requireRoot(options.root, "syntax_resolution_executor");
-        run = runSyntaxResolutionExecutor(bundle, root);
-        break;
-      }
-      // `agent` and `rolling_dispatch_executor` are host-delegation executors:
-      // the review tasks are dispatched to sub-agents by the host and ingested
-      // via merge-and-ingest + next-step. advanceAudit cannot complete them
-      // deterministically. The next-step caller routes them
-      // through host delegation before reaching here; if dispatched into
-      // advanceAudit directly they fall through to the default branch, which
-      // returns a no-progress "selected but not yet dispatched" handoff rather
-      // than throwing. Explicit cases keep the registry⇄switch invariant
-      // (executor-registry-sync) honest.
-      case "agent":
-      case "rolling_dispatch_executor":
-      default: {
-        log.event({
-          phase: "advance",
-          kind: "error",
-          correlationId,
-          obligation: selectedObligation ?? undefined,
-          note: `Unrecognized executor: ${selectedExecutor}`,
-        });
-        log.event({
-          phase: "advance",
-          kind: "executor_end",
-          correlationId,
-          obligation: selectedObligation ?? undefined,
-          note: selectedExecutor,
-          duration_ms: Date.now() - executorStartedAt,
-        });
-        const state = deriveAuditState(bundle);
-        state.last_executor = selectedExecutor;
-        state.last_obligation = selectedObligation ?? undefined;
-        return {
-          audit_state: state,
-          selected_obligation: selectedObligation,
-          selected_executor: selectedExecutor,
-          progress_made: false,
-          artifacts_written: ["audit_state.json"],
-          progress_summary: `Executor ${selectedExecutor} is selected but not yet dispatched through advance-audit.`,
-          next_likely_step: selectedObligation,
-          updated_bundle: { ...bundle, audit_state: state },
-        };
-      }
-    }
+    run = await runner(bundle, {
+      options,
+      log,
+      correlationId,
+      obligation: selectedObligation,
+    });
   } catch (error) {
     log.event({
       phase: "advance",
@@ -326,18 +152,6 @@ export async function advanceAudit(
     note: selectedExecutor,
     duration_ms: Date.now() - executorStartedAt,
   });
-  if (plannedScope) {
-    log.event({
-      phase: "advance",
-      kind: "scope",
-      correlationId,
-      obligation: selectedObligation ?? undefined,
-      note:
-        plannedScope.mode === "delta"
-          ? `delta since ${plannedScope.since}: ${plannedScope.seed_files.length} changed + ${plannedScope.expanded_files.length} neighbors; full audit advised before release`
-          : "full audit scope",
-    });
-  }
   for (const artifact of run.artifacts_written) {
     log.event({
       phase: "advance",

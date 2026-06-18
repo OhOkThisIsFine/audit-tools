@@ -1,29 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 // Import from source via tsx loader so un-rebuilt changes are caught.
 import { EXECUTOR_REGISTRY, isHostDelegationExecutor } from "../src/orchestrator/executors.ts";
+import { EXECUTOR_RUNNERS } from "../src/orchestrator/executorRunners.ts";
 import { PRIORITY } from "../src/orchestrator/nextStep.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-const advancePath = join(here, "..", "src", "orchestrator", "advance.ts");
-
-/**
- * Extract the set of literal case strings from the switch(selectedExecutor)
- * block in advance.ts without importing or building the file.
- */
-async function extractSwitchCases() {
-  const src = await readFile(advancePath, "utf8");
-  const cases = new Set();
-  // Match case "...": lines inside the switch block.
-  for (const m of src.matchAll(/case\s+"([^"]+)"\s*:/g)) {
-    cases.add(m[1]);
-  }
-  return cases;
-}
 
 test("every PRIORITY obligation is covered by exactly one EXECUTOR_REGISTRY entry", () => {
   for (const obligationId of PRIORITY) {
@@ -91,20 +72,33 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
   );
 });
 
-test("every registry executor with a PRIORITY obligation has an explicit case in the advance.ts switch", async () => {
-  const switchCases = await extractSwitchCases();
+test("every registry executor with a PRIORITY obligation has a runner in EXECUTOR_RUNNERS (host-delegation dispatch executors excepted)", () => {
   const prioritySet = new Set(PRIORITY);
+  // agent + rolling_dispatch_executor are host-delegation *dispatch* points:
+  // routed through host delegation before advanceAudit, they intentionally have
+  // NO deterministic runner and produce a no-progress handoff (the "no runner"
+  // branch in advanceAudit) if dispatched directly. EXECUTOR_RUNNERS is now the
+  // single source of dispatch — this replaces the old "explicit case in the
+  // advance.ts switch" invariant (the switch is gone).
+  const HOST_DELEGATED_DISPATCH = new Set(["agent", "rolling_dispatch_executor"]);
 
   for (const entry of EXECUTOR_REGISTRY) {
-    // Only check executors that have at least one obligation_id listed in PRIORITY.
     const hasPriorityObligation = entry.obligation_ids.some((id) =>
       prioritySet.has(id),
     );
     if (!hasPriorityObligation) continue;
 
-    assert.ok(
-      switchCases.has(entry.id),
-      `EXECUTOR_REGISTRY entry "${entry.id}" has PRIORITY obligation(s) [${entry.obligation_ids.filter((id) => prioritySet.has(id)).join(", ")}] but has no explicit case in the advance.ts switch — it would silently fall through to the default branch`,
-    );
+    const hasRunner = Object.hasOwn(EXECUTOR_RUNNERS, entry.id);
+    if (HOST_DELEGATED_DISPATCH.has(entry.id)) {
+      assert.ok(
+        !hasRunner,
+        `host-delegation dispatch executor "${entry.id}" must NOT have a deterministic runner in EXECUTOR_RUNNERS`,
+      );
+    } else {
+      assert.ok(
+        hasRunner,
+        `EXECUTOR_REGISTRY entry "${entry.id}" has PRIORITY obligation(s) [${entry.obligation_ids.filter((id) => prioritySet.has(id)).join(", ")}] but no runner in EXECUTOR_RUNNERS — advanceAudit could not dispatch it`,
+      );
+    }
   }
 });
