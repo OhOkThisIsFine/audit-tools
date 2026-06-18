@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { AuditTask } from "../types.js";
 import type { GraphBundle, GraphEdge } from "@audit-tools/shared";
 
@@ -16,42 +17,53 @@ import type { GraphBundle, GraphEdge } from "@audit-tools/shared";
 // tasks).
 // ---------------------------------------------------------------------------
 
-export type TaskAffinityEdgeKind =
-  | "shared_file"
-  | "cross_lens_same_file"
-  | "same_flow"
-  | "same_unit"
-  | "call_adjacent"
-  | "same_dir";
+export const TaskAffinityEdgeKindSchema = z.enum([
+  "shared_file",
+  "cross_lens_same_file",
+  "same_flow",
+  "same_unit",
+  "call_adjacent",
+  "same_dir",
+]);
+export type TaskAffinityEdgeKind = z.infer<typeof TaskAffinityEdgeKindSchema>;
 
-export interface TaskAffinityNode {
-  task_id: string;
-  unit_id: string;
-  lens: string;
-  file_paths: string[];
-  /** Frozen byte-based content-token estimate (from the task). */
-  token_estimate: number;
-  /** Frozen audit-risk score in [0,1] (from the task). */
-  risk_estimate: number;
-}
+export const TaskAffinityNodeSchema = z
+  .object({
+    task_id: z.string(),
+    unit_id: z.string(),
+    lens: z.string(),
+    file_paths: z.array(z.string()),
+    /** Frozen byte-based content-token estimate (from the task). */
+    token_estimate: z.number(),
+    /** Frozen audit-risk score in [0,1] (from the task). */
+    risk_estimate: z.number(),
+  })
+  .strict();
+export type TaskAffinityNode = z.infer<typeof TaskAffinityNodeSchema>;
 
-export interface TaskAffinityEdge {
-  /** task_id of one endpoint (undirected; emitted once, from < to). */
-  from: string;
-  to: string;
-  /** Dominant relatedness kind (the one contributing the max weight). */
-  kind: TaskAffinityEdgeKind;
-  /** Affinity weight in [0,1]; higher = pack together first. */
-  weight: number;
-  /** All contributing kinds (+ "same_lens" bonus), for transparency. */
-  reason?: string;
-}
+export const TaskAffinityEdgeSchema = z
+  .object({
+    /** task_id of one endpoint (undirected; emitted once, from < to). */
+    from: z.string(),
+    to: z.string(),
+    /** Dominant relatedness kind (the one contributing the max weight). */
+    kind: TaskAffinityEdgeKindSchema,
+    /** Affinity weight in [0,1]; higher = pack together first. */
+    weight: z.number(),
+    /** All contributing kinds (+ "same_lens" bonus), for transparency. */
+    reason: z.string().optional(),
+  })
+  .strict();
+export type TaskAffinityEdge = z.infer<typeof TaskAffinityEdgeSchema>;
 
-export interface TaskAffinityGraph {
-  schema_version: "task-affinity-graph/v1";
-  nodes: TaskAffinityNode[];
-  edges: TaskAffinityEdge[];
-}
+export const TaskAffinityGraphSchema = z
+  .object({
+    schema_version: z.literal("task-affinity-graph/v1"),
+    nodes: z.array(TaskAffinityNodeSchema),
+    edges: z.array(TaskAffinityEdgeSchema),
+  })
+  .strict();
+export type TaskAffinityGraph = z.infer<typeof TaskAffinityGraphSchema>;
 
 /**
  * Restrict a task-affinity graph to a set of task ids, keeping only nodes whose
