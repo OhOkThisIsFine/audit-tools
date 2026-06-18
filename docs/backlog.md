@@ -96,10 +96,14 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   visited-state-signature cycle detection — the precise primitive `maxTransitions` approximated — subsuming
   audit's two hand guards; remediate untouched, return type a superset). **Slice 2a** `0886d06` (audit
   dispatch `switch` → `EXECUTOR_RUNNERS` map; absence of a runner = the no-progress handoff). Plus remediate
-  orphaned-helper sweep `33f568f` + parity-check doc `6bfae53`. **START-HERE = slice 2b** (rewire
-  `runDeterministicForNextStep` onto `advance`: deterministic→transition, host-delegation/dispatch→emit,
-  reusing the slice-2a runners; retire the bespoke guards), then slice 2c (reconcile + dead-`description`
-  decision). The redesign track. (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
+  orphaned-helper sweep `33f568f` + parity-check doc `6bfae53`. **Slice 2b+2c were ATTEMPTED, merged, then
+  REVERTED** (`0903a000`; work on branch `slice-2b-wip`): the audit-fold rewrite broke on **Linux CI only**
+  (green on Windows + passed review — only the release publish CI caught it). Root cause: the rewrite collapsed
+  the hand loop's TWO cycle guards into one 0-tolerance visited-set, which is too strict (the old guards skip
+  `no-metadata` states + tolerate 16 content-signature revisits). **START-HERE = slice 2b re-attempt** — restore
+  the old no-metadata-skip + tolerance semantics AND land a Linux-reproducing test FIRST (see `docs/HANDOFF.md`
+  ⚠️ block), then slice 2c (dead-`description` removal). The redesign track. (ARC-f5a5612b, ARC-f5a5612b-3,
+  ARC-b85edf3f.)
 - **A8 — Rolling dispatch: one shared core + two co-equal full-rolling drivers (REFRAMED 2026-06-16).**
   NO LONGER "flip a flag / delete the host fallback" — that reading was incoherent with conversation-first
   (in-conversation subagent dispatch is FIRST-CLASS; subscription/no-API users depend on it — memory

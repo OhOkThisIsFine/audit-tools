@@ -9,10 +9,12 @@
 
 ## Where things stand
 
-- **`main` (pushed + PUBLISHED): the go-forward program keeps accumulating.** Code tip =
-  **A3 step 4 slice 2a — fold the dispatch switch into an executor-runner map** `0886d06`; then **shipped
-  2026-06-18** (release-bump commits `dd0e296`/`06ed90e`/`8224c8e`). Green at every commit; suites green on
-  the committed tree (shared **726** / audit **2193** / remediate **1671**, +1 documented skip each).
+- **`main` (pushed + PUBLISHED): the go-forward program keeps accumulating.** Effective code tip =
+  **A3 step 4 slice 2a — fold the dispatch switch into an executor-runner map** `0886d06` (the tree of the
+  revert commit `0903a000` is byte-identical to it). **A full slice 2b+2c attempt landed then was REVERTED**
+  (`0903a000`) — it broke on Linux CI only; see the ⚠️ block in "Immediate next" and branch `slice-2b-wip`.
+  Earlier this was **shipped 2026-06-18** (release-bump commits `dd0e296`/`06ed90e`/`8224c8e`). Green at every
+  commit; suites green on the committed tree (shared **726** / audit **2193** / remediate **1671**, +1 skip each).
   **PUBLISHED 2026-06-18 — publish hold lifted for Ethan's cross-machine usage:** `@audit-tools/shared 0.22.1`
   / `auditor-lambda 0.27.1` / `remediator-lambda 0.27.1` — all three CI-green on npm (runs 27731143814 /
   27731177158 / 27731386835); global bins reinstalled + postinstall run + `--version` smoke green.
@@ -78,16 +80,37 @@ remediate untouched — return type is a superset); **slice 2a** `0886d06` (audi
 `agent`/`rolling_dispatch_executor`; `AdvanceAuditOptions/Result` → leaf `advanceTypes.ts` for the madge acyclic
 guard; switch⇄registry invariant test → runner-map coverage invariant).
 
-**START-HERE next session — A3 step 4 slice 2b (the big one, the audit fold rewire).** Replace
+> **⚠️ ATTEMPT 1 FAILED + WAS REVERTED (read before retrying).** A full slice 2b+2c landed on `main`, then was
+> reverted (`0903a000`) because it broke on **Linux CI only**. The work is preserved on branch
+> **`slice-2b-wip`** (`5df1c6e`…`87f5d76e`). main is back to the CI-green published-0.27.1 tree.
+> - **Symptom:** on a fresh Linux env the FIRST next-step folds straight to `blocked` instead of `confirm_intent`
+>   (`audit-code-completion` + `audit-code-wrapper`: "unexpected step kind 'blocked' (iteration 1)").
+> - **Root cause:** the rewrite collapsed the hand loop's **TWO** cycle guards into ONE 0-tolerance visited-set
+>   (`nextStepStateSignature` = `artifact-sig|obligation|executor`). The old guards were *looser*:
+>   `checkNoProgressBeforeDispatch` only stops on a recurring **real** signature and **explicitly skips
+>   `no-metadata`** states; `checkFinalizationCycle` tolerates **16** content-signature revisits before declaring
+>   a cycle. The 0-tolerance collapse false-trips on the fresh-Linux early chain.
+> - **The trap:** all 2191 local Windows tests passed AND a careful diff review passed — only the **release CI
+>   (Linux) caught it**. So the re-attempt's #1 job is a **regression test that reproduces the Linux failure
+>   locally** (env-dependent → likely the analyzer cache `~/.audit-tools/analyzer-cache` and/or CRLF/path
+>   content makes Windows artifact signatures artificially distinct where Linux's collide). Without that test,
+>   any fix is unverifiable from a Windows box except via slow CI round-trips.
+> - **The fix direction:** the audit cycle detection must FAITHFULLY preserve both old behaviours — (a) never
+>   cycle-stop on `no-metadata` bootstrap states, and (b) a tolerance (≈16) for content-signature revisits — OR
+>   keep the old two-guard structure and only swap the *loop* onto `advance`. Compare `nextStepStateSignature`
+>   on `slice-2b-wip` against `checkNoProgressBeforeDispatch`/`checkFinalizationCycle` at `abd4a111`.
+
+**START-HERE next session — A3 step 4 slice 2b (re-attempt; the audit fold rewire).** Replace
 `runDeterministicForNextStep`'s `for`-loop with shared `advance`: audit obligations become `ObligationDef`s
 (`derive` = lookup into `deriveAuditState`'s precomputed obligation states; `execute` = call the **slice-2a
-runner** → `transition` for deterministic, `emit` for host-delegation/dispatch/terminal). Pass `opts.stateSignature`
-(lift audit's existing signature from `checkFinalizationCycle`). Retire `checkNoProgressBeforeDispatch` +
-`checkFinalizationCycle` + `maxRuns`; `preferredExecutor`/integrity-check become a preamble (like remediate's
-`forceReplan`). The typed host-step branches (`handleGraphEnrichmentBranch` / `handleDesignReviewBranch` /
-`handleSynthesisNarrativeBranch` / `ensureSemanticReviewRun`) relocate into the obligations' `emit` payloads.
-Atomic replace: hand-loop → `advance`. The audit `node:test` suite (2193) is the equivalence oracle. Then
-**slice 2c** (reconcile + the dead-`description` decision below). After 2c, A3 is done → B2+B3.
+runner** → `transition` for deterministic, `emit` for host-delegation/dispatch/terminal). **Cycle detection is
+the landmine (see the ⚠️ above)** — preserve the old no-metadata-skip + tolerance-16 semantics and land a
+Linux-reproducing test FIRST. Retire `checkNoProgressBeforeDispatch` + `checkFinalizationCycle` + `maxRuns`;
+`preferredExecutor`/integrity-check become a preamble (like remediate's `forceReplan`). The typed host-step
+branches (`handleGraphEnrichmentBranch` / `handleDesignReviewBranch` / `handleSynthesisNarrativeBranch` /
+`ensureSemanticReviewRun`) relocate into the obligations' `emit` payloads. Atomic replace: hand-loop → `advance`.
+The audit `node:test` suite (2193) is the equivalence oracle. Then **slice 2c** (reconcile + the dead-`description`
+decision below). After 2c, A3 is done → B2+B3.
 
 **OPEN Q for Ethan (non-blocking):** the `description` field on `EXECUTOR_REGISTRY` is read nowhere (dead as
 *behaviour*) but is human-readable per-executor documentation. Keep as inline docs, or delete? Retained for now;
