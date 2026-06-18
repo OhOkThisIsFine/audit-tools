@@ -80,15 +80,17 @@ export const RepoManifestSchema = z.object({
 });
 export type RepoManifest = z.infer<typeof RepoManifestSchema>;
 
-export const AuditUnitSchema = z.object({
-  unit_id: z.string(),
-  name: z.string(),
-  kind: z.string().optional(),
-  files: z.array(z.string()),
-  risk_score: z.number().optional(),
-  required_lenses: z.array(z.string()),
-  critical_flows: z.array(z.string()).optional(),
-});
+export const AuditUnitSchema = z
+  .object({
+    unit_id: z.string(),
+    name: z.string(),
+    kind: z.string().optional(),
+    files: z.array(z.string()),
+    risk_score: z.number().min(0).max(10).optional(),
+    required_lenses: z.array(z.string()),
+    critical_flows: z.array(z.string()).optional(),
+  })
+  .strict();
 export type AuditUnit = z.infer<typeof AuditUnitSchema>;
 
 export const UnitManifestSchema = z.object({

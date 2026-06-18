@@ -8,20 +8,20 @@
 // grounded > refuted > ungrounded merge precedence and the schema drift fix.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { assertMatchesJsonSchema } from "./helpers/auditSchemaRegistry.mjs";
-
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..");
+import { AuditFindingsReportSchema } from "@audit-tools/shared";
 
 const { buildAuditReportModel, buildAuditFindingsReport, renderAuditReportMarkdown } =
   await import("../src/reporting/synthesis.ts");
 
-const auditFindingsSchema = JSON.parse(
-  await readFile(join(repoRoot, "schemas", "audit_findings.schema.json"), "utf8"),
-);
+function assertMatchesAuditFindings(value, label) {
+  const result = AuditFindingsReportSchema.safeParse(value);
+  assert.ok(
+    result.success,
+    `${label} should satisfy AuditFindingsReportSchema: ${
+      result.success ? "" : JSON.stringify(result.error.issues)
+    }`,
+  );
+}
 
 function resultWith(findings) {
   return [
@@ -58,7 +58,7 @@ function report(findings) {
 test("grounding_status_breakdown is omitted with no verdict and counted otherwise", () => {
   const plain = report([finding({ title: "Plain" })]);
   assert.equal(plain.summary.grounding_status_breakdown, undefined);
-  assertMatchesJsonSchema(auditFindingsSchema, plain, "plain");
+  assertMatchesAuditFindings(plain, "plain");
 
   const mixed = report([
     finding({ title: "Grounded one", category: "a", grounding: { status: "grounded" } }),
@@ -73,7 +73,7 @@ test("grounding_status_breakdown is omitted with no verdict and counted otherwis
   // Grounded findings flow through the report carrying their verdict + quote —
   // this assertion is the regression guard for the audit_findings.schema.json
   // drift (grounding / quoted_text were missing under additionalProperties:false).
-  assertMatchesJsonSchema(auditFindingsSchema, mixed, "mixed");
+  assertMatchesAuditFindings(mixed, "mixed");
 });
 
 test("grounded-wins: a grounded re-emission keeps the merged finding out of quarantine", () => {
@@ -119,7 +119,7 @@ test("B4: a refuted finding is excluded from findings + work_blocks and recorded
   assert.equal(rep.quarantined_findings[0].grounding.status, "refuted");
   assert.equal(rep.summary.finding_count, 1);
   assert.deepEqual(rep.summary.grounding_status_breakdown, { refuted: 1, grounded: 1 });
-  assertMatchesJsonSchema(auditFindingsSchema, rep, "refuted-quarantine");
+  assertMatchesAuditFindings(rep, "refuted-quarantine");
 });
 
 test("B4: grounded-wins over refuted across passes — a finding grounded on another pass is NOT quarantined", () => {

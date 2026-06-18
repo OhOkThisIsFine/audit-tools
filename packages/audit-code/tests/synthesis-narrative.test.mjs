@@ -3,7 +3,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertMatchesJsonSchema } from "./helpers/auditSchemaRegistry.mjs";
+import { AuditFindingsReportSchema } from "@audit-tools/shared";
+
+function assertMatchesJsonSchema(_schema, value, label) {
+  const result = AuditFindingsReportSchema.safeParse(value);
+  assert.ok(
+    result.success,
+    `${label} should satisfy AuditFindingsReportSchema: ${
+      result.success ? "" : JSON.stringify(result.error.issues)
+    }`,
+  );
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -20,9 +30,6 @@ const {
 } = await import("../src/orchestrator/synthesisExecutors.ts");
 const { advanceAudit } = await import("../src/orchestrator/advance.ts");
 
-const auditFindingsSchema = JSON.parse(
-  await readFile(join(repoRoot, "schemas", "audit_findings.schema.json"), "utf8"),
-);
 
 function syntheticResults() {
   return [
@@ -107,7 +114,7 @@ test("buildAuditFindingsReport wraps the model in the canonical contract", () =>
   assert.equal(report.top_risks, undefined);
   // Deterministic findings carry no theme tag yet.
   assert.ok(report.findings.every((f) => f.theme_id === undefined));
-  assertMatchesJsonSchema(auditFindingsSchema, report, "auditFindings");
+  assertMatchesJsonSchema(null, report, "auditFindings");
 });
 
 test("deterministic report renders without narrative sections", () => {
@@ -140,7 +147,7 @@ test("applyNarrative tags findings, drops unknown ids, and round-trips theme_id"
   assert.equal(byId[parseId].theme_id, "T-1");
 
   // The enriched canonical contract still validates.
-  assertMatchesJsonSchema(auditFindingsSchema, enriched, "auditFindingsEnriched");
+  assertMatchesJsonSchema(null, enriched, "auditFindingsEnriched");
 });
 
 test("narrative-enriched report renders themes, summary, top risks (JSON↔markdown parity)", () => {
@@ -170,7 +177,7 @@ test("runSynthesisExecutor emits canonical findings and renders the report", () 
   assert.equal(run.updated.audit_findings.themes, undefined);
   assert.match(run.updated.audit_report, /# Audit Report/);
   assert.doesNotMatch(run.updated.audit_report, /## Themes/);
-  assertMatchesJsonSchema(auditFindingsSchema, run.updated.audit_findings, "executorFindings");
+  assertMatchesJsonSchema(null, run.updated.audit_findings, "executorFindings");
 });
 
 test("runSynthesisNarrativeExecutor omits cleanly without a narrative", () => {
@@ -217,7 +224,7 @@ test("runSynthesisNarrativeExecutor applies a provider narrative", () => {
   assert.equal(run.updated.synthesis_narrative.top_risk_count, 2);
   assert.equal(run.updated.audit_findings.themes.length, 1);
   assert.match(run.updated.audit_report, /## Themes/);
-  assertMatchesJsonSchema(auditFindingsSchema, run.updated.audit_findings, "appliedFindings");
+  assertMatchesJsonSchema(null, run.updated.audit_findings, "appliedFindings");
 });
 
 test("advanceAudit forced synthesis_narrative_executor applies and records the narrative", async () => {

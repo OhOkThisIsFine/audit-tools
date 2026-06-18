@@ -103,51 +103,6 @@ test("INV-audit-tests-02: no test file uses a relative path into shared/dist/", 
   );
 });
 
-// ── INV-audit-tests-03: jsonSchemaAssert helper handles the `not` keyword ────
-// TST-3f7508d4: jsonSchemaAssert previously silently ignored the `not` keyword,
-// which meant schemas with `not` constraints would produce false-negative test
-// results (invalid values pass validation when they shouldn't). The fix adds
-// a `not` branch to validateCombinerKeywords. This test locks the invariant.
-
-const { assertMatchesJsonSchema } = await import("./helpers/jsonSchemaAssert.mjs");
-
-test("INV-audit-tests-03: assertMatchesJsonSchema enforces the not keyword (not: { type: 'integer' })", () => {
-  // A string value must PASS when the schema says NOT integer.
-  assert.doesNotThrow(
-    () => assertMatchesJsonSchema({ not: { type: "integer" } }, "hello", "val"),
-    "string value must satisfy not:integer constraint",
-  );
-  // An integer value must FAIL when the schema says NOT integer.
-  assert.throws(
-    () => assertMatchesJsonSchema({ not: { type: "integer" } }, 42, "val"),
-    /must NOT satisfy the 'not' schema/,
-    "integer value must be rejected by not:integer constraint",
-  );
-});
-
-test("INV-audit-tests-03: not keyword fires even when combined with other keywords", () => {
-  // { type: 'string', not: { minLength: 5 } } — string must be short
-  assert.throws(
-    () =>
-      assertMatchesJsonSchema(
-        { type: "string", not: { minLength: 5 } },
-        "hello world",
-        "val",
-      ),
-    /must NOT satisfy the 'not' schema/,
-    "long string must be rejected by not:minLength:5",
-  );
-  assert.doesNotThrow(
-    () =>
-      assertMatchesJsonSchema(
-        { type: "string", not: { minLength: 5 } },
-        "hi",
-        "val",
-      ),
-    "short string satisfies not:minLength:5 and must pass",
-  );
-});
-
 // ── INV-audit-tests-04: python-logical-lines test has no trivially-true assertions ──
 // TST-6ccb17f3: `assert.ok(edges.length >= 0)` is trivially true for any Array
 // (length is never negative) and provides no protection. The test must assert a
