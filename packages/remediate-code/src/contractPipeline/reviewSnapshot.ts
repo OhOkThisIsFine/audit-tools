@@ -22,7 +22,14 @@
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { readOptionalJsonFile, writeJsonFile } from "@audit-tools/shared";
+import {
+  diffProjections,
+  readOptionalJsonFile,
+  renderDiffReReviewSection,
+  writeJsonFile,
+} from "@audit-tools/shared";
+
+export { diffProjections };
 import {
   contractPipelineDir,
   DEPENDENCY_MAP,
@@ -119,74 +126,9 @@ export async function captureReviewSnapshot(
 }
 
 // ── Projection diffing ─────────────────────────────────────────────────────────
-
-/** Flatten a projection to leaf path → stable string value. */
-function flatten(value: unknown, prefix: string, out: Map<string, string>): void {
-  if (value === null || value === undefined) {
-    out.set(prefix || "(root)", "null");
-    return;
-  }
-  if (typeof value !== "object") {
-    out.set(prefix || "(root)", JSON.stringify(value));
-    return;
-  }
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      out.set(prefix || "(root)", "[]");
-      return;
-    }
-    value.forEach((item, i) => flatten(item, `${prefix}[${i}]`, out));
-    return;
-  }
-  const keys = Object.keys(value as Record<string, unknown>).sort();
-  if (keys.length === 0) {
-    out.set(prefix || "(root)", "{}");
-    return;
-  }
-  for (const key of keys) {
-    flatten(
-      (value as Record<string, unknown>)[key],
-      prefix ? `${prefix}.${key}` : key,
-      out,
-    );
-  }
-}
-
-const MAX_DIFF_LINES = 40;
-
-/** A truncated value for display (long strings get an ellipsis). */
-function short(value: string): string {
-  return value.length > 120 ? `${value.slice(0, 117)}...` : value;
-}
-
-/**
- * Render a leaf-level diff between two projections as `+`/`-`/`~` lines. Returns
- * an empty array when the projections are identical. Bounded to MAX_DIFF_LINES
- * with an explicit overflow note (never silently truncated).
- */
-export function diffProjections(prior: unknown, current: unknown): string[] {
-  const a = new Map<string, string>();
-  const b = new Map<string, string>();
-  flatten(prior, "", a);
-  flatten(current, "", b);
-
-  const allKeys = [...new Set([...a.keys(), ...b.keys()])].sort();
-  const lines: string[] = [];
-  for (const key of allKeys) {
-    const before = a.get(key);
-    const after = b.get(key);
-    if (before === after) continue;
-    if (before === undefined) lines.push(`+ ${key}: ${short(after!)}`);
-    else if (after === undefined) lines.push(`- ${key}: ${short(before)}`);
-    else lines.push(`~ ${key}: ${short(before)} → ${short(after)}`);
-  }
-  if (lines.length > MAX_DIFF_LINES) {
-    const shown = lines.slice(0, MAX_DIFF_LINES);
-    shown.push(`… and ${lines.length - MAX_DIFF_LINES} more changed field(s).`);
-    return shown;
-  }
-  return lines;
-}
+// The leaf-level diff algorithm is the shared `diffProjections`
+// (`@audit-tools/shared`) — single-sourced so audit-code and remediate-code
+// produce identical re-review deltas.
 
 export interface ReReviewDelta {
   /** Per-dependency diff lines, keyed by dependency name; empty for unchanged. */
@@ -223,44 +165,21 @@ export async function computeReReviewDelta(
  * Render the diff-based re-review section appended to a review phase's re-emit
  * prompt. Carries the prior verdict and the precise changed-since-last-review
  * delta, and instructs the worker to re-affirm the prior verdict when the delta
- * does not affect it, or revise only the affected items otherwise.
+ * does not affect it, or revise only the affected items otherwise. Delegates the
+ * prompt body to the shared `renderDiffReReviewSection` (single-sourced shape).
  */
 export function renderReReviewSection(
-  name: ContractPipelineArtifactName,
+  _name: ContractPipelineArtifactName,
   snapshot: ReviewSnapshot,
   delta: ReReviewDelta,
 ): string {
-  const priorJson = JSON.stringify(snapshot.prior_payload, null, 2);
-  const deltaBlock = delta.allUnchanged
-    ? "_No upstream semantic change was detected._ The inputs you reviewed are unchanged in substance; re-emit your prior verdict verbatim (only the provenance/timestamp differs)."
-    : delta.changedInputs
-        .map(
-          (entry) =>
-            `### Changed: \`${entry.dep}\`\n\n\`\`\`diff\n${entry.lines.join("\n")}\n\`\`\``,
-        )
-        .join("\n\n");
-
-  return `## Diff-Based Re-Review — only re-examine what changed
-
-This artifact was already reviewed; its upstreams then changed, so it must be
-re-emitted. **Do NOT re-run the full review.** Diff against your prior verdict
-and re-examine ONLY the changes below.
-
-### Your prior verdict (re-affirm it verbatim if the changes below do not affect it)
-
-\`\`\`json
-${priorJson}
-\`\`\`
-
-### Changed since your prior verdict
-
-${deltaBlock}
-
-### How to respond
-
-- If the changes above do **not** affect any item in your prior verdict, re-emit
-  the prior verdict unchanged (you may freshen ids/timestamps the schema requires).
-- If they **do**, revise ONLY the affected items and leave the rest as they were.
-- Do not invent new findings unrelated to the changes above.
-`;
+  return renderDiffReReviewSection({
+    priorPayload: snapshot.prior_payload,
+    changedInputs: delta.changedInputs.map((entry) => ({
+      label: entry.dep,
+      lines: entry.lines,
+    })),
+    allUnchanged: delta.allUnchanged,
+    subjectNoun: "artifact",
+  });
 }

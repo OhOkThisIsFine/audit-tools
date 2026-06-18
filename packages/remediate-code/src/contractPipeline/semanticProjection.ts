@@ -23,8 +23,10 @@
  * orchestrators stay in conceptual parity (semantic-projection staleness) while
  * each owns the projection table for its own artifact set.
  */
-import { isRecord } from "@audit-tools/shared";
+import { isRecord, stableStringifyProjection } from "@audit-tools/shared";
 import type { ContractPipelineArtifactName } from "./artifactStore.js";
+
+export { stableStringifyProjection };
 
 /**
  * Non-semantic top-level fields stripped from EVERY artifact before projecting.
@@ -108,22 +110,8 @@ export function semanticProjection(
 }
 
 /**
- * Order-independent stable serialization of a projection. Object keys are sorted
- * so two payloads that differ only in key order project to the same string (and
- * thus the same semantic hash); arrays preserve order (element order can be
- * load-bearing). `undefined` is encoded as `null` so a present-but-undefined
- * field and an absent field collapse — they carry the same meaning here.
+ * The order-independent stable serialization used to hash a projection is the
+ * shared `stableStringifyProjection` (re-exported above) — single-sourced in
+ * `@audit-tools/shared` so audit-code and remediate-code hash projections
+ * identically.
  */
-export function stableStringifyProjection(value: unknown): string {
-  if (value === undefined || value === null) return "null";
-  if (typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringifyProjection(item)).join(",")}]`;
-  }
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, item]) => item !== undefined)
-    .sort(([a], [b]) => a.localeCompare(b));
-  return `{${entries
-    .map(([key, item]) => `${JSON.stringify(key)}:${stableStringifyProjection(item)}`)
-    .join(",")}}`;
-}
