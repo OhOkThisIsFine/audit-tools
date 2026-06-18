@@ -380,10 +380,28 @@ export async function groundPassingFindings(
   );
 }
 
-export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
-  const runId = getFlag(argv, "--run-id");
-  if (!runId) throw new Error("merge-and-ingest requires --run-id <run_id>");
-  const artifactsDir = getArtifactsDir(argv);
+/** Outcome of an in-process merge-and-ingest, mirroring the CLI's stdout payload. */
+export interface MergeAndIngestResult {
+  /** The summary object the CLI prints as its sole stdout JSON payload. */
+  summary: Record<string, unknown>;
+  /** True when at least one dispatched task result was missing or invalid. */
+  has_failures: boolean;
+}
+
+/**
+ * Ingest a dispatched run's per-packet AuditResult files into the cumulative
+ * audit store. The callable core of `cmdMergeAndIngest` (the CLI is a thin argv →
+ * call → stdout/exit-code wrapper). The in-process audit rolling driver
+ * (A8(a) `driveRollingAuditDispatch`) calls this directly once it has driven every
+ * packet through the configured provider, the symmetric counterpart of remediate's
+ * callable `mergeImplementResults`. Resolves with the summary payload + a failure
+ * flag; never writes stdout or mutates `process.exitCode` itself.
+ */
+export async function mergeAndIngest(params: {
+  runId: string;
+  artifactsDir: string;
+}): Promise<MergeAndIngestResult> {
+  const { runId, artifactsDir } = params;
 
   const runDir = join(artifactsDir, "runs", runId);
   const taskResultsDir = join(runDir, "task-results");
@@ -395,8 +413,10 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
   // Phase 1: idempotency — replay a completed run or discard a stale marker.
   const priorSummary = await checkIdempotencyReplay(runId, mergeCompletePath, tasksPath, taskResultsDir);
   if (priorSummary) {
-    console.log(JSON.stringify({ ...priorSummary, idempotent_replay: true }, null, 2));
-    return;
+    return {
+      summary: { ...priorSummary, idempotent_replay: true },
+      has_failures: false,
+    };
   }
 
   const workerTask = await readJsonFile<WorkerTask>(taskPath);
@@ -609,9 +629,21 @@ export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
     await writeJsonFile(mergeCompletePath, summaryPayload);
   }
 
-  console.log(JSON.stringify(summaryPayload, null, 2));
+  return { summary: summaryPayload, has_failures: failing.length > 0 };
+}
 
-  if (failing.length > 0) {
+/**
+ * CLI wrapper for `merge-and-ingest`: parse argv, run the callable core, emit the
+ * summary as the sole stdout JSON payload, and set the exit code on failure.
+ */
+export async function cmdMergeAndIngest(argv: string[]): Promise<void> {
+  const runId = getFlag(argv, "--run-id");
+  if (!runId) throw new Error("merge-and-ingest requires --run-id <run_id>");
+  const artifactsDir = getArtifactsDir(argv);
+
+  const { summary, has_failures } = await mergeAndIngest({ runId, artifactsDir });
+  console.log(JSON.stringify(summary, null, 2));
+  if (has_failures) {
     process.exitCode = 2;
   }
 }
