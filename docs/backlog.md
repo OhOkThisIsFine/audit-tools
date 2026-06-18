@@ -219,8 +219,14 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   validated internal-state types (RemediationItemState, coverage ledgers, the outcome family) left as
   interfaces by design (inert to convert; decision Ethan 2026-06-18). `ajv` was never imported (no-op).
   (ARC-ad53dd0d-2.)
-- **A12 — Single-package collapse** (see *Single-package install/publish* below; Ethan reversed the
-  earlier same-day defer — now wanted).
+- **A12 — Single-package collapse — ✓ DONE (merged `main` `27c7a24e`, 2026-06-18).** The three packages
+  collapsed into ONE `audit-tools` package (shared inlined to `src/shared`; imports via `audit-tools/shared`
+  exports self-reference; plain `vX.Y.Z` tags; one ci/publish job; merged postinstall + opencode.json). Green
+  end-to-end (build+check, shared 724 / audit 2129 / remediate 1607, 4 smokes, Linux CI dry-run). Layout +
+  durable facts in memory `a12-single-package-collapse-done` + `docs/a12-single-package-collapse-plan.md`.
+  **Publish tail:** first OIDC publish of the new name `audit-tools` triggered (`v0.28.0`); needs npm trusted
+  publishing enabled for the package (Ethan). Then `npm deprecate auditor-lambda/remediator-lambda/
+  @audit-tools/shared` → redirect, and reinstall global bins. (Old *Single-package install/publish* section below is history.)
 - **A7 (REFRAMED) — Validate the host machinery EVERYWHERE, don't cut it.** The multi-host vision is
   alive: Ethan uses the package regularly in **Codex, OpenCode, and Antigravity**, not just Claude Code.
   The finding flips from "delete the unvalidated 7-host install ceremony" to "build real
