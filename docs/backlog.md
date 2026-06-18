@@ -79,18 +79,19 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   extracted status enum is the formalized hub; recon also corrected the plan's ambiguous "merge the two
   disposition unions" — `PerFindingDisposition` (terminal outcome) and `CoverageLedgerEntry.disposition`
   (planning fate) are disjoint domains and stay separate; only the status→vocab *mapping* was single-sourced.
-  **A3 step 3 (the keystone) IN PROGRESS** — `decideNextStepLoop` is now
+  **A3 step 3 (the keystone) DONE** — `decideNextStepLoop` is now
   preamble → `advance(pre-intake)` → `countStep` → `advance(main)`, the whole guard cascade re-expressed as a
-  declarative `ObligationDef` list on the shared `advance` loop: **3a** `8250aab` (added `advance` /
-  `ObligationDef` / `findNextObligation` to `@audit-tools/shared/src/engine/`, 10 unit tests); **slice 1**
-  `79e2dcd` (pre-intake gates, +2 teeth-verified regression tests for the entry-gate-freeze + cascade-ordered-
-  warning traps); **slice 2a** `ae0326c` (post-intake tail + the 3 tail recursion sites → transitions).
-  **Remaining — slice 2b:** unwind the phase-handler internal recursion (`handlePlanning` /
-  `handleImplementing` / `handleAllTerminalTransition` / `handleClosing` / `buildImplementDispatchStep` still
-  `return decideNextStepLoop(...true)`) into `transition`/`emit` outcomes; 3 boundary cases need individual
-  regression tests (closing→complete cross-engine, `buildImplementDispatchStep` merge-reenter, forceReplan/
-  count) — see the plan doc Status. Then step 4 reconcile (drop vestigial `skipCount` + dead params; parity-
-  check audit vs remediate). The redesign track. (ARC-f5a5612b, ARC-f5a5612b-3, ARC-b85edf3f.)
+  declarative `ObligationDef` list on the shared `advance` loop, with **zero recursion**: **3a** `8250aab`
+  (added `advance` / `ObligationDef` / `findNextObligation` to `@audit-tools/shared/src/engine/`, 10 unit
+  tests); **slice 1** `79e2dcd` (pre-intake gates, +2 teeth tests for the entry-gate-freeze + cascade-ordered-
+  warning traps); **slice 2a** `ae0326c` (post-intake tail + the 3 tail recursion sites → transitions);
+  **slice 2b** `719e276`+`838a0ae` (every phase handler returns a `RemediateOutcome`; the 3 boundary cases —
+  `handleClosing`→`complete` cross-engine via emit+reload, `buildImplementDispatchStep` merge-reenter reload,
+  forceReplan/count two-advance — resolved + teeth-locked; `skipCount` + dead params dropped; the recursion
+  removal also restored slice-1 entry-gate-freeze for `confirm_resume`). **Remaining — step 4 (small):**
+  orphaned-helper sweep; parity-check audit vs remediate obligation shapes; optional-but-ideal **audit-code
+  adopts `advance` emit-only** (completes the one-engine north star). The redesign track. (ARC-f5a5612b,
+  ARC-f5a5612b-3, ARC-b85edf3f.)
 - **A8 — Rolling dispatch: one shared core + two co-equal full-rolling drivers (REFRAMED 2026-06-16).**
   NO LONGER "flip a flag / delete the host fallback" — that reading was incoherent with conversation-first
   (in-conversation subagent dispatch is FIRST-CLASS; subscription/no-API users depend on it — memory

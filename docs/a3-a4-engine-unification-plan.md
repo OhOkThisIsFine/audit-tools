@@ -162,12 +162,11 @@ is the atomic replace.
   (`derive`+`execute`) + `findNextObligation` are in the shared engine. `advance` is a strict generalization
   of the bare scan (emit-only ⇒ one bounded unit; `transition` ⇒ in-call re-scan) with a `maxTransitions`
   cycle backstop. 10 unit tests pin the mechanics. Pure addition; remediate adopts it next (the real consumer).
-- **In progress: step 3 — remediate engine rewire (multi-session bulk).** Staged as a *strangler*: move the
-  cascade's guards into an `ObligationDef` list run through `advance`; the un-migrated remainder stays inline
-  as the fall-through tail and shrinks each slice. Green at each commit (the vitest suite is the equivalence
-  oracle). `decideNextStepLoop` is now: preamble → `advance(pre-intake)` → `countStep` → `advance(main)`. The
-  two-advance split places `countStep` at the exact original count point (after intake resolves, before main
-  dispatch).
+- **Step 3 DONE — remediate engine rewire (the multi-session bulk).** Staged as a *strangler* across slices 1
+  → 2a → 2b, green at each commit (the vitest suite was the equivalence oracle). `decideNextStepLoop` is now
+  preamble → `advance(pre-intake)` → `countStep` → `advance(main)`, and EVERY guard + phase handler runs as a
+  declarative `ObligationDef` returning `transition`/`emit` — zero recursion. The two-`advance` split places
+  `countStep` at the exact original count point (after intake resolves, before main dispatch).
 - **Slice 1 DONE** (`79e2dcd`): the linear pre-intake gates run through `advance`; the inline tail
   (from `waiting_for_clarification`) is unchanged. 1667→1669 (+2 teeth-verified regression tests), green.
   Two faithfulness subtleties the naive translation gets wrong (both fixed + regression-locked):
@@ -217,29 +216,35 @@ no-ops (counted seeded true). The handler recursion that remains after 2a re-ent
   intermediate:** the phase handlers still `return decideNextStepLoop(...true)` — that recursion now re-enters
   `advance` (each nested call has its own budget + reloads state), which is sound but not the endpoint.
 
-**Slice 2b = unwind the handler recursion (the remaining bulk).** Convert the phase handlers' internal
-`return decideNextStepLoop(...true)` into `transition`/`emit` outcomes so the engine drives everything with
-zero recursion. Handlers to convert: `handlePlanning` (→ implementing, transition; review-halt + integrity
-steps stay emit), `handleImplementing` (→ triaged, transition), `handleAllTerminalTransition` (→ closing /
-reattempt implementing, transition), `handleClosing`, and `buildImplementDispatchStep`. **Boundary cases that
-need individual care + teeth-verified regression tests (the entry-gate-freeze bug slipped past 1667 tests, so
-do not trust a green suite alone):**
-1. **`handleClosing` → `complete` crosses the engine boundary.** `complete` lives in the pre-intake engine, so
-   a *main*-engine transition can't reach it. Cleanest: `handleClosing` on `closed.status==='complete'` emits
-   `handleComplete` directly (close-complete ⇒ present the durable report; verify `presentReportStep` behaves
-   the same whether passed the closed state or `null`, since the original reloads `null` after the artifact
-   dir is deleted). The not-complete branch transitions (re-scan finds closing/implementing/triage).
-   Alternative: merge the two engines into one `advance` (then `complete` is reachable) — but that reopens the
-   `forceReplan`+count interaction (case 3), so the emit approach is lower-risk.
-2. **`buildImplementDispatchStep` recurses at 3 merge-then-reenter sites** (`nextStep.ts` ~1454/1463/1543:
-   no-eligible-frontier ⇒ merge ⇒ `decideNextStepLoop`) and has many `writeCurrentStep` emit paths. Convert
-   its return type to the outcome union; the merge-then-reenter sites become `transition`, the dispatch-step
-   paths become `emit`.
-3. **`forceReplan` + count.** `forceReplan` counts the pre-replan state then may null it; keep the two-advance
-   structure so `countStep` placement is unchanged (a merge would have to re-derive this). After 2b removes
-   all handler recursion, `skipCount` is vestigial (only the public entry calls with `false`) — drop it +
-   the `counted` seed in the 2b cleanup.
+- **Slice 2b DONE** (`719e276` core + `838a0ae` cleanup): every phase handler now returns a `RemediateOutcome`
+  (`transition` | `emit`); `advance` drives every fold with ZERO recursion. `handlePlanning` (→ implementing,
+  transition; review-halt + integrity steps emit), `handleImplementing` (→ triaged, transition),
+  `handleAllTerminalTransition` (→ closing / reattempt-implementing, transition), `handleClosing`, and
+  `buildImplementDispatchStep` converted. `skipCount` + the `counted`-seed + the `forceReplan !skipCount`
+  guard dropped (the public entry was the only remaining caller); the now-dead `options`/`runLogger` handler
+  params + a dead `changed` flag dropped in cleanup. 1669 → **1671** (+2 teeth tests), green.
+  - **Boundary case 1 (`handleClosing` → `complete`) resolved by emit, not transition.** `complete` is a
+    pre-intake obligation, unreachable from a main transition. On `closed.status==='complete'` it emits
+    `handleComplete(root, artifactsDir, await store.loadState())` — the reload reproduces the original
+    recursion EXACTLY: a fully-green close deletes the artifact dir (reload → `null` → `randomRunId`), a
+    not-green close preserves it (reload → the saved complete state → its `plan_id`). Both sub-cases are
+    teeth-locked in `next-step-implement-dispatch.test.ts` (run_id pins the reload; passing always-null /
+    always-closed, or transitioning into `unhandled_state`, each fail one).
+  - **Boundary case 2 (`buildImplementDispatchStep`):** the 3 merge-then-reenter sites reload the post-merge
+    state and `transition`; the 3 `writeCurrentStep` paths `emit`. (`store` threaded into its ctx for the reload.)
+  - **Boundary case 3 (`forceReplan` + count):** the two-`advance` split is unchanged, so `countStep`
+    placement is identical; `step_count`-increments-once is regression-pinned by the existing fold test.
+  - **Faithfulness finding (not a regression — a fix).** Removing the recursion removed a slice-2a artifact:
+    `handlePlanning`'s `return decideNextStepLoop(...true)` re-ran the WHOLE pre-intake pass, which re-fired
+    `confirm_resume` against the freshly-built `implementing` state (no resume-ack). The single-`advance`
+    fold evaluates the entry gates once against the frozen call-entry state — restoring the slice-1
+    entry-gate-freeze semantics that the residual recursion had been circumventing. `confirm_resume` still
+    fires for a genuinely pre-existing in-progress run (entryState non-null at call entry). Only one test
+    relied on the spurious halt (`next-step-review-gate` Path-A coverage, which never asserted the step kind);
+    it now folds to the implement dispatch under a non-dispatching host (asserted as the no-refire teeth).
 
-**Then (step 4 reconcile):** drop now-dead params (`handlePlanning`/`handleImplementing`/`handleClosing` no
-longer need `options`/`runLogger` once they don't recurse), `skipCount`, and any orphaned helpers; parity-check
-audit vs remediate obligation shapes; consider audit adopting `findNextObligation`/`advance` for symmetry.
+**Remaining = step 4 (final reconcile), small.** skipCount + dead params already dropped (above). Left: a
+quick orphaned-helper sweep; **parity-check audit vs remediate obligation shapes**; and the optional-but-ideal
+symmetry of **audit-code adopting `advance` emit-only** (it is already on the shared `findFirstActionableObligation`
+scan — `advance` with only-emit obligations is a strict generalization, so this unifies the *mechanism* fully and
+completes the A3 north star "one declarative engine both tools run on"). After step 4, A3 is done → B2+B3.
