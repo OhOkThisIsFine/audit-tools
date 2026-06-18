@@ -9,7 +9,29 @@
 
 ## Where things stand
 
-- **`main`: A3 IS DONE + PUBLISHED.** **A3 step 4 slice 2c DONE** (`819dda7`) — the final reconcile; both
+- **`main`: B2+B3 DONE (unpublished).** Contract-pipeline staleness is now content/semantics-aware and
+  re-reviews are diff-based. Two commits on `main` after the published A3:
+  - **B3 (`f5cea40`):** `semanticProjection.ts` — staleness records/compares each dependency by the hash
+    of its SEMANTIC projection (provenance fields stripped universally; finalized module-contract entries
+    narrowed to the derivable fields `deriveObligationLedger` consumes), not raw payload bytes. Envelope
+    gained `semantic_hash`; `dependency_hashes` + `detectStaleArtifacts` use it; `content_hash` stays
+    raw-payload for judge/ledger repair-state identity. Cosmetic upstream edits (reworded rationale, fresh
+    `created_at`, re-derived ledger) no longer re-stale the obligation-bearing chain.
+  - **B2 (`f126be4`):** `reviewSnapshot.ts` — the four verdict-bearing review phases (critique /
+    assessment / critic / judge) snapshot their verdict + the upstream semantic projections they reviewed
+    (captured at ingest). A staleness re-emit appends the prior verdict + the changed-since-last-review
+    delta and instructs re-affirm-or-revise-only-affected, so a re-review is diff-scoped, not a blind full
+    re-run. Diff rides the same projection as B3 (cosmetic change → no delta → "re-affirm verbatim").
+  - **Verified green (CLAUDECODE unset):** shared build + `npm run check` zero errors; remediate suite
+    **1687** pass / 0 fail / 1 skip. New tests: `contract-pipeline-semantic-staleness.test.ts` (B3),
+    `contract-pipeline-diff-review.test.ts` (B2). One obsolete `n-r07` assertion (perturbed only
+    `created_at` to force a re-stale — the old raw-hash behavior) updated to perturb a load-bearing field.
+  - **Parity follow-up (NOT done):** audit-code's design-review passes re-run as full passes on staleness
+    too — port B2's diff-based-re-review + a finalized-style structural projection to audit-code. Logged
+    in backlog under the B-track item.
+  - **Publish:** unpublished. Ship via `/ship` when Ethan asks or the next milestone lands.
+
+- **A3 IS DONE + PUBLISHED.** **A3 step 4 slice 2c DONE** (`819dda7`) — the final reconcile; both
   orchestrators now run the **same** shared `advance` fold engine. **Shipped 2026-06-18:** `auditor-lambda
   0.27.2` (slice 2b+2c, release commit `1067b27`, publish CI run `27774138156` green, live on npm latest);
   global bins reinstalled + postinstall host-assets redeployed (7/7). `@audit-tools/shared 0.22.1` /
@@ -78,13 +100,14 @@ orchestrators run the same shared `advance` fold engine; the parallel hand-rolle
 non-parity is erased. Working plan (now history-of-decision, still ground truth for *why*):
 [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md).
 
-**START-HERE next session — A3 is done, pushed, and published. Begin B2+B3.**
-Everything through A3 is landed, Linux-CI-green (`c6cccb2`), and shipped (`auditor-lambda 0.27.2`). Nothing
-to finish on A3. Start the next program item: **B2+B3** (diff re-reviews + obligation-set staleness, built on
-the unified engine).
+**START-HERE next session — A3 + B2 + B3 are done. Pick the next program item.**
+A3 is shipped (`auditor-lambda 0.27.2`); B2+B3 are landed on `main` (unpublished, see *Where things stand*).
+Candidate next: the **B2 audit-code parity port** (diff-based re-review + finalized-style structural
+projection for audit-code's design-review passes — small, closes the cross-orchestrator gap B2/B3 opened),
+or jump to **A6**.
 
-**Next program items (suggested order, yours to change):** **B2+B3** (diff re-reviews + obligation-set
-staleness — build on the unified engine) → **A6** (kill schema dual-encoding; drop dead-imported `ajv`; also
+**Next program items (suggested order, yours to change):** **B2 audit-code parity port** (above) →
+**A6** (kill schema dual-encoding; drop dead-imported `ajv`; also
 fold the minor `OUTCOME_KEYS` re-list noted in the plan doc) → **A8(a)** (audit-code symmetric rolling wiring
 — its dormant `runRollingDispatch`; audit dispatch is read-only review packets → AuditResult, NOT worktree
 edits, so it needs a provider-backed packet dispatcher + routing) → **A12** (single-package collapse — LAST)

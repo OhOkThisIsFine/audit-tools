@@ -142,8 +142,22 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   `buildConfirmedPools` emits it as a 2nd CapacityPool alongside the primary, and `makeProviderNodeDispatcher`
   resolves the provider PER-SLOT so the INV-QD-14 spill mechanically routes a node to the openai-compatible pool
   in the in-process driver.)* Plan: `docs/a8-rolling-cutover-plan.md`. (ARC-f378135d family.)
-- **B1 ✓ DONE / B2 / B3 — greenlit** (magic-numbers audit [done — see *Known friction* below],
-  diff-based-re-review, and staleness-cascade; B2/B3 are accepted work, not just logged friction).
+- **B1 ✓ DONE / B2 ✓ DONE / B3 ✓ DONE** (magic-numbers audit [done — see *Known friction* below],
+  diff-based-re-review, and staleness-cascade). **B3 (`f5cea40`):** contract-pipeline staleness
+  is now content/semantics-aware — `semanticProjection.ts` strips provenance (created_at/generated_at)
+  universally and narrows each finalized module-contract entry to its derivable fields (the set
+  `deriveObligationLedger` consumes); the envelope gained `semantic_hash`, and `dependency_hashes` +
+  `detectStaleArtifacts` record/compare the dep's *semantic* hash, so a cosmetic upstream edit no
+  longer re-stales the obligation-bearing chain (`content_hash` stays raw-payload for judge/ledger
+  repair-state identity). **B2 (next commit):** verdict-bearing review phases (critique / assessment /
+  critic / judge) snapshot their verdict + the upstream semantic projections they reviewed
+  (`reviewSnapshot.ts`, captured at ingest); a staleness re-emit appends the prior verdict + the
+  changed-since-last-review delta and instructs re-affirm-or-revise-only-affected, so a re-review is
+  diff-scoped not a blind full re-run. Mirrors audit-code's `normalizeForMetadataHash` (semantic-
+  projection staleness). **Parity follow-up (NOT yet done):** audit-code's design-review passes
+  (`design_assessment` / `design_review_*`) re-run as full passes on staleness too — port B2's
+  diff-based-re-review (and the finalized-style structural projection for B3) to audit-code for
+  cross-orchestrator parity. (ARC-B2B3.)
 - **B4 — Hard-exclude tool-refuted findings — ✓ DONE.** A tier-2 REFUTED finding (e.g. a madge-disproven
   cycle) is now a distinct `grounding:'refuted'` status, quarantined-EXCLUDED from the admitted contract
   rather than collapsed into `ungrounded` (still-merged-as-fact). Shipped: (1) `FindingGrounding.status`
@@ -225,21 +239,15 @@ agent (strong or weak), not "be careful" patches.
   - **`DEFAULT_WAVE_SIZE`=5** (`dispatch.ts`): a legacy fallback that fires only when the host reports no
     concurrency limit; rolling dispatch now derives concurrency from quota, so it rarely matters. Low-priority;
     left (would be env-derivable if it ever bites). (Ethan, 2026-06-16.)
-- **Re-reviews are full passes over unchanged designs — make them diff-based.** When an
-  upstream artifact's content-hash changes, the conceptual critique / counterexample /
-  assessment re-run as *full* passes even when the change was cosmetic (e.g. adding
-  gate-satisfying verbatim text to `outputs` with no design change). A re-review should
-  diff against the prior-reviewed version (with file access for context) and only
-  re-examine what changed, returning "prior verdict still holds" cheaply. Today the host
-  must either burn another full critic subagent (~100-190k tokens) or hand-re-emit the
-  prior verdict. (Ethan, 2026-06-16.)
-- **Staleness cascade re-runs the whole downstream chain on every upstream edit.** Any
-  edit to finalized_module_contracts re-stales obligation_ledger → test_validator_plan →
-  contract_assessment (and the host must re-author each), even when the obligation set is
-  unchanged (stable ids). Cosmetic/text-only upstream changes shouldn't force full
-  downstream re-authoring. Pairs with the diff-review item: staleness should be
-  content/semantics-aware, or downstream artifacts keyed on the *obligation set* not the
-  raw upstream hash.
+- **Re-reviews are full passes over unchanged designs — make them diff-based. ✓ DONE (B2).**
+  Verdict-bearing review phases now snapshot their verdict + the upstream semantic projections
+  they reviewed and, on a staleness re-emit, get the prior verdict + the changed-since-last-review
+  delta with a re-affirm-or-revise-only-affected instruction (`reviewSnapshot.ts`). (Ethan, 2026-06-16.)
+- **Staleness cascade re-runs the whole downstream chain on every upstream edit. ✓ DONE (B3).**
+  Staleness is now keyed on each dependency's *semantic projection* (provenance stripped; finalized
+  contracts narrowed to the obligation-bearing derivable fields), so a cosmetic/text-only upstream
+  edit no longer re-stales obligation_ledger → test_validator_plan → contract_assessment
+  (`semanticProjection.ts` + `semantic_hash` in the envelope).
 - **Paired-obligation gate (OBL-CO-01) keyword regex is a hidden contract.** It scans each
   obligation's assertions for a positive-signal word (`passes|returns|produces|valid|
   matches|...`) AND a negative-signal word (`reject|throw|fail|never|not|...`); a `\b`
