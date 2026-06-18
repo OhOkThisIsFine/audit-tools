@@ -13,6 +13,10 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { hashContent, readOptionalJsonFile, writeJsonFile } from "@audit-tools/shared";
+import {
+  semanticProjection,
+  stableStringifyProjection,
+} from "./semanticProjection.js";
 
 // ── Artifact names ────────────────────────────────────────────────────────────
 
@@ -79,8 +83,17 @@ export const DEPENDENCY_MAP: Record<ContractPipelineArtifactName, ContractPipeli
 
 export interface ContractPipelineArtifactEnvelope {
   artifact_name: ContractPipelineArtifactName;
+  /** SHA-256 of the raw payload bytes — byte identity of this exact emission. */
   content_hash: string;
-  /** Hashes of upstream dependency artifacts at write time. */
+  /**
+   * SHA-256 of the artifact's SEMANTIC PROJECTION (load-bearing structure only;
+   * see `semanticProjection`). This — not `content_hash` — is what staleness
+   * records and compares, so a cosmetic upstream edit does not re-stale
+   * downstreams (B3). Optional for forward-compat with envelopes written before
+   * this field existed; `envelopeSemanticHash` recomputes it on read when absent.
+   */
+  semantic_hash?: string;
+  /** Semantic-projection hashes of upstream dependency artifacts at write time. */
   dependency_hashes: Partial<Record<ContractPipelineArtifactName, string>>;
   payload: unknown;
 }
@@ -110,6 +123,32 @@ function computeHash(value: unknown): string {
   return hashContent(JSON.stringify(value), { length: 32 });
 }
 
+/** Hash an artifact's semantic projection (order-independent, stamp-stripped). */
+function computeSemanticHash(
+  name: ContractPipelineArtifactName,
+  payload: unknown,
+): string {
+  return hashContent(
+    stableStringifyProjection(semanticProjection(name, payload)),
+    { length: 32 },
+  );
+}
+
+/**
+ * The semantic hash to compare a dependency against. Prefers the envelope's
+ * recorded `semantic_hash`; recomputes from the payload for envelopes written
+ * before the field existed (no migration needed — staleness stays correct on the
+ * first read of a legacy envelope).
+ */
+export function envelopeSemanticHash(
+  envelope: ContractPipelineArtifactEnvelope,
+): string {
+  return (
+    envelope.semantic_hash ??
+    computeSemanticHash(envelope.artifact_name, envelope.payload)
+  );
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /** Write an artifact envelope. Creates parent directories as needed. */
@@ -120,19 +159,23 @@ export async function writeContractArtifact(
 ): Promise<ContractPipelineArtifactEnvelope> {
   await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
   const content_hash = computeHash(payload);
+  const semantic_hash = computeSemanticHash(name, payload);
 
-  // Capture dependency hashes at write time.
+  // Capture each dependency's SEMANTIC-projection hash at write time, so a later
+  // cosmetic edit to that dependency (same projection) does not re-stale this
+  // artifact — only a load-bearing change does (B3).
   const dependency_hashes: Partial<Record<ContractPipelineArtifactName, string>> = {};
   for (const dep of DEPENDENCY_MAP[name]) {
     const depEnvelope = await readContractArtifact(artifactsDir, dep);
     if (depEnvelope) {
-      dependency_hashes[dep] = depEnvelope.content_hash;
+      dependency_hashes[dep] = envelopeSemanticHash(depEnvelope);
     }
   }
 
   const envelope: ContractPipelineArtifactEnvelope = {
     artifact_name: name,
     content_hash,
+    semantic_hash,
     dependency_hashes,
     payload,
   };
@@ -163,8 +206,10 @@ export interface StalenessResult {
  * Detect stale artifacts by walking the dependency DAG transitively.
  * An artifact is stale when:
  * - A dependency artifact is absent/missing.
- * - A dependency artifact's current content hash differs from what was recorded
- *   at write time in this artifact's envelope.
+ * - A dependency artifact's current SEMANTIC-projection hash differs from what
+ *   was recorded at write time in this artifact's envelope. Cosmetic upstream
+ *   edits (reworded prose, regenerated timestamps, reordered keys) project to
+ *   the same hash and do NOT mark downstreams stale (B3).
  *
  * Absent artifacts (never written) are reported under `absent`, not `stale`.
  */
@@ -196,7 +241,7 @@ export async function detectStaleArtifacts(
         break;
       }
       const recordedHash = envelope.dependency_hashes[dep];
-      if (recordedHash !== depEnvelope.content_hash) {
+      if (recordedHash !== envelopeSemanticHash(depEnvelope)) {
         stale.add(name);
         break;
       }

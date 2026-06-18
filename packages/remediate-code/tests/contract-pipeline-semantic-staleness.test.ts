@@ -1,0 +1,208 @@
+/**
+ * B3 — content/semantics-aware staleness guard.
+ *
+ * Staleness records and compares each dependency by the hash of its SEMANTIC
+ * PROJECTION (load-bearing structure only), not its raw payload bytes. These
+ * tests lock the two halves of that property:
+ *
+ *  1. A COSMETIC upstream edit — a reworded rationale, a regenerated
+ *     `created_at` stamp, reordered keys, or a non-derivable field on the
+ *     finalized contracts — does NOT re-stale downstream artifacts.
+ *  2. A LOAD-BEARING upstream edit — a new module invariant / failure mode / a
+ *     changed interface on the finalized contracts — DOES re-stale downstream.
+ *
+ * Without this, every cosmetic edit to finalized_module_contracts re-staled
+ * obligation_ledger → test_validator_plan → contract_assessment and forced a
+ * full (LLM) re-authoring of artifacts whose load-bearing inputs were unchanged.
+ */
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  writeContractArtifact,
+  readContractArtifact,
+  detectStaleArtifacts,
+  contractArtifactFilePath,
+  envelopeSemanticHash,
+  type ContractPipelineArtifactEnvelope,
+} from "../src/contractPipeline/artifactStore.js";
+import { semanticProjection } from "../src/contractPipeline/semanticProjection.js";
+
+let tmpDir: string;
+let artifactsDir: string;
+
+beforeEach(async () => {
+  tmpDir = await mkdtemp(join(tmpdir(), "cp-sem-stale-"));
+  artifactsDir = join(tmpDir, ".audit-tools", "remediation");
+});
+afterEach(async () => {
+  await rm(tmpDir, { recursive: true, force: true });
+});
+
+const GOAL = "GOAL-SEM";
+
+function makeFinalized(opts: {
+  invariants?: string[];
+  failure_modes?: string[];
+  rationale?: string;
+  created_at?: string;
+} = {}): Record<string, unknown> {
+  return {
+    contract_version: "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
+    goal_id: GOAL,
+    module_contracts: [
+      {
+        name: "mod-a",
+        inputs: ["x"],
+        outputs: ["y"],
+        invariants: opts.invariants ?? [],
+        failure_modes: opts.failure_modes ?? [],
+        validation_boundary: "validates x",
+        side_effects: [],
+        seam_adjustments: [],
+        // Non-derivable prose the projection must ignore.
+        rationale: opts.rationale ?? "original rationale",
+      },
+    ],
+    created_at: opts.created_at ?? "2026-06-18T00:00:00.000Z",
+  };
+}
+
+/** A derived-ledger-shaped payload depending on finalized_module_contracts. */
+function makeLedger(created_at = "2026-06-18T00:00:00.000Z"): Record<string, unknown> {
+  return {
+    contract_version: "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
+    goal_id: GOAL,
+    obligations: [
+      { id: "OBL-mod-a-contract", description: "Implement mod-a.", kind: "structural", depends_on: [], status: "pending" },
+    ],
+    created_at,
+  };
+}
+
+/** Seed finalized's full transitive ancestor chain so finalized is fresh (no
+ *  missing-dependency staleness leaks into the assertions below). */
+async function seedFinalizedDeps(): Promise<void> {
+  for (const name of [
+    "goal_spec",
+    "context_bundle",
+    "module_decomposition",
+    "module_contracts",
+    "seam_reconciliation_report",
+  ] as const) {
+    await writeContractArtifact(artifactsDir, name, { goal_id: GOAL, artifact: name });
+  }
+}
+
+describe("B3 semantic staleness — cosmetic upstream edits do not re-stale", () => {
+  it("a non-derivable (rationale) edit to finalized_module_contracts leaves obligation_ledger fresh", async () => {
+    await seedFinalizedDeps();
+    await writeContractArtifact(artifactsDir, "finalized_module_contracts", makeFinalized());
+    await writeContractArtifact(artifactsDir, "obligation_ledger", makeLedger());
+    expect((await detectStaleArtifacts(artifactsDir)).stale).not.toContain("obligation_ledger");
+
+    // Reword rationale + bump created_at — both non-load-bearing.
+    await writeContractArtifact(
+      artifactsDir,
+      "finalized_module_contracts",
+      makeFinalized({ rationale: "completely reworded rationale", created_at: "2099-01-01T00:00:00.000Z" }),
+    );
+
+    const { stale } = await detectStaleArtifacts(artifactsDir);
+    expect(stale).not.toContain("finalized_module_contracts"); // just written → fresh
+    expect(stale).not.toContain("obligation_ledger"); // cosmetic upstream → still fresh
+  });
+
+  it("a created_at-only re-emit of obligation_ledger does not re-stale test_validator_plan", async () => {
+    await seedFinalizedDeps();
+    await writeContractArtifact(artifactsDir, "finalized_module_contracts", makeFinalized());
+    await writeContractArtifact(artifactsDir, "obligation_ledger", makeLedger("2026-06-18T00:00:00.000Z"));
+    await writeContractArtifact(artifactsDir, "test_validator_plan", { goal_id: GOAL, test_specs: [] });
+    expect((await detectStaleArtifacts(artifactsDir)).stale).not.toContain("test_validator_plan");
+
+    // Re-derive the ledger: identical obligations, fresh created_at (the exact
+    // churn the derived-ledger path produces every run).
+    await writeContractArtifact(artifactsDir, "obligation_ledger", makeLedger("2030-12-31T23:59:59.000Z"));
+
+    expect((await detectStaleArtifacts(artifactsDir)).stale).not.toContain("test_validator_plan");
+  });
+});
+
+describe("B3 semantic staleness — load-bearing upstream edits do re-stale", () => {
+  it("adding a module invariant to finalized_module_contracts re-stales obligation_ledger", async () => {
+    await seedFinalizedDeps();
+    await writeContractArtifact(artifactsDir, "finalized_module_contracts", makeFinalized());
+    await writeContractArtifact(artifactsDir, "obligation_ledger", makeLedger());
+    expect((await detectStaleArtifacts(artifactsDir)).stale).not.toContain("obligation_ledger");
+
+    // A new invariant IS load-bearing (it becomes a new obligation).
+    await writeContractArtifact(
+      artifactsDir,
+      "finalized_module_contracts",
+      makeFinalized({ invariants: ["x must never be negative"] }),
+    );
+
+    expect((await detectStaleArtifacts(artifactsDir)).stale).toContain("obligation_ledger");
+  });
+
+  it("adding a failure mode is load-bearing and re-stales downstream", async () => {
+    await seedFinalizedDeps();
+    await writeContractArtifact(artifactsDir, "finalized_module_contracts", makeFinalized());
+    await writeContractArtifact(artifactsDir, "obligation_ledger", makeLedger());
+
+    await writeContractArtifact(
+      artifactsDir,
+      "finalized_module_contracts",
+      makeFinalized({ failure_modes: ["upstream timeout"] }),
+    );
+
+    expect((await detectStaleArtifacts(artifactsDir)).stale).toContain("obligation_ledger");
+  });
+});
+
+describe("B3 semantic staleness — projection + envelope", () => {
+  it("finalized projection keeps derivable fields and drops rationale/created_at/seam prose", () => {
+    const projected = semanticProjection("finalized_module_contracts", makeFinalized({ rationale: "x" })) as {
+      goal_id: string;
+      module_contracts: Array<Record<string, unknown>>;
+    };
+    expect(projected.goal_id).toBe(GOAL);
+    const mod = projected.module_contracts[0];
+    expect(mod).toHaveProperty("invariants");
+    expect(mod).toHaveProperty("failure_modes");
+    expect(mod).not.toHaveProperty("rationale");
+    expect(mod).not.toHaveProperty("seam_adjustments");
+    expect(mod).not.toHaveProperty("created_at");
+  });
+
+  it("the written envelope carries a semantic_hash distinct from a cosmetic-only twin", async () => {
+    const a = await writeContractArtifact(artifactsDir, "finalized_module_contracts", makeFinalized());
+    expect(typeof a.semantic_hash).toBe("string");
+    const b = await writeContractArtifact(
+      artifactsDir,
+      "finalized_module_contracts",
+      makeFinalized({ rationale: "different", created_at: "2099-01-01T00:00:00.000Z" }),
+    );
+    // Different bytes → different content_hash; same meaning → same semantic_hash.
+    expect(b.content_hash).not.toBe(a.content_hash);
+    expect(b.semantic_hash).toBe(a.semantic_hash);
+  });
+
+  it("envelopeSemanticHash recomputes for a legacy envelope missing the field", async () => {
+    await writeContractArtifact(artifactsDir, "obligation_ledger", makeLedger());
+    const env = (await readContractArtifact(artifactsDir, "obligation_ledger"))!;
+    const expected = env.semantic_hash!;
+    // Simulate a legacy envelope written before semantic_hash existed.
+    const legacy: ContractPipelineArtifactEnvelope = { ...env, semantic_hash: undefined };
+    expect(envelopeSemanticHash(legacy)).toBe(expected);
+  });
+
+  it("on-disk envelope round-trips the semantic_hash field", async () => {
+    await writeContractArtifact(artifactsDir, "goal_spec", { goal_id: GOAL });
+    const raw = JSON.parse(
+      await readFile(contractArtifactFilePath(artifactsDir, "goal_spec"), "utf8"),
+    );
+    expect(typeof raw.semantic_hash).toBe("string");
+  });
+});
