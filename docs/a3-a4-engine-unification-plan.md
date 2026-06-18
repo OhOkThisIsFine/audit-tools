@@ -281,33 +281,84 @@ completes the A3 north star "one declarative engine both tools run on"). After s
   independently of any single obligation; remediate's is the obligation itself). These reflect the
   two halves' real shapes, established in the ground-truth recon at the top of this doc.
 
-### Decision: the "audit adopts `advance`" symmetry — three options
+### The decisive finding: audit ALREADY folds — `runDeterministicForNextStep` is a hand-rolled `advance`
 
-**A — stop here.** Selection + vocabulary already shared; declare A3 met; leave audit dispatch as-is.
-- *Against:* leaves audit's known cruft — the `EXECUTOR_REGISTRY`⇄`switch` duality (kept honest only
-  by the `executor-registry-sync` invariant test) and the **dead `description` field** (recon: read
-  nowhere). Violates *cleanest endpoint*.
+An earlier draft of this section recommended **B** (fold the `switch` into the registry; *don't*
+call `advance`) on the premise that "audit is emit-only, no transitions, so `advance`'s loop would
+run exactly once = ceremony." **That premise was false.** `runDeterministicForNextStep`
+(`src/cli/nextStepHelpers.ts:590`) is audit's real driver, and it is a fold loop:
 
-**B — fold the `switch` into the registry (recommended).** Give each `EXECUTOR_REGISTRY` entry its own
-`run(bundle, ctx)`; both the scan path and the `preferredExecutor` path dispatch via `entry.run`.
-- Deletes the `switch` in `advance.ts` **and** the `executor-registry-sync` invariant (no two-places-
-  to-sync) **and** the dead `description`. Keeps audit's genuine executor model (N:1, `kind`,
-  forced dispatch all stay natural). Does **not** call `advance` — correct, because audit has no
-  transitions, so `advance`'s loop provably runs exactly once (ceremony over the bare scan).
+```
+for (index < maxRuns):                       // the fold loop
+  decideNextStep (scan) → one executor via advanceAudit
+  deterministic executor      → continue     // keep folding  == transition
+  host-delegation / dispatch  → return X     // stop, hand to host == emit
+  guards: maxRuns + checkNoProgressBeforeDispatch + checkFinalizationCycle
+```
 
-**C — wire audit onto `advance` with obligation-keyed `ObligationDef`s (the plan's stated "ideal").**
-Literally "both tools call `advance`."
-- *Cost (why I now read this as false parity, not ideal):* (1) audit is emit-only, so `advance`'s
-  loop **never iterates** — it is provably equivalent to `findFirstActionableObligation` + one
-  `execute`; the only delta over today is "calls the function named `advance`." (2) `ObligationDef`
-  has no slot for audit's executor-level **`kind`** → either pollute the *shared* contract with an
-  audit-only field or keep an audit-local side table (re-introducing a second catalog). (3) The
-  `preferredExecutor` path is **executor-addressed**; obligation selection can't express it (for
-  `intake_executor` it maps to *two* obligations), so a parallel forced-dispatch path survives →
-  two dispatch mechanisms. C fights audit's grain to buy a cosmetic "same function name."
+It reloads + persists the bundle each iteration (`:619`) and folds the entire deterministic chain
+(intake → structure → graph → design-assessment → planning → …) into **one** host round-trip,
+stopping only at real host work. That is structurally a **hand-rolled `advance`**: `continue` ≡
+`transition`, `return X` ≡ `emit`, `maxRuns` ≡ `maxTransitions`. The round-trip-avoidance fold that
+birthed `advance` for remediate is present in audit too — implemented a *second time*, by hand, with
+its own bespoke cycle guards. **That parallel fold mechanism is the genuine non-parity** A3 exists to
+erase. (`runDeterministicForNextStep` runs on *every* `next-step`; it is the driver, not a fallback.)
 
-**Recommendation: B.** The genuinely-shared logic (selection + vocabulary) is *already* shared; the
-dispatch loop legitimately differs because the work-unit models differ. B removes audit's real cruft
-(switch/sync-invariant/dead-`description`) without forcing a false symmetry; C adds ceremony and
-either pollutes the shared contract or keeps a second catalog anyway. Pending Ethan's call (this is
-an architecture-philosophy fork that diverges from the plan's earlier "C = ideal" framing).
+### Decision: C — unify audit's fold onto `advance` (B is its first sub-step)
+
+Replace `runDeterministicForNextStep`'s loop + `checkNoProgressBeforeDispatch` +
+`checkFinalizationCycle` + `maxRuns` with the shared `advance`. Audit obligations become
+`ObligationDef`s: **deterministic executors return `transition`** (fold), **host-delegation / dispatch
+/ terminal return `emit`** (hand to host). One fold mechanism, one cycle-guard model, both tools on
+the same engine — the A3 north star, properly reached.
+
+- The three earlier objections to C dissolve once you see the loop already exists: (1) "the loop never
+  iterates" was wrong — it iterates the whole deterministic chain today. (2) executor `kind` need not
+  live on the shared `ObligationDef`: it's just "deterministic ⇒ `transition`, host-delegation ⇒
+  `emit`" — encoded in each obligation's own `execute`, no shared-contract field. (3) the
+  `preferredExecutor` forced path becomes a **preamble** before `advance` (exactly like remediate's
+  `forceReplan`), not a parallel dispatch mechanism.
+- **B is folded in as the first sub-step**, not discarded: co-locating each executor's dispatch (the
+  `switch` arm) so the obligation `execute` closures are trivial *is* part of getting onto `advance`,
+  and it still kills the `switch` + the `executor-registry-sync` invariant + the dead `description`.
+
+### Cycle-guard resolution (the design question) — DONE, slice 1
+
+Audit's guards are richer than `advance`'s blunt `maxTransitions` throw: they detect *no-net-progress*
+(an executor that ran but left artifacts unchanged) and *finalization thrashing* (a return to an
+already-seen artifact state), and surface a **graceful terminal** naming the cycling obligations.
+
+**Resolution: visited-state-signature cycle detection** — the precise primitive `maxTransitions` only
+approximated. `advance` gained an optional `opts.stateSignature(state) => string`; it records the
+signature of every state it scans from, and a transition landing on an already-seen signature stops
+the loop with a discriminated `stopped: "cycle"` (not a throw), so the caller renders the terminal.
+This single primitive **subsumes both audit guards** (no-progress = the signature didn't change →
+immediate revisit; finalization-cycle = a later revisit) and is *general* (remediate's blunt
+`maxTransitions` is strictly improved by it), so it belongs in shared, not as an audit special-case.
+It handles audit's **non-monotonic** deepening correctly (each round is a new signature → keep
+folding; converge → natural completion; genuine thrash → revisit → stop). `maxTransitions` remains the
+absolute backstop when no signature is supplied (remediate, for now). Landed in
+`@audit-tools/shared/src/engine/obligationEngine.ts` + 5 unit tests; pure addition, remediate
+untouched (the return type went `{state,step}` → `{state,step,stopped?}`, a superset).
+
+### C decomposition (slices, green at each — mirrors remediate's 1→2a→2b)
+
+1. **✓ DONE — shared engine: visited-state-signature cycle detection** (this session). The
+   `stateSignature` option + `AdvanceResult.stopped` + the visited-set loop. Consumer-less pure
+   addition (exempt from atomic-replace).
+2. **Slice 2a — fold the `switch` into executor runners (B).** Each executor becomes a
+   `run(bundle, ctx) => ExecutorRunResult`; `advanceAudit`'s scan path AND the `preferredExecutor`
+   path dispatch via the runner map. Atomic replace: `switch` → runner map. Deletes
+   `executor-registry-sync` (no switch to sync) + the dead `description`. `runDeterministicForNextStep`
+   unchanged; audit `node:test` suite is the oracle.
+3. **Slice 2b — `advance` drives the deterministic fold.** Audit `ObligationDef`s (`derive` = lookup
+   into `deriveAuditState`'s precomputed obligation states; `execute` = run the executor → `transition`
+   for deterministic, `emit` for host-delegation/dispatch/terminal). Replace
+   `runDeterministicForNextStep`'s for-loop with `advance` + `stateSignature` (lift audit's existing
+   state-signature). Retire `checkNoProgressBeforeDispatch` + `checkFinalizationCycle` + `maxRuns`;
+   `preferredExecutor`/integrity-check become a preamble. The typed host-step branches
+   (`handleGraphEnrichmentBranch` / `handleDesignReviewBranch` / `handleSynthesisNarrativeBranch` /
+   `ensureSemanticReviewRun`) move into the obligations' `emit` payloads. Atomic replace: hand-loop →
+   `advance`.
+4. **Slice 2c — reconcile + clean.** Retire any now-dead CLI helpers; final parity-check; update
+   memory/backlog. After this, both tools run the *same* fold engine and A3 is done.

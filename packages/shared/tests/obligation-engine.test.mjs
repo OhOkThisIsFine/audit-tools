@@ -185,3 +185,78 @@ test("advance default transition cap is exported and finite", () => {
   assert.equal(typeof DEFAULT_MAX_TRANSITIONS, "number");
   assert.ok(DEFAULT_MAX_TRANSITIONS > 0 && Number.isFinite(DEFAULT_MAX_TRANSITIONS));
 });
+
+// --- advance: visited-state-signature cycle detection (A3 step 4 / audit fold) ---
+// The precise cycle primitive maxTransitions only approximated: a transition that
+// revisits a state signature is not converging. Subsumes audit's two hand-rolled
+// guards — per-step no-progress AND multi-obligation state cycles — and terminates
+// gracefully (stopped:"cycle") instead of throwing.
+
+test("advance with stateSignature stops gracefully on a no-progress transition (no throw)", async () => {
+  let executions = 0;
+  const engine = {
+    priority: ["loop"],
+    // Transitions to a fresh object that is STILL actionable, but the signature
+    // never changes → no net progress (audit's checkNoProgressBeforeDispatch case).
+    obligations: [
+      { id: "loop", derive: () => "missing", execute: async (s) => { executions++; return { kind: "transition", state: { ...s } }; } },
+    ],
+  };
+  const result = await advance(engine, { v: 0 }, {}, { stateSignature: () => "same" });
+  assert.equal(result.step, null);
+  assert.equal(result.stopped, "cycle");
+  // Initial signature recorded, ONE transition fires, the re-scan sees the same
+  // signature → stop. One wasted execution, not a maxTransitions-deep spin.
+  assert.equal(executions, 1);
+});
+
+test("advance with stateSignature stops on a multi-obligation state cycle (A→B→A)", async () => {
+  // a: x→y, b: y→x. Without signature detection this ping-pongs forever
+  // (audit's checkFinalizationCycle case — obligations re-staling each other).
+  const engine = {
+    priority: ["a", "b"],
+    obligations: [
+      { id: "a", derive: (s) => (s.at === "x" ? "missing" : "satisfied"), execute: async () => ({ kind: "transition", state: { at: "y" } }) },
+      { id: "b", derive: (s) => (s.at === "y" ? "missing" : "satisfied"), execute: async () => ({ kind: "transition", state: { at: "x" } }) },
+    ],
+  };
+  const result = await advance(engine, { at: "x" }, {}, { stateSignature: (s) => s.at });
+  assert.equal(result.step, null);
+  assert.equal(result.stopped, "cycle");
+});
+
+test("advance with stateSignature folds a non-monotonic chain to completion (deepening-shaped)", async () => {
+  // Models selective deepening: each round ADDS work (the set grows) before it
+  // converges. Distinct signature each round → never a false cycle-stop; ends at
+  // natural completion, NOT stopped:"cycle".
+  const engine = {
+    priority: ["deepen"],
+    obligations: [
+      { id: "deepen", derive: (s) => (s.items < 3 ? "missing" : "satisfied"), execute: async (s) => ({ kind: "transition", state: { items: s.items + 1 } }) },
+    ],
+  };
+  const result = await advance(engine, { items: 0 }, {}, { stateSignature: (s) => `items:${s.items}` });
+  assert.equal(result.step, null);
+  assert.equal(result.stopped, undefined); // converged, not a cycle
+  assert.equal(result.state.items, 3);
+});
+
+test("advance with stateSignature still returns a normal emit", async () => {
+  const engine = {
+    priority: ["a"],
+    obligations: [{ id: "a", derive: () => "missing", execute: async () => ({ kind: "emit", step: "s" }) }],
+  };
+  const result = await advance(engine, {}, {}, { stateSignature: () => "x" });
+  assert.equal(result.step, "s");
+  assert.equal(result.stopped, undefined);
+});
+
+test("advance with stateSignature reports completion (not cycle) when nothing is actionable", async () => {
+  const engine = {
+    priority: ["a"],
+    obligations: [{ id: "a", derive: () => "satisfied", execute: async () => ({ kind: "emit", step: "never" }) }],
+  };
+  const result = await advance(engine, {}, {}, { stateSignature: () => "x" });
+  assert.equal(result.step, null);
+  assert.equal(result.stopped, undefined);
+});
