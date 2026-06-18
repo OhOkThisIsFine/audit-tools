@@ -204,18 +204,19 @@ types, routing now lives in `runHostDelegationObligation`) → **A12** (single-p
 "Accepted go-forward program".
 
 ### A8 remaining loose ends
-- **A8(a) audit-code symmetric wiring — ✓ DONE (branch `a8a-audit-rolling-wiring`, NOT yet merged/published).**
+- **A8(a) audit-code symmetric wiring — ✓ DONE (branch `a8a-audit-rolling-wiring`, merged with A6/A3 `main`).**
   `driveRollingAuditDispatch` + `makeAuditProviderPacketDispatcher` (`src/cli/rollingAuditDispatch.ts`) wire the
-  in-process provider driver into `runDeterministicForNextStep`'s host-delegation branch with the SAME
-  flag-gated pattern as remediate (`rolling_engine` ON + explicit in-process provider → drive in-process +
-  `continue`; else the host-subagent dispatch step). **KEY DIFFERENCE from remediate:** audit dispatch is
-  READ-ONLY review (packet → `AuditResult[]`), so there is NO per-node worktree / commit / cherry-pick — every
-  worker launches against the real repo root and writes only its result file; the "merge" is the deterministic
-  `mergeAndIngest` (extracted as a callable from `cmdMergeAndIngest`). Full strand → records the
-  partial-completion terminal + skips ingestion; an all-error pass → converges to `blocked` via a no-progress
-  guard. Commits: `0e0d70c4` (mergeAndIngest extract) → `4227c2fe` (driver, dormant) → routing (this slice).
-  Tests `tests/rolling-audit-dispatch.test.mjs` (7). **STILL TODO:** an audit NIM e2e (mirror of remediate's
-  `nim-rolling-e2e`) for live-provider validation through next-step; A8(a) ships together with A6 (coordinate).
+  in-process provider driver into the host-delegation obligation (`runHostDelegationObligation` in the
+  A3-`advance` fold) with the SAME flag-gated pattern as remediate (`rolling_engine` ON + explicit in-process
+  provider → drive in-process and `transition` so the fold re-derives; else `emit` the host-subagent dispatch
+  step). **KEY DIFFERENCE from remediate:** audit dispatch is READ-ONLY review (packet → `AuditResult[]`), so
+  there is NO per-node worktree / commit / cherry-pick — every worker launches against the real repo root and
+  writes only its result file; the "merge" is the deterministic `mergeAndIngest` (extracted as a callable from
+  `cmdMergeAndIngest`). Full strand → records the partial-completion terminal + skips ingestion; an all-error
+  pass → `emit`s `blocked` via a no-progress guard. The in-process provider set is NARROWER than remediate's —
+  `{openai-compatible, codex, opencode}` only (`local-subprocess` is audit's host-dispatch default → including it
+  would hijack `dispatch_review`). Tests `tests/rolling-audit-dispatch.test.mjs` (7). **STILL TODO:** an audit
+  NIM e2e (mirror of remediate's `nim-rolling-e2e`) for live-provider validation through next-step.
 - **REMAINING — INV-QD-14 b-residual:** the {host-subagent (Claude) + NIM} HYBRID topology (host-subagent
   driver offloading spilled nodes to the in-process NIM pool) + a live cross-provider spill run. The
   in-process-driver spill path is mechanically wired (`f92ed1b`); the host-subagent hybrid is the larger
