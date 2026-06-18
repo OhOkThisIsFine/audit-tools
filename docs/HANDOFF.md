@@ -9,10 +9,17 @@
 
 ## Where things stand
 
-- **A6 — zod single-source migration: ✓ DONE on branch `a6-zod-finish` (8 commits, UNMERGED/UNPUBLISHED).**
-  Every artifact contract is single-sourced as a zod schema (`z.infer`red types); the parallel JSON-schema
-  encoding + hand validators are gone, so drift is structurally impossible. Branch off `main` (earlier A6
-  partial progress was already merged in-progress into `main`; this branch finishes it).
+- **A6 — zod single-source migration: ✓ DONE + SHIPPED 2026-06-18.** `@audit-tools/shared 0.22.2` /
+  `auditor-lambda 0.27.3` / `remediator-lambda 0.27.2` live on npm (publish CI all green: shared
+  `27789310915`, audit `27789365786`, remediate `27789706009`); merged to `main` (HEAD release commits
+  `edb527d9`/`b6a77690`/`c992e0a8`), global bins reinstalled + postinstall run (audit-code 0.27.3,
+  remediate-code 0.27.2). Every artifact contract is single-sourced as a zod schema (`z.infer`red types);
+  the parallel JSON-schema encoding + hand validators are gone, so drift is structurally impossible.
+  - **Publish trap hit (logged):** the audit-code packaged-smoke gate (`smoke-packaged-audit-code.mjs`
+    `requiredPackagedPaths`) asserted the tarball ships a now-deleted schema (`audit-code-v1alpha1.schema.json`)
+    → first publish failed the gate (no partial publish — gate is pre-bump). Fixed to point at a worker-5
+    schema (`fix` commit `2cb208bf`). Lesson: when deleting a shipped file, grep the smoke/verify scripts for
+    a hardcoded required-paths list.
   - **audit-code:** all internal JSON schemas DELETED except the 5 worker-facing ones (lens/finding/
     audit_task/audit_result/audit_results — GENERATED from zod by `scripts/generate-schemas.mjs`, drift-
     guarded by `worker-schema-generation.test.mjs`). Hand validator `tests/helpers/jsonSchemaAssert.mjs` +
@@ -39,8 +46,6 @@
     `target_paths`≥1). (3) `Read` before `Edit`. (4) worker schemas generated `$refStrategy:"none"` (self-
     contained); the drift test enforces committed==generated. (5) Bash `cd` persists across calls → use
     absolute paths for Edit/Read after a `cd`.
-  - **IMMEDIATE NEXT for A6:** merge `a6-zod-finish` → `main`, then `/ship` (audit-code + shared + remediate
-    all changed). Publish hold is LIFTED; the "no partial-A6 ship" gate is now satisfied (A6 is full).
 
 - **`main`: B2 audit-code parity port DONE (unpublished, 2026-06-18).** Audit-code's design-review
   passes now do diff-based re-review on a semantic-projection staleness key — the cross-orchestrator
@@ -156,15 +161,15 @@ orchestrators run the same shared `advance` fold engine; the parallel hand-rolle
 non-parity is erased. Working plan (now history-of-decision, still ground truth for *why*):
 [`docs/a3-a4-engine-unification-plan.md`](a3-a4-engine-unification-plan.md).
 
-**START-HERE next session — A3, B2/B3, the B2 audit-code parity port, and A6 are done.**
-**FIRST:** merge `a6-zod-finish` → `main` and `/ship` (A6 is complete + green but UNMERGED/UNPUBLISHED —
-see *Where things stand*). Then pick the next program item.
+**START-HERE next session — A3, B2/B3, the B2 audit-code parity port, and A6 are all DONE + SHIPPED.**
+Pick the next program item. Tree is clean, `main` synced + published (shared 0.22.2 / audit 0.27.3 /
+remediate 0.27.2).
 
 **Next program items (suggested order, yours to change):**
-~~**A6**~~ **DONE** (zod single-source migration; branch `a6-zod-finish`, ship pending) →
-~~**A8(a)**~~ **DONE** (audit-code symmetric rolling wiring — see *A8 remaining loose ends* below) →
-**A12** (single-package collapse — LAST) → **A7** (host machinery across hosts). Deferred: A2, A9/A10.
-Full specs + recon: `docs/backlog.md` → "Accepted go-forward program".
+~~**A6**~~ **DONE+SHIPPED** (zod single-source migration) → ~~**A8(a)**~~ **DONE** (audit-code symmetric
+rolling wiring — see *A8 remaining loose ends* below) → **A12** (single-package collapse — LAST) →
+**A7** (host machinery across hosts). Deferred: A2, A9/A10. Full specs + recon: `docs/backlog.md` →
+"Accepted go-forward program".
 
 ### A8 remaining loose ends
 - **A8(a) audit-code symmetric wiring — ✓ DONE (branch `a8a-audit-rolling-wiring`, merged with A6/A3 `main`).**

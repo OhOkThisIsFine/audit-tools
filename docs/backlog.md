@@ -235,6 +235,12 @@ triaged.
 
 ## Known friction (agent / dev experience)
 
+- **Packaged-smoke gate hardcodes a `requiredPackagedPaths` list (2026-06-18).** `smoke-packaged-audit-code.mjs`
+  asserts the publish tarball ships specific files; A6 deleted `schemas/audit-code-v1alpha1.schema.json` (ported
+  to a zod source) but left the list naming it → the first A6 publish failed the audit-code `verify:release`
+  gate (pre-bump, so no partial publish). Fixed by repointing at a worker-5 schema. Whenever you delete a
+  *shipped* file, grep the smoke/verify scripts for a required-paths list. (remediate's smoke does not list
+  schema paths, so it was unaffected.)
 - **Release `waitForRunCompletion` matches a publish run by tag display name, not run identity (2026-06-18).**
   Hit shipping `auditor-lambda 0.27.2`: 0.27.2 had been tagged+burned during the reverted A3 ATTEMPT-1, so a
   STALE failed `publish-package` run carried the same `audit-code-v0.27.2` display name in history. After
