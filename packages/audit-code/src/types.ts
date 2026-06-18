@@ -1,4 +1,6 @@
+import { z } from "zod";
 import type { Finding as SharedFinding } from "@audit-tools/shared";
+import { FindingSchema } from "@audit-tools/shared";
 
 export type Lens =
   | "correctness"
@@ -136,21 +138,25 @@ export interface CoverageMatrix {
 
 export type AuditTaskStatus = "pending" | "complete";
 
-export interface AuditTask {
-  task_id: string;
-  unit_id: string;
-  pass_id: string;
-  lens: string;
-  file_paths: string[];
-  file_line_counts?: Record<string, number>;
-  line_ranges?: Array<{
-    path: string;
-    start: number;
-    end: number;
-  }>;
-  inputs?: Record<string, string>;
-  rationale: string;
-  priority?: "high" | "medium" | "low";
+export const AuditTaskSchema = z.object({
+  task_id: z.string(),
+  unit_id: z.string(),
+  pass_id: z.string(),
+  lens: z.string(),
+  file_paths: z.array(z.string()),
+  file_line_counts: z.record(z.string(), z.number()).optional(),
+  line_ranges: z
+    .array(
+      z.object({
+        path: z.string(),
+        start: z.number(),
+        end: z.number(),
+      }),
+    )
+    .optional(),
+  inputs: z.record(z.string(), z.string()).optional(),
+  rationale: z.string(),
+  priority: z.enum(["high", "medium", "low"]).optional(),
   /**
    * Frozen, provider-neutral estimate of the content tokens this task's files
    * contribute to a review prompt. Seeded deterministically at planning
@@ -158,51 +164,58 @@ export interface AuditTask {
    * input to just-in-time dispatch packetization — see
    * docs/audit-workflow-design.md.
    */
-  token_estimate?: number;
+  token_estimate: z.number().optional(),
   /**
    * Frozen, provider-neutral audit-risk score in [0,1] (likelihood × stakes of
    * latent defects). Seeded deterministically from priority/lens/tags and
    * refined/frozen by the estimate-review step. Drives just-in-time risk-mass
    * packetization and model-tier routing; never a model/provider decision.
    */
-  risk_estimate?: number;
-  tags?: string[];
-  status?: AuditTaskStatus;
-  completed_at?: string;
-  completion_reason?: string;
-}
+  risk_estimate: z.number().optional(),
+  tags: z.array(z.string()).optional(),
+  status: z.enum(["pending", "complete"]).optional(),
+  completed_at: z.string().optional(),
+  completion_reason: z.string().optional(),
+});
+export type AuditTask = z.infer<typeof AuditTaskSchema>;
 
 // The canonical field set lives in @audit-tools/shared. The auditor accepts
-// any string as lens (canonical + custom); everything else is inherited so
-// the wire contract stays in sync (including `theme_id` added in Phase 6).
-export interface Finding extends Omit<SharedFinding, "lens"> {
-  lens: string;
-}
+// any string as lens (canonical + custom); SharedFinding already types `lens`
+// as a string, so the former Omit<…,"lens"> re-narrowing was a no-op — this is
+// now a direct alias so the wire contract can never drift from shared.
+export type Finding = SharedFinding;
 
-export interface AuditVerification {
-  verified: boolean;
-  needs_followup: boolean;
-  concerns?: string[];
-  coverage_concerns?: string[];
-  confidence_concerns?: string[];
-  followup_tasks?: AuditTask[];
-}
+export const AuditVerificationSchema = z.object({
+  verified: z.boolean(),
+  needs_followup: z.boolean(),
+  concerns: z.array(z.string()).optional(),
+  coverage_concerns: z.array(z.string()).optional(),
+  confidence_concerns: z.array(z.string()).optional(),
+  followup_tasks: z.array(AuditTaskSchema).optional(),
+});
+export type AuditVerification = z.infer<typeof AuditVerificationSchema>;
 
-export interface AuditResult {
-  task_id: string;
-  unit_id: string;
-  pass_id: string;
-  lens: string;
-  agent_role?: string;
-  file_coverage: Array<{
-    path: string;
-    total_lines: number;
-  }>;
-  findings: Finding[];
-  notes?: string[];
-  requires_followup?: boolean;
-  followup_tasks?: string[];
-  verification?: AuditVerification;
-  run_id?: string;
-  submitted_at?: string;
-}
+export const AuditResultSchema = z.object({
+  task_id: z.string(),
+  unit_id: z.string(),
+  pass_id: z.string(),
+  lens: z.string(),
+  agent_role: z.string().optional(),
+  file_coverage: z.array(
+    z.object({
+      path: z.string(),
+      total_lines: z.number(),
+    }),
+  ),
+  // The auditor accepts any string as lens (canonical + custom); the shared
+  // FindingSchema already types lens as string, so a Finding here IS a
+  // SharedFinding (the former Omit<…,"lens"> narrowing was a no-op).
+  findings: z.array(FindingSchema),
+  notes: z.array(z.string()).optional(),
+  requires_followup: z.boolean().optional(),
+  followup_tasks: z.array(z.string()).optional(),
+  verification: AuditVerificationSchema.optional(),
+  run_id: z.string().optional(),
+  submitted_at: z.string().optional(),
+});
+export type AuditResult = z.infer<typeof AuditResultSchema>;

@@ -1335,66 +1335,55 @@ test("step_contract schema validates progress with all StepProgress fields (ARC-
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// DAT-db770721: lens enum must be defined only once, in lens.schema.json;
-// no other schema file should contain an inline enum array with "correctness".
+// DAT-db770721 (A6): the lens vocabulary has ONE source — the `LensSchema` zod
+// enum. The worker-facing JSON schemas inline it (generated from that source),
+// so inline lens enums are allowed, but every one of them must EQUAL the source
+// — a hand-copied / drifted lens list can never slip in.
 // ---------------------------------------------------------------------------
 
-test("lens enum is defined only once across all schemas (DAT-db770721)", async () => {
+test("every inline lens enum across schemas equals the LensSchema source (DAT-db770721)", async () => {
+  const { LensSchema } = await import("@audit-tools/shared");
+  const CANONICAL = LensSchema.options;
   const { readdir } = await import("node:fs/promises");
   const schemasDir = join(repoRoot, "schemas");
   const schemaFiles = (await readdir(schemasDir)).filter((f) =>
     f.endsWith(".schema.json"),
   );
 
-  const EXPECTED_LENSES = [
-    "correctness",
-    "architecture",
-    "maintainability",
-    "security",
-    "reliability",
-    "performance",
-    "data_integrity",
-    "tests",
-    "operability",
-    "config_deployment",
-    "observability",
-  ];
-
-  // lens.schema.json must exist and hold the canonical 11-value enum
+  // lens.schema.json is generated from LensSchema; it must hold exactly the source.
   const lensSchema = JSON.parse(
     await readFile(join(schemasDir, "lens.schema.json"), "utf8"),
   );
   assert.deepEqual(
     lensSchema.enum,
-    EXPECTED_LENSES,
-    "lens.schema.json must contain exactly the 11 canonical lens values",
+    [...CANONICAL],
+    "lens.schema.json must contain exactly the canonical lens values",
   );
 
-  // No other schema file may embed an inline enum containing "correctness"
-  function containsInlineLensEnum(obj) {
-    if (typeof obj !== "object" || obj === null) return false;
-    if (
-      Array.isArray(obj.enum) &&
-      obj.enum.includes("correctness")
-    ) {
-      return true;
+  // Any inline lens enum (array containing "correctness") anywhere must match the
+  // single source — proving it was derived from LensSchema, not hand-copied.
+  const offenders = [];
+  function checkInlineLensEnums(obj, file) {
+    if (typeof obj !== "object" || obj === null) return;
+    if (Array.isArray(obj.enum) && obj.enum.includes("correctness")) {
+      try {
+        assert.deepEqual(obj.enum, [...CANONICAL]);
+      } catch {
+        offenders.push(file);
+      }
     }
-    for (const value of Object.values(obj)) {
-      if (containsInlineLensEnum(value)) return true;
-    }
-    return false;
+    for (const value of Object.values(obj)) checkInlineLensEnums(value, file);
   }
 
   for (const file of schemaFiles) {
-    if (file === "lens.schema.json") continue;
-    const parsed = JSON.parse(
-      await readFile(join(schemasDir, file), "utf8"),
-    );
-    assert.ok(
-      !containsInlineLensEnum(parsed),
-      `${file} must not contain an inline lens enum array — use {"$ref":"lens.schema.json"} instead`,
-    );
+    const parsed = JSON.parse(await readFile(join(schemasDir, file), "utf8"));
+    checkInlineLensEnums(parsed, file);
   }
+  assert.deepEqual(
+    offenders,
+    [],
+    `these schemas contain a lens enum that drifted from LensSchema: ${offenders.join(", ")}`,
+  );
 });
 
 test("blind_spot_register schema rejects invalid lens names in suggested_lenses (DAT-3fb8a01d)", async () => {
