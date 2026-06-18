@@ -17,7 +17,7 @@ interface SemgrepJson {
 
 /**
  * Maps semgrep's native uppercase severity strings to the lowercase enum values
- * required by external_analyzer_results.schema.json. Case-insensitive lookup so
+ * required by ExternalAnalyzerResultsSchema. Case-insensitive lookup so
  * any casing variant is handled uniformly.
  *
  * Semgrep → schema:

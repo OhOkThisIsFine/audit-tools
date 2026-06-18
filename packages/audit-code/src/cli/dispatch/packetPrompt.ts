@@ -246,7 +246,7 @@ export function buildPacketPrompt(params: {
     "yourself: '[' + (ConvertTo-Json $obj -Depth 12) + ']', or build the array with Write-Output -NoEnumerate.",
     "",
     "Schema file (resolve relative to this prompt's directory): audit_result.schema.json",
-    "  $refs resolved from the same directory: finding.schema.json, audit_task.schema.json",
+    "  self-contained (all shapes inlined); finding.schema.json and audit_task.schema.json are also provided for reference.",
     "You MAY validate your JSON array against the schema before emitting. This is optional.",
     "",
     "Required AuditResult fields:",

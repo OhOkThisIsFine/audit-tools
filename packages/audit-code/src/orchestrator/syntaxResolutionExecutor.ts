@@ -102,9 +102,9 @@ function runTsc(root: string): {
       results.push({
         id: `tsc-${results.length}`,
         category: "correctness",
-        // Canonical severity vocabulary required by
-        // external_analyzer_results.schema.json is critical|high|medium|low|info
-        // — a tsc error maps to "high" (COR-5d9f2421), not the raw "error".
+        // Canonical severity vocabulary required by ExternalAnalyzerResultsSchema
+        // is critical|high|medium|low|info — a tsc error maps to "high"
+        // (COR-5d9f2421), not the raw "error".
         severity: "high",
         path: match[1].replace(/\\/g, "/"),
         line_start: parseInt(match[2], 10),
