@@ -9,6 +9,7 @@ import {
 } from "../../types/activeDispatch.js";
 import type { AuditTask } from "../../types.js";
 import type { DispatchModelHint } from "@audit-tools/shared";
+import type { CapacityPool } from "../../quota/index.js";
 
 // Shared interfaces, constants, and type re-exports for the dispatch pipeline.
 // Consumed by tierRouting, packetFilter, packetPrompt, quotaPool, and the
@@ -80,6 +81,19 @@ export interface PrepareDispatchResult {
   } | null;
   warning_count: number;
   dispatch_warnings_path: string | null;
+  /**
+   * The dispatch plan in memory (also persisted to `dispatch_plan_path`). Returned
+   * so the in-process rolling driver (A8(a)) can build dispatch packets directly
+   * without re-reading the file it just wrote.
+   */
+  plan: DispatchPlanEntry[];
+  /**
+   * The quota-derived capacity pools resolved for this dispatch (host-model
+   * windows + discovered limits). Returned so the in-process rolling driver can
+   * feed them straight into `runRollingDispatch` as `confirmedPools` rather than
+   * re-resolving the pool.
+   */
+  pools: CapacityPool[];
 }
 
 export interface DispatchPlanEntry {
