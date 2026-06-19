@@ -832,21 +832,40 @@ function normalizeForMatch(value: string): string {
 }
 
 /**
- * A derivation is satisfied when every salient token (length >= 4) of the agreed
- * interface appears in the finalized-contract corpus. This tolerates rewording
- * (the finalized contract need not be a verbatim copy) while still failing when
- * the agreed interface left no trace at all.
+ * Function words that are length >= 4 but carry no interface meaning. Excluded from
+ * the salient-token set so a derivation is judged on its CONTENT terms, not on filler
+ * — otherwise "must"/"than"/"with" force the finalized contract to echo the agreed
+ * interface near-verbatim (the dogfood: a faithful paraphrase failed INV-CO-12).
+ */
+const DERIVATION_STOPWORDS = new Set([
+  "must", "shall", "should", "will", "would", "with", "that", "this", "from", "into",
+  "when", "then", "than", "they", "them", "their", "there", "have", "been", "were",
+  "what", "which", "while", "your", "here", "where", "also", "only", "such", "each",
+  "both", "more", "most", "some", "very", "upon", "onto", "does", "done",
+]);
+
+/**
+ * A derivation is satisfied when a strong majority of the agreed interface's salient
+ * CONTENT tokens (length >= 4, excluding function-word stopwords) appear in the
+ * finalized-contract corpus. Substring matching already tolerates morphology
+ * (`flush` ⊂ `flushes`); dropping stopwords and requiring a majority rather than ALL
+ * tolerates genuine rewording (a synonym or two), while still failing when the agreed
+ * interface left little or no trace — the INV-CO-12 fail-closed property.
  */
 function corpusContainsAgreedInterface(corpus: string, agreed: string): boolean {
   const tokens = normalizeForMatch(agreed)
     .split(" ")
-    .filter((t) => t.length >= 4);
+    .filter((t) => t.length >= 4 && !DERIVATION_STOPWORDS.has(t));
   if (tokens.length === 0) {
-    // No salient tokens — fall back to a normalized substring check.
+    // No salient content tokens — fall back to a normalized substring check.
     const normAgreed = normalizeForMatch(agreed);
     return normAgreed.length === 0 || corpus.includes(normAgreed);
   }
-  return tokens.every((t) => corpus.includes(t));
+  const present = tokens.filter((t) => corpus.includes(t)).length;
+  // Require ~60% of content tokens — one reworded term in a short interface passes,
+  // a mostly-absent interface fails. ceil keeps 1–2-token interfaces strict.
+  const required = Math.max(1, Math.ceil(tokens.length * 0.6));
+  return present >= required;
 }
 
 // ── Node model-tier derivation (relative rank, never a model name) ─────────────
