@@ -5,12 +5,17 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
+import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createWorktree,
   removeWorktree,
   verifyNodeInWorktree,
   mergeWorktree,
   worktreePath,
+  seedUntrackedDeclaredPaths,
 } from "../../src/remediate/steps/dispatch.js";
 import { resolveWindowsShimSpawnCommand } from "audit-tools/shared";
 
@@ -34,6 +39,67 @@ function makeSpawnResult(status: number, stdout = "", stderr = "") {
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+// ---------------------------------------------------------------------------
+// seedUntrackedDeclaredPaths (pure fs — copies declared targets a worktree lacks)
+// ---------------------------------------------------------------------------
+
+describe("seedUntrackedDeclaredPaths", () => {
+  async function makeDirs() {
+    const base = await mkdtemp(join(tmpdir(), "seed-untracked-"));
+    const root = join(base, "root");
+    const wt = join(base, "wt");
+    await mkdir(root, { recursive: true });
+    await mkdir(wt, { recursive: true });
+    return { base, root, wt };
+  }
+
+  it("copies a declared path present in root but absent from the worktree", async () => {
+    const { base, root, wt } = await makeDirs();
+    try {
+      await writeFile(join(root, "opencode.json"), '{"a":1}');
+      seedUntrackedDeclaredPaths(root, wt, ["opencode.json"]);
+      expect(existsSync(join(wt, "opencode.json"))).toBe(true);
+      expect(await readFile(join(wt, "opencode.json"), "utf8")).toBe('{"a":1}');
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("creates nested parent dirs for a declared path", async () => {
+    const { base, root, wt } = await makeDirs();
+    try {
+      await mkdir(join(root, ".gemini", "commands"), { recursive: true });
+      await writeFile(join(root, ".gemini", "commands", "audit-code.toml"), "x = 1");
+      seedUntrackedDeclaredPaths(root, wt, [".gemini/commands/audit-code.toml"]);
+      expect(existsSync(join(wt, ".gemini", "commands", "audit-code.toml"))).toBe(true);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("never clobbers a path already materialized in the worktree (tracked-from-HEAD)", async () => {
+    const { base, root, wt } = await makeDirs();
+    try {
+      await writeFile(join(root, "tracked.txt"), "ROOT-DIRTY");
+      await writeFile(join(wt, "tracked.txt"), "WORKTREE-HEAD");
+      seedUntrackedDeclaredPaths(root, wt, ["tracked.txt"]);
+      expect(await readFile(join(wt, "tracked.txt"), "utf8")).toBe("WORKTREE-HEAD");
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("skips a declared path that does not exist in root, and absolute paths", async () => {
+    const { base, root, wt } = await makeDirs();
+    try {
+      seedUntrackedDeclaredPaths(root, wt, ["missing.json", join(root, "abs.json")]);
+      expect(existsSync(join(wt, "missing.json"))).toBe(false);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

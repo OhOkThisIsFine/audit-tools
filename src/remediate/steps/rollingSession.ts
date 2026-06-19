@@ -6,6 +6,8 @@ import {
   createWorktree,
   resetNodeWorktreeAndBranch,
   ensureWorktreeNodeModules,
+  seedUntrackedDeclaredPaths,
+  declaredPathsFromPlan,
   worktreePath,
   worktreeBranchForBlock,
   acceptNodeWorktree,
@@ -84,7 +86,12 @@ function sessionLockPath(artifactsDir: string, runId: string): string {
 }
 
 /** Remove any stale worktree, then create a fresh isolated one with node_modules linked. */
-function createNodeWorktree(root: string, blockId: string, runId: string): void {
+function createNodeWorktree(
+  root: string,
+  blockId: string,
+  runId: string,
+  declaredPaths: string[],
+): void {
   const wt = worktreePath(root, blockId, runId);
   const branch = worktreeBranchForBlock(blockId, runId);
   // Fully reset (worktree dir + pruned admin entries + force-deleted branch) so a
@@ -94,6 +101,28 @@ function createNodeWorktree(root: string, blockId: string, runId: string): void 
   resetNodeWorktreeAndBranch(root, wt, branch);
   createWorktree(root, wt, branch);
   ensureWorktreeNodeModules(root, wt);
+  // Bring in declared targets that are untracked/ignored in the main tree — a
+  // committed-files-only worktree otherwise can't see them (BUG: a config node
+  // couldn't reach its own untracked opencode.json / .gemini/*.toml targets).
+  seedUntrackedDeclaredPaths(root, wt, declaredPaths);
+}
+
+/**
+ * A block's declared target paths (write ∪ read) from the persisted dispatch plan,
+ * for worktree seeding. Best-effort: worktree seeding is enrichment, never a
+ * correctness gate, so a missing/unreadable plan degrades to no seeding rather than
+ * aborting the JIT dispatch (mirrors `computeAcceptScope`).
+ */
+async function declaredPathsForBlockSafe(
+  artifactsDir: string,
+  runId: string,
+  blockId: string,
+): Promise<string[]> {
+  try {
+    return declaredPathsFromPlan(await readDispatchPlan(artifactsDir, runId, "implement"), blockId);
+  } catch {
+    return [];
+  }
 }
 
 /** Targeted verify commands for a block (deduped), from its findings. */
@@ -185,8 +214,15 @@ export async function prepareHostRollingDispatch(
   // are JIT-created by `accept-node` as nodes complete — so ~slots worktrees
   // exist at any time, never the whole frontier at once.
   const initialNodes = frontier.slice(0, Math.min(slots, frontier.length));
+  // `plan` (above) is the single source of each block's declared scope (write ∪
+  // read) — used to seed untracked declared targets into each worktree.
   for (const node of initialNodes) {
-    createNodeWorktree(options.root, node.block_id, runId);
+    createNodeWorktree(
+      options.root,
+      node.block_id,
+      runId,
+      declaredPathsFromPlan(plan, node.block_id),
+    );
   }
 
   const session: RollingSession = {
@@ -256,7 +292,12 @@ export async function advanceHostRolling(opts: {
 
     const next = session.frontier.find((n) => !session.dispatched.includes(n.block_id));
     if (next) {
-      createNodeWorktree(opts.root, next.block_id, opts.runId);
+      createNodeWorktree(
+        opts.root,
+        next.block_id,
+        opts.runId,
+        await declaredPathsForBlockSafe(opts.artifactsDir, opts.runId, next.block_id),
+      );
       session.dispatched.push(next.block_id);
       await writeJsonFile(sessionPath(opts.artifactsDir, opts.runId), session);
       return {
