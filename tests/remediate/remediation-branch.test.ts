@@ -6,12 +6,15 @@
  */
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   remediationBranchName,
   ensureRemediationBranchCheckedOut,
+  quarantineFailedNodeCommit,
+  clearQuarantinedCommit,
+  listQuarantinedCommits,
 } from "../../src/remediate/steps/dispatch.js";
 
 function git(repo: string, ...args: string[]) {
@@ -71,5 +74,34 @@ describe("ensureRemediationBranchCheckedOut", () => {
   it("returns null on a non-git root (best-effort, never throws)", () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "rem-nogit-")));
     expect(ensureRemediationBranchCheckedOut(dir, "PLAN-3")).toBeNull();
+  });
+});
+
+describe("failed-node commit quarantine (BUG 2 — no lost verified fix)", () => {
+  it("preserves a failed node's commit so it survives branch -D, then clears", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    // A worktree-style node branch carrying a real commit (the would-be fix).
+    git(repo, "checkout", "-b", "remediate-BLK1-RID");
+    writeFileSync(join(repo, "fix.txt"), "the verified fix");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-m", "fix");
+    const sha = git(repo, "rev-parse", "HEAD").stdout.trim();
+    git(repo, "checkout", "-"); // leave the node branch (back to base)
+
+    const q = quarantineFailedNodeCommit(repo, "remediate-BLK1-RID", "RID", "BLK1");
+    expect(q?.commit).toBe(sha);
+
+    // resetNodeWorktreeAndBranch force-deletes the node branch on re-dispatch...
+    git(repo, "branch", "-D", "remediate-BLK1-RID");
+    // ...but the commit is STILL reachable via the durable quarantine ref.
+    expect(git(repo, "rev-parse", "--verify", q!.ref).stdout.trim()).toBe(sha);
+
+    expect(listQuarantinedCommits(repo, "RID")).toEqual([
+      { block: "BLK1", ref: q!.ref, commit: sha },
+    ]);
+
+    clearQuarantinedCommit(repo, "RID", "BLK1");
+    expect(listQuarantinedCommits(repo, "RID")).toEqual([]);
   });
 });

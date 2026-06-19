@@ -736,13 +736,93 @@ export function worktreePath(root: string, blockId: string, runId: string): stri
  * worktree branches (`remediate-<blockId>-<runId>`) — this uses a `remediation/` ref
  * namespace so the two never collide.
  */
-export function remediationBranchName(runId: string): string {
-  const safe =
-    runId
+function refSafeSegment(s: string, fallback: string): string {
+  return (
+    s
       .replace(/[^A-Za-z0-9._-]+/g, "-")
       .replace(/\.{2,}/g, ".") // ".." is invalid in a git ref name
-      .replace(/^[-.]+|[-.]+$/g, "") || "run";
-  return `remediation/${safe}`;
+      .replace(/^[-.]+|[-.]+$/g, "") || fallback
+  );
+}
+
+export function remediationBranchName(runId: string): string {
+  return `remediation/${refSafeSegment(runId, "run")}`;
+}
+
+/** Durable ref under which a failed-but-committed node's commit is preserved. */
+function quarantineRef(runId: string, blockId: string): string {
+  return `refs/remediation-quarantine/${refSafeSegment(runId, "run")}/${refSafeSegment(blockId, "node")}`;
+}
+
+/**
+ * Preserve a failed-but-committed node's work so it can never be lost. A node that
+ * committed real edits to its worktree branch but then failed verify / the
+ * write-scope gate / the cherry-pick is about to have its worktree removed and (on
+ * the next re-dispatch) its branch force-deleted — orphaning the commit. The dogfood
+ * lost a verified fix exactly this way (the worktree was pruned before recovery).
+ * Point a durable ref at the branch tip: a ref under refs/remediation-quarantine/
+ * survives `git branch -D` and `git worktree prune`, so the work stays reachable for
+ * a manual `git cherry-pick`. Best-effort; returns the ref + commit, or null.
+ */
+export function quarantineFailedNodeCommit(
+  root: string,
+  branch: string,
+  runId: string,
+  blockId: string,
+): { ref: string; commit: string } | null {
+  const rev = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${branch}^{commit}`], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (rev.status !== 0) return null;
+  const commit = (rev.stdout ?? "").trim();
+  const ref = quarantineRef(runId, blockId);
+  const upd = spawnSync("git", ["update-ref", ref, commit], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (upd.status !== 0) {
+    process.stderr.write(
+      `[remediate-code] could not quarantine ${branch}: ${(upd.stderr ?? "").trim()}\n`,
+    );
+    return null;
+  }
+  process.stderr.write(
+    `[remediate-code] preserved failed node ${blockId} commit ${commit.slice(0, 8)} at ${ref} for recovery\n`,
+  );
+  return { ref, commit };
+}
+
+/** Clear a node's quarantine ref (e.g. once a later re-dispatch landed successfully). Best-effort. */
+export function clearQuarantinedCommit(root: string, runId: string, blockId: string): void {
+  spawnSync("git", ["update-ref", "-d", quarantineRef(runId, blockId)], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+}
+
+/** Quarantined failed-node commits still preserved for a run, for recovery surfacing in the report. */
+export function listQuarantinedCommits(
+  root: string,
+  runId: string,
+): Array<{ block: string; ref: string; commit: string }> {
+  const prefix = `refs/remediation-quarantine/${refSafeSegment(runId, "run")}/`;
+  const res = spawnSync("git", ["for-each-ref", "--format=%(refname) %(objectname)", prefix], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (res.status !== 0 || !res.stdout) return [];
+  const out: Array<{ block: string; ref: string; commit: string }> = [];
+  for (const line of res.stdout.split("\n")) {
+    const [ref, commit] = line.trim().split(/\s+/);
+    if (!ref || !commit) continue;
+    out.push({ block: ref.slice(prefix.length), ref, commit });
+  }
+  return out;
 }
 
 /**
@@ -942,7 +1022,11 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
   verifyPassed = verify.passed;
   if (!verify.passed) {
     // Verify failed: do not merge; drop the worktree so the main tree stays clean.
-    // Carry the failing command + output so triage isn't blind on outcome:error.
+    // The node DID commit real edits, so preserve them under a durable quarantine
+    // ref before the worktree/branch go away — a tool-verify false-negative must
+    // not destroy a good fix (the dogfood lost one this way). Carry the failing
+    // command + output so triage isn't blind on outcome:error.
+    quarantineFailedNodeCommit(root, branch, runId, blockId);
     removeWorktree(root, wt);
     return { outcome: "error", verifyPassed, merged, diagnostic: verify.output };
   }
@@ -962,6 +1046,8 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
       amendedFiles: params.scope.amendedFiles,
     });
     if (decision.blocked) {
+      // Scope-blocked but the node committed real work — preserve it for recovery.
+      quarantineFailedNodeCommit(root, branch, runId, blockId);
       removeWorktree(root, wt);
       return { outcome: "error", verifyPassed, merged: false, diagnostic: decision.reason };
     }
@@ -972,8 +1058,13 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
   const mergeRes = mergeWorktree(root, wt, branch);
   merged = mergeRes.success;
   if (!mergeRes.success) {
+    // Cherry-pick conflict: the committed work would otherwise be orphaned — preserve it.
+    quarantineFailedNodeCommit(root, branch, runId, blockId);
     return { outcome: "error", verifyPassed, merged, diagnostic: mergeRes.error };
   }
+  // Landed successfully: clear any quarantine ref left by a prior failed attempt
+  // for this node so the recovery report lists only genuinely-unrecovered work.
+  clearQuarantinedCommit(root, runId, blockId);
   return { outcome: "success", verifyPassed, merged };
 }
 
