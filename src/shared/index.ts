@@ -83,6 +83,7 @@ export {
   AuditFindingsReportSchema,
 } from "./types/finding.js";
 export type { IntentCheckpoint } from "./types/intentCheckpoint.js";
+export { IntentCheckpointSchema } from "./types/intentCheckpoint.js";
 export type { InterpretedIntent } from "./intent/freeFormIntentInterpreter.js";
 export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
 
@@ -101,6 +102,11 @@ export type {
   RemediationOutcomeStatus,
   RemediationOutcome,
   RemediationOutcomesReport,
+} from "./types/remediationOutcome.js";
+export {
+  RemediationOutcomeStatusSchema,
+  RemediationOutcomeSchema,
+  RemediationOutcomesReportSchema,
 } from "./types/remediationOutcome.js";
 // Canonical lens vocabulary + the runtime validation Sets derived from it.
 export type { Lens } from "./types/lens.js";
@@ -159,6 +165,7 @@ export {
   SESSION_UI_MODES,
   PROVIDER_SECTION_KEYS,
   ANALYZER_SETTINGS,
+  AnalyzerSettingSchema,
 } from "./types/sessionConfig.js";
 
 // Contracts
@@ -773,6 +780,8 @@ export type {
   AdvanceResult,
 } from "./engine/obligationEngine.js";
 export {
+  ObligationStateSchema,
+  ObligationSchema,
   findFirstActionableObligation,
   findNextObligation,
   advance,

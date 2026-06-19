@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { GraphEdge, RouteEdge, AnalyzerSetting } from "audit-tools/shared";
 import type { FileDisposition } from "audit-tools/shared";
 import type { RepoManifest } from "../../types.js";
@@ -42,13 +43,15 @@ export interface LanguageAnalyzer {
 }
 
 /** How an analyzer's dependency resolved (or why it will not run). */
-export type AnalyzerResolution =
-  | "repo"
-  | "cache"
-  | "installed"
-  | "absent"
-  | "skip"
-  | "not_applicable";
+export const AnalyzerResolutionSchema = z.enum([
+  "repo",
+  "cache",
+  "installed",
+  "absent",
+  "skip",
+  "not_applicable",
+]);
+export type AnalyzerResolution = z.infer<typeof AnalyzerResolutionSchema>;
 
 /**
  * Deterministic pre-install resolution for one analyzer. Computed without

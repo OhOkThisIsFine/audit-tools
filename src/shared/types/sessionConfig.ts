@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { DispatchModelTier } from "./stepContract.js";
 
 export const PROVIDER_NAMES = [
@@ -250,7 +251,8 @@ export const ANALYZER_SETTINGS = [
   "skip",
   "auto",
 ] as const;
-export type AnalyzerSetting = (typeof ANALYZER_SETTINGS)[number];
+export const AnalyzerSettingSchema = z.enum(ANALYZER_SETTINGS);
+export type AnalyzerSetting = z.infer<typeof AnalyzerSettingSchema>;
 
 export interface DesignReviewConfig {
   /**
