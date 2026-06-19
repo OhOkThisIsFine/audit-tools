@@ -502,6 +502,17 @@ export function validatePairedObligations(
       ? (spec.assertions as unknown[]).filter((a): a is string => typeof a === "string")
       : [];
     for (const assertion of assertions) {
+      // An explicit POSITIVE:/NEGATIVE: label is authoritative: it sets exactly
+      // that one polarity and the keyword regexes are skipped for this assertion
+      // (so e.g. "POSITIVE: must not exceed N" counts only as positive, even
+      // though its free text matches a negative keyword). Only unlabeled
+      // assertions fall through to the keyword fallback.
+      const label = /^\s*(POSITIVE|NEGATIVE)\s*:/i.exec(assertion);
+      if (label) {
+        if (label[1].toUpperCase() === "POSITIVE") entry.positive = true;
+        else entry.negative = true;
+        continue;
+      }
       if (NEGATIVE_ASSERTION_PATTERN.test(assertion)) entry.negative = true;
       if (POSITIVE_ASSERTION_PATTERN.test(assertion)) entry.positive = true;
     }
@@ -759,7 +770,13 @@ export function validateReconciliationDerivation(
       : [];
   for (const mod of moduleContracts) {
     if (!isRecord(mod)) continue;
-    for (const field of ["inputs", "outputs", "invariants", "side_effects"] as const) {
+    for (const field of [
+      "inputs",
+      "outputs",
+      "invariants",
+      "side_effects",
+      "seam_adjustments",
+    ] as const) {
       if (Array.isArray(mod[field])) {
         for (const entry of mod[field] as unknown[]) {
           if (typeof entry === "string") corpusParts.push(entry);
