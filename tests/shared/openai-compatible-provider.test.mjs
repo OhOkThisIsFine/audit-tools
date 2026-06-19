@@ -68,6 +68,34 @@ test("parseJsonLoose parses direct, fenced, and prose-wrapped JSON", () => {
   assert.throws(() => parseJsonLoose("no json here"));
 });
 
+test("parseJsonLoose balance scan tolerates trailing garbage after the object", () => {
+  // A complete object followed by junk braces/brackets: the lastIndexOf-slice
+  // approach would over-capture; the balance scan stops at the matched close.
+  assert.deepEqual(parseJsonLoose('prefix {"a":1,"b":[2,3]} }]}'), {
+    a: 1,
+    b: [2, 3],
+  });
+});
+
+test("parseJsonLoose returns the real object, not a trivial example before it", () => {
+  // Reasoning models often emit an illustrative `{}` before the real payload.
+  const text = 'Example: {} then the answer:\n{"files":[],"result":{"ok":true}}';
+  assert.deepEqual(parseJsonLoose(text), { files: [], result: { ok: true } });
+});
+
+test("parseJsonLoose ignores braces inside strings", () => {
+  // A `}` inside a string must not terminate the object early.
+  assert.deepEqual(parseJsonLoose('{"msg":"a } b"}'), { msg: "a } b" });
+  // Escaped quote inside a string must not flip string state.
+  assert.deepEqual(parseJsonLoose('{"msg":"she said \\"hi } bye\\""}'), {
+    msg: 'she said "hi } bye"',
+  });
+});
+
+test("parseJsonLoose throws on an unterminated object", () => {
+  assert.throws(() => parseJsonLoose('garbage {"a":1, "b": {'));
+});
+
 test("launch applies files to the worktree and writes the result", async () => {
   const { repoRoot, input } = makeCtx();
   const content = JSON.stringify({
@@ -237,6 +265,92 @@ test("a configured endpoint beats the codex last-resort; without it codex wins",
     resolveFreshSessionProviderName("auto", {}, { env, commandExists: onlyCodex }),
     "codex",
   );
+});
+
+test("request body defaults response_format ON when not configured", async () => {
+  const { input } = makeCtx();
+  let captured;
+  const fetchFn = async (_url, init) => {
+    captured = JSON.parse(init.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ files: [], result: {} }) } }],
+      }),
+      text: async () => "",
+    };
+  };
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  const res = await provider.launch(input);
+  assert.equal(res.accepted, true);
+  assert.deepEqual(captured.response_format, { type: "json_object" });
+});
+
+test("request body omits response_format when explicitly disabled", async () => {
+  const { input } = makeCtx();
+  let captured;
+  const fetchFn = async (_url, init) => {
+    captured = JSON.parse(init.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ files: [], result: {} }) } }],
+      }),
+      text: async () => "",
+    };
+  };
+  const provider = new OpenAiCompatibleProvider(
+    { ...minimalConfig, response_format_json: false },
+    { fetchFn },
+  );
+  const res = await provider.launch(input);
+  assert.equal(res.accepted, true);
+  assert.equal(captured.response_format, undefined);
+});
+
+for (const status of [400, 422]) {
+  test(`HTTP ${status} on the response_format request degrades to a no-format retry that succeeds`, async () => {
+    const { input } = makeCtx();
+    const bodies = [];
+    let call = 0;
+    const fetchFn = async (_url, init) => {
+      call += 1;
+      bodies.push(JSON.parse(init.body));
+      if (call === 1) {
+        return { ok: false, status, json: async () => ({}), text: async () => "no json mode" };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ files: [], result: { ok: true } }) } }],
+        }),
+        text: async () => "",
+      };
+    };
+    const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+    const res = await provider.launch(input);
+    assert.equal(res.accepted, true, res.error);
+    assert.equal(call, 2, "must retry exactly once");
+    assert.deepEqual(bodies[0].response_format, { type: "json_object" });
+    assert.equal(bodies[1].response_format, undefined, "retry must drop response_format");
+  });
+}
+
+test("a degrade-exhausted request (both attempts fail) is fatal", async () => {
+  const { input } = makeCtx();
+  let call = 0;
+  const fetchFn = async () => {
+    call += 1;
+    return { ok: false, status: 400, json: async () => ({}), text: async () => "still bad" };
+  };
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  const res = await provider.launch(input);
+  assert.equal(res.accepted, false);
+  assert.match(res.error ?? "", /HTTP 400/);
+  assert.equal(call, 2, "first attempt + one retry, no loop");
 });
 
 test("createFreshSessionProvider constructs the openai-compatible provider", () => {
