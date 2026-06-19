@@ -75,16 +75,21 @@ export function renderConfirmIntentPrompt(
           .join("\n")
       : "_(none)_";
 
-  // Render lens proposals
-  const lensProposalLines =
-    preDigest.lens_proposals.length > 0
-      ? preDigest.lens_proposals
-          .map((p) => `- **${p.lens}**: ${p.action === "exclude" ? "suggest excluding" : "include"} — ${p.reason}`)
-          .join("\n")
-      : "_(none)_";
+  // Render the canonical lens proposition table (note 1) — one glyph-labelled
+  // row per lens, in registry order. Mandatory rows always show ● mandatory.
+  const dispositionCell: Record<string, string> = {
+    mandatory: "● mandatory",
+    recommend_include: "✓ recommend include",
+    recommend_exclude: "✗ recommend exclude",
+  };
+  const lensTableRows = preDigest.lens_propositions
+    .map(
+      (p) =>
+        `| ${p.lens.padEnd(18)} | ${(dispositionCell[p.disposition] ?? p.disposition).padEnd(21)} | ${p.reason} |`,
+    )
+    .join("\n");
 
   const hasOverrideProposals = preDigest.disposition_override_proposals.length > 0;
-  const hasLensProposals = preDigest.lens_proposals.length > 0;
   // Derive the mandatory-lens prose from the authoritative MANDATORY_LENSES
   // constant so the rendered guidance can never drift from the enforced set
   // (MNT-df8c4551).
@@ -141,33 +146,34 @@ export function renderConfirmIntentPrompt(
           "",
         ]
       : []),
-    ...(hasLensProposals
-      ? [
-          "## Lens proposals",
-          "",
-          `Based on codebase character. Mandatory lenses (${mandatoryLensList})`,
-          "cannot be excluded regardless of selection.",
-          "",
-          lensProposalLines,
-          "",
-        ]
-      : []),
-    "## Lens catalog",
+    "## Lens proposition",
     "",
-    "The following canonical lenses are available:",
+    "Deterministic first pass over the codebase. ● = mandatory (always audited,",
+    "never re-confirmed), ✓ = recommend include, ✗ = recommend exclude.",
+    "",
+    "| Lens               | Disposition           | Why |",
+    "|--------------------|-----------------------|-----|",
+    lensTableRows,
+    "",
+    "### Review and finalize this table (do this BEFORE asking the user)",
+    "",
+    "Using your own judgment — research the code if it helps — review every",
+    "disposition above. You MAY:",
+    "- flip any `✓ recommend include` / `✗ recommend exclude` row when the codebase",
+    "  warrants it;",
+    "- append rows for non-canonical (custom) lenses you decide would help this",
+    "  audit — give each a disposition and a reason; they sit in the same table,",
+    "  undistinguished from canonical lenses.",
+    `You may NOT change the ● mandatory rows — Mandatory lenses (${mandatoryLensList})`,
+    "are always audited. This review is **invisible to the user** — they see only your final,",
+    "merged table, never a \"deterministic said X, I changed it to Y\" diff.",
+    "",
+    "Canonical lens meanings (for your review; you need not show these to the user):",
     "",
     ...LENSES.map((lens) => {
-      const isMandatory = (MANDATORY_LENSES as readonly string[]).includes(lens);
       const desc = LENS_DESCRIPTIONS[lens];
-      return `- **${lens}**${isMandatory ? " *(mandatory)*" : ""}${desc ? ` — ${desc}` : ""}`;
+      return `- **${lens}**${desc ? ` — ${desc}` : ""}`;
     }),
-    "",
-    `Mandatory lenses (${mandatoryLensList}) are`,
-    "always included regardless of selection.",
-    "",
-    "**Custom lenses are also accepted.** You may define any additional review",
-    "perspective — the lens name is freeform. Workers receive the lens name and",
-    "the `free_form_intent` as context for custom lenses.",
     "",
     "## Conceptual design-review depth",
     "",
@@ -186,17 +192,24 @@ export function renderConfirmIntentPrompt(
     "This records *how much* review to do, not which model runs it — model choice",
     "is resolved at dispatch against whatever models the provider has then.",
     "",
-    "## User confirmation required",
+    "## Ask the user (single round)",
     "",
-    "Before writing the checkpoint, confirm with the user in a single round of",
-    "questions (e.g. one `AskUserQuestion`):",
+    "After you have finalized the lens table, confirm with the user in ONE round,",
+    "using whatever native question mechanism your host provides (do not assume any",
+    "specific tool). Ask:",
     "",
     "1. Present the scope summary above.",
-    "2. Present the lens selection (default: all canonical lenses, or per the",
-    "   proposals above). Ask which lenses to include/exclude and whether the",
-    "   user wants to add any custom lenses.",
+    "2. Show the user ONLY your final lens table. Ask which **optional** lenses to",
+    "   **layer on top** of the always-on mandatory set (and whether to flip any",
+    "   recommend-include / recommend-exclude). Do NOT re-confirm or even mention the",
+    "   mandatory lenses — they are always on. The user may add **any number** of",
+    "   additional custom lenses (freeform names).",
     "3. Ask the conceptual design-review depth (default **shallow**).",
     "4. Wait for the user to confirm before proceeding.",
+    "",
+    "Record the result in `lens_selection`: optional + custom lenses the user wants",
+    "go in `include`; recommend-include lenses the user drops go in `exclude`.",
+    "(Mandatory lenses are always audited and need not be listed.)",
     "",
     "## What to do",
     "",

@@ -46,9 +46,22 @@ export interface DispositionOverrideProposal {
   reason: string;
 }
 
-export interface LensProposal {
-  lens: Lens;
-  action: "include" | "exclude";
+/**
+ * A single row in the canonical lens proposition table (dogfood note 1). Every
+ * canonical lens gets exactly one disposition; the host's invisible LLM review
+ * may flip a disposition or append rows for non-canonical (custom) lenses it
+ * decides would help — those appear in the same table, undistinguished from
+ * canonical rows. Dispositions are exactly three: there is no "available".
+ */
+export type LensDisposition =
+  | "mandatory"
+  | "recommend_include"
+  | "recommend_exclude";
+
+export interface LensProposition {
+  /** Canonical lens name OR an LLM-authored custom lens name. */
+  lens: string;
+  disposition: LensDisposition;
   reason: string;
 }
 
@@ -78,11 +91,14 @@ export interface ScopePreDigest {
    */
   disposition_override_proposals: DispositionOverrideProposal[];
   /**
-   * Lens proposals informed by codebase character (language distribution,
-   * test presence, network surface, config files). Mandatory lenses are never
-   * proposed for exclusion.
+   * Canonical lens proposition table (dogfood note 1) — ONE disposition per
+   * canonical lens, in registry order, derived deterministically from codebase
+   * character (language distribution, test presence, network surface, config
+   * files). Mandatory lenses always carry the `mandatory` disposition. The host
+   * reviews/adjusts these (and may add custom rows) invisibly before showing the
+   * user the final table.
    */
-  lens_proposals: LensProposal[];
+  lens_propositions: LensProposition[];
 }
 
 // ---------------------------------------------------------------------------
@@ -182,23 +198,22 @@ function buildDispositionOverrideProposals(
 }
 
 /**
- * Derive lens proposals from codebase character:
- * - unit_manifest shape (language distribution, test units, network surface)
- * - design_assessment findings tags (optional)
- *
- * Never proposes excluding a mandatory lens.
+ * Derive the canonical lens proposition table from codebase character (dogfood
+ * note 1). Emits exactly ONE disposition per canonical lens, in registry order:
+ * mandatory lenses always `mandatory`; the rest `recommend_include` or
+ * `recommend_exclude` from deterministic heuristics (network surface, test
+ * units, config files, module spread). This is the deterministic first pass; the
+ * host's invisible LLM review confirms/adjusts dispositions and may append
+ * custom-lens rows before the final table is shown to the user.
  */
-function buildLensProposals(
+function buildLensPropositions(
   unitManifest: { units: Array<{ kind?: string; required_lenses?: string[] }> } | undefined,
   inScopePaths: string[],
   dispositionFiles: Array<{ path: string; status: string }>,
-): LensProposal[] {
-  const proposals: LensProposal[] = [];
-
-  // Determine codebase character from unit manifest and paths
+): LensProposition[] {
   const units = unitManifest?.units ?? [];
 
-  // Check for network-surface units (kind contains "interface"/"api"/"http")
+  // Network-surface signal (kind contains interface/api/http, or path heuristics).
   const hasNetworkSurface = units.some((u) => {
     const kind = (u.kind ?? "").toLowerCase();
     return kind.includes("interface") || kind.includes("api") || kind.includes("http") || kind.includes("network");
@@ -207,7 +222,7 @@ function buildLensProposals(
     return norm.includes("/api/") || norm.includes("/routes/") || norm.includes("/controllers/");
   });
 
-  // Check for test units
+  // Test-unit signal.
   const hasTestUnits = units.some((u) => {
     const kind = (u.kind ?? "").toLowerCase();
     return kind.includes("test") || kind.includes("spec");
@@ -216,7 +231,7 @@ function buildLensProposals(
     return norm.includes("/test/") || norm.includes("/tests/") || norm.includes("/spec/") || norm.includes(".test.") || norm.includes(".spec.");
   });
 
-  // Check for config files
+  // Config/deployment signal.
   const hasConfigFiles = inScopePaths.some((p) => {
     const norm = normalizeExtractorPath(p);
     const base = norm.split("/").at(-1) ?? "";
@@ -229,34 +244,80 @@ function buildLensProposals(
     return base.endsWith(".yaml") || base.endsWith(".yml");
   });
 
-  // Build proposals
-  for (const lens of LENSES as readonly Lens[]) {
-    const mandatory = isMandatoryLens(lens as Lens);
+  // Structural-complexity signal: code spread across more than one top-level dir.
+  const topDirs = new Set(
+    inScopePaths.map((p) => normalizeExtractorPath(p).split("/")[0] || "."),
+  );
+  const isMultiModule = topDirs.size > 1;
 
-    if (lens === "operability" && !hasNetworkSurface) {
-      if (mandatory) {
-        proposals.push({ lens, action: "include", reason: "mandatory lens; no network-surface units detected (vacuous pass)" });
-      } else {
-        proposals.push({ lens, action: "exclude", reason: "no network-surface units detected; operability review may not apply" });
-      }
-    } else if (lens === "tests" && !hasTestUnits) {
-      if (mandatory) {
-        proposals.push({ lens, action: "include", reason: "mandatory lens; no test units detected (vacuous pass)" });
-      } else {
-        proposals.push({ lens, action: "exclude", reason: "no test units detected; tests lens may not apply" });
-      }
-    } else if (lens === "config_deployment" && !hasConfigFiles) {
-      if (mandatory) {
-        proposals.push({ lens, action: "include", reason: "mandatory lens; no config files detected (vacuous pass)" });
-      } else {
-        proposals.push({ lens, action: "exclude", reason: "no config/deployment files detected; config_deployment lens may not apply" });
-      }
+  const include = (lens: string, reason: string): LensProposition => ({
+    lens,
+    disposition: "recommend_include",
+    reason,
+  });
+  const exclude = (lens: string, reason: string): LensProposition => ({
+    lens,
+    disposition: "recommend_exclude",
+    reason,
+  });
+
+  const propositions: LensProposition[] = [];
+  for (const lens of LENSES as readonly Lens[]) {
+    if (isMandatoryLens(lens)) {
+      propositions.push({ lens, disposition: "mandatory", reason: "always audited" });
+      continue;
     }
-    // Mandatory lenses with zero in-scope units: note but don't exclude
-    // (handled above inline)
+    switch (lens) {
+      case "architecture":
+        propositions.push(
+          hasNetworkSurface || isMultiModule
+            ? include(lens, "network-surface units and/or multi-module structure")
+            : exclude(lens, "single small module; limited structural surface"),
+        );
+        break;
+      case "tests":
+        propositions.push(
+          hasTestUnits
+            ? include(lens, "test units present")
+            : exclude(lens, "no test units detected"),
+        );
+        break;
+      case "config_deployment":
+        propositions.push(
+          hasConfigFiles
+            ? include(lens, "config/deployment files detected")
+            : exclude(lens, "no config/deployment files detected"),
+        );
+        break;
+      case "operability":
+        propositions.push(
+          hasNetworkSurface
+            ? include(lens, "network-surface units present")
+            : exclude(lens, "no network-surface units detected"),
+        );
+        break;
+      case "performance":
+        propositions.push(
+          exclude(lens, "no hot-path / perf-sensitive units detected"),
+        );
+        break;
+      case "observability":
+        propositions.push(
+          exclude(lens, "no logging/metrics surface detected in scope"),
+        );
+        break;
+      case "maintainability":
+        propositions.push(
+          exclude(lens, "broadly applicable but low signal-to-noise; include on request"),
+        );
+        break;
+      default:
+        // Any future canonical lens defaults to recommend_include.
+        propositions.push(include(lens, "applies to this codebase"));
+    }
   }
 
-  return proposals;
+  return propositions;
 }
 
 export function computeScopePreDigest(
@@ -294,7 +355,7 @@ export function computeScopePreDigest(
 
   const excluded_summary = buildExcludedSummary(excluded);
   const disposition_override_proposals = buildDispositionOverrideProposals(dispositionFiles);
-  const lens_proposals = buildLensProposals(bundle.unit_manifest, inScopePaths, dispositionFiles);
+  const lens_propositions = buildLensPropositions(bundle.unit_manifest, inScopePaths, dispositionFiles);
 
   return {
     mode: scope.mode === "delta" ? "delta" : "full",
@@ -303,7 +364,7 @@ export function computeScopePreDigest(
     scope_dirs,
     excluded_summary,
     disposition_override_proposals,
-    lens_proposals,
+    lens_propositions,
   };
 }
 

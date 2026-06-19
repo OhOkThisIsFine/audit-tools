@@ -85,7 +85,7 @@ export const IntentCheckpointSchema = z
       .optional(),
     /**
      * Accepted or modified lens set from the host, derived from the
-     * `lens_proposals` in the scope pre-digest. `include` is additive (always
+     * lens proposition table in the scope pre-digest. `include` is additive (always
      * merged with mandatory lenses); `exclude` removes non-mandatory lenses.
      */
     lens_selection: z

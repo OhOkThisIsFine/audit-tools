@@ -132,7 +132,7 @@ await test("renderConfirmIntentPrompt includes the scope picture, target path, a
       scope_dirs: [{ dir: "src", files: 2 }],
       excluded_summary: [{ path: "dist/out.js", status: "generated", reason: "build output" }],
       disposition_override_proposals: [],
-      lens_proposals: [],
+      lens_propositions: [],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
@@ -157,9 +157,8 @@ await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDA
       scope_dirs: [{ dir: "src", files: 2 }],
       excluded_summary: [],
       disposition_override_proposals: [],
-      // A lens proposal so the "Lens proposals" prose block (which also names
-      // the mandatory set) is rendered.
-      lens_proposals: [{ lens: "operability", action: "exclude", reason: "no ops surface" }],
+      // A lens proposition so the table + the mandatory-set prose render.
+      lens_propositions: [{ lens: "operability", disposition: "recommend_exclude", reason: "no ops surface" }],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
@@ -187,7 +186,7 @@ await test("renderConfirmIntentPrompt asks for conceptual design-review depth (d
       scope_dirs: [{ dir: "src", files: 2 }],
       excluded_summary: [],
       disposition_override_proposals: [],
-      lens_proposals: [],
+      lens_propositions: [],
     },
     {
       intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json",
