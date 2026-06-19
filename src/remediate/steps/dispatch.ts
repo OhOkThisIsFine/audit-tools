@@ -1,6 +1,6 @@
 import { mkdir, rename } from "node:fs/promises";
-import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
-import { join, relative, dirname, resolve } from "node:path";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { join, relative, dirname, resolve, isAbsolute } from "node:path";
 import { OwnershipRegistry } from "../dispatch/ownershipRegistry.js";
 import { routeAmendmentRequest } from "../dispatch/amendmentClaim.js";
 import { toBlockId, fromBlockId } from "../contractPipeline/idRegistry.js";
@@ -556,6 +556,45 @@ export function createWorktree(root: string, worktreePath: string, branchName: s
     throw new Error(
       `git worktree add failed (exit ${result.status ?? "unknown"}):\n${stderr || stdout}`,
     );
+  }
+}
+
+/**
+ * Materialize into a fresh worktree any of the node's declared target paths that
+ * exist in the main tree but are absent from the worktree — i.e. git-untracked or
+ * gitignored files that `git worktree add HEAD` does not bring over. Without this
+ * a node whose scope names an untracked config file (the dogfood hit
+ * `opencode.json` and an uncommitted `.gemini/commands/*.toml`) cannot see its own
+ * target, so the edit silently no-ops. The "absent in worktree" test is the
+ * discriminator: a tracked path is already materialized from HEAD, so only the
+ * genuinely-missing untracked/ignored declarations are copied — a tracked-but-dirty
+ * file keeps its clean-from-HEAD worktree content and is never clobbered. Paths are
+ * repo-relative (the declared scope contract); absolute/escaping paths are skipped.
+ * Best-effort: a copy failure must not abort the dispatch (logged, not thrown).
+ */
+export function seedUntrackedDeclaredPaths(
+  root: string,
+  worktreeRoot: string,
+  declaredPaths: Iterable<string>,
+): void {
+  for (const rel of new Set(declaredPaths)) {
+    if (!rel || isAbsolute(rel)) continue;
+    // Reject paths that escape the root (defence-in-depth; declared scope is
+    // repo-relative and never `..`-prefixed in practice).
+    const dst = join(worktreeRoot, rel);
+    const src = join(root, rel);
+    if (relative(worktreeRoot, dst).startsWith("..")) continue;
+    if (!existsSync(src) || existsSync(dst)) continue;
+    try {
+      mkdirSync(dirname(dst), { recursive: true });
+      cpSync(src, dst, { recursive: true });
+    } catch (err) {
+      process.stderr.write(
+        `[remediate-code] worktree seed: could not copy untracked declared path ${rel}: ${
+          (err as Error).message
+        }\n`,
+      );
+    }
   }
 }
 
@@ -2104,6 +2143,21 @@ export function blockScopesFromPlan(
       ? [{ block_id: item.block_id, write_paths: item.access.write_paths }]
       : [],
   );
+}
+
+/**
+ * A block's declared target paths (write ∪ read) from the persisted dispatch plan
+ * — the single source of the scope the worker actually received (same authority
+ * the accept-time write-scope gate reads). Used to seed untracked declared targets
+ * into a fresh worktree (see {@link seedUntrackedDeclaredPaths}).
+ */
+export function declaredPathsFromPlan(
+  plan: RemediationDispatchPlan,
+  blockId: string,
+): string[] {
+  const item = plan.items.find((i) => i.block_id === blockId);
+  if (!item?.access) return [];
+  return [...(item.access.write_paths ?? []), ...(item.access.read_paths ?? [])];
 }
 
 /**

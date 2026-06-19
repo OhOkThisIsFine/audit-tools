@@ -27,6 +27,7 @@ import {
   acceptNodeWorktree,
   recordNodeAcceptOutcome,
   ensureWorktreeNodeModules,
+  seedUntrackedDeclaredPaths,
   worktreePath,
   worktreeBranchForBlock,
   blockScopesFromPlan,
@@ -750,6 +751,11 @@ export async function driveRollingImplementDispatch(
       // A fresh worktree has no node_modules (gitignored); link the main checkout's
       // so this node's verify commands can run.
       ensureWorktreeNodeModules(root, wt);
+      // Bring in declared targets that are untracked/ignored in the main tree so a
+      // committed-files-only worktree can still see this node's own targets.
+      // `touched_files` is the block's authoritative declared write set (the same
+      // source the dispatch plan's write scope is derived from).
+      seedUntrackedDeclaredPaths(root, wt, block.touched_files ?? []);
       const result = await dispatchNode({
         block,
         slot,
