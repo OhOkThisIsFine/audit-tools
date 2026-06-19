@@ -138,8 +138,17 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   `runDeterministicForNextStep`'s host-delegation branch with the SAME flag-gated pattern as remediate
   (`rolling_engine` ON + explicit in-process provider → route to in-process; default host-subagent dispatch
   step otherwise). Full strand records the partial-completion terminal + skips ingestion; an all-error pass
-  converges to `blocked` via a no-progress guard. Tests: `tests/rolling-audit-dispatch.test.mjs`. STILL TODO:
-  an audit NIM e2e (mirror of remediate's `nim-rolling-e2e`) for live-provider validation through next-step.
+  converges to `blocked` via a no-progress guard. Tests: `tests/rolling-audit-dispatch.test.mjs`.
+  **Audit NIM e2e DONE (2026-06-18):** `tests/audit/nim-rolling-audit-e2e.test.mjs` (gated `RUN_NIM_E2E=1` +
+  `NVIDIA_API_KEY`) stages the deterministic chain to planning, persists the bundle, then drives the REAL
+  `runDeterministicForNextStep` over live NIM — the in-process driver reviews the fixture read-only and lands
+  results via `mergeAndIngest` (validated green). It surfaced + fixed TWO real bugs: (1) **colon-in-packet-id
+  sidecar crash** — `makeAuditProviderPacketDispatcher` built `${packet.id}.task.json` verbatim, but audit
+  packet ids embed `:` (invalid filename on Windows) → the write threw before launch, erroring EVERY packet on
+  win32; now uses the canonical `artifactNameForId` FS-safe stem. (2) **all-invalid ingest crashed next-step** —
+  when every provider-accepted result is contract-invalid, `mergeAndIngest` throws a hard block; the rolling
+  driver now absorbs it into a no-progress pass (`ingest:null`) so the fold blocks cleanly. Both red→green in
+  `tests/audit/rolling-audit-dispatch.test.mjs`.
   (b-residual) the {host-subagent (Claude) + NIM} HYBRID topology + a
   live cross-provider spill run (see *Cross-IDE/provider quota detection* below). *(FIXED: worktree-branch reuse
   across a `rate_limited` re-queue — `resetNodeWorktreeAndBranch` removes the worktree, prunes stale admin
@@ -241,6 +250,15 @@ triaged.
 
 ## Known friction (agent / dev experience)
 
+- **`openai-compatible` loose JSON parse can't recover a stray trailing brace; prefer `response_format_json` (2026-06-18).**
+  Driving live NVIDIA NIM (`openai/gpt-oss-120b`) as the in-process worker, the model intermittently appends an
+  extra closing brace (`…}]}}`) under the free-form instruction. `parseJsonLoose`'s brace fallback uses
+  `lastIndexOf("}")`, which grabs the stray brace → `JSON.parse` throws → the launch fails `accepted:false`.
+  Setting `openai_compatible.response_format_json:true` (sends `response_format:{type:"json_object"}`) makes NIM
+  return strict JSON and fixes it. Two possible hardenings: (1) make `parseJsonLoose` balance-scan for the first
+  complete top-level object instead of slicing to the last brace (handles trailing garbage from any backend);
+  (2) consider defaulting `response_format_json` on for `openai-compatible` (most OpenAI-compatible endpoints
+  support it). Affects both orchestrators (shared provider). Not blocking — the e2e + real runs just set the flag.
 - **Packaged-smoke gate hardcodes a `requiredPackagedPaths` list (2026-06-18).** `smoke-packaged-audit-code.mjs`
   asserts the publish tarball ships specific files; A6 deleted `schemas/audit-code-v1alpha1.schema.json` (ported
   to a zod source) but left the list naming it → the first A6 publish failed the audit-code `verify:release`

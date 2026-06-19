@@ -44,8 +44,14 @@ publishable single-package milestone → publish → use the tool on itself). Re
   Antigravity), not just Claude Code.
 - Deferred: **A2** (falsifiable finding-quality oracle), **A9/A10** (autonomy acceptance + multi-process
   coordination — revisit when A8 multi-process gets concrete).
-- **A8 loose ends:** audit-code NIM e2e (mirror of remediate's `nim-rolling-e2e`); the {host-subagent + NIM}
-  HYBRID spill topology (FINDING-020 capstone). See `docs/a8-rolling-cutover-plan.md`.
+- **A8 loose ends:** audit-code NIM e2e ✓ **DONE (2026-06-18)** — `tests/audit/nim-rolling-audit-e2e.test.mjs`
+  (gated `RUN_NIM_E2E=1` + `NVIDIA_API_KEY`) drives the REAL `runDeterministicForNextStep` over live NIM,
+  validated green; it found+fixed two real bugs in the audit in-process dispatch path: a **colon-in-packet-id
+  sidecar crash** (audit packet ids embed `:`, invalid on Windows → errored every packet on win32; now uses the
+  `artifactNameForId` FS-safe stem) and an **all-invalid-ingest crash** (`mergeAndIngest`'s hard block now
+  absorbed into a no-progress pass so the fold blocks cleanly). Regression tests in
+  `tests/audit/rolling-audit-dispatch.test.mjs`. REMAINING A8: the {host-subagent + NIM} HYBRID spill topology
+  (FINDING-020 capstone) + a live cross-provider spill run. See `docs/a8-rolling-cutover-plan.md`.
 
 ## Working constraints (single-package)
 - **Green at every commit:** `npm run build && npm run check` → zero errors. Commit hook enforces it.
