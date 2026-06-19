@@ -24,6 +24,31 @@ test("interpretFreeFormIntent — blank string (spaces only) returns zero-weight
 });
 
 // ---------------------------------------------------------------------------
+// Decimal / version tokens must not be split on their internal period
+// ---------------------------------------------------------------------------
+
+test("interpretFreeFormIntent — a version token (5.1) is not split into a bogus '1' clause", () => {
+  const r = interpretFreeFormIntent("freeze behaviour on Windows PowerShell 5.1");
+  // Regression: splitting on every '.' turned "...5.1" into "...5" + "1", and the
+  // stray "1" surfaced as a spurious unencodable clause.
+  assert.ok(
+    !r.unencodableClauses.includes("1"),
+    `"5.1" must not fragment into a "1" clause: ${JSON.stringify(r.unencodableClauses)}`,
+  );
+  assert.ok(
+    r.unencodableClauses.some((c) => c.includes("5.1")),
+    `the version must survive intact in one clause: ${JSON.stringify(r.unencodableClauses)}`,
+  );
+});
+
+test("interpretFreeFormIntent — sentence-ending periods still split clauses", () => {
+  // The digit-guard must not disable ordinary sentence splitting.
+  const r = interpretFreeFormIntent("focus on security. also review reliability");
+  assert.ok(r.lensWeights.security > 0, "security clause must encode");
+  assert.ok(r.lensWeights.reliability > 0, "reliability clause must encode");
+});
+
+// ---------------------------------------------------------------------------
 // Single lens keyword → weight boost
 // ---------------------------------------------------------------------------
 
