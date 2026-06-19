@@ -224,10 +224,20 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   strict + `risk_score` 0..10). **remediate:** the `PUBLIC_CONTRACT_SCHEMA_COMPANIONS` hack removed; all 18
   JSON schemas + the structural drift-guard test deleted (verified none were runtime-read / worker-fetched /
   validated — contracts are enforced by the hand-coded TS validators); the artifact-contract types
-  (RemediationPlan/Block, ItemSpec, ClarificationRequest, ClosingPlan/Preview) converted to zod. Never-
-  validated internal-state types (RemediationItemState, coverage ledgers, the outcome family) left as
-  interfaces by design (inert to convert; decision Ethan 2026-06-18). `ajv` was never imported (no-op).
-  (ARC-ad53dd0d-2.)
+  (RemediationPlan/Block, ItemSpec, ClarificationRequest, ClosingPlan/Preview) converted to zod. `ajv` was
+  never imported (no-op). (ARC-ad53dd0d-2.)
+  - **Completeness follow-up — ✓ DONE (`07f387d`, 2026-06-19, unpublished, Ethan-approved this session).**
+    The merged A6 left several *produced-artifact* contracts as plain TS interfaces; converted the
+    interface-only ones to zod single-source so "every artifact contract is a zod schema" actually holds:
+    shared `RemediationOutcome{,Status,sReport}` + `IntentCheckpoint`; audit `AuditState` /
+    `AuditScopeManifest` / `FlowCoverageManifest` / `AnalyzerCapabilityRecord` (+ prereq schemas
+    `Obligation`/`ObligationState`, `AnalyzerResolution`, `AnalyzerSetting`; `OUTCOME_KEYS` now derived).
+    This supersedes the 2026-06-18 "leave the outcome family as interfaces" call FOR THE OUTCOME REPORT.
+    **Still interfaces by design** (pure internal run-state, never serialized as a standalone contract):
+    `RemediationItemState`, `CoverageLedger` / `PerFindingCoverageLedger`, and the remediate-side
+    `RemediationOutcomeItem` / `OutcomeCoverageEntry`/`Ledger` / `ItemSpecSummary` (they extend the now-zod
+    shared types; converting them adds no validation surface). Behavior-identical (`z.infer`), so it rides
+    the next `release:patch` — no dedicated publish needed.
 - **A12 — Single-package collapse — ✓ DONE (merged `main` `27c7a24e`, 2026-06-18).** The three packages
   collapsed into ONE `audit-tools` package (shared inlined to `src/shared`; imports via `audit-tools/shared`
   exports self-reference; plain `vX.Y.Z` tags; one ci/publish job; merged postinstall + opencode.json). Green
