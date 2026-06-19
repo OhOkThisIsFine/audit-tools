@@ -162,8 +162,9 @@ test("narrative-enriched report renders themes, summary, top risks (JSON↔markd
   assert.match(markdown, /## Themes/);
   assert.match(markdown, /### T-1 — Inputs trusted without validation/);
   assert.match(markdown, /- Suggested fix pattern: Validate and normalize/);
-  // Each theme finding surfaces its theme tag.
-  assert.match(markdown, /- Theme: T-1/);
+  // Note 2: the theme→finding mapping lives in the ## Themes section (the
+  // per-finding block no longer repeats a `- Theme:` line).
+  assert.match(markdown, /- Findings: SEC-[0-9a-f]+, COR-[0-9a-f]+/);
 });
 
 test("runSynthesisExecutor emits canonical findings and renders the report", () => {
