@@ -240,13 +240,13 @@ test("buildAuditReportModel forwards external analyzer context into merged findi
 
   const markdown = renderAuditReportMarkdown(report);
   assert.match(markdown, /Severity breakdown: medium: 1/);
-  assert.match(
-    markdown,
-    /external:semgrep:src\/api\/auth\.ts:Analyzer corroboration\./,
-  );
+  // Note 2: the markdown summarizes evidence (count + top item, pointer to JSON)
+  // rather than dumping every entry; the full list stays in audit-findings.json
+  // (asserted on the contract above).
+  assert.match(markdown, /Evidence: \d+ items .* see audit-findings\.json/);
 });
 
-test("renderAuditReportMarkdown includes finding categories", () => {
+test("renderAuditReportMarkdown renders the standardized per-finding block", () => {
   const report = {
     summary: {
       finding_count: 2,
@@ -286,8 +286,15 @@ test("renderAuditReportMarkdown includes finding categories", () => {
 
   const markdown = renderAuditReportMarkdown(report);
 
-  assert.match(markdown, /- Category: inferred_contract_gap/);
-  assert.match(markdown, /- Category: trust_boundary_gap/);
+  // Note 2: fixed-order labelled badge block — Severity → Confidence → Lens →
+  // Grounding (always shown, even when no verdict was recorded). Category is no
+  // longer rendered in the block (the full record stays in audit-findings.json).
+  assert.match(markdown, /### DR-001 — Implicit tenant boundary is unenforced/);
+  assert.match(markdown, /- Severity: medium/);
+  assert.match(markdown, /- Confidence: high/);
+  assert.match(markdown, /- Lens: architecture/);
+  assert.match(markdown, /- Grounding: not assessed/);
+  assert.doesNotMatch(markdown, /- Category:/);
 });
 
 // ── Cross-lens dedup ────────────────────────────────────────────────────────

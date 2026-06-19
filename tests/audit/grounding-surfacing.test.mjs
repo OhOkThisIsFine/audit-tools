@@ -152,9 +152,14 @@ test("B4: renderAuditReportMarkdown lists a Refuted Findings (quarantined — ex
   );
   assert.match(md, /## Refuted Findings \(quarantined — excluded\)/);
   assert.match(md, /Disproven cycle/);
-  assert.match(md, /Refuted: executable anchor refuted the claim/);
-  // The disproven finding must NOT appear in the main Findings section as actionable.
-  assert.doesNotMatch(md, /### .*Disproven cycle/);
+  assert.match(md, /Grounding: ✗ refuted — executable anchor refuted the claim/);
+  // Note 2: refuted findings now use the SAME full block format, but only under
+  // the Refuted section — never in the main `## Findings` section as actionable.
+  const mainFindings = md.slice(
+    md.indexOf("## Findings"),
+    md.indexOf("## Refuted Findings"),
+  );
+  assert.doesNotMatch(mainFindings, /Disproven cycle/);
   assert.match(md, /refuted findings are quarantined-excluded below/);
 });
 
@@ -173,7 +178,7 @@ test("renderAuditReportMarkdown quarantines ungrounded findings, inline-marks th
   assert.match(md, /## Ungrounded Findings \(not confirmed\)/);
   assert.match(md, /Hallucinated cycle/);
   assert.match(md, /Reason: src\/x\.ts: quoted_text not found on disk/);
-  assert.match(md, /⚠ Grounding: ungrounded/);
+  assert.match(md, /Grounding: ⚠ ungrounded/);
   assert.match(
     md,
     /- Grounding \(S7\): grounded: 1, ungrounded: 1 — ungrounded findings are surfaced-not-confirmed below/,
