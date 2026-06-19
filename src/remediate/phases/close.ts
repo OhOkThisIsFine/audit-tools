@@ -1,6 +1,6 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
-import { remediationBranchName } from "../steps/dispatch.js";
+import { remediationBranchName, listQuarantinedCommits } from "../steps/dispatch.js";
 import { dirname, extname, isAbsolute, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import {
@@ -769,6 +769,7 @@ function buildRemediationReportMarkdown(
   outcomesReport: RemediationOutcomesReport,
   combinedTest: CombinedTestResult,
   reflections: AgentReflection[] = [],
+  quarantined: Array<{ block: string; ref: string; commit: string }> = [],
 ): string {
   let reportContent = `# Remediation Report\n\n`;
 
@@ -878,6 +879,14 @@ function buildRemediationReportMarkdown(
   if (!combinedTest.passed) {
     reportContent += `\n## Combined Test Suite Failure\n\nThe full test suite failed after remediation. No items with a resolved status were available to re-block, so the run completed, but the following failure was recorded:\n\n`;
     if (combinedTest.output) reportContent += `\`\`\`\n${combinedTest.output}\n\`\`\`\n`;
+  }
+
+  if (quarantined.length > 0) {
+    reportContent += `\n## Preserved for Recovery\n\n`;
+    reportContent += `${quarantined.length} node(s) committed real edits but failed the tool's verify/scope/merge and were NOT landed. Their work is preserved under durable git refs (it survives worktree cleanup) — review and recover manually if a fix was correct:\n\n`;
+    for (const q of quarantined) {
+      reportContent += `- **${q.block}**: \`git cherry-pick ${q.commit}\`  (ref: \`${q.ref}\`)\n`;
+    }
   }
 
   // Opt-in worker reflections, aggregated into the same "Process Feedback"
@@ -1234,6 +1243,12 @@ export async function runClosePhase(
   const feedbackText = await readOptionalTextFile(
     join(options.artifactsDir, AGENT_FEEDBACK_FILENAME),
   );
+  // Failed-but-committed nodes whose work was preserved under a durable quarantine
+  // ref (a tool-verify false-negative must never destroy a good fix) — surface them
+  // so the user can recover the work manually.
+  const quarantined = options.root
+    ? listQuarantinedCommits(options.root, state.plan?.plan_id ?? "")
+    : [];
   const reportContent = buildRemediationReportMarkdown(
     state,
     entries,
@@ -1242,6 +1257,7 @@ export async function runClosePhase(
     outcomesReport,
     combinedTest,
     feedbackText ? parseReflectionsNdjson(feedbackText) : [],
+    quarantined,
   );
 
   // Enrich the coverage ledger with never-planned payloads NOW, from the live
