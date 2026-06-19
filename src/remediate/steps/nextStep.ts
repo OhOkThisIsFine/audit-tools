@@ -29,6 +29,7 @@ import {
   ensureWorktreeNodeModules,
   worktreePath,
   worktreeBranchForBlock,
+  blockScopesFromPlan,
 } from "./dispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
 import { prepareHostRollingDispatch } from "./rollingSession.js";
@@ -72,6 +73,7 @@ import {
   isIntakeReady,
   readIntakeArtifacts,
   resolveManifestSources,
+  type IntakeSourceManifest,
 } from "../intake.js";
 import type { IntentCheckpoint } from "audit-tools/shared";
 import {
@@ -258,6 +260,29 @@ function resolveInputPaths(
     missing: [],
     checked,
   };
+}
+
+/**
+ * True when a supplied `--input` is the SAME input the existing run was already
+ * built from (its recorded intake source manifest, `created_from: "input"`, with
+ * a path set equal to the supplied paths). The `/remediate-code` loader re-passes
+ * the same `--input` on every `next-step`; treating that unchanged input as a
+ * RESUME — not an `input_conflict` — spares the host a needless resume/restart ack
+ * dance, while a genuinely DIFFERENT input still trips the conflict gate. Enforced
+ * in the tool, never by asking the loader to remember to drop the flag (a needed
+ * manual flag is a bug signal).
+ */
+function suppliedInputMatchesRun(
+  inputResolution: InputResolution,
+  manifest: IntakeSourceManifest | undefined,
+): boolean {
+  if (!inputResolution.supplied) return false;
+  if (!manifest || manifest.created_from !== "input") return false;
+  const supplied = new Set(inputResolution.checked.map((p) => resolve(p)));
+  const recorded = new Set(manifest.sources.map((s) => resolve(s.path)));
+  if (supplied.size === 0 || supplied.size !== recorded.size) return false;
+  for (const p of supplied) if (!recorded.has(p)) return false;
+  return true;
 }
 
 export type {
@@ -660,6 +685,10 @@ export async function driveRollingImplementDispatch(
       .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
       .map((i) => [i.block_id, i.result_path]),
   );
+  // Every block's declared write scope, for the accept-time write-scope gate's
+  // amendment ownership adjudication (so an amended path owned by a sibling block
+  // is a seam conflict, not a silent grant). Built once from the in-memory plan.
+  const allBlockScopes = blockScopesFromPlan(plan);
   // Map each planned block id to its worktree-rooted prompt path so the
   // provider-backed dispatcher launches the worker with the right prompt.
   const promptPathByBlock = new Map(
@@ -737,6 +766,9 @@ export async function driveRollingImplementDispatch(
           return finding?.targeted_commands ?? [];
         }),
       );
+      // The worker's self-reported amendments, adjudicated (never trusted as the
+      // gate input) by the accept-time write-scope gate before the cherry-pick.
+      const workerResult = await readOptionalJsonFile<{ amended_files?: string[] }>(resultPath);
       const accept = acceptNodeWorktree({
         root,
         runId,
@@ -745,6 +777,7 @@ export async function driveRollingImplementDispatch(
         branch,
         workerOutcome: result.outcome,
         targetedCommands: targeted,
+        scope: { allBlockScopes, amendedFiles: workerResult?.amended_files ?? [] },
       });
       // Persist the tool-owned verify/merge outcome so finalization blocks a node
       // that self-reported resolved but never actually landed (OBL-DS-06). Parity
@@ -3052,6 +3085,11 @@ interface PreIntakeSnapshot {
    * re-checked, so a re-scan must not resurrect them against an intake-built state).
    */
   entryState: RemediationState | null;
+  /**
+   * True when the supplied `--input` is identical to the input the existing run
+   * was built from — so the conflict gate treats it as a resume, not a conflict.
+   */
+  suppliedInputUnchanged: boolean;
 }
 
 type RemediateObligation = ObligationDef<
@@ -3110,7 +3148,7 @@ function buildPreIntakeObligations(
   snapshot: PreIntakeSnapshot,
 ): RemediateObligation[] {
   const { artifactsDir, inputResolution } = ctx;
-  const { existingCheckpoint, resumeAck, entryState } = snapshot;
+  const { existingCheckpoint, resumeAck, entryState, suppliedInputUnchanged } = snapshot;
   const ip = intakePaths(artifactsDir);
   const checkpointPath = join(artifactsDir, "intent_checkpoint.json");
   const ackPath = join(artifactsDir, "confirm_resume_ack.json");
@@ -3123,12 +3161,15 @@ function buildPreIntakeObligations(
 
   return [
     {
-      // A new --input against a run already past intake must not silently resume
-      // the old plan; require an explicit resume-vs-restart choice. Derives from
-      // the frozen entry state — never an intake-created one.
+      // A new, DIFFERENT --input against a run already past intake must not
+      // silently resume the old plan; require an explicit resume-vs-restart
+      // choice. The SAME --input re-passed (the loader does this every next-step)
+      // is an unchanged input → a resume, not a conflict. Derives from the frozen
+      // entry state — never an intake-created one.
       id: "input_conflict",
       derive: () =>
         inputResolution.supplied &&
+        !suppliedInputUnchanged &&
         entryState != null &&
         entryState.status !== "pending"
           ? "missing"
@@ -3580,6 +3621,15 @@ async function decideNextStepLoop(
   const resumeAck = await readOptionalJsonFile<{ choice?: string }>(
     join(artifactsDir, "confirm_resume_ack.json"),
   );
+  // Whether a supplied `--input` matches the input the existing run was built
+  // from — so re-passing the same `--input` (the loader does this each next-step)
+  // resumes rather than tripping the input_conflict gate.
+  const suppliedInputUnchanged = suppliedInputMatchesRun(
+    inputResolution,
+    await readOptionalJsonFile<IntakeSourceManifest>(
+      intakePaths(artifactsDir).sourceManifest,
+    ),
+  );
 
   // The linear pre-intake gates run as obligations through the shared advance
   // loop. An emit returns to the host; a transition re-scans within this call;
@@ -3601,6 +3651,7 @@ async function decideNextStepLoop(
         existingCheckpoint,
         resumeAck,
         entryState: state,
+        suppliedInputUnchanged,
       }),
     },
     state,

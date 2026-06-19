@@ -268,21 +268,27 @@ Fixed this run (committed): the rolling implement path was **100% broken on Wind
 re-dispatch cleanup gaps (`resetNodeWorktreeAndBranch` now resets the stale branch `c9575b7f` + force-removes
 an orphaned worktree dir `e29cec16`). F5–F8 (below) landed through the tool after these. **Open frictions
 surfaced (fix these):**
-- **Write-scope gate runs AFTER `accept-node` cherry-picks into main.** In the host-rolling path the
-  out-of-scope edits land first, then `mergeImplementResults` flags them post-hoc — it reports, it doesn't
-  prevent. Move the write-scope check before the cherry-pick (or make accept-node enforce it). Also: the
-  host-declared `file_scope` in module_decomposition is a guess the rolling worker can't amend through a
-  surfaced protocol — a too-narrow/guessed scope (wrong test filename, an unavoidable helper relocation, a
-  doc-comment touch) blocks a correct fix. Enforce-in-tooling: derive/loosen scope, or surface an amend path.
+- **Write-scope gate runs AFTER `accept-node` cherry-picks into main. ✓ DONE (2026-06-19).** Enforcement
+  moved INTO `acceptNodeWorktree` (`enforceAcceptWriteScope`): after the verify, BEFORE the cherry-pick, so an
+  out-of-scope edit is PREVENTED from landing rather than reported post-hoc — a blocked node reaches the merge
+  as `merged:false` and the merge-state gate routes it to triage with the write-scope reason in its diagnostic.
+  The redundant post-hoc `mergeImplementResults` write-scope gate was deleted (the accept gate is now the single
+  enforcement point; `editedByBlock`/lost-update collection kept). The host-declared `file_scope`-is-a-guess
+  half is also addressed: the worker's self-reported `amended_files` are adjudicated at accept time against an
+  ephemeral `OwnershipRegistry` seeded from every block's declared scope — an unowned amendment widens the
+  effective scope (the surfaced amend path: a too-narrow declared scope no longer blocks a correct fix), one
+  owned by a sibling block is a seam conflict that blocks. Both rolling drivers pass the scope; declared scope
+  is single-sourced from the persisted dispatch plan (carries the referencing-test expansion the worker got).
 - **`accept-outcome` sidecar + triage discard the verify command output. ✓ DONE (2026-06-19).**
   `acceptNodeWorktree` now carries a `diagnostic` (the failing verify command + its stdout/stderr, or the git
   commit / cherry-pick error) on every failure outcome; `recordNodeAcceptOutcome` persists it into the
   `accept-outcome-*.json` sidecar (optional field, schema-compatible) and the merge-state gate echoes it into
   the triage `failure_reason` so `outcome:error` is no longer blind to the root cause (`dispatch.ts`).
-- **`--input` after intake is a hard conflict.** The `/remediate-code` loader tells the host to pass the same
-  flags each `next-step`, but a post-intake `--input` triggers input_conflict + a resume/restart ack dance.
-  Loader guidance should drop `--input` once a run exists (or the backend should treat an unchanged `--input`
-  as resume).
+- **`--input` after intake is a hard conflict. ✓ DONE (2026-06-19).** Fixed in the backend (not by asking the
+  loader to remember to drop the flag): `decideNextStep` now treats a supplied `--input` whose resolved path set
+  equals the run's recorded intake source manifest (`created_from:"input"`) as an UNCHANGED input → resume, so
+  re-passing the same `--input` each `next-step` no longer trips `input_conflict`. A genuinely DIFFERENT input
+  still trips the gate (`suppliedInputMatchesRun` in `nextStep.ts`).
 - **`accept-node` requires `--run-id` but the rolling dispatch prompt shows only `--id`. ✓ DONE (2026-06-19).**
   The `dispatch_implement_rolling` prompt now renders `accept-node --id <BLOCK_ID> --run-id ${runId}`
   (matching how it already renders `merge-implement-results --run-id`), so the host copies a runnable

@@ -771,6 +771,20 @@ export interface AcceptNodeWorktreeParams {
   workerOutcome: NodeWorkerOutcome;
   /** Deduped per-node verify commands (from the block's findings). */
   targetedCommands: string[];
+  /**
+   * Accept-time write-scope inputs (OBL-DS-06). When present, the write-scope
+   * gate runs HERE — after the verify, BEFORE the cherry-pick — so an out-of-scope
+   * or seam-conflicting edit is PREVENTED from landing in the main tree rather than
+   * reported post-hoc once it is already merged. Both rolling drivers supply it;
+   * unit tests that exercise the verify/merge lifecycle in isolation omit it (the
+   * gate is then skipped, matching the legacy lifecycle).
+   */
+  scope?: {
+    /** Every block's declared write scope, for amendment ownership adjudication. */
+    allBlockScopes: Array<{ block_id: string; write_paths: string[] }>;
+    /** The worker's self-reported `amended_files` (adjudicated, never trusted as the gate input). */
+    amendedFiles: string[];
+  };
 }
 
 export interface AcceptNodeWorktreeResult {
@@ -842,6 +856,26 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
     // Carry the failing command + output so triage isn't blind on outcome:error.
     removeWorktree(root, wt);
     return { outcome: "error", verifyPassed, merged, diagnostic: verify.output };
+  }
+
+  // Write-scope gate (OBL-DS-06), BEFORE the cherry-pick: an out-of-scope or
+  // seam-conflicting edit must never land in the main tree, so it is adjudicated
+  // against the branch's git diff (the ground truth) here rather than reported
+  // after `mergeWorktree` already merged it. A worker that legitimately needed a
+  // file outside its declared scope declares it via `amended_files`; an unowned
+  // amendment widens the effective scope, while one owned by another block blocks.
+  if (params.scope) {
+    const decision = enforceAcceptWriteScope({
+      root,
+      branch,
+      blockId,
+      allBlockScopes: params.scope.allBlockScopes,
+      amendedFiles: params.scope.amendedFiles,
+    });
+    if (decision.blocked) {
+      removeWorktree(root, wt);
+      return { outcome: "error", verifyPassed, merged: false, diagnostic: decision.reason };
+    }
   }
 
   // mergeWorktree cherry-picks the verified branch and removes the worktree (on
@@ -2059,6 +2093,70 @@ export function enforceWriteScope(
   };
 }
 
+/** Each block's declared write scope from a dispatch plan — the seed for the
+ *  accept-time write-scope gate's ownership registry (so an amended path owned by
+ *  a sibling block is recognised as a seam conflict, not silently granted). */
+export function blockScopesFromPlan(
+  plan: RemediationDispatchPlan,
+): Array<{ block_id: string; write_paths: string[] }> {
+  return plan.items.flatMap((item) =>
+    item.block_id && item.access
+      ? [{ block_id: item.block_id, write_paths: item.access.write_paths }]
+      : [],
+  );
+}
+
+/**
+ * Accept-time write-scope gate (OBL-DS-06), run from `acceptNodeWorktree` AFTER
+ * the verify and BEFORE the cherry-pick so a violation PREVENTS the merge rather
+ * than being reported once the edit already landed in main. It adjudicates the
+ * worker's self-reported `amended_files` against all blocks' declared scopes via
+ * an ephemeral `OwnershipRegistry` seeded from `allBlockScopes`: an unowned
+ * amended path is granted and widens this node's effective scope (the surfaced
+ * amend path — a too-narrow declared scope no longer blocks a correct fix); a path
+ * owned by another block is a seam conflict that blocks. The gate then diffs the
+ * worktree branch (the git ground truth, never the self-report) against the
+ * effective scope. Cross-sibling contention on a file two live nodes both amend is
+ * left to the merge-time lost-update detector (`detectOverlappingEdits`), which
+ * sees the full set of merged blocks a single accept cannot.
+ */
+export function enforceAcceptWriteScope(params: {
+  root: string;
+  branch: string;
+  blockId: string;
+  allBlockScopes: Array<{ block_id: string; write_paths: string[] }>;
+  amendedFiles: string[];
+}): WriteScopeDecision {
+  const { root, branch, blockId, allBlockScopes, amendedFiles } = params;
+  const registry = new OwnershipRegistry();
+  registry.initialize(
+    allBlockScopes.map((b) => ({ node_id: b.block_id, write_paths: b.write_paths })),
+  );
+  if (amendedFiles.length > 0) {
+    const { seam_routed } = routeAmendmentRequest(registry, blockId, amendedFiles);
+    if (seam_routed.length > 0) {
+      const detail = seam_routed
+        .map((r) => {
+          const reason = r.reason;
+          if (reason.outcome === "owned") return `${r.path} owned by ${reason.owner_node_id}`;
+          if (reason.outcome === "contended") {
+            return `${r.path} contended by ${reason.sibling_node_id}`;
+          }
+          return r.path;
+        })
+        .join("; ");
+      return {
+        blocked: true,
+        reason:
+          `Worker amended files owned by another block (seam conflict): ${detail}. ` +
+          `Resolve via the seam protocol before this node can land.`,
+      };
+    }
+  }
+  const effective = registry.getScope(blockId);
+  return enforceWriteScope(effective, gitEditedFilesForBranch(root, branch), root);
+}
+
 // ---------------------------------------------------------------------------
 // Merge-seam: obligation-id → node remap + multi-entry collapse (tolerance)
 // ---------------------------------------------------------------------------
@@ -2603,46 +2701,21 @@ async function mergeImplementResultsIntoState(
       }
     }
 
-    // Write-scope enforcement against the worker's ACTUAL git edits
-    // (OBL-DS-06): never trust self-reported amended_files for the gate. The
-    // enforcement ground truth is the worker's worktree diff; it is applied when
-    // this block was dispatched into an isolated worktree (the rolling-dispatch
-    // flow). On the interim main-tree path there is no per-worker isolation to
-    // diff against, so the gate is skipped here rather than mistaking ambient
-    // working-tree state for this worker's edits. The decision is a pure function
-    // (`enforceWriteScope`) so it is unit-tested directly against a known edit
-    // set, and fail-closed semantics apply when git is a repo but the probe fails.
+    // Per-block ACTUAL worktree-branch edits, collected for the post-loop
+    // lost-update / overlapping-edit detection (a file edited by more than one
+    // merged block). The write-scope gate itself is NOT applied here: it runs at
+    // ACCEPT time (`acceptNodeWorktree` → `enforceAcceptWriteScope`), BEFORE the
+    // cherry-pick, so an out-of-scope edit is prevented from landing rather than
+    // reported once already merged — and a node it blocks reaches the merge as
+    // `merged:false`, routed to triage by the merge-state gate below (with the
+    // write-scope reason carried in its diagnostic). A missing branch means the
+    // interim main-tree path was used (no per-worker diff): nothing to collect.
     const worktreeBranch = worktreeBranchForBlock(blockId, runId);
-    // Resolve this block's ACTUAL worktree-branch edits ONCE when the branch
-    // exists — reused for the write-scope gate below AND the post-loop
-    // lost-update detection. A missing branch means the interim main-tree path
-    // was used (no per-worker diff): skip both checks for this block.
     const branchEdited = gitBranchExists(options.root, worktreeBranch)
       ? gitEditedFilesForBranch(options.root, worktreeBranch)
       : null;
     if (branchEdited?.available) {
       editedByBlock.push({ block_id: blockId, files: branchEdited.files });
-    }
-    // Activate the write-scope gate only when this block was actually dispatched
-    // through an isolated worktree (its branch exists). A missing branch means
-    // the interim main-tree path was used — there is no per-worker diff to
-    // enforce against, so the gate is skipped (NOT fail-closed: fail-closed is
-    // for a present repo whose diff genuinely errors).
-    if (resolvedFindingIds.length > 0 && item.access && branchEdited) {
-      const decision = enforceWriteScope(
-        item.access.write_paths,
-        branchEdited,
-        options.root,
-      );
-      if (decision.blocked) {
-        for (const findingId of resolvedFindingIds) {
-          const stateItem = state.items[findingId];
-          if (!stateItem) continue;
-          stateItem.status = "blocked";
-          markTerminal(stateItem);
-          stateItem.failure_reason = decision.reason;
-        }
-      }
     }
 
     // Merge-state gate (authoritative, OBL-DS-06): a node that self-reported a
