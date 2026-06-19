@@ -27,6 +27,7 @@ import type {
   CapacityPool,
 } from "audit-tools/shared";
 import { resolveWindowsShimSpawnCommand } from "audit-tools/shared";
+import { findingLead, renderFindingBadgeBody } from "audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
   readJsonFile,
@@ -1842,10 +1843,13 @@ Set the shell/tool workdir to the repository root when running commands; do not 
 ${items
   .map(
     ({ finding, spec, clarification }) => `
-### ${finding.id} - ${finding.title}
+### ${finding.id} — ${finding.title}
 
+${findingLead(finding.summary)}
+
+${renderFindingBadgeBody(finding, { showGrounding: false, showFiles: false, showDetails: false, showEvidence: false }).join("\n")}
 - Files: ${itemReadFiles(finding, spec).map(resolveFilePath).join(", ")}
-- Summary: ${finding.summary}
+- Details: ${finding.summary}
 ${clarification ? `- Clarified scope (decided with the user — act on THIS): ${clarification}\n` : ""}${groundingVerificationBullet(finding)}
 ${spec ? `- Concrete change: ${spec.concrete_change}
 - Tests to write: ${spec.tests_to_write

@@ -187,6 +187,20 @@ export type {
   AgentReflection,
   ReflectionAggregate,
 } from "./agentReflections.js";
+export type {
+  FindingFileRef,
+  FindingBadge,
+  FindingDisplay,
+  FindingDisplayOptions,
+} from "./reporting/findingDisplay.js";
+export {
+  findingLead,
+  formatFindingFileRef,
+  findingGroundingLine,
+  renderFindingBadgeBody,
+  renderFindingBlockLines,
+  renderFindingBlock,
+} from "./reporting/findingDisplay.js";
 export {
   AGENT_FEEDBACK_FILENAME,
   parseReflectionsNdjson,

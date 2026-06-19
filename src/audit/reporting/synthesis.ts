@@ -16,6 +16,7 @@ import {
   AUDIT_FINDINGS_CONTRACT_VERSION as SHARED_AUDIT_FINDINGS_CONTRACT_VERSION,
   AUDITOR_REPORT_MARKER,
   renderProcessFeedbackSection,
+  renderFindingBlockLines,
   type AgentReflection,
 } from "audit-tools/shared";
 import type {
@@ -335,110 +336,15 @@ export interface RenderAuditReportOptions {
 
 /**
  * Standardized per-finding render (dogfood note 2). Every finding — admitted,
- * ungrounded, or refuted/quarantined — uses this ONE block so the report scans
- * uniformly regardless of which fields a finding happens to carry. The block is
- * decision-first: a one-line lead, a fixed-order labelled badge body, then only
- * the data a reader needs to act — long file lists and deep evidence are
- * trimmed/summarized with a pointer to `audit-findings.json` (the full source of
- * truth). Enforced in tooling, not host discretion.
+ * ungrounded, or refuted/quarantined — uses the ONE shared `renderFindingBlock`
+ * (single-sourced in `audit-tools/shared` so the auditor report and the
+ * remediator's host prompts can never drift apart). Decision-first defaults: a
+ * one-line lead, a fixed-order labelled badge body, files trimmed to a `+N more`
+ * count and evidence summarized with a pointer to `audit-findings.json` (the full
+ * source of truth).
  */
-const MAX_FILES_SHOWN = 4;
-const MAX_EVIDENCE_LEAD = 160;
-
-/** First sentence of a summary, for the one-line lead above the badge block. */
-function firstSentence(text: string): string {
-  const trimmed = text.trim();
-  const match = trimmed.match(/^[\s\S]*?[.!?](?=\s|$)/);
-  return (match ? match[0] : trimmed).trim();
-}
-
-/** `path:start–end` (en-dash), backticked; falls back to `path` with no lines. */
-function formatFileRef(file: {
-  path: string;
-  line_start?: number;
-  line_end?: number;
-}): string {
-  let ref = file.path;
-  if (typeof file.line_start === "number") {
-    ref += `:${file.line_start}`;
-    if (typeof file.line_end === "number" && file.line_end !== file.line_start) {
-      ref += `–${file.line_end}`;
-    }
-  }
-  return `\`${ref}\``;
-}
-
-/** Grounding line, ALWAYS shown (note 2): grounded / ungrounded / refuted / not assessed. */
-function formatGroundingLine(finding: SharedFinding): string {
-  const grounding = finding.grounding;
-  if (!grounding) {
-    return "- Grounding: not assessed";
-  }
-  if (grounding.status === "grounded") {
-    return "- Grounding: grounded";
-  }
-  if (grounding.status === "ungrounded") {
-    return `- Grounding: ⚠ ungrounded — ${grounding.reason ?? "cited span did not re-verify against disk"} (surfaced, not confirmed)`;
-  }
-  return `- Grounding: ✗ refuted — ${grounding.reason ?? "an executable anchor disproved the claim"}`;
-}
-
-function renderFindingBlock(finding: SharedFinding, lines: string[]): void {
-  lines.push(`### ${finding.id} — ${finding.title}`);
-  lines.push("");
-
-  const summary = (finding.summary ?? "").trim();
-  const lead = firstSentence(summary);
-  if (lead) {
-    lines.push(lead, "");
-  }
-
-  // Fixed-order badge body — same labels, same order, every finding.
-  lines.push(`- Severity: ${finding.severity}`);
-  lines.push(`- Confidence: ${finding.confidence}`);
-  lines.push(`- Lens: ${finding.lens}`);
-  lines.push(formatGroundingLine(finding));
-  if (finding.systemic === true) {
-    lines.push("- Systemic: yes");
-  }
-  if (finding.impact) {
-    lines.push(`- Impact: ${finding.impact}`);
-  }
-  if (finding.likelihood) {
-    lines.push(`- Likelihood: ${finding.likelihood}`);
-  }
-
-  // Files — first N with line refs, then a `+K more` count (JSON has the rest).
-  const files = finding.affected_files ?? [];
-  if (files.length > 0) {
-    const shown = files.slice(0, MAX_FILES_SHOWN).map(formatFileRef);
-    const extra = files.length - shown.length;
-    lines.push(
-      `- Files: ${shown.join(", ")}${extra > 0 ? ` +${extra} more` : ""}`,
-    );
-  }
-
-  // Details — the full summary, only when it carries more than the lead.
-  if (summary && summary !== lead) {
-    lines.push(`- Details: ${summary}`);
-  }
-
-  // Evidence — summarized with a count + top item; full list lives in the JSON.
-  const evidence = finding.evidence ?? [];
-  if (evidence.length === 1) {
-    lines.push(`- Evidence: ${evidence[0]}`);
-  } else if (evidence.length > 1) {
-    const first = evidence[0];
-    const top =
-      first.length > MAX_EVIDENCE_LEAD
-        ? `${first.slice(0, MAX_EVIDENCE_LEAD)}…`
-        : first;
-    lines.push(
-      `- Evidence: ${evidence.length} items (top: "${top}") — see audit-findings.json for the full list`,
-    );
-  }
-
-  lines.push("");
+function pushFindingBlock(finding: SharedFinding, lines: string[]): void {
+  lines.push(...renderFindingBlockLines(finding));
 }
 
 export function renderAuditReportMarkdown(
@@ -542,7 +448,7 @@ export function renderAuditReportMarkdown(
     lines.push("No findings were recorded.", "");
   } else {
     for (const finding of report.findings) {
-      renderFindingBlock(finding, lines);
+      pushFindingBlock(finding, lines);
     }
   }
 
@@ -582,7 +488,7 @@ export function renderAuditReportMarkdown(
       "",
     );
     for (const finding of refutedFindings) {
-      renderFindingBlock(finding, lines);
+      pushFindingBlock(finding, lines);
     }
   }
 
