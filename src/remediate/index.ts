@@ -15,6 +15,7 @@ import { validateArtifacts } from "./validation/artifacts.js";
 import { CONTRACT_PIPELINE_VALIDATORS } from "./validation/contractPipeline.js";
 import {
   CP_ARTIFACT_NAMES,
+  isEnvelope,
   type ContractPipelineArtifactName,
 } from "./contractPipeline/artifactStore.js";
 import {
@@ -299,9 +300,9 @@ program
       );
       process.exit(2);
     }
-    let payload: unknown;
+    let parsed: unknown;
     try {
-      payload = JSON.parse(raw);
+      parsed = JSON.parse(raw);
     } catch (err) {
       console.log(
         JSON.stringify(
@@ -312,6 +313,10 @@ program
       );
       process.exit(2);
     }
+    // Unwrap a stored content-hash envelope so the bare payload is validated
+    // against its contract; a plain payload validates as-is. Uses the canonical
+    // isEnvelope predicate so CLI self-check and ingest unwrap identically.
+    const payload = isEnvelope(parsed) ? parsed.payload : parsed;
     const issues = validator(payload, name);
     const errors = issues.filter((issue) => issue.severity === "error");
     console.log(

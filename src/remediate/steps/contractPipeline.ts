@@ -40,6 +40,7 @@ import {
   contractArtifactFilePath,
   contractPipelineDir,
   detectStaleArtifacts,
+  isEnvelope,
   pathASeedFilePath,
   readContractArtifact,
   writeContractArtifact,
@@ -214,15 +215,6 @@ export async function writeCyclicSeamRepairState(
 }
 
 // ── Envelope handling ─────────────────────────────────────────────────────────
-
-function isEnvelope(value: unknown): value is ContractPipelineArtifactEnvelope {
-  return (
-    isRecord(value) &&
-    typeof value.artifact_name === "string" &&
-    typeof value.content_hash === "string" &&
-    "payload" in value
-  );
-}
 
 /** Payload of a stored artifact whether or not it has been enveloped yet. */
 function envelopePayload(envelope: ContractPipelineArtifactEnvelope | null): unknown {
