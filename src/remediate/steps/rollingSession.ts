@@ -4,7 +4,7 @@ import { StateStore, type RemediationState } from "../state/store.js";
 import {
   prepareImplementDispatch,
   createWorktree,
-  removeWorktree,
+  resetNodeWorktreeAndBranch,
   ensureWorktreeNodeModules,
   worktreePath,
   worktreeBranchForBlock,
@@ -84,8 +84,13 @@ function sessionLockPath(artifactsDir: string, runId: string): string {
 /** Remove any stale worktree, then create a fresh isolated one with node_modules linked. */
 function createNodeWorktree(root: string, blockId: string, runId: string): void {
   const wt = worktreePath(root, blockId, runId);
-  removeWorktree(root, wt);
-  createWorktree(root, wt, worktreeBranchForBlock(blockId, runId));
+  const branch = worktreeBranchForBlock(blockId, runId);
+  // Fully reset (worktree dir + pruned admin entries + force-deleted branch) so a
+  // re-dispatch after a prior blocked/triaged attempt starts clean from HEAD — a
+  // bare removeWorktree leaves the branch behind and `git worktree add -b` then
+  // fails "branch already exists" (parity with the in-process driver's reset).
+  resetNodeWorktreeAndBranch(root, wt, branch);
+  createWorktree(root, wt, branch);
   ensureWorktreeNodeModules(root, wt);
 }
 
