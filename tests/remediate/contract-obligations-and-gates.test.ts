@@ -424,6 +424,64 @@ describe("validateReconciliationDerivation", () => {
     expect(issues[0].message).toContain("INV-CO-12");
   });
 
+  it("tolerates a faithful paraphrase — filler words and rewording do not fail INV-CO-12", () => {
+    // "must"/"an"/"ack" are filler/short; the finalized contract reworded the agreed
+    // interface but kept the content terms. The old all-salient-tokens rule failed on
+    // "must"; the content-majority rule passes.
+    const issues = validateReconciliationDerivation(
+      report([
+        {
+          seam_id: "S1",
+          module_a: "a",
+          module_b: "b",
+          description: "d",
+          resolution: { decision: "A", agreed_interface: "writeRecord must return an ack token" },
+        },
+      ]),
+      finalized([
+        {
+          name: "a",
+          inputs: ["record"],
+          outputs: ["writeRecord returns the acknowledgement token"],
+          invariants: [],
+          side_effects: [],
+          validation_boundary: "v",
+          failure_modes: [],
+        },
+      ]),
+    );
+    expect(issues).toHaveLength(0);
+  });
+
+  it("still fails when most content terms of the agreed interface are absent", () => {
+    // Only 1 of 3 content tokens (writeRecord) is reflected; returns/token are gone —
+    // below the majority threshold, so INV-CO-12 still fails (fail-closed preserved).
+    const issues = validateReconciliationDerivation(
+      report([
+        {
+          seam_id: "S1",
+          module_a: "a",
+          module_b: "b",
+          description: "d",
+          resolution: { decision: "A", agreed_interface: "writeRecord returns ack token" },
+        },
+      ]),
+      finalized([
+        {
+          name: "a",
+          inputs: ["record"],
+          outputs: ["writeRecord accepts a payload"],
+          invariants: [],
+          side_effects: [],
+          validation_boundary: "v",
+          failure_modes: [],
+        },
+      ]),
+    );
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues[0].message).toContain("INV-CO-12");
+  });
+
   it("is fail-closed: a reconciled mismatch with no finalized contracts is underived", () => {
     const issues = validateReconciliationDerivation(
       report([
