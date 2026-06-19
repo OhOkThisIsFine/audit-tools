@@ -184,6 +184,9 @@ describe("acceptNodeWorktree", () => {
     expect(res.verifyPassed).toBe(false);
     expect(res.merged).toBe(false);
     expect(res.outcome).toBe("error");
+    // The failing command + its output is captured so triage isn't blind.
+    expect(res.diagnostic).toBeTruthy();
+    expect(res.diagnostic).toContain("git rev-parse --verify refs/heads/__nope__");
     expect(existsSync(wt)).toBe(false);
     expect(headHas(repo, "src/a.ts")).toBe(false);
   });
