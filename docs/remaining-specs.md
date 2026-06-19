@@ -80,27 +80,41 @@ accounting and feeds *both* drivers — the host-subagent driver pulls nodes it
 should spawn (returned in the step contract), the in-process driver pulls nodes it
 runs itself, and `acceptNodeWorktree` (already shared) merges both identically.
 
-**DECISION — spill trigger.** Recommend **reactive spill** (route to NIM only when
-the primary pool is quota-blocked / cooling down), not proactive load-balancing —
-matches the quota-dispatch north star ("self-monitoring, own-provider-only;
-spill on exhaustion"), and avoids paying NIM cost while Claude quota is healthy.
-Proactive balancing is a later optimization.
+**DECIDED — proactive spill.** The coordinator distributes the frontier across BOTH
+pools *continuously* by available capacity, not only when the primary is blocked: as
+long as both pools have headroom, nodes flow to both concurrently to maximize
+throughput. This makes a trustworthy per-pool capacity estimate (INV-2 below) a hard
+dependency — proactive balancing is only as good as the capacity signal it reads, so
+it must degrade safely (byte-estimate + safety margin) when a pool's signal is
+silent, never over-committing on a confidently-wrong number.
+
+**Pool discovery (folded in from FINDING-020 / former INV-2).** A8 also owns
+detecting the host's own models to stand up additional pools and per-packet provider
+assignment — the coordinator + claim registry (A10) + per-slot provider resolution
+ARE heterogeneous dispatch, so it is built here, not as a separate track. The only
+distinct residual is host-model detection feeding the pool set, specced as part of
+A8's pool setup.
 
 **Tradeoffs / risks.** Concurrent drivers sharing one frontier is the genuinely new
 coordination surface — race on "who claims node X." Mitigate by making the
 coordinator the single claimant (a node is assigned to exactly one pool before
-either driver sees it). The live run needs both a Claude session AND a NIM key
-present at once — gate it like the existing NIM e2e (`RUN_NIM_E2E=1`).
+either driver sees it). Proactive balancing on a wrong capacity number over-commits
+to a pool that's actually blocked — the safe-degradation floor (below) is the guard.
+The live run needs both a Claude session AND a NIM key present at once — gate it like
+the existing NIM e2e (`RUN_NIM_E2E=1`).
 
 **Acceptance criteria.**
 - One coordinator assigns each frontier node to exactly one pool; no double-claim.
-- A gated live e2e runs an audit (or remediate) with both pools active, forces the
-  primary to cool down, and asserts ≥1 node lands via the NIM pool — never
-  false-resolved, write-scope still enforced.
+- With both pools healthy, work is distributed across BOTH concurrently (proactive),
+  proven by a test that asserts both pools receive nodes when each has capacity.
+- A gated live e2e runs an audit (or remediate) with both pools active and asserts
+  nodes land via each pool — never false-resolved, write-scope still enforced.
+- A pool with a silent/absent capacity signal falls back to byte-estimate + margin,
+  never over-committed (test).
 - `docs/a8-rolling-cutover-plan.md` updated to mark the hybrid done.
 
-**Depends on:** the cross-provider quota work below (a trustworthy "primary is
-blocked" signal is what triggers spill).
+**Depends on:** INV-2 (cross-provider quota detection) — proactive balancing reads a
+trustworthy per-pool capacity estimate; sequence INV-2 first/alongside.
 
 ---
 
@@ -524,16 +538,11 @@ signatures; vertical-slice packaging ≈ work-blocks).
 **Acceptance criteria (of the investigation).** A short decision memo: per lever,
 build / defer / reject + rationale; the committed ones become their own specs.
 
-### INV-2 — Heterogeneous multi-agent dispatch (FINDING-020)  · **M**
+> **Heterogeneous multi-agent dispatch (former INV-2 / FINDING-020) is folded into
+> A8 + A10** — the coordinator, claim registry, per-slot provider resolution, and
+> host-model pool discovery ARE heterogeneous dispatch; it is not a separate track.
 
-`computeDispatchCapacity` already sizes/partitions across pools. Remaining:
-per-packet provider assignment, host-model detection for additional pools, and a
-real second pool (an IDE model or another CLI provider). Largely subsumed by A8 +
-A10 (the coordinator + claim registry + per-slot provider resolution ARE this) —
-**recommend folding INV-2 into A8/A10** rather than tracking separately; the only
-distinct residual is host-model detection feeding additional pools.
-
-### INV-3 — Cross-IDE/provider quota detection  · **L**
+### INV-2 — Cross-IDE/provider quota detection  · **L**
 
 **Goal.** A trustworthy capacity/limit estimate for every provider+IDE+model triple,
 degrading safely (byte-estimate + 429/TPM learning + safety margin) when a source is
@@ -544,17 +553,14 @@ Copilot / Antigravity / OpenCode / Gemini.
 (Claude OAuth usage source is live + wired). Remaining: validate each provider's
 source against the *real* endpoint (not just unit fixtures), wire learned-limit
 feedback + the capability handshake into one capacity picture per triple, and prove
-the safe-degradation path. This is the trustworthy "primary pool is blocked" signal
-A8's reactive spill depends on — **sequence INV-3 before / alongside the A8 live
+the safe-degradation path. This is the trustworthy per-pool capacity signal A8's
+**proactive** balancing reads — **sequence INV-2 before / alongside the A8 live
 run.** Red line (quota-dispatch vision): self-monitoring own-provider-only, never IDE
 GUI automation.
 
-**Action item (Ethan, non-code): rotate the Antigravity token** (flagged in memory)
-before any live Antigravity quota validation.
-
 **Acceptance criteria.** Each provider source validated live; one capacity estimate
-per triple that degrades to byte-estimate+margin when silent; A8 spill consumes a
-real "blocked" signal.
+per triple that degrades to byte-estimate+margin when silent; A8 proactive balancing
+consumes a real per-pool capacity signal.
 
 ---
 
@@ -567,9 +573,10 @@ Roughly dependency-ordered, cheap-and-safe first:
 2. **Self-contained DCs (S–M):** DC-3 (parallel module phases), DC-1 (free-form
    intent), DC-4 (audit pause/scope/ingest — ship the three sub-fixes separately).
 3. **Quality track:** A2 (oracle) + DC-5 (paired obligations) — raise output trust.
-4. **Dispatch track (the big interlock):** INV-3 (quota signal) → A10 (claim
-   registry) → A8 (hybrid spill) → DC-6 (host-subagent rolling) → DC-2 (Gate-0);
-   INV-2 folds in here.
+4. **Dispatch track (the big interlock):** INV-2 (per-pool quota signal) → A10
+   (claim registry) → A8 (proactive hybrid spill + heterogeneous-dispatch /
+   host-model pools, former INV-2-FINDING-020 folded in) → DC-6 (host-subagent
+   rolling) → DC-2 (Gate-0).
 5. **Validation track:** A7 (multi-host) — independent, do whenever; PB-2 rides its
    checklist.
 6. **Autonomy capstone:** A9 (end-to-end acceptance) — last, once the dispatch track
