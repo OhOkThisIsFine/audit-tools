@@ -21,22 +21,19 @@
     Tests: node:test `.mjs` (tests/shared, tests/audit) + vitest (tests/remediate). Plain `vX.Y.Z` release tags.
     One `ci.yml`/`publish-package.yml` job. `opencode.json` at root has both agent scopes.
 
-- **PUBLISH TAIL (immediate next — finish the pipeline):**
-  1. **First publish attempted + failed at the OIDC publish step ONLY** (run `27796284511`): Linux
-     `verify:release` + `npm pack` all passed; `npm publish` got `404 PUT .../audit-tools — you do not have
-     permission` = the new name has **no npm trusted publisher configured yet**. Ethan is enabling it on
-     npmjs.com (owner `OhOkThisIsFine`, repo `audit-tools`, workflow `publish-package.yml`, no environment).
-     The `v0.28.0` tag + GitHub Release exist; nothing published (npm still 404). **After Ethan enables trusted
-     publishing, re-trigger with a fresh dispatch** (picks up the post-failure workflow fix; do NOT `gh run
-     rerun` the old run — it predates the `--ignore-scripts` fix):
-     `gh workflow run publish-package.yml -f dry_run=false --ref main` → publishes `audit-tools@0.28.0`.
-     (Fixed `256c4905`: `npm publish --ignore-scripts` so retries don't re-run verify:release into the 10-min
-     step timeout.)
-  2. **After it's live on npm:** `npm deprecate auditor-lambda "moved to audit-tools"` (same for
-     `remediator-lambda` and `@audit-tools/shared`) — redirect the old names.
-  3. **Reinstall global bins** from the published package: `npm i -g audit-tools` (or `npm i -g .` from the
-     repo), then run the postinstall / approve-scripts so host assets deploy. Verify `audit-code --version` /
-     `remediate-code --version` → `0.28.0`.
+- **PUBLISH: ✓ DONE.** `audit-tools@0.28.0` is **live on npm** (`latest` tag, both bins). Bootstrapped via a
+  one-time authenticated **local** `npm publish --ignore-scripts` (Ethan's 2FA) because the OIDC CI publish
+  cannot create a brand-new package name — npm requires a trusted publisher configured on an EXISTING package,
+  so the first publish needs real auth. Global bins swapped: old `auditor-lambda`/`remediator-lambda` removed
+  `-g`, `audit-tools` installed `-g`, postinstall run (host assets deployed to ~/.claude, ~/.codex, …);
+  `audit-code`/`remediate-code --version` → `0.28.0`. CI publish fix landed `256c4905`
+  (`npm publish --ignore-scripts`).
+- **TWO remaining Ethan-only npm actions (both need his 2FA / browser auth — I can't):**
+  1. **Deprecate the old names** (redirect): `npm deprecate auditor-lambda "Merged into 'audit-tools' (v0.28.0+).
+     Install: npm i -g audit-tools"` — same for `remediator-lambda` and `@audit-tools/shared`.
+  2. **Configure npm trusted publishing on the now-existing `audit-tools` package** (owner `OhOkThisIsFine`,
+     repo `audit-tools`, workflow `publish-package.yml`) so FUTURE releases publish tokenlessly via CI/`/ship`
+     with provenance. Until then, a CI publish of a new version will 404 again — bootstrap is local-only.
 
 ## Immediate next: the go-forward program
 
