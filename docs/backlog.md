@@ -310,9 +310,14 @@ narrowing (`a9cf29d0`).
   those fields feed downstream LLM prompts, so stripping them under-fires staleness (a prose edit must
   still re-run the LLM phase whose input changed). Only safe if each downstream's PROMPT input (not just
   its deriver code) is proven not to read the field. Efficiency-only; revisit if churn still bites.
-- **OPEN (need Ethan's format call):** (1) lens-proposition markdown schema for confirm-intent;
-  (2) standardized per-finding display in the audit report; (3) resolve all scoping/judgment ambiguity
-  up-front at intake/confirm-intent (never defer mid-run). Plan: draft concrete proposals for review.
+- **Notes 1–3 SHIPPED** (design finalized by Ethan 2026-06-19; built on the same branch):
+  (1) canonical lens **proposition table** (glyphs, three dispositions, invisible deterministic→LLM
+  review, IDE-agnostic layer-on-top question) — `0092405b`/`e88d1afa`;
+  (2) **standardized per-finding block** (one renderFindingBlock: lead + fixed-order badge body,
+  grounding always shown, file/evidence trim with JSON as source of truth) — `0092405b`;
+  (3) ambiguity-up-front: **runPlanAmbiguityGate** (deterministic candidates → host review w/ repo
+  access → batched round, hard-gate planning, explicit user `defer`) — `264b36da` — plus the mid-run
+  **`needs_clarification`** worker outcome routing to a clarification round instead of triage — `70d74a8d`.
 
 ### Other
 
