@@ -21,35 +21,39 @@
     Tests: node:test `.mjs` (tests/shared, tests/audit) + vitest (tests/remediate). Plain `vX.Y.Z` release tags.
     One `ci.yml`/`publish-package.yml` job. `opencode.json` at root has both agent scopes.
 
-- **PUBLISH: ✓ DONE — `audit-tools@0.28.1` is live on npm** (`latest`, both bins), carrying the **win32 audit
-  fix** + audit NIM e2e (A8) that the in-process audit dispatch needed (colon-in-packet-id sidecar crash had
-  100%-broken Windows in-process dispatch). **Trusted publishing is now CONFIGURED (Ethan) and CONFIRMED
-  WORKING** — `v0.28.1` published tokenlessly via the OIDC CI `publish-package.yml` run
-  (`27798932666`), no local bootstrap. The go-forward release path is `npm run release:patch:publish` (single
-  package; `scripts/release-and-publish.mjs`). Global bins reinstalled + postinstall run (host assets to
-  ~/.claude, ~/.codex, ~/.config/opencode, ~/.gemini); `audit-code`/`remediate-code --version` → `0.28.1`.
-  (0.28.0 was the prior local-bootstrap publish; history in memory.)
+- **PUBLISH: `audit-tools@0.28.2` PUBLISHING (release:patch:publish in flight as of this writing).** Carries
+  the dogfood's 3 rolling-dispatch fixes + F5–F8 (below). 0.28.1 was the prior release (win32 audit fix + NIM
+  e2e). Trusted publishing is CONFIGURED + CONFIRMED WORKING (OIDC CI, tokenless). Go-forward release path:
+  `env -u CLAUDECODE npm run release:patch:publish`. **If 0.28.2 finished:** confirm `npm view audit-tools
+  version` = 0.28.2, then `npm i -g audit-tools` + run the global `scripts/postinstall.mjs` + smoke
+  `--version`. (See the `bvfkt2qnx` background task output if mid-flight.)
 - **ONE remaining Ethan-only npm action (needs his 2FA — I can't):** deprecate the old names (redirect):
   `npm deprecate auditor-lambda "Merged into 'audit-tools' (v0.28.0+). Install: npm i -g audit-tools"` — same
   for `remediator-lambda` and `@audit-tools/shared`. Non-blocking (cosmetic redirect for old installs).
 
+- **DOGFOOD remediate-code on its own backlog: ✓ DONE (2026-06-18).** Full record:
+  `docs/dogfood-remediation-findings-2026-06-18.md`. Drove `remediate-code` end-to-end (full contract pipeline +
+  adversarial critic→judge→repair + rolling implement). **Found+fixed 3 bugs (the rolling implement path was
+  100% broken on Windows):** win32 verify-shim (`6a551b28`), stale-branch reset (`c9575b7f`), orphaned-dir reset
+  (`e29cec16`). **Landed F5–F8 THROUGH the tool** (accept-node verify+merge → cherry-picks `bca2850c`/`3ecb492d`/
+  `c5005289`): parseJsonLoose balance-scan + response_format default-on/degrade; OBL-CO-01 explicit
+  POSITIVE:/NEGATIVE: labels; INV-CO-12 seam_adjustments corpus; validate-artifact envelope unwrap. Discovered 6
+  backlog items already-shipped (pruned). Durable lesson: memory `rolling-implement-windows-and-writescope-findings`.
+
 ## Immediate next: the go-forward program
 
-**After publish lands, dogfood `remediate-code` on the rest of the backlog** (Ethan's stated plan: reach a
-publishable single-package milestone → publish → use the tool on itself). Remaining program items
-(`docs/backlog.md` → "Accepted go-forward program"):
+**Open dogfood frictions to fix (highest-value next, all in `docs/backlog.md` Known-friction):**
+- Write-scope gate runs AFTER `accept-node` cherry-picks → reports post-hoc, doesn't prevent; and the
+  host-declared `file_scope` is a guess the rolling worker can't amend (a too-narrow scope blocks a correct fix).
+- `accept-outcome` sidecar + triage discard the verify command output (triage flies blind on `outcome:error`).
+- `--input` after intake → hard input_conflict; `accept-node` needs `--run-id` though the prompt shows only `--id`.
+
+**Remaining accepted program** (`docs/backlog.md` → "Accepted go-forward program"):
 - **A7 (REFRAMED)** — validate the host install/integration machinery across all hosts (Codex, OpenCode,
   Antigravity), not just Claude Code.
-- Deferred: **A2** (falsifiable finding-quality oracle), **A9/A10** (autonomy acceptance + multi-process
-  coordination — revisit when A8 multi-process gets concrete).
-- **A8 loose ends:** audit-code NIM e2e ✓ **DONE (2026-06-18)** — `tests/audit/nim-rolling-audit-e2e.test.mjs`
-  (gated `RUN_NIM_E2E=1` + `NVIDIA_API_KEY`) drives the REAL `runDeterministicForNextStep` over live NIM,
-  validated green; it found+fixed two real bugs in the audit in-process dispatch path: a **colon-in-packet-id
-  sidecar crash** (audit packet ids embed `:`, invalid on Windows → errored every packet on win32; now uses the
-  `artifactNameForId` FS-safe stem) and an **all-invalid-ingest crash** (`mergeAndIngest`'s hard block now
-  absorbed into a no-progress pass so the fold blocks cleanly). Regression tests in
-  `tests/audit/rolling-audit-dispatch.test.mjs`. REMAINING A8: the {host-subagent + NIM} HYBRID spill topology
-  (FINDING-020 capstone) + a live cross-provider spill run. See `docs/a8-rolling-cutover-plan.md`.
+- Deferred: **A2** (falsifiable finding-quality oracle), **A9/A10** (autonomy acceptance + multi-process).
+- **A8 loose end:** the {host-subagent + NIM} HYBRID spill topology (FINDING-020 capstone) + a live
+  cross-provider spill run. See `docs/a8-rolling-cutover-plan.md`. (audit-code NIM e2e already DONE in 0.28.1.)
 
 ## Working constraints (single-package)
 - **Green at every commit:** `npm run build && npm run check` → zero errors. Commit hook enforces it.
