@@ -18,6 +18,8 @@ import { spawnSync } from "node:child_process";
 import {
   acceptNodeWorktree,
   createWorktree,
+  removeWorktree,
+  resetNodeWorktreeAndBranch,
   worktreePath,
   worktreeBranchForBlock,
 } from "../../src/remediate/steps/dispatch.js";
@@ -55,6 +57,35 @@ function makeWorktreeWithEdit(repo: string, blockId: string, file: string): stri
 // ===========================================================================
 // acceptNodeWorktree — the shared commit -> verify -> merge core
 // ===========================================================================
+
+// ===========================================================================
+// Re-dispatch after a blocked/triaged attempt — stale branch must be reset
+// (regression: createNodeWorktree left the branch behind -> "branch already
+// exists" on retry, blocking the whole host-rolling re-dispatch).
+// ===========================================================================
+
+describe("re-dispatch after a stale prior attempt", () => {
+  it("resetNodeWorktreeAndBranch clears a leftover branch so createWorktree -b succeeds again", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const blockId = "RETRY1";
+    const wt = worktreePath(repo, blockId, RID);
+    const branch = worktreeBranchForBlock(blockId, RID);
+
+    // First attempt: create worktree+branch, then remove ONLY the worktree
+    // (the bug: branch survives) — mirrors a node dropped on a failed verify.
+    createWorktree(repo, wt, branch);
+    removeWorktree(repo, wt);
+
+    // A bare re-create now fails because the branch still exists.
+    expect(() => createWorktree(repo, wt, branch)).toThrow(/already exists/);
+
+    // The reset clears worktree dir + pruned admin + branch, so -b recreates it.
+    resetNodeWorktreeAndBranch(repo, wt, branch);
+    expect(() => createWorktree(repo, wt, branch)).not.toThrow();
+    expect(existsSync(wt)).toBe(true);
+  });
+});
 
 describe("acceptNodeWorktree", () => {
   it("commits, verifies, and merges a successful node's edits into HEAD", () => {
