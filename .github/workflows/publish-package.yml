@@ -141,9 +141,12 @@ jobs:
         run: |
           set -euo pipefail
           trap 'echo "::error::npm publish failed. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."' ERR
+          # --ignore-scripts: the "Verify release gate" step already ran verify:release
+          # and built dist; without this, `npm publish` re-runs verify:release via
+          # prepublishOnly on EVERY retry attempt (≈6 min each), blowing the step timeout.
           BACKOFF_SECONDS=(5 15)
           for attempt in 1 2 3; do
-            if output=$(npm publish --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}" 2>&1); then
+            if output=$(npm publish --ignore-scripts --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}" 2>&1); then
               echo "$output"
               echo "Publish succeeded on attempt ${attempt}."
               {
@@ -205,7 +208,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm publish --dry-run --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+          npm publish --dry-run --ignore-scripts --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
           {
             echo "### Publish outcome"
             echo "- status: dry-run (no upload)"
