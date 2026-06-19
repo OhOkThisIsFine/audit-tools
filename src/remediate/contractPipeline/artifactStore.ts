@@ -12,7 +12,7 @@
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { hashContent, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
+import { hashContent, isRecord, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
 import {
   semanticProjection,
   stableStringifyProjection,
@@ -96,6 +96,23 @@ export interface ContractPipelineArtifactEnvelope {
   /** Semantic-projection hashes of upstream dependency artifacts at write time. */
   dependency_hashes: Partial<Record<ContractPipelineArtifactName, string>>;
   payload: unknown;
+}
+
+/**
+ * Canonical predicate for a stored content-hash envelope. Single-sourced here so
+ * any consumer (the contract-pipeline ingest path, the `validate-artifact` CLI)
+ * unwraps with identical structural rules and cannot drift. A plain payload that
+ * happens to carry an `artifact_name` but no `content_hash` is NOT an envelope.
+ */
+export function isEnvelope(
+  value: unknown,
+): value is ContractPipelineArtifactEnvelope {
+  return (
+    isRecord(value) &&
+    typeof value.artifact_name === "string" &&
+    typeof value.content_hash === "string" &&
+    "payload" in value
+  );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
