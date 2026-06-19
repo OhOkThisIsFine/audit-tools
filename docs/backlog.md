@@ -294,6 +294,26 @@ surfaced (fix these):**
   (matching how it already renders `merge-implement-results --run-id`), so the host copies a runnable
   command instead of hitting a missing-required-option error (`nextStep.ts`).
 
+### Dogfood (audit→remediate on the friction-loop repo) — bugs FIXED + open format notes (2026-06-19)
+
+Full record: [`dogfood-feedback-2026-06-19.md`](dogfood-feedback-2026-06-19.md) (local working doc).
+All 8 code bugs fixed on branch `resume-list-dogfood-fixes` (green at every commit), pending ship:
+`resolved_no_change` merge crash (`38d9cf1e`); `free_form_intent` `5.1`-split mangle (`6d0d101a`);
+audit `scope_summary.json` never emitted (`7a9a7925`); untracked declared targets invisible to worktrees
+(`da6e142f`); remediate committed to the base branch → now a dedicated `remediation/<runId>` branch left
+for review (`53e5caf2`); failed-but-committed node work orphaned → durable quarantine ref (`f437e80f`);
+INV-CO-12 demanded near-verbatim seam text → content-majority match (`3f08d192`); contract-pipeline
+re-emit churn on cosmetic edits → projection whitespace-normalize + intermediate `module_contracts`
+narrowing (`a9cf29d0`).
+- **DEFERRED (BUG Y, deeper):** narrowing the staleness projection of the prose-heavy artifacts
+  (design_spec narrative, obligation/dag/assessment descriptions, rationales) was deliberately NOT done —
+  those fields feed downstream LLM prompts, so stripping them under-fires staleness (a prose edit must
+  still re-run the LLM phase whose input changed). Only safe if each downstream's PROMPT input (not just
+  its deriver code) is proven not to read the field. Efficiency-only; revisit if churn still bites.
+- **OPEN (need Ethan's format call):** (1) lens-proposition markdown schema for confirm-intent;
+  (2) standardized per-finding display in the audit report; (3) resolve all scoping/judgment ambiguity
+  up-front at intake/confirm-intent (never defer mid-run). Plan: draft concrete proposals for review.
+
 ### Other
 
 - **Packaged-smoke gate hardcodes a `requiredPackagedPaths` list (2026-06-18).** `smoke-packaged-audit-code.mjs`
