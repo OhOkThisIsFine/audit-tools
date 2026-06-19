@@ -22,11 +22,16 @@
     One `ci.yml`/`publish-package.yml` job. `opencode.json` at root has both agent scopes.
 
 - **PUBLISH TAIL (immediate next — finish the pipeline):**
-  1. **First publish triggered:** GitHub Release `v0.28.0` created → fired `publish-package.yml` (OIDC). The
-     new npm name `audit-tools` is brand-new (404), so the OIDC publish **needs npm trusted publishing enabled
-     for the package** — Ethan is doing this on npmjs.com (owner `OhOkThisIsFine`, repo `audit-tools`, workflow
-     `publish-package.yml`). If the first run failed on the trusted-publisher prereq, **re-run the same run**
-     (`gh run rerun <id>`) after Ethan enables it — no new tag/version needed (still `v0.28.0`).
+  1. **First publish attempted + failed at the OIDC publish step ONLY** (run `27796284511`): Linux
+     `verify:release` + `npm pack` all passed; `npm publish` got `404 PUT .../audit-tools — you do not have
+     permission` = the new name has **no npm trusted publisher configured yet**. Ethan is enabling it on
+     npmjs.com (owner `OhOkThisIsFine`, repo `audit-tools`, workflow `publish-package.yml`, no environment).
+     The `v0.28.0` tag + GitHub Release exist; nothing published (npm still 404). **After Ethan enables trusted
+     publishing, re-trigger with a fresh dispatch** (picks up the post-failure workflow fix; do NOT `gh run
+     rerun` the old run — it predates the `--ignore-scripts` fix):
+     `gh workflow run publish-package.yml -f dry_run=false --ref main` → publishes `audit-tools@0.28.0`.
+     (Fixed `256c4905`: `npm publish --ignore-scripts` so retries don't re-run verify:release into the 10-min
+     step timeout.)
   2. **After it's live on npm:** `npm deprecate auditor-lambda "moved to audit-tools"` (same for
      `remediator-lambda` and `@audit-tools/shared`) — redirect the old names.
   3. **Reinstall global bins** from the published package: `npm i -g audit-tools` (or `npm i -g .` from the
