@@ -16,7 +16,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 
 const {
   makeAuditProviderPacketDispatcher,
@@ -349,4 +349,91 @@ test("A8a: driveRollingAuditDispatch records a partial-completion terminal when 
     activeDispatch.partial_completion_terminal.stranded_ids.sort(),
     result.stranded_ids.sort(),
   );
+});
+
+// ── 4. Regressions found by the live NIM e2e ──────────────────────────────────
+
+test("A8a: a packet id containing ':' does not crash the dispatcher (Windows-safe sidecar names)", async (t) => {
+  // Real audit packet ids embed ':' (e.g. "flow:flow:surface:src-api-auth-ts:security").
+  // The dispatcher used to build sidecar paths (`${packet.id}.task.json`) verbatim,
+  // which is an invalid filename on Windows (NTFS reads ':' as an ADS separator) —
+  // the write threw before launch, erroring EVERY packet. The sidecars must use the
+  // canonical FS-safe stem instead.
+  const { artifactsDir, runDir } = await makeRun();
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  await mkdir(join(runDir, "task-results"), { recursive: true });
+
+  const colonId = "flow:flow:surface:src-api-auth-ts:security-correctness:packet-1-58b5a59ccd";
+  const captured = [];
+  const dispatcher = makeAuditProviderPacketDispatcher({
+    root: artifactsDir,
+    artifactsDir,
+    runId: RUN_ID,
+    sessionConfig: { provider: "openai-compatible" },
+    timeoutMs: 1000,
+    createProvider: () => ({
+      name: "fake",
+      async launch(input) {
+        captured.push(input);
+        await writeFile(input.resultPath, JSON.stringify([]), "utf8");
+        return { accepted: true };
+      },
+    }),
+  });
+
+  const packet = {
+    id: colonId,
+    payload: {
+      packet_id: colonId,
+      prompt_path: join(runDir, "task-results", "pkt.prompt.md"),
+      result_path: join(runDir, "task-results", "pkt.inline-result.json"),
+      access: { read_paths: [], write_paths: [], forbidden_patterns: [] },
+      complexity: { estimated_tokens: 100, priority: "medium" },
+    },
+    estimatedTokens: 100,
+    complexity: 0.5,
+  };
+
+  const outcome = await dispatcher(packet, { providerName: "openai-compatible", hostModel: null, poolId: "p" });
+  assert.equal(outcome.outcome, "success", "must not error on a colon-bearing packet id");
+  assert.equal(captured.length, 1, "the worker must actually launch (the sidecar write must not throw)");
+  // Every sidecar filename the dispatcher derives must be free of ':' (FS-safe).
+  for (const key of ["stdoutPath", "stderrPath"]) {
+    assert.ok(
+      !basename(captured[0][key]).includes(":"),
+      `${key} basename must be colon-free, got ${basename(captured[0][key])}`,
+    );
+  }
+});
+
+test("A8a: driveRollingAuditDispatch degrades to no-progress (does not crash) when every accepted result is ingestion-invalid", async (t) => {
+  // A packet `outcome:"success"` only means the provider wrote a result file. When
+  // every provider-accepted result is contract-invalid, mergeAndIngest raises a hard
+  // "all assigned results invalid" block. In the rolling driver that throw must be
+  // absorbed into a no-progress pass (ingest:null) so the fold blocks cleanly instead
+  // of crashing next-step (robustness to any-strength provider).
+  const { artifactsDir, runDir, taskList } = await makeRun();
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  // Workers "succeed" (write a result file) but ingestion is stubbed to throw the
+  // same all-invalid error mergeAndIngest raises.
+  const throwingIngest = async () => {
+    throw new Error("All 4 assigned task result(s) were missing or invalid; blocked before ingestion.");
+  };
+
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await driveRollingAuditDispatch({
+      root: artifactsDir,
+      artifactsDir,
+      activeReviewRun: activeReviewRun(artifactsDir, runDir),
+      sessionConfig: { provider: "openai-compatible" },
+      timeoutMs: 1000,
+      dispatchPacket: makeWritingDispatcher(runDir, taskList),
+      ingest: throwingIngest,
+    });
+  }, "an all-invalid ingestion must not propagate out of the driver");
+
+  assert.equal(result.ingest, null, "no usable ingest result is recorded (no-progress pass)");
+  assert.equal(result.packet_count, 3, "the packets were still dispatched");
 });

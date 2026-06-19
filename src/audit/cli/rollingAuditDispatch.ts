@@ -44,6 +44,7 @@ import { createFreshSessionProvider } from "../providers/index.js";
 import { prepareDispatchArtifacts, type DispatchPlanEntry } from "./dispatch.js";
 import { mergeAndIngest, type MergeAndIngestResult } from "./mergeAndIngestCommand.js";
 import { packageRoot } from "./paths.js";
+import { artifactNameForId } from "./args.js";
 
 /**
  * Backends the orchestrator can drive IN-PROCESS as the per-packet review worker
@@ -179,9 +180,16 @@ export function makeAuditProviderPacketDispatcher(params: {
 
     const resultPath = entry.result_path;
     const dir = dirname(resultPath);
-    const taskPath = join(dir, `${packet.id}.task.json`);
-    const stdoutPath = join(dir, `${packet.id}.stdout.txt`);
-    const stderrPath = join(dir, `${packet.id}.stderr.txt`);
+    // Sidecar files share the packet's canonical FS-safe stem. Packet ids embed
+    // ':' (e.g. "root-config:correctness:packet-3"), which is an invalid filename
+    // character on Windows (NTFS reads it as an alternate-data-stream separator),
+    // so a raw `${packet.id}.task.json` throws on the write — before any launch,
+    // erroring every packet. `artifactNameForId` is the same sanitizer the
+    // prompt/result files use (stem + digest), keeping the sidecars co-named and
+    // OS-agnostic (INV everything-agnostic / Windows-aware).
+    const taskPath = join(dir, artifactNameForId(packet.id, "task.json"));
+    const stdoutPath = join(dir, artifactNameForId(packet.id, "stdout.txt"));
+    const stderrPath = join(dir, artifactNameForId(packet.id, "stderr.txt"));
 
     const task: WorkerTask = {
       contract_version: "audit-code-worker/v1alpha1",
@@ -349,12 +357,34 @@ export async function driveRollingAuditDispatch(params: {
   // packet stranded on an exhausted pool) has nothing to fold in, and ingesting
   // would block on "all assigned results missing" — the recorded terminal already
   // lets the pipeline proceed to synthesis on partial coverage.
+  //
+  // A packet `outcome:"success"` only means the provider WROTE a result file, not
+  // that the result is contract-valid. When every provider-accepted result is
+  // ingestion-invalid (e.g. a weak/unreliable backend returned wrong line counts
+  // or a malformed AuditResult), `mergeAndIngest` raises a hard "all assigned
+  // results invalid" block — correct for the synchronous CLI worker, but in the
+  // rolling driver that must degrade to a NO-PROGRESS pass (ingest:null) so the
+  // host-delegation fold's convergence guard emits a clean block instead of an
+  // unhandled throw crashing next-step (INV enforce-in-tooling: the path must be
+  // robust to ANY-strength provider).
   const anySuccess = run.results.some((r) => r.outcome === "success");
+  let ingestResult: MergeAndIngestResult | null = null;
+  if (anySuccess) {
+    try {
+      ingestResult = await ingest({ runId, artifactsDir });
+    } catch (err) {
+      ingestResult = null;
+      process.stderr.write(
+        `[rollingAuditDispatch] ingestion produced no usable results for run ${runId} ` +
+          `(every provider-accepted result was invalid): ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+    }
+  }
   return {
     status: run.status,
     packet_count: packets.length,
     stranded_ids: run.stranded_ids,
-    ingest: anySuccess ? await ingest({ runId, artifactsDir }) : null,
+    ingest: ingestResult,
   };
 }
 
