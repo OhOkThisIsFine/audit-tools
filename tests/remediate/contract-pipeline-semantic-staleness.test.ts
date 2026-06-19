@@ -176,6 +176,57 @@ describe("B3 semantic staleness — projection + envelope", () => {
     expect(mod).not.toHaveProperty("created_at");
   });
 
+  it("a whitespace-only edit to a load-bearing field projects identically (no churn)", () => {
+    const a = makeFinalized({ invariants: ["x must never be negative"] });
+    const b = makeFinalized({ invariants: ["x   must  never   be negative  "] });
+    expect(semanticProjection("finalized_module_contracts", a)).toEqual(
+      semanticProjection("finalized_module_contracts", b),
+    );
+  });
+
+  it("the intermediate module_contracts artifact narrows per-entry non-derivable fields too", () => {
+    const make = (sideEffects: string[]) => ({
+      contract_version: "remediate-code-contract-pipeline/module-contracts/v1alpha1",
+      goal_id: GOAL,
+      module_contracts: [
+        {
+          name: "mod-a",
+          inputs: ["x"],
+          outputs: ["y"],
+          invariants: [],
+          failure_modes: [],
+          validation_boundary: "v",
+          side_effects: sideEffects,
+          neighbor_needs: ["needs mod-b"],
+        },
+      ],
+      created_at: "2026-06-18T00:00:00.000Z",
+    });
+    const projected = semanticProjection("module_contracts", make(["logs"])) as {
+      module_contracts: Array<Record<string, unknown>>;
+    };
+    expect(projected.module_contracts[0]).not.toHaveProperty("side_effects");
+    expect(projected.module_contracts[0]).not.toHaveProperty("neighbor_needs");
+    // A non-derivable per-entry edit projects identically — no downstream churn.
+    expect(semanticProjection("module_contracts", make(["logs"]))).toEqual(
+      semanticProjection("module_contracts", make(["writes a file"])),
+    );
+  });
+
+  it("a changed interface on the intermediate module_contracts still re-projects (load-bearing)", () => {
+    const make = (outputs: string[]) => ({
+      contract_version: "remediate-code-contract-pipeline/module-contracts/v1alpha1",
+      goal_id: GOAL,
+      module_contracts: [
+        { name: "mod-a", inputs: ["x"], outputs, invariants: [], failure_modes: [], validation_boundary: "v" },
+      ],
+      created_at: "2026-06-18T00:00:00.000Z",
+    });
+    expect(semanticProjection("module_contracts", make(["y"]))).not.toEqual(
+      semanticProjection("module_contracts", make(["y", "z"])),
+    );
+  });
+
   it("the written envelope carries a semantic_hash distinct from a cosmetic-only twin", async () => {
     const a = await writeContractArtifact(artifactsDir, "finalized_module_contracts", makeFinalized());
     expect(typeof a.semantic_hash).toBe("string");

@@ -76,6 +76,24 @@ function projectModuleContract(value: unknown): Record<string, unknown> {
 }
 
 /**
+ * Collapse cosmetic whitespace in every projected string (trim + runs → single
+ * space), recursively. A reflow / trailing-space / indentation edit to a contract
+ * field is not a semantic change, but without this it churns the projection hash
+ * and re-stales the downstream chain. Safe: the downstream gates/derivers match on
+ * word boundaries and substrings, which whitespace normalization never alters.
+ */
+function normalizeWhitespaceDeep(value: unknown): unknown {
+  if (typeof value === "string") return value.replace(/\s+/g, " ").trim();
+  if (Array.isArray(value)) return value.map(normalizeWhitespaceDeep);
+  if (isRecord(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, v] of Object.entries(value)) out[key] = normalizeWhitespaceDeep(v);
+    return out;
+  }
+  return value;
+}
+
+/**
  * Project a contract-pipeline artifact payload to only its load-bearing
  * structure for downstream-staleness purposes. The universal provenance strip
  * applies to every artifact; `finalized_module_contracts` additionally projects
@@ -92,21 +110,24 @@ export function semanticProjection(
   if (!isRecord(payload)) return payload;
   const stripped = stripFields(payload, UNIVERSAL_NON_SEMANTIC_FIELDS);
 
-  if (name === "finalized_module_contracts") {
-    // Keep every top-level field (contract_version, goal_id, …) but narrow each
-    // module entry to its derivable fields, so a reworded per-module rationale /
-    // seam-prose edit projects identically while a changed interface / new
-    // invariant does not. Narrowing entries (not the whole artifact) keeps the
-    // projection conservative: any top-level field a downstream might read still
-    // participates in staleness.
-    if (!Array.isArray(stripped.module_contracts)) return stripped;
-    return {
-      ...stripped,
-      module_contracts: stripped.module_contracts.map(projectModuleContract),
-    };
+  // Both the intermediate `module_contracts` and the `finalized_module_contracts`
+  // carry the same module-entry shape; narrow each entry to its derivable fields for
+  // BOTH so a reworded per-module rationale / a tweaked non-derivable array
+  // (side_effects / seam_adjustments / neighbor_needs) projects identically while a
+  // changed interface / new invariant does not. Keep every top-level field
+  // (contract_version, goal_id, …): the narrowing is per-entry, so any top-level
+  // field a downstream might read still participates in staleness.
+  if (name === "finalized_module_contracts" || name === "module_contracts") {
+    if (Array.isArray(stripped.module_contracts)) {
+      return normalizeWhitespaceDeep({
+        ...stripped,
+        module_contracts: stripped.module_contracts.map(projectModuleContract),
+      });
+    }
+    return normalizeWhitespaceDeep(stripped);
   }
 
-  return stripped;
+  return normalizeWhitespaceDeep(stripped);
 }
 
 /**
