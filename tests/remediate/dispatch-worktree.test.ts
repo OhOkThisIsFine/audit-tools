@@ -12,6 +12,11 @@ import {
   mergeWorktree,
   worktreePath,
 } from "../../src/remediate/steps/dispatch.js";
+import { resolveWindowsShimSpawnCommand } from "audit-tools/shared";
+
+// The package-manager shim base names verifyNodeInWorktree routes through the
+// shell on win32 (must mirror VERIFY_SHIM_BASE_NAMES in dispatch.ts).
+const VERIFY_SHIM_BASE_NAMES = ["npm", "npx", "pnpm", "yarn"] as const;
 
 // ---------------------------------------------------------------------------
 // Stub spawnSync to avoid real git calls in unit tests
@@ -132,21 +137,38 @@ describe("removeWorktree", () => {
 // ---------------------------------------------------------------------------
 
 describe("verifyNodeInWorktree", () => {
-  it("runs each targeted_command in the worktree cwd", () => {
+  it("runs each targeted_command in the worktree cwd, routed through the platform shim resolver", () => {
     spawnSyncMock.mockReturnValue(makeSpawnResult(0, "ok", ""));
 
     verifyNodeInWorktree("/repo/wt", ["npm test", "npm run lint"]);
 
+    // The command must be routed through resolveWindowsShimSpawnCommand so a
+    // `.cmd` shim (npm/npx/...) is exec'able on win32; on other platforms it
+    // resolves to the raw command. Compute the expected spawn per platform.
+    const t = resolveWindowsShimSpawnCommand("npm", ["test"], VERIFY_SHIM_BASE_NAMES);
+    const l = resolveWindowsShimSpawnCommand("npm", ["run", "lint"], VERIFY_SHIM_BASE_NAMES);
     expect(spawnSyncMock).toHaveBeenCalledWith(
-      "npm",
-      ["test"],
-      expect.objectContaining({ cwd: "/repo/wt" }),
+      t.command,
+      t.args,
+      expect.objectContaining({ cwd: "/repo/wt", shell: false }),
     );
     expect(spawnSyncMock).toHaveBeenCalledWith(
-      "npm",
-      ["run", "lint"],
-      expect.objectContaining({ cwd: "/repo/wt" }),
+      l.command,
+      l.args,
+      expect.objectContaining({ cwd: "/repo/wt", shell: false }),
     );
+  });
+
+  it("routes a package-manager shim through the command shell on win32 (regression: shell:false ENOENT)", () => {
+    // The bug: spawning `npm`/`npx` with shell:false on win32 fails because the
+    // PATH entry is a `.cmd` wrapper. The resolver must wrap it in cmd.exe /c.
+    const win = resolveWindowsShimSpawnCommand("npm", ["run", "build"], VERIFY_SHIM_BASE_NAMES, "win32", "cmd.exe");
+    expect(win.command).toBe("cmd.exe");
+    expect(win.args).toEqual(["/d", "/s", "/c", "npm run build"]);
+    // On non-win32 the same call must spawn npm directly (OS-agnostic).
+    const nix = resolveWindowsShimSpawnCommand("npm", ["run", "build"], VERIFY_SHIM_BASE_NAMES, "linux");
+    expect(nix.command).toBe("npm");
+    expect(nix.args).toEqual(["run", "build"]);
   });
 
   it("returns passed: true when all commands exit 0", () => {
@@ -165,6 +187,22 @@ describe("verifyNodeInWorktree", () => {
     const result = verifyNodeInWorktree("/repo/wt", ["npm test -w pkg1", "npm test -w pkg2"]);
     expect(result.passed).toBe(false);
     expect(result.output).toContain("FAIL: assertion failed");
+  });
+
+  it("returns passed: false and surfaces the message when the spawn itself errors", () => {
+    spawnSyncMock.mockReturnValue({
+      status: null,
+      stdout: "",
+      stderr: "",
+      pid: 0,
+      output: [],
+      signal: null,
+      error: new Error("spawn npm ENOENT"),
+    } as ReturnType<typeof spawnSync>);
+
+    const result = verifyNodeInWorktree("/repo/wt", ["npm run build"]);
+    expect(result.passed).toBe(false);
+    expect(result.output).toContain("ENOENT");
   });
 
   it("returns passed: true and includes output when no commands are given", () => {

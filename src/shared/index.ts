@@ -404,7 +404,7 @@ export {
   resolveWorkerTaskTimeoutMs,
   applyWorkerTaskLaunchSettings,
 } from "./providers/workerTaskLaunch.js";
-export { resolveOpenCodeSpawnCommand } from "./providers/opencodeLaunch.js";
+export { resolveOpenCodeSpawnCommand, resolveWindowsShimSpawnCommand } from "./providers/opencodeLaunch.js";
 
 // Shared structured provider launch/done diagnostics (single source so the
 // claude-code / opencode providers emit byte-identical stderr records).

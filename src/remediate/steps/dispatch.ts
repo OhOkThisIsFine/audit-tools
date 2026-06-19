@@ -25,6 +25,7 @@ import type {
   HostModelRosterEntry,
   CapacityPool,
 } from "audit-tools/shared";
+import { resolveWindowsShimSpawnCommand } from "audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
   readJsonFile,
@@ -600,18 +601,36 @@ export function resetNodeWorktreeAndBranch(
 }
 
 /** Run each targeted command in the worktree directory. Returns pass/fail and combined output. */
+/**
+ * Package-manager / runner shim base names that must be spawned through the
+ * command shell on Windows (their PATH entries are `.cmd` wrappers that
+ * `spawnSync(..., { shell: false })` cannot exec). Routed through the shared
+ * `resolveWindowsShimSpawnCommand` so the verify step is OS-agnostic — on
+ * non-win32 these spawn directly. Without this, every node's first verify
+ * command (`npm run build`) errors on Windows and the whole rolling implement
+ * path blocks at triage.
+ */
+const VERIFY_SHIM_BASE_NAMES = ["npm", "npx", "pnpm", "yarn"] as const;
+
 export function verifyNodeInWorktree(
   worktreePath: string,
   targetedCommands: string[],
 ): WorktreeVerifyResult {
   const outputs: string[] = [];
   for (const cmd of targetedCommands) {
-    const [bin, ...args] = cmd.split(" ");
-    const r = spawnSync(bin, args, {
+    const [bin, ...rawArgs] = cmd.split(" ");
+    const { command, args } = resolveWindowsShimSpawnCommand(bin, rawArgs, VERIFY_SHIM_BASE_NAMES);
+    const r = spawnSync(command, args, {
       cwd: worktreePath,
       encoding: "utf8",
       shell: false,
     });
+    if (r.error) {
+      // Spawn itself failed (e.g. a shim not exec'able without a shell) — surface
+      // it as a verify failure with the error text rather than a silent status.
+      outputs.push(`$ ${cmd}\n${r.error.message}`);
+      return { passed: false, output: outputs.join("\n---\n") };
+    }
     const combined = [r.stdout ?? "", r.stderr ?? ""].filter(Boolean).join("\n");
     outputs.push(`$ ${cmd}\n${combined}`);
     if (r.status !== 0) {
