@@ -210,9 +210,10 @@ export function validateImplementWorkerResult(
     if (
       result.status !== "resolved" &&
       result.status !== "resolved_no_change" &&
-      result.status !== "blocked"
+      result.status !== "blocked" &&
+      result.status !== "needs_clarification"
     ) {
-      pushValidationIssue(issues, `${resultPath}.status`, `${resultPath}.status must be resolved, resolved_no_change, or blocked.`);
+      pushValidationIssue(issues, `${resultPath}.status`, `${resultPath}.status must be resolved, resolved_no_change, blocked, or needs_clarification.`);
     }
   }
   return issues;

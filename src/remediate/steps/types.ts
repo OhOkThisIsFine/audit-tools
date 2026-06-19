@@ -85,9 +85,18 @@ export interface RemediationDispatchPlan {
 
 export interface ImplementWorkerItemResult {
   finding_id: string;
-  status: "resolved" | "resolved_no_change" | "blocked";
+  status: "resolved" | "resolved_no_change" | "blocked" | "needs_clarification";
   evidence?: string[];
   failure_reason?: string;
+  /**
+   * Set with `status: "needs_clarification"` (note 3, part B): the scoping/
+   * judgment question the worker hit, surfaced to the user as a real clarification
+   * round rather than routed to triage as an execution failure. Optional
+   * `clarification_category` narrows it to one of the canonical clarification
+   * categories (defaults to `scope_of_fix`).
+   */
+  clarification_question?: string;
+  clarification_category?: string;
 }
 
 export interface ImplementWorkerResult {

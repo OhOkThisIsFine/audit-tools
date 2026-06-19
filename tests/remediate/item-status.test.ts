@@ -13,11 +13,12 @@ import type { PerFindingDisposition } from "../../src/remediate/state/types.js";
 import type { RemediationOutcomeStatus } from "audit-tools/shared";
 
 describe("itemStatus — canonical status enum", () => {
-  it("enumerates the ten lifecycle statuses with no duplicates", () => {
+  it("enumerates the eleven lifecycle statuses with no duplicates", () => {
     expect([...ITEM_STATUSES].sort()).toEqual([
       "blocked",
       "deemed_inappropriate",
       "ignored",
+      "needs_clarification",
       "pending",
       "refactored",
       "resolved",
@@ -37,6 +38,7 @@ describe("itemStatus — statusToDisposition", () => {
     ignored: "ignored",
     deemed_inappropriate: "deemed_inappropriate",
     blocked: "force_closed_unresolved",
+    needs_clarification: "force_closed_unresolved",
     pending: "force_closed_unresolved",
     tested: "force_closed_unresolved",
     tested_successfully: "force_closed_unresolved",
@@ -85,6 +87,7 @@ describe("itemStatus — isInProgressStatus", () => {
       "resolved",
       "resolved_no_change",
       "blocked",
+      "needs_clarification",
       "deemed_inappropriate",
       "ignored",
     ]) {
@@ -105,6 +108,7 @@ describe("itemStatus — isTerminalStatus", () => {
     }
     for (const s of [
       "blocked",
+      "needs_clarification",
       "pending",
       "tested",
       "tested_successfully",
@@ -120,7 +124,7 @@ describe("itemStatus — isVerifiedCompleteStatus", () => {
   it("only resolved / resolved_no_change are verified-complete (INV-RS-01)", () => {
     expect(isVerifiedCompleteStatus("resolved")).toBe(true);
     expect(isVerifiedCompleteStatus("resolved_no_change")).toBe(true);
-    for (const s of ["ignored", "deemed_inappropriate", "blocked", "pending"]) {
+    for (const s of ["ignored", "deemed_inappropriate", "blocked", "needs_clarification", "pending"]) {
       expect(isVerifiedCompleteStatus(s)).toBe(false);
     }
     expect(isVerifiedCompleteStatus(undefined)).toBe(false);
@@ -135,6 +139,7 @@ describe("itemStatus — isSkipStatus", () => {
       "resolved",
       "resolved_no_change",
       "blocked",
+      "needs_clarification",
       "pending",
       "verified",
     ]) {
@@ -147,13 +152,14 @@ describe("itemStatus — isSkipStatus", () => {
 // terminal is exactly verified-complete ∪ skip. Adding a status without
 // classifying it (or mis-bucketing one) fails here.
 describe("itemStatus — partition coherence", () => {
-  it("every status is in exactly one of {in-progress, verified-complete, skip, blocked}", () => {
+  it("every status is in exactly one of {in-progress, verified-complete, skip, blocked, needs_clarification}", () => {
     for (const status of ITEM_STATUSES) {
       const buckets = [
         isInProgressStatus(status),
         isVerifiedCompleteStatus(status),
         isSkipStatus(status),
         status === "blocked",
+        status === "needs_clarification",
       ].filter(Boolean).length;
       expect(buckets, `status ${status} must be in exactly one bucket`).toBe(1);
     }
@@ -179,6 +185,8 @@ describe("itemStatus — close-phase outcome derivation (behavior lock)", () => 
     deemed_inappropriate: "inappropriate",
     ignored: "ignored",
     blocked: "blocked",
+    // needs_clarification → force-closed (if the run ends before the answer) → blocked
+    needs_clarification: "blocked",
     // in-progress → force-closed → blocked
     pending: "blocked",
     tested: "blocked",
