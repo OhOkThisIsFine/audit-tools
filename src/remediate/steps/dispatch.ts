@@ -1,5 +1,5 @@
 import { mkdir, rename } from "node:fs/promises";
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { join, relative, dirname, resolve } from "node:path";
 import { OwnershipRegistry } from "../dispatch/ownershipRegistry.js";
 import { routeAmendmentRequest } from "../dispatch/amendmentClaim.js";
@@ -598,6 +598,14 @@ export function resetNodeWorktreeAndBranch(
   spawnSync("git", ["worktree", "prune"], { cwd: root, shell: false });
   // Force-delete the leftover branch from a prior attempt so `-b` recreates it.
   spawnSync("git", ["branch", "-D", branchName], { cwd: root, shell: false });
+  // Force-remove a leftover worktree DIRECTORY: when a prior attempt's worktree
+  // became an orphaned dir (registered admin entry gone but files remain),
+  // `git worktree remove` no-ops ("is not a working tree") and `git worktree add`
+  // then refuses because the path already exists. Deleting the dir makes the
+  // re-create succeed. Best-effort.
+  if (existsSync(worktreePath)) {
+    rmSync(worktreePath, { recursive: true, force: true });
+  }
 }
 
 /** Run each targeted command in the worktree directory. Returns pass/fail and combined output. */

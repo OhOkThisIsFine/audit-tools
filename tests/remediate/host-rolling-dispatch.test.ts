@@ -85,6 +85,27 @@ describe("re-dispatch after a stale prior attempt", () => {
     expect(() => createWorktree(repo, wt, branch)).not.toThrow();
     expect(existsSync(wt)).toBe(true);
   });
+
+  it("reset force-removes an orphaned worktree DIRECTORY (admin gone, files remain)", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const blockId = "RETRY2";
+    const wt = worktreePath(repo, blockId, RID);
+    const branch = worktreeBranchForBlock(blockId, RID);
+
+    // Simulate an orphaned worktree dir: a directory at the worktree path that
+    // git does not know about (admin entry pruned), with leftover files. A bare
+    // `git worktree add` refuses because the path already exists.
+    mkdirSync(join(wt, "src"), { recursive: true });
+    writeFileSync(join(wt, "src", "stale.ts"), "export const stale = true;\n");
+    expect(() => createWorktree(repo, wt, branch)).toThrow(/already exists/);
+
+    // Reset must delete the leftover directory so the re-create succeeds.
+    resetNodeWorktreeAndBranch(repo, wt, branch);
+    expect(() => createWorktree(repo, wt, branch)).not.toThrow();
+    expect(existsSync(wt)).toBe(true);
+    expect(existsSync(join(wt, "src", "stale.ts"))).toBe(false);
+  });
 });
 
 describe("acceptNodeWorktree", () => {
