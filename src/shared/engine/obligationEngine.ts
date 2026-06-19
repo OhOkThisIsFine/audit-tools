@@ -17,24 +17,31 @@
  * rather than designed in a vacuum. See `docs/a3-a4-engine-unification-plan.md`.
  */
 
+import { z } from "zod";
+
 /**
  * Satisfaction state of a single ordered obligation. `missing` and `stale` are
  * the *actionable* states the scan selects on; `present`, `satisfied`, and
  * `blocked` are non-actionable.
  */
-export type ObligationState =
-  | "missing"
-  | "present"
-  | "stale"
-  | "blocked"
-  | "satisfied";
+export const ObligationStateSchema = z.enum([
+  "missing",
+  "present",
+  "stale",
+  "blocked",
+  "satisfied",
+]);
+export type ObligationState = z.infer<typeof ObligationStateSchema>;
 
 /** A single ordered obligation carrying its precomputed satisfaction state. */
-export interface Obligation {
-  id: string;
-  state: ObligationState;
-  reason?: string;
-}
+export const ObligationSchema = z
+  .object({
+    id: z.string(),
+    state: ObligationStateSchema,
+    reason: z.string().optional(),
+  })
+  .strict();
+export type Obligation = z.infer<typeof ObligationSchema>;
 
 /**
  * Return the first obligation — in `priority` order — that is actionable

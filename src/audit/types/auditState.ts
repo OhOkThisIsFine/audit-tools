@@ -1,28 +1,35 @@
-import type { Obligation } from "audit-tools/shared";
+import { z } from "zod";
+import { ObligationSchema } from "audit-tools/shared";
 
-export type AuditTopLevelStatus =
-  | "not_started"
-  | "active"
-  | "blocked"
-  | "complete";
+export const AuditTopLevelStatusSchema = z.enum([
+  "not_started",
+  "active",
+  "blocked",
+  "complete",
+]);
+export type AuditTopLevelStatus = z.infer<typeof AuditTopLevelStatusSchema>;
 
 // The obligation vocabulary is single-sourced in the shared obligation engine
 // (A3). `ObligationState` is re-exported so audit-code call sites keep importing
 // it from here; `AuditObligation` is the domain alias of the shared `Obligation`
 // ({id, state, reason?}) — same shape, named for the audit context.
 export type { ObligationState } from "audit-tools/shared";
-export type AuditObligation = Obligation;
+export const AuditObligationSchema = ObligationSchema;
+export type AuditObligation = z.infer<typeof AuditObligationSchema>;
 
-export interface AuditState {
-  status: AuditTopLevelStatus;
-  last_executor?: string;
-  last_obligation?: string;
-  blockers?: string[];
-  obligations: AuditObligation[];
-  /**
-   * Set when the rolling dispatch engine fires a partial-completion terminal
-   * (empty pool or livelock). Allows synthesis to proceed on partial coverage
-   * without hard-gating on `audit_tasks_completed`.
-   */
-  partial_coverage_terminal?: boolean;
-}
+export const AuditStateSchema = z
+  .object({
+    status: AuditTopLevelStatusSchema,
+    last_executor: z.string().optional(),
+    last_obligation: z.string().optional(),
+    blockers: z.array(z.string()).optional(),
+    obligations: z.array(AuditObligationSchema),
+    /**
+     * Set when the rolling dispatch engine fires a partial-completion terminal
+     * (empty pool or livelock). Allows synthesis to proceed on partial coverage
+     * without hard-gating on `audit_tasks_completed`.
+     */
+    partial_coverage_terminal: z.boolean().optional(),
+  })
+  .strict();
+export type AuditState = z.infer<typeof AuditStateSchema>;

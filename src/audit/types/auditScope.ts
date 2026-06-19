@@ -12,48 +12,56 @@
  * staleness DAG.
  */
 
-export interface AuditScopeBudget {
-  /**
-   * Upper bound on the number of in-scope files (seeds + expanded). Seeds are
-   * always retained; expansion stops once this cap is reached.
-   */
-  max_files: number;
-}
+import { z } from "zod";
 
-export interface AuditScopeManifest {
-  /**
-   * `full` audits every auditable file; `delta` scopes to a changed
-   * neighbourhood; `budget` dispatches only the top-K review packets under a
-   * `max_packets` cap and defers the rest.
-   */
-  mode: "full" | "delta" | "budget";
-  /** Git ref/SHA the delta was measured against; `null` in full mode. */
-  since: string | null;
-  /**
-   * Changed auditable files (relative to `since`) that exist in the repo
-   * manifest. Empty in full mode. Sorted for determinism.
-   */
-  seed_files: string[];
-  /**
-   * Auditable files pulled in by deterministic priority-frontier expansion over
-   * the dependency graph (graph neighbours of the seeds). Sorted for determinism.
-   */
-  expanded_files: string[];
-  /** The budget applied during expansion. */
-  budget: AuditScopeBudget;
-  /**
-   * Human-readable note when the scope was truncated by the budget, or when a
-   * requested `--since` could not be honoured and the run fell back to full.
-   */
-  dropped_note?: string;
-  /**
-   * When `mode === 'budget'`: the number of review packets that were NOT
-   * dispatched due to the `max_packets` cap. Present only in budget mode.
-   */
-  deferred_packet_count?: number;
-  /**
-   * When `mode === 'budget'`: the task_ids skipped due to the budget cap.
-   * Present only in budget mode.
-   */
-  deferred_task_ids?: string[];
-}
+export const AuditScopeBudgetSchema = z
+  .object({
+    /**
+     * Upper bound on the number of in-scope files (seeds + expanded). Seeds are
+     * always retained; expansion stops once this cap is reached.
+     */
+    max_files: z.number().int().min(1),
+  })
+  .strict();
+export type AuditScopeBudget = z.infer<typeof AuditScopeBudgetSchema>;
+
+export const AuditScopeManifestSchema = z
+  .object({
+    /**
+     * `full` audits every auditable file; `delta` scopes to a changed
+     * neighbourhood; `budget` dispatches only the top-K review packets under a
+     * `max_packets` cap and defers the rest.
+     */
+    mode: z.enum(["full", "delta", "budget"]),
+    /** Git ref/SHA the delta was measured against; `null` in full mode. */
+    since: z.string().nullable(),
+    /**
+     * Changed auditable files (relative to `since`) that exist in the repo
+     * manifest. Empty in full mode. Sorted for determinism.
+     */
+    seed_files: z.array(z.string()),
+    /**
+     * Auditable files pulled in by deterministic priority-frontier expansion over
+     * the dependency graph (graph neighbours of the seeds). Sorted for determinism.
+     */
+    expanded_files: z.array(z.string()),
+    /** The budget applied during expansion. */
+    budget: AuditScopeBudgetSchema,
+    /**
+     * Human-readable note when the scope was truncated by the budget, or when a
+     * requested `--since` could not be honoured and the run fell back to full.
+     */
+    dropped_note: z.string().optional(),
+    /**
+     * When `mode === 'budget'`: the number of review packets that were NOT
+     * dispatched due to the `max_packets` cap. Present only in budget mode.
+     */
+    deferred_packet_count: z.number().int().min(0).optional(),
+    /**
+     * When `mode === 'budget'`: the task_ids skipped due to the budget cap.
+     * Present only in budget mode.
+     */
+    deferred_task_ids: z.array(z.string()).optional(),
+  })
+  .strict();
+export type AuditScopeManifest = z.infer<typeof AuditScopeManifestSchema>;

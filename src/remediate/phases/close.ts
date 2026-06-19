@@ -11,6 +11,7 @@ import {
   stagedAndUntracked,
   writeJsonFile,
   writeTextFile,
+  RemediationOutcomeStatusSchema,
 } from "audit-tools/shared";
 import type {
   AgentReflection,
@@ -48,12 +49,10 @@ import {
   statusToDisposition,
 } from "../state/itemStatus.js";
 
+// Derived from the single source so the key list can never drift from the
+// RemediationOutcomeStatus contract (A6).
 const OUTCOME_KEYS: RemediationOutcomeStatus[] = [
-  "resolved",
-  "verified_no_change",
-  "inappropriate",
-  "ignored",
-  "blocked",
+  ...RemediationOutcomeStatusSchema.options,
 ];
 
 /** Retry-oriented final status per outcome (see RemediationOutcomeFinalStatus). */
