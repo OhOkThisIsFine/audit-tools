@@ -1,5 +1,6 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
+import { remediationBranchName } from "../steps/dispatch.js";
 import { dirname, extname, isAbsolute, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import {
@@ -770,6 +771,14 @@ function buildRemediationReportMarkdown(
   reflections: AgentReflection[] = [],
 ): string {
   let reportContent = `# Remediation Report\n\n`;
+
+  // Code changes land on a dedicated remediation branch (the base branch is never
+  // modified); surface it so the user can review and merge. Only meaningful when a
+  // node actually committed a change — a no-change/skip-only run leaves no commits.
+  if (entries.resolved.length > 0) {
+    const branch = remediationBranchName(state.plan?.plan_id ?? "");
+    reportContent += `## Review\n\nAll code changes were applied on the dedicated branch \`${branch}\` — your base branch was left untouched. Review the diff and merge \`${branch}\` into your base branch.\n\n`;
+  }
 
   reportContent += `## Resolved — Changed Files\n\n`;
   if (entries.resolved.length === 0) {
