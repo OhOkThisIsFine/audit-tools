@@ -142,6 +142,7 @@ export async function runAuditStep(options: {
 
   const result = await advanceAudit(bundle, {
     root: options.root,
+    artifactsDir: options.artifactsDir,
     lineIndex,
     sizeIndex,
     auditResults: auditResults as AuditResult[] | undefined,

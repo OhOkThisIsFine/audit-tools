@@ -15,6 +15,14 @@ import type { EdgeReasoningResults } from "./edgeReasoning.js";
  */
 export interface AdvanceAuditOptions {
   root?: string;
+  /**
+   * Directory the artifact bundle is persisted to (`.audit-tools/audit/`). The
+   * intake executor writes `scope_summary.json` here directly (a side-artifact,
+   * not a typed bundle field) so the host loader can read the scope it advertises;
+   * absent → the side-write is skipped (the typed `scope_summary` channel still
+   * carries it in-process).
+   */
+  artifactsDir?: string;
   lineIndex?: Record<string, number>;
   /** Path → size_bytes (from the repo manifest); drives byte-based packet token sizing. */
   sizeIndex?: Record<string, number>;

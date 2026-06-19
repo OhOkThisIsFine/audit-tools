@@ -1137,7 +1137,11 @@ export async function runDeterministicForNextStep(
             `[audit-code] nextStep: integrity check — ${integrity.changed_files.length} changed, ` +
               `${integrity.missing_files.length} missing, ${integrity.io_errors.length} io-error(s); re-running intake.\n`,
           );
-          await advanceAudit(bundle, { root: params.root, preferredExecutor: "intake_executor" });
+          await advanceAudit(bundle, {
+            root: params.root,
+            artifactsDir: params.artifactsDir,
+            preferredExecutor: "intake_executor",
+          });
         }
       }
     }
