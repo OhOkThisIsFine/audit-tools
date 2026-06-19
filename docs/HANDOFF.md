@@ -21,6 +21,11 @@
     Tests: node:test `.mjs` (tests/shared, tests/audit) + vitest (tests/remediate). Plain `vX.Y.Z` release tags.
     One `ci.yml`/`publish-package.yml` job. `opencode.json` at root has both agent scopes.
 
+- **`main` is AHEAD of the published 0.28.0** (`e30efa3c`): a **win32 audit fix** + the audit NIM e2e (A8) —
+  the in-process audit dispatch was 100% broken on Windows (colon-in-packet-id sidecar crash). These ride the
+  NEXT publish, which is still gated on the trusted-publisher prereq below (no version bumped/tagged this turn:
+  an OIDC CI publish would 404 until trusted publishing is configured).
+
 - **PUBLISH: ✓ DONE.** `audit-tools@0.28.0` is **live on npm** (`latest` tag, both bins). Bootstrapped via a
   one-time authenticated **local** `npm publish --ignore-scripts` (Ethan's 2FA) because the OIDC CI publish
   cannot create a brand-new package name — npm requires a trusted publisher configured on an EXISTING package,
