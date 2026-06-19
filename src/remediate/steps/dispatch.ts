@@ -2244,14 +2244,18 @@ export function collapseItemResults(
       byFinding.set(targetId, normalized);
       continue;
     }
-    // Collapse: blocked dominates; merge evidence; keep first failure_reason.
+    // Collapse: blocked dominates; an actual `resolved` change dominates a
+    // `resolved_no_change` (a no-change claim only survives if every entry agreed
+    // nothing changed); merge evidence; keep first failure_reason.
     const mergedEvidence = [
       ...new Set([...(existing.evidence ?? []), ...(normalized.evidence ?? [])]),
     ];
-    const status =
+    const status: ImplementWorkerResult["item_results"][number]["status"] =
       existing.status === "blocked" || normalized.status === "blocked"
         ? "blocked"
-        : "resolved";
+        : existing.status === "resolved" || normalized.status === "resolved"
+          ? "resolved"
+          : "resolved_no_change";
     byFinding.set(targetId, {
       finding_id: targetId,
       status,
@@ -2653,9 +2657,12 @@ async function mergeImplementResultsIntoState(
       if (isTerminalStatus(stateItem.status)) {
         continue;
       }
-      if (itemResult.status === "resolved") {
+      if (itemResult.status === "resolved" || itemResult.status === "resolved_no_change") {
         const spec = stateItem.item_spec;
-        const isNoChange = specIndicatesNoChange(spec);
+        // The worker's explicit `resolved_no_change` is a no-change signal in its
+        // own right; the spec heuristic is the fallback for a plain `resolved`.
+        const isNoChange =
+          itemResult.status === "resolved_no_change" || specIndicatesNoChange(spec);
         if (isNoChange && !hasExecutableEvidence(itemResult.evidence)) {
           // No-prose closure: a "verified-already-satisfied" (no-change) claim must
           // be backed by an executable assertion (a test/build/check command +

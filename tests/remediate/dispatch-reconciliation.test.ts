@@ -363,10 +363,10 @@ describe("mergeImplementResults per-item validation", () => {
     ).rejects.toThrow(/finding_id must be a string/);
   });
 
-  it("throws when an entry's status is neither resolved nor blocked", async () => {
+  it("throws when an entry's status is not a recognized status", async () => {
     await expect(
       mergeWithItemResults([{ finding_id: "F-001", status: "maybe" }]),
-    ).rejects.toThrow(/status must be resolved or blocked/);
+    ).rejects.toThrow(/status must be resolved, resolved_no_change, or blocked/);
   });
 });
 

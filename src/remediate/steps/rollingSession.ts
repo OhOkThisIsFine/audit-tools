@@ -141,7 +141,14 @@ async function computeAcceptScope(
 async function resultOutcome(resultPath: string): Promise<"success" | "error"> {
   const result = await readOptionalJsonFile<ImplementWorkerResult>(resultPath);
   if (!result || !Array.isArray(result.item_results)) return "error";
-  return result.item_results.some((r) => r.status === "resolved") ? "success" : "error";
+  // A `resolved_no_change` node legitimately resolved its finding without edits;
+  // it flows to `acceptNodeWorktree`'s no-commit branch (the merge adjudicates the
+  // no-change claim against its evidence). Only an all-blocked result is an error.
+  return result.item_results.some(
+    (r) => r.status === "resolved" || r.status === "resolved_no_change",
+  )
+    ? "success"
+    : "error";
 }
 
 /**
