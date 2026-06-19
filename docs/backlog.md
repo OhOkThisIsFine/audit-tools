@@ -8,6 +8,12 @@ too early to encode as implementation contracts.
 an item needs design detail, record durable contracts, gates, and principles
 rather than "where the code is today."
 
+> **Design-level specs for every open item live in
+> [`docs/remaining-specs.md`](remaining-specs.md)** (2026-06-19 spec pass —
+> problem → approach → decisions → acceptance criteria per item, with a suggested
+> sequencing). Update both together; collapse a spec section to a shipped-pointer
+> when its item lands.
+
 > **Last reconciled 2026-06-13** against the shipped rolling-dispatch redesign +
 > the self-audit remediation. Removed (verified against current `src`): the whole
 > "2026-06-11 dogfood" friction block — lens interactivity, conceptual-review
