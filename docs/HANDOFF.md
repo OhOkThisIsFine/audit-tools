@@ -21,24 +21,17 @@
     Tests: node:test `.mjs` (tests/shared, tests/audit) + vitest (tests/remediate). Plain `vX.Y.Z` release tags.
     One `ci.yml`/`publish-package.yml` job. `opencode.json` at root has both agent scopes.
 
-- **`main` is AHEAD of the published 0.28.0** (`e30efa3c`): a **win32 audit fix** + the audit NIM e2e (A8) —
-  the in-process audit dispatch was 100% broken on Windows (colon-in-packet-id sidecar crash). These ride the
-  NEXT publish, which is still gated on the trusted-publisher prereq below (no version bumped/tagged this turn:
-  an OIDC CI publish would 404 until trusted publishing is configured).
-
-- **PUBLISH: ✓ DONE.** `audit-tools@0.28.0` is **live on npm** (`latest` tag, both bins). Bootstrapped via a
-  one-time authenticated **local** `npm publish --ignore-scripts` (Ethan's 2FA) because the OIDC CI publish
-  cannot create a brand-new package name — npm requires a trusted publisher configured on an EXISTING package,
-  so the first publish needs real auth. Global bins swapped: old `auditor-lambda`/`remediator-lambda` removed
-  `-g`, `audit-tools` installed `-g`, postinstall run (host assets deployed to ~/.claude, ~/.codex, …);
-  `audit-code`/`remediate-code --version` → `0.28.0`. CI publish fix landed `256c4905`
-  (`npm publish --ignore-scripts`).
-- **TWO remaining Ethan-only npm actions (both need his 2FA / browser auth — I can't):**
-  1. **Deprecate the old names** (redirect): `npm deprecate auditor-lambda "Merged into 'audit-tools' (v0.28.0+).
-     Install: npm i -g audit-tools"` — same for `remediator-lambda` and `@audit-tools/shared`.
-  2. **Configure npm trusted publishing on the now-existing `audit-tools` package** (owner `OhOkThisIsFine`,
-     repo `audit-tools`, workflow `publish-package.yml`) so FUTURE releases publish tokenlessly via CI/`/ship`
-     with provenance. Until then, a CI publish of a new version will 404 again — bootstrap is local-only.
+- **PUBLISH: ✓ DONE — `audit-tools@0.28.1` is live on npm** (`latest`, both bins), carrying the **win32 audit
+  fix** + audit NIM e2e (A8) that the in-process audit dispatch needed (colon-in-packet-id sidecar crash had
+  100%-broken Windows in-process dispatch). **Trusted publishing is now CONFIGURED (Ethan) and CONFIRMED
+  WORKING** — `v0.28.1` published tokenlessly via the OIDC CI `publish-package.yml` run
+  (`27798932666`), no local bootstrap. The go-forward release path is `npm run release:patch:publish` (single
+  package; `scripts/release-and-publish.mjs`). Global bins reinstalled + postinstall run (host assets to
+  ~/.claude, ~/.codex, ~/.config/opencode, ~/.gemini); `audit-code`/`remediate-code --version` → `0.28.1`.
+  (0.28.0 was the prior local-bootstrap publish; history in memory.)
+- **ONE remaining Ethan-only npm action (needs his 2FA — I can't):** deprecate the old names (redirect):
+  `npm deprecate auditor-lambda "Merged into 'audit-tools' (v0.28.0+). Install: npm i -g audit-tools"` — same
+  for `remediator-lambda` and `@audit-tools/shared`. Non-blocking (cosmetic redirect for old installs).
 
 ## Immediate next: the go-forward program
 
