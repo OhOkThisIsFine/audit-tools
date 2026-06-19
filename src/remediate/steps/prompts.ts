@@ -61,8 +61,75 @@ After the user answers, write JSON to exactly:
 ]
 \`\`\`
 
-Use \`"action": "deemed_inappropriate"\` for out-of-scope items. Then run
+Per item use \`"action": "clarified"\` (the user answered — proceed with the
+answer in \`rationale\`), \`"action": "deemed_inappropriate"\` (not a real issue),
+or \`"action": "defer"\` (the user explicitly chose to skip it this run). Then run
 \`${loaderCommand("next-step")}\`.
+`;
+}
+
+/**
+ * Up-front ambiguity-review prompt (note 3, part A). The tool seeds deterministic
+ * CANDIDATE ambiguities; the host's job is the judgment slot the tool cannot
+ * fill: review each candidate against the actual code, dismiss false positives,
+ * ADD any genuine scoping/judgment ambiguity it finds, then batch ALL genuine
+ * ones into ONE round of user questions before any fix is implemented. This is
+ * the gate that stops a scoping question from falling silently to triage mid-run.
+ *
+ * If, after reviewing with repo access, there is nothing genuinely ambiguous, the
+ * host writes an empty array to proceed — no user round is forced on a clean plan.
+ */
+export function ambiguityReviewPrompt(
+  candidates: ClarificationRequest[],
+  resolutionPath: string,
+): string {
+  const candidateBlock = candidates.length
+    ? candidates
+        .map(
+          (item) => `
+## ${item.finding_id}
+
+- Category: ${item.category}
+- Candidate ambiguity: ${item.description}`,
+        )
+        .join("\n")
+    : "_(no deterministic candidates — still review the plan's findings yourself)_";
+
+  return `
+# Resolve scoping/judgment ambiguity BEFORE implementing
+
+Below are deterministic **candidate** ambiguities in the remediation plan. They
+are starting points, not a final list.
+
+1. **Review each candidate against the code** (read the cited files / repo). Drop
+   any that are not genuinely ambiguous.
+2. **Add any ambiguity you find** that the heuristics missed — anything where the
+   right scope, the intended behavior, or whether to act at all is unclear.
+3. **Batch every genuine ambiguity into ONE round** of user questions. Resolve
+   them all now; do not let any scoping/judgment question slip to mid-run triage.
+
+${candidateBlock}
+
+After the user answers (or if you determined there is nothing genuinely
+ambiguous), write JSON to exactly:
+
+\`${resolutionPath}\`
+
+\`\`\`json
+[
+  {
+    "finding_id": "...",
+    "action": "clarified",
+    "rationale": "the user's answer / decided scope"
+  }
+]
+\`\`\`
+
+Per item: \`"action": "clarified"\` (answered — proceed with the answer in
+\`rationale\`), \`"action": "deemed_inappropriate"\` (not a real issue), or
+\`"action": "defer"\` (the user explicitly chose to skip it this run). Deferral is
+the **user's** call — never decide it unilaterally. Write \`[]\` if nothing is
+genuinely ambiguous. Then run \`${loaderCommand("next-step")}\`.
 `;
 }
 

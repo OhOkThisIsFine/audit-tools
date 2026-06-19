@@ -78,6 +78,7 @@ import {
 } from "../intake.js";
 import type { IntentCheckpoint } from "audit-tools/shared";
 import {
+  ambiguityReviewPrompt,
   clarificationPrompt,
   collectIntakeClarificationsPrompt,
   collectStartingPointPrompt,
@@ -1803,6 +1804,18 @@ function reviewDecisionPath(artifactsDir: string): string {
   return join(artifactsDir, "review_decision.json");
 }
 
+// Up-front ambiguity gate (note 3, part A) — its own request/resolution/decision
+// files, mirroring the review gate so it fires (and halts) at most once per run.
+function ambiguityRequestPath(artifactsDir: string): string {
+  return join(artifactsDir, "ambiguity_request.json");
+}
+function ambiguityResolutionPath(artifactsDir: string): string {
+  return join(artifactsDir, "ambiguity_resolution.json");
+}
+function ambiguityDecisionPath(artifactsDir: string): string {
+  return join(artifactsDir, "ambiguity_decision.json");
+}
+
 /** Pull the Finding[] out of a parsed audit-findings.json payload. */
 function extractAuditFindings(parsed: unknown): Finding[] {
   if (isRecord(parsed) && Array.isArray(parsed.findings)) {
@@ -2229,23 +2242,35 @@ Stop after presenting this choice. Do not advance the run until the user decides
   });
 }
 
+type PlanClarificationAction = "clarified" | "deemed_inappropriate" | "defer";
+
+const PLAN_CLARIFICATION_ACTIONS: readonly PlanClarificationAction[] = [
+  "clarified",
+  "deemed_inappropriate",
+  "defer",
+];
+
+function isPlanClarificationAction(value: unknown): value is PlanClarificationAction {
+  return (
+    typeof value === "string" &&
+    (PLAN_CLARIFICATION_ACTIONS as readonly string[]).includes(value)
+  );
+}
+
 interface PlanClarificationResolution {
   finding_id: string;
-  action: "clarified" | "deemed_inappropriate";
+  action: PlanClarificationAction;
   rationale?: string;
 }
 
 function normalizePlanClarificationResolutions(value: unknown): PlanClarificationResolution[] {
   if (Array.isArray(value)) {
     return value.filter(isRecord).flatMap((entry) => {
-      if (
-        typeof entry.finding_id === "string" &&
-        (entry.action === "clarified" || entry.action === "deemed_inappropriate")
-      ) {
+      if (typeof entry.finding_id === "string" && isPlanClarificationAction(entry.action)) {
         return [
           {
             finding_id: entry.finding_id,
-            action: entry.action as "clarified" | "deemed_inappropriate",
+            action: entry.action,
             rationale: typeof entry.rationale === "string" ? entry.rationale : undefined,
           },
         ];
@@ -2262,13 +2287,43 @@ function normalizePlanClarificationResolutions(value: unknown): PlanClarificatio
   }
   return Object.entries(value as Record<string, unknown>).flatMap(([findingId, entry]) => {
     if (!isRecord(entry)) return [];
-    if (entry.action !== "clarified" && entry.action !== "deemed_inappropriate") return [];
+    if (!isPlanClarificationAction(entry.action)) return [];
     return [{
       finding_id: typeof entry.finding_id === "string" ? entry.finding_id : findingId,
-      action: entry.action as "clarified" | "deemed_inappropriate",
+      action: entry.action,
       rationale: typeof entry.rationale === "string" ? entry.rationale : undefined,
     }];
   });
+}
+
+/**
+ * Apply one clarification resolution to its item. Single-sourced so the up-front
+ * ambiguity gate (part A) and the mid-run clarification round (part B) settle an
+ * item identically: `clarified` re-opens it (pending) with the answer as context,
+ * `deemed_inappropriate` closes it as not-a-real-issue, and `defer` closes it as
+ * an explicit user deferral for this run. Never resurrects a terminal item.
+ */
+function applyClarificationActionToItem(
+  item: RemediationItemState,
+  res: PlanClarificationResolution,
+  now: string,
+): void {
+  if (res.action === "deemed_inappropriate") {
+    item.status = "deemed_inappropriate";
+    item.failure_reason = res.rationale;
+    item.started_at ??= now;
+    item.completed_at = now;
+  } else if (res.action === "defer") {
+    item.status = "ignored";
+    item.failure_reason = res.rationale
+      ? `User-deferred for this run: ${res.rationale}`
+      : "User-deferred for this run.";
+    item.started_at ??= now;
+    item.completed_at = now;
+  } else {
+    item.status = "pending";
+    item.clarification_context = res.rationale;
+  }
 }
 
 /**
@@ -2289,16 +2344,8 @@ async function applyPlanClarificationResolution(
   const now = new Date().toISOString();
   for (const res of resolutions) {
     const item = state.items[res.finding_id];
-    if (!item) continue;
-    if (res.action === "deemed_inappropriate") {
-      item.status = "deemed_inappropriate";
-      item.failure_reason = res.rationale;
-      item.started_at ??= now;
-      item.completed_at = now;
-    } else {
-      item.status = "pending";
-      item.clarification_context = res.rationale;
-    }
+    if (!item || isTerminalStatus(item.status)) continue;
+    applyClarificationActionToItem(item, res, now);
   }
   if (existsSync(resolutionPath)) {
     await withFsRetry(() => rename(resolutionPath, `${resolutionPath}.consumed-${Date.now()}`));
@@ -2442,6 +2489,124 @@ async function runPlanningReviewGate(
   return null;
 }
 
+/**
+ * Deterministic first pass (note 3, part A): scan the plan's non-terminal
+ * findings for scoping/judgment ambiguity, classified into the canonical
+ * clarification categories. These are CANDIDATES — the host reviews them against
+ * the repo, dismisses false positives, and adds any it finds, before batching one
+ * user round. Conservative by design: a candidate the host dismisses costs one
+ * read; a real scoping question that falls silently to mid-run triage is the bug
+ * this gate exists to prevent.
+ */
+function detectPlanAmbiguities(
+  findings: Finding[],
+  items: Record<string, RemediationItemState> | undefined,
+): ClarificationRequest[] {
+  const out: ClarificationRequest[] = [];
+  for (const f of findings) {
+    const item = items?.[f.id];
+    if (item && isTerminalStatus(item.status)) continue;
+    const lens = (f.lens ?? "").toLowerCase();
+    const fileCount = f.affected_files?.length ?? 0;
+    const broadScope =
+      (lens === "architecture" || lens === "maintainability") &&
+      (fileCount === 0 || fileCount >= 5);
+    if (broadScope) {
+      out.push({
+        finding_id: f.id,
+        category: "scope_of_fix",
+        description:
+          `"${f.title}" is a ${lens} finding with ${fileCount === 0 ? "no cited files" : `${fileCount} affected files`}; ` +
+          "confirm how far the fix should reach (minimal local change vs. broader restructuring).",
+      });
+      continue;
+    }
+    if (f.confidence === "low") {
+      out.push({
+        finding_id: f.id,
+        category: "issue_appropriateness",
+        description:
+          `"${f.title}" is a low-confidence finding; confirm it is a real issue worth fixing in this run.`,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Up-front ambiguity gate (note 3, part A). Mirrors {@link runPlanningReviewGate}:
+ * it fires once at planning, BEFORE any implement dispatch, so scoping/judgment
+ * ambiguity is asked as a single batched question up front rather than falling
+ * silently to triage mid-run. Deterministic heuristics seed CANDIDATES; the host
+ * reviews them with repo access, dismisses/adds, and batches one user round. Each
+ * item is resolved as `clarified` (answered → re-opened), `deemed_inappropriate`
+ * (not a real issue), or `defer` (the user's explicit choice to skip this run).
+ *
+ * Idempotent: once `ambiguity_decision.json` exists the gate is done and never
+ * re-halts. An empty resolution proceeds (the host found nothing to ask).
+ */
+async function runPlanAmbiguityGate(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+  store: StateStore,
+): Promise<RemediationStep | null> {
+  const findings = state.plan?.findings ?? [];
+  if (findings.length === 0) return null;
+
+  const requestPath = ambiguityRequestPath(artifactsDir);
+  const resolutionPath = ambiguityResolutionPath(artifactsDir);
+  const decisionPath = ambiguityDecisionPath(artifactsDir);
+
+  if (!existsSync(resolutionPath)) {
+    // Deterministic detection is the gate trigger: with zero candidates there is
+    // nothing for the host to review, so the plan proceeds without a round. Any
+    // ambiguity the heuristics miss is still caught by the mid-run escape hatch
+    // (part B). When candidates exist, halt for the host's review + the user's
+    // batched answers.
+    const candidates = detectPlanAmbiguities(findings, state.items);
+    if (candidates.length === 0) return null;
+    await writeJsonFile(requestPath, candidates);
+    return writeCurrentStep({
+      stepKind: "collect_clarifications",
+      status: "blocked",
+      runId: stateRunId(state),
+      repoRoot: root,
+      artifactsDir,
+      prompt: ambiguityReviewPrompt(candidates, resolutionPath),
+      allowedCommands: [loaderCommand("next-step")],
+      stopCondition:
+        "Stop after reviewing the candidate ambiguities (and asking the user any genuine ones), unless the resolution is already written and the prompt told you to continue.",
+      artifactPaths: {
+        ambiguity_request: requestPath,
+        ambiguity_resolution: resolutionPath,
+      },
+    });
+  }
+
+  // Resolution present: apply it to items, mark the gate done, archive inputs so
+  // it cannot re-halt.
+  const resolutions = normalizePlanClarificationResolutions(
+    await readOptionalJsonFile<unknown>(resolutionPath),
+  );
+  const now = new Date().toISOString();
+  let changed = false;
+  for (const res of resolutions) {
+    const item = state.items?.[res.finding_id];
+    if (!item || isTerminalStatus(item.status)) continue;
+    applyClarificationActionToItem(item, res, now);
+    changed = true;
+  }
+  await writeJsonFile(decisionPath, { resolved_at: now, resolution_count: resolutions.length });
+  for (const p of [resolutionPath, requestPath]) {
+    if (existsSync(p)) {
+      await withFsRetry(() => rename(p, `${p}.consumed-${Date.now()}`));
+    }
+  }
+  if (changed) await store.saveState(state);
+  return null;
+}
+
 async function handlePlanning(
   root: string,
   artifactsDir: string,
@@ -2457,6 +2622,14 @@ async function handlePlanning(
   // recorded terminal disposition.
   if (state.plan && !existsSync(reviewDecisionPath(artifactsDir))) {
     const halt = await runPlanningReviewGate(root, artifactsDir, state, store);
+    if (halt) return { kind: "emit", step: halt };
+  }
+
+  // Up-front ambiguity gate (note 3, part A): resolve every scoping/judgment
+  // ambiguity in ONE batched round here, before any implement dispatch, so a
+  // question never falls silently to mid-run triage. Fires at most once per run.
+  if (state.plan && !existsSync(ambiguityDecisionPath(artifactsDir))) {
+    const halt = await runPlanAmbiguityGate(root, artifactsDir, state, store);
     if (halt) return { kind: "emit", step: halt };
   }
 
