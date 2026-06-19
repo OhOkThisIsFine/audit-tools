@@ -21,6 +21,12 @@
     Tests: node:test `.mjs` (tests/shared, tests/audit) + vitest (tests/remediate). Plain `vX.Y.Z` release tags.
     One `ci.yml`/`publish-package.yml` job. `opencode.json` at root has both agent scopes.
 
+- **A6 completeness follow-up: ✓ landed on `main` `07f387d` (UNPUBLISHED, 2026-06-19).** The merged A6
+  deleted all JSON schemas but left 6 contracts as plain TS interfaces; converted them to zod single-source
+  (`RemediationOutcome{,Status,sReport}`, `IntentCheckpoint`, `AuditState`, `AuditScopeManifest`,
+  `FlowCoverageManifest`, `AnalyzerCapabilityRecord`) + prereq schemas + `OUTCOME_KEYS` derived. Behavior-
+  identical (z.infer), so a republish is OPTIONAL — rolls into the next `release:patch` whenever one ships.
+  Details: memory `a6-zod-single-source-done`.
 - **PUBLISH: ✓ `audit-tools@0.28.2` LIVE on npm** (`latest`, OIDC CI run `27801269989`, tokenless). Carries
   the dogfood's 3 rolling-dispatch fixes + F5–F8 (below). Global bins reinstalled + postinstall run; both
   `--version` → 0.28.2. (0.28.1 = prior win32 audit fix + NIM e2e.) Go-forward release path:
