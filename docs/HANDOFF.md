@@ -44,9 +44,17 @@
   POSITIVE:/NEGATIVE: labels; INV-CO-12 seam_adjustments corpus; validate-artifact envelope unwrap. Discovered 6
   backlog items already-shipped (pruned). Durable lesson: memory `rolling-implement-windows-and-writescope-findings`.
 
-## Immediate next: the go-forward program
+## Immediate next: ship branch `resume-list-dogfood-fixes`
 
-**Open dogfood frictions: ✓ ALL CLEARED (2026-06-19, UNPUBLISHED — roll into the next `release:patch`).**
+**Branch `resume-list-dogfood-fixes` is COMPLETE + green at every commit — ready to merge to `main` +
+`release:patch:publish`.** Carries the 2026-06-19 dogfood work: 8 code-bug fixes (see `docs/backlog.md`
+§Dogfood 2026-06-19) **plus notes 1–3** (lens proposition table `0092405b`/`e88d1afa`; standardized
+per-finding block `0092405b`; up-front ambiguity gate `264b36da` + mid-run `needs_clarification`
+outcome `70d74a8d`). Full node+remediate suites green (1663 remediate / node exit-0). Local working
+docs `docs/dogfood-{feedback,format-proposals}-2026-06-19.md` are untracked source/spec — not for commit.
+Ship: `env -u CLAUDECODE npm run release:patch:publish` (or `/ship`) after merge to `main`.
+
+**Open dogfood frictions (write-scope / input-resume): ✓ CLEARED earlier (2026-06-19, on this branch).**
 - ✓ Write-scope now ENFORCED before the cherry-pick (the architecturally-significant one). Moved into
   `acceptNodeWorktree` → `enforceAcceptWriteScope`: after verify, before merge, so an out-of-scope edit never
   lands; a blocked node is `merged:false` → triage with the reason in its diagnostic. The worker's
