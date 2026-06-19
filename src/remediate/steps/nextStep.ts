@@ -1439,7 +1439,7 @@ async function buildImplementDispatchStep(ctx: {
       }
       const rollMerge = loaderCommand(`merge-implement-results --run-id ${runId}`);
       const rollNext = loaderCommand("next-step");
-      const acceptCmd = loaderCommand("accept-node --id <BLOCK_ID>");
+      const acceptCmd = loaderCommand(`accept-node --id <BLOCK_ID> --run-id ${runId}`);
       const nodeLines = rolling.initial
         .map(
           (n) =>
