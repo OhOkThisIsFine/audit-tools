@@ -73,7 +73,11 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
   provider_confirmation_executor: async (bundle) =>
     runProviderConfirmationAutoComplete(bundle),
   intake_executor: async (bundle, { options }) =>
-    runIntakeExecutor(bundle, requireRoot(options.root, "intake_executor")),
+    runIntakeExecutor(
+      bundle,
+      requireRoot(options.root, "intake_executor"),
+      options.artifactsDir,
+    ),
   intent_checkpoint_executor: async (bundle, { options }) =>
     runIntentCheckpointAutoComplete(
       bundle,

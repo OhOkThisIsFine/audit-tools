@@ -199,6 +199,36 @@ test("runIntakeExecutor progress_summary contains no SCOPE_SUMMARY sentinel", as
   assert.equal(result.scope_summary.repo_root, root);
 });
 
+test("advanceAudit intake_executor writes scope_summary.json to the artifacts dir", async (t) => {
+  // Regression: the conversation-first loader instructs the host to read
+  // scope_summary.json after intake, but the intake_executor runner never
+  // threaded artifactsDir into runIntakeExecutor, so the file was never produced.
+  const { advanceAudit } = await import("../../src/audit/orchestrator/advance.ts");
+  const { readFile } = await import("node:fs/promises");
+
+  const base = await makeTempDir();
+  t.after(async () => rm(base, { recursive: true, force: true }));
+  await mkdir(join(base, ".git"), { recursive: true });
+  const root = join(base, "repo");
+  await mkdir(root, { recursive: true });
+  await writeFile(join(root, "index.js"), "export const x = 1;\n");
+  const artifactsDir = join(root, ".audit-tools", "audit");
+  await mkdir(artifactsDir, { recursive: true });
+
+  const result = await advanceAudit(
+    {},
+    { root, artifactsDir, preferredExecutor: "intake_executor" },
+  );
+
+  assert.ok(
+    result.artifacts_written.includes("scope_summary.json"),
+    `artifacts_written should list scope_summary.json: ${JSON.stringify(result.artifacts_written)}`,
+  );
+  const parsed = JSON.parse(await readFile(join(artifactsDir, "scope_summary.json"), "utf8"));
+  assert.equal(parsed.repo_root, root);
+  assert.equal(typeof parsed.auditable_file_count, "number");
+});
+
 test("runIntakeExecutor includes a scope_summary in its result", async (t) => {
   const base = await makeTempDir();
   t.after(async () => rm(base, { recursive: true, force: true }));
