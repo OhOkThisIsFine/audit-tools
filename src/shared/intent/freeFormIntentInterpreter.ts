@@ -73,8 +73,12 @@ const DEFAULT_WEIGHT_BOOST = 1.5;
  * guards the difference.
  */
 function decomposeClauses(input: string): string[] {
+  // Split on `;`, `,`, newlines, and sentence-ending `.` — but NOT a period
+  // flanked by digits, so version/decimal tokens stay intact ("Windows
+  // PowerShell 5.1" must not fragment into "...5" + "1", which then surfaces a
+  // spurious unencodable clause). A run of separators collapses to one split.
   return input
-    .split(/[.;,\n]+/)
+    .split(/(?:[;,\n]|(?<![0-9])\.(?![0-9]))+/)
     .map((c) => c.trim())
     .filter((c) => c.length > 0);
 }
