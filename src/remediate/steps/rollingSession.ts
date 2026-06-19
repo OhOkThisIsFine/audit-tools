@@ -10,6 +10,8 @@ import {
   worktreeBranchForBlock,
   acceptNodeWorktree,
   recordNodeAcceptOutcome,
+  readDispatchPlan,
+  blockScopesFromPlan,
   type DispatchOptions,
 } from "./dispatch.js";
 import type {
@@ -103,6 +105,31 @@ function computeTargeted(state: RemediationState | null, blockId: string): strin
     return finding?.targeted_commands ?? [];
   });
   return [...new Set(cmds.filter((c) => typeof c === "string" && c.length > 0))];
+}
+
+/**
+ * Accept-time write-scope inputs for `acceptNodeWorktree`: every block's declared
+ * scope (from the persisted dispatch plan, so it carries the referencing-test
+ * expansion the worker was granted) plus this node's self-reported `amended_files`.
+ * The dispatch plan is the single source of the declared scope the worker actually
+ * received — recomputing it here would risk drifting from that grant. If the plan
+ * can't be read (it should always exist for an active rolling session), the gate is
+ * skipped rather than enforced against a guessed-narrow scope that could falsely
+ * block a correct fix.
+ */
+async function computeAcceptScope(
+  artifactsDir: string,
+  runId: string,
+  resultPath: string,
+): Promise<{ allBlockScopes: Array<{ block_id: string; write_paths: string[] }>; amendedFiles: string[] } | undefined> {
+  let allBlockScopes: Array<{ block_id: string; write_paths: string[] }>;
+  try {
+    allBlockScopes = blockScopesFromPlan(await readDispatchPlan(artifactsDir, runId, "implement"));
+  } catch {
+    return undefined;
+  }
+  const result = await readOptionalJsonFile<ImplementWorkerResult>(resultPath);
+  return { allBlockScopes, amendedFiles: result?.amended_files ?? [] };
 }
 
 /**
@@ -212,6 +239,7 @@ export async function advanceHostRolling(opts: {
         branch: worktreeBranchForBlock(opts.blockId, opts.runId),
         workerOutcome: await resultOutcome(node.result_path),
         targetedCommands: computeTargeted(state, opts.blockId),
+        scope: await computeAcceptScope(opts.artifactsDir, opts.runId, node.result_path),
       });
       // Persist the tool-owned verify/merge outcome so finalization (mergeImplementResults)
       // blocks a node that self-reported resolved but never actually landed (OBL-DS-06).

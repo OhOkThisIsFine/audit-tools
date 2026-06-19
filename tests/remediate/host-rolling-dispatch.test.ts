@@ -193,6 +193,105 @@ describe("acceptNodeWorktree", () => {
 });
 
 // ===========================================================================
+// acceptNodeWorktree — accept-time write-scope gate (BEFORE the cherry-pick)
+// An out-of-scope edit must be PREVENTED from landing, not reported post-hoc.
+// ===========================================================================
+
+describe("acceptNodeWorktree — accept-time write-scope gate", () => {
+  it("merges an in-scope edit (declared write path) without blocking", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktreeWithEdit(repo, "WS1", "a.ts");
+    const res = acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "WS1",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("WS1", RID),
+      workerOutcome: "success",
+      targetedCommands: [],
+      scope: { allBlockScopes: [{ block_id: "WS1", write_paths: ["src/a.ts"] }], amendedFiles: [] },
+    });
+    expect(res.merged).toBe(true);
+    expect(headHas(repo, "src/a.ts")).toBe(true);
+  });
+
+  it("BLOCKS an out-of-scope edit before the cherry-pick — main tree stays clean", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktreeWithEdit(repo, "WS2", "a.ts");
+    const res = acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "WS2",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("WS2", RID),
+      workerOutcome: "success",
+      targetedCommands: [],
+      // Declared scope does NOT include src/a.ts and the worker declared no amendment.
+      scope: { allBlockScopes: [{ block_id: "WS2", write_paths: ["src/declared.ts"] }], amendedFiles: [] },
+    });
+    expect(res.merged).toBe(false);
+    expect(res.outcome).toBe("error");
+    expect(res.diagnostic).toContain("src/a.ts");
+    // The edit was PREVENTED from landing — never cherry-picked into HEAD.
+    expect(headHas(repo, "src/a.ts")).toBe(false);
+    expect(existsSync(wt)).toBe(false);
+  });
+
+  it("grants an unowned amended_files path — the worker's surfaced amend path lands", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktreeWithEdit(repo, "WS3", "a.ts");
+    const res = acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "WS3",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("WS3", RID),
+      workerOutcome: "success",
+      targetedCommands: [],
+      // src/a.ts is outside the declared scope but the worker declared it as an
+      // amendment and no other block owns it → granted → effective scope widens.
+      scope: {
+        allBlockScopes: [{ block_id: "WS3", write_paths: ["src/declared.ts"] }],
+        amendedFiles: ["src/a.ts"],
+      },
+    });
+    expect(res.merged).toBe(true);
+    expect(headHas(repo, "src/a.ts")).toBe(true);
+  });
+
+  it("seam-conflicts an amended path OWNED by another block — blocked, not landed", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktreeWithEdit(repo, "WS4", "owned.ts");
+    const res = acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "WS4",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("WS4", RID),
+      workerOutcome: "success",
+      targetedCommands: [],
+      // src/owned.ts is in sibling block OTHER's declared scope → seam conflict.
+      scope: {
+        allBlockScopes: [
+          { block_id: "WS4", write_paths: ["src/declared.ts"] },
+          { block_id: "OTHER", write_paths: ["src/owned.ts"] },
+        ],
+        amendedFiles: ["src/owned.ts"],
+      },
+    });
+    expect(res.merged).toBe(false);
+    expect(res.outcome).toBe("error");
+    expect(res.diagnostic).toMatch(/seam conflict/i);
+    expect(res.diagnostic).toContain("owned by OTHER");
+    expect(headHas(repo, "src/owned.ts")).toBe(false);
+  });
+});
+
+// ===========================================================================
 // advanceHostRolling — the per-completion session state machine
 // ===========================================================================
 

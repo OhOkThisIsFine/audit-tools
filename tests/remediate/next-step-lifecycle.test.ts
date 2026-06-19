@@ -121,6 +121,30 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     expect(await readFile(step.prompt_path, "utf8")).toMatch(/already exists/i);
   });
 
+  it("re-passing the SAME --input the run was built from resumes (no input_conflict)", async () => {
+    // The /remediate-code loader re-passes the same --input on every next-step.
+    // An unchanged input must be treated as a resume, not a conflict — enforced in
+    // the tool, not by asking the loader to remember to drop the flag.
+    await saveState(makePlanningState());
+    const inputPath = join(REPO_DIR, "feedback.md");
+    await writeFile(inputPath, "# The brief this run was built from\n", "utf8");
+    const intakeDir = join(ARTIFACTS_DIR, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    await writeFile(
+      join(intakeDir, "source-manifest.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-source-manifest/v1alpha1",
+        created_from: "input",
+        sources: [{ type: "document", path: inputPath, label: "input-01" }],
+      }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR, input: inputPath });
+
+    expect(step.step_kind).not.toBe("input_conflict");
+  });
+
   it("writes a structured run log recording the state and resulting step", async () => {
     const step = await decideNextStep({ root: REPO_DIR });
 

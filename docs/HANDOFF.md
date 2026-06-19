@@ -46,15 +46,19 @@
 
 ## Immediate next: the go-forward program
 
-**Open dogfood frictions to fix (highest-value next, all in `docs/backlog.md` Known-friction):**
-- Write-scope gate runs AFTER `accept-node` cherry-picks → reports post-hoc, doesn't prevent; and the
-  host-declared `file_scope` is a guess the rolling worker can't amend (a too-narrow scope blocks a correct fix).
-  **(Still open — the architecturally-significant one.)**
-- `--input` after intake → hard input_conflict; the `/remediate-code` loader keeps re-passing `--input` each
-  `next-step`. Drop `--input` from loader guidance once a run exists (or treat an unchanged `--input` as resume).
-- ✓ DONE (2026-06-19, this branch, UNPUBLISHED): `accept-outcome` sidecar now persists the failing command +
-  output (triage no longer blind on `outcome:error`); the rolling-dispatch prompt now shows
-  `accept-node --id <BLOCK_ID> --run-id <runId>`. Rolls into the next `release:patch`.
+**Open dogfood frictions: ✓ ALL CLEARED (2026-06-19, UNPUBLISHED — roll into the next `release:patch`).**
+- ✓ Write-scope now ENFORCED before the cherry-pick (the architecturally-significant one). Moved into
+  `acceptNodeWorktree` → `enforceAcceptWriteScope`: after verify, before merge, so an out-of-scope edit never
+  lands; a blocked node is `merged:false` → triage with the reason in its diagnostic. The worker's
+  `amended_files` are adjudicated at accept time against an ephemeral `OwnershipRegistry` seeded from every
+  block's declared scope (unowned → granted/widened = the surfaced amend path; sibling-owned → seam conflict).
+  The redundant post-hoc merge-time gate was deleted; declared scope is single-sourced from the persisted
+  dispatch plan. New gate tests in `host-rolling-dispatch.test.ts`.
+- ✓ `--input` re-passed after intake now RESUMES (no `input_conflict`) when it matches the run's recorded intake
+  source (`suppliedInputMatchesRun` in `nextStep.ts`); a different input still trips the gate. Backend fix, not
+  loader guidance. Test in `next-step-lifecycle.test.ts`.
+- ✓ (prior PR #9) `accept-outcome` sidecar persists the failing command + output; rolling-dispatch prompt shows
+  `accept-node --id <BLOCK_ID> --run-id <runId>`.
 
 **Remaining accepted program** (`docs/backlog.md` → "Accepted go-forward program"):
 - **A7 (REFRAMED)** — validate the host install/integration machinery across all hosts (Codex, OpenCode,
