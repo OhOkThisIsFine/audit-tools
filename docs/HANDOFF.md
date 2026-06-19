@@ -44,15 +44,18 @@
   POSITIVE:/NEGATIVE: labels; INV-CO-12 seam_adjustments corpus; validate-artifact envelope unwrap. Discovered 6
   backlog items already-shipped (pruned). Durable lesson: memory `rolling-implement-windows-and-writescope-findings`.
 
-## Immediate next: ship branch `resume-list-dogfood-fixes`
+## Immediate next
 
-**Branch `resume-list-dogfood-fixes` is COMPLETE + green at every commit — ready to merge to `main` +
-`release:patch:publish`.** Carries the 2026-06-19 dogfood work: 8 code-bug fixes (see `docs/backlog.md`
-§Dogfood 2026-06-19) **plus notes 1–3** (lens proposition table `0092405b`/`e88d1afa`; standardized
-per-finding block `0092405b`; up-front ambiguity gate `264b36da` + mid-run `needs_clarification`
-outcome `70d74a8d`). Full node+remediate suites green (1663 remediate / node exit-0). Local working
-docs `docs/dogfood-{feedback,format-proposals}-2026-06-19.md` are untracked source/spec — not for commit.
-Ship: `env -u CLAUDECODE npm run release:patch:publish` (or `/ship`) after merge to `main`.
+**2026-06-19 dogfood work: ✓ SHIPPED.** `resume-list-dogfood-fixes` merged to `main`;
+**`audit-tools@0.28.3` LIVE** (8 code-bug fixes + notes 1–3: lens proposition table
+`0092405b`/`e88d1afa`; standardized per-finding block `0092405b`; up-front ambiguity gate `264b36da`
++ mid-run `needs_clarification` outcome `70d74a8d`). Follow-up `013438ab` (Ethan: auditor↔remediator
+parity) single-sources the finding-display block into `src/shared/reporting/findingDisplay.ts` —
+ships as **0.28.4**. Branch `resume-list-dogfood-fixes` can be deleted.
+
+**Remaining go-forward program** (`docs/backlog.md` → "Accepted go-forward program"): A7 (host
+install/integration validation across Codex/OpenCode/Antigravity), A8 hybrid spill topology + live
+cross-provider run, deferred A2/A9/A10.
 
 **Open dogfood frictions (write-scope / input-resume): ✓ CLEARED earlier (2026-06-19, on this branch).**
 - ✓ Write-scope now ENFORCED before the cherry-pick (the architecturally-significant one). Moved into
