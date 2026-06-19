@@ -21,12 +21,10 @@
     Tests: node:test `.mjs` (tests/shared, tests/audit) + vitest (tests/remediate). Plain `vX.Y.Z` release tags.
     One `ci.yml`/`publish-package.yml` job. `opencode.json` at root has both agent scopes.
 
-- **PUBLISH: `audit-tools@0.28.2` PUBLISHING (release:patch:publish in flight as of this writing).** Carries
-  the dogfood's 3 rolling-dispatch fixes + F5–F8 (below). 0.28.1 was the prior release (win32 audit fix + NIM
-  e2e). Trusted publishing is CONFIGURED + CONFIRMED WORKING (OIDC CI, tokenless). Go-forward release path:
-  `env -u CLAUDECODE npm run release:patch:publish`. **If 0.28.2 finished:** confirm `npm view audit-tools
-  version` = 0.28.2, then `npm i -g audit-tools` + run the global `scripts/postinstall.mjs` + smoke
-  `--version`. (See the `bvfkt2qnx` background task output if mid-flight.)
+- **PUBLISH: ✓ `audit-tools@0.28.2` LIVE on npm** (`latest`, OIDC CI run `27801269989`, tokenless). Carries
+  the dogfood's 3 rolling-dispatch fixes + F5–F8 (below). Global bins reinstalled + postinstall run; both
+  `--version` → 0.28.2. (0.28.1 = prior win32 audit fix + NIM e2e.) Go-forward release path:
+  `env -u CLAUDECODE npm run release:patch:publish`.
 - **ONE remaining Ethan-only npm action (needs his 2FA — I can't):** deprecate the old names (redirect):
   `npm deprecate auditor-lambda "Merged into 'audit-tools' (v0.28.0+). Install: npm i -g audit-tools"` — same
   for `remediator-lambda` and `@audit-tools/shared`. Non-blocking (cosmetic redirect for old installs).
