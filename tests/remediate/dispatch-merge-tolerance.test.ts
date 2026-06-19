@@ -203,6 +203,81 @@ describe("collapseItemResults", () => {
     expect(unresolved).toHaveLength(1);
     expect(unresolved[0].finding_id).toBe("TOTALLY-UNKNOWN");
   });
+
+  it("preserves a lone resolved_no_change status (not flattened to resolved)", () => {
+    const { collapsed } = collapseItemResults(
+      [{ finding_id: "N-x", status: "resolved_no_change", evidence: ["test passed"] }],
+      aliasMap(),
+      known,
+    );
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0].status).toBe("resolved_no_change");
+  });
+
+  it("collapse: an actual resolved change dominates a sibling resolved_no_change", () => {
+    const { collapsed } = collapseItemResults(
+      [
+        { finding_id: "N-x", status: "resolved_no_change", evidence: ["a"] },
+        { finding_id: "N-x", status: "resolved", evidence: ["b"] },
+      ],
+      aliasMap(),
+      known,
+    );
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0].status).toBe("resolved");
+  });
+
+  it("collapse: resolved_no_change survives only when every entry agreed", () => {
+    const { collapsed } = collapseItemResults(
+      [
+        { finding_id: "N-x", status: "resolved_no_change", evidence: ["a"] },
+        { finding_id: "OBL-X-01", status: "resolved_no_change", evidence: ["b"] },
+      ],
+      aliasMap(),
+      known,
+    );
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0].status).toBe("resolved_no_change");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Worker-result validation accepts resolved_no_change (regression: a worker
+// the prompt itself tells to emit resolved_no_change hard-crashed the merge).
+// ---------------------------------------------------------------------------
+
+describe("validateImplementWorkerResult — resolved_no_change", () => {
+  it("accepts resolved_no_change as a valid item status", async () => {
+    const { validateImplementWorkerResult } = await import(
+      "../../src/remediate/validation/artifacts.js"
+    );
+    const result = {
+      contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+      phase: "implement",
+      item_results: [
+        { finding_id: "N-x", status: "resolved_no_change", evidence: ["test passed"] },
+      ],
+    };
+    const errors = validateImplementWorkerResult(result, "result").filter(
+      (i) => i.severity === "error",
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("still rejects an unknown status", async () => {
+    const { validateImplementWorkerResult } = await import(
+      "../../src/remediate/validation/artifacts.js"
+    );
+    const result = {
+      contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+      phase: "implement",
+      item_results: [{ finding_id: "N-x", status: "made_up_status" }],
+    };
+    const errors = validateImplementWorkerResult(result, "result").filter(
+      (i) => i.severity === "error",
+    );
+    expect(errors.length).toBeGreaterThan(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

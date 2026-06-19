@@ -207,8 +207,12 @@ export function validateImplementWorkerResult(
     if (typeof result.finding_id !== "string") {
       pushValidationIssue(issues, `${resultPath}.finding_id`, `${resultPath}.finding_id must be a string.`);
     }
-    if (result.status !== "resolved" && result.status !== "blocked") {
-      pushValidationIssue(issues, `${resultPath}.status`, `${resultPath}.status must be resolved or blocked.`);
+    if (
+      result.status !== "resolved" &&
+      result.status !== "resolved_no_change" &&
+      result.status !== "blocked"
+    ) {
+      pushValidationIssue(issues, `${resultPath}.status`, `${resultPath}.status must be resolved, resolved_no_change, or blocked.`);
     }
   }
   return issues;

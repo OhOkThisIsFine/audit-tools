@@ -85,7 +85,7 @@ export interface RemediationDispatchPlan {
 
 export interface ImplementWorkerItemResult {
   finding_id: string;
-  status: "resolved" | "blocked";
+  status: "resolved" | "resolved_no_change" | "blocked";
   evidence?: string[];
   failure_reason?: string;
 }
