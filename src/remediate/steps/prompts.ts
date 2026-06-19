@@ -4,7 +4,11 @@ import type {
 } from "../state/types.js";
 import type { RemediationState } from "../state/store.js";
 import type { ReviewRequest } from "../review/reviewGate.js";
-import { renderPromptCommand } from "audit-tools/shared";
+import {
+  findingLead,
+  renderFindingBadgeBody,
+  renderPromptCommand,
+} from "audit-tools/shared";
 import {
   INTAKE_CLARIFICATION_SCHEMA_VERSION,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
@@ -153,18 +157,27 @@ export function reviewApprovalPrompt(
   const tierSections = request.tiers
     .map((tier) => {
       const items = tier.items
-        .map(
-          (item) => `
-### ${item.finding_id} — ${item.title}
-
-- Lens / severity / confidence: \`${item.lens}\` / \`${item.severity}\` / \`${item.confidence}\`
-- Why this tier: ${item.rationale}
-- Implementation cost (blast radius): \`${item.implementation_cost}\`
-- Affected files: ${item.affected_files.length ? item.affected_files.map((f) => `\`${f}\``).join(", ") : "_none cited_"}
-- Summary: ${item.summary}
-- **Present to the user with the pros/cons of acting vs. not acting, then record their decision.**`,
-        )
-        .join("\n");
+        .map((item) => {
+          // Parallel with the auditor's finding block (note 2): one-line lead +
+          // the SAME fixed-order badge (Severity → Confidence → Lens → Files →
+          // Details), then the review-specific decision fields. Grounding is not
+          // part of the review projection, so it is omitted here.
+          const lead = findingLead(item.summary);
+          const badge = renderFindingBadgeBody(item, {
+            showGrounding: false,
+            evidencePointer: "audit-findings.json",
+          }).join("\n");
+          return [
+            `### ${item.finding_id} — ${item.title}`,
+            "",
+            ...(lead ? [lead, ""] : []),
+            badge,
+            `- Why this tier: ${item.rationale}`,
+            `- Implementation cost (blast radius): \`${item.implementation_cost}\``,
+            "- **Present to the user with the pros/cons of acting vs. not acting, then record their decision.**",
+          ].join("\n");
+        })
+        .join("\n\n");
       return `## ${tier.label} — ${tier.items.length} item(s)\n\n${tier.description}\n${items}`;
     })
     .join("\n\n");
