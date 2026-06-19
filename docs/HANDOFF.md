@@ -31,9 +31,9 @@
   the dogfood's 3 rolling-dispatch fixes + F5–F8 (below). Global bins reinstalled + postinstall run; both
   `--version` → 0.28.2. (0.28.1 = prior win32 audit fix + NIM e2e.) Go-forward release path:
   `env -u CLAUDECODE npm run release:patch:publish`.
-- **ONE remaining Ethan-only npm action (needs his 2FA — I can't):** deprecate the old names (redirect):
-  `npm deprecate auditor-lambda "Merged into 'audit-tools' (v0.28.0+). Install: npm i -g audit-tools"` — same
-  for `remediator-lambda` and `@audit-tools/shared`. Non-blocking (cosmetic redirect for old installs).
+- **Old-name deprecations: ✓ DONE (Ethan, via npm website, 2026-06-19).** `auditor-lambda` /
+  `remediator-lambda` / `@audit-tools/shared` are deprecated → redirect to `audit-tools`. No npm actions
+  outstanding.
 
 - **DOGFOOD remediate-code on its own backlog: ✓ DONE (2026-06-18).** Full record:
   `docs/dogfood-remediation-findings-2026-06-18.md`. Drove `remediate-code` end-to-end (full contract pipeline +
