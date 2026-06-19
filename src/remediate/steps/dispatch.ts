@@ -729,6 +729,56 @@ export function worktreePath(root: string, blockId: string, runId: string): stri
 }
 
 /**
+ * Deterministic name of the dedicated remediation branch for a run. Derived from
+ * the stable run id (= the plan id, constant for the whole remediation) so every
+ * wave and the final report resolve the SAME branch without persisting it. Ref-safe:
+ * any character outside [A-Za-z0-9._-] collapses to '-'. Distinct from the per-node
+ * worktree branches (`remediate-<blockId>-<runId>`) — this uses a `remediation/` ref
+ * namespace so the two never collide.
+ */
+export function remediationBranchName(runId: string): string {
+  const safe =
+    runId
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/\.{2,}/g, ".") // ".." is invalid in a git ref name
+      .replace(/^[-.]+|[-.]+$/g, "") || "run";
+  return `remediation/${safe}`;
+}
+
+/**
+ * Ensure the main checkout is on the dedicated remediation branch BEFORE any node
+ * commit is cherry-picked, so accepted work lands there and the user's base branch
+ * is NEVER modified — the run leaves a feature branch for review (it does not merge
+ * back). Idempotent across waves: creates the branch from the current HEAD (the base)
+ * the first time, checks it out on later waves. Best-effort on a non-git root (the
+ * worktree dispatch flow can't run there anyway): returns null without throwing so
+ * non-git callers/tests are unaffected. Returns the branch name on success.
+ */
+export function ensureRemediationBranchCheckedOut(root: string, runId: string): string | null {
+  const top = gitTopLevel(root);
+  if (top === null || canonicalPathKey(top) !== canonicalPathKey(root)) return null;
+  const branch = remediationBranchName(runId);
+  const current = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (current.status === 0 && (current.stdout ?? "").trim() === branch) return branch;
+  const args = gitBranchExists(root, branch) ? ["checkout", branch] : ["checkout", "-b", branch];
+  const co = spawnSync("git", args, { cwd: root, encoding: "utf8", shell: false });
+  if (co.status !== 0) {
+    process.stderr.write(
+      `[remediate-code] could not switch to remediation branch ${branch}: ${(co.stderr ?? "").trim()}\n`,
+    );
+    return null;
+  }
+  process.stderr.write(
+    `[remediate-code] remediation changes land on branch ${branch} (base branch left untouched)\n`,
+  );
+  return branch;
+}
+
+/**
  * Stage and commit all of a worktree's edits onto its branch. The TOOL owns this
  * commit (never the worker/host) so that the branch has a real commit for two
  * downstream invariants: `gitEditedFilesForBranch` (the write-scope ground truth,
@@ -1835,6 +1885,14 @@ export async function prepareImplementDispatch(
     }
     return false;
   });
+
+  // Before any node is dispatched (and therefore before any accepted commit is
+  // cherry-picked into the main tree), switch the main checkout onto the dedicated
+  // remediation branch so all landed work accumulates there and the base branch is
+  // never modified. Idempotent across waves; only when there is work to land.
+  if (candidateBlocks.length > 0 && options.root) {
+    ensureRemediationBranchCheckedOut(options.root, runId);
+  }
 
   // Walk the repo for test files ONCE per dispatch (not once per block) and cache
   // their contents; collectReferencingTests then matches in memory.
