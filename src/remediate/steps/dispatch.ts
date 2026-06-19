@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { StateStore, type RemediationState } from "../state/store.js";
 import {
   REMEDIATION_STEP,
+  isClarificationCategory,
   type ClarificationRequest,
   type Finding,
   type ItemSpec,
@@ -1794,7 +1795,10 @@ function implementPrompt(
     if (item.status !== "pending") return [];
     // item_spec may be pre-populated from the plan DAG node or absent;
     // either way the implementer receives finding context directly.
-    return [{ finding, spec: item.item_spec }];
+    // clarification_context carries the user's answer when this item was re-opened
+    // from a clarification round (up-front gate or mid-run) — thread it through so
+    // the retry acts on the decided scope, not the original ambiguity.
+    return [{ finding, spec: item.item_spec, clarification: item.clarification_context }];
   });
 
   // When a worktreeRoot is supplied, the worker operates in the worktree, not
@@ -1837,12 +1841,12 @@ Set the shell/tool workdir to the repository root when running commands; do not 
 
 ${items
   .map(
-    ({ finding, spec }) => `
+    ({ finding, spec, clarification }) => `
 ### ${finding.id} - ${finding.title}
 
 - Files: ${itemReadFiles(finding, spec).map(resolveFilePath).join(", ")}
 - Summary: ${finding.summary}
-${groundingVerificationBullet(finding)}
+${clarification ? `- Clarified scope (decided with the user — act on THIS): ${clarification}\n` : ""}${groundingVerificationBullet(finding)}
 ${spec ? `- Concrete change: ${spec.concrete_change}
 - Tests to write: ${spec.tests_to_write
       .map((test) => `${test.name}: ${test.assertions.join("; ")}`)
@@ -1896,8 +1900,15 @@ ${items
 }
 \`\`\`
 
-For an item you cannot safely finish, set \`status\` to \`blocked\` and include
-\`failure_reason\`. Stop after writing the result JSON.
+For an item you cannot safely finish because of an EXECUTION failure (a test
+won't pass, a build breaks, the change is infeasible), set \`status\` to
+\`blocked\` and include \`failure_reason\`. If instead you are stuck on a SCOPING
+or JUDGMENT question — how far the fix should reach, which of several valid
+behaviors is intended, or whether the issue is real — do NOT guess and do NOT
+block: set \`status\` to \`needs_clarification\` and put the question in
+\`clarification_question\` (optionally \`clarification_category\`). It is routed to
+the user as a real question, then re-dispatched with the answer. Stop after
+writing the result JSON.
 
 ## File access
 
@@ -2447,23 +2458,31 @@ export function collapseItemResults(
       byFinding.set(targetId, normalized);
       continue;
     }
-    // Collapse: blocked dominates; an actual `resolved` change dominates a
-    // `resolved_no_change` (a no-change claim only survives if every entry agreed
-    // nothing changed); merge evidence; keep first failure_reason.
+    // Collapse precedence: blocked > needs_clarification > resolved >
+    // resolved_no_change. A hard failure dominates an unanswered scoping question,
+    // which dominates an actual change, which dominates a no-change claim (a
+    // no-change claim only survives if every entry agreed nothing changed). Merge
+    // evidence; keep first failure_reason / clarification question.
     const mergedEvidence = [
       ...new Set([...(existing.evidence ?? []), ...(normalized.evidence ?? [])]),
     ];
     const status: ImplementWorkerResult["item_results"][number]["status"] =
       existing.status === "blocked" || normalized.status === "blocked"
         ? "blocked"
-        : existing.status === "resolved" || normalized.status === "resolved"
-          ? "resolved"
-          : "resolved_no_change";
+        : existing.status === "needs_clarification" || normalized.status === "needs_clarification"
+          ? "needs_clarification"
+          : existing.status === "resolved" || normalized.status === "resolved"
+            ? "resolved"
+            : "resolved_no_change";
     byFinding.set(targetId, {
       finding_id: targetId,
       status,
       evidence: mergedEvidence.length > 0 ? mergedEvidence : undefined,
       failure_reason: existing.failure_reason ?? normalized.failure_reason,
+      clarification_question:
+        existing.clarification_question ?? normalized.clarification_question,
+      clarification_category:
+        existing.clarification_category ?? normalized.clarification_category,
     });
   }
   return { collapsed: [...byFinding.values()], unresolved };
@@ -2903,6 +2922,31 @@ async function mergeImplementResultsIntoState(
             );
           }
         }
+      } else if (itemResult.status === "needs_clarification") {
+        // Mid-run escape hatch (note 3, part B): the worker hit scoping/judgment
+        // ambiguity. Route it to a clarification round (a real user question), not
+        // to triage's retry/ignore/halt. NOT terminal — the answer re-opens it.
+        stateItem.status = "needs_clarification";
+        const question =
+          itemResult.clarification_question ??
+          itemResult.failure_reason ??
+          "The worker reported unresolved scoping/judgment ambiguity.";
+        stateItem.failure_reason = question;
+        const category = isClarificationCategory(itemResult.clarification_category)
+          ? itemResult.clarification_category
+          : "scope_of_fix";
+        const clarifications = state.clarifications ?? [];
+        if (!clarifications.some((c) => c.finding_id === itemResult.finding_id)) {
+          clarifications.push({
+            finding_id: itemResult.finding_id,
+            category,
+            description: question,
+          });
+        }
+        state.clarifications = clarifications;
+        // The run is paused for the batched clarification round at the single
+        // post-loop status decision below (a needs_clarification item outranks
+        // implementing/triage), so the answer is applied before any more work.
       } else {
         stateItem.status = "blocked";
         markTerminal(stateItem);
@@ -3101,14 +3145,23 @@ async function mergeImplementResultsIntoState(
       `${implementRejected} rejected\n`,
   );
 
-  // Route back to implementing while pending work remains (later dependency
-  // waves, or blocks deferred this wave because a prerequisite was still
-  // running) so the next next-step dispatches the now-ready blocks; otherwise
-  // advance to implementing → triage.
+  // A worker that reported needs_clarification (note 3, part B) outranks both
+  // implementing and triage: pause the run for the batched clarification round so
+  // the user's answer is applied before any more work is dispatched or triaged.
+  // Otherwise route back to implementing while pending work remains (later
+  // dependency waves, or blocks deferred this wave because a prerequisite was
+  // still running); else advance to triage.
+  const needsClarification = Object.values(state.items).some(
+    (it) => it.status === "needs_clarification",
+  );
   const moreToImplement = Object.values(state.items).some(
     (it) => it.status === "pending",
   );
-  state.status = moreToImplement ? "implementing" : "triage";
+  state.status = needsClarification
+    ? "waiting_for_clarification"
+    : moreToImplement
+      ? "implementing"
+      : "triage";
   // Single commit: StateStore.mutate writes the returned state once, under the
   // lock it already holds (OBL-INV-RSD-02 / OBL-SEAM-RSD-04). No saveState here.
   return state;

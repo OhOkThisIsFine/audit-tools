@@ -119,6 +119,21 @@ export const ClarificationRequestSchema = z
   .strict();
 export type ClarificationRequest = z.infer<typeof ClarificationRequestSchema>;
 
+/** The canonical clarification categories (single-sourced from the schema). */
+export const CLARIFICATION_CATEGORIES =
+  ClarificationRequestSchema.shape.category.options;
+export type ClarificationCategory = ClarificationRequest["category"];
+
+/** Narrow an arbitrary value to a canonical clarification category. */
+export function isClarificationCategory(
+  value: unknown,
+): value is ClarificationCategory {
+  return (
+    typeof value === "string" &&
+    (CLARIFICATION_CATEGORIES as readonly string[]).includes(value)
+  );
+}
+
 export const ClosingActionPreviewSchema = z
   .object({
     /** Repo-relative paths that would be staged for the commit. */

@@ -366,7 +366,63 @@ describe("mergeImplementResults per-item validation", () => {
   it("throws when an entry's status is not a recognized status", async () => {
     await expect(
       mergeWithItemResults([{ finding_id: "F-001", status: "maybe" }]),
-    ).rejects.toThrow(/status must be resolved, resolved_no_change, or blocked/);
+    ).rejects.toThrow(
+      /status must be resolved, resolved_no_change, blocked, or needs_clarification/,
+    );
+  });
+
+  it("note 3 part B: needs_clarification routes to a clarification round, not triage", async () => {
+    await saveState(makeImplementingState());
+    const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
+    await mkdir(resultDir, { recursive: true });
+    const resultPath = join(resultDir, "implement-B-001.result.json");
+    await writeFile(
+      join(resultDir, "dispatch-plan.json"),
+      JSON.stringify({
+        contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+        phase: "implement",
+        run_id: runId,
+        repo_root: REPO_DIR,
+        artifacts_dir: ARTIFACTS_DIR,
+        items: [
+          {
+            task_id: "implement-B-001",
+            block_id: "B-001",
+            prompt_path: join(resultDir, "implement-B-001.md"),
+            result_path: resultPath,
+          },
+        ],
+      }),
+    );
+    await writeFile(
+      resultPath,
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [
+          {
+            finding_id: "F-001",
+            status: "needs_clarification",
+            clarification_question: "How far should the boundary refactor reach?",
+          },
+        ],
+      }),
+    );
+
+    const merged = await mergeImplementResults(
+      { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },
+      runId,
+    );
+
+    // The item is paused (NOT blocked → triage, NOT terminal) and the run flips to
+    // the clarification round with the worker's question surfaced.
+    expect(merged.items?.["F-001"].status).toBe("needs_clarification");
+    expect(merged.status).toBe("waiting_for_clarification");
+    expect(merged.clarifications?.[0]).toMatchObject({
+      finding_id: "F-001",
+      category: "scope_of_fix",
+    });
+    expect(merged.clarifications?.[0].description).toMatch(/boundary refactor/);
   });
 });
 

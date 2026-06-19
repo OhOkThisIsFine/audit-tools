@@ -18,8 +18,10 @@ import type { PerFindingDisposition } from "./types.js";
 /**
  * Every status a remediation item can hold, in lifecycle order: the in-progress
  * states (`pending`…`verified`), the success states (`resolved`,
- * `resolved_no_change`), the failure state (`blocked`), and the settled-no-act
- * states (`deemed_inappropriate`, `ignored`).
+ * `resolved_no_change`), the failure state (`blocked`), the awaiting-answer state
+ * (`needs_clarification` — a worker hit scoping/judgment ambiguity mid-run and
+ * paused the item for a clarification round rather than blocking it), and the
+ * settled-no-act states (`deemed_inappropriate`, `ignored`).
  */
 export const ITEM_STATUSES = [
   "pending",
@@ -30,6 +32,7 @@ export const ITEM_STATUSES = [
   "resolved",
   "resolved_no_change",
   "blocked",
+  "needs_clarification",
   "deemed_inappropriate",
   "ignored",
 ] as const;
@@ -126,8 +129,9 @@ const STATUS_TO_DISPOSITION: Record<RemediationItemStatus, PerFindingDisposition
   resolved_no_change: "resolved_no_change",
   ignored: "ignored",
   deemed_inappropriate: "deemed_inappropriate",
-  // Non-terminal (blocked + in-progress) → surfaced, not dropped.
+  // Non-terminal (blocked + needs_clarification + in-progress) → surfaced, not dropped.
   blocked: "force_closed_unresolved",
+  needs_clarification: "force_closed_unresolved",
   pending: "force_closed_unresolved",
   tested: "force_closed_unresolved",
   tested_successfully: "force_closed_unresolved",
