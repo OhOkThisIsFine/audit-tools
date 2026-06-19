@@ -109,6 +109,72 @@ describe("validatePairedObligations", () => {
     expect(issues).toHaveLength(0);
   });
 
+  it("passes with POSITIVE:/NEGATIVE:-labeled assertions whose free text would not match keywords (authoritative label)", () => {
+    const issues = validatePairedObligations(
+      ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" }]),
+      plan([
+        {
+          obligation_id: "O-1",
+          name: "t",
+          kind: "unit",
+          // Neither free text contains a polarity keyword; the labels are authoritative.
+          assertions: ["POSITIVE: the widget count stays under the cap", "NEGATIVE: the widget count over the cap is caught"],
+        },
+      ]),
+    );
+    expect(issues).toHaveLength(0);
+  });
+
+  it("treats a POSITIVE: label as authoritative even when the free text matches a negative keyword", () => {
+    // "must not exceed N" matches NEGATIVE_ASSERTION_PATTERN, but the POSITIVE:
+    // label wins and the keyword regex is skipped for this assertion. With only
+    // this one assertion the negative half is therefore missing.
+    const issues = validatePairedObligations(
+      ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" }]),
+      plan([
+        {
+          obligation_id: "O-1",
+          name: "t",
+          kind: "unit",
+          assertions: ["POSITIVE: must not exceed N"],
+        },
+      ]),
+    );
+    expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(true);
+    expect(issues.some((i) => i.path.endsWith(".positive"))).toBe(false);
+  });
+
+  it("recognizes the polarity label with surrounding whitespace and mixed case", () => {
+    const issues = validatePairedObligations(
+      ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" }]),
+      plan([
+        {
+          obligation_id: "O-1",
+          name: "t",
+          kind: "unit",
+          assertions: ["  positive : the value is produced", "\tNegAtIvE: the bad path is handled"],
+        },
+      ]),
+    );
+    expect(issues).toHaveLength(0);
+  });
+
+  it("still fails a one-sided labeled spec (only POSITIVE: labels => negative half missing)", () => {
+    const issues = validatePairedObligations(
+      ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" }]),
+      plan([
+        {
+          obligation_id: "O-1",
+          name: "t",
+          kind: "unit",
+          assertions: ["POSITIVE: the value is produced"],
+        },
+      ]),
+    );
+    expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(true);
+    expect(issues.some((i) => i.path.endsWith(".positive"))).toBe(false);
+  });
+
   it("accepts an explicit inapplicable_claim as opt-out", () => {
     const issues = validatePairedObligations(
       ledger([{ id: "O-1", description: "x", kind: "invariant", depends_on: [], status: "pending" }]),
@@ -378,6 +444,64 @@ describe("validateReconciliationDerivation", () => {
   it("passes when there are no mismatches to derive", () => {
     const issues = validateReconciliationDerivation(report([]), finalized([]));
     expect(issues).toHaveLength(0);
+  });
+
+  it("derives the agreed interface via seam_adjustments alone (corpus includes seam_adjustments)", () => {
+    const issues = validateReconciliationDerivation(
+      report([
+        {
+          seam_id: "S1",
+          module_a: "a",
+          module_b: "b",
+          description: "d",
+          resolution: { decision: "A", agreed_interface: "writeRecord returns ack token" },
+        },
+      ]),
+      finalized([
+        {
+          name: "a",
+          // The agreed interface text lives ONLY in seam_adjustments; the other
+          // fields are unrelated. The gate must still consider it derived.
+          inputs: ["unrelated"],
+          outputs: ["something else entirely"],
+          invariants: [],
+          side_effects: [],
+          seam_adjustments: ["writeRecord returns ack token"],
+          validation_boundary: "v",
+          failure_modes: [],
+        },
+      ]),
+    );
+    expect(issues).toHaveLength(0);
+  });
+
+  it("still fails when the agreed interface appears in no field, including seam_adjustments", () => {
+    const issues = validateReconciliationDerivation(
+      report([
+        {
+          seam_id: "S1",
+          module_a: "a",
+          module_b: "b",
+          description: "d",
+          resolution: { decision: "A", agreed_interface: "writeRecord returns ack token" },
+        },
+      ]),
+      finalized([
+        {
+          name: "a",
+          inputs: ["unrelated"],
+          outputs: ["something else entirely"],
+          invariants: [],
+          side_effects: [],
+          seam_adjustments: ["a totally different adjustment"],
+          validation_boundary: "v",
+          failure_modes: [],
+        },
+      ]),
+    );
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.every((i) => i.severity === "error")).toBe(true);
+    expect(issues[0].message).toContain("INV-CO-12");
   });
 });
 
