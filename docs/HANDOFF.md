@@ -46,12 +46,18 @@
 
 ## Immediate next
 
-**2026-06-19 dogfood work: ✓ SHIPPED.** `resume-list-dogfood-fixes` merged to `main`;
-**`audit-tools@0.28.3` LIVE** (8 code-bug fixes + notes 1–3: lens proposition table
-`0092405b`/`e88d1afa`; standardized per-finding block `0092405b`; up-front ambiguity gate `264b36da`
-+ mid-run `needs_clarification` outcome `70d74a8d`). Follow-up `013438ab` (Ethan: auditor↔remediator
-parity) single-sources the finding-display block into `src/shared/reporting/findingDisplay.ts` —
-ships as **0.28.4**. Branch `resume-list-dogfood-fixes` can be deleted.
+**2026-06-19 dogfood work: ✓ SHIPPED — current live = `audit-tools@0.28.5`.**
+- `0.28.3` — `resume-list-dogfood-fixes` merged: 8 code-bug fixes + notes 1–3 (lens proposition table
+  `0092405b`/`e88d1afa`; standardized per-finding block `0092405b`; up-front ambiguity gate `264b36da`
+  + mid-run `needs_clarification` outcome `70d74a8d`).
+- `0.28.4` — auditor↔remediator parity (`013438ab`): the finding-display block is single-sourced in
+  `src/shared/reporting/findingDisplay.ts`, rendered by both the audit report and the remediator
+  prompts (review-gate + implement worker). Drift-guard test dropped (`c365d379`) — the shared
+  renderer IS the guarantee.
+- `0.28.5` — `17799586`: the duplication-vs-extraction smell is encoded in the worker-facing lens
+  guidance (`dispatch/lens-definitions.json`) for the maintainability / architecture / tests lenses
+  (conceptual reviewer deliberately left broad).
+Branch `resume-list-dogfood-fixes` can be deleted.
 
 **Remaining go-forward program** (`docs/backlog.md` → "Accepted go-forward program"): A7 (host
 install/integration validation across Codex/OpenCode/Antigravity), A8 hybrid spill topology + live
