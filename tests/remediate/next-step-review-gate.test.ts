@@ -263,6 +263,13 @@ describe("Path-A coverage is built over the original findings", () => {
       }),
       "utf8",
     );
+    // Note 3, part A: the up-front ambiguity gate also fires once at planning.
+    // Pre-mark it decided so this fold-to-implement test isn't intercepted by it.
+    await writeFile(
+      join(ARTIFACTS_DIR, "ambiguity_decision.json"),
+      JSON.stringify({ resolved_at: new Date().toISOString(), resolution_count: 0 }),
+      "utf8",
+    );
     await harness.writeIntentCheckpoint();
 
     // This fresh run (no state.json at entry) folds intake → plan → implementing
@@ -407,6 +414,136 @@ describe("Path-B planning review gate", () => {
 
     expect(step.step_kind).not.toBe("collect_review_approval");
     expect(existsSync(decisionPath)).toBe(true);
+  });
+});
+
+describe("up-front ambiguity gate (note 3, part A)", () => {
+  // Findings whose scope/judgment is ambiguous must be resolved in ONE batched
+  // round at planning, before any implement dispatch — never fall to mid-run
+  // triage. The deterministic heuristics seed candidates; the gate halts only
+  // when at least one is detected.
+  const AMBIG_ID = "CP-ARCH-broad";
+  const CLEAR_ID = "CP-SEC-clear";
+  const ambiguityRequestPath = join(ARTIFACTS_DIR, "ambiguity_request.json");
+  const ambiguityResolutionPath = join(ARTIFACTS_DIR, "ambiguity_resolution.json");
+  const ambiguityDecisionPath = join(ARTIFACTS_DIR, "ambiguity_decision.json");
+
+  async function writeAmbiguousPlan(): Promise<void> {
+    await mkdir(join(REPO_DIR, "src"), { recursive: true });
+    await writeFile(join(REPO_DIR, "src", "login.ts"), "// login\n", "utf8");
+    // Pre-decide the review gate so it doesn't intercept before the ambiguity gate.
+    await writeFile(
+      decisionPath,
+      JSON.stringify({
+        schema_version: "remediate-code-review-decision/v1",
+        plan_id: "pre-decided",
+        approved_ids: [AMBIG_ID, CLEAR_ID],
+        declined: [],
+        created_at: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(ARTIFACTS_DIR, "extracted-plan.json"),
+      JSON.stringify({
+        plan_id: "PLAN-AMBIG",
+        source: "contract_pipeline",
+        findings: [
+          {
+            // architecture lens + NO cited files → scope_of_fix candidate.
+            id: AMBIG_ID,
+            title: "Rework module boundaries",
+            category: "architecture",
+            severity: "medium",
+            confidence: "medium",
+            lens: "architecture",
+            summary: "Restructure the store/db seam.",
+            affected_files: [],
+            evidence: ["obligation O-ARCH"],
+          },
+          {
+            // security + 1 cited file + high confidence → not ambiguous.
+            id: CLEAR_ID,
+            title: "Escape login input",
+            category: "security",
+            severity: "high",
+            confidence: "high",
+            lens: "security",
+            summary: "Escape the email before the query.",
+            affected_files: [{ path: "src/login.ts" }],
+            evidence: ["obligation O-SEC"],
+          },
+        ],
+        blocks: [
+          { block_id: "B-ARCH", items: [AMBIG_ID], parallel_safe: true },
+          { block_id: "B-SEC", items: [CLEAR_ID], parallel_safe: true },
+        ],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      join(REPO_DIR, "session-config.json"),
+      JSON.stringify({ dispatch: { rolling_engine: false } }),
+      "utf8",
+    );
+    await harness.writeIntentCheckpoint();
+    await acknowledgeResume();
+  }
+
+  it("halts at collect_clarifications with the detected candidate when ambiguity exists", async () => {
+    await writeAmbiguousPlan();
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("collect_clarifications");
+    const request = JSON.parse(await readFile(ambiguityRequestPath, "utf8"));
+    const ids = request.map((c: { finding_id: string }) => c.finding_id);
+    expect(ids).toContain(AMBIG_ID); // ambiguous arch finding flagged
+    expect(ids).not.toContain(CLEAR_ID); // clear security finding not flagged
+    expect(request.find((c: { finding_id: string }) => c.finding_id === AMBIG_ID).category).toBe(
+      "scope_of_fix",
+    );
+  });
+
+  it("explicit user deferral closes the item as ignored and the run proceeds", async () => {
+    await writeAmbiguousPlan();
+    await decideNextStep({ root: REPO_DIR }); // halt + write request
+
+    await writeFile(
+      ambiguityResolutionPath,
+      JSON.stringify([
+        { finding_id: AMBIG_ID, action: "defer", rationale: "out of scope this run" },
+      ]),
+      "utf8",
+    );
+    const step = await decideNextStep({ root: REPO_DIR }); // consume + proceed
+
+    expect(step.step_kind).not.toBe("collect_clarifications");
+    expect(existsSync(ambiguityDecisionPath)).toBe(true);
+    const state = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"));
+    // Deferred item is a recorded terminal disposition (ignored), never silently dropped.
+    expect(state.items[AMBIG_ID].status).toBe("ignored");
+    expect(state.items[AMBIG_ID].failure_reason).toMatch(/deferred/i);
+    // The clear item stays live for implementation.
+    expect(state.items[CLEAR_ID].status).toBe("pending");
+  });
+
+  it("re-running after the resolution does not re-halt (fires at most once)", async () => {
+    await writeAmbiguousPlan();
+    await decideNextStep({ root: REPO_DIR });
+    await writeFile(
+      ambiguityResolutionPath,
+      JSON.stringify([{ finding_id: AMBIG_ID, action: "clarified", rationale: "minimal local fix" }]),
+      "utf8",
+    );
+    await decideNextStep({ root: REPO_DIR });
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).not.toBe("collect_clarifications");
+    expect(existsSync(ambiguityDecisionPath)).toBe(true);
   });
 });
 
