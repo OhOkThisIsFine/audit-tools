@@ -250,15 +250,31 @@ triaged.
 
 ## Known friction (agent / dev experience)
 
-- **`openai-compatible` loose JSON parse can't recover a stray trailing brace; prefer `response_format_json` (2026-06-18).**
-  Driving live NVIDIA NIM (`openai/gpt-oss-120b`) as the in-process worker, the model intermittently appends an
-  extra closing brace (`…}]}}`) under the free-form instruction. `parseJsonLoose`'s brace fallback uses
-  `lastIndexOf("}")`, which grabs the stray brace → `JSON.parse` throws → the launch fails `accepted:false`.
-  Setting `openai_compatible.response_format_json:true` (sends `response_format:{type:"json_object"}`) makes NIM
-  return strict JSON and fixes it. Two possible hardenings: (1) make `parseJsonLoose` balance-scan for the first
-  complete top-level object instead of slicing to the last brace (handles trailing garbage from any backend);
-  (2) consider defaulting `response_format_json` on for `openai-compatible` (most OpenAI-compatible endpoints
-  support it). Affects both orchestrators (shared provider). Not blocking — the e2e + real runs just set the flag.
+### Dogfood (remediate-code on its own backlog) — rolling-dispatch bugs FIXED + frictions (2026-06-18)
+
+Full record: [`dogfood-remediation-findings-2026-06-18.md`](dogfood-remediation-findings-2026-06-18.md).
+Fixed this run (committed): the rolling implement path was **100% broken on Windows** —
+`verifyNodeInWorktree` spawned `npm`/`npx` with `shell:false`/no shim resolver (`6a551b28`); plus two
+re-dispatch cleanup gaps (`resetNodeWorktreeAndBranch` now resets the stale branch `c9575b7f` + force-removes
+an orphaned worktree dir `e29cec16`). F5–F8 (below) landed through the tool after these. **Open frictions
+surfaced (fix these):**
+- **Write-scope gate runs AFTER `accept-node` cherry-picks into main.** In the host-rolling path the
+  out-of-scope edits land first, then `mergeImplementResults` flags them post-hoc — it reports, it doesn't
+  prevent. Move the write-scope check before the cherry-pick (or make accept-node enforce it). Also: the
+  host-declared `file_scope` in module_decomposition is a guess the rolling worker can't amend through a
+  surfaced protocol — a too-narrow/guessed scope (wrong test filename, an unavoidable helper relocation, a
+  doc-comment touch) blocks a correct fix. Enforce-in-tooling: derive/loosen scope, or surface an amend path.
+- **`accept-outcome` sidecar + triage discard the verify command output.** `outcome:error` with no captured
+  stderr leaves triage blind to the root cause. Persist the failing command + output in the sidecar.
+- **`--input` after intake is a hard conflict.** The `/remediate-code` loader tells the host to pass the same
+  flags each `next-step`, but a post-intake `--input` triggers input_conflict + a resume/restart ack dance.
+  Loader guidance should drop `--input` once a run exists (or the backend should treat an unchanged `--input`
+  as resume).
+- **`accept-node` requires `--run-id` but the rolling dispatch prompt shows only `--id`.** Doc drift — fix the
+  prompt or default `--run-id` from the in-progress run.
+
+### Other
+
 - **Packaged-smoke gate hardcodes a `requiredPackagedPaths` list (2026-06-18).** `smoke-packaged-audit-code.mjs`
   asserts the publish tarball ships specific files; A6 deleted `schemas/audit-code-v1alpha1.schema.json` (ported
   to a zod source) but left the list naming it → the first A6 publish failed the audit-code `verify:release`
@@ -308,26 +324,6 @@ agent (strong or weak), not "be careful" patches.
   contracts narrowed to the obligation-bearing derivable fields), so a cosmetic/text-only upstream
   edit no longer re-stales obligation_ledger → test_validator_plan → contract_assessment
   (`semanticProjection.ts` + `semantic_hash` in the envelope).
-- **Paired-obligation gate (OBL-CO-01) keyword regex is a hidden contract.** It scans each
-  obligation's assertions for a positive-signal word (`passes|returns|produces|valid|
-  matches|...`) AND a negative-signal word (`reject|throw|fail|never|not|...`); a `\b`
-  word boundary means "POSITIVE:"/"NEGATIVE:" prefixes and words like "reproduced"
-  (≠ `\bproduces\b`) DON'T satisfy it. Caused several rewrite loops. Fix: accept the
-  explicit POSITIVE/NEGATIVE labels the prompt implies, or state the required keyword set
-  in the prompt, or replace the regex heuristic with the explicit labels.
-- **S5 seam-derivation gate (INV-CO-12) ignores `seam_adjustments`.** It builds its corpus
-  from inputs/outputs/invariants/side_effects/validation_boundary only and requires every
-  ≥4-char token of each seam `agreed_interface` to appear there — but `seam_adjustments`
-  (the natural place to record a seam decision) is NOT scanned. Recording the decision
-  where it belongs fails the gate; you must duplicate the verbatim interface into
-  `outputs`. Fix: scan `seam_adjustments` too, or document the corpus + require the
-  reflection there.
-- **validate-artifact wants the plain payload; next-step wraps the file in a content-hash
-  envelope.** After next-step, every artifact on disk is `{artifact_name, content_hash,
-  dependency_hashes, payload}`; `validate-artifact` then rejects it (expects top-level
-  contract_version/...). To re-validate or re-edit you must unwrap `.payload` back to a
-  plain file. Non-obvious round-trip; either make validate-artifact accept the wrapped
-  form, or don't rewrap files the host may still edit.
 - **Async typecheck hook = stale-dist false alarm after shared edits.** After a worker
   edits `@audit-tools/shared/src`, the PostToolUse hook runs a dependent package's `tsc`
   against the not-yet-rebuilt `shared/dist` and reports phantom "no exported member"
@@ -440,32 +436,14 @@ agent (strong or weak), not "be careful" patches.
   this guidance (bracket-wrap the output, or `Write-Output -NoEnumerate`).
   (Sibling of the `foreach`/`-Filter` PowerShell traps above.)
 
-- **`--host-can-dispatch-subagents` is documented as a boolean but defined with a value.**
-  The `/remediate-code` and `/audit-code` loaders show `--host-can-dispatch-subagents`
-  as a bare flag, but commander defines it as `--host-can-dispatch-subagents <value>`,
-  so passing it bare swallows the *next* flag as its value
-  (`… --host-can-dispatch-subagents --host-max-concurrent 4` made `4` a stray positional
-  → "too many arguments for 'next-step'"). Spotted 2026-06-14. Fix: define it as a true
-  boolean option (no `<value>`) so the documented usage works, or change the loader docs
-  to `--host-can-dispatch-subagents true`. (The `--host-models` JSON roster itself passes
-  fine through the PowerShell→.cmd shim when single-quoted.)
-- **`conversation-start.md` is not auto-registered as an intake source.** When
-  `/remediate-code` receives conversational/memory guidance *alongside* an `--input`
-  report, the loader writes the guidance to `intake/conversation-start.md`, but
-  `synthesize_intake`'s source-manifest lists only the `--input` document — so the
-  guidance reaches planning only if the host folds it in by hand (it did, 2026-06-14).
-  Fix: have intake discover `intake/conversation-start.md` (and any `intake/*.md`) and
-  add it to the source-manifest as a supplementary `conversation` source, so mixed
-  report+guidance runs are first-class.
-- **Implement-worker `finding_id` trap recurred — renderer fix still unshipped.** The
-  documented renderer fix above (emit the real node id + "one item_result per item id;
-  never FND-*/OBL-* obligation ids") is still not in `prepareImplementDispatch`; the
-  2026-06-14 run hit it again (an opus worker emitted one item_result per obligation incl.
-  `OBL-WS-C` → `merge-implement-results` threw; the result file was patched post-hoc).
-  Two-sided fix worth doing together: (1) renderer emits the node id + the one-entry rule;
-  (2) make `merge-implement-results` *tolerant* — if an unknown `finding_id` is actually a
-  known obligation id, map it back to its owning node instead of throwing (and collapse
-  multiple per-obligation `item_results` for one node).
+- **Verified-shipped during the 2026-06-18 dogfood (these three were stale — removed):**
+  `--host-can-dispatch-subagents` is now a true boolean (`parseHostBooleanFlag`);
+  `conversation-start.md` + any `intake/*.md` are auto-discovered into the source manifest
+  (`scanConversationSources`) and `--guidance-file` is a single-step bootstrap; the
+  implement-worker `finding_id` trap is fixed both sides (renderer emits the node id +
+  `mergeImplementResults` tolerantly remaps an obligation id to its owning node, OBL-INV-RSD-01).
+  (Also confirmed shipped: planner sets `model_hint.tier` by complexity; the
+  generator↔fixture drift guard test exists. See the dogfood findings doc.)
 
 ### Self-audit 2026-06-15 — confirmed dispatch / contract bugs (HIGH)
 
