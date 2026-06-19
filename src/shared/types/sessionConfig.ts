@@ -82,7 +82,11 @@ export interface OpenAiCompatibleConfig {
   temperature?: number;
   /** Completion token budget (`max_tokens`). Defaults to a generous value so full files fit. */
   max_output_tokens?: number;
-  /** Send `response_format: {type:"json_object"}`. Off by default (not all endpoints accept it). */
+  /**
+   * Send `response_format: {type:"json_object"}`. ON by default (nullish: enabled
+   * unless explicitly `false`). If the endpoint rejects it (HTTP 400/422), the
+   * provider retries once without it, so leaving it on is safe for any endpoint.
+   */
   response_format_json?: boolean;
   /** Inline current contents of prompt-referenced files so edits are grounded. Default true. */
   include_referenced_files?: boolean;

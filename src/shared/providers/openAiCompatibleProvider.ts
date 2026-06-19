@@ -126,27 +126,38 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), input.timeoutMs);
-    let content: string;
-    try {
-      const res = await this.fetchFn(`${baseUrl}/chat/completions`, {
+    // response_format defaults ON (nullish: on unless explicitly false); not all
+    // endpoints accept it, so a 400/422 rejection degrades to one retry without it.
+    const wantJsonFormat = this.config.response_format_json !== false;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      ...(this.config.headers ?? {}),
+    };
+    const buildBody = (withJsonFormat: boolean): string =>
+      JSON.stringify({
+        model,
+        messages,
+        temperature: this.config.temperature ?? 0,
+        max_tokens: this.config.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+        stream: false,
+        ...(withJsonFormat ? { response_format: { type: "json_object" } } : {}),
+      });
+    const post = (withJsonFormat: boolean): ReturnType<FetchFn> =>
+      this.fetchFn(`${baseUrl}/chat/completions`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-          ...(this.config.headers ?? {}),
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature: this.config.temperature ?? 0,
-          max_tokens: this.config.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-          stream: false,
-          ...(this.config.response_format_json
-            ? { response_format: { type: "json_object" } }
-            : {}),
-        }),
+        headers,
+        body: buildBody(withJsonFormat),
         signal: controller.signal,
       });
+
+    let content: string;
+    try {
+      let res = await post(wantJsonFormat);
+      // A response_format rejection (400/422) is non-fatal: retry once without it.
+      if (!res.ok && wantJsonFormat && (res.status === 400 || res.status === 422)) {
+        res = await post(false);
+      }
       if (!res.ok) {
         const body = await safeText(res);
         return fail(`openai-compatible endpoint returned HTTP ${res.status}: ${truncate(body, 600)}`);
@@ -347,8 +358,11 @@ function safeResolveInRepo(repoRoot: string, candidate: string): string | null {
 /**
  * Parse JSON that may arrive wrapped in markdown fences or with leading/trailing
  * prose (reasoning models sometimes do this even under an explicit JSON
- * instruction). Tries a direct parse, then a fenced block, then the outermost
- * brace-delimited object.
+ * instruction). Tries a direct parse, then a fenced block, then a
+ * string/escape-aware balance scan that collects every complete top-level object
+ * and returns the LARGEST one that parses — so a trivial `{}` example emitted
+ * before the real payload is skipped, an in-string `}` doesn't truncate the
+ * object, and trailing garbage after the object is tolerated.
  */
 export function parseJsonLoose(text: string): unknown {
   const trimmed = text.trim();
@@ -365,10 +379,57 @@ export function parseJsonLoose(text: string): unknown {
       // fall through
     }
   }
-  const first = trimmed.indexOf("{");
-  const last = trimmed.lastIndexOf("}");
-  if (first !== -1 && last > first) {
-    return JSON.parse(trimmed.slice(first, last + 1));
+  for (const candidate of extractBalancedObjects(trimmed)) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // not valid JSON — try the next candidate.
+    }
   }
   throw new Error("no JSON object found in response");
+}
+
+/**
+ * Scan `text` for complete, brace-balanced top-level `{…}` objects, tracking
+ * JSON string state so a `{` or `}` inside a string (or escaped) is ignored.
+ * Returns the candidate substrings ordered largest-first, so the caller prefers
+ * the real payload over a trivial example object.
+ */
+function extractBalancedObjects(text: string): string[] {
+  const objects: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === '"' && !isEscaped(text, i)) inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth += 1;
+    } else if (ch === "}") {
+      if (depth > 0) {
+        depth -= 1;
+        if (depth === 0 && start !== -1) {
+          objects.push(text.slice(start, i + 1));
+          start = -1;
+        }
+      }
+    }
+  }
+  // Largest first: skips a leading trivial `{}` in favour of the real object.
+  return objects.sort((a, b) => b.length - a.length);
+}
+
+/** True when the character at `index` is escaped by an odd run of backslashes. */
+function isEscaped(text: string, index: number): boolean {
+  let backslashes = 0;
+  for (let i = index - 1; i >= 0 && text[i] === "\\"; i -= 1) backslashes += 1;
+  return backslashes % 2 === 1;
 }
