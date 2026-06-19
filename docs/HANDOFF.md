@@ -49,8 +49,12 @@
 **Open dogfood frictions to fix (highest-value next, all in `docs/backlog.md` Known-friction):**
 - Write-scope gate runs AFTER `accept-node` cherry-picks → reports post-hoc, doesn't prevent; and the
   host-declared `file_scope` is a guess the rolling worker can't amend (a too-narrow scope blocks a correct fix).
-- `accept-outcome` sidecar + triage discard the verify command output (triage flies blind on `outcome:error`).
-- `--input` after intake → hard input_conflict; `accept-node` needs `--run-id` though the prompt shows only `--id`.
+  **(Still open — the architecturally-significant one.)**
+- `--input` after intake → hard input_conflict; the `/remediate-code` loader keeps re-passing `--input` each
+  `next-step`. Drop `--input` from loader guidance once a run exists (or treat an unchanged `--input` as resume).
+- ✓ DONE (2026-06-19, this branch, UNPUBLISHED): `accept-outcome` sidecar now persists the failing command +
+  output (triage no longer blind on `outcome:error`); the rolling-dispatch prompt now shows
+  `accept-node --id <BLOCK_ID> --run-id <runId>`. Rolls into the next `release:patch`.
 
 **Remaining accepted program** (`docs/backlog.md` → "Accepted go-forward program"):
 - **A7 (REFRAMED)** — validate the host install/integration machinery across all hosts (Codex, OpenCode,

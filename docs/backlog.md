@@ -274,14 +274,19 @@ surfaced (fix these):**
   host-declared `file_scope` in module_decomposition is a guess the rolling worker can't amend through a
   surfaced protocol — a too-narrow/guessed scope (wrong test filename, an unavoidable helper relocation, a
   doc-comment touch) blocks a correct fix. Enforce-in-tooling: derive/loosen scope, or surface an amend path.
-- **`accept-outcome` sidecar + triage discard the verify command output.** `outcome:error` with no captured
-  stderr leaves triage blind to the root cause. Persist the failing command + output in the sidecar.
+- **`accept-outcome` sidecar + triage discard the verify command output. ✓ DONE (2026-06-19).**
+  `acceptNodeWorktree` now carries a `diagnostic` (the failing verify command + its stdout/stderr, or the git
+  commit / cherry-pick error) on every failure outcome; `recordNodeAcceptOutcome` persists it into the
+  `accept-outcome-*.json` sidecar (optional field, schema-compatible) and the merge-state gate echoes it into
+  the triage `failure_reason` so `outcome:error` is no longer blind to the root cause (`dispatch.ts`).
 - **`--input` after intake is a hard conflict.** The `/remediate-code` loader tells the host to pass the same
   flags each `next-step`, but a post-intake `--input` triggers input_conflict + a resume/restart ack dance.
   Loader guidance should drop `--input` once a run exists (or the backend should treat an unchanged `--input`
   as resume).
-- **`accept-node` requires `--run-id` but the rolling dispatch prompt shows only `--id`.** Doc drift — fix the
-  prompt or default `--run-id` from the in-progress run.
+- **`accept-node` requires `--run-id` but the rolling dispatch prompt shows only `--id`. ✓ DONE (2026-06-19).**
+  The `dispatch_implement_rolling` prompt now renders `accept-node --id <BLOCK_ID> --run-id ${runId}`
+  (matching how it already renders `merge-implement-results --run-id`), so the host copies a runnable
+  command instead of hitting a missing-required-option error (`nextStep.ts`).
 
 ### Other
 

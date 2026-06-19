@@ -285,6 +285,7 @@ describe("mergeImplementResults — merge-state gate (verify/merge must actually
     outcome: "success" | "error" | "rate_limited" | "timeout";
     verifyPassed: boolean;
     merged: boolean;
+    diagnostic?: string;
   }): Promise<void> {
     await mkdir(join(ARTIFACTS_DIR, "runs", "PLAN-1", "implement"), { recursive: true });
     await recordNodeAcceptOutcome(ARTIFACTS_DIR, "PLAN-1", "CP-BLOCK-N-x", outcome);
@@ -300,6 +301,24 @@ describe("mergeImplementResults — merge-state gate (verify/merge must actually
     ]);
     expect(merged.items!["N-x"].status).toBe("blocked");
     expect(merged.items!["N-x"].failure_reason).toMatch(/did not land|not in.*main tree/i);
+  });
+
+  it("surfaces the captured failing command output in the triage failure_reason", async () => {
+    await saveState(makeNodeState());
+    // The accept-outcome sidecar carries the failing verify command + its output;
+    // the merge-state gate must echo it so triage sees the root cause, not a bare
+    // outcome:error.
+    await writeAcceptOutcome({
+      outcome: "error",
+      verifyPassed: false,
+      merged: false,
+      diagnostic: "$ vitest run src/foo.test.ts\nFAIL src/foo.test.ts > expected 3, got 4",
+    });
+    const merged = await mergeWith([
+      { finding_id: "N-x", status: "resolved", evidence: ["claimed resolved but verify failed"] },
+    ]);
+    expect(merged.items!["N-x"].failure_reason).toContain("Failing command output:");
+    expect(merged.items!["N-x"].failure_reason).toContain("FAIL src/foo.test.ts");
   });
 
   it("keeps a resolved node resolved when its accept-outcome shows it merged", async () => {

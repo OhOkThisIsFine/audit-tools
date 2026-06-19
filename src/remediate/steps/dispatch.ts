@@ -778,6 +778,13 @@ export interface AcceptNodeWorktreeResult {
   outcome: NodeWorkerOutcome;
   verifyPassed: boolean;
   merged: boolean;
+  /**
+   * On a failure outcome, the captured failing command + its output — the verify
+   * stdout/stderr (`$ <cmd>\n<output>`), or the git commit / cherry-pick error text.
+   * Persisted into the accept-outcome sidecar so triage can see the root cause
+   * instead of an `outcome:error` with no captured stderr. Absent on success.
+   */
+  diagnostic?: string;
 }
 
 /**
@@ -816,7 +823,7 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
   if (commit.error) {
     // Could not commit the worker's edits → cannot safely land; drop it.
     removeWorktree(root, wt);
-    return { outcome: "error", verifyPassed, merged };
+    return { outcome: "error", verifyPassed, merged, diagnostic: commit.error };
   }
   if (!commit.committed) {
     // Worker reported success but made no tracked edits — nothing to verify or merge.
@@ -832,15 +839,19 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
   verifyPassed = verify.passed;
   if (!verify.passed) {
     // Verify failed: do not merge; drop the worktree so the main tree stays clean.
+    // Carry the failing command + output so triage isn't blind on outcome:error.
     removeWorktree(root, wt);
-    return { outcome: "error", verifyPassed, merged };
+    return { outcome: "error", verifyPassed, merged, diagnostic: verify.output };
   }
 
   // mergeWorktree cherry-picks the verified branch and removes the worktree (on
   // success AND on conflict-abort), so no explicit cleanup is needed afterwards.
   const mergeRes = mergeWorktree(root, wt, branch);
   merged = mergeRes.success;
-  return { outcome: mergeRes.success ? "success" : "error", verifyPassed, merged };
+  if (!mergeRes.success) {
+    return { outcome: "error", verifyPassed, merged, diagnostic: mergeRes.error };
+  }
+  return { outcome: "success", verifyPassed, merged };
 }
 
 /**
@@ -877,6 +888,8 @@ export async function recordNodeAcceptOutcome(
     outcome: result.outcome,
     verify_passed: result.verifyPassed,
     merged: result.merged,
+    // Only present on a failure outcome; gives triage the failing command + output.
+    ...(result.diagnostic !== undefined ? { diagnostic: result.diagnostic } : {}),
   });
 }
 
@@ -890,9 +903,15 @@ export async function loadNodeAcceptOutcome(
     outcome: NodeWorkerOutcome;
     verify_passed: boolean;
     merged: boolean;
+    diagnostic?: string;
   }>(nodeAcceptOutcomePath(artifactsDir, runId, blockId));
   if (!raw) return null;
-  return { outcome: raw.outcome, verifyPassed: raw.verify_passed, merged: raw.merged };
+  return {
+    outcome: raw.outcome,
+    verifyPassed: raw.verify_passed,
+    merged: raw.merged,
+    ...(raw.diagnostic !== undefined ? { diagnostic: raw.diagnostic } : {}),
+  };
 }
 
 export interface DispatchOptions {
@@ -2647,7 +2666,10 @@ async function mergeImplementResultsIntoState(
             `Node ${blockId} reported finding ${findingId} resolved, but its tool-owned ` +
             `verify/merge did not land the edits (outcome=${acceptOutcome.outcome}, ` +
             `verify_passed=${acceptOutcome.verifyPassed}, merged=false); the fix is not in ` +
-            `the main tree. Routed to triage.`;
+            `the main tree. Routed to triage.` +
+            (acceptOutcome.diagnostic
+              ? `\nFailing command output:\n${acceptOutcome.diagnostic}`
+              : "");
         }
       }
     }
