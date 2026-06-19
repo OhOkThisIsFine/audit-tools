@@ -162,61 +162,53 @@ test("computeScopePreDigest does NOT propose override for clean included source 
 });
 
 // ---------------------------------------------------------------------------
-// 3. lens_proposals
+// 3. lens_propositions (note 1: canonical table, one disposition per lens)
 // ---------------------------------------------------------------------------
 
-test("computeScopePreDigest proposes excluding operability when no network-surface units", () => {
+const MANDATORY = ["security", "correctness", "reliability", "data_integrity"];
+
+test("computeScopePreDigest emits one proposition per canonical lens", () => {
   const bundle = makeBaseBundle({ unit_manifest: { units: [] } });
   const digest = computeScopePreDigest(bundle, "/repo");
 
-  const operabilityExclude = digest.lens_proposals.find(
-    (p) => p.lens === "operability" && p.action === "exclude",
-  );
-  assert.ok(operabilityExclude, "should propose excluding operability with no network-surface units");
+  // 11 canonical lenses, each appears exactly once.
+  const lenses = digest.lens_propositions.map((p) => p.lens);
+  assert.equal(new Set(lenses).size, lenses.length, "no duplicate lens rows");
+  for (const m of MANDATORY) {
+    assert.ok(lenses.includes(m), `${m} should appear in the table`);
+  }
+  for (const p of digest.lens_propositions) {
+    assert.ok(
+      ["mandatory", "recommend_include", "recommend_exclude"].includes(p.disposition),
+      `disposition must be one of the three, got ${p.disposition}`,
+    );
+    assert.ok(p.reason, "every proposition has a reason");
+  }
 });
 
-test("computeScopePreDigest proposes excluding tests when no test units", () => {
+test("computeScopePreDigest recommends excluding operability when no network-surface units", () => {
   const bundle = makeBaseBundle({ unit_manifest: { units: [] } });
   const digest = computeScopePreDigest(bundle, "/repo");
 
-  const testsExclude = digest.lens_proposals.find(
-    (p) => p.lens === "tests" && p.action === "exclude",
-  );
-  assert.ok(testsExclude, "should propose excluding tests with no test units");
+  const operability = digest.lens_propositions.find((p) => p.lens === "operability");
+  assert.equal(operability?.disposition, "recommend_exclude");
 });
 
-test("computeScopePreDigest never proposes excluding mandatory lenses", () => {
+test("computeScopePreDigest recommends excluding tests when no test units", () => {
   const bundle = makeBaseBundle({ unit_manifest: { units: [] } });
   const digest = computeScopePreDigest(bundle, "/repo");
 
-  const mandatoryExcludes = digest.lens_proposals.filter(
-    (p) =>
-      p.action === "exclude" &&
-      ["security", "correctness", "reliability", "data_integrity"].includes(p.lens),
-  );
-  assert.equal(
-    mandatoryExcludes.length,
-    0,
-    "mandatory lenses should never appear in exclude proposals",
-  );
+  const tests = digest.lens_propositions.find((p) => p.lens === "tests");
+  assert.equal(tests?.disposition, "recommend_exclude");
 });
 
-test("computeScopePreDigest notes mandatory lens vacuous pass (include action, not exclude)", () => {
-  // A mandatory lens with zero in-scope units: should be include (not exclude)
-  // For now, mandatory lenses don't appear in proposals unless the specific
-  // condition triggers — this tests that if they appear they are never exclude
+test("computeScopePreDigest marks mandatory lenses as mandatory, never recommend_exclude", () => {
   const bundle = makeBaseBundle({ unit_manifest: { units: [] } });
   const digest = computeScopePreDigest(bundle, "/repo");
 
-  const mandatoryIncludes = digest.lens_proposals.filter(
-    (p) =>
-      p.action === "include" &&
-      ["security", "correctness", "reliability", "data_integrity"].includes(p.lens),
-  );
-  // None of these should be exclude proposals
-  for (const p of mandatoryIncludes) {
-    assert.equal(p.action, "include");
-    assert.ok(p.reason, "include proposal for mandatory lens should have a reason");
+  for (const m of MANDATORY) {
+    const row = digest.lens_propositions.find((p) => p.lens === m);
+    assert.equal(row?.disposition, "mandatory", `${m} must be disposition=mandatory`);
   }
 });
 
