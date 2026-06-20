@@ -35,7 +35,15 @@ function initRepo(): { repo: string; ok: boolean } {
   if (git("init").status !== 0) return { repo, ok: false };
   git("config", "user.email", "t@t");
   git("config", "user.name", "t");
-  git("commit", "--allow-empty", "-m", "base");
+  // A minimal package.json with a trivial, cross-platform `check` script: the
+  // per-node verify is now DERIVED (always runs `npm run check`), so the fixture
+  // repo must resolve that script. `node --version` always exits 0 and needs no deps.
+  writeFileSync(
+    join(repo, "package.json"),
+    JSON.stringify({ name: "host-roll-fixture", private: true, scripts: { check: "node --version" } }, null, 2) + "\n",
+  );
+  git("add", "package.json");
+  git("commit", "-m", "base");
   return { repo, ok: true };
 }
 

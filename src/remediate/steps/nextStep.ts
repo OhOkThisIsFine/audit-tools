@@ -767,14 +767,10 @@ export async function driveRollingImplementDispatch(
       // host-subagent driver's `accept-node` callback. Records the LIFECYCLE
       // outcome but returns the worker's TRANSPORT result to the engine (so a
       // rate_limited worker re-queues; a verify-failure routes to triage via merge).
-      const targeted = uniqueStrings(
-        block.items.flatMap((id) => {
-          const finding = state.plan?.findings.find((f) => f.id === id);
-          return finding?.targeted_commands ?? [];
-        }),
-      );
-      // The accept-time write-scope gate adjudicates the node's ACTUAL git edits
-      // (ground truth) against all blocks' declared scopes — no worker self-report.
+      // Verify commands are DERIVED from the node's actually-touched tests inside
+      // acceptNodeWorktree (post-commit) — omit them here so a host-authored path
+      // can't mis-verify. The accept-time write-scope gate likewise adjudicates the
+      // node's ACTUAL git edits (ground truth) against all blocks' declared scopes.
       const accept = acceptNodeWorktree({
         root,
         runId,
@@ -782,7 +778,6 @@ export async function driveRollingImplementDispatch(
         worktreeRoot: wt,
         branch,
         workerOutcome: result.outcome,
-        targetedCommands: targeted,
         scope: { allBlockScopes },
       });
       // Persist the tool-owned verify/merge outcome so finalization blocks a node

@@ -125,16 +125,6 @@ async function declaredPathsForBlockSafe(
   }
 }
 
-/** Targeted verify commands for a block (deduped), from its findings. */
-function computeTargeted(state: RemediationState | null, blockId: string): string[] {
-  const block = state?.plan?.blocks.find((b) => b.block_id === blockId);
-  if (!block) return [];
-  const cmds = block.items.flatMap((id) => {
-    const finding = state?.plan?.findings.find((f) => f.id === id);
-    return finding?.targeted_commands ?? [];
-  });
-  return [...new Set(cmds.filter((c) => typeof c === "string" && c.length > 0))];
-}
 
 /**
  * Accept-time write-scope inputs for `acceptNodeWorktree`: every block's declared
@@ -277,7 +267,8 @@ export async function advanceHostRolling(opts: {
         worktreeRoot: worktreePath(opts.root, opts.blockId, opts.runId),
         branch: worktreeBranchForBlock(opts.blockId, opts.runId),
         workerOutcome: await resultOutcome(node.result_path),
-        targetedCommands: computeTargeted(state, opts.blockId),
+        // targetedCommands omitted → acceptNodeWorktree derives verify from the
+        // node's actually-touched tests post-commit (correct paths/runner).
         scope: await computeAcceptScope(opts.artifactsDir, opts.runId),
       });
       // Persist the tool-owned verify/merge outcome so finalization (mergeImplementResults)
