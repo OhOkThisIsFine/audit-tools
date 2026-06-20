@@ -51,6 +51,11 @@ env:
 
 jobs:
   contract:
+    # Skip the release-bump commit (`release: vX.Y.Z`, pushed by
+    # release-and-publish.mjs): its full verify:release runs on Linux in
+    # publish-package.yml before the upload, so re-running it here is a pure
+    # duplicate. Every other push/PR still runs the contract gate.
+    if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'release: v') }}"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -74,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           trap 'echo "::error::npm ci failed. Inspect the uploaded ci-npm-logs artifact and rerun npm ci locally to reproduce."' ERR
-          npm ci
+          npm ci --prefer-offline --no-audit --no-fund
       - name: Verify release contract
         timeout-minutes: 25
         shell: bash
