@@ -4,6 +4,7 @@ import type { FreshSessionProvider, ProviderRateLimits } from "./types.js";
 import {
   resolveFreshSessionProviderName,
   hasConfiguredOpenAiCompatible,
+  hasConfiguredOpenCode,
 } from "./providerFactory.js";
 
 // ---------------------------------------------------------------------------
@@ -122,6 +123,15 @@ export function discoverProviders(
     const available = commandExists(command);
 
     if (!available) continue;
+
+    // PB-1: a bare-PATH opencode (no opencode.* config) is OPT-IN, not an
+    // eligible auto-dispatch target. Surfacing it here would let it join the
+    // confirmed pool and be launched unprompted. Only surface opencode when the
+    // operator has explicitly configured it (opencode.command / opencode.extra_args);
+    // all other PATH-detected providers are surfaced as before.
+    if (probe.providerName === "opencode" && !hasConfiguredOpenCode(sessionConfig)) {
+      continue;
+    }
 
     // Self-spawn guard: mirror providerFactory — don't surface claude-code when
     // already inside a claude-code session, codex when inside codex, etc.

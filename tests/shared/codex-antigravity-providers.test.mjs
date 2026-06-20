@@ -415,7 +415,10 @@ test("chooseAutoProvider: tie-break resolves claude-code when only claude is ava
   assert.equal(resolved, "claude-code");
 });
 
-test("chooseAutoProvider: tie-break resolves opencode when only opencode is available", () => {
+test("PB-1: bare-PATH opencode (no config, no claude) is NOT tie-broken to; falls through to local-subprocess", () => {
+  // A detected-on-PATH opencode is OPT-IN. There is no bare-availability opencode
+  // tie-break rung, so with no opencode config and no claude, resolution falls
+  // through to local-subprocess rather than launching opencode unprompted.
   const resolved = resolveFreshSessionProviderName(
     "auto",
     {},
@@ -424,7 +427,7 @@ test("chooseAutoProvider: tie-break resolves opencode when only opencode is avai
       commandExists: (cmd) => cmd === "opencode",
     },
   );
-  assert.equal(resolved, "opencode");
+  assert.equal(resolved, "local-subprocess");
 });
 
 test("chooseAutoProvider: last-resort resolves codex when only codex is available", () => {

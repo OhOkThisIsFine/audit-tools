@@ -80,6 +80,19 @@ test("discoverProviders surfaces openai-compatible when configured (config-gated
   );
 });
 
+test("PB-1: discoverProviders does NOT surface a bare-PATH opencode without explicit config", () => {
+  // A detected-on-PATH opencode is OPT-IN: without opencode.* config it must not
+  // be surfaced as an eligible dispatch target (it could otherwise be launched
+  // unprompted). This holds regardless of whether opencode is actually installed
+  // in the test environment — the gate `continue`s before pushing the entry.
+  const result = discoverProviders({}, {});
+  assert.equal(
+    result.some((p) => p.name === "opencode"),
+    false,
+    "bare-PATH opencode must NOT appear without opencode.* config",
+  );
+});
+
 // ---------------------------------------------------------------------------
 // applyProviderConfirmationSelections
 // ---------------------------------------------------------------------------

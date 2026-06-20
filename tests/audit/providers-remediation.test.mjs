@@ -377,7 +377,9 @@ test("ClaudeCodeProvider.launch emits pre-launch and post-launch diagnostics to 
 
 test("OpenCodeProvider.launch emits pre-launch and post-launch diagnostics to stderr", async () => {
   await withTempDir("audit-code-opencode-provider-stderr-", async (root) => {
-    const input = buildLaunchInput(root);
+    // opencode only runs conversationally (uiMode "visible"); headless is gated
+    // (PB-1), so exercise the launch-diagnostics path under visible mode.
+    const input = buildLaunchInput(root, { uiMode: "visible" });
     await writeFile(input.promptPath, "Audit this repo", "utf8");
     await writeFile(
       input.taskPath,

@@ -136,10 +136,28 @@ test("provider auto selects Claude Code when Claude is available and OpenCode is
   assert.equal(provider, "claude-code");
 });
 
-test("provider auto selects OpenCode when OpenCode is available and Claude is not", () => {
+test("PB-1: bare-PATH OpenCode (no config, no Claude) is NOT auto-selected; falls through to local-subprocess", () => {
+  // A detected-on-PATH opencode is OPT-IN — it must never be auto-selected for a
+  // real run on bare availability. With neither claude nor configured-opencode,
+  // resolution falls through to local-subprocess rather than launching opencode
+  // unprompted.
   const provider = resolveFreshSessionProviderName(
     undefined,
     { provider: "auto" },
+    {
+      commandExists: (command) => command === "opencode",
+      env: {},
+    },
+  );
+
+  assert.equal(provider, "local-subprocess");
+});
+
+test("PB-1: configured OpenCode is still auto-selected when on PATH (opt-in preserved)", () => {
+  // The config-gated rung remains: explicitly-configured opencode is honored.
+  const provider = resolveFreshSessionProviderName(
+    undefined,
+    { provider: "auto", opencode: { command: "opencode" } },
     {
       commandExists: (command) => command === "opencode",
       env: {},
