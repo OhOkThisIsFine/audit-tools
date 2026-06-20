@@ -46,6 +46,9 @@
 
 ## Immediate next
 
+**Quick-wins (S) remediation: ✓ DONE on branch `remediation/remaining-specs-quick-wins-s` (off `main`, 2026-06-19) — pending merge + ship.**
+F-2/F-3/F-5/F-6/F-7/PB-1 implemented; each its own green commit; combined build+check+touched-suites green. Commit map + scope decisions: memory `remaining-specs-quickwins-remediation`. NOTE the tool bug found doing it (memory `ambiguity-step-deemed-inappropriate-drops-finding`, backlog Known-friction): the ambiguity step's `deemed_inappropriate` silently DECLINED 5/7 approved findings — they were recovered by hand-implementing on the branch. **Next:** merge to `main` + `env -u CLAUDECODE npm run release:patch:publish` + reinstall bins.
+
 **2026-06-19 dogfood work: ✓ SHIPPED — current live = `audit-tools@0.28.5`.**
 - `0.28.3` — `resume-list-dogfood-fixes` merged: 8 code-bug fixes + notes 1–3 (lens proposition table
   `0092405b`/`e88d1afa`; standardized per-finding block `0092405b`; up-front ambiguity gate `264b36da`

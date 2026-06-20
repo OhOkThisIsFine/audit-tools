@@ -333,6 +333,19 @@ narrowing (`a9cf29d0`).
   gate (pre-bump, so no partial publish). Fixed by repointing at a worker-5 schema. Whenever you delete a
   *shipped* file, grep the smoke/verify scripts for a required-paths list. (remediate's smoke does not list
   schema paths, so it was unaffected.)
+- **BUG: ambiguity-step `deemed_inappropriate` silently DECLINES the finding (2026-06-19).** At the
+  `collect_clarifications` step, the prompt says `"action": "deemed_inappropriate"` = "not a real *issue*",
+  read naturally as "this candidate *ambiguity* isn't genuine — proceed with the finding." But the engine
+  maps that disposition onto the FINDING: marking an ambiguity `deemed_inappropriate` drops the underlying
+  finding from implementation (it lands in "Deemed Inappropriate" in the report, never coded). During the
+  remaining-specs quick-wins run this silently dropped 5 of 7 approved findings (F-2/F-3/F-5/PB-1 + docs) —
+  only the two marked `clarified` were implemented; recovered by hand-implementing the 5 on the branch.
+  Enforce-in-tooling fix: an ambiguity marked not-genuinely-ambiguous must CLEAR the ambiguity and PROCEED
+  with the finding (the correct host action today is `"action": "clarified"`), never decline it — or rename/
+  re-scope the dispositions so "no ambiguity here" can't be confused with "drop this finding." A host that
+  approved a finding at the review gate must not be able to lose it at the ambiguity gate by a natural-reading
+  word choice.
+
 ### Contract-pipeline friction surfaced during the 2026-06-15 self-remediation (systematic fixes wanted)
 
 Hit while driving the full `remediate-code` contract pipeline over the 227-finding
