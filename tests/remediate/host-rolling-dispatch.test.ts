@@ -175,6 +175,47 @@ describe("acceptNodeWorktree", () => {
     expect(headHas(repo, "src/a.ts")).toBe(false);
   });
 
+  it("runs the node's additionalVerifyCommands ALONGSIDE the derived verify (task_7d35176d): a failing targeted command gates even when no test files were touched", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    // A non-test edit → the derived verify is just `npm run check` (passes here);
+    // the node's own targeted command must still run + gate the merge.
+    const wt = makeWorktreeWithEdit(repo, "ADD1", "a.ts");
+    const res = acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "ADD1",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("ADD1", RID),
+      workerOutcome: "success",
+      // No targetedCommands override → derive runs; the additional command runs too.
+      additionalVerifyCommands: ["node -e process.exit(1)"],
+    });
+    expect(res.outcome).toBe("error");
+    expect(res.verifyPassed).toBe(false);
+    expect(res.merged).toBe(false);
+    expect(headHas(repo, "src/a.ts")).toBe(false);
+  });
+
+  it("merges when BOTH the derived verify and the node's additionalVerifyCommands pass", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktreeWithEdit(repo, "ADD2", "a.ts");
+    const res = acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "ADD2",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("ADD2", RID),
+      workerOutcome: "success",
+      additionalVerifyCommands: ["node --version"],
+    });
+    expect(res.outcome).toBe("success");
+    expect(res.verifyPassed).toBe(true);
+    expect(res.merged).toBe(true);
+    expect(headHas(repo, "src/a.ts")).toBe(true);
+  });
+
   it("rejects a node whose verify fails: not merged, worktree dropped, main tree clean", () => {
     const { repo, ok } = initRepo();
     if (!ok) return;

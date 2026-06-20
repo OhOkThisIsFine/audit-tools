@@ -24,6 +24,7 @@ import {
   executeNodeInWorktree,
   blockScopesFromPlan,
   declaredPathsFromPlan,
+  targetedCommandsForBlock,
   type WorktreeNodeWorker,
 } from "./dispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
@@ -802,6 +803,7 @@ export async function driveRollingImplementDispatch(
       resultPath,
       seedPaths: block.touched_files ?? [],
       allBlockScopes,
+      additionalVerifyCommands: targetedCommandsForBlock(state, block.block_id),
       dispatchNode,
     });
     nodeOutcomes.push({
@@ -946,6 +948,7 @@ export async function executeInProcessPartition(params: {
         resultPath,
         seedPaths: declaredPathsFromPlan(plan, a.nodeId),
         allBlockScopes,
+        additionalVerifyCommands: state ? targetedCommandsForBlock(state, a.nodeId) : [],
         dispatchNode,
       });
       // Run-once → terminal; free the coordinator claim (token-checked).

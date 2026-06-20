@@ -15,6 +15,7 @@ import {
   worktreePath,
   worktreeBranchForBlock,
   acceptNodeWorktree,
+  targetedCommandsForBlock,
   recordNodeAcceptOutcome,
   readDispatchPlan,
   blockScopesFromPlan,
@@ -360,9 +361,9 @@ export async function advanceHostRolling(opts: {
     const registry = nodeClaimRegistry(opts.artifactsDir, opts.runId);
 
     if (!session.accepted.includes(opts.blockId)) {
-      // loadState is read for parity with the in-process driver (verify auto-passes
-      // when state is absent); the accept lifecycle does not consume it directly.
-      await new StateStore(opts.artifactsDir).loadState();
+      // State supplies the node's own targeted_commands for the verify (task_7d35176d);
+      // verify auto-passes when state is absent (parity with the in-process driver).
+      const state = await new StateStore(opts.artifactsDir).loadState();
       const accept = acceptNodeWorktree({
         root: opts.root,
         runId: opts.runId,
@@ -370,8 +371,10 @@ export async function advanceHostRolling(opts: {
         worktreeRoot: worktreePath(opts.root, opts.blockId, opts.runId),
         branch: worktreeBranchForBlock(opts.blockId, opts.runId),
         workerOutcome: await resultOutcome(node.result_path),
-        // targetedCommands omitted → acceptNodeWorktree derives verify from the
-        // node's actually-touched tests post-commit (correct paths/runner).
+        // targetedCommands omitted → acceptNodeWorktree DERIVES verify from the node's
+        // actually-touched tests post-commit (correct paths/runner) AND runs the node's
+        // own build-free targeted_commands in addition (task_7d35176d).
+        additionalVerifyCommands: state ? targetedCommandsForBlock(state, opts.blockId) : [],
         scope: await computeAcceptScope(opts.artifactsDir, opts.runId),
       });
       // Persist the tool-owned verify/merge outcome so finalization (mergeImplementResults)
