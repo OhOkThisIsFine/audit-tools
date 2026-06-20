@@ -85,9 +85,15 @@ const LIFECYCLE_WRITTEN_FILES = new Set([
  *   - scope_summary.json: written by runIntakeExecutor when artifactsDir is
  *     provided; hosts read it directly. The in-process channel is the typed
  *     scope_summary field on ExecutorRunResult. Never in ARTIFACT_DEFINITIONS.
+ *   - provider-confirmation.json: the shared session-level provider confirmation
+ *     (DC-2) written by runProviderConfirmationAutoComplete to <root>/.audit-tools/
+ *     provider-confirmation.json so a later remediate run can honor it. It is a
+ *     cross-tool side channel, not an audit-pipeline artifact, so it is
+ *     intentionally outside ARTIFACT_DEFINITIONS and the staleness DAG.
  */
 const SIDE_CHANNEL_FILES = new Set([
   "scope_summary.json",
+  "provider-confirmation.json",
 ]);
 
 // ── Source paths for all executor modules ────────────────────────────────────
