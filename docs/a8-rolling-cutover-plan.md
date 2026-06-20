@@ -142,3 +142,38 @@ One-shot-CLI orchestrator + host-as-executor ⇒ rolling via a **per-completion 
 - **Surface `openai-compatible` as a confirmed pool** — DONE for the in-process driver (config-gated discovery
   + 2nd CapacityPool + per-slot provider resolution); the {host-subagent + NIM} hybrid + live cross-provider
   spill run remain (backlog quota *a-residual*).
+
+## Step 7 — hybrid topology wiring (FINDING-020 capstone, task_847a8c7d) — IN PROGRESS
+
+> Ethan-confirmed scope (2026-06-20): **Full hybrid now.** ONE remediate cycle splits the eligible frontier
+> across [host-subagent pool + in-process backend (NIM) pool] via the `HybridSpillCoordinator`, host nodes →
+> subagents (step contract), NIM nodes → in-process workers (this cycle), both merged by the shared
+> `acceptNodeWorktree`. Live cross-provider run stays gated (`RUN_NIM_E2E=1`). Spec: `docs/remaining-specs.md` §A8.
+
+**Key fact:** `buildConfirmedPools` (src/remediate/steps/dispatch.ts) ALREADY returns `[hostPool, nimPool]` when
+`provider != openai-compatible` AND `openai_compatible` is configured. The gap: the host-subagent driver ignores
+the 2nd pool; the decision point (`nextStep.ts` ~L1485) selects ONE driver mutually-exclusively. The coordinator
+(`src/shared/dispatch/coordinator.ts`, `planAssignments`) is the single claimant + proactive splitter, zero
+production callers today.
+
+**Model (matches spec L78-81):** per next-step cycle — `coordinator.planAssignments(frontier)` does the full
+host-vs-inprocess split (each node claimed to exactly one pool); partition by pool providerName; run the in-process
+partition NOW (concurrent, bounded by the coordinator's split); hand the host partition to the host via the
+existing `dispatch_implement_rolling` step. Next cycle re-splits the remaining frontier by current capacity →
+continuous proactive distribution. Claims + ownerTokens flow from the coordinator to whichever driver executes.
+
+**Increments (green at every commit; cutover is one atomic replace):**
+1. `planHybridImplementDispatch` — prepare frontier → buildConfirmedPools → classify pools (in-process vs host)
+   → coordinator.planAssignments → partition `{inProcess, host}` (block_id + ownerToken + prompt/result + pool).
+   Additive + hermetic test. NOT wired.
+2. Extract the per-node in-process lifecycle (`dispatchNodeWithWorktree` body: worktree → provider.launch →
+   acceptNodeWorktree → recordNodeAcceptOutcome → release) into a reusable fn both the old reactive path and the
+   new hybrid executor call. Refactor, green.
+3. Host driver (`prepareHostRollingDispatch`/`advanceHostRolling`) consumes a coordinator partition (pre-claimed
+   host subset + tokens) instead of self-claiming the full frontier. Additive param, green.
+4. **Atomic cutover** — replace the mutually-exclusive if/if at `nextStep.ts` with the unified hybrid entry:
+   plan → run in-process partition → return host step for host partition (or merge+transition if host empty).
+   Delete the either/or selection + dead reactive-only assignment. One commit, green.
+5. Coordinator settled-set/`terminalStatus` pause wired to the in-process exhaustion path (DC-4 handshake);
+   audit symmetric wiring (`driveRollingAuditDispatch`); hybrid integration test (criterion 2, hermetic) +
+   safe-degrade test (criterion 4) + gated live NIM hybrid e2e (criterion 3); fold + delete this doc.
