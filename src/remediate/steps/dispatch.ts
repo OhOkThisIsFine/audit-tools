@@ -52,7 +52,7 @@ import {
   compareTier,
   mostCapableTier,
   normalizeRepoPath,
-  hasConfiguredOpenAiCompatible,
+  buildConfiguredApiPool,
   type FindingTheme,
 } from "audit-tools/shared";
 import {
@@ -388,32 +388,16 @@ export async function buildConfirmedPools(input: {
 
   // A configured openai-compatible endpoint (NIM/vLLM/…) is a real, always-available
   // API pool — surface it as a SECOND CapacityPool alongside the primary so the
-  // scheduler's proactive cross-pool spill (INV-QD-14, selectProvider) can route a
-  // node here when the primary pool is quota-degraded. Only when it isn't already
-  // the primary provider (no duplicate pool key). It's an independent API pool, so
-  // hostConcurrencyLimit is null (it doesn't draw on the host subagent budget) and
-  // it has no proactive quota source / capability handshake (discoveredLimits null;
-  // concurrency is governed by learned 429/RPM state).
-  if (
-    providerName !== "openai-compatible" &&
-    hasConfiguredOpenAiCompatible(sessionConfig.openai_compatible)
-  ) {
-    const apiModel = sessionConfig.openai_compatible?.model ?? null;
-    const apiPoolKey = buildProviderModelKey("openai-compatible", apiModel);
-    const apiProbe = await probeQuotaSource(quotaSource, apiPoolKey).catch(
-      (): QuotaProbeResult => ({ snapshot: null, status: "degraded" }),
-    );
-    primaryPools.push({
-      id: apiPoolKey,
-      providerName: "openai-compatible",
-      hostModel: apiModel,
-      hostConcurrencyLimit: null,
-      quotaStateEntry: quotaEntries[apiPoolKey] ?? null,
-      discoveredLimits: null,
-      quotaSourceSnapshot: apiProbe.snapshot,
-      ...(apiProbe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
-    });
-  }
+  // scheduler's proactive cross-pool spill (INV-QD-14) and the A-8 coordinator can
+  // route work here. Single-sourced in shared (`buildConfiguredApiPool`) so audit and
+  // remediate surface the IDENTICAL pool shape — the spill topology can't drift.
+  const apiPool = await buildConfiguredApiPool({
+    sessionConfig,
+    primaryProviderName: providerName,
+    quotaSource,
+    quotaEntries,
+  });
+  if (apiPool) primaryPools.push(apiPool);
 
   return primaryPools;
 }

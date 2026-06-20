@@ -610,6 +610,9 @@ export type {
   PartialCompletionTerminal,
 } from "./quota/capacity.js";
 export { DispatchCapacityPoolSummarySchema } from "./quota/capacity.js";
+// Configured openai-compatible (NIM) pool surfacing — the single-sourced 2nd-pool
+// shape both orchestrators spill into under A-8's hybrid topology.
+export { buildConfiguredApiPool } from "./quota/apiPool.js";
 export type { CacheablePromptParts } from "./prompts.js";
 export {
   buildCacheablePrompt,
