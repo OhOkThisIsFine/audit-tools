@@ -333,6 +333,20 @@ narrowing (`a9cf29d0`).
   gate (pre-bump, so no partial publish). Fixed by repointing at a worker-5 schema. Whenever you delete a
   *shipped* file, grep the smoke/verify scripts for a required-paths list. (remediate's smoke does not list
   schema paths, so it was unaffected.)
+- **BUG: stale `remediation-report.md` short-circuits a fresh confirmed run to `complete` (2026-06-20).**
+  `complete_redelivery` in `nextStep.ts` (`buildPreIntakeObligations`, ~L3439) emits `present_report:complete`
+  when `state==null` && no `--input` on the call && a prior-run `remediation-report.md` exists at the canonical
+  path && neither `conversation-start.md` nor `extracted-plan.json` exists. Its `freshIntent` check ignores the
+  **ready `intake-summary.json` + host-confirmed `intent_checkpoint.json`** — exactly the mid-flight signal a NEW
+  run carries right after `confirm_intent` (before any `state.json`/`extracted-plan.json` is written). So over a
+  repo where a *prior* completed run's promoted report still sits at `.audit-tools/remediation-report.md`, a bare
+  `next-step` after confirming intent re-delivered the OLD report instead of extracting — silently skipping the
+  whole contract pipeline. Hit during the whole-backlog remediation over `docs/remaining-specs.md` (the prior
+  quick-wins run's report was the stale one). Worked around by re-passing `--input` (sets
+  `inputResolution.supplied` → gate satisfied → `pending_intake` extraction runs). **Fix in tooling**
+  (enforce-in-tooling, not "host remembers the flag"): `complete_redelivery`'s `freshIntent` must also treat a
+  ready `intake-summary.json` + `confirmed_by:"host"` checkpoint with no `state.json` as an active run, not a
+  finished one to re-deliver.
 - **BUG: ambiguity-step `deemed_inappropriate` silently DECLINES the finding (2026-06-19).** At the
   `collect_clarifications` step, the prompt says `"action": "deemed_inappropriate"` = "not a real *issue*",
   read naturally as "this candidate *ambiguity* isn't genuine — proceed with the finding." But the engine
