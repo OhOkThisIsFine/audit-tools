@@ -27,9 +27,9 @@
   `FlowCoverageManifest`, `AnalyzerCapabilityRecord`) + prereq schemas + `OUTCOME_KEYS` derived. Behavior-
   identical (z.infer), so a republish is OPTIONAL — rolls into the next `release:patch` whenever one ships.
   Details: memory `a6-zod-single-source-done`.
-- **PUBLISH: ✓ `audit-tools@0.28.2` LIVE on npm** (`latest`, OIDC CI run `27801269989`, tokenless). Carries
-  the dogfood's 3 rolling-dispatch fixes + F5–F8 (below). Global bins reinstalled + postinstall run; both
-  `--version` → 0.28.2. (0.28.1 = prior win32 audit fix + NIM e2e.) Go-forward release path:
+- **PUBLISH: ✓ `audit-tools@0.28.9` LIVE on npm** (`latest`, OIDC CI run `27881912699`, tokenless) — the full A-8
+  hybrid (remediate + audit + DC-4 + generic dispatchable sources, live crit-3 NIM-validated). Global bins
+  reinstalled + postinstall run; both `--version` → 0.28.9. Go-forward release path:
   `env -u CLAUDECODE npm run release:patch:publish`.
 - **Old-name deprecations: ✓ DONE (Ethan, via npm website, 2026-06-19).** `auditor-lambda` /
   `remediator-lambda` / `@audit-tools/shared` are deprecated → redirect to `audit-tools`. No npm actions
@@ -58,8 +58,8 @@ Readable plan: [`docs/remaining-specs-remediation-plan.md`](remaining-specs-reme
   one merge-surfaced regression (DC-2's new `provider-confirmation.json` write → registered as a side-channel in
   the executor-writeset parity test, `a71050fb`). Each block was green in isolation; only the merge surfaced it.
 - **Deliberate integration seams (NOT bugs) — finish before a release:**
-  - **A-8 hybrid: ✓ DONE — remediate + audit + DC-4, shared infra (2026-06-20, branch `a8-hybrid-spill-wiring`,
-    ~13 commits `2ea578d`..`7e0a2e7`, fully green — awaiting Ethan's review before FF-merge + publish).**
+  - **A-8 hybrid: ✓ DONE — remediate + audit + DC-4, shared infra; MERGED to `main` + PUBLISHED
+    `audit-tools@0.28.9` (2026-06-20, release `b659116`, OIDC CI run `27881912699` green, branch deleted).**
     Ethan-confirmed scope = **Full hybrid now** (memory `a8-hybrid-full-scope`). BOTH orchestrators' next-step now
     split the eligible frontier host-vs-NIM via the ONE shared `planHybridDispatch` (the coordinator claims each
     node; classification injected): remediate runs the NIM partition in-process + hands the host partition to the
