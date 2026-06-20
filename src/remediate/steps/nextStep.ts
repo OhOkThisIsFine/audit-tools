@@ -33,7 +33,8 @@ import {
   blockScopesFromPlan,
 } from "./dispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
-import { prepareHostRollingDispatch } from "./rollingSession.js";
+import { prepareHostRollingDispatch, nodeClaimRegistry } from "./rollingSession.js";
+import type { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep } from "./types.js";
 import { dependencyVerifiedComplete } from "./stepUtils.js";
@@ -641,6 +642,23 @@ function resolvesToInProcessDispatchProvider(
 }
 
 /**
+ * Release a node's shared claim on a terminal accept (token-checked through the
+ * registry), then drop the held token. Idempotent: a node with no held token (a
+ * peer-owned skip, or a double-release) is a no-op. Single-sourced so both the
+ * success and the error paths of the in-process driver free the claim identically.
+ */
+async function releaseNodeClaim(
+  registry: ClaimRegistry,
+  claimTokens: Map<string, string>,
+  blockId: string,
+): Promise<void> {
+  const token = claimTokens.get(blockId);
+  if (!token) return;
+  await registry.release(blockId, token);
+  claimTokens.delete(blockId);
+}
+
+/**
  * Drive the implement phase through the in-process rolling engine. Engages the
  * shared `createRollingDispatcher` (via `driveRollingDispatch`) over
  * quota-derived `confirmedPools`, runs each node in an isolated worktree, gates
@@ -734,12 +752,38 @@ export async function driveRollingImplementDispatch(
 
   const nodeOutcomes: DriveRollingImplementDispatchResult["nodes"] = [];
 
+  // The SAME file-backed claim registry the host-subagent driver claims through
+  // (`nodeClaimRegistry`, keyed only to run + artifacts dir). Claiming a node here
+  // BEFORE creating its worktree makes the in-process and host-subagent drivers
+  // mutually exclusive on a node — exactly-one-claimant across both (A-10), the
+  // cross-driver double-dispatch guard. Owner tokens are held in-memory for the
+  // life of this run: a `rate_limited` re-queue re-enters for the same block, so a
+  // node already claimed by THIS driver reuses its token rather than self-colliding.
+  const registry = nodeClaimRegistry(artifactsDir, runId);
+  const claimTokens = new Map<string, string>();
+
   // Per-node worktree dispatch + verify-before-accept, wrapped so the rolling
   // engine's dispatchNode callback always RESOLVES (never rejects).
   const dispatchNodeWithWorktree: RollingNodeDispatcher = async (block, slot) => {
     const branch = worktreeBranchForBlock(block.block_id, runId);
     const wt = worktreePath(root, block.block_id, runId);
     const resultPath = resultPathByBlock.get(block.block_id)!;
+    // Claim BEFORE any worktree work (CE-001). A node THIS driver already holds (a
+    // rate_limited re-queue) reuses its token. A node a PEER driver holds is its to
+    // run — skip the worker + accept lifecycle entirely so we never double-dispatch
+    // or double-merge it; the run-level `mergeImplementResults` reconciles from the
+    // peer's accept outcome.
+    if (!claimTokens.has(block.block_id)) {
+      const claim = await registry.claim(block.block_id, "in-process");
+      if (!claim.acquired) {
+        nodeOutcomes.push({ block_id: block.block_id, outcome: "success", verify_passed: false, merged: false });
+        return {
+          packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
+          outcome: "success",
+        };
+      }
+      claimTokens.set(block.block_id, claim.ownerToken);
+    }
     try {
       // Idempotent reset of any worktree dir AND leftover branch from a prior
       // attempt before creating this node's isolated worktree. A `rate_limited`
@@ -790,6 +834,13 @@ export async function driveRollingImplementDispatch(
         verify_passed: accept.verifyPassed,
         merged: accept.merged,
       });
+      // Release the claim ONLY on a terminal accept. A `rate_limited` worker
+      // re-queues (still owned work — keep the claim so a peer can't grab it
+      // mid-retry); success / error / timeout is terminal → free it through the
+      // shared registry (token-checked) so the registry stays a true in-flight view.
+      if (result.outcome !== "rate_limited") {
+        await releaseNodeClaim(registry, claimTokens, block.block_id);
+      }
       return result;
     } catch (err) {
       removeWorktree(root, wt);
@@ -799,6 +850,7 @@ export async function driveRollingImplementDispatch(
         merged: false,
       });
       nodeOutcomes.push({ block_id: block.block_id, outcome: "error", verify_passed: false, merged: false });
+      await releaseNodeClaim(registry, claimTokens, block.block_id);
       return {
         packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
         outcome: "error",

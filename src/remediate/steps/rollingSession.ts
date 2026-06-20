@@ -1,5 +1,9 @@
 import { join } from "node:path";
 import { readOptionalJsonFile, writeJsonFile, withFileLock } from "audit-tools/shared";
+// Direct module path (not the barrel) per the A-8/A-10 seam: the registry is the
+// SAME mutual-exclusion primitive the in-process driver claims through, so a node
+// dispatched by one driver can never be re-dispatched by the other.
+import { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
 import { StateStore, type RemediationState } from "../state/store.js";
 import {
   prepareImplementDispatch,
@@ -61,6 +65,25 @@ export interface RollingSession {
   dispatched: string[];
   /** Block ids whose `acceptNodeWorktree` lifecycle has run. */
   accepted: string[];
+  /**
+   * Owner token minted by the shared `ClaimRegistry` for each dispatched node,
+   * keyed by block id. Persisted so a later `accept-node` invocation (a separate
+   * process) can RELEASE the claim it holds once the node's lifecycle finishes —
+   * token-checked, so a driver only ever releases a node it actually claimed.
+   * A node a peer driver already holds is never added here (it was not dispatched
+   * by this session).
+   */
+  claims: Record<string, string>;
+  /**
+   * Block ids a PEER driver (the in-process engine, or a second host loop) already
+   * holds a live claim on — observed while JIT-walking the frontier. They are NOT
+   * this session's to dispatch or accept; recorded so the walk does not re-probe
+   * them every completion AND so they are excluded from this session's completion
+   * target (the peer accepts them; `mergeImplementResults` is the run-level
+   * finalizer over every driver's accept outcomes). Absent/empty in the common
+   * single-driver case, so `total` stays `frontier.length`.
+   */
+  contested?: string[];
 }
 
 export type RollingDirective =
@@ -84,6 +107,28 @@ function sessionPath(artifactsDir: string, runId: string): string {
 function sessionLockPath(artifactsDir: string, runId: string): string {
   return join(implementDir(artifactsDir, runId), "rolling-session.lock");
 }
+/**
+ * The file-backed node-claim registry path for a run. Keyed ONLY to the run +
+ * artifacts dir — both the host-subagent driver here and the in-process provider
+ * driver (`driveRollingImplementDispatch`) derive the identical path, so a claim
+ * one driver takes is visible to the other (exactly-one-claimant across both, the
+ * cross-driver double-dispatch guard — A-10).
+ */
+export function nodeClaimRegistryPath(artifactsDir: string, runId: string): string {
+  return join(implementDir(artifactsDir, runId), "node-claims.json");
+}
+/** Build the run's shared claim registry. Single-sourced so both drivers agree. */
+export function nodeClaimRegistry(artifactsDir: string, runId: string): ClaimRegistry {
+  return new ClaimRegistry(nodeClaimRegistryPath(artifactsDir, runId));
+}
+/**
+ * The claim pool id for a host-subagent-driven node. The pool axis is diagnostic
+ * only in the registry (it is not part of claim identity), so the host-subagent
+ * driver records a single stable id; the in-process driver records its provider
+ * pool id. Either way the NODE id is the exclusion key, which is what makes the
+ * two drivers mutually exclusive on a node.
+ */
+const HOST_SUBAGENT_CLAIM_POOL = "host-subagent";
 
 /** Remove any stale worktree, then create a fresh isolated one with node_modules linked. */
 function createNodeWorktree(
@@ -198,17 +243,28 @@ export async function prepareHostRollingDispatch(
 
   // Pre-create worktrees only for the initial bounded batch (≤ slots); the rest
   // are JIT-created by `accept-node` as nodes complete — so ~slots worktrees
-  // exist at any time, never the whole frontier at once.
-  const initialNodes = frontier.slice(0, Math.min(slots, frontier.length));
-  // `plan` (above) is the single source of each block's declared scope (write ∪
-  // read) — used to seed untracked declared targets into each worktree.
-  for (const node of initialNodes) {
+  // exist at any time, never the whole frontier at once. Each node is CLAIMED
+  // through the shared registry BEFORE its worktree is created, so a node the
+  // in-process driver (or a second host loop) already holds is skipped here
+  // rather than double-dispatched (A-10 exactly-one-claimant). The slot freed by
+  // a skipped node is filled by walking further into the frontier.
+  const registry = nodeClaimRegistry(options.artifactsDir, runId);
+  const initialNodes: RollingFrontierNode[] = [];
+  const claims: Record<string, string> = {};
+  for (const node of frontier) {
+    if (initialNodes.length >= slots) break;
+    const claim = await registry.claim(node.block_id, HOST_SUBAGENT_CLAIM_POOL);
+    if (!claim.acquired) continue; // held by another driver — its node to run.
+    // `plan` (above) is the single source of each block's declared scope (write ∪
+    // read) — used to seed untracked declared targets into each worktree.
     createNodeWorktree(
       options.root,
       node.block_id,
       runId,
       declaredPathsFromPlan(plan, node.block_id),
     );
+    initialNodes.push(node);
+    claims[node.block_id] = claim.ownerToken;
   }
 
   const session: RollingSession = {
@@ -217,6 +273,7 @@ export async function prepareHostRollingDispatch(
     frontier,
     dispatched: initialNodes.map((n) => n.block_id),
     accepted: [],
+    claims,
   };
   await writeJsonFile(sessionPath(options.artifactsDir, runId), session);
 
@@ -258,8 +315,15 @@ export async function advanceHostRolling(opts: {
       );
     }
 
+    // Sessions persisted before claim-wiring lack `claims` — default to empty so
+    // the read-modify-write is forward-only (never throws on an older session).
+    session.claims ??= {};
+    const registry = nodeClaimRegistry(opts.artifactsDir, opts.runId);
+
     if (!session.accepted.includes(opts.blockId)) {
-      const state = await new StateStore(opts.artifactsDir).loadState();
+      // loadState is read for parity with the in-process driver (verify auto-passes
+      // when state is absent); the accept lifecycle does not consume it directly.
+      await new StateStore(opts.artifactsDir).loadState();
       const accept = acceptNodeWorktree({
         root: opts.root,
         runId: opts.runId,
@@ -275,10 +339,51 @@ export async function advanceHostRolling(opts: {
       // blocks a node that self-reported resolved but never actually landed (OBL-DS-06).
       await recordNodeAcceptOutcome(opts.artifactsDir, opts.runId, opts.blockId, accept);
       session.accepted.push(opts.blockId);
+      // Terminal accept outcome → release this node's claim through the SAME
+      // registry the in-process driver shares (token-checked, so only the claim we
+      // actually hold is dropped). The node is done; freeing its claim lets a stale
+      // re-discovery never re-offer it and keeps the registry a true in-flight view.
+      const ownerToken = session.claims[opts.blockId];
+      if (ownerToken) {
+        await registry.release(opts.blockId, ownerToken);
+        delete session.claims[opts.blockId];
+      }
     }
 
-    const next = session.frontier.find((n) => !session.dispatched.includes(n.block_id));
-    if (next) {
+    session.contested ??= [];
+
+    // JIT-dispatch the next eligible node. Walk the frontier and CLAIM each
+    // undispatched, non-contested node through the shared registry BEFORE creating
+    // its worktree; a node a peer driver already holds is recorded `contested` (it
+    // is theirs to run + accept) and the walk advances — so the two drivers never
+    // both pick the same node and the freed slot is not wasted on a contested id
+    // (A-10 exactly-one-claimant / coordinator parity).
+    let next: RollingFrontierNode | undefined;
+    let nextToken: string | undefined;
+    for (const candidate of session.frontier) {
+      if (
+        session.dispatched.includes(candidate.block_id) ||
+        session.contested.includes(candidate.block_id)
+      ) {
+        continue;
+      }
+      const claim = await registry.claim(candidate.block_id, HOST_SUBAGENT_CLAIM_POOL);
+      if (!claim.acquired) {
+        session.contested.push(candidate.block_id);
+        continue;
+      }
+      next = candidate;
+      nextToken = claim.ownerToken;
+      break;
+    }
+
+    // This session's completion target is the frontier minus the nodes a peer
+    // driver owns. Empty `contested` (the common single-driver case) → the full
+    // frontier, so the directive counts are unchanged.
+    const ownTotal = session.frontier.length - session.contested.length;
+    const inFlight = session.dispatched.length - session.accepted.length;
+
+    if (next && nextToken) {
       createNodeWorktree(
         opts.root,
         next.block_id,
@@ -286,6 +391,7 @@ export async function advanceHostRolling(opts: {
         await declaredPathsForBlockSafe(opts.artifactsDir, opts.runId, next.block_id),
       );
       session.dispatched.push(next.block_id);
+      session.claims[next.block_id] = nextToken;
       await writeJsonFile(sessionPath(opts.artifactsDir, opts.runId), session);
       return {
         kind: "dispatch",
@@ -293,19 +399,23 @@ export async function advanceHostRolling(opts: {
         worktree_root: worktreePath(opts.root, next.block_id, opts.runId),
         in_flight: session.dispatched.length - session.accepted.length,
         accepted: session.accepted.length,
-        total: session.frontier.length,
+        total: ownTotal,
       };
     }
 
     await writeJsonFile(sessionPath(opts.artifactsDir, opts.runId), session);
-    if (session.accepted.length >= session.frontier.length) {
-      return { kind: "done", accepted: session.accepted.length, total: session.frontier.length };
+    // Done when every node this session is responsible for has been accepted AND
+    // nothing is still in flight — a contested node held by a peer driver does not
+    // keep this session waiting forever (the peer accepts it; the run-level
+    // `mergeImplementResults` is the finalizer over both drivers' outcomes).
+    if (session.accepted.length >= ownTotal && inFlight <= 0) {
+      return { kind: "done", accepted: session.accepted.length, total: ownTotal };
     }
     return {
       kind: "wait",
-      in_flight: session.dispatched.length - session.accepted.length,
+      in_flight: inFlight,
       accepted: session.accepted.length,
-      total: session.frontier.length,
+      total: ownTotal,
     };
   });
 }
