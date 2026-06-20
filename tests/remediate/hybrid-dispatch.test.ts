@@ -19,7 +19,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaimRegistry } from "../../src/shared/quota/claimRegistry.js";
-import { planHybridDispatch } from "../../src/remediate/steps/hybridDispatch.js";
+import { planHybridDispatch } from "audit-tools/shared";
 import type { CapacityPool, FrontierNode, SessionConfig } from "audit-tools/shared";
 
 // Configured hosted concurrency so the shared fold yields a wave > 1 — which is
@@ -101,6 +101,10 @@ function fakeRegistry(): ClaimRegistry {
   return stub as unknown as ClaimRegistry;
 }
 
+// The in-process classification injected into the shared split (remediate's view:
+// the conversation host is `claude-code`; every backend pool runs in-process).
+const IN_PROCESS = (p: { providerName: string }): boolean => p.providerName !== "claude-code";
+
 describe("A-8 planHybridDispatch", () => {
   it("hybrid [host + nim], both healthy: both partitions receive nodes (proactive split, crit. 2)", async () => {
     const store = settledStore();
@@ -111,6 +115,7 @@ describe("A-8 planHybridDispatch", () => {
       claimRegistry: fakeRegistry(),
       readSettled: store.readSettled,
       onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
     });
 
     // Both pools carry load concurrently when both have headroom.
@@ -133,10 +138,11 @@ describe("A-8 planHybridDispatch", () => {
         claimRegistry: registry,
         readSettled: store.readSettled,
         onSettle: store.onSettle,
+        isInProcess: IN_PROCESS,
       });
 
-      const hostIds = part.host.map((a) => a.block_id);
-      const inProcIds = part.inProcess.map((a) => a.block_id);
+      const hostIds = part.host.map((a) => a.nodeId);
+      const inProcIds = part.inProcess.map((a) => a.nodeId);
       // No node appears in both partitions.
       expect(hostIds.filter((id) => inProcIds.includes(id))).toEqual([]);
       // Every claimed node carries a real ownerToken (the release credential).
@@ -163,6 +169,7 @@ describe("A-8 planHybridDispatch", () => {
       claimRegistry: fakeRegistry(),
       readSettled: store.readSettled,
       onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
     });
     expect(part.inProcess.length).toBeGreaterThanOrEqual(1);
     expect(part.host).toEqual([]);
@@ -177,6 +184,7 @@ describe("A-8 planHybridDispatch", () => {
       claimRegistry: fakeRegistry(),
       readSettled: store.readSettled,
       onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
     });
     expect(part.host.length).toBeGreaterThan(0);
     expect(part.inProcess).toEqual([]);
@@ -191,6 +199,7 @@ describe("A-8 planHybridDispatch", () => {
       claimRegistry: fakeRegistry(),
       readSettled: store.readSettled,
       onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
     });
     expect(part.inProcess.length).toBeGreaterThan(0);
     expect(part.host).toEqual([]);
@@ -206,6 +215,7 @@ describe("A-8 planHybridDispatch", () => {
       claimRegistry: fakeRegistry(),
       readSettled: store.readSettled,
       onSettle: store.onSettle,
+      isInProcess: IN_PROCESS,
     });
     // The settled backend pool receives nothing; all work routes to the host pool.
     expect(part.inProcess).toEqual([]);

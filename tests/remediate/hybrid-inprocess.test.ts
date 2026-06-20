@@ -28,7 +28,7 @@ import {
   type SessionConfig,
 } from "audit-tools/shared";
 import { executeInProcessPartition } from "../../src/remediate/steps/nextStep.js";
-import { planHybridDispatch } from "../../src/remediate/steps/hybridDispatch.js";
+import { planHybridDispatch } from "audit-tools/shared";
 import { prepareHostRollingDispatch } from "../../src/remediate/steps/rollingSession.js";
 import type { WorktreeNodeWorker } from "../../src/remediate/steps/dispatch.js";
 import type { RemediationDispatchPlan } from "../../src/remediate/steps/types.js";
@@ -138,6 +138,7 @@ describe("A-8 executeInProcessPartition", () => {
       claimRegistry: registry,
       readSettled: () => settled,
       onSettle: (p) => settled.add(p),
+      isInProcess: (pool) => pool.providerName === "openai-compatible",
     });
     expect(partition.inProcess.length).toBe(2);
     expect(partition.host).toEqual([]);
@@ -180,6 +181,7 @@ describe("A-8 executeInProcessPartition", () => {
       claimRegistry: registry,
       readSettled: () => settled,
       onSettle: (p) => settled.add(p),
+      isInProcess: (pool) => pool.providerName === "openai-compatible",
     });
 
     const errorWorker: WorktreeNodeWorker = async ({ block }) => ({
