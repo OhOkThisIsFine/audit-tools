@@ -24,6 +24,19 @@ export interface AuditResultIssue extends ValidationIssue {
 
 export interface ValidateAuditResultOptions {
   lineIndex?: Record<string, number>;
+  /**
+   * Packet/unit boundary file list: the union of the file_paths of every sibling
+   * task dispatched in the same packet. When provided and non-empty, the two
+   * hard-reject evidence gates (`file_coverage` paths and
+   * `verification.followup_tasks.file_paths`) are widened from the single task's
+   * assigned files to this boundary — a result may declare coverage of, or queue
+   * a followup over, any file a sibling task in the packet was assigned, without
+   * a hard reject. `affected_files` stays warn-and-retain regardless (INV-09).
+   *
+   * Fail-closed: an empty/undefined boundary falls back to the per-task assigned
+   * set, so the gates never widen by accident.
+   */
+  boundaryPaths?: string[];
 }
 
 const REQUIRED_FINDING_FIELDS: Array<keyof Finding> = [
@@ -469,6 +482,7 @@ function validateVerification(
   result: Record<string, unknown>,
   task: AuditTask | undefined,
   coverage: NormalizedFileCoverage[],
+  normBoundary: Set<string>,
   taskId: string,
   resultIndex: number,
   issues: AuditResultIssue[],
@@ -548,7 +562,14 @@ function validateVerification(
     return;
   }
 
-  const allowedPaths = new Set(coverage.map((entry) => entry.path));
+  // Followup tasks may target any file within the packet/unit boundary, not just
+  // the assigned files surfaced in this result's coverage. Widen the allowed set
+  // with the boundary (fail-closed: an empty boundary adds nothing, leaving the
+  // gate at the per-result coverage paths).
+  const allowedPaths = new Set([
+    ...coverage.map((entry) => entry.path),
+    ...normBoundary,
+  ]);
   for (let index = 0; index < value.followup_tasks.length; index++) {
     validateVerificationFollowupTask(
       value.followup_tasks[index],
@@ -591,6 +612,12 @@ interface ResultValidationContext {
   taskNormMap: Map<string, string>;
   normLineIndex: Map<string, number>;
   allTasks: AuditTask[];
+  /**
+   * Normalized packet/unit boundary paths (union of sibling task file_paths).
+   * Empty when no boundary was supplied → gates fail closed to the per-task
+   * assigned set.
+   */
+  normBoundary: Set<string>;
 }
 
 function validateResultIdentityFields(ctx: ResultValidationContext, issues: AuditResultIssue[]): void {
@@ -636,7 +663,7 @@ function validateFileCoverageEntry(
   normalizedFileCoverage: NormalizedFileCoverage[],
   issues: AuditResultIssue[],
 ): void {
-  const { task, taskId, resultIndex, taskNormMap, normLineIndex } = ctx;
+  const { task, taskId, resultIndex, taskNormMap, normLineIndex, normBoundary } = ctx;
   if (!isRecord(entry)) {
     pushIssue(issues, {
       result_index: resultIndex,
@@ -649,10 +676,18 @@ function validateFileCoverageEntry(
 
   const entryNorm = isNonEmptyString(entry.path) ? normalizeCoveragePath(entry.path as string) : "";
   const canonicalPath = taskNormMap.get(entryNorm);
+  // Widen the hard-reject gate from the per-task assigned set to the packet/unit
+  // boundary (union of sibling task file_paths). A coverage path the assigned
+  // task didn't list, but a sibling in the packet did, is accepted rather than
+  // hard-rejected. Fail-closed: an empty boundary leaves only assigned paths in
+  // scope. `inBoundary` is the normalized boundary path used downstream so the
+  // span-coverage check can reference in-boundary coverage entries.
+  const inBoundary = entryNorm.length > 0 && normBoundary.has(entryNorm);
+  const acceptedPath = canonicalPath ?? (inBoundary ? entryNorm : undefined);
 
   if (!isNonEmptyString(entry.path)) {
     pushIssue(issues, { result_index: resultIndex, task_id: taskId, field: `file_coverage[${j}].path`, message: "file_coverage entry has an empty path." });
-  } else if (task && !canonicalPath) {
+  } else if (task && !acceptedPath) {
     pushIssue(issues, {
       result_index: resultIndex,
       task_id: taskId,
@@ -665,8 +700,8 @@ function validateFileCoverageEntry(
     seenCoveragePaths.add(entryNorm);
   }
 
-  if (entryNorm.length > 0 && (!task || canonicalPath)) {
-    declaredAssignedCoveragePaths.add(canonicalPath ?? entryNorm);
+  if (entryNorm.length > 0 && (!task || acceptedPath)) {
+    declaredAssignedCoveragePaths.add(acceptedPath ?? entryNorm);
   }
 
   if (!Number.isInteger(entry.total_lines)) {
@@ -692,8 +727,8 @@ function validateFileCoverageEntry(
     });
   }
 
-  if (entryNorm.length > 0 && Number.isInteger(entry.total_lines) && Number(entry.total_lines) >= 0 && (!task || canonicalPath)) {
-    normalizedFileCoverage.push({ path: canonicalPath ?? entryNorm, total_lines: Number(entry.total_lines) });
+  if (entryNorm.length > 0 && Number.isInteger(entry.total_lines) && Number(entry.total_lines) >= 0 && (!task || acceptedPath)) {
+    normalizedFileCoverage.push({ path: acceptedPath ?? entryNorm, total_lines: Number(entry.total_lines) });
   }
 }
 
@@ -812,6 +847,7 @@ function validateSingleAuditResult(
   taskMap: Map<string, AuditTask>,
   allTasks: AuditTask[],
   normLineIndex: Map<string, number>,
+  normBoundary: Set<string>,
   issues: AuditResultIssue[],
 ): void {
   if (!isRecord(result)) {
@@ -834,7 +870,7 @@ function validateSingleAuditResult(
     }
   }
 
-  const ctx: ResultValidationContext = { result, task, taskId, resultIndex, taskNormMap, normLineIndex, allTasks };
+  const ctx: ResultValidationContext = { result, task, taskId, resultIndex, taskNormMap, normLineIndex, allTasks, normBoundary };
 
   validateResultIdentityFields(ctx, issues);
 
@@ -843,7 +879,7 @@ function validateSingleAuditResult(
   const findingsOk = validateResultFindings(ctx, normalizedFileCoverage, declaredAssignedCoveragePaths, issues);
   if (!findingsOk) return;
 
-  validateVerification(result.verification, result, task, normalizedFileCoverage, taskId, resultIndex, issues);
+  validateVerification(result.verification, result, task, normalizedFileCoverage, normBoundary, taskId, resultIndex, issues);
 }
 
 export function validateAuditResults(
@@ -871,8 +907,17 @@ export function validateAuditResults(
     }
   }
 
+  // Packet/unit boundary (union of sibling task file_paths) for widening the
+  // two hard-reject evidence gates. Fail-closed: undefined/empty → no widening.
+  const normBoundary = new Set<string>();
+  for (const path of options.boundaryPaths ?? []) {
+    if (isNonEmptyString(path)) {
+      normBoundary.add(normalizeCoveragePath(path));
+    }
+  }
+
   for (let i = 0; i < results.length; i++) {
-    validateSingleAuditResult(results[i], i, taskMap, tasks, normLineIndex, issues);
+    validateSingleAuditResult(results[i], i, taskMap, tasks, normLineIndex, normBoundary, issues);
   }
 
   if (issues.length > 0) {
