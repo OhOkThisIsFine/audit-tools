@@ -23,6 +23,16 @@ export type IntentClauseKind = "lens_weight" | "priority_signal" | "scope_emphas
 
 /** Result of decomposing and assessing a single clause. */
 export interface IntentClause {
+  /**
+   * Stable identity of this clause — the resolution key for the blocking
+   * escalation gate (CE-004). The rendered `checkpoint_question` is a derived
+   * presentation string and is NOT injective: two distinct clauses can render to
+   * the same question (e.g. duplicated directive text), so keying resolution on
+   * it collapses them and answering one silently resolves both. The clause
+   * identity is keyed on the normalized clause text instead, so every distinct
+   * directive must be answered individually.
+   */
+  clause_id: string;
   /** The original clause text (trimmed). */
   text: string;
   /** Whether this clause maps to at least one recognised signal. */
@@ -146,6 +156,23 @@ function matchesPriority(clause: string): boolean {
   return PRIORITY_PATTERNS.some((p) => p.test(clause));
 }
 
+/**
+ * Stable identity for a clause — the resolution key for the blocking escalation
+ * gate (CE-004). Derived deterministically from the clause's own text
+ * (case-folded, whitespace-collapsed, trailing punctuation trimmed) so the same
+ * directive always yields the same id across passes/runs, while two textually
+ * different directives that happen to render to the same `checkpoint_question`
+ * get distinct ids and must each be answered. Pure — no IO, no hashing.
+ */
+export function clauseIdentity(text: string): string {
+  const normalized = text
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[.;,!?]+$/g, "")
+    .trim();
+  return `clause|${normalized}`;
+}
+
 /** Generate a checkpoint question for an unencodable clause. */
 function generateCheckpointQuestion(clause: string): string {
   return (
@@ -207,14 +234,17 @@ export function assessClauseEncodability(clause: string): {
 /** Internal variant that returns a full IntentClause object. */
 function assessClauseEncodabilityAsClause(text: string): IntentClause {
   const result = assessClauseEncodability(text);
+  const clause_id = clauseIdentity(text);
   if (result.encodable && result.kind && result.detail) {
     return {
+      clause_id,
       text,
       encodable: true,
       encoded_as: { kind: result.kind, detail: result.detail },
     };
   }
   return {
+    clause_id,
     text,
     encodable: false,
     checkpoint_question: result.checkpoint_question,

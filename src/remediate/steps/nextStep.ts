@@ -3117,7 +3117,7 @@ Only \`scope_summary\` and \`intent_summary\` are required; add the optional fie
   "confirmed_by": "host",
   "scope_summary": "<the files/areas in scope>",
   "intent_summary": "<the goal, e.g. full-remediation / security-only>",
-  "free_form_intent": "<optional: guidance threaded into remediation worker prompts>",
+  "free_form_intent": "<optional: interpreted into lens/priority ordering at planning; never threaded verbatim into worker prompts>",
   "filters": {
     "severity": ["critical", "high"],
     "lenses": ["security", "reliability"],

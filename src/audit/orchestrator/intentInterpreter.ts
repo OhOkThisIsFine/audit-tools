@@ -81,6 +81,14 @@ export function interpretFreeFormIntentForAudit(
 
 /** A blocking checkpoint question that the host has not yet answered. */
 export interface UnresolvedConstraintClause {
+  /**
+   * Stable clause identity — the resolution key (CE-004). A `constraint_clauses`
+   * entry resolves this clause when its `clause_id` matches, NOT when its
+   * rendered `checkpoint_question` matches (two distinct clauses can render to
+   * the same question). The host/headless recorder threads this back so the
+   * answer is keyed on identity.
+   */
+  clause_id: string;
   /** The original unencodable clause text. */
   text: string;
   /** The blocking question that must be answered before planning proceeds. */
@@ -92,14 +100,20 @@ export interface UnresolvedConstraintClause {
  * `free_form_intent` that the host has NOT yet resolved.
  *
  * An unencodable clause is "resolved" only when the checkpoint carries a
- * `constraint_clauses` entry for it (matched by checkpoint_question text) whose
- * `host_answer` is a non-empty string. Until then the clause is an unanswered
- * blocking question — returned here so the orchestrator can keep the
- * `intent_checkpoint_current` obligation unsatisfied (re-firing `confirm_intent`)
- * rather than silently dropping the directive at planning time.
+ * `constraint_clauses` entry for it — matched on CLAUSE IDENTITY (`clause_id`),
+ * not the rendered `checkpoint_question` (CE-004: the question is a derived,
+ * non-injective presentation string, so keying on it collapses two distinct
+ * directives that render identically and answering one silently resolves both).
+ * A legacy entry written before clause ids existed (no `clause_id`) still
+ * resolves by `checkpoint_question` so old checkpoints keep working. Until a
+ * clause is resolved it is an unanswered blocking question — returned here so the
+ * orchestrator keeps the `intent_checkpoint_current` obligation unsatisfied
+ * (re-firing `confirm_intent`) rather than silently dropping the directive at
+ * planning time.
  *
- * Deterministic — delegates encodability to the single shared authority
- * (`interpretFreeFormIntentForAudit` → shared `interpretIntent`).
+ * Deterministic — delegates clause decomposition + encodability + identity to the
+ * single shared authority (`interpretFreeFormIntentForAudit` → shared
+ * `interpretIntent`).
  */
 export function unresolvedConstraintClauses(
   checkpoint: IntentCheckpoint | undefined,
@@ -111,18 +125,29 @@ export function unresolvedConstraintClauses(
   const result = interpretIntent(freeForm);
   if (!result.has_unencodable) return [];
 
-  const answered = new Set<string>();
+  // A clause is answered when an entry with a non-empty host_answer matches it
+  // by clause identity (preferred) or, for legacy entries lacking a clause_id,
+  // by the rendered checkpoint_question.
+  const answeredIds = new Set<string>();
+  const answeredQuestions = new Set<string>();
   for (const c of checkpoint?.constraint_clauses ?? []) {
-    if (typeof c.host_answer === "string" && c.host_answer.trim().length > 0) {
-      answered.add(c.checkpoint_question);
+    if (typeof c.host_answer !== "string" || c.host_answer.trim().length === 0) {
+      continue;
+    }
+    if (typeof c.clause_id === "string" && c.clause_id.length > 0) {
+      answeredIds.add(c.clause_id);
+    } else {
+      answeredQuestions.add(c.checkpoint_question);
     }
   }
 
   const unresolved: UnresolvedConstraintClause[] = [];
   for (const clause of result.clauses) {
     if (clause.encodable || !clause.checkpoint_question) continue;
-    if (answered.has(clause.checkpoint_question)) continue;
+    if (answeredIds.has(clause.clause_id)) continue;
+    if (answeredQuestions.has(clause.checkpoint_question)) continue;
     unresolved.push({
+      clause_id: clause.clause_id,
       text: clause.text,
       checkpoint_question: clause.checkpoint_question,
     });

@@ -46,7 +46,7 @@ export function renderConfirmIntentPrompt(
      * `constraint_clauses` — so the prompt leads with them. Computed
      * deterministically from the single shared intent interpreter.
      */
-    unresolvedConstraintClauses?: Array<{ text: string; checkpoint_question: string }>;
+    unresolvedConstraintClauses?: Array<{ clause_id: string; text: string; checkpoint_question: string }>;
   },
 ): string {
   const dirLines =
@@ -107,14 +107,16 @@ export function renderConfirmIntentPrompt(
           "Your `free_form_intent` contains directive(s) that could NOT be encoded",
           "as a lens weight, priority signal, or scope emphasis. They will be",
           "**silently lost** unless you resolve them here — the audit will not",
-          "proceed past planning until each is answered. For every question below,",
-          "add a `constraint_clauses` entry (with the exact `checkpoint_question`",
-          "text and a concrete `host_answer`) to `intent_checkpoint.json`, or remove",
-          "the clause from `free_form_intent`:",
+          "proceed past planning until each is answered. For every clause below,",
+          "add a `constraint_clauses` entry (with the exact `clause_id` shown, the",
+          "`checkpoint_question` text, and a concrete `host_answer`) to",
+          "`intent_checkpoint.json`, or remove the clause from `free_form_intent`.",
+          "Each clause is keyed by its `clause_id`, so answer **every** one — two",
+          "clauses that read alike still need separate entries:",
           "",
           ...unresolvedClauses.map(
             (c, i) =>
-              `${i + 1}. Clause: \`${c.text}\`\n   Question: ${c.checkpoint_question}`,
+              `${i + 1}. Clause: \`${c.text}\`\n   clause_id: \`${c.clause_id}\`\n   Question: ${c.checkpoint_question}`,
           ),
           "",
         ]
@@ -228,7 +230,7 @@ export function renderConfirmIntentPrompt(
     '  "scope_summary": "<what is in scope>",',
     '  "intent_summary": "<the goal, e.g. full-audit / security-focused>",',
     '  "free_form_intent": "<optional: what to focus on; interpreted into lens/priority signals at planning, never threaded verbatim into worker prompts>",',
-    '  "constraint_clauses": [{ "text": "<unencodable clause>", "checkpoint_question": "<the question above>", "host_answer": "<how to apply it>" }],',
+    '  "constraint_clauses": [{ "clause_id": "<the clause_id above>", "text": "<unencodable clause>", "checkpoint_question": "<the question above>", "host_answer": "<how to apply it>" }],',
     '  "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],',
     '  "must_not_touch": ["<glob>"],',
     '  "disposition_overrides": [{ "path": "<path>", "status": "<generated|vendor|excluded|...>", "reason": "<why>" }],',
@@ -237,10 +239,12 @@ export function renderConfirmIntentPrompt(
     "}",
     "```",
     "",
-    "- `constraint_clauses` resolves the blocking questions above: each unencodable",
-    "  `free_form_intent` clause needs one entry with a concrete `host_answer`.",
-    "  Until every blocking question is answered (or its clause removed from",
-    "  `free_form_intent`), this confirm-intent step re-fires and planning is held.",
+    "- `constraint_clauses` resolves the blocking clauses above: each unencodable",
+    "  `free_form_intent` clause needs one entry carrying its `clause_id` and a",
+    "  concrete `host_answer`. Resolution is keyed on `clause_id`, so each distinct",
+    "  clause must be answered individually. Until every blocking clause is answered",
+    "  (or its clause removed from `free_form_intent`), this confirm-intent step",
+    "  re-fires and planning is held.",
     "- `excluded_scope` entries are pruned from planning so excluded files never",
     "  become audit tasks, and they are listed in the final report under",
     '  "Excluded / Out-of-Scope".',
