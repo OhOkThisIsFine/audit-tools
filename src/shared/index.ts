@@ -772,6 +772,18 @@ export {
   createRollingDispatcher,
 } from "./dispatch/rollingDispatch.js";
 
+// Hybrid spill coordinator (A-8) — the ONE assignment layer both dispatch drivers
+// drive identically: claim-before-assign (CE-001), co-owned SettledExclusionSet,
+// proactive capacity split through the single S4 fold, and the sole pause-authorizing
+// 'all pools exhausted' terminal.
+export type {
+  FrontierNode,
+  NodeAssignment,
+  CoordinatorTerminalStatus,
+  HybridSpillCoordinatorOptions,
+} from "./dispatch/coordinator.js";
+export { HybridSpillCoordinator } from "./dispatch/coordinator.js";
+
 // Versioned seam contracts (N-X06) — pinned interface types + version constants
 export type {
   RollingDispatchEnginePacket,
