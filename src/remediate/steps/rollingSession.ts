@@ -123,6 +123,14 @@ export function nodeClaimRegistry(artifactsDir: string, runId: string): ClaimReg
   return new ClaimRegistry(nodeClaimRegistryPath(artifactsDir, runId));
 }
 /**
+ * The run's cross-cycle settled-pool store path (DC-4) — read each cycle by the A-8
+ * coordinator's `readSettled` and appended to when a backend (NIM) pool exhausts, so
+ * the next cycle excludes it and the work falls to the host-subagent pool.
+ */
+export function nodeSettledPoolsPath(artifactsDir: string, runId: string): string {
+  return join(implementDir(artifactsDir, runId), "hybrid-settled-pools.json");
+}
+/**
  * The claim pool id for a host-subagent-driven node. The pool axis is diagnostic
  * only in the registry (it is not part of claim identity), so the host-subagent
  * driver records a single stable id; the in-process driver records its provider

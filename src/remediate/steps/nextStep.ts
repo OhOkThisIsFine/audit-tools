@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -27,7 +27,7 @@ import {
   type WorktreeNodeWorker,
 } from "./dispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
-import { prepareHostRollingDispatch, nodeClaimRegistry } from "./rollingSession.js";
+import { prepareHostRollingDispatch, nodeClaimRegistry, nodeSettledPoolsPath } from "./rollingSession.js";
 import type { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep, RemediationDispatchPlan } from "./types.js";
@@ -1617,22 +1617,25 @@ async function buildImplementDispatchStep(ctx: {
           return { kind: "transition", state: await store.loadState() };
         }
         // One coordinator over the shared claim registry splits + claims each node to
-        // exactly one pool. The settled set is per-cycle here; cross-cycle pause
-        // authorization (terminalStatus → all_pools_exhausted) is a DC-4 follow-up.
-        const settled = new Set<string>();
+        // exactly one pool. DC-4: the settled set is cross-cycle (persisted) — a backend
+        // pool that exhausted on a prior cycle is excluded here, so its work falls to the
+        // host-subagent pool instead of re-looping on a dead backend.
+        const settledPath = nodeSettledPoolsPath(artifactsDir, runId);
+        const settled = await readSettledPools(settledPath);
         const partition = await planHybridDispatch({
           frontier,
           pools: confirmedPools,
           sessionConfig: sessionConfigImpl ?? {},
           claimRegistry: nodeClaimRegistry(artifactsDir, runId),
           readSettled: () => settled,
-          onSettle: (id) => {
+          onSettle: async (id) => {
             settled.add(id);
+            await addSettledPool(settledPath, id);
           },
           isInProcess: isInProcessPool,
         });
         // Run the in-process partition now (each node on its assigned backend pool).
-        await executeInProcessPartition({
+        const inProcessOutcome = await executeInProcessPartition({
           root,
           artifactsDir,
           runId,
@@ -1641,6 +1644,17 @@ async function buildImplementDispatchStep(ctx: {
           plan,
           coordinator: partition.coordinator,
         });
+        // DC-4: a backend pool whose node rate-limited is exhausted → settle it
+        // (cross-cycle) so the next cycle routes its share to the host pool.
+        const rateLimited = new Set(
+          inProcessOutcome.nodes.filter((n) => n.outcome === "rate_limited").map((n) => n.block_id),
+        );
+        const exhaustedPools = new Set(
+          partition.inProcess.filter((a) => rateLimited.has(a.nodeId)).map((a) => a.poolId),
+        );
+        for (const poolId of exhaustedPools) {
+          await partition.coordinator.settlePool(poolId);
+        }
         // The backend carried the whole batch (or every host node was contested by a
         // peer driver) → nothing for the host this cycle; merge what landed + transition.
         if (partition.host.length === 0) {
