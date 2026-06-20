@@ -4,6 +4,8 @@ import { join, relative, dirname, resolve, isAbsolute } from "node:path";
 import { OwnershipRegistry } from "../dispatch/ownershipRegistry.js";
 import { routeAmendmentRequest } from "../dispatch/amendmentClaim.js";
 import { toBlockId, fromBlockId } from "../contractPipeline/idRegistry.js";
+import { readContractArtifact } from "../contractPipeline/artifactStore.js";
+import { verifyPairingForFinding } from "../contractPipeline/changeClassification.js";
 import { spawnSync } from "node:child_process";
 import { StateStore, type RemediationState } from "../state/store.js";
 import {
@@ -2793,6 +2795,24 @@ export function detectOverlappingEdits(
   return overlaps.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+/**
+ * The contract-pipeline obligation ids a finding covers — the union of its
+ * `contract_obligation_ids` (satisfied) and `verification_obligation_ids`
+ * (verified). Empty for audit-findings intake (no contract overlay), so the DC-5
+ * verify gate is inert there.
+ */
+function obligationIdsForFinding(
+  state: RemediationState,
+  findingId: string,
+): string[] {
+  const finding = state.plan?.findings.find((f) => f.id === findingId);
+  if (!finding) return [];
+  return [
+    ...(finding.contract_obligation_ids ?? []),
+    ...(finding.verification_obligation_ids ?? []),
+  ];
+}
+
 export async function mergeImplementResults(
   options: DispatchOptions,
   runId: string,
@@ -2849,6 +2869,18 @@ async function mergeImplementResultsIntoState(
     throw new Error("Cannot merge implement results without items.");
   }
   const dir = runDir(options.artifactsDir, runId, "implement");
+
+  // DC-5 verify gate: load the obligation_ledger + test_validator_plan once so a
+  // resolved finding that covers a behavior-CHANGE obligation can be re-blocked
+  // when its test specs are only one polarity (a positive without a scoped
+  // negative, or a negative-only set). Absent for non-contract-pipeline runs
+  // (audit-findings intake), where the gate is inert. Read defensively: the
+  // payloads are the validated artifact bodies, or `undefined` when missing.
+  const obligationLedgerPayload =
+    (await readContractArtifact(options.artifactsDir, "obligation_ledger"))?.payload;
+  const testValidatorPlanPayload =
+    (await readContractArtifact(options.artifactsDir, "test_validator_plan"))?.payload;
+
   const plannedBlockIds = new Set(
     plan.items.map((item) => item.block_id).filter((id): id is string => typeof id === "string"),
   );
@@ -3042,6 +3074,19 @@ async function mergeImplementResultsIntoState(
         // own right; the spec heuristic is the fallback for a plain `resolved`.
         const isNoChange =
           itemResult.status === "resolved_no_change" || specIndicatesNoChange(spec);
+        // DC-5 verify gate: an actual-change closure for a finding that covers a
+        // behavior-CHANGE obligation must have a paired positive+scoped-negative
+        // test spec; only-one-polarity (or an unscoped repo-wide negative) is
+        // blocked, never silently resolved. The same single-source pairing/scoping
+        // evaluation the test-plan derivation gate uses. A no-change closure makes
+        // no edits, so it is exempt (the closure path above already proves it).
+        const pairingBlockReason = isNoChange
+          ? null
+          : verifyPairingForFinding(
+              obligationIdsForFinding(state, itemResult.finding_id),
+              obligationLedgerPayload,
+              testValidatorPlanPayload,
+            );
         if (isNoChange && !hasExecutableEvidence(itemResult.evidence)) {
           // No-prose closure: a "verified-already-satisfied" (no-change) claim must
           // be backed by an executable assertion (a test/build/check command +
@@ -3052,6 +3097,10 @@ async function mergeImplementResultsIntoState(
           stateItem.failure_reason =
             "verified-already-satisfied requires an executable regression test proving " +
             "the behavior (a test/build/check command + result in evidence), not prose.";
+        } else if (pairingBlockReason) {
+          stateItem.status = "blocked";
+          markTerminal(stateItem);
+          stateItem.failure_reason = pairingBlockReason;
         } else {
           stateItem.status = isNoChange ? "resolved_no_change" : "resolved";
           markTerminal(stateItem);

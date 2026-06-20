@@ -152,10 +152,17 @@ function payloads(overrides: {
       obligations: [
         {
           id: "O-1",
-          description: "Auth flow behavior preserved.",
+          description: "the session behavior is preserved",
           kind: "behavioral",
           depends_on: [],
           status: "pending",
+          // DC-5: a behavior CHANGE touching `session`; its paired negative must be
+          // scoped to that symbol (an unscoped repo-wide negative fails the gate).
+          change_classification: {
+            change_kind: "change",
+            touched_symbols: ["session"],
+            determined_by: "touches_existing_symbol",
+          },
         },
       ],
       created_at: CREATED_AT,
@@ -179,7 +186,7 @@ function payloads(overrides: {
           kind: "invariant",
           assertions: [
             "returns the preserved session on the satisfied path",
-            "rejects the request on the failure path",
+            "rejects the session request on the failure path",
           ],
         },
       ],

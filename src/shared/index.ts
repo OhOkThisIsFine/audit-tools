@@ -630,6 +630,7 @@ export type {
   DesignCritiqueItem,
   ObligationLedger,
   ObligationEntry,
+  ObligationChangeClassification,
   ContractAssessmentReport,
   ContractAssessmentFinding,
   Counterexample,

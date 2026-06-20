@@ -27,6 +27,10 @@ import {
   type ObligationEntry,
   type ObligationLedger,
 } from "audit-tools/shared";
+import {
+  buildBaselineSymbolCorpus,
+  classifyObligationChange,
+} from "./changeClassification.js";
 
 /** The finalized-module-contract fields the obligation deriver reads. */
 interface DerivableModuleContract {
@@ -75,6 +79,13 @@ export function deriveObligationLedger(
   const usedIds = new Set<string>();
   const obligations: ObligationEntry[] = [];
 
+  // DC-5: baseline corpus of pre-existing symbols, built once from the declared
+  // interface surface. A testable obligation that references a symbol in here is
+  // classified a behavior CHANGE (deterministic FIRST pass); otherwise an
+  // ADDITION. The verdict is recorded on each obligation so the paired-test gate
+  // is driven by data, not by render-only prose (CE-013).
+  const baselineSymbols = buildBaselineSymbolCorpus(finalizedModuleContracts);
+
   for (const mod of finalized.module_contracts) {
     const base = slug(mod.name) || "module";
 
@@ -100,6 +111,7 @@ export function deriveObligationLedger(
         depends_on: [],
         status: "pending",
         source: "design_spec",
+        change_classification: classifyObligationChange(invariant, baselineSymbols),
       });
     });
 
@@ -111,6 +123,7 @@ export function deriveObligationLedger(
         depends_on: [],
         status: "pending",
         source: "design_spec",
+        change_classification: classifyObligationChange(failureMode, baselineSymbols),
       });
     });
   }

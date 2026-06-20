@@ -27,6 +27,44 @@ export const CONTRACT_PIPELINE_JUDGE_REPORT_VERSION =
 
 // ── ObligationLedger ──────────────────────────────────────────────────────────
 
+/**
+ * Change-vs-addition classification for one obligation (DC-5 / CE-013).
+ *
+ * Whether an obligation *changes existing behavior* or *adds new behavior*
+ * decides its test burden: a behavior CHANGE must be covered by a PAIRED
+ * positive+negative test spec whose negative is scoped to the changed
+ * symbol/file (so a regression is caught), whereas a pure ADDITION has no prior
+ * behavior to regress and is never forced to pair.
+ *
+ * The verdict is reached deterministically FIRST — `touches_existing_symbol`
+ * means the obligation references a symbol/file that already exists in the
+ * baseline corpus — and an LLM may then CONFIRM or OVERRIDE it. The method is
+ * recorded on `determined_by` so the classification is never silent (the
+ * "deterministic by default; LLM only for judgment — bounded and recorded"
+ * invariant).
+ */
+export interface ObligationChangeClassification {
+  /** A `change` touches prior behavior (→ paired test); an `addition` does not. */
+  change_kind: "change" | "addition";
+  /**
+   * Existing symbol/file tokens the change touches. These are the scope anchors
+   * a paired negative assertion must name — an unscoped, repo-wide negative
+   * (CE-006) is rejected because it matches none of them. Empty for an addition.
+   */
+  touched_symbols: string[];
+  /**
+   * How the verdict was reached. The deterministic heuristic runs first; an LLM
+   * confirmation/override (when present) is recorded here, never discarded.
+   */
+  determined_by:
+    | "touches_existing_symbol"
+    | "no_existing_symbol"
+    | "llm_confirmed"
+    | "llm_override";
+  /** Recorded rationale when an LLM confirmed or overrode the deterministic call. */
+  rationale?: string;
+}
+
 /** One implementation obligation derived from the design. */
 export interface ObligationEntry {
   id: string;
@@ -40,6 +78,15 @@ export interface ObligationEntry {
   priority?: number;
   /** Traceability: where this obligation originated. */
   source?: "design_spec" | "critique" | "counterexample" | "manual";
+  /**
+   * DC-5: change-vs-addition classification. Present on testable
+   * (invariant/behavioral) obligations the deriver classified; absent on
+   * structural obligations (no test burden) and on obligations from sources
+   * that predate the classifier. The paired-test gate treats an *unclassified*
+   * testable obligation as a CHANGE (fail-closed): pairing is only relaxed when
+   * an obligation is explicitly classified as an addition.
+   */
+  change_classification?: ObligationChangeClassification;
 }
 
 export interface ObligationLedger {

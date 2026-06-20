@@ -57,16 +57,30 @@ describe("validatePairedObligations", () => {
     test_specs: specs,
     created_at: CREATED_AT,
   });
+  // DC-5: a behavior CHANGE obligation classified as touching the symbol `widget`,
+  // so its negative half must be SCOPED to `widget` (an unscoped negative fails).
+  const changeObl = (kind: "behavioral" | "invariant" = "behavioral") => ({
+    id: "O-1",
+    description: "widget count stays under the cap",
+    kind,
+    depends_on: [],
+    status: "pending",
+    change_classification: {
+      change_kind: "change",
+      touched_symbols: ["widget"],
+      determined_by: "touches_existing_symbol",
+    },
+  });
 
-  it("passes when a testable obligation has both a positive and a negative assertion", () => {
+  it("passes when a testable change obligation has a positive and a scoped negative", () => {
     const issues = validatePairedObligations(
-      ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" }]),
+      ledger([changeObl()]),
       plan([
         {
           obligation_id: "O-1",
           name: "t",
           kind: "unit",
-          assertions: ["returns the value on success", "rejects an invalid input"],
+          assertions: ["returns the widget on success", "rejects an invalid widget"],
         },
       ]),
     );
@@ -75,7 +89,7 @@ describe("validatePairedObligations", () => {
 
   it("fails (fail-closed) when a testable obligation has no covering test spec", () => {
     const issues = validatePairedObligations(
-      ledger([{ id: "O-1", description: "x", kind: "invariant", depends_on: [], status: "pending" }]),
+      ledger([changeObl("invariant")]),
       plan([]),
     );
     expect(issues.length).toBeGreaterThan(0);
@@ -85,17 +99,17 @@ describe("validatePairedObligations", () => {
 
   it("fails when only a positive assertion exists (missing the negative half)", () => {
     const issues = validatePairedObligations(
-      ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" }]),
-      plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["returns the value"] }]),
+      ledger([changeObl()]),
+      plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["returns the widget"] }]),
     );
     expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(true);
     expect(issues.some((i) => i.path.endsWith(".positive"))).toBe(false);
   });
 
-  it("fails when only a negative assertion exists (missing the positive half)", () => {
+  it("fails when only a (scoped) negative assertion exists (missing the positive half)", () => {
     const issues = validatePairedObligations(
-      ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" }]),
-      plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["throws on bad input"] }]),
+      ledger([changeObl()]),
+      plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["throws on a bad widget"] }]),
     );
     expect(issues.some((i) => i.path.endsWith(".positive"))).toBe(true);
     expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(false);
@@ -111,13 +125,14 @@ describe("validatePairedObligations", () => {
 
   it("passes with POSITIVE:/NEGATIVE:-labeled assertions whose free text would not match keywords (authoritative label)", () => {
     const issues = validatePairedObligations(
-      ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" }]),
+      ledger([changeObl()]),
       plan([
         {
           obligation_id: "O-1",
           name: "t",
           kind: "unit",
-          // Neither free text contains a polarity keyword; the labels are authoritative.
+          // Neither free text contains a polarity keyword; the labels are
+          // authoritative. Both name `widget`, so the negative is scoped.
           assertions: ["POSITIVE: the widget count stays under the cap", "NEGATIVE: the widget count over the cap is caught"],
         },
       ]),
@@ -130,13 +145,13 @@ describe("validatePairedObligations", () => {
     // label wins and the keyword regex is skipped for this assertion. With only
     // this one assertion the negative half is therefore missing.
     const issues = validatePairedObligations(
-      ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" }]),
+      ledger([changeObl()]),
       plan([
         {
           obligation_id: "O-1",
           name: "t",
           kind: "unit",
-          assertions: ["POSITIVE: must not exceed N"],
+          assertions: ["POSITIVE: the widget must not exceed N"],
         },
       ]),
     );
@@ -146,13 +161,13 @@ describe("validatePairedObligations", () => {
 
   it("recognizes the polarity label with surrounding whitespace and mixed case", () => {
     const issues = validatePairedObligations(
-      ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" }]),
+      ledger([changeObl()]),
       plan([
         {
           obligation_id: "O-1",
           name: "t",
           kind: "unit",
-          assertions: ["  positive : the value is produced", "\tNegAtIvE: the bad path is handled"],
+          assertions: ["  positive : the widget is produced", "\tNegAtIvE: the bad widget path is handled"],
         },
       ]),
     );
@@ -161,13 +176,13 @@ describe("validatePairedObligations", () => {
 
   it("still fails a one-sided labeled spec (only POSITIVE: labels => negative half missing)", () => {
     const issues = validatePairedObligations(
-      ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" }]),
+      ledger([changeObl()]),
       plan([
         {
           obligation_id: "O-1",
           name: "t",
           kind: "unit",
-          assertions: ["POSITIVE: the value is produced"],
+          assertions: ["POSITIVE: the widget is produced"],
         },
       ]),
     );
@@ -177,7 +192,7 @@ describe("validatePairedObligations", () => {
 
   it("accepts an explicit inapplicable_claim as opt-out", () => {
     const issues = validatePairedObligations(
-      ledger([{ id: "O-1", description: "x", kind: "invariant", depends_on: [], status: "pending" }]),
+      ledger([changeObl("invariant")]),
       plan([
         {
           obligation_id: "O-1",
@@ -187,6 +202,23 @@ describe("validatePairedObligations", () => {
           inapplicable_claim: { obligation_id: "O-1", reason: "no code path exists for this in the target" },
         },
       ]),
+    );
+    expect(issues).toHaveLength(0);
+  });
+
+  it("does not force a pure ADDITION obligation to pair (CE-013)", () => {
+    const issues = validatePairedObligations(
+      ledger([
+        {
+          id: "O-1",
+          description: "a brand new capability is added",
+          kind: "behavioral",
+          depends_on: [],
+          status: "pending",
+          change_classification: { change_kind: "addition", touched_symbols: [], determined_by: "no_existing_symbol" },
+        },
+      ]),
+      plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["emits a new counter"] }]),
     );
     expect(issues).toHaveLength(0);
   });
@@ -684,7 +716,19 @@ async function seedChain(): Promise<void> {
     contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
     goal_id: "G1",
     obligations: [
-      { id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending" },
+      {
+        id: "O-1",
+        description: "record write stays consistent",
+        kind: "behavioral",
+        depends_on: [],
+        status: "pending",
+        // DC-5: a behavior CHANGE touching `record` → its negative must be scoped.
+        change_classification: {
+          change_kind: "change",
+          touched_symbols: ["record"],
+          determined_by: "touches_existing_symbol",
+        },
+      },
     ],
     created_at: CREATED_AT,
   });
@@ -696,7 +740,7 @@ async function seedChain(): Promise<void> {
         obligation_id: "O-1",
         name: "t",
         kind: "unit",
-        assertions: ["returns the value on success", "rejects invalid input"],
+        assertions: ["returns the record on success", "rejects an invalid record"],
       },
     ],
     created_at: CREATED_AT,
