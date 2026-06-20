@@ -19,6 +19,10 @@ const allowedBumps = new Set(["patch", "minor", "major"]);
 const bump = process.argv[2] ?? "patch";
 const bumpOnly = process.argv.includes("--bump-only");
 const dryRun = process.argv.includes("--dry-run");
+// --no-wait: tag + push + create the Release, then return WITHOUT blocking on the
+// publish CI run + npm propagation (~minutes). CI still publishes asynchronously;
+// confirm with `npm view audit-tools version` before reinstalling the global bin.
+const noWait = process.argv.includes("--no-wait");
 const pollIntervalMs = 5_000;
 const releaseRunTimeoutMs = 10 * 60 * 1000;
 const registryTimeoutMs = 2 * 60 * 1000;
@@ -288,8 +292,12 @@ async function main() {
     return;
   }
 
-  console.log("[release] running release gate (verify:release)");
-  run(npm, ["run", "verify:release"]);
+  // Local pre-tag gate is a fast typecheck only — the authoritative full-suite
+  // gate (check + test + smokes) runs on Linux in publish-package.yml before the
+  // upload, and the /ship preflight already ran it locally. Re-running the whole
+  // verify:release here a third time only delayed the tag.
+  console.log("[release] running local pre-tag gate (check)");
+  run(npm, ["run", "check"]);
 
   console.log(`[release] bumping ${bump} version`);
   const { packageAfter, tag } = bumpVersionAndTag(npm);
@@ -302,6 +310,15 @@ async function main() {
 
   console.log(`[release] creating GitHub Release ${tag}`);
   run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"]);
+
+  if (noWait) {
+    console.log(
+      `[release] --no-wait: GitHub Release ${tag} created; publish-package CI will publish ` +
+        `${packageAfter.name}@${packageAfter.version} asynchronously. ` +
+        `Confirm with: npm view ${packageAfter.name} version`,
+    );
+    return;
+  }
 
   console.log(`[release] waiting for publish-package release run for ${tag}`);
   const runEntry = await waitForReleaseRun(repoSlug, tag);
