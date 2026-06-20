@@ -30,11 +30,13 @@ import {
   stableStringifyProjection,
   type CriticalFlowManifest,
   type GraphBundle,
+  type IntentCheckpoint,
   type RiskRegister,
   type SurfaceManifest,
 } from "audit-tools/shared";
 import type { RepoManifest, UnitManifest } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
+import { deriveUnitScopeDisposition } from "./intentScopeDisposition.js";
 
 /**
  * The narrow read-only slice of the artifact bundle the design-review projection
@@ -51,6 +53,14 @@ export interface DesignReviewBundle {
   critical_flows?: CriticalFlowManifest;
   risk_register?: RiskRegister;
   design_assessment?: DesignAssessment;
+  /**
+   * The confirmed intent checkpoint, read ONLY to derive each unit's structured
+   * in-scope/excluded disposition (see `projectUnitManifest`). The cosmetic
+   * bracket-tag reason text is not projected — only the disposition KIND, which
+   * the prompt renders as `[in scope]` vs `[excluded: …]` and which the review
+   * actually reasons about (which units to skip).
+   */
+  intent_checkpoint?: IntentCheckpoint;
 }
 
 /**
@@ -102,10 +112,26 @@ function projectRepoManifest(bundle: DesignReviewBundle): unknown {
   };
 }
 
-/** Project units to their boundaries: id, name, kind, files, lenses, flows. */
+/**
+ * Project units to their boundaries: id, name, kind, files, lenses, flows, and
+ * the structured in-scope/excluded `scope` disposition.
+ *
+ * The `scope` field keeps dc4's per-unit determination INSIDE the projection so a
+ * scope change re-stales: when an `excluded_scope` / `disposition_overrides` edit
+ * flips a unit between in-scope and excluded, the prompt's `[in scope]` vs
+ * `[excluded: …]` tag flips with it, and the review must re-run (a unit it was
+ * told to skip is now reviewable, or vice versa). Only the disposition KIND is
+ * captured, NOT the reason text: the bracket-tag reason (`[excluded: <reason>]`)
+ * is cosmetic prose — re-wording "third-party code" to "third party" does not
+ * change which units the review covers, so it must not re-stale. The reason is
+ * read by no other downstream consumer (only this one prompt-render path puts it
+ * in front of the model, and it carries no machine-checkable meaning), so
+ * excluding it is sound under CE-008.
+ */
 function projectUnitManifest(bundle: DesignReviewBundle): unknown {
   const units = bundle.unit_manifest?.units;
   if (!units) return null;
+  const checkpoint = bundle.intent_checkpoint;
   const projected = units.map((unit) => ({
     unit_id: unit.unit_id,
     name: unit.name,
@@ -113,6 +139,7 @@ function projectUnitManifest(bundle: DesignReviewBundle): unknown {
     files: sortStrings(unit.files),
     required_lenses: sortStrings(unit.required_lenses),
     critical_flows: sortStrings(unit.critical_flows),
+    scope: deriveUnitScopeDisposition(unit.files, checkpoint).kind,
   }));
   return sortByProjection(projected);
 }

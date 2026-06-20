@@ -5,6 +5,7 @@ import type { CoverageMatrix } from "../types.js";
 import type { AuditScopeBudget, AuditScopeManifest } from "../types/auditScope.js";
 import { buildDispositionMap } from "../extractors/disposition.js";
 import { buildPathLookup } from "../extractors/graph.js";
+import { pathMatchesExclusion } from "./intentScopeDisposition.js";
 import {
   HIGH_FAN_DEGREE_THRESHOLD,
   buildGraphDegreeIndex,
@@ -12,6 +13,8 @@ import {
   graphEdgeConfidence,
   normalizeGraphPath,
 } from "./reviewPacketGraph.js";
+
+export { pathMatchesExclusion } from "./intentScopeDisposition.js";
 
 /** Default cap on in-scope files (seeds + expanded) before expansion stops. */
 export const DEFAULT_SCOPE_MAX_FILES = 200;
@@ -309,21 +312,6 @@ export function applyScopeToCoverage(
     }
   }
   return coverage;
-}
-
-/**
- * True when `filePath` is covered by an `excluded_scope` entry path — an exact
- * match or a directory-prefix match (path separators normalized to `/` so the
- * predicate is OS-agnostic). The single authority for "is this file excluded by
- * intent scope," shared by coverage application (`applyIntentExclusionsToCoverage`)
- * and the design-review per-unit scope annotation, so the two can never disagree
- * on what "excluded" means.
- */
-export function pathMatchesExclusion(filePath: string, entryPath: string): boolean {
-  const f = filePath.replace(/\\/g, "/");
-  const p = entryPath.replace(/\\/g, "/").replace(/\/+$/, "");
-  if (!p) return false;
-  return f === p || f.startsWith(`${p}/`);
 }
 
 /**
