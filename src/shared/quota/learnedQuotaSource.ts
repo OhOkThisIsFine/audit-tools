@@ -1,4 +1,4 @@
-import type { QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
+import type { QuotaProbeResult, QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
 import { readQuotaState, computeMaxSafeConcurrency } from "./state.js";
 
 export class LearnedQuotaSource implements QuotaSource {
@@ -11,9 +11,18 @@ export class LearnedQuotaSource implements QuotaSource {
   }
 
   async queryCurrentUsage(providerModelKey: string): Promise<QuotaUsageSnapshot | null> {
+    return (await this.probeUsage(providerModelKey)).snapshot;
+  }
+
+  /**
+   * No learned entry yet is `not_applicable`, never `degraded`: the learned
+   * source is the reactive fallback, so the absence of history is the normal
+   * cold-start state, not a lost signal.
+   */
+  async probeUsage(providerModelKey: string): Promise<QuotaProbeResult> {
     const state = await readQuotaState();
     const entry = state.entries[providerModelKey];
-    if (!entry) return null;
+    if (!entry) return { snapshot: null, status: "not_applicable" };
 
     const maxSafe = computeMaxSafeConcurrency(entry, this.halfLifeHours);
     const isInCooldown =
@@ -21,12 +30,15 @@ export class LearnedQuotaSource implements QuotaSource {
       new Date(entry.cooldown_until).getTime() > Date.now();
 
     return {
-      remaining_pct: isInCooldown ? 0 : null,
-      reset_at: isInCooldown ? entry.cooldown_until : null,
-      requests_remaining: maxSafe,
-      tokens_remaining: null,
-      captured_at: entry.updated_at,
-      source: "learned",
+      snapshot: {
+        remaining_pct: isInCooldown ? 0 : null,
+        reset_at: isInCooldown ? entry.cooldown_until : null,
+        requests_remaining: maxSafe,
+        tokens_remaining: null,
+        captured_at: entry.updated_at,
+        source: "learned",
+      },
+      status: "ok",
     };
   }
 }

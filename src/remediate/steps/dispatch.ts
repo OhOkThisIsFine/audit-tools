@@ -25,8 +25,9 @@ import type {
   DiscoveredRateLimitsInput,
   HostModelRosterEntry,
   CapacityPool,
+  QuotaProbeResult,
 } from "audit-tools/shared";
-import { resolveWindowsShimSpawnCommand } from "audit-tools/shared";
+import { resolveWindowsShimSpawnCommand, probeQuotaSource } from "audit-tools/shared";
 import { findingLead, renderFindingBadgeBody } from "audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
@@ -273,7 +274,9 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
       providerName,
       entry?.model_id ?? quotaModelKeySegment,
     );
-    const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(poolKey).catch(() => null);
+    const probe = await probeQuotaSource(quotaSource, poolKey).catch(
+      (): QuotaProbeResult => ({ snapshot: null, status: "degraded" }),
+    );
     return {
       id: poolKey,
       providerName,
@@ -287,7 +290,8 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
             output_tokens: entry.output_tokens,
           }
         : hostCapabilityLimits,
-      quotaSourceSnapshot,
+      quotaSourceSnapshot: probe.snapshot,
+      ...(probe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
     };
   }));
   const capacity = computeDispatchCapacity({
@@ -360,7 +364,9 @@ export async function buildConfirmedPools(input: {
       providerName,
       entry?.model_id ?? quotaModelKeySegment,
     );
-    const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(poolKey).catch(() => null);
+    const probe = await probeQuotaSource(quotaSource, poolKey).catch(
+      (): QuotaProbeResult => ({ snapshot: null, status: "degraded" }),
+    );
     return {
       id: poolKey,
       providerName,
@@ -371,7 +377,8 @@ export async function buildConfirmedPools(input: {
       discoveredLimits: entry
         ? { context_tokens: entry.context_tokens, output_tokens: entry.output_tokens }
         : hostCapabilityLimits,
-      quotaSourceSnapshot,
+      quotaSourceSnapshot: probe.snapshot,
+      ...(probe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
     };
   }));
 
@@ -389,7 +396,9 @@ export async function buildConfirmedPools(input: {
   ) {
     const apiModel = sessionConfig.openai_compatible?.model ?? null;
     const apiPoolKey = buildProviderModelKey("openai-compatible", apiModel);
-    const apiSnapshot = await quotaSource.queryCurrentUsage(apiPoolKey).catch(() => null);
+    const apiProbe = await probeQuotaSource(quotaSource, apiPoolKey).catch(
+      (): QuotaProbeResult => ({ snapshot: null, status: "degraded" }),
+    );
     primaryPools.push({
       id: apiPoolKey,
       providerName: "openai-compatible",
@@ -397,7 +406,8 @@ export async function buildConfirmedPools(input: {
       hostConcurrencyLimit: null,
       quotaStateEntry: quotaEntries[apiPoolKey] ?? null,
       discoveredLimits: null,
-      quotaSourceSnapshot: apiSnapshot,
+      quotaSourceSnapshot: apiProbe.snapshot,
+      ...(apiProbe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
     });
   }
 
