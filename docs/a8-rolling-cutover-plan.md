@@ -143,7 +143,7 @@ One-shot-CLI orchestrator + host-as-executor ⇒ rolling via a **per-completion 
   + 2nd CapacityPool + per-slot provider resolution); the {host-subagent + NIM} hybrid + live cross-provider
   spill run remain (backlog quota *a-residual*).
 
-## Step 7 — hybrid topology wiring (FINDING-020 capstone, task_847a8c7d) — REMEDIATE DONE (green)
+## Step 7 — hybrid topology wiring (FINDING-020 capstone, task_847a8c7d) — DONE: remediate + audit, shared infra, DC-4 (green)
 
 > Ethan-confirmed scope (2026-06-20): **Full hybrid now.** ONE remediate cycle splits the eligible frontier
 > across [host-subagent pool + in-process backend (NIM) pool] via the `HybridSpillCoordinator`, host nodes →
@@ -179,31 +179,35 @@ continuous proactive distribution. Claims + ownerTokens flow from the coordinato
    backend pool, merge into HEAD, claims released; an errored node is not merged (triage, never false-resolved).
    Commit `c5f991c`.
 
-**Remaining for FULL A-8 (NOT blocking the remediate-hybrid review):**
-- **Audit symmetric — LARGER than a mirror (mapped 2026-06-20).** Correction: `driveRollingAuditDispatch` is NOT
-  dormant — it's wired live (`nextStepHelpers.ts` ~L987, gated on `resolvesToInProcessDispatchProvider`),
-  symmetric to remediate. The real gap: **audit surfaces no NIM pool.** Remediate's `buildConfirmedPools` appends
-  the `openai-compatible` 2nd pool; audit's `buildDispatchPool` (`dispatch/quotaPool.ts`) builds only host-model
-  pools, so there is nothing to spill into. Concrete clean design (ingestion is already unified — `mergeAndIngest`
-  folds `task-results/` by `task_id`, and `buildPendingAuditTasks` is coverage-driven):
-  1. **NIM-pool surfacing for the hybrid** — a hybrid-only audit pool builder returning `[hostPool(s), nimPool]`
-     (mirror remediate's openai-compatible block; ideally extract that block to a SHARED `appendConfiguredApiPool`
-     so both tools single-source it). Do NOT change `buildDispatchPool` (it feeds host-review quota sizing).
-  2. **`prepareDispatchArtifacts` gains `tasksOverride?: AuditTask[]`** — the in-process driver reviews ONLY its
-     subset without touching the shared `pending-audit-tasks.json` the host path owns.
-  3. **`driveRollingAuditDispatch` gains `tasksOverride` + `poolsOverride`** (`= [nimPool]`) — reviews the NIM
-     subset on the NIM provider (`makeAuditProviderPacketDispatcher` already resolves the per-slot provider).
-  4. **Audit split wrapper** = `planHybridDispatch` parameterized by audit's in-process provider set (audit's set
-     EXCLUDES `local-subprocess`/`subprocess-template`); ideally the shared, predicate-parameterized split.
-  5. **Cutover** in the host-review branch of `runHostDelegationStep` (`nextStepHelpers.ts`): when rolling +
-     backend pool confirmed, split → run NIM in-process (ingests) → **fall through to `ensureSemanticReviewRun`**,
-     which now sees the NIM tasks as covered and reviews only the complement. No `materializeReviewRun` change.
-  6. Tests: split (crit. 2/4) + an in-process-subset review e2e (mirror `nim-rolling-audit-e2e`).
-- **DC-4 cross-cycle pause** — the hybrid's settled set is per-cycle; persist it + wire `coordinator.terminalStatus`
-  → the `all_pools_exhausted` resumable pause (today an exhausted backend node routes to triage — bounded, no
-  livelock, but no resumable pause yet). NOTE: for the host+NIM hybrid the host pool keeps a run alive when NIM
-  exhausts, so the all-pools pause is mostly an audit-in-process-only concern; audit already has the pause
-  machinery (`advanceRollingPause` + `SettledExclusionSet` on the active-dispatch artifact) to wire into.
+**Audit symmetric + the dispatcher unification — ✓ DONE (2026-06-20).** Per Ethan: the dispatch is ONE shared
+infra, not parallel copies. What landed:
+- ✓ `buildConfiguredApiPool` extracted to SHARED (`src/shared/quota/apiPool.ts`) — audit + remediate surface the
+  IDENTICAL NIM pool shape (commit `de91c63`). The drift Ethan spotted — NIM overflow existed only in remediate's
+  pool builder because the builder was forked — is closed.
+- ✓ `planHybridDispatch` is ONE SHARED split layer (`src/shared/dispatch/hybridDispatch.ts`), classification
+  injected as an `isInProcess` predicate; both orchestrators drive it (commit `256c477`). The two parallel
+  wrappers are deleted.
+- ✓ Audit in-process subset wiring — `prepareDispatchArtifacts` + `driveRollingAuditDispatch` gain
+  `tasksOverride`/`poolsOverride` (commit `5d1faa1`); audit NIM-pool builder + claim registry
+  (`src/audit/cli/hybridDispatch.ts`, commit `d9310be`); cutover in `runHostDelegationObligation` →
+  review the NIM partition in-process, host reviews the coverage-driven complement (commit `b19f7dc`).
+- ✓ **DC-4 cross-cycle pause** — SHARED settled-pool store (`src/shared/dispatch/settledPools.ts`, lock-guarded,
+  commit `7e0a2e7`) both cutovers read each cycle + append to on backend exhaustion: audit settles the NIM pool
+  when `driveRollingAuditDispatch` returns non-complete; remediate settles a pool whose node rate-limited. Next
+  cycle the coordinator excludes the settled pool → stranded work falls back to the host pool.
+- Tests: `tests/audit/hybrid-dispatch.test.mjs` (3) + `tests/shared/settled-pools.test.mjs` (2) +
+  the remediate split/executor tests above.
+
+**Net:** the dispatcher brain is now fully shared — quota/capacity fold, rolling engine, A-10 claim registry,
+A-8 coordinator, the split layer, the NIM pool shape, the settled-pool store. Only the per-node EXECUTION
+(read-only review + ingest vs. worktree edit → commit → verify → cherry-pick merge) and the host-spawn mechanism
+(batch `semantic_review` handoff vs. rolling `accept-node` loop) stay per-tool, because the work genuinely differs.
+
+**Genuinely remaining:**
 - **Live hybrid run (crit. 3)** — manual in-session validation with a Claude session AND a NIM key present at once
-  (`provider=claude-code` + `openai_compatible` configured); the in-process half is already covered by the gated
+  (`provider=claude-code` + `openai_compatible` configured); the in-process half is gated
   `tests/nim-rolling-e2e.test.ts`. The host half needs a real host, so it is an in-session check, not a CI test.
+- **(optional) host-pool roster construction** — `buildConfirmedPools` (remediate) vs `buildDispatchPool` (audit)
+  still build host-model pools separately; their OUTPUT contracts differ (audit needs `contextBudgetTokens` +
+  `tierBudgets` for packetization, remediate does not), so this is a genuine difference, NOT a capability gap (the
+  NIM/spill capability IS shared). Unify only if the duplication proves a maintenance cost.

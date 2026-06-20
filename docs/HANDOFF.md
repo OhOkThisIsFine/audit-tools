@@ -58,22 +58,25 @@ Readable plan: [`docs/remaining-specs-remediation-plan.md`](remaining-specs-reme
   one merge-surfaced regression (DC-2's new `provider-confirmation.json` write → registered as a side-channel in
   the executor-writeset parity test, `a71050fb`). Each block was green in isolation; only the merge surfaced it.
 - **Deliberate integration seams (NOT bugs) — finish before a release:**
-  - **A-8 hybrid: ✓ REMEDIATE DONE (2026-06-20, branch `a8-hybrid-spill-wiring`, 5 commits `2ea578d`..`c5f991c`,
-    fully green — awaiting Ethan's review before FF-merge + publish).** Ethan-confirmed scope = **Full hybrid now**
-    (memory `a8-hybrid-full-scope`). The remediate next-step now activates a proactive host-subagent + in-process
-    backend (NIM) split via `HybridSpillCoordinator.planAssignments()`: one cycle splits the eligible frontier
-    across both pools, the orchestrator runs the in-process partition itself (`executeInProcessPartition`), the host
-    spawns subagents for its partition, both merged by the shared `acceptNodeWorktree`. Pure host-subagent / pure
-    in-process fall out when only one pool class is confirmed. **Remaining for FULL A-8** (NOT blocking this review;
-    see `docs/a8-rolling-cutover-plan.md` §Step 7): audit symmetric wiring (`driveRollingAuditDispatch` still
-    reactive), DC-4 cross-cycle settled-set/pause (per-cycle today; an exhausted backend node routes to triage —
-    bounded), and the live host+NIM run (crit. 3 — needs a Claude session AND a NIM key present at once).
+  - **A-8 hybrid: ✓ DONE — remediate + audit + DC-4, shared infra (2026-06-20, branch `a8-hybrid-spill-wiring`,
+    ~13 commits `2ea578d`..`7e0a2e7`, fully green — awaiting Ethan's review before FF-merge + publish).**
+    Ethan-confirmed scope = **Full hybrid now** (memory `a8-hybrid-full-scope`). BOTH orchestrators' next-step now
+    split the eligible frontier host-vs-NIM via the ONE shared `planHybridDispatch` (the coordinator claims each
+    node; classification injected): remediate runs the NIM partition in-process + hands the host partition to the
+    `accept-node` loop; audit reviews the NIM partition in-process + the host batch-reviews the coverage-driven
+    complement. The dispatcher brain is now FULLY shared (quota fold, rolling engine, claim registry, A-8
+    coordinator, split layer, NIM pool shape `buildConfiguredApiPool`, DC-4 settled-pool store) — only the per-node
+    EXECUTION (review-ingest vs worktree-merge) + host-spawn mechanism stay per-tool (the work differs). **DC-4
+    cross-cycle pause:** a backend pool that exhausts settles (persisted, shared store) → next cycle excludes it →
+    stranded work falls to the host pool. **Only remaining:** the live host+NIM run (crit. 3 — needs a Claude
+    session AND a NIM key at once; in-process half gated `nim-rolling-e2e`); optional host-pool-roster unify (a
+    genuine output-contract difference, NOT a capability gap). Full record: `docs/a8-rolling-cutover-plan.md` §Step 7.
   - **DC-4** injectable `discoverProviders` stub (hermetic default; live roster supplies net-new).
   - **A-2** scorer + fixture corpus built; real scoring needs operator-authored `corpus/<run-id>.labels.json`.
   - Gated live e2e skip without creds: INV-2 `AUDIT_TOOLS_LIVE_QUOTA=1`, A-7 `RUN_CODEX_E2E=1`, A-9 `RUN_AUTONOMY_E2E=1`.
-- **Open follow-up tasks (spawned):** `task_847a8c7d` (A-8 wiring) — ✓ DONE for remediate (branch above; audit
-  symmetric + DC-4 pause remain, §Step 7); `task_7d35176d` (in-process per-node verify hardcodes `npm run check`,
-  ignores node `targeted_commands`), `task_2092be69` (complete_redelivery stale-report gate).
+- **Open follow-up tasks (spawned):** `task_847a8c7d` (A-8 wiring) — ✓ DONE (remediate + audit + DC-4, branch
+  above); `task_7d35176d` (in-process per-node verify hardcodes `npm run check`, ignores node
+  `targeted_commands`), `task_2092be69` (complete_redelivery stale-report gate).
 - **Prior-run cleanup (not a bug):** the earlier quick-wins run's promoted outputs sit in
   `.audit-tools/prior-run-quickwins-2026-06-19.bak/` (moved to clear the stale-report gate short-circuit; memory
   `stale-remediation-report-complete-redelivery-trap`).
