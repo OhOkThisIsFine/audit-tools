@@ -1,0 +1,31 @@
+{
+  "schema_version": "score-audit-corpus-labels/v1",
+  "run_id": "scoring-fixture-001",
+  "labels": [
+    {
+      "signature": "anchor|src/api/auth.ts|login",
+      "label": "true_positive",
+      "note": "Real missing-auth defect; re-emitted with reworded title across runs but must still match by signature."
+    },
+    {
+      "signature": "anchor|src/lib/hash.ts|digest",
+      "label": "false_positive",
+      "note": "Reviewed and judged not exploitable in context."
+    },
+    {
+      "signature": "anchor|src/db/query.ts|run",
+      "label": "hallucinated",
+      "note": "Cited concatenation does not exist on disk; grounding should have caught it."
+    },
+    {
+      "signature": "anchor|src/db/missing.ts|gone",
+      "label": "true_positive",
+      "note": "Known true defect that THIS run failed to re-find (a recall miss)."
+    },
+    {
+      "signature": "rule|operability|ci",
+      "label": "true_positive",
+      "note": "CE-010: a single label sitting on a signature two distinct fileless findings collide on."
+    }
+  ]
+}

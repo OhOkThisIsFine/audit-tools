@@ -40,6 +40,7 @@ import { cmdResynthesize } from "./cli/resynthesizeCommand.js";
 import { cmdCleanup } from "./cli/cleanupCommand.js";
 import { cmdQuota } from "./cli/quotaCommand.js";
 import { cmdDispatchStatus } from "./cli/dispatchStatusCommand.js";
+import { cmdScoreAudit } from "./cli/scoreAuditCommand.js";
 
 export { runSample };
 
@@ -129,10 +130,13 @@ async function main(argv: string[]): Promise<void> {
     case "dispatch-status":
       await cmdDispatchStatus(argv);
       return;
+    case "score-audit":
+      await cmdScoreAudit(argv);
+      return;
     default:
       console.error(`Unknown command: ${command}`);
       console.error(
-        "Available commands: sample-run, advance-audit, next-step, worker-run, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, resynthesize, cleanup, prepare-dispatch, merge-and-ingest, submit-packet, validate-result, quota, status, dispatch-status",
+        "Available commands: sample-run, advance-audit, next-step, worker-run, import-external-analyzer, intake, plan, ingest-results, explain-task, update-runtime-validation, validate, validate-results, requeue, synthesize, resynthesize, cleanup, prepare-dispatch, merge-and-ingest, submit-packet, validate-result, quota, status, dispatch-status, score-audit",
       );
       process.exitCode = 1;
   }
