@@ -333,16 +333,6 @@ narrowing (`a9cf29d0`).
   gate (pre-bump, so no partial publish). Fixed by repointing at a worker-5 schema. Whenever you delete a
   *shipped* file, grep the smoke/verify scripts for a required-paths list. (remediate's smoke does not list
   schema paths, so it was unaffected.)
-- **Release `waitForRunCompletion` matches a publish run by tag display name, not run identity (2026-06-18).**
-  Hit shipping `auditor-lambda 0.27.2`: 0.27.2 had been tagged+burned during the reverted A3 ATTEMPT-1, so a
-  STALE failed `publish-package` run carried the same `audit-code-v0.27.2` display name in history. After
-  pushing the new tag, the wait logic (`packages/audit-code/scripts/release-and-publish.mjs`
-  `waitForRunCompletion`) matched the OLD failed run "after 1s" and threw a false publish failure — the NEW
-  run (`27774138156`) actually succeeded and 0.27.2 went live. Fix: select the run by `databaseId`/`createdAt`
-  strictly AFTER the tag-push time (or by the tag-push commit sha), never the most-recent run sharing the tag
-  display name. Only bites when a version is reused after a revert, but it's a real false-negative in the
-  ship gate. (Tooling-side robustness — not a "remember to check" patch.)
-
 ### Contract-pipeline friction surfaced during the 2026-06-15 self-remediation (systematic fixes wanted)
 
 Hit while driving the full `remediate-code` contract pipeline over the 227-finding
@@ -394,15 +384,6 @@ agent (strong or weak), not "be careful" patches.
   because write-scope was respected, but the worker should be told its declared
   write-scope + that prior in-scope edits are expected — the rolling write-scope/ownership
   enforcement (ARC-f378135d-2) is the real fix.
-
-- **`quota` command silently drops the capability-handshake flags.** The
-  informational `quota` command parses neither the scalar
-  `--host-context-tokens`/`--host-output-tokens` pair nor
-  `--host-models`/`--host-model-id`, so its capacity estimate reflects only
-  cached/learned limits. Low stakes (read-only diagnostics); wiring the flags
-  would make it useful for previewing roster capacity. (The other half of this
-  entry — `run-to-completion` — was resolved 2026-06-12 by deleting the batch
-  loop entirely; `next-step` is the only terminal loop.)
 
 - **Run CLAUDECODE-unset tests via the PowerShell tool, not nested `cmd /c`.**
   `cmd /c "set CLAUDECODE=&& npm test"` from inside the bash tool printed only the
@@ -590,18 +571,6 @@ finding_id trap, `--host-can-dispatch-subagents`, conversation-start intake — 
 
 ### Friction from the June 8–9 self-audit (auditor feedback)
 
-- **Whether to allow declared-boundary files as `affected_files` evidence.** The
-  `submit-packet` rejection now *lists* the task's allowed files (shipped
-  2026-06-09), but auditors still may reference only their assigned files — a
-  finding that needs to cite an in-boundary-but-unassigned file (e.g. a
-  `schemas/finding.schema.json` to fully describe a duplicate-schema finding) must
-  drop that evidence. Open contract decision: allow declared-boundary files as
-  evidence, or keep the strict assigned-files-only rule.
-- **Read tool truncates lines over ~2000 chars.** Large `file_coverage` arrays
-  inside prior-result JSON exceed the per-line cap, so auditors couldn't
-  reconstruct exact arrays and fell back to `Get-Content`/bash. Worth noting for
-  any task that must read wide single-line JSON.
-
 ### Cross-package drift map — reinvented pieces to unite (2026-06-15)
 
 A 6-way recon sweep mapped code duplicated/reinvented across `shared` + the two
@@ -623,61 +592,7 @@ test. The CLAUDE.md lock doc-fix landed in Wave-0 and is now guarded by
 fully closed is R1 (wire the rolling engine), tracked above under *Self-audit 2026-06-15*
 — wired behind a default-OFF flag this run, with the atomic cutover still remaining.**
 
-- **Intermittent hermeticity flake: `phase-plan.test.ts` "non-audit JSON file falls through
-  to the LLM extractor path".** Fails ~1-in-N full-suite runs, passes in isolation and most
-  full runs (observed 2026-06-16 while adding the review-gate tests — unrelated code path).
-  The two `runPlanPhase` describe blocks share module-level `currentRoot`/`currentOptions`/
-  `baseState`, and the test asserts the LLM-extractor path *rejects* (ENOENT on a missing
-  `result_plan.json`) — both are concurrency/global-state sensitive. Fix: scope the
-  shared `let`s per-describe (or use the unique-dir-per-test pattern consistently) and make
-  the "falls through → throws" assertion not depend on dispatch global state.
-
 ## Deferred fixes (product bugs)
-
-### Something keeps opening the OpenCode app/window unprompted (Windows) — find & fix
-
-**Symptom (Ethan, 2026-06-16):** the OpenCode app keeps launching unprompted during normal work.
-Unknown trigger — could be a test, a skill, an MCP server, or a bash invocation that hits the OpenCode
-*executable* (launches the GUI/TUI) instead of the headless `opencode` CLI.
-
-**Update (Ethan, 2026-06-16):** OpenCode is now UNINSTALLED on his machine. So the same trigger will now
-likely surface as a command-line ERROR (`opencode` not found / non-zero exit) instead of opening the app —
-which is itself a useful signal: watch for an `opencode`-not-found error in CLI output, that pinpoints the
-exact caller. Deferred per Ethan (leave logged); revisit in a dedicated pass.
-
-**Recon already done (don't redo — start from the prime suspect):**
-- **SAFE — not these:** provider detection probes PATH with `where`/`which opencode`, never spawns it
-  (`packages/shared/src/providers/providerConfirmation.ts:62-63`). Postinstall only *writes*
-  `~/.config/opencode/opencode.json` (global `/audit-code` command + `auditor` agent + permissions) — no
-  spawn (`packages/audit-code/scripts/postinstall.mjs:196-244`). All provider unit tests inject a stub
-  `launchCommand` that captures argv and returns `{accepted,exitCode}` without spawning
-  (`packages/remediate-code/tests/providers.test.ts:378-408`); `opencode-launch.test.mjs` only exercises
-  the pure `resolveOpenCodeSpawnCommand`. Skills don't invoke `opencode`.
-- **PRIME SUSPECT:** the *only* place the `opencode` binary is actually spawned is
-  `OpenCodeProvider.launch()` → `opencode run` (prompt via stdin), and on Windows that is wrapped as
-  `cmd.exe /d /s /c "opencode run …"` (`packages/shared/src/providers/opencodeProvider.ts:44-49` +
-  `opencodeLaunch.ts:25-29`). This fires whenever the orchestrator auto-resolves/selects `opencode` as a
-  *dispatch* provider for a real run. If the `opencode` on the user's PATH is the desktop/TUI launcher
-  (not a pure headless CLI), or if `opencode run` itself opens a window, every dispatch "opens OpenCode" —
-  exactly Ethan's "hitting the executable not the CLI" hypothesis.
-- **SECOND VECTOR:** provider auto-resolution may be *picking* opencode when it shouldn't (it's detected on
-  PATH). Conversation-first means claude-code/the host should be the default dispatch target — check the
-  resolution order in `packages/*/src/providers/index.ts` + `shared/src/providers/providerFactory.ts`.
-- **CONFIRMED REPRO (2026-06-16):** with `CLAUDECODE` unset (the release-gate env), `runPlanPhase`'s
-  free-form extractor → `createFreshSessionProvider` → `provider.launch` auto-resolved a CLI backend whose
-  subprocess HUNG (30s) rather than fast-failing — surfaced as a hang in `phase-plan.test.ts` under
-  `verify:release`. That test was made hermetic (commit `b8c8c30a`, injects the `extractFindings` seam), but
-  the underlying hang remains: a provider-less / OpenCode-uninstalled env should fast-fail, not block. Strong
-  evidence the auto-resolver picks a non-headless/missing `opencode` and `opencode run` hangs on stdin.
-
-**Next steps to find & fix:**
-1. On the affected machine: `where opencode` — is it the headless CLI or the desktop-app launcher? Confirm
-   whether `opencode run` opens a window for the installed version.
-2. Check provider auto-resolution order — is `opencode` being selected for dispatch over claude-code? If so,
-   that's the real-run trigger; fix the ordering / don't auto-select opencode as a dispatch target.
-3. If `opencode run` is not reliably headless, gate it (headless flag) or stop auto-selecting opencode.
-4. Reconsider whether the postinstall should register the global OpenCode command/agent at all when OpenCode
-   isn't a desired host (the multi-host deploy writes to all 4 hosts unconditionally).
 
 ### Manual real-OpenCode validation of scoped permissions (user-owned)
 

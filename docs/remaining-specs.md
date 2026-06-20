@@ -399,32 +399,9 @@ already cut the worst of it.
 downstream prompt doesn't read it; staleness still fires when a *load-bearing* field
 changes.
 
-### F-2 — Release `waitForRunCompletion` selects by run identity, not tag name  · **S**
+### F-2 — Release `waitForRunCompletion` selects by run identity, not tag name · **shipped (5c2568b5)** — pure selectReleaseRun keyed on head_sha + post-push time.
 
-**Problem.** `scripts/release-and-publish.mjs` (`waitForRunCompletion`) matches a
-publish run by tag *display name*; a reused version after a revert leaves a stale
-failed run with the same name, so the waiter can match the OLD run and throw a false
-failure (hit shipping 0.27.2).
-
-**Approach.** Select the run strictly by `createdAt` after the tag-push time (or by
-the tag-push commit SHA / `databaseId`), never the most-recent run sharing the
-display name.
-
-**Acceptance criteria.** The waiter ignores any run created before this push;
-reusing a version after a revert no longer yields a false publish failure.
-
-### F-3 — `quota` command drops the capability-handshake flags  · **S**
-
-**Problem.** The read-only `quota` command parses neither
-`--host-context-tokens`/`--host-output-tokens` nor `--host-models`/`--host-model-id`,
-so its capacity estimate reflects only cached/learned limits.
-
-**Approach.** Parse the same handshake flags the dispatch path already accepts and
-feed them into the capacity estimate so `quota` previews real roster capacity.
-Low-stakes (diagnostics only).
-
-**Acceptance criteria.** `quota` with the handshake flags reports a capacity
-estimate that incorporates the supplied roster, matching what dispatch would size.
+### F-3 — `quota` command drops the capability-handshake flags · **shipped (057e5146)** — quota parses host-* flags through buildDispatchPool read-only preview.
 
 ### F-4 — Provider `queryLimits`  · **note, deferred-by-design**
 
@@ -434,77 +411,17 @@ nothing. **No action** until a provider gains a real proactive rate-limit endpoi
 belongs with the cross-provider quota work (F/9c). Kept here so it's not mistaken
 for a gap.
 
-### F-5 — `phase-plan.test.ts` hermeticity flake  · **S**
+### F-5 — `phase-plan.test.ts` hermeticity flake · **shipped (9e9f1f2c)** — scoped per-describe state kills the cross-describe afterEach dir-deletion race.
 
-**Problem.** "non-audit JSON file falls through to the LLM extractor path" fails
-~1-in-N full-suite runs (passes in isolation). The two `runPlanPhase` describe
-blocks share module-level `currentRoot`/`currentOptions`/`baseState`, and the test
-asserts an ENOENT-reject that's concurrency/global-state sensitive.
+### F-6 — Allow in-boundary, unassigned files as `affected_files` evidence · **shipped (f0a30ceb)** — packet/unit boundary widens file_coverage + followup_tasks reject gates via submit-packet.
 
-**Approach.** Scope the shared `let`s per-describe (or adopt the unique-dir-per-test
-pattern consistently) and make the "falls through → throws" assertion independent of
-dispatch global state. Per the test-failure protocol: this is a hermeticity bug, fix
-the test, not the code.
-
-**Acceptance criteria.** The test passes deterministically under full-suite
-concurrency (no shared mutable module state across describes).
-
-### F-6 — Allow in-boundary, unassigned files as `affected_files` evidence  · **S** · **DECIDED**
-
-**Problem.** A finding may currently cite only its assigned files; a finding that
-genuinely needs an in-boundary-but-unassigned file (e.g. a sibling schema) must drop
-that evidence.
-
-**Approach (DECIDED: allow in-boundary unassigned).** Widen the `submit-packet` /
-result evidence validation: an `affected_files` / evidence path is accepted if it
-lies within the task's *packet/unit boundary*, not only its assigned file set.
-Out-of-boundary paths still rejected. The boundary is already known to the validator
-(it lists allowed files on rejection today) — widen "allowed" from assigned to
-boundary.
-
-**Tradeoffs / risks.** Slightly looser scope; mitigated by keeping the *boundary* as
-the hard limit (a finding still can't cite arbitrary repo files). Grounding
-(quoted_text re-verify) is unaffected — it already checks content on disk regardless
-of assignment.
-
-**Acceptance criteria.** A finding citing an in-boundary unassigned file is accepted
-with its evidence intact; an out-of-boundary citation is still rejected (tests both
-ways).
-
-### F-7 — Read-tool >2000-char line truncation  · **note, host-limitation**
-
-The host Read tool truncates lines over ~2000 chars, so very wide single-line JSON
-(large `file_coverage` arrays in prior results) can't be reconstructed by a worker.
-Not our bug to fix, but our artifacts can avoid it: **pretty-print / line-wrap the
-JSON artifacts workers must re-read** (or have workers read via a bounded accessor),
-so no single line exceeds the cap. Cheap, defensive; do it where a worker re-reads a
-tool-written JSON.
+### F-7 — Read-tool >2000-char line truncation · **shipped (2e640a57)** — writeJsonFile container-wraps; added bounded-accessor read path (readJsonStringScalar/Chunks) for over-cap scalars.
 
 ---
 
 ## Deferred product bugs
 
-### PB-1 — OpenCode launches unprompted on Windows  · **S** · **DECIDED (defensive fix)**
-
-**Problem.** The OpenCode app launched unprompted during normal work. Prime suspect:
-provider auto-resolution *selecting* `opencode` as a dispatch target, and `opencode
-run` (wrapped `cmd /c`) opening the GUI rather than running headless. OpenCode is now
-uninstalled, so the same trigger will surface as an `opencode`-not-found error.
-
-**Approach (DECIDED: defensive fix, no diagnosis needed).** Two enforced changes:
-1. **Don't auto-select `opencode` as a dispatch target.** Conversation-first =
-   the host is the default dispatch target; a detected-on-PATH `opencode` must not
-   be auto-chosen for a real run. Fix the resolution order in
-   `providers/index.ts` / `providerFactory.ts` so opencode is opt-in, never
-   auto-selected.
-2. **Gate `opencode run` behind a headless check.** Only spawn it when it can run
-   headless; otherwise fast-fail with a clear error instead of opening a window /
-   hanging on stdin (this also fixes the `verify:release` hang where a
-   provider-less env blocked for 30s).
-
-**Acceptance criteria.** With `opencode` on PATH but not explicitly configured, no
-run spawns it (test on the resolver); a provider-less / non-headless env fast-fails
-rather than hanging or launching a GUI.
+### PB-1 — OpenCode launches unprompted on Windows · **shipped (1a2ea2d7)** — bare-PATH opencode opt-in at chooseAutoProvider/discoverProviders; headless launch gate in OpenCodeProvider.launch.
 
 ### PB-2 — Manual real-OpenCode scoped-permission validation  · **note, user-owned**
 
