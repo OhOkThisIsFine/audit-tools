@@ -28,6 +28,8 @@ import type {
   HostModelRosterEntry,
   CapacityPool,
   QuotaProbeResult,
+  ProviderSlot,
+  RollingDispatchResult,
 } from "audit-tools/shared";
 import { resolveWindowsShimSpawnCommand, probeQuotaSource } from "audit-tools/shared";
 import { findingLead, renderFindingBadgeBody } from "audit-tools/shared";
@@ -1209,6 +1211,100 @@ export async function loadNodeAcceptOutcome(
     merged: raw.merged,
     ...(raw.diagnostic !== undefined ? { diagnostic: raw.diagnostic } : {}),
   };
+}
+
+/**
+ * The per-node worktree worker an in-process driver launches: it edits within the
+ * node's isolated worktree (cwd-confined), writes its result file, and returns the
+ * transport outcome. `makeProviderNodeDispatcher` is the live implementation; tests
+ * inject a stub. Structurally identical to `nextStep`'s `ProgrammaticNodeDispatcher`.
+ */
+export type WorktreeNodeWorker = (args: {
+  block: RemediationBlock;
+  slot: ProviderSlot;
+  worktreeRoot: string;
+  resultPath: string;
+}) => Promise<RollingDispatchResult<{ block_id: string }>>;
+
+/** One node's worktree-lifecycle result: the worker transport outcome + the accept lifecycle. */
+export interface NodeWorktreeExecution {
+  /** Worker transport outcome the rolling engine consumes (success/error/rate_limited/timeout). */
+  result: RollingDispatchResult<{ block_id: string }>;
+  /** Tool-owned accept outcome (commit→verify→merge), already persisted via recordNodeAcceptOutcome. */
+  accept: AcceptNodeWorktreeResult;
+}
+
+/**
+ * Run ONE node's full in-process lifecycle in an isolated worktree — shared by BOTH
+ * in-process callers (the reactive `driveRollingImplementDispatch` engine and the
+ * A-8 hybrid executor) so they create / commit / verify / merge identically:
+ *
+ *   reset + create the node's worktree → link node_modules → seed declared targets →
+ *   launch the worker (`dispatchNode`) → `acceptNodeWorktree` (tool-commit, rebase,
+ *   verify, write-scope gate, cherry-pick) → persist the accept outcome.
+ *
+ * Claim ownership is the CALLER's concern (the reactive engine claims through the
+ * shared registry; the hybrid executor is handed a coordinator-minted claim), so
+ * this fn neither claims nor releases — it returns the worker transport result AND
+ * the accept lifecycle outcome and lets the caller record `nodeOutcomes` / release.
+ * Any thrown error degrades to a dropped worktree + a persisted `error` accept
+ * outcome, never an unhandled rejection into the engine.
+ */
+export async function executeNodeInWorktree(args: {
+  block: RemediationBlock;
+  slot: ProviderSlot;
+  root: string;
+  artifactsDir: string;
+  runId: string;
+  resultPath: string;
+  /** Untracked declared targets to seed into the worktree (the node's write set or write∪read). */
+  seedPaths: string[];
+  /** Every block's declared write scope, for the accept-time write-scope gate (OBL-DS-06). */
+  allBlockScopes: Array<{ block_id: string; write_paths: string[] }>;
+  dispatchNode: WorktreeNodeWorker;
+}): Promise<NodeWorktreeExecution> {
+  const { block, slot, root, artifactsDir, runId, resultPath, seedPaths, allBlockScopes, dispatchNode } = args;
+  const branch = worktreeBranchForBlock(block.block_id, runId);
+  const wt = worktreePath(root, block.block_id, runId);
+  try {
+    // Idempotent reset of any worktree dir AND leftover branch from a prior attempt
+    // (a `rate_limited` re-queue re-enters for the same block with its branch still
+    // present), then create this node's isolated worktree, link the main checkout's
+    // node_modules (gitignored → absent in a fresh worktree) so verify can run, and
+    // seed untracked declared targets a committed-files-only worktree can't see.
+    resetNodeWorktreeAndBranch(root, wt, branch);
+    createWorktree(root, wt, branch);
+    ensureWorktreeNodeModules(root, wt);
+    seedUntrackedDeclaredPaths(root, wt, seedPaths);
+    const result = await dispatchNode({ block, slot, worktreeRoot: wt, resultPath });
+    // Shared post-worker lifecycle. Verify commands are DERIVED from the node's
+    // actually-touched tests inside acceptNodeWorktree (post-commit) — omit them so a
+    // host-authored path can't mis-verify. The write-scope gate adjudicates the node's
+    // ACTUAL git edits against every block's declared scope.
+    const accept = acceptNodeWorktree({
+      root,
+      runId,
+      blockId: block.block_id,
+      worktreeRoot: wt,
+      branch,
+      workerOutcome: result.outcome,
+      scope: { allBlockScopes },
+    });
+    await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept);
+    return { result, accept };
+  } catch (err) {
+    removeWorktree(root, wt);
+    const accept: AcceptNodeWorktreeResult = { outcome: "error", verifyPassed: false, merged: false };
+    await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept);
+    return {
+      result: {
+        packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
+        outcome: "error",
+        error: err,
+      },
+      accept,
+    };
+  }
 }
 
 export interface DispatchOptions {
