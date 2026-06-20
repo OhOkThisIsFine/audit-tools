@@ -517,8 +517,13 @@ export {
   WaveBindingCapSchema,
   BackoffStateSchema,
 } from "./quota/types.js";
-export type { QuotaSource, QuotaUsageSnapshot } from "./quota/quotaSource.js";
-export { QuotaUsageSnapshotSchema } from "./quota/quotaSource.js";
+export type {
+  QuotaSource,
+  QuotaUsageSnapshot,
+  QuotaProbeResult,
+  QuotaProbeStatus,
+} from "./quota/quotaSource.js";
+export { QuotaUsageSnapshotSchema, probeQuotaSource } from "./quota/quotaSource.js";
 export {
   resolveLimits,
   classifyProvider,

@@ -1,4 +1,4 @@
-import type { QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
+import type { QuotaProbeResult, QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
 import { LearnedQuotaSource } from "./learnedQuotaSource.js";
 import { ClaudeOAuthQuotaSource } from "./claudeOAuthQuotaSource.js";
 import { CodexQuotaSource } from "./codexQuotaSource.js";
@@ -30,13 +30,40 @@ export class CompositeQuotaSource implements QuotaSource {
   }
 
   async queryCurrentUsage(providerModelKey: string): Promise<QuotaUsageSnapshot | null> {
+    return (await this.probeUsage(providerModelKey)).snapshot;
+  }
+
+  /**
+   * Probe the cascade with an aggregate status: the first source that returns a
+   * snapshot wins (`ok`); otherwise the result is `degraded` when any source
+   * that handles this provider was queried and silently degraded (or threw), and
+   * `not_applicable` only when no source ever applied. This is what lets a pool
+   * record that a live quota reading was expected but lost, instead of treating
+   * every empty cascade as "no source configured".
+   */
+  async probeUsage(providerModelKey: string): Promise<QuotaProbeResult> {
+    let sawDegraded = false;
     for (const source of this.sources) {
       try {
-        const snapshot = await source.queryCurrentUsage(providerModelKey);
-        if (snapshot) return snapshot;
+        // Invoke the source directly (not via the swallowing `probeQuotaSource`)
+        // so a throw propagates to the catch below, where it is BOTH logged and
+        // counted as a degrade — preserving the operator-visible failure event.
+        let result: QuotaProbeResult;
+        if (source.probeUsage) {
+          result = await source.probeUsage(providerModelKey);
+        } else {
+          // A bare `queryCurrentUsage` source can't distinguish a silent degrade
+          // from a non-match, so a null result is `not_applicable`; a throw falls
+          // through to the catch and is recorded as a degrade there.
+          const snapshot = await source.queryCurrentUsage(providerModelKey);
+          result = { snapshot, status: snapshot ? "ok" : "not_applicable" };
+        }
+        if (result.snapshot) return result;
+        if (result.status === "degraded") sawDegraded = true;
       } catch (err) {
-        // Skip failing sources, try next — but surface the failure so operators
-        // can detect a persistently failing quota source.
+        // A throw is a degrade for that source — surface it so operators can
+        // detect a persistently failing quota source, then try the next one.
+        sawDegraded = true;
         this.runLogger.event({
           kind: "error",
           phase: "quota",
@@ -44,7 +71,7 @@ export class CompositeQuotaSource implements QuotaSource {
         });
       }
     }
-    return null;
+    return { snapshot: null, status: sawDegraded ? "degraded" : "not_applicable" };
   }
 }
 

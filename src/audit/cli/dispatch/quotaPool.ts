@@ -1,10 +1,11 @@
 import { join } from "node:path";
-import { writeJsonFile } from "audit-tools/shared";
+import { writeJsonFile, probeQuotaSource } from "audit-tools/shared";
 import type {
   ProviderRateLimits,
   SessionConfig,
   DispatchModelTier,
   HostModelRosterEntry,
+  QuotaProbeResult,
 } from "audit-tools/shared";
 import { DEFAULT_EMPIRICAL_HALF_LIFE_HOURS } from "audit-tools/shared";
 import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource";
@@ -122,7 +123,9 @@ export async function buildDispatchPool(params: {
       ? buildProviderModelKey(quotaProviderName, modelId)
       : quotaProviderKey;
     const dispatchCachedLimits = await lookupDiscoveredLimits(poolKey).catch(() => null);
-    const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(poolKey).catch(() => null);
+    const probe = await probeQuotaSource(quotaSource, poolKey).catch(
+      (): QuotaProbeResult => ({ snapshot: null, status: "degraded" }),
+    );
     return {
       id: poolKey,
       providerName: quotaProviderName,
@@ -135,7 +138,8 @@ export async function buildDispatchPool(params: {
         providerLimits,
         dispatchCachedLimits,
       ),
-      quotaSourceSnapshot,
+      quotaSourceSnapshot: probe.snapshot,
+      ...(probe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
     };
   };
   const probeBudget = (pool: CapacityPool): number => {

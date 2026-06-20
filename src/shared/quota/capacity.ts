@@ -124,6 +124,16 @@ export interface CapacityPool {
   discoveredLimits?: DiscoveredRateLimitsInput | null;
   /** Real-time usage snapshot for this pool, if available. */
   quotaSourceSnapshot?: QuotaUsageSnapshot | null;
+  /**
+   * Explicit silent-degrade marker: true when this pool's proactive quota source
+   * was queried and degraded to no snapshot (missing/expired creds, 401/5xx,
+   * network error, unmappable payload) — i.e. a live reading was EXPECTED but
+   * lost, which a bare `quotaSourceSnapshot: null` cannot distinguish from "no
+   * source applies here". This is a RAW per-pool signal for observability and the
+   * downstream fold; it is deliberately NOT pre-folded into a slot count here (the
+   * byte-estimate × safety-margin floor-1 degrade lives in `scheduleWave`, S4).
+   */
+  quotaSignalDegraded?: boolean;
 }
 
 /** One pool's slice of the overall dispatch capacity. */
@@ -135,6 +145,12 @@ export interface PoolDispatchAllocation {
   slots: number;
   /** Full wave schedule for this pool (resolved limits, binding cap, cooldown). */
   schedule: WaveSchedule;
+  /**
+   * Echo of {@link CapacityPool.quotaSignalDegraded} — the pool's proactive quota
+   * source was queried and silently degraded. Carried through unfolded so the
+   * summary/observability can surface it; never affects slot math here.
+   */
+  quotaSignalDegraded?: boolean;
 }
 
 /** Compact, serializable view of one pool allocation for dispatch-quota files. */
@@ -152,6 +168,8 @@ export const DispatchCapacityPoolSummarySchema = z
     estimated_wave_tokens: z.number().int().min(0),
     binding_cap: WaveBindingCapSchema,
     quota_source_snapshot: QuotaUsageSnapshotSchema.nullable().optional(),
+    /** Raw silent-degrade marker for this pool (see CapacityPool.quotaSignalDegraded). */
+    quota_signal_degraded: z.boolean().optional(),
   })
   .strict();
 export type DispatchCapacityPoolSummary = z.infer<
@@ -431,6 +449,8 @@ function schedulePool(
       ? Math.min(schedule.max_concurrent, itemTokens.length)
       : schedule.max_concurrent,
     schedule,
+    // Raw signal carried through unfolded — does not enter the slot math above.
+    ...(pool.quotaSignalDegraded ? { quotaSignalDegraded: true } : {}),
   };
 }
 
@@ -466,5 +486,6 @@ export function summarizeDispatchCapacityPools(
     estimated_wave_tokens: allocation.schedule.estimated_wave_tokens,
     binding_cap: allocation.schedule.binding_cap ?? "none",
     quota_source_snapshot: allocation.schedule.quota_source_snapshot ?? null,
+    ...(allocation.quotaSignalDegraded ? { quota_signal_degraded: true } : {}),
   }));
 }

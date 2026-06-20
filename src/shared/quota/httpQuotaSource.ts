@@ -1,4 +1,4 @@
-import type { QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
+import type { QuotaProbeResult, QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
 
 /**
  * Shared scaffolding for PROACTIVE per-provider quota sources (Claude, Codex,
@@ -51,6 +51,14 @@ export interface HttpQuotaSourceOptions {
 interface CachedSnapshot {
   fetchedAtMs: number;
   snapshot: QuotaUsageSnapshot | null;
+  /** True when a live probe ran (so a null snapshot is a degrade, not a skip). */
+  attempted: boolean;
+}
+
+/** A handled provider with a snapshot is `ok`; attempted-but-empty is `degraded`. */
+function classifyProbe(cached: CachedSnapshot): QuotaProbeResult["status"] {
+  if (cached.snapshot) return "ok";
+  return cached.attempted ? "degraded" : "not_applicable";
 }
 
 const DEFAULT_CACHE_TTL_MS = 45_000;
@@ -88,20 +96,42 @@ export abstract class BaseHttpQuotaSource implements QuotaSource {
   ): Promise<QuotaUsageSnapshot | null>;
 
   async queryCurrentUsage(providerModelKey: string): Promise<QuotaUsageSnapshot | null> {
+    return (await this.probeUsage(providerModelKey)).snapshot;
+  }
+
+  /**
+   * Probe with an explicit status (see {@link QuotaProbeResult}). A non-matching
+   * provider key or a network-skipped probe is `not_applicable`; a real query
+   * that yields no snapshot (missing creds, 401/5xx, bad payload) is `degraded`
+   * — the silent-degrade signal a bare `null` from `queryCurrentUsage` hides.
+   * Both paths return through here so the cache and the status stay consistent.
+   */
+  async probeUsage(providerModelKey: string): Promise<QuotaProbeResult> {
     const { provider, model } = parseProviderModelKey(providerModelKey);
-    if (!this.handlesProvider(provider)) return null;
+    // Gated out for this provider — no I/O, and no signal was ever expected.
+    if (!this.handlesProvider(provider)) {
+      return { snapshot: null, status: "not_applicable" };
+    }
 
     const nowMs = this.now();
     const cached = this.cache.get(providerModelKey);
     if (cached && nowMs - cached.fetchedAtMs < this.cacheTtlMs) {
-      return cached.snapshot;
+      return { snapshot: cached.snapshot, status: classifyProbe(cached) };
     }
 
-    const snapshot = this.shouldSkipNetwork()
-      ? null
-      : await this.fetchSnapshot(provider, model, nowMs);
-    this.cache.set(providerModelKey, { fetchedAtMs: nowMs, snapshot });
-    return snapshot;
+    // The live probe was intentionally skipped (hermeticity / disabled) — absent
+    // by design, not a degrade.
+    if (this.shouldSkipNetwork()) {
+      const result: CachedSnapshot = { fetchedAtMs: nowMs, snapshot: null, attempted: false };
+      this.cache.set(providerModelKey, result);
+      return { snapshot: null, status: "not_applicable" };
+    }
+
+    // A real query for a handled provider: a null result is a silent degrade.
+    const snapshot = await this.fetchSnapshot(provider, model, nowMs);
+    const result: CachedSnapshot = { fetchedAtMs: nowMs, snapshot, attempted: true };
+    this.cache.set(providerModelKey, result);
+    return { snapshot, status: classifyProbe(result) };
   }
 
   /** Context for the reusable `fetchXxxUsage` helpers. */
