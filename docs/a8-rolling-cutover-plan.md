@@ -199,9 +199,16 @@ infra, not parallel copies. What landed:
   the remediate split/executor tests above.
 
 **Net:** the dispatcher brain is now fully shared — quota/capacity fold, rolling engine, A-10 claim registry,
-A-8 coordinator, the split layer, the NIM pool shape, the settled-pool store. Only the per-node EXECUTION
-(read-only review + ingest vs. worktree edit → commit → verify → cherry-pick merge) and the host-spawn mechanism
-(batch `semantic_review` handoff vs. rolling `accept-node` loop) stay per-tool, because the work genuinely differs.
+A-8 coordinator, the split layer, the generic source/pool builders, the settled-pool store. Only the per-node
+EXECUTION (read-only review + ingest vs. worktree edit → commit → verify → cherry-pick merge) and the host-spawn
+mechanism (batch `semantic_review` handoff vs. rolling `accept-node` loop) stay per-tool, because the work differs.
+
+**Dispatchable sources GENERALIZED (2026-06-20, commit `46d35e6`).** The openai-compatible-only NIM pool became a
+generic `DispatchableSource = {provider, endpoint, parameters, quota}` (`SessionConfig.sources[]`): ANY non-IDE
+backend (multiple NIM/vLLM endpoints, a CLI pool, …) is its own CapacityPool with its own rate limit, and the
+provider launches FROM its source's config (`withSourceConfig` / `sourceByPoolId`) so two sources of the same
+provider dispatch distinctly. `buildSourcePools` (shared) replaced `buildConfiguredApiPool`; a legacy
+`openai_compatible` block folds in as one source (back-compat). See memory `dispatchable-sources-generic`.
 
 **Live hybrid run (crit. 3) — ✓ DONE (2026-06-20, remediate, live NVIDIA NIM).** New gated e2e
 `tests/remediate/hybrid-nim-e2e.test.ts` (RUN_NIM_E2E=1) drives the production `decideNextStep` with
