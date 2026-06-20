@@ -167,7 +167,62 @@ function bumpVersionAndTag(npm) {
   return { packageAfter, tag };
 }
 
-async function waitForReleaseRun(repoSlug, tag) {
+// Skew tolerance (ms) applied to the created_at > tagPushedAtMs fallback gate:
+// a genuine run can be stamped a few seconds before the local push instant
+// (clock skew, run row created as the push lands), so allow a small grace.
+const RELEASE_RUN_SKEW_MS = 5_000;
+
+// Pure, deterministic run selector. Given the raw list of workflow runs and the
+// tag identity (name + push timestamp + tag-commit SHA), returns the matching
+// run object or null. Independent of input array order.
+//
+// Selection rules:
+//   1. Identity gate — only runs whose head_branch===tag OR display_title===tag.
+//   2. Prefer head_sha===headSha (the tag commit). Among those, newest by
+//      created_at, tiebreak greatest run_number then id.
+//   3. If headSha is absent or nothing matches by SHA, fall back to runs whose
+//      created_at is strictly after (tagPushedAtMs - skew), newest first.
+//   4. Never return a run by array position / name alone — return null if
+//      nothing qualifies the identity + freshness gate.
+export function selectReleaseRun(runs, { tag, tagPushedAtMs, headSha } = {}) {
+  if (!Array.isArray(runs)) return null;
+
+  const sameTag = runs.filter(
+    (runEntry) =>
+      runEntry != null &&
+      (runEntry.head_branch === tag || runEntry.display_title === tag),
+  );
+  if (sameTag.length === 0) return null;
+
+  const createdAtMs = (runEntry) => {
+    const parsed = Date.parse(runEntry?.created_at ?? "");
+    return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+  };
+  const newerFirst = (a, b) => {
+    const byCreated = createdAtMs(b) - createdAtMs(a);
+    if (byCreated !== 0) return byCreated;
+    const byRunNumber = (b.run_number ?? 0) - (a.run_number ?? 0);
+    if (byRunNumber !== 0) return byRunNumber;
+    return (b.id ?? 0) - (a.id ?? 0);
+  };
+
+  if (headSha != null) {
+    const bySha = sameTag.filter((runEntry) => runEntry.head_sha === headSha);
+    if (bySha.length > 0) {
+      return [...bySha].sort(newerFirst)[0];
+    }
+  }
+
+  const threshold =
+    typeof tagPushedAtMs === "number" && Number.isFinite(tagPushedAtMs)
+      ? tagPushedAtMs - RELEASE_RUN_SKEW_MS
+      : Number.NEGATIVE_INFINITY;
+  const fresh = sameTag.filter((runEntry) => createdAtMs(runEntry) > threshold);
+  if (fresh.length === 0) return null;
+  return [...fresh].sort(newerFirst)[0];
+}
+
+async function waitForReleaseRun(repoSlug, tag, { tagPushedAtMs, headSha } = {}) {
   run("gh", ["workflow", "view", "publish-package.yml"]);
   const deadline = Date.now() + releaseRunTimeoutMs;
   const startedAt = Date.now();
@@ -179,9 +234,11 @@ async function waitForReleaseRun(repoSlug, tag) {
       "api",
       `repos/${repoSlug}/actions/workflows/publish-package.yml/runs?event=release&per_page=20`,
     ]);
-    const match = response.workflow_runs?.find(
-      (runEntry) => runEntry?.head_branch === tag || runEntry?.display_title === tag,
-    );
+    const match = selectReleaseRun(response.workflow_runs, {
+      tag,
+      tagPushedAtMs,
+      headSha,
+    });
     if (match) {
       const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
       console.log(
@@ -198,7 +255,15 @@ async function waitForReleaseRun(repoSlug, tag) {
     }
     await sleep(pollIntervalMs);
   }
-  throw new Error(`Timed out waiting for publish-package release run for ${tag}.`);
+  const pushedAtIso =
+    typeof tagPushedAtMs === "number" && Number.isFinite(tagPushedAtMs)
+      ? new Date(tagPushedAtMs).toISOString()
+      : "unknown";
+  throw new Error(
+    `Timed out waiting for publish-package release run for ${tag} ` +
+      `(tag pushed at ${pushedAtIso}; no run matched by SHA or post-push timestamp — ` +
+      `refusing to match a stale same-name run).`,
+  );
 }
 
 async function waitForRunCompletion(repoSlug, runId) {
@@ -305,6 +370,24 @@ async function main() {
 
   console.log(`[release] pushing ${releaseBranch} (${tag})`);
   run("git", ["push", remoteName, releaseBranch]);
+
+  // Resolve the tag commit SHA so the publish-run waiter can key on run identity
+  // (head_sha) rather than the reusable display name. Degrade to timestamp-only
+  // selection if rev-parse fails.
+  let headSha = null;
+  try {
+    headSha = run("git", ["rev-parse", `${tag}^{commit}`], { capture: true }).stdout.trim() || null;
+  } catch (error) {
+    console.log(
+      `[release] could not resolve tag commit SHA for ${tag}; falling back to timestamp-only ` +
+        `run selection (${error instanceof Error ? error.message : String(error)}).`,
+    );
+  }
+
+  // Capture the push instant immediately BEFORE pushing the tag: any genuine
+  // publish run is created at or after this moment, so it gates out stale
+  // same-name runs from an earlier reverted release of the same version.
+  const tagPushedAtMs = Date.now();
   console.log(`[release] pushing tag ${tag}`);
   run("git", ["push", remoteName, tag]);
 
@@ -321,7 +404,7 @@ async function main() {
   }
 
   console.log(`[release] waiting for publish-package release run for ${tag}`);
-  const runEntry = await waitForReleaseRun(repoSlug, tag);
+  const runEntry = await waitForReleaseRun(repoSlug, tag, { tagPushedAtMs, headSha });
   console.log(`[release] publish run detected: ${runEntry.html_url}`);
 
   const completedRun = await waitForRunCompletion(repoSlug, runEntry.id);
@@ -333,4 +416,12 @@ async function main() {
   console.log(`[release] published ${packageAfter.name}@${packageAfter.version} successfully.`);
 }
 
-await main();
+// Only run the release flow when invoked directly as the entry script. Importing
+// this module (e.g. unit-testing the pure `selectReleaseRun`) must not execute
+// `main()` — which would push/tag/publish.
+const invokedDirectly =
+  process.argv[1] != null &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
+  await main();
+}
