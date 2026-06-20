@@ -135,6 +135,85 @@ export async function writeJsonFile(
   await writeFileAtomic(path, JSON.stringify(value, null, 2) + "\n");
 }
 
+/**
+ * Resolve a JSON-pointer-style path (a list of object keys / array indices)
+ * against an already-parsed value. Returns `undefined` if any segment is
+ * missing. Kept tiny and fully-owned: it only walks plain objects and arrays,
+ * which is all a stored artifact ever nests.
+ */
+function resolveScalarPath(root: unknown, segments: readonly string[]): unknown {
+  let current: unknown = root;
+  for (const segment of segments) {
+    if (current === null || typeof current !== "object") {
+      return undefined;
+    }
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0 || index >= current.length) {
+        return undefined;
+      }
+      current = current[index];
+      continue;
+    }
+    if (!Object.prototype.hasOwnProperty.call(current, segment)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+/**
+ * Bounded-accessor read path for an over-cap SCALAR string value.
+ *
+ * 2-space indentation (see `writeJsonFile`) wraps containers across lines but
+ * CANNOT wrap a single scalar string — a >2000-char `quoted_text` / base64
+ * `evidence` value lands on one physical line, which a line-truncating reader
+ * (e.g. the host Read tool, capped at ~2000 chars/line) silently clips. A
+ * worker that must re-read such a value cannot reconstruct it by eyeballing the
+ * file. This accessor reconstructs it programmatically: it `JSON.parse`s the
+ * whole file (Node has no per-line cap) and returns the full scalar at
+ * `segments`, regardless of length.
+ *
+ * Returns the string value, or `undefined` if the path is missing or the value
+ * at the path is not a string scalar.
+ */
+export async function readJsonStringScalar(
+  path: string,
+  segments: readonly string[],
+): Promise<string | undefined> {
+  const root = await readJsonFile<unknown>(path);
+  const value = resolveScalarPath(root, segments);
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Same reconstruction as `readJsonStringScalar`, but yields the scalar in
+ * fixed-size character chunks so a consumer whose own read surface is bounded
+ * (e.g. a worker relaying through a capped transport) can stream an arbitrarily
+ * long scalar without ever holding a single over-cap line. Concatenating the
+ * yielded chunks reproduces the scalar exactly. Yields nothing if the path is
+ * missing or the value is not a string.
+ */
+export async function* readJsonStringScalarChunks(
+  path: string,
+  segments: readonly string[],
+  chunkSize = 1000,
+): AsyncGenerator<string, void, void> {
+  if (!Number.isInteger(chunkSize) || chunkSize <= 0) {
+    throw new Error(
+      `readJsonStringScalarChunks: chunkSize must be a positive integer, got ${chunkSize}`,
+    );
+  }
+  const value = await readJsonStringScalar(path, segments);
+  if (value === undefined) {
+    return;
+  }
+  for (let offset = 0; offset < value.length; offset += chunkSize) {
+    yield value.slice(offset, offset + chunkSize);
+  }
+}
+
 export async function appendNdjsonFile(
   path: string,
   value: unknown,

@@ -332,6 +332,8 @@ export {
   withFsRetry,
   readJsonFile,
   writeJsonFile,
+  readJsonStringScalar,
+  readJsonStringScalarChunks,
   appendNdjsonFile,
   readNdjsonFile,
   readOptionalJsonFile,
