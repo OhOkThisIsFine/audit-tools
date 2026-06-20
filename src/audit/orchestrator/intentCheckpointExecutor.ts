@@ -402,7 +402,10 @@ export function runIntentCheckpointAutoComplete(
     }
     // Record each unresolved unencodable clause as a host-answered constraint so
     // it survives into planning rather than being silently dropped headlessly.
+    // Keyed on clause identity (CE-004) so each distinct clause is resolved on
+    // its own, never collapsed with another that renders to the same question.
     const recorded = unresolved.map((c) => ({
+      clause_id: c.clause_id,
       text: c.text,
       checkpoint_question: c.checkpoint_question,
       host_answer:

@@ -14,6 +14,7 @@ import type { AuditFindingsReport, FindingTheme, IntentCheckpoint } from "audit-
 import {
   isValidAuditFindingsReport,
   findingNeedsVerificationBeforeFix,
+  interpretFreeFormIntent,
 } from "audit-tools/shared";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
@@ -39,6 +40,7 @@ import {
   fixupBlocksAfterDedup,
 } from "../dedup/crossLensDedup.js";
 import { filterFindingsByCheckpoint } from "../intent/checkpointFilter.js";
+import { applyIntentOrdering } from "../intent/intentOrdering.js";
 import {
   validateRemediationPlan,
   validateFinding,
@@ -1049,6 +1051,21 @@ export async function runPlanPhase(
     },
     options,
   ));
+
+  // DC-1: fold the confirmed checkpoint's structured free_form_intent into block
+  // and finding ORDERING (never filtering — that already happened above via the
+  // checkpoint filters). The raw string is interpreted ONCE by the single shared
+  // interpreter into lens/priority/scope signals (INV-S04: the verbatim string is
+  // never read here and never reaches a worker prompt); emphasised work sorts
+  // first. A blank/absent free_form_intent is a strict no-op.
+  if (
+    intentCheckpoint?.confirmed_by === "host" &&
+    typeof intentCheckpoint.free_form_intent === "string" &&
+    intentCheckpoint.free_form_intent.trim().length > 0
+  ) {
+    const interpreted = interpretFreeFormIntent(intentCheckpoint.free_form_intent);
+    ({ findings, blocks } = applyIntentOrdering(findings, blocks, interpreted));
+  }
 
   // Project command discovery (shared; now also covers Go and Python). The
   // RemediationPlan stores commands as strings, so argv arrays are joined.

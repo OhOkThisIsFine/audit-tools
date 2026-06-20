@@ -97,6 +97,7 @@ export {
   decomposeIntent,
   assessClauseEncodability,
   interpretIntent,
+  clauseIdentity,
 } from "./intent/clauseInterpreter.js";
 export type {
   RemediationOutcomeStatus,

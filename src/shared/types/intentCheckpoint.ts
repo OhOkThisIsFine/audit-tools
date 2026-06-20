@@ -56,6 +56,16 @@ export const IntentCheckpointSchema = z
       .array(
         z
           .object({
+            /**
+             * Stable clause identity — the RESOLUTION KEY (CE-004). An entry
+             * resolves the clause whose identity equals this id, regardless of
+             * how the question renders. Keyed off the clause text by
+             * `clauseIdentity`; optional for back-compat (a legacy entry without
+             * it falls back to matching on `checkpoint_question`), but every
+             * fresh entry carries it so two distinct clauses that render to the
+             * same question are answered individually.
+             */
+            clause_id: z.string().optional(),
             /** The original unencodable clause text. */
             text: z.string(),
             /** The blocking checkpoint question generated for this clause. */
