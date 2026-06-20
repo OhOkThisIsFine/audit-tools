@@ -24,6 +24,7 @@ import {
   executeNodeInWorktree,
   blockScopesFromPlan,
   declaredPathsFromPlan,
+  type WorktreeNodeWorker,
 } from "./dispatch.js";
 import {
   planHybridDispatch,
@@ -874,6 +875,12 @@ export async function executeInProcessPartition(params: {
   partition: HybridNodeAssignment[];
   plan: RemediationDispatchPlan;
   coordinator: HybridSpillCoordinator;
+  /**
+   * Injectable per-node worker (tests). Defaults to the live provider-backed
+   * dispatcher, which resolves each node's provider from its slot so the
+   * coordinator's per-node pool assignment routes it (cross-provider dispatch).
+   */
+  dispatchNode?: WorktreeNodeWorker;
 }): Promise<InProcessPartitionResult> {
   const { root, artifactsDir, runId, sessionConfig, partition, plan, coordinator } = params;
   if (partition.length === 0) return { nodes: [] };
@@ -889,13 +896,15 @@ export async function executeInProcessPartition(params: {
     (state?.plan?.blocks ?? []).map((b) => [b.block_id, b]),
   );
 
-  const dispatchNode = makeProviderNodeDispatcher({
-    root,
-    artifactsDir,
-    runId,
-    sessionConfig,
-    promptPathByBlock,
-  });
+  const dispatchNode =
+    params.dispatchNode ??
+    makeProviderNodeDispatcher({
+      root,
+      artifactsDir,
+      runId,
+      sessionConfig,
+      promptPathByBlock,
+    });
 
   const nodes = await Promise.all(
     partition.map(async (a) => {
