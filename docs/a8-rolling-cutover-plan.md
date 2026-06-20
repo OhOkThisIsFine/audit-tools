@@ -180,12 +180,30 @@ continuous proactive distribution. Claims + ownerTokens flow from the coordinato
    Commit `c5f991c`.
 
 **Remaining for FULL A-8 (NOT blocking the remediate-hybrid review):**
-- **Audit symmetric** — `driveRollingAuditDispatch` still uses the reactive `runRollingDispatch`; wire it through
-  the coordinator so review-packet spill matches remediate (cutover-plan step 5; audit in-process is still dormant
-  in the live path, so this is a larger pre-existing gap, not just "apply the coordinator").
+- **Audit symmetric — LARGER than a mirror (mapped 2026-06-20).** Correction: `driveRollingAuditDispatch` is NOT
+  dormant — it's wired live (`nextStepHelpers.ts` ~L987, gated on `resolvesToInProcessDispatchProvider`),
+  symmetric to remediate. The real gap: **audit surfaces no NIM pool.** Remediate's `buildConfirmedPools` appends
+  the `openai-compatible` 2nd pool; audit's `buildDispatchPool` (`dispatch/quotaPool.ts`) builds only host-model
+  pools, so there is nothing to spill into. Concrete clean design (ingestion is already unified — `mergeAndIngest`
+  folds `task-results/` by `task_id`, and `buildPendingAuditTasks` is coverage-driven):
+  1. **NIM-pool surfacing for the hybrid** — a hybrid-only audit pool builder returning `[hostPool(s), nimPool]`
+     (mirror remediate's openai-compatible block; ideally extract that block to a SHARED `appendConfiguredApiPool`
+     so both tools single-source it). Do NOT change `buildDispatchPool` (it feeds host-review quota sizing).
+  2. **`prepareDispatchArtifacts` gains `tasksOverride?: AuditTask[]`** — the in-process driver reviews ONLY its
+     subset without touching the shared `pending-audit-tasks.json` the host path owns.
+  3. **`driveRollingAuditDispatch` gains `tasksOverride` + `poolsOverride`** (`= [nimPool]`) — reviews the NIM
+     subset on the NIM provider (`makeAuditProviderPacketDispatcher` already resolves the per-slot provider).
+  4. **Audit split wrapper** = `planHybridDispatch` parameterized by audit's in-process provider set (audit's set
+     EXCLUDES `local-subprocess`/`subprocess-template`); ideally the shared, predicate-parameterized split.
+  5. **Cutover** in the host-review branch of `runHostDelegationStep` (`nextStepHelpers.ts`): when rolling +
+     backend pool confirmed, split → run NIM in-process (ingests) → **fall through to `ensureSemanticReviewRun`**,
+     which now sees the NIM tasks as covered and reviews only the complement. No `materializeReviewRun` change.
+  6. Tests: split (crit. 2/4) + an in-process-subset review e2e (mirror `nim-rolling-audit-e2e`).
 - **DC-4 cross-cycle pause** — the hybrid's settled set is per-cycle; persist it + wire `coordinator.terminalStatus`
   → the `all_pools_exhausted` resumable pause (today an exhausted backend node routes to triage — bounded, no
-  livelock, but no resumable pause yet).
+  livelock, but no resumable pause yet). NOTE: for the host+NIM hybrid the host pool keeps a run alive when NIM
+  exhausts, so the all-pools pause is mostly an audit-in-process-only concern; audit already has the pause
+  machinery (`advanceRollingPause` + `SettledExclusionSet` on the active-dispatch artifact) to wire into.
 - **Live hybrid run (crit. 3)** — manual in-session validation with a Claude session AND a NIM key present at once
   (`provider=claude-code` + `openai_compatible` configured); the in-process half is already covered by the gated
   `tests/nim-rolling-e2e.test.ts`. The host half needs a real host, so it is an in-session check, not a CI test.
