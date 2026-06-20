@@ -23,12 +23,15 @@ import {
   readJsonFile,
   readOptionalJsonFile,
   writeJsonFile,
+  advancePausedState,
   type SessionConfig,
   type CapacityPool,
   type ProviderSlot,
   type RollingDispatchPacket,
   type RollingDispatchResult,
   type PartialCompletionTerminal,
+  type RollingEngineLifecycleState,
+  type SettledExclusionSet,
   type FreshSessionProvider,
   type HostModelRosterEntry,
 } from "audit-tools/shared";
@@ -37,6 +40,7 @@ import type { WorkerTask } from "../types/workerSession.js";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import {
   type ActiveDispatchState,
+  type DispatchPausedState,
   ACTIVE_DISPATCH_FILENAME,
 } from "../types/activeDispatch.js";
 import { runRollingDispatch } from "../orchestrator/rollingDispatch.js";
@@ -117,11 +121,20 @@ export type AuditResultIngestor = (params: {
 
 /** Outcome of an in-process rolling audit dispatch pass. */
 export interface DriveRollingAuditDispatchResult {
-  /** complete = every packet dispatched; partial = some stranded (empty pool / livelock). */
-  status: "complete" | "partial";
+  /**
+   * - `complete` — every packet dispatched.
+   * - `paused`   — the pool exhausted and the run is paused on a resumable
+   *                `waiting_for_provider` state (DC-4): re-invoking re-discovers
+   *                capacity and resumes, rather than stranding the packets. Pauses
+   *                ONLY after the engine's in-pass spill + reactive re-route already
+   *                failed (a full strand), so spill is always tried first.
+   * - `partial`  — terminal: the pause limit was reached (livelock) and the
+   *                stranded packets are yielded to synthesis on partial coverage.
+   */
+  status: "complete" | "paused" | "partial";
   /** Number of packets dispatched this pass (0 = nothing eligible). */
   packet_count: number;
-  /** Packet ids stranded when status === "partial". */
+  /** Packet ids stranded when status === "partial", or held while `paused`. */
   stranded_ids: string[];
   /**
    * Result of the deterministic ingestion that folds the worker results in, or
@@ -130,7 +143,23 @@ export interface DriveRollingAuditDispatchResult {
    * to synthesis on partial coverage without a spurious "all results missing" block).
    */
   ingest: MergeAndIngestResult | null;
+  /**
+   * The resumable paused state recorded when `status === "paused"` (the live
+   * `waiting_for_provider` lifecycle + the accumulated settled-exclusion set), so
+   * the caller can render a resumable "waiting for provider" handoff. Absent for
+   * `complete` / `partial`.
+   */
+  paused_state?: DispatchPausedState;
 }
+
+/**
+ * Re-discover the provider ids currently available to the run. Injected by the
+ * caller (and stubbable in tests); the default — used in production wiring — is
+ * supplied by the orchestrator from the live provider roster. Returns the bare
+ * provider/pool ids so `filterNewProviders` can diff them against the persisted
+ * `SettledExclusionSet`.
+ */
+export type ProviderRediscovery = () => Promise<string[]> | string[];
 
 /**
  * Map a packet's deterministic priority to a complexity score in [0, 1] so the
@@ -283,6 +312,18 @@ export async function driveRollingAuditDispatch(params: {
    * a seam here rather than an inline call.
    */
   ingest?: AuditResultIngestor;
+  /**
+   * Re-discover the provider ids currently available. Probed only when the run is
+   * already paused on a `waiting_for_provider` state, to decide resume vs. stay
+   * paused vs. terminal/livelock (DC-4). Defaults to the run's confirmed pool ids
+   * (the dispatch plan's pools), i.e. "the same pools that were just exhausted" —
+   * so with no external re-discovery wiring the run still advances toward livelock
+   * rather than spinning forever, while a caller that can re-probe a live roster
+   * (or a8's coordinator that adds a spilled-in pool) supplies real net-new ids.
+   */
+  discoverProviders?: ProviderRediscovery;
+  /** Override the livelock pause limit (defaults to the shared `LIVELOCK_PAUSE_LIMIT`). */
+  livelockLimit?: number;
 }): Promise<DriveRollingAuditDispatchResult> {
   const { root, artifactsDir, sessionConfig } = params;
   const runId = params.activeReviewRun.run_id;
@@ -342,14 +383,23 @@ export async function driveRollingAuditDispatch(params: {
     dispatchPacket,
   );
 
-  // Stranded packets (empty pool / livelock): record a partial-completion terminal
-  // on the active-dispatch artifact so `deriveAuditState` treats
-  // `audit_tasks_completed` as satisfied and the pipeline proceeds to synthesis on
-  // partial coverage rather than re-dispatching tasks that can never land.
+  // Stranded packets (the engine's in-pass spill + reactive re-route already failed
+  // — a FULL strand): rather than immediately stranding to a partial-completion
+  // terminal, enter (or advance) the resumable `waiting_for_provider` pause so a
+  // quota-exhausted run resumes when capacity returns instead of giving up (DC-4).
+  // The pause is promoted to a partial-completion terminal only once the livelock
+  // guard fires (capacity never returned within the pause limit), at which point the
+  // pipeline proceeds to synthesis on partial coverage. Because this branch is
+  // reached ONLY on a full strand, spill is always exhausted before any pause.
+  let pausedState: DispatchPausedState | undefined;
   if (run.status === "partial" && run.stranded_ids.length > 0) {
-    await recordPartialCompletionTerminal(artifactsDir, runId, {
-      reason: run.partial_reason ?? "empty_pool",
-      stranded_ids: run.stranded_ids,
+    pausedState = await advanceRollingPause({
+      artifactsDir,
+      runId,
+      strandedIds: run.stranded_ids,
+      exhaustedPoolIds: run.exhausted_pool_ids,
+      discoverProviders: params.discoverProviders,
+      livelockLimit: params.livelockLimit,
     });
   }
 
@@ -380,12 +430,151 @@ export async function driveRollingAuditDispatch(params: {
       );
     }
   }
+  // A resumable pause is its own status so the caller renders a "waiting for
+  // provider" handoff rather than a terminal partial. The terminal (livelock)
+  // strand keeps `run.status` ("partial") — `advanceRollingPause` already stamped
+  // the partial-completion terminal that lets synthesis proceed on partial coverage.
   return {
-    status: run.status,
+    status: pausedState ? "paused" : run.status,
     packet_count: packets.length,
     stranded_ids: run.stranded_ids,
     ingest: ingestResult,
+    paused_state: pausedState,
   };
+}
+
+/**
+ * Advance the resumable `waiting_for_provider` pause for a full-strand pass (DC-4).
+ *
+ * On the FIRST strand there is no prior paused state, so the run enters
+ * `waiting_for_provider` (pause_count 0) carrying the freshly-exhausted pool ids as
+ * its `SettledExclusionSet`. On a SUBSEQUENT strand a prior paused state exists, so
+ * the persisted settled set is UNIONED with this pass's exhausted ids (CE-001 — the
+ * shared set is co-derived/accumulated, never shrunk), the available providers are
+ * re-discovered, and `advancePausedState` decides:
+ *   - genuinely-new capacity (a provider not in the settled set) → `running` →
+ *     pause cleared, the next pass re-dispatches the stranded packets;
+ *   - still no new capacity, below the limit → bump `pause_count`, stay paused;
+ *   - at/over the limit → `terminal/livelock` → record the partial-completion
+ *     terminal so the pipeline proceeds to synthesis on partial coverage.
+ *
+ * Returns the live paused state when the run stays paused, or `undefined` when it
+ * resumed or went terminal (both clear the paused state on the artifact).
+ */
+async function advanceRollingPause(params: {
+  artifactsDir: string;
+  runId: string;
+  strandedIds: string[];
+  exhaustedPoolIds: string[];
+  discoverProviders?: ProviderRediscovery;
+  livelockLimit?: number;
+}): Promise<DispatchPausedState | undefined> {
+  const { artifactsDir, runId, strandedIds, exhaustedPoolIds } = params;
+  const prior = await readActiveDispatch(artifactsDir, runId);
+  const priorPaused = prior?.paused_state;
+
+  // Accumulate the shared settled-exclusion set: prior settled ∪ this pass's
+  // exhausted pools. Never shrinks — a pool that has been spilled-then-exhausted
+  // stays settled so re-discovery cannot re-offer it as net-new (INV-S03 / CE-001).
+  const settled: SettledExclusionSet = new Set([
+    ...(priorPaused?.settled_exclusions ?? []),
+    ...exhaustedPoolIds,
+  ]);
+  const settledArray = [...settled].sort();
+
+  // First strand: enter the paused state. No re-discovery yet — the pool was just
+  // exhausted this very pass, so probing now would only re-surface the same ids.
+  if (!priorPaused) {
+    const lifecycle: Extract<
+      RollingEngineLifecycleState,
+      { kind: "waiting_for_provider" }
+    > = {
+      kind: "waiting_for_provider",
+      paused_at: new Date().toISOString(),
+      pause_count: 0,
+      stranded_node_ids: strandedIds,
+    };
+    const pausedState: DispatchPausedState = {
+      lifecycle,
+      settled_exclusions: settledArray,
+    };
+    await persistPausedState(artifactsDir, runId, pausedState);
+    return pausedState;
+  }
+
+  // Already paused: re-discover and let advancePausedState transition.
+  const rediscovered = params.discoverProviders
+    ? await params.discoverProviders()
+    : exhaustedPoolIds; // default: the same (already-settled) pools → no net-new.
+  const next = advancePausedState({
+    current: priorPaused.lifecycle,
+    rediscoveredProviders: rediscovered,
+    settledExclusions: settled,
+    livelockLimit: params.livelockLimit,
+  });
+
+  if (next.kind === "running") {
+    // Capacity returned: clear the pause so the next pass re-dispatches.
+    await clearPausedState(artifactsDir, runId);
+    return undefined;
+  }
+
+  if (next.kind === "terminal") {
+    // Livelock: clear the pause and record the partial-completion terminal so the
+    // pipeline proceeds to synthesis on partial coverage (the no-indefinite-stall
+    // guard, CE-003/CE-205). The terminal carries the stranded ids it gave up on.
+    await clearPausedState(artifactsDir, runId);
+    await recordPartialCompletionTerminal(artifactsDir, runId, {
+      reason: "livelock_guard",
+      stranded_ids: next.stranded_node_ids,
+    });
+    return undefined;
+  }
+
+  // Still waiting (pause_count bumped). Persist the advanced state + settled set.
+  const pausedState: DispatchPausedState = {
+    lifecycle: next,
+    settled_exclusions: settledArray,
+  };
+  await persistPausedState(artifactsDir, runId, pausedState);
+  return pausedState;
+}
+
+/** Read the run's active-dispatch artifact, or null when absent / for another run. */
+async function readActiveDispatch(
+  artifactsDir: string,
+  runId: string,
+): Promise<ActiveDispatchState | null> {
+  const path = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
+  const existing = await readJsonFile<ActiveDispatchState>(path).catch(() => null);
+  return existing && existing.run_id === runId ? existing : null;
+}
+
+/** Persist the resumable paused state onto the active-dispatch artifact. */
+async function persistPausedState(
+  artifactsDir: string,
+  runId: string,
+  pausedState: DispatchPausedState,
+): Promise<void> {
+  const existing = await readActiveDispatch(artifactsDir, runId);
+  if (!existing) return;
+  await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), {
+    ...existing,
+    paused_state: pausedState,
+  } satisfies ActiveDispatchState);
+}
+
+/** Clear the paused state (run resumed or went terminal). */
+async function clearPausedState(
+  artifactsDir: string,
+  runId: string,
+): Promise<void> {
+  const existing = await readActiveDispatch(artifactsDir, runId);
+  if (!existing || !existing.paused_state) return;
+  const { paused_state: _dropped, ...rest } = existing;
+  await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), {
+    ...rest,
+  } satisfies ActiveDispatchState);
 }
 
 /**

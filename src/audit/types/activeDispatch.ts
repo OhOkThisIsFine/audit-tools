@@ -1,7 +1,32 @@
-import type { PartialCompletionTerminal } from "audit-tools/shared";
+import type {
+  PartialCompletionTerminal,
+  RollingEngineLifecycleState,
+} from "audit-tools/shared";
 
 export const DISPATCH_RESULT_MAP_FILENAME = "dispatch-result-map.json";
 export const ACTIVE_DISPATCH_FILENAME = "active-dispatch.json";
+
+/**
+ * The resumable `waiting_for_provider` paused state of an audit rolling-dispatch
+ * run, persisted on the active-dispatch artifact so a quota-exhausted run pauses
+ * across `next-step` invocations instead of stranding packets (DC-4 fix 1). It
+ * carries the rolling-engine lifecycle state (`waiting_for_provider` →
+ * `terminal/livelock` per `advancePausedState`) PLUS the accumulated
+ * `SettledExclusionSet` — the pool ids that have been spilled-then-exhausted. The
+ * set is serialized as a sorted array (JSON has no Set) and rehydrated to a
+ * `ReadonlySet` before `advancePausedState`, so a settled pool is never re-offered
+ * as net-new on re-discovery (INV-S03 / CE-001). a8's cross-pool coordinator reads
+ * and co-derives the SAME field — this is the shared exclusion set, not a private
+ * one — so a pool a8 spilled off is already accounted for when the pause engages.
+ */
+export interface DispatchPausedState {
+  lifecycle: Extract<
+    RollingEngineLifecycleState,
+    { kind: "waiting_for_provider" }
+  >;
+  /** Sorted pool ids that have been exhausted (the shared SettledExclusionSet). */
+  settled_exclusions: string[];
+}
 
 export interface ActiveDispatchState {
   run_id: string;
@@ -24,6 +49,14 @@ export interface ActiveDispatchState {
    * on partial coverage, without blocking on tasks that can never be dispatched.
    */
   partial_completion_terminal?: PartialCompletionTerminal;
+  /**
+   * Set when the rolling audit run is paused on an exhausted provider pool and is
+   * resumable (DC-4). Cleared once it resumes (capacity returned) or is promoted to
+   * a `partial_completion_terminal` (livelock after the pause limit). Mutually
+   * exclusive with a "done" state — a run is either paused here or terminal there,
+   * never both.
+   */
+  paused_state?: DispatchPausedState;
 }
 
 export interface DispatchResultMapEntry {

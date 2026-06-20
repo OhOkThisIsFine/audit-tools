@@ -313,12 +313,15 @@ test("A8a: driveRollingAuditDispatch drives every packet, writes results, and fo
 
 // ── 3. driveRollingAuditDispatch strand path ──────────────────────────────────
 
-test("A8a: driveRollingAuditDispatch records a partial-completion terminal when packets strand", async (t) => {
+test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) when packets strand (DC-4)", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
   t.after(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // A dispatcher that always rate-limits exhausts the single host pool, so the
-  // rolling engine strands every packet (INV-QD-07 empty-pool terminal).
+  // rolling engine strands every packet (INV-QD-07). Per DC-4, a full strand now
+  // PAUSES to a resumable `waiting_for_provider` state instead of immediately
+  // stamping a partial-completion terminal — the terminal is reached only after the
+  // livelock pause limit. (Covered in detail in dc4.test.mjs.)
   const stranding = async (packet) => ({ packet, outcome: "rate_limited" });
   const ingestStub = async () => {
     throw new Error("ingestion must be skipped on a full strand");
@@ -334,20 +337,21 @@ test("A8a: driveRollingAuditDispatch records a partial-completion terminal when 
     ingest: ingestStub,
   });
 
-  assert.equal(result.status, "partial");
+  assert.equal(result.status, "paused", "a full strand pauses resumably, not terminal");
   assert.ok(result.stranded_ids.length > 0, "packets stranded on an exhausted pool");
   assert.equal(result.ingest, null, "no ingestion on a full strand");
+  assert.ok(result.paused_state, "a resumable paused state is surfaced");
 
   const activeDispatch = JSON.parse(
     await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
   );
   assert.ok(
-    activeDispatch.partial_completion_terminal,
-    "partial-completion terminal must be stamped onto the active-dispatch artifact",
+    activeDispatch.paused_state,
+    "the resumable paused state must be persisted onto the active-dispatch artifact",
   );
-  assert.deepEqual(
-    activeDispatch.partial_completion_terminal.stranded_ids.sort(),
-    result.stranded_ids.sort(),
+  assert.ok(
+    !activeDispatch.partial_completion_terminal,
+    "a first strand is a resumable pause, NOT yet a partial-completion terminal",
   );
 });
 

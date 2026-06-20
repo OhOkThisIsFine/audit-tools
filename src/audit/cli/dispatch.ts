@@ -387,6 +387,18 @@ export async function prepareDispatchArtifacts(params: {
   // exclude them under a budget cap (present only when actually capped).
   const deferredPacketIds = deferredPackets.map((packet) => packet.packet_id);
   const deferredTaskIds = deferredPackets.flatMap((packet) => packet.task_ids);
+  // Carry forward the resumable DC-4 pause across re-preparation: a paused rolling
+  // run re-prepares its dispatch plan each pass, so a fresh artifact would clobber
+  // the persisted `paused_state` (settled exclusions + pause_count) and reset the
+  // run to pause-0 forever. Preserve it for the SAME run id so `advanceRollingPause`
+  // reads the prior pause and advances it toward resume-or-livelock.
+  const priorActiveDispatch = await readJsonFile<ActiveDispatchState>(
+    join(artifactsDir, ACTIVE_DISPATCH_FILENAME),
+  ).catch(() => null);
+  const carriedPausedState =
+    priorActiveDispatch?.run_id === runId
+      ? priorActiveDispatch.paused_state
+      : undefined;
   const activeDispatch: ActiveDispatchState = {
     run_id: runId,
     created_at: new Date().toISOString(),
@@ -400,6 +412,7 @@ export async function prepareDispatchArtifacts(params: {
           deferred_task_ids: deferredTaskIds,
         }
       : {}),
+    ...(carriedPausedState ? { paused_state: carriedPausedState } : {}),
   };
   await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), activeDispatch);
 
