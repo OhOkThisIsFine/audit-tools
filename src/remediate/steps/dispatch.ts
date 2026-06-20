@@ -53,6 +53,7 @@ import {
   mostCapableTier,
   normalizeRepoPath,
   buildSourcePools,
+  buildHostModelPools,
   type FindingTheme,
 } from "audit-tools/shared";
 import {
@@ -363,28 +364,22 @@ export async function buildConfirmedPools(input: {
       ?.empirical_half_life_hours,
   });
 
-  const primaryPools: CapacityPool[] = await Promise.all((roster ?? [null]).map(async (entry) => {
-    const poolKey = buildProviderModelKey(
-      providerName,
-      entry?.model_id ?? quotaModelKeySegment,
-    );
-    const probe = await probeQuotaSource(quotaSource, poolKey).catch(
-      (): QuotaProbeResult => ({ snapshot: null, status: "degraded" }),
-    );
-    return {
-      id: poolKey,
-      providerName,
-      hostModel,
-      ...(entry ? { rank: entry.rank } : {}),
-      hostConcurrencyLimit: hostLimit,
-      quotaStateEntry: quotaEntries[poolKey] ?? null,
+  // Host-model pools via the shared host-pool-from-roster core (identical shape across
+  // audit + remediate). The per-tool part is just the key + the roster/capability limits.
+  const primaryPools: CapacityPool[] = await buildHostModelPools({
+    providerName,
+    hostModel,
+    hostConcurrencyLimit: hostLimit,
+    quotaSource,
+    quotaEntries,
+    roster,
+    resolve: (entry) => ({
+      poolKey: buildProviderModelKey(providerName, entry?.model_id ?? quotaModelKeySegment),
       discoveredLimits: entry
         ? { context_tokens: entry.context_tokens, output_tokens: entry.output_tokens }
         : hostCapabilityLimits,
-      quotaSourceSnapshot: probe.snapshot,
-      ...(probe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
-    };
-  }));
+    }),
+  });
 
   // Every configured dispatchable backend source (any non-IDE source: NIM/vLLM API,
   // a CLI pool, …) becomes a CapacityPool alongside the primary, so the scheduler's

@@ -1,11 +1,10 @@
 import { join } from "node:path";
-import { writeJsonFile, probeQuotaSource } from "audit-tools/shared";
+import { writeJsonFile, buildHostModelPools } from "audit-tools/shared";
 import type {
   ProviderRateLimits,
   SessionConfig,
   DispatchModelTier,
   HostModelRosterEntry,
-  QuotaProbeResult,
 } from "audit-tools/shared";
 import { DEFAULT_EMPIRICAL_HALF_LIFE_HOURS } from "audit-tools/shared";
 import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource";
@@ -114,34 +113,6 @@ export async function buildDispatchPool(params: {
   // queried and cached limits for context/output (the discovered-capability
   // rung then sizes the partition to the real window). RPM/TPM stay null in
   // the capability entry and fill from the queried/cached sources.
-  const buildPool = async (
-    capability: DiscoveredRateLimits | null,
-    rank?: DispatchModelTier,
-    modelId?: string,
-  ): Promise<CapacityPool> => {
-    const poolKey = modelId
-      ? buildProviderModelKey(quotaProviderName, modelId)
-      : quotaProviderKey;
-    const dispatchCachedLimits = await lookupDiscoveredLimits(poolKey).catch(() => null);
-    const probe = await probeQuotaSource(quotaSource, poolKey).catch(
-      (): QuotaProbeResult => ({ snapshot: null, status: "degraded" }),
-    );
-    return {
-      id: poolKey,
-      providerName: quotaProviderName,
-      hostModel,
-      ...(rank ? { rank } : {}),
-      hostConcurrencyLimit,
-      quotaStateEntry: quotaState.entries[poolKey] ?? null,
-      discoveredLimits: mergeDiscoveredLimits(
-        capability,
-        providerLimits,
-        dispatchCachedLimits,
-      ),
-      quotaSourceSnapshot: probe.snapshot,
-      ...(probe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
-    };
-  };
   const probeBudget = (pool: CapacityPool): number => {
     const probe = computeDispatchCapacity({
       pools: [pool],
@@ -152,22 +123,56 @@ export async function buildDispatchPool(params: {
     return Math.max(1, limits.context_tokens - limits.output_tokens);
   };
 
-  const roster = params.hostModelRoster ?? null;
-  if (roster && roster.length > 0) {
-    const pools: CapacityPool[] = [];
-    const perRank = new Map<DispatchModelTier, number>();
-    for (const entry of roster) {
-      const pool = await buildPool(
-        {
+  // Single-window capability limits (scalar handshake / nothing reported) — defined
+  // before `resolve` so the single-pool path can fall back to it.
+  const hostCapabilityLimits: DiscoveredRateLimits | null =
+    params.hostContextTokens != null || params.hostOutputTokens != null
+      ? {
+          context_tokens: params.hostContextTokens ?? null,
+          output_tokens: params.hostOutputTokens ?? null,
+          source: "host_capability",
+        }
+      : null;
+
+  // The per-tool resolve for the SHARED host-pool-from-roster core: audit's pool key
+  // (quotaProviderKey for the single pool; per-rank model_id for a roster) and its
+  // richer discovered-limits — the capability handshake merged FIRST (so it outranks
+  // context/output) with the queried + learned-cache limits.
+  const resolve = async (entry: HostModelRosterEntry | null) => {
+    const poolKey = entry?.model_id
+      ? buildProviderModelKey(quotaProviderName, entry.model_id)
+      : quotaProviderKey;
+    const dispatchCachedLimits = await lookupDiscoveredLimits(poolKey).catch(() => null);
+    const capability: DiscoveredRateLimits | null = entry
+      ? {
           context_tokens: entry.context_tokens,
           output_tokens: entry.output_tokens,
           source: "host_capability",
-        },
-        entry.rank,
-        entry.model_id,
-      );
-      pools.push(pool);
-      perRank.set(entry.rank, probeBudget(pool));
+        }
+      : hostCapabilityLimits;
+    return {
+      poolKey,
+      discoveredLimits: mergeDiscoveredLimits(capability, providerLimits, dispatchCachedLimits),
+    };
+  };
+
+  const roster = params.hostModelRoster ?? null;
+  const pools = await buildHostModelPools({
+    providerName: quotaProviderName,
+    hostModel,
+    hostConcurrencyLimit,
+    quotaSource,
+    quotaEntries: quotaState.entries,
+    roster,
+    resolve,
+  });
+
+  // Audit-specific budget layer on the shared pools: per-tier budgets from a roster,
+  // else the single pool's budget shared across every tier.
+  if (roster && roster.length > 0) {
+    const perRank = new Map<DispatchModelTier, number>();
+    for (const pool of pools) {
+      if (pool.rank) perRank.set(pool.rank, probeBudget(pool));
     }
     const tierBudgets = resolveTierBudgets(perRank);
     return {
@@ -177,22 +182,10 @@ export async function buildDispatchPool(params: {
       tierBudgets,
     };
   }
-
-  // Single-window handshake (scalar shorthand) or no handshake at all: one
-  // pool, conservative floor when nothing was reported — unchanged behavior.
-  const hostCapabilityLimits: DiscoveredRateLimits | null =
-    params.hostContextTokens != null || params.hostOutputTokens != null
-      ? {
-          context_tokens: params.hostContextTokens ?? null,
-          output_tokens: params.hostOutputTokens ?? null,
-          source: "host_capability",
-        }
-      : null;
-  const hostPool = await buildPool(hostCapabilityLimits);
   return {
-    pools: [hostPool],
+    pools,
     hostModel,
-    contextBudgetTokens: probeBudget(hostPool),
+    contextBudgetTokens: probeBudget(pools[0]!),
     tierBudgets: null,
   };
 }

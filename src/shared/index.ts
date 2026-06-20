@@ -623,6 +623,8 @@ export {
   collectDispatchableSources,
   withSourceConfig,
   sourceByPoolId,
+  buildHostModelPool,
+  buildHostModelPools,
 } from "./quota/apiPool.js";
 export type { CacheablePromptParts } from "./prompts.js";
 export {
