@@ -786,6 +786,9 @@ export type {
   HybridSpillCoordinatorOptions,
 } from "./dispatch/coordinator.js";
 export { HybridSpillCoordinator } from "./dispatch/coordinator.js";
+// The ONE hybrid split layer both orchestrators drive (classification injected).
+export { planHybridDispatch } from "./dispatch/hybridDispatch.js";
+export type { HybridDispatchPartition, HybridDispatchInput } from "./dispatch/hybridDispatch.js";
 
 // Versioned seam contracts (N-X06) — pinned interface types + version constants
 export type {

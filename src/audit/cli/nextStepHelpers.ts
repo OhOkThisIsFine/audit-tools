@@ -74,9 +74,10 @@ import {
 } from "./rollingAuditDispatch.js";
 import {
   buildAuditNimPools,
-  planAuditHybridDispatch,
+  isInProcessAuditPool,
   auditNodeClaimRegistry,
 } from "./hybridDispatch.js";
+import { planHybridDispatch } from "audit-tools/shared";
 
 // ── Incoming-artifact helper ──────────────────────────────────────────────────
 
@@ -1073,19 +1074,22 @@ async function runHostDelegationObligation(
     const pending = buildPendingAuditTasks(bundle);
     if (pending.length > 0) {
       const settled = new Set<string>();
-      const partition = await planAuditHybridDispatch({
+      const partition = await planHybridDispatch({
         // Flat estimate: the coordinator bounds NIM by SLOTS, so uniform is sufficient.
         frontier: pending.map((t) => ({ id: t.task_id, estimatedTokens: 2000 })),
-        nimPools: auditNimPools,
+        // Audit passes ONLY the NIM pool(s): the coordinator bounds NIM to its capacity
+        // and claims those tasks; the rest stay pending for the batch host review.
+        pools: auditNimPools,
         sessionConfig: hybridCfg,
         claimRegistry: auditNodeClaimRegistry(ctx.params.artifactsDir),
         readSettled: () => settled,
         onSettle: (id) => {
           settled.add(id);
         },
+        isInProcess: isInProcessAuditPool,
       });
       if (partition.inProcess.length > 0) {
-        const nimIds = new Set(partition.inProcess.map((a) => a.task_id));
+        const nimIds = new Set(partition.inProcess.map((a) => a.nodeId));
         const nimTasks = pending.filter((t) => nimIds.has(t.task_id));
         const complement = pending.filter((t) => !nimIds.has(t.task_id));
         // Materialize the host review over the COMPLEMENT so its prompt excludes the NIM
@@ -1112,13 +1116,7 @@ async function runHostDelegationObligation(
         });
         // Terminal accept for each in-process task → free its coordinator claim.
         for (const a of partition.inProcess) {
-          await partition.coordinator.release({
-            nodeId: a.task_id,
-            poolId: a.pool_id,
-            providerName: a.providerName,
-            hostModel: a.hostModel,
-            ownerToken: a.ownerToken,
-          });
+          await partition.coordinator.release(a);
         }
         if (complement.length === 0) {
           // NIM reviewed the whole frontier — nothing left for the host this obligation.

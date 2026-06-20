@@ -19,9 +19,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { ClaimRegistry } = await import("../../src/shared/quota/claimRegistry.ts");
-const { planAuditHybridDispatch, isInProcessAuditPool } = await import(
-  "../../src/audit/cli/hybridDispatch.ts"
-);
+const { isInProcessAuditPool } = await import("../../src/audit/cli/hybridDispatch.ts");
+const { planHybridDispatch } = await import("../../src/shared/dispatch/hybridDispatch.ts");
 
 const SESSION = { quota: { unknown_hosted_concurrency: 8 } };
 
@@ -61,9 +60,10 @@ test("audit hybrid: the NIM partition is claimed + capacity-bounded; all on the 
   try {
     const registry = new ClaimRegistry(join(dir, "claims.json"));
     const store = settledStore();
-    const part = await planAuditHybridDispatch({
+    const part = await planHybridDispatch({
+      isInProcess: isInProcessAuditPool,
       frontier: tasks(12),
-      nimPools: [nimPool()],
+      pools: [nimPool()],
       sessionConfig: SESSION,
       claimRegistry: registry,
       readSettled: store.readSettled,
@@ -87,9 +87,10 @@ test("audit hybrid: a quotaSignalDegraded NIM pool still gets a floored slot (sa
   try {
     const registry = new ClaimRegistry(join(dir, "claims.json"));
     const store = settledStore();
-    const part = await planAuditHybridDispatch({
+    const part = await planHybridDispatch({
+      isInProcess: isInProcessAuditPool,
       frontier: tasks(3, 500),
-      nimPools: [nimPool({ quotaSignalDegraded: true, quotaSourceSnapshot: null })],
+      pools: [nimPool({ quotaSignalDegraded: true, quotaSourceSnapshot: null })],
       sessionConfig: SESSION,
       claimRegistry: registry,
       readSettled: store.readSettled,

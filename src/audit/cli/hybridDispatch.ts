@@ -20,16 +20,13 @@
 
 import { join } from "node:path";
 import {
-  HybridSpillCoordinator,
   ClaimRegistry,
   buildConfiguredApiPool,
   buildQuotaSource,
   readQuotaState,
   type CapacityPool,
-  type FrontierNode,
   type QuotaStateEntry,
   type SessionConfig,
-  type SettledExclusionSet,
 } from "audit-tools/shared";
 
 /**
@@ -78,23 +75,6 @@ export async function buildAuditNimPools(sessionConfig: SessionConfig): Promise<
   return nim ? [nim] : [];
 }
 
-/** One coordinator-claimed review task, joined to the backend pool it was assigned to. */
-export interface AuditHybridAssignment {
-  task_id: string;
-  pool_id: string;
-  providerName: CapacityPool["providerName"];
-  hostModel: string | null;
-  ownerToken: string;
-}
-
-/** The in-process partition of one review frontier + the live coordinator. */
-export interface AuditHybridPartition {
-  /** Tasks the orchestrator reviews in-process this cycle (on a backend pool). */
-  inProcess: AuditHybridAssignment[];
-  /** The live coordinator, for `release` on terminal + `settlePool` / `terminalStatus`. */
-  coordinator: HybridSpillCoordinator;
-}
-
 /**
  * The audit run's shared claim registry — keyed only to the artifacts dir, so a claim
  * the in-process driver takes is visible to any peer in-process loop driving the same
@@ -103,36 +83,4 @@ export interface AuditHybridPartition {
  */
 export function auditNodeClaimRegistry(artifactsDir: string): ClaimRegistry {
   return new ClaimRegistry(join(artifactsDir, "runs", "audit-node-claims.json"));
-}
-
-/**
- * Split a review frontier: claim up to the NIM pool(s)' capacity for in-process review;
- * leave the rest pending for the batch host review (coverage-driven complement). Pass
- * ONLY the NIM pool(s) — the host needs no bounded share (it batch-reviews whatever the
- * coordinator does not claim).
- */
-export async function planAuditHybridDispatch(input: {
-  frontier: FrontierNode[];
-  nimPools: CapacityPool[];
-  sessionConfig: SessionConfig;
-  claimRegistry: ClaimRegistry;
-  readSettled: () => SettledExclusionSet;
-  onSettle?: (poolId: string) => void | Promise<void>;
-}): Promise<AuditHybridPartition> {
-  const coordinator = new HybridSpillCoordinator({
-    pools: input.nimPools,
-    sessionConfig: input.sessionConfig,
-    claimRegistry: input.claimRegistry,
-    readSettled: input.readSettled,
-    onSettle: input.onSettle,
-  });
-  const assignments = await coordinator.planAssignments(input.frontier);
-  const inProcess: AuditHybridAssignment[] = assignments.map((a) => ({
-    task_id: a.nodeId,
-    pool_id: a.poolId,
-    providerName: a.providerName,
-    hostModel: a.hostModel,
-    ownerToken: a.ownerToken,
-  }));
-  return { inProcess, coordinator };
 }
