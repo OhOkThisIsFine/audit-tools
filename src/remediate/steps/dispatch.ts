@@ -940,8 +940,14 @@ export interface AcceptNodeWorktreeParams {
   branch: string;
   /** The worker's transport outcome from the node dispatcher. */
   workerOutcome: NodeWorkerOutcome;
-  /** Deduped per-node verify commands (from the block's findings). */
-  targetedCommands: string[];
+  /**
+   * Per-node verify commands. OMIT (leave `undefined`) for the real rolling drivers:
+   * the gate then DERIVES the verify from the node's actually-touched test files
+   * post-commit ({@link deriveVerifyCommandsFromBranch}) — correct paths/runner by
+   * construction, never the whole suite. Pass `[]` to skip the gate (lifecycle unit
+   * tests on a minimal temp repo), or an explicit list to force specific commands.
+   */
+  targetedCommands?: string[];
   /**
    * Accept-time write-scope inputs (OBL-DS-06). When present, the write-scope
    * gate runs HERE — after the verify, BEFORE the cherry-pick — so an out-of-scope
@@ -1015,9 +1021,17 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
     return { outcome: "success", verifyPassed, merged };
   }
 
+  // Verify commands: when the host omits them (real rolling drivers), DERIVE them
+  // from the just-committed branch's touched test files — correct paths/runner by
+  // construction, only this node's own tests, never the whole suite. An explicit
+  // list (or `[]` to skip) overrides; both used by lifecycle unit tests.
+  const verifyCommands =
+    targetedCommands === undefined
+      ? deriveVerifyCommandsFromBranch(root, branch)
+      : targetedCommands;
   const verify =
-    targetedCommands.length > 0
-      ? verifyNodeInWorktree(wt, targetedCommands)
+    verifyCommands.length > 0
+      ? verifyNodeInWorktree(wt, verifyCommands)
       : { passed: true, output: "" };
   verifyPassed = verify.passed;
   if (!verify.passed) {
@@ -1230,6 +1244,53 @@ export function isBuildFreeVerifyCommand(cmd: string): boolean {
 function buildFreeVerifyCommands(commands: string[] | undefined): string[] {
   if (!Array.isArray(commands)) return [];
   return commands.filter((c) => typeof c === "string" && isBuildFreeVerifyCommand(c));
+}
+
+/** A repo-relative test path → the runner that executes that file directly. */
+function verifyRunnerForTestFile(repoRelPath: string): string | undefined {
+  // node:test suites (audit/shared) — run via the tsx loader so the TS source the
+  // test imports needs no prior build. vitest suites (remediate) — `vitest run`.
+  if (/^tests\/.+\.test\.mjs$/.test(repoRelPath)) return "node:test";
+  if (/^tests\/.+\.test\.(ts|tsx)$/.test(repoRelPath)) return "vitest";
+  return undefined;
+}
+
+/**
+ * Derive a node's per-node verify commands from the test files it ACTUALLY touched
+ * on its worktree branch (the git ground truth), instead of trusting host-authored
+ * `targeted_commands` whose paths/runner can drift from where the worker put the
+ * test. Always typechecks (`npm run check`, no emit), then runs ONLY this node's
+ * own touched test files with the repo's runners — never the whole suite (which
+ * would re-enter worktree-spawning tests inside a nested worktree). Build-free: the
+ * host owns the central build; a node's own test imports the source it changed via
+ * the tsx loader. Returns `[]` when there is no git ground truth so the caller can
+ * skip the gate rather than fabricate a command.
+ */
+/** Pure assembly (git-free) of the verify commands for a set of edited paths —
+ *  the testable core of {@link deriveVerifyCommandsFromBranch}. */
+export function verifyCommandsForEdits(editedFiles: Iterable<string>): string[] {
+  const nodeTests: string[] = [];
+  const vitestTests: string[] = [];
+  for (const f of editedFiles) {
+    const rel = f.replace(/\\/g, "/");
+    const runner = verifyRunnerForTestFile(rel);
+    if (runner === "node:test") nodeTests.push(rel);
+    else if (runner === "vitest") vitestTests.push(rel);
+  }
+  const cmds = ["npm run check"];
+  if (nodeTests.length > 0) {
+    cmds.push(`node --import tsx/esm --test ${nodeTests.sort().join(" ")}`);
+  }
+  if (vitestTests.length > 0) {
+    cmds.push(`npx vitest run ${vitestTests.sort().join(" ")}`);
+  }
+  return cmds;
+}
+
+export function deriveVerifyCommandsFromBranch(root: string, branch: string): string[] {
+  const edited = gitEditedFilesForBranch(root, branch);
+  if (!edited.available) return [];
+  return verifyCommandsForEdits(edited.files);
 }
 
 function markStarted(item: { started_at?: string; completed_at?: string }): void {
