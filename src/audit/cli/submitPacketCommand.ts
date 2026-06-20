@@ -73,6 +73,13 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
   const lineIndex = Object.fromEntries(
     tasks.flatMap((task) => Object.entries(task.file_line_counts ?? {})),
   );
+  // Packet boundary: the union of every sibling task's assigned file_paths.
+  // A result in this packet may declare coverage of, or queue a followup over,
+  // any file a sibling task was assigned without a hard reject — the evidence
+  // gates widen from the single task's files to the whole packet's files.
+  const boundaryPaths = [
+    ...new Set(tasks.flatMap((task) => task.file_paths ?? [])),
+  ];
   const encodedResults = getFlag(argv, "--results-b64");
   const raw = encodedResults ? fromBase64Url(encodedResults) : await readStdinText();
   if (raw.trim().length === 0) {
@@ -91,7 +98,7 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
   }
 
   const resultErrors: string[] = [];
-  const issues = validateAuditResults(payload, tasks, { lineIndex });
+  const issues = validateAuditResults(payload, tasks, { lineIndex, boundaryPaths });
   const validationErrors = issues.filter((issue) => issue.severity === "error");
   const validationWarnings = issues.filter((issue) => issue.severity === "warning");
   if (validationWarnings.length > 0) {

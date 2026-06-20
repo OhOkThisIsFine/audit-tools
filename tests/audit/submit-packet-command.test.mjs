@@ -624,3 +624,161 @@ await test("throws when --packet-id is missing", async (t) => {
     `Expected '--packet-id' in error message, got: ${error.message}`,
   );
 });
+
+// ── 13. F-6: packet/unit boundary widens the file_coverage hard-reject gate ────
+//
+// Both packet tasks are assigned to PACKET_ID, so the packet boundary is the
+// union { src/task-bound-a.ts, src/task-bound-b.ts }. A result for task A that
+// declares coverage of task B's file (unassigned to A, but in-boundary) must be
+// ACCEPTED rather than hard-rejected — the boundary is computed by the real
+// submit-packet path, not hand-injected. An out-of-boundary file must still be
+// hard-rejected.
+
+await test("F-6: file_coverage of an in-boundary (sibling-assigned) file is accepted", async (t) => {
+  const taskA = makeTaskCovering("task-bound-a", "src/task-bound-a.ts", "correctness");
+  const taskB = makeTaskCovering("task-bound-b", "src/task-bound-b.ts", "correctness", "unit-2");
+  const { artifactsDir, runDir } = await makeArtifactsDir({
+    tasks: [taskA, taskB],
+    packetTaskIds: [taskA.task_id, taskB.task_id],
+  });
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  // taskA's result declares coverage of BOTH its own file and taskB's file.
+  // taskB's file is unassigned to taskA but lives inside the packet boundary.
+  const resultA = {
+    ...makeResult(taskA),
+    file_coverage: [
+      { path: "src/task-bound-a.ts", total_lines: 50 },
+      { path: "src/task-bound-b.ts", total_lines: 50 },
+    ],
+  };
+  const resultB = makeResult(taskB);
+
+  const argv = makeArgv(artifactsDir, PACKET_ID, [resultA, resultB]);
+  const { stdout, error } = await runSubmit(argv);
+
+  assert.equal(error, null, `In-boundary coverage should be accepted; got: ${error?.message}`);
+  const parsed = JSON.parse(stdout.trim());
+  assert.equal(parsed.accepted_count, 2);
+  // Result files still written.
+  const written = JSON.parse(
+    await readFile(join(runDir, "task-results", `${taskA.task_id}.json`), "utf8"),
+  );
+  assert.equal(written.task_id, taskA.task_id);
+});
+
+await test("F-6: file_coverage of an out-of-boundary file is still hard-rejected", async (t) => {
+  const taskA = makeTaskCovering("task-oob-a", "src/task-oob-a.ts", "correctness");
+  const taskB = makeTaskCovering("task-oob-b", "src/task-oob-b.ts", "correctness", "unit-2");
+  const { artifactsDir } = await makeArtifactsDir({
+    tasks: [taskA, taskB],
+    packetTaskIds: [taskA.task_id, taskB.task_id],
+  });
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  // taskA declares coverage of a file NOT assigned to any sibling in the packet.
+  const resultA = {
+    ...makeResult(taskA),
+    file_coverage: [
+      { path: "src/task-oob-a.ts", total_lines: 50 },
+      { path: "src/totally-outside.ts", total_lines: 50 },
+    ],
+  };
+  const resultB = makeResult(taskB);
+
+  const argv = makeArgv(artifactsDir, PACKET_ID, [resultA, resultB]);
+  const { error } = await runSubmit(argv);
+
+  assert.ok(error instanceof Error, "Out-of-boundary coverage must be rejected");
+  assert.ok(
+    error.message.includes("src/totally-outside.ts"),
+    `Expected out-of-boundary path in error, got: ${error.message}`,
+  );
+});
+
+// ── 14. F-6: boundary widens the verification.followup_tasks.file_paths gate ───
+
+function makeLensVerificationTask(taskId, path, unitId = "unit-1") {
+  return {
+    ...makeTaskCovering(taskId, path, "correctness", unitId),
+    tags: ["lens_verification"],
+  };
+}
+
+await test("F-6: followup_tasks targeting an in-boundary file is accepted", async (t) => {
+  // Verification task A is tagged lens_verification; its followup may target a
+  // file assigned to sibling task B (in-boundary) without a hard reject.
+  const taskA = makeLensVerificationTask("task-fu-a", "src/fu-a.ts");
+  const taskB = makeTaskCovering("task-fu-b", "src/fu-b.ts", "correctness", "unit-2");
+  const { artifactsDir } = await makeArtifactsDir({
+    tasks: [taskA, taskB],
+    packetTaskIds: [taskA.task_id, taskB.task_id],
+  });
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  const resultA = {
+    ...makeResult(taskA),
+    verification: {
+      verified: true,
+      needs_followup: true,
+      followup_tasks: [
+        {
+          task_id: "followup-fu-1",
+          unit_id: "unit-1",
+          pass_id: "pass:correctness",
+          lens: "correctness",
+          rationale: "cross-cutting concern surfaced in the packet",
+          priority: "medium",
+          file_paths: ["src/fu-b.ts"],
+        },
+      ],
+    },
+  };
+  const resultB = makeResult(taskB);
+
+  const argv = makeArgv(artifactsDir, PACKET_ID, [resultA, resultB]);
+  const { stdout, error } = await runSubmit(argv);
+
+  assert.equal(error, null, `In-boundary followup file should be accepted; got: ${error?.message}`);
+  const parsed = JSON.parse(stdout.trim());
+  assert.equal(parsed.accepted_count, 2);
+});
+
+await test("F-6: followup_tasks targeting an out-of-boundary file is still hard-rejected", async (t) => {
+  const taskA = makeLensVerificationTask("task-fuoob-a", "src/fuoob-a.ts");
+  const taskB = makeTaskCovering("task-fuoob-b", "src/fuoob-b.ts", "correctness", "unit-2");
+  const { artifactsDir } = await makeArtifactsDir({
+    tasks: [taskA, taskB],
+    packetTaskIds: [taskA.task_id, taskB.task_id],
+  });
+  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  const resultA = {
+    ...makeResult(taskA),
+    verification: {
+      verified: true,
+      needs_followup: true,
+      followup_tasks: [
+        {
+          task_id: "followup-oob-1",
+          unit_id: "unit-1",
+          pass_id: "pass:correctness",
+          lens: "correctness",
+          rationale: "out of the packet boundary",
+          priority: "medium",
+          file_paths: ["src/way-outside.ts"],
+        },
+      ],
+    },
+  };
+  const resultB = makeResult(taskB);
+
+  const argv = makeArgv(artifactsDir, PACKET_ID, [resultA, resultB]);
+  const { error } = await runSubmit(argv);
+
+  assert.ok(error instanceof Error, "Out-of-boundary followup file must be rejected");
+  assert.ok(
+    error.message.includes("src/way-outside.ts"),
+    `Expected out-of-boundary followup path in error, got: ${error.message}`,
+  );
+});
