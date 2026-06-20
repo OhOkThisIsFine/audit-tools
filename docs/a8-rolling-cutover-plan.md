@@ -143,7 +143,7 @@ One-shot-CLI orchestrator + host-as-executor ⇒ rolling via a **per-completion 
   + 2nd CapacityPool + per-slot provider resolution); the {host-subagent + NIM} hybrid + live cross-provider
   spill run remain (backlog quota *a-residual*).
 
-## Step 7 — hybrid topology wiring (FINDING-020 capstone, task_847a8c7d) — IN PROGRESS
+## Step 7 — hybrid topology wiring (FINDING-020 capstone, task_847a8c7d) — REMEDIATE DONE (green)
 
 > Ethan-confirmed scope (2026-06-20): **Full hybrid now.** ONE remediate cycle splits the eligible frontier
 > across [host-subagent pool + in-process backend (NIM) pool] via the `HybridSpillCoordinator`, host nodes →
@@ -162,18 +162,30 @@ partition NOW (concurrent, bounded by the coordinator's split); hand the host pa
 existing `dispatch_implement_rolling` step. Next cycle re-splits the remaining frontier by current capacity →
 continuous proactive distribution. Claims + ownerTokens flow from the coordinator to whichever driver executes.
 
-**Increments (green at every commit; cutover is one atomic replace):**
-1. `planHybridImplementDispatch` — prepare frontier → buildConfirmedPools → classify pools (in-process vs host)
-   → coordinator.planAssignments → partition `{inProcess, host}` (block_id + ownerToken + prompt/result + pool).
-   Additive + hermetic test. NOT wired.
-2. Extract the per-node in-process lifecycle (`dispatchNodeWithWorktree` body: worktree → provider.launch →
-   acceptNodeWorktree → recordNodeAcceptOutcome → release) into a reusable fn both the old reactive path and the
-   new hybrid executor call. Refactor, green.
-3. Host driver (`prepareHostRollingDispatch`/`advanceHostRolling`) consumes a coordinator partition (pre-claimed
-   host subset + tokens) instead of self-claiming the full frontier. Additive param, green.
-4. **Atomic cutover** — replace the mutually-exclusive if/if at `nextStep.ts` with the unified hybrid entry:
-   plan → run in-process partition → return host step for host partition (or merge+transition if host empty).
-   Delete the either/or selection + dead reactive-only assignment. One commit, green.
-5. Coordinator settled-set/`terminalStatus` pause wired to the in-process exhaustion path (DC-4 handshake);
-   audit symmetric wiring (`driveRollingAuditDispatch`); hybrid integration test (criterion 2, hermetic) +
-   safe-degrade test (criterion 4) + gated live NIM hybrid e2e (criterion 3); fold + delete this doc.
+**Increments (all green; branch `a8-hybrid-spill-wiring`, awaiting Ethan review before merge/publish):**
+1. ✓ `planHybridDispatch` (`src/remediate/steps/hybridDispatch.ts`) — drive the coordinator to split the frontier
+   + claim each node, partition `{inProcess, host}` by `isInProcessPool`. Hermetic test proves crit. 1/2/4 at the
+   partition level (`tests/remediate/hybrid-dispatch.test.ts`, 6). Commit `2ea578d`.
+2. ✓ Extract `executeNodeInWorktree` (`dispatch.ts`) — the per-node in-process lifecycle (reset→create→seed→
+   launch→acceptNodeWorktree→record), shared by the reactive engine and the hybrid executor. Behaviour-preserving.
+   Commit `b574012`.
+3. ✓ `prepareHostRollingDispatch` consumes a pre-prepared plan + pre-claimed host partition (reuses coordinator
+   tokens, no re-claim); `advanceHostRolling` needs no change (partition ≤ slots). Commit `5f12e99`.
+4. ✓ **Cutover** — the host-subagent branch of `decideImplementDispatch` activates the hybrid when a backend pool
+   is ALSO confirmed: prepare once → `planHybridDispatch` → `executeInProcessPartition` (in-process partition runs
+   this cycle, each node on its assigned pool) → host partition handed to the host driver. Pure host-subagent
+   falls out when no backend pool. The explicit-backend in-process branch is unchanged. Commit `384a696`.
+5. ✓ Hermetic executor integration test (`tests/remediate/hybrid-inprocess.test.ts`, 2) — nodes run on their
+   backend pool, merge into HEAD, claims released; an errored node is not merged (triage, never false-resolved).
+   Commit `c5f991c`.
+
+**Remaining for FULL A-8 (NOT blocking the remediate-hybrid review):**
+- **Audit symmetric** — `driveRollingAuditDispatch` still uses the reactive `runRollingDispatch`; wire it through
+  the coordinator so review-packet spill matches remediate (cutover-plan step 5; audit in-process is still dormant
+  in the live path, so this is a larger pre-existing gap, not just "apply the coordinator").
+- **DC-4 cross-cycle pause** — the hybrid's settled set is per-cycle; persist it + wire `coordinator.terminalStatus`
+  → the `all_pools_exhausted` resumable pause (today an exhausted backend node routes to triage — bounded, no
+  livelock, but no resumable pause yet).
+- **Live hybrid run (crit. 3)** — manual in-session validation with a Claude session AND a NIM key present at once
+  (`provider=claude-code` + `openai_compatible` configured); the in-process half is already covered by the gated
+  `tests/nim-rolling-e2e.test.ts`. The host half needs a real host, so it is an in-session check, not a CI test.

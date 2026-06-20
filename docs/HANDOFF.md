@@ -58,14 +58,22 @@ Readable plan: [`docs/remaining-specs-remediation-plan.md`](remaining-specs-reme
   one merge-surfaced regression (DC-2's new `provider-confirmation.json` write → registered as a side-channel in
   the executor-writeset parity test, `a71050fb`). Each block was green in isolation; only the merge surfaced it.
 - **Deliberate integration seams (NOT bugs) — finish before a release:**
-  - **A-8 coordinator NOT wired into the live drivers** — `HybridSpillCoordinator` is built + unit-green but the
-    drivers don't call `planAssignments()` yet (proactive hybrid-spill not active end-to-end). DC-6 *did* wire both
-    drivers through the a10 ClaimRegistry, so double-dispatch protection is live. Follow-up = `task_847a8c7d`.
+  - **A-8 hybrid: ✓ REMEDIATE DONE (2026-06-20, branch `a8-hybrid-spill-wiring`, 5 commits `2ea578d`..`c5f991c`,
+    fully green — awaiting Ethan's review before FF-merge + publish).** Ethan-confirmed scope = **Full hybrid now**
+    (memory `a8-hybrid-full-scope`). The remediate next-step now activates a proactive host-subagent + in-process
+    backend (NIM) split via `HybridSpillCoordinator.planAssignments()`: one cycle splits the eligible frontier
+    across both pools, the orchestrator runs the in-process partition itself (`executeInProcessPartition`), the host
+    spawns subagents for its partition, both merged by the shared `acceptNodeWorktree`. Pure host-subagent / pure
+    in-process fall out when only one pool class is confirmed. **Remaining for FULL A-8** (NOT blocking this review;
+    see `docs/a8-rolling-cutover-plan.md` §Step 7): audit symmetric wiring (`driveRollingAuditDispatch` still
+    reactive), DC-4 cross-cycle settled-set/pause (per-cycle today; an exhausted backend node routes to triage —
+    bounded), and the live host+NIM run (crit. 3 — needs a Claude session AND a NIM key present at once).
   - **DC-4** injectable `discoverProviders` stub (hermetic default; live roster supplies net-new).
   - **A-2** scorer + fixture corpus built; real scoring needs operator-authored `corpus/<run-id>.labels.json`.
   - Gated live e2e skip without creds: INV-2 `AUDIT_TOOLS_LIVE_QUOTA=1`, A-7 `RUN_CODEX_E2E=1`, A-9 `RUN_AUTONOMY_E2E=1`.
-- **Open follow-up tasks (spawned):** `task_847a8c7d` (A-8 wiring), `task_7d35176d` (in-process per-node verify
-  hardcodes `npm run check`, ignores node `targeted_commands`), `task_2092be69` (complete_redelivery stale-report gate).
+- **Open follow-up tasks (spawned):** `task_847a8c7d` (A-8 wiring) — ✓ DONE for remediate (branch above; audit
+  symmetric + DC-4 pause remain, §Step 7); `task_7d35176d` (in-process per-node verify hardcodes `npm run check`,
+  ignores node `targeted_commands`), `task_2092be69` (complete_redelivery stale-report gate).
 - **Prior-run cleanup (not a bug):** the earlier quick-wins run's promoted outputs sit in
   `.audit-tools/prior-run-quickwins-2026-06-19.bak/` (moved to clear the stale-report gate short-circuit; memory
   `stale-remediation-report-complete-redelivery-trap`).
