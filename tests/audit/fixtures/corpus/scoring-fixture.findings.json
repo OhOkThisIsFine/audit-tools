@@ -1,0 +1,74 @@
+{
+  "contract_version": "audit-code-findings/v1alpha1",
+  "summary": {
+    "finding_count": 6,
+    "work_block_count": 0,
+    "severity_breakdown": {},
+    "audited_file_count": 0,
+    "excluded_file_count": 0,
+    "runtime_validation_status_breakdown": {}
+  },
+  "findings": [
+    {
+      "id": "SEC-001",
+      "title": "auth check absent on the login route (v2, line 88)",
+      "category": "authz",
+      "severity": "high",
+      "confidence": "high",
+      "lens": "security",
+      "summary": "The login route never verifies the caller is authenticated.",
+      "affected_files": [{ "path": "src/api/auth.ts", "symbol": "login", "line_start": 12, "line_end": 30 }]
+    },
+    {
+      "id": "SEC-002",
+      "title": "Weak password hash",
+      "category": "crypto",
+      "severity": "medium",
+      "confidence": "high",
+      "lens": "security",
+      "summary": "Password digest uses an unsalted fast hash.",
+      "affected_files": [{ "path": "src/lib/hash.ts", "symbol": "digest" }]
+    },
+    {
+      "id": "SEC-003",
+      "title": "SQL injection in query builder",
+      "category": "injection",
+      "severity": "critical",
+      "confidence": "high",
+      "lens": "security",
+      "summary": "User input is concatenated into a SQL string.",
+      "affected_files": [{ "path": "src/db/query.ts", "symbol": "run" }]
+    },
+    {
+      "id": "SEC-004",
+      "title": "Unlabeled emitted finding",
+      "category": "misc",
+      "severity": "low",
+      "confidence": "low",
+      "lens": "security",
+      "summary": "An emitted finding the corpus has no label for.",
+      "affected_files": [{ "path": "src/x.ts", "symbol": "foo" }]
+    },
+    {
+      "id": "OPS-001",
+      "title": "No CI pipeline configured",
+      "category": "ci",
+      "severity": "medium",
+      "confidence": "medium",
+      "lens": "operability",
+      "summary": "The repo has no continuous-integration workflow.",
+      "affected_files": []
+    },
+    {
+      "id": "OPS-002",
+      "title": "CI is entirely absent from the repo",
+      "category": "ci",
+      "severity": "medium",
+      "confidence": "medium",
+      "lens": "operability",
+      "summary": "A second, distinct fileless finding sharing the lens+category signature.",
+      "affected_files": []
+    }
+  ],
+  "work_blocks": []
+}
