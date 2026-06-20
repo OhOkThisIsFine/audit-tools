@@ -76,8 +76,9 @@ import {
   buildAuditNimPools,
   isInProcessAuditPool,
   auditNodeClaimRegistry,
+  auditHybridSettledPath,
 } from "./hybridDispatch.js";
-import { planHybridDispatch } from "audit-tools/shared";
+import { planHybridDispatch, readSettledPools, addSettledPool } from "audit-tools/shared";
 
 // ── Incoming-artifact helper ──────────────────────────────────────────────────
 
@@ -1073,7 +1074,10 @@ async function runHostDelegationObligation(
   if (resolveAuditRollingEngineEnabled({ sessionConfig }) && auditNimPools.length > 0) {
     const pending = buildPendingAuditTasks(bundle);
     if (pending.length > 0) {
-      const settled = new Set<string>();
+      // DC-4: read the cross-cycle settled-pool set; a NIM pool exhausted on a prior
+      // cycle is excluded from this split, so its stranded tasks route to the host.
+      const settledPath = auditHybridSettledPath(ctx.params.artifactsDir);
+      const settled = await readSettledPools(settledPath);
       const partition = await planHybridDispatch({
         // Flat estimate: the coordinator bounds NIM by SLOTS, so uniform is sufficient.
         frontier: pending.map((t) => ({ id: t.task_id, estimatedTokens: 2000 })),
@@ -1083,8 +1087,9 @@ async function runHostDelegationObligation(
         sessionConfig: hybridCfg,
         claimRegistry: auditNodeClaimRegistry(ctx.params.artifactsDir),
         readSettled: () => settled,
-        onSettle: (id) => {
+        onSettle: async (id) => {
           settled.add(id);
+          await addSettledPool(settledPath, id);
         },
         isInProcess: isInProcessAuditPool,
       });
@@ -1105,7 +1110,7 @@ async function runHostDelegationObligation(
           tasksOverride: complement.length > 0 ? complement : nimTasks,
         });
         // Review the NIM partition in-process into the SAME run's task-results/ + ingest.
-        await driveRollingAuditDispatch({
+        const driven = await driveRollingAuditDispatch({
           root: ctx.params.root,
           artifactsDir: ctx.params.artifactsDir,
           activeReviewRun,
@@ -1117,6 +1122,14 @@ async function runHostDelegationObligation(
         // Terminal accept for each in-process task → free its coordinator claim.
         for (const a of partition.inProcess) {
           await partition.coordinator.release(a);
+        }
+        // DC-4: the NIM pool exhausted (paused / livelock-partial) and could not carry
+        // its partition → settle it (cross-cycle) so the next cycle excludes it and the
+        // stranded review tasks fall back to the batch host review instead of re-looping.
+        if (driven.status !== "complete") {
+          for (const pool of auditNimPools) {
+            await partition.coordinator.settlePool(pool.id);
+          }
         }
         if (complement.length === 0) {
           // NIM reviewed the whole frontier — nothing left for the host this obligation.

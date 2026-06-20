@@ -84,3 +84,12 @@ export async function buildAuditNimPools(sessionConfig: SessionConfig): Promise<
 export function auditNodeClaimRegistry(artifactsDir: string): ClaimRegistry {
   return new ClaimRegistry(join(artifactsDir, "runs", "audit-node-claims.json"));
 }
+
+/**
+ * The audit run's cross-cycle settled-pool store path (DC-4) — keyed to the artifacts
+ * dir, read each cycle by the coordinator's `readSettled` and appended to when a NIM
+ * pool exhausts, so the stranded review tasks fall back to the batch host review.
+ */
+export function auditHybridSettledPath(artifactsDir: string): string {
+  return join(artifactsDir, "runs", "hybrid-settled-pools.json");
+}

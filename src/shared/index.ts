@@ -789,6 +789,9 @@ export { HybridSpillCoordinator } from "./dispatch/coordinator.js";
 // The ONE hybrid split layer both orchestrators drive (classification injected).
 export { planHybridDispatch } from "./dispatch/hybridDispatch.js";
 export type { HybridDispatchPartition, HybridDispatchInput } from "./dispatch/hybridDispatch.js";
+// Cross-cycle settled-pool store (DC-4): a spilled-then-exhausted pool the coordinator
+// excludes from future splits so stranded work falls back to the host pool.
+export { readSettledPools, addSettledPool } from "./dispatch/settledPools.js";
 
 // Versioned seam contracts (N-X06) — pinned interface types + version constants
 export type {
