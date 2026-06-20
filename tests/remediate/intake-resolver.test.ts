@@ -413,6 +413,39 @@ describe("resolveIntakeStep", () => {
     expect(result.step.status).toBe("ready");
   });
 
+  it("bare next-step (no --input) preserves an input-bound manifest — does not swap to a default candidate", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-preserve-input");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+
+    const docPath = join(TEST_DIR, "remaining-specs.md");
+    await writeFile(docPath, "# Specs", "utf8");
+    // A stale default candidate a bare call would otherwise hijack.
+    const stalePath = join(TEST_DIR, "audit-findings.json");
+    await writeFile(stalePath, JSON.stringify({ findings: [] }), "utf8");
+
+    const manifest: IntakeSourceManifest = {
+      schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+      created_from: "input",
+      sources: [{ type: "document", path: docPath, label: "input-01" }],
+    };
+    await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(manifest), "utf8");
+
+    const stubs = makeStubs();
+    await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      // Bare call: default discovery surfaced the stale candidate, no --input.
+      inputResolution: { supplied: false, existing: [stalePath], missing: [], checked: [stalePath] },
+      ...stubs,
+    });
+
+    // The on-disk manifest must STILL be the input-bound document, never the candidate.
+    const after = JSON.parse(await readFile(join(intakeDir, "source-manifest.json"), "utf8"));
+    expect(after.created_from).toBe("input");
+    expect(after.sources[0].path).toBe(docPath);
+  });
+
   it("summary present but not ready and no clarification resolution returns collect_intake_clarifications step", async () => {
     const artifactsDir = join(TEST_DIR, "artifacts-not-ready");
     const intakeDir = join(artifactsDir, "intake");
