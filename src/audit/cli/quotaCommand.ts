@@ -4,7 +4,6 @@ import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource"
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import {
-  scheduleWave,
   buildProviderModelKey,
   readQuotaState,
   resolveLimits,
@@ -13,12 +12,16 @@ import {
   getQuotaStatePath,
   lookupDiscoveredLimits,
 } from "../quota/index.js";
+import { buildDispatchPool } from "./dispatch/quotaPool.js";
 import {
   getArtifactsDir,
   getExplicitProvider,
-  getFlag,
   getHostMaxActiveSubagents,
   getHostModel,
+  getHostContextTokens,
+  getHostOutputTokens,
+  getHostModelRoster,
+  getHostModelId,
 } from "./args.js";
 
 export async function cmdQuota(argv: string[]): Promise<void> {
@@ -53,15 +56,20 @@ export async function cmdQuota(argv: string[]): Promise<void> {
   const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(providerModelKey).catch(() => null);
   const queryDiscoveredLimits = await lookupDiscoveredLimits(providerModelKey).catch(() => null);
 
-  const waveSchedule = scheduleWave({
-    providerName,
+  // Capacity preview reuses the same pool-resolution path real dispatch sizes
+  // its partition with — parsing the capability-handshake flags so the preview
+  // reflects the host's reported roster/window, not just cached/learned limits.
+  // `queryLimits: undefined` (read-only — no live provider to probe) and this
+  // command never calls finalizeDispatchQuota, so nothing is written to disk.
+  const dispatchPool = await buildDispatchPool({
     sessionConfig,
     hostModel,
-    requestedConcurrency: sessionConfig.parallel_workers ?? 1,
-    quotaStateEntry,
-    hostConcurrencyLimit,
-    quotaSourceSnapshot,
-    discoveredLimits: queryDiscoveredLimits,
+    queryLimits: undefined,
+    hostActiveSubagentLimit: getHostMaxActiveSubagents(argv),
+    hostContextTokens: getHostContextTokens(argv),
+    hostOutputTokens: getHostOutputTokens(argv),
+    hostModelRoster: getHostModelRoster(argv),
+    hostModelId: getHostModelId(argv),
   });
 
   console.log(
@@ -83,7 +91,11 @@ export async function cmdQuota(argv: string[]): Promise<void> {
           : null,
         quota_source_snapshot: quotaSourceSnapshot,
         discovered_limits: queryDiscoveredLimits,
-        wave_schedule: waveSchedule,
+        capacity_preview: {
+          pools: dispatchPool.pools,
+          context_budget_tokens: dispatchPool.contextBudgetTokens,
+          tier_budgets: dispatchPool.tierBudgets,
+        },
         quota_state_path: getQuotaStatePath(),
       },
       null,
