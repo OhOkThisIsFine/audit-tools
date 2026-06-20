@@ -34,6 +34,7 @@ import {
   isBuildFreeVerifyCommand,
   writeScopeViolations,
   enforceWriteScope,
+  adjudicateWriteScope,
   gitEditedFiles,
   buildNodeDisposition,
   attributeSiblingRed,
@@ -350,6 +351,57 @@ describe("enforceWriteScope — gate decision (fail-closed; ignores amended_file
     expect(decision.blocked).toBe(true);
     expect(decision.reason).toContain("src/elsewhere.ts");
     expect(decision.reason).toMatch(/amended_files set is not trusted/i);
+  });
+});
+
+describe("adjudicateWriteScope — git-actual edits, unowned-grant + seam-block (no self-report)", () => {
+  const root = "/repo";
+  const scopes = [
+    { block_id: "A", write_paths: ["src/a.ts"] },
+    { block_id: "B", write_paths: ["src/b.ts"] },
+  ];
+
+  it("does not block an edit inside the node's own declared scope", () => {
+    const edited: GitEditedFiles = { available: true, files: new Set(["src/a.ts"]) };
+    expect(adjudicateWriteScope(scopes, "A", edited, root)).toEqual({ blocked: false });
+  });
+
+  it("GRANTS an edit to an UNOWNED file no sibling declared (the defect-1 fix): not blocked", () => {
+    // src/util.ts is in no block's declared scope → unowned → granted, even though
+    // node A's declared scope (src/a.ts) does not list it and the worker reported nothing.
+    const edited: GitEditedFiles = { available: true, files: new Set(["src/a.ts", "src/util.ts"]) };
+    expect(adjudicateWriteScope(scopes, "A", edited, root)).toEqual({ blocked: false });
+  });
+
+  it("BLOCKS (seam conflict) an edit to a file in another block's declared scope", () => {
+    // Node A edits src/b.ts, which block B owns → seam conflict, not a silent grant.
+    const edited: GitEditedFiles = { available: true, files: new Set(["src/a.ts", "src/b.ts"]) };
+    const decision = adjudicateWriteScope(scopes, "A", edited, root);
+    expect(decision.blocked).toBe(true);
+    expect(decision.reason).toMatch(/seam conflict/i);
+    expect(decision.reason).toContain("src/b.ts owned by B");
+  });
+
+  it("grants an empty-declared-scope node's real edits (matches the rolling default where scope is derived empty)", () => {
+    const emptyScopes = [{ block_id: "A", write_paths: [] }];
+    const edited: GitEditedFiles = { available: true, files: new Set(["src/x.ts", "tests/x.test.mjs"]) };
+    expect(adjudicateWriteScope(emptyScopes, "A", edited, root)).toEqual({ blocked: false });
+  });
+
+  it("normalises absolute declared paths so ownership compares like-for-like", () => {
+    const absScopes = [
+      { block_id: "A", write_paths: [`${root}/src/a.ts`] },
+      { block_id: "B", write_paths: [`${root}/src/b.ts`] },
+    ];
+    const edited: GitEditedFiles = { available: true, files: new Set(["src/b.ts"]) };
+    const decision = adjudicateWriteScope(absScopes, "A", edited, root);
+    expect(decision.blocked).toBe(true);
+    expect(decision.reason).toContain("owned by B");
+  });
+
+  it("fails closed when git could not be probed (no ground truth)", () => {
+    const edited: GitEditedFiles = { available: false, reason: "probe_failed", error: "boom" };
+    expect(adjudicateWriteScope(scopes, "A", edited, root).blocked).toBe(true);
   });
 });
 
