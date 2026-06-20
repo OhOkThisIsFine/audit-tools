@@ -156,7 +156,13 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   driver now absorbs it into a no-progress pass (`ingest:null`) so the fold blocks cleanly. Both red→green in
   `tests/audit/rolling-audit-dispatch.test.mjs`.
   (b-residual) the {host-subagent (Claude) + NIM} HYBRID topology + a
-  live cross-provider spill run (see *Cross-IDE/provider quota detection* below). *(FIXED: worktree-branch reuse
+  live cross-provider spill run (see *Cross-IDE/provider quota detection* below). **✓ REMEDIATE HYBRID DONE
+  (2026-06-20, branch `a8-hybrid-spill-wiring`, awaiting review):** the remediate next-step now splits one
+  eligible frontier across [host-subagent pool + in-process backend pool] via `HybridSpillCoordinator.planAssignments`
+  (single claimant, proactive capacity split) — `executeInProcessPartition` runs the backend partition this cycle,
+  the host driver spawns subagents for its partition, both merged by `acceptNodeWorktree`. REMAINING: audit
+  symmetric (`driveRollingAuditDispatch` still reactive), DC-4 cross-cycle settled-set/pause, live host+NIM run
+  (crit. 3). See `docs/a8-rolling-cutover-plan.md` §Step 7. *(FIXED: worktree-branch reuse
   across a `rate_limited` re-queue — `resetNodeWorktreeAndBranch` removes the worktree, prunes stale admin
   entries, and force-deletes the leftover branch so every re-dispatch starts clean from HEAD.
   FIXED: the worktree-walks-up-to-parent-repo foot-gun — `createWorktree`
