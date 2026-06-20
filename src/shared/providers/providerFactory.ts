@@ -25,7 +25,7 @@ function hasConfiguredClaudeCode(sessionConfig: SessionConfig): boolean {
   );
 }
 
-function hasConfiguredOpenCode(sessionConfig: SessionConfig): boolean {
+export function hasConfiguredOpenCode(sessionConfig: SessionConfig): boolean {
   return (
     Boolean(sessionConfig.opencode?.command?.trim()) ||
     hasEntries(sessionConfig.opencode?.extra_args)
@@ -192,14 +192,17 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
   },
   {
     name: "claude-code",
-    comment: "Tie-break: claude is available but opencode is not — prefer claude-code.",
-    predicate: (ctx) => ctx.claudeAvailable && !ctx.opencodeAvailable,
+    comment:
+      "Tie-break: claude is available — prefer claude-code. (No `!opencodeAvailable` " +
+      "guard: opencode no longer competes at the bare-availability rung, so claude " +
+      "wins whenever present rather than yielding to an unconfigured opencode.)",
+    predicate: (ctx) => ctx.claudeAvailable,
   },
-  {
-    name: "opencode",
-    comment: "Tie-break: opencode is available but claude is not — prefer opencode.",
-    predicate: (ctx) => ctx.opencodeAvailable && !ctx.claudeAvailable,
-  },
+  // NOTE: there is deliberately NO bare-availability opencode tie-break. A
+  // PATH-detected `opencode` is OPT-IN only — it is auto-selected solely via the
+  // config-gated rung above (hasOpenCodeConfig && opencodeAvailable). Without
+  // claude and without configured-opencode, resolution falls through to
+  // local-subprocess rather than launching opencode unprompted (PB-1).
   {
     name: "openai-compatible",
     comment:

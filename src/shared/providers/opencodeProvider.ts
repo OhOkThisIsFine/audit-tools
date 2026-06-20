@@ -39,6 +39,20 @@ export class OpenCodeProvider implements FreshSessionProvider {
   }
 
   async launch(input: LaunchFreshSessionInput) {
+    // PB-1: `opencode run` is an interactive/conversational launcher — it has no
+    // documented headless flag, and spawning it under a headless dispatch can pop
+    // a GUI or block forever reading stdin. Gate at the launch boundary on the
+    // input's uiMode (never trust callers to have checked): a headless run cannot
+    // be served by opencode, so fast-fail BEFORE any spawn with an actionable error.
+    if (input.uiMode === "headless") {
+      throw new Error(
+        "opencode cannot run headless: `opencode run` has no headless mode and " +
+          "would launch interactively (GUI / blocking on stdin). For headless / " +
+          "background dispatch configure a headless-capable provider " +
+          "(claude-code or subprocess-template) in session-config.json, or run " +
+          "opencode conversationally (uiMode 'visible').",
+      );
+    }
     const prompt = await readFile(input.promptPath, "utf8");
     const task = await readJsonFile<WorkerTaskWithCommand>(input.taskPath);
     const baseCommand = this.config.command ?? "opencode";

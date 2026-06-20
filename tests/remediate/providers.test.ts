@@ -383,7 +383,8 @@ describe("provider launch methods", () => {
         },
       );
 
-      await provider.launch(input);
+      // opencode only runs conversationally (uiMode "visible"); headless is gated.
+      await provider.launch({ ...input, uiMode: "visible" });
 
       // A custom command name is not a recognized launcher, so it is spawned
       // directly on every platform (no cmd.exe wrapping).
@@ -392,6 +393,24 @@ describe("provider launch methods", () => {
       expect(calls[0].args).not.toContain(prompt);
       expect(calls[0].launchInput.stdinText).toBe(prompt);
       expect(calls[0].launchInput.timeoutMs).toBe(1234);
+    });
+  });
+
+  it("PB-1: OpenCodeProvider.launch with uiMode 'headless' fast-fails before spawning (no GUI / no stdin hang)", async () => {
+    await withProviderFiles(async ({ input }) => {
+      const calls: any[] = [];
+      const provider = createOpenCodeProvider({}, async (command, args, launchInput) => {
+        calls.push({ command, args, launchInput });
+        return { accepted: true, exitCode: 0 };
+      });
+
+      // makeInput defaults uiMode to "headless"; assert the gate rejects with an
+      // actionable error and that the launcher was NEVER invoked (no spawn, so no
+      // GUI pop, no blocking read on stdin).
+      await expect(
+        provider.launch({ ...input, uiMode: "headless" }),
+      ).rejects.toThrow(/opencode cannot run headless/i);
+      expect(calls.length).toBe(0);
     });
   });
 
@@ -407,7 +426,8 @@ describe("provider launch methods", () => {
         },
       );
 
-      await provider.launch(input);
+      // opencode only runs conversationally (uiMode "visible"); headless is gated.
+      await provider.launch({ ...input, uiMode: "visible" });
 
       if (process.platform === "win32") {
         // On Windows the opencode `.cmd` shim is wrapped through cmd.exe.
