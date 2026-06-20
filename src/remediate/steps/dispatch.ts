@@ -991,6 +991,15 @@ export interface AcceptNodeWorktreeParams {
    */
   targetedCommands?: string[];
   /**
+   * The node's own `targeted_commands` (the auditor/finding-specified verification),
+   * run IN ADDITION to the derived commands — filtered to the build-free subset and
+   * deduped against the derive. The derive gives correct-paths-by-construction; these
+   * add the fix-specific regression checks the derive misses when a fix touches no test
+   * (task_7d35176d). Omit / `[]` → derive-only (the prior behaviour). Ignored when
+   * `targetedCommands` is an explicit override (the lifecycle unit-test path).
+   */
+  additionalVerifyCommands?: string[];
+  /**
    * Accept-time write-scope inputs (OBL-DS-06). When present, the write-scope
    * gate runs HERE — after the verify, BEFORE the cherry-pick — so an out-of-scope
    * or seam-conflicting edit is PREVENTED from landing in the main tree rather than
@@ -1040,7 +1049,7 @@ export interface AcceptNodeWorktreeResult {
  * caller persists via `mergeImplementResults`.
  */
 export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNodeWorktreeResult {
-  const { root, runId, blockId, worktreeRoot: wt, branch, workerOutcome, targetedCommands } = params;
+  const { root, runId, blockId, worktreeRoot: wt, branch, workerOutcome, targetedCommands, additionalVerifyCommands } = params;
   let verifyPassed = false;
   let merged = false;
 
@@ -1079,11 +1088,18 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
   // Verify commands: when the host omits them (real rolling drivers), DERIVE them
   // from the just-committed branch's touched test files — correct paths/runner by
   // construction, only this node's own tests, never the whole suite. An explicit
-  // list (or `[]` to skip) overrides; both used by lifecycle unit tests.
-  const verifyCommands =
+  // list (or `[]` to skip) overrides; both used by lifecycle unit tests. task_7d35176d:
+  // run the derive AND the node's own build-free `targeted_commands` (deduped) — the
+  // auditor's fix-specific regression checks the derive misses when a fix touches no
+  // test. `additionalVerifyCommands` is ignored on the explicit-override path.
+  const baseCommands =
     targetedCommands === undefined
       ? deriveVerifyCommandsFromBranch(root, branch)
       : targetedCommands;
+  const verifyCommands =
+    targetedCommands === undefined
+      ? [...new Set([...baseCommands, ...buildFreeVerifyCommands(additionalVerifyCommands)])]
+      : baseCommands;
   const verify =
     verifyCommands.length > 0
       ? verifyNodeInWorktree(wt, verifyCommands)
@@ -1245,9 +1261,11 @@ export async function executeNodeInWorktree(args: {
   seedPaths: string[];
   /** Every block's declared write scope, for the accept-time write-scope gate (OBL-DS-06). */
   allBlockScopes: Array<{ block_id: string; write_paths: string[] }>;
+  /** The node's own targeted_commands, run IN ADDITION to the derived verify (task_7d35176d). */
+  additionalVerifyCommands?: string[];
   dispatchNode: WorktreeNodeWorker;
 }): Promise<NodeWorktreeExecution> {
-  const { block, slot, root, artifactsDir, runId, resultPath, seedPaths, allBlockScopes, dispatchNode } = args;
+  const { block, slot, root, artifactsDir, runId, resultPath, seedPaths, allBlockScopes, additionalVerifyCommands, dispatchNode } = args;
   const branch = worktreeBranchForBlock(block.block_id, runId);
   const wt = worktreePath(root, block.block_id, runId);
   try {
@@ -1272,6 +1290,7 @@ export async function executeNodeInWorktree(args: {
       worktreeRoot: wt,
       branch,
       workerOutcome: result.outcome,
+      additionalVerifyCommands,
       scope: { allBlockScopes },
     });
     await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept);
@@ -1440,6 +1459,24 @@ export function deriveVerifyCommandsFromBranch(root: string, branch: string): st
   const edited = gitEditedFilesForBranch(root, branch);
   if (!edited.available) return [];
   return verifyCommandsForEdits(edited.files);
+}
+
+/**
+ * A node's own `targeted_commands` for the per-node verify (task_7d35176d) — the union
+ * of the block's `targeted_commands` and its findings' `targeted_commands` (the
+ * auditor-specified, fix-specific verification). `acceptNodeWorktree` runs these IN
+ * ADDITION to the derived touched-test commands (build-free subset, deduped), so a
+ * fix-specific regression check is honoured even when the fix touches no test file.
+ */
+export function targetedCommandsForBlock(state: RemediationState, blockId: string): string[] {
+  const block = state.plan?.blocks?.find((b) => b.block_id === blockId);
+  if (!block) return [];
+  const out = [...(block.targeted_commands ?? [])];
+  for (const fid of block.items) {
+    const finding = state.plan?.findings?.find((f) => f.id === fid);
+    for (const c of finding?.targeted_commands ?? []) out.push(c);
+  }
+  return [...new Set(out)];
 }
 
 function markStarted(item: { started_at?: string; completed_at?: string }): void {
