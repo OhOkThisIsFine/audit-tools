@@ -1,4 +1,5 @@
-import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -703,6 +704,127 @@ export async function installBootstrap(argv, options = {}) {
   return payload;
 }
 
+/**
+ * Run a single host's `verify()` handler from INSTALL_HOST_DEFINITIONS against
+ * already-deployed assets and collect its check results. Single-sourced so the
+ * `verify-install` CLI and the `verify:hosts` release gate exercise the exact
+ * same per-host handler — adding a host to the table auto-extends both.
+ *
+ * @param {string} hostKey
+ * @param {{ root: string, assetPaths: object, hostEntry?: object }} context
+ * @returns {Promise<{ host: string, status: 'ok' | 'error', checks: object[] }>}
+ */
+export async function runHostVerifyChecks(hostKey, { root, assetPaths, hostEntry }) {
+  const checks = [];
+
+  if (hostEntry) {
+    await collectVerifyCheck(checks, 'host_manifest_entry', async () => ({
+      summary: `Host guidance exists for ${hostEntry.label}.`,
+      primary_path: hostEntry.primary_path,
+    }));
+  }
+
+  const hostDefinition = INSTALL_HOST_DEFINITIONS[hostKey];
+  if (hostDefinition?.verify) {
+    await hostDefinition.verify({ checks, root, assetPaths, collectVerifyCheck });
+  } else {
+    checks.push({
+      id: 'host_handler',
+      status: 'error',
+      summary: `No verification handler is implemented for host "${hostKey}".`,
+    });
+  }
+
+  return {
+    host: hostKey,
+    status: checks.some((check) => check.status === 'error') ? 'error' : 'ok',
+    checks,
+  };
+}
+
+/**
+ * Deploy every host's assets into an ISOLATED throwaway repo root under a
+ * redirected `$HOME`/`USERPROFILE` (so the real user config is never touched),
+ * then re-run each host's `verify()` handler from the SAME INSTALL_HOST_DEFINITIONS
+ * table that drives the deploy. The set of hosts verified is derived from
+ * INSTALL_HOST_ORDER, so adding a host to the table auto-extends verification.
+ *
+ * Returns a structured report; callers (the `verify:hosts` script, tests) decide
+ * how to surface it. Never mutates the caller's environment beyond restoring the
+ * redirected HOME/USERPROFILE on the way out.
+ *
+ * @param {{ keepArtifacts?: boolean }} [options]
+ * @returns {Promise<{
+ *   status: 'ok' | 'error',
+ *   issue_count: number,
+ *   verified_hosts: string[],
+ *   home_dir: string,
+ *   repo_root: string,
+ *   hosts: { host: string, status: 'ok' | 'error', checks: object[] }[],
+ * }>}
+ */
+export async function verifyHostsIsolated(options = {}) {
+  // A temp $HOME guarantees a postinstall-style deploy (or any HOME-reading code
+  // path) can never write to the operator's real ~/.config — defense in depth on
+  // top of the throwaway repo root the bootstrap writes into.
+  const homeDir = await mkdtemp(join(tmpdir(), 'audit-code-verify-hosts-home-'));
+  const repoRoot = join(homeDir, 'repo');
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  process.env.HOME = homeDir;
+  process.env.USERPROFILE = homeDir;
+
+  try {
+    await mkdir(repoRoot, { recursive: true });
+    // Deploy every host surface into the throwaway root from the canonical assets.
+    await installBootstrap(['--host', 'all', '--root', repoRoot], { quiet: true });
+
+    // Derive expectations from the SAME table the deploy uses: profile → asset
+    // paths → per-host verify(). INSTALL_HOST_ORDER is the source of truth for the
+    // verified host set.
+    const profile = getInstallProfile('all');
+    const assetPaths = buildInstallAssetPaths(repoRoot, profile);
+    const hostCatalog = new Map(
+      buildHostCatalog({ root: repoRoot, host: 'all', assets: assetPaths }).map(
+        (entry) => [entry.host, entry],
+      ),
+    );
+
+    const hosts = [];
+    for (const hostKey of INSTALL_HOST_ORDER) {
+      hosts.push(
+        await runHostVerifyChecks(hostKey, {
+          root: repoRoot,
+          assetPaths,
+          hostEntry: hostCatalog.get(hostKey),
+        }),
+      );
+    }
+
+    const issueCount = hosts.reduce(
+      (sum, host) => sum + host.checks.filter((check) => check.status === 'error').length,
+      0,
+    );
+
+    return {
+      status: issueCount > 0 ? 'error' : 'ok',
+      issue_count: issueCount,
+      verified_hosts: [...INSTALL_HOST_ORDER],
+      home_dir: homeDir,
+      repo_root: repoRoot,
+      hosts,
+    };
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    if (!options.keepArtifacts) {
+      await rm(homeDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+}
+
 export async function verifyInstalledBootstrap(argv) {
   const root = resolve(getFlag(argv, '--root') ?? '.');
   const requestedHost = getFlag(argv, '--host')?.toLowerCase() ?? null;
@@ -820,40 +942,24 @@ export async function verifyInstalledBootstrap(argv) {
   });
 
   for (const hostKey of selectedHosts) {
-    const checks = [];
     const hostEntry = hostCatalog.get(hostKey);
 
     if (!hostEntry) {
-      checks.push({
-        id: 'host_manifest_entry',
+      hostResults.push({
+        host: hostKey,
         status: 'error',
-        summary: `Install manifest does not contain host guidance for "${hostKey}".`,
+        checks: [{
+          id: 'host_manifest_entry',
+          status: 'error',
+          summary: `Install manifest does not contain host guidance for "${hostKey}".`,
+        }],
       });
-      hostResults.push({ host: hostKey, status: 'error', checks });
       continue;
     }
 
-    await collectVerifyCheck(checks, 'host_manifest_entry', async () => ({
-      summary: `Host guidance exists for ${hostEntry.label}.`,
-      primary_path: hostEntry.primary_path,
-    }));
-
-    const hostDefinition = INSTALL_HOST_DEFINITIONS[hostKey];
-    if (hostDefinition?.verify) {
-      await hostDefinition.verify({ checks, root, assetPaths, collectVerifyCheck });
-    } else {
-      checks.push({
-        id: 'host_handler',
-        status: 'error',
-        summary: `No verification handler is implemented for host "${hostKey}".`,
-      });
-    }
-
-    hostResults.push({
-      host: hostKey,
-      status: checks.some((check) => check.status === 'error') ? 'error' : 'ok',
-      checks,
-    });
+    hostResults.push(
+      await runHostVerifyChecks(hostKey, { root, assetPaths, hostEntry }),
+    );
   }
 
   const issueCount =
