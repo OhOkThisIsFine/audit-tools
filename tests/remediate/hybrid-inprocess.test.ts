@@ -29,6 +29,7 @@ import {
 } from "audit-tools/shared";
 import { executeInProcessPartition } from "../../src/remediate/steps/nextStep.js";
 import { planHybridDispatch } from "../../src/remediate/steps/hybridDispatch.js";
+import { prepareHostRollingDispatch } from "../../src/remediate/steps/rollingSession.js";
 import type { WorktreeNodeWorker } from "../../src/remediate/steps/dispatch.js";
 import type { RemediationDispatchPlan } from "../../src/remediate/steps/types.js";
 import {
@@ -202,5 +203,50 @@ describe("A-8 executeInProcessPartition", () => {
     expect(headHas(repo, "src/BAD.ts")).toBe(false);
     // Terminal error → claim released (never stuck claimed).
     expect(Object.keys(await registry.listClaims())).toEqual([]);
+  });
+});
+
+describe("A-8 prepareHostRollingDispatch (hybrid partition)", () => {
+  it("restricts the frontier to the host partition and REUSES the coordinator's claims (no re-claim)", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const artifactsDir = artifactsDirOf(repo);
+    const implementDir = join(artifactsDir, "runs", RID, "implement");
+    mkdirSync(implementDir, { recursive: true });
+    // slots=2 so both partition nodes dispatch in the initial batch.
+    writeFileSync(join(implementDir, "dispatch-quota.json"), JSON.stringify({ max_concurrent_agents: 2 }) + "\n");
+
+    // The plan has THREE host blocks; the coordinator partition covers only two.
+    const plan = planFor(repo, ["HOST1", "HOST2", "HOST3"]);
+
+    // Pre-claim the two partition nodes (as the coordinator would), capturing the
+    // tokens the host driver must REUSE — the registry path is the one
+    // prepareHostRollingDispatch derives from (artifactsDir + runId).
+    const registry = new ClaimRegistry(join(implementDir, "node-claims.json"));
+    const c1 = await registry.claim("HOST1", "host-subagent");
+    const c2 = await registry.claim("HOST2", "host-subagent");
+    expect(c1.acquired && c2.acquired).toBe(true);
+    const t1 = c1.acquired ? c1.ownerToken : "";
+    const t2 = c2.acquired ? c2.ownerToken : "";
+
+    const { session } = await prepareHostRollingDispatch(
+      { root: repo, artifactsDir },
+      RID,
+      { sessionConfig: SESSION },
+      {
+        plan,
+        partition: [
+          { block_id: "HOST1", ownerToken: t1 },
+          { block_id: "HOST2", ownerToken: t2 },
+        ],
+      },
+    );
+
+    // Frontier restricted to the partition (HOST3 excluded — it's another pool's / cycle's).
+    expect(session.frontier.map((n) => n.block_id).sort()).toEqual(["HOST1", "HOST2"]);
+    // Claims REUSED the coordinator's tokens. A re-claim would have FAILED (already
+    // held) → the node would be skipped, so identical tokens prove the reuse path.
+    expect(session.claims).toEqual({ HOST1: t1, HOST2: t2 });
+    expect(session.dispatched.sort()).toEqual(["HOST1", "HOST2"]);
   });
 });
