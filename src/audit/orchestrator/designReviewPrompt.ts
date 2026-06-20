@@ -1,13 +1,87 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
+import type { IntentCheckpoint } from "audit-tools/shared";
+import { pathMatchesExclusion } from "./scope.js";
+
+/**
+ * The structured scope disposition of one design-review unit: `in_scope`, or
+ * `excluded` with the human reason. Derived from the STRUCTURED IntentCheckpoint
+ * scope fields ONLY — `excluded_scope` (path/prefix + reason) and an `excluded`
+ * `disposition_overrides` entry — never from `free_form_intent` (which is
+ * interpreted into priority/lens signals, never threaded verbatim, INV-S04). A
+ * unit counts as excluded only when EVERY one of its files is excluded; a unit
+ * with any in-scope file stays in scope so the reviewer is never told to skip a
+ * unit that still carries reviewable code.
+ */
+export type UnitScopeDisposition =
+  | { kind: "in_scope" }
+  | { kind: "excluded"; reason: string };
+
+/** Statuses a `disposition_overrides` entry can carry that mean "out of scope". */
+const EXCLUDED_OVERRIDE_STATUSES: ReadonlySet<string> = new Set([
+  "excluded",
+  "generated",
+  "vendor",
+]);
+
+/**
+ * Resolve a single file's structured exclusion (path match wins over override),
+ * returning the reason when excluded or null when in scope. Reads only the
+ * structured `excluded_scope` / `disposition_overrides` fields.
+ */
+function fileExclusionReason(
+  filePath: string,
+  checkpoint: IntentCheckpoint | undefined,
+): string | null {
+  const excludedScope = checkpoint?.excluded_scope ?? [];
+  for (const entry of excludedScope) {
+    if (pathMatchesExclusion(filePath, entry.path)) return entry.reason;
+  }
+  const overrides = checkpoint?.disposition_overrides ?? [];
+  for (const ov of overrides) {
+    if (EXCLUDED_OVERRIDE_STATUSES.has(ov.status) && pathMatchesExclusion(filePath, ov.path)) {
+      return ov.reason;
+    }
+  }
+  return null;
+}
+
+/**
+ * Disposition of a whole unit: excluded only when every file is excluded by the
+ * structured scope, carrying the first file's reason (units are excluded as a
+ * directory in practice, so one reason is representative). No checkpoint, or any
+ * in-scope file ⇒ `in_scope`.
+ */
+export function deriveUnitScopeDisposition(
+  files: readonly string[],
+  checkpoint: IntentCheckpoint | undefined,
+): UnitScopeDisposition {
+  if (!checkpoint || files.length === 0) return { kind: "in_scope" };
+  let firstReason: string | null = null;
+  for (const file of files) {
+    const reason = fileExclusionReason(file, checkpoint);
+    if (reason === null) return { kind: "in_scope" };
+    if (firstReason === null) firstReason = reason;
+  }
+  return { kind: "excluded", reason: firstReason ?? "out of scope" };
+}
+
+/** Render the `[in scope]` / `[excluded: reason]` tag for a unit disposition. */
+function scopeTag(disposition: UnitScopeDisposition): string {
+  return disposition.kind === "excluded"
+    ? `[excluded: ${disposition.reason}]`
+    : "[in scope]";
+}
 
 function summarizeUnits(bundle: ArtifactBundle): string {
   const units = bundle.unit_manifest?.units ?? [];
   if (units.length === 0) return "No units identified.";
 
+  const checkpoint = bundle.intent_checkpoint;
   const lines = units.map((unit) => {
     const lenses = unit.required_lenses.join(", ") || "none";
-    return `- ${unit.unit_id} (${unit.files.length} files, lenses: ${lenses})`;
+    const tag = scopeTag(deriveUnitScopeDisposition(unit.files, checkpoint));
+    return `- ${unit.unit_id} ${tag} (${unit.files.length} files, lenses: ${lenses})`;
   });
 
   return [

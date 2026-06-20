@@ -1003,6 +1003,30 @@ async function runHostDelegationObligation(
       timeoutMs: ctx.params.timeoutMs,
     });
     await clearDispatchFiles(ctx.params.artifactsDir);
+    // Resumable pause (DC-4): the pool exhausted after spill and the run is paused
+    // on a `waiting_for_provider` state, persisted on the active-dispatch artifact.
+    // Emit a resumable blocked handoff — re-invoking `next-step` re-discovers
+    // capacity and `advancePausedState` resumes or, after the pause limit, promotes
+    // to a partial-completion terminal. This is NOT a no-progress spin: the paused
+    // state advances each pass toward resume-or-livelock.
+    if (driven.status === "paused") {
+      const paused = driven.paused_state;
+      const pauseCount = paused?.lifecycle.pause_count ?? 0;
+      return {
+        kind: "emit",
+        step: {
+          kind: "blocked",
+          state,
+          bundle,
+          reason:
+            `In-process rolling dispatch paused waiting for provider capacity: ` +
+            `${driven.stranded_ids.length} review packet(s) are stranded on an exhausted ` +
+            `provider pool (provider '${sessionConfig?.provider}', pause ${pauseCount + 1}). ` +
+            "The run is resumable — re-run next-step once provider capacity returns; " +
+            "it will resume automatically, or yield to synthesis on partial coverage after the pause limit.",
+        },
+      };
+    }
     // Convergence guard: a pass that ingested NO new results and stranded nothing
     // (every packet errored at the provider) made no net progress, and
     // re-dispatching the same unchanged state would loop to the maxTransitions

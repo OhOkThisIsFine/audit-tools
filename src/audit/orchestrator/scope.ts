@@ -311,7 +311,15 @@ export function applyScopeToCoverage(
   return coverage;
 }
 
-function pathMatchesExclusion(filePath: string, entryPath: string): boolean {
+/**
+ * True when `filePath` is covered by an `excluded_scope` entry path — an exact
+ * match or a directory-prefix match (path separators normalized to `/` so the
+ * predicate is OS-agnostic). The single authority for "is this file excluded by
+ * intent scope," shared by coverage application (`applyIntentExclusionsToCoverage`)
+ * and the design-review per-unit scope annotation, so the two can never disagree
+ * on what "excluded" means.
+ */
+export function pathMatchesExclusion(filePath: string, entryPath: string): boolean {
   const f = filePath.replace(/\\/g, "/");
   const p = entryPath.replace(/\\/g, "/").replace(/\/+$/, "");
   if (!p) return false;

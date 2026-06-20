@@ -38,6 +38,15 @@ export interface RollingRunResult<TPacket> {
   stranded_ids: string[];
   /** Reason for partial termination (undefined when status === "complete"). */
   partial_reason?: "empty_pool" | "livelock_guard";
+  /**
+   * Pool ids the engine dropped into its exhausted set this pass (after spill +
+   * the reactive 429 re-route both failed to keep them eligible). These are the
+   * provider ids that have been *spilled off then exhausted*, and so become the
+   * `SettledExclusionSet` the resumable pause carries (DC-4 / INV-S03): on
+   * re-discovery they are filtered out of net-new capacity so a pool that already
+   * gave up is never re-offered as fresh. Empty when status === "complete".
+   */
+  exhausted_pool_ids: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +93,10 @@ export async function runRollingDispatch<TPacket>(
       results: [],
       stranded_ids: strandedIds,
       partial_reason: "empty_pool",
+      // No pool was ever eligible — every confirmed pool is, by definition,
+      // unavailable for this run and is settled-excluded so re-discovery must
+      // surface genuinely-new capacity to resume.
+      exhausted_pool_ids: confirmedPools.map((p) => p.id),
     };
   }
 
@@ -121,6 +134,11 @@ export async function runRollingDispatch<TPacket>(
   // Run the engine — it drives all packets to completion.
   const results = await dispatcher.run();
 
+  // Pools the engine exhausted this pass (spill + reactive re-route already tried
+  // and failed to keep them eligible). These seed the resumable pause's settled
+  // exclusion set (DC-4) so re-discovery never re-offers them as net-new.
+  const exhaustedPoolIds = [...dispatcher.getState().exhaustedPoolIds];
+
   // Check for livelock post-run (packets that never completed).
   const completedIds = new Set(results.map((r) => r.packet.id));
   const pendingIds = packets.map((p) => p.id).filter((id) => !completedIds.has(id));
@@ -143,6 +161,7 @@ export async function runRollingDispatch<TPacket>(
       results,
       stranded_ids: terminal.stranded_ids,
       partial_reason: terminal.reason,
+      exhausted_pool_ids: exhaustedPoolIds,
     };
   }
 
@@ -152,5 +171,6 @@ export async function runRollingDispatch<TPacket>(
     status: "complete",
     results,
     stranded_ids: [],
+    exhausted_pool_ids: exhaustedPoolIds,
   };
 }
