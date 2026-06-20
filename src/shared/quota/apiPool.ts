@@ -1,10 +1,13 @@
 import type { CapacityPool } from "./capacity.js";
 import type {
   DispatchableSource,
+  ResolvedProviderName,
   SessionConfig,
 } from "../types/sessionConfig.js";
-import type { QuotaStateEntry } from "./types.js";
+import type { DispatchModelTier } from "../types/stepContract.js";
+import type { HostConcurrencyLimit, QuotaStateEntry } from "./types.js";
 import type { QuotaSource, QuotaProbeResult } from "./quotaSource.js";
+import type { DiscoveredRateLimitsInput, HostModelRosterEntry } from "./scheduler.js";
 import { probeQuotaSource } from "./quotaSource.js";
 import { buildProviderModelKey } from "./scheduler.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
@@ -68,6 +71,78 @@ export function withSourceConfig(
   source: DispatchableSource | undefined,
 ): SessionConfig {
   return source ? { ...sessionConfig, ...sourceProviderConfig(source) } : sessionConfig;
+}
+
+/**
+ * Assemble ONE host-model CapacityPool from already-resolved inputs — the shared
+ * pool-shape + quota-probe core both orchestrators' host-pool builders use, so the
+ * CapacityPool shape can't drift between them. The per-tool parts (the pool key and
+ * the discovered-limits computation) are resolved by the caller and passed in.
+ */
+export async function buildHostModelPool(params: {
+  poolKey: string;
+  providerName: ResolvedProviderName;
+  hostModel: string | null;
+  rank?: DispatchModelTier;
+  hostConcurrencyLimit: HostConcurrencyLimit | null;
+  quotaStateEntry: QuotaStateEntry | null;
+  discoveredLimits: DiscoveredRateLimitsInput | null;
+  quotaSource: QuotaSource;
+}): Promise<CapacityPool> {
+  const probe = await probeQuotaSource(params.quotaSource, params.poolKey).catch(
+    (): QuotaProbeResult => ({ snapshot: null, status: "degraded" }),
+  );
+  return {
+    id: params.poolKey,
+    providerName: params.providerName,
+    hostModel: params.hostModel,
+    ...(params.rank ? { rank: params.rank } : {}),
+    hostConcurrencyLimit: params.hostConcurrencyLimit,
+    quotaStateEntry: params.quotaStateEntry ?? null,
+    discoveredLimits: params.discoveredLimits,
+    quotaSourceSnapshot: probe.snapshot,
+    ...(probe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
+  };
+}
+
+/**
+ * Build a host-model CapacityPool per roster rank (or one pool for the scalar/absent
+ * handshake) — the shared host-pool-from-roster core both orchestrators drive. The
+ * caller's `resolve(entry)` supplies the only per-tool parts: the pool key and the
+ * discovered-limits (audit merges capability + provider + cached limits; remediate
+ * uses the roster/capability pair). Everything else — the roster iteration, the
+ * learned-quota lookup, and the pool assembly — is shared. Audit layers its
+ * contextBudget / tierBudget computation on top of the returned pools.
+ */
+export async function buildHostModelPools(params: {
+  providerName: ResolvedProviderName;
+  hostModel: string | null;
+  hostConcurrencyLimit: HostConcurrencyLimit | null;
+  quotaSource: QuotaSource;
+  quotaEntries: Record<string, QuotaStateEntry>;
+  roster: HostModelRosterEntry[] | null;
+  resolve: (
+    entry: HostModelRosterEntry | null,
+  ) => Promise<{ poolKey: string; discoveredLimits: DiscoveredRateLimitsInput | null }> | {
+    poolKey: string;
+    discoveredLimits: DiscoveredRateLimitsInput | null;
+  };
+}): Promise<CapacityPool[]> {
+  return Promise.all(
+    (params.roster ?? [null]).map(async (entry) => {
+      const { poolKey, discoveredLimits } = await params.resolve(entry);
+      return buildHostModelPool({
+        poolKey,
+        providerName: params.providerName,
+        hostModel: params.hostModel,
+        rank: entry?.rank,
+        hostConcurrencyLimit: params.hostConcurrencyLimit,
+        quotaStateEntry: params.quotaEntries[poolKey] ?? null,
+        discoveredLimits,
+        quotaSource: params.quotaSource,
+      });
+    }),
+  );
 }
 
 /** Index the source-backed pools by their pool id, for per-node provider resolution. */
