@@ -22,6 +22,7 @@ import {
 } from "./dispatch.js";
 import type {
   DispatchPlanItem,
+  RemediationDispatchPlan,
   RemediationDispatchQuota,
   ImplementWorkerResult,
 } from "./types.js";
@@ -221,19 +222,43 @@ export async function prepareHostRollingDispatch(
   options: DispatchOptions,
   runId: string,
   waveOptions: NonNullable<Parameters<typeof prepareImplementDispatch>[3]>,
+  hybrid?: {
+    /**
+     * The dispatch plan the decision point already prepared once for the A-8
+     * coordinator split — reused here so the frontier + per-node prompts are not
+     * re-derived (and cannot diverge from what the coordinator split over).
+     */
+    plan: RemediationDispatchPlan;
+    /**
+     * The coordinator's pre-claimed HOST partition (block_id + the ownerToken the
+     * coordinator minted). In hybrid mode this driver runs ONLY these nodes — the
+     * in-process partition is run by the orchestrator this cycle — and reuses the
+     * coordinator's claims rather than self-claiming (re-claiming would self-collide).
+     */
+    partition: Array<{ block_id: string; ownerToken: string }>;
+  },
 ): Promise<{
   session: RollingSession;
   initial: Array<RollingFrontierNode & { worktree_root: string }>;
   planPath: string;
   quotaPath: string;
 }> {
-  const plan = await prepareImplementDispatch(options, runId, undefined, {
-    ...waveOptions,
-    // Each node runs in its own worktree, so its prompt is rooted there.
-    worktreeRootedPrompts: true,
-  });
+  const plan =
+    hybrid?.plan ??
+    (await prepareImplementDispatch(options, runId, undefined, {
+      ...waveOptions,
+      // Each node runs in its own worktree, so its prompt is rooted there.
+      worktreeRootedPrompts: true,
+    }));
+  // Hybrid: restrict the frontier to the coordinator's host partition + reuse its
+  // claims. Standalone: the whole eligible frontier is this driver's to self-claim.
+  const partitionIds = hybrid ? new Set(hybrid.partition.map((a) => a.block_id)) : null;
+  const preClaimed = hybrid
+    ? new Map(hybrid.partition.map((a) => [a.block_id, a.ownerToken]))
+    : null;
   const frontier: RollingFrontierNode[] = plan.items
     .filter((i): i is DispatchPlanItem & { block_id: string } => typeof i.block_id === "string")
+    .filter((i) => !partitionIds || partitionIds.has(i.block_id))
     .map((i) => ({ block_id: i.block_id, prompt_path: i.prompt_path, result_path: i.result_path }));
 
   const dir = implementDir(options.artifactsDir, runId);
@@ -247,14 +272,20 @@ export async function prepareHostRollingDispatch(
   // through the shared registry BEFORE its worktree is created, so a node the
   // in-process driver (or a second host loop) already holds is skipped here
   // rather than double-dispatched (A-10 exactly-one-claimant). The slot freed by
-  // a skipped node is filled by walking further into the frontier.
+  // a skipped node is filled by walking further into the frontier. In hybrid mode
+  // the coordinator already claimed each partition node, so its token is REUSED
+  // (never re-claimed — that would self-collide and skip the node).
   const registry = nodeClaimRegistry(options.artifactsDir, runId);
   const initialNodes: RollingFrontierNode[] = [];
   const claims: Record<string, string> = {};
   for (const node of frontier) {
     if (initialNodes.length >= slots) break;
-    const claim = await registry.claim(node.block_id, HOST_SUBAGENT_CLAIM_POOL);
-    if (!claim.acquired) continue; // held by another driver — its node to run.
+    let token = preClaimed?.get(node.block_id);
+    if (!token) {
+      const claim = await registry.claim(node.block_id, HOST_SUBAGENT_CLAIM_POOL);
+      if (!claim.acquired) continue; // held by another driver — its node to run.
+      token = claim.ownerToken;
+    }
     // `plan` (above) is the single source of each block's declared scope (write ∪
     // read) — used to seed untracked declared targets into each worktree.
     createNodeWorktree(
@@ -264,7 +295,7 @@ export async function prepareHostRollingDispatch(
       declaredPathsFromPlan(plan, node.block_id),
     );
     initialNodes.push(node);
-    claims[node.block_id] = claim.ownerToken;
+    claims[node.block_id] = token;
   }
 
   const session: RollingSession = {
