@@ -26,6 +26,7 @@ import {
   writeJsonFile,
   readOptionalJsonFile,
   formatValidationIssues,
+  hashContent,
   isRecord,
   withFsRetry,
   type ValidationIssue,
@@ -33,6 +34,7 @@ import {
   type JudgeRepairDirective,
   type ImplementationDAG,
   type ObligationLedger,
+  type SessionConfig,
 } from "audit-tools/shared";
 import {
   CP_ARTIFACT_NAMES,
@@ -73,6 +75,8 @@ import {
 } from "./contractPipelinePrompts.js";
 import {
   CONTRACT_PIPELINE_VALIDATORS,
+  CP_MODULE_CONTRACTS_VERSION,
+  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
   validateDesignSpecGates,
   validateGoalIdConsistency,
   validateImplementationDAGIntegrity,
@@ -83,6 +87,7 @@ import {
   deriveNodeModelTierFromNode,
 } from "../validation/contractPipeline.js";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
+import { scheduleWave, type WaveScheduleResult } from "./dispatch.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import { loaderCommand } from "./prompts.js";
 import type { RemediationStep } from "./types.js";
@@ -394,6 +399,13 @@ export interface ContractPipelineStepOptions {
   artifactsDir: string;
   runId: string;
   sourcePaths?: string[];
+  /**
+   * Session config for the parallel per-module wave scheduler (DC-3). Optional:
+   * when omitted it is loaded from `<root>/session-config.json`, so the wave cap
+   * is derived from the SAME quota/host machinery (`scheduleWave`) implement
+   * dispatch uses. Threaded explicitly only so tests can inject it deterministically.
+   */
+  sessionConfig?: SessionConfig | null;
 }
 
 // ── Path-A seed ───────────────────────────────────────────────────────────────
@@ -744,6 +756,180 @@ export async function evaluatePreCriticStructuralGate(
   return null;
 }
 
+// ── DC-3: parallel per-module contract phases ─────────────────────────────────
+//
+// `module_contract_drafting` (→ module_contracts) and `contract_finalization`
+// (→ finalized_module_contracts) both aggregate a `module_contracts[]` array
+// keyed by module name. DC-3 fans these out to ONE agent per module through the
+// shared wave scheduler (`scheduleWave`, the SAME quota/host machinery implement
+// dispatch uses), replacing the former single sequential agent. Each agent writes
+// a per-module SHARD; the orchestrator merges all shards into the aggregated
+// artifact — byte-identical in shape to the single-agent output — and guarantees
+// the merge is COMPLETE (every decomposed module present) before downstream
+// derivation runs. A missing shard re-emits the wave (never a partial aggregate).
+
+/** The two phases that fan out per module, and the artifact each produces. */
+const PARALLEL_MODULE_PHASES = {
+  module_contract_drafting: "module_contracts",
+  contract_finalization: "finalized_module_contracts",
+} as const;
+
+type ParallelModulePhase = keyof typeof PARALLEL_MODULE_PHASES;
+
+export function isParallelModulePhase(phase: string): phase is ParallelModulePhase {
+  return phase === "module_contract_drafting" || phase === "contract_finalization";
+}
+
+interface DecomposedModule {
+  name: string;
+  responsibilities: string;
+  file_scope: string[];
+}
+
+/** Read the decomposed modules (name + responsibilities + file_scope) in order. */
+async function readDecomposedModules(
+  artifactsDir: string,
+): Promise<DecomposedModule[]> {
+  const decomposition = envelopePayload(
+    await readContractArtifact(artifactsDir, "module_decomposition"),
+  );
+  const modules = isRecord(decomposition) && Array.isArray(decomposition.modules)
+    ? decomposition.modules
+    : [];
+  const result: DecomposedModule[] = [];
+  for (const mod of modules) {
+    if (!isRecord(mod) || typeof mod.name !== "string" || mod.name.length === 0) {
+      continue;
+    }
+    result.push({
+      name: mod.name,
+      responsibilities:
+        typeof mod.responsibilities === "string" ? mod.responsibilities : "",
+      file_scope: Array.isArray(mod.file_scope)
+        ? mod.file_scope.filter((p): p is string => typeof p === "string")
+        : [],
+    });
+  }
+  return result;
+}
+
+/** The goal_id carried by module_decomposition (authoritative for the merge). */
+async function readDecompositionGoalId(artifactsDir: string): Promise<string> {
+  const decomposition = envelopePayload(
+    await readContractArtifact(artifactsDir, "module_decomposition"),
+  );
+  return isRecord(decomposition) && typeof decomposition.goal_id === "string"
+    ? decomposition.goal_id
+    : "";
+}
+
+/** Filesystem-safe shard id for a module name (the merge re-keys by name, not id). */
+function moduleShardId(moduleName: string): string {
+  const slug = moduleName.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+  // Keep names disjoint even after slugging by appending a short content hash.
+  return `${slug || "module"}-${hashContent(moduleName, { length: 8 })}`;
+}
+
+/** Directory holding one per-module shard for a given parallel phase. */
+function moduleWaveDir(artifactsDir: string, phase: ParallelModulePhase): string {
+  return join(contractPipelineDir(artifactsDir), "module-waves", phase);
+}
+
+function moduleShardPath(
+  artifactsDir: string,
+  phase: ParallelModulePhase,
+  moduleName: string,
+): string {
+  return join(moduleWaveDir(artifactsDir, phase), `${moduleShardId(moduleName)}.json`);
+}
+
+interface ModuleShardScan {
+  /** Shards present and parseable, keyed by the module name they cover. */
+  present: Map<string, Record<string, unknown>>;
+  /** Decomposed module names with no present (or unparseable) shard. */
+  missing: string[];
+}
+
+/**
+ * Scan the per-module shards for a phase against the decomposed module set. A
+ * shard counts as present only when it parses to an object whose module-contract
+ * `name` matches the decomposed module it is filed under — a stray/mismatched
+ * shard never satisfies completeness.
+ */
+async function scanModuleShards(
+  artifactsDir: string,
+  phase: ParallelModulePhase,
+  modules: DecomposedModule[],
+): Promise<ModuleShardScan> {
+  const present = new Map<string, Record<string, unknown>>();
+  const missing: string[] = [];
+  for (const mod of modules) {
+    const shard = await readOptionalJsonFile<unknown>(
+      moduleShardPath(artifactsDir, phase, mod.name),
+    );
+    const contract = extractShardContract(shard, mod.name);
+    if (contract) {
+      present.set(mod.name, contract);
+    } else {
+      missing.push(mod.name);
+    }
+  }
+  return { present, missing };
+}
+
+/**
+ * Normalize a worker-written shard into the single module-contract record for
+ * `moduleName`. Accepts either the bare contract object (`{ name, ... }`) or the
+ * aggregated wrapper shape (`{ module_contracts: [{ name, ... }] }`) so a worker
+ * that mirrored the aggregate schema for one module still merges. Returns null
+ * when no record for `moduleName` is found.
+ */
+function extractShardContract(
+  shard: unknown,
+  moduleName: string,
+): Record<string, unknown> | null {
+  if (!isRecord(shard)) return null;
+  if (Array.isArray(shard.module_contracts)) {
+    const match = shard.module_contracts.find(
+      (entry) => isRecord(entry) && entry.name === moduleName,
+    );
+    return isRecord(match) ? match : null;
+  }
+  if (shard.name === moduleName) return shard;
+  return null;
+}
+
+/**
+ * Merge complete per-module shards into the aggregated artifact for `phase`,
+ * byte-identical in shape to the former single-agent output: the same envelope
+ * (`contract_version`, `goal_id`, `module_contracts[]`, `created_at`) with one
+ * entry per module in DECOMPOSITION order (deterministic, not directory order).
+ * Caller guarantees completeness first.
+ */
+function mergeModuleShards(
+  phase: ParallelModulePhase,
+  modules: DecomposedModule[],
+  present: Map<string, Record<string, unknown>>,
+  goalId: string,
+): {
+  contract_version: string;
+  goal_id: string;
+  module_contracts: Record<string, unknown>[];
+  created_at: string;
+} {
+  const contractVersion =
+    phase === "module_contract_drafting"
+      ? CP_MODULE_CONTRACTS_VERSION
+      : CP_FINALIZED_MODULE_CONTRACTS_VERSION;
+  const moduleContracts = modules.map((mod) => present.get(mod.name)!);
+  return {
+    contract_version: contractVersion,
+    goal_id: goalId,
+    module_contracts: moduleContracts,
+    created_at: new Date().toISOString(),
+  };
+}
+
 // ── Step builder ──────────────────────────────────────────────────────────────
 
 /**
@@ -823,17 +1009,174 @@ After writing the output file, run:
   };
 
   const buildParallelModuleWaveStep = async (
-    phase: "module_contract_drafting" | "contract_finalization",
+    phase: ParallelModulePhase,
   ): Promise<RemediationStep> => {
-    // For the parallel module phases, build a single step that notes the parallel
-    // wave nature. The actual wave dispatch is handled by the host reading the prompt.
-    // We emit a single agent step: the worker reads the module list and produces
-    // the aggregated artifact for all modules (since true parallel dispatch uses
-    // the waveScheduler from implement phase, not the contract pipeline).
-    // The prompt instructs the single agent to process all modules in sequence
-    // and emit the aggregated output — a pure contract-pipeline workaround for
-    // environments that do not support parallel sub-agents.
-    return buildPhaseStep(phase);
+    // DC-3: fan the phase out to ONE agent per module, concurrency-capped by the
+    // shared wave scheduler (the same quota/host machinery implement dispatch
+    // uses). Each agent writes a per-module shard; the orchestrator merges the
+    // shards into the aggregated artifact on the next next-step (see the
+    // module-shard-merge intercept), guaranteeing completeness before any
+    // downstream derivation. A degenerate decomposition (zero or one module)
+    // has no parallelism to exploit — fall back to the single aggregated step.
+    const modules = await readDecomposedModules(artifactsDir);
+    if (modules.length <= 1) {
+      return buildPhaseStep(phase);
+    }
+
+    // Concurrency cap from the shared scheduler: session config is loaded from
+    // the same path decideNextStep uses, env + on-disk learned quota feed the
+    // same wave-sizing implement dispatch consumes. itemCount = module count.
+    const sessionConfig =
+      options.sessionConfig ??
+      (await readOptionalJsonFile<SessionConfig>(
+        join(root, "session-config.json"),
+      ));
+    const schedule: WaveScheduleResult = await scheduleWave({
+      sessionConfig: sessionConfig ?? null,
+      itemCount: modules.length,
+      env: process.env,
+    });
+    const maxConcurrent = schedule.max_concurrent;
+
+    const inputArtifact =
+      phase === "module_contract_drafting" ? "module_decomposition" : "module_contracts";
+    const inputPaths = (
+      phase === "module_contract_drafting"
+        ? (["goal_spec", "context_bundle", "module_decomposition"] as const)
+        : (["module_contracts", "seam_reconciliation_report"] as const)
+    ).map((key) => `- \`${artifactPaths[key]}\` (${key})`);
+
+    const moduleLines = modules
+      .map((mod, i) => {
+        const shardPath = moduleShardPath(artifactsDir, phase, mod.name);
+        const scope =
+          mod.file_scope.length > 0
+            ? mod.file_scope.map((p) => `\`${p}\``).join(", ")
+            : "_(no declared file scope)_";
+        return `${i + 1}. **${mod.name}** — file scope: ${scope}\n   - Write this module's contract to exactly: \`${shardPath}\``;
+      })
+      .join("\n");
+
+    const perModuleSchema =
+      phase === "module_contract_drafting"
+        ? `{
+  "name": "<module-name — must equal the assigned module>",
+  "inputs": ["<what this module receives>"],
+  "outputs": ["<what this module produces>"],
+  "invariants": ["<invariant that must hold — include a verification_obligation note>"],
+  "side_effects": ["<observable side-effects with owner>"],
+  "validation_boundary": "<what this module validates vs. what callers must guarantee>",
+  "failure_modes": ["<ways this module can fail and how callers should handle them>"],
+  "neighbor_needs": [{ "neighbor": "<module-name>", "needs": "<what this module needs>" }]
+}`
+        : `{
+  "name": "<module-name — must equal the assigned module>",
+  "inputs": ["<final — incorporating reconciliation decisions>"],
+  "outputs": ["<final — incorporating reconciliation decisions>"],
+  "invariants": ["<invariant id + description>"],
+  "side_effects": ["<side-effect with owner>"],
+  "validation_boundary": "<finalized validation boundary>",
+  "failure_modes": ["<failure mode + caller handling>"],
+  "seam_adjustments": ["<adjustments made per seam_reconciliation_report, if any>"]
+}`;
+
+    const taskVerb =
+      phase === "module_contract_drafting"
+        ? "draft its module contract"
+        : "incorporate the reconciliation decisions from seam_reconciliation_report and produce its finalized module contract";
+
+    const cwdNote = `\n> Set the shell/tool working directory to \`${root}\` before running any commands.\n`;
+    const nextCommand = loaderCommand("next-step");
+    const prompt = `# ${PHASE_TO_ARTIFACT[phase] === "module_contracts" ? "Per-Module Contract Drafting" : "Per-Module Contract Finalization"} — Parallel Wave (${modules.length} modules)
+
+This phase fans out to ONE sub-agent PER MODULE. Dispatch the ${modules.length} modules below as parallel sub-agents in waves of at most **${maxConcurrent}** concurrent agents (the quota/host concurrency cap). Each sub-agent reads only its module's file scope, then writes ONLY that module's contract shard — no agent owns both sides of a seam, and no agent writes the aggregated artifact.
+${cwdNote}
+## Shared Inputs (every sub-agent may read these)
+
+${inputPaths.join("\n")}
+
+## Per-Module Assignments — one sub-agent each
+
+For each module, dispatch one sub-agent to read its file scope from \`${inputArtifact}\` and ${taskVerb}, writing the result to the module's shard path:
+
+${moduleLines}
+
+Each shard must be a single JSON object of this shape (the orchestrator merges all shards into the aggregated \`${PHASE_TO_ARTIFACT[phase]}\` artifact — do NOT write that file yourself):
+
+\`\`\`json
+${perModuleSchema}
+\`\`\`
+
+## After All Sub-Agents Finish
+
+Once every module's shard above has been written (all ${modules.length}), run:
+
+\`${nextCommand}\`
+
+The orchestrator verifies every module shard is present, merges them into \`${PHASE_TO_ARTIFACT[phase]}\`, and advances. If any shard is missing, this same wave is re-emitted for the missing modules — never a partial aggregate.
+
+**Stop after the per-module shards are written and you run next-step.** Do not edit source files. Do not write the aggregated artifact. Do not advance further.
+`;
+
+    const stepArtifactPaths: Record<string, string> = {};
+    for (const [k, v] of Object.entries(artifactPaths)) {
+      if (v && existsSync(v)) {
+        stepArtifactPaths[k] = v;
+      }
+    }
+    if (sourcePaths) {
+      stepArtifactPaths.source_manifest = paths.sourceManifest;
+      stepArtifactPaths.remediation_brief = paths.brief;
+    }
+    return writeCurrentStep({
+      stepKind: CONTRACT_STEP_KIND,
+      status: "ready",
+      runId,
+      repoRoot: root,
+      artifactsDir,
+      prompt,
+      allowedCommands: [nextCommand],
+      stopCondition: `Stop after writing every per-module shard for phase "${phase}" and running next-step.`,
+      artifactPaths: stepArtifactPaths,
+    });
+  };
+
+  /**
+   * DC-3 merge intercept: when a parallel phase's aggregated artifact is still
+   * missing, merge the per-module shards into it once they are ALL present. A
+   * missing shard re-emits the wave (never promotes a partial aggregate). After
+   * a complete merge the artifact is written enveloped and the pipeline
+   * re-derives; the existing seam_reconciliation / critique pass downstream
+   * stays the consistency gate over the merged contracts.
+   */
+  const tryMergeModuleShards = async (
+    phase: ParallelModulePhase,
+  ): Promise<RemediationStep | "merged" | "incomplete"> => {
+    const modules = await readDecomposedModules(artifactsDir);
+    // Degenerate decompositions never used the shard path — let the normal
+    // single-agent aggregate step handle them.
+    if (modules.length <= 1) return "incomplete";
+
+    const scan = await scanModuleShards(artifactsDir, phase, modules);
+    if (scan.missing.length > 0) {
+      // Completeness not met → re-emit the wave for the missing modules.
+      return buildParallelModuleWaveStep(phase);
+    }
+
+    // goal_id: the upstream module_decomposition is authoritative (every artifact
+    // shares one goal_id; the goal-ID consistency gate enforces it). Fall back to
+    // a shard's goal_id only if the decomposition somehow lacks one.
+    const decompositionGoalId = await readDecompositionGoalId(artifactsDir);
+    const goalId =
+      decompositionGoalId ||
+      [...scan.present.values()]
+        .map((c) => (typeof c.goal_id === "string" ? c.goal_id : undefined))
+        .find((g): g is string => Boolean(g)) ||
+      "";
+
+    const merged = mergeModuleShards(phase, modules, scan.present, goalId);
+    await writeContractArtifact(artifactsDir, PARALLEL_MODULE_PHASES[phase], merged);
+    return "merged";
   };
 
   // 1. Ingest raw worker outputs into validated envelopes. An output that
@@ -1477,9 +1820,23 @@ ${preCriticGate.errorLines.join("\n")}
     }
   }
 
-  // Parallel-capable phases: module_contract_drafting and contract_finalization
-  // both benefit from parallel per-module dispatch.
-  if (nextPhase === "module_contract_drafting" || nextPhase === "contract_finalization") {
+  // Parallel-capable phases (DC-3): module_contract_drafting and
+  // contract_finalization fan out to one agent per module. The aggregated
+  // artifact is missing here, so first try to merge per-module shards (the
+  // worker may have just written them) — a COMPLETE shard set merges into the
+  // aggregated artifact and the pipeline re-derives; an incomplete set re-emits
+  // the wave; a degenerate (≤1 module) decomposition falls through to a single
+  // aggregated step. The seam_reconciliation / critique pass downstream remains
+  // the consistency gate over the merged contracts.
+  if (isParallelModulePhase(nextPhase)) {
+    const mergeOutcome = await tryMergeModuleShards(nextPhase);
+    if (mergeOutcome === "merged") {
+      return buildNextContractPipelineStep(options);
+    }
+    if (mergeOutcome !== "incomplete") {
+      // A re-emitted wave step (missing shards).
+      return mergeOutcome;
+    }
     return buildParallelModuleWaveStep(nextPhase);
   }
 
