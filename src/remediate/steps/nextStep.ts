@@ -827,11 +827,6 @@ export async function driveRollingImplementDispatch(
   };
 }
 
-/** Dedupe a string list preserving order (local helper for verify command sets). */
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.filter((v) => typeof v === "string" && v.length > 0))];
-}
-
 // ---------------------------------------------------------------------------
 // Tool-owned final completion gate (INV-RS-10) + coarse re-block (INV-RS-09)
 // ---------------------------------------------------------------------------
