@@ -375,10 +375,17 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
       obligations: [
         {
           id: "O-1",
-          description: "Auth flow cleanup is implemented.",
+          description: "the authFlow cleanup is implemented",
           kind: "behavioral",
           depends_on: [],
           status: "pending",
+          // DC-5: a behavior CHANGE touching `authFlow`; its paired negative must
+          // be scoped to that symbol (an unscoped repo-wide negative fails the gate).
+          change_classification: {
+            change_kind: "change",
+            touched_symbols: ["authflow"],
+            determined_by: "touches_existing_symbol",
+          },
         },
       ],
       created_at,
@@ -404,8 +411,8 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
           name: "auth flow cleanup holds and rejects the failure case",
           kind: "invariant",
           assertions: [
-            "returns the cleaned-up auth flow on the satisfied path",
-            "rejects the invalid auth request on the failure path",
+            "authFlow returns the cleaned-up flow on the satisfied path",
+            "authFlow rejects the invalid request on the failure path",
           ],
         },
       ],

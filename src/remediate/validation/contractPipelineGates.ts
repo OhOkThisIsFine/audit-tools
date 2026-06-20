@@ -19,6 +19,12 @@ import {
   isRecord,
   pushValidationIssue,
 } from "audit-tools/shared";
+import {
+  evaluatePairing,
+  obligationScopeAnchors,
+  readObligationChangeClassification,
+  type PairingVerdict,
+} from "../contractPipeline/changeClassification.js";
 
 // ── DesignSpec structural gates ───────────────────────────────────────────────
 
@@ -426,23 +432,27 @@ export function validateImplementationDAGIntegrity(
 
 const TESTABLE_OBLIGATION_KINDS = new Set(["invariant", "behavioral"]);
 
-/** Phrases that mark a negative/failure assertion (paired-obligation half). */
-const NEGATIVE_ASSERTION_PATTERN =
-  /\b(reject|rejected|throw|throws|error|errors|fail|fails|failure|invalid|disallow|forbidden|must not|does not|should not|never|negative|missing|absent|empty)\b/i;
-
-/** Phrases that mark a positive/satisfied assertion (paired-obligation half). */
-const POSITIVE_ASSERTION_PATTERN =
-  /\b(accept|accepted|allow|allowed|succeed|succeeds|returns?|produces?|valid|present|satisfies|satisfied|passes?|emits?|writes?|equal|equals|matches?)\b/i;
-
 /**
- * OBL-CO-01 — paired-obligation gate (fail-closed).
+ * OBL-CO-01 / DC-5 — paired-obligation gate (fail-closed, change-scoped).
  *
- * Every obligation whose kind is testable (invariant / behavioral) must be
- * covered by at least one test_validator_plan spec, and that coverage must
- * include BOTH a positive (satisfied-path) assertion and a negative
- * (failure-path) assertion. A single positive-only assertion set is the latent
- * failure mode this gate exists to prevent: a narrow positive test passes while
- * the obligation's negative half goes unverified.
+ * Every TESTABLE (invariant / behavioral) obligation must be covered by at least
+ * one test_validator_plan spec. Whether that coverage must be a positive+negative
+ * PAIR depends on the obligation's change-vs-addition classification (CE-013):
+ *
+ *  - A behavior CHANGE (it touches an existing symbol) requires BOTH a positive
+ *    (satisfied-path) assertion AND a negative (failure-path) assertion, and the
+ *    negative must be SCOPED to the changed symbol/file (CE-006): an unscoped,
+ *    repo-wide negative does not count. A narrow positive-only test, or a negative
+ *    that greps the whole tree, is the exact latent failure mode this gate stops.
+ *  - A pure ADDITION has no prior behavior to regress, so it is NEVER forced to
+ *    pair — coverage by any spec is sufficient.
+ *  - An UNCLASSIFIED testable obligation is treated as a CHANGE (fail-closed): a
+ *    dropped classification can never silently relax the requirement.
+ *
+ * The classification is recorded on the ledger by `deriveObligationLedger`
+ * (deterministic first pass, LLM-confirmable). Pairing/scoping/polarity are all
+ * evaluated through the single-source `changeClassification` helpers so this gate
+ * and the `mergeImplementResults` verify gate agree exactly.
  *
  * An obligation may opt out only via an explicit, falsifiable `inapplicable_claim`
  * on a spec that cites that obligation id — bare omission is an error.
@@ -460,20 +470,18 @@ export function validatePairedObligations(
     return issues;
   }
 
-  // Index test specs by obligation id, tracking the assertion polarity each
-  // covering spec provides and whether any spec declares the obligation
-  // inapplicable with a falsifiable claim.
+  // Index covering test specs by obligation id: gather every assertion string and
+  // whether any spec declares the obligation inapplicable with a falsifiable claim.
   interface Coverage {
-    positive: boolean;
-    negative: boolean;
     covered: boolean;
     inapplicable: boolean;
+    assertions: string[];
   }
   const coverage = new Map<string, Coverage>();
   const ensure = (id: string): Coverage => {
     let entry = coverage.get(id);
     if (!entry) {
-      entry = { positive: false, negative: false, covered: false, inapplicable: false };
+      entry = { covered: false, inapplicable: false, assertions: [] };
       coverage.set(id, entry);
     }
     return entry;
@@ -498,23 +506,10 @@ export function validatePairedObligations(
       entry.inapplicable = true;
     }
 
-    const assertions = Array.isArray(spec.assertions)
-      ? (spec.assertions as unknown[]).filter((a): a is string => typeof a === "string")
-      : [];
-    for (const assertion of assertions) {
-      // An explicit POSITIVE:/NEGATIVE: label is authoritative: it sets exactly
-      // that one polarity and the keyword regexes are skipped for this assertion
-      // (so e.g. "POSITIVE: must not exceed N" counts only as positive, even
-      // though its free text matches a negative keyword). Only unlabeled
-      // assertions fall through to the keyword fallback.
-      const label = /^\s*(POSITIVE|NEGATIVE)\s*:/i.exec(assertion);
-      if (label) {
-        if (label[1].toUpperCase() === "POSITIVE") entry.positive = true;
-        else entry.negative = true;
-        continue;
+    if (Array.isArray(spec.assertions)) {
+      for (const a of spec.assertions as unknown[]) {
+        if (typeof a === "string") entry.assertions.push(a);
       }
-      if (NEGATIVE_ASSERTION_PATTERN.test(assertion)) entry.negative = true;
-      if (POSITIVE_ASSERTION_PATTERN.test(assertion)) entry.positive = true;
     }
   }
 
@@ -528,30 +523,46 @@ export function validatePairedObligations(
       pushValidationIssue(
         issues,
         `test_validator_plan.coverage[${id}]`,
-        `Testable obligation "${id}" (kind "${obl.kind}") has no test spec — every invariant/behavioral obligation must be covered by a paired positive+negative test spec, or declared inapplicable with a falsifiable claim.`,
+        `Testable obligation "${id}" (kind "${obl.kind}") has no test spec — every invariant/behavioral obligation must be covered by a test spec (a paired positive+negative for a behavior change), or declared inapplicable with a falsifiable claim.`,
       );
       continue;
     }
     if (entry.inapplicable) continue;
 
-    if (!entry.positive) {
+    // A pure ADDITION is not forced to pair — coverage by any spec is enough.
+    const classification = readObligationChangeClassification(obl);
+    if (classification?.change_kind === "addition") continue;
+
+    // CHANGE (or fail-closed unclassified): require the scoped positive+negative
+    // pair, evaluated by the single-source helper against the change's anchors.
+    const description = typeof obl.description === "string" ? obl.description : "";
+    const anchors = obligationScopeAnchors(id, description, classification);
+    const verdict: PairingVerdict = evaluatePairing(entry.assertions, anchors);
+
+    if (!verdict.hasPositive) {
       pushValidationIssue(
         issues,
         `test_validator_plan.coverage[${id}].positive`,
-        `Testable obligation "${id}" has no positive (satisfied-path) assertion — a paired obligation must assert the behavior holds in the success case.`,
+        `Testable obligation "${id}" (behavior change) has no positive (satisfied-path) assertion — a paired obligation must assert the behavior holds in the success case.`,
       );
     }
-    if (!entry.negative) {
+    if (!verdict.hasNegative) {
+      const detail = verdict.negativeUnscoped
+        ? `its negative assertion is not scoped to the changed symbol/file (anchors: ${anchors.join(", ") || "none"}) — an unscoped, repo-wide negative is rejected (CE-006)`
+        : `it has no negative (failure-path) assertion`;
       pushValidationIssue(
         issues,
         `test_validator_plan.coverage[${id}].negative`,
-        `Testable obligation "${id}" has no negative (failure-path) assertion — a paired obligation must assert the failure mode is rejected, not only the positive case.`,
+        `Testable obligation "${id}" (behavior change) ${detail}. A paired obligation must assert the failure mode is rejected, scoped to the change, not only the positive case.`,
       );
     }
   }
 
   return issues;
 }
+
+/** Re-exported PairingVerdict so importers of this gate module can type the result. */
+export type { PairingVerdict };
 
 /**
  * OBL-CO-03 — evidence-threading gate (fail-closed).

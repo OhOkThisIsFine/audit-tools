@@ -53,6 +53,7 @@ export {
   CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
 } from "./contractPipeline/obligations.js";
 export type {
+  ObligationChangeClassification,
   ObligationEntry,
   ObligationLedger,
   TestSpec,

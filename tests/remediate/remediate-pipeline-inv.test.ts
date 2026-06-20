@@ -157,7 +157,20 @@ function makeApprovedChainPayloads() {
       contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
       goal_id: "G1",
       obligations: [
-        { id: "O-1", description: "Behavior holds.", kind: "behavioral", depends_on: [], status: "pending" },
+        {
+          id: "O-1",
+          description: "the parseInput behavior holds",
+          kind: "behavioral",
+          depends_on: [],
+          status: "pending",
+          // DC-5: a behavior CHANGE touching `parseInput`, so its paired negative
+          // must be scoped to that symbol (an unscoped negative would fail the gate).
+          change_classification: {
+            change_kind: "change",
+            touched_symbols: ["parseinput"],
+            determined_by: "touches_existing_symbol",
+          },
+        },
       ],
       created_at: CREATED_AT,
     },
@@ -179,8 +192,8 @@ function makeApprovedChainPayloads() {
           name: "behavior holds and rejects the failure case",
           kind: "invariant",
           assertions: [
-            "returns the expected result on the satisfied path",
-            "rejects the invalid input on the failure path",
+            "parseInput returns the expected result on the satisfied path",
+            "parseInput rejects the invalid input on the failure path",
           ],
         },
       ],
