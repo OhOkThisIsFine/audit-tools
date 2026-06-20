@@ -156,13 +156,16 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   driver now absorbs it into a no-progress pass (`ingest:null`) so the fold blocks cleanly. Both red→green in
   `tests/audit/rolling-audit-dispatch.test.mjs`.
   (b-residual) the {host-subagent (Claude) + NIM} HYBRID topology + a
-  live cross-provider spill run (see *Cross-IDE/provider quota detection* below). **✓ REMEDIATE HYBRID DONE
-  (2026-06-20, branch `a8-hybrid-spill-wiring`, awaiting review):** the remediate next-step now splits one
-  eligible frontier across [host-subagent pool + in-process backend pool] via `HybridSpillCoordinator.planAssignments`
-  (single claimant, proactive capacity split) — `executeInProcessPartition` runs the backend partition this cycle,
-  the host driver spawns subagents for its partition, both merged by `acceptNodeWorktree`. REMAINING: audit
-  symmetric (`driveRollingAuditDispatch` still reactive), DC-4 cross-cycle settled-set/pause, live host+NIM run
-  (crit. 3). See `docs/a8-rolling-cutover-plan.md` §Step 7. *(FIXED: worktree-branch reuse
+  live cross-provider spill run (see *Cross-IDE/provider quota detection* below). **✓ HYBRID DONE — remediate +
+  audit + DC-4, shared infra (2026-06-20, branch `a8-hybrid-spill-wiring`, green, awaiting review):** BOTH
+  orchestrators' next-step split the eligible frontier host-vs-NIM via the ONE shared `planHybridDispatch`
+  (coordinator claims each node; classification injected). Remediate runs the NIM partition in-process + hands the
+  host partition to the `accept-node` loop; audit reviews the NIM partition in-process + the host batch-reviews the
+  coverage-driven complement. The dispatcher brain is fully shared (split layer, NIM pool shape, coordinator, claim
+  registry, quota fold, rolling engine, DC-4 settled-pool store); only per-node execution + host-spawn mechanism
+  stay per-tool. DC-4: an exhausted backend pool settles cross-cycle → work falls to the host pool. REMAINING: the
+  live host+NIM run (crit. 3, needs a Claude session + NIM key at once); optional host-pool-roster unify (genuine
+  output-contract difference, not a capability gap). See `docs/a8-rolling-cutover-plan.md` §Step 7. *(FIXED: worktree-branch reuse
   across a `rate_limited` re-queue — `resetNodeWorktreeAndBranch` removes the worktree, prunes stale admin
   entries, and force-deletes the leftover branch so every re-dispatch starts clean from HEAD.
   FIXED: the worktree-walks-up-to-parent-repo foot-gun — `createWorktree`
