@@ -46,6 +46,20 @@
 
 ## Immediate next
 
+**Whole-backlog remediation PLAN: ✓ BUILT + PAUSED at the approval gate (2026-06-20, plan-only, build deferred).**
+`/remediate-code over docs/remaining-specs.md` — Ethan chose whole actionable backlog + **finish plan / defer build**.
+The contract pipeline ran end-to-end (goal→…→14-node implementation_dag; 162 obligations, 148 test specs, 13
+counterexamples all judged **residual_risk** & folded into the designs) and is **paused at the review-approval
+gate** (blocked, resumable). Readable deliverable: [`docs/remaining-specs-remediation-plan.md`](remaining-specs-remediation-plan.md);
+machine artifacts under `.audit-tools/remediation/intake/contract/` (gitignored). **To build:** `remediate-code
+next-step` → write `review_resolution.json` (empty disapproved = approve all) → `next-step`; recommend
+dependency-order slices (independent bounded fixes → inv2→a10→a8→dc6/dc2 interlock → a2/a7 → a9 capstone), not one
+mega-run. This plan is the detailed form of the former go-forward program (A2/A7/A8/A9/A10 + the DCs/F-1/INV-1/2).
+- **Deliberate intermediate state (not bugs):** the run sits at the blocked gate by design; the prior quick-wins
+  run's promoted outputs were moved to `.audit-tools/prior-run-quickwins-2026-06-19.bak/` to clear a tooling-bug
+  short-circuit (memory `stale-remediation-report-complete-redelivery-trap`; fix = spawned `task_2092be69` +
+  backlog *Known friction*).
+
 **Quick-wins (S) remediation: ✓ SHIPPED — `audit-tools@0.28.8` LIVE (2026-06-19, `main` `7ee727c1`, CI run 27857663331).**
 F-2/F-3/F-5/F-6/F-7/PB-1 — each its own green commit; full suite green; FF-merged to `main`, published, global bins reinstalled (both `--version` → 0.28.8). Commit map + scope decisions: memory `remaining-specs-quickwins-remediation`. NOTE the tool bug found doing it (memory `ambiguity-step-deemed-inappropriate-drops-finding`, backlog Known-friction): the ambiguity step's `deemed_inappropriate` silently DECLINED 5/7 approved findings — recovered by hand-implementing on the branch. Fix-in-tooling is OPEN.
 
@@ -62,9 +76,8 @@ F-2/F-3/F-5/F-6/F-7/PB-1 — each its own green commit; full suite green; FF-mer
   (conceptual reviewer deliberately left broad).
 Branch `resume-list-dogfood-fixes` can be deleted.
 
-**Remaining go-forward program** (`docs/backlog.md` → "Accepted go-forward program"): A7 (host
-install/integration validation across Codex/OpenCode/Antigravity), A8 hybrid spill topology + live
-cross-provider run, deferred A2/A9/A10.
+**Remaining go-forward program** — now fully specced + planned in the whole-backlog plan above
+(`docs/remaining-specs-remediation-plan.md`): A2/A7/A8/A9/A10 + DC-1..6 + F-1 + INV-1/2.
 
 **Open dogfood frictions (write-scope / input-resume): ✓ CLEARED earlier (2026-06-19, on this branch).**
 - ✓ Write-scope now ENFORCED before the cherry-pick (the architecturally-significant one). Moved into
@@ -79,13 +92,6 @@ cross-provider run, deferred A2/A9/A10.
   loader guidance. Test in `next-step-lifecycle.test.ts`.
 - ✓ (prior PR #9) `accept-outcome` sidecar persists the failing command + output; rolling-dispatch prompt shows
   `accept-node --id <BLOCK_ID> --run-id <runId>`.
-
-**Remaining accepted program** (`docs/backlog.md` → "Accepted go-forward program"):
-- **A7 (REFRAMED)** — validate the host install/integration machinery across all hosts (Codex, OpenCode,
-  Antigravity), not just Claude Code.
-- Deferred: **A2** (falsifiable finding-quality oracle), **A9/A10** (autonomy acceptance + multi-process).
-- **A8 loose end:** the {host-subagent + NIM} HYBRID spill topology (FINDING-020 capstone) + a live
-  cross-provider spill run. See `docs/a8-rolling-cutover-plan.md`. (audit-code NIM e2e already DONE in 0.28.1.)
 
 ## Working constraints (single-package)
 - **Green at every commit:** `npm run build && npm run check` → zero errors. Commit hook enforces it.
