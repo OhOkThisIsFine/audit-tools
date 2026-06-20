@@ -98,11 +98,19 @@ async function rmWithRetry(path: string, retries = 20): Promise<void> {
   }
 }
 
-let currentRoot: string;
-let currentArtifactsDir: string;
-let currentOptions: { root: string; artifactsDir: string };
-
 describe("runPlanPhase — audit-findings.json consume path", () => {
+  // Scoped to this describe so the two runPlanPhase describes can't stomp each
+  // other's state. These were module-level `let`s shared with the
+  // "content-driven structured-audit report parsing" describe below; that
+  // describe's beforeEach would overwrite `currentRoot` while this describe's
+  // long-retrying afterEach (rmWithRetry, up to ~52s of async backoff on
+  // Windows EBUSY) was still pending — so this describe's cleanup could delete
+  // the *other* describe's fresh directory, destroying its fixture file and
+  // making the "non-audit JSON falls through to the extractor" test throw
+  // "Missing valid input" instead of reaching the injected extractor seam.
+  let currentRoot: string;
+  let currentArtifactsDir: string;
+  let currentOptions: { root: string; artifactsDir: string };
 
   beforeEach(async () => {
     currentRoot = join(testDir, `.test-plan-artifacts-${randomUUID()}`);
@@ -1036,6 +1044,13 @@ describe("splitBlocksByContextBudget — directory path exclusion (FINDING-014)"
 });
 
 describe("runPlanPhase — content-driven structured-audit report parsing", () => {
+  // Scoped to this describe (see the consume-path describe above for why these
+  // must not be module-global): independent state prevents cross-describe
+  // afterEach from deleting this describe's fixture directory mid-test.
+  let currentRoot: string;
+  let currentArtifactsDir: string;
+  let currentOptions: { root: string; artifactsDir: string };
+
   beforeEach(async () => {
     currentRoot = join(testDir, `.test-plan-artifacts-${randomUUID()}`);
     currentArtifactsDir = join(currentRoot, ".audit-tools", "remediation");
