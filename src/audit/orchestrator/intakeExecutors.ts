@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { isGitRepo, writeJsonFile } from "audit-tools/shared";
+import {
+  isGitRepo,
+  writeJsonFile,
+  buildSharedProviderConfirmation,
+  writeSharedProviderConfirmation,
+} from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { confirmProviders } from "./providerConfirmation.js";
 import {
@@ -101,14 +106,31 @@ function readPackageJson(dir: string): PackageJsonShape | undefined {
  * emits a `provider_confirmation` host step; this runs only when `advanceAudit`
  * is driven headlessly with no host to confirm the provider pool, writing a
  * default provider_confirmation artifact so the pipeline can proceed.
+ *
+ * DC-2: audit is the single WRITER of the shared session-level confirmation at
+ * `<root>/.audit-tools/provider-confirmation.json`. When `root` is known we also
+ * write that shared artifact (atomic temp-then-rename under a file lock — CE-003)
+ * so a subsequent remediate run can read + honor the same pool. The per-tool
+ * `provider_confirmation` bundle field (the N-X06 seam contract) is unchanged;
+ * the shared artifact is built from the same auto-discovery and carries the
+ * roster snapshot remediate's accessor uses for staleness.
  */
-export function runProviderConfirmationAutoComplete(
+export async function runProviderConfirmationAutoComplete(
   bundle: ArtifactBundle,
-): ExecutorRunResult {
+  root?: string,
+): Promise<ExecutorRunResult> {
   const confirmation = confirmProviders({});
+  const artifactsWritten = ["provider_confirmation.json"];
+  if (root) {
+    await writeSharedProviderConfirmation(
+      root,
+      buildSharedProviderConfirmation({}),
+    );
+    artifactsWritten.push("provider-confirmation.json");
+  }
   return {
     updated: { ...bundle, provider_confirmation: confirmation },
-    artifacts_written: ["provider_confirmation.json"],
+    artifacts_written: artifactsWritten,
     progress_summary: "Auto-completed provider confirmation gate (headless).",
   };
 }
