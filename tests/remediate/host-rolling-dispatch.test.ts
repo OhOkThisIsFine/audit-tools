@@ -276,6 +276,74 @@ describe("acceptNodeWorktree — accept-time write-scope gate", () => {
 });
 
 // ===========================================================================
+// acceptNodeWorktree — rebase-onto-HEAD folds in a sibling's merge (defect-3 seam).
+// Two nodes branched off the same base both edit one file; the second rebases onto
+// the first's merge so non-overlapping edits land and a true line conflict triages.
+// ===========================================================================
+
+describe("acceptNodeWorktree — rebase-onto-HEAD seam handling", () => {
+  function seedShared(repo: string, lines: string[]): void {
+    const git = (...a: string[]) => spawnSync("git", a, { cwd: repo, encoding: "utf8", shell: false });
+    mkdirSync(join(repo, "src"), { recursive: true });
+    writeFileSync(join(repo, "src", "shared.ts"), lines.join("\n") + "\n");
+    git("add", "src/shared.ts");
+    git("commit", "-m", "seed shared");
+  }
+  function worktreeEditingShared(repo: string, blockId: string, lines: string[]): void {
+    const wt = worktreePath(repo, blockId, RID);
+    createWorktree(repo, wt, worktreeBranchForBlock(blockId, RID));
+    writeFileSync(join(wt, "src", "shared.ts"), lines.join("\n") + "\n");
+  }
+  const accept = (repo: string, blockId: string) =>
+    acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId,
+      worktreeRoot: worktreePath(repo, blockId, RID),
+      branch: worktreeBranchForBlock(blockId, RID),
+      workerOutcome: "success",
+      // omit targetedCommands → derive; no test file touched → `npm run check` only,
+      // which the fixture's package.json resolves to `node --version` (exits 0).
+    });
+  const sharedAtHead = (repo: string): string =>
+    spawnSync("git", ["show", "HEAD:src/shared.ts"], { cwd: repo, encoding: "utf8", shell: false }).stdout;
+
+  it("auto-merges two nodes that edit DIFFERENT lines of one file (rebase folds in the prior merge)", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    seedShared(repo, ["A0", "B0", "C0"]);
+    // Both worktrees branch off the SAME base (created before either merges).
+    worktreeEditingShared(repo, "SEAMA", ["A1", "B0", "C0"]); // edits line 1
+    worktreeEditingShared(repo, "SEAMB", ["A0", "B0", "C1"]); // edits line 3
+
+    expect(accept(repo, "SEAMA").merged).toBe(true); // first lands; HEAD advances
+    expect(accept(repo, "SEAMB").merged).toBe(true); // rebased onto A's merge; non-overlapping
+
+    const shared = sharedAtHead(repo);
+    expect(shared).toContain("A1"); // node A's change survived
+    expect(shared).toContain("C1"); // node B's change folded in on top
+  });
+
+  it("routes to triage when two nodes edit the SAME line (a true seam the rebase can't merge)", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    seedShared(repo, ["A0", "B0", "C0"]);
+    worktreeEditingShared(repo, "SEAMC", ["AX", "B0", "C0"]);
+    worktreeEditingShared(repo, "SEAMD", ["AY", "B0", "C0"]); // same line, different content
+
+    expect(accept(repo, "SEAMC").merged).toBe(true);
+    const b = accept(repo, "SEAMD");
+    expect(b.merged).toBe(false); // rebase conflict on line 1 → not merged
+    expect(b.outcome).toBe("error");
+    expect(b.diagnostic).toMatch(/seam|conflict|rebase/i);
+
+    const shared = sharedAtHead(repo);
+    expect(shared).toContain("AX"); // first node intact; second did not clobber it
+    expect(shared).not.toContain("AY");
+  });
+});
+
+// ===========================================================================
 // advanceHostRolling — the per-completion session state machine
 // ===========================================================================
 

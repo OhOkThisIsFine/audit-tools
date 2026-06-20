@@ -725,6 +725,50 @@ export function mergeWorktree(
   return { success: true };
 }
 
+/**
+ * Rebase a node's worktree branch onto the main checkout's current HEAD (the
+ * remediation branch tip) so a sibling that merged AFTER this worktree was created
+ * is folded in before this node verifies and merges. Additive edits to a shared
+ * file merge automatically (git's per-commit 3-way); a true hunk conflict is a
+ * genuine seam that aborts cleanly so the node routes to triage instead of landing
+ * a broken merge. The branch is checked out in the worktree, so the rebase runs
+ * there. A no-op (branch already on HEAD — the common, no-sibling-merged case)
+ * succeeds. Leaves the branch on its pre-rebase commit on abort (so the failed
+ * node's work can still be quarantined).
+ */
+export function rebaseBranchOntoHead(
+  root: string,
+  worktreePath: string,
+  branch: string,
+): { ok: true } | { ok: false; error: string } {
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", shell: false });
+  if (head.error || head.status !== 0) {
+    const detail = (head.stderr ?? head.error?.message ?? "git rev-parse failed").toString().trim();
+    return { ok: false, error: `could not resolve remediation HEAD for rebase: ${detail}` };
+  }
+  const target = head.stdout.trim();
+  const rebase = spawnSync("git", ["rebase", target], {
+    cwd: worktreePath,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (rebase.error || rebase.status !== 0) {
+    const detail = [rebase.stdout ?? "", rebase.stderr ?? "", rebase.error?.message ?? ""]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    // Leave a clean tree: abort the in-progress rebase before the worktree is dropped.
+    spawnSync("git", ["rebase", "--abort"], { cwd: worktreePath, shell: false });
+    return {
+      ok: false,
+      error:
+        `rebase onto the current remediation HEAD conflicted (a real seam — two ` +
+        `nodes edited the same lines): ${detail}`,
+    };
+  }
+  return { ok: true };
+}
+
 /** Worktree path for a remediation block. */
 export function worktreePath(root: string, blockId: string, runId: string): string {
   return join(root, ".audit-tools", "worktrees", `remediate-${blockId}-${runId}`);
@@ -1019,6 +1063,19 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
     // The deterministic merge adjudicates the result file (resolved_no_change needs evidence).
     removeWorktree(root, wt);
     return { outcome: "success", verifyPassed, merged };
+  }
+
+  // Rebase the node's branch onto the current remediation HEAD BEFORE verify, so a
+  // sibling that merged after this worktree was created is folded in. Verify, the
+  // write-scope gate, and the cherry-pick then all operate on the FINAL to-be-merged
+  // content (green-at-merge; the later cherry-pick can no longer conflict). A true
+  // hunk conflict here is a genuine seam — preserve the work and route to triage
+  // rather than land a broken merge.
+  const rebase = rebaseBranchOntoHead(root, wt, branch);
+  if (!rebase.ok) {
+    quarantineFailedNodeCommit(root, branch, runId, blockId);
+    removeWorktree(root, wt);
+    return { outcome: "error", verifyPassed, merged, diagnostic: rebase.error };
   }
 
   // Verify commands: when the host omits them (real rolling drivers), DERIVE them
