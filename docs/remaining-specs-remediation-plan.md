@@ -1,13 +1,17 @@
 # Remaining-specs remediation plan (whole actionable backlog)
 
-Point-in-time **plan** produced 2026-06-20 by `/remediate-code over docs/remaining-specs.md`.
-Scope decision (Ethan): **whole actionable backlog**; this session **finishes the plan
-and defers all implementation**. Collapse / delete sections here as items ship.
+Produced 2026-06-20 by `/remediate-code over docs/remaining-specs.md`. Scope (Ethan):
+**whole actionable backlog**.
 
-> Machine source of truth: the validated contract-pipeline artifacts under
-> [`.audit-tools/remediation/intake/contract/`](../.audit-tools/remediation/intake/contract/)
-> (gitignored). The remediation run is **paused at the pre-implementation
-> review-approval gate** — resume to build (see *Resuming the build* below).
+> **STATUS: ✓ BUILT + MERGED to `main` (`a71050fb`, 2026-06-20) — npm PUBLISH HELD.**
+> All 14 modules implemented via dependency-ordered subagent dispatch and merged green
+> (`build`+`check`; node:test 2987/0, vitest 1754/0; A-9 capstone ran live over NIM).
+> **Integration seams left as follow-ups (NOT done):** A-8's `HybridSpillCoordinator` is
+> built+tested but not yet wired into the live dispatch drivers (`task_847a8c7d`); DC-4
+> uses an injectable `discoverProviders` stub; A-2 needs operator-authored corpus labels;
+> INV-2/A-7/A-9 live e2e are gated. Publish was held until the A-8 wiring lands + review.
+> Per-module build notes live in the merged `*.result.json` + the run's
+> [contract artifacts](../.audit-tools/remediation/intake/contract/) (gitignored).
 
 ## What this plan covers
 

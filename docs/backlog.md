@@ -347,6 +347,14 @@ narrowing (`a9cf29d0`).
   (enforce-in-tooling, not "host remembers the flag"): `complete_redelivery`'s `freshIntent` must also treat a
   ready `intake-summary.json` + `confirmed_by:"host"` checkpoint with no `state.json` as an active run, not a
   finished one to re-deliver.
+- **Dispatch per-node `targeted_commands` for node-test files omit the tsx loader (2026-06-20).** The
+  implementation-DAG/dispatch renders a `.mjs` test's verification command as `node --test tests/audit/x.test.mjs`,
+  but every audit/shared `.mjs` test imports `audit-tools/shared` (mapped to `./src` via tsconfig `paths`, honored
+  only by tsx) and there is no built `dist/` in a per-node worktree → bare `node --test` cannot resolve the import.
+  The package's own `test:node`/`test:single` scripts all use `node --import tsx/esm --test`. Every implement
+  worker had to notice + adjust the command this run. Fix in tooling: render node-test `targeted_commands` as
+  `node --import tsx/esm --test <file>` (the suite runner) so the in-process verify + the host command match. (Same
+  root as `task_7d35176d` — the in-process per-node verify hardcodes `npm run check` and ignores `targeted_commands`.)
 - **BUG: ambiguity-step `deemed_inappropriate` silently DECLINES the finding (2026-06-19).** At the
   `collect_clarifications` step, the prompt says `"action": "deemed_inappropriate"` = "not a real *issue*",
   read naturally as "this candidate *ambiguity* isn't genuine — proceed with the finding." But the engine
