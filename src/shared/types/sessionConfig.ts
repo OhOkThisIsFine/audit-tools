@@ -118,6 +118,66 @@ export const PROVIDER_SECTION_KEYS = {
   antigravity: "antigravity",
 } as const;
 
+/**
+ * The non-IDE backends a {@link DispatchableSource} can run. Excludes the
+ * conversation host (`claude-code`) and the IDE-bound providers (`vscode-task` /
+ * `antigravity`), which are driven through their host/IDE, not as a generic
+ * dispatchable source with an endpoint + parameters.
+ */
+export const DISPATCHABLE_SOURCE_PROVIDERS = [
+  "openai-compatible",
+  "codex",
+  "opencode",
+  "local-subprocess",
+  "subprocess-template",
+] as const;
+export type DispatchableSourceProvider =
+  (typeof DISPATCHABLE_SOURCE_PROVIDERS)[number];
+
+/**
+ * A generic dispatchable backend source — the uniform shape the dispatch engine
+ * spills work onto, applicable to ANY non-IDE source (an OpenAI-compatible API like
+ * NIM / vLLM / LM Studio, a headless CLI like codex / opencode, a subprocess
+ * template, …). A source is its `{provider, endpoint, parameters, quota}`, so the
+ * operator can configure MANY of them (two NIM endpoints, a local vLLM + a hosted
+ * model, a CLI pool) and each becomes its own CapacityPool with its own rate limit.
+ *
+ * `endpoint` + `parameters` are interpreted per provider: for `openai-compatible`
+ * the endpoint is the API `base_url` and `parameters` carries `temperature` /
+ * `headers` / `max_output_tokens` / …; for a CLI (`codex` / `opencode` /
+ * `local-subprocess`) the endpoint is the launcher command and `parameters` carries
+ * `extra_args` / `sandbox_mode` / `command_template` / …. The bridge to each
+ * provider's concrete config block lives in `sourceProviderConfig` (shared).
+ */
+export interface DispatchableSource {
+  /**
+   * Stable id for this source — the CapacityPool id + the key learned quota is
+   * recorded under. Defaults to `${provider}:${model ?? endpoint}` when omitted, so
+   * two sources of the same provider stay distinct as long as their model/endpoint
+   * differ (give them explicit ids otherwise).
+   */
+  id?: string;
+  /** The non-IDE backend that runs this source. */
+  provider: DispatchableSourceProvider;
+  /** API base URL (`openai-compatible`) or launcher command (CLI providers). */
+  endpoint?: string;
+  /** Model id, where the backend takes one. Never defaulted (no hardcoded model identity). */
+  model?: string;
+  /** Env var holding the API key (API sources). Preferred over `api_key`. */
+  api_key_env?: string;
+  /** Inline API key (discouraged — prefer `api_key_env`). */
+  api_key?: string;
+  /**
+   * Backend-specific extra parameters, merged into the provider's config block:
+   * `temperature` / `headers` / `max_output_tokens` / `response_format_json` /
+   * `include_referenced_files` (openai-compatible); `extra_args` / `sandbox_mode`
+   * (codex); `extra_args` (opencode); `command_template` / `env` (subprocess).
+   */
+  parameters?: Record<string, unknown>;
+  /** Per-source quota / rate-limit (rpm, tpm, context/output tokens). */
+  quota?: QuotaModelLimits;
+}
+
 export interface BlockQuotaConfig {
   context_tokens?: number;
   reserved_output_tokens?: number;
@@ -312,6 +372,15 @@ export interface SessionConfig {
   openai_compatible?: OpenAiCompatibleConfig;
   vscode_task?: VSCodeTaskConfig;
   antigravity?: AntigravityConfig;
+  /**
+   * Additional dispatchable backend sources the engine spills onto, beyond the
+   * primary `provider`. Each is a generic `{provider, endpoint, parameters, quota}`
+   * (see {@link DispatchableSource}) and becomes its own CapacityPool — so any
+   * non-IDE source (multiple NIM/vLLM endpoints, a CLI pool, …) is dispatchable
+   * uniformly. A legacy `openai_compatible` block (when it isn't the primary
+   * provider) is folded in as one implicit source for back-compat.
+   */
+  sources?: DispatchableSource[];
   agent_task_batch_size?: number;
   parallel_workers?: number;
   block_quota?: BlockQuotaConfig;

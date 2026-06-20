@@ -52,7 +52,7 @@ import {
   compareTier,
   mostCapableTier,
   normalizeRepoPath,
-  buildConfiguredApiPool,
+  buildSourcePools,
   type FindingTheme,
 } from "audit-tools/shared";
 import {
@@ -386,18 +386,18 @@ export async function buildConfirmedPools(input: {
     };
   }));
 
-  // A configured openai-compatible endpoint (NIM/vLLM/…) is a real, always-available
-  // API pool — surface it as a SECOND CapacityPool alongside the primary so the
-  // scheduler's proactive cross-pool spill (INV-QD-14) and the A-8 coordinator can
-  // route work here. Single-sourced in shared (`buildConfiguredApiPool`) so audit and
-  // remediate surface the IDENTICAL pool shape — the spill topology can't drift.
-  const apiPool = await buildConfiguredApiPool({
+  // Every configured dispatchable backend source (any non-IDE source: NIM/vLLM API,
+  // a CLI pool, …) becomes a CapacityPool alongside the primary, so the scheduler's
+  // proactive cross-pool spill (INV-QD-14) and the A-8 coordinator can route work to
+  // them. Single-sourced in shared (`buildSourcePools`) so audit and remediate surface
+  // the IDENTICAL pool shapes — the spill topology can't drift.
+  const sourcePools = await buildSourcePools({
     sessionConfig,
     primaryProviderName: providerName,
     quotaSource,
     quotaEntries,
   });
-  if (apiPool) primaryPools.push(apiPool);
+  primaryPools.push(...sourcePools);
 
   return primaryPools;
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
+import type { ResolvedProviderName, SessionConfig, DispatchableSource } from "../types/sessionConfig.js";
 import type { DispatchModelTier } from "../types/stepContract.js";
 import { DispatchModelTierSchema } from "../types/stepContract.js";
 import type {
@@ -134,6 +134,14 @@ export interface CapacityPool {
    * byte-estimate × safety-margin floor-1 degrade lives in `scheduleWave`, S4).
    */
   quotaSignalDegraded?: boolean;
+  /**
+   * The generic dispatchable source this pool was built from, when it is a
+   * configured backend source (not the conversation host's own pool). The dispatch
+   * worker rebuilds the provider from THIS source's `{endpoint, model, parameters}`
+   * rather than the global per-provider config block — which is what lets two
+   * sources of the same provider (e.g. two NIM endpoints) launch distinctly.
+   */
+  source?: DispatchableSource;
 }
 
 /** One pool's slice of the overall dispatch capacity. */

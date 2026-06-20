@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -721,19 +721,6 @@ export async function driveRollingImplementDispatch(
       .map((i) => [i.block_id, i.prompt_path]),
   );
 
-  // The live per-node worker: the configured provider, launched with the node's
-  // worktree-rooted prompt and cwd = its worktree. Tests inject `options.dispatchNode`
-  // to exercise the engine without spawning a real worker.
-  const dispatchNode: ProgrammaticNodeDispatcher =
-    options.dispatchNode ??
-    makeProviderNodeDispatcher({
-      root,
-      artifactsDir,
-      runId,
-      sessionConfig: options.sessionConfig,
-      promptPathByBlock,
-    });
-
   // Confirmed pools: quota-derived concurrency, never the raw host flag (INV-QD-11).
   const confirmedPools = await buildConfirmedPools({
     sessionConfig: options.sessionConfig,
@@ -743,6 +730,21 @@ export async function driveRollingImplementDispatch(
     hostModels: options.waveOptions?.hostModels,
     hostModelId: options.waveOptions?.hostModelId,
   });
+
+  // The live per-node worker: the configured provider, launched with the node's
+  // worktree-rooted prompt and cwd = its worktree. Tests inject `options.dispatchNode`
+  // to exercise the engine without spawning a real worker. A node on a source-backed
+  // pool launches FROM its source's config (A-8 generic dispatchable sources).
+  const dispatchNode: ProgrammaticNodeDispatcher =
+    options.dispatchNode ??
+    makeProviderNodeDispatcher({
+      root,
+      artifactsDir,
+      runId,
+      sessionConfig: options.sessionConfig,
+      promptPathByBlock,
+      sourceByPoolId: sourceByPoolId(confirmedPools),
+    });
 
   // Load state to partition the eligible frontier into rolling dependency levels.
   const state = await new StateStore(artifactsDir).loadState();
@@ -886,6 +888,13 @@ export async function executeInProcessPartition(params: {
    * coordinator's per-node pool assignment routes it (cross-provider dispatch).
    */
   dispatchNode?: WorktreeNodeWorker;
+  /**
+   * Per-pool dispatchable source (A-8 generic sources), keyed by pool id. Lets a node
+   * launch FROM its source's own `{endpoint, model, parameters}` (so two sources of the
+   * same provider — e.g. two NIM endpoints — dispatch distinctly). Built from the
+   * confirmed pools by the caller; absent → the global per-provider config block.
+   */
+  sourceByPoolId?: Map<string, DispatchableSource>;
 }): Promise<InProcessPartitionResult> {
   const { root, artifactsDir, runId, sessionConfig, partition, plan, coordinator } = params;
   if (partition.length === 0) return { nodes: [] };
@@ -909,6 +918,7 @@ export async function executeInProcessPartition(params: {
       runId,
       sessionConfig,
       promptPathByBlock,
+      sourceByPoolId: params.sourceByPoolId,
     });
 
   const nodes = await Promise.all(
@@ -1634,7 +1644,8 @@ async function buildImplementDispatchStep(ctx: {
           },
           isInProcess: isInProcessPool,
         });
-        // Run the in-process partition now (each node on its assigned backend pool).
+        // Run the in-process partition now (each node on its assigned backend pool,
+        // launched FROM that pool's source config — A-8 generic dispatchable sources).
         const inProcessOutcome = await executeInProcessPartition({
           root,
           artifactsDir,
@@ -1643,6 +1654,7 @@ async function buildImplementDispatchStep(ctx: {
           partition: partition.inProcess,
           plan,
           coordinator: partition.coordinator,
+          sourceByPoolId: sourceByPoolId(confirmedPools),
         });
         // DC-4: a backend pool whose node rate-limited is exhausted → settle it
         // (cross-cycle) so the next cycle routes its share to the host pool.
