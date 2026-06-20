@@ -122,11 +122,22 @@ export async function resolveIntakeStep(params: {
   let manifest: IntakeSourceManifest | undefined = intake.manifest;
   let manifestRefreshed = false;
 
-  if (!inputResolution.supplied && manifest && inputResolution.existing.length > 0) {
+  if (
+    !inputResolution.supplied &&
+    manifest &&
+    manifest.created_from !== "input" &&
+    inputResolution.existing.length > 0
+  ) {
     // Re-derive the manifest from the current default candidates so on-disk
     // changes are picked up. Whether this actually invalidates downstream intake
     // artifacts is decided below by comparing against the persisted manifest —
     // an unchanged candidate set must NOT discard a ready summary/brief.
+    //
+    // BUT never clobber an `input`-bound manifest: the loader re-passes `--input`
+    // on every next-step, yet a bare next-step (no flag) must NOT silently swap the
+    // user's explicit input for a default candidate (a stale `audit-findings.json`
+    // in `.audit-tools/` would otherwise hijack the run). An input-bound run's
+    // source set is fixed by the user, so it is preserved across bare calls.
     manifest = undefined;
   }
 
