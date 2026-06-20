@@ -68,9 +68,13 @@ Readable plan: [`docs/remaining-specs-remediation-plan.md`](remaining-specs-reme
     coordinator, split layer, NIM pool shape `buildConfiguredApiPool`, DC-4 settled-pool store) — only the per-node
     EXECUTION (review-ingest vs worktree-merge) + host-spawn mechanism stay per-tool (the work differs). **DC-4
     cross-cycle pause:** a backend pool that exhausts settles (persisted, shared store) → next cycle excludes it →
-    stranded work falls to the host pool. **Only remaining:** the live host+NIM run (crit. 3 — needs a Claude
-    session AND a NIM key at once; in-process half gated `nim-rolling-e2e`); optional host-pool-roster unify (a
-    genuine output-contract difference, NOT a capability gap). Full record: `docs/a8-rolling-cutover-plan.md` §Step 7.
+    stranded work falls to the host pool. **crit. 3 live run ✓ DONE** (gated `tests/remediate/hybrid-nim-e2e.test.ts`
+    drove `decideNextStep` with `provider=claude-code` + live NVIDIA NIM: split a 4-node frontier, NIM fixed
+    B-003/n3.mjs → HEAD, host got 3). **Plus: dispatchable sources GENERALIZED** (commit `46d35e6`) —
+    `DispatchableSource {provider,endpoint,parameters,quota}` in `SessionConfig.sources[]`, any non-IDE backend is
+    its own pool launching from its own config (memory `dispatchable-sources-generic`). Remaining (NOT blocking):
+    audit full-cutover hermetic test; `nim-rolling-e2e` gamma = `task_7d35176d`; optional host-pool-roster unify.
+    Full record: `docs/a8-rolling-cutover-plan.md` §Step 7.
   - **DC-4** injectable `discoverProviders` stub (hermetic default; live roster supplies net-new).
   - **A-2** scorer + fixture corpus built; real scoring needs operator-authored `corpus/<run-id>.labels.json`.
   - Gated live e2e skip without creds: INV-2 `AUDIT_TOOLS_LIVE_QUOTA=1`, A-7 `RUN_CODEX_E2E=1`, A-9 `RUN_AUTONOMY_E2E=1`.
