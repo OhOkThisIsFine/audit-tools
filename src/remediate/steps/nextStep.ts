@@ -21,15 +21,7 @@ import {
   prepareImplementDispatch,
   readExtractedPlanIfPresent,
   buildConfirmedPools,
-  createWorktree,
-  removeWorktree,
-  resetNodeWorktreeAndBranch,
-  acceptNodeWorktree,
-  recordNodeAcceptOutcome,
-  ensureWorktreeNodeModules,
-  seedUntrackedDeclaredPaths,
-  worktreePath,
-  worktreeBranchForBlock,
+  executeNodeInWorktree,
   blockScopesFromPlan,
 } from "./dispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
@@ -765,8 +757,6 @@ export async function driveRollingImplementDispatch(
   // Per-node worktree dispatch + verify-before-accept, wrapped so the rolling
   // engine's dispatchNode callback always RESOLVES (never rejects).
   const dispatchNodeWithWorktree: RollingNodeDispatcher = async (block, slot) => {
-    const branch = worktreeBranchForBlock(block.block_id, runId);
-    const wt = worktreePath(root, block.block_id, runId);
     const resultPath = resultPathByBlock.get(block.block_id)!;
     // Claim BEFORE any worktree work (CE-001). A node THIS driver already holds (a
     // rate_limited re-queue) reuses its token. A node a PEER driver holds is its to
@@ -784,79 +774,35 @@ export async function driveRollingImplementDispatch(
       }
       claimTokens.set(block.block_id, claim.ownerToken);
     }
-    try {
-      // Idempotent reset of any worktree dir AND leftover branch from a prior
-      // attempt before creating this node's isolated worktree. A `rate_limited`
-      // re-queue re-enters this dispatcher for the same block with the branch
-      // still present; a bare `createWorktree -b` would then fail with "branch
-      // already exists". `resetNodeWorktreeAndBranch` clears both (+ prunes stale
-      // admin entries) so every (re-)dispatch starts clean from HEAD.
-      resetNodeWorktreeAndBranch(root, wt, branch);
-      createWorktree(root, wt, branch);
-      // A fresh worktree has no node_modules (gitignored); link the main checkout's
-      // so this node's verify commands can run.
-      ensureWorktreeNodeModules(root, wt);
-      // Bring in declared targets that are untracked/ignored in the main tree so a
-      // committed-files-only worktree can still see this node's own targets.
-      // `touched_files` is the block's authoritative declared write set (the same
-      // source the dispatch plan's write scope is derived from).
-      seedUntrackedDeclaredPaths(root, wt, block.touched_files ?? []);
-      const result = await dispatchNode({
-        block,
-        slot,
-        worktreeRoot: wt,
-        resultPath,
-      });
-      // Shared post-worker lifecycle (commit → verify → merge), identical to the
-      // host-subagent driver's `accept-node` callback. Records the LIFECYCLE
-      // outcome but returns the worker's TRANSPORT result to the engine (so a
-      // rate_limited worker re-queues; a verify-failure routes to triage via merge).
-      // Verify commands are DERIVED from the node's actually-touched tests inside
-      // acceptNodeWorktree (post-commit) — omit them here so a host-authored path
-      // can't mis-verify. The accept-time write-scope gate likewise adjudicates the
-      // node's ACTUAL git edits (ground truth) against all blocks' declared scopes.
-      const accept = acceptNodeWorktree({
-        root,
-        runId,
-        blockId: block.block_id,
-        worktreeRoot: wt,
-        branch,
-        workerOutcome: result.outcome,
-        scope: { allBlockScopes },
-      });
-      // Persist the tool-owned verify/merge outcome so finalization blocks a node
-      // that self-reported resolved but never actually landed (OBL-DS-06). Parity
-      // with the host-subagent driver's `accept-node` callback.
-      await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept);
-      nodeOutcomes.push({
-        block_id: block.block_id,
-        outcome: accept.outcome,
-        verify_passed: accept.verifyPassed,
-        merged: accept.merged,
-      });
-      // Release the claim ONLY on a terminal accept. A `rate_limited` worker
-      // re-queues (still owned work — keep the claim so a peer can't grab it
-      // mid-retry); success / error / timeout is terminal → free it through the
-      // shared registry (token-checked) so the registry stays a true in-flight view.
-      if (result.outcome !== "rate_limited") {
-        await releaseNodeClaim(registry, claimTokens, block.block_id);
-      }
-      return result;
-    } catch (err) {
-      removeWorktree(root, wt);
-      await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, {
-        outcome: "error",
-        verifyPassed: false,
-        merged: false,
-      });
-      nodeOutcomes.push({ block_id: block.block_id, outcome: "error", verify_passed: false, merged: false });
+    // The shared per-node worktree lifecycle (reset → create → link node_modules →
+    // seed → dispatch → commit/verify/write-scope/merge → record), identical to the
+    // A-8 hybrid executor and behaviourally to the host-subagent driver's
+    // `accept-node` callback. `touched_files` is the block's authoritative declared
+    // write set (the source the dispatch plan's write scope is derived from).
+    const { result, accept } = await executeNodeInWorktree({
+      block,
+      slot,
+      root,
+      artifactsDir,
+      runId,
+      resultPath,
+      seedPaths: block.touched_files ?? [],
+      allBlockScopes,
+      dispatchNode,
+    });
+    nodeOutcomes.push({
+      block_id: block.block_id,
+      outcome: accept.outcome,
+      verify_passed: accept.verifyPassed,
+      merged: accept.merged,
+    });
+    // Release the claim ONLY on a terminal accept. A `rate_limited` worker re-queues
+    // (still owned work — keep the claim so a peer can't grab it mid-retry); success /
+    // error / timeout is terminal → free it through the shared registry (token-checked).
+    if (result.outcome !== "rate_limited") {
       await releaseNodeClaim(registry, claimTokens, block.block_id);
-      return {
-        packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
-        outcome: "error",
-        error: err,
-      };
     }
+    return result;
   };
 
   await driveRollingDispatch(levels, {
