@@ -35,7 +35,7 @@ import {
   type FreshSessionProvider,
   type HostModelRosterEntry,
 } from "audit-tools/shared";
-import type { AuditResult } from "../types.js";
+import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import {
@@ -324,6 +324,15 @@ export async function driveRollingAuditDispatch(params: {
   discoverProviders?: ProviderRediscovery;
   /** Override the livelock pause limit (defaults to the shared `LIVELOCK_PAUSE_LIMIT`). */
   livelockLimit?: number;
+  /**
+   * A-8 hybrid: review ONLY this task subset (the coordinator-assigned backend/NIM
+   * partition), packetized + dispatched against {@link poolsOverride}, WITHOUT
+   * touching the shared `pending-audit-tasks.json` the host-review path owns for its
+   * complementary subset.
+   */
+  tasksOverride?: AuditTask[];
+  /** A-8 hybrid: size + dispatch against these backend (NIM) pool(s), not the host pool. */
+  poolsOverride?: CapacityPool[];
 }): Promise<DriveRollingAuditDispatchResult> {
   const { root, artifactsDir, sessionConfig } = params;
   const runId = params.activeReviewRun.run_id;
@@ -343,6 +352,8 @@ export async function driveRollingAuditDispatch(params: {
     hostOutputTokens: params.hostOutputTokens,
     hostModelRoster: params.hostModelRoster,
     hostModelId: params.hostModelId,
+    tasksOverride: params.tasksOverride,
+    poolsOverride: params.poolsOverride,
   });
 
   // Nothing eligible this pass (every task already answered / budget-capped):

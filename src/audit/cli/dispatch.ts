@@ -11,8 +11,8 @@
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readJsonFile, writeJsonFile } from "audit-tools/shared";
-import type { SessionConfig } from "audit-tools/shared";
+import { readJsonFile, writeJsonFile, computeDispatchCapacity } from "audit-tools/shared";
+import type { SessionConfig, CapacityPool } from "audit-tools/shared";
 import type { HostModelRosterEntry, ProviderRateLimits } from "audit-tools/shared";
 import { isFileMissingError } from "audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -129,6 +129,19 @@ export async function prepareDispatchArtifacts(params: {
   hostModelRoster?: HostModelRosterEntry[] | null;
   /** Opaque model identity for the quota key when no model name resolves. */
   hostModelId?: string | null;
+  /**
+   * Restrict packetization to an explicit task subset (A-8 hybrid): the in-process
+   * driver reviews ONLY its coordinator-assigned partition WITHOUT reading or
+   * rewriting the shared `pending-audit-tasks.json` the host-review path owns for
+   * its own (complementary) subset. Absent → the usual file-or-bundle task source.
+   */
+  tasksOverride?: AuditTask[];
+  /**
+   * Override the confirmed capacity pools (A-8 hybrid): the in-process driver sizes
+   * + dispatches against the backend (NIM) pool(s) only, not the host pool it is
+   * spilling off of. Absent → the host-model pools from `buildDispatchPool`.
+   */
+  poolsOverride?: CapacityPool[];
 }): Promise<PrepareDispatchResult> {
   const runId = params.runId;
   const artifactsDir = params.artifactsDir;
@@ -147,14 +160,19 @@ export async function prepareDispatchArtifacts(params: {
 
   const bundle = await loadArtifactBundle(artifactsDir);
   const tasksPath = join(runDir, "pending-audit-tasks.json");
-  const tasks = await readJsonFile<AuditTask[]>(tasksPath).catch(async (error) => {
-    if (isFileMissingError(error)) {
-      const generated = buildPendingAuditTasks(bundle);
-      await writeJsonFile(tasksPath, generated);
-      return generated;
-    }
-    throw error;
-  });
+  // A-8 hybrid: an explicit task subset (the in-process driver's coordinator-assigned
+  // partition) bypasses the shared pending-audit-tasks.json the host-review path owns
+  // for its complementary subset — so the two drivers never review the same task.
+  const tasks =
+    params.tasksOverride ??
+    (await readJsonFile<AuditTask[]>(tasksPath).catch(async (error) => {
+      if (isFileMissingError(error)) {
+        const generated = buildPendingAuditTasks(bundle);
+        await writeJsonFile(tasksPath, generated);
+        return generated;
+      }
+      throw error;
+    }));
   const sessionConfig: SessionConfig =
     params.sessionConfig ?? (await loadSessionConfig(artifactsDir).catch(() => ({} as SessionConfig)));
   const lensDefsPath = join(params.packageRoot, "dispatch", "lens-definitions.json");
@@ -193,16 +211,36 @@ export async function prepareDispatchArtifacts(params: {
   // first, then partition the provider-neutral task-affinity graph into packets
   // sized to that budget (JIT). This replaces the frozen plan-time packet cap —
   // a run started under one model re-partitions cleanly under another's window.
-  const dispatchPool = await buildDispatchPool({
-    sessionConfig,
-    hostModel: params.hostModel,
-    queryLimits: params.queryLimits,
-    hostActiveSubagentLimit: params.hostActiveSubagentLimit,
-    hostContextTokens: params.hostContextTokens,
-    hostOutputTokens: params.hostOutputTokens,
-    hostModelRoster: params.hostModelRoster,
-    hostModelId: params.hostModelId,
-  });
+  // A-8 hybrid: when the caller pins the backend (NIM) pool(s), size packetization to
+  // THAT pool's window (through the shared capacity fold) and dispatch against it — so
+  // the in-process driver reviews its partition on the backend it spilled onto, not the
+  // host pool. Otherwise resolve the host-model pools from the handshake as usual.
+  let dispatchPool: Awaited<ReturnType<typeof buildDispatchPool>>;
+  if (params.poolsOverride && params.poolsOverride.length > 0) {
+    const probe = computeDispatchCapacity({
+      pools: params.poolsOverride,
+      sessionConfig,
+      pendingItemTokens: [],
+    });
+    const limits = probe.primary.schedule.resolved_limits;
+    dispatchPool = {
+      pools: params.poolsOverride,
+      hostModel: params.hostModel ?? null,
+      contextBudgetTokens: Math.max(1, limits.context_tokens - limits.output_tokens),
+      tierBudgets: null,
+    };
+  } else {
+    dispatchPool = await buildDispatchPool({
+      sessionConfig,
+      hostModel: params.hostModel,
+      queryLimits: params.queryLimits,
+      hostActiveSubagentLimit: params.hostActiveSubagentLimit,
+      hostContextTokens: params.hostContextTokens,
+      hostOutputTokens: params.hostOutputTokens,
+      hostModelRoster: params.hostModelRoster,
+      hostModelId: params.hostModelId,
+    });
+  }
   const taskGraph = resolveDispatchTaskGraph(bundle, orderedTasks);
   let packets = buildReviewPacketsFromPartition(orderedTasks, {
     graph: taskGraph,
