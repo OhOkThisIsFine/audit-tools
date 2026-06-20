@@ -7,6 +7,7 @@ import {
 } from "../io/artifacts.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import type { AuditState } from "../types/auditState.js";
+import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import {
   buildRunId,
@@ -89,6 +90,13 @@ export interface MaterializeReviewRunParams {
   obligationId: string | null;
   selfCliPath: string;
   timeoutMs: number;
+  /**
+   * Materialize the review over an explicit task subset (A-8 hybrid: the host
+   * COMPLEMENT, after the in-process driver claimed the backend/NIM partition) so the
+   * rendered worker prompt + pending-audit-tasks.json exclude the in-process tasks and
+   * the host never re-reviews them. Absent → the full coverage-derived pending set.
+   */
+  tasksOverride?: AuditTask[];
 }
 
 /**
@@ -107,7 +115,7 @@ export async function materializeReviewRun(
   const paths = getRunPaths(params.artifactsDir, runId);
   const pendingTasks = await addFileLineCountHints(
     params.root,
-    buildPendingAuditTasks(params.bundle),
+    params.tasksOverride ?? buildPendingAuditTasks(params.bundle),
   );
   const pendingTasksPath = join(paths.runDir, "pending-audit-tasks.json");
   const auditResultsPath = join(paths.runDir, "run-results.json");

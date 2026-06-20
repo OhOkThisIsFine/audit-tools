@@ -72,6 +72,11 @@ import {
   resolveAuditRollingEngineEnabled,
   resolvesToInProcessDispatchProvider,
 } from "./rollingAuditDispatch.js";
+import {
+  buildAuditNimPools,
+  planAuditHybridDispatch,
+  auditNodeClaimRegistry,
+} from "./hybridDispatch.js";
 
 // ── Incoming-artifact helper ──────────────────────────────────────────────────
 
@@ -1052,11 +1057,87 @@ async function runHostDelegationObligation(
     };
   }
 
+  // A-8 hybrid: when the rolling engine is enabled AND a backend (NIM) pool is
+  // configured alongside the conversation host, split the pending review tasks via the
+  // SAME shared coordinator remediate drives — review the NIM partition IN-PROCESS this
+  // cycle (claimed, exactly-one-claimant), then materialize the host review over the
+  // COMPLEMENT so the two never review the same task (coverage folds both by task_id).
+  // When NIM covers the whole frontier, transition to the fold; otherwise fall through
+  // to the host-review emit below over the freshly-ingested coverage. Inert when no NIM
+  // pool is confirmed (the existing host-review path is unchanged).
+  let reviewBundle = bundle;
+  let reviewState = state;
+  const hybridCfg = sessionConfig ?? ({} as SessionConfig);
+  const auditNimPools = await buildAuditNimPools(hybridCfg);
+  if (resolveAuditRollingEngineEnabled({ sessionConfig }) && auditNimPools.length > 0) {
+    const pending = buildPendingAuditTasks(bundle);
+    if (pending.length > 0) {
+      const settled = new Set<string>();
+      const partition = await planAuditHybridDispatch({
+        // Flat estimate: the coordinator bounds NIM by SLOTS, so uniform is sufficient.
+        frontier: pending.map((t) => ({ id: t.task_id, estimatedTokens: 2000 })),
+        nimPools: auditNimPools,
+        sessionConfig: hybridCfg,
+        claimRegistry: auditNodeClaimRegistry(ctx.params.artifactsDir),
+        readSettled: () => settled,
+        onSettle: (id) => {
+          settled.add(id);
+        },
+      });
+      if (partition.inProcess.length > 0) {
+        const nimIds = new Set(partition.inProcess.map((a) => a.task_id));
+        const nimTasks = pending.filter((t) => nimIds.has(t.task_id));
+        const complement = pending.filter((t) => !nimIds.has(t.task_id));
+        // Materialize the host review over the COMPLEMENT so its prompt excludes the NIM
+        // tasks. When NIM took the whole frontier, materialize over the NIM tasks just to
+        // give the in-process driver a run dir; the host emit is skipped below.
+        const { activeReviewRun } = await materializeReviewRun({
+          root: ctx.params.root,
+          artifactsDir: ctx.params.artifactsDir,
+          bundle,
+          obligationId: decision.selected_obligation,
+          selfCliPath: ctx.params.selfCliPath,
+          timeoutMs: ctx.params.timeoutMs,
+          tasksOverride: complement.length > 0 ? complement : nimTasks,
+        });
+        // Review the NIM partition in-process into the SAME run's task-results/ + ingest.
+        await driveRollingAuditDispatch({
+          root: ctx.params.root,
+          artifactsDir: ctx.params.artifactsDir,
+          activeReviewRun,
+          sessionConfig: hybridCfg,
+          timeoutMs: ctx.params.timeoutMs,
+          tasksOverride: nimTasks,
+          poolsOverride: auditNimPools,
+        });
+        // Terminal accept for each in-process task → free its coordinator claim.
+        for (const a of partition.inProcess) {
+          await partition.coordinator.release({
+            nodeId: a.task_id,
+            poolId: a.pool_id,
+            providerName: a.providerName,
+            hostModel: a.hostModel,
+            ownerToken: a.ownerToken,
+          });
+        }
+        if (complement.length === 0) {
+          // NIM reviewed the whole frontier — nothing left for the host this obligation.
+          await clearDispatchFiles(ctx.params.artifactsDir);
+          return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+        }
+        // Reload so the host-review emits over coverage that now reflects the NIM results
+        // (and never writes the stale pre-NIM bundle back over them).
+        reviewBundle = await loadArtifactBundle(ctx.params.artifactsDir);
+        reviewState = deriveAuditState(reviewBundle);
+      }
+    }
+  }
+
   const review = await ensureSemanticReviewRun({
     root: ctx.params.root,
     artifactsDir: ctx.params.artifactsDir,
-    bundle,
-    state,
+    bundle: reviewBundle,
+    state: reviewState,
     obligationId: decision.selected_obligation,
     selfCliPath: ctx.params.selfCliPath,
     timeoutMs: ctx.params.timeoutMs,
