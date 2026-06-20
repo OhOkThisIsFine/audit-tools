@@ -34,6 +34,9 @@ import {
   type SettledExclusionSet,
   type FreshSessionProvider,
   type HostModelRosterEntry,
+  type DispatchableSource,
+  withSourceConfig,
+  sourceByPoolId,
 } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -198,14 +201,20 @@ export function makeAuditProviderPacketDispatcher(params: {
     name: string | undefined,
     sessionConfig: SessionConfig,
   ) => FreshSessionProvider;
+  /**
+   * Per-pool dispatchable source (A-8 generic sources), keyed by `slot.poolId`. When a
+   * packet's pool is source-backed, its review worker is built FROM that source's config
+   * (its own endpoint/model/parameters), not the global per-provider block.
+   */
+  sourceByPoolId?: Map<string, DispatchableSource>;
 }): AuditPacketDispatcher {
   return async (packet, slot) => {
     const entry = packet.payload;
     const resolveProvider = params.createProvider ?? createFreshSessionProvider;
-    const provider = resolveProvider(
-      slot?.providerName || params.sessionConfig.provider,
-      params.sessionConfig,
-    );
+    // A-8 generic sources: build the per-packet worker FROM its pool's source config.
+    const source = params.sourceByPoolId?.get(slot?.poolId ?? "");
+    const cfg = withSourceConfig(params.sessionConfig, source);
+    const provider = resolveProvider(slot?.providerName || cfg.provider, cfg);
 
     const resultPath = entry.result_path;
     const dir = dirname(resultPath);
@@ -384,6 +393,8 @@ export async function driveRollingAuditDispatch(params: {
       runId,
       sessionConfig,
       timeoutMs: params.timeoutMs,
+      // A packet on a source-backed pool launches FROM that source's config.
+      sourceByPoolId: sourceByPoolId(dispatch.pools as CapacityPool[]),
     });
 
   const run = await runRollingDispatch<DispatchPlanEntry>(

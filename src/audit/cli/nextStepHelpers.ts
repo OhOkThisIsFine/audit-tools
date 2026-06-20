@@ -73,7 +73,7 @@ import {
   resolvesToInProcessDispatchProvider,
 } from "./rollingAuditDispatch.js";
 import {
-  buildAuditNimPools,
+  buildAuditSourcePools,
   isInProcessAuditPool,
   auditNodeClaimRegistry,
   auditHybridSettledPath,
@@ -1070,8 +1070,8 @@ async function runHostDelegationObligation(
   let reviewBundle = bundle;
   let reviewState = state;
   const hybridCfg = sessionConfig ?? ({} as SessionConfig);
-  const auditNimPools = await buildAuditNimPools(hybridCfg);
-  if (resolveAuditRollingEngineEnabled({ sessionConfig }) && auditNimPools.length > 0) {
+  const auditSourcePools = await buildAuditSourcePools(hybridCfg);
+  if (resolveAuditRollingEngineEnabled({ sessionConfig }) && auditSourcePools.length > 0) {
     const pending = buildPendingAuditTasks(bundle);
     if (pending.length > 0) {
       // DC-4: read the cross-cycle settled-pool set; a NIM pool exhausted on a prior
@@ -1083,7 +1083,7 @@ async function runHostDelegationObligation(
         frontier: pending.map((t) => ({ id: t.task_id, estimatedTokens: 2000 })),
         // Audit passes ONLY the NIM pool(s): the coordinator bounds NIM to its capacity
         // and claims those tasks; the rest stay pending for the batch host review.
-        pools: auditNimPools,
+        pools: auditSourcePools,
         sessionConfig: hybridCfg,
         claimRegistry: auditNodeClaimRegistry(ctx.params.artifactsDir),
         readSettled: () => settled,
@@ -1117,7 +1117,7 @@ async function runHostDelegationObligation(
           sessionConfig: hybridCfg,
           timeoutMs: ctx.params.timeoutMs,
           tasksOverride: nimTasks,
-          poolsOverride: auditNimPools,
+          poolsOverride: auditSourcePools,
         });
         // Terminal accept for each in-process task → free its coordinator claim.
         for (const a of partition.inProcess) {
@@ -1127,7 +1127,7 @@ async function runHostDelegationObligation(
         // its partition → settle it (cross-cycle) so the next cycle excludes it and the
         // stranded review tasks fall back to the batch host review instead of re-looping.
         if (driven.status !== "complete") {
-          for (const pool of auditNimPools) {
+          for (const pool of auditSourcePools) {
             await partition.coordinator.settlePool(pool.id);
           }
         }

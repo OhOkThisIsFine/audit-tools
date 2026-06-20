@@ -2,10 +2,12 @@ import { dirname, join } from "node:path";
 import {
   readOptionalJsonFile,
   writeJsonFile,
+  withSourceConfig,
   type SessionConfig,
   type ProviderSlot,
   type RollingDispatchResult,
   type FreshSessionProvider,
+  type DispatchableSource,
 } from "audit-tools/shared";
 import { createFreshSessionProvider } from "../providers/index.js";
 import {
@@ -31,6 +33,13 @@ export interface ProviderNodeDispatcherParams {
     name: string | undefined,
     sessionConfig: SessionConfig,
   ) => FreshSessionProvider;
+  /**
+   * Per-pool dispatchable source (A-8 generic sources), keyed by `slot.poolId`. When a
+   * node's pool is backed by a source, its provider is built FROM that source's config
+   * (its own endpoint/model/parameters) rather than the global per-provider block — so
+   * two sources of the same provider (e.g. two NIM endpoints) launch distinctly.
+   */
+  sourceByPoolId?: Map<string, DispatchableSource>;
 }
 
 /**
@@ -84,10 +93,12 @@ export function makeProviderNodeDispatcher(
     // when the primary pool is quota-degraded). Falls back to the configured
     // provider when no slot provider is present.
     const resolveProvider = params.createProvider ?? createFreshSessionProvider;
-    const provider = resolveProvider(
-      slot?.providerName || params.sessionConfig?.provider,
-      params.sessionConfig ?? {},
-    );
+    // A-8 generic sources: build the node's provider FROM its pool's source config
+    // (its own endpoint/model/params) when the pool is source-backed, else the global
+    // block — so two sources of the same provider (e.g. two NIM endpoints) launch distinctly.
+    const source = params.sourceByPoolId?.get(slot?.poolId ?? "");
+    const cfg = withSourceConfig(params.sessionConfig ?? {}, source);
+    const provider = resolveProvider(slot?.providerName || cfg.provider, cfg);
     const dir = dirname(resultPath);
     const taskPath = join(dir, `${block.block_id}.task.json`);
     const stdoutPath = join(dir, `${block.block_id}.stdout.txt`);

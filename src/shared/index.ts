@@ -147,6 +147,8 @@ export type {
   CodexConfig,
   OpenCodeConfig,
   OpenAiCompatibleConfig,
+  DispatchableSource,
+  DispatchableSourceProvider,
   VSCodeTaskConfig,
   AntigravityConfig,
   BlockQuotaConfig,
@@ -610,9 +612,18 @@ export type {
   PartialCompletionTerminal,
 } from "./quota/capacity.js";
 export { DispatchCapacityPoolSummarySchema } from "./quota/capacity.js";
-// Configured openai-compatible (NIM) pool surfacing — the single-sourced 2nd-pool
-// shape both orchestrators spill into under A-8's hybrid topology.
-export { buildConfiguredApiPool } from "./quota/apiPool.js";
+// Generic dispatchable-source pools — the single-sourced backend-pool shape both
+// orchestrators spill into (any non-IDE source: API endpoint or CLI), each with its
+// own endpoint/parameters/quota. Generalizes the former openai-compatible-only path.
+export {
+  buildSourcePools,
+  buildSourcePool,
+  sourceProviderConfig,
+  dispatchableSourceId,
+  collectDispatchableSources,
+  withSourceConfig,
+  sourceByPoolId,
+} from "./quota/apiPool.js";
 export type { CacheablePromptParts } from "./prompts.js";
 export {
   buildCacheablePrompt,

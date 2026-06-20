@@ -21,7 +21,7 @@
 import { join } from "node:path";
 import {
   ClaimRegistry,
-  buildConfiguredApiPool,
+  buildSourcePools,
   buildQuotaSource,
   readQuotaState,
   type CapacityPool,
@@ -48,12 +48,13 @@ export function isInProcessAuditPool(pool: { providerName: string }): boolean {
 }
 
 /**
- * Build the in-process backend (NIM / openai-compatible) pool(s) audit can spill review
- * packets onto, alongside the conversation host. Uses the SAME shared
- * `buildConfiguredApiPool` remediate's `buildConfirmedPools` does, so the pool shape is
- * identical across both drivers. Empty when no endpoint is configured (→ no hybrid).
+ * Build the in-process backend source pool(s) audit can spill review packets onto,
+ * alongside the conversation host — any configured non-IDE dispatchable source
+ * (`sessionConfig.sources` + a legacy `openai_compatible` block). Uses the SAME shared
+ * `buildSourcePools` remediate's `buildConfirmedPools` does, so the pool shapes are
+ * identical across both drivers. Empty when no source is configured (→ no hybrid).
  */
-export async function buildAuditNimPools(sessionConfig: SessionConfig): Promise<CapacityPool[]> {
+export async function buildAuditSourcePools(sessionConfig: SessionConfig): Promise<CapacityPool[]> {
   const primaryProviderName =
     (sessionConfig as { provider?: string }).provider ?? "claude-code";
   let quotaEntries: Record<string, QuotaStateEntry> = {};
@@ -66,13 +67,7 @@ export async function buildAuditNimPools(sessionConfig: SessionConfig): Promise<
     halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
       ?.empirical_half_life_hours,
   });
-  const nim = await buildConfiguredApiPool({
-    sessionConfig,
-    primaryProviderName,
-    quotaSource,
-    quotaEntries,
-  });
-  return nim ? [nim] : [];
+  return buildSourcePools({ sessionConfig, primaryProviderName, quotaSource, quotaEntries });
 }
 
 /**
