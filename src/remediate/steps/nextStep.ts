@@ -773,9 +773,8 @@ export async function driveRollingImplementDispatch(
           return finding?.targeted_commands ?? [];
         }),
       );
-      // The worker's self-reported amendments, adjudicated (never trusted as the
-      // gate input) by the accept-time write-scope gate before the cherry-pick.
-      const workerResult = await readOptionalJsonFile<{ amended_files?: string[] }>(resultPath);
+      // The accept-time write-scope gate adjudicates the node's ACTUAL git edits
+      // (ground truth) against all blocks' declared scopes — no worker self-report.
       const accept = acceptNodeWorktree({
         root,
         runId,
@@ -784,7 +783,7 @@ export async function driveRollingImplementDispatch(
         branch,
         workerOutcome: result.outcome,
         targetedCommands: targeted,
-        scope: { allBlockScopes, amendedFiles: workerResult?.amended_files ?? [] },
+        scope: { allBlockScopes },
       });
       // Persist the tool-owned verify/merge outcome so finalization blocks a node
       // that self-reported resolved but never actually landed (OBL-DS-06). Parity

@@ -953,8 +953,6 @@ export interface AcceptNodeWorktreeParams {
   scope?: {
     /** Every block's declared write scope, for amendment ownership adjudication. */
     allBlockScopes: Array<{ block_id: string; write_paths: string[] }>;
-    /** The worker's self-reported `amended_files` (adjudicated, never trusted as the gate input). */
-    amendedFiles: string[];
   };
 }
 
@@ -1036,16 +1034,16 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
   // Write-scope gate (OBL-DS-06), BEFORE the cherry-pick: an out-of-scope or
   // seam-conflicting edit must never land in the main tree, so it is adjudicated
   // against the branch's git diff (the ground truth) here rather than reported
-  // after `mergeWorktree` already merged it. A worker that legitimately needed a
-  // file outside its declared scope declares it via `amended_files`; an unowned
-  // amendment widens the effective scope, while one owned by another block blocks.
+  // after `mergeWorktree` already merged it. The gate routes the node's ACTUAL
+  // out-of-declared edits (git diff, never a self-report): an edit to a file no
+  // sibling block owns widens the effective scope, while one owned by another
+  // block blocks as a seam conflict.
   if (params.scope) {
     const decision = enforceAcceptWriteScope({
       root,
       branch,
       blockId,
       allBlockScopes: params.scope.allBlockScopes,
-      amendedFiles: params.scope.amendedFiles,
     });
     if (decision.blocked) {
       // Scope-blocked but the node committed real work — preserve it for recovery.
@@ -2325,54 +2323,81 @@ export function declaredPathsFromPlan(
 }
 
 /**
- * Accept-time write-scope gate (OBL-DS-06), run from `acceptNodeWorktree` AFTER
- * the verify and BEFORE the cherry-pick so a violation PREVENTS the merge rather
- * than being reported once the edit already landed in main. It adjudicates the
- * worker's self-reported `amended_files` against all blocks' declared scopes via
- * an ephemeral `OwnershipRegistry` seeded from `allBlockScopes`: an unowned
- * amended path is granted and widens this node's effective scope (the surfaced
- * amend path — a too-narrow declared scope no longer blocks a correct fix); a path
- * owned by another block is a seam conflict that blocks. The gate then diffs the
- * worktree branch (the git ground truth, never the self-report) against the
- * effective scope. Cross-sibling contention on a file two live nodes both amend is
- * left to the merge-time lost-update detector (`detectOverlappingEdits`), which
+ * Pure write-scope adjudication (OBL-DS-06) — git-free so it is unit-testable with
+ * a synthetic edit set. Seeds an ephemeral `OwnershipRegistry` from `allBlockScopes`
+ * (normalised to repo-relative so ownership compares like-for-like) and routes the
+ * node's ACTUAL out-of-declared edits — the git ground truth, never a self-report:
+ *  - an edit to a file no sibling block owns is granted and widens this node's
+ *    effective scope (a too-narrow — or empty — declared scope no longer blocks a
+ *    correct fix; this is the sanctioned "extend into unowned files" path);
+ *  - an edit to a file in another block's declared scope is a seam conflict that
+ *    blocks until the seam protocol re-scopes or serialises the nodes.
+ * Cross-sibling contention on a file two live nodes both touch (neither declared)
+ * is left to the merge-time lost-update detector (`detectOverlappingEdits`), which
  * sees the full set of merged blocks a single accept cannot.
+ */
+export function adjudicateWriteScope(
+  allBlockScopes: Array<{ block_id: string; write_paths: string[] }>,
+  blockId: string,
+  edited: GitEditedFiles,
+  root: string,
+): WriteScopeDecision {
+  const registry = new OwnershipRegistry();
+  registry.initialize(
+    allBlockScopes.map((b) => ({
+      node_id: b.block_id,
+      write_paths: b.write_paths.map((p) => toRepoRelative(p, root)),
+    })),
+  );
+  if (edited.available) {
+    // The node's real source edits outside its declared scope (sanctioned side
+    // outputs already excluded by writeScopeViolations).
+    const candidates = writeScopeViolations(registry.getScope(blockId), edited.files, root);
+    if (candidates.length > 0) {
+      const { seam_routed } = routeAmendmentRequest(registry, blockId, candidates);
+      if (seam_routed.length > 0) {
+        const detail = seam_routed
+          .map((r) => {
+            const reason = r.reason;
+            if (reason.outcome === "owned") return `${r.path} owned by ${reason.owner_node_id}`;
+            if (reason.outcome === "contended") {
+              return `${r.path} contended by ${reason.sibling_node_id}`;
+            }
+            return r.path;
+          })
+          .join("; ");
+        return {
+          blocked: true,
+          reason:
+            `Node edited files owned by another block (seam conflict): ${detail}. ` +
+            `Resolve via the seam protocol (re-scope contracts or serialise the nodes) before this node can land.`,
+        };
+      }
+      // every candidate was unowned → granted into this node's effective scope.
+    }
+  }
+  return enforceWriteScope(registry.getScope(blockId), edited, root);
+}
+
+/**
+ * Accept-time write-scope gate, run from `acceptNodeWorktree` AFTER the verify and
+ * BEFORE the cherry-pick so a violation PREVENTS the merge rather than being
+ * reported once the edit already landed in main. Thin git wrapper around
+ * {@link adjudicateWriteScope}: resolves the branch's actual edits and adjudicates.
  */
 export function enforceAcceptWriteScope(params: {
   root: string;
   branch: string;
   blockId: string;
   allBlockScopes: Array<{ block_id: string; write_paths: string[] }>;
-  amendedFiles: string[];
 }): WriteScopeDecision {
-  const { root, branch, blockId, allBlockScopes, amendedFiles } = params;
-  const registry = new OwnershipRegistry();
-  registry.initialize(
-    allBlockScopes.map((b) => ({ node_id: b.block_id, write_paths: b.write_paths })),
+  const { root, branch, blockId, allBlockScopes } = params;
+  return adjudicateWriteScope(
+    allBlockScopes,
+    blockId,
+    gitEditedFilesForBranch(root, branch),
+    root,
   );
-  if (amendedFiles.length > 0) {
-    const { seam_routed } = routeAmendmentRequest(registry, blockId, amendedFiles);
-    if (seam_routed.length > 0) {
-      const detail = seam_routed
-        .map((r) => {
-          const reason = r.reason;
-          if (reason.outcome === "owned") return `${r.path} owned by ${reason.owner_node_id}`;
-          if (reason.outcome === "contended") {
-            return `${r.path} contended by ${reason.sibling_node_id}`;
-          }
-          return r.path;
-        })
-        .join("; ");
-      return {
-        blocked: true,
-        reason:
-          `Worker amended files owned by another block (seam conflict): ${detail}. ` +
-          `Resolve via the seam protocol before this node can land.`,
-      };
-    }
-  }
-  const effective = registry.getScope(blockId);
-  return enforceWriteScope(effective, gitEditedFilesForBranch(root, branch), root);
 }
 
 // ---------------------------------------------------------------------------

@@ -210,13 +210,13 @@ describe("acceptNodeWorktree — accept-time write-scope gate", () => {
       branch: worktreeBranchForBlock("WS1", RID),
       workerOutcome: "success",
       targetedCommands: [],
-      scope: { allBlockScopes: [{ block_id: "WS1", write_paths: ["src/a.ts"] }], amendedFiles: [] },
+      scope: { allBlockScopes: [{ block_id: "WS1", write_paths: ["src/a.ts"] }] },
     });
     expect(res.merged).toBe(true);
     expect(headHas(repo, "src/a.ts")).toBe(true);
   });
 
-  it("BLOCKS an out-of-scope edit before the cherry-pick — main tree stays clean", () => {
+  it("GRANTS an out-of-declared edit to an UNOWNED file — the gate routes git-actual edits, no self-report needed", () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     const wt = makeWorktreeWithEdit(repo, "WS2", "a.ts");
@@ -228,41 +228,17 @@ describe("acceptNodeWorktree — accept-time write-scope gate", () => {
       branch: worktreeBranchForBlock("WS2", RID),
       workerOutcome: "success",
       targetedCommands: [],
-      // Declared scope does NOT include src/a.ts and the worker declared no amendment.
-      scope: { allBlockScopes: [{ block_id: "WS2", write_paths: ["src/declared.ts"] }], amendedFiles: [] },
-    });
-    expect(res.merged).toBe(false);
-    expect(res.outcome).toBe("error");
-    expect(res.diagnostic).toContain("src/a.ts");
-    // The edit was PREVENTED from landing — never cherry-picked into HEAD.
-    expect(headHas(repo, "src/a.ts")).toBe(false);
-    expect(existsSync(wt)).toBe(false);
-  });
-
-  it("grants an unowned amended_files path — the worker's surfaced amend path lands", () => {
-    const { repo, ok } = initRepo();
-    if (!ok) return;
-    const wt = makeWorktreeWithEdit(repo, "WS3", "a.ts");
-    const res = acceptNodeWorktree({
-      root: repo,
-      runId: RID,
-      blockId: "WS3",
-      worktreeRoot: wt,
-      branch: worktreeBranchForBlock("WS3", RID),
-      workerOutcome: "success",
-      targetedCommands: [],
-      // src/a.ts is outside the declared scope but the worker declared it as an
-      // amendment and no other block owns it → granted → effective scope widens.
-      scope: {
-        allBlockScopes: [{ block_id: "WS3", write_paths: ["src/declared.ts"] }],
-        amendedFiles: ["src/a.ts"],
-      },
+      // src/a.ts is outside the declared scope, but no sibling block owns it, so the
+      // actual git edit is granted (extend-into-unowned) and the node lands — even
+      // though the worker reported nothing. A too-narrow/empty declared scope no
+      // longer falsely blocks a correct fix.
+      scope: { allBlockScopes: [{ block_id: "WS2", write_paths: ["src/declared.ts"] }] },
     });
     expect(res.merged).toBe(true);
     expect(headHas(repo, "src/a.ts")).toBe(true);
   });
 
-  it("seam-conflicts an amended path OWNED by another block — blocked, not landed", () => {
+  it("seam-conflicts an actual edit to a file OWNED by another block — blocked, not landed", () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     const wt = makeWorktreeWithEdit(repo, "WS4", "owned.ts");
@@ -274,13 +250,13 @@ describe("acceptNodeWorktree — accept-time write-scope gate", () => {
       branch: worktreeBranchForBlock("WS4", RID),
       workerOutcome: "success",
       targetedCommands: [],
-      // src/owned.ts is in sibling block OTHER's declared scope → seam conflict.
+      // src/owned.ts is in sibling block OTHER's declared scope → seam conflict on
+      // the node's ACTUAL edit (no self-report involved).
       scope: {
         allBlockScopes: [
           { block_id: "WS4", write_paths: ["src/declared.ts"] },
           { block_id: "OTHER", write_paths: ["src/owned.ts"] },
         ],
-        amendedFiles: ["src/owned.ts"],
       },
     });
     expect(res.merged).toBe(false);
