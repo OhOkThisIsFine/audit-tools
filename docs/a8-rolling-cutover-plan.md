@@ -203,10 +203,20 @@ A-8 coordinator, the split layer, the NIM pool shape, the settled-pool store. On
 (read-only review + ingest vs. worktree edit → commit → verify → cherry-pick merge) and the host-spawn mechanism
 (batch `semantic_review` handoff vs. rolling `accept-node` loop) stay per-tool, because the work genuinely differs.
 
+**Live hybrid run (crit. 3) — ✓ DONE (2026-06-20, remediate, live NVIDIA NIM).** New gated e2e
+`tests/remediate/hybrid-nim-e2e.test.ts` (RUN_NIM_E2E=1) drives the production `decideNextStep` with
+`provider=claude-code` + a live NIM `openai_compatible` pool: the coordinator split a 4-node frontier → **NIM=1
+(B-003/n3.mjs fixed by the live endpoint, merged to HEAD this cycle) + host=3 (handed off)**. Asserts via git HEAD
+(NIM merges per-cycle; state items resolve only at host-done `mergeImplementResults`). The spec is "audit OR
+remediate" → satisfied; the audit-specific cutover (coverage-driven complement) is unit-tested + reasoned, not yet
+live-driven (a full audit pipeline run would confirm it).
+  - **Surfaced (pre-existing, NOT a regression):** the older `tests/remediate/nim-rolling-e2e.test.ts` gamma
+    "verify-fail → triage" assertion is RED when run live — `verifyCommandsForEdits` (dispatch.ts) ALWAYS derives
+    `npm run check` and IGNORES a finding's `targeted_commands`, so gamma's intended verify never fires. That is
+    `task_7d35176d` manifesting (per-node verify ignores `targeted_commands`), not the hybrid. Fix belongs to that
+    task (it needs a design call: honor `targeted_commands`, or keep derive-only + fix the test).
+
 **Genuinely remaining:**
-- **Live hybrid run (crit. 3)** — manual in-session validation with a Claude session AND a NIM key present at once
-  (`provider=claude-code` + `openai_compatible` configured); the in-process half is gated
-  `tests/nim-rolling-e2e.test.ts`. The host half needs a real host, so it is an in-session check, not a CI test.
 - **(optional) host-pool roster construction** — `buildConfirmedPools` (remediate) vs `buildDispatchPool` (audit)
   still build host-model pools separately; their OUTPUT contracts differ (audit needs `contextBudgetTokens` +
   `tierBudgets` for packetization, remediate does not), so this is a genuine difference, NOT a capability gap (the
