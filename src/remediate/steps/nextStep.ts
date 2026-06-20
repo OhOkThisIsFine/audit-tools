@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -23,12 +23,18 @@ import {
   buildConfirmedPools,
   executeNodeInWorktree,
   blockScopesFromPlan,
+  declaredPathsFromPlan,
 } from "./dispatch.js";
+import {
+  planHybridDispatch,
+  isInProcessPool,
+  type HybridNodeAssignment,
+} from "./hybridDispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
 import { prepareHostRollingDispatch, nodeClaimRegistry } from "./rollingSession.js";
 import type { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
 import { writeCurrentStep } from "./stepWriter.js";
-import type { RemediationStep } from "./types.js";
+import type { RemediationStep, RemediationDispatchPlan } from "./types.js";
 import { dependencyVerifiedComplete } from "./stepUtils.js";
 import {
   isTerminalStatus,
@@ -825,6 +831,120 @@ export async function driveRollingImplementDispatch(
   };
 }
 
+/**
+ * Flat per-node input-token estimate for the A-8 hybrid frontier split. The
+ * coordinator splits by per-pool SLOTS (concurrency) — host vs. backend — so a
+ * uniform estimate is sufficient here; it matches the default the in-process engine
+ * uses (`driveRollingDispatch`'s `() => 2000`), keeping the two paths consistent.
+ */
+const HYBRID_NODE_TOKEN_ESTIMATE = 2000;
+
+/** Outcome of running the coordinator's in-process partition this cycle. */
+export interface InProcessPartitionResult {
+  nodes: Array<{
+    block_id: string;
+    outcome: RollingDispatchResult<{ block_id: string }>["outcome"];
+    verify_passed: boolean;
+    merged: boolean;
+  }>;
+}
+
+/**
+ * Run the A-8 coordinator's IN-PROCESS partition this cycle. Each node was already
+ * claimed by the coordinator and assigned to a backend pool (NIM / codex / …), so it
+ * is launched on THAT pool's provider — binding the slot's providerName to the
+ * per-node assignment is what routes a node to its assigned backend — cwd-confined to
+ * its worktree, through the shared `executeNodeInWorktree` lifecycle (commit → verify
+ * → write-scope → merge); then the coordinator's claim is released.
+ *
+ * Nodes run concurrently: the coordinator's proactive split already bounded the
+ * partition to the backend pools' capacity, so the partition size IS the safe
+ * concurrency. The host partition runs in parallel via the host-subagent driver;
+ * both write accept-outcome sidecars the run-level `mergeImplementResults` reconciles.
+ *
+ * Run-once (no in-pass re-queue): a node whose worker rate-limits or errors is not
+ * merged (its worktree drops) and is routed to triage by the deterministic merge —
+ * bounded, never a livelock. (Cross-cycle settled-pool re-balancing is a follow-up.)
+ */
+export async function executeInProcessPartition(params: {
+  root: string;
+  artifactsDir: string;
+  runId: string;
+  sessionConfig: SessionConfig | null;
+  partition: HybridNodeAssignment[];
+  plan: RemediationDispatchPlan;
+  coordinator: HybridSpillCoordinator;
+}): Promise<InProcessPartitionResult> {
+  const { root, artifactsDir, runId, sessionConfig, partition, plan, coordinator } = params;
+  if (partition.length === 0) return { nodes: [] };
+
+  const allBlockScopes = blockScopesFromPlan(plan);
+  const withBlockId = plan.items.filter(
+    (i): i is typeof i & { block_id: string } => typeof i.block_id === "string",
+  );
+  const promptPathByBlock = new Map(withBlockId.map((i) => [i.block_id, i.prompt_path]));
+  const resultPathByBlock = new Map(withBlockId.map((i) => [i.block_id, i.result_path]));
+  const state = await new StateStore(artifactsDir).loadState();
+  const blockById = new Map<string, RemediationBlock>(
+    (state?.plan?.blocks ?? []).map((b) => [b.block_id, b]),
+  );
+
+  const dispatchNode = makeProviderNodeDispatcher({
+    root,
+    artifactsDir,
+    runId,
+    sessionConfig,
+    promptPathByBlock,
+  });
+
+  const nodes = await Promise.all(
+    partition.map(async (a) => {
+      const release = () =>
+        coordinator.release({
+          nodeId: a.block_id,
+          poolId: a.pool_id,
+          providerName: a.providerName,
+          hostModel: a.hostModel,
+          ownerToken: a.ownerToken,
+        });
+      const resultPath = resultPathByBlock.get(a.block_id);
+      if (!resultPath) {
+        // No prepared prompt/result for this node — release + mark error (the merge
+        // routes it to triage); never silently drop a claimed node.
+        await release();
+        return { block_id: a.block_id, outcome: "error" as const, verify_passed: false, merged: false };
+      }
+      const block = blockById.get(a.block_id) ?? ({ block_id: a.block_id } as RemediationBlock);
+      const slot: ProviderSlot = {
+        providerName: a.providerName,
+        hostModel: a.hostModel,
+        poolId: a.pool_id,
+      };
+      const { accept } = await executeNodeInWorktree({
+        block,
+        slot,
+        root,
+        artifactsDir,
+        runId,
+        resultPath,
+        seedPaths: declaredPathsFromPlan(plan, a.block_id),
+        allBlockScopes,
+        dispatchNode,
+      });
+      // Run-once → terminal; free the coordinator claim (token-checked).
+      await release();
+      return {
+        block_id: a.block_id,
+        outcome: accept.outcome,
+        verify_passed: accept.verifyPassed,
+        merged: accept.merged,
+      };
+    }),
+  );
+
+  return { nodes };
+}
+
 // ---------------------------------------------------------------------------
 // Tool-owned final completion gate (INV-RS-10) + coarse re-block (INV-RS-09)
 // ---------------------------------------------------------------------------
@@ -1457,7 +1577,76 @@ async function buildImplementDispatchStep(ctx: {
     }
 
     if (rollingEngineEnabled && canDispatchImpl) {
-      const rolling = await prepareHostRollingDispatch({ root, artifactsDir }, runId, waveOptsImpl);
+      // A-8 hybrid spill: when an in-process backend pool is ALSO confirmed (a
+      // configured NIM/openai-compatible endpoint alongside the conversation host),
+      // split the eligible frontier across BOTH pool classes via the shared
+      // HybridSpillCoordinator (single claimant, proactive capacity split) — the
+      // orchestrator runs the in-process partition THIS cycle while the host spawns
+      // subagents for its partition. Pure host-subagent dispatch falls out when no
+      // backend pool is confirmed (the coordinator has nothing to split against).
+      const confirmedPools = await buildConfirmedPools({
+        sessionConfig: sessionConfigImpl ?? null,
+        hostMaxConcurrent: options.hostMaxConcurrent,
+        hostContextTokens: options.hostContextTokens,
+        hostOutputTokens: options.hostOutputTokens,
+        hostModels: options.hostModels,
+        hostModelId: options.hostModelId,
+      });
+      const backendPools = confirmedPools.filter(isInProcessPool);
+
+      let rolling: Awaited<ReturnType<typeof prepareHostRollingDispatch>>;
+      if (backendPools.length > 0) {
+        // Prepare the frontier ONCE (worktree-rooted prompts) so the coordinator
+        // split, the in-process executor, and the host driver all read the same plan.
+        const plan = await prepareImplementDispatch({ root, artifactsDir }, runId, undefined, {
+          ...waveOptsImpl,
+          worktreeRootedPrompts: true,
+        });
+        const frontier: FrontierNode[] = plan.items
+          .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
+          .map((i) => ({ id: i.block_id, estimatedTokens: HYBRID_NODE_TOKEN_ESTIMATE }));
+        if (frontier.length === 0) {
+          await mergeImplementResults({ root, artifactsDir }, runId);
+          return { kind: "transition", state: await store.loadState() };
+        }
+        // One coordinator over the shared claim registry splits + claims each node to
+        // exactly one pool. The settled set is per-cycle here; cross-cycle pause
+        // authorization (terminalStatus → all_pools_exhausted) is a DC-4 follow-up.
+        const settled = new Set<string>();
+        const partition = await planHybridDispatch({
+          frontier,
+          pools: confirmedPools,
+          sessionConfig: sessionConfigImpl ?? {},
+          claimRegistry: nodeClaimRegistry(artifactsDir, runId),
+          readSettled: () => settled,
+          onSettle: (id) => {
+            settled.add(id);
+          },
+        });
+        // Run the in-process partition now (each node on its assigned backend pool).
+        await executeInProcessPartition({
+          root,
+          artifactsDir,
+          runId,
+          sessionConfig: sessionConfigImpl ?? null,
+          partition: partition.inProcess,
+          plan,
+          coordinator: partition.coordinator,
+        });
+        // The backend carried the whole batch (or every host node was contested by a
+        // peer driver) → nothing for the host this cycle; merge what landed + transition.
+        if (partition.host.length === 0) {
+          await mergeImplementResults({ root, artifactsDir }, runId);
+          return { kind: "transition", state: await store.loadState() };
+        }
+        // Hand the host partition (pre-claimed) to the host-subagent driver.
+        rolling = await prepareHostRollingDispatch({ root, artifactsDir }, runId, waveOptsImpl, {
+          plan,
+          partition: partition.host.map((a) => ({ block_id: a.block_id, ownerToken: a.ownerToken })),
+        });
+      } else {
+        rolling = await prepareHostRollingDispatch({ root, artifactsDir }, runId, waveOptsImpl);
+      }
       // Everything eligible may already be done/skipped — fold straight to merge
       // rather than emitting a dispatch step with zero nodes.
       if (rolling.session.frontier.length === 0) {
