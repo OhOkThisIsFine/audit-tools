@@ -46,19 +46,29 @@
 
 ## Immediate next
 
-**Whole-backlog remediation PLAN: ✓ BUILT + PAUSED at the approval gate (2026-06-20, plan-only, build deferred).**
-`/remediate-code over docs/remaining-specs.md` — Ethan chose whole actionable backlog + **finish plan / defer build**.
-The contract pipeline ran end-to-end (goal→…→14-node implementation_dag; 162 obligations, 148 test specs, 13
-counterexamples all judged **residual_risk** & folded into the designs) and is **paused at the review-approval
-gate** (blocked, resumable). Readable deliverable: [`docs/remaining-specs-remediation-plan.md`](remaining-specs-remediation-plan.md);
-machine artifacts under `.audit-tools/remediation/intake/contract/` (gitignored). **To build:** `remediate-code
-next-step` → write `review_resolution.json` (empty disapproved = approve all) → `next-step`; recommend
-dependency-order slices (independent bounded fixes → inv2→a10→a8→dc6/dc2 interlock → a2/a7 → a9 capstone), not one
-mega-run. This plan is the detailed form of the former go-forward program (A2/A7/A8/A9/A10 + the DCs/F-1/INV-1/2).
-- **Deliberate intermediate state (not bugs):** the run sits at the blocked gate by design; the prior quick-wins
-  run's promoted outputs were moved to `.audit-tools/prior-run-quickwins-2026-06-19.bak/` to clear a tooling-bug
-  short-circuit (memory `stale-remediation-report-complete-redelivery-trap`; fix = spawned `task_2092be69` +
-  backlog *Known friction*).
+**Whole-backlog remediation: ✓ BUILT + MERGED to `main` (2026-06-20, `a71050fb`) — PUBLISH HELD per Ethan.**
+`/remediate-code over docs/remaining-specs.md` — all 14 modules (DC-1..6, F-1, A-2/A-7/A-8/A-9/A-10, INV-1/2)
+planned end-to-end (162 obligations, 148 test specs, 13 residual-risk counterexamples folded in), then BUILT via
+dependency-ordered subagent dispatch waves (worktree-isolated, tool-owned accept/merge). FF-merged to `main`;
+**fully green** (`npm run build && check`; node:test **2987 pass / 0 fail / 11 gated-skip**; vitest **1754 / 0**).
+A-9 autonomy capstone **ran live** (a NIM key was present): audit→remediate→`complete`, all four assertions pass.
+Readable plan: [`docs/remaining-specs-remediation-plan.md`](remaining-specs-remediation-plan.md). **npm NOT published**
+(global bins still run 0.28.8); publish was held until the A-8 wiring lands + Ethan reviews the diff.
+- **Closing-gate catch:** the run skipped its closing gate, so I ran the merged-branch suite myself and fixed the
+  one merge-surfaced regression (DC-2's new `provider-confirmation.json` write → registered as a side-channel in
+  the executor-writeset parity test, `a71050fb`). Each block was green in isolation; only the merge surfaced it.
+- **Deliberate integration seams (NOT bugs) — finish before a release:**
+  - **A-8 coordinator NOT wired into the live drivers** — `HybridSpillCoordinator` is built + unit-green but the
+    drivers don't call `planAssignments()` yet (proactive hybrid-spill not active end-to-end). DC-6 *did* wire both
+    drivers through the a10 ClaimRegistry, so double-dispatch protection is live. Follow-up = `task_847a8c7d`.
+  - **DC-4** injectable `discoverProviders` stub (hermetic default; live roster supplies net-new).
+  - **A-2** scorer + fixture corpus built; real scoring needs operator-authored `corpus/<run-id>.labels.json`.
+  - Gated live e2e skip without creds: INV-2 `AUDIT_TOOLS_LIVE_QUOTA=1`, A-7 `RUN_CODEX_E2E=1`, A-9 `RUN_AUTONOMY_E2E=1`.
+- **Open follow-up tasks (spawned):** `task_847a8c7d` (A-8 wiring), `task_7d35176d` (in-process per-node verify
+  hardcodes `npm run check`, ignores node `targeted_commands`), `task_2092be69` (complete_redelivery stale-report gate).
+- **Prior-run cleanup (not a bug):** the earlier quick-wins run's promoted outputs sit in
+  `.audit-tools/prior-run-quickwins-2026-06-19.bak/` (moved to clear the stale-report gate short-circuit; memory
+  `stale-remediation-report-complete-redelivery-trap`).
 
 **Quick-wins (S) remediation: ✓ SHIPPED — `audit-tools@0.28.8` LIVE (2026-06-19, `main` `7ee727c1`, CI run 27857663331).**
 F-2/F-3/F-5/F-6/F-7/PB-1 — each its own green commit; full suite green; FF-merged to `main`, published, global bins reinstalled (both `--version` → 0.28.8). Commit map + scope decisions: memory `remaining-specs-quickwins-remediation`. NOTE the tool bug found doing it (memory `ambiguity-step-deemed-inappropriate-drops-finding`, backlog Known-friction): the ambiguity step's `deemed_inappropriate` silently DECLINED 5/7 approved findings — recovered by hand-implementing on the branch. Fix-in-tooling is OPEN.
