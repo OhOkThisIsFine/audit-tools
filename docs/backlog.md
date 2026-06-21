@@ -7,25 +7,7 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Ambiguity-step `deemed_inappropriate` silently DECLINES the finding.** At `collect_clarifications`,
-  `"action":"deemed_inappropriate"` reads naturally as "this candidate *ambiguity* isn't genuine — proceed
-  with the finding," but the engine maps it onto the FINDING and drops it from implementation (lands in
-  "Deemed Inappropriate", never coded). Fix: an ambiguity marked not-genuinely-ambiguous must CLEAR the
-  ambiguity and PROCEED with the finding (today's correct host action is `"action":"clarified"`), or rename
-  the dispositions so "no ambiguity here" can't be confused with "drop this finding." A host that approved a
-  finding at the review gate must not be able to lose it at the ambiguity gate by a natural word choice.
-- **Dispatch node-test `targeted_commands` omit the tsx loader.** The implementation-DAG renders a `.mjs`
-  test's verify command as `node --test tests/audit/x.test.mjs`, but every audit/shared `.mjs` test imports
-  `audit-tools/shared` (tsconfig `paths`, honored only by tsx) with no built `dist/` in a per-node worktree
-  → bare `node --test` can't resolve the import. Render node-test `targeted_commands` as
-  `node --import tsx/esm --test <file>` so the in-process verify + the host command match.
-- **Stale `remediation-report.md` short-circuits a fresh confirmed run to `complete`** (`task_2092be69`).
-  `complete_redelivery` (`nextStep.ts`, `buildPreIntakeObligations`) emits `present_report:complete` when
-  `state==null` + no `--input` + a prior-run report exists + no `conversation-start.md`/`extracted-plan.json`.
-  Its `freshIntent` check ignores a ready `intake-summary.json` + host-confirmed `intent_checkpoint.json` —
-  exactly the signal a NEW run carries right after `confirm_intent` — so a bare `next-step` re-delivers the OLD
-  report instead of extracting. Fix: `freshIntent` must treat a ready intake-summary + `confirmed_by:"host"`
-  checkpoint with no `state.json` as an active run, not a finished one.
+_(none open — add the moment you hit one)_
 
 ## Forward tracks
 

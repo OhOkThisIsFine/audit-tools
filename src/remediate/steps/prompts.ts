@@ -65,10 +65,12 @@ After the user answers, write JSON to exactly:
 ]
 \`\`\`
 
-Per item use \`"action": "clarified"\` (the user answered — proceed with the
-answer in \`rationale\`), \`"action": "deemed_inappropriate"\` (not a real issue),
-or \`"action": "defer"\` (the user explicitly chose to skip it this run). Then run
-\`${loaderCommand("next-step")}\`.
+Per item use \`"action": "clarified"\` (the user answered, OR there was no real
+ambiguity after all — proceed with the finding, put the answer/decision in
+\`rationale\`), \`"action": "reject_finding"\` (the FINDING itself is not a real
+issue — this DROPS it, so use it only to discard a finding, never just to say the
+question wasn't ambiguous), or \`"action": "defer"\` (the user explicitly chose to
+skip it this run). Then run \`${loaderCommand("next-step")}\`.
 `;
 }
 
@@ -129,11 +131,14 @@ ambiguous), write JSON to exactly:
 ]
 \`\`\`
 
-Per item: \`"action": "clarified"\` (answered — proceed with the answer in
-\`rationale\`), \`"action": "deemed_inappropriate"\` (not a real issue), or
-\`"action": "defer"\` (the user explicitly chose to skip it this run). Deferral is
-the **user's** call — never decide it unilaterally. Write \`[]\` if nothing is
-genuinely ambiguous. Then run \`${loaderCommand("next-step")}\`.
+Per item: \`"action": "clarified"\` (answered, OR you decided it was not genuinely
+ambiguous — proceed with the finding, put the answer/decision in \`rationale\`),
+\`"action": "reject_finding"\` (the FINDING itself is not a real issue — this DROPS
+it; never use it merely to say a question wasn't ambiguous, or you will lose a
+finding the review gate approved), or \`"action": "defer"\` (the user explicitly
+chose to skip it this run). Deferral is the **user's** call — never decide it
+unilaterally. Write \`[]\` if nothing is genuinely ambiguous. Then run
+\`${loaderCommand("next-step")}\`.
 `;
 }
 

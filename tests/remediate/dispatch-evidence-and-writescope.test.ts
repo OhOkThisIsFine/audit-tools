@@ -32,6 +32,7 @@ import {
   prepareImplementDispatch,
   buildImplementModelHint,
   isBuildFreeVerifyCommand,
+  normalizeNodeTestCommand,
   writeScopeViolations,
   enforceWriteScope,
   adjudicateWriteScope,
@@ -245,6 +246,37 @@ describe("isBuildFreeVerifyCommand", () => {
     expect(isBuildFreeVerifyCommand("tsc --build")).toBe(false);
     expect(isBuildFreeVerifyCommand("tsc -p tsconfig.json")).toBe(false);
     expect(isBuildFreeVerifyCommand("")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeNodeTestCommand — inject the tsx loader into bare node --test
+// ---------------------------------------------------------------------------
+
+describe("normalizeNodeTestCommand — tsx loader for node:test (.mjs) verify", () => {
+  it("injects --import tsx/esm into a bare node --test command", () => {
+    expect(normalizeNodeTestCommand("node --test tests/audit/x.test.mjs")).toBe(
+      "node --import tsx/esm --test tests/audit/x.test.mjs",
+    );
+    expect(
+      normalizeNodeTestCommand("node --test tests/audit/a.test.mjs tests/audit/b.test.mjs"),
+    ).toBe("node --import tsx/esm --test tests/audit/a.test.mjs tests/audit/b.test.mjs");
+  });
+
+  it("is idempotent — leaves a command that already carries a loader untouched", () => {
+    const already = "node --import tsx/esm --test tests/audit/x.test.mjs";
+    expect(normalizeNodeTestCommand(already)).toBe(already);
+    const loader = "node --loader tsx/esm --test tests/audit/x.test.mjs";
+    expect(normalizeNodeTestCommand(loader)).toBe(loader);
+  });
+
+  it("leaves non-node-test commands alone", () => {
+    expect(normalizeNodeTestCommand("npm run check")).toBe("npm run check");
+    expect(normalizeNodeTestCommand("npx vitest run tests/foo.test.ts")).toBe(
+      "npx vitest run tests/foo.test.ts",
+    );
+    // `node` without `--test` (e.g. a script run) is not a node:test invocation.
+    expect(normalizeNodeTestCommand("node scripts/seed.mjs")).toBe("node scripts/seed.mjs");
   });
 });
 

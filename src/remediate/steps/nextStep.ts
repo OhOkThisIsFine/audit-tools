@@ -2455,11 +2455,17 @@ Stop after presenting this choice. Do not advance the run until the user decides
   });
 }
 
-type PlanClarificationAction = "clarified" | "deemed_inappropriate" | "defer";
+// Action tokens are deliberately unambiguous so a host CANNOT lose an
+// approved finding by a natural word choice at the ambiguity gate: "this
+// candidate ambiguity isn't genuine" reads as a comment on the AMBIGUITY, so it
+// must map to `clarified` (proceed with the finding), never to a drop. The
+// finding-dropping token is named `reject_finding` — it speaks about the
+// FINDING, not the ambiguity, and so can't be confused with "no ambiguity here."
+type PlanClarificationAction = "clarified" | "reject_finding" | "defer";
 
 const PLAN_CLARIFICATION_ACTIONS: readonly PlanClarificationAction[] = [
   "clarified",
-  "deemed_inappropriate",
+  "reject_finding",
   "defer",
 ];
 
@@ -2513,15 +2519,16 @@ function normalizePlanClarificationResolutions(value: unknown): PlanClarificatio
  * Apply one clarification resolution to its item. Single-sourced so the up-front
  * ambiguity gate (part A) and the mid-run clarification round (part B) settle an
  * item identically: `clarified` re-opens it (pending) with the answer as context,
- * `deemed_inappropriate` closes it as not-a-real-issue, and `defer` closes it as
- * an explicit user deferral for this run. Never resurrects a terminal item.
+ * `reject_finding` closes it as not-a-real-issue (terminal `deemed_inappropriate`
+ * disposition), and `defer` closes it as an explicit user deferral for this run.
+ * Never resurrects a terminal item.
  */
 function applyClarificationActionToItem(
   item: RemediationItemState,
   res: PlanClarificationResolution,
   now: string,
 ): void {
-  if (res.action === "deemed_inappropriate") {
+  if (res.action === "reject_finding") {
     item.status = "deemed_inappropriate";
     item.failure_reason = res.rationale;
     item.started_at ??= now;
@@ -2541,7 +2548,7 @@ function applyClarificationActionToItem(
 
 /**
  * Consume clarification_resolution.json for plan-phase clarifications.
- * Mirrors the triage resolution consume: deemed_inappropriate → terminal,
+ * Mirrors the triage resolution consume: reject_finding → terminal,
  * clarified → re-open (pending) for implement dispatch. Archives the file.
  */
 async function applyPlanClarificationResolution(
@@ -3665,8 +3672,15 @@ function buildPreIntakeObligations(
         if (state != null || inputResolution.supplied || !existsSync(reportPath)) {
           return "satisfied";
         }
+        // A ready intake-summary + host-confirmed checkpoint with no state.json is
+        // the signal a NEW run carries right after confirm_intent (plan not yet
+        // built) — an active run, not a finished one. A fully-green close deletes
+        // the whole artifact dir (close.ts), so the summary + checkpoint can only
+        // co-exist for a live run; never re-deliver the leftover root report over it.
         const freshIntent =
-          existsSync(ip.conversationStart) || existsSync(ip.extractedPlan);
+          existsSync(ip.conversationStart) ||
+          existsSync(ip.extractedPlan) ||
+          (existsSync(ip.summary) && existingCheckpoint?.confirmed_by === "host");
         return freshIntent ? "satisfied" : "missing";
       },
       execute: async (state, c) => ({
