@@ -224,7 +224,7 @@ project's concerns: it is a **repo-agnostic** tool that audits any codebase, so 
 **general** first-principles questions, never project-specific lenses. The real root cause is that
 the implementation **degraded the original design** into a narrow, constrained step. Restore it:
 - **Ask general first-principles questions (primary).** Today the prompt
-  (`audit-code/src/orchestrator/designReviewPrompt.ts:246-257`) asks only "what library / pattern /
+  (`src/audit/orchestrator/designReviewPrompt.ts:246-257`) asks only "what library / pattern /
   simplification / missing capability" — a local improvement checklist. → **Fix:** ask the general
   architectural questions — *"is the fundamental approach the right one? what core assumption
   underlies this design, and is it sound? what would a clean-sheet redesign do differently? where is
@@ -243,7 +243,7 @@ the implementation **degraded the original design** into a narrow, constrained s
   reviewing", `designReviewPrompt.ts:494`). → **Fix:** restore its evaluative role — assess merit /
   validity / severity, decide what is real, and flag what is *missing* — not just fold duplicates.
 - **Ground the output (general; = S7 applied to the reviewer).** Conceptual findings are ingested on
-  `Array.isArray()` alone (`audit-code/src/cli/nextStepHelpers.ts:325-332`) — no evidence, unlike
+  `Array.isArray()` alone (`src/audit/cli/nextStepHelpers.ts:325-332`) — no evidence, unlike
   schema-gated `AuditResult`. → **Fix:** require each finding to carry evidence (components/lines) and
   validate on ingest. (An output requirement, not a prompt lens — stays repo-agnostic.)
 - **Gate it.** The obligation is a boolean (`state.ts:158-159`); `runDesignReviewAutoComplete`
