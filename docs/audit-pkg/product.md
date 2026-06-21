@@ -24,7 +24,7 @@ fallback. It is not the preferred end-user mental model.
 The supported user-facing surfaces are:
 
 1. `/audit-code` in conversation
-2. `npm install -g auditor-lambda` as the one-time package install
+2. `npm install -g audit-tools` as the one-time package install
 3. `audit-code prompt-path` to locate the packaged prompt asset
 4. `audit-code ensure` for idempotent repo-local bootstrap
 5. `audit-code install` for explicit repair or force refresh
