@@ -31,8 +31,9 @@ import type {
   ProviderSlot,
   RollingDispatchResult,
 } from "audit-tools/shared";
-import { resolveWindowsShimSpawnCommand, probeQuotaSource } from "audit-tools/shared";
+import { probeQuotaSource } from "audit-tools/shared";
 import { findingLead, renderFindingBadgeBody } from "audit-tools/shared";
+import { runShellCommand } from "../utils/commands.js";
 import {
   AGENT_FEEDBACK_FILENAME,
   readJsonFile,
@@ -642,34 +643,35 @@ export function resetNodeWorktreeAndBranch(
   }
 }
 
-/** Run each targeted command in the worktree directory. Returns pass/fail and combined output. */
 /**
- * Package-manager / runner shim base names that must be spawned through the
- * command shell on Windows (their PATH entries are `.cmd` wrappers that
- * `spawnSync(..., { shell: false })` cannot exec). Routed through the shared
- * `resolveWindowsShimSpawnCommand` so the verify step is OS-agnostic — on
- * non-win32 these spawn directly. Without this, every node's first verify
- * command (`npm run build`) errors on Windows and the whole rolling implement
- * path blocks at triage.
+ * Run each targeted command in the worktree directory. Returns pass/fail and
+ * combined output.
+ *
+ * `targeted_commands` are opaque host-authored command *strings* (e.g.
+ * `npm run build`, `grep -c '/packages/' .gitignore`, anything with pipes,
+ * quotes, or redirections), NOT pre-tokenized argv. They are run through the
+ * platform shell (`runShellCommand` → `spawnSync(..., { shell: true })`, the
+ * same path `close.ts` uses for `test_command`/`e2e_command`) so the shell — not
+ * a word-split + `spawnSync(shell:false)` — resolves the verb. That is what
+ * makes this OS-agnostic: on win32 `cmd.exe` natively execs `.cmd` shims (npm,
+ * npx, …) and resolves PATH commands; on darwin/linux `/bin/sh` does. The prior
+ * argv path ENOENT'd the *spawn itself* for any verb that wasn't a bare
+ * executable (e.g. `grep` on Windows), turning a correct fix into a phantom
+ * contract failure that burned the retry budget.
  */
-const VERIFY_SHIM_BASE_NAMES = ["npm", "npx", "pnpm", "yarn"] as const;
-
 export function verifyNodeInWorktree(
   worktreePath: string,
   targetedCommands: string[],
 ): WorktreeVerifyResult {
   const outputs: string[] = [];
   for (const cmd of targetedCommands) {
-    const [bin, ...rawArgs] = cmd.split(" ");
-    const { command, args } = resolveWindowsShimSpawnCommand(bin, rawArgs, VERIFY_SHIM_BASE_NAMES);
-    const r = spawnSync(command, args, {
+    const r = runShellCommand(cmd, {
       cwd: worktreePath,
       encoding: "utf8",
-      shell: false,
     });
     if (r.error) {
-      // Spawn itself failed (e.g. a shim not exec'able without a shell) — surface
-      // it as a verify failure with the error text rather than a silent status.
+      // Shell itself failed to spawn — surface it as a verify failure with the
+      // error text rather than a silent status.
       outputs.push(`$ ${cmd}\n${r.error.message}`);
       return { passed: false, output: outputs.join("\n---\n") };
     }
