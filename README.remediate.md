@@ -37,25 +37,24 @@ after that brief is clear enough to convert into bounded findings.
 
 ## Runtime Artifacts
 
-Active runs use `.remediation-artifacts/` in the target repository. The current
-state is `.remediation-artifacts/state.json`, and the current step contract is
+Active runs use `.audit-tools/remediation/` in the target repository. The current
+state is `.audit-tools/remediation/state.json`, and the current step contract is
 written to:
 
-- `.remediation-artifacts/steps/current-step.json`
-- `.remediation-artifacts/steps/current-prompt.md`
+- `.audit-tools/remediation/steps/current-step.json`
+- `.audit-tools/remediation/steps/current-prompt.md`
 
-After close, the durable outputs are written at the repo root:
+After close, the durable outputs are written to `.audit-tools/`:
 
 - `remediation-report.md`
-- `remediation-report.json`
+- `remediation-outcomes.json`
 - `remediation-closing-result.json`
 
 ## Development From Source
 
 The global `npm install -g remediator-lambda` path is for users. For repository
 development in a fresh clone or git worktree, run `npm install` at the repo root
-before build, check, test, or package-scoped workflows so workspace links point
-at the current `@audit-tools/shared` sources instead of stale compiled output.
+before build, check, or test workflows.
 
 ## CLI
 
@@ -92,7 +91,7 @@ The remediator can start from any of these inputs:
 - conversational feedback typed directly after `/remediate-code`
 - a mix of documents and conversation
 
-Runtime intake artifacts live under `.remediation-artifacts/intake/`:
+Runtime intake artifacts live under `.audit-tools/remediation/intake/`:
 
 - `source-manifest.json`
 - `conversation-start.md`
