@@ -69,6 +69,10 @@ Standing gotchas worth keeping for any agent (strong or weak):
   "no exported member") → run `npm install` in the worktree first.
 - **`node --test` needs the tsx loader**: `node --import tsx/esm --test <file>` (bare `node --test` can't
   resolve `audit-tools/shared` via tsconfig `paths`). Same for `npm run test:single`.
+- **Don't mask the test exit code.** `node --test … ; echo "exit=$?"` and `npm test > out; echo done` report
+  the *trailing* command's exit, not the suite's — and piping through `grep`/`rm` in the same Bash call races
+  the output file, so a real failure reads as "green." Capture the suite's own status: `npm test > out 2>&1 &&
+  echo PASS || echo "FAIL=$?"`. (Mis-reading a masked exit shipped a release whose CI then failed.)
 - **Global `-g` install defers `postinstall`** (npm allow-scripts) → the host-integration deploy silently
   skips; finish with `npm i -g --allow-scripts=audit-tools` or `node "$(npm root -g)/audit-tools/scripts/postinstall.mjs"`.
 - **The Bash tool mangles Windows backslash paths** (`C:\a\b` → `C:ab`) → use forward slashes or the
