@@ -190,4 +190,4 @@ Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + comm
 
 Tracked in [`docs/backlog.md`](docs/backlog.md). Add entry when deferring; remove when shipped.
 
-**Log friction the moment you hit it** — non-obvious traps, misbehaving tools, missing affordances, shell/env quirks. One line to `docs/backlog.md` under *Known friction* before moving on. 30-second note now = fix a future session can pick up.
+**Log friction the moment you hit it** — non-obvious traps, misbehaving tools, missing affordances, shell/env quirks. One line to `docs/backlog.md` — under *Open bugs / frictions* if it's a fixable defect, or *Durable traps* if it's a standing environment/tooling gotcha — before moving on. 30-second note now = fix a future session can pick up.
