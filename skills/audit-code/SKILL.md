@@ -98,7 +98,7 @@ The prompt payload in `audit-code.prompt.md` remains the canonical instruction a
 The intended user setup is one global package install:
 
 ```bash
-npm install -g auditor-lambda
+npm install -g audit-tools
 ```
 
 That makes `audit-code` available on `PATH` and seeds user-level command/skill
@@ -132,12 +132,11 @@ audit-code
 
 from the target repository root.
 
-When developing `auditor-lambda` itself, prefer the local wrapper at
-`packages/audit-code/audit-code.mjs` (there is no `audit-code.mjs` at the
-monorepo root):
+When developing `audit-tools` itself, prefer the local wrapper at
+`audit-code.mjs` (at the repo root):
 
 ```bash
-node packages/audit-code/audit-code.mjs   # from the monorepo root
+node audit-code.mjs   # from the repo root
 ```
 
 That keeps the run pinned to the local wrapper and local `dist/` output instead
