@@ -9,6 +9,7 @@ import { buildRiskRegister } from "../extractors/risk.js";
 import { buildSurfaceManifest } from "../extractors/surfaces.js";
 import { buildUnitManifest } from "./unitBuilder.js";
 import { buildDesignAssessment } from "../extractors/designAssessment.js";
+import { deriveGraphSignals } from "../extractors/graphSignals.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 
 export async function runStructureExecutor(
@@ -41,10 +42,12 @@ export async function runStructureExecutor(
     surfaceManifest,
     disposition,
   );
+  const graphSignals = deriveGraphSignals(graphBundle);
   const riskRegister = buildRiskRegister(
     unitManifest,
     criticalFlows,
     externalAnalyzerResults,
+    graphSignals,
   );
 
   return {

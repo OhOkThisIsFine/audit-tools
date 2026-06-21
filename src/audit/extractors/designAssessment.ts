@@ -1,6 +1,7 @@
 import type { Finding, UnitManifest } from "../types.js";
-import type { GraphBundle, GraphEdge, CriticalFlowManifest, RiskRegister } from "audit-tools/shared";
+import type { GraphBundle, CriticalFlowManifest, RiskRegister } from "audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
+import { deriveGraphSignals, type GraphSignals } from "./graphSignals.js";
 
 // ID generation is instance-scoped per build (no shared mutable module state),
 // so repeated/concurrent buildDesignAssessment calls produce independent,
@@ -10,105 +11,11 @@ function createFindingIdGenerator(): () => string {
   return () => `DA-${String(n++).padStart(3, "0")}`;
 }
 
-function allEdges(graphBundle: GraphBundle): GraphEdge[] {
-  const edges: GraphEdge[] = [];
-  for (const [key, value] of Object.entries(graphBundle.graphs)) {
-    if (key === "routes" || !Array.isArray(value)) continue;
-    for (const edge of value) {
-      if (edge && typeof edge.from === "string" && typeof edge.to === "string") {
-        edges.push(edge);
-      }
-    }
-  }
-  return edges;
-}
-
-function dfsVisit(
-  node: string,
-  path: string[],
-  adjacency: Map<string, Set<string>>,
-  visited: Set<string>,
-  stack: Set<string>,
-  cycles: string[][],
-): void {
-  if (stack.has(node)) {
-    const cycleStart = path.indexOf(node);
-    if (cycleStart >= 0) {
-      cycles.push(path.slice(cycleStart));
-    }
-    return;
-  }
-  if (visited.has(node)) return;
-
-  visited.add(node);
-  stack.add(node);
-  path.push(node);
-
-  for (const neighbor of adjacency.get(node) ?? []) {
-    dfsVisit(neighbor, path, adjacency, visited, stack, cycles);
-  }
-
-  path.pop();
-  stack.delete(node);
-}
-
-function detectCycles(edges: GraphEdge[]): string[][] {
-  const adjacency = new Map<string, Set<string>>();
-  for (const edge of edges) {
-    if (!adjacency.has(edge.from)) adjacency.set(edge.from, new Set());
-    adjacency.get(edge.from)!.add(edge.to);
-  }
-
-  const cycles: string[][] = [];
-
-  // Each DFS root gets a fresh per-DFS visited set so that nodes already fully
-  // explored via one root are re-entered from a new root. This is required
-  // because a shared visited set across DFS starts prevents detection of cycles
-  // that are reachable from a later root only through an already-visited node
-  // (the "diamond reachability" case). The stack (current DFS path) is still
-  // per-path-bookkeeping and correctly identifies back-edges within each DFS.
-  for (const node of adjacency.keys()) {
-    const visited = new Set<string>();
-    const stack = new Set<string>();
-    dfsVisit(node, [], adjacency, visited, stack, cycles);
-  }
-  return cycles;
-}
-
-// Canonicalize a directed cycle by rotating it so the lexicographically
-// smallest node leads, preserving order/direction. Rotation (not sort) keeps
-// distinct directed cycles over the same node set apart (A→B→C→A vs A→C→B→A)
-// while still deduping the same cycle discovered from different DFS start nodes
-// (which differ only by rotation).
-function canonicalCycleKey(cycle: string[]): string {
-  if (cycle.length === 0) return "";
-  let minIdx = 0;
-  for (let i = 1; i < cycle.length; i++) {
-    if (cycle[i]! < cycle[minIdx]!) minIdx = i;
-  }
-  const rotated = [...cycle.slice(minIdx), ...cycle.slice(0, minIdx)];
-  return rotated.join("\0");
-}
-
-function deduplicateCycles(cycles: string[][]): string[][] {
-  const seen = new Set<string>();
-  const unique: string[][] = [];
-  for (const cycle of cycles) {
-    const normalized = canonicalCycleKey(cycle);
-    if (!seen.has(normalized)) {
-      seen.add(normalized);
-      unique.push(cycle);
-    }
-  }
-  return unique;
-}
-
 function detectCycleFindings(
-  graphBundle: GraphBundle,
+  signals: GraphSignals,
   nextId: () => string,
 ): Finding[] {
-  const edges = allEdges(graphBundle);
-  const cycles = deduplicateCycles(detectCycles(edges));
+  const cycles = signals.cycles;
   if (cycles.length === 0) return [];
 
   return cycles.slice(0, 10).map((cycle) => ({
@@ -125,54 +32,36 @@ function detectCycleFindings(
 }
 
 function detectHubModules(
-  graphBundle: GraphBundle,
+  signals: GraphSignals,
   nextId: () => string,
 ): Finding[] {
-  const edges = allEdges(graphBundle);
-  const fanIn = new Map<string, number>();
-  const fanOut = new Map<string, number>();
-
-  for (const edge of edges) {
-    fanOut.set(edge.from, (fanOut.get(edge.from) ?? 0) + 1);
-    fanIn.set(edge.to, (fanIn.get(edge.to) ?? 0) + 1);
-  }
-
-  const allNodes = new Set([...fanIn.keys(), ...fanOut.keys()]);
-  const hubThreshold = Math.max(8, Math.ceil(allNodes.size * 0.15));
-
   const findings: Finding[] = [];
-  for (const node of allNodes) {
-    const inCount = fanIn.get(node) ?? 0;
-    const outCount = fanOut.get(node) ?? 0;
-    if (inCount >= hubThreshold && outCount >= hubThreshold) {
-      findings.push({
-        id: nextId(),
-        title: `Hub module: ${node}`,
-        category: "hub_module",
-        severity: "medium",
-        confidence: "high",
-        lens: "architecture",
-        summary: `${node} has ${inCount} incoming and ${outCount} outgoing dependencies. Hub modules become change bottlenecks and make the dependency graph fragile.`,
-        affected_files: [{ path: node }],
-        systemic: true,
-      });
-    }
+  // Deterministic order: `hubs` derives from the connected set's iteration order
+  // (edge insertion order), so the DA-### ids assigned here are reproducible.
+  for (const node of signals.hubs) {
+    const inCount = signals.fanIn.get(node) ?? 0;
+    const outCount = signals.fanOut.get(node) ?? 0;
+    findings.push({
+      id: nextId(),
+      title: `Hub module: ${node}`,
+      category: "hub_module",
+      severity: "medium",
+      confidence: "high",
+      lens: "architecture",
+      summary: `${node} has ${inCount} incoming and ${outCount} outgoing dependencies. Hub modules become change bottlenecks and make the dependency graph fragile.`,
+      affected_files: [{ path: node }],
+      systemic: true,
+    });
   }
   return findings;
 }
 
 function detectOrphanUnits(
   unitManifest: UnitManifest,
-  graphBundle: GraphBundle,
+  signals: GraphSignals,
   nextId: () => string,
 ): Finding[] {
-  const edges = allEdges(graphBundle);
-  const connected = new Set<string>();
-  for (const edge of edges) {
-    connected.add(edge.from);
-    connected.add(edge.to);
-  }
-
+  const connected = signals.connected;
   if (connected.size === 0) return [];
 
   const orphans: string[] = [];
@@ -289,15 +178,10 @@ function detectUnitSprawl(
 
 function detectFlowGaps(
   criticalFlows: CriticalFlowManifest,
-  graphBundle: GraphBundle,
+  signals: GraphSignals,
   nextId: () => string,
 ): Finding[] {
-  const edges = allEdges(graphBundle);
-  const connected = new Set<string>();
-  for (const edge of edges) {
-    connected.add(edge.from);
-    connected.add(edge.to);
-  }
+  const connected = signals.connected;
 
   const findings: Finding[] = [];
   for (const flow of criticalFlows.flows) {
@@ -329,14 +213,17 @@ export function buildDesignAssessment(params: {
   riskRegister: RiskRegister;
 }): DesignAssessment {
   const nextId = createFindingIdGenerator();
+  // Single source of truth for the whole-graph signals — the same module the
+  // risk register reads, so cycle/hub/orphan derivation cannot drift between them.
+  const signals = deriveGraphSignals(params.graphBundle);
 
   const findings: Finding[] = [
-    ...detectCycleFindings(params.graphBundle, nextId),
-    ...detectHubModules(params.graphBundle, nextId),
-    ...detectOrphanUnits(params.unitManifest, params.graphBundle, nextId),
+    ...detectCycleFindings(signals, nextId),
+    ...detectHubModules(signals, nextId),
+    ...detectOrphanUnits(params.unitManifest, signals, nextId),
     ...detectRiskConcentration(params.riskRegister, params.unitManifest, nextId),
     ...detectUnitSprawl(params.unitManifest, nextId),
-    ...detectFlowGaps(params.criticalFlows, params.graphBundle, nextId),
+    ...detectFlowGaps(params.criticalFlows, signals, nextId),
   ];
 
   return {

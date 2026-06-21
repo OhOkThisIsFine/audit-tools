@@ -149,6 +149,47 @@ test("buildRiskRegister derives deterministic risk signals from units, flows, an
   );
 });
 
+test("buildRiskRegister folds whole-graph signals: cycle + hub raise score, deletion candidate is informational", () => {
+  const unitManifest = {
+    units: [
+      { unit_id: "cyc", name: "cyc", files: ["src/cyc.ts"], required_lenses: [], risk_score: 0 },
+      { unit_id: "hub", name: "hub", files: ["src/hub.ts"], required_lenses: [], risk_score: 0 },
+      { unit_id: "dead", name: "dead", files: ["src/dead.ts"], required_lenses: [], risk_score: 0 },
+      { unit_id: "plain", name: "plain", files: ["src/plain.ts"], required_lenses: [], risk_score: 0 },
+    ],
+  };
+  const graphSignals = {
+    cycles: [["src/cyc.ts"]],
+    fanIn: new Map(),
+    fanOut: new Map(),
+    nodesInCycles: new Set(["src/cyc.ts"]),
+    hubs: new Set(["src/hub.ts"]),
+    hubThreshold: 8,
+    deletionCandidates: new Set(["src/dead.ts"]),
+    connected: new Set(["src/cyc.ts", "src/hub.ts"]),
+  };
+
+  const register = buildRiskRegister(unitManifest, undefined, undefined, graphSignals);
+  const byId = Object.fromEntries(register.items.map((i) => [i.unit_id, i]));
+
+  assert.deepEqual(byId.cyc.signals, ["member_of_cycle"]);
+  assert.equal(byId.cyc.risk_score, 1, "cycle membership adds 1");
+  assert.deepEqual(byId.hub.signals, ["is_hub"]);
+  assert.equal(byId.hub.risk_score, 1, "hub status adds 1");
+  // deletion_candidate is advisory: signal present, score unchanged.
+  assert.deepEqual(byId.dead.signals, ["deletion_candidate"]);
+  assert.equal(byId.dead.risk_score, 0, "deletion candidate does not inflate score");
+  assert.deepEqual(byId.plain.signals, []);
+});
+
+test("buildRiskRegister omits graph signals entirely when none are supplied (back-compat)", () => {
+  const unitManifest = {
+    units: [{ unit_id: "u", name: "u", files: ["src/u.ts"], required_lenses: [], risk_score: 0 }],
+  };
+  const register = buildRiskRegister(unitManifest);
+  assert.deepEqual(register.items[0].signals, []);
+});
+
 test("buildRepoManifestFromFs traverses recursively, ignores configured paths, and hashes bounded files", async () => {
   await withTempDir("audit-code-fs-intake-", async (root) => {
     await mkdir(join(root, "src", "nested"), { recursive: true });

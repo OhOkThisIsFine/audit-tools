@@ -1,6 +1,7 @@
 import type { UnitManifest } from "../types.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { CriticalFlowManifest, RiskItem, RiskRegister } from "audit-tools/shared";
+import type { GraphSignals } from "./graphSignals.js";
 
 const MAX_RISK_SCORE = 10;
 
@@ -8,6 +9,7 @@ export function buildRiskRegister(
   unitManifest: UnitManifest,
   criticalFlows?: CriticalFlowManifest,
   externalAnalyzerResults?: ExternalAnalyzerResults,
+  graphSignals?: GraphSignals,
 ): RiskRegister {
   const flowMap = new Map<string, number>();
   for (const flow of criticalFlows?.flows ?? []) {
@@ -54,11 +56,31 @@ export function buildRiskRegister(
       signals.push("external_analyzer_signal");
     }
 
+    // Whole-graph structural signals (single-sourced in graphSignals). A unit
+    // inherits a signal when ANY of its files is so flagged in the dependency
+    // graph. `member_of_cycle` and `is_hub` raise structural-fragility risk;
+    // `deletion_candidate` (low-in-degree dead-code suspect) is informational —
+    // it flags cleanup scope without inflating the risk score.
+    const inCycle =
+      graphSignals != null &&
+      unit.files.some((path) => graphSignals.nodesInCycles.has(path));
+    if (inCycle) signals.push("member_of_cycle");
+    const isHub =
+      graphSignals != null &&
+      unit.files.some((path) => graphSignals.hubs.has(path));
+    if (isHub) signals.push("is_hub");
+    const deletionCandidate =
+      graphSignals != null &&
+      unit.files.some((path) => graphSignals.deletionCandidates.has(path));
+    if (deletionCandidate) signals.push("deletion_candidate");
+
     const riskScore =
       (unit.risk_score ?? 0) +
       flowHits +
       externalHits +
-      (signals.includes("path_level_stateful_behavior") ? 1 : 0);
+      (signals.includes("path_level_stateful_behavior") ? 1 : 0) +
+      (inCycle ? 1 : 0) +
+      (isHub ? 1 : 0);
 
     return {
       unit_id: unit.unit_id,
