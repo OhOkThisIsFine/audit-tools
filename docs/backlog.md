@@ -7,10 +7,12 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Residual A12 doc straggler (low priority, non-runtime).** `CLAUDE.md`'s layout table still lists the
-  pre-A12 npm names (`auditor-lambda` / `remediator-lambda`) — but `CLAUDE.md` is an instruction file
-  (escalate-only, never auto-edited), so it needs a deliberate manual pass. Harmless (no runtime/test impact) —
-  tidy when convenient. (The `.gitignore` dead `/packages/` block was removed 2026-06-21.)
+- **Residual A12 doc straggler (low priority, non-runtime).** `CLAUDE.md`'s **architecture sections** still cite
+  pre-A12 bare source paths (`src/orchestrator/`, `src/extractors/`, `src/adapters/`, `src/state/`, `src/steps/`,
+  `src/phases/`, `src/providers/`) that now live under `src/audit/…` or `src/remediate/…`. `CLAUDE.md` is an
+  instruction file (escalate-only, never auto-edited) → needs a deliberate manual pass. Harmless (no runtime/test
+  impact). (Layout table, npm names, `audit-tools/shared` import paths, build commands, and the `.gitignore` dead
+  `/packages/` block were all corrected 2026-06-21.)
 
 ## Forward tracks
 
