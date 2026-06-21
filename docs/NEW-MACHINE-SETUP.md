@@ -41,9 +41,9 @@ git clone -o audit-tools https://github.com/OhOkThisIsFine/audit-tools.git
 cd audit-tools
 git fetch audit-tools slice-2b-wip        # the in-flight branch (see step 5)
 
-# Install + build (shared FIRST — npm does NOT topo-sort) + typecheck:
+# Install + build + typecheck:
 npm install
-npm run build -w @audit-tools/shared && npm run build
+npm run build
 npm run check                              # zero errors expected
 ```
 
@@ -115,8 +115,8 @@ export NVIDIA_API_KEY=<your key>   # PowerShell: $env:NVIDIA_API_KEY="<your key>
 
 ### Global slash-command bins (to run `/audit-code` · `/remediate-code` and the CLIs)
 ```bash
-npm i -g --allow-scripts=auditor-lambda,remediator-lambda auditor-lambda remediator-lambda
-audit-code --version && remediate-code --version     # expect 0.27.1
+npm i -g --allow-scripts=audit-tools audit-tools
+audit-code --version && remediate-code --version     # expect 0.28.10
 ```
 The **`--allow-scripts` flag is required** — npm silently defers the postinstall (host-integration deploy) on a
 `-g` install otherwise.
