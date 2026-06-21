@@ -515,7 +515,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
       join(ARTIFACTS_DIR, "clarification_resolution.json"),
       JSON.stringify([
         { finding_id: "F-001", action: "clarified", rationale: "Scope is just the auth module." },
-        { finding_id: "F-002", action: "deemed_inappropriate", rationale: "Not a real issue." },
+        { finding_id: "F-002", action: "reject_finding", rationale: "Not a real issue." },
       ]),
       "utf8",
     );
@@ -536,7 +536,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     expect(state.items["F-001"]).toMatchObject({
       status: "pending",
     });
-    // deemed_inappropriate → terminal, rationale recorded as the failure reason.
+    // reject_finding → terminal deemed_inappropriate disposition, rationale recorded.
     expect(state.items["F-002"]).toMatchObject({
       status: "deemed_inappropriate",
       failure_reason: "Not a real issue.",

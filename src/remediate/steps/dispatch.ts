@@ -1400,13 +1400,35 @@ export function isBuildFreeVerifyCommand(cmd: string): boolean {
 }
 
 /**
+ * Inject the tsx ESM loader into a bare `node --test <file>` command so the `.mjs`
+ * node:test suites (which import `audit-tools/shared` via tsconfig `paths`, honored
+ * only by tsx) resolve in a per-node worktree with no built `dist/`. A host- or
+ * DAG-authored `node --test tests/audit/x.test.mjs` would otherwise fail module
+ * resolution; the tool normalizes it so correctness can't depend on the host
+ * remembering to add the loader. Idempotent: a command already carrying
+ * `--import tsx/esm` or a `--loader` is left untouched. Mirrors the runner the
+ * derived verify uses ({@link verifyCommandsForEdits}), so the displayed per-node
+ * command and the in-process verify match.
+ */
+export function normalizeNodeTestCommand(cmd: string): string {
+  const trimmed = cmd.trim();
+  if (!/^node\b/.test(trimmed)) return cmd;
+  if (!/\s--test\b/.test(trimmed)) return cmd;
+  if (/--import\s+tsx\/esm\b/.test(trimmed) || /--loader\b/.test(trimmed)) return cmd;
+  return trimmed.replace(/^node\b/, "node --import tsx/esm");
+}
+
+/**
  * Filter a node's `targeted_commands` to the build-free subset for the per-node
  * verify section. Build-prepending or build commands are dropped (the host runs
- * the build centrally) rather than emitted into the prompt.
+ * the build centrally) rather than emitted into the prompt. Surviving
+ * `node --test` commands are normalized to carry the tsx loader.
  */
 function buildFreeVerifyCommands(commands: string[] | undefined): string[] {
   if (!Array.isArray(commands)) return [];
-  return commands.filter((c) => typeof c === "string" && isBuildFreeVerifyCommand(c));
+  return commands
+    .filter((c) => typeof c === "string" && isBuildFreeVerifyCommand(c))
+    .map(normalizeNodeTestCommand);
 }
 
 /** A repo-relative test path → the runner that executes that file directly. */
@@ -2009,7 +2031,7 @@ The host builds the package centrally; do NOT run \`npm run build\` or \`npm tes
 - Type-check with \`npm run check\` (no emit).
 - Run the package's build-free test runner directly against your change
   (remediate-code: \`npx vitest run <your-test-file>\`; node-test packages:
-  \`node --test <your-test-file>\`).
+  \`node --import tsx/esm --test <your-test-file>\`).
 
 ${commandBlock}A node is verified-complete only when its declared outputs exist and these
 build-free checks pass; otherwise mark the item blocked with the failure in

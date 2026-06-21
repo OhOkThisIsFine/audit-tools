@@ -98,6 +98,36 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     expect(step.step_kind).not.toBe("present_report");
   });
 
+  it("does not re-present a leftover report over a fresh confirmed run (intake-summary + host checkpoint, no state)", async () => {
+    // task_2092be69: right after confirm_intent a NEW run carries a ready
+    // intake-summary + host-confirmed checkpoint but no state.json yet (plan not
+    // built). A prior run's leftover root report must NOT short-circuit it to
+    // present_report — that signal means an active run, not a finished one.
+    await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
+    await writeFile(join(REPO_DIR, ".audit-tools", "remediation-report.md"), "# Stale prior run\n", "utf8");
+    const intakeDir = join(ARTIFACTS_DIR, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    await writeFile(
+      join(intakeDir, "intake-summary.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-intake-summary/v1alpha1",
+        ready: true,
+        source_type: "structured_audit",
+        goals: ["Remediate the findings."],
+        non_goals: [],
+        constraints: [],
+        affected_files: [],
+        open_questions: [],
+      }),
+      "utf8",
+    );
+    await writeIntentCheckpoint();
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).not.toBe("present_report");
+  });
+
   it("re-presents the report on a bare re-invocation after a completed+cleaned run", async () => {
     // close deletes .audit-tools/remediation/state.json but leaves durable root
     // outputs. A bare next-step with no fresh intent should re-present the report.
