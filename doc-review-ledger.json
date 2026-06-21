@@ -1,0 +1,62 @@
+{
+  "_meta": {
+    "note": "First run — ledger uses doc-level keys. Item-level SHA-256 content hashing starts next run.",
+    "mainHeadAtRunStart": "a0ea70fde6d00a13d9b45a43b88b6b8290b637ca",
+    "mainHeadAfterApply": "aca57eb4f7b6a9c2e3d1f8205b6a0e7f4c3d9b1a",
+    "runDate": "2026-06-21"
+  },
+  "docs/NEW-MACHINE-SETUP.md": {
+    "lastCheckedCommit": "aca57eb",
+    "lastCheckedAt": "2026-06-21T00:00:00Z",
+    "status": "reviewed",
+    "openItems": ["D-1", "D-2", "D-3"]
+  },
+  "README.remediate.md": {
+    "lastCheckedCommit": "aca57eb",
+    "lastCheckedAt": "2026-06-21T00:00:00Z",
+    "status": "reviewed",
+    "openItems": ["D-7"]
+  },
+  "docs/glossary-ids.md": {
+    "lastCheckedCommit": "aca57eb",
+    "lastCheckedAt": "2026-06-21T00:00:00Z",
+    "status": "reviewed",
+    "openItems": []
+  },
+  "README.audit.md": {
+    "lastCheckedCommit": "aca57eb",
+    "lastCheckedAt": "2026-06-21T00:00:00Z",
+    "status": "reviewed",
+    "openItems": ["D-4", "D-5", "D-6"]
+  },
+  "CLAUDE.md": {
+    "lastCheckedCommit": "aca57eb",
+    "lastCheckedAt": "2026-06-21T00:00:00Z",
+    "status": "reviewed",
+    "openItems": ["CLAUDE-1", "CLAUDE-2", "CLAUDE-3", "CLAUDE-4", "CLAUDE-5", "CLAUDE-6", "CLAUDE-7", "CLAUDE-8", "CLAUDE-9", "CLAUDE-10", "CLAUDE-11", "CLAUDE-12"]
+  },
+  "AGENTS.audit.md": {
+    "lastCheckedCommit": "aca57eb",
+    "lastCheckedAt": "2026-06-21T00:00:00Z",
+    "status": "reviewed",
+    "openItems": ["AGENTS-1"]
+  },
+  "AGENTS.remediate.md": {
+    "lastCheckedCommit": "aca57eb",
+    "lastCheckedAt": "2026-06-21T00:00:00Z",
+    "status": "reviewed",
+    "openItems": ["AGENTS-2"]
+  },
+  "docs/HANDOFF.md": {
+    "lastCheckedCommit": "aca57eb",
+    "lastCheckedAt": "2026-06-21T00:00:00Z",
+    "status": "reviewed",
+    "openItems": []
+  },
+  "docs/backlog.md": {
+    "lastCheckedCommit": "aca57eb",
+    "lastCheckedAt": "2026-06-21T00:00:00Z",
+    "status": "reviewed",
+    "openItems": []
+  }
+}
