@@ -7,19 +7,11 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Nightly doc-review routine pushes to `main` without a CI gate.** On 2026-06-21 it pushed ~18 A12-cleanup
-  commits direct to `main`; one half-fixed the dev entrypoint (`auditor.agent.md` → `audit-code.mjs`) but left
-  the canonical Gemini asset stale, reddening `main` (host-asset drift + wrapper tests) — only surfaced when a
-  release's `verify:release` failed in CI. The routine must run `npm run build && npm run check && npm test`
-  (or open a PR gated by CI) before pushing, so it can never land a red `main`. Until then, treat its commits
-  as unverified and re-run the gate after pulling.
-- **A12 host-asset stragglers — stale `auditor-lambda` still in runtime host integration.** The global-install
-  hint (`audit-code-wrapper-install-hosts.mjs:158,190` → `npm install -g auditor-lambda`) and the OpenCode
-  worker permission globs (`audit-code-wrapper-opencode.mjs`, `opencode.json`: `*node* *auditor-lambda*dist*index.js*
-  worker-run*`) still reference the pre-A12 package name. The permission globs are load-bearing — if the worker
-  command path no longer contains `auditor-lambda` post-A12, the allow-rule never matches (latent runtime bug);
-  verify the actual worker invocation path and update the glob + install hint together, then regenerate the
-  committed OpenCode assets.
+- **Residual A12 doc/ignore stragglers (low priority, non-runtime).** `CLAUDE.md`'s layout table still lists the
+  pre-A12 npm names (`auditor-lambda` / `remediator-lambda`) — but `CLAUDE.md` is an instruction file
+  (escalate-only, never auto-edited), so it needs a deliberate manual pass. `.gitignore` still carries a dead
+  `/packages/audit-code/…` block (incl. a malformed `Codeauditor-lambda.audit-artifacts/` line) that ignores
+  paths the A12 collapse removed. Both are harmless (no runtime/test impact) — tidy when convenient.
 
 ## Forward tracks
 
