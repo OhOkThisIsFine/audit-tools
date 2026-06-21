@@ -17,8 +17,9 @@ NEVER `@audit-tools/shared`. One `tsconfig.json`, one `npm run build`. Both bins
 
 ## Where things stand
 
-- **HEAD `main` = `f061f25` (release: v0.28.10), `main == origin/main`. LIVE on npm = `audit-tools@0.28.10`**
-  (`latest`, OIDC CI run `27888048799` green). Global bins reinstalled + postinstall run; both `--version` → 0.28.10.
+- **LIVE on npm = `audit-tools@0.28.10`** (`latest`, release commit `f061f25`, OIDC CI run `27888048799` green);
+  `main == origin/main` (docs commits may sit on top of the release tag). Global bins reinstalled + postinstall
+  run; both `--version` → 0.28.10.
 - **A-8 hybrid program: ✓ COMPLETE — both orchestrators, live-validated, shipped.** BOTH next-steps split the
   eligible frontier host-vs-NIM via the ONE shared `planHybridDispatch` (coordinator claims each node;
   classification injected). Remediate runs the NIM partition in-process + hands the host partition to the
