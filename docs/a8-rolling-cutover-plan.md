@@ -162,7 +162,7 @@ partition NOW (concurrent, bounded by the coordinator's split); hand the host pa
 existing `dispatch_implement_rolling` step. Next cycle re-splits the remaining frontier by current capacity →
 continuous proactive distribution. Claims + ownerTokens flow from the coordinator to whichever driver executes.
 
-**Increments (all green; branch `a8-hybrid-spill-wiring`, awaiting Ethan review before merge/publish):**
+**Increments (all green; MERGED to `main` + PUBLISHED `audit-tools@0.28.9`, follow-ups in `0.28.10`):**
 1. ✓ `planHybridDispatch` (`src/remediate/steps/hybridDispatch.ts`) — drive the coordinator to split the frontier
    + claim each node, partition `{inProcess, host}` by `isInProcessPool`. Hermetic test proves crit. 1/2/4 at the
    partition level (`tests/remediate/hybrid-dispatch.test.ts`, 6). Commit `2ea578d`.
@@ -214,17 +214,25 @@ provider dispatch distinctly. `buildSourcePools` (shared) replaced `buildConfigu
 `tests/remediate/hybrid-nim-e2e.test.ts` (RUN_NIM_E2E=1) drives the production `decideNextStep` with
 `provider=claude-code` + a live NIM `openai_compatible` pool: the coordinator split a 4-node frontier → **NIM=1
 (B-003/n3.mjs fixed by the live endpoint, merged to HEAD this cycle) + host=3 (handed off)**. Asserts via git HEAD
-(NIM merges per-cycle; state items resolve only at host-done `mergeImplementResults`). The spec is "audit OR
-remediate" → satisfied; the audit-specific cutover (coverage-driven complement) is unit-tested + reasoned, not yet
-live-driven (a full audit pipeline run would confirm it).
-  - **Surfaced (pre-existing, NOT a regression):** the older `tests/remediate/nim-rolling-e2e.test.ts` gamma
-    "verify-fail → triage" assertion is RED when run live — `verifyCommandsForEdits` (dispatch.ts) ALWAYS derives
-    `npm run check` and IGNORES a finding's `targeted_commands`, so gamma's intended verify never fires. That is
-    `task_7d35176d` manifesting (per-node verify ignores `targeted_commands`), not the hybrid. Fix belongs to that
-    task (it needs a design call: honor `targeted_commands`, or keep derive-only + fix the test).
+(NIM merges per-cycle; state items resolve only at host-done `mergeImplementResults`).
 
-**Genuinely remaining:**
-- **(optional) host-pool roster construction** — `buildConfirmedPools` (remediate) vs `buildDispatchPool` (audit)
-  still build host-model pools separately; their OUTPUT contracts differ (audit needs `contextBudgetTokens` +
-  `tierBudgets` for packetization, remediate does not), so this is a genuine difference, NOT a capability gap (the
-  NIM/spill capability IS shared). Unify only if the duplication proves a maintenance cost.
+**Live hybrid run BOTH sides — ✓ DONE (audit added 2026-06-20, `0.28.10`).** The audit-side live e2e
+`tests/audit/hybrid-nim-audit-e2e.test.mjs` (RUN_NIM_E2E=1) drives the production audit next-step with
+`provider=claude-code` + a live NIM pool: NIM reviews its partition in-process (results ingested via
+`mergeAndIngest`) and the host gets the clean coverage-driven complement (asserts the host review EXCLUDES every
+NIM-covered task). It **caught + fixed 3 real correctness bugs the 0.28.9 audit hybrid shipped** (the provider-
+stubbing unit tests structurally couldn't): (1) `acquireLock` ENOENT'd on a missing parent dir — the audit hybrid
+claims node ids before its run dir exists; fixed at the primitive (acquireLock mkdir's the lock dir). (2) The NIM
+partition's review was never ingested — the in-process run was materialized over the host COMPLEMENT but the
+driver reviewed the NIM PARTITION, so mergeAndIngest read the wrong pending-list (`accepted_count:0`); the run now
+lists the NIM tasks. (3) The host complement was orphaned — the ephemeral NIM run owned `dispatch/current-task.json`
+so the host reused its task set; the NIM run now passes `updateDispatch:false` and the host re-derives the complement.
+
+- **`task_7d35176d` — ✓ CLOSED (`0.28.10`, "run both").** The per-node verify (`acceptNodeWorktree`) now runs the
+  branch-derived commands AND the block's `targeted_commands`, so a finding's intended verify fires. (The separate
+  RENDERING half — node-test `targeted_commands` need the tsx loader — stays open; see backlog *Known friction*.)
+
+**Genuinely remaining: nothing — the A-8 program is complete + shipped (`0.28.10`).** The host-pool roster
+construction (`buildConfirmedPools` / `buildDispatchPool`) was UNIFIED into shared `buildHostModelPools` in
+`0.28.10`: both tools drive it via a per-tool `resolve(entry)` callback for the pool key + discovered-limits;
+audit layers its `contextBudgetTokens` / `tierBudgets` on top (its genuine output-contract difference, the only fork).

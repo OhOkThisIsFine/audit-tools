@@ -64,6 +64,13 @@ GUI hosts may change asset formats out from under us; the no-drift guard catches
 
 ## A8 — Hybrid spill topology + live cross-provider run  · **M**
 
+> **✓ SHIPPED — `audit-tools@0.28.10` (2026-06-20).** Every acceptance criterion below is met, BOTH orchestrators
+> live-validated (gated `RUN_NIM_E2E=1`): the coordinator single-claims + proactively splits the frontier
+> host-vs-NIM, both pools receive nodes, the gated live e2es land work via each pool (remediate `hybrid-nim-e2e`
+> + audit `hybrid-nim-audit-e2e`), silent-signal pools fall back to byte-estimate+margin, and
+> `a8-rolling-cutover-plan.md` §Step 7 records it. Memory: `a8-hybrid-full-scope`, `dispatchable-sources-generic`.
+> Design rationale retained below.
+
 **Problem.** The rolling engine, in-process provider driver, `openai-compatible`
 2nd pool, and per-slot provider resolution are all built and individually
 validated. The unbuilt residual (FINDING-020 capstone) is the **hybrid topology**:
