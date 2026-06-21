@@ -43,11 +43,6 @@ dist/
 /ingest-results.mjs
 /ingest-results-direct.mjs
 /worker0-auto.js
-/packages/audit-code/audit-report.md
-/packages/audit-code/audit-findings.json
-/packages/audit-code/Codeauditor-lambda.audit-artifacts/
-/packages/audit-code/.audit-tools/
-/packages/remediate-code/.audit-tools/
 .remediation-artifacts/
 .agents/
 skills-lock.json
