@@ -51,9 +51,9 @@ Verify green — **CLAUDECODE must be unset** for a true-green run (one provider
 `( unset CLAUDECODE; <cmd> )`; PowerShell: `$env:CLAUDECODE=$null` before the command.
 
 ```bash
-( unset CLAUDECODE; npm test -w @audit-tools/shared )                      # shared  ~726 pass / 1 skip
-( cd packages/audit-code   && unset CLAUDECODE && npm test )               # audit  ~2193 pass / 1 skip
-( cd packages/remediate-code && unset CLAUDECODE && npx vitest run )       # remediate ~1671 pass / 1 skip
+( unset CLAUDECODE; npm run test:shared )   # shared
+( unset CLAUDECODE; npm run test:audit )    # audit
+( unset CLAUDECODE; npm run test:remediate )  # remediate
 ```
 
 GitHub access for PRs / releases / CI:
@@ -116,7 +116,7 @@ export NVIDIA_API_KEY=<your key>   # PowerShell: $env:NVIDIA_API_KEY="<your key>
 ### Global slash-command bins (to run `/audit-code` · `/remediate-code` and the CLIs)
 ```bash
 npm i -g --allow-scripts=audit-tools audit-tools
-audit-code --version && remediate-code --version     # expect 0.28.10
+audit-code --version && remediate-code --version     # expect 0.28.11
 ```
 The **`--allow-scripts` flag is required** — npm silently defers the postinstall (host-integration deploy) on a
 `-g` install otherwise.
