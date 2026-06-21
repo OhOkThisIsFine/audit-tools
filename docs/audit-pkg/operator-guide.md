@@ -37,7 +37,7 @@ Shared install files:
 - `.audit-code/install/GETTING-STARTED.md`
 - `.audit-code/install/manifest.json`
 - `.audit-code/install/run-mcp-server.mjs`
-- `.audit-artifacts/session-config.json` when no backend fallback config exists
+- `.audit-tools/audit/session-config.json` when no backend fallback config exists
 
 Host-specific files may include:
 
@@ -111,14 +111,14 @@ audit-code cleanup
 ```
 
 `audit-code next-step` is the backend-rendered step engine used by the
-conversation prompt. It writes `.audit-artifacts/steps/current-step.json` and
-`.audit-artifacts/steps/current-prompt.md`, then the host should follow only
+conversation prompt. It writes `.audit-tools/audit/steps/current-step.json` and
+`.audit-tools/audit/steps/current-prompt.md`, then the host should follow only
 that prompt.
 
 `audit-code validate` checks artifact shape, cross-artifact consistency,
 session config, and explicit provider readiness.
 
-`audit-code cleanup` removes the `.audit-artifacts/` directory when safe to
+`audit-code cleanup` removes the `.audit-tools/audit/` directory when safe to
 do so. It reads `audit_state.json` before acting: `complete` and `not_started`
 states are deleted unconditionally; `active` and `blocked` states are refused
 (the audit is resumable). If `audit_state.json` is missing — typically a
@@ -130,7 +130,7 @@ previews the action without deleting anything.
 Backend fallback configuration lives at:
 
 ```text
-.audit-artifacts/session-config.json
+.audit-tools/audit/session-config.json
 ```
 
 The canonical `/audit-code` conversation route should not require users to
