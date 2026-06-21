@@ -1,6 +1,6 @@
 # State Machine Specification
 
-This state machine follows [audit-goals.md](C:/Code/auditor-lambda/spec/audit-goals.md).
+This state machine follows [audit-goals.md](audit-goals.md).
 
 ## Top-level states
 
