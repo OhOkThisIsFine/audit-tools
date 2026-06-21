@@ -1,15 +1,15 @@
-# remediator-lambda
+# remediate-code
 
 Conversation-first remediation orchestrator for arbitrary repositories. It
 accepts the auditor's `audit-findings.json` (the deterministic machine contract)
-from [auditor-lambda](https://github.com/OhOkThisIsFine/auditor-lambda), an
+from [audit-code](https://github.com/OhOkThisIsFine/audit-tools), an
 `audit-report.md` or other feedback document (LLM-extracted), or conversational
 feedback — then advances through one backend-rendered step prompt at a time.
 
 ## Primary Usage
 
 ```bash
-npm install -g remediator-lambda
+npm install -g audit-tools
 ```
 
 Then start from a conversation:
@@ -52,7 +52,7 @@ After close, the durable outputs are written to `.audit-tools/`:
 
 ## Development From Source
 
-The global `npm install -g remediator-lambda` path is for users. For repository
+The global `npm install -g audit-tools` path is for users. For repository
 development in a fresh clone or git worktree, run `npm install` at the repo root
 before build, check, or test workflows.
 
@@ -79,7 +79,7 @@ no LLM involved. A Markdown `audit-report.md` (or any other free-form or partial
 document) is instead routed through intake synthesis and bounded LLM finding
 extraction, so it cannot silently produce a zero-finding plan. The deterministic
 contract is locked by `tests/fixtures/auditor-contract-audit-findings.json`,
-regenerated with `npm run fixtures:auditor-contract` from auditor-lambda's
+regenerated with `npm run fixtures:auditor-contract` from audit-code's
 findings renderer.
 
 ## Intake
