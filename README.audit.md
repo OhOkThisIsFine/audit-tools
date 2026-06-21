@@ -1,4 +1,4 @@
-# auditor-lambda
+# audit-code
 
 Skill-first audit orchestration backend for the `/audit-code` product surface.
 
@@ -25,7 +25,7 @@ Packaged installs and repository checkouts both ship that prompt asset.
 The intended user install is one global tool install:
 
 ```bash
-npm install -g auditor-lambda
+npm install -g audit-tools
 ```
 
 That makes `audit-code` available on `PATH`. During package install, the package
@@ -105,7 +105,7 @@ audit-code next-step
 Repository-local equivalent:
 
 ```bash
-node /path/to/auditor-lambda/audit-code.mjs next-step
+node /path/to/audit-tools/audit-code.mjs next-step
 ```
 
 This advances deterministic audit state one bounded step, writes
@@ -148,7 +148,7 @@ For task-to-coverage inspection without reverse-engineering multiple artifacts:
 audit-code explain-task <task_id>
 ```
 
-To remove a leftover `.audit-artifacts/` directory from an interrupted or
+To remove a leftover `.audit-tools/audit/` directory from an interrupted or
 crashed audit:
 
 ```bash
@@ -188,7 +188,7 @@ Optional backend config:
 ## Practical Guidance
 
 - use `/audit-code` in conversation as the canonical product surface
-- install once with `npm install -g auditor-lambda`, then let `/audit-code` run `audit-code ensure --quiet` in each repository
+- install once with `npm install -g audit-tools`, then let `/audit-code` run `audit-code ensure --quiet` in each repository
 - use `audit-code install` when you want to repair or force-refresh repo-local host assets
 - use `audit-code prompt-path` to locate the packaged prompt asset
 - use `audit-code` from the repository root only when you need the repo-local backend fallback
@@ -200,15 +200,14 @@ Optional backend config:
 
 ```bash
 npm install
-npm run test:single -- tests/next-step.test.mjs
+npm run test:single -- tests/audit/next-step.test.mjs
 npm run verify:release
 npm run release:patch
 npm run release:patch:publish
 ```
 
 When developing from a fresh clone or git worktree, run repo-root `npm install`
-before package checks. Missing workspace links can look like stale
-`@audit-tools/shared` export or type errors.
+before package checks. Missing `node_modules` can cause misleading type errors.
 
 For GitHub Actions publication and npm Trusted Publishing setup, see `docs/audit-pkg/release.md`.
 
