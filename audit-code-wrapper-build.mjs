@@ -38,7 +38,7 @@ function runBuild(command, args) {
     const child = spawn(resolved.command, resolved.args, {
       cwd: repoRoot,
       // Auto-rebuild output is diagnostic — route both child streams to the
-      // parent's stderr (fd 2) so npm's `> auditor-lambda@… build` banner can
+      // parent's stderr (fd 2) so npm's `> audit-tools@… build` banner can
       // never pollute the wrapper's stdout JSON channel when a caller captures it.
       stdio: ['ignore', 2, 2],
       env: process.env,

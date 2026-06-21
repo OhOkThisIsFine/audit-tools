@@ -98,9 +98,19 @@ timeless doc are exactly the status-noise we flag).
 4. Agree → stands. Contested → **Judge** → final disposition + apply/escalate
    (default-escalate).
 5. **Apply** (final = stale-factual-fix, and the file is *not* an instruction
-   file): make the edit on `main`. Before pushing, run the green gate
-   (`npm run build -w @audit-tools/shared && npm run build && npm run check`) —
-   must be zero-error. Commit as **one discrete, revertible commit**
+   file): make the edit on `main`. Before pushing, run the **full green gate**
+   with the host-signalling env unset (set → one audit-code provider test fails):
+   `env -u CLAUDECODE npm run build && npm run check && npm test` — must be
+   zero-error / all-pass. **The `npm test` step is non-negotiable, not just
+   `build`+`check`:** several in-scope `*.md` files are the *source of truth* for
+   generated host-integration assets (e.g. `skills/audit-code/audit-code.prompt.md`
+   is the canonical loader body every IDE asset renders from). A "factual"
+   entrypoint/path fix to such a file can leave its derived committed asset
+   (`.gemini/commands/audit-code.toml`, `.github/agents/auditor.agent.md`, …)
+   stale — and ONLY the test suite (host-asset drift, wrapper, contract) catches
+   that drift. If the gate fails because a derived/generated asset needs
+   regenerating, regenerate it in the SAME commit; if you cannot, **do not push —
+   escalate**. Commit as **one discrete, revertible commit**
    (`doc-review: <summary>`), push `main`.
    - Self-correcting: an applied edit changes the item's hash → next night it
      re-stales and all three agents re-verify the edit.
@@ -146,7 +156,10 @@ If there is nothing open, the block is present but empty (hook stays silent).
 - Verify from code, never from prose.
 - No code anchor → it is a question for Ethan, never a silent deletion.
 - Instruction files (`CLAUDE.md`, `AGENTS*.md`) are **never** auto-edited.
-- Green gate passes before any `main` push.
+- The **full** green gate — `env -u CLAUDECODE npm run build && npm run check &&
+  npm test` — passes before any `main` push. Never `build`+`check` alone: the
+  test suite is what catches a doc edit that desyncs a generated host asset from
+  its source-of-truth `.md`.
 - Each auto-applied change is one discrete, revertible commit.
 - Findings file & ledger live only on the `doc-review` branch; `main` only ever
   receives reviewed, green-gated doc edits.

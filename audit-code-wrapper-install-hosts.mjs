@@ -155,7 +155,7 @@ export const INSTALL_HOST_DEFINITIONS = {
     ],
     steps: [
       'Open this repository in Codex.',
-      'Use the global `/audit-code` skill installed by `npm install -g auditor-lambda`.',
+      'Use the global `/audit-code` skill installed by `npm install -g audit-tools`.',
       'If the global skill is unavailable, follow the AGENTS fallback instructions that point at the repo-local prompt asset.',
     ],
     profile: {
@@ -187,7 +187,7 @@ export const INSTALL_HOST_DEFINITIONS = {
     ],
     steps: [
       'Open this repository in OpenCode.',
-      'Use the global `/audit-code` command installed by `npm install -g auditor-lambda`.',
+      'Use the global `/audit-code` command installed by `npm install -g audit-tools`.',
       'Let OpenCode load the generated `opencode.json` for project permissions; the global command drives `audit-code next-step` directly.',
     ],
     profile: {

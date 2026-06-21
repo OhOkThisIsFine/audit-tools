@@ -58,7 +58,6 @@ function buildAuditBashPermissions() {
   for (const sub of AUDIT_CODE_WRAPPER_EXTRA_SUBCOMMANDS) {
     perm[`*audit-code.mjs* ${sub}`] = 'allow';
   }
-  perm['*node* *auditor-lambda*dist*index.js* worker-run*'] = 'allow';
   perm['git status*'] = 'allow';
   perm['git diff*'] = 'allow';
   perm['grep *'] = 'allow';
@@ -158,7 +157,6 @@ export function assertOpenCodeAuditPermissionConfig(permissionConfig, label) {
     '*audit-code.mjs* submit-packet*',
     '*audit-code.mjs* merge-and-ingest*',
     '*audit-code.mjs* worker-run*',
-    '*node* *auditor-lambda*dist*index.js* worker-run*',
   ]) {
     if (bash[pattern] !== 'allow') {
       throw new Error(`OpenCode ${label}.bash must allow ${pattern}. Run "audit-code install --host opencode".`);
@@ -213,7 +211,7 @@ function mergePermissionBlock(existingPermission, generatedPermission) {
 export function buildMergedOpenCodeProjectConfig(existing, root) {
   if (!sharedOpenCodePermissions) {
     throw new Error(
-      'audit-tools/shared is not available. Run "npm run build -w audit-tools/shared" before deploying OpenCode config.',
+      'audit-tools/shared is not available. Run "npm run build" before deploying OpenCode config.',
     );
   }
   const generated = renderOpenCodeProjectConfig(root);
