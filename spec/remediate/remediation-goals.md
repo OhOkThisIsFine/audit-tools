@@ -3,7 +3,7 @@
 This document is the normative product definition for the remediator. Other
 specs and docs should defer to it. The remediator may be paired with the auditor
 but runs independently; when the two are paired, read alongside the auditor's
-[`spec/audit-goals.md`](../../audit-code/spec/audit-goals.md).
+[`spec/audit-goals.md`](../audit/audit-goals.md).
 
 ## Core principles
 
@@ -22,17 +22,17 @@ but runs independently; when the two are paired, read alongside the auditor's
 
 Remediator accepts any of:
 
-- An `audit-findings.json` produced by `auditor-lambda` — the canonical machine
+- An `audit-findings.json` produced by `audit-code` — the canonical machine
   contract. Finding extraction from it is deterministic: findings, work-block
   assignments, and synthesis themes are adopted verbatim, with no LLM involved.
 - An audit document in free-form Markdown or other text — including
-  `auditor-lambda`'s human-facing `audit-report.md`. Findings are extracted by
+  `audit-code`'s human-facing `audit-report.md`. Findings are extracted by
   the LLM.
 - A conversation transcript or user-supplied list of issues. Findings are
   extracted by the LLM.
 
-Auditor-lambda only retains the finalized report and `audit-findings.json` on
-success, so remediator does not rely on `.audit-artifacts/` being present.
+Audit-code only retains the finalized report and `audit-findings.json` on
+success, so remediator does not rely on `.audit-tools/audit/` being present.
 
 Remediator does not re-run the auditor and does not modify its inputs.
 
@@ -165,7 +165,7 @@ blocked items, Phase 3b is skipped.
   the e2e issue is investigated. E2e failures do not re-enter triage because
   they are not attributable to a single item.
 - Render `remediation-report.md` from the durable item records.
-- Remove `.remediation-artifacts/` and any scratch files, logs, or
+- Remove `.audit-tools/remediation/` and any scratch files, logs, or
   branches created only to support remediation.
 - Execute the confirmed closing action. The fixed enumeration is:
   `commit`, `push`, `open-pr`, `publish`, `tag`, `none`, `custom`. The
@@ -176,7 +176,7 @@ blocked items, Phase 3b is skipped.
 
 Deterministic responsibilities:
 
-- finding extraction from an auditor-lambda `audit-findings.json`
+- finding extraction from an audit-code `audit-findings.json`
 - block derivation and parallel-safety computation
 - project-type and closing-action detection
 - test execution and result capture
@@ -270,7 +270,7 @@ Remediation is complete only when:
 - the configured closing action has either executed or been explicitly
   recorded as skipped,
 - `remediation-report.md` has been rendered at repo root,
-- `.remediation-artifacts/` has been cleared.
+- `.audit-tools/remediation/` has been cleared.
 
 If any condition fails, the run is not complete and resumable state is
 retained.
@@ -290,7 +290,7 @@ the user.
 
 ## Resume semantics
 
-Only minimal resumable state lives under `.remediation-artifacts/` during
+Only minimal resumable state lives under `.audit-tools/remediation/` during
 a run. On resume the remediator reads persisted item state and continues
 from the last non-complete step of each item. User-answered clarifications
 and triage decisions are persisted so resume does not re-prompt.
