@@ -294,7 +294,7 @@ host_delegation wrapper and executor registration.
 
 The remediation walkthrough produced a companion design
 ([`remediation-workflow-design.md`](remediation-workflow-design.md)). Items
-shared between the two tools — implement once, in `@audit-tools/shared`:
+shared between the two tools — implement once, in `audit-tools/shared`:
 
 - **Rolling dispatch engine.** The dispatch section above and remediation's
   rolling worktree dispatch are the same loop (quota tracking, per-packet

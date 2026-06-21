@@ -9,7 +9,7 @@ to narrate past defects.
 Companion to [`audit-workflow-design.md`](audit-workflow-design.md) — the two
 share principles (rolling dispatch, provider confirmation, prompt caching,
 structured output, roundtrip minimization). Genuinely shared infrastructure lives
-in `@audit-tools/shared` and is listed under *Cross-tool alignment* in both.
+in `audit-tools/shared` and is listed under *Cross-tool alignment* in both.
 
 ---
 
@@ -45,7 +45,7 @@ provider_confirmation        [user gate — shared with audit; session-level]
 
 The audit design's Gate 1 (provider discovery, capability tiers, quota state,
 user include/exclude) applies to remediation identically and is implemented once,
-session-level, in `@audit-tools/shared`. The confirmed provider pool drives
+session-level, in `audit-tools/shared`. The confirmed provider pool drives
 rolling-dispatch routing for both tools; a pool confirmed for an audit run carries
 over to a remediation run in the same session.
 
@@ -361,7 +361,7 @@ grants) scoped to the node's package.
 
 ## Cross-tool alignment (shared with the auditor)
 
-- **Rolling dispatch engine lives in `@audit-tools/shared`.** Both tools use the
+- **Rolling dispatch engine lives in `audit-tools/shared`.** Both tools use the
   same loop (quota tracking, per-packet provider selection, capacity re-check on
   result arrival) with different packet types. It exposes a consumer-neutral
   terminal: when the confirmed pool empties mid-run and the livelock guard trips,
