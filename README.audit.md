@@ -183,7 +183,7 @@ If you want best-effort cross-editor or provider routing, opt into:
 
 Optional backend config:
 
-`.audit-artifacts/session-config.json`
+`.audit-tools/audit/session-config.json`
 
 ## Practical Guidance
 
@@ -210,14 +210,14 @@ When developing from a fresh clone or git worktree, run repo-root `npm install`
 before package checks. Missing workspace links can look like stale
 `@audit-tools/shared` export or type errors.
 
-For GitHub Actions publication and npm Trusted Publishing setup, see `docs/release.md`.
+For GitHub Actions publication and npm Trusted Publishing setup, see `docs/audit-pkg/release.md`.
 
 ## Key Docs
 
-- `docs/product.md`
-- `docs/operator-guide.md`
-- `docs/contracts.md`
-- `docs/release.md`
-- `docs/development.md`
+- `docs/audit-pkg/product.md`
+- `docs/audit-pkg/operator-guide.md`
+- `docs/audit-pkg/contracts.md`
+- `docs/audit-pkg/release.md`
+- `docs/audit-pkg/development.md`
 - `docs/history.md`
 - `skills/audit-code/SKILL.md`
