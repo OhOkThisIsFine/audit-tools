@@ -16,12 +16,11 @@ First, make sure the repository has current local audit assets:
 audit-code ensure --quiet
 ```
 
-When developing `auditor-lambda` itself, the entrypoint lives at
-`packages/audit-code/audit-code.mjs` (there is no `audit-code.mjs` at the
-monorepo root). From the monorepo root use:
+When developing `audit-tools` itself, the entrypoint lives at
+`audit-code.mjs` (at the repo root). From the repo root use:
 
 ```bash
-node packages/audit-code/audit-code.mjs ensure --quiet
+node audit-code.mjs ensure --quiet
 ```
 
 Then ask the backend for exactly one next step. This is also the **capability
@@ -63,10 +62,10 @@ lower it under rate-limit pressure. The backend's learned quota adapts from
 there. The token values should match the window of the model(s) dispatching the
 packets (e.g. 200000 / 32000 for a 200k-context model).
 
-When developing `auditor-lambda` itself, from the monorepo root use:
+When developing `audit-tools` itself, from the repo root use:
 
 ```bash
-node packages/audit-code/audit-code.mjs next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
+node audit-code.mjs next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
 ```
 
 Read the returned JSON only far enough to find `prompt_path`, then read and
