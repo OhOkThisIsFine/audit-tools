@@ -67,8 +67,8 @@ GUI hosts may change asset formats out from under us; the no-drift guard catches
 > **✓ SHIPPED — `audit-tools@0.28.10` (2026-06-20).** Every acceptance criterion below is met, BOTH orchestrators
 > live-validated (gated `RUN_NIM_E2E=1`): the coordinator single-claims + proactively splits the frontier
 > host-vs-NIM, both pools receive nodes, the gated live e2es land work via each pool (remediate `hybrid-nim-e2e`
-> + audit `hybrid-nim-audit-e2e`), silent-signal pools fall back to byte-estimate+margin, and
-> `a8-rolling-cutover-plan.md` §Step 7 records it. Memory: `a8-hybrid-full-scope`, `dispatchable-sources-generic`.
+> + audit `hybrid-nim-audit-e2e`), and silent-signal pools fall back to byte-estimate+margin. Memory:
+> `a8-hybrid-full-scope`, `dispatchable-sources-generic`.
 > Design rationale retained below.
 
 **Problem.** The rolling engine, in-process provider driver, `openai-compatible`
@@ -118,7 +118,7 @@ the existing NIM e2e (`RUN_NIM_E2E=1`).
   nodes land via each pool — never false-resolved, write-scope still enforced.
 - A pool with a silent/absent capacity signal falls back to byte-estimate + margin,
   never over-committed (test).
-- `docs/a8-rolling-cutover-plan.md` updated to mark the hybrid done.
+- The hybrid's shipped state recorded in project memory (`a8-hybrid-full-scope`) + git history.
 
 **Depends on:** INV-2 (cross-provider quota detection) — proactive balancing reads a
 trustworthy per-pool capacity estimate; sequence INV-2 first/alongside.
