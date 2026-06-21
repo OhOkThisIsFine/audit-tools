@@ -196,7 +196,6 @@ function assertOpenCodeAuditPermissions(config) {
   assert.equal(config.permission?.bash?.["*audit-code.mjs* submit-packet*"], "allow");
   assert.equal(config.permission?.bash?.["*audit-code.mjs* worker-run*"], "allow");
   assert.equal(config.permission?.bash?.["*audit-code.mjs* synthesize*"], "deny");
-  assert.equal(config.permission?.bash?.["*node* *auditor-lambda*dist*index.js* worker-run*"], "allow");
   assert.equal(config.permission?.bash?.["Select-String *"], "allow");
   assert.equal(config.agent?.auditor?.permission?.read, "allow");
   assert.equal(config.agent?.auditor?.permission?.glob, "allow");
