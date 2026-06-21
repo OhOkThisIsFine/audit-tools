@@ -7,11 +7,17 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Residual A12 doc/ignore stragglers (low priority, non-runtime).** `CLAUDE.md`'s layout table still lists the
+- **Residual A12 doc straggler (low priority, non-runtime).** `CLAUDE.md`'s layout table still lists the
   pre-A12 npm names (`auditor-lambda` / `remediator-lambda`) — but `CLAUDE.md` is an instruction file
-  (escalate-only, never auto-edited), so it needs a deliberate manual pass. `.gitignore` still carries a dead
-  `/packages/audit-code/…` block (incl. a malformed `Codeauditor-lambda.audit-artifacts/` line) that ignores
-  paths the A12 collapse removed. Both are harmless (no runtime/test impact) — tidy when convenient.
+  (escalate-only, never auto-edited), so it needs a deliberate manual pass. Harmless (no runtime/test impact) —
+  tidy when convenient. (The `.gitignore` dead `/packages/` block was removed 2026-06-21.)
+- **remediate-code verify spawns `targeted_commands` without a shell → `grep`/other non-exe verbs ENOENT on
+  Windows.** Hit 2026-06-21: a node's verify ran `grep -c '/packages/' .gitignore` via `spawnSync` directly,
+  which fails `spawnSync grep ENOENT` on win32 (no shell, grep not a PATH exe), marking a correct fix as a
+  contract failure and burning the retry budget. OS-agnostic violation — verify should run targeted_commands
+  through the platform shell (or restrict to guaranteed-portable verbs), the same way `spawnLoggedCommand` /
+  `resolveWindowsShimSpawnCommand` route other spawns. Workaround used: rewrite the node's targeted_commands to
+  git-only checks. Fix in the verify harness so any host-authored command runs cross-platform.
 
 ## Forward tracks
 
