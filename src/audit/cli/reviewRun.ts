@@ -91,12 +91,23 @@ export interface MaterializeReviewRunParams {
   selfCliPath: string;
   timeoutMs: number;
   /**
-   * Materialize the review over an explicit task subset (A-8 hybrid: the host
-   * COMPLEMENT, after the in-process driver claimed the backend/NIM partition) so the
-   * rendered worker prompt + pending-audit-tasks.json exclude the in-process tasks and
-   * the host never re-reviews them. Absent → the full coverage-derived pending set.
+   * Materialize the review over an explicit task subset rather than the full
+   * coverage-derived pending set. The A-8 hybrid's in-process run passes the NIM
+   * PARTITION so the run's pending-audit-tasks.json lists exactly those tasks — which is
+   * what `driveRollingAuditDispatch`'s mergeAndIngest reads to fold the NIM results. The
+   * host complement is NOT passed here: once the NIM tasks are ingested+covered, the host
+   * `ensureSemanticReviewRun` re-derives the complement from coverage automatically.
    */
   tasksOverride?: AuditTask[];
+  /**
+   * Whether this run owns the shared host-facing dispatch pointer
+   * (`dispatch/current-task.json`, which `loadCurrentActiveReviewRun` reads). Default
+   * true (the host review run IS the current run). The A-8 hybrid's EPHEMERAL in-process
+   * NIM run passes false: it must NOT become the "current" run, or the subsequent host
+   * `ensureSemanticReviewRun` would reuse the NIM partition's task set (orphaning the
+   * complement) instead of re-deriving the full coverage-driven host complement.
+   */
+  updateDispatch?: boolean;
 }
 
 /**
@@ -154,6 +165,7 @@ export async function materializeReviewRun(
     paths,
     params.artifactsDir,
     pendingTasks,
+    { updateDispatch: params.updateDispatch },
   );
   await writeJsonFile(pendingTasksPath, pendingTasks);
 

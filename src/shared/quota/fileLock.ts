@@ -1,4 +1,5 @@
-import { writeFile, unlink, stat, readFile } from "node:fs/promises";
+import { writeFile, unlink, stat, readFile, mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { RunLogger } from "../observability/runLog.js";
 
 export const STALE_LOCK_MS = 30_000;
@@ -122,6 +123,12 @@ export async function acquireLock(
   const deadline = Date.now() + timeoutMs;
   let lastStaleCheckAt = 0;
   let retryInterval = RETRY_INTERVAL_INITIAL_MS;
+
+  // A lock cannot be created in a directory that does not exist — the `wx` create
+  // would ENOENT (not EEXIST), failing the whole acquisition. Ensure the parent dir
+  // exists so callers that lock a path before its run dir is materialized (e.g. the
+  // A-8 audit hybrid claiming before the review run is set up) just work. Idempotent.
+  await mkdir(dirname(lockPath), { recursive: true });
 
   while (true) {
     try {
