@@ -1097,9 +1097,13 @@ async function runHostDelegationObligation(
         const nimIds = new Set(partition.inProcess.map((a) => a.nodeId));
         const nimTasks = pending.filter((t) => nimIds.has(t.task_id));
         const complement = pending.filter((t) => !nimIds.has(t.task_id));
-        // Materialize the host review over the COMPLEMENT so its prompt excludes the NIM
-        // tasks. When NIM took the whole frontier, materialize over the NIM tasks just to
-        // give the in-process driver a run dir; the host emit is skipped below.
+        // Materialize the in-process review run over the NIM PARTITION — its
+        // `pending-audit-tasks.json` is what `driveRollingAuditDispatch`'s mergeAndIngest
+        // reads to know which results to fold, so it MUST list the NIM tasks (else the
+        // NIM results are reviewed but never ingested). The host then reviews the
+        // coverage-driven complement below: once these NIM tasks are ingested+covered,
+        // `buildPendingAuditTasks` excludes them, so `ensureSemanticReviewRun` re-derives
+        // exactly the complement. (`complement` is computed only for the skip-host guard.)
         const { activeReviewRun } = await materializeReviewRun({
           root: ctx.params.root,
           artifactsDir: ctx.params.artifactsDir,
@@ -1107,7 +1111,11 @@ async function runHostDelegationObligation(
           obligationId: decision.selected_obligation,
           selfCliPath: ctx.params.selfCliPath,
           timeoutMs: ctx.params.timeoutMs,
-          tasksOverride: complement.length > 0 ? complement : nimTasks,
+          tasksOverride: nimTasks,
+          // This in-process run is EPHEMERAL — it must not own the host-facing dispatch
+          // pointer, or `ensureSemanticReviewRun` below would reuse this NIM partition's
+          // task set instead of re-deriving the full coverage-driven host complement.
+          updateDispatch: false,
         });
         // Review the NIM partition in-process into the SAME run's task-results/ + ingest.
         const driven = await driveRollingAuditDispatch({
