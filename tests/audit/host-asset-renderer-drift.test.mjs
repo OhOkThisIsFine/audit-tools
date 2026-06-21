@@ -100,17 +100,17 @@ test("E1: all four capability flags appear in every IDE asset", () => {
 
 // ── E1: correct in-repo entrypoint (no wrong `node audit-code.mjs` root path) ─
 
-test("E1: every IDE asset uses the correct in-repo entrypoint, not a wrong root path", () => {
+test("E1: every IDE asset uses the correct in-repo entrypoint, not a stale monorepo path", () => {
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
+    // A12 collapsed the monorepo: the dev entrypoint is `audit-code.mjs` at the
+    // repo root, not the old `packages/audit-code/audit-code.mjs`.
     assert.ok(
-      asset.includes("node packages/audit-code/audit-code.mjs"),
-      `${kind} asset must reference the correct in-repo entrypoint`,
+      /\bnode audit-code\.mjs\b/.test(asset),
+      `${kind} asset must reference the repo-root 'node audit-code.mjs' entrypoint`,
     );
-    // The stale wrong entrypoint (no `audit-code.mjs` exists at the monorepo
-    // root) must not reappear as a bare `node audit-code.mjs ...` instruction.
     assert.ok(
-      !/\bnode audit-code\.mjs\b/.test(asset),
-      `${kind} asset must not embed the wrong 'node audit-code.mjs' entrypoint`,
+      !asset.includes("packages/audit-code/audit-code.mjs"),
+      `${kind} asset must not embed the stale 'packages/audit-code/audit-code.mjs' entrypoint`,
     );
   }
 });

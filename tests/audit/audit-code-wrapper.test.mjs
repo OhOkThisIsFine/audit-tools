@@ -1268,7 +1268,7 @@ const repoLocalHostCases = [
       const vscodeAgent = await readFile(paths.vscodeAgentPath, "utf8");
       assert.match(vscodeAgent, /# Audit Code Agent/);
       assert.match(vscodeAgent, /--host-models/);
-      assert.match(vscodeAgent, /node packages\/audit-code\/audit-code\.mjs/);
+      assert.match(vscodeAgent, /node audit-code\.mjs/);
       // The MCP surface was removed: install no longer writes .vscode/mcp.json.
       await assert.rejects(() => stat(join(root, ".vscode", "mcp.json")));
       assert.match(await readFile(paths.installGuidePath, "utf8"), /## VS Code/);
