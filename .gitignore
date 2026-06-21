@@ -47,5 +47,5 @@ dist/
 .agents/
 skills-lock.json
 
-# Test scratch — vitest test-plan artifacts written under packages/*/tests/
+# Test scratch — vitest test-plan artifacts written under tests/
 .test-plan-artifacts-*/
