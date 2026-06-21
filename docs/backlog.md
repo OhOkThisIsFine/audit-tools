@@ -156,16 +156,21 @@ record of what was **greenlit** is here. Each is a target, not a status line —
   driver now absorbs it into a no-progress pass (`ingest:null`) so the fold blocks cleanly. Both red→green in
   `tests/audit/rolling-audit-dispatch.test.mjs`.
   (b-residual) the {host-subagent (Claude) + NIM} HYBRID topology + a
-  live cross-provider spill run (see *Cross-IDE/provider quota detection* below). **✓ HYBRID DONE — remediate +
-  audit + DC-4, shared infra (2026-06-20, branch `a8-hybrid-spill-wiring`, green, awaiting review):** BOTH
+  live cross-provider spill run (see *Cross-IDE/provider quota detection* below). **✓ HYBRID COMPLETE + PUBLISHED
+  `audit-tools@0.28.10` (2026-06-20) — remediate + audit + DC-4, shared infra:** BOTH
   orchestrators' next-step split the eligible frontier host-vs-NIM via the ONE shared `planHybridDispatch`
   (coordinator claims each node; classification injected). Remediate runs the NIM partition in-process + hands the
   host partition to the `accept-node` loop; audit reviews the NIM partition in-process + the host batch-reviews the
   coverage-driven complement. The dispatcher brain is fully shared (split layer, NIM pool shape, coordinator, claim
   registry, quota fold, rolling engine, DC-4 settled-pool store); only per-node execution + host-spawn mechanism
-  stay per-tool. DC-4: an exhausted backend pool settles cross-cycle → work falls to the host pool. REMAINING: the
-  live host+NIM run (crit. 3, needs a Claude session + NIM key at once); optional host-pool-roster unify (genuine
-  output-contract difference, not a capability gap). See `docs/a8-rolling-cutover-plan.md` §Step 7. *(FIXED: worktree-branch reuse
+  stay per-tool. DC-4: an exhausted backend pool settles cross-cycle → work falls to the host pool. **Live crit-3
+  e2e BOTH sides ✓** (gated `RUN_NIM_E2E=1`): remediate `hybrid-nim-e2e` + audit `hybrid-nim-audit-e2e`. The audit
+  live e2e caught + fixed **3 real bugs 0.28.9 shipped** (lock-ENOENT-on-missing-parent-dir, fixed at the
+  `acquireLock` primitive; the NIM partition's review was never ingested — the in-process run now lists the NIM
+  tasks not the complement so its mergeAndIngest folds them; the host complement was orphaned — the ephemeral NIM
+  run passes `updateDispatch:false` so it doesn't own the dispatch pointer + the host re-derives the complement).
+  Host-pool-from-roster core unified into shared `buildHostModelPools`; per-node verify runs derived +
+  `targeted_commands` (`task_7d35176d` closed). See `docs/a8-rolling-cutover-plan.md` §Step 7. *(FIXED: worktree-branch reuse
   across a `rate_limited` re-queue — `resetNodeWorktreeAndBranch` removes the worktree, prunes stale admin
   entries, and force-deletes the leftover branch so every re-dispatch starts clean from HEAD.
   FIXED: the worktree-walks-up-to-parent-repo foot-gun — `createWorktree`
@@ -362,8 +367,10 @@ narrowing (`a9cf29d0`).
   only by tsx) and there is no built `dist/` in a per-node worktree → bare `node --test` cannot resolve the import.
   The package's own `test:node`/`test:single` scripts all use `node --import tsx/esm --test`. Every implement
   worker had to notice + adjust the command this run. Fix in tooling: render node-test `targeted_commands` as
-  `node --import tsx/esm --test <file>` (the suite runner) so the in-process verify + the host command match. (Same
-  root as `task_7d35176d` — the in-process per-node verify hardcodes `npm run check` and ignores `targeted_commands`.)
+  `node --import tsx/esm --test <file>` (the suite runner) so the in-process verify + the host command match.
+  (`task_7d35176d` — the in-process per-node verify now RUNS `targeted_commands` alongside the derived ones [closed,
+  "run both"]; but this RENDERING half — node-test `targeted_commands` need the tsx loader — is still open: the
+  in-process verify faithfully runs whatever command was rendered, so a `node --test` without tsx still fails.)
 - **BUG: ambiguity-step `deemed_inappropriate` silently DECLINES the finding (2026-06-19).** At the
   `collect_clarifications` step, the prompt says `"action": "deemed_inappropriate"` = "not a real *issue*",
   read naturally as "this candidate *ambiguity* isn't genuine — proceed with the finding." But the engine
