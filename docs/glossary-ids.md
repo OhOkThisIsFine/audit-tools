@@ -6,8 +6,8 @@
 > table. Each entry below is a one-sentence statement of what the family means and where its
 > authority lives.
 >
-> **Rule.** Every identifier *family* (prefix) referenced from `packages/*/src/**/*.ts` MUST have an
-> entry here. A guard test (`packages/shared/tests/id-glossary.test.mjs`) scans the source tree and
+> **Rule.** Every identifier *family* (prefix) referenced from `src/**/*.ts` MUST have an
+> entry here. A guard test (`tests/shared/id-glossary.test.mjs`) scans the source tree and
 > fails if a new family prefix appears in code without a glossary entry. New *individual* ids inside an
 > existing family do not need their own row, but the load-bearing ones are enumerated under their
 > family for quick lookup; inline the one-sentence statement at the primary definition site so the id
@@ -30,16 +30,16 @@ The grep that backs the guard recognises these family shapes:
 
 | Area | Domain | Primary owner |
 |---|---|---|
-| `INV-CC` | Confirm-intent / CLI guidance handshake (sole-writer, idempotent-on-target guidance file). | `audit-code/src/cli/nextStepCommand.ts` |
-| `INV-CL` | Coverage ledger — source-type-aware denominator (finding-enumeration vs source-file coverage). | `remediate-code/src/coverage/findingLedger.ts` |
-| `INV-CO` | Contract obligations — paired obligations, evidence threading, reconciliation derivation in the contract pipeline. | `remediate-code/src/steps/contractPipeline.ts` |
-| `INV-DS` | Dispatch — reconciliation expectations a node must honour, write-scope, evidence. | `remediate-code/src/steps/dispatch.ts` |
-| `INV-GND` | Grounding — a finding with no grounding verdict is treated as ungrounded (verify-before-fix). | `shared/src/validation/findingGrounding.ts` |
-| `INV-ID` | Idempotent intake — content-hash keyed source registration (re-register is a no-op). | `remediate-code/src/intake.ts` |
-| `INV-QD` | Quota-driven dispatch — quota headroom is the sole throttle; in-flight token accounting is the single authority (no external concurrency cap). | `shared/src/dispatch/rollingDispatch.ts` |
-| `INV-RPS` | Remediation plan / cross-lens dedup — distinct structural-anchor identities stay distinct. | `remediate-code/src/dedup/crossLensDedup.ts` |
-| `INV-RS` | Remediation steps / state machine — ordered-obligation, one-bounded-step, fail-closed final gate. | `remediate-code/src/steps/nextStep.ts` |
-| `INV-RSD` | Rolling single-tree dispatch — the whole read-modify-write of `state.json` runs under one held lock. | `remediate-code/src/steps/dispatch.ts` |
+| `INV-CC` | Confirm-intent / CLI guidance handshake (sole-writer, idempotent-on-target guidance file). | `src/audit/cli/nextStepCommand.ts` |
+| `INV-CL` | Coverage ledger — source-type-aware denominator (finding-enumeration vs source-file coverage). | `src/remediate/coverage/findingLedger.ts` |
+| `INV-CO` | Contract obligations — paired obligations, evidence threading, reconciliation derivation in the contract pipeline. | `src/remediate/steps/contractPipeline.ts` |
+| `INV-DS` | Dispatch — reconciliation expectations a node must honour, write-scope, evidence. | `src/remediate/steps/dispatch.ts` |
+| `INV-GND` | Grounding — a finding with no grounding verdict is treated as ungrounded (verify-before-fix). | `src/shared/validation/findingGrounding.ts` |
+| `INV-ID` | Idempotent intake — content-hash keyed source registration (re-register is a no-op). | `src/remediate/intake.ts` |
+| `INV-QD` | Quota-driven dispatch — quota headroom is the sole throttle; in-flight token accounting is the single authority (no external concurrency cap). | `src/shared/dispatch/rollingDispatch.ts` |
+| `INV-RPS` | Remediation plan / cross-lens dedup — distinct structural-anchor identities stay distinct. | `src/remediate/dedup/crossLensDedup.ts` |
+| `INV-RS` | Remediation steps / state machine — ordered-obligation, one-bounded-step, fail-closed final gate. | `src/remediate/steps/nextStep.ts` |
+| `INV-RSD` | Rolling single-tree dispatch — the whole read-modify-write of `state.json` runs under one held lock. | `src/remediate/steps/dispatch.ts` |
 
 ### Historical single-letter INV spelling (`INV-S05`, `INV-X06`)
 
@@ -48,8 +48,8 @@ A handful of invariants predate the two-letter area scheme and are still cited u
 
 | Id | Meaning | Site |
 |---|---|---|
-| `INV-S05` | Quota headroom is the sole dispatch throttle (the modern `INV-QD-11` restates it). | `shared/src/dispatch/rollingDispatch.ts` |
-| `INV-X06` | Partial-completion terminal hook — undispatchable/blocked work routes the run to close instead of looping forever. | `remediate-code/src/state/store.ts`, `remediate-code/src/steps/nextStep.ts` |
+| `INV-S05` | Quota headroom is the sole dispatch throttle (the modern `INV-QD-11` restates it). | `src/shared/dispatch/rollingDispatch.ts` |
+| `INV-X06` | Partial-completion terminal hook — undispatchable/blocked work routes the run to close instead of looping forever. | `src/remediate/state/store.ts`, `src/remediate/steps/nextStep.ts` |
 
 Treat the single-letter `INV-<letter><NN>` spelling as the redesign-node form of an invariant; new
 invariants should use the two-letter area scheme above.
@@ -58,18 +58,18 @@ invariants should use the two-letter area scheme above.
 
 | Id | Defends against | Site |
 |---|---|---|
-| `CE-001` / `CE-002` | A design/assessment claim the adversarial critic falsifies; the pipeline emits a counterexample envelope. | `remediate-code/src/steps/contractPipelinePrompts.ts` |
-| `CE-003` / `CE-205` | Indefinite stall: after `LIVELOCK_PAUSE_LIMIT` consecutive paused passes with zero net new capacity the rolling engine must terminate, not spin. | `shared/src/rolling/pausedState.ts` |
-| `CE-005` | Grounding must be a *total* function — an absent/undefined grounding verdict resolves to "ungrounded → verify", never silently passes. | `shared/src/validation/findingGrounding.ts` |
-| `CE-206` | Companion livelock counterexample to `CE-205` (paused-state re-discovery must make progress or stop). | `shared/src/rolling/pausedState.ts` |
+| `CE-001` / `CE-002` | A design/assessment claim the adversarial critic falsifies; the pipeline emits a counterexample envelope. | `src/remediate/steps/contractPipelinePrompts.ts` |
+| `CE-003` / `CE-205` | Indefinite stall: after `LIVELOCK_PAUSE_LIMIT` consecutive paused passes with zero net new capacity the rolling engine must terminate, not spin. | `src/shared/rolling/pausedState.ts` |
+| `CE-005` | Grounding must be a *total* function — an absent/undefined grounding verdict resolves to "ungrounded → verify", never silently passes. | `src/shared/validation/findingGrounding.ts` |
+| `CE-206` | Companion livelock counterexample to `CE-205` (paused-state re-discovery must make progress or stop). | `src/shared/rolling/pausedState.ts` |
 
 ## SEAM-* seam contracts
 
 | Id | Contract | Site |
 |---|---|---|
-| `SEAM-rolling-stranding` | When all quota pools are exhausted, waiting cannot help: strand the remainder and surface an `empty_pool` terminal rather than blocking forever. | `shared/src/dispatch/rollingDispatch.ts` |
-| `SEAM-ACL-*` | Allowlisted-command / env seam — host-signalling env (`CLAUDECODE`, `CLAUDE_CODE_*`) is stripped by the shared owner before a runtime command runs. | `audit-code/src/orchestrator/runtimeCommand.ts` |
-| `SEAM-RSD-*` | Rolling single-tree dispatch hand-off — state mutation is committed atomically under the single held lock (paired with `INV-RSD`). | `remediate-code/src/steps/dispatch.ts` |
+| `SEAM-rolling-stranding` | When all quota pools are exhausted, waiting cannot help: strand the remainder and surface an `empty_pool` terminal rather than blocking forever. | `src/shared/dispatch/rollingDispatch.ts` |
+| `SEAM-ACL-*` | Allowlisted-command / env seam — host-signalling env (`CLAUDECODE`, `CLAUDE_CODE_*`) is stripped by the shared owner before a runtime command runs. | `src/shared/tooling/exec.ts` |
+| `SEAM-RSD-*` | Rolling single-tree dispatch hand-off — state mutation is committed atomically under the single held lock (paired with `INV-RSD`). | `src/remediate/steps/dispatch.ts` |
 
 ## N-* plan nodes (load-bearing references in code)
 
