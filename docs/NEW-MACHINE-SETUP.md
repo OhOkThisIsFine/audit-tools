@@ -125,15 +125,9 @@ The **`--allow-scripts` flag is required** — npm silently defers the postinsta
 
 ## 4. Continue the in-flight work
 
-Read **the ⚠️ block at the top of [`docs/HANDOFF.md`](HANDOFF.md)**. Current state:
-
-- `main` is at the **CI-green published 0.27.1** tree; npm has `@audit-tools/shared 0.22.1` / `auditor-lambda
-  0.27.1` / `remediator-lambda 0.27.1`.
-- **A3 step 4 slices 1+2a are landed; slice 2b+2c were attempted, merged, then REVERTED** (Linux-only
-  cycle-detection regression). The reverted work is on branch **`slice-2b-wip`**.
-- The re-attempt's first job is a **test that reproduces the Linux false-cycle locally** (a fresh Linux box is the
-  right place), then restore the old `no-metadata`-skip + tolerance-16 cycle semantics. Details + the exact
-  diagnosis are in the HANDOFF ⚠️ block and `docs/a3-a4-engine-unification-plan.md`.
+For the current state, read **[`docs/HANDOFF.md`](HANDOFF.md)** — it always carries the live HEAD, the
+published version, and the immediate next steps. (This file is the durable *setup procedure* only; it
+deliberately holds no point-in-time state snapshot, which would just go stale next to the handoff.)
 
 `docs/backlog.md` is the program of record; `CLAUDE.md` holds the durable conventions (green-at-every-commit,
 build-shared-first, the `/ship` flow).
