@@ -236,11 +236,11 @@ If `runtime_validation_report.json` changes, synthesis artifacts are stale, but 
 ## Implementation note
 
 The canonical machine-readable form of this map is `ARTIFACT_DEPENDS_ON_MAP` in
-`src/orchestrator/dependencyMap.ts`. That table is the single hand-authored
+`src/audit/orchestrator/dependencyMap.ts`. That table is the single hand-authored
 adjacency representation: it is keyed `{ artifact → dependsOn[] }` (the natural
 direction for recording upstream revisions), and the forward "upstream → dependents"
 view (`ARTIFACT_DEPENDENTS_MAP`) is derived from it via `invertDependencyMap` — so
 the two adjacency views can never drift. `computeStaleArtifacts` (in
-`src/orchestrator/staleness.ts`) uses the derived dependents map to propagate
+`src/audit/orchestrator/staleness.ts`) uses the derived dependents map to propagate
 staleness downstream deterministically. This document is the declarative reference;
 the TypeScript table is the authoritative implementation.
