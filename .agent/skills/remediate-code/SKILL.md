@@ -51,7 +51,7 @@ instruction asset.
 The intended user setup is one global package install:
 
 ```bash
-npm install -g remediator-lambda
+npm install -g audit-tools
 ```
 
 That makes `remediate-code` available on `PATH` and seeds user-level
@@ -76,7 +76,7 @@ bootstrap.
 
 ## Repo-local fallback
 
-When developing inside the `remediator-lambda` repository itself, prefer:
+When developing inside the `audit-tools` repository itself, prefer:
 
 ```bash
 node remediate-code.mjs
