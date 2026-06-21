@@ -17,12 +17,6 @@ import {
   worktreePath,
   seedUntrackedDeclaredPaths,
 } from "../../src/remediate/steps/dispatch.js";
-import { resolveWindowsShimSpawnCommand } from "audit-tools/shared";
-
-// The package-manager shim base names verifyNodeInWorktree routes through the
-// shell on win32 (must mirror VERIFY_SHIM_BASE_NAMES in dispatch.ts).
-const VERIFY_SHIM_BASE_NAMES = ["npm", "npx", "pnpm", "yarn"] as const;
-
 // ---------------------------------------------------------------------------
 // Stub spawnSync to avoid real git calls in unit tests
 // ---------------------------------------------------------------------------
@@ -203,38 +197,41 @@ describe("removeWorktree", () => {
 // ---------------------------------------------------------------------------
 
 describe("verifyNodeInWorktree", () => {
-  it("runs each targeted_command in the worktree cwd, routed through the platform shim resolver", () => {
+  it("runs each targeted_command as an opaque string through the platform shell in the worktree cwd", () => {
     spawnSyncMock.mockReturnValue(makeSpawnResult(0, "ok", ""));
 
     verifyNodeInWorktree("/repo/wt", ["npm test", "npm run lint"]);
 
-    // The command must be routed through resolveWindowsShimSpawnCommand so a
-    // `.cmd` shim (npm/npx/...) is exec'able on win32; on other platforms it
-    // resolves to the raw command. Compute the expected spawn per platform.
-    const t = resolveWindowsShimSpawnCommand("npm", ["test"], VERIFY_SHIM_BASE_NAMES);
-    const l = resolveWindowsShimSpawnCommand("npm", ["run", "lint"], VERIFY_SHIM_BASE_NAMES);
+    // targeted_commands are opaque host-authored strings run through the platform
+    // shell (shell:true) so cmd.exe/sh — not a word-split argv spawn — resolves
+    // the verb. This is what makes verify OS-agnostic: `.cmd` shims (npm/npx/...)
+    // exec natively on win32 and PATH commands resolve everywhere.
     expect(spawnSyncMock).toHaveBeenCalledWith(
-      t.command,
-      t.args,
-      expect.objectContaining({ cwd: "/repo/wt", shell: false }),
+      "npm test",
+      expect.objectContaining({ cwd: "/repo/wt", shell: true }),
     );
     expect(spawnSyncMock).toHaveBeenCalledWith(
-      l.command,
-      l.args,
-      expect.objectContaining({ cwd: "/repo/wt", shell: false }),
+      "npm run lint",
+      expect.objectContaining({ cwd: "/repo/wt", shell: true }),
     );
   });
 
-  it("routes a package-manager shim through the command shell on win32 (regression: shell:false ENOENT)", () => {
-    // The bug: spawning `npm`/`npx` with shell:false on win32 fails because the
-    // PATH entry is a `.cmd` wrapper. The resolver must wrap it in cmd.exe /c.
-    const win = resolveWindowsShimSpawnCommand("npm", ["run", "build"], VERIFY_SHIM_BASE_NAMES, "win32", "cmd.exe");
-    expect(win.command).toBe("cmd.exe");
-    expect(win.args).toEqual(["/d", "/s", "/c", "npm run build"]);
-    // On non-win32 the same call must spawn npm directly (OS-agnostic).
-    const nix = resolveWindowsShimSpawnCommand("npm", ["run", "build"], VERIFY_SHIM_BASE_NAMES, "linux");
-    expect(nix.command).toBe("npm");
-    expect(nix.args).toEqual(["run", "build"]);
+  it("runs a non-executable verb through the shell verbatim (regression: shell:false ENOENT'd the spawn on win32)", () => {
+    // The bug: word-split + spawnSync(shell:false) ENOENT'd the *spawn itself*
+    // for any verb that is not a bare PATH executable (e.g. `grep` on win32, or
+    // a command with pipes/redirections), turning a correct fix into a phantom
+    // contract failure that burned the retry budget. shell:true hands the whole
+    // string to the shell, which resolves the verb (or fails with a normal
+    // non-zero status, never a spawn error).
+    spawnSyncMock.mockReturnValue(makeSpawnResult(0, "0", ""));
+
+    const result = verifyNodeInWorktree("/repo/wt", ["grep -c '/packages/' .gitignore"]);
+
+    expect(spawnSyncMock).toHaveBeenCalledWith(
+      "grep -c '/packages/' .gitignore",
+      expect.objectContaining({ cwd: "/repo/wt", shell: true }),
+    );
+    expect(result.passed).toBe(true);
   });
 
   it("returns passed: true when all commands exit 0", () => {
