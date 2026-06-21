@@ -1,6 +1,6 @@
 # Product
 
-> Normative definition: [`spec/audit-goals.md`](../spec/audit-goals.md) — product
+> Normative definition: [`spec/audit-goals.md`](../../spec/audit/audit-goals.md) — product
 > identity, invariants, deterministic/LLM boundaries, and completion. This page is
 > the product overview.
 

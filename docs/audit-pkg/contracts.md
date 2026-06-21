@@ -56,7 +56,7 @@ audit-code validate-results --results /path/to/results.json
 
 ## Artifact bundle
 
-The backend stores resumable artifacts under `.audit-artifacts/`, including:
+The backend stores resumable artifacts under `.audit-tools/audit/`, including:
 
 - `repo_manifest.json`
 - `file_disposition.json`
