@@ -454,13 +454,13 @@ agent (strong or weak), not "be careful" patches.
   worker's dispatch wrapper prompt — eliminated the error for 11/11 wave-2 blocks
   (3/7 wave-1 blocks hit it and needed post-hoc result-file patching).
 
-- **Global install defers `postinstall` under npm's allow-scripts policy.**
-  `npm install -g auditor-lambda` installs the bin but prints
+- **Global install defers `postinstall` under npm's allow-scripts policy.** (Still live — hit again 0.28.10.)
+  `npm install -g audit-tools` installs the bins but prints
   `npm warn allow-scripts … (postinstall: node scripts/postinstall.mjs)` and skips
   it, so the host-integration deploy (OpenCode config + `/audit-code` skill/prompt)
-  silently doesn't run. Finish with `npm approve-scripts auditor-lambda` or invoke
-  `postinstall.mjs` manually. (This also gates the overbroad-perms deploy flagged
-  by `CFG-4996560e`, so it's not purely a regression.)
+  silently doesn't run. Finish with `npm i -g --allow-scripts=audit-tools` or invoke
+  `node "$(npm root -g)/audit-tools/scripts/postinstall.mjs"` manually. (This also gates the overbroad-perms
+  deploy flagged by `CFG-4996560e`, so it's not purely a regression.)
 - **`t.mock.module` is unusable in audit-code tests.** audit-code runs tests via
   `node --import tsx/esm --test`; `t.mock.module` needs
   `--experimental-test-module-mocks` and conflicts with the tsx/esm loader, so it

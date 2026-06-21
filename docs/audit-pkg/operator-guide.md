@@ -5,7 +5,7 @@
 Install once:
 
 ```bash
-npm install -g auditor-lambda
+npm install -g audit-tools
 ```
 
 Then invoke `/audit-code` in a supported host. The prompt self-bootstraps the
@@ -64,7 +64,7 @@ with the canonical `/audit-code` spelling.
 Claude Desktop is treated as a bundle-install host. Use the generated project
 template and local bundle artifacts when installing the integration.
 
-OpenCode uses the global command seeded by `npm install -g auditor-lambda`.
+OpenCode uses the global command seeded by `npm install -g audit-tools`.
 The generated project `opencode.json` should not define `command["audit-code"]`;
 it only wires the auditor agent and project permissions. VS Code uses
 repo-local prompt and MCP configuration files.

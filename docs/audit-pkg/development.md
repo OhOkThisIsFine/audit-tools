@@ -29,7 +29,7 @@ npm run verify:release
 
 Run `npm install` from the repository root before running build, check, test, or
 package-scoped workflows in a fresh clone or git worktree. Missing
-`node_modules` can surface as misleading `@audit-tools/shared` export or type
+`node_modules` can surface as misleading `audit-tools/shared` export or type
 errors because dependents may resolve stale compiled `dist/` output.
 
 The test suite is intentionally contract-heavy. Update tests when changing
