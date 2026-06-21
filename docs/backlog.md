@@ -16,11 +16,17 @@ _(none open — add the moment you hit one)_
   ambiguity/low-confidence to Ethan. The next big build now that the architecture is stable and the A-9
   autonomy acceptance test passes.
 - **Build the deterministic analyzers.** The INV-1 investigation decided the levers; building them is the
-  forward work: AST/structural (tree-sitter, ast-grep), promote `madge` (already shelled in `anchorGrounding`)
-  to a real graph-edge extractor, dead-code (knip/ts-prune), complexity/duplication, broader semgrep, CodeQL
-  for dataflow. Each must enrich the shared language-neutral graph via the adapter pattern (in-process pure-JS,
-  reproducible), never fork planning per ecosystem. Worth mining ralph-architecture-sweep's *heuristics* as
-  graph queries: deletion test (low-in-degree nodes), seam detection (repeated call-site signatures).
+  forward work: AST/structural (tree-sitter, ast-grep), dead-code (knip/ts-prune), complexity/duplication,
+  broader semgrep, CodeQL for dataflow. Each must enrich the shared language-neutral graph via the adapter
+  pattern (in-process pure-JS, reproducible), never fork planning per ecosystem.
+  - DONE (graph-query heuristics): cycles, hub fan-in/out, orphans, and the **deletion test (low-in-degree
+    nodes)** are single-sourced in `src/audit/extractors/graphSignals.ts` (`deriveGraphSignals`), consumed by
+    BOTH the design assessment and the risk register (new signals `member_of_cycle` / `is_hub` /
+    `deletion_candidate`). `madge` was evaluated and **deliberately not added** — it would re-resolve imports
+    the TS compiler analyzer already produces at higher fidelity, JS/TS-only; mining the heuristics as
+    language-neutral graph queries over the merged edge set is the durable form.
+  - OPEN: the external analyzers above (ast-grep, knip/ts-prune, complexity/duplication, broader semgrep,
+    CodeQL), plus **seam detection (repeated call-site signatures)** as another graph query.
 - **Cross-IDE/provider quota — real-host validation.** The per-provider HTTP `QuotaSource`s are built on
   `BaseHttpQuotaSource` (Claude OAuth source live + wired); the open work is validating each provider's source
   against the *real* endpoint (not just fixtures), folding learned-limit feedback + the capability handshake
