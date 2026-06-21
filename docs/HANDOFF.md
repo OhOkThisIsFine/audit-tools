@@ -3,7 +3,9 @@
 > The single rolling cross-machine handoff: current published state + anything in flight. Durable how-to is in
 > `CLAUDE.md`; open work in [`docs/backlog.md`](backlog.md).
 
-**Live:** `audit-tools@0.28.11` on npm (`latest`). `main == origin/main`, clean tree, both bins → 0.28.11.
+**Live:** `audit-tools@0.29.1` on npm (`latest`). `main == origin/main`, clean tree, both bins → 0.29.1.
+(0.29.0's publish CI failed on a pre-existing host-asset drift the nightly doc-review routine introduced;
+fixed in `d9cd8da`, republished as 0.29.1.)
 
 **In flight:** nothing — clean, verified, fully pushed.
 
