@@ -12,10 +12,9 @@
 
 ## Agent handoff
 
-Keep long-term product direction in `docs/product.md` and archival context
-(shipped sprints, field-trial lessons) in `docs/history.md`. There is no
-standing per-sprint handoff file; sprint notes are folded into `docs/history.md`
-once the work ships.
+Long-term product direction lives in [`product.md`](product.md). Current state + immediate next steps are in
+the repo-root [`HANDOFF.md`](../HANDOFF.md); open work in [`backlog.md`](../backlog.md). There is no
+shipped-sprint archive — that history lives in git + project memory.
 
 ## Build and test
 
