@@ -2,7 +2,7 @@
 
 This document is the normative product definition for the auditor. Other specs
 and docs should defer to it. The human-facing product overview and strategy live
-in [`docs/product.md`](../docs/product.md).
+in [`docs/audit-pkg/product.md`](../../docs/audit-pkg/product.md).
 
 ## Product identity and boundary
 
@@ -120,4 +120,4 @@ is low priority. No partial-success status should be introduced.
 - Root-cause clustering is not part of the product.
 - Once the audit completes, other audit artifacts should be cleared out.
 - During incomplete or blocked runs, only minimal resumable state should remain
-  under `.audit-artifacts/`.
+  under `.audit-tools/audit/`.
