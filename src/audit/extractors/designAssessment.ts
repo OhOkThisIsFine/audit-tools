@@ -218,7 +218,7 @@ function detectComplexityHotspots(
   // `signals.complexity` is already node-id sorted at the source; re-sort here so
   // id assignment is reproducible regardless of upstream ordering. Each row is a
   // node-keyed finding — a node belonging to NO unit still surfaces.
-  const hotspots = [...signals.complexity]
+  const hotspots = [...(signals.complexity ?? [])]
     .filter((m) => m.value >= HIGH_COMPLEXITY)
     .sort((a, b) => a.node.localeCompare(b.node));
 
@@ -242,7 +242,7 @@ function detectDuplication(
   // `signals.duplication` is already node-id sorted at the source; re-sort here
   // for reproducible id assignment. Node-keyed: a duplication node owned by no
   // unit still surfaces.
-  const dups = [...signals.duplication]
+  const dups = [...(signals.duplication ?? [])]
     .filter((m) => m.value >= DUPLICATION_FLOOR)
     .sort((a, b) => a.node.localeCompare(b.node));
 
@@ -266,7 +266,7 @@ function detectSeams(
   // `signals.seams` is already from-then-to sorted at the source; re-sort here so
   // id assignment is reproducible. Each seam is keyed by its two endpoints — a
   // seam whose endpoints belong to no unit still surfaces as a node-keyed finding.
-  const seams = [...signals.seams].sort(
+  const seams = [...(signals.seams ?? [])].sort(
     (a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to),
   );
 

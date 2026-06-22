@@ -87,7 +87,7 @@ export function buildRiskRegister(
     if (isHub) signals.push("is_hub");
     const isSeamEndpoint =
       graphSignals != null &&
-      graphSignals.seams.some(
+      (graphSignals.seams ?? []).some(
         (seam) =>
           unit.files.includes(seam.from) || unit.files.includes(seam.to),
       );
@@ -102,13 +102,13 @@ export function buildRiskRegister(
     // raises maintainability risk by a bounded +1 each.
     const hasHighComplexity =
       graphSignals != null &&
-      graphSignals.complexity.some(
+      (graphSignals.complexity ?? []).some(
         (m) => unit.files.includes(m.node) && m.value >= HIGH_COMPLEXITY,
       );
     if (hasHighComplexity) signals.push("high_complexity");
     const hasDuplication =
       graphSignals != null &&
-      graphSignals.duplication.some(
+      (graphSignals.duplication ?? []).some(
         (m) => unit.files.includes(m.node) && m.value >= DUPLICATION_FLOOR,
       );
     if (hasDuplication) signals.push("duplicated_code");
