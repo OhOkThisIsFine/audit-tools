@@ -57,7 +57,7 @@ the check for its type:
 |---|---|---|---|
 | **design / concept** | `docs/audit-workflow-design.md`, `docs/remediation-workflow-design.md`, `docs/contract-authoring-determinism-design.md`, `docs/cross-provider-quota-matrix.md`, `docs/glossary-ids.md`, `docs/host-validation.md` | Claims vs code (drift); flag current-state / changelog creep (docs are timeless concepts, not status). | factual-stale → yes |
 | **instruction / policy** | `CLAUDE.md`, `AGENTS.md`, `AGENTS.audit.md`, `AGENTS.remediate.md` | Factual claims only (file/command/path staleness). Policy & conventions untouchable. | **No — escalate-only.** Highest blast radius: a wrong edit deletes a guardrail governing all agents. |
-| **ops / usage** | `README.md`, `README.audit.md`, `README.remediate.md`, `docs/NEW-MACHINE-SETUP.md` | Do the documented commands / paths still resolve and run. | factual-stale → yes |
+| **ops / usage** | `README.md`, `README.audit.md`, `README.remediate.md` | Do the documented commands / paths still resolve and run. | factual-stale → yes |
 | **backlog** | `docs/backlog.md` | Shipped-detection (item demonstrably built in code → remove, with proof); dedup near-identical raw items; A→B draft (below). Durable-traps section is **reference** — only flag a trap proven fixed-in-tooling. | shipped-removal & dedup → yes; A→B → escalate |
 | **handoff** | `docs/HANDOFF.md` | Immediate-next-only (flag multi-step-out / changelog creep); verify each item vs code; a done item → clear it, with proof. | yes |
 | **excluded** | `docs/doc-review-guidelines.md` (this spec), `docs/doc-review-findings.md` (output), `meta-audit-log.md` (append-only log — staleness review is a category error) | — | — |
