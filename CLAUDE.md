@@ -110,9 +110,9 @@ Accepts auditor reports or free-form feedback. Advances via bounded step prompts
 
 **State machine** (`src/remediate/steps/nextStep.ts` → `decideNextStep()`):
 ```
-pending → planning → documenting → implementing → closing → complete
-              ↕                         ↕
-  waiting_for_clarification          triage → waiting_for_triage
+pending → planning → implementing → closing → complete
+              ↕            ↕
+  waiting_for_clarification  triage → waiting_for_triage
 ```
 
 **Phases** (`src/remediate/phases/`):
@@ -145,7 +145,7 @@ pending → planning → documenting → implementing → closing → complete
 
 ## Release & publish
 
-Per-package via `.github/workflows/publish-package.yml`. Triggered by GitHub Release tag `audit-code-v*`, `remediate-code-v*`, or `shared-v*` (or manual `workflow_dispatch`). Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version) → `next` dist-tag, else `latest`. CI: `npm ci` → build shared → `verify:release` gate → publish.
+Per-package via `.github/workflows/publish-package.yml`. Triggered by plain `vX.Y.Z` tags (or manual `workflow_dispatch`). Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version) → `next` dist-tag, else `latest`. CI: `npm ci` → `verify:release` gate → publish.
 
 Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + commit + tag) or `:publish` variants (also push + create GitHub Release + wait for CI). Use `/ship` skill — encodes trap list (CLAUDECODE unset for gates, CRLF clean-tree guard, allow-scripts postinstall on global reinstall, release-CI-is-the-real-signal) and never parks at push/publish boundary.
 
@@ -164,7 +164,7 @@ Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + comm
 - **PowerShell JSON generation is statement-safe.** Assign `foreach` output to a var first, then pipe to `ConvertTo-Json`.
 - **Atomic-replace ordering invariant.** Every destructive change — deleting a fast path, phase, scheduler, cap, or monolithic pass — ships as single atomic replace: new mechanism + deletion in one commit. Never add-then-delete across commits.
 - **Green-at-every-commit.** Before any push: `npm run build && npm run check` → zero errors. Hook-enforced since 2026-06-11: PreToolUse blocks `git commit` until check is green; async PostToolUse typechecks edited package after TS edits (`.claude/hooks/`).
-- **End-of-sprint cleanup — run it every sprint, unprompted.** A *sprint* = any coherent stretch of work that ends at a pause, handoff, or milestone (a shipped item, "wrap up here", switching windows). Before handing off, ALWAYS run the cleanup pass (don't wait to be asked): (1) **verify green** — `npm run build -w @audit-tools/shared && npm run build && npm run check` + the touched package's test suite, on a **clean, fully-pushed tree**; (2) **scan the sprint's diff** for dead code / orphaned helpers / stray `console`/`TODO`/debug and remove them; (3) **ensure no half-done broken state** — and call out any *deliberate* intermediate state in the handoff so it isn't mistaken for a bug; (4) **trim `docs/HANDOFF.md`** to lean + accurate (correct HEAD/commits, immediate-next-only, never a changelog); (5) **update `docs/backlog.md`** program-of-record status; (6) **sync memory + its index**. (Ethan, 2026-06-16.)
+- **End-of-sprint cleanup — run it every sprint, unprompted.** A *sprint* = any coherent stretch of work that ends at a pause, handoff, or milestone (a shipped item, "wrap up here", switching windows). Before handing off, ALWAYS run the cleanup pass (don't wait to be asked): (1) **verify green** — `npm run build && npm run check` + the touched package's test suite, on a **clean, fully-pushed tree**; (2) **scan the sprint's diff** for dead code / orphaned helpers / stray `console`/`TODO`/debug and remove them; (3) **ensure no half-done broken state** — and call out any *deliberate* intermediate state in the handoff so it isn't mistaken for a bug; (4) **trim `docs/HANDOFF.md`** to lean + accurate (correct HEAD/commits, immediate-next-only, never a changelog); (5) **update `docs/backlog.md`** program-of-record status; (6) **sync memory + its index**. (Ethan, 2026-06-16.)
 
 ## Preferences & standing decisions
 

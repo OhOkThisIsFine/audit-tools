@@ -27,9 +27,7 @@ Git, the repo, and `.claude/hooks` + `.claude/skills` all travel with the clone.
 
 > **OS note up front.** The source machine is Windows. If the new box is Linux/macOS: `npm install` rebuilds
 > `node_modules` fine; the **`headroom` binary and the global CLI bins need the matching-platform build**; mind
-> CRLF (the repo is LF-normalized) and make `.claude/hooks/*` executable (`chmod +x`). A **Linux** new machine is
-> the *ideal* place to fix the in-flight slice-2b bug — it lacks the `~/.audit-tools/analyzer-cache` that masks
-> the failure on Windows (see `docs/HANDOFF.md` ⚠️ block).
+> CRLF (the repo is LF-normalized) and make `.claude/hooks/*` executable (`chmod +x`).
 
 ---
 
@@ -39,7 +37,6 @@ Git, the repo, and `.claude/hooks` + `.claude/skills` all travel with the clone.
 # Clone with the remote named `audit-tools` (NOT origin), default branch main:
 git clone -o audit-tools https://github.com/OhOkThisIsFine/audit-tools.git
 cd audit-tools
-git fetch audit-tools slice-2b-wip        # the in-flight branch (see step 5)
 
 # Install + build + typecheck:
 npm install
