@@ -21,6 +21,39 @@ export const RouteEdgeSchema = z
   .strict();
 export type RouteEdge = z.infer<typeof RouteEdgeSchema>;
 
+/**
+ * Per-node structural measure (one of complexity / duplication). `value` is the
+ * raw metric, `measure` names the concrete algorithm used (so consumers never
+ * guess units), and `reach` records the scope of source the measure actually
+ * covered — currently only `'js-ts-effective'` (computed over JS/TS source).
+ */
+export const NodeMetricSchema = z
+  .object({
+    value: z.number(),
+    measure: z.string(),
+    reach: z.literal("js-ts-effective"),
+  })
+  .strict();
+export type NodeMetric = z.infer<typeof NodeMetricSchema>;
+
+/**
+ * Optional per-node (repo-path keyed) structural metrics computed at graph-build
+ * time, where the file source is available. Absent for non-js/ts files (never
+ * zero-filled). Each metric is independently optional. Declared as an explicit
+ * optional Zod field (not a catchall) so a `.strict()` bundle WITHOUT
+ * `node_metrics` still parses, while an unknown sibling key is rejected.
+ */
+export const NodeMetricsSchema = z.record(
+  z.string(),
+  z
+    .object({
+      complexity: NodeMetricSchema.optional(),
+      duplication: NodeMetricSchema.optional(),
+    })
+    .strict(),
+);
+export type NodeMetrics = z.infer<typeof NodeMetricsSchema>;
+
 export const GraphBundleSchema = z
   .object({
     graphs: z
@@ -38,6 +71,12 @@ export const GraphBundleSchema = z
      * the deterministic regex floor was used). See Phase 5 analyzer seam.
      */
     analyzers_used: z.array(z.string()).optional(),
+    /**
+     * Optional per-node structural metrics (complexity / duplication) computed at
+     * graph-build time over js/ts source. Explicit optional field so legacy
+     * bundles without it still parse under `.strict()`.
+     */
+    node_metrics: NodeMetricsSchema.optional(),
   })
   .strict();
 export type GraphBundle = z.infer<typeof GraphBundleSchema>;
