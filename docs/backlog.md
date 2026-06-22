@@ -23,8 +23,20 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
     `deletion_candidate`). `madge` was evaluated and **deliberately not added** — it would re-resolve imports
     the TS compiler analyzer already produces at higher fidelity, JS/TS-only; mining the heuristics as
     language-neutral graph queries over the merged edge set is the durable form.
-  - OPEN: the external analyzers above (ast-grep, knip/ts-prune, complexity/duplication, broader semgrep,
-    CodeQL), plus **seam detection (repeated call-site signatures)** as another graph query.
+  - DONE (extraction-persisted + edge-native signals): **complexity** + **duplication** are computed at
+    extraction in `buildGraphBundle` (where per-file source is available) and persisted as the optional,
+    additive `GraphBundle.node_metrics` contract (`js-ts-effective` reach, absent — not zero — for non-js/ts);
+    **seam detection** ships as **bridges/cut-edges** over the undirected projection of the merged edge set
+    (NOT the originally-imagined "repeated call-site signatures"). All three are exposed on `deriveGraphSignals`
+    (a pure reader — complexity/duplication read `node_metrics`, seams derived from edges) and consumed by BOTH
+    the risk register (bounded structural family) and design assessment. Durable lesson: the edge graph is a
+    thin substrate — any signal richer than edge-topology must be computed at extraction (source/file-universe/
+    entrypoints available there) and persisted as node metadata; `deriveGraphSignals` stays a pure reader.
+  - OPEN: the remaining external analyzers (ast-grep, broader semgrep, CodeQL dataflow) — each needs an
+    external/native engine, so per the two-tier dependency policy import a vetted tool behind the adapter
+    seam rather than hand-rolling. **dead-code** is deferred here too: a sound dead-code signal needs the full
+    file universe (pure orphans emit zero edges) + entrypoint provenance — i.e. knip/ts-prune territory, not a
+    hand-rolled edge query (the shipped `deletion_candidate` low-in-degree signal covers the cheap version).
 - **Cross-IDE/provider quota — real-host validation.** The per-provider HTTP `QuotaSource`s are built on
   `BaseHttpQuotaSource` (Claude OAuth source live + wired); the open work is validating each provider's source
   against the *real* endpoint (not just fixtures), folding learned-limit feedback + the capability handshake
