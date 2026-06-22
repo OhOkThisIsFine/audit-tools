@@ -39,6 +39,9 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   silent. Per-provider recipes: [`cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md). Red line:
   self-monitoring own-provider only, never IDE-GUI automation.
 
+- **Enforce the independent-critic / counterexample dispatch in tooling — not host discretion.** The contract pipeline emits a conceptual-critique and a counterexample (adversarial critic) step, but today relies on the host *choosing* to dispatch them to an INDEPENDENT sub-agent (an author marking its own homework misses gaps). When the host advertises subagent-dispatch capability via the capability handshake, both orchestrators (audit-code + remediate-code) must MANDATE independent dispatch of those phases so the property holds for any host in any project — degrading to inline only when the host genuinely cannot dispatch. Instance of "enforce robustness in tooling, not host discretion."
+- **End-of-run friction capture, tool-enforced for every project.** At the close of every audit and every remediation run, the orchestrator should emit an obligation for the host to record the friction it hit (non-obvious traps, tooling misbehavior, gate quirks, shell/env gotchas) into a per-project artifact. Today this only happens by dogfooding habit (notes land in *this* repo's `docs/backlog.md`); a host running audit-tools in another project gets nothing. Make friction capture a tool-emitted close-out step, everywhere.
+
 ## Deferred / waiting
 
 - **A2 finding-quality oracle** — the `score-audit` scorer is built; it needs operator-authored
