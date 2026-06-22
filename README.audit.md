@@ -218,5 +218,4 @@ For GitHub Actions publication and npm Trusted Publishing setup, see `docs/audit
 - `docs/audit-pkg/contracts.md`
 - `docs/audit-pkg/release.md`
 - `docs/audit-pkg/development.md`
-- `docs/history.md`
 - `skills/audit-code/SKILL.md`
