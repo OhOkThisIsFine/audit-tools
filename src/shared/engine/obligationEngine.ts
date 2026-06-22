@@ -14,7 +14,7 @@
  * cascade. The richer transition/emit advance loop (needed to absorb
  * remediate-code's internally-recursive control flow) is added here when
  * remediate-code adopts the engine, so the API is proven by a real consumer
- * rather than designed in a vacuum. See `docs/a3-a4-engine-unification-plan.md`.
+ * rather than designed in a vacuum. See `spec/a3-a4-engine-unification-plan.md`.
  */
 
 import { z } from "zod";

@@ -837,7 +837,7 @@ export { FREE_FORM_INTENT_INTERPRETATION_VERSION } from "./types/intentInterpret
 // Shared obligation engine (A3) — the single source for the ordered-obligation
 // vocabulary + selection scan both orchestrators run on. audit-code binds its
 // PRIORITY to findFirstActionableObligation; remediate-code adopts it as it
-// migrates off its imperative cascade. See docs/a3-a4-engine-unification-plan.md.
+// migrates off its imperative cascade. See spec/a3-a4-engine-unification-plan.md.
 export type {
   ObligationState,
   Obligation,

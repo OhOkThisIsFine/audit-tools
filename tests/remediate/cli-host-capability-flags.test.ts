@@ -27,7 +27,7 @@ const LOADER_DOCS = {
     "remediate-code",
     "remediate-code.prompt.md",
   ),
-  remediateReadme: join(REPO_ROOT, "README.remediate.md"),
+  remediateReadme: join(REPO_ROOT, "README.md"),
   auditContracts: join(REPO_ROOT, "docs", "audit-pkg", "contracts.md"),
 };
 
