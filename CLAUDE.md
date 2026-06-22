@@ -82,9 +82,9 @@ Imported via the `audit-tools/shared` subpath export (single package — no `@au
 
 Obligation-driven. Each invocation executes the highest-priority valid next step. Repeated → normalized repo understanding → bounded audit tasks → verified coverage → findings report.
 
-**Core loop** (`src/orchestrator/advance.ts` → `advanceAudit`):
+**Core loop** (`src/audit/orchestrator/advance.ts` → `advanceAudit`):
 1. Load artifact bundle from `.audit-tools/audit/`
-2. `decideNextStep` (`src/orchestrator/nextStep.ts`) — derives state, picks obligation
+2. `decideNextStep` (`src/audit/orchestrator/nextStep.ts`) — derives state, picks obligation
 3. Dispatch to one executor
 4. Persist + return execution summary
 
@@ -92,41 +92,41 @@ The priority chain in `nextStep.ts`: `provider_confirmation` → `repo_manifest`
 
 Synthesis emits `audit-findings.json` (machine contract); `audit-report.md` is its render. `synthesis_narrative_current` layers LLM narrative (themes/exec summary/top risks); omits cleanly without provider.
 
-**Artifacts** (`.audit-tools/audit/`): `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `coverage_matrix.json`, `audit_tasks.json`, `task_affinity_graph.json`, `audit_results.jsonl`, `runtime_validation_report.json`, `audit-findings.json`, `synthesis-narrative.json`. Review packets: partitioned JIT at dispatch, never persisted. Staleness: explicit dependency DAG (`spec/dependency-map.md`, `src/audit/orchestrator/staleness.ts`, `src/audit/orchestrator/artifactMetadata.ts`).
+**Artifacts** (`.audit-tools/audit/`): `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `coverage_matrix.json`, `audit_tasks.json`, `task_affinity_graph.json`, `audit_results.jsonl`, `runtime_validation_report.json`, `audit-findings.json`, `synthesis-narrative.json`. Review packets: partitioned JIT at dispatch, never persisted. Staleness: explicit dependency DAG (`spec/audit/dependency-map.md`, `src/audit/orchestrator/staleness.ts`, `src/audit/orchestrator/artifactMetadata.ts`).
 
 **Entrypoint:** `audit-code.mjs` → `audit-code-wrapper-lib.mjs`. Conversation-first: `audit-code next-step` writes `.audit-tools/audit/steps/current-step.json` + `current-prompt.md`.
 
-**Providers** (`src/providers/`): `claude-code`, `codex`, `opencode`, `openai-compatible`, `subprocess-template`, `vscode-task`, `antigravity`, `local-subprocess`. Auto-resolved (`src/providers/index.ts`); implement `FreshSessionProvider` from shared. `codex` is headless CLI auto-detected like `claude-code`; `antigravity` is agentic-IDE backend routed through a configured command/task template. `openai-compatible` is NOT a CLI — it's a single-shot, API-driven worker (the `llm write` pattern as a provider): it POSTs the node prompt to any OpenAI-compatible `/chat/completions` endpoint (NVIDIA NIM / vLLM / LM Studio / …), applies the returned `{files,result}` into the node's worktree, and writes the result. Endpoint/model/key are operator-supplied in session config (`openai_compatible.{base_url,model,api_key_env}`) — never hardcoded — so it's a portable, always-available background dispatch pool, and the backend the in-process rolling engine drives for headless autonomy.
+**Providers** (`src/audit/providers/`): `claude-code`, `codex`, `opencode`, `openai-compatible`, `subprocess-template`, `vscode-task`, `antigravity`, `local-subprocess`. Auto-resolved (`src/audit/providers/index.ts`); implement `FreshSessionProvider` from shared. `codex` is headless CLI auto-detected like `claude-code`; `antigravity` is agentic-IDE backend routed through a configured command/task template. `openai-compatible` is NOT a CLI — it's a single-shot, API-driven worker (the `llm write` pattern as a provider): it POSTs the node prompt to any OpenAI-compatible `/chat/completions` endpoint (NVIDIA NIM / vLLM / LM Studio / …), applies the returned `{files,result}` into the node's worktree, and writes the result. Endpoint/model/key are operator-supplied in session config (`openai_compatible.{base_url,model,api_key_env}`) — never hardcoded — so it's a portable, always-available background dispatch pool, and the backend the in-process rolling engine drives for headless autonomy.
 
 **Schemas** (`schemas/`): `AuditResult` contract (`schemas/audit_result.schema.json`) — `task_id`, `unit_id`, `pass_id`, `lens` must match assigned task; `file_coverage[].total_lines` must match actual line counts.
 
 **Lenses:** `correctness`, `architecture`, `maintainability`, `security`, `reliability`, `performance`, `data_integrity`, `tests`, `operability`, `config_deployment`, `observability`.
 
-**Other modules:** `src/extractors/` (deterministic repo analysis), `src/adapters/` (normalize semgrep/eslint/npm-audit), `src/io/`, `src/validation/`, `src/reporting/` (synthesis + work-block rendering), `src/supervisor/` (session config, run ledger, operator handoff).
+**Other modules:** `src/audit/extractors/` (deterministic repo analysis), `src/audit/adapters/` (normalize semgrep/eslint/npm-audit), `src/audit/io/`, `src/audit/validation/`, `src/audit/reporting/` (synthesis + work-block rendering), `src/audit/supervisor/` (session config, run ledger, operator handoff).
 
 ## remediate-code architecture
 
 Accepts auditor reports or free-form feedback. Advances via bounded step prompts. Single runtime dep: `commander`.
 
-**State machine** (`src/steps/nextStep.ts` → `decideNextStep()`):
+**State machine** (`src/remediate/steps/nextStep.ts` → `decideNextStep()`):
 ```
 pending → planning → documenting → implementing → closing → complete
               ↕                         ↕
   waiting_for_clarification          triage → waiting_for_triage
 ```
 
-**Phases** (`src/phases/`):
+**Phases** (`src/remediate/phases/`):
 - `plan.ts` — `RemediationPlan` with `Finding[]` + `RemediationBlock[]`; detects auditor vs. conversation input
-- `document.ts` — `ItemSpec` per finding (concrete changes, tests to write)
-- `implement.ts` — dispatches implementation with test execution + verification
+- document phase (`ItemSpec` per finding: concrete changes, tests to write) — now in `src/remediate/steps/dispatch.ts` (former `src/phases/document.ts` inlined into the dispatch step)
+- implement phase (dispatches implementation with test execution + verification) — now in `src/remediate/steps/dispatch.ts` (former `src/phases/implement.ts` inlined into the dispatch step)
 - `triage.ts` — failed items; retry vs. block
 - `close.ts` — closing actions (test suites, build, lint)
 
-**Dispatch:** parallel waves (`src/steps/dispatch.ts`: `prepareDocumentDispatch` / `mergeDocumentResults` / `prepareImplementDispatch` / `mergeImplementResults`; `src/steps/waveScheduler.ts` for concurrency limiting). Providers mirror audit-code's backend set.
+**Dispatch:** parallel waves (`src/remediate/steps/dispatch.ts`: `prepareImplementDispatch` / `mergeImplementResults`, plus `scheduleWave` / `resolveHostConcurrencyLimit` for concurrency limiting — the former `src/steps/waveScheduler.ts` is inlined into `dispatch.ts`). Providers mirror audit-code's backend set.
 
-**State persistence** (`src/state/store.ts`): file-backed `RemediationState`, atomic temp-then-rename writes, guarded by the shared `withFileLock` (`audit-tools/shared/quota/fileLock`: exponential 50ms→500ms backoff, token-checked 30s stale-lock cleanup). The lock is single-sourced — `store.ts` adds no backoff/retry logic of its own.
+**State persistence** (`src/remediate/state/store.ts`): file-backed `RemediationState`, atomic temp-then-rename writes, guarded by the shared `withFileLock` (`audit-tools/shared/quota/fileLock`: exponential 50ms→500ms backoff, token-checked 30s stale-lock cleanup). The lock is single-sourced — `store.ts` adds no backoff/retry logic of its own.
 
-**Core types** (`src/state/types.ts`): `Finding`, `RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `RemediationItemState`, `TestSpec`, `VerificationResult`, `CoverageLedger`. `src/dedup/crossLensDedup.ts` deduplicates across lenses; `src/intake.ts` orchestrates source manifest, summary, clarification resolution.
+**Core types** (`src/remediate/state/types.ts`): `Finding`, `RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `RemediationItemState`, `TestSpec`, `VerificationResult`, `CoverageLedger`. `src/remediate/dedup/crossLensDedup.ts` deduplicates across lenses; `src/remediate/intake.ts` orchestrates source manifest, summary, clarification resolution.
 
 **Artifact layout:**
 ```

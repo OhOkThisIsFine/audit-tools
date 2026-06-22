@@ -7,13 +7,6 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Residual A12 doc straggler (low priority, non-runtime).** `CLAUDE.md`'s **architecture sections** still cite
-  pre-A12 bare source paths (`src/orchestrator/`, `src/extractors/`, `src/adapters/`, `src/state/`, `src/steps/`,
-  `src/phases/`, `src/providers/`) that now live under `src/audit/…` or `src/remediate/…`. `CLAUDE.md` is an
-  instruction file (escalate-only, never auto-edited) → needs a deliberate manual pass. Harmless (no runtime/test
-  impact). (Layout table, npm names, `audit-tools/shared` import paths, build commands, and the `.gitignore` dead
-  `/packages/` block were all corrected 2026-06-21.)
-
 ## Forward tracks
 
 - **Nightly autonomous audit→remediate→PR pipeline — the capstone.** Scheduled run (cloud routine or local
@@ -38,6 +31,9 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   into one trustworthy capacity estimate per provider+IDE+model triple, degrading safely when a source is
   silent. Per-provider recipes: [`cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md). Red line:
   self-monitoring own-provider only, never IDE-GUI automation.
+
+- **Enforce the independent-critic / counterexample dispatch in tooling — not host discretion.** The contract pipeline emits a conceptual-critique and a counterexample (adversarial critic) step, but today relies on the host *choosing* to dispatch them to an INDEPENDENT sub-agent (an author marking its own homework misses gaps). When the host advertises subagent-dispatch capability via the capability handshake, both orchestrators (audit-code + remediate-code) must MANDATE independent dispatch of those phases so the property holds for any host in any project — degrading to inline only when the host genuinely cannot dispatch. Instance of "enforce robustness in tooling, not host discretion."
+- **End-of-run friction capture, tool-enforced for every project.** At the close of every audit and every remediation run, the orchestrator should emit an obligation for the host to record the friction it hit (non-obvious traps, tooling misbehavior, gate quirks, shell/env gotchas) into a per-project artifact. Today this only happens by dogfooding habit (notes land in *this* repo's `docs/backlog.md`); a host running audit-tools in another project gets nothing. Make friction capture a tool-emitted close-out step, everywhere.
 
 ## Deferred / waiting
 
