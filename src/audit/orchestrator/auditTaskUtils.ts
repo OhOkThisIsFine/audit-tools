@@ -28,7 +28,7 @@ export function priorityRank(priority: AuditTask["priority"]): number {
  * planning produces a frozen risk number that just-in-time dispatch can route
  * on without re-deriving. The estimate-review step (N3) may refine this; it is
  * never a model/provider decision. See
- * docs/audit-workflow-design.md.
+ * spec/audit-workflow-design.md.
  */
 const SENSITIVE_LENSES = new Set(["security", "data_integrity", "reliability"]);
 

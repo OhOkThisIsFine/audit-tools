@@ -105,7 +105,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
   ],
   // Provider-neutral task-affinity graph derived from audit_tasks (Phase A of
   // the plan/dispatch seam). Dispatch partitions it just-in-time and persists
-  // nothing back. See docs/audit-workflow-design.md.
+  // nothing back. See spec/audit-workflow-design.md.
   "task_affinity_graph.json": ["audit_tasks.json"],
   "flow_coverage.json": [
     "repo_manifest.json",

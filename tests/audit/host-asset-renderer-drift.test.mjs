@@ -8,7 +8,7 @@ import {
   renderCodexAutomationRecipe,
   renderAntigravityPlanningGuide,
   renderGeminiCommandToml,
-} from "../../audit-code-wrapper-install-renderers.mjs";
+} from "../../wrapper/audit-code-wrapper-install-renderers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");

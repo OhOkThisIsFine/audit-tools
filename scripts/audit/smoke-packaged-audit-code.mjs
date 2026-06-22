@@ -19,7 +19,7 @@ const packageVersion = JSON.parse(
 ).version;
 const requiredPackagedPaths = [
   "audit-code.mjs",
-  "audit-code-wrapper-lib.mjs",
+  "wrapper/audit-code-wrapper-lib.mjs",
   "package.json",
   "README.md",
   "dist/audit/index.js",

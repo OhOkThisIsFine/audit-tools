@@ -16,7 +16,7 @@ import type {
 //
 // This function makes NO model/provider decision — the caller supplies the
 // ceilings derived from whatever model it is dispatching to right now. See
-// docs/audit-workflow-design.md.
+// spec/audit-workflow-design.md.
 // ---------------------------------------------------------------------------
 
 export interface GraphPacket {

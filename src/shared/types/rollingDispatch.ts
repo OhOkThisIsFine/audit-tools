@@ -53,7 +53,7 @@ export interface RollingDispatchEngineResult<TPacket = unknown> {
  * Core interface for the rolling dispatch engine.
  *
  * Fields correspond to the key lifecycle hooks described in the redesign spec
- * (docs/audit-workflow-design.md §rolling_dispatch):
+ * (spec/audit-workflow-design.md §rolling_dispatch):
  *
  * - dispatchItems: enqueue packets for processing.
  * - onResult:      callback invoked synchronously after each result.

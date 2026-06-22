@@ -223,7 +223,7 @@ export async function runPlanningExecutor(
   // token estimate and a deterministic risk seed. These persist on the task and
   // become the authoritative inputs to just-in-time dispatch packetization /
   // routing (the estimate-review step may later refine them). See
-  // docs/audit-workflow-design.md.
+  // spec/audit-workflow-design.md.
   const freezeEstimates = (task: AuditTask): AuditTask => ({
     ...task,
     token_estimate:
@@ -239,7 +239,7 @@ export async function runPlanningExecutor(
 
   // Provider-neutral task-affinity graph (Phase A of the plan/dispatch seam):
   // frozen task nodes + soft weighted affinity edges. Dispatch partitions this
-  // just-in-time; see docs/audit-workflow-design.md.
+  // just-in-time; see spec/audit-workflow-design.md.
   const taskAffinityGraph = buildTaskAffinityGraph(allDispatchTasks, {
     graphBundle: bundle.graph_bundle,
   });
