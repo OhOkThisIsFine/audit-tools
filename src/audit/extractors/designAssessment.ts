@@ -206,6 +206,83 @@ function detectFlowGaps(
   return findings;
 }
 
+// Complexity value at/above which a node-keyed maintainability finding surfaces.
+const HIGH_COMPLEXITY = 10;
+// Duplication value at/above which a node-keyed maintainability finding surfaces.
+const DUPLICATION_FLOOR = 1;
+
+function detectComplexityHotspots(
+  signals: GraphSignals,
+  nextId: () => string,
+): Finding[] {
+  // `signals.complexity` is already node-id sorted at the source; re-sort here so
+  // id assignment is reproducible regardless of upstream ordering. Each row is a
+  // node-keyed finding — a node belonging to NO unit still surfaces.
+  const hotspots = [...signals.complexity]
+    .filter((m) => m.value >= HIGH_COMPLEXITY)
+    .sort((a, b) => a.node.localeCompare(b.node));
+
+  return hotspots.map((m) => ({
+    id: nextId(),
+    title: `High complexity: ${m.node}`,
+    category: "complexity_hotspot",
+    severity: "medium",
+    confidence: "medium",
+    lens: "maintainability" as const,
+    summary: `${m.node} has a ${m.measure} of ${m.value} (reach: ${m.reach}). High structural complexity is hard to test and change safely.`,
+    affected_files: [{ path: m.node }],
+    systemic: false,
+  }));
+}
+
+function detectDuplication(
+  signals: GraphSignals,
+  nextId: () => string,
+): Finding[] {
+  // `signals.duplication` is already node-id sorted at the source; re-sort here
+  // for reproducible id assignment. Node-keyed: a duplication node owned by no
+  // unit still surfaces.
+  const dups = [...signals.duplication]
+    .filter((m) => m.value >= DUPLICATION_FLOOR)
+    .sort((a, b) => a.node.localeCompare(b.node));
+
+  return dups.map((m) => ({
+    id: nextId(),
+    title: `Duplicated code: ${m.node}`,
+    category: "code_duplication",
+    severity: "low",
+    confidence: "medium",
+    lens: "maintainability" as const,
+    summary: `${m.node} has a ${m.measure} of ${m.value} (reach: ${m.reach}). Duplicated code multiplies the cost of every future change to that logic.`,
+    affected_files: [{ path: m.node }],
+    systemic: false,
+  }));
+}
+
+function detectSeams(
+  signals: GraphSignals,
+  nextId: () => string,
+): Finding[] {
+  // `signals.seams` is already from-then-to sorted at the source; re-sort here so
+  // id assignment is reproducible. Each seam is keyed by its two endpoints — a
+  // seam whose endpoints belong to no unit still surfaces as a node-keyed finding.
+  const seams = [...signals.seams].sort(
+    (a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to),
+  );
+
+  return seams.map((seam) => ({
+    id: nextId(),
+    title: `Architectural seam: ${seam.from} ↔ ${seam.to}`,
+    category: "architectural_seam",
+    severity: "medium",
+    confidence: "medium",
+    lens: "architecture" as const,
+    summary: `The dependency between ${seam.from} and ${seam.to} is a bridge (cut-edge): its removal disconnects the two regions. A single load-bearing link is a fragility and refactor risk.`,
+    affected_files: [{ path: seam.from }, { path: seam.to }],
+    systemic: true,
+  }));
+}
+
 export function buildDesignAssessment(params: {
   unitManifest: UnitManifest;
   graphBundle: GraphBundle;
@@ -224,6 +301,12 @@ export function buildDesignAssessment(params: {
     ...detectRiskConcentration(params.riskRegister, params.unitManifest, nextId),
     ...detectUnitSprawl(params.unitManifest, nextId),
     ...detectFlowGaps(params.criticalFlows, signals, nextId),
+    // Appended AFTER the existing detectors so the shared DA-### id counter does
+    // not renumber any pre-existing finding. Each new detector sorts its signal
+    // collection before assigning ids, so ids are reproducible.
+    ...detectComplexityHotspots(signals, nextId),
+    ...detectDuplication(signals, nextId),
+    ...detectSeams(signals, nextId),
   ];
 
   return {
