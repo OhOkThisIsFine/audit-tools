@@ -43,11 +43,15 @@ export type {
   GraphEdge,
   RouteEdge,
   GraphBundle,
+  NodeMetric,
+  NodeMetrics,
 } from "./types/graph.js";
 export {
   GraphEdgeSchema,
   RouteEdgeSchema,
   GraphBundleSchema,
+  NodeMetricSchema,
+  NodeMetricsSchema,
 } from "./types/graph.js";
 export type { AccessDeclaration } from "./types/accessDeclaration.js";
 export { AccessDeclarationSchema } from "./types/accessDeclaration.js";

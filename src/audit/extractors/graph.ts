@@ -2,7 +2,14 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { posix } from "node:path";
 import type { RepoManifest } from "../types.js";
-import type { FileDisposition, GraphBundle, GraphEdge, RouteEdge } from "audit-tools/shared";
+import type {
+  FileDisposition,
+  GraphBundle,
+  GraphEdge,
+  NodeMetrics,
+  RouteEdge,
+} from "audit-tools/shared";
+import { computeNodeMetricsForFile } from "./analyzers/complexityDuplication.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import {
@@ -656,6 +663,11 @@ export function buildGraphBundle(
   const dispositionMap = buildDispositionMap(disposition);
   const pathLookup = buildPathLookup(repoManifest, dispositionMap);
 
+  // The ONLY compute site for per-node structural metrics. Populated only for
+  // included files whose source is available; non-js/ts files yield no entry
+  // (computeNodeMetricsForFile returns undefined → absent, never zero-filled).
+  const nodeMetrics: NodeMetrics = {};
+
   for (const file of repoManifest.files) {
     const status = dispositionMap.get(file.path);
     if (file.excluded || (status && isAuditExcludedStatus(status))) {
@@ -671,6 +683,10 @@ export function buildGraphBundle(
     const fileRoutes: RouteEdge[] = [];
     if (content) {
       extractContentEdgesForFile(file.path, content, pathLookup, acc, fileRoutes);
+      const metrics = computeNodeMetricsForFile(file.path, content);
+      if (metrics) {
+        nodeMetrics[file.path] = metrics;
+      }
     }
     fileRoutes.push(...extractConventionalRouteEvidence(file.path, content));
     if (fileRoutes.length === 0) {
@@ -695,5 +711,7 @@ export function buildGraphBundle(
 
   logGraphExtractionMetric(graphs);
 
-  return { graphs };
+  return Object.keys(nodeMetrics).length > 0
+    ? { graphs, node_metrics: nodeMetrics }
+    : { graphs };
 }
