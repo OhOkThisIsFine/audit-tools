@@ -365,6 +365,19 @@ export interface SessionConfig {
   timeout_ms?: number;
   ui_mode?: SessionUiMode;
   host_can_dispatch_subagents?: boolean;
+  /**
+   * Run unattended (nightly autonomous pipeline). Host-agnostic — ONE flag
+   * drives the whole path, with no cloud/local fork. When set, the
+   * review-approval gate does NOT halt for a human: it auto-approves only the
+   * findings whose ambiguity tier is "safe" AND whose change-kind is positively
+   * on the fail-closed non-destructiveness ALLOWLIST (additive / localized /
+   * reversible — see src/remediate/review/autonomousGate.ts). Every other
+   * finding is left LIVE and re-emitted as a re-consumable audit deliverable
+   * pair (audit-findings.json + audit-report.md); leftovers are NEVER durably
+   * rejected, so the next nightly run re-evaluates them fresh. Ambiguity-only:
+   * there is NO cost / severity / run-budget gate.
+   */
+  autonomous_mode?: boolean;
   subprocess_template?: SubprocessTemplateConfig;
   claude_code?: ClaudeCodeConfig;
   codex?: CodexConfig;
