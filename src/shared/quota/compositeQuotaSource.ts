@@ -1,4 +1,5 @@
 import type { QuotaProbeResult, QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
+import { resolveAccountIdSafe } from "./quotaSource.js";
 import { LearnedQuotaSource } from "./learnedQuotaSource.js";
 import { ClaudeOAuthQuotaSource } from "./claudeOAuthQuotaSource.js";
 import { CodexQuotaSource } from "./codexQuotaSource.js";
@@ -73,6 +74,20 @@ export class CompositeQuotaSource implements QuotaSource {
     }
     return { snapshot: null, status: sawDegraded ? "degraded" : "not_applicable" };
   }
+
+  /**
+   * Resolve the account id from the first source in the cascade that handles this
+   * provider and yields one (each source returns null for a provider it doesn't
+   * own). Never throws — a failing source is skipped so account resolution degrades
+   * to null rather than aborting pool construction.
+   */
+  async resolveAccountId(providerModelKey: string): Promise<string | null> {
+    for (const source of this.sources) {
+      const account = await resolveAccountIdSafe(source, providerModelKey);
+      if (account) return account;
+    }
+    return null;
+  }
 }
 
 /**
@@ -101,4 +116,30 @@ export function buildQuotaSource(options: BuildQuotaSourceOptions = {}): QuotaSo
     ...(options.additionalSources ?? []),
     new LearnedQuotaSource(options.halfLifeHours ?? 24),
   ], options.runLogger);
+}
+
+/**
+ * A quota source scoped to ONE dispatch source's own credential, for a source that
+ * authenticates as a different account than the host (its `credentials_path`). The
+ * returned source probes usage + resolves the account id from THAT file, so the
+ * source forms a pool keyed on its own `(provider, account)` — a distinct budget
+ * from the host's same-provider pool (docs/quota-dispatch-design.md §5b). Falls back
+ * to the shared source when no per-source credential is declared, or the provider has
+ * no per-account proactive endpoint (only Claude/Codex expose one).
+ */
+export function buildAccountScopedQuotaSource(
+  source: { provider: string; credentials_path?: string },
+  fallback: QuotaSource,
+): QuotaSource {
+  const credentialsPath = source.credentials_path;
+  if (!credentialsPath) return fallback;
+  switch (source.provider) {
+    case "claude":
+    case "claude-code":
+      return new ClaudeOAuthQuotaSource({ credentialsPath });
+    case "codex":
+      return new CodexQuotaSource({ credentialsPath });
+    default:
+      return fallback;
+  }
 }

@@ -114,7 +114,10 @@ and vice-versa. This is the intended way to get more aggregate Claude throughput
 subagents out to a second account's CLI — so the design must keep the two readings separate
 rather than letting one credential's snapshot masquerade as both.
 
-**Consequences for the implementation:**
+**Implemented** (the key + resolution + stamping; see `scheduler.ts buildProviderModelKey`,
+`httpQuotaSource.ts parseProviderModelKey`, `quotaSource.ts resolveAccountId`,
+`apiPool.ts buildHostModelPools`/`buildSourcePool`, `compositeQuotaSource.ts
+buildAccountScopedQuotaSource`):
 - The quota key carries an **account discriminator**, not just provider/model. A bare
   `provider/model` key is only sufficient when there is exactly one account for that
   provider in the run; once a second same-provider account is a dispatch target, the

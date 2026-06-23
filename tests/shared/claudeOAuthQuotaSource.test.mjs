@@ -58,13 +58,33 @@ function okResponse(body) {
 // ---- parseProviderModelKey ----
 
 test("parseProviderModelKey splits provider/model and normalizes wildcard/empty", () => {
-  assert.deepEqual(parseProviderModelKey("claude-code/*"), { provider: "claude-code", model: null });
-  assert.deepEqual(parseProviderModelKey("claude-code/"), { provider: "claude-code", model: null });
+  assert.deepEqual(parseProviderModelKey("claude-code/*"), { provider: "claude-code", account: null, model: null });
+  assert.deepEqual(parseProviderModelKey("claude-code/"), { provider: "claude-code", account: null, model: null });
   assert.deepEqual(parseProviderModelKey("claude-code/claude-opus-4-8"), {
     provider: "claude-code",
+    account: null,
     model: "claude-opus-4-8",
   });
-  assert.deepEqual(parseProviderModelKey("codex"), { provider: "codex", model: null });
+  assert.deepEqual(parseProviderModelKey("codex"), { provider: "codex", account: null, model: null });
+});
+
+test("parseProviderModelKey extracts the account segment (provider#account/model)", () => {
+  assert.deepEqual(parseProviderModelKey("claude-code#org-abc/claude-opus-4-8"), {
+    provider: "claude-code",
+    account: "org-abc",
+    model: "claude-opus-4-8",
+  });
+  assert.deepEqual(parseProviderModelKey("claude-code#org-abc/*"), {
+    provider: "claude-code",
+    account: "org-abc",
+    model: null,
+  });
+  // Model tail may itself contain '/': only provider+account live before the first '/'.
+  assert.deepEqual(parseProviderModelKey("openrouter#acctB/anthropic/claude-x"), {
+    provider: "openrouter",
+    account: "acctB",
+    model: "anthropic/claude-x",
+  });
 });
 
 // ---- mapUsageToSnapshot ----
@@ -213,6 +233,40 @@ test("queryCurrentUsage with the DEFAULT fetch makes no network call under a tes
     now: () => NOW,
   });
   assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
+});
+
+// ---- resolveAccountId (account discriminator for pool keys) ----
+
+test("resolveAccountId reads organizationUuid from the credential, gated by provider", async () => {
+  const src = new ClaudeOAuthQuotaSource({
+    credentialsPath: writeCreds({ ...validCreds(), organizationUuid: "org-xyz" }),
+    readEnvToken: () => null,
+  });
+  assert.equal(await src.resolveAccountId("claude-code/*"), "org-xyz");
+  assert.equal(await src.resolveAccountId("claude-code/some-model"), "org-xyz");
+  // Not this source's provider → null (no cross-provider account leakage).
+  assert.equal(await src.resolveAccountId("codex/*"), null);
+});
+
+test("resolveAccountId is null when the credential file has no organizationUuid / is absent", async () => {
+  const noOrg = new ClaudeOAuthQuotaSource({
+    credentialsPath: writeCreds(validCreds()),
+    readEnvToken: () => null,
+  });
+  assert.equal(await noOrg.resolveAccountId("claude-code/*"), null);
+  const absent = new ClaudeOAuthQuotaSource({
+    credentialsPath: join(tmpdir(), "no-such-claude", ".credentials.json"),
+    readEnvToken: () => "env-only",
+  });
+  assert.equal(await absent.resolveAccountId("claude-code/*"), null);
+});
+
+test("resolveAccountId skips the DEFAULT credential path under a test runner (hermeticity)", async () => {
+  // No credentialsPath → default (~/.claude/.credentials.json). Under the test
+  // runner this must NOT read the real machine credential, or pool ids would be
+  // machine-dependent. An explicitly-injected path (above) is still honored.
+  const def = new ClaudeOAuthQuotaSource({ readEnvToken: () => null });
+  assert.equal(await def.resolveAccountId("claude-code/*"), null);
 });
 
 // ---- credential resolution: env handoff + refresh-on-expiry ----

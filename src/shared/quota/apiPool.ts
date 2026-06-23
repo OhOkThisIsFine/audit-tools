@@ -8,8 +8,10 @@ import type { DispatchModelTier } from "../types/stepContract.js";
 import type { HostConcurrencyLimit, QuotaStateEntry } from "./types.js";
 import type { QuotaSource, QuotaProbeResult } from "./quotaSource.js";
 import type { DiscoveredRateLimitsInput, HostModelRosterEntry } from "./scheduler.js";
-import { probeQuotaSource } from "./quotaSource.js";
+import { probeQuotaSource, resolveAccountIdSafe } from "./quotaSource.js";
 import { buildProviderModelKey } from "./scheduler.js";
+import { parseProviderModelKey } from "./httpQuotaSource.js";
+import { buildAccountScopedQuotaSource } from "./compositeQuotaSource.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
 
 /**
@@ -18,8 +20,9 @@ import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
  * distinct as long as their model/endpoint differ. This is the CapacityPool id and
  * the key learned quota is recorded under.
  */
-export function dispatchableSourceId(source: DispatchableSource): string {
-  return source.id ?? buildProviderModelKey(source.provider, source.model ?? source.endpoint ?? null);
+export function dispatchableSourceId(source: DispatchableSource, account?: string | null): string {
+  if (source.id) return account ? `${source.id}#${account}` : source.id;
+  return buildProviderModelKey(source.provider, source.model ?? source.endpoint ?? null, account);
 }
 
 /**
@@ -128,9 +131,20 @@ export async function buildHostModelPools(params: {
     discoveredLimits: DiscoveredRateLimitsInput | null;
   };
 }): Promise<CapacityPool[]> {
+  // Resolve the host account ONCE from the host credential, then fold it into every
+  // roster pool key — so the host's pools are keyed on its own (provider, account)
+  // and never alias a same-provider dispatch source on a different account (§5).
+  const hostAccount = await resolveAccountIdSafe(
+    params.quotaSource,
+    buildProviderModelKey(params.providerName, params.hostModel),
+  );
   return Promise.all(
     (params.roster ?? [null]).map(async (entry) => {
-      const { poolKey, discoveredLimits } = await params.resolve(entry);
+      const resolved = await params.resolve(entry);
+      // Re-key with the host account (the caller builds an account-less key; recover
+      // its provider/model and re-stamp). Account-null → key is unchanged.
+      const parsed = parseProviderModelKey(resolved.poolKey);
+      const poolKey = buildProviderModelKey(parsed.provider, parsed.model, hostAccount);
       return buildHostModelPool({
         poolKey,
         providerName: params.providerName,
@@ -138,7 +152,7 @@ export async function buildHostModelPools(params: {
         rank: entry?.rank,
         hostConcurrencyLimit: params.hostConcurrencyLimit,
         quotaStateEntry: params.quotaEntries[poolKey] ?? null,
-        discoveredLimits,
+        discoveredLimits: resolved.discoveredLimits,
         quotaSource: params.quotaSource,
       });
     }),
@@ -171,8 +185,19 @@ export async function buildSourcePool(params: {
   quotaEntries: Record<string, QuotaStateEntry>;
 }): Promise<CapacityPool> {
   const { source, quotaSource, quotaEntries } = params;
-  const poolKey = dispatchableSourceId(source);
-  const probe = await probeQuotaSource(quotaSource, poolKey).catch(
+  // Scope the probe + account read to THIS source's own credential when it declares
+  // one, so a same-provider second-account source forms a distinct pool (§5b).
+  const scoped = buildAccountScopedQuotaSource(source, quotaSource);
+  // Account: explicit override > read from the source's credential. A provider-shaped
+  // key carries the provider for gating regardless of any explicit source.id.
+  const account =
+    source.account ??
+    (await resolveAccountIdSafe(
+      scoped,
+      buildProviderModelKey(source.provider, source.model ?? source.endpoint ?? null),
+    ));
+  const poolKey = dispatchableSourceId(source, account);
+  const probe = await probeQuotaSource(scoped, poolKey).catch(
     (): QuotaProbeResult => ({ snapshot: null, status: "degraded" }),
   );
   return {
