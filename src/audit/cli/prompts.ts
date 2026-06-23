@@ -1,4 +1,8 @@
-import { DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE } from "audit-tools/shared";
+import {
+  DO_NOT_TOKEN_WRAP_NOTE,
+  DISPATCH_PROMPT_HANDOFF_NOTE,
+  renderQuotaCoverageNudge,
+} from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import { renderCommand } from "./args.js";
@@ -116,11 +120,17 @@ export function renderDispatchReviewPrompt(params: {
     'If a subagent reports a host session/usage limit (e.g. "hit your session limit · resets <time>") instead of submitting its result, do not immediately re-dispatch it: run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
   );
 
+  const quotaCoverageNudge = renderQuotaCoverageNudge(
+    params.dispatchQuotaPath,
+    params.artifactsDir,
+  );
+
   return [
     "# audit-code dispatch review",
     "",
     ...dispatchDataLines,
     "",
+    ...(quotaCoverageNudge ? [quotaCoverageNudge, ""] : []),
     DISPATCH_PROMPT_HANDOFF_NOTE,
     "",
     "Subagent prompt shape:",

@@ -58,6 +58,14 @@ export interface QuotaSource {
    * Local-only (no network). Optional so plain stubs stay valid.
    */
   resolveAccountId?(providerModelKey: string): Promise<string | null>;
+  /**
+   * Pure capability check: does this source provide PROACTIVE quota tracking for
+   * `provider`? No credentials, no network — answers "is this provider supported in
+   * code", which is what separates an unsupported environment (`unestablished`) from
+   * a supported-but-degraded one. Reactive-only sources (learned, host-session) omit
+   * it. See {@link classifyQuotaCoverage}.
+   */
+  coversProvider?(provider: string): boolean;
 }
 
 /**

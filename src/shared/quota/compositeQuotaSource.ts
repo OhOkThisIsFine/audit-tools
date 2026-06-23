@@ -88,6 +88,11 @@ export class CompositeQuotaSource implements QuotaSource {
     }
     return null;
   }
+
+  /** Proactive coverage if ANY source in the cascade covers the provider. */
+  coversProvider(provider: string): boolean {
+    return this.sources.some((s) => s.coversProvider?.(provider) ?? false);
+  }
 }
 
 /**

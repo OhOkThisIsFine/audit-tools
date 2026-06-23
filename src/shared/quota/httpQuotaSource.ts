@@ -88,6 +88,11 @@ export abstract class BaseHttpQuotaSource implements QuotaSource {
   /** Providers this source answers for. A non-matching key returns null (no I/O). */
   protected abstract handlesProvider(provider: string): boolean;
 
+  /** A proactive HTTP source covers exactly the providers it handles (no creds read). */
+  coversProvider(provider: string): boolean {
+    return this.handlesProvider(provider);
+  }
+
   /**
    * Provider-specific: read the local credential, call the endpoint, and map the
    * response to a snapshot. Return null to degrade (missing/expired creds,

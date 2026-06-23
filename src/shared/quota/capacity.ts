@@ -17,6 +17,8 @@ import {
 } from "./types.js";
 import type { QuotaUsageSnapshot } from "./quotaSource.js";
 import { QuotaUsageSnapshotSchema } from "./quotaSource.js";
+import type { QuotaCoverageStatus } from "./coverage.js";
+import { QuotaCoverageStatusSchema } from "./coverage.js";
 import { scheduleWave, type DiscoveredRateLimitsInput } from "./scheduler.js";
 
 /**
@@ -135,6 +137,14 @@ export interface CapacityPool {
    */
   quotaSignalDegraded?: boolean;
   /**
+   * Proactive-quota coverage for this pool's provider: whether a source is wired in
+   * code (`established`), the provider is reactive-only by nature (`reactive_only`),
+   * or the environment is unsupported (`unestablished`). The last drives the
+   * host-agent nudge instead of silently degrading to reactive 429. See
+   * {@link classifyQuotaCoverage}.
+   */
+  quotaCoverage?: QuotaCoverageStatus;
+  /**
    * The generic dispatchable source this pool was built from, when it is a
    * configured backend source (not the conversation host's own pool). The dispatch
    * worker rebuilds the provider from THIS source's `{endpoint, model, parameters}`
@@ -159,6 +169,8 @@ export interface PoolDispatchAllocation {
    * summary/observability can surface it; never affects slot math here.
    */
   quotaSignalDegraded?: boolean;
+  /** Echo of {@link CapacityPool.quotaCoverage} — proactive-quota coverage for this pool. */
+  quotaCoverage?: QuotaCoverageStatus;
 }
 
 /** Compact, serializable view of one pool allocation for dispatch-quota files. */
@@ -178,6 +190,8 @@ export const DispatchCapacityPoolSummarySchema = z
     quota_source_snapshot: QuotaUsageSnapshotSchema.nullable().optional(),
     /** Raw silent-degrade marker for this pool (see CapacityPool.quotaSignalDegraded). */
     quota_signal_degraded: z.boolean().optional(),
+    /** Proactive-quota coverage status for this pool's provider (see classifyQuotaCoverage). */
+    quota_coverage: QuotaCoverageStatusSchema.optional(),
   })
   .strict();
 export type DispatchCapacityPoolSummary = z.infer<
@@ -459,6 +473,7 @@ function schedulePool(
     schedule,
     // Raw signal carried through unfolded — does not enter the slot math above.
     ...(pool.quotaSignalDegraded ? { quotaSignalDegraded: true } : {}),
+    ...(pool.quotaCoverage ? { quotaCoverage: pool.quotaCoverage } : {}),
   };
 }
 
@@ -495,5 +510,6 @@ export function summarizeDispatchCapacityPools(
     binding_cap: allocation.schedule.binding_cap ?? "none",
     quota_source_snapshot: allocation.schedule.quota_source_snapshot ?? null,
     ...(allocation.quotaSignalDegraded ? { quota_signal_degraded: true } : {}),
+    ...(allocation.quotaCoverage ? { quota_coverage: allocation.quotaCoverage } : {}),
   }));
 }

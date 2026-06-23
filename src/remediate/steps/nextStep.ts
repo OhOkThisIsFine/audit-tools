@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, frictionCaptured, persistFrictionCapture, frictionCapturePath, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, frictionCaptured, persistFrictionCapture, frictionCapturePath, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -1784,6 +1784,8 @@ Then run:
 
 \`${rollNext}\`
 
+${renderQuotaCoverageNudge(rolling.quotaPath, artifactsDir)}
+
 ${DISPATCH_PROMPT_HANDOFF_NOTE}
 `,
         allowedCommands: [acceptCmd, rollMerge, rollNext],
@@ -1886,6 +1888,8 @@ For each item in \`items\`, dispatch one subagent with that item's
 block and must write only its assigned \`result_path\`.
 
 ${SHARED_REBUILD_BETWEEN_LEVELS_NOTE}
+
+${renderQuotaCoverageNudge(implQuotaPath, artifactsDir)}
 
 ${DISPATCH_PROMPT_HANDOFF_NOTE}
 
