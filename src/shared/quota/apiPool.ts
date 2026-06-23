@@ -12,6 +12,7 @@ import { probeQuotaSource, resolveAccountIdSafe } from "./quotaSource.js";
 import { buildProviderModelKey } from "./scheduler.js";
 import { parseProviderModelKey } from "./httpQuotaSource.js";
 import { buildAccountScopedQuotaSource } from "./compositeQuotaSource.js";
+import { classifyQuotaCoverage, sourceCoversProvider } from "./coverage.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
 
 /**
@@ -105,6 +106,10 @@ export async function buildHostModelPool(params: {
     discoveredLimits: params.discoveredLimits,
     quotaSourceSnapshot: probe.snapshot,
     ...(probe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
+    quotaCoverage: classifyQuotaCoverage(
+      params.providerName,
+      sourceCoversProvider(params.quotaSource, params.providerName),
+    ),
   };
 }
 
@@ -211,6 +216,7 @@ export async function buildSourcePool(params: {
     discoveredLimits: source.quota ?? null,
     quotaSourceSnapshot: probe.snapshot,
     ...(probe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
+    quotaCoverage: classifyQuotaCoverage(source.provider, sourceCoversProvider(scoped, source.provider)),
     source,
   };
 }

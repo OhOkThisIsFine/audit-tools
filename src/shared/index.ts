@@ -756,8 +756,25 @@ export { LearnedQuotaSource } from "./quota/learnedQuotaSource.js";
 // Parsing utilities
 export type { QuoteChar, StringAwareScannerOptions } from "./parsing/stringAwareScanner.js";
 export { scanStringAware } from "./parsing/stringAwareScanner.js";
-export { CompositeQuotaSource, buildQuotaSource } from "./quota/compositeQuotaSource.js";
+export {
+  CompositeQuotaSource,
+  buildQuotaSource,
+  buildAccountScopedQuotaSource,
+} from "./quota/compositeQuotaSource.js";
 export type { BuildQuotaSourceOptions } from "./quota/compositeQuotaSource.js";
+export {
+  classifyQuotaCoverage,
+  sourceCoversProvider,
+  renderUnestablishedQuotaNudge,
+  REACTIVE_ONLY_PROVIDERS,
+  QuotaCoverageStatusSchema,
+} from "./quota/coverage.js";
+export type { QuotaCoverageStatus } from "./quota/coverage.js";
+export {
+  shouldEmitQuotaNudge,
+  quotaNudgeMarkerName,
+  renderQuotaCoverageNudge,
+} from "./quota/quotaCoverageNudge.js";
 export {
   ClaudeOAuthQuotaSource,
   parseProviderModelKey,

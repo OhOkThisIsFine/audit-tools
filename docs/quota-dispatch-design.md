@@ -91,6 +91,43 @@ has a discoverable proactive own-quota endpoint, build a `QuotaSource` for it (C
 host-session source** (parse "you hit your session limit · resets …" from the worker
 channel) — still own-quota, just lower-fidelity. Either way the host is tracked.
 
+### 4a. Unsupported environment is LOUD, not silent — `quota_coverage`
+
+The goal is progressively wider out-of-the-box coverage. Until a host provider is
+wired, the orchestrator must **see** the gap rather than silently degrading to
+reactive 429. Each host pool carries a `quota_coverage` status (in the dispatch-quota
+contract's `capacity_pools[]`), classified from the pure no-creds capability check
+(`QuotaSource.coversProvider`):
+
+- **`established`** — a proactive source in code covers this provider (live-vs-missing-
+  creds is the orthogonal `quota_signal_degraded` flag).
+- **`reactive_only`** — the provider has no proactive surface BY NATURE (static API
+  key / local model: NIM, vLLM, Ollama, local-subprocess, generic openai-compatible).
+  Not a gap — reactive 429 is correct; no nudge.
+- **`unestablished`** — no source covers this provider. The environment isn't supported
+  yet.
+
+On `unestablished`, the dispatch step prompt emits a **host-agent nudge, once per
+environment** (per-provider marker in the artifact dir; terse status thereafter),
+with two conversation-first paths: (1) if the host has built-in access to its own
+usage, report it so the run can pace from it and it can be wired in; (2) else OFFER to
+research the provider's quota endpoint / a third-party tool that solved it, and on the
+user's consent report the findings (endpoint, credential location, response shape) so a
+new `QuotaSource` is added — the progressive-coverage flywheel. Implemented:
+`coverage.ts`, `quotaCoverageNudge.ts`, surfaced by `apiPool.ts` + both orchestrators'
+dispatch prompts.
+
+### 4b. Dev-side coverage routine (scheduled)
+
+Coverage widens on two tracks: the runtime nudge above (driven by real unsupported
+environments users hit) and a **scheduled dev agent** that proactively, on a regular
+cadence: (1) scans online for additional providers worth supporting (IDEs / CLIs /
+other), (2) researches how to read each candidate's quota (proactive endpoint, creds
+location, response shape — the `cross-provider-quota-matrix.md` recipe form), and (3)
+**re-verifies existing sources' methodologies** for drift or newly-exposed capabilities
+(endpoints, headers, response fields change). Findings land as matrix/backlog updates
+proposing new `QuotaSource`s or fixes to existing ones.
+
 ## 5. Quota is account-level — pools key on (provider, account), not provider alone
 
 Quota is billed and reset **per account**, not per provider and not per surface. The
