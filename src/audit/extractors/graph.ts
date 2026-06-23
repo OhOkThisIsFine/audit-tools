@@ -110,7 +110,10 @@ const EDGE_KIND = {
   analyzerOwnershipRootLink: "analyzer-ownership-root-link",
   relativeStringReference: "relative-string-reference",
   repoPathReference: "repo-path-reference",
+  analyzerDataflowEdge: "analyzer-dataflow-edge",
 } as const;
+
+const ANALYZER_DATAFLOW_EDGE_CONFIDENCE = 0.7;
 
 function shouldReadForGraph(file: RepoManifest["files"][number]): boolean {
   const normalized = normalizeGraphPath(file.path);
@@ -247,6 +250,62 @@ function extractAnalyzerOwnershipEdges(
     }
   }
 
+  return edges;
+}
+
+/**
+ * Ingest the language-neutral graph edges contributed by an EXTERNAL dataflow
+ * analyzer (ast-grep / broader-semgrep dataflow / CodeQL), already normalized to
+ * the `ExternalAnalyzerResults.graph_edges` contract by an adapter wrapper. Both
+ * endpoints are resolved against the repo path lookup; an edge whose `from` or
+ * `to` does not resolve to a known repo file is dropped (the analyzer may
+ * reference vendored / generated / out-of-tree paths). Self-edges are dropped.
+ * Degrades to an empty edge list when `graph_edges` is absent / not an array /
+ * malformed — a bad analyzer payload can never throw here. The merged edges are
+ * deduped + sorted downstream (`uniqueSortedEdges`) for deterministic output.
+ */
+function extractAnalyzerGraphEdges(
+  externalAnalyzerResults: ExternalAnalyzerResults | undefined,
+  pathLookup: Map<string, string>,
+): GraphEdge[] {
+  const rawEdges = Array.isArray(externalAnalyzerResults?.graph_edges)
+    ? externalAnalyzerResults.graph_edges
+    : [];
+  const edges: GraphEdge[] = [];
+  const tool = externalAnalyzerResults?.tool ?? "analyzer";
+  for (const rawEdge of rawEdges) {
+    if (
+      !rawEdge ||
+      typeof rawEdge.from !== "string" ||
+      typeof rawEdge.to !== "string"
+    ) {
+      continue;
+    }
+    const from = resolveCandidate(rawEdge.from, pathLookup);
+    const to = resolveCandidate(rawEdge.to, pathLookup);
+    if (!from || !to || from === to) continue;
+    const kind =
+      typeof rawEdge.kind === "string" && rawEdge.kind.trim().length > 0
+        ? rawEdge.kind.trim()
+        : EDGE_KIND.analyzerDataflowEdge;
+    edges.push(
+      graphEdge({
+        from,
+        to,
+        kind,
+        direction: "directed",
+        confidence: clampConfidence(
+          rawEdge.confidence,
+          ANALYZER_DATAFLOW_EDGE_CONFIDENCE,
+        ),
+        reason:
+          typeof rawEdge.reason === "string" &&
+          rawEdge.reason.trim().length > 0
+            ? rawEdge.reason.trim()
+            : `${tool} reports a dataflow edge from '${from}' to '${to}'.`,
+      }),
+    );
+  }
   return edges;
 }
 
@@ -637,6 +696,9 @@ function accumulateCrossFileEdges(
       options.externalAnalyzerResults,
       pathLookup,
     ),
+  );
+  acc.references.push(
+    ...extractAnalyzerGraphEdges(options.externalAnalyzerResults, pathLookup),
   );
   acc.references.push(...extractPytestConftestLinks(pathLookup));
   acc.references.push(
