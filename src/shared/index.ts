@@ -368,6 +368,22 @@ export {
   REMEDIATION_OUTCOMES_FILENAME,
 } from "./io/auditToolsPaths.js";
 
+// IO: tool-emitted end-of-run friction capture (single-sourced shape + persist
+// helper for BOTH orchestrators — cannot drift, never couples to any one repo's
+// backlog doc).
+export type {
+  FrictionItem,
+  FrictionCaptureArtifact,
+} from "./io/frictionCapture.js";
+export {
+  FRICTION_CAPTURE_SCHEMA_VERSION,
+  FRICTION_CAPTURE_DIRNAME,
+  frictionCaptureDir,
+  frictionCapturePath,
+  frictionCaptured,
+  persistFrictionCapture,
+} from "./io/frictionCapture.js";
+
 // IO: single-sourced step-contract object + writer (drift-plan R3). Owns the
 // steps/ filenames, mkdir + prompt write + atomic current-step.json write, the
 // toPromptPathToken normalization of ALL host-facing path fields, and the

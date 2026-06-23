@@ -68,6 +68,7 @@ const HandoffArtifactPathsSchema = z
     current_tasks: z.string().nullable(),
     audit_tasks: z.string().nullable(),
     runtime_validation_tasks: z.string().nullable(),
+    friction_record: z.string(),
   })
   .strict();
 

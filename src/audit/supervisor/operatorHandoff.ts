@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { writeJsonFile } from "audit-tools/shared";
+import { writeJsonFile, frictionCapturePath } from "audit-tools/shared";
 import { type ArtifactBundle, AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import type {
   AuditState,
@@ -31,6 +31,12 @@ export interface AuditCodeHandoffArtifactPaths {
   current_tasks: string | null;
   audit_tasks: string | null;
   runtime_validation_tasks: string | null;
+  /**
+   * The run's friction-capture record path (run_id-keyed, under the artifacts dir).
+   * Single-sourced from the shared `frictionCapturePath` so it cannot drift from the
+   * close-out writer in `decideAuditFrictionCloseout`.
+   */
+  friction_record: string;
 }
 
 export interface ActiveReviewRun {
@@ -244,6 +250,7 @@ const ARTIFACT_PATH_RENDER_FIELDS: ReadonlyArray<{
     key: "runtime_validation_tasks",
     fallback: "not available yet",
   },
+  { label: "friction record", key: "friction_record" },
 ];
 
 function renderMarkdown(handoff: AuditCodeHandoff): string {
@@ -325,6 +332,12 @@ export function buildAuditCodeHandoff(params: {
   progressSummary: string;
   isConfigError?: boolean;
   activeReviewRun?: ActiveReviewRun;
+  /**
+   * The run_id this handoff belongs to. Used only to resolve the run_id-keyed
+   * friction-capture record path. Defaults to "run" when the caller has no run_id
+   * yet (early/blocked handoffs), matching the shared helper's sanitized fallback.
+   */
+  runId?: string;
 }): AuditCodeHandoff {
   const isConfigError = params.isConfigError ?? false;
   const incomingDir = join(params.artifactsDir, INCOMING_DIRNAME);
@@ -358,6 +371,10 @@ export function buildAuditCodeHandoff(params: {
     runtime_validation_tasks: params.bundle.runtime_validation_tasks
       ? join(params.artifactsDir, RUNTIME_VALIDATION_TASKS_FILENAME)
       : null,
+    friction_record: frictionCapturePath(
+      params.artifactsDir,
+      params.runId ?? "run",
+    ),
   };
   const suggestedInputs = buildSuggestedInputs(
     params.artifactsDir,
