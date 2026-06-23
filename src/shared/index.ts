@@ -384,6 +384,21 @@ export {
   persistFrictionCapture,
 } from "./io/frictionCapture.js";
 
+// IO: install/ensure-time .gitignore management for artifacts emitted into a
+// consuming repo's tree — always-ignore build/install assets + friction sidecar;
+// visibility-conditional ignore of deliverables + meta-audit reflections.
+export type { RepoVisibility } from "./io/gitignoreArtifacts.js";
+export {
+  ALWAYS_IGNORE_PATTERNS,
+  VISIBILITY_CONDITIONAL_PATTERNS,
+  GITIGNORE_BLOCK_BEGIN,
+  GITIGNORE_BLOCK_END,
+  renderGitignoreBlock,
+  mergeGitignoreBlock,
+  detectRepoVisibility,
+  ensureArtifactGitignore,
+} from "./io/gitignoreArtifacts.js";
+
 // IO: single-sourced step-contract object + writer (drift-plan R3). Owns the
 // steps/ filenames, mkdir + prompt write + atomic current-step.json write, the
 // toPromptPathToken normalization of ALL host-facing path fields, and the
