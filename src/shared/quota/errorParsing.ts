@@ -115,6 +115,35 @@ function extractResetsAtClockMs(text: string, now: number): number | null {
   return ms > 0 ? ms + 5000 : null;
 }
 
+/**
+ * The worker output channel a piece of text came from. Host *session-limit*
+ * sentinels are only trustworthy from the ERROR / STATUS channel: the consumed
+ * AuditResult finding content is attacker- / model-controlled prose that may
+ * legitimately *quote* a limit string (e.g. a finding describing a rate-limit
+ * bug). Treating that as a real session cap would let result content pause the
+ * run. CE-003 channel isolation: only `error` / `status` may trip a session
+ * limit; `result` is parsed for nothing.
+ */
+export type WorkerOutputChannel = "error" | "status" | "result";
+
+/**
+ * Channel-isolated session-limit detection (CE-003). The single entry point a
+ * dispatch consumer MUST use when the text originates from worker output: it
+ * refuses to inspect the consumed-result channel, so a healthy AuditResult that
+ * merely quotes a limit string can never consume a pause. Only `error` /
+ * `status` text is forwarded to {@link detectRateLimitError}.
+ */
+export function detectRateLimitFromChannel(
+  channel: WorkerOutputChannel,
+  text: string,
+  now: number = Date.now(),
+): RateLimitDetectionResult {
+  if (channel === "result") {
+    return { isRateLimited: false, retryAfterMs: null, rawMatch: null };
+  }
+  return detectRateLimitError(text, now);
+}
+
 export function detectRateLimitError(
   text: string,
   now: number = Date.now(),
@@ -136,7 +165,7 @@ export function detectRateLimitError(
   return { isRateLimited: false, retryAfterMs: null, rawMatch: null };
 }
 
-const DEFAULT_COOLDOWN_MS = 60_000;
+export const DEFAULT_COOLDOWN_MS = 60_000;
 
 export function computeCooldownUntil(
   retryAfterMs: number | null,

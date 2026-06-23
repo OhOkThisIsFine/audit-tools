@@ -571,8 +571,22 @@ export {
 } from "./quota/state.js";
 export {
   detectRateLimitError,
+  detectRateLimitFromChannel,
   computeCooldownUntil,
+  DEFAULT_COOLDOWN_MS,
 } from "./quota/errorParsing.js";
+export type { WorkerOutputChannel } from "./quota/errorParsing.js";
+export {
+  HostSessionQuotaSource,
+  HOST_SESSION_QUOTA_SOURCE_NAME,
+  DEFAULT_MAX_CONSECUTIVE_RE_LIMITS,
+} from "./quota/hostSessionQuotaSource.js";
+export type {
+  NowFn,
+  HostSessionEscalation,
+  HostSessionLimitEvent,
+  HostSessionQuotaSourceOptions,
+} from "./quota/hostSessionQuotaSource.js";
 // Shared claude-code stderr JSON-line scan (single source for the claude-code
 // error parser + audit header extractor).
 export { collectClaudeCodeJsonLines } from "./quota/claudeCodeJsonLines.js";
