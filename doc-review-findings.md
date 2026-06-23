@@ -1,23 +1,23 @@
-# Doc-review findings — 2026-06-22 (run 3)
+# Doc-review findings — 2026-06-23 (run 4)
 
-Run against main HEAD `9f9727b` → pushed to `96c39a5` after applying 2 commits.
+Run against main HEAD `4a128be` → pushed to `142a818` after applying 1 commit.
 
 ---
 
 ## FYI — auto-applied this run
 
-Two commits pushed to main (each discrete and revertible):
+One commit pushed to main (discrete and revertible):
 
 | Commit | Summary |
 |---|---|
-| `a862869` | `docs/HANDOFF.md` — update live version `0.29.3` → `0.30.0`; drop stale 0.29.x history parenthetical |
-| `96c39a5` | `docs/NEW-MACHINE-SETUP.md` — update expected CLI version `# expect 0.28.11` → `# expect 0.30.0` |
+| `142a818` | `tests/audit/fixtures/simple-app/README.md` — replace stale `auditor-lambda` with `audit-code` (package renamed by A12 monorepo collapse) |
 
-**Resolved from previous run (committed by Ethan in `e0c479e`, dropped from open list):**
-CLAUDE-1 (layout table), CLAUDE-2 (workspace commands), CLAUDE-3 (audit src paths), CLAUDE-5 (phases list),
-CLAUDE-6 (dispatch symbols), CLAUDE-7 (waveScheduler), CLAUDE-11 (abbreviated paths), CLAUDE-12 (test paths).
+**Carried from previous runs (Ethan-approved, not yet applied — instruction files):**
+CLAUDE-4, CLAUDE-8, CLAUDE-9, CLAUDE-10, AGENTS-1, AGENTS-2 remain open pending Ethan's approval.
 
-**Reviewer error corrected:** Run 2 incorrectly marked AGENTS-1/AGENTS-2 as resolved. Both files exist at repo root and both broken links are confirmed by adversary + judge — items remain open.
+**Carried design decisions:** D-1, D-2, D-4 remain open.
+
+**New files added to ledger this run:** `.claude/skills/disambiguate-backlog/SKILL.md`, `.claude/skills/ship/SKILL.md`, `examples/README.md`, `src/audit/README.md`, `src/audit/adapters/README.md`, `templates/AGENTS.remediate-code.md`, `tests/audit/fixtures/simple-app/README.md` (fixed), `tests/remediate/remediation-report.md` — all clean except the fixture README (fixed above).
 
 ---
 
