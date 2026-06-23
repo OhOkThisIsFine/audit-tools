@@ -29,6 +29,15 @@ close-out in both orchestrators. Durable design captured in memory + CLAUDE.md._
   territory, not a hand-rolled edge query (the shipped `deletion_candidate` low-in-degree signal covers
   the cheap version). The graph-query heuristics (cycles / hub / orphans / deletion-test) and
   extraction-persisted complexity / duplication / seams remain DONE (`deriveGraphSignals` pure reader).
+- **Account-keyed quota pools — pool identity is `(provider, account[, model])`, not `provider/model`.**
+  Spec'd in [`quota-dispatch-design.md`](quota-dispatch-design.md) §5: same provider + DIFFERENT accounts
+  (e.g. Claude Desktop on account A + Claude CLI subagents on account B) are TWO independent pools with
+  separate budgets — the intended way to scale aggregate throughput via a second account. Current quota
+  keys (`buildProviderModelKey`, `parseProviderModelKey`) carry no account discriminator, so two
+  same-provider accounts would alias to one pool and one credential's `/usage` would masquerade as both.
+  Build: read account identity from each credential (Claude OAuth account/org; Codex `account_id`; …),
+  add an account segment to the quota key, merge same-provider pools iff account ids match, keep separate
+  otherwise. Self-gating must hold per `(provider, account)` so account B's source never probes A.
 - **Cross-provider quota — LIVE-endpoint confirmation.** The per-provider mappings are validated against
   live-*shaped* fixtures and the capacity fold; confirming each source against its **real** endpoint
   (Claude/Codex live; Copilot/Antigravity gated→degrade) is environment-bound and still a recorded-
