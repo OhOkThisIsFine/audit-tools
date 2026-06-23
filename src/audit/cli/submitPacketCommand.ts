@@ -1,7 +1,11 @@
 import { join, resolve } from "node:path";
 import { readJsonFile, writeJsonFile } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
-import { validateAuditResults, formatAuditResultIssues } from "../validation/auditResults.js";
+import {
+  validateAuditResults,
+  formatAuditResultIssues,
+  defaultFindingLensFromResult,
+} from "../validation/auditResults.js";
 import {
   DISPATCH_RESULT_MAP_FILENAME,
   resolveRunScopedArg,
@@ -96,6 +100,12 @@ export async function cmdSubmitPacket(argv: string[]): Promise<void> {
       `Invalid submit-packet JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+
+  // Force-default findings[].lens from each AuditResult.lens before validation
+  // (the validator requires a non-empty per-finding lens; weaker workers set
+  // only the top-level lens). Tool-enforced so no result is rejected for an
+  // omitted per-finding lens. Mutates the parsed payload in place.
+  defaultFindingLensFromResult(payload);
 
   const resultErrors: string[] = [];
   const issues = validateAuditResults(payload, tasks, { lineIndex, boundaryPaths });

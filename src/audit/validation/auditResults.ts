@@ -15,6 +15,42 @@ export function normalizeCoveragePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
+/**
+ * Force-default each `findings[].lens` from the result's top-level
+ * `AuditResult.lens` when the per-finding lens is missing/blank. Deepening
+ * (and weaker) workers routinely set only the AuditResult lens and omit the
+ * per-finding lens — which the validator requires as a non-empty string — so
+ * every such result was hard-rejected and its `deepening:*` task re-queued
+ * forever (the non-convergence loop). Backfilling the per-finding lens from the
+ * AuditResult lens BEFORE validation is the tool-enforced fix (INV
+ * enforce-in-tooling: never rely on the worker remembering to set it).
+ *
+ * Mutates in place and returns the same payload for chaining. A non-array, a
+ * non-object result, a non-array `findings`, or a non-string/blank
+ * AuditResult.lens are all left untouched (validation reports them as-is); a
+ * finding that already carries a non-empty lens is never overwritten (so a
+ * genuine per-finding/AuditResult lens MISMATCH is still surfaced, not masked).
+ */
+export function defaultFindingLensFromResult<T>(payload: T): T {
+  if (!Array.isArray(payload)) {
+    return payload;
+  }
+  for (const result of payload) {
+    if (!isRecord(result)) continue;
+    const resultLens = result.lens;
+    if (typeof resultLens !== "string" || resultLens.trim().length === 0) continue;
+    const findings = result.findings;
+    if (!Array.isArray(findings)) continue;
+    for (const finding of findings) {
+      if (!isRecord(finding)) continue;
+      if (typeof finding.lens !== "string" || finding.lens.trim().length === 0) {
+        finding.lens = resultLens;
+      }
+    }
+  }
+  return payload;
+}
+
 export interface AuditResultIssue extends ValidationIssue {
   result_index: number;
   task_id: string;

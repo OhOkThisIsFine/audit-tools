@@ -89,6 +89,7 @@
               ]
             },
             "lens": {
+              "description": "Optional: when omitted, the tool defaults it from the enclosing AuditResult.lens before validation. Supply it only to override the result lens for a cross-lens finding.",
               "type": "string",
               "enum": [
                 "correctness",
@@ -308,7 +309,6 @@
             "category",
             "severity",
             "confidence",
-            "lens",
             "summary",
             "affected_files",
             "evidence"
