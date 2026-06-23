@@ -7,12 +7,80 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Selective-deepening tasks never converge — packet result task_id ≠ assigned `deepening:*` id.** Repro
+  (run `20260622T023504252Z_audit_tasks_completed_001`): after the base pass, `deepening:finding:*` /
+  `deepening:steward:*` tasks are created and counted pending, but the dispatch packager re-emits *base-unit*
+  packets whose worker results carry packet-style task_ids (e.g. `flow:...:reliability:packet-3-…`) that don't
+  match the assigned `deepening:finding:e0e34e19f3`. merge-and-ingest reports "Missing audit result for
+  assigned task", spawns *more* deepening tasks, and loops forever — never reaching synthesis. Two sub-bugs:
+  (1) packager dispatches wrong task_ids for deepening follow-ups; (2) workers omit `findings[].lens` (validator
+  requires it) — only the top-level `AuditResult.lens` is set, so every deepening result is rejected until the
+  per-finding lens is backfilled. Fix in tooling: deepening packet prompts must bind the worker output to the
+  exact assigned `deepening:*` task_id, and the renderer/validator must force `findings[].lens` (default from the
+  AuditResult lens). Until fixed, recovery = quarantine the orphan pending `deepening:*` tasks to let synthesis
+  run (loses only second-pass verification of already-recorded findings). (Ethan, 2026-06-22.)
+- **Dispatch is not aware of the host's own session/usage quota — hits the wall instead of adapting.** This run
+  hit the Claude Code host session limit twice mid-dispatch (`You've hit your session limit · resets 10:30pm`,
+  then `1:30pm`). Each time the in-flight workers returned a limit message instead of results (0 tokens, wasted
+  dispatch), and the *only* adaptation was the operator (me) noticing the reset time and manually re-firing after
+  it cleared. That is a tool defect, not an environmental fact: the auditor/remediator advertise quota-awareness
+  (learned RPM/TPM, sliding window, 429/524 parsing, cross-provider `QuotaSource`), and the host session is the
+  host provider's *own* quota — squarely inside the self-monitoring red line (own-provider-only; never IDE GUI
+  automation). Expected behavior: (1) track the host session/usage budget (fixed-window reset, not just
+  per-minute RPM/TPM) as a first-class `QuotaSource`; (2) pace/throttle concurrency *before* the wall and, when a
+  worker returns a session-limit message, parse the reset timestamp, automatically pause, and resume at reset —
+  no operator in the loop; (3) treat a limit-message worker result as a re-queue, not a consumed packet. The
+  current `merge-and-ingest` "re-derive remaining from disk" path is reactive recovery, not the quota-aware
+  adaptation the design promises. Extends the cross-provider quota matrix / quota-dispatch vision to the host's
+  own session budget. (Ethan, 2026-06-22.)
+- **Final-report promotion path mismatch — ENOENT on synthesis.** At synthesis the orchestrator logs
+  `completed audit but could not promote final report to ...\.audit-tools\audit-report.md: ENOENT ... lstat
+  '...\.audit-tools\audit\audit-report.md'`. Synthesis writes the promoted deliverables directly to
+  `.audit-tools/audit-report.md` + `.audit-tools/audit-findings.json` (the documented final location), but the
+  promote step — and the `present_report` step prompt — look for the source at `.audit-tools/audit/audit-report.md`,
+  which is never written there. Harmless this run (deliverables exist at the right place) but the warning is noise
+  and the `present_report` prompt points the host at a nonexistent path. Fix: single-source the promote source/dest
+  and the prompt's report path off one path module. (Ethan, 2026-06-22.)
+- **Gitignore generated skills + host assets (always-ignore).** `audit-code ensure` / install-hosts emit
+  generated skill files (generated audit-code & remediate-code skills, host renderer outputs, etc.) into the
+  working tree; these are build/install artifacts, not source — always add them to `.gitignore` so they don't
+  show up as tracked/dirty state. (Ethan, 2026-06-22.)
+- **Conditionally gitignore the canonical audit/remediation deliverables + meta-audit reflections — by repo
+  visibility.** The process-conclusion documents — `audit-report.md`, `audit-findings.json`,
+  `remediation-report.md`, `remediation-outcomes.json`, and the **meta-audit reflections** file — are NOT
+  build artifacts; whether they belong in VCS depends on the repo's visibility:
+  - **Private repo → do NOT gitignore** (keep them tracked; they're a useful in-repo record).
+  - **Public repo → gitignore by default** (don't publish internal audit findings/reflections unless opted in).
+  Detect visibility at install/ensure time (e.g. `gh repo view --json isPrivate`, fall back to a config flag /
+  prompt when `gh` or remote is absent) and write the `.gitignore` rule accordingly — never hardcode either way,
+  and make it overridable. This is distinct from the always-ignore build artifacts above. (Ethan, 2026-06-22.)
+
 ## Forward tracks
 
-- **Nightly autonomous audit→remediate→PR pipeline — the capstone.** Scheduled run (cloud routine or local
-  headless) → audit → auto-remediate actionable findings behind green gates → PR + report, escalating only
-  ambiguity/low-confidence to Ethan. The next big build now that the architecture is stable and the A-9
-  autonomy acceptance test passes.
+- **Autonomous audit→remediate→PR pipeline — the capstone.** The normal audit→remediate flow run
+  unattended, with the human's selection step automated. Settled design (Ethan, 2026-06-22):
+  - **Host-agnostic — same logic local or cloud.** The host is only a thin trigger/credential
+    difference, never a fork of the decision logic.
+  - **Selection = act as if the user picked the unambiguously-good items.** remediate-code already
+    categorizes findings along a scale from unambiguously-good to ambiguous-design-choice-with-no-
+    right-answer; the nightly run auto-remediates the unambiguously-good tier and leaves the rest.
+    The ambiguity tier is the *only* selection axis — no token/cost gate, no run budget (deliberately
+    dropped as unnecessary dev overhead).
+  - **No durable rejection.** Items not auto-remediated are never marked rejected, declined, or
+    pending in any persistent state — nothing suppresses them. They stay ordinary live findings, so a
+    later run surfaces them normally.
+  - **The leftovers are emitted as a standard audit deliverable.** The remaining actionable items —
+    the audit minus {deduped, deemed-inappropriate, already-remediated, auto-fixed this run} — are
+    written as a normal audit pair: a human-readable report plus its machine-readable findings JSON,
+    identical in shape to any audit's output. So the human deals with them by simply running
+    remediate-code against that audit like any other audit; acting on them is outside the nightly
+    process's scope.
+  - **Severity is presentation/ordering only**, never a gate or override — a critical-but-ambiguous
+    item just lands in the leftover audit like everything else, for the human to act on later.
+  - **Delivery.** Auto-applied fixes land on a branch; a PR is emitted when a remote exists (showing
+    what was done and what remains), but the PR is not the primary artifact — the leftover audit
+    deliverable pair is. The deliverables are always written to disk so an unattended cloud run with
+    nobody watching still produces a consumable result.
 - **Build the deterministic analyzers.** The INV-1 investigation decided the levers; building them is the
   forward work: AST/structural (tree-sitter, ast-grep), dead-code (knip/ts-prune), complexity/duplication,
   broader semgrep, CodeQL for dataflow. Each must enrich the shared language-neutral graph via the adapter
