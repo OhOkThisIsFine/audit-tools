@@ -208,6 +208,12 @@ export {
   renderFindingBlockLines,
   renderFindingBlock,
 } from "./reporting/findingDisplay.js";
+export type { AuditDeliverablePair } from "./reporting/auditDeliverable.js";
+export {
+  buildAuditFindingsDeliverable,
+  renderAuditDeliverableMarkdown,
+  buildAuditDeliverablePair,
+} from "./reporting/auditDeliverable.js";
 export {
   AGENT_FEEDBACK_FILENAME,
   parseReflectionsNdjson,

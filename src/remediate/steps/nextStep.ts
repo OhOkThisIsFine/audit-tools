@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, frictionCaptured, persistFrictionCapture, frictionCapturePath, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, frictionCaptured, persistFrictionCapture, frictionCapturePath, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -64,6 +64,7 @@ import {
   type ReviewRequest,
   type ReviewResolution,
 } from "../review/reviewGate.js";
+import { buildAutonomousReviewDecision } from "../review/autonomousGate.js";
 import { runFindingFilterPass, type FindingFilterResult } from "../findingFilter.js";
 import {
   intakePaths,
@@ -141,6 +142,25 @@ export function resolveHostDispatchCapability(options: {
   // genuinely cannot dispatch opts out via host_can_dispatch_subagents:false,
   // REMEDIATE_HOST_CAN_DISPATCH=false, or --host-can-dispatch-subagents=false.
   return true;
+}
+
+/**
+ * Whether the run is unattended (autonomous). Host-agnostic — ONE flag drives
+ * the whole path. Resolution order: sessionConfig.autonomous_mode →
+ * REMEDIATE_AUTONOMOUS env → false (attended/interactive default, so the review
+ * gate halts for a human unless autonomy is explicitly requested).
+ */
+export function resolveAutonomousMode(options: {
+  sessionConfig?: SessionConfig | null;
+  env?: NodeJS.ProcessEnv;
+} = {}): boolean {
+  if (options.sessionConfig?.autonomous_mode !== undefined) {
+    return options.sessionConfig.autonomous_mode;
+  }
+  const envValue = (options.env ?? process.env).REMEDIATE_AUTONOMOUS;
+  if (envValue === "true") return true;
+  if (envValue === "false") return false;
+  return false;
 }
 
 /**
@@ -2151,6 +2171,7 @@ async function runReviewApprovalGate(
   root: string,
   artifactsDir: string,
   survivors: Finding[],
+  autonomous = false,
 ): Promise<ReviewGateProceed | ReviewGateHalt> {
   const decisionPath = reviewDecisionPath(artifactsDir);
 
@@ -2159,6 +2180,37 @@ async function runReviewApprovalGate(
     survivors.length > 0 &&
     !existsSync(decisionPath) &&
     !contractArtifactExists(artifactsDir, "goal_spec");
+
+  // Autonomous (unattended) mode: the gate NEVER halts. It re-evaluates the
+  // survivors FRESH (no prior-run memory) and auto-approves only tier-safe +
+  // allowlisted-change-kind findings; everything else is left LIVE. Leftovers
+  // are re-emitted as a re-consumable audit deliverable pair (NO durable
+  // rejection — leftovers carry no declined disposition). Idempotent: once
+  // review_decision.json exists it is consumed directly below.
+  if (gateOpen && autonomous) {
+    const auto = buildAutonomousReviewDecision(survivors);
+    const approvedSet = new Set(auto.approved_ids);
+    // Leftovers stay LIVE: declined is EMPTY (no durable rejection). The split
+    // below excludes nothing, so every leftover remains a live finding.
+    const record: ReviewDecisionRecord = {
+      schema_version: REVIEW_DECISION_SCHEMA_VERSION,
+      plan_id: REVIEW_GATE_PLAN_ID,
+      approved_ids: auto.approved_ids,
+      declined: [],
+      created_at: new Date().toISOString(),
+    };
+    await writeJsonFile(decisionPath, record);
+    // Re-emit the leftovers as a standard, re-consumable audit deliverable pair
+    // so the next nightly run picks them up via defaultInputCandidates. Always
+    // on disk regardless of whether a git remote / PR is available.
+    const leftovers = survivors.filter((f) => !approvedSet.has(f.id));
+    await emitAutonomousLeftoverDeliverable(root, artifactsDir, leftovers);
+    return {
+      kind: "proceed",
+      approved: survivors.filter((f) => approvedSet.has(f.id)),
+      declined: [],
+    };
+  }
 
   if (gateOpen) {
     const resolutionPath = reviewResolutionPath(artifactsDir);
@@ -2203,6 +2255,41 @@ async function runReviewApprovalGate(
     approved: survivors.filter((f) => !declinedIds.has(f.id)),
     declined,
   };
+}
+
+/**
+ * Re-emit the autonomous-run leftovers (findings left LIVE, neither auto-fixed
+ * nor durably rejected) as a standard, re-consumable audit deliverable pair:
+ * `audit-findings.json` (machine contract, source of truth) + `audit-report.md`
+ * (human render), built by the SHARED emitter. Written to `<repo>/.audit-tools/`
+ * — exactly where the remediator's `defaultInputCandidates` looks first — so the
+ * next nightly run round-trips them straight back through intake and re-evaluates
+ * the allowlist FRESH. Always on disk regardless of any git remote / PR.
+ *
+ * Empty leftovers still emit an (empty) pair so a downstream "is there work?"
+ * probe sees a deterministic deliverable rather than a stale one.
+ */
+async function emitAutonomousLeftoverDeliverable(
+  root: string,
+  artifactsDir: string,
+  leftovers: Finding[],
+): Promise<void> {
+  const pair = buildAuditDeliverablePair(leftovers, {
+    title: "Audit Report — Autonomous Leftovers",
+    intro:
+      "Findings left LIVE by an unattended (autonomous) remediation run: not on the " +
+      "fail-closed non-destructiveness allowlist (or not tier-safe), so not auto-fixed. " +
+      "They carry NO declined disposition — re-run remediation to re-evaluate them.",
+  });
+  // Prefer the canonical `.audit-tools/` location (defaultInputCandidates[0]);
+  // fall back to the artifacts dir's parent when artifactsDir is non-standard.
+  const auditToolsDir = join(root, ".audit-tools");
+  const outDir = existsSync(auditToolsDir) ? auditToolsDir : dirname(artifactsDir);
+  await mkdir(outDir, { recursive: true });
+  await Promise.all([
+    writeJsonFile(join(outDir, "audit-findings.json"), pair.findings_report),
+    writeTextFile(join(outDir, "audit-report.md"), pair.report_markdown),
+  ]);
 }
 
 // ── Path-A filter dispositions (persisted for the coverage ledger) ──────────────
@@ -2303,7 +2390,12 @@ async function handleReadyIntakeContractPipeline(
           checkpoint: checkpoint ?? undefined,
           evidenceGrounding: true,
         });
-        const gate = await runReviewApprovalGate(root, artifactsDir, filter.survivors);
+        const gate = await runReviewApprovalGate(
+          root,
+          artifactsDir,
+          filter.survivors,
+          resolveAutonomousMode(options ?? {}),
+        );
         if (gate.kind === "halt") {
           return gate.step;
         }

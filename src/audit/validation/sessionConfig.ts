@@ -412,6 +412,17 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
     );
   }
 
+  if (
+    value.autonomous_mode !== undefined &&
+    typeof value.autonomous_mode !== "boolean"
+  ) {
+    pushIssue(
+      issues,
+      "autonomous_mode",
+      "autonomous_mode must be a boolean when provided.",
+    );
+  }
+
   validateTemplateProviderSection(
     value.subprocess_template,
     "subprocess_template",
