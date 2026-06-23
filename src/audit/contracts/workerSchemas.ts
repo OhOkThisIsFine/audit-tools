@@ -39,7 +39,9 @@ export const WorkerFindingLocationSchema = FindingLocationSchema.extend({
  */
 export const WorkerFindingSchema = FindingSchema.extend({
   category: z.string().min(1),
-  lens: LensSchema,
+  lens: LensSchema.describe(
+    "Optional: when omitted, the tool defaults it from the enclosing AuditResult.lens before validation. Supply it only to override the result lens for a cross-lens finding.",
+  ).optional(),
   affected_files: z.array(WorkerFindingLocationSchema).min(1),
   evidence: z.array(z.string()).min(1),
   reproduction: z.array(z.string()).min(1).optional(),

@@ -1,7 +1,8 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { AdvanceAuditOptions } from "./advanceTypes.js";
-import { RunLogger } from "audit-tools/shared";
+import { RunLogger, auditArtifactsDir } from "audit-tools/shared";
+import { decideAuditFrictionCloseout } from "./nextStep.js";
 import { runIntakeExecutor, runProviderConfirmationAutoComplete } from "./intakeExecutors.js";
 import { runIntentCheckpointAutoComplete } from "./intentCheckpointExecutor.js";
 import {
@@ -167,4 +168,24 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       bundle,
       requireRoot(options.root, "syntax_resolution_executor"),
     ),
+  // Terminal friction close-out (parity with remediate-code). Fires the shared,
+  // run_id-keyed friction persist via `decideAuditFrictionCloseout`: degrade-clean
+  // (a zero-friction record satisfies the obligation) and idempotent (a record
+  // already present short-circuits, so it never re-fires). The artifacts dir
+  // defaults to the standard `.audit-tools/audit` location; the run id mirrors the
+  // operator-handoff default of "run" when the caller has no explicit run id.
+  friction_capture_executor: async (bundle, { options }) => {
+    const artifactsDir =
+      options.artifactsDir ??
+      auditArtifactsDir(requireRoot(options.root, "friction_capture_executor"));
+    const decision = await decideAuditFrictionCloseout(artifactsDir, "run");
+    return {
+      updated: bundle,
+      artifacts_written: ["friction/run.json"],
+      progress_summary:
+        decision.action === "capture"
+          ? "Friction close-out captured (degrade-clean record persisted)."
+          : "Friction close-out already captured this run.",
+    };
+  },
 };

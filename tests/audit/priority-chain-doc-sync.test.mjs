@@ -36,8 +36,8 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
 
   assert.equal(
     ids.length,
-    17,
-    `Expected 17 obligation ids in the CLAUDE.md chain sentence, found ${ids.length}: ${ids.join(", ")}`,
+    18,
+    `Expected 18 obligation ids in the CLAUDE.md chain sentence, found ${ids.length}: ${ids.join(", ")}`,
   );
 
   // doc == code: same ids, same order.
@@ -51,6 +51,7 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
   assert.equal(PRIORITY[0], "provider_confirmation");
   assert.equal(PRIORITY[1], "repo_manifest");
   assert.equal(PRIORITY[16], "synthesis_narrative_current");
+  assert.equal(PRIORITY[17], "friction_capture_current");
 
   assert.ok(PRIORITY.includes("graph_enrichment_current"));
   assert.ok(PRIORITY.includes("design_assessment_current"));

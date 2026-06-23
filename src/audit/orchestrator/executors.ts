@@ -117,4 +117,9 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     kind: "host_delegation",
     obligation_ids: ["audit_tasks_completed"],
   },
+  {
+    id: "friction_capture_executor",
+    kind: "deterministic",
+    obligation_ids: ["friction_capture_current"],
+  },
 ];
