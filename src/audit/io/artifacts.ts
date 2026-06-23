@@ -1,5 +1,13 @@
 import { cp, rm, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import {
+  AUDIT_REPORT_FILENAME,
+  AUDIT_FINDINGS_FILENAME,
+  auditReportPath,
+  auditFindingsPath,
+  promotedAuditReportPath,
+  promotedAuditFindingsPath,
+} from "audit-tools/shared";
 import type {
   AuditResult,
   AuditTask,
@@ -176,10 +184,13 @@ interface ArtifactDefinition<K extends ArtifactBundleKey = ArtifactBundleKey> {
   write: (path: string, value: ArtifactPayloadMap[K]) => Promise<void>;
 }
 
-// Canonical filename for the rendered findings report. Single source of truth
-// for path construction. The dependency table below still lists it as plain
-// data alongside its sibling artifact-name literals.
-export const AUDIT_REPORT_FILENAME = "audit-report.md";
+// Canonical filename for the rendered findings report. Single-sourced in the
+// shared `auditToolsPaths` module so the synthesis writer, the promote
+// source/dest, and the present_report prompt path cannot drift to different
+// spellings. Re-exported here for the audit-side consumers (and tests) that
+// already import it from this module. The dependency table below still lists it
+// as plain data alongside its sibling artifact-name literals.
+export { AUDIT_REPORT_FILENAME };
 
 function jsonArtifact<K extends ArtifactBundleKey>(
   fileName: string,
@@ -261,7 +272,7 @@ export const ARTIFACT_DEFINITIONS = {
   task_affinity_graph: jsonArtifact("task_affinity_graph.json", "execution"),
   requeue_tasks: jsonArtifact("requeue_tasks.json", "execution"),
   audit_report: textArtifact(AUDIT_REPORT_FILENAME, "reporting"),
-  audit_findings: jsonArtifact("audit-findings.json", "reporting"),
+  audit_findings: jsonArtifact(AUDIT_FINDINGS_FILENAME, "reporting"),
   synthesis_narrative: jsonArtifact("synthesis-narrative.json", "reporting"),
   audit_state: jsonArtifact("audit_state.json", "supervisor"),
   artifact_metadata: jsonArtifact("artifact_metadata.json", "supervisor"),
@@ -410,9 +421,8 @@ export async function promoteFinalAuditReport(params: {
   remove?: typeof rm;
   warn?: (message: string) => void;
 } = {}): Promise<{ promoted: boolean; cleaned: boolean; warning?: string }> {
-  const outputDir = dirname(params.artifactsDir);
-  const source = join(params.artifactsDir, AUDIT_REPORT_FILENAME);
-  const destination = join(outputDir, AUDIT_REPORT_FILENAME);
+  const source = auditReportPath(params.artifactsDir);
+  const destination = promotedAuditReportPath(params.artifactsDir);
   const copy = options.copy ?? cp;
   const remove = options.remove ?? rm;
   const warn = options.warn ?? ((message) => process.stderr.write(`${message}\n`));
@@ -429,15 +439,15 @@ export async function promoteFinalAuditReport(params: {
   // (e.g. legacy bundle) or unreadable: best-effort, never blocks completion.
   try {
     await copy(
-      join(params.artifactsDir, "audit-findings.json"),
-      join(outputDir, "audit-findings.json"),
+      auditFindingsPath(params.artifactsDir),
+      promotedAuditFindingsPath(params.artifactsDir),
       { force: true },
     );
   } catch (error) {
     // audit-findings.json is optional output; absence must not fail promotion.
     // Log so operators can distinguish a partial promotion from a clean one.
     warn(
-      `audit-code: could not promote audit-findings.json to ${join(outputDir, "audit-findings.json")}: ` +
+      `audit-code: could not promote ${AUDIT_FINDINGS_FILENAME} to ${promotedAuditFindingsPath(params.artifactsDir)}: ` +
         (error instanceof Error ? error.message : String(error)),
     );
   }

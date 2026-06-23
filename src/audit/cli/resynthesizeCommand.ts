@@ -8,14 +8,16 @@ import {
 } from "../reporting/synthesis.js";
 import {
   AGENT_FEEDBACK_FILENAME,
+  AUDIT_FINDINGS_FILENAME,
+  AUDIT_REPORT_FILENAME,
   parseReflectionsNdjson,
   readOptionalTextFile,
 } from "audit-tools/shared";
 import type { AuditFindingsReport } from "audit-tools/shared";
 
 const AUDIT_TOOLS_DIR = ".audit-tools";
-const FINDINGS_FILENAME = "audit-findings.json";
-const REPORT_FILENAME = "audit-report.md";
+const FINDINGS_FILENAME = AUDIT_FINDINGS_FILENAME;
+const REPORT_FILENAME = AUDIT_REPORT_FILENAME;
 
 export async function cmdResynthesize(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
