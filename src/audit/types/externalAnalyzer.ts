@@ -19,6 +19,28 @@ export type ExternalAnalyzerResultItem = z.infer<
   typeof ExternalAnalyzerResultItemSchema
 >;
 
+/**
+ * A normalized language-neutral graph edge contributed by an EXTERNAL analyzer
+ * (ast-grep / broader-semgrep dataflow / CodeQL dataflow). `from`/`to` are repo
+ * paths (resolved against the path lookup at extraction); `kind`/`confidence`/
+ * `reason` are optional provenance, mirroring the in-tree {@link GraphEdge}
+ * shape so external dataflow enriches the same edge set the language analyzers
+ * feed — no per-ecosystem fork. Carried on the adapter contract so a malformed
+ * native payload degrades to an empty edge list rather than throwing.
+ */
+export const ExternalAnalyzerGraphEdgeSchema = z
+  .object({
+    from: z.string(),
+    to: z.string(),
+    kind: z.string().optional(),
+    confidence: z.number().optional(),
+    reason: z.string().optional(),
+  })
+  .strict();
+export type ExternalAnalyzerGraphEdge = z.infer<
+  typeof ExternalAnalyzerGraphEdgeSchema
+>;
+
 /** A normalized analyzer hint that a bounded set of files belongs to a root. */
 export const ExternalAnalyzerOwnershipRootSchema = z
   .object({
@@ -62,6 +84,11 @@ export const ExternalAnalyzerResultsSchema = z
     tool: z.string(),
     generated_at: z.string().optional(),
     ownership_roots: z.array(ExternalAnalyzerOwnershipRootSchema).optional(),
+    /**
+     * Language-neutral graph edges contributed by an external dataflow analyzer.
+     * Optional so legacy/finding-only imports still parse under `.strict()`.
+     */
+    graph_edges: z.array(ExternalAnalyzerGraphEdgeSchema).optional(),
     tool_statuses: z.array(ExternalAnalyzerToolStatusSchema).optional(),
     results: z.array(ExternalAnalyzerResultItemSchema),
   })
