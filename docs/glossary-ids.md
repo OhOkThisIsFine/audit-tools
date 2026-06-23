@@ -32,6 +32,7 @@ The grep that backs the guard recognises these family shapes:
 |---|---|---|
 | `INV-CC` | Confirm-intent / CLI guidance handshake (sole-writer, idempotent-on-target guidance file). | `src/audit/cli/nextStepCommand.ts` |
 | `INV-CL` | Coverage ledger — source-type-aware denominator (finding-enumeration vs source-file coverage). | `src/remediate/coverage/findingLedger.ts` |
+| `INV-DA` | Deterministic-analyzers — the low-in-degree `deletion_candidate` / edge-topology dead-code signal is UNSOUND for deletion and must never gate unattended auto-apply. | `src/remediate/review/autonomousGate.ts` |
 | `INV-CO` | Contract obligations — paired obligations, evidence threading, reconciliation derivation in the contract pipeline. | `src/remediate/steps/contractPipeline.ts` |
 | `INV-DS` | Dispatch — reconciliation expectations a node must honour, write-scope, evidence. | `src/remediate/steps/dispatch.ts` |
 | `INV-GND` | Grounding — a finding with no grounding verdict is treated as ungrounded (verify-before-fix). | `src/shared/validation/findingGrounding.ts` |

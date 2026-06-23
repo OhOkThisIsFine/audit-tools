@@ -49,3 +49,15 @@ skills-lock.json
 
 # Test scratch — vitest test-plan artifacts written under tests/
 .test-plan-artifacts-*/
+
+# >>> audit-tools managed ignores >>>
+# Generated/install artifacts — always ignored (build artifacts, not source).
+.audit-code/
+.audit-tools/*/friction/
+# Deliverables + meta-audit reflections — ignored because this repo is public.
+.audit-tools/audit-report.md
+.audit-tools/audit-findings.json
+.audit-tools/remediation-report.md
+.audit-tools/remediation-outcomes.json
+.audit-tools/*/agent-feedback.jsonl
+# <<< audit-tools managed ignores <<<

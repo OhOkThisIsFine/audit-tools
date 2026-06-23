@@ -8,10 +8,6 @@ import {
   renderAuditReportMarkdown,
 } from "../reporting/synthesis.js";
 import type { SynthesisNarrative } from "audit-tools/shared";
-import {
-  AUDIT_REPORT_FILENAME,
-  AUDIT_FINDINGS_FILENAME,
-} from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 
 function buildBaseFindingsReport(
@@ -66,7 +62,7 @@ export function runSynthesisExecutor(
         reflections: bundle.agent_reflections,
       }),
     },
-    artifacts_written: [AUDIT_FINDINGS_FILENAME, AUDIT_REPORT_FILENAME],
+    artifacts_written: ["audit-findings.json", "audit-report.md"],
     progress_summary: `Rendered deterministic audit report and canonical findings for ${finalResults.length} audit result entries.`,
   };
 }
@@ -107,7 +103,7 @@ export function runSynthesisNarrativeExecutor(
         synthesis_narrative: record,
       },
       artifacts_written: needsBaseWrite
-        ? [AUDIT_FINDINGS_FILENAME, "synthesis-narrative.json"]
+        ? ["audit-findings.json", "synthesis-narrative.json"]
         : ["synthesis-narrative.json"],
       progress_summary:
         "Synthesis narrative omitted; deterministic findings report retained.",
@@ -134,8 +130,8 @@ export function runSynthesisNarrativeExecutor(
       synthesis_narrative: record,
     },
     artifacts_written: [
-      AUDIT_FINDINGS_FILENAME,
-      AUDIT_REPORT_FILENAME,
+      "audit-findings.json",
+      "audit-report.md",
       "synthesis-narrative.json",
     ],
     progress_summary: `Synthesis narrative applied: ${record.theme_count} theme(s), ${record.top_risk_count} top risk(s).`,
