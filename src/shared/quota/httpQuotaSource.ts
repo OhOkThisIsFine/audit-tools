@@ -138,6 +138,22 @@ export abstract class BaseHttpQuotaSource implements QuotaSource {
     return { snapshot, status: classifyProbe(result) };
   }
 
+  /**
+   * Resolve the account id from the source's credential (local, no network).
+   * Gated by provider; subclasses that key per-account override
+   * {@link readAccountId}. Default null = provider carries no account discriminator.
+   */
+  async resolveAccountId(providerModelKey: string): Promise<string | null> {
+    const { provider } = parseProviderModelKey(providerModelKey);
+    if (!this.handlesProvider(provider)) return null;
+    return this.readAccountId(provider);
+  }
+
+  /** Read this credential's account id (local file/JWT read), or null. Override per provider. */
+  protected readAccountId(_provider: string): string | null {
+    return null;
+  }
+
   /** Context for the reusable `fetchXxxUsage` helpers. */
   protected fetchContext(): UsageFetchContext {
     return { fetchImpl: this.fetchImpl, now: this.now, userAgent: this.userAgent };
@@ -146,6 +162,19 @@ export abstract class BaseHttpQuotaSource implements QuotaSource {
   protected shouldSkipNetwork(): boolean {
     if (isTruthyEnv(process.env.AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA)) return true;
     if (this.usingDefaultFetch && isUnderTestRunner()) return true;
+    return false;
+  }
+
+  /**
+   * Hermeticity guard for the LOCAL credential read behind {@link readAccountId}:
+   * reading the real machine credential under a test runner is machine-dependent,
+   * so skip it when the source points at its DEFAULT credential path (an explicitly
+   * injected path — a test fixture or a per-source `credentials_path` — is always
+   * honored). The kill-switch disables it outright.
+   */
+  protected shouldSkipCredentialRead(usingDefaultCredentialsPath: boolean): boolean {
+    if (isTruthyEnv(process.env.AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA)) return true;
+    if (usingDefaultCredentialsPath && isUnderTestRunner()) return true;
     return false;
   }
 }
@@ -170,13 +199,24 @@ export async function fetchJsonOrNull(
   }
 }
 
-/** Splits a `provider/model` quota key; `provider/*` and bare `provider` → model null. */
-export function parseProviderModelKey(key: string): { provider: string; model: string | null } {
+/**
+ * Splits a `provider[#account]/model` quota key into its parts. `provider/*` and a
+ * bare `provider` → model null; no `#` → account null. The model tail may contain
+ * `/` (split on the FIRST `/` only); provider + optional account live in the head.
+ */
+export function parseProviderModelKey(key: string): {
+  provider: string;
+  account: string | null;
+  model: string | null;
+} {
   const idx = key.indexOf("/");
-  if (idx < 0) return { provider: key, model: null };
-  const provider = key.slice(0, idx);
-  const rest = key.slice(idx + 1);
-  return { provider, model: rest === "" || rest === "*" ? null : rest };
+  const head = idx < 0 ? key : key.slice(0, idx);
+  const rest = idx < 0 ? "" : key.slice(idx + 1);
+  const model = idx < 0 || rest === "" || rest === "*" ? null : rest;
+  const hashIdx = head.indexOf("#");
+  if (hashIdx < 0) return { provider: head, account: null, model };
+  const account = head.slice(hashIdx + 1);
+  return { provider: head.slice(0, hashIdx), account: account === "" ? null : account, model };
 }
 
 /** Clamp to a 0–1 fraction (the scheduler's `remaining_pct` scale). */

@@ -300,7 +300,9 @@ export function selectProvider<TPacket>(
   // folds in the real-time quota snapshot, learned limits, and any active
   // cooldown, so it doubles as the health signal for the spill ordering below.
   const scheduleForPool = (pool: CapacityPool): WaveSchedule => {
-    const poolKey = buildProviderModelKey(pool.providerName, pool.hostModel);
+    // pool.id is the canonical (provider, account, model) key — use it directly so
+    // scheduling and outcome-recording index the SAME account-stamped quota entry.
+    const poolKey = pool.id;
     const quotaStateEntry = pool.quotaStateEntry ?? quotaStateEntries[poolKey] ?? null;
     const inFlightTokens = inFlightTracker.getInFlightTokens(pool.id);
     return scheduleWave({
@@ -455,7 +457,9 @@ export function createRollingDispatcher<TPacket>(
     // Record quota outcome. 'error' is a distinct quota outcome (non-quota
     // failure — no cooldown, only failure weight); 'rate_limited' applies the
     // backoff cooldown that throttles the exhausted pool's learned limits.
-    const providerModelKey = buildProviderModelKey(providerSlot.providerName, providerSlot.hostModel);
+    // The pool id IS the canonical (provider, account, model) quota key — record the
+    // outcome under it so learned state lands on the same entry scheduling reads.
+    const providerModelKey = providerSlot.poolId;
     const quotaOutcome = result.outcome === "success" ? "success"
       : result.outcome === "rate_limited" ? "rate_limited"
       : result.outcome === "error" ? "error"

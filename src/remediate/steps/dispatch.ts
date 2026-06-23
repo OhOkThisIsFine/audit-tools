@@ -272,34 +272,24 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
       ?.empirical_half_life_hours,
   });
 
-  // One capacity pool per reported roster rank (most capable first), each with
-  // its own discovered window and quota key; a single pool for the scalar/
-  // absent handshake. A rank's opaque `model_id` keys that pool's quota.
-  const pools = await Promise.all((roster ?? [null]).map(async (entry) => {
-    const poolKey = buildProviderModelKey(
-      providerName,
-      entry?.model_id ?? quotaModelKeySegment,
-    );
-    const probe = await probeQuotaSource(quotaSource, poolKey).catch(
-      (): QuotaProbeResult => ({ snapshot: null, status: "degraded" }),
-    );
-    return {
-      id: poolKey,
-      providerName,
-      hostModel,
-      ...(entry ? { rank: entry.rank } : {}),
-      hostConcurrencyLimit: hostLimit,
-      quotaStateEntry: quotaEntries[poolKey] ?? null,
+  // One capacity pool per reported roster rank (most capable first), each with its
+  // own discovered window and quota key; a single pool for the scalar/absent
+  // handshake. Built via the shared host-pool-from-roster core (same as
+  // buildConfirmedPools) so the pool shape + account-keyed pool ids can't drift.
+  const pools = await buildHostModelPools({
+    providerName,
+    hostModel,
+    hostConcurrencyLimit: hostLimit,
+    quotaSource,
+    quotaEntries,
+    roster,
+    resolve: (entry) => ({
+      poolKey: buildProviderModelKey(providerName, entry?.model_id ?? quotaModelKeySegment),
       discoveredLimits: entry
-        ? {
-            context_tokens: entry.context_tokens,
-            output_tokens: entry.output_tokens,
-          }
+        ? { context_tokens: entry.context_tokens, output_tokens: entry.output_tokens }
         : hostCapabilityLimits,
-      quotaSourceSnapshot: probe.snapshot,
-      ...(probe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
-    };
-  }));
+    }),
+  });
   const capacity = computeDispatchCapacity({
     pools,
     sessionConfig,

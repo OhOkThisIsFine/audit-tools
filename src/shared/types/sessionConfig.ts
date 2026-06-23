@@ -176,6 +176,22 @@ export interface DispatchableSource {
   parameters?: Record<string, unknown>;
   /** Per-source quota / rate-limit (rpm, tpm, context/output tokens). */
   quota?: QuotaModelLimits;
+  /**
+   * Path to THIS source's own credential file, when it authenticates as a
+   * different account than the host (e.g. a Claude CLI signed into a second
+   * account: its own `.credentials.json`; a second Codex `auth.json`). The
+   * source's quota probe + account id are read from here, so the source forms a
+   * pool keyed on its OWN `(provider, account)` — distinct budget from the host's
+   * same-provider pool (docs/quota-dispatch-design.md §5b). Omit when the source
+   * shares the host's account.
+   */
+  credentials_path?: string;
+  /**
+   * Explicit account id override for the pool key, when it can't be read from a
+   * credential (e.g. an API-key source). Takes precedence over the credential-read
+   * account. Omit to auto-resolve from {@link credentials_path} / the host cred.
+   */
+  account?: string;
 }
 
 export interface BlockQuotaConfig {

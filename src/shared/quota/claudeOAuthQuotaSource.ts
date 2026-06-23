@@ -110,6 +110,7 @@ export interface ClaudeOAuthQuotaSourceOptions extends HttpQuotaSourceOptions {
 export class ClaudeOAuthQuotaSource extends BaseHttpQuotaSource {
   readonly name = "claude-oauth";
   private readonly credentialsPath: string;
+  private readonly usingDefaultCredentialsPath: boolean;
   private readonly providerNames: Set<string>;
   private readonly readEnvToken: () => string | null | undefined;
   private readonly oauthClientId: string;
@@ -117,6 +118,7 @@ export class ClaudeOAuthQuotaSource extends BaseHttpQuotaSource {
 
   constructor(options: ClaudeOAuthQuotaSourceOptions = {}) {
     super(options, DEFAULT_USER_AGENT);
+    this.usingDefaultCredentialsPath = options.credentialsPath === undefined;
     this.credentialsPath =
       options.credentialsPath ?? path.join(homedir(), ".claude", ".credentials.json");
     this.providerNames = new Set(options.claudeProviderNames ?? CLAUDE_PROVIDER_NAMES);
@@ -128,6 +130,19 @@ export class ClaudeOAuthQuotaSource extends BaseHttpQuotaSource {
 
   protected handlesProvider(provider: string): boolean {
     return this.providerNames.has(provider);
+  }
+
+  /**
+   * Account id = the credential's `organizationUuid` (account/org the token is
+   * bound to). Read from the creds file; null when only an env token is present
+   * (the org isn't carried there) or the file is absent — the pool then stays
+   * account-unkeyed, which is correct for a single-account run.
+   */
+  protected readAccountId(_provider: string): string | null {
+    if (this.shouldSkipCredentialRead(this.usingDefaultCredentialsPath)) return null;
+    const full = this.readFullCredentials();
+    const org = full?.organizationUuid;
+    return typeof org === "string" && org !== "" ? org : null;
   }
 
   protected async fetchSnapshot(

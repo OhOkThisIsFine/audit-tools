@@ -49,6 +49,32 @@ export interface QuotaSource {
    * derives a best-effort result for sources that don't implement it.
    */
   probeUsage?(providerModelKey: string): Promise<QuotaProbeResult>;
+  /**
+   * Resolve the ACCOUNT identity this source reads for a provider, from its
+   * credential — never guessed (see docs/quota-dispatch-design.md §5). Used to
+   * stamp the account segment into the pool key so two same-provider accounts
+   * form distinct pools. Returns null when the source doesn't handle the provider,
+   * the credential is absent/unreadable, or the provider carries no account id.
+   * Local-only (no network). Optional so plain stubs stay valid.
+   */
+  resolveAccountId?(providerModelKey: string): Promise<string | null>;
+}
+
+/**
+ * Resolve a provider's account id via a source's {@link QuotaSource.resolveAccountId}
+ * when it has one, else null. Never throws — account resolution failure degrades to
+ * an unkeyed (account-null) pool rather than aborting pool construction.
+ */
+export async function resolveAccountIdSafe(
+  source: QuotaSource,
+  providerModelKey: string,
+): Promise<string | null> {
+  if (!source.resolveAccountId) return null;
+  try {
+    return await source.resolveAccountId(providerModelKey);
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -52,10 +52,12 @@ export interface CodexQuotaSourceOptions extends HttpQuotaSourceOptions {
 export class CodexQuotaSource extends BaseHttpQuotaSource {
   readonly name = "codex";
   private readonly credentialsPath: string;
+  private readonly usingDefaultCredentialsPath: boolean;
   private readonly providerNames: Set<string>;
 
   constructor(options: CodexQuotaSourceOptions = {}) {
     super(options, DEFAULT_USER_AGENT);
+    this.usingDefaultCredentialsPath = options.credentialsPath === undefined;
     this.credentialsPath = options.credentialsPath ?? path.join(homedir(), ".codex", "auth.json");
     this.providerNames = new Set(options.codexProviderNames ?? CODEX_PROVIDER_NAMES);
   }
@@ -68,6 +70,12 @@ export class CodexQuotaSource extends BaseHttpQuotaSource {
     const creds = this.readCredentials();
     if (!creds) return null;
     return fetchCodexUsage(creds, this.fetchContext());
+  }
+
+  /** Account id = the ChatGPT `account_id` from `~/.codex/auth.json`. */
+  protected readAccountId(_provider: string): string | null {
+    if (this.shouldSkipCredentialRead(this.usingDefaultCredentialsPath)) return null;
+    return this.readCredentials()?.accountId ?? null;
   }
 
   /** Reads `{ access_token, account_id }` from `~/.codex/auth.json`, or null. */
