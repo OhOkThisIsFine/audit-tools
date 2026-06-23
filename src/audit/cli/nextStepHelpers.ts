@@ -27,8 +27,11 @@ import {
   loadArtifactBundle,
   promoteFinalAuditReport,
   writeCoreArtifacts,
-  AUDIT_REPORT_FILENAME,
 } from "../io/artifacts.js";
+import {
+  auditReportPath,
+  promotedAuditReportPath,
+} from "audit-tools/shared";
 import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
@@ -198,8 +201,8 @@ export async function buildTerminalStep(
     state,
     bundle,
     finalReportPath: promoted.promoted
-      ? join(dirname(params.artifactsDir), AUDIT_REPORT_FILENAME)
-      : join(params.artifactsDir, AUDIT_REPORT_FILENAME),
+      ? promotedAuditReportPath(params.artifactsDir)
+      : auditReportPath(params.artifactsDir),
   };
 }
 
@@ -1317,8 +1320,8 @@ export async function runDeterministicForNextStep(
       // Promotion copies the report to the artifacts dir's PARENT
       // (.audit-tools/audit-report.md), not the repo root.
       finalReportPath: promoted.promoted
-        ? join(dirname(params.artifactsDir), AUDIT_REPORT_FILENAME)
-        : join(params.artifactsDir, AUDIT_REPORT_FILENAME),
+        ? promotedAuditReportPath(params.artifactsDir)
+        : auditReportPath(params.artifactsDir),
     };
   }
 

@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 /**
  * Single source of truth for the on-disk `.audit-tools/` layout shared by both
@@ -15,6 +15,20 @@ import { join, resolve } from "node:path";
  * explicit artifacts-dir override should honor the override verbatim and fall
  * back to these helpers only for the default.
  */
+
+/**
+ * Canonical deliverable filenames shared by both halves of the pipeline. The
+ * audit half renders `audit-report.md` (human) from `audit-findings.json`
+ * (machine contract); the remediation half writes `remediation-report.md` /
+ * `remediation-outcomes.json`. These live here, in exactly one place, so the
+ * synthesis writer, the promote source/dest, the present_report prompt path,
+ * and the remediation close writer cannot drift to different spellings — a
+ * drift that previously surfaced as a promote-time ENOENT.
+ */
+export const AUDIT_REPORT_FILENAME = "audit-report.md";
+export const AUDIT_FINDINGS_FILENAME = "audit-findings.json";
+export const REMEDIATION_REPORT_FILENAME = "remediation-report.md";
+export const REMEDIATION_OUTCOMES_FILENAME = "remediation-outcomes.json";
 
 /** `<root>/.audit-tools` (absolute). */
 export function auditToolsDir(root: string): string {
@@ -49,4 +63,41 @@ export function stepsDir(artifactsDir: string): string {
  */
 export function incomingDir(artifactsDir: string): string {
   return join(artifactsDir, "incoming");
+}
+
+/**
+ * `<artifactsDir>/audit-report.md` — where synthesis renders the human report
+ * and the promote step reads it FROM. Source and write target derive from this
+ * one helper so they are byte-identical.
+ */
+export function auditReportPath(artifactsDir: string): string {
+  return join(artifactsDir, AUDIT_REPORT_FILENAME);
+}
+
+/** `<artifactsDir>/audit-findings.json` — the canonical machine contract. */
+export function auditFindingsPath(artifactsDir: string): string {
+  return join(artifactsDir, AUDIT_FINDINGS_FILENAME);
+}
+
+/**
+ * `<dirname(artifactsDir)>/audit-report.md` — the promote destination, one
+ * level up from the working artifacts dir (i.e. `.audit-tools/audit-report.md`
+ * for the canonical `.audit-tools/audit/` artifacts dir). This is also where
+ * the present_report prompt points and where remediate-code probes first.
+ */
+export function promotedAuditReportPath(artifactsDir: string): string {
+  return join(outputDirFor(artifactsDir), AUDIT_REPORT_FILENAME);
+}
+
+/** `<dirname(artifactsDir)>/audit-findings.json` — promoted machine contract. */
+export function promotedAuditFindingsPath(artifactsDir: string): string {
+  return join(outputDirFor(artifactsDir), AUDIT_FINDINGS_FILENAME);
+}
+
+/**
+ * The directory deliverables are promoted INTO: the parent of the working
+ * artifacts dir. Single-sourced so every promote/present consumer agrees.
+ */
+export function outputDirFor(artifactsDir: string): string {
+  return dirname(artifactsDir);
 }

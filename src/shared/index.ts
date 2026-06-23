@@ -357,6 +357,15 @@ export {
   remediationArtifactsDir,
   stepsDir,
   incomingDir,
+  outputDirFor,
+  auditReportPath,
+  auditFindingsPath,
+  promotedAuditReportPath,
+  promotedAuditFindingsPath,
+  AUDIT_REPORT_FILENAME,
+  AUDIT_FINDINGS_FILENAME,
+  REMEDIATION_REPORT_FILENAME,
+  REMEDIATION_OUTCOMES_FILENAME,
 } from "./io/auditToolsPaths.js";
 
 // IO: single-sourced step-contract object + writer (drift-plan R3). Owns the
