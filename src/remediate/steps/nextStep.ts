@@ -2183,6 +2183,7 @@ async function persistReviewFilterDispositions(
 async function handleReadyIntakeContractPipeline(
   root: string,
   artifactsDir: string,
+  options?: NextStepOptions,
 ): Promise<RemediationStep | RemediationState | null> {
   // Fast path: if an extracted-plan.json already exists (pipeline complete or
   // promoted from a previous contract pipeline run), consume it directly without
@@ -2322,11 +2323,31 @@ async function handleReadyIntakeContractPipeline(
     }
   }
 
+  // Resolve the independent-critic dispatch capability from the SAME handshake
+  // (`resolveHostDispatchCapability`) implement dispatch uses — never a manual
+  // flag. Threaded into the contract pipeline so the adversarial 'critique' /
+  // 'critic' prompts MANDATE an independent sub-agent reviewer when the host can
+  // dispatch one (fail-safe: mandate by default).
+  const sessionConfigForDispatch =
+    options?.sessionConfig ??
+    (await readOptionalJsonFile<SessionConfig>(
+      join(root, ".remediation-artifacts", "session-config.json"),
+    )) ??
+    (await readOptionalJsonFile<SessionConfig>(
+      join(root, "session-config.json"),
+    ));
+  const hostCanDispatchSubagents = resolveHostDispatchCapability({
+    hostCanDispatchSubagents: options?.hostCanDispatchSubagents,
+    sessionConfig: sessionConfigForDispatch,
+  });
+
   const step = await buildNextContractPipelineStep({
     root,
     artifactsDir,
     runId: randomRunId("CONTRACT"),
     sourcePaths: [...sourcePaths],
+    sessionConfig: sessionConfigForDispatch,
+    hostCanDispatchSubagents,
   });
   if (step) {
     return step;
@@ -2355,7 +2376,7 @@ async function handlePendingIntake(
   // full intake artifact set is no longer present.
   const earlyExtractedPlan = await readExtractedPlanIfPresent(artifactsDir);
   if (earlyExtractedPlan) {
-    return handleReadyIntakeContractPipeline(root, artifactsDir);
+    return handleReadyIntakeContractPipeline(root, artifactsDir, options);
   }
 
   const inputResolution = resolveInputPaths(root, options.input);
@@ -2374,7 +2395,7 @@ async function handlePendingIntake(
     return intakeResult.step;
   }
   // Intake is complete — route both paths through the contract pipeline.
-  return handleReadyIntakeContractPipeline(root, artifactsDir);
+  return handleReadyIntakeContractPipeline(root, artifactsDir, options);
 }
 
 async function handleNoState(

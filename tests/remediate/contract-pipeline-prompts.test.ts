@@ -378,3 +378,64 @@ describe("contract pipeline prompt renderer — isolation", () => {
     expect(result.prompt).toContain("remediation-brief.md");
   });
 });
+
+describe("contract pipeline — mandatory independent critic (paired positive/negative)", () => {
+  // Adversarial review phases keyed strictly off phase identity.
+  for (const role of ["critique", "critic"] as const) {
+    it(`POSITIVE: ${role} MANDATES an independent sub-agent when host can dispatch`, () => {
+      const result = renderContractPipelinePrompt({
+        role,
+        artifactPaths: ALL_PATHS,
+        hostCanDispatchSubagents: true,
+      });
+      expect(result.prompt).toContain("Independent Review — MANDATORY");
+      expect(result.prompt).toContain("MUST dispatch");
+      expect(result.prompt).toContain("independent sub-agent");
+      // Must NOT render the degrade-to-inline path.
+      expect(result.prompt).not.toContain("degraded to inline self-review");
+    });
+
+    it(`NEGATIVE: ${role} degrades to inline (no hard mandate) when host cannot dispatch`, () => {
+      const result = renderContractPipelinePrompt({
+        role,
+        artifactPaths: ALL_PATHS,
+        hostCanDispatchSubagents: false,
+      });
+      expect(result.prompt).toContain("degraded to inline self-review");
+      expect(result.prompt).not.toContain("Independent Review — MANDATORY");
+      expect(result.prompt).not.toContain("MUST dispatch");
+    });
+
+    it(`FAIL-SAFE: ${role} defaults to MANDATE when the flag is missing`, () => {
+      const result = renderContractPipelinePrompt({
+        role,
+        artifactPaths: ALL_PATHS,
+      });
+      expect(result.prompt).toContain("Independent Review — MANDATORY");
+      expect(result.prompt).not.toContain("degraded to inline self-review");
+    });
+  }
+
+  // Non-adversarial review phases must NOT carry the independent-critic mandate,
+  // regardless of dispatch capability (keyed off phase identity, not assessment/judge).
+  for (const role of ["assessment", "judge"] as const) {
+    it(`${role} carries no independent-critic directive (true)`, () => {
+      const result = renderContractPipelinePrompt({
+        role,
+        artifactPaths: ALL_PATHS,
+        hostCanDispatchSubagents: true,
+      });
+      expect(result.prompt).not.toContain("Independent Review — MANDATORY");
+      expect(result.prompt).not.toContain("degraded to inline self-review");
+    });
+    it(`${role} carries no independent-critic directive (false)`, () => {
+      const result = renderContractPipelinePrompt({
+        role,
+        artifactPaths: ALL_PATHS,
+        hostCanDispatchSubagents: false,
+      });
+      expect(result.prompt).not.toContain("Independent Review — MANDATORY");
+      expect(result.prompt).not.toContain("degraded to inline self-review");
+    });
+  }
+});

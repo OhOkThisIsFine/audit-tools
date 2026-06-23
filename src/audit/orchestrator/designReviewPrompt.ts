@@ -179,6 +179,44 @@ function formatDeterministicFindings(findings: Finding[], max = 20): string {
 export interface DesignReviewOptions {
   max_units?: number;
   conceptual_depth?: "shallow" | "deep";
+  /**
+   * Whether the host can dispatch independent sub-agents. Threaded from the
+   * resolved `host_can_dispatch_subagents` handshake (`resolveHostDispatchCapability`),
+   * NOT a manual flag. Parity with the remediate contract pipeline: the
+   * adversarial design-review passes (contract-assessment / conceptual-critique)
+   * MANDATE an independent sub-agent reviewer when true and degrade to an
+   * explicit inline self-review instruction when false. Fail-safe: when omitted,
+   * the mandate is rendered.
+   */
+  hostCanDispatchSubagents?: boolean;
+}
+
+/**
+ * Render the independent-reviewer directive shared by the audit-side adversarial
+ * review prompts, mirroring the remediate contract pipeline's 'critique' /
+ * 'critic' mandate. Mandate when the host can dispatch (default / fail-safe);
+ * degrade to an explicit inline self-review instruction when it provably cannot.
+ */
+export function renderIndependentReviewerDirective(
+  hostCanDispatchSubagents: boolean | undefined,
+): string[] {
+  // Fail-safe default: undefined ⇒ mandate. A host that genuinely cannot
+  // dispatch opts out by passing false explicitly.
+  const mandate = hostCanDispatchSubagents !== false;
+  if (mandate) {
+    return [
+      "## Independent review — MANDATORY",
+      "",
+      "This is an adversarial review: its value comes from a reviewer who is **not** the author of the design under review. You MUST dispatch this review to a fresh, independent sub-agent that did not author the work and does not see the author's reasoning. An author grading their own work systematically misses the gaps this pass exists to catch. Do NOT perform this review inline yourself.",
+      "",
+    ];
+  }
+  return [
+    "## Independent review — degraded to inline self-review",
+    "",
+    "This host reported it cannot dispatch an independent sub-agent, so this adversarial review runs inline. Compensate deliberately: adopt a fresh adversarial stance, set aside the author's reasoning, and attack the design as a hostile outside reviewer would. (When sub-agent dispatch is available this review is MANDATED to an independent agent — inline self-review is the degraded fallback, not the intended path.)",
+    "",
+  ];
 }
 
 /**
@@ -551,6 +589,7 @@ export function renderDesignReviewPrompt(
     "You are reviewing the overall design of this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide qualitative observations in two distinct modes: contract assessment for inferred or existing project contracts, and conceptual design critique for broader architecture ideas that static analysis cannot produce.",
     "",
     renderSharedStructuralContext(bundle, maxUnits),
+    ...renderIndependentReviewerDirective(options.hostCanDispatchSubagents),
     "## What to assess",
     "",
     `Focus on the ${maxUnits} highest-risk units listed above; you need not read the entire repository, though you may follow any thread that demands more context. Produce findings about:`,
