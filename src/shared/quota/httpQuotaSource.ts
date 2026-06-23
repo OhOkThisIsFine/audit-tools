@@ -15,9 +15,13 @@ import type { QuotaProbeResult, QuotaSource, QuotaUsageSnapshot } from "./quotaS
  *    `fetchSnapshot`, yields `null` so the {@link CompositeQuotaSource} falls
  *    through to the next source.
  *
- * Token refresh is intentionally NEVER performed by these sources: the host CLI
- * owns the rotating credential chain, and rewriting it from a read-only quota
- * probe risks breaking the user's auth — degrade on expiry/401 instead.
+ * Token refresh is the subclass's call, not this base's: most sources degrade on
+ * expiry/401 (the host owns their credential). The Claude source is the
+ * exception — it refreshes its CLI credential and persists the rotated token
+ * under a file lock (double-checked), because that file is otherwise abandoned
+ * once the access token expires. Any source that refreshes MUST do so atomically
+ * under a lock so a rotated refresh token is never lost — see
+ * {@link ClaudeOAuthQuotaSource}.
  */
 
 export interface FetchResponseLike {

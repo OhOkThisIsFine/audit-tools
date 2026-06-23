@@ -2,7 +2,7 @@ import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 
 const { ClaudeOAuthQuotaSource, parseProviderModelKey, mapUsageToSnapshot } = await import("../../src/shared/quota/claudeOAuthQuotaSource.ts");
 
@@ -213,6 +213,109 @@ test("queryCurrentUsage with the DEFAULT fetch makes no network call under a tes
     now: () => NOW,
   });
   assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
+});
+
+// ---- credential resolution: env handoff + refresh-on-expiry ----
+
+const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
+
+/** Fetch double that routes the usage GET and the refresh POST independently. */
+function routedFetch({ onUsage, onToken }) {
+  const calls = [];
+  const fn = async (url, init) => {
+    calls.push({ url, init });
+    if (url === TOKEN_URL) return onToken(JSON.parse(init.body));
+    if (url === USAGE_URL) return onUsage(init);
+    throw new Error(`unexpected url ${url}`);
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+function readCreds(p) {
+  return JSON.parse(readFileSync(p, "utf8"));
+}
+
+test("CLAUDE_CODE_OAUTH_TOKEN short-circuits the file and probes with the env token", async () => {
+  const fetchImpl = recordingFetch(okResponse(LIVE_USAGE));
+  const src = new ClaudeOAuthQuotaSource({
+    // Point at a non-existent file: the env token must make the file irrelevant.
+    credentialsPath: join(tmpdir(), "no-such-claude", ".credentials.json"),
+    readEnvToken: () => "env-handoff-token",
+    fetchImpl,
+    now: () => NOW,
+  });
+  const snap = await src.queryCurrentUsage("claude-code/*");
+  assert.equal(snap.remaining_pct, 0.9);
+  assert.equal(fetchImpl.calls[0].init.headers.Authorization, "Bearer env-handoff-token");
+});
+
+test("an expired token is refreshed, the rotated creds are persisted, and /usage uses the new token", async () => {
+  const credsPath = writeCreds(validCreds({ expiresAt: NOW - 1, refreshToken: "rt-old" }));
+  let usageAuth = null;
+  const fetchImpl = routedFetch({
+    onToken: (body) => {
+      assert.equal(body.grant_type, "refresh_token");
+      assert.equal(body.refresh_token, "rt-old");
+      return okResponse({ access_token: "at-new", refresh_token: "rt-new", expires_in: 28800, scope: "user:inference" });
+    },
+    onUsage: (init) => {
+      usageAuth = init.headers.Authorization;
+      return okResponse(LIVE_USAGE);
+    },
+  });
+  const src = new ClaudeOAuthQuotaSource({ credentialsPath: credsPath, readEnvToken: () => null, fetchImpl, now: () => NOW });
+  const snap = await src.queryCurrentUsage("claude-code/*");
+  assert.equal(snap.remaining_pct, 0.9);
+  assert.equal(usageAuth, "Bearer at-new");
+  // Rotated credential persisted atomically (refresh token replaced, expiry advanced).
+  const persisted = readCreds(credsPath).claudeAiOauth;
+  assert.equal(persisted.accessToken, "at-new");
+  assert.equal(persisted.refreshToken, "rt-new");
+  assert.equal(persisted.expiresAt, NOW + 28800 * 1000);
+});
+
+test("a 401 on a file token forces one refresh + retry", async () => {
+  const credsPath = writeCreds(validCreds({ expiresAt: NOW + 600_000, accessToken: "at-stale", refreshToken: "rt-old" }));
+  let usageCalls = 0;
+  const fetchImpl = routedFetch({
+    onToken: () => okResponse({ access_token: "at-fresh", refresh_token: "rt-new", expires_in: 28800 }),
+    onUsage: (init) => {
+      usageCalls += 1;
+      if (init.headers.Authorization === "Bearer at-stale") return { ok: false, status: 401, json: async () => ({}) };
+      return okResponse(LIVE_USAGE);
+    },
+  });
+  const src = new ClaudeOAuthQuotaSource({ credentialsPath: credsPath, readEnvToken: () => null, fetchImpl, now: () => NOW });
+  const snap = await src.queryCurrentUsage("claude-code/*");
+  assert.equal(snap.remaining_pct, 0.9);
+  assert.equal(usageCalls, 2); // stale 401, then retry with refreshed token
+  assert.equal(readCreds(credsPath).claudeAiOauth.accessToken, "at-fresh");
+});
+
+test("a failed refresh grant degrades to null and leaves creds untouched", async () => {
+  const credsPath = writeCreds(validCreds({ expiresAt: NOW - 1, accessToken: "at-old", refreshToken: "rt-old" }));
+  const fetchImpl = routedFetch({
+    onToken: () => ({ ok: false, status: 400, json: async () => ({ error: "invalid_grant" }) }),
+    onUsage: () => okResponse(LIVE_USAGE),
+  });
+  const src = new ClaudeOAuthQuotaSource({ credentialsPath: credsPath, readEnvToken: () => null, fetchImpl, now: () => NOW });
+  assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
+  // Original (expired) creds are NOT clobbered by a failed refresh.
+  assert.equal(readCreds(credsPath).claudeAiOauth.refreshToken, "rt-old");
+});
+
+test("an expired token with no refresh token degrades without any network call", async () => {
+  const fetchImpl = recordingFetch(okResponse(LIVE_USAGE));
+  const src = new ClaudeOAuthQuotaSource({
+    credentialsPath: writeCreds(validCreds({ expiresAt: NOW - 1 })),
+    readEnvToken: () => null,
+    fetchImpl,
+    now: () => NOW,
+  });
+  assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
+  assert.equal(fetchImpl.calls.length, 0);
 });
 
 test("AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA disables the source even with an injected fetch", async () => {

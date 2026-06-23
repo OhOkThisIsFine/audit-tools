@@ -1,28 +1,50 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { QuotaUsageSnapshot } from "./quotaSource.js";
+import { withFileLock } from "./fileLock.js";
 import {
   BaseHttpQuotaSource,
   fetchJsonOrNull,
   clampFraction,
   parseProviderModelKey,
+  type FetchLike,
   type HttpQuotaSourceOptions,
   type UsageFetchContext,
 } from "./httpQuotaSource.js";
 
 /**
- * Proactive Claude-subscription quota source — reads the local Claude OAuth
- * credential and queries the undocumented `api.anthropic.com/api/oauth/usage`
- * endpoint (the only proactive remaining-quota signal Claude Code exposes),
- * mapping the most-constraining window to a {@link QuotaUsageSnapshot}. The
- * cross-cutting cache/guard/degrade behavior lives in {@link BaseHttpQuotaSource}.
+ * Proactive Claude-subscription quota source — resolves a Claude OAuth access
+ * token (see {@link resolveAccessToken}) and queries the undocumented
+ * `api.anthropic.com/api/oauth/usage` endpoint (the only proactive
+ * remaining-quota signal Claude Code exposes), mapping the most-constraining
+ * window to a {@link QuotaUsageSnapshot}. The cross-cutting cache/guard/degrade
+ * behavior lives in {@link BaseHttpQuotaSource}.
+ *
+ * Credential resolution (first hit wins; see
+ * docs/quota-claude-credential-resolution.md):
+ *  1. `CLAUDE_CODE_OAUTH_TOKEN` — the only docs-blessed subprocess handoff
+ *     (`claude setup-token`). Used as-is, NO file is read or written. This is
+ *     what lets a non-CLI host (e.g. the Claude Desktop app, whose own token
+ *     lives in an OS-encrypted store we must not decrypt) still get a proactive
+ *     account-level reading.
+ *  2. `~/.claude/.credentials.json` (the CLI credential) with REFRESH-ON-EXPIRY:
+ *     when the access token is missing/expired (or `/usage` 401s) but a refresh
+ *     token is present, the refresh grant is run and the ROTATED credential is
+ *     persisted atomically under {@link withFileLock} (double-checked: the file
+ *     is re-read after the lock is acquired, so concurrent probes never
+ *     double-rotate and invalidate each other's refresh token).
+ *  3. Otherwise degrade to null — the {@link CompositeQuotaSource} falls through
+ *     to the reactive host-session source.
  */
 
 const CLAUDE_PROVIDER_NAMES = new Set(["claude-code", "claude"]);
 const USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
 const OAUTH_BETA_HEADER = "oauth-2025-04-20";
 const DEFAULT_USER_AGENT = "claude-cli (external, cli)";
+/** Claude Code's public OAuth client id + token endpoint (refresh grant). */
+const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const OAUTH_TOKEN_ENDPOINT = "https://console.anthropic.com/v1/oauth/token";
 
 // Re-exported for back-compat (tests + index import these from here).
 export { parseProviderModelKey };
@@ -43,8 +65,29 @@ interface UsageResponse {
   seven_day?: UsageWindow | null;
   limits?: UsageLimitEntry[] | null;
 }
+interface ClaudeOAuthBlock {
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  scopes?: string[];
+}
 interface ClaudeOAuthCredentials {
-  claudeAiOauth?: { accessToken?: string; expiresAt?: number };
+  claudeAiOauth?: ClaudeOAuthBlock;
+}
+
+/** Where a resolved access token came from — governs 401-driven refresh. */
+type TokenOrigin = "env" | "file";
+interface ResolvedToken {
+  accessToken: string;
+  origin: TokenOrigin;
+}
+
+/** Shape of a successful refresh-grant response (defensive subset). */
+interface RefreshGrantResponse {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  scope?: string;
 }
 
 export interface ClaudeOAuthQuotaSourceOptions extends HttpQuotaSourceOptions {
@@ -52,18 +95,35 @@ export interface ClaudeOAuthQuotaSourceOptions extends HttpQuotaSourceOptions {
   credentialsPath?: string;
   /** Override the provider-name gate (mainly for tests). */
   claudeProviderNames?: Iterable<string>;
+  /**
+   * Supplies the docs-blessed `CLAUDE_CODE_OAUTH_TOKEN` handoff. Defaults to
+   * reading `process.env.CLAUDE_CODE_OAUTH_TOKEN` at probe time; injectable for
+   * tests. A non-empty return short-circuits the credential file entirely.
+   */
+  readEnvToken?: () => string | null | undefined;
+  /** Override the OAuth client id (refresh grant). Defaults to Claude Code's public client. */
+  oauthClientId?: string;
+  /** Override the token endpoint (refresh grant). */
+  oauthTokenEndpoint?: string;
 }
 
 export class ClaudeOAuthQuotaSource extends BaseHttpQuotaSource {
   readonly name = "claude-oauth";
   private readonly credentialsPath: string;
   private readonly providerNames: Set<string>;
+  private readonly readEnvToken: () => string | null | undefined;
+  private readonly oauthClientId: string;
+  private readonly oauthTokenEndpoint: string;
 
   constructor(options: ClaudeOAuthQuotaSourceOptions = {}) {
     super(options, DEFAULT_USER_AGENT);
     this.credentialsPath =
       options.credentialsPath ?? path.join(homedir(), ".claude", ".credentials.json");
     this.providerNames = new Set(options.claudeProviderNames ?? CLAUDE_PROVIDER_NAMES);
+    this.readEnvToken =
+      options.readEnvToken ?? (() => process.env.CLAUDE_CODE_OAUTH_TOKEN);
+    this.oauthClientId = options.oauthClientId ?? OAUTH_CLIENT_ID;
+    this.oauthTokenEndpoint = options.oauthTokenEndpoint ?? OAUTH_TOKEN_ENDPOINT;
   }
 
   protected handlesProvider(provider: string): boolean {
@@ -75,29 +135,150 @@ export class ClaudeOAuthQuotaSource extends BaseHttpQuotaSource {
     model: string | null,
     nowMs: number,
   ): Promise<QuotaUsageSnapshot | null> {
-    const accessToken = this.readAccessToken(nowMs);
-    if (!accessToken) return null;
-    return fetchClaudeUsage({ accessToken, model }, this.fetchContext());
+    const resolved = await this.resolveAccessToken(nowMs, false);
+    if (!resolved) return null;
+    const snap = await fetchClaudeUsage(
+      { accessToken: resolved.accessToken, model },
+      this.fetchContext(),
+    );
+    if (snap) return snap;
+    // A null here means a non-200 (commonly 401: token revoked/expired between
+    // resolution and use). For a FILE-origin token we can recover by forcing one
+    // refresh and retrying; an env token is operator-owned and not ours to rotate.
+    if (resolved.origin !== "file") return null;
+    const refreshed = await this.resolveAccessToken(nowMs, true);
+    if (!refreshed || refreshed.accessToken === resolved.accessToken) return null;
+    return fetchClaudeUsage(
+      { accessToken: refreshed.accessToken, model },
+      this.fetchContext(),
+    );
   }
 
-  /** Reads a non-expired access token from the local credential file, or null. */
-  private readAccessToken(nowMs: number): string | null {
+  /**
+   * Resolve an access token via the documented chain (env handoff → CLI file
+   * with refresh-on-expiry). `forceRefresh` skips the still-valid fast path and
+   * always runs the refresh grant (used to recover from a 401).
+   */
+  private async resolveAccessToken(
+    nowMs: number,
+    forceRefresh: boolean,
+  ): Promise<ResolvedToken | null> {
+    const envToken = this.readEnvToken();
+    if (typeof envToken === "string" && envToken.trim() !== "") {
+      return { accessToken: envToken.trim(), origin: "env" };
+    }
+
+    const oauth = this.readOAuthBlock();
+    if (!oauth) return null;
+
+    const valid =
+      typeof oauth.accessToken === "string" &&
+      oauth.accessToken !== "" &&
+      !(typeof oauth.expiresAt === "number" && nowMs >= oauth.expiresAt);
+    if (valid && !forceRefresh) {
+      return { accessToken: oauth.accessToken as string, origin: "file" };
+    }
+
+    // Expired/missing/forced and no refresh token → degrade (nothing to refresh).
+    if (typeof oauth.refreshToken !== "string" || oauth.refreshToken === "") {
+      return null;
+    }
+
+    const refreshed = await this.refreshAndPersist(nowMs, forceRefresh);
+    return refreshed ? { accessToken: refreshed, origin: "file" } : null;
+  }
+
+  /** Parse the `claudeAiOauth` block from the credential file, or null. */
+  private readOAuthBlock(): ClaudeOAuthBlock | null {
     let raw: string;
     try {
       raw = readFileSync(this.credentialsPath, "utf8");
     } catch {
       return null; // missing file (e.g. creds in an OS keychain) → degrade
     }
-    let parsed: ClaudeOAuthCredentials;
     try {
-      parsed = JSON.parse(raw) as ClaudeOAuthCredentials;
+      return (JSON.parse(raw) as ClaudeOAuthCredentials).claudeAiOauth ?? null;
     } catch {
       return null;
     }
-    const oauth = parsed.claudeAiOauth;
-    if (!oauth?.accessToken) return null;
-    if (typeof oauth.expiresAt === "number" && nowMs >= oauth.expiresAt) return null;
-    return oauth.accessToken;
+  }
+
+  /**
+   * Run the refresh grant and persist the ROTATED credential under a file lock.
+   * Double-checked: after the lock is held the file is re-read, so if a
+   * concurrent probe already refreshed (token now valid, and we are not forcing)
+   * that fresh token is used instead of rotating again — a second rotation would
+   * invalidate the first refresh token and brick the credential.
+   */
+  private async refreshAndPersist(nowMs: number, forceRefresh: boolean): Promise<string | null> {
+    const lockPath = `${this.credentialsPath}.lock`;
+    try {
+      return await withFileLock(lockPath, async () => {
+        const oauth = this.readOAuthBlock();
+        if (!oauth) return null;
+        const stillValid =
+          typeof oauth.accessToken === "string" &&
+          oauth.accessToken !== "" &&
+          !(typeof oauth.expiresAt === "number" && nowMs >= oauth.expiresAt);
+        if (stillValid && !forceRefresh) return oauth.accessToken as string;
+        if (typeof oauth.refreshToken !== "string" || oauth.refreshToken === "") return null;
+
+        const grant = await this.runRefreshGrant(oauth.refreshToken);
+        if (!grant?.access_token || !grant.refresh_token || typeof grant.expires_in !== "number") {
+          return null;
+        }
+        const next: ClaudeOAuthCredentials & Record<string, unknown> = {
+          ...(this.readFullCredentials() ?? {}),
+        };
+        next.claudeAiOauth = {
+          ...(next.claudeAiOauth ?? {}),
+          accessToken: grant.access_token,
+          refreshToken: grant.refresh_token,
+          expiresAt: nowMs + grant.expires_in * 1000,
+          scopes: grant.scope ? grant.scope.split(" ") : next.claudeAiOauth?.scopes,
+        };
+        this.writeCredentialsAtomic(next);
+        return grant.access_token;
+      });
+    } catch {
+      return null; // lock timeout / IO failure → degrade, never throw out of a probe
+    }
+  }
+
+  /** POST the refresh-token grant; null on any non-200/network/parse failure. */
+  private async runRefreshGrant(refreshToken: string): Promise<RefreshGrantResponse | null> {
+    const body = await fetchJsonOrNull(this.fetchImpl as FetchLike, this.oauthTokenEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: this.oauthClientId,
+      }),
+    });
+    return body == null ? null : (body as RefreshGrantResponse);
+  }
+
+  /** Full credential object (preserves sibling fields like organizationUuid), or null. */
+  private readFullCredentials(): (ClaudeOAuthCredentials & Record<string, unknown>) | null {
+    let raw: string;
+    try {
+      raw = readFileSync(this.credentialsPath, "utf8");
+    } catch {
+      return null;
+    }
+    try {
+      return JSON.parse(raw) as ClaudeOAuthCredentials & Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Atomic temp-then-rename write so a crash mid-write never truncates the credential. */
+  private writeCredentialsAtomic(creds: unknown): void {
+    const tmp = `${this.credentialsPath}.tmp`;
+    writeFileSync(tmp, JSON.stringify(creds, null, 2));
+    renameSync(tmp, this.credentialsPath);
   }
 }
 
