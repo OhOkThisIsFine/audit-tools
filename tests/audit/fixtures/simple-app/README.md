@@ -1,3 +1,3 @@
 # simple-app
 
-Fixture repository for auditor-lambda orchestration tests.
+Fixture repository for audit-code orchestration tests.
