@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, frictionCaptured, persistFrictionCapture, frictionCapturePath, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -1498,6 +1498,12 @@ async function presentReportStep(
   state: RemediationState | null,
 ): Promise<RemediationStep> {
   const reportPath = join(dirname(artifactsDir), "remediation-report.md");
+  // Tool-emitted terminal friction-capture close-out, FOLDED into present_report so it
+  // is one bounded step (parity with audit-code's `decideAuditFrictionCloseout`; same
+  // single-sourced shared shape + persist helper). Degrade-clean (persists a
+  // zero-friction record so it never blocks completion) and never-re-loop (idempotent
+  // on the run_id-keyed record). Never couples to any repo's backlog doc.
+  const closeout = await decideRemediateFrictionCloseout(artifactsDir, state);
   return writeCurrentStep({
     stepKind: "present_report",
     status: "complete",
@@ -1509,12 +1515,27 @@ async function presentReportStep(
 
 Read \`${reportPath}\` and summarize the remediation outcome for the user.
 Mention the resolved, ignored, and deemed-inappropriate counts plus the closing action.
-Stop after presenting the summary.
+
+## Record run friction (close-out)
+
+A friction record for this run exists at \`${closeout.recordPath}\` (currently empty).
+If you hit any friction this run — non-obvious traps, misbehaving tools, missing
+affordances, shell/env quirks, unclear instructions — overwrite that file with the same
+JSON shape, filling \`frictions\` with one entry per item (each
+\`{ "note": "...", optional "severity", "category", "area" }\`), keeping
+\`schema_version\`, \`tool\`, \`run_id\`, and \`captured_at\` as written. Hit none → leave
+it empty. This is the run's own record under its artifacts dir — do NOT edit any
+repository's tracking/backlog doc.
+
+Stop after presenting the summary (and recording friction, or confirming none).
 `,
     allowedCommands: [],
-    stopCondition: "Stop after presenting the remediation report summary.",
+    stopCondition:
+      "Stop after presenting the remediation report summary and recording run friction (or confirming none).",
     artifactPaths: {
       final_report: reportPath,
+      // Surface the run's friction record (resolved through the shared path module).
+      friction_record: closeout.recordPath,
     },
   });
 }
@@ -1876,6 +1897,48 @@ async function handleComplete(
   state: RemediationState | null,
 ): Promise<RemediationStep> {
   return presentReportStep(root, artifactsDir, state);
+}
+
+/** The terminal friction-capture close-out decision for the remediate half. */
+export interface RemediateFrictionCloseoutDecision {
+  /**
+   * "captured" → already recorded for this run_id (the close-out persisted nothing
+   * new this pass). "captured_now" → the degrade-clean record was persisted this pass
+   * (the FIRST time the run reaches its terminal). Either way the close-out is now
+   * satisfied; it never re-loops.
+   */
+  action: "captured_now" | "captured";
+  /** The run_id-keyed friction record path (always set). */
+  recordPath: string;
+}
+
+/**
+ * The terminal friction-capture close-out for the remediate half — the exact analog
+ * of audit-code's `decideAuditFrictionCloseout`, sharing the SAME single-sourced shape
+ * + persist helper (`audit-tools/shared`) so the two halves cannot drift. It fires at
+ * the terminal (folded INTO present_report, so it is one bounded step, never an extra
+ * round-trip): on the first terminal pass it persists a degrade-clean zero-friction
+ * record (so it can NEVER block completion); thereafter it is a no-op read returning
+ * "captured" (never re-loops). Deterministic — keyed only off the on-disk record at
+ * `(artifactsDir, runId)`, never host discretion — and never coupled to any repo's
+ * backlog doc.
+ */
+export async function decideRemediateFrictionCloseout(
+  artifactsDir: string,
+  state: RemediationState | null,
+): Promise<RemediateFrictionCloseoutDecision> {
+  const runId = stateRunId(state);
+  const recordPath = frictionCapturePath(artifactsDir, runId);
+  if (await frictionCaptured(artifactsDir, runId)) {
+    return { action: "captured", recordPath };
+  }
+  await persistFrictionCapture({
+    artifactsDir,
+    runId,
+    tool: "remediate-code",
+    frictions: [],
+  });
+  return { action: "captured_now", recordPath };
 }
 
 async function handlePendingExtractedPlan(

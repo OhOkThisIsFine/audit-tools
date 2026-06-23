@@ -20,7 +20,7 @@ afterEach(async () => {
   await harness.cleanupTestRepo();
 });
 describe("decideNextStep — run lifecycle, input handling, and intake routing", () => {
-  it("complete run emits present_report", async () => {
+  it("complete run emits present_report with a folded friction close-out", async () => {
     await saveState({ status: "complete" });
     await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
     await writeFile(join(REPO_DIR, ".audit-tools", "remediation-report.md"), "# Report\n", "utf8");
@@ -31,7 +31,13 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     expect(step.step_kind).toBe("present_report");
     expect(step.status).toBe("complete");
     expect(step.artifact_paths.final_report).toMatch(/remediation-report\.md$/);
-    expect(await readFile(step.prompt_path, "utf8")).toMatch(/Present Remediation Report/);
+    // The terminal friction close-out is folded in: the record path is surfaced and
+    // the prompt asks the host to record run friction.
+    expect(step.artifact_paths.friction_record).toMatch(/friction[\\/].+\.json$/);
+    expect(existsSync(step.artifact_paths.friction_record)).toBe(true);
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toMatch(/Present Remediation Report/);
+    expect(prompt).toMatch(/Record run friction/);
   });
 
   it("accepts options supplied as a JSON string", async () => {
