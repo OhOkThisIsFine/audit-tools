@@ -336,6 +336,50 @@ export interface ContractPipelineRenderInput {
    * traces back to an auditor finding.
    */
   pathASeedPath?: string;
+  /**
+   * Whether the host can dispatch independent sub-agents. Threaded from the
+   * resolved `host_can_dispatch_subagents` handshake (NOT a manual flag). The
+   * adversarial review phases ('critique' / 'critic') MANDATE an independent
+   * sub-agent when true (an author marking their own homework misses gaps) and
+   * degrade to an explicit inline-self-review instruction when false. Fail-safe:
+   * when omitted, the mandate is rendered (a host that genuinely cannot dispatch
+   * opts out explicitly), so the stronger guarantee is the default.
+   */
+  hostCanDispatchSubagents?: boolean;
+}
+
+/**
+ * Phases whose value is adversarial independence — the reviewer must NOT be the
+ * author. Keyed strictly off phase identity: 'critique' (conceptual design
+ * critique) and 'critic' (counterexample search). The non-adversarial review
+ * phases ('assessment', 'judge') are intentionally excluded.
+ */
+const INDEPENDENT_CRITIC_PHASES = new Set(["critique", "critic"]);
+
+/**
+ * Render the independent-dispatch directive for an adversarial review phase.
+ * Mandate when the host can dispatch (default / fail-safe); degrade to an
+ * explicit inline self-review instruction when it provably cannot. Empty for
+ * any non-adversarial phase.
+ */
+function renderIndependentCriticDirective(
+  role: string,
+  hostCanDispatchSubagents: boolean | undefined,
+): string {
+  if (!INDEPENDENT_CRITIC_PHASES.has(role)) return "";
+  // Fail-safe default: undefined ⇒ mandate. A host that genuinely cannot
+  // dispatch opts out by passing false explicitly.
+  const mandate = hostCanDispatchSubagents !== false;
+  if (mandate) {
+    return `\n## Independent Review — MANDATORY
+
+This is an adversarial review phase: its value comes from a reviewer who is **not** the author of the design under review. You MUST dispatch this review to a fresh, independent sub-agent — one that did NOT author the upstream contract artifacts and does not see the author's reasoning. An author grading their own work systematically misses the gaps this phase exists to catch. Do NOT perform this review inline yourself.
+`;
+  }
+  return `\n## Independent Review — degraded to inline self-review
+
+This host reported it cannot dispatch an independent sub-agent, so this adversarial review runs inline. Compensate deliberately: adopt a fresh adversarial stance, set aside the author's reasoning, and attack the design as a hostile outside reviewer would. (When sub-agent dispatch is available this review is MANDATED to an independent agent — inline self-review is the degraded fallback, not the intended path.)
+`;
 }
 
 export interface ContractPipelineRenderResult {
@@ -401,10 +445,15 @@ export function renderContractPipelinePrompt(
       ? `\n## Path-A Audit Seed\n\nThis run originates from a structured audit-findings report. The seed file below contains the findings summary and affected files — your output must frame the goal and context around these findings so every subsequent pipeline node traces to an auditor finding:\n\n- \`${input.pathASeedPath}\` (path_a_seed)\n`
       : "";
 
+  const independentCriticDirective = renderIndependentCriticDirective(
+    input.role,
+    input.hostCanDispatchSubagents,
+  );
+
   const prompt = `# ${role.title}
 
 ${role.description}
-${cwdNote}
+${cwdNote}${independentCriticDirective}
 ## Required Inputs
 ${inputSections.length > 0 ? inputSections.join("\n") : "_No artifact inputs required for this role._"}
 ${sourceSections}${pathASeedSection}
