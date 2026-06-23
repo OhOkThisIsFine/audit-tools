@@ -154,6 +154,7 @@ export function mapCopilotUsage(
   body: CopilotUsageResponse,
   nowMs: number,
 ): QuotaUsageSnapshot | null {
+  if (body == null || typeof body !== "object") return null;
   const q = body.quota_snapshots?.premium_interactions ?? body.quota_snapshots?.chat;
   if (!q) return null;
   let remaining: number;

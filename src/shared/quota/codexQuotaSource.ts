@@ -112,6 +112,7 @@ export async function fetchCodexUsage(
  * a 0–1 fraction; `reset_at` is the absolute reset (unix seconds → ISO).
  */
 export function mapCodexUsage(body: CodexUsageResponse, nowMs: number): QuotaUsageSnapshot | null {
+  if (body == null || typeof body !== "object") return null;
   const rl = body.rate_limit;
   const windows = [rl?.primary_window, rl?.secondary_window].filter(
     (w): w is CodexWindow => !!w && typeof w.used_percent === "number",

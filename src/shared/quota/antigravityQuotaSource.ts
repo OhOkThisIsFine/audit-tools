@@ -110,6 +110,7 @@ export function mapAntigravityUsage(
   body: AntigravityResponse,
   nowMs: number,
 ): QuotaUsageSnapshot | null {
+  if (body == null || typeof body !== "object") return null;
   const infos = (body.models ?? [])
     .map((m) => m.quotaInfo)
     .filter((q): q is { remainingFraction: number; resetTime?: string | null } =>
