@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { isFileMissingError, mapWithConcurrency, readJsonFile, writeJsonFile } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
-import { validateAuditResults } from "../validation/auditResults.js";
+import { validateAuditResults, defaultFindingLensFromResult } from "../validation/auditResults.js";
 import { verifyFindingGrounding } from "../validation/quoteGrounding.js";
 import {
   ANCHOR_GROUNDING_CONCURRENCY,
@@ -219,10 +219,30 @@ async function scanTaskResults(
  * Reads results from the result-map paths or falls back to the task_id lookup table
  * for tasks recovered from non-canonical files.
  */
-async function validateAndCollectResults(
+/**
+ * Build, per dispatched packet_id, the list of member task_ids assigned to it
+ * (excluding the synthetic `__prior_dispatch__` sentinel, which is not a real
+ * packet). Used to rebind a worker result mistakenly keyed under the packet_id
+ * onto its sole OUTSTANDING member.
+ */
+export function packetMembersByPacketId(
+  entries: Array<{ task_id: string; packet_id: string }>,
+): Map<string, string[]> {
+  const byPacket = new Map<string, string[]>();
+  for (const entry of entries) {
+    if (entry.packet_id === "__prior_dispatch__") continue;
+    const members = byPacket.get(entry.packet_id) ?? [];
+    members.push(entry.task_id);
+    byPacket.set(entry.packet_id, members);
+  }
+  return byPacket;
+}
+
+export async function validateAndCollectResults(
   allTasks: AuditTask[],
   entryByTaskId: Map<string, { result_path: string; task_id: string; packet_id: string }>,
   fallbackByTaskId: Map<string, unknown>,
+  packetMembers: Map<string, string[]>,
 ): Promise<{
   passing: AuditResult[];
   failing: Array<{ task_id: string; errors: string[] }>;
@@ -239,6 +259,51 @@ async function validateAndCollectResults(
   // array file per packet, so this is the normal collection path, not an error.
   let recoveredCount = 0;
 
+  // OUTSTANDING (still-pending) members keyed by their dispatched packet_id.
+  // A multi-member packet that was partially answered then re-queued keeps only
+  // its still-pending members here, so a result keyed under the packet_id is
+  // rebound to the SOLE outstanding member (never to an already-answered one,
+  // and never when >1 member is still outstanding — that would be ambiguous).
+  const outstandingIds = new Set(allTasks.map((t) => t.task_id));
+  const outstandingMembersByPacketId = new Map<string, string[]>();
+  for (const [packetId, members] of packetMembers) {
+    const stillOutstanding = members.filter((id) => outstandingIds.has(id));
+    if (stillOutstanding.length > 0) {
+      outstandingMembersByPacketId.set(packetId, stillOutstanding);
+    }
+  }
+
+  /**
+   * A worker that keyed its result under the synthetic packet_id (not the
+   * assigned member task_id — the deepening non-convergence leak) leaves the
+   * member's own result missing. Recover it by binding the packet-id-keyed
+   * result to the packet's SOLE outstanding member, then rewrite its task_id to
+   * the member id so the identity gates pass. Returns the rebound object or null.
+   */
+  function rebindPacketIdKeyedResult(member: AuditTask): unknown {
+    const entry = entryByTaskId.get(member.task_id);
+    const packetId = entry?.packet_id;
+    if (!packetId || packetId === "__prior_dispatch__") return null;
+    const stillOutstanding = outstandingMembersByPacketId.get(packetId) ?? [];
+    if (stillOutstanding.length !== 1 || stillOutstanding[0] !== member.task_id) {
+      return null; // ambiguous (≠1 outstanding member) — never guess.
+    }
+    const keyed = fallbackByTaskId.get(packetId);
+    if (!keyed || typeof keyed !== "object" || Array.isArray(keyed)) return null;
+    // The worker stamped EVERY identity field from the packet (task_id, unit_id,
+    // pass_id, lens), not just task_id — so rebinding only task_id leaves the
+    // pass_id/unit_id/lens mismatching the member and the result still rejects.
+    // Identity is the tool's authority (not the worker's), so force all four from
+    // the assigned member's metadata. The findings/coverage payload is untouched.
+    return {
+      ...(keyed as Record<string, unknown>),
+      task_id: member.task_id,
+      unit_id: member.unit_id,
+      pass_id: member.pass_id,
+      lens: member.lens,
+    };
+  }
+
   for (const task of allTasks) {
     const entry = entryByTaskId.get(task.task_id);
     let obj: unknown;
@@ -248,7 +313,7 @@ async function validateAndCollectResults(
         obj = JSON.parse(await readFile(filePath, "utf8"));
       } catch (e) {
         if (isFileMissingError(e)) {
-          const fallback = fallbackByTaskId.get(task.task_id);
+          const fallback = fallbackByTaskId.get(task.task_id) ?? rebindPacketIdKeyedResult(task);
           if (fallback) {
             recoveredCount++;
             obj = fallback;
@@ -272,7 +337,7 @@ async function validateAndCollectResults(
       // against). Recover it by task_id so it ingests instead of looping forever
       // as "pending"; only when no such file exists is the task genuinely held
       // back for the next dispatch (not a failure).
-      const fallback = fallbackByTaskId.get(task.task_id);
+      const fallback = fallbackByTaskId.get(task.task_id) ?? rebindPacketIdKeyedResult(task);
       if (!fallback) {
         notDispatched.push(task.task_id);
         continue;
@@ -280,6 +345,11 @@ async function validateAndCollectResults(
       recoveredCount++;
       obj = fallback;
     }
+
+    // Force-default findings[].lens from the AuditResult lens before validation
+    // (weaker/deepening workers set only the top-level lens; the validator
+    // requires a non-empty per-finding lens). Mutates the recovered object.
+    defaultFindingLensFromResult([obj]);
     const record = obj && typeof obj === "object" && !Array.isArray(obj)
       ? obj as Record<string, unknown>
       : undefined;
@@ -455,6 +525,7 @@ export async function mergeAndIngest(params: {
     allTasks,
     entryByTaskId,
     fallbackByTaskId,
+    packetMembersByPacketId(resultMap.entries),
   );
   if (recoveredCount > 0) {
     process.stderr.write(
