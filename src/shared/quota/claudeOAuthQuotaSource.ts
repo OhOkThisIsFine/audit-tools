@@ -133,6 +133,9 @@ export function mapUsageToSnapshot(
   model: string | null,
   nowMs: number,
 ): QuotaUsageSnapshot | null {
+  // A malformed / non-object payload degrades to null and never throws (mirrors
+  // the codex/copilot/antigravity mappers' null-safety).
+  if (body == null || typeof body !== "object") return null;
   const binding = pickBindingWindow(body, model);
   if (binding == null) return null;
   return {
