@@ -118,6 +118,29 @@ describe("scheduleWave", () => {
     expect(result.host_concurrency_limit!.active_subagents).toBe(3);
   });
 
+  it("F4 inv-4: a host limit below the computed wave reduces max_concurrent to exactly active_subagents and binds host_concurrency", async () => {
+    // No reported host limit → unknown-provider fallback yields a wave > 2.
+    const uncapped = await scheduleWave({
+      sessionConfig: null,
+      itemCount: 20,
+      env: {} as any,
+    });
+    expect(uncapped.max_concurrent).toBeGreaterThan(2);
+
+    // Same request, but the host reports active_subagents=2 (strictly below the
+    // computed wave). The reported limit is a hard ceiling: the wave is clamped
+    // to exactly 2 and binding_cap is stamped host_concurrency.
+    const capped = await scheduleWave({
+      hostMaxConcurrent: 2,
+      sessionConfig: null,
+      itemCount: 20,
+      env: {} as any,
+    });
+    expect(capped.max_concurrent).toBe(2);
+    expect(capped.host_concurrency_limit!.active_subagents).toBe(2);
+    expect(capped.binding_cap).toBe("host_concurrency");
+  });
+
   it("defaults to 5 when no limit is known", async () => {
     const result = await scheduleWave({
       sessionConfig: null,
