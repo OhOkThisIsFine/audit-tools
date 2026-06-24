@@ -261,6 +261,29 @@ export {
 export type { HashContentOptions } from "./hash.js";
 export { hashContent } from "./hash.js";
 
+// Single canonical deterministic serializer (INV-CK-2) — the ONE stableStringify.
+export { stableStringify } from "./stableStringify.js";
+
+// Content-key seam (O2 ↔ F1): tool-owned task-content signature + discriminator,
+// grouping identityKey, signature-stable idempotencyKey, signature-sensitive
+// contentKey, per-record instance id. See src/shared/contentKey.ts.
+export type {
+  IdentityKeyInput,
+  TaskContentSignatureInput,
+  ResultEmitSource,
+  ResultContentDiscriminatorInput,
+  IdempotencyKeyInput,
+  ContentKeyInput,
+} from "./contentKey.js";
+export {
+  buildTaskContentSignature,
+  buildResultContentDiscriminator,
+  identityKey,
+  idempotencyKey,
+  contentKey,
+  newInstanceId,
+} from "./contentKey.js";
+
 // Diff-based re-review (B2/B3): generic projection serialization, leaf-level
 // projection diff, and the re-review prompt section. Each orchestrator owns its
 // own projection table; this single-sources the diff algorithm + prompt shape.
@@ -362,6 +385,7 @@ export {
   auditArtifactsDir,
   remediationArtifactsDir,
   stepsDir,
+  artifactTreeLockPath,
   incomingDir,
   outputDirFor,
   auditReportPath,
@@ -388,7 +412,59 @@ export {
   frictionCapturePath,
   frictionCaptured,
   persistFrictionCapture,
+  sanitizeRunId,
 } from "./io/frictionCapture.js";
+
+// The single mechanical-friction sink (FC-005): no-op-safe, best-effort,
+// per-event de-duped append wrapping the frictionCapture.ts substrate. O3/O2
+// mechanical seams call this with a stable distinct event id.
+export type {
+  FrictionEvent,
+  CapturedFrictionItem,
+} from "./friction/captureFrictionEvent.js";
+export { captureFrictionEvent } from "./friction/captureFrictionEvent.js";
+
+// O1 end-of-run friction TRIAGE: single-sourced triage step shape, disposition
+// vocabulary (keep|discard|annotate), blocking semantics, and the close-out
+// decider for BOTH orchestrators. Drops false-green; satisfaction = mechanical
+// events UNION surfaced agent-feedback reflections; friction appends ride O2's
+// withFileLock.
+export type {
+  FrictionDisposition,
+  FrictionDispositionRecord,
+  TriageSubject,
+  FrictionTriageDecision,
+  TriagedFrictionArtifact,
+} from "./friction/triage.js";
+export {
+  FRICTION_DISPOSITIONS,
+  isFrictionDisposition,
+  reflectionKey,
+  frictionLockPath,
+  collectTriageSubjects,
+  decideFrictionTriage,
+  appendFrictionUnderLock,
+  recordFrictionDisposition,
+} from "./friction/triage.js";
+
+// O3 emit-validate-repair seam: the single-sourced cheapest-first monotonic
+// repair pipeline (deterministic coercion -> bounded errors-only LLM patch ->
+// re-dispatch), one canonical validator re-run after each stage. Everything-
+// agnostic: contract id, validator, coercion, and patcher are all caller-supplied.
+export type {
+  RepairValidationError,
+  RepairValidationResult,
+  RepairCoercion,
+  RepairCoercionResult,
+  RepairPatcher,
+  RepairContract,
+  RepairStatus,
+  RepairStage,
+  RepairRedispatch,
+  RepairOutcome,
+  RunEmitValidateRepairOptions,
+} from "./repair/index.js";
+export { runEmitValidateRepair } from "./repair/index.js";
 
 // IO: install/ensure-time .gitignore management for artifacts emitted into a
 // consuming repo's tree — always-ignore build/install assets + friction sidecar;

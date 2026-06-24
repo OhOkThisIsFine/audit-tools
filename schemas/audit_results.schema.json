@@ -498,6 +498,15 @@
       "submitted_at": {
         "type": "string",
         "format": "date-time"
+      },
+      "instance_id": {
+        "type": "string"
+      },
+      "identity_key": {
+        "type": "string"
+      },
+      "idempotency_key": {
+        "type": "string"
       }
     },
     "required": [
