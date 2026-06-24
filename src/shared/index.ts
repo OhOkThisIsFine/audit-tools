@@ -385,6 +385,7 @@ export {
   auditArtifactsDir,
   remediationArtifactsDir,
   stepsDir,
+  artifactTreeLockPath,
   incomingDir,
   outputDirFor,
   auditReportPath,

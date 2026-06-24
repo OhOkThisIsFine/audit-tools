@@ -58,6 +58,18 @@ export function stepsDir(artifactsDir: string): string {
 }
 
 /**
+ * `<artifactsDir>/artifact-tree.lock` — the single pessimistic lock guarding
+ * every artifact-tree read-modify-write (advance/persist/ingest, O2). All
+ * mutators acquire THIS lock via `withFileLock` so a concurrent next-step /
+ * merge-and-ingest can never interleave a load against another writer's
+ * partially-written bundle (the staleness-cascade wipe trap). Single-sourced so
+ * every mutator agrees on the exact path.
+ */
+export function artifactTreeLockPath(artifactsDir: string): string {
+  return join(artifactsDir, "artifact-tree.lock");
+}
+
+/**
  * `<artifactsDir>/incoming` — the drop directory for upstream worker results
  * and externally supplied evidence. Takes an already-resolved artifacts dir.
  */

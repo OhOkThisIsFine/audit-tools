@@ -1,6 +1,12 @@
 import { rename } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { readJsonFile, RunLogger, withFsRetry } from "audit-tools/shared";
+import {
+  artifactTreeLockPath,
+  readJsonFile,
+  RunLogger,
+  withFileLock,
+  withFsRetry,
+} from "audit-tools/shared";
 import {
   loadArtifactBundle,
   writeCoreArtifacts,
@@ -61,10 +67,41 @@ export async function runAuditStep(options: {
   since?: string;
   runLog?: boolean;
 }) {
-  const bundle = await loadArtifactBundle(options.artifactsDir);
   const runLogger = new RunLogger(join(options.artifactsDir, "run.log.jsonl"), {
     enabled: options.runLog ?? true,
   });
+  // O2: every artifact-tree read-modify-write (load → advance → persist) runs
+  // under the single pessimistic artifact-tree lock so a concurrent next-step /
+  // merge-and-ingest can never load against a partially-written bundle and never
+  // interleave two writers (the staleness-cascade wipe trap). The lock has a loud
+  // timeout (FileLockTimeoutError, logged) — we NEVER proceed unlocked.
+  return withFileLock(
+    artifactTreeLockPath(options.artifactsDir),
+    () => runAuditStepLocked(options, runLogger),
+    undefined,
+    runLogger,
+  );
+}
+
+async function runAuditStepLocked(
+  options: {
+    root: string;
+    artifactsDir: string;
+    preferredExecutor?: string;
+    auditResultsPath?: string;
+    runtimeUpdatesPath?: string;
+    externalAnalyzerPath?: string;
+    externalAnalyzerData?: ExternalAnalyzerResults;
+    narrativeResultsPath?: string;
+    edgeReasoningResultsPath?: string;
+    analyzers?: Record<string, AnalyzerSetting>;
+    graphLlmEdgeReasoning?: boolean;
+    since?: string;
+    runLog?: boolean;
+  },
+  runLogger: RunLogger,
+) {
+  const bundle = await loadArtifactBundle(options.artifactsDir);
   const lineIndex = bundle.repo_manifest
     ? await buildLineIndex(options.root, bundle.repo_manifest)
     : undefined;
