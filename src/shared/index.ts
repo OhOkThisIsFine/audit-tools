@@ -560,6 +560,8 @@ export type {
   LaunchFreshSessionResult,
   ProviderRateLimits,
   FreshSessionProvider,
+  OutputConstraintMode,
+  OutputConstraintCapability,
 } from "./providers/types.js";
 
 // Provider constants
@@ -632,6 +634,7 @@ export {
   resolveFreshSessionProviderName,
   createFreshSessionProvider,
   hasConfiguredOpenAiCompatible,
+  discoverOutputConstraintCapability,
 } from "./providers/providerFactory.js";
 
 // Provider confirmation (Gate-0 pool discovery + selection)

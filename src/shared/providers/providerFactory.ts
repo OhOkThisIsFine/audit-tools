@@ -1,5 +1,8 @@
 import { spawnSync } from "node:child_process";
-import type { FreshSessionProvider } from "./types.js";
+import type {
+  FreshSessionProvider,
+  OutputConstraintCapability,
+} from "./types.js";
 import type {
   ResolvedProviderName,
   SessionConfig,
@@ -259,6 +262,46 @@ export function resolveFreshSessionProviderName(
 }
 
 /**
+ * Discover a backend's output-constraint capability ONCE (F3 ↔ F4 seam). This is
+ * PROVIDER-AGNOSTIC: it switches only on the resolved provider *kind* and on
+ * operator-supplied config signals — it NEVER inspects, branches on, or hardcodes
+ * a model id, context window, or tier→model map (an explicit project invariant).
+ *
+ * The agentic-CLI backends (claude-code / codex / opencode / antigravity /
+ * vscode-task / subprocess-template / local-subprocess) take only a rendered
+ * prompt; we have no API-level forced-tool-call or schema-constrained decoding
+ * over them, so their structural guarantee is `none` and the emit path degrades to
+ * the O3 emit-validate-repair seam. The `openai-compatible` backend is the only one
+ * that exposes a structural signal: when `response_format_json` is on (the nullish
+ * default), it constrains decoding to a JSON object → `structured_output`.
+ */
+export function discoverOutputConstraintCapability(
+  providerName: ResolvedProviderName,
+  sessionConfig: SessionConfig = {},
+): OutputConstraintCapability {
+  if (providerName === "openai-compatible") {
+    const jsonObject = sessionConfig.openai_compatible?.response_format_json;
+    // Nullish ⟹ on by default (mirrors the provider's own request behavior).
+    if (jsonObject !== false) {
+      return {
+        mode: "structured_output",
+        reason:
+          "openai-compatible endpoint emits response_format json_object (structured output, no per-field schema enforcement).",
+      };
+    }
+    return {
+      mode: "none",
+      reason:
+        "openai-compatible endpoint has response_format_json disabled; no structural output constraint — degrade to emit-validate-repair.",
+    };
+  }
+  return {
+    mode: "none",
+    reason: `provider '${providerName}' takes a rendered prompt only (no API-level output constraint); emit path degrades to the emit-validate-repair seam.`,
+  };
+}
+
+/**
  * Per-orchestrator hooks for the two providers that legitimately differ between
  * audit-code and remediate-code (prompt delivery, skip-permissions default, and
  * the session-config path referenced in error messages). The shared factory owns
@@ -331,6 +374,23 @@ export function createFreshSessionProvider(
     });
   }
 
+  const provider = constructProvider(providerName, sessionConfig, deps);
+  // F3: discover the output-constraint capability ONCE, here at construction, and
+  // stamp it on the provider contract so the dispatch/emit site only ever READS it
+  // (never recomputes). Provider-agnostic — see discoverOutputConstraintCapability.
+  provider.outputConstraint = discoverOutputConstraintCapability(
+    providerName,
+    sessionConfig,
+  );
+  return provider;
+}
+
+/** Instantiate the concrete provider class for a resolved provider name. */
+function constructProvider(
+  providerName: ResolvedProviderName,
+  sessionConfig: SessionConfig,
+  deps: FreshSessionProviderDeps,
+): FreshSessionProvider {
   switch (providerName) {
     case "local-subprocess":
       return new LocalSubprocessProvider();
