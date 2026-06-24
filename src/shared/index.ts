@@ -261,6 +261,22 @@ export {
 export type { HashContentOptions } from "./hash.js";
 export { hashContent } from "./hash.js";
 
+// Single canonical deterministic serializer (INV-CK-2) — the ONE stableStringify.
+export { stableStringify } from "./stableStringify.js";
+
+// Content-key seam (O2 ↔ F1): tool-owned task-content signature + grouping
+// identityKey + content-discriminating contentKey. See src/shared/contentKey.ts.
+export type {
+  IdentityKeyInput,
+  TaskContentSignatureInput,
+  ContentKeyInput,
+} from "./contentKey.js";
+export {
+  buildTaskContentSignature,
+  identityKey,
+  contentKey,
+} from "./contentKey.js";
+
 // Diff-based re-review (B2/B3): generic projection serialization, leaf-level
 // projection diff, and the re-review prompt section. Each orchestrator owns its
 // own projection table; this single-sources the diff algorithm + prompt shape.
