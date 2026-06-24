@@ -466,6 +466,24 @@ export type {
 } from "./repair/index.js";
 export { runEmitValidateRepair } from "./repair/index.js";
 
+// F4 dispatch-broker seam (lands first): the single gated F3<->F4 / O3<->F4
+// chokepoint. Every seam consumer dispatches ONLY through the broker — quota
+// read, deterministic-local estimate, refuse-over-budget, and the raw-result
+// await-completion handoff are single-sourced so the two halves can't drift.
+export type {
+  BrokeredDispatchSlot,
+  BrokerAdmission,
+  BrokeredDispatchDecision,
+  BrokeredCompletion,
+  BrokerDispatchInput,
+  BrokeredRepairDispatch,
+} from "./repair/index.js";
+export {
+  createBrokeredRepairDispatch,
+  estimateSlotTokens,
+  classifyCapableHost,
+} from "./repair/index.js";
+
 // IO: install/ensure-time .gitignore management for artifacts emitted into a
 // consuming repo's tree — always-ignore build/install assets + friction sidecar;
 // visibility-conditional ignore of deliverables + meta-audit reflections.
