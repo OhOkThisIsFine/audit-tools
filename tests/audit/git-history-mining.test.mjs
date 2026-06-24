@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const { mineGitHistory } = await import("../../src/shared/git.ts");
@@ -48,6 +49,34 @@ const manifest = (paths) => ({
     language: "typescript",
     excluded: false,
   })),
+});
+
+// F6 inv-1: the git-history extractor is owned + purely mechanical — it mines
+// git via src/shared/git.ts ONLY, and must never reach into F5's analyzer or
+// adapter seam (AST analyzers / external-tool adapters).
+test("F6 inv-1: gitHistory extractor imports no F5 analyzer/adapter seam", async () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = await readFile(
+    join(here, "../../src/audit/extractors/gitHistory.ts"),
+    "utf8",
+  );
+  const importLines = src
+    .split("\n")
+    .filter((line) => /^\s*import\b/.test(line) || /\bfrom\s+["']/.test(line));
+  for (const line of importLines) {
+    assert.doesNotMatch(
+      line,
+      /extractors\/analyzers/,
+      `F6 must not import an F5 analyzer: ${line.trim()}`,
+    );
+    assert.doesNotMatch(
+      line,
+      /\.\.\/adapters\//,
+      `F6 must not import an F5 adapter: ${line.trim()}`,
+    );
+  }
+  // It does mine through the shared git seam.
+  assert.match(src, /from\s+["']audit-tools\/shared["']/);
 });
 
 test("mineGitHistory degrades to empty on a non-git directory", async () => {
