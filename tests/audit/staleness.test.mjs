@@ -359,6 +359,7 @@ test("absent dependency with recordedRevision > 0 marks artifact stale", async (
   // with revision 0 and is absent, the artifact should NOT be stale from this branch.
   // Construct metadata manually where the recorded revision for the absent dep is 0.
   const zeroRevisionMetadata = {
+    metadata_schema_version: 1,
     artifacts: {
       "file_disposition.json": {
         revision: 1,
@@ -433,4 +434,262 @@ test("computeStaleArtifacts returns empty set when artifact_metadata key is pres
   const stale = computeStaleArtifacts({ artifact_metadata: undefined });
   assert.ok(stale instanceof Set, "must return a Set");
   assert.equal(stale.size, 0, "undefined artifact_metadata → no stale artifacts");
+});
+
+// ---------------------------------------------------------------------------
+// F1-granular-staleness boundary tests
+// ---------------------------------------------------------------------------
+
+const {
+  buildTaskContentSignature,
+  buildResultContentDiscriminator,
+  contentKey,
+  idempotencyKey,
+} = await import("../../src/shared/contentKey.ts");
+const {
+  deriveLiveResultKeys,
+  recordResultBaseline,
+  perElementStalenessVerdict,
+  isMetadataManifestCurrent,
+} = await import("../../src/audit/orchestrator/resultBaseline.ts");
+const { METADATA_SCHEMA_VERSION } = await import(
+  "../../src/audit/types/artifactMetadata.ts"
+);
+
+test("F1 inv: computeArtifactMetadata stamps the current metadata_schema_version", () => {
+  const metadata = computeArtifactMetadata(makeBaseBundle());
+  assert.equal(metadata.metadata_schema_version, METADATA_SCHEMA_VERSION);
+  assert.ok(METADATA_SCHEMA_VERSION >= 1);
+});
+
+test("F1 seam-equality: per-element verdict equals the verdict from the contentKey seam directly", () => {
+  const coordinate = {
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: buildTaskContentSignature({ goal: "audit auth" }),
+  };
+  // Derive the keys the same way a caller would, straight from the seam.
+  const disc = buildResultContentDiscriminator({ source: "base" });
+  const seamIk = idempotencyKey({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    result_content_discriminator: disc,
+  });
+  const seamCk = contentKey({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    result_content_discriminator: disc,
+    task_content_signature: coordinate.task_content_signature,
+  });
+  const liveKeys = deriveLiveResultKeys(coordinate);
+  assert.equal(liveKeys.idempotency_key, seamIk, "idempotency_key from the seam");
+  assert.equal(liveKeys.content_key, seamCk, "content_key from the seam");
+
+  // With a baseline recorded at the seam contentKey, an unchanged element is skipped.
+  const baselines = recordResultBaseline(undefined, {
+    idempotency_key: seamIk,
+    content_key: seamCk,
+  });
+  assert.equal(perElementStalenessVerdict(baselines, coordinate), "skipped");
+});
+
+test("F1 discriminator-in-key: two same-grouping-coordinate results with distinct sources produce DISTINCT contentKeys → not collapsed", () => {
+  const sig = buildTaskContentSignature({ goal: "audit auth" });
+  const base = deriveLiveResultKeys({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: sig,
+  });
+  const redispatch = deriveLiveResultKeys({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "redispatch",
+    attempt: 1,
+    task_content_signature: sig,
+  });
+  // Same {unit_id,lens,pass_id} grouping coordinate, different discriminator.
+  assert.notEqual(base.idempotency_key, redispatch.idempotency_key);
+  assert.notEqual(base.content_key, redispatch.content_key);
+
+  // A baseline for the base result must NOT skip the re-dispatched result.
+  const baselines = recordResultBaseline(undefined, base);
+  assert.equal(
+    perElementStalenessVerdict(baselines, {
+      unit_id: "u1",
+      lens: "security",
+      pass_id: "p1",
+      source: "redispatch",
+      attempt: 1,
+      task_content_signature: sig,
+    }),
+    "re-derive",
+    "distinct same-coordinate result must not be false-skipped (CE-009)",
+  );
+});
+
+test("F1 skip-by-construction: unchanged element skipped, mutated element re-derived", () => {
+  const coord = (sig) => ({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: sig,
+  });
+  const sigA = buildTaskContentSignature({ goal: "g", body: "v1" });
+  const keysA = deriveLiveResultKeys(coord(sigA));
+  const baselines = recordResultBaseline(undefined, keysA);
+
+  // Run B — same content: unchanged → skipped.
+  assert.equal(perElementStalenessVerdict(baselines, coord(sigA)), "skipped");
+
+  // Run B — mutated content (benign edit bumps contentKey): re-derive.
+  const sigB = buildTaskContentSignature({ goal: "g", body: "v2 edited" });
+  assert.equal(perElementStalenessVerdict(baselines, coord(sigB)), "re-derive");
+});
+
+test("F1 fail-safe: missing discriminator (no source) → re-derive, never grouping-key compare", () => {
+  const sig = buildTaskContentSignature({ goal: "g" });
+  // First establish a baseline under base so a grouping-key compare COULD falsely skip.
+  const keys = deriveLiveResultKeys({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: sig,
+  });
+  const baselines = recordResultBaseline(undefined, keys);
+  // Coordinate omitting `source` (the discriminator) → fail-safe stale (CE-009).
+  assert.equal(
+    perElementStalenessVerdict(baselines, {
+      unit_id: "u1",
+      lens: "security",
+      pass_id: "p1",
+      task_content_signature: sig,
+    }),
+    "re-derive",
+  );
+});
+
+test("F1 fail-safe: corrupt/undefined element state → re-derive", () => {
+  const coord = {
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: "", // empty signature → seam throws → fail-safe
+  };
+  assert.equal(perElementStalenessVerdict({}, coord), "re-derive");
+
+  // No baseline recorded for a valid coordinate → first compare → re-derive.
+  const sig = buildTaskContentSignature({ goal: "g" });
+  assert.equal(
+    perElementStalenessVerdict(undefined, {
+      unit_id: "u1",
+      lens: "security",
+      pass_id: "p1",
+      source: "base",
+      task_content_signature: sig,
+    }),
+    "re-derive",
+    "no recorded baseline → never a false skip",
+  );
+});
+
+test("F1 metadata-migration fail-safe: old-shape (pre-F1) manifest → ALL present artifacts stale, no throw", () => {
+  const initialBundle = makeBaseBundle();
+  const metadata = computeArtifactMetadata(initialBundle);
+  // Simulate a pre-F1 on-disk manifest: same whole-artifact hashes, but NO
+  // metadata_schema_version (and strip per-element data). The whole-artifact
+  // hashes still MATCH the current artifacts → a naive reader would skip all.
+  const preF1Manifest = {
+    artifacts: Object.fromEntries(
+      Object.entries(metadata.artifacts).map(([name, entry]) => [
+        name,
+        {
+          revision: entry.revision,
+          content_hash: entry.content_hash,
+          dependency_revisions: entry.dependency_revisions,
+        },
+      ]),
+    ),
+  };
+  delete preF1Manifest.metadata_schema_version;
+  assert.equal(isMetadataManifestCurrent(preF1Manifest), false);
+
+  const bundle = { ...initialBundle, artifact_metadata: preF1Manifest };
+  let stale;
+  assert.doesNotThrow(() => {
+    stale = computeStaleArtifacts(bundle);
+  }, "old-shape manifest must degrade, never throw");
+  // Every present DAG artifact is stale (no false-skip off matching hashes).
+  for (const name of ["repo_manifest.json", "file_disposition.json", "unit_manifest.json", "audit-report.md"]) {
+    assert.ok(stale.has(name), `${name} must be all-stale under migration fail-safe`);
+  }
+});
+
+test("F1 metadata-migration fail-safe: strict-decode-mismatch manifest → all-stale, no throw", () => {
+  const initialBundle = makeBaseBundle();
+  // A manifest that would not decode to the F1 shape (garbage entries) but is
+  // present. Absent metadata_schema_version → treated as old-shape → all-stale.
+  const garbageManifest = { artifacts: { "repo_manifest.json": "not-an-entry" } };
+  const bundle = { ...initialBundle, artifact_metadata: garbageManifest };
+  let stale;
+  assert.doesNotThrow(() => {
+    stale = computeStaleArtifacts(bundle);
+  });
+  assert.ok(stale.has("repo_manifest.json"));
+  assert.ok(stale.size > 0, "must degrade to a non-empty stale set");
+});
+
+test("F1 reproducible DAG: persist/reload cycle yields identical stale set + per-element verdicts", () => {
+  const initialBundle = makeBaseBundle();
+  const metadata = computeArtifactMetadata(initialBundle);
+  // Round-trip the manifest through JSON (persist/reload).
+  const reloaded = JSON.parse(JSON.stringify(metadata));
+  assert.equal(reloaded.metadata_schema_version, METADATA_SCHEMA_VERSION);
+
+  const stale1 = computeStaleArtifacts({ ...initialBundle, artifact_metadata: metadata });
+  const stale2 = computeStaleArtifacts({ ...initialBundle, artifact_metadata: reloaded });
+  assert.deepEqual([...stale1].sort(), [...stale2].sort());
+
+  // Per-element verdicts are identical across the reload too.
+  const coord = {
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: buildTaskContentSignature({ goal: "g" }),
+  };
+  const keys = deriveLiveResultKeys(coord);
+  const baselines = recordResultBaseline(undefined, keys);
+  const reloadedBaselines = JSON.parse(JSON.stringify(baselines));
+  assert.equal(
+    perElementStalenessVerdict(baselines, coord),
+    perElementStalenessVerdict(reloadedBaselines, coord),
+  );
+});
+
+test("F1 single-adjacency: ARTIFACT_DEPENDENTS_MAP is the derived inversion of the one canonical table", () => {
+  // Rebuild the inversion independently and assert equality (no second hand-authored list).
+  const rebuilt = {};
+  for (const [artifact, ups] of Object.entries(ARTIFACT_DEPENDS_ON_MAP)) {
+    if (!ups) continue;
+    for (const up of ups) {
+      (rebuilt[up] ??= []).push(artifact);
+    }
+  }
+  const norm = (m) =>
+    Object.fromEntries(
+      Object.entries(m)
+        .map(([k, v]) => [k, [...v].sort()])
+        .sort(([a], [b]) => a.localeCompare(b)),
+    );
+  assert.deepEqual(norm(ARTIFACT_DEPENDENTS_MAP), norm(rebuilt));
 });

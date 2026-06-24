@@ -1,10 +1,12 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
 import {
+  ALL_DAG_ARTIFACTS,
   ARTIFACT_DEPENDENTS_MAP,
   ARTIFACT_DEPENDS_ON_MAP,
 } from "./dependencyMap.js";
 import { present } from "./artifactMetadata.js";
+import { isMetadataManifestCurrent } from "./resultBaseline.js";
 import {
   hashArtifactValue,
   stableStringify,
@@ -27,6 +29,30 @@ const ARTIFACT_DEPENDENCIES_MAP: Partial<Record<string, string[]>> =
 export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
   const stale = new Set<string>();
   const metadata = bundle.artifact_metadata;
+
+  // Metadata-migration fail-safe (CE-007): an old-shape (pre-F1) manifest —
+  // present but absent/older `metadata_schema_version`, or that would not decode
+  // to the F1 shape — must NOT be trusted to skip work off its still-matching
+  // whole-artifact hashes. Degrade to ALL-STALE (every present DAG artifact),
+  // never false-skip and never throw on a shape mismatch. A genuinely-absent
+  // manifest stays "nothing to compare ⇒ nothing stale" (handled below).
+  if (metadata && !isMetadataManifestCurrent(metadata)) {
+    for (const artifactName of ALL_DAG_ARTIFACTS) {
+      if (artifactName === "artifact_metadata.json") continue;
+      if (present(bundle, artifactName)) stale.add(artifactName);
+    }
+    if (stale.size > 0) {
+      process.stderr.write(
+        JSON.stringify({
+          kind: "staleness",
+          stale_artifacts: [...stale].sort(),
+          reason: "metadata_schema_version_migration",
+          ts: new Date().toISOString(),
+        }) + "\n",
+      );
+    }
+    return stale;
+  }
 
   if (metadata) {
     for (const [artifactName, entry] of Object.entries(metadata.artifacts)) {
