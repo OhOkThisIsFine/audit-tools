@@ -20,6 +20,39 @@ const HIGH_COMPLEXITY = 10;
 /** Duplication value (from node_metrics) at/above which a unit is flagged. */
 const DUPLICATION_FLOOR = 1;
 
+/**
+ * CCU-analyzer-merge-helper-seam (risk half).
+ *
+ * Append an analyzer's per-unit risk signals into a risk register, returning a
+ * NEW register (the input is never mutated). This is the single, pre-shipped
+ * seam through which any post-build analyzer risk contribution — git-history
+ * change-hotspot / broad-authorship (F6), and any later F5+ analyzer — re-enters
+ * the register, so contributions can never drift in how they merge.
+ *
+ * Each entry of `signalsByUnit` (keyed by `unit_id`) is unioned into the
+ * matching item's `signals`, deduped and re-sorted for determinism. Signals for
+ * an unknown unit are ignored. `risk_score` is intentionally untouched — these
+ * are informational signals; score weighting stays owned by `buildRiskRegister`.
+ * Degrades to the original register (cloned) when the map is empty.
+ */
+export function mergeAnalyzerRiskSignals(
+  register: RiskRegister,
+  signalsByUnit: Map<string, string[]> | undefined,
+): RiskRegister {
+  const map = signalsByUnit ?? new Map<string, string[]>();
+  return {
+    ...register,
+    items: register.items.map((item) => {
+      const added = map.get(item.unit_id);
+      if (!added || added.length === 0) return { ...item };
+      const merged = [...new Set([...item.signals, ...added])].sort((a, b) =>
+        a.localeCompare(b),
+      );
+      return { ...item, signals: merged };
+    }),
+  };
+}
+
 export function buildRiskRegister(
   unitManifest: UnitManifest,
   criticalFlows?: CriticalFlowManifest,

@@ -355,6 +355,14 @@ export {
   changedFiles,
   fileCommits,
   stagedAndUntracked,
+  mineGitHistory,
+} from "./git.js";
+export type {
+  GitHistory,
+  CoChangePair,
+  ChurnEntry,
+  AuthorshipEntry,
+  MineGitHistoryOptions,
 } from "./git.js";
 
 // Observability
