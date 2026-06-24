@@ -166,6 +166,47 @@ test("mineGitHistory is language-agnostic: churn/authorship for every touched pa
   }
 });
 
+// F6 inv-6: a co-change edge is emitted only above a fixed minimum joint-commit
+// support; confidence is a deterministic function of that support.
+test("F6 inv-6: co-change is gated by min joint-commit support; confidence is a deterministic function of support", async () => {
+  const dir = await makeRepo();
+  try {
+    // a.ts & b.ts share exactly ONE commit (below the default min of 2) →
+    // the pair must be omitted. c.ts & d.ts share TWO commits → emitted.
+    await commit(
+      dir,
+      { "a.ts": "1", "b.ts": "1", "c.ts": "1", "d.ts": "1" },
+      { name: "Author A", email: "a@example.com" },
+    );
+    // Second commit touches c.ts & d.ts together again, but NOT a.ts/b.ts.
+    await commit(
+      dir,
+      { "c.ts": "2", "d.ts": "2" },
+      { name: "Author A", email: "a@example.com" },
+    );
+
+    const history = mineGitHistory(dir);
+    const pairs = new Set(history.co_change.map((p) => `${p.a}|${p.b}`));
+    // Below-threshold pair (1 shared commit) omitted.
+    assert.equal(pairs.has("a.ts|b.ts"), false, "single-commit pair below threshold is omitted");
+    // Above-threshold pair (2 shared commits) emitted with its support count.
+    assert.deepEqual(
+      history.co_change.find((p) => p.a === "c.ts" && p.b === "d.ts"),
+      { a: "c.ts", b: "d.ts", commits: 2 },
+    );
+
+    // Confidence is a deterministic function of support: base + 0.05*(n-1).
+    const edges = gitHistoryGraphEdges(history);
+    const cd = edges.find((e) => e.from === "c.ts" && e.to === "d.ts");
+    assert.ok(cd, "above-threshold pair projects to a graph edge");
+    assert.equal(cd.confidence, 0.45, "confidence for 2 shared commits = 0.4 + 0.05*(2-1)");
+    // The omitted pair never reaches the edge projection.
+    assert.equal(edges.some((e) => e.from === "a.ts" && e.to === "b.ts"), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("mineGitHistoryArtifact drops out-of-scope and excluded paths", async () => {
   const dir = await makeRepo();
   try {
