@@ -1,23 +1,24 @@
-# Doc-review findings — 2026-06-23 (run 4)
+# Doc-review findings — 2026-06-24 (run 5)
 
-Run against main HEAD `4a128be` → pushed to `142a818` after applying 1 commit.
+Run against main HEAD `6178760` → pushed to `28fa490` after applying 2 commits.
 
 ---
 
 ## FYI — auto-applied this run
 
-One commit pushed to main (discrete and revertible):
+Two commits pushed to main (discrete and revertible):
 
 | Commit | Summary |
 |---|---|
-| `142a818` | `tests/audit/fixtures/simple-app/README.md` — replace stale `auditor-lambda` with `audit-code` (package renamed by A12 monorepo collapse) |
+| `628454c` | `docs/HANDOFF.md` — version `0.30.0` → `0.30.3` (three release commits since last HANDOFF update) |
+| `28fa490` | `docs/NEW-MACHINE-SETUP.md` L119 — expected version `0.30.0` → `0.30.3` |
 
 **Carried from previous runs (Ethan-approved, not yet applied — instruction files):**
 CLAUDE-4, CLAUDE-8, CLAUDE-9, CLAUDE-10, AGENTS-1, AGENTS-2 remain open pending Ethan's approval.
 
 **Carried design decisions:** D-1, D-2, D-4 remain open.
 
-**New files added to ledger this run:** `.claude/skills/disambiguate-backlog/SKILL.md`, `.claude/skills/ship/SKILL.md`, `examples/README.md`, `src/audit/README.md`, `src/audit/adapters/README.md`, `templates/AGENTS.remediate-code.md`, `tests/audit/fixtures/simple-app/README.md` (fixed), `tests/remediate/remediation-report.md` — all clean except the fixture README (fixed above).
+**New files added to ledger this run:** `docs/quota-dispatch-design.md`, `docs/quota-claude-credential-resolution.md` — both clean (factual claims verified against code).
 
 ---
 
@@ -38,9 +39,9 @@ CLAUDE-4, CLAUDE-8, CLAUDE-9, CLAUDE-10, AGENTS-1, AGENTS-2 remain open pending 
 
 ### Design decisions for you
 
-- [D-1] `docs/NEW-MACHINE-SETUP.md` L42 — `"git fetch audit-tools slice-2b-wip  # the in-flight branch (see step 5)"` — no step 5 exists (doc has sections 0–4 only); HANDOFF.md says "In flight: nothing"; `slice-2b-wip` branch exists on remote but appears stale. Remove these lines? Or is there active in-flight work that should replace them?
+- [D-1] `docs/NEW-MACHINE-SETUP.md` L42 — `"git fetch audit-tools slice-2b-wip  # the in-flight branch (see step 5)"` — no step 5 exists (doc has sections 0–4 only); HANDOFF.md says "In flight: nothing"; `slice-2b-wip` branch exists on remote but is 479 commits behind main (diverged v0.27.x era). Remove these lines? Or is there active in-flight work that should replace them?
 
-- [D-2] `docs/NEW-MACHINE-SETUP.md` intro box L32 — `"see docs/HANDOFF.md ⚠️ block"` — no ⚠️ block in HANDOFF.md. The box describes a Linux-specific in-flight bug that appears to have shipped in v0.28.11. Should the intro box be updated or removed?
+- [D-2] `docs/NEW-MACHINE-SETUP.md` intro box — `"A Linux new machine is the ideal place to fix the in-flight slice-2b bug — see docs/HANDOFF.md ⚠️ block"` — no ⚠️ block in HANDOFF.md (says "In flight: nothing"). The box describes a Linux-specific in-flight bug; if slice-2b shipped, should this OS note be updated or removed?
 
 - [D-4] `README.audit.md` Key Docs — `docs/history.md` referenced but file doesn't exist (not at `docs/history.md` or `docs/audit-pkg/history.md`). Remove the reference, or create the file?
 <!-- DOC-REVIEW-OPEN:END -->
