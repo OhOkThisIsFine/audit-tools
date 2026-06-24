@@ -21,10 +21,14 @@ or a collection of one-off audit phases.
 
 ## Core principles
 
-1. The auditor is deterministic by default.
-2. The LLM is used only for bounded semantic code review and explicit
-   critical-flow fallback when deterministic inference fails a defined
-   confidence bar.
+1. The auditor uses the right tool for each job — it is **not** "100%
+   deterministic." Where a mechanical/deterministic tool does the job as well as
+   or better than an LLM, it uses the tool; where a bit of non-deterministic LLM
+   judgment strongly improves quality, it uses the LLM (bounded and recorded).
+2. The LLM is used for bounded semantic code review, synthesis, ambiguity
+   resolution, and explicit fallback when deterministic inference fails a defined
+   confidence bar — and any property that *can* be guaranteed mechanically is
+   enforced in tooling rather than left to LLM instruction-following.
 3. The audit is binary: it is either complete or it is not.
 4. The final retained output is deterministic Markdown at `audit-report.md`.
 

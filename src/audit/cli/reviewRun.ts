@@ -1,5 +1,11 @@
 import { join } from "node:path";
-import { isFileMissingError, readJsonFile, writeJsonFile } from "audit-tools/shared";
+import {
+  artifactTreeLockPath,
+  isFileMissingError,
+  readJsonFile,
+  withFileLock,
+  writeJsonFile,
+} from "audit-tools/shared";
 import {
   type ArtifactBundle,
   loadArtifactBundle,
@@ -197,7 +203,9 @@ export async function ensureSemanticReviewRun(params: {
             blocker: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
           });
     const blockedBundle = { ...params.bundle, audit_state: blockedState };
-    await writeCoreArtifacts(params.artifactsDir, blockedBundle);
+    await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
+      writeCoreArtifacts(params.artifactsDir, blockedBundle),
+    );
     await writeHandoffOnly({
       root: params.root,
       artifactsDir: params.artifactsDir,
@@ -220,10 +228,12 @@ export async function ensureSemanticReviewRun(params: {
     executor: "agent",
     blocker: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
   });
-  await writeCoreArtifacts(params.artifactsDir, {
-    ...params.bundle,
-    audit_state: blockedState,
-  });
+  await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
+    writeCoreArtifacts(params.artifactsDir, {
+      ...params.bundle,
+      audit_state: blockedState,
+    }),
+  );
 
   const { activeReviewRun } = await materializeReviewRun(params);
   const blockedBundle = {
@@ -243,6 +253,18 @@ export async function ensureSemanticReviewRun(params: {
 }
 
 export async function persistConfigErrorHandoff(params: {
+  root: string;
+  artifactsDir: string;
+  progressSummary: string;
+}): Promise<void> {
+  // O2: load→modify→persist is one artifact-tree mutation; hold the lock across
+  // the whole RMW so it never interleaves with a concurrent next-step/ingest.
+  await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
+    persistConfigErrorHandoffLocked(params),
+  );
+}
+
+async function persistConfigErrorHandoffLocked(params: {
   root: string;
   artifactsDir: string;
   progressSummary: string;

@@ -29,8 +29,10 @@ import {
   writeCoreArtifacts,
 } from "../io/artifacts.js";
 import {
+  artifactTreeLockPath,
   auditReportPath,
   promotedAuditReportPath,
+  withFileLock,
 } from "audit-tools/shared";
 import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
@@ -541,11 +543,16 @@ export async function executeAndRecord(
     });
     return result;
   } catch (error) {
-    const current = await loadArtifactBundle(params.artifactsDir);
-    const currentState = deriveAuditState(current);
-    currentState.last_executor = decision.selected_executor ?? undefined;
-    currentState.last_obligation = decision.selected_obligation ?? undefined;
-    await writeCoreArtifacts(params.artifactsDir, { ...current, audit_state: currentState });
+    // O2: error-recovery is itself a load→modify→persist artifact-tree mutation
+    // (runAuditStep has already released its lock by the time we reach this
+    // catch), so hold the artifact-tree lock across the whole RMW.
+    await withFileLock(artifactTreeLockPath(params.artifactsDir), async () => {
+      const current = await loadArtifactBundle(params.artifactsDir);
+      const currentState = deriveAuditState(current);
+      currentState.last_executor = decision.selected_executor ?? undefined;
+      currentState.last_obligation = decision.selected_obligation ?? undefined;
+      await writeCoreArtifacts(params.artifactsDir, { ...current, audit_state: currentState });
+    });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
       last_executor: decision.selected_executor,

@@ -32,12 +32,12 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     expect(step.status).toBe("complete");
     expect(step.artifact_paths.final_report).toMatch(/remediation-report\.md$/);
     // The terminal friction close-out is folded in: the record path is surfaced and
-    // the prompt asks the host to record run friction.
+    // the prompt surfaces the single-sourced run-friction triage (events UNION reflections).
     expect(step.artifact_paths.friction_record).toMatch(/friction[\\/].+\.json$/);
     expect(existsSync(step.artifact_paths.friction_record)).toBe(true);
     const prompt = await readFile(step.prompt_path, "utf8");
     expect(prompt).toMatch(/Present Remediation Report/);
-    expect(prompt).toMatch(/Record run friction/);
+    expect(prompt).toMatch(/[Ff]riction triage/);
   });
 
   it("accepts options supplied as a JSON string", async () => {

@@ -75,7 +75,7 @@ export function frictionCapturePath(artifactsDir: string, runId: string): string
 }
 
 /** Reduce a run id to a stable, filename-safe token (OS-agnostic). */
-function sanitizeRunId(runId: string): string {
+export function sanitizeRunId(runId: string): string {
   const cleaned = runId.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   return cleaned.length > 0 ? cleaned : "run";
 }
