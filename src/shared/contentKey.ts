@@ -1,38 +1,64 @@
 /**
- * The shared content-key seam (O2 ↔ F1).
+ * The shared content-key seam (O2 ↔ F1) — the SOLE definition of the workflow's
+ * derived keys (INV-CK-1). O2's append-only results ledger (re-association +
+ * append-time idempotency) and F1's element-staleness gate both import their keys
+ * from HERE, so the two cannot drift.
  *
- * Three pure, deterministic functions — no IO, clock, or randomness. They derive
- * the canonical keys both O2's append-only results ledger (re-association) and
- * F1's element-staleness gate import, so the two cannot drift.
+ * THREE derived keys, one canonical-input derivation chain (OBL-content-key-seam-contract):
  *
- * Keys (see plan-of-record CE-001 / FC-001 / FC-002):
+ *  - `identityKey` (INV-CK-3 / INV-CK-4): sha256 over the canonical
+ *    {unit_id, lens, pass_id} tuple. EXCLUDES task_id and every volatile/provenance
+ *    field (INV-CK-3). It is a ONE-TO-MANY GROUPING key (INV-CK-4 / CE-001) used to
+ *    re-associate ledger records — NEVER a primary key. `{unit_id, lens, pass_id}` is
+ *    not unique within a pass (base vs. deepening/steward, or an O3 re-dispatch), so
+ *    multiple distinct results legitimately share one identityKey.
  *
- *  - `buildTaskContentSignature` (TOOL-OWNED, FC-002): the signature recipe lives
- *    HERE, never in callers. It is derived ONLY from task-defining content and
- *    MUST exclude `task_id` and any timestamp/provenance field — a caller-built
- *    signature is a false-fresh latent bug.
+ *  - `idempotencyKey` (INV-CK-7, signature-STABLE): sha256 over
+ *    {identity_key, result_content_discriminator}. It is the anchor O2 ingests on:
+ *    a replay of the *same* logical result is a no-op (CE-001b / fail-4), because a
+ *    benign edit to the task content (which only moves the task_content_signature)
+ *    does NOT move the idempotencyKey. Two genuinely-different same-coordinate
+ *    results carry distinct discriminators → distinct idempotencyKeys → both persist
+ *    (CE-001). This is signature-STABLE by construction: task_content_signature is
+ *    not one of its inputs.
  *
- *  - `identityKey` (INV-CK-3): sha256 over the canonical {unit_id, lens, pass_id}
- *    tuple. EXCLUDES task_id. It is a ONE-TO-MANY GROUPING key (INV-CK-3b) used to
- *    re-associate ledger records — NEVER a primary key. `{unit_id, lens, pass_id}`
- *    is not unique within a pass (base vs. deepening/steward, or an O3 re-dispatch),
- *    so multiple distinct results legitimately share one identityKey.
+ *  - `contentKey` (INV-CK-5, signature-SENSITIVE): sha256 over
+ *    {idempotency_key, task_content_signature}. It BUMPS when the idempotencyKey OR
+ *    the task_content_signature changes, so it is the correct driver for staleness:
+ *    a benign content edit (idempotencyKey fixed, signature C1→C2) bumps ONLY the
+ *    contentKey (fail-4), letting idempotent re-ingest stay a no-op while staleness
+ *    still fires.
  *
- *  - `contentKey`: sha256 over {identity_key, task_content_signature,
- *    result_content_discriminator}. It BUMPS when task content OR the discriminator
- *    changes, so two genuinely-different results that share {unit_id, lens, pass_id}
- *    get DIFFERENT content_keys (CE-001). This is the idempotency key the ledger
- *    appends on.
+ *  - `newInstanceId`: a per-record unique id (INV-CK / CE-001). The ledger is keyed
+ *    by this — every appended record is distinct — so identityKey/idempotencyKey are
+ *    grouping/idempotency keys, never primary keys (fail-2). This is the ONLY
+ *    non-pure helper here (it mints randomness); the three key derivations above are
+ *    pure and deterministic (INV-CK-2).
  *
- * Relating invariant (C-006): contentKey is a pure function of (identity_key,
- * task_content_signature, result_content_discriminator). Since identity_key is one
- * of those inputs, equal contentKey ⟹ equal identityKey. One canonical input
- * yields both keys with this documented relation — re-association stability and
- * staleness-on-change are reconciled, not in tension.
+ * Tool-owned inputs (never caller discretion):
+ *  - `buildTaskContentSignature` (FC-002 / fail-1): the signature recipe lives HERE.
+ *    Derived ONLY from task-defining content; `task_id` and timestamp/provenance
+ *    fields are STRIPPED — a caller-built signature is a false-fresh latent bug.
+ *  - `buildResultContentDiscriminator` (C-002 / fail-3): the discriminator recipe
+ *    lives HERE too, keyed off the emit-source enum (base | deepening | steward |
+ *    redispatch). Because the discriminator feeds the signature-STABLE
+ *    idempotencyKey, a caller-chosen discriminator is a correctness hazard (a wrongly
+ *    identical one collapses two distinct results; a wrongly distinct one on a replay
+ *    mints a duplicate). The recipe is owned, never operator-chosen.
+ *
+ * Relating invariant (INV-CK-6, OBL-content-key-seam-inv-7/inv-8):
+ *   equal contentKey ⟹ equal idempotencyKey ⟹ equal identityKey
+ * (NOT the converses), and `idempotencyKey` is invariant under a change to
+ * `task_content_signature` alone. The chain holds because each key nests the prior
+ * one as a signed input: contentKey signs idempotency_key, which signs identity_key.
+ * One canonical input thus yields all three keys with this documented relation —
+ * re-association stability (idempotencyKey) and staleness-on-change (contentKey) are
+ * reconciled, not in tension.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { stableStringify } from "./stableStringify.js";
+import { normalizeForMetadataHash } from "../audit/orchestrator/artifactFreshness.js";
 
 /** Coordinate that groups results: {unit_id, lens, pass_id}. */
 export interface IdentityKeyInput {
@@ -51,38 +77,66 @@ export interface TaskContentSignatureInput {
   task_id?: unknown;
 }
 
-export interface ContentKeyInput extends IdentityKeyInput {
-  task_content_signature: string;
+/**
+ * The closed set of emit paths a result can originate from. The discriminator
+ * recipe is keyed off this enum (C-002) — callers pick the source, never the
+ * discriminator string.
+ */
+export type ResultEmitSource = 'base' | 'deepening' | 'steward' | 'redispatch';
+
+/** Inputs to `buildResultContentDiscriminator`. */
+export interface ResultContentDiscriminatorInput {
+  source: ResultEmitSource;
+  /**
+   * Required for (and ONLY meaningful for) `source: 'redispatch'`: the 1-based
+   * attempt counter that distinguishes an O3 re-dispatch from the result it
+   * replaces (R2 advisory). A re-dispatch carries a distinct discriminator so its
+   * idempotencyKey differs from the prior attempt.
+   */
+  attempt?: number;
+}
+
+/** Inputs to `idempotencyKey`: the identity coordinate + the result discriminator. */
+export interface IdempotencyKeyInput extends IdentityKeyInput {
   result_content_discriminator: string;
 }
 
+/** Inputs to `contentKey`: everything `idempotencyKey` needs + the task signature. */
+export interface ContentKeyInput extends IdempotencyKeyInput {
+  task_content_signature: string;
+}
+
 function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
+  return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
 // Provenance / non-content fields stripped before signing. Renumbering a task,
-// or restamping it, must not change the task-content signature (FC-002).
+// or restamping it, must not change the task-content signature (FC-002). The
+// artifact name routes through the shared normalizeForMetadataHash so the same
+// non-semantic-stripping discipline is reused (INV-CK-2), never re-implemented.
+const TASK_SIGNATURE_ARTIFACT = 'task_content_signature';
 const NON_CONTENT_SIGNATURE_FIELDS: ReadonlySet<string> = new Set([
-  "task_id",
-  "generated_at",
-  "created_at",
-  "updated_at",
-  "timestamp",
-  "provenance",
+  'task_id',
+  'generated_at',
+  'created_at',
+  'updated_at',
+  'timestamp',
+  'provenance',
 ]);
 
 /**
- * TOOL-OWNED task-content signature (FC-002). Derives a stable signature from the
- * task-defining content ONLY — `task_id` and timestamp/provenance fields are
- * stripped, and the remaining fields are serialized with the single canonical
- * `stableStringify`, so reordered keys produce an identical signature.
+ * TOOL-OWNED task-content signature (FC-002 / fail-1). Derives a stable signature
+ * from the task-defining content ONLY — `task_id` and timestamp/provenance fields
+ * are stripped, then the remaining fields are run through the shared
+ * `normalizeForMetadataHash` + canonical `stableStringify` (the single serializer,
+ * INV-CK-2), so reordered keys produce an identical signature.
  */
 export function buildTaskContentSignature(
   input: TaskContentSignatureInput,
 ): string {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error(
-      "buildTaskContentSignature: input must be a plain object of task-defining content",
+      'buildTaskContentSignature: input must be a plain object of task-defining content',
     );
   }
   const content = Object.fromEntries(
@@ -90,13 +144,44 @@ export function buildTaskContentSignature(
       ([key]) => !NON_CONTENT_SIGNATURE_FIELDS.has(key),
     ),
   );
-  return sha256(stableStringify(content));
+  return sha256(
+    stableStringify(normalizeForMetadataHash(TASK_SIGNATURE_ARTIFACT, content)),
+  );
+}
+
+/**
+ * TOOL-OWNED result-content discriminator (C-002 / fail-3). The discriminator
+ * string is derived from the emit-source enum (plus the attempt counter for a
+ * re-dispatch), never chosen by a caller — because it feeds the signature-STABLE
+ * idempotencyKey, an operator-chosen value would be a correctness hazard.
+ */
+export function buildResultContentDiscriminator(
+  input: ResultContentDiscriminatorInput,
+): string {
+  const source = input?.source;
+  if (source === 'base' || source === 'deepening' || source === 'steward') {
+    return source;
+  }
+  if (source === 'redispatch') {
+    const attempt = input.attempt;
+    if (!Number.isInteger(attempt) || (attempt as number) < 1) {
+      // Without a distinct attempt counter two re-dispatches would collide
+      // (fail-3) — refuse rather than mint a colliding discriminator.
+      throw new Error(
+        "buildResultContentDiscriminator: source 'redispatch' requires an integer attempt >= 1",
+      );
+    }
+    return `redispatch-attempt-${attempt}`;
+  }
+  throw new Error(
+    `buildResultContentDiscriminator: unknown emit source ${JSON.stringify(source)}`,
+  );
 }
 
 function requireField(value: unknown, name: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    // No silent colliding key (content-key-seam-fail-3): a missing component
-    // would otherwise hash to the same key for distinct coordinates.
+  if (typeof value !== 'string' || value.length === 0) {
+    // No silent colliding key (fail-3): a missing component would otherwise hash
+    // to the same key for distinct coordinates.
     throw new Error(
       `contentKey: ${name} is required and must be a non-empty string`,
     );
@@ -106,36 +191,56 @@ function requireField(value: unknown, name: string): string {
 
 /**
  * sha256 over the canonical {unit_id, lens, pass_id} tuple (INV-CK-3). EXCLUDES
- * task_id. ONE-TO-MANY grouping key (INV-CK-3b) — never a primary key. Throws if
- * any component is missing (content-key-seam-fail-3).
+ * task_id and all volatile fields. ONE-TO-MANY grouping key (INV-CK-4) — never a
+ * primary key. Throws if any component is missing (fail-3).
  */
 export function identityKey(input: IdentityKeyInput): string {
-  const unit_id = requireField(input?.unit_id, "unit_id");
-  const lens = requireField(input?.lens, "lens");
-  const pass_id = requireField(input?.pass_id, "pass_id");
+  const unit_id = requireField(input?.unit_id, 'unit_id');
+  const lens = requireField(input?.lens, 'lens');
+  const pass_id = requireField(input?.pass_id, 'pass_id');
   return sha256(stableStringify({ unit_id, lens, pass_id }));
 }
 
 /**
- * sha256 over {identity_key, task_content_signature, result_content_discriminator}.
- * Bumps when task content OR the discriminator changes (CE-001). equal contentKey
- * ⟹ equal identityKey, since identity_key is one of the signed inputs.
+ * sha256 over {identity_key, result_content_discriminator} (INV-CK-7). SIGNATURE-
+ * STABLE: the task_content_signature is deliberately NOT an input, so a benign
+ * content edit does not move it (fail-4). This is the key O2 ingests on. equal
+ * idempotencyKey ⟹ equal identityKey, since identity_key is a signed input.
  */
-export function contentKey(input: ContentKeyInput): string {
+export function idempotencyKey(input: IdempotencyKeyInput): string {
   const identity_key = identityKey(input);
-  const task_content_signature = requireField(
-    input?.task_content_signature,
-    "task_content_signature",
-  );
   const result_content_discriminator = requireField(
     input?.result_content_discriminator,
-    "result_content_discriminator",
+    'result_content_discriminator',
   );
   return sha256(
-    stableStringify({
-      identity_key,
-      task_content_signature,
-      result_content_discriminator,
-    }),
+    stableStringify({ identity_key, result_content_discriminator }),
   );
+}
+
+/**
+ * sha256 over {idempotency_key, task_content_signature} (INV-CK-5). SIGNATURE-
+ * SENSITIVE: bumps when the idempotencyKey OR the task_content_signature changes,
+ * so it drives staleness (CE-001 / inv-5). equal contentKey ⟹ equal idempotencyKey
+ * ⟹ equal identityKey, since each is a signed input of the next.
+ */
+export function contentKey(input: ContentKeyInput): string {
+  const idempotency_key = idempotencyKey(input);
+  const task_content_signature = requireField(
+    input?.task_content_signature,
+    'task_content_signature',
+  );
+  return sha256(
+    stableStringify({ idempotency_key, task_content_signature }),
+  );
+}
+
+/**
+ * Mint a fresh per-record instance id (CE-001 / fail-2). The ledger keys on this,
+ * so every appended record is distinct and identityKey/idempotencyKey are never
+ * primary keys. This is the ONLY non-deterministic helper in the seam — the three
+ * key derivations above are pure.
+ */
+export function newInstanceId(): string {
+  return randomUUID();
 }
