@@ -15,8 +15,10 @@ import {
   CODEX_DESKTOP_ACTIVE_SUBAGENT_LIMIT,
   createBrokeredRepairDispatch,
   classifyCapableHost,
+  computeDispatchCapacity,
   estimateSlotTokens,
   type BrokeredDispatchSlot,
+  type CapacityPool,
   type QuotaStateEntry,
 } from "audit-tools/shared";
 
@@ -536,6 +538,91 @@ describe("createBrokeredRepairDispatch — broker()", () => {
     });
     expect(decision.cooldownUntil).toBe(future);
     expect(decision.bindingCap).toBe("cooldown");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F4 inv-1 (CP-NODE-39) — single chokepoint, no over-dispatch.
+//
+// EVERY dispatch path sizes concurrency through the SAME shared scheduler:
+//  - the wave/repair path: createBrokeredRepairDispatch().broker() -> scheduleWave
+//  - the rolling engine path: computeDispatchCapacity (what reroutePackets calls)
+//    -> schedulePool -> scheduleWave
+// Both must clamp a request of N slots to the host concurrency cap (< N) and
+// attribute the SAME binding_cap, so no path can over-dispatch past
+// max_concurrent.
+// ---------------------------------------------------------------------------
+
+describe("F4 inv-1 — single chokepoint clamps N>cap to the host cap", () => {
+  const HOST_CAP = 3;
+  const N = 8; // requested slots, deliberately greater than the cap
+  const hostLimit = {
+    active_subagents: HOST_CAP,
+    source: "session_config" as const,
+  };
+
+  it("repair entry (broker) returns admitted < N with binding_cap=host_concurrency", () => {
+    const broker = createBrokeredRepairDispatch();
+    const decision = broker.broker({
+      providerName: "claude-code",
+      sessionConfig: {},
+      hostModel: null,
+      // Small, equal payloads so the host cap (not the over-budget gate) binds.
+      slots: Array.from({ length: N }, (_, i) => slot(`n${i}`, 500)),
+      hostConcurrencyLimit: hostLimit as any,
+    });
+    expect(decision.admission).toBe("admitted");
+    expect(decision.admitted).toBeLessThan(N);
+    expect(decision.admitted).toBe(HOST_CAP);
+    expect(decision.schedule.max_concurrent).toBe(HOST_CAP);
+    expect(decision.bindingCap).toBe("host_concurrency");
+  });
+
+  it("rolling-engine entry (computeDispatchCapacity) routes the SAME cap", () => {
+    const pool: CapacityPool = {
+      id: "claude-code/*",
+      providerName: "claude-code",
+      hostModel: null,
+      hostConcurrencyLimit: hostLimit,
+    };
+    const capacity = computeDispatchCapacity({
+      pools: [pool],
+      sessionConfig: {},
+      // N pending items, each cheap — the host cap must bind the wave, not tokens.
+      pendingItemTokens: Array.from({ length: N }, () => 500),
+    });
+    expect(capacity.total_slots).toBeLessThan(N);
+    expect(capacity.total_slots).toBe(HOST_CAP);
+    expect(capacity.primary.schedule.max_concurrent).toBe(HOST_CAP);
+    expect(capacity.binding_cap).toBe("host_concurrency");
+  });
+
+  it("both entries agree on the same max_concurrent (one scheduling authority)", () => {
+    const broker = createBrokeredRepairDispatch();
+    const decision = broker.broker({
+      providerName: "claude-code",
+      sessionConfig: {},
+      hostModel: null,
+      slots: Array.from({ length: N }, (_, i) => slot(`n${i}`, 500)),
+      hostConcurrencyLimit: hostLimit as any,
+    });
+    const capacity = computeDispatchCapacity({
+      pools: [
+        {
+          id: "claude-code/*",
+          providerName: "claude-code",
+          hostModel: null,
+          hostConcurrencyLimit: hostLimit,
+        },
+      ],
+      sessionConfig: {},
+      pendingItemTokens: Array.from({ length: N }, () => 500),
+    });
+    // Identical cap from both dispatch paths ⟹ a single scheduling chokepoint.
+    expect(decision.schedule.max_concurrent).toBe(
+      capacity.primary.schedule.max_concurrent,
+    );
+    expect(decision.bindingCap).toBe(capacity.binding_cap);
   });
 });
 
