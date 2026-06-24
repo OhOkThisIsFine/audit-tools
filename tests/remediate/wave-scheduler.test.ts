@@ -13,6 +13,10 @@ import {
 } from "../../src/remediate/quota/index.js";
 import {
   CODEX_DESKTOP_ACTIVE_SUBAGENT_LIMIT,
+  createBrokeredRepairDispatch,
+  classifyCapableHost,
+  estimateSlotTokens,
+  type BrokeredDispatchSlot,
   type QuotaStateEntry,
 } from "audit-tools/shared";
 
@@ -427,6 +431,121 @@ describe("scheduleWave — host capability handshake (N8)", () => {
     // floor; reporting the real window sizes the budget up to it.
     expect(floor.resolved_limits.context_tokens).toBe(32_000);
     expect(discovered.resolved_limits.context_tokens).toBe(200_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F4 BrokeredRepairDispatch seam (CP-NODE-38) — single gated chokepoint.
+// ---------------------------------------------------------------------------
+
+function slot(slotId: string, payloadBytes: number): BrokeredDispatchSlot {
+  return { slotId, payloadBytes };
+}
+
+describe("estimateSlotTokens (deterministic-local)", () => {
+  it("is byte-derived plus a fixed prompt overhead and never an API call", () => {
+    const a = estimateSlotTokens(slot("a", 4000));
+    const b = estimateSlotTokens(slot("a", 4000));
+    expect(a).toBe(b); // deterministic
+    // 4000 bytes / 4 = 1000 tokens + 900 overhead
+    expect(a).toBe(1900);
+  });
+
+  it("zero bytes estimates to just the prompt overhead", () => {
+    expect(estimateSlotTokens(slot("z", 0))).toBe(900);
+  });
+});
+
+describe("classifyCapableHost (off the cold-start floor)", () => {
+  it("a first-contact host with no signal is NOT capable", () => {
+    expect(
+      classifyCapableHost({ sessionConfig: {}, hostConcurrencyLimit: null, quotaStateEntry: null }),
+    ).toBe(false);
+  });
+
+  it("a host reporting a ceiling above the floor IS capable", () => {
+    expect(
+      classifyCapableHost({
+        sessionConfig: {},
+        hostConcurrencyLimit: { active_subagents: 8, source: "session_config" } as any,
+        quotaStateEntry: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("a host reporting a ceiling at/below the floor is NOT capable", () => {
+    expect(
+      classifyCapableHost({
+        sessionConfig: { quota: { first_contact_concurrency: 3 } } as any,
+        hostConcurrencyLimit: { active_subagents: 3, source: "session_config" } as any,
+        quotaStateEntry: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("learned evidence above the floor lifts the host off it", () => {
+    const entry = makeQuotaStateEntry({
+      buckets: { "6": { weight: 5, last_success_at: "2026-01-01T00:00:00.000Z" } } as any,
+    });
+    expect(
+      classifyCapableHost({ sessionConfig: {}, hostConcurrencyLimit: null, quotaStateEntry: entry }),
+    ).toBe(true);
+  });
+});
+
+describe("createBrokeredRepairDispatch — broker()", () => {
+  const broker = createBrokeredRepairDispatch();
+
+  it("admits a sized wave under the host concurrency ceiling", () => {
+    const decision = broker.broker({
+      providerName: "claude-code",
+      sessionConfig: {},
+      hostModel: null,
+      slots: [slot("n1", 1000), slot("n2", 1000), slot("n3", 1000)],
+      hostConcurrencyLimit: { active_subagents: 2, source: "session_config" } as any,
+    });
+    expect(decision.admission).toBe("admitted");
+    expect(decision.admitted).toBe(2);
+    expect(decision.admittedSlotIds).toEqual(["n1", "n2"]);
+    expect(decision.capableHost).toBe(false);
+    expect(decision.estimatedWaveTokens).toBeGreaterThan(0);
+  });
+
+  it("refuses over-budget when even the top slot exceeds the usable window", () => {
+    // Conservative 32k floor → usable budget ~ (32000-4096)*0.7 ≈ 19532 tokens.
+    // A ~30MB payload estimates far above that, so the single slot is refused.
+    const decision = broker.broker({
+      providerName: "claude-code",
+      sessionConfig: {},
+      hostModel: null,
+      slots: [slot("huge", 30_000_000)],
+    });
+    expect(decision.admission).toBe("refused_over_budget");
+    expect(decision.admitted).toBe(0);
+    expect(decision.admittedSlotIds).toEqual([]);
+  });
+
+  it("surfaces a persisted cooldown_until from the quota state entry", () => {
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const decision = broker.broker({
+      providerName: "openai-compatible",
+      sessionConfig: { quota: { enabled: true } } as any,
+      hostModel: null,
+      slots: [slot("n1", 500)],
+      quotaStateEntry: makeQuotaStateEntry({ cooldown_until: future }),
+    });
+    expect(decision.cooldownUntil).toBe(future);
+    expect(decision.bindingCap).toBe("cooldown");
+  });
+});
+
+describe("createBrokeredRepairDispatch — awaitNextCompletion()", () => {
+  it("passes the raw worker result straight through (no validation)", () => {
+    const broker = createBrokeredRepairDispatch();
+    const raw = { id: "n1", arbitrary: { nested: true }, missing_required: undefined };
+    const out = broker.awaitNextCompletion({ slotId: "n1", rawResult: raw });
+    expect(out.slotId).toBe("n1");
+    expect(out.rawResult).toBe(raw); // identity — untouched
   });
 });
 
