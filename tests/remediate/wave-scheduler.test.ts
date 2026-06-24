@@ -456,6 +456,42 @@ describe("estimateSlotTokens (deterministic-local)", () => {
   it("zero bytes estimates to just the prompt overhead", () => {
     expect(estimateSlotTokens(slot("z", 0))).toBe(900);
   });
+
+  // F4 inv-2: the broker's per-wave token budget derives SOLELY from
+  // estimateTokensFromBytes (BYTES_PER_TOKEN=4) + fixed prompt overhead — a
+  // deterministic local arithmetic, never a network token-counting call. Feed
+  // known byte sizes and assert the exact, reproducible estimatedWaveTokens with
+  // no provider I/O: any global fetch/HTTP touch fails the test.
+  it("broker estimatedWaveTokens is exact, reproducible, and performs no network I/O", () => {
+    const fetchSpy = vi.fn(() => {
+      throw new Error("network token-count attempted — inv-2 violated");
+    });
+    const prevFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = fetchSpy;
+    try {
+      const broker = createBrokeredRepairDispatch();
+      const slots = [slot("n1", 4000), slot("n2", 8000), slot("n3", 2000)];
+      // Per slot: ceil(bytes/4) + 900 overhead → n1=1900, n2=2900, n3=1400.
+      // Host ceiling caps the wave at 2 slots; the budget fitter admits them in
+      // input order (n1, n2) → estimatedWaveTokens = 1900 + 2900 = 4800.
+      const expected = 1900 + 2900;
+      const run = () =>
+        broker.broker({
+          providerName: "claude-code",
+          sessionConfig: {},
+          hostModel: null,
+          slots,
+          hostConcurrencyLimit: { active_subagents: 2, source: "session_config" } as any,
+        });
+      const a = run();
+      const b = run();
+      expect(a.estimatedWaveTokens).toBe(expected);
+      expect(b.estimatedWaveTokens).toBe(a.estimatedWaveTokens); // reproducible
+      expect(fetchSpy).not.toHaveBeenCalled(); // zero provider I/O
+    } finally {
+      (globalThis as any).fetch = prevFetch;
+    }
+  });
 });
 
 describe("classifyCapableHost (off the cold-start floor)", () => {
