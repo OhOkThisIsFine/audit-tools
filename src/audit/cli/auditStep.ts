@@ -80,25 +80,29 @@ export async function runAuditStep(options: {
     ? await readJsonFile<unknown>(options.auditResultsPath)
     : undefined;
   if (auditResults !== undefined) {
-    // Drop results whose task_id is no longer in the active manifest — e.g.
-    // selective-deepening tasks pruned by a later re-plan, whose orphaned answers
-    // would otherwise abort the whole batch at the validation gate below and
-    // strand every valid result. They cannot be ingested (coverage is keyed by
-    // the active task set), so skip-and-warn instead of throwing; results for
-    // KNOWN tasks with real errors still abort. The filtered array is what flows
-    // to advanceAudit, so orphans are neither validated nor ingested.
+    // Partition results whose task_id is no longer in the active manifest — e.g.
+    // selective-deepening tasks pruned by a later re-plan. Only the RETAINED
+    // (task-known) subset is validated below: an orphan cannot be validated
+    // against a task that no longer exists, and would otherwise abort the whole
+    // batch at the validation gate and strand every valid result. But O2's
+    // RETAIN-UNASSIGNED invariant means an orphan is NEVER pruned from the
+    // ledger — so the FULL set (retained + orphaned) still flows to advanceAudit,
+    // where the append-only ledger keeps the orphan, just un-associated.
     const partition = partitionOrphanedAuditResults(
       auditResults,
       new Set((bundle.audit_tasks ?? []).map((task) => task.task_id)),
     );
+    const resultsToValidate =
+      partition && partition.orphanedTaskIds.length > 0
+        ? partition.retained
+        : auditResults;
     if (partition && partition.orphanedTaskIds.length > 0) {
       process.stderr.write(
-        `audit-results ingestion: skipped ${partition.orphanedTaskIds.length} result(s) whose task_id ` +
-          `is not in the active manifest (orphaned by re-planning): ${partition.orphanedTaskIds.join(", ")}\n`,
+        `audit-results ingestion: ${partition.orphanedTaskIds.length} result(s) whose task_id ` +
+          `is not in the active manifest (orphaned by re-planning) retained in the ledger but skipped at the validation gate: ${partition.orphanedTaskIds.join(", ")}\n`,
       );
-      auditResults = partition.retained;
     }
-    const issues = validateAuditResults(auditResults, bundle.audit_tasks ?? [], {
+    const issues = validateAuditResults(resultsToValidate, bundle.audit_tasks ?? [], {
       lineIndex,
     });
     const errors = issues.filter((issue) => issue.severity === "error");

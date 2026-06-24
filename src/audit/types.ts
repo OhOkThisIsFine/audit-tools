@@ -227,5 +227,13 @@ export const AuditResultSchema = z.object({
   verification: AuditVerificationSchema.optional(),
   run_id: z.string().optional(),
   submitted_at: z.string().optional(),
+  // Ledger keys (O2). Stamped by the tool at ingest from the shared content-key
+  // seam (src/shared/contentKey.ts) — never authored by a worker. `instance_id`
+  // is the per-record primary key (the append-only ledger keys on this);
+  // `identity_key` is the one-to-many grouping key for re-association;
+  // `idempotency_key` is the logical-identity anchor a replay is a no-op on.
+  instance_id: z.string().optional(),
+  identity_key: z.string().optional(),
+  idempotency_key: z.string().optional(),
 });
 export type AuditResult = z.infer<typeof AuditResultSchema>;
