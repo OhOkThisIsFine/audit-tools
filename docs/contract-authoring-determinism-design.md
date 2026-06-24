@@ -11,9 +11,12 @@ Invert it: the tool owns structure, IDs, cross-references, derivation, and valid
 authors only the irreducible *judgment* content, in small pre-scaffolded, write-validated slots.**
 
 Determinism owns *structure*; the model owns *meaning*. Every strategy below is an application of
-this inversion. It is the same principle the codebase already commits to — *"Deterministic by
-default; LLM only for judgment"* — applied to the pipeline's **own** artifact authoring, which is
-currently the biggest violation of it.
+this inversion. It is the same principle the codebase already commits to — *use the mechanical tool
+where it does the job as well as or better than the LLM, and reserve the LLM for the irreducible
+judgment* (the project is **not** "100% deterministic"; see CLAUDE.md *"Right tool, not deterministic
+dogma"*) — applied to the pipeline's **own** artifact authoring, which is currently the biggest
+violation of it: structure/IDs/cross-refs/derivation are exactly the work a mechanical tool does
+better, so the LLM should never be authoring them.
 
 Why this is the right axis for "manageable by both weak and strong models": a model's failure
 surface today is "produce a large, schema-conforming, internally-consistent JSON artifact from
