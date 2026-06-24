@@ -447,6 +447,25 @@ export {
   recordFrictionDisposition,
 } from "./friction/triage.js";
 
+// O3 emit-validate-repair seam: the single-sourced cheapest-first monotonic
+// repair pipeline (deterministic coercion -> bounded errors-only LLM patch ->
+// re-dispatch), one canonical validator re-run after each stage. Everything-
+// agnostic: contract id, validator, coercion, and patcher are all caller-supplied.
+export type {
+  RepairValidationError,
+  RepairValidationResult,
+  RepairCoercion,
+  RepairCoercionResult,
+  RepairPatcher,
+  RepairContract,
+  RepairStatus,
+  RepairStage,
+  RepairRedispatch,
+  RepairOutcome,
+  RunEmitValidateRepairOptions,
+} from "./repair/index.js";
+export { runEmitValidateRepair } from "./repair/index.js";
+
 // IO: install/ensure-time .gitignore management for artifacts emitted into a
 // consuming repo's tree — always-ignore build/install assets + friction sidecar;
 // visibility-conditional ignore of deliverables + meta-audit reflections.
