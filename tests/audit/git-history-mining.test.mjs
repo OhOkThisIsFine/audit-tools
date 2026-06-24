@@ -117,6 +117,55 @@ test("mineGitHistory is deterministic and sorted (co_change/churn/authorship)", 
   }
 });
 
+test("mineGitHistory is language-agnostic: churn/authorship for every touched path regardless of extension", async () => {
+  // F6 inv-2: co-change/churn/authorship derive only from commit-to-path
+  // association — identical behavior regardless of file language/ecosystem.
+  const dir = await makeRepo();
+  try {
+    // Mixed extensions plus an extensionless path. None is gated by language.
+    const paths = ["mod.py", "lib.ts", "core.rs", "Makefile"];
+    const seed = Object.fromEntries(paths.map((p) => [p, "1"]));
+    await commit(dir, seed, { name: "Author A", email: "a@example.com" });
+    const bump = Object.fromEntries(paths.map((p) => [p, "2"]));
+    await commit(dir, bump, { name: "Author B", email: "b@example.com" });
+
+    const history = mineGitHistory(dir);
+
+    // Every touched path appears in churn (2 commits each), no language gating.
+    // Order is collation-dependent, so compare as a path→count map.
+    assert.deepEqual(
+      Object.fromEntries(history.churn.map((c) => [c.path, c.commits])),
+      { "mod.py": 2, "lib.ts": 2, "core.rs": 2, Makefile: 2 },
+      "churn covers every extension and the extensionless path equally",
+    );
+    // Every touched path appears in authorship (2 distinct authors each).
+    assert.deepEqual(
+      Object.fromEntries(history.authorship.map((a) => [a.path, a.authors])),
+      { "mod.py": 2, "lib.ts": 2, "core.rs": 2, Makefile: 2 },
+      "authorship covers every extension and the extensionless path equally",
+    );
+    // Co-change pairs span across languages too (all 6 pairs, 2 commits each).
+    assert.deepEqual(
+      new Set(history.co_change.map((c) => `${c.a}|${c.b}`)),
+      new Set([
+        "Makefile|core.rs",
+        "Makefile|lib.ts",
+        "Makefile|mod.py",
+        "core.rs|lib.ts",
+        "core.rs|mod.py",
+        "lib.ts|mod.py",
+      ]),
+      "co-change pairs cross language boundaries with no gating",
+    );
+    assert.ok(
+      history.co_change.every((c) => c.commits === 2),
+      "every cross-language pair counted across both commits",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("mineGitHistoryArtifact drops out-of-scope and excluded paths", async () => {
   const dir = await makeRepo();
   try {
