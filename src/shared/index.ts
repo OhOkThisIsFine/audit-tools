@@ -404,7 +404,17 @@ export {
   frictionCapturePath,
   frictionCaptured,
   persistFrictionCapture,
+  sanitizeRunId,
 } from "./io/frictionCapture.js";
+
+// The single mechanical-friction sink (FC-005): no-op-safe, best-effort,
+// per-event de-duped append wrapping the frictionCapture.ts substrate. O3/O2
+// mechanical seams call this with a stable distinct event id.
+export type {
+  FrictionEvent,
+  CapturedFrictionItem,
+} from "./friction/captureFrictionEvent.js";
+export { captureFrictionEvent } from "./friction/captureFrictionEvent.js";
 
 // IO: install/ensure-time .gitignore management for artifacts emitted into a
 // consuming repo's tree — always-ignore build/install assets + friction sidecar;
