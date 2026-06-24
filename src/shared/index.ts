@@ -423,6 +423,29 @@ export type {
 } from "./friction/captureFrictionEvent.js";
 export { captureFrictionEvent } from "./friction/captureFrictionEvent.js";
 
+// O1 end-of-run friction TRIAGE: single-sourced triage step shape, disposition
+// vocabulary (keep|discard|annotate), blocking semantics, and the close-out
+// decider for BOTH orchestrators. Drops false-green; satisfaction = mechanical
+// events UNION surfaced agent-feedback reflections; friction appends ride O2's
+// withFileLock.
+export type {
+  FrictionDisposition,
+  FrictionDispositionRecord,
+  TriageSubject,
+  FrictionTriageDecision,
+  TriagedFrictionArtifact,
+} from "./friction/triage.js";
+export {
+  FRICTION_DISPOSITIONS,
+  isFrictionDisposition,
+  reflectionKey,
+  frictionLockPath,
+  collectTriageSubjects,
+  decideFrictionTriage,
+  appendFrictionUnderLock,
+  recordFrictionDisposition,
+} from "./friction/triage.js";
+
 // IO: install/ensure-time .gitignore management for artifacts emitted into a
 // consuming repo's tree — always-ignore build/install assets + friction sidecar;
 // visibility-conditional ignore of deliverables + meta-audit reflections.

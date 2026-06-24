@@ -1,8 +1,7 @@
 import { findFirstActionableObligation } from "audit-tools/shared";
 import {
-  frictionCaptured,
-  persistFrictionCapture,
-  frictionCapturePath,
+  decideFrictionTriage,
+  type FrictionTriageDecision,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditObligation, AuditState } from "../types/auditState.js";
@@ -98,50 +97,20 @@ export function decideNextStep(bundle: ArtifactBundle): NextStepDecision {
   };
 }
 
-/** The terminal friction-capture close-out decision for the audit half. */
-export interface AuditFrictionCloseoutDecision {
-  /**
-   * "capture" → the close-out must fire this pass (a friction step is emitted and a
-   * degrade-clean record persisted). "captured" → already recorded for this run_id;
-   * the close-out is satisfied and the run proceeds to its complete/present terminal.
-   */
-  action: "capture" | "captured";
-  /** The run_id-keyed friction record path (always set, for the handoff pointer). */
-  recordPath: string;
-}
-
 /**
- * Resolve (and, on first fire, satisfy) the terminal friction-capture close-out for
- * the audit half. This is the audit analog of remediate-code's friction gate in
- * `handleComplete`:
- *
- *  - DETERMINISTIC: keyed only off the on-disk record at `(artifactsDir, runId)` via
- *    the SINGLE shared helper — never host discretion or a bundle flag.
- *  - DEGRADE-CLEANLY: on first fire it persists a zero-friction record up front, so
- *    the close-out is immediately satisfiable and can NEVER block completion.
- *  - NEVER RE-LOOP: once a record exists, returns "captured" and the run proceeds —
- *    the close-out fires at most once per run.
- *  - PARITY: identical shape + persist helper to the remediate side (single-sourced
- *    in `audit-tools/shared`), so the two halves cannot drift.
- *  - NEVER couples to any repo's backlog doc — the record lives under the run's own
- *    artifacts dir.
- *
- * Returns "capture" the first time (the host should be prompted to optionally enrich
- * the persisted record), "captured" thereafter.
+ * The terminal friction-TRIAGE close-out for the audit half. Thin delegation to the
+ * single-sourced `decideFrictionTriage` (`audit-tools/shared`) so the triage shape,
+ * disposition vocabulary, blocking semantics, and close-out logic cannot drift from
+ * the remediate half. Drops the former false-green (an empty up-front record no
+ * longer satisfies): the close-out blocks ("dispose") until every captured
+ * mechanical event AND every surfaced agent-feedback reflection carries a
+ * disposition; an empty set (zero events AND zero reflections) is trivially
+ * "disposed". Keyed only off `(artifactsDir, runId)`; never coupled to any repo's
+ * backlog doc.
  */
 export async function decideAuditFrictionCloseout(
   artifactsDir: string,
   runId: string,
-): Promise<AuditFrictionCloseoutDecision> {
-  const recordPath = frictionCapturePath(artifactsDir, runId);
-  if (await frictionCaptured(artifactsDir, runId)) {
-    return { action: "captured", recordPath };
-  }
-  await persistFrictionCapture({
-    artifactsDir,
-    runId,
-    tool: "audit-code",
-    frictions: [],
-  });
-  return { action: "capture", recordPath };
+): Promise<FrictionTriageDecision> {
+  return decideFrictionTriage(artifactsDir, runId, "audit-code");
 }
