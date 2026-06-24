@@ -181,6 +181,40 @@ test("mineGitHistoryArtifact drops out-of-scope and excluded paths", async () =>
   }
 });
 
+// F6 inv-5: co-change edges are path-scoped to known graph nodes — a pair with
+// one endpoint outside the manifest (out-of-tree / excluded / vendored) is
+// dropped entirely, while a fully in-scope pair survives.
+test("F6 inv-5: co-change pair with an unknown endpoint is dropped, in-scope pair survives", async () => {
+  const dir = await makeRepo();
+  try {
+    // in.ts + also.ts co-change (both in scope); in.ts + vendor.ts co-change
+    // (vendor.ts not in manifest → that edge must be dropped).
+    await commit(
+      dir,
+      { "in.ts": "1", "also.ts": "1", "vendor.ts": "1" },
+      { name: "Author A", email: "a@example.com" },
+    );
+    await commit(
+      dir,
+      { "in.ts": "2", "also.ts": "2", "vendor.ts": "2" },
+      { name: "Author A", email: "a@example.com" },
+    );
+    const history = mineGitHistoryArtifact(dir, manifest(["in.ts", "also.ts"]));
+    // Only the fully in-scope pair survives; every pair touching vendor.ts dropped.
+    assert.deepEqual(history.co_change, [
+      { a: "also.ts", b: "in.ts", commits: 2 },
+    ]);
+    // churn/authorship likewise scoped — no vendor.ts row.
+    assert.equal(history.churn.some((e) => e.path === "vendor.ts"), false);
+    assert.equal(
+      history.authorship.some((e) => e.path === "vendor.ts"),
+      false,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("gitHistoryGraphEdges projects co-change to undirected edges (empty → empty)", () => {
   assert.deepEqual(gitHistoryGraphEdges({ co_change: [], churn: [], authorship: [] }), []);
   const edges = gitHistoryGraphEdges({
