@@ -264,17 +264,24 @@ export { hashContent } from "./hash.js";
 // Single canonical deterministic serializer (INV-CK-2) — the ONE stableStringify.
 export { stableStringify } from "./stableStringify.js";
 
-// Content-key seam (O2 ↔ F1): tool-owned task-content signature + grouping
-// identityKey + content-discriminating contentKey. See src/shared/contentKey.ts.
+// Content-key seam (O2 ↔ F1): tool-owned task-content signature + discriminator,
+// grouping identityKey, signature-stable idempotencyKey, signature-sensitive
+// contentKey, per-record instance id. See src/shared/contentKey.ts.
 export type {
   IdentityKeyInput,
   TaskContentSignatureInput,
+  ResultEmitSource,
+  ResultContentDiscriminatorInput,
+  IdempotencyKeyInput,
   ContentKeyInput,
 } from "./contentKey.js";
 export {
   buildTaskContentSignature,
+  buildResultContentDiscriminator,
   identityKey,
+  idempotencyKey,
   contentKey,
+  newInstanceId,
 } from "./contentKey.js";
 
 // Diff-based re-review (B2/B3): generic projection serialization, leaf-level
