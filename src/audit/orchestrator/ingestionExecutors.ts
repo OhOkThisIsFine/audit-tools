@@ -13,6 +13,7 @@ import {
   ingestAuditResults,
   updateAuditTaskStatuses,
 } from "./resultIngestion.js";
+import { appendResultsToLedger } from "./ledger.js";
 import {
   buildAuditPlanMetrics,
   sizeIndexFromManifest,
@@ -134,7 +135,10 @@ export function runResultIngestionExecutor(
         bundle.runtime_validation_report,
       )
     : bundle.runtime_validation_report;
-  const mergedResults = [...(bundle.audit_results ?? []), ...results];
+  // Append-only, instance-keyed, IDEMPOTENT on idempotency_key (O2): a replay of
+  // an already-ingested logical result is a no-op; distinct results sharing a
+  // coordinate (base vs. deepening/steward) both persist. Never a naive concat.
+  const mergedResults = appendResultsToLedger(bundle.audit_results, results);
   const completedAuditTasks = updateAuditTaskStatuses(
     bundle.audit_tasks,
     mergedResults,
