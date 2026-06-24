@@ -800,6 +800,45 @@ test("scheduleWave reports binding_cap='host_concurrency' when the host limit bi
   assert.equal(schedule.binding_cap, "host_concurrency");
 });
 
+test("F4 inv-3: a capable host resolved via resolveHostActiveSubagentLimit is OFF the first_contact floor; an unknown host is ON it", () => {
+  // Capable host: F4's own handshake (resolveHostActiveSubagentLimit, NOT F3's
+  // descriptor) yields a reported active-subagent ceiling. That host gets
+  // agent-host concurrency and must NOT be clamped to the cold-start
+  // first_contact floor.
+  const capableLimit = resolveHostActiveSubagentLimit({
+    sessionConfig: { quota: { host_active_subagent_limit: 8 } },
+    env: {},
+  });
+  assert.notEqual(capableLimit, null);
+  const capable = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: { quota: {} },
+    hostModel: null,
+    requestedConcurrency: 96,
+    quotaStateEntry: null,
+    hostConcurrencyLimit: capableLimit,
+  });
+  assert.equal(capable.max_concurrent, 8);
+  assert.notEqual(capable.binding_cap, "first_contact");
+
+  // Unknown host: no handshake signal at all → resolveHostActiveSubagentLimit
+  // returns null and the conservative first_contact floor binds.
+  const unknownLimit = resolveHostActiveSubagentLimit({
+    sessionConfig: { quota: {} },
+    env: {},
+  });
+  assert.equal(unknownLimit, null);
+  const unknown = scheduleWave({
+    providerName: "local-subprocess",
+    sessionConfig: {},
+    hostModel: null,
+    requestedConcurrency: 96,
+    quotaStateEntry: null,
+    hostConcurrencyLimit: unknownLimit,
+  });
+  assert.equal(unknown.binding_cap, "first_contact");
+});
+
 test("scheduleWave reports binding_cap='none' when nothing reduces the requested wave", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
