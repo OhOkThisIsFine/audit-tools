@@ -11,6 +11,30 @@ Docs drift; an agent that *remembers* to re-check them is a latent failure mode
 re-check into tooling: every night, against the live codebase, with three
 independent agents gating every change.
 
+## The rubric source: the documentation philosophy
+
+Every judgement in this routine measures against
+[`documentation-philosophy.md`](documentation-philosophy.md) — the canonical statement of
+what this repo's docs are for and how they're shaped (durable concepts not current state;
+one home per concept; status-noise forbidden; the condensation bias). That doc is the
+*what*; this file is the *how* (the three-agent gate, dispositions, pipeline). Load the
+philosophy at the start of every run; when it and these mechanics ever conflict, the
+philosophy wins and this file is the thing to fix.
+
+## Two perspectives — review the items AND the doc set
+
+The routine reviews on **two distinct perspectives every run** (the philosophy demands both):
+
+1. **Within a document** — do the items inside it fit the philosophy (durable concept, not
+   status-noise) and are they factually true against code? This is the item-level pass below.
+2. **Across the document set** — is each *document itself* in line with the philosophy, and
+   **can/should the corpus be condensed**? Overlap between docs, a doc that should fold into
+   another, a doc whose reason-to-exist has lapsed, a thin doc that belongs as a section
+   elsewhere. This is the corpus-level pass ("Doc-set condensation review" below).
+
+Perspective 1 can auto-apply narrow factual fixes; perspective 2 is **always a
+design-decision → escalate** (never merge, retire, or split a doc autonomously).
+
 ## Trust model — three agents earn the autonomy
 
 A single agent editing docs is itself an untrusted host. Autonomy is earned by a
@@ -66,6 +90,26 @@ auto-applied. Two smells force the question (do not silently "fix" either):
   type + reason-to-exist, fold into an existing canonical doc, or delete."* Never leave it
   unrouted and silently maintained.
 
+## Doc-set condensation review — the corpus as a whole (perspective 2)
+
+Once per run, after the per-doc work, step back and review the **whole document set** against
+the philosophy's *condensation bias* — fewer, denser, timeless docs beat many thin or
+overlapping ones. This is a corpus-level pass, not a per-item one, and every outcome is a
+**design-decision → escalate** (the routine never merges, folds, retires, or splits a doc on
+its own). Hunt for:
+
+- **Overlap / duplication** — two docs stating the same concept (a fact in two homes will
+  drift). Propose: pick the most-durable home, fold the other in, leave a pointer not a copy.
+- **Fold candidates** — a doc whose content is really a *section* of another (e.g. a single
+  provider's credential mechanics belongs in the per-provider matrix, not its own file).
+- **Lapsed reason-to-exist** — the work shipped, the concept moved into code/policy, or it was
+  always current-state. Propose retire.
+- **Bloat** — a concept doc grown into a changelog/log; propose trim to the durable core.
+- **Split** — rare; only when one doc carries two genuinely-unrelated durable concepts.
+
+Each proposal quotes the docs involved and names the target home; Ethan makes the merge/retire
+call. Surface these in the findings file under a **"Doc-set condensation"** heading.
+
 ## Scope — every doc, routed by type
 
 All `*.md` under the repo, **recursively**, except the exclusions. Each doc gets
@@ -73,7 +117,7 @@ the check for its type:
 
 | Type | Files | Check | Auto-apply? |
 |---|---|---|---|
-| **design / concept** | `docs/audit-workflow-design.md`, `docs/remediation-workflow-design.md`, `docs/contract-authoring-determinism-design.md`, `docs/backlog-remediation-design.md`, `docs/quota-dispatch-design.md`, `docs/cross-provider-quota-matrix.md`, `docs/glossary-ids.md`, `docs/host-validation.md` | Claims vs code (drift); flag current-state / changelog creep (docs are timeless concepts, not status). | factual-stale → yes |
+| **design / concept** | `docs/documentation-philosophy.md`, `docs/audit-workflow-design.md`, `docs/remediation-workflow-design.md`, `docs/contract-authoring-determinism-design.md`, `docs/backlog-remediation-design.md`, `docs/quota-dispatch-design.md`, `docs/cross-provider-quota-matrix.md`, `docs/glossary-ids.md`, `docs/host-validation.md` | Claims vs code (drift); flag current-state / changelog creep (docs are timeless concepts, not status). | factual-stale → yes |
 | **instruction / policy** | `CLAUDE.md`, `AGENTS.md`, `AGENTS.audit.md`, `AGENTS.remediate.md` | Factual claims only (file/command/path staleness). Policy & conventions untouchable. | **No — escalate-only.** Highest blast radius: a wrong edit deletes a guardrail governing all agents. |
 | **ops / usage** | `README.md`, `README.audit.md`, `README.remediate.md` | Do the documented commands / paths still resolve and run. | factual-stale → yes |
 | **package docs (audit)** | `docs/audit-pkg/product.md`, `docs/audit-pkg/contracts.md`, `docs/audit-pkg/development.md`, `docs/audit-pkg/operator-guide.md`, `docs/audit-pkg/release.md` | Claims vs code/spec (these page the normative `spec/audit/*`); flag current-state / changelog creep. | factual-stale → yes |
@@ -114,11 +158,15 @@ timeless doc are exactly the status-noise we flag).
 
 ## Pipeline (one nightly run)
 
+0. Load [`documentation-philosophy.md`](documentation-philosophy.md) — the rubric source
+   every disposition measures against.
 1. On the `doc-review` branch, `git fetch` `main`; check out `main`'s HEAD content
    to review against. Load the ledger.
-2. **Reviewer** over every in-scope item: read `diff lastChecked..HEAD` for
-   scope, full code on demand. Emit per-item `{ disposition, edit?, question?,
-   a2b_draft?, evidence }`. Stamp ledger for examined items.
+2. **Reviewer** over every in-scope item (perspective 1, within-doc): read
+   `diff lastChecked..HEAD` for scope, full code on demand. Emit per-item
+   `{ disposition, edit?, question?, a2b_draft?, evidence }`. Stamp ledger for
+   examined items. Also run the **per-doc existence-review** and the
+   **doc-set condensation review** (perspective 2) — emit those as escalations.
 3. **Adversary** independently over every item: `agree | refute` + evidence.
 4. Agree → stands. Contested → **Judge** → final disposition + apply/escalate
    (default-escalate).
@@ -171,6 +219,8 @@ conversation. Keep the FYI ("what I auto-applied") outside the block.
 - [id] CLAUDE.md — <one line> — proposed: <diff or change>
 ### Design decisions for you
 - [id] <doc> — <the question, with verbatim quote where relevant>
+### Doc-set condensation
+- [id] <docs involved> — <merge / fold / retire / trim proposal + target home>
 <!-- DOC-REVIEW-OPEN:END -->
 ```
 
