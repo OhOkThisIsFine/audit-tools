@@ -155,6 +155,39 @@ test("F3: a clean emit passes through with status 'clean' and no LLM touch", asy
   assert.equal(patcherCalls, 0, "no LLM patch for a clean payload");
 });
 
+test("F3 inv-4: an advertised constraint mode + conforming payload validates with zero repair stages", async () => {
+  // inv-4: when a backend advertises a constraint mode (json_schema_constrained /
+  // forced_tool_call), a conforming payload is enforced at emit and validates with
+  // ZERO runEmitValidateRepair stages — only the initial 'validate', never coerce
+  // / llm_patch / redispatch — and no LLM touch.
+  for (const mode of ["json_schema_constrained", "forced_tool_call"]) {
+    let patcherCalls = 0;
+    const result = await enforceSchemaAtEmit({
+      contractId: "audit_results",
+      schema: WorkerAuditResultsSchema,
+      payload: validWorkerResults(),
+      provider: { outputConstraint: { mode, reason: "advertised" } },
+      broker: createBrokeredRepairDispatch(),
+      brokerContext,
+      artifactsDir,
+      runId: `run-inv4-${mode}`,
+      tool: "audit-code",
+      patcher: async (p) => {
+        patcherCalls += 1;
+        return p;
+      },
+    });
+    assert.equal(result.mode, mode, `emit reports the advertised mode (${mode})`);
+    assert.equal(result.repair.status, "clean", `${mode}: conforming payload is clean`);
+    assert.deepEqual(
+      result.repair.stages_applied,
+      ["validate"],
+      `${mode}: zero repair stages — only the initial validate`,
+    );
+    assert.equal(patcherCalls, 0, `${mode}: no LLM touch on a conforming payload`);
+  }
+});
+
 test("F3: capability 'none' + invalid payload degrades via O3, patch routed through the broker", async () => {
   let patcherCalls = 0;
   const result = await enforceSchemaAtEmit({
