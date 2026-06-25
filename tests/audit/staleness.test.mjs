@@ -1265,3 +1265,54 @@ test("F1 fail-8 [CP-NODE-19 r2]: provenance (wall-clock/run-id) never leaks into
     "run-id-bearing provenance stamp must not leak into a narrative element's per-element hash",
   );
 });
+
+test("F1 inv-9 [CP-NODE-10 r2]: git_history.json co-registered in dependencyMap.ts AND dependency-map.md", async () => {
+  // F1 inv-9 atomic co-commit guard (CCU-git-history-registration, CE-001): F1's
+  // dep-map-registration half and F6's git_history.json writer+declaration half
+  // are ONE scheduler-enforced co-commit unit — neither may land independently.
+  // Distinct angle from inv-7 (the exact upstream SET) and inv-6 (literal .md⟺TS
+  // parity of that set): this pins the BOTH-SIDES PRESENCE of the registration
+  // itself. If a future change registers git_history.json in only one of the two
+  // sources (TS table OR the .md declarative reference), the atomicity is broken
+  // and this fails — the two halves cannot drift apart.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+
+  // (a) Side 1 — the canonical TS adjacency table keys git_history.json.
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(
+      ARTIFACT_DEPENDS_ON_MAP,
+      "git_history.json",
+    ),
+    "git_history.json MUST be registered as a key in ARTIFACT_DEPENDS_ON_MAP (dependencyMap.ts)",
+  );
+  assert.ok(
+    Array.isArray(ARTIFACT_DEPENDS_ON_MAP["git_history.json"]) &&
+      ARTIFACT_DEPENDS_ON_MAP["git_history.json"].length > 0,
+    "git_history.json's TS registration must carry its upstream edge set, not an empty stub",
+  );
+
+  // (b) Side 2 — the declarative reference (.md) carries git_history.json as a
+  // backticked artifact token. Parse for the literal `git_history.json` bullet so
+  // a prose mention alone does not satisfy the guard.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const mdPath = join(here, "../../spec/audit/dependency-map.md");
+  const md = readFileSync(mdPath, "utf8");
+  const mdHasGitHistory = md
+    .split(/\r?\n/)
+    .some((line) => /`git_history\.json`/.test(line));
+  assert.ok(
+    mdHasGitHistory,
+    "git_history.json MUST be registered in spec/audit/dependency-map.md (co-commit with the TS table)",
+  );
+
+  // (c) Atomicity: BOTH sides present together — the co-commit unit landed whole.
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(
+      ARTIFACT_DEPENDS_ON_MAP,
+      "git_history.json",
+    ) && mdHasGitHistory,
+    "F1+F6 co-commit unit requires git_history.json in BOTH dependencyMap.ts and dependency-map.md — neither half may land alone",
+  );
+});
