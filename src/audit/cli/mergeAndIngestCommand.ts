@@ -210,8 +210,9 @@ async function scanTaskResults(
 
       try {
         const raw = await readFile(filePath, "utf8");
-        // Preferred files overwrite incidental entries set in the same pass;
-        // within incidentals, first alphabetical match wins (original behavior).
+        // Both passes use overwrite=false: preferred files insert first so
+        // incidental files cannot claim the same task_id; within each pass,
+        // first alphabetical match wins.
         addCandidates(raw, false);
       } catch { /* not parseable — skip */ }
 
@@ -310,6 +311,22 @@ async function validateAndCollectResults(
         resultErrors.push(
           `Result file is assigned to '${task.task_id}' but contains task_id '${taskId}'.`,
         );
+      }
+    }
+    // Lens backfill: if AuditResult.lens is a non-empty string, propagate it to
+    // any finding where lens is absent or empty. This repairs auditor output that
+    // correctly sets the top-level lens but omits it on individual findings — which
+    // would otherwise trigger REQUIRED_FINDING_FIELDS validation errors. If
+    // AuditResult.lens is itself absent/empty, pass through so validation rejects it.
+    if (record && typeof record.lens === "string" && record.lens.trim() !== "" &&
+        Array.isArray(record.findings)) {
+      for (const finding of record.findings) {
+        if (finding && typeof finding === "object" && !Array.isArray(finding)) {
+          const f = finding as Record<string, unknown>;
+          if (typeof f.lens !== "string" || f.lens.trim() === "") {
+            f.lens = record.lens;
+          }
+        }
       }
     }
     const issues = validateAuditResults(
