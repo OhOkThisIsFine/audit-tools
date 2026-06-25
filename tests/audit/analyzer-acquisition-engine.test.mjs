@@ -392,6 +392,56 @@ test("F5 inv-8: F5 analyzer risk signals union into the register through the sha
   assert.deepEqual(register.items[0].signals, ["change_hotspot"], "input register not mutated");
 });
 
+test("F5 inv-5 [CP-NODE-62]: no probed runners => every candidate degrades to skipped/not_resolved, zero edges (runtime-discovered)", () => {
+  // inv-5: ecosystem detection + runner selection are RUNTIME-discovered — there
+  // is no baked-in language->tool or OS->runner table; the capability probe
+  // (`--version`) is the sole authority on what can run on THIS machine. Simulate
+  // a machine where NO runner is installed: every `--version` probe fails. Each
+  // in-scope (detected, admitted) candidate must then degrade through the
+  // run-safety gate to `not_resolved`; a consent-denied candidate degrades to
+  // `skipped` — but NOTHING is silently dropped, NO tool is spawned, and ZERO
+  // edges/results reach the shared merge seam.
+  let toolSpawned = false;
+  const noRunnerInstalled = (argv) => {
+    if (argv.includes('--version')) {
+      // Every runner is absent regardless of which one a candidate selected.
+      return { status: 127, stdout: '', stderr: 'command not found', argv, duration_ms: 1, error: new Error('ENOENT') };
+    }
+    toolSpawned = true; // must never be reached
+    return { status: 0, stdout: findingPayload, stderr: '', argv, duration_ms: 1 };
+  };
+
+  // Candidates spanning multiple ecosystems/runners — none has a baked-in
+  // privilege; all are subject to the same runtime probe.
+  const candidates = [
+    candidate({ id: 'eslint', runner: 'npx', defaultRun: true, detect: () => true }),
+    candidate({ id: 'ruff', runner: 'pipx', defaultRun: true, detect: () => true }),
+    candidate({ id: 'clippy', runner: 'cargo', defaultRun: true, detect: () => true }),
+    candidate({ id: 'rubocop', runner: 'bundle', defaultRun: false, detect: () => true }), // no token => skipped
+  ];
+
+  const { results, statuses } = runAcquisitionEngine(candidates, '/root', { run: noRunnerInstalled });
+
+  assert.equal(toolSpawned, false, 'no tool may be spawned when no runner probes successfully');
+  // One status per in-scope candidate — none silently dropped.
+  assert.equal(statuses.length, candidates.length, 'exactly one status per candidate (report-skipped-never-silently)');
+  assert.deepEqual(statuses.map((s) => s.tool).sort(), ['clippy', 'eslint', 'rubocop', 'ruff']);
+  // The three default candidates fail the runtime capability probe => not_resolved.
+  for (const id of ['eslint', 'ruff', 'clippy']) {
+    const s = statuses.find((x) => x.tool === id);
+    assert.equal(s.status, 'not_resolved', `${id} must degrade to not_resolved when its runner is absent`);
+    assert.match(s.error, /not available/);
+  }
+  // The non-default candidate without a consent token is skipped before any probe.
+  assert.equal(statuses.find((x) => x.tool === 'rubocop').status, 'skipped');
+  // Zero results AND zero edges reach the merge seam.
+  assert.equal(results.length, 0, 'no candidate contributes results when no runner is discovered');
+  assert.ok(
+    results.every((r) => !r.graph_edges || r.graph_edges.length === 0),
+    'no graph_edges survive when no runner is discovered',
+  );
+});
+
 test("detectNodeEcosystem: deterministic marker-file detection", async () => {
   const root = await mkdtemp(join(tmpdir(), "f5-detect-"));
   try {
