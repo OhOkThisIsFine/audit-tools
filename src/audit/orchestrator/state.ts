@@ -1,3 +1,4 @@
+import { AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type {
   AuditObligation,
@@ -306,7 +307,7 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
       "synthesis_current",
       staleOrSatisfied(
         staleArtifacts,
-        ["audit-report.md"],
+        [AUDIT_REPORT_FILENAME],
         has(bundle.audit_report),
       ),
     ),
