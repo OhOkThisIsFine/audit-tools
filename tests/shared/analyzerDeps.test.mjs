@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -393,5 +393,48 @@ test("resolveAnalyzerDep logs absent when not found", async () => {
     } finally {
       console.error = origError;
     }
+  });
+});
+
+// F5 fail-10 (OBL-f5-analyzer-acquisition-engine-fail-10): a version-keyed cache
+// WRITE failure (disk full / permission denied) degrades to absent for that tool
+// — installToCache returns ok:false without throwing, never spawns the installer
+// after the write fails, and never touches the audited project tree. The write
+// failure is induced cross-platform by making the cache root's parent a regular
+// FILE, so the engine's mkdirSync(installDir, …) raises a filesystem error
+// (ENOTDIR/EEXIST) exactly as a disk/permission failure would.
+test("F5 fail-10: a cache-write failure degrades to ok:false, never throws, never spawns, never touches the project tree", async () => {
+  await withTempDir(async (base) => {
+    // A regular file occupies the path where the cache root must be a directory:
+    // mkdirSync(<file>/typescript@5.8.0, {recursive}) fails (the parent is a file).
+    const blocker = join(base, "blocker");
+    await writeFile(blocker, "not a directory", "utf8");
+    const cacheRoot = blocker; // writing under a file → deterministic FS error
+
+    // The audited project tree — must remain untouched by a cache-side failure.
+    const projectRoot = join(base, "audited-project");
+    await mkdir(projectRoot, { recursive: true });
+
+    let spawned = 0;
+    const run = () => {
+      spawned += 1;
+      return { status: 0, stdout: "", stderr: "", argv: [] };
+    };
+
+    // Must not throw — the whole point of fail-10 is graceful degradation.
+    const result = installToCache("typescript@5.8.0", { cacheRoot, run, log: () => {} });
+
+    assert.equal(result.ok, false, "cache-write failure must degrade to ok:false");
+    assert.ok(result.error && result.error.length > 0, "a failure reason must be recorded");
+    assert.equal(spawned, 0, "the installer must never spawn once the cache write fails");
+
+    // The audited project tree is never written into — no node_modules appears.
+    assert.equal(
+      existsSync(join(projectRoot, "node_modules")),
+      false,
+      "a cache-write failure must never touch the audited project tree",
+    );
+    // The blocker file is untouched (the engine never clobbered it to force a dir).
+    assert.equal(existsSync(blocker), true, "the engine must not destroy existing paths");
   });
 });
