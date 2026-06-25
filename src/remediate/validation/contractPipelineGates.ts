@@ -972,4 +972,4 @@ export function deriveNodeModelTierFromNode(nodePayload: unknown): DispatchModel
 // `detectStaleArtifacts`, consumed in `buildNextContractPipelineStep`) ALREADY
 // re-derives exactly the genuinely-affected downstream artifacts after a repair, so
 // this function had no correct caller. Verified via the S2/S4 dogfood (2026-06-15);
-// see `docs/contract-authoring-determinism-design.md` S2. Do not re-add it.
+// see `spec/contract-authoring-determinism-design.md` S2. Do not re-add it.

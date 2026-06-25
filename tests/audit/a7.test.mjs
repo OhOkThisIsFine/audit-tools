@@ -19,7 +19,7 @@
  *
  * Plus a GATED Codex headless live-dispatch e2e (skips cleanly unless
  * RUN_CODEX_E2E=1), mirroring the NIM e2e gate — the things CI cannot reach
- * (Antigravity / OpenCode GUI dispatch) live in docs/host-validation.md.
+ * (Antigravity / OpenCode GUI dispatch) live in spec/host-validation.md.
  */
 
 import test from "node:test";
@@ -33,7 +33,7 @@ import {
   INSTALL_HOST_ORDER,
   INSTALL_HOST_DEFINITIONS,
   verifyHostsIsolated,
-} from "../../audit-code-wrapper-install-hosts.mjs";
+} from "../../wrapper/audit-code-wrapper-install-hosts.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -193,7 +193,7 @@ test(
     // production provider routing; this gate only guarantees it is exercised when
     // a Codex backend is actually present.
     const { verifyHostsIsolated: verify } = await import(
-      "../../audit-code-wrapper-install-hosts.mjs"
+      "../../wrapper/audit-code-wrapper-install-hosts.mjs"
     );
     const report = await verify({ keepArtifacts: true });
     try {

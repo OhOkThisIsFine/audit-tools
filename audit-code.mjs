@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { runAuditCodeWrapper } from "./audit-code-wrapper-lib.mjs";
+import { runAuditCodeWrapper } from "./wrapper/audit-code-wrapper-lib.mjs";
 
 try {
   await runAuditCodeWrapper({

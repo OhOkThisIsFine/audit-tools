@@ -21,7 +21,7 @@ import {
   buildPendingAuditTasks,
 } from "./dispatch.js";
 import { addFileLineCountHints } from "./lineIndex.js";
-import { isCanonicalResultFilename, getArtifactsDir, getFlag } from "./args.js";
+import { artifactNameForId, isCanonicalResultFilename, getArtifactsDir, getFlag } from "./args.js";
 import { buildWorkerResult } from "./workerResult.js";
 import { PACKET_SCHEMA_FILENAMES } from "../io/runArtifacts.js";
 
@@ -159,11 +159,18 @@ async function checkIdempotencyReplay(
  * task_id from files that are NOT in the expected result-path set for this
  * round. Also tracks spurious (non-canonical) filenames for warning output.
  *
+ * `preferredResultPaths` — canonical inline-result files derived from the
+ * dispatch plan's packet_ids. When a task_id appears in BOTH a preferred file
+ * and an incidental packet file, the preferred file wins regardless of
+ * alphabetical sort order. This prevents a packet that incidentally covers a
+ * task_id from shadowing the authoritative result for that task.
+ *
  * Returns both the fallback map and the list of spurious filenames.
  */
 async function scanTaskResults(
   taskResultsDir: string,
   expectedPaths: Set<string>,
+  preferredResultPaths: Set<string>,
 ): Promise<{ fallbackByTaskId: Map<string, unknown>; spuriousFiles: string[] }> {
   let files: string[];
   try {
@@ -172,42 +179,50 @@ async function scanTaskResults(
     files = [];
   }
 
+  // Two-pass scan: preferred files (derived from this round's packet_ids) first,
+  // then all other non-expected files. A task_id claimed by a preferred file is
+  // never overwritten by an incidental file from a different packet.
   const fallbackByTaskId = new Map<string, unknown>();
   const spuriousFiles: string[] = [];
 
-  for (const filename of files) {
-    // Schema pointer files (audit_result/finding/audit_task .schema.json) are
-    // copied into task-results/ by prepare-dispatch for optional worker
-    // self-validation; they are expected, not stray.
-    if (PACKET_SCHEMA_FILENAME_SET.has(filename)) continue;
-    const filePath = resolve(join(taskResultsDir, filename));
-    if (expectedPaths.has(filePath)) continue;
-
-    // Not part of this round's plan. Still read it so a current task can be
-    // recovered by task_id (e.g. a subagent wrote a valid result under a
-    // non-assigned name, or wrote an inline AuditResult[] array to a packet
-    // result file). Expand top-level arrays element-by-element so a worker
-    // that emits an AuditResult[] payload can be recovered by task_id (INV-01).
-    try {
-      const raw = await readFile(filePath, "utf8");
-      const parsed = JSON.parse(raw);
-      const candidates: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
-      for (const item of candidates) {
-        if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-        const tid = typeof (item as Record<string, unknown>).task_id === "string"
-          ? String((item as Record<string, unknown>).task_id) : undefined;
-        if (tid && !fallbackByTaskId.has(tid)) {
-          fallbackByTaskId.set(tid, item);
-        }
+  const addCandidates = (raw: string, overwrite: boolean) => {
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch { return; }
+    const candidates: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+    for (const item of candidates) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const tid = typeof (item as Record<string, unknown>).task_id === "string"
+        ? String((item as Record<string, unknown>).task_id) : undefined;
+      if (tid && (overwrite || !fallbackByTaskId.has(tid))) {
+        fallbackByTaskId.set(tid, item);
       }
-    } catch { /* not parseable — skip */ }
+    }
+  };
 
-    // Only genuinely stray files are "spurious". Canonical per-task result files
-    // (<stem>_<digest>.json) left by prior deepening rounds in the same
-    // task-results/ dir are legitimate and must not inflate the count or bury
-    // the real stray-file signal (3 -> 191 over a run before this fix).
-    if (!isCanonicalResultFilename(filename)) {
-      spuriousFiles.push(filename);
+  for (const pass of [true, false] as const) {
+    // pass=true → preferred files; pass=false → incidental files
+    for (const filename of files) {
+      if (PACKET_SCHEMA_FILENAME_SET.has(filename)) continue;
+      const filePath = resolve(join(taskResultsDir, filename));
+      if (expectedPaths.has(filePath)) continue;
+      const isPreferred = preferredResultPaths.has(filePath);
+      if (isPreferred !== pass) continue;
+
+      try {
+        const raw = await readFile(filePath, "utf8");
+        // Both passes use overwrite=false: preferred files insert first so
+        // incidental files cannot claim the same task_id; within each pass,
+        // first alphabetical match wins.
+        addCandidates(raw, false);
+      } catch { /* not parseable — skip */ }
+
+      // Only genuinely stray files are "spurious". Canonical per-task result files
+      // (<stem>_<digest>.json) left by prior deepening rounds in the same
+      // task-results/ dir are legitimate and must not inflate the count or bury
+      // the real stray-file signal (3 -> 191 over a run before this fix).
+      if (!isCanonicalResultFilename(filename)) {
+        spuriousFiles.push(filename);
+      }
     }
   }
 
@@ -368,6 +383,22 @@ export async function validateAndCollectResults(
         );
       }
     }
+    // Lens backfill: if AuditResult.lens is a non-empty string, propagate it to
+    // any finding where lens is absent or empty. This repairs auditor output that
+    // correctly sets the top-level lens but omits it on individual findings — which
+    // would otherwise trigger REQUIRED_FINDING_FIELDS validation errors. If
+    // AuditResult.lens is itself absent/empty, pass through so validation rejects it.
+    if (record && typeof record.lens === "string" && record.lens.trim() !== "" &&
+        Array.isArray(record.findings)) {
+      for (const finding of record.findings) {
+        if (finding && typeof finding === "object" && !Array.isArray(finding)) {
+          const f = finding as Record<string, unknown>;
+          if (typeof f.lens !== "string" || f.lens.trim() === "") {
+            f.lens = record.lens;
+          }
+        }
+      }
+    }
     const issues = validateAuditResults(
       [obj],
       [task],
@@ -506,9 +537,17 @@ export async function mergeAndIngest(params: {
   const expectedPaths = new Set(
     resultMap.entries.map((entry) => resolve(entry.result_path)),
   );
+  // Canonical inline-result paths derived from each packet's packet_id. A host
+  // that writes an AuditResult[] array to the packet inline-result file instead
+  // of the per-task file lands here; these are authoritative for their packet's
+  // tasks and must win over incidental same-task_id mentions in other files.
+  const preferredResultPaths = new Set(
+    [...new Set(resultMap.entries.map(e => e.packet_id))]
+      .map(packetId => resolve(join(taskResultsDir, artifactNameForId(packetId, "inline-result.json")))),
+  );
 
   // Phase 2: scan task-results/ to build the fallback-by-task_id recovery table.
-  const { fallbackByTaskId, spuriousFiles } = await scanTaskResults(taskResultsDir, expectedPaths);
+  const { fallbackByTaskId, spuriousFiles } = await scanTaskResults(taskResultsDir, expectedPaths, preferredResultPaths);
 
   // Collapse stray-file warnings into a single stderr line so the real summary
   // (emitted as the sole stdout JSON payload) is never buried under a wall of

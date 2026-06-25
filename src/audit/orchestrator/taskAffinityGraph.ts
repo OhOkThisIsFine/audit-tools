@@ -10,7 +10,7 @@ import type { GraphBundle, GraphEdge } from "audit-tools/shared";
 // persisted, provider-neutral planning artifact. It encodes no model, packet,
 // tier, or concurrency decision. At dispatch time a provider partitions this
 // graph into packets just-in-time, under its own model's context + risk-mass
-// ceilings (see docs/audit-workflow-design.md).
+// ceilings (see spec/audit-workflow-design.md).
 //
 // Reuses the language-neutral edge contract shape (from/to/kind/weight/reason)
 // and is kept DISTINCT from graph_bundle.json (which is code structure, not

@@ -9,7 +9,7 @@ import {
   _getInstallHostKeys as getInstallHostKeys,
   _getInstallProfile as getInstallProfile,
   _renderGeminiCommandToml as renderGeminiCommandToml,
-} from "../../audit-code-wrapper-lib.mjs";
+} from "../../wrapper/audit-code-wrapper-lib.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -144,7 +144,7 @@ test("renderAntigravityAssets text does not reference removed MCP tools (INV-aud
   // asset that instructs the host agent to call them silently fails because the
   // tools no longer exist.
   const STALE_MCP_TOOLS = ["start_audit", "get_status", "continue_audit"];
-  const installHostsPath = join(repoRoot, "audit-code-wrapper-install-hosts.mjs");
+  const installHostsPath = join(repoRoot, "wrapper", "audit-code-wrapper-install-hosts.mjs");
   const source = readFileSync(installHostsPath, "utf8");
   for (const tool of STALE_MCP_TOOLS) {
     // Allow deny-list entries (e.g. 'deny' rules in permission config) and

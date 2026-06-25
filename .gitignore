@@ -22,7 +22,6 @@ dist/
 # Generated audit/remediation outputs (legacy root locations)
 /audit-report.md
 /audit-findings.json
-/meta-audit-log.md
 /meta-remediation-report.md
 /remediation-report.md
 /remediation-report.json

@@ -2,7 +2,7 @@
  * Deterministic derivers for contract-pipeline artifacts.
  *
  * S1 of the contract-authoring determinism design
- * (`docs/contract-authoring-determinism-design.md`): the contract pipeline
+ * (`spec/contract-authoring-determinism-design.md`): the contract pipeline
  * historically had the LLM author every structured artifact and the backend
  * only validate it afterward. For the artifacts whose *structure* is a pure
  * function of an upstream artifact, that is wasted generation and a weak-model

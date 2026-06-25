@@ -8,6 +8,55 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
 - **Friction DETECTION is mechanical-only — no LLM judgement reviews the run, so semantic/process friction goes uncaptured (VERIFIED, this 2026-06-25 session).** The O1 fix added auto-capture + mandatory triage, but capture is fed by exactly two instrumented call sites (`intentCheckpointGate.ts` semantic-gate, `emitValidateRepair.ts` repair seam) plus the opt-in `agent-feedback.jsonl` worker channel. `decideFrictionTriage` (`src/shared/friction/triage.ts`) only *dispositions* that pre-populated set and **`EMPTY SET → trivially disposed`**. Nothing applies LLM judgement over the conversation/run history to *find* friction. Proof: the rolling-dispatch run was friction-heavy (≈3 silent re-emit rounds fighting the CE-006 anchor-token gate; the merged-main integration-guard trap — unregistered `INV-SOO`, either-or `.toContain` — needing two post-merge fixes; the stale-handoff detour) yet the friction record came up **empty** because neither instrumented source fired. Mechanical capture is incomplete by construction (only catches pre-instrumented events). This is exactly *Right tool, not deterministic dogma* rule (2): friction detection is semantic → wants bounded, recorded LLM judgement. **Tension:** the CLI backend has no transcript (it lives in the host), and host-volunteering is the forbidden *host-remembers* anti-pattern — so the fix must be tool-ENFORCED, not opt-in. **Direction:** (1) drop `empty set → trivially disposed` (a friction-heavy run must not self-certify friction-free); (2) make the close-out a tool-enforced host-delegation step (same shape as the review-gate) that MANDATES a structured friction-review artifact, non-skippable, requiring ≥N considered entries. The named dimensions (gate re-loops, integration-guard failures, re-scopes, surprises, manual out-of-band interventions) are PROMPTS/SEEDS, not an exhaustive schema — the artifact MUST also carry a free-form/open-ended channel for friction that fits no named dimension (most real friction is unanticipated; a fixed taxonomy would silently drop it, recreating the empty-record failure in a subtler form). So: named dimensions to jog the review + an always-present open-ended capture, both feeding one record. (3) mechanical events seed/prior that pass rather than being the whole input. Apply to BOTH orchestrators (parity). Generalizes *enforce-robustness-in-tooling, never host discretion*. (Ethan, 2026-06-25.)
+- **Selective-deepening tasks never converge — packet result task_id ≠ assigned `deepening:*` id.** Repro
+  (run `20260622T023504252Z_audit_tasks_completed_001`): after the base pass, `deepening:finding:*` /
+  `deepening:steward:*` tasks are created and counted pending, but the dispatch packager re-emits *base-unit*
+  packets whose worker results carry packet-style task_ids (e.g. `flow:...:reliability:packet-3-…`) that don't
+  match the assigned `deepening:finding:e0e34e19f3`. merge-and-ingest reports "Missing audit result for
+  assigned task", spawns *more* deepening tasks, and loops forever — never reaching synthesis. Two sub-bugs:
+  (1) packager dispatches wrong task_ids for deepening follow-ups; (2) workers omit `findings[].lens` (validator
+  requires it) — only the top-level `AuditResult.lens` is set, so every deepening result is rejected until the
+  per-finding lens is backfilled. Fix in tooling: deepening packet prompts must bind the worker output to the
+  exact assigned `deepening:*` task_id, and the renderer/validator must force `findings[].lens` (default from the
+  AuditResult lens). Until fixed, recovery = quarantine the orphan pending `deepening:*` tasks to let synthesis
+  run (loses only second-pass verification of already-recorded findings). (Ethan, 2026-06-22.)
+- **Dispatch is not aware of the host's own session/usage quota — hits the wall instead of adapting.** This run
+  hit the Claude Code host session limit twice mid-dispatch (`You've hit your session limit · resets 10:30pm`,
+  then `1:30pm`). Each time the in-flight workers returned a limit message instead of results (0 tokens, wasted
+  dispatch), and the *only* adaptation was the operator (me) noticing the reset time and manually re-firing after
+  it cleared. That is a tool defect, not an environmental fact: the auditor/remediator advertise quota-awareness
+  (learned RPM/TPM, sliding window, 429/524 parsing, cross-provider `QuotaSource`), and the host session is the
+  host provider's *own* quota — squarely inside the self-monitoring red line (own-provider-only; never IDE GUI
+  automation). Expected behavior: (1) track the host session/usage budget (fixed-window reset, not just
+  per-minute RPM/TPM) as a first-class `QuotaSource`; (2) pace/throttle concurrency *before* the wall and, when a
+  worker returns a session-limit message, parse the reset timestamp, automatically pause, and resume at reset —
+  no operator in the loop; (3) treat a limit-message worker result as a re-queue, not a consumed packet. The
+  current `merge-and-ingest` "re-derive remaining from disk" path is reactive recovery, not the quota-aware
+  adaptation the design promises. Extends the cross-provider quota matrix / quota-dispatch vision to the host's
+  own session budget. (Ethan, 2026-06-22.)
+- **Final-report promotion path mismatch — ENOENT on synthesis.** At synthesis the orchestrator logs
+  `completed audit but could not promote final report to ...\.audit-tools\audit-report.md: ENOENT ... lstat
+  '...\.audit-tools\audit\audit-report.md'`. Synthesis writes the promoted deliverables directly to
+  `.audit-tools/audit-report.md` + `.audit-tools/audit-findings.json` (the documented final location), but the
+  promote step — and the `present_report` step prompt — look for the source at `.audit-tools/audit/audit-report.md`,
+  which is never written there. Harmless this run (deliverables exist at the right place) but the warning is noise
+  and the `present_report` prompt points the host at a nonexistent path. Fix: single-source the promote source/dest
+  and the prompt's report path off one path module. (Ethan, 2026-06-22.)
+- **Fallback race in `merge-and-ingest` — wrong inline-result wins when multiple files claim the same `task_id`.** `scanTaskResults` scans all JSON files in `task-results/` not in `expectedPaths` and uses first-match-wins (`!fallbackByTaskId.has(tid)`). Files are sorted alphabetically, so a packet that INCIDENTALLY contains a result for a task_id (because the agent reviewed more files than assigned) beats the canonical packet file when it sorts earlier. Repro (2026-06-23): `flow-flow-surface-src-audit-cli-advanceAuditCommand-ts_...inline-result.json` claimed `src-audit:tests:part-11` with 12 files (no `stewardFollowup.ts`); the canonical `src-audit_tests_packet-1-b37a9a2fd9_...inline-result.json` had 13. Alphabetical 'f' < 's' → bad result won → "Missing stewardFollowup.ts" error on every retry. Fix: prefer the entry whose `packet_id` matches the dispatch-result-map entry for that task, or use the packet-result file as primary and inline-only as last resort. Workaround used: write the individual task file (`write_paths` path) directly so merge-and-ingest reads it as a first-class entry, bypassing the fallback scan. (Ethan, 2026-06-23.)
+- **Subagent spawning nested background sub-tasks instead of writing inline results.** When the host dispatches a packet agent that internally forks work (e.g. splits 12-file review into 12 parallel sub-agents via TaskCreate/background spawn), the host receives TaskNotification pings but no inline-result.json. Recovery requires collecting all notification outputs, continuating the agent via SendMessage, waiting for it to consolidate and write its result — a manual multi-step process that defeats the "agent writes result, host continues" contract. Fix: packet prompt should state explicitly that the agent must write one `AuditResult[]` JSON file to the assigned `result_path` and NOT spawn further background tasks. Consider adding a contract-level check: if the result file is absent after the agent completes and no inline text JSON was emitted, treat as a re-queue. (Ethan, 2026-06-23.)
+- **Gitignore generated skills + host assets (always-ignore).** `audit-code ensure` / install-hosts emit
+  generated skill files (generated audit-code & remediate-code skills, host renderer outputs, etc.) into the
+  working tree; these are build/install artifacts, not source — always add them to `.gitignore` so they don't
+  show up as tracked/dirty state. (Ethan, 2026-06-22.)
+- **Conditionally gitignore the canonical audit/remediation deliverables + meta-audit reflections — by repo
+  visibility.** The process-conclusion documents — `audit-report.md`, `audit-findings.json`,
+  `remediation-report.md`, `remediation-outcomes.json`, and the **meta-audit reflections** file — are NOT
+  build artifacts; whether they belong in VCS depends on the repo's visibility:
+  - **Private repo → do NOT gitignore** (keep them tracked; they're a useful in-repo record).
+  - **Public repo → gitignore by default** (don't publish internal audit findings/reflections unless opted in).
+  Detect visibility at install/ensure time (e.g. `gh repo view --json isPrivate`, fall back to a config flag /
+  prompt when `gh` or remote is absent) and write the `.gitignore` rule accordingly — never hardcode either way,
+  and make it overridable. This is distinct from the always-ignore build artifacts above. (Ethan, 2026-06-22.)
 
 ## Forward tracks
 
