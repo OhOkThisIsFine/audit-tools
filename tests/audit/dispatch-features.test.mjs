@@ -385,10 +385,18 @@ await test("FINDING-018: dispatch plan entries access.write_paths contains only 
   const taskResultsDir = join(runDir, "task-results");
 
   assert.ok(Array.isArray(entry.access.write_paths), "access.write_paths should be an array");
-  assert.equal(entry.access.write_paths.length, 1, "should have one write path per task");
+  // Per-task canonical ingestion target(s) plus the per-packet result file the
+  // worker actually writes (packetResultPath) — both pre-approved so hosts that
+  // enforce write_paths don't block the result write. For a single-task packet
+  // that is 2 entries: one per-task path + the inline-result.json packet file.
+  assert.equal(entry.access.write_paths.length, 2, "single-task packet has one per-task path + the packet result file");
   assert.ok(
-    entry.access.write_paths[0].startsWith(taskResultsDir),
-    "write_path should be inside task-results/",
+    entry.access.write_paths.every((p) => p.startsWith(taskResultsDir)),
+    "every write_path should be a file inside task-results/",
+  );
+  assert.ok(
+    entry.access.write_paths.some((p) => p.endsWith("inline-result.json")),
+    "write_paths should include the per-packet result file the worker writes",
   );
   assert.ok(
     !entry.access.write_paths.includes(taskResultsDir),

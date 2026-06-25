@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import {
   writeFixtureRepo,
@@ -28,6 +28,35 @@ async function persistSynthesisReadyState(root, artifactsDir) {
   await mkdir(artifactsDir, { recursive: true });
   await writeCoreArtifacts(artifactsDir, synthesis.updated_bundle);
   return synthesis;
+}
+
+/** Run next-step until present_report emits status:"complete", clearing the
+ * mandatory friction-triage pause (write ≥1 open_observation, then re-call) the
+ * way a host would. promoteFinalAuditReport deletes artifactsDir, so recreate
+ * the friction subdir before writing. Returns the completed present_report step. */
+async function nextStepToComplete(root) {
+  for (let i = 0; i < 5; i++) {
+    const step = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
+    if (
+      step.step_kind === "present_report" &&
+      step.status === "ready" &&
+      step.artifact_paths?.friction_record
+    ) {
+      let record = {};
+      try {
+        record = JSON.parse(await readFile(step.artifact_paths.friction_record, "utf8"));
+      } catch { /* new record */ }
+      record.open_observations = [
+        ...(record.open_observations ?? []),
+        { dimension: "other", note: "no friction this run" },
+      ];
+      await mkdir(dirname(step.artifact_paths.friction_record), { recursive: true });
+      await writeFile(step.artifact_paths.friction_record, JSON.stringify(record) + "\n");
+      continue;
+    }
+    return step;
+  }
+  throw new Error("next-step did not reach present_report:complete within 5 calls");
 }
 
 test("next-step pauses for the synthesis narrative, then completes after it is provided", async () => {
@@ -91,8 +120,9 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
       ) + "\n",
     );
 
-    // Second next-step ingests the narrative and completes.
-    const done = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
+    // Second next-step ingests the narrative; subsequent calls clear the
+    // friction-triage pause and complete.
+    const done = await nextStepToComplete(root);
     assert.equal(done.step_kind, "present_report");
     assert.equal(done.status, "complete");
 
@@ -134,7 +164,7 @@ test("next-step omits the narrative when synthesis.narrative is disabled", async
       ) + "\n",
     );
 
-    const done = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
+    const done = await nextStepToComplete(root);
     assert.equal(done.step_kind, "present_report");
     assert.equal(done.status, "complete");
 
