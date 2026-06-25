@@ -246,6 +246,59 @@ test("F3: a refused broker means no LLM touch — O3 falls to the re-dispatch si
   assert.ok(result.repair.redispatch, "re-dispatch signal surfaced");
 });
 
+test("F3 inv-5 [CP-NODE-26]: capability 'none' degrades through the brokered repair seam", async () => {
+  // inv-5: a backend that cannot enforce (capability 'none') OR whose enforced
+  // emit fails validation degrades to runEmitValidateRepair, and its stage-2 LLM
+  // patch is routed through the SHARED BrokeredRepairDispatch seam — the emit path
+  // NEVER spawns a re-dispatch directly. Prove it by passing a broker stub whose
+  // `broker()` admission gate is the sole control over whether the patcher runs,
+  // and assert the stage-2 result flows back through `awaitNextCompletion`.
+  let brokerCalls = 0;
+  let awaitCalls = 0;
+  let patcherCalls = 0;
+  const seamBroker = {
+    broker: ({ slots }) => {
+      brokerCalls += 1;
+      const slotId = slots[0].slotId;
+      return {
+        admitted: 1,
+        admission: "admitted",
+        admittedSlotIds: [slotId],
+        estimatedWaveTokens: 0,
+        cooldownUntil: null,
+        bindingCap: "none",
+        capableHost: true,
+        schedule: {},
+      };
+    },
+    awaitNextCompletion: (completion) => {
+      awaitCalls += 1;
+      return completion;
+    },
+  };
+  const result = await enforceSchemaAtEmit({
+    contractId: "audit_results",
+    schema: WorkerAuditResultsSchema,
+    payload: [{ task_id: "T1" }], // invalid → must degrade through O3
+    provider: { outputConstraint: { mode: "none", reason: "cannot enforce" } },
+    broker: seamBroker,
+    brokerContext,
+    artifactsDir,
+    runId: "run-cp-node-26",
+    tool: "audit-code",
+    patcher: async () => {
+      patcherCalls += 1;
+      return validWorkerResults(); // the brokered LLM touch fixes it
+    },
+  });
+  // The degrade path went through the SHARED broker, not a direct spawn.
+  assert.equal(brokerCalls, 1, "stage-2 patch was gated by the shared broker exactly once");
+  assert.equal(awaitCalls, 1, "patched result flowed back through the broker's awaitNextCompletion");
+  assert.equal(patcherCalls, 1, "broker admitted the slot → bounded LLM patch ran once");
+  assert.equal(result.mode, "none", "emit reports capability 'none'");
+  assert.equal(result.repair.status, "patched", "invalid 'none' payload is salvaged via the brokered repair seam");
+});
+
 test("F3 inv-3: discovery runs exactly ONCE per constructed provider, ZERO per emit/dispatch", async () => {
   // inv-3: OutputConstraintCapability discovery happens once at provider
   // construction and is then READ at every emit — never re-discovered per
