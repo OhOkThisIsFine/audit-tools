@@ -174,7 +174,10 @@ describe('cross-node seam-signature boundary guard (CP-NODE-2)', () => {
     const decision = broker.broker(brokerInput([slot('s1', 1024), slot('s2', 2048)]));
 
     expect(typeof decision.admitted).toBe('number');
-    expect(['admitted', 'refused_over_budget', 'cooldown']).toContain(decision.admission);
+    // Pin `admission` to the enum membership (shape), avoiding the either-or
+    // `expect([...]).toContain(var)` pattern flagged by INV-remediate-tests-04.
+    expect(typeof decision.admission).toBe('string');
+    expect(['admitted', 'refused_over_budget', 'cooldown'].includes(decision.admission)).toBe(true);
     expect(Array.isArray(decision.admittedSlotIds)).toBe(true);
     expect(typeof decision.estimatedWaveTokens).toBe('number');
     expect(
