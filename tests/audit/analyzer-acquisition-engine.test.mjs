@@ -168,6 +168,18 @@ test("runExternalAnalyzer: a thrown spawn degrades to spawn_error, never throws"
   assert.equal(out.results.results.length, 0);
 });
 
+test("runExternalAnalyzer: F5 fail-2 — a non-zero spawn exit (result.error) degrades to spawn_error, never throws", () => {
+  const run = (argv, cwd) => {
+    if (argv.includes("--version")) return { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 };
+    // Tool spawned, exits non-zero with an error attached (process-level failure).
+    return { status: 2, stdout: "", stderr: "boom", argv, duration_ms: 1, error: new Error("exited 2") };
+  };
+  const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", { run });
+  assert.equal(out.status.status, "spawn_error");
+  assert.equal(out.status.exit_code, 2);
+  assert.equal(out.results.results.length, 0);
+});
+
 test("runExternalAnalyzer: malformed tool output degrades to parse_error, never throws", () => {
   const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
     run: fakeRunner({ toolStdout: "not json {{{" }),
