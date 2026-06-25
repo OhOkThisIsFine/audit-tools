@@ -1206,6 +1206,85 @@ describe("F4 fail-3 [CP-NODE-51]: token estimate is local estimateTokensFromByte
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// F4 inv-9 (CP-NODE-47) — await-completion records the just-finished wave's
+// outcome BEFORE the next scheduling decision: each ObservedWaveOutcome is
+// persisted to QuotaState via recordWaveOutcome, so the learned concurrency the
+// next schedule reads back reflects that finished wave. A `success` outcome
+// lifts the learned safe concurrency to the observed wave width; a follow-up
+// `rate_limited` outcome bumps consecutive_429_count, stamps last_429_at, sets a
+// cooldown_until, and drives the learned safe concurrency back down — all read
+// back from the SAME persisted QuotaState. (The inv-5 cooldown_until persists
+// earlier and independently of this outcome accounting.)
+// ---------------------------------------------------------------------------
+
+describe("F4 inv-9 [CP-NODE-47]: success/rate_limited outcome via recordWaveOutcome updates learned state; next schedule reflects it", () => {
+  it("persists each wave outcome to QuotaState so the next decision's learned concurrency reflects the just-finished wave", async () => {
+    const {
+      setQuotaStateDir,
+      recordWaveOutcome,
+      readQuotaState,
+      computeMaxSafeConcurrency,
+    } = await import("../../src/remediate/quota/index.js");
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const dir = await mkdtemp(join(tmpdir(), "cp-node-47-quota-"));
+    const HALF_LIFE = 24;
+    const KEY = "claude-code/*";
+    const WAVE = 4;
+    try {
+      setQuotaStateDir(dir);
+
+      // Cold start: no learned evidence → safe concurrency floors at 1.
+      const cold = await readQuotaState();
+      expect(computeMaxSafeConcurrency(cold.entries[KEY] ?? { updated_at: "", buckets: {}, cooldown_until: null, last_429_at: null }, HALF_LIFE)).toBe(1);
+
+      // A wave of width 4 finishes successfully. await-completion records the
+      // outcome BEFORE the next decision: it is persisted to QuotaState.
+      await recordWaveOutcome(
+        KEY,
+        { concurrency: WAVE, estimated_tokens: 1000, outcome: "success" },
+        HALF_LIFE,
+      );
+
+      // The NEXT decision reads the persisted state back: every bucket 1..4 now
+      // carries success evidence, so learned safe concurrency reflects the
+      // just-finished wave width.
+      const afterSuccess = await readQuotaState();
+      const successEntry = afterSuccess.entries[KEY];
+      expect(successEntry).toBeDefined();
+      expect(successEntry.consecutive_429_count ?? 0).toBe(0);
+      expect(successEntry.cooldown_until).toBeNull();
+      expect(successEntry.buckets[String(WAVE)].success_weight).toBeGreaterThanOrEqual(1);
+      expect(computeMaxSafeConcurrency(successEntry, HALF_LIFE)).toBe(WAVE);
+
+      // The same wave then hits a 429. Recording the rate_limited outcome bumps
+      // consecutive_429_count, stamps last_429_at, sets a cooldown, and spreads
+      // failure evidence onto the bucket — all persisted to the SAME state.
+      await recordWaveOutcome(
+        KEY,
+        { concurrency: WAVE, estimated_tokens: 1000, outcome: "rate_limited" },
+        HALF_LIFE,
+      );
+
+      const afterRateLimit = await readQuotaState();
+      const rlEntry = afterRateLimit.entries[KEY];
+      expect(rlEntry.consecutive_429_count).toBe(1);
+      expect(rlEntry.last_429_at).not.toBeNull();
+      expect(rlEntry.cooldown_until).not.toBeNull();
+      expect(rlEntry.buckets[String(WAVE)].failure_weight).toBeGreaterThan(0);
+      // The next decision now reads a LOWER learned safe concurrency: the bucket
+      // at the throttled width is poisoned by failure evidence, so the scan
+      // stops below it — the just-finished rate-limited wave shaped the decision.
+      expect(computeMaxSafeConcurrency(rlEntry, HALF_LIFE)).toBeLessThan(WAVE);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
