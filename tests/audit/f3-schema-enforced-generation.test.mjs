@@ -470,3 +470,132 @@ test("F3 inv-1 [CP-NODE-22]: structural guard rejects hardcoded model literals i
     `F3 files must discover capability at runtime — no hardcoded model id / capability constant (CE-003). Violations:\n${violations.join("\n")}`,
   );
 });
+
+test("F3 inv-6 [CP-NODE-27]: enforcement core has no per-backend branching (parametrized over all providers)", async () => {
+  // CP-NODE-27 / OBL-f3-schema-enforced-generation-inv-6: enforcement is
+  // provider-agnostic. Identical code paths must run for EVERY resolved provider —
+  // a new backend enriches the discovered descriptor, never forks enforcement.
+  // Two complementary checks:
+  //   (a) RUNTIME — the emit seam, driven across every resolved provider name,
+  //       behaves identically given the SAME constraint mode. Provider identity
+  //       is invisible to the enforcement core; only the descriptor's `mode`
+  //       steers behavior. A conforming payload is `clean` with only the initial
+  //       `validate` stage and NO LLM touch — for ALL backends alike.
+  //   (b) STRUCTURAL — the enforcement core source (schemaEnforcedEmit.ts) must
+  //       contain NO branch keyed on a backend NAME. It may read the descriptor
+  //       `mode` only; a `=== "<provider-name>"` / `providerName ===` comparison
+  //       would be a per-backend fork.
+
+  // The full set of resolved provider names (mirrors the F3 discovery test set
+  // plus the API-driven openai-compatible backend).
+  const allProviders = [
+    'claude-code',
+    'codex',
+    'opencode',
+    'local-subprocess',
+    'subprocess-template',
+    'vscode-task',
+    'antigravity',
+    'openai-compatible',
+  ];
+
+  // (a) Runtime: one shared path for every resolved provider. We pin the SAME
+  // constraint mode for each so any divergence can ONLY come from a per-backend
+  // fork in the enforcement core — there is none, so every result is identical.
+  for (const providerName of allProviders) {
+    let patcherCalls = 0;
+    const result = await enforceSchemaAtEmit({
+      contractId: 'audit_results',
+      schema: WorkerAuditResultsSchema,
+      payload: validWorkerResults(),
+      // Provider identity carried for realism, but the enforcement core reads
+      // ONLY the descriptor mode — the name must not steer anything.
+      provider: {
+        name: providerName,
+        outputConstraint: { mode: 'structured_output', reason: `descriptor for ${providerName}` },
+      },
+      broker: createBrokeredRepairDispatch(),
+      brokerContext: { ...brokerContext, providerName },
+      artifactsDir,
+      runId: `run-inv6-${providerName}`,
+      tool: 'audit-code',
+      patcher: async (p) => {
+        patcherCalls += 1;
+        return p;
+      },
+    });
+    assert.equal(
+      result.mode,
+      'structured_output',
+      `${providerName}: emit reports the descriptor mode, not the backend name`,
+    );
+    assert.equal(
+      result.repair.status,
+      'clean',
+      `${providerName}: identical clean path for a conforming payload`,
+    );
+    assert.deepEqual(
+      result.repair.stages_applied,
+      ['validate'],
+      `${providerName}: one shared validate stage — no backend-specific stages`,
+    );
+    assert.equal(patcherCalls, 0, `${providerName}: no LLM touch on a conforming payload`);
+  }
+
+  // (b) Structural: the enforcement core branches on the descriptor `mode` only,
+  // never on a backend name. Walk the AST and reject any comparison whose other
+  // operand is a known provider-name string literal, or a comparison against a
+  // `providerName` / `provider.name` access.
+  const ts = (await import('typescript')).default;
+  const emitRel = 'src/audit/contracts/schemaEnforcedEmit.ts';
+  const emitSrc = await readFile(join(repoRoot, emitRel), 'utf8');
+  const sourceFile = ts.createSourceFile(emitRel, emitSrc, ts.ScriptTarget.Latest, true);
+
+  const providerNameSet = new Set(allProviders);
+  const branchViolations = [];
+
+  const isProviderNameLiteral = (node) =>
+    (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+    providerNameSet.has(node.text);
+
+  const isProviderNameAccess = (node) => {
+    if (ts.isIdentifier(node)) return /providerName/i.test(node.text);
+    if (ts.isPropertyAccessExpression(node)) {
+      return /^name$/i.test(node.name.text) && /provider/i.test(node.expression.getText(sourceFile));
+    }
+    return false;
+  };
+
+  const visit = (node) => {
+    // Equality/switch comparisons that key off a backend name are per-backend forks.
+    if (ts.isBinaryExpression(node)) {
+      const op = node.operatorToken.kind;
+      const isEq =
+        op === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+        op === ts.SyntaxKind.EqualsEqualsToken ||
+        op === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
+        op === ts.SyntaxKind.ExclamationEqualsToken;
+      if (isEq) {
+        const sides = [node.left, node.right];
+        if (sides.some(isProviderNameLiteral)) {
+          branchViolations.push(`${emitRel}: equality branch on a provider-name literal`);
+        }
+        if (sides.some(isProviderNameAccess) && sides.some(isProviderNameLiteral)) {
+          branchViolations.push(`${emitRel}: equality branch comparing provider name to a backend literal`);
+        }
+      }
+    }
+    // A `switch (providerName)` is likewise a per-backend fork.
+    if (ts.isSwitchStatement(node) && isProviderNameAccess(node.expression)) {
+      branchViolations.push(`${emitRel}: switch keyed on a provider name`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+
+  assert.deepEqual(
+    branchViolations,
+    [],
+    `Enforcement core must be provider-agnostic — no branch keyed on a backend name (inv-6). Violations:\n${branchViolations.join('\n')}`,
+  );
+});
