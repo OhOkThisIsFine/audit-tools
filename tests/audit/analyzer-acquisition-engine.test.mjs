@@ -534,3 +534,47 @@ test("F5 inv-2 [CP-NODE-59]: spawn-admission gates every non-DEFAULT tool on con
   assert.equal(defaultOutcome.status.status, "findings", "DEFAULT tool runs without consent");
   assert.ok(spawned.length > beforeDefault, "DEFAULT spawn invoked the runner unprompted");
 });
+
+// F5 inv-7 (normalize through the existing adapter seam, unchanged): an acquired
+// tool's RAW output must re-enter the SAME ExternalAnalyzerResults contract that
+// the wired semgrep/ast-grep/codeql adapters produce — there is no parallel
+// shape. runExternalAnalyzer normalizes the acquired tool's raw stdout through
+// normalizeGenericExternalResults / normalizeGenericExternalEdges (the adapter
+// seam), and the normalized object validates against ExternalAnalyzerResultsSchema
+// .strict(). `.strict()` is load-bearing here: it would REJECT any extra/parallel
+// field, so a green parse proves the acquired path emits the exact contract shape.
+const { ExternalAnalyzerResultsSchema } = await import(
+  "../../src/audit/types/externalAnalyzer.ts"
+);
+
+test("F5 inv-7 [CP-NODE-64]: acquired output normalizes through the existing adapter seam, validates ExternalAnalyzerResultsSchema.strict()", () => {
+  const out = runExternalAnalyzer(candidate(), "/root", {
+    consentToken: "tok",
+    run: fakeRunner({ toolStdout: findingPayload }),
+  });
+
+  // The acquired tool ran and was normalized through the adapter seam.
+  assert.equal(out.status.status, "findings");
+  assert.equal(out.results.tool, "eslint");
+  assert.equal(out.results.results.length, 1);
+  assert.ok(out.results.graph_edges && out.results.graph_edges.length === 1);
+
+  // Same contract as the wired adapters: the normalized object validates against
+  // ExternalAnalyzerResultsSchema.strict() — no parallel shape, no extra fields.
+  const parsed = ExternalAnalyzerResultsSchema.strict().safeParse(out.results);
+  assert.ok(
+    parsed.success,
+    `acquired-tool output must validate against the shared contract; got ${
+      parsed.success ? "" : JSON.stringify(parsed.error.issues)
+    }`,
+  );
+
+  // A parallel/extra field on the acquired shape would be rejected by .strict() —
+  // proving the validation above is actually discriminating the contract.
+  const withParallelShape = { ...out.results, parallel_findings: [{ x: 1 }] };
+  assert.equal(
+    ExternalAnalyzerResultsSchema.strict().safeParse(withParallelShape).success,
+    false,
+    ".strict() must reject any parallel/extra shape on the acquired contract",
+  );
+});
