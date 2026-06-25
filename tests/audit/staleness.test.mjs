@@ -693,3 +693,13 @@ test("F1 single-adjacency: ARTIFACT_DEPENDENTS_MAP is the derived inversion of t
     );
   assert.deepEqual(norm(ARTIFACT_DEPENDENTS_MAP), norm(rebuilt));
 });
+
+// F1 inv-7: transcription-not-authorship. The git_history.json upstream edge
+// set F1 registers MUST be EXACTLY F6's declared {repo_manifest, file_disposition}
+// — F1 neither guesses nor infers. Pinning the set so any divergence fails.
+test("inv-7: git_history.json upstream set is exactly F6's declared {repo_manifest, file_disposition}", () => {
+  assert.deepEqual(
+    [...ARTIFACT_DEPENDS_ON_MAP["git_history.json"]].sort(),
+    ["file_disposition.json", "repo_manifest.json"],
+  );
+});
