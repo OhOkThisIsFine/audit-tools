@@ -18,6 +18,9 @@ const { mergeAnalyzerGraphContribution } = await import(
 const { mergeAnalyzerRiskSignals } = await import(
   "../../src/audit/extractors/risk.ts"
 );
+const { ARTIFACT_DEPENDS_ON_MAP } = await import(
+  "../../src/audit/orchestrator/dependencyMap.ts"
+);
 
 function git(cwd, args) {
   const r = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -77,6 +80,16 @@ test("F6 inv-1: gitHistory extractor imports no F5 analyzer/adapter seam", async
   }
   // It does mine through the shared git seam.
   assert.match(src, /from\s+["']audit-tools\/shared["']/);
+});
+
+// F6 inv-7: F6 is the authoritative source for git_history.json's upstream-dep
+// declaration — exactly {repo_manifest, file_disposition}. F1 only transcribes
+// it into ARTIFACT_DEPENDS_ON_MAP / dependency-map.md (CCU-git-history-registration).
+test("F6 inv-7: git_history.json declares upstream deps exactly {repo_manifest, file_disposition}", () => {
+  assert.deepEqual(
+    [...(ARTIFACT_DEPENDS_ON_MAP["git_history.json"] ?? [])].sort(),
+    ["file_disposition.json", "repo_manifest.json"],
+  );
 });
 
 test("mineGitHistory degrades to empty on a non-git directory", async () => {
