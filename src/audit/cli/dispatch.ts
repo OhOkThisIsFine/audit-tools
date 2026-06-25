@@ -379,7 +379,10 @@ export async function prepareDispatchArtifacts(params: {
             ? packet.file_paths.map((p) => join(reviewRoot, p))
             : packet.file_paths),
         ],
-        write_paths: packetWritePaths,
+        // packetResultPath is the file the worker actually writes; per-task
+        // paths are canonical ingestion targets. Both must be pre-approved so
+        // hosts that enforce write_paths don't block the result write.
+        write_paths: [...packetWritePaths, packetResultPath],
         forbidden_patterns: ["packet-*-result.json", "audit_result_*.json"],
       },
     });
