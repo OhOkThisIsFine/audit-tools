@@ -86,6 +86,27 @@ test("runSafetyGate: missing runner degrades (probe fails → ok:false)", () => 
   assert.equal(gate.ok, false);
 });
 
+test("runSafetyGate: F5 inv-1 — candidate lacking a pinned version is never executed (degrades)", () => {
+  for (const spec of ["", "   ", undefined]) {
+    const gate = runSafetyGate(candidate({ spec }), fakeRunner({ probeOk: true }), "/root");
+    assert.equal(gate.ok, false, `spec=${JSON.stringify(spec)} must fail the gate`);
+    assert.match(gate.reason, /pinned version/);
+  }
+});
+
+test("runExternalAnalyzer: F5 inv-1 — unpinned candidate yields empty results + a tool_status, never spawns the tool", () => {
+  let toolSpawned = false;
+  const run = (argv, cwd) => {
+    if (!argv.includes("--version")) toolSpawned = true;
+    return fakeRunner({ toolStdout: findingPayload })(argv, cwd);
+  };
+  const out = runExternalAnalyzer(candidate({ defaultRun: true, spec: "" }), "/root", { run });
+  assert.equal(toolSpawned, false, "an unpinned tool must never be spawned");
+  assert.equal(out.status.status, "not_resolved");
+  assert.match(out.status.error, /pinned version/);
+  assert.equal(out.results.results.length, 0);
+});
+
 test("runExternalAnalyzer: non-default tool without consent is reported skipped (never silently)", () => {
   const out = runExternalAnalyzer(candidate(), "/root", { run: fakeRunner({ toolStdout: findingPayload }) });
   assert.equal(out.status.status, "skipped");

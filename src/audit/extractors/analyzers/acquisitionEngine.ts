@@ -187,6 +187,11 @@ export function runSafetyGate(
   run: AcquisitionRunner,
   root: string,
 ): { ok: true } | { ok: false; reason: string } {
+  // Pinned version is mandatory for reproducibility — a candidate without a
+  // pinned tool spec is never executed (degrades to empty + status).
+  if (!candidate.spec || candidate.spec.trim().length === 0) {
+    return { ok: false, reason: `tool '${candidate.id}' has no pinned version spec` };
+  }
   const probe = run(runnerProbeArgv(candidate.runner), root);
   if (probe.error || probe.status !== 0) {
     return {
