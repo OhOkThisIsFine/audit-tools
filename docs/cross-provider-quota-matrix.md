@@ -30,6 +30,54 @@ already consumes `remaining_pct` (thresholds 0.1/0.3) to throttle/cool-down befo
 
 ---
 
+## 0. Claude (shipped) — credential resolution
+
+The reference analog every other provider below is measured against. The signal:
+`ClaudeOAuthQuotaSource` probes the undocumented `GET api.anthropic.com/api/oauth/usage`
+(OAuth Bearer + `anthropic-beta: oauth-2025-04-20` + first-party-shaped `User-Agent`). Response:
+top-level `five_hour` / `seven_day` windows each `{utilization, resets_at}`, plus `limits[]` with
+per-scope `{percent, resets_at, scope.model}` — pick the most-constraining (highest utilization)
+window → `remaining_pct`.
+
+**Who needs Claude quota, and which credential** — gate on Claude being the active dispatch target;
+never probe/touch Claude creds otherwise. Host = Claude Desktop → Desktop's account quota; host = other
+IDE dispatching via the Claude CLI provider → the CLI's quota; host = other IDE, no Claude CLI dispatch →
+don't touch Claude creds at all. Quota is **account-level**: any valid credential for the same account
+returns the same `/usage` numbers regardless of surface.
+
+**No supported decryption-free read of Desktop's own token** (confirmed vs official Claude Code / Agent
+SDK docs): no host→subprocess token handoff API is public; `apiKeyHelper` is terminal-CLI-only (not
+Desktop/OAuth); Desktop's token lives in the OS-encrypted store (Electron safeStorage / DPAPI) and manual
+decryption is unsupported + version-fragile → **forbidden by robustness-in-tooling**. The only blessed
+subprocess handoff is `claude setup-token` → long-lived `CLAUDE_CODE_OAUTH_TOKEN` (an OAuth token, works
+against `/usage`).
+
+**Resolution order** (auto-discovered, no manual flag; first hit wins):
+1. `CLAUDE_CODE_OAUTH_TOKEN` (env or session config) — the supported handoff; works for any host
+   including Desktop. One-time `claude setup-token`.
+2. `~/.claude/.credentials.json` with **refresh-on-expiry**: when `accessToken` is missing/expired (or
+   `/usage` 401s) and a `refreshToken` exists, POST the refresh grant (`console.anthropic.com/v1/oauth/token`,
+   grant_type=refresh_token), then **persist the rotated creds atomically under `withFileLock`** —
+   double-checked (re-read after acquiring the lock so concurrent probes never double-rotate). This is the
+   CLI-dispatch credential. (The defect this fixed: the source only *read* `accessToken` and bailed on
+   expiry; the access token lives ~8h, the long-lived `refreshToken` beside it was never used → the source
+   went dark ~8h after any CLI login. Refresh logic never existed — a gap, not a regression.)
+3. Else degrade to the reactive `HostSessionQuotaSource` (parses "you hit your session limit" from the
+   worker channel) — no credential, graceful, no proactive remaining-%.
+
+**Hard-won hazard: refresh tokens rotate.** A refresh grant rotates the refresh token; the old one is
+immediately invalidated. (1) Persist the new refresh token or the credential is bricked — during
+investigation an un-persisted refresh + a failed retry wrote `undefined` into the creds file (the exact
+clobber the file-lock + double-check must prevent). (2) Never refresh+rotate a creds file owned by another
+*active* host; Desktop uses its own encrypted store, so refreshing the idle CLI file is safe — the gating
+above guarantees we only refresh the file whose surface we're actually dispatching to.
+
+**Constants, not couplings:** OAuth `client_id` (Claude Code's public client) + token endpoint are named
+constants with override options (same pattern as `USAGE_ENDPOINT` / beta-header constants); no model
+identities hardcoded (`limits[].scope.model` is data-driven).
+
+---
+
 ## 1. Codex (OpenAI, ChatGPT-subscription OAuth) — PROACTIVE (HIGH)
 
 Strictly better than the Claude analog: a free standalone GET **and** reactive headers

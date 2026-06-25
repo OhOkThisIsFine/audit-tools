@@ -8,7 +8,10 @@
 **In flight:** nothing — clean, verified, fully pushed.
 
 **Next:** pick from [`docs/backlog.md`](backlog.md) — open bugs/frictions, design commitments not yet built,
-larger tracks.
+larger tracks. The biggest open commitment is the **backlog-remediation foundations phase** — O1
+friction-capture, O2 append-only-ledger+lock (the data-loss fix → leads), O3 emit-validate-repair-seam:
+unshipped (consumers F1/F3/F4/F5/F6 shipped 0.30.5). Design + verified invariants:
+[`docs/backlog-remediation-design.md`](backlog-remediation-design.md).
 
 **Release:** `env -u CLAUDECODE npm run release:patch:publish` (bumps + tags `vX.Y.Z` + GitHub Release → OIDC
 CI publishes → waits for npm). Recover a bad attempt: `gh release delete vX.Y.Z --cleanup-tag`, forward-bump,

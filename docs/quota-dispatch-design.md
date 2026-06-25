@@ -1,10 +1,9 @@
 # Quota & dispatch design (canonical conceptual spec)
 
 The single source of truth for *who tracks which quota and why*. Per-provider
-mechanics live in [`cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md);
-the Claude credential specifics in
-[`quota-claude-credential-resolution.md`](quota-claude-credential-resolution.md).
-This doc is the model those two implement.
+mechanics — including the Claude credential-resolution specifics (§0) — live in
+[`cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md). This doc is the
+model that matrix implements.
 
 ## 1. The frame: conversation-first, inside a host IDE
 
