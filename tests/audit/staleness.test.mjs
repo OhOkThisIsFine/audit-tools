@@ -6,7 +6,7 @@ const { computeArtifactMetadata, computeArtifactStateSignature } =
 const { computeStaleArtifacts } =
   await import("../../src/audit/orchestrator/staleness.ts");
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.ts");
-const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP } = await import("../../src/audit/orchestrator/dependencyMap.ts");
+const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP, invertDependencyMap } = await import("../../src/audit/orchestrator/dependencyMap.ts");
 const {
   hashArtifactValue,
   stableStringify,
@@ -865,6 +865,23 @@ test("F1 single-adjacency: ARTIFACT_DEPENDENTS_MAP is the derived inversion of t
         .sort(([a], [b]) => a.localeCompare(b)),
     );
   assert.deepEqual(norm(ARTIFACT_DEPENDENTS_MAP), norm(rebuilt));
+});
+
+test("F1 inv-5 [CP-NODE-6]: dependents map is the derived inversion of the single adjacency table", () => {
+  // ARTIFACT_DEPENDS_ON_MAP is the ONLY hand-authored adjacency; the dependents
+  // map MUST be exactly invertDependencyMap(ARTIFACT_DEPENDS_ON_MAP), not a
+  // second hand-maintained list. Assert against the exported derivation itself
+  // so any drift (or a re-introduced hand-authored dependents table) fails.
+  const norm = (m) =>
+    Object.fromEntries(
+      Object.entries(m)
+        .map(([k, v]) => [k, [...v].sort()])
+        .sort(([a], [b]) => a.localeCompare(b)),
+    );
+  assert.deepEqual(
+    norm(ARTIFACT_DEPENDENTS_MAP),
+    norm(invertDependencyMap(ARTIFACT_DEPENDS_ON_MAP)),
+  );
 });
 
 // F1 inv-7: transcription-not-authorship. The git_history.json upstream edge
