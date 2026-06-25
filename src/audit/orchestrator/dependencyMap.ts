@@ -184,7 +184,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
  * map. The sole derivation from the canonical table — keeps the two adjacency
  * views in lockstep by construction.
  */
-function invertDependencyMap(dependsOn: DependencyMap): DependencyMap {
+export function invertDependencyMap(dependsOn: DependencyMap): DependencyMap {
   const dependents: Record<string, ArtifactFileName[]> = {};
   for (const [artifact, upstreams] of Object.entries(dependsOn)) {
     if (!upstreams) continue;
