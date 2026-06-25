@@ -578,3 +578,53 @@ test("F5 inv-7 [CP-NODE-64]: acquired output normalizes through the existing ada
     ".strict() must reject any parallel/extra shape on the acquired contract",
   );
 });
+
+// F5 fail-4 (C-009): a non-DEFAULT tool requested WITHOUT the per-run consent
+// token must resolve to a consent_denied outcome — status skipped, resolved=false,
+// and ZERO subprocesses spawned — enforced at the spawn-admission chokepoint
+// (admitSpawn), not by any downstream caller. This is the negative-path companion
+// to F5 inv-2: it asserts the FAIL contract (skipped/denied + no spawn) holds even
+// when the candidate's own `detect()` would say the tool is installed, so nothing
+// past the chokepoint (probe or real spawn) can leak through.
+test("F5 fail-4 [CP-NODE-69]: non-DEFAULT tool without consent => consent_denied, zero subprocess spawn", () => {
+  // detect() returns true so a missing-binary path can't masquerade as the reason
+  // for skipping; the ONLY thing withholding the spawn is the absent consent token.
+  const installedNonDefault = candidate({
+    id: "eslint",
+    defaultRun: false,
+    detect: () => true,
+  });
+
+  // Pure chokepoint: denial yields a string (the consent_denied reason), never the
+  // `undefined` that means "admitted".
+  const reason = admitSpawn(installedNonDefault, "auto", undefined);
+  assert.equal(typeof reason, "string", "non-default w/o token must be denied at admitSpawn");
+
+  // End-to-end through the engine with a spy runner: not a single argv may be
+  // dispatched — not even the `--version` capability probe.
+  const spawned = [];
+  const spy = (argv, cwd) => {
+    spawned.push(argv);
+    return fakeRunner({ toolStdout: findingPayload })(argv, cwd);
+  };
+
+  const outcome = runExternalAnalyzer(installedNonDefault, "/root", {
+    run: spy,
+    // non-default tool requested (auto), but NO consentToken supplied this run.
+    analyzers: { eslint: "auto" },
+  });
+
+  // consent_denied contract: skipped status, no findings (resolved=false), and the
+  // operator-facing reason names the missing consent token.
+  assert.equal(outcome.status.status, "skipped", "consent_denied => status skipped");
+  assert.match(outcome.status.error, /consent token/i, "denied reason names the consent token");
+  assert.equal(outcome.results.results.length, 0, "consent_denied => no findings (resolved=false)");
+
+  // The load-bearing half of C-009: enforcement is at the SPAWN-admission chokepoint,
+  // so zero subprocesses ran — the probe never even fired.
+  assert.equal(
+    spawned.length,
+    0,
+    "consent_denied must short-circuit at admitSpawn => ZERO subprocesses (not even the probe)",
+  );
+});
