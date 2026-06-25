@@ -110,9 +110,9 @@ Accepts auditor reports or free-form feedback. Advances via bounded step prompts
 
 **State machine** (`src/remediate/steps/nextStep.ts` → `decideNextStep()`):
 ```
-pending → planning → documenting → implementing → closing → complete
-              ↕                         ↕
-  waiting_for_clarification          triage → waiting_for_triage
+pending → planning → implementing → closing → complete
+              ↕           ↕
+  waiting_for_clarification   triage → waiting_for_triage
 ```
 
 **Phases** (`src/remediate/phases/`):
@@ -145,7 +145,7 @@ pending → planning → documenting → implementing → closing → complete
 
 ## Release & publish
 
-Per-package via `.github/workflows/publish-package.yml`. Triggered by GitHub Release tag `audit-code-v*`, `remediate-code-v*`, or `shared-v*` (or manual `workflow_dispatch`). Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version) → `next` dist-tag, else `latest`. CI: `npm ci` → build shared → `verify:release` gate → publish.
+Per-package via `.github/workflows/publish-package.yml`. Triggered by plain `vX.Y.Z` GitHub Release tag (or manual `workflow_dispatch`). Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version) → `next` dist-tag, else `latest`. CI: `npm ci` → `verify:release` gate → publish.
 
 Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + commit + tag) or `:publish` variants (also push + create GitHub Release + wait for CI). Use `/ship` skill — encodes trap list (CLAUDECODE unset for gates, CRLF clean-tree guard, allow-scripts postinstall on global reinstall, release-CI-is-the-real-signal) and never parks at push/publish boundary.
 
