@@ -231,7 +231,7 @@ async function disableNarrative(artifactsDir) {
 }
 
 // Bound the number of next-step calls needed to finalize after ingestion.
-const MAX_FINALIZE_STEPS = 5;
+const MAX_FINALIZE_STEPS = 10;
 
 async function nextStepUntilPresentReport(root, extraArgs = []) {
   for (let i = 0; i < MAX_FINALIZE_STEPS; i++) {
@@ -239,6 +239,24 @@ async function nextStepUntilPresentReport(root, extraArgs = []) {
       (await runWrapper(["next-step", ...extraArgs], { cwd: root })).stdout,
     );
     if (step.step_kind === "present_report") {
+      // Friction triage pending: the tool materialized the record and set status
+      // "ready" so the host can add open_observations. Simulate the host adding
+      // one observation, then loop so the next call emits status:"complete".
+      if (step.status === "ready" && step.artifact_paths?.friction_record) {
+        let record = {};
+        try {
+          record = JSON.parse(await readFile(step.artifact_paths.friction_record, "utf8"));
+        } catch { /* new record, start empty */ }
+        record.open_observations = [
+          ...(record.open_observations ?? []),
+          { dimension: "other", note: "no friction this run" },
+        ];
+        // promoteFinalAuditReport deletes artifactsDir; recreate the friction
+        // subdir so the write and the subsequent next-step call both succeed.
+        await mkdir(dirname(step.artifact_paths.friction_record), { recursive: true });
+        await writeFile(step.artifact_paths.friction_record, JSON.stringify(record) + "\n");
+        continue;
+      }
       return step;
     }
   }
@@ -352,6 +370,16 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
         (await runWrapper(["next-step"], { cwd: root })).stdout,
       );
       if (step.step_kind === "present_report") {
+        // Friction triage pending: seed an observation and loop so next call
+        // returns status:"complete".
+        if (step.status === "ready" && step.artifact_paths?.friction_record) {
+          let record = {};
+          try { record = JSON.parse(await readFile(step.artifact_paths.friction_record, "utf8")); } catch { /* new */ }
+          record.open_observations = [...(record.open_observations ?? []), { dimension: "other", note: "no friction this run" }];
+          await mkdir(dirname(step.artifact_paths.friction_record), { recursive: true });
+          await writeFile(step.artifact_paths.friction_record, JSON.stringify(record) + "\n");
+          continue;
+        }
         presented = step;
         break;
       }

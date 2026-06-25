@@ -18,20 +18,7 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   block the packet file write. **Needs live validation** — the prompt-side fix (1) should prevent the convergence
   loop but can't be verified without a real deepening-capable run. Recovery until validated: quarantine orphan
   pending `deepening:*` tasks to let synthesis run. (Ethan, 2026-06-22; partial fix 2026-06-25.)
-- **Dispatch is not aware of the host's own session/usage quota — hits the wall instead of adapting.** This run
-  hit the Claude Code host session limit twice mid-dispatch (`You've hit your session limit · resets 10:30pm`,
-  then `1:30pm`). Each time the in-flight workers returned a limit message instead of results (0 tokens, wasted
-  dispatch), and the *only* adaptation was the operator (me) noticing the reset time and manually re-firing after
-  it cleared. That is a tool defect, not an environmental fact: the auditor/remediator advertise quota-awareness
-  (learned RPM/TPM, sliding window, 429/524 parsing, cross-provider `QuotaSource`), and the host session is the
-  host provider's *own* quota — squarely inside the self-monitoring red line (own-provider-only; never IDE GUI
-  automation). Expected behavior: (1) track the host session/usage budget (fixed-window reset, not just
-  per-minute RPM/TPM) as a first-class `QuotaSource`; (2) pace/throttle concurrency *before* the wall and, when a
-  worker returns a session-limit message, parse the reset timestamp, automatically pause, and resume at reset —
-  no operator in the loop; (3) treat a limit-message worker result as a re-queue, not a consumed packet. The
-  current `merge-and-ingest` "re-derive remaining from disk" path is reactive recovery, not the quota-aware
-  adaptation the design promises. Extends the cross-provider quota matrix / quota-dispatch vision to the host's
-  own session budget. (Ethan, 2026-06-22.)
+- **Dispatch is not aware of the host's own session/usage quota — hits the wall instead of adapting.** **Partially fixed (2026-06-25):** (3) limit-message worker result is now a non-consuming re-queue (`rate_limited` outcome) — both `rollingAuditDispatch.ts` and `providerNodeDispatch.ts` call `detectRateLimitFromChannel("error", stderrText)` after each worker and return `rate_limited` when matched; the rolling engine drops the provider and re-queues the packet (CE-003 channel isolation: only error/status channels checked, never the result file). **Remaining:** (1) `HostSessionQuotaSource` (fully implemented in `src/shared/quota/hostSessionQuotaSource.ts`) is NOT yet wired into dispatch — fixed-window tracking, per-packet attribution, bounded re-limit escalation, and auto-pause/resume are available but have zero call sites; (2) pre-wall throttling (pace concurrency before the session wall is hit, not just recover after) requires wiring the host session as a first-class `QuotaSource` in the scheduler. The `rate_limited` re-queue fixes the wasted-packet problem; the full quota-aware scheduling requires the `HostSessionQuotaSource` wiring. (Ethan, 2026-06-22; partial fix 2026-06-25.)
 - **Conditionally gitignore the canonical audit/remediation deliverables + meta-audit reflections — by repo
   visibility.** The process-conclusion documents — `audit-report.md`, `audit-findings.json`,
   `remediation-report.md`, `remediation-outcomes.json`, and the **meta-audit reflections** file — are NOT

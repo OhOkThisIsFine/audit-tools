@@ -25,19 +25,31 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
     await writeFile(join(REPO_DIR, ".audit-tools", "remediation-report.md"), "# Report\n", "utf8");
 
-    const step = await decideNextStep({ root: REPO_DIR });
+    // First call: friction triage pending — record materialized, needs open_observations.
+    const pending = await decideNextStep({ root: REPO_DIR });
 
-    expect(step.contract_version).toBe("remediate-code-step/v1alpha1");
-    expect(step.step_kind).toBe("present_report");
-    expect(step.status).toBe("complete");
-    expect(step.artifact_paths.final_report).toMatch(/remediation-report\.md$/);
+    expect(pending.contract_version).toBe("remediate-code-step/v1alpha1");
+    expect(pending.step_kind).toBe("present_report");
+    expect(pending.status).toBe("ready");
+    expect(pending.artifact_paths.final_report).toMatch(/remediation-report\.md$/);
     // The terminal friction close-out is folded in: the record path is surfaced and
     // the prompt surfaces the single-sourced run-friction triage (events UNION reflections).
-    expect(step.artifact_paths.friction_record).toMatch(/friction[\\/].+\.json$/);
-    expect(existsSync(step.artifact_paths.friction_record)).toBe(true);
-    const prompt = await readFile(step.prompt_path, "utf8");
-    expect(prompt).toMatch(/Present Remediation Report/);
-    expect(prompt).toMatch(/[Ff]riction triage/);
+    expect(pending.artifact_paths.friction_record).toMatch(/friction[\\/].+\.json$/);
+    expect(existsSync(pending.artifact_paths.friction_record)).toBe(true);
+    const pendingPrompt = await readFile(pending.prompt_path, "utf8");
+    expect(pendingPrompt).toMatch(/[Ff]riction triage/);
+
+    // Host writes an open_observation → friction satisfied.
+    const record = JSON.parse(await readFile(pending.artifact_paths.friction_record, "utf8"));
+    record.open_observations = [{ dimension: "other", note: "no friction this run" }];
+    await writeFile(pending.artifact_paths.friction_record, JSON.stringify(record) + "\n", "utf8");
+
+    // Second call: friction satisfied → status:"complete", prompt includes report.
+    const done = await decideNextStep({ root: REPO_DIR });
+    expect(done.step_kind).toBe("present_report");
+    expect(done.status).toBe("complete");
+    const donePrompt = await readFile(done.prompt_path, "utf8");
+    expect(donePrompt).toMatch(/Present Remediation Report/);
   });
 
   it("accepts options supplied as a JSON string", async () => {

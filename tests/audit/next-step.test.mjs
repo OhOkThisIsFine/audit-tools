@@ -57,6 +57,24 @@ test("next-step emits present_report for a complete audit", async () => {
       "# Audit report\n\n## Work blocks\n\n- Done\n",
     );
 
+    // Seed a pre-satisfied friction record so present_report emits status:"complete"
+    // rather than status:"ready" (friction triage requires ≥1 open_observation;
+    // without the record the tool materializes one with needs_open_observations=true).
+    const frictionDir = join(artifactsDir, "friction");
+    await mkdir(frictionDir, { recursive: true });
+    await writeFile(
+      join(frictionDir, "run.json"),
+      JSON.stringify({
+        schema_version: "friction-capture/v1alpha1",
+        tool: "audit-code",
+        run_id: "run",
+        captured_at: new Date().toISOString(),
+        frictions: [],
+        dispositions: [],
+        open_observations: [{ dimension: "other", note: "no friction this run" }],
+      }) + "\n",
+    );
+
     const step = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
 
     assert.equal(step.contract_version, "audit-code-step/v1alpha1");

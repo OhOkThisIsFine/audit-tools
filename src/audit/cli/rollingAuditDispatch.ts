@@ -22,8 +22,10 @@ import { dirname, join } from "node:path";
 import {
   readJsonFile,
   readOptionalJsonFile,
+  readOptionalTextFile,
   writeJsonFile,
   advancePausedState,
+  detectRateLimitFromChannel,
   type SessionConfig,
   type CapacityPool,
   type ProviderSlot,
@@ -269,10 +271,28 @@ export function makeAuditProviderPacketDispatcher(params: {
           ),
         };
       }
+      // Channel-isolated session-limit detection (CE-003): only the error/status
+      // channel (stderr) is inspected — the result file is never scanned for limit
+      // strings, so a healthy AuditResult quoting a limit never triggers a re-queue.
+      const stderrText = (await readOptionalTextFile(stderrPath)) ?? "";
+      const limitCheck = detectRateLimitFromChannel("error", stderrText);
+      if (limitCheck.isRateLimited) {
+        // Non-consuming re-queue: the rolling engine drops the provider and puts
+        // this packet back into the pending pool so it retries once the cooldown passes.
+        return { packet, outcome: "rate_limited" };
+      }
+
       // The worker writes its AuditResult[] per the prompt; confirm it landed and
       // parses. Contents are adjudicated by the deterministic merge downstream.
       const result = await readOptionalJsonFile<AuditResult[]>(resultPath);
       if (!result) {
+        // Also check stdout for a session-limit message before reporting as error
+        // (some providers write their status to stdout, not stderr).
+        const stdoutText = (await readOptionalTextFile(stdoutPath)) ?? "";
+        const stdoutLimitCheck = detectRateLimitFromChannel("status", stdoutText);
+        if (stdoutLimitCheck.isRateLimited) {
+          return { packet, outcome: "rate_limited" };
+        }
         return {
           packet,
           outcome: "error",

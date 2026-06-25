@@ -636,7 +636,10 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     });
 
     expect(step.step_kind).toBe("present_report");
-    expect(step.status).toBe("complete");
+    // status is "ready" (friction triage pending) — the test doesn't have a
+    // passing test command so close isn't fully-green; the friction record is
+    // materialized on this call with needs_open_observations=true.
+    expect(step.status).toBe("ready");
     expect(existsSync(join(REPO_DIR, ".audit-tools", "remediation-report.md"))).toBe(true);
   });
 

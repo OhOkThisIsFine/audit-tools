@@ -461,7 +461,7 @@ describe("A3 slice 2b: handleClosing → complete crosses the engine boundary", 
     expect(step.run_id).toBe("PLAN-1");
   });
 
-  it("fully-green close deletes artifacts → present_report carries a fresh run id (reload → null)", async () => {
+  it("fully-green close deletes artifacts → present_report carries a stable fallback run id (reload → null)", async () => {
     await saveState(
       makePlanningState({
         status: "closing",
@@ -476,7 +476,9 @@ describe("A3 slice 2b: handleClosing → complete crosses the engine boundary", 
 
     const step = await decideNextStep({ root: REPO_DIR });
     expect(step.step_kind).toBe("present_report");
-    // Fully green → artifact dir deleted → the reload is null → randomRunId.
-    expect(step.run_id).toMatch(/^REMEDIATE-/);
+    // Fully green → artifact dir deleted → the reload is null → stable fallback "run".
+    // (Changed from randomRunId("REMEDIATE") to "run" so the friction record path is
+    // deterministic across multiple next-step calls on the same run.)
+    expect(step.run_id).toBe("run");
   });
 });
