@@ -96,6 +96,28 @@ test("F3: descriptor is discovered ONCE and stamped on the constructed provider"
   assert.equal(oai.outputConstraint.mode, "structured_output");
 });
 
+test("F3 inv-2: descriptor is output-constraint-scoped only — no concurrency/agent-nesting field (CP-NODE-23)", () => {
+  // Read the descriptor through a constructed FreshSessionProvider and assert it
+  // carries ONLY output-constraint keys (mode + reason) — F3 is sole owner and the
+  // descriptor must never grow an agent-nesting / host-concurrency field.
+  const allowedKeys = new Set(["mode", "reason"]);
+  const forbiddenKeyPattern = /concurrency|agent.?nest|host.?concurrency|parallel|nesting/i;
+
+  for (const [name, config] of [
+    ["local-subprocess", {}],
+    ["openai-compatible", { openai_compatible: { base_url: "https://x/v1", model: "m" } }],
+  ]) {
+    const provider = createFreshSessionProvider(name, config, noopDeps);
+    const descriptor = provider.outputConstraint;
+    assert.ok(descriptor, `${name} carries a discovered descriptor`);
+    const keys = Object.keys(descriptor);
+    for (const key of keys) {
+      assert.ok(allowedKeys.has(key), `${name} descriptor has unexpected key '${key}' — output-constraint-scoped only`);
+      assert.ok(!forbiddenKeyPattern.test(key), `${name} descriptor must not carry a concurrency/agent-nesting key '${key}'`);
+    }
+  }
+});
+
 test("F3: resolveEmitConstraint treats an absent descriptor as 'none'", () => {
   assert.equal(resolveEmitConstraint({}).mode, "none");
   assert.equal(
