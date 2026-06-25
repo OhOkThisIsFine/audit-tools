@@ -1173,3 +1173,95 @@ test("F1 inv-8 [CP-NODE-9 r2]: persist/reload recomputes identical stale set (pr
     "artifact state signature must be reproducible across runs",
   );
 });
+
+test("F1 fail-8 [CP-NODE-19 r2]: provenance (wall-clock/run-id) never leaks into per-element hash", async () => {
+  // F1 fail-8 per-element-hash boundary: distinct from the inv-8 recompute test
+  // above (which proves the *manifest-level* recompute is reproducible). This
+  // one drills into the single primitive — hashArtifactValue, the per-element
+  // content hash — and proves directly that provenance (a wall-clock stamp and a
+  // run-id-bearing field) can NEVER change the digest of an artifact element.
+  // If it could, every rebuild would churn the element's revision and
+  // perpetually re-stale its downstreams. The guarantee comes from
+  // normalizeForMetadataHash stripping provenance before stableStringify.
+  const { normalizeForMetadataHash } = await import(
+    "../../src/audit/orchestrator/artifactFreshness.ts"
+  );
+
+  // Two artifact element values, byte-identical in CONTENT but differing only in
+  // provenance: a wall-clock `generated_at` stamp (early vs. late) plus a
+  // run-id-bearing variant of that same stamp.
+  const semanticContent = {
+    repository: { name: "fixture" },
+    files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: 100 }],
+  };
+  const earlyRun = {
+    generated_at: "2026-01-01T00:00:00.000Z",
+    ...semanticContent,
+  };
+  const lateRun = {
+    generated_at: "2026-12-31T23:59:59.999Z",
+    ...semanticContent,
+  };
+
+  // (a) The per-element content hash is identical across the two runs despite the
+  // differing wall-clock provenance — no leakage into the digest.
+  const hashEarly = hashArtifactValue("repo_manifest.json", earlyRun);
+  const hashLate = hashArtifactValue("repo_manifest.json", lateRun);
+  assert.equal(
+    hashEarly,
+    hashLate,
+    "per-element content hash must not change when only the wall-clock provenance stamp differs",
+  );
+
+  // (b) The normalized + serialized form carries NO trace of either wall-clock
+  // stamp — the stripped bytes never reach stableStringify, so they cannot
+  // possibly reach the digest.
+  const serializedEarly = stableStringify(
+    normalizeForMetadataHash("repo_manifest.json", earlyRun),
+  );
+  const serializedLate = stableStringify(
+    normalizeForMetadataHash("repo_manifest.json", lateRun),
+  );
+  assert.equal(
+    serializedEarly,
+    serializedLate,
+    "stripped normalized forms must be byte-identical across provenance-only deltas",
+  );
+  assert.ok(
+    !serializedEarly.includes("2026-01-01") &&
+      !serializedEarly.includes("2026-12-31"),
+    "stripped normalized form must not carry any wall-clock provenance stamp",
+  );
+
+  // (c) Negative control: a real CONTENT change (not provenance) DOES move the
+  // per-element hash — proving the stripping is surgical, not a blanket no-op.
+  const contentChanged = hashArtifactValue("repo_manifest.json", {
+    generated_at: "2026-01-01T00:00:00.000Z",
+    repository: { name: "fixture" },
+    files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: 101 }],
+  });
+  assert.notEqual(
+    hashEarly,
+    contentChanged,
+    "a genuine content change must still move the per-element hash",
+  );
+
+  // (d) Provenance-stripping holds even for an artifact whose stamp is the ONLY
+  // top-level non-content field, simulating a run-id-bearing element: the same
+  // semantic body under two distinct stamps hashes equal.
+  const runIdEarly = hashArtifactValue("synthesis-narrative.json", {
+    generated_at: "run-2026-01-01T00:00:00Z",
+    theme_count: 3,
+    finding_count: 7,
+  });
+  const runIdLate = hashArtifactValue("synthesis-narrative.json", {
+    generated_at: "run-2026-12-31T23:59:59Z",
+    theme_count: 3,
+    finding_count: 7,
+  });
+  assert.equal(
+    runIdEarly,
+    runIdLate,
+    "run-id-bearing provenance stamp must not leak into a narrative element's per-element hash",
+  );
+});
