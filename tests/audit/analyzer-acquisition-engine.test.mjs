@@ -628,3 +628,37 @@ test("F5 fail-4 [CP-NODE-69]: non-DEFAULT tool without consent => consent_denied
     "consent_denied must short-circuit at admitSpawn => ZERO subprocesses (not even the probe)",
   );
 });
+
+// F5 fail-7 [CP-NODE-72]: an owned signal (git-history / secret-scan) registered
+// as an acquired external tool is REJECTED at registration. The own-vs-acquire
+// boundary is enforced mechanically: OWNED_TOOL_IDS can never enter the engine,
+// so an owned id cannot be double-run via the acquisition path.
+test("F5 fail-7 [CP-NODE-72]: an owned signal (git-history/secret-scan) registered as an acquired tool is rejected at registration", () => {
+  // Every OWNED id, plus a legitimate acquirable tool that MUST survive.
+  const ownedCandidates = [...OWNED_TOOL_IDS].map((id) => candidate({ id }));
+  const acquirable = candidate({ id: "eslint", defaultRun: true });
+
+  const accepted = registerExternalAnalyzers([...ownedCandidates, acquirable]);
+  const acceptedIds = new Set(accepted.map((c) => c.id));
+
+  // Not a single owned id is admitted.
+  for (const id of OWNED_TOOL_IDS) {
+    assert.equal(
+      acceptedIds.has(id),
+      false,
+      `owned signal "${id}" must be rejected at registration (cannot enter the acquisition engine)`,
+    );
+  }
+  // The boundary drops ONLY owned ids; the genuine acquirable tool survives.
+  assert.equal(acceptedIds.has("eslint"), true, "a legitimate acquirable tool is still accepted");
+  assert.equal(accepted.length, 1, "exactly the non-owned candidate survives registration");
+
+  // End-to-end: driving the whole set through the engine never runs an owned id.
+  const spawned = [];
+  const spy = (argv, cwd) => {
+    spawned.push(argv);
+    return fakeRunner({ toolStdout: "[]" })(argv, cwd);
+  };
+  runAcquisitionEngine([...ownedCandidates], "/root", { run: spy, analyzers: {} });
+  assert.equal(spawned.length, 0, "no owned candidate is ever spawned through the engine");
+});

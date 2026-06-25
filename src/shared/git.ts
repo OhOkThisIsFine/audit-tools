@@ -65,7 +65,8 @@ interface GitCommitRecord {
 }
 
 /**
- * Parse `git log --name-only` output (with our `%H%x00%an` header format) into
+ * Parse `git log --name-only` output (with our `%H%x00%aN` mailmap-canonical
+ * header format) into
  * per-commit records. Tolerant of blank lines and malformed headers; degrades
  * to an empty list rather than throwing on unexpected shapes.
  */
@@ -159,10 +160,16 @@ export function mineGitHistory(
     [
       "git",
       "log",
+      // Canonicalize author identity through .mailmap so two display names for
+      // one person (or one person split across emails) roll up to ONE author:
+      // `--use-mailmap` activates the mapping, `%aN` is the mailmap-canonical
+      // author name. This keeps the per-file distinct-author count (bus-factor
+      // signal) correct — output changes iff the authorship signal changes.
+      "--use-mailmap",
       `--max-count=${maxCommits}`,
       "--no-merges",
       "--name-only",
-      "--format=%H%x00%an",
+      "--format=%H%x00%aN",
     ],
     { cwd: root, encoding: "utf8" },
   );

@@ -869,3 +869,109 @@ test("F6 fail-1 [CP-NODE-86]: git absent/isGitRepo false => mined:false empty, n
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// F6 inv-8 [CP-NODE-84]: author identity is mailmap-canonical (output changes
+// iff the authorship signal changes). Two display-names committed for ONE human
+// must roll up — via .mailmap + `--use-mailmap`/`%aN` — to a SINGLE distinct
+// author in the authorship / bus-factor output. Without mailmap, the same file
+// would show 2 authors (a split-identity false bus-factor signal).
+test("F6 inv-8 [CP-NODE-84]: author identity is mailmap-canonical (output changes iff the authorship signal changes)", async () => {
+  const dir = await makeRepo();
+  try {
+    // .mailmap rolls both display names/emails onto ONE canonical identity.
+    await writeFile(
+      join(dir, ".mailmap"),
+      "Canonical Person <canon@example.com> Alias One <alias1@example.com>\n" +
+        "Canonical Person <canon@example.com> Alias Two <alias2@example.com>\n",
+      "utf8",
+    );
+    // Same file touched under two DISTINCT raw author identities, both aliased
+    // to the one canonical person by the mailmap above.
+    await commit(
+      dir,
+      { "f.ts": "1" },
+      { name: "Alias One", email: "alias1@example.com" },
+    );
+    await commit(
+      dir,
+      { "f.ts": "2" },
+      { name: "Alias Two", email: "alias2@example.com" },
+    );
+
+    const history = mineGitHistory(dir);
+    assert.equal(
+      history.authorship.find((a) => a.path === "f.ts")?.authors,
+      1,
+      "two mailmap-aliased names for one person collapse to ONE distinct author",
+    );
+    // Determinism preserved through the mailmap path.
+    assert.deepEqual(mineGitHistory(dir), history);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// F6 fail-4 [CP-NODE-89]: author split/collision prevented by mailmap roll-up.
+// One human under two names must NOT inflate distinct_author_count, AND two
+// genuinely-distinct humans must NOT be collapsed — mailmap canonicalizes only
+// what it is told to, so real authorship breadth survives.
+test("F6 fail-4 [CP-NODE-89]: author split/collision prevented by mailmap roll-up", async () => {
+  const dir = await makeRepo();
+  try {
+    // Only the two aliases of ONE person are mapped; the third human is left
+    // untouched, so the file's true distinct-author count is 2, not 1 or 3.
+    await writeFile(
+      join(dir, ".mailmap"),
+      "Canonical Person <canon@example.com> Alias One <alias1@example.com>\n" +
+        "Canonical Person <canon@example.com> Alias Two <alias2@example.com>\n",
+      "utf8",
+    );
+    await commit(dir, { "shared.ts": "1" }, { name: "Alias One", email: "alias1@example.com" });
+    await commit(dir, { "shared.ts": "2" }, { name: "Alias Two", email: "alias2@example.com" });
+    await commit(dir, { "shared.ts": "3" }, { name: "Distinct Human", email: "other@example.com" });
+
+    const history = mineGitHistory(dir);
+    assert.equal(
+      history.authorship.find((a) => a.path === "shared.ts")?.authors,
+      2,
+      "one human under two names does NOT inflate the count; a second human is NOT collapsed",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// F6 fail-7 [CP-NODE-92]: a FIXED co-change support threshold keeps
+// git_history.json content-stable across runs — re-mining unchanged history
+// must yield byte-identical co_change (no run-varying / time-varying threshold).
+test("F6 fail-7 [CP-NODE-92]: fixed co-change support threshold keeps git_history.json content-stable across runs", async () => {
+  const dir = await makeRepo();
+  try {
+    // x.ts/y.ts co-change twice (>= the fixed default min of 2); x.ts/z.ts once
+    // (below threshold) — a boundary pair whose inclusion depends entirely on the
+    // threshold being fixed and applied identically every run.
+    await commit(
+      dir,
+      { "x.ts": "1", "y.ts": "1", "z.ts": "1" },
+      { name: "Author A", email: "a@example.com" },
+    );
+    await commit(
+      dir,
+      { "x.ts": "2", "y.ts": "2" },
+      { name: "Author A", email: "a@example.com" },
+    );
+
+    const first = JSON.stringify(mineGitHistory(dir).co_change);
+    const second = JSON.stringify(mineGitHistory(dir).co_change);
+    const third = JSON.stringify(mineGitHistory(dir).co_change);
+    assert.equal(first, second, "fixed threshold => byte-identical co_change across re-mines");
+    assert.equal(second, third, "fixed threshold => byte-identical co_change across re-mines");
+    // The threshold actually gated: the above-support pair is in, the single-
+    // commit pair is out — proving stability is of a real, non-empty result.
+    const pairs = new Set(mineGitHistory(dir).co_change.map((p) => `${p.a}|${p.b}`));
+    assert.equal(pairs.has("x.ts|y.ts"), true, "above-support pair included");
+    assert.equal(pairs.has("x.ts|z.ts"), false, "below-support pair excluded by the fixed threshold");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
