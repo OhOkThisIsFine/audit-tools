@@ -159,6 +159,8 @@ close-out in both orchestrators. Durable design captured in memory + CLAUDE.md._
 
 Standing gotchas worth keeping for any agent (strong or weak):
 
+- **Remediate-code worktree branches strand commits off main.** Remediate runs on isolated git worktree branches; those branches are never auto-merged. Any doc or code fix applied inside a remediate run lives on a branch like `remediate-CP-BLOCK-IMPL-*` and never reaches main unless explicitly cherry-picked or merged. Effect: the doc-review nightly routine (which reviews main) keeps re-surfacing the same findings indefinitely. Symptom: same doc-review items reappear every run, including items you believe were already fixed. Fix: after a remediate run that touches docs or code you want on main, merge or cherry-pick the relevant commits before the next nightly run.
+
 - **CLAUDECODE** is set in-session → UNSET for true-green gate runs (`env -u CLAUDECODE …`; set = one
   audit-code provider test fails).
 - **Fresh git worktree lacks `node_modules`** → `audit-tools/shared` resolves a stale `dist/` (spurious
