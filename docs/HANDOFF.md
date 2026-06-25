@@ -3,13 +3,12 @@
 > The single rolling cross-machine handoff: current published state + anything in flight. Durable how-to is in
 > `CLAUDE.md`; open work in [`docs/backlog.md`](backlog.md).
 
-**Live:** `audit-tools@0.30.6` on npm (`latest`). `main == audit-tools/main` (remote is `audit-tools`, not
-`origin`), clean tree, both bins → 0.30.6.
+**Live:** `audit-tools@0.30.7` on npm (`latest`). `main == audit-tools/main` (remote is `audit-tools`, not
+`origin`), clean tree, both bins → 0.30.7.
 
-**In flight:** nothing — clean, verified, fully pushed. `main` is ahead of the `0.30.6` tag by the
-rolling-dispatch same-file fix (below); not yet released.
+**In flight:** nothing — clean, verified, fully pushed, released, global bins reinstalled at 0.30.7.
 
-**Last landed (2026-06-25): rolling-dispatch same-file merge-serialization fix (a)+(c).** `main` now carries:
+**Last landed (2026-06-25, shipped in 0.30.7): rolling-dispatch same-file merge-serialization fix (a)+(c).** `main` carries:
 - **(a)** file-ownership-disjoint wave scheduling — `src/remediate/dispatch/ownershipScheduler.ts` (new) +
   `ownershipRegistry.ts`/`amendmentClaim.ts` + `src/remediate/steps/nextStep.ts`: replaces the numeric
   `block_id.localeCompare` in-level admission with one-writer-per-canonical-file sub-wave admission, grant-time
@@ -31,8 +30,8 @@ ledger, friction triage, repair seam, with tests) and shipped in the 0.30.x line
 empty; the only unshipped remediation-program item is the **mechanical multi-goal decompose + boundary-enforce**
 forward track (the host still hand-scopes large inputs to one phase).
 
-**Next — release the rolling-dispatch fix.** `main` is ahead of `0.30.6`; cut a patch release so the fix lands on
-npm: `env -u CLAUDECODE npm run release:patch:publish`.
+**Next — nothing pending.** Pick up the next forward track from [`backlog.md`](backlog.md) (the mechanical
+multi-goal decompose + boundary-enforce remediator track is the highest-leverage open item).
 
 **Release:** `env -u CLAUDECODE npm run release:patch:publish` (bumps + tags `vX.Y.Z` + GitHub Release → OIDC
 CI publishes → waits for npm). Recover a bad attempt: `gh release delete vX.Y.Z --cleanup-tag`, forward-bump,
