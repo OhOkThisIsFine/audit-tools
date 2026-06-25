@@ -561,3 +561,70 @@ test("F6 inv-9: an end-to-end co-commit append composes producers with the seam 
     "producer+seam never mutate the input register",
   );
 });
+
+// F6 inv-3 [CP-NODE-79]: degrade-to-empty in a non-git repo OR a shallow/empty
+// clone. The full F6 path must produce {mined-equivalent empty} signals and add
+// ZERO graph edges / risk signals vs a baseline bundle+register — and never
+// throw — when there is no usable history. A non-git temp dir is the canonical
+// unminable state (the same status!==0 => [] contract a shallow/empty clone
+// hits when `git log` yields nothing in scope).
+test("F6 inv-3 [CP-NODE-79]: non-git/shallow => mined:false empty, graph/risk unchanged vs baseline, no throw", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "no-git-inv3-"));
+  try {
+    // Manifest/units reference paths that simply do not exist in any history,
+    // standing in for a shallow/empty clone whose log contributes nothing.
+    const repoManifest = manifest(["a.ts", "b.ts"]);
+    const units = {
+      units: [{ unit_id: "u1", files: ["a.ts"] }, { unit_id: "u2", files: ["b.ts"] }],
+    };
+
+    // 1) The scoped artifact never throws and degrades to the empty aggregate.
+    let history;
+    assert.doesNotThrow(() => {
+      history = mineGitHistoryArtifact(dir, repoManifest);
+    }, "non-git directory must not throw");
+    assert.deepEqual(
+      history,
+      { co_change: [], churn: [], authorship: [] },
+      "non-git / shallow clone mines to the empty aggregate (mined:false)",
+    );
+
+    // 2) Producers project the empty aggregate to zero edges / zero signals.
+    const edges = gitHistoryGraphEdges(history);
+    assert.deepEqual(edges, [], "no co-change => zero graph edges");
+    const riskSignals = gitHistoryRiskSignals(history, units);
+    assert.equal(riskSignals.size, 0, "no churn/authorship => zero risk signals");
+
+    // 3) Merging that empty contribution leaves a baseline graph bundle and
+    //    risk register byte-for-byte unchanged: zero edges, zero new signals.
+    const baselineBundle = {
+      graphs: {
+        imports: [{ from: "x.ts", to: "y.ts", kind: "import" }],
+        calls: [],
+        references: [],
+        routes: [],
+      },
+    };
+    const mergedGraph = mergeAnalyzerGraphContribution(baselineBundle, edges);
+    assert.deepEqual(
+      mergedGraph.graphs,
+      baselineBundle.graphs,
+      "empty F6 contribution adds zero edges (graph unchanged vs baseline)",
+    );
+
+    const baselineRegister = {
+      items: [
+        { unit_id: "u1", risk_score: 2, signals: ["security_relevant"], notes: [] },
+        { unit_id: "u2", risk_score: 1, signals: [], notes: [] },
+      ],
+    };
+    const mergedRisk = mergeAnalyzerRiskSignals(baselineRegister, riskSignals);
+    assert.deepEqual(
+      mergedRisk.items.map((i) => i.signals),
+      [["security_relevant"], []],
+      "empty F6 contribution adds zero risk signals (register unchanged vs baseline)",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
