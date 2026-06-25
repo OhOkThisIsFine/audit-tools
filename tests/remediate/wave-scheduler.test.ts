@@ -671,6 +671,68 @@ describe("createBrokeredRepairDispatch — broker()", () => {
 });
 
 // ---------------------------------------------------------------------------
+// F4 inv-5 (CP-NODE-43) — critical snapshot throttles to 1 AND persists cooldown;
+// a later transiently-null snapshot reads the persisted cooldown and STAYS at 1
+// (CE-010). The persistence happens WITHIN the decision and WITHOUT making
+// broker() asynchronous (a sibling sync test reads estimatedWaveTokens directly).
+// ---------------------------------------------------------------------------
+
+describe("F4 inv-5 — critical snapshot throttles to 1 and persists cooldown (CE-010)", () => {
+  it("critical→throttle-to-1+cooldown; subsequent null snapshot stays at 1", () => {
+    const broker = createBrokeredRepairDispatch();
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const args = {
+      providerName: "openai-compatible" as const,
+      sessionConfig: { quota: { enabled: true } } as any,
+      hostModel: null,
+      // Several cheap slots so, absent throttling, the wave would size > 1.
+      slots: Array.from({ length: 6 }, (_, i) => slot(`n${i}`, 500)),
+    };
+
+    // Decision 1: a real-time snapshot below CRITICAL (remaining_pct < 0.1) must
+    // throttle the wave to exactly 1 and surface the snapshot's reset_at cooldown.
+    const critical = broker.broker({
+      ...args,
+      quotaSourceSnapshot: {
+        remaining_pct: 0.05,
+        reset_at: future,
+        captured_at: new Date().toISOString(),
+        source: "test",
+      } as any,
+    });
+    expect(critical.schedule.max_concurrent).toBe(1);
+    expect(critical.admitted).toBe(1);
+    expect(critical.cooldownUntil).toBe(future);
+
+    // Decision 2: a transiently-null snapshot for the SAME pool. The persisted
+    // cooldown (recorded within decision 1) is read back, so the wave stays at 1.
+    const followUp = broker.broker({
+      ...args,
+      quotaSourceSnapshot: null,
+    });
+    expect(followUp.schedule.max_concurrent).toBe(1);
+    expect(followUp.admitted).toBe(1);
+    expect(followUp.cooldownUntil).toBe(future);
+    expect(followUp.bindingCap).toBe("cooldown");
+  });
+
+  it("broker() stays synchronous — the decision is a plain object, not a Promise", () => {
+    const broker = createBrokeredRepairDispatch();
+    const decision = broker.broker({
+      providerName: "claude-code",
+      sessionConfig: {},
+      hostModel: null,
+      slots: [slot("n1", 500), slot("n2", 500)],
+      hostConcurrencyLimit: { active_subagents: 2, source: "session_config" } as any,
+    });
+    // A Promise would have no estimatedWaveTokens and would expose .then.
+    expect((decision as any).then).toBeUndefined();
+    expect(typeof decision.estimatedWaveTokens).toBe("number");
+    expect(decision.estimatedWaveTokens).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // F4 inv-1 (CP-NODE-39) — single chokepoint, no over-dispatch.
 //
 // EVERY dispatch path sizes concurrency through the SAME shared scheduler:
