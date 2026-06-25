@@ -116,7 +116,7 @@ export NVIDIA_API_KEY=<your key>   # PowerShell: $env:NVIDIA_API_KEY="<your key>
 ### Global slash-command bins (to run `/audit-code` · `/remediate-code` and the CLIs)
 ```bash
 npm i -g --allow-scripts=audit-tools audit-tools
-audit-code --version && remediate-code --version     # expect 0.30.3
+audit-code --version && remediate-code --version     # expect 0.30.5
 ```
 The **`--allow-scripts` flag is required** — npm silently defers the postinstall (host-integration deploy) on a
 `-g` install otherwise.
