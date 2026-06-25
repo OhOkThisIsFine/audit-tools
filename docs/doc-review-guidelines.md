@@ -48,6 +48,24 @@ The split is the entire safety surface. The classifying rule:
 
 When in doubt, it is a design-decision. Escalate.
 
+## Existence review — every doc, every run (not just intra-doc staleness)
+
+Keeping a doc *factually true* is not the whole job: a doomed doc that is dutifully
+kept accurate never gets retired. So **in addition** to the per-type check below, every
+doc is asked, every run: **does this still have a reason to exist, and is this the
+right home for its content?** This is always a **design-decision → escalate**, never
+auto-applied. Two smells force the question (do not silently "fix" either):
+
+- **A pinned version / date / status string in a prose doc** (e.g. "expected version
+  0.30.5", "plan of record (2026-06-24)", "THIS RUN implements…") is **status-noise, not
+  a factual claim to bump.** Reclassify it from stale-factual-fix to a design-decision:
+  escalate *"de-status this (derive the value or drop it), or retire the doc"* — **never
+  auto-bump the number.** A doc whose only diffs across runs are version/status bumps is a
+  status doc masquerading as a concept doc → propose generate-or-delete.
+- **A doc that is not in the canonical manifest** (below) → escalate *"register with a
+  type + reason-to-exist, fold into an existing canonical doc, or delete."* Never leave it
+  unrouted and silently maintained.
+
 ## Scope — every doc, routed by type
 
 All `*.md` under the repo, **recursively**, except the exclusions. Each doc gets
@@ -58,12 +76,19 @@ the check for its type:
 | **design / concept** | `docs/audit-workflow-design.md`, `docs/remediation-workflow-design.md`, `docs/contract-authoring-determinism-design.md`, `docs/backlog-remediation-design.md`, `docs/quota-dispatch-design.md`, `docs/cross-provider-quota-matrix.md`, `docs/glossary-ids.md`, `docs/host-validation.md` | Claims vs code (drift); flag current-state / changelog creep (docs are timeless concepts, not status). | factual-stale → yes |
 | **instruction / policy** | `CLAUDE.md`, `AGENTS.md`, `AGENTS.audit.md`, `AGENTS.remediate.md` | Factual claims only (file/command/path staleness). Policy & conventions untouchable. | **No — escalate-only.** Highest blast radius: a wrong edit deletes a guardrail governing all agents. |
 | **ops / usage** | `README.md`, `README.audit.md`, `README.remediate.md` | Do the documented commands / paths still resolve and run. | factual-stale → yes |
+| **package docs (audit)** | `docs/audit-pkg/product.md`, `docs/audit-pkg/contracts.md`, `docs/audit-pkg/development.md`, `docs/audit-pkg/operator-guide.md`, `docs/audit-pkg/release.md` | Claims vs code/spec (these page the normative `spec/audit/*`); flag current-state / changelog creep. | factual-stale → yes |
 | **backlog** | `docs/backlog.md` | Shipped-detection (item demonstrably built in code → remove, with proof); dedup near-identical raw items; A→B draft (below). Durable-traps section is **reference** — only flag a trap proven fixed-in-tooling. | shipped-removal & dedup → yes; A→B → escalate |
 | **handoff** | `docs/HANDOFF.md` | Immediate-next-only (flag multi-step-out / changelog creep); verify each item vs code; a done item → clear it, with proof. | yes |
 | **excluded** | `docs/doc-review-guidelines.md` (this spec), `docs/doc-review-findings.md` (output), `meta-audit-log.md` (append-only log — staleness review is a category error) | — | — |
 
-A doc that exists but matches no row → treat as design/concept and, if it looks
-out of place, **escalate** ("should this exist / fold in / retire").
+The file list above is the **canonical manifest**: every tracked `docs/**/*.md` must
+appear in exactly one row (or the `excluded` row). This is mechanically reconciled by a
+release-gate check (`scripts/check-doc-manifest.mjs`, run in `verify:release`): any
+`docs/*.md` not listed here **fails the build** — so a stray doc can never merge silently
+and the manifest can never drift from the filesystem. The reviewer still applies the
+existence-review smell above; the gate is the hard backstop. A doc that exists but matches
+no row → **escalate** ("register here with a reason / fold in / retire"), never
+silently treated as design/concept.
 
 ## Item keying & the ledger (incremental scope)
 
