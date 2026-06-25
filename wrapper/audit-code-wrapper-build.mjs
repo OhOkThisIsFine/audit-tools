@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileExists, newestMtimeMs } from './audit-code-wrapper-io.mjs';
 
-const repoRoot = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const distEntry = join(repoRoot, 'dist', 'audit', 'index.js');
 const tsconfigPath = join(repoRoot, 'tsconfig.json');
 const sourceRoot = join(repoRoot, 'src');
