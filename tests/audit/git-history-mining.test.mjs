@@ -628,3 +628,108 @@ test("F6 inv-3 [CP-NODE-79]: non-git/shallow => mined:false empty, graph/risk un
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// F6 fail-6 [CP-NODE-91]: out-of-manifest paths dropped at path-lookup gate,
+// no dangling nodes. `git log` legitimately reports paths the audit never sees
+// in scope — a vendored tree, a file deleted before HEAD, or a path renamed
+// away. Those land in the raw mined aggregate (co_change / churn / authorship)
+// but are NOT in repo_manifest, so `mineGitHistoryArtifact`'s in-scope filter
+// (the `known()` path-lookup gate) MUST drop every row that references them.
+// The end-to-end consequence: the co-change producer never emits a graph edge
+// whose `from`/`to` is an unknown path, so merging F6's contribution can never
+// introduce a dangling graph node (an edge endpoint with no manifest backing).
+test("F6 fail-6 [CP-NODE-91]: out-of-manifest paths dropped at path-lookup gate, no dangling nodes", async () => {
+  const dir = await makeRepo();
+  try {
+    // Three commits that ALWAYS co-touch the two in-scope files a.ts/b.ts AND a
+    // vendored file outside the manifest, plus one churn-only out-of-scope path.
+    // The vendored path co-changes with a.ts/b.ts every time and is the single
+    // highest-churn / broadest-authorship file — precisely the row a naive miner
+    // would surface — so dropping it is load-bearing, not incidental.
+    await commit(
+      dir,
+      { "a.ts": "a1", "b.ts": "b1", "vendored.js": "v1", "gone.ts": "g1" },
+      { name: "Author A", email: "a@example.com" },
+    );
+    await commit(
+      dir,
+      { "a.ts": "a2", "b.ts": "b2", "vendored.js": "v2" },
+      { name: "Author B", email: "b@example.com" },
+    );
+    await commit(
+      dir,
+      { "a.ts": "a3", "b.ts": "b3", "vendored.js": "v3" },
+      { name: "Author C", email: "c@example.com" },
+    );
+
+    // Manifest scopes ONLY a.ts and b.ts. vendored.js and gone.ts are
+    // out-of-manifest (stand-ins for vendored / deleted / renamed paths).
+    const repoManifest = manifest(["a.ts", "b.ts"]);
+    const history = mineGitHistoryArtifact(dir, repoManifest);
+
+    // 1) Every mined list is scoped: not a single row references an
+    //    out-of-manifest path.
+    const minedPaths = new Set([
+      ...history.co_change.flatMap((p) => [p.a, p.b]),
+      ...history.churn.map((e) => e.path),
+      ...history.authorship.map((e) => e.path),
+    ]);
+    assert.ok(
+      !minedPaths.has("vendored.js"),
+      "vendored out-of-manifest path dropped from the mined aggregate",
+    );
+    assert.ok(
+      !minedPaths.has("gone.ts"),
+      "deleted/renamed out-of-manifest path dropped from the mined aggregate",
+    );
+    for (const p of minedPaths) {
+      assert.ok(
+        p === "a.ts" || p === "b.ts",
+        `mined aggregate references only in-scope paths, saw ${p}`,
+      );
+    }
+
+    // 2) The in-scope co-change survives the gate (proves the filter drops only
+    //    the unknown paths, it does not gut legitimate signal): a.ts<->b.ts
+    //    co-changed across all three commits.
+    assert.equal(
+      history.co_change.length,
+      1,
+      "the single in-scope co-change pair survives the gate",
+    );
+    assert.deepEqual(
+      [history.co_change[0].a, history.co_change[0].b].sort(),
+      ["a.ts", "b.ts"],
+      "surviving pair is exactly the in-scope a.ts/b.ts coupling",
+    );
+
+    // 3) End-to-end: the co-change producer emits no edge touching an unknown
+    //    path, so a merge into the graph bundle introduces ZERO dangling nodes
+    //    (every edge endpoint is manifest-backed).
+    const manifestKeys = new Set(repoManifest.files.map((f) => f.path));
+    const edges = gitHistoryGraphEdges(history);
+    for (const edge of edges) {
+      assert.ok(
+        manifestKeys.has(edge.from) && manifestKeys.has(edge.to),
+        `every git-co-change edge endpoint is in-manifest (no dangling node), saw ${edge.from} -> ${edge.to}`,
+      );
+    }
+
+    const bundle = {
+      graphs: { imports: [], calls: [], references: [], routes: [] },
+    };
+    const merged = mergeAnalyzerGraphContribution(bundle, edges);
+    const landedEndpoints = merged.graphs.references.flatMap((e) => [
+      e.from,
+      e.to,
+    ]);
+    for (const endpoint of landedEndpoints) {
+      assert.ok(
+        manifestKeys.has(endpoint),
+        `no dangling graph node after merge, saw ${endpoint}`,
+      );
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
