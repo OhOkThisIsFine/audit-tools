@@ -349,3 +349,90 @@ test("mergeAnalyzerRiskSignals degrades to a clone on an empty map", () => {
   assert.notEqual(out, register);
   assert.deepEqual(out.items[0].signals, []);
 });
+
+// F6 inv-9 (merge-helper seam land-order safety): F6's co-change edges +
+// churn/bus-factor signals append ONLY through the shared
+// mergeAnalyzerGraphContribution / mergeAnalyzerRiskSignals pair (the pre-shipped
+// CCU-analyzer-merge-helper-seam, which lands FIRST). F6 declares a scheduling
+// dependency on that seam, so a half-shipped state — the seam absent while F6's
+// producers are present — is UNSCHEDULABLE: consuming F6's output is impossible
+// without first resolving the seam imports. This test makes that land-order
+// mechanical, not host-remembered (additive to the CE-006 apply-ordering test).
+
+test("F6 inv-9: the pre-shipped merge-helper seam pair lands first (statically importable)", () => {
+  // The seam pair is the only sanctioned append path. If either symbol were
+  // unshipped, the top-level `await import(...)` at the head of this file would
+  // have thrown before any F6 consumer test could run — so a half-shipped state
+  // (F6 present, seam absent) can never be scheduled.
+  assert.equal(
+    typeof mergeAnalyzerGraphContribution,
+    "function",
+    "graph-contribution seam must be shipped before F6 consumers run",
+  );
+  assert.equal(
+    typeof mergeAnalyzerRiskSignals,
+    "function",
+    "risk-signals seam must be shipped before F6 consumers run",
+  );
+});
+
+test("F6 inv-9: gitHistory appends ONLY through the seam — never mutating a graph bundle / risk register directly", async () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = await readFile(
+    join(here, "../../src/audit/extractors/gitHistory.ts"),
+    "utf8",
+  );
+  // F6 emits plain edge/signal DATA (gitHistoryGraphEdges / gitHistoryRiskSignals)
+  // for the seam to merge. It must never reach past the seam and mutate a
+  // graph bundle's edge lists or a risk register's items in place — that would
+  // be a second, land-order-unsafe append path bypassing the shared helper.
+  assert.doesNotMatch(
+    src,
+    /\.graphs\.(imports|calls|references|routes)\b/,
+    "F6 must not touch graph-bundle edge lists directly; route through mergeAnalyzerGraphContribution",
+  );
+  assert.doesNotMatch(
+    src,
+    /\bregister\.items\b/,
+    "F6 must not mutate the risk register directly; route through mergeAnalyzerRiskSignals",
+  );
+});
+
+test("F6 inv-9: an end-to-end co-commit append composes producers with the seam (the only land-order-safe path)", () => {
+  // The full F6 path: mined data → producer → seam merge. Proves the producers'
+  // output is exactly what the pre-shipped seam consumes, so F6 has no reason to
+  // reach around it.
+  const history = {
+    co_change: [{ a: "a.ts", b: "b.ts", commits: 3 }],
+    churn: [{ path: "a.ts", commits: 12 }],
+    authorship: [{ path: "a.ts", authors: 5 }],
+  };
+  const units = { units: [{ unit_id: "u1", files: ["a.ts"] }] };
+
+  const bundle = { graphs: { imports: [], calls: [], references: [], routes: [] } };
+  const mergedGraph = mergeAnalyzerGraphContribution(
+    bundle,
+    gitHistoryGraphEdges(history),
+  );
+  assert.equal(mergedGraph.graphs.references.length, 1, "co-change edge landed via the seam");
+  assert.equal(mergedGraph.graphs.references[0].kind, "git-co-change");
+  assert.deepEqual(bundle.graphs.references, [], "producer+seam never mutate the input bundle");
+
+  const register = {
+    items: [{ unit_id: "u1", risk_score: 2, signals: ["security_relevant"], notes: [] }],
+  };
+  const mergedRisk = mergeAnalyzerRiskSignals(
+    register,
+    gitHistoryRiskSignals(history, units),
+  );
+  assert.deepEqual(
+    mergedRisk.items[0].signals,
+    ["broad_authorship", "change_hotspot", "security_relevant"],
+    "churn/bus-factor signals landed via the seam, unioned with existing",
+  );
+  assert.deepEqual(
+    register.items[0].signals,
+    ["security_relevant"],
+    "producer+seam never mutate the input register",
+  );
+});
