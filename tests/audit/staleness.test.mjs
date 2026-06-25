@@ -612,6 +612,55 @@ test("F1 discriminator-in-key: two same-grouping-coordinate results with distinc
   );
 });
 
+test("F1 inv-2 [CP-NODE-3]: unchanged element skipped, distinct discriminator never collapses (incl. O3 re-dispatch)", () => {
+  const sig = buildTaskContentSignature({ goal: "audit auth", body: "v1" });
+  const baseCoord = {
+    unit_id: "uX",
+    lens: "security",
+    pass_id: "p3",
+    source: "base",
+    task_content_signature: sig,
+  };
+  const baseKeys = deriveLiveResultKeys(baseCoord);
+  const baselines = recordResultBaseline(undefined, baseKeys);
+
+  // Skip-by-construction: persisted contentKey == freshly-computed → unchanged → skip.
+  assert.equal(
+    perElementStalenessVerdict(baselines, baseCoord),
+    "skipped",
+    "unchanged element (identical contentKey) must skip",
+  );
+
+  // O3 stage-3 re-dispatch: same {unit_id,lens,pass_id} grouping coordinate, distinct
+  // discriminator → distinct keys → must NOT false-skip against the base baseline (CE-009).
+  const redispatchCoord = {
+    unit_id: "uX",
+    lens: "security",
+    pass_id: "p3",
+    source: "redispatch",
+    stage: "O3",
+    attempt: 3,
+    task_content_signature: sig,
+  };
+  const redispatchKeys = deriveLiveResultKeys(redispatchCoord);
+  assert.notEqual(
+    redispatchKeys.content_key,
+    baseKeys.content_key,
+    "O3 re-dispatch must have a distinct contentKey from the base result",
+  );
+  assert.equal(
+    perElementStalenessVerdict(baselines, redispatchCoord),
+    "re-derive",
+    "two distinct same-grouping-coordinate results must never collapse to a false skip (CE-009)",
+  );
+
+  // And once the re-dispatch is itself recorded, its own unchanged re-run skips —
+  // proving the skip operates at per-result, not grouping, granularity.
+  const both = recordResultBaseline(baselines, redispatchKeys);
+  assert.equal(perElementStalenessVerdict(both, redispatchCoord), "skipped");
+  assert.equal(perElementStalenessVerdict(both, baseCoord), "skipped");
+});
+
 test("F1 skip-by-construction: unchanged element skipped, mutated element re-derived", () => {
   const coord = (sig) => ({
     unit_id: "u1",
