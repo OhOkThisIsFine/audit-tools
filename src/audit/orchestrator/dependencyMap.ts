@@ -151,7 +151,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
   // the canonical machine contract (audit-findings.json) is co-produced by
   // synthesis. The optional narrative marker tracks audit-findings so a
   // re-synthesized contract re-stales the themes/exec-summary/top-risks pass.
-  "audit-report.md": [
+  [AUDIT_REPORT_FILENAME]: [
     "repo_manifest.json",
     "file_disposition.json",
     "unit_manifest.json",

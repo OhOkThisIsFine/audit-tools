@@ -1,4 +1,5 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
+import { AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import type { AuditResult } from "../types.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import {
@@ -62,7 +63,7 @@ export function runSynthesisExecutor(
         reflections: bundle.agent_reflections,
       }),
     },
-    artifacts_written: ["audit-findings.json", "audit-report.md"],
+    artifacts_written: ["audit-findings.json", AUDIT_REPORT_FILENAME],
     progress_summary: `Rendered deterministic audit report and canonical findings for ${finalResults.length} audit result entries.`,
   };
 }
@@ -131,7 +132,7 @@ export function runSynthesisNarrativeExecutor(
     },
     artifacts_written: [
       "audit-findings.json",
-      "audit-report.md",
+      AUDIT_REPORT_FILENAME,
       "synthesis-narrative.json",
     ],
     progress_summary: `Synthesis narrative applied: ${record.theme_count} theme(s), ${record.top_risk_count} top risk(s).`,

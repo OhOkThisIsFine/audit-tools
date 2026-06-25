@@ -12,10 +12,10 @@ import {
   readOptionalTextFile,
 } from "audit-tools/shared";
 import type { AuditFindingsReport } from "audit-tools/shared";
+import { AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 
 const AUDIT_TOOLS_DIR = ".audit-tools";
 const FINDINGS_FILENAME = "audit-findings.json";
-const REPORT_FILENAME = "audit-report.md";
 
 export async function cmdResynthesize(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
@@ -60,7 +60,7 @@ export async function cmdResynthesize(argv: string[]): Promise<void> {
   await mkdir(auditToolsDir, { recursive: true });
 
   const outputFindingsPath = join(auditToolsDir, FINDINGS_FILENAME);
-  const outputReportPath = join(auditToolsDir, REPORT_FILENAME);
+  const outputReportPath = join(auditToolsDir, AUDIT_REPORT_FILENAME);
 
   await writeFile(outputFindingsPath, JSON.stringify(normalized, null, 2), "utf8");
   await writeFile(outputReportPath, markdown, "utf8");
