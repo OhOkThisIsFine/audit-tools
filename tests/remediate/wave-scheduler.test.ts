@@ -1050,6 +1050,99 @@ describe("scheduleWave — logs to stderr when readQuotaState throws", () => {
 });
 
 // ---------------------------------------------------------------------------
+// F4 fail-2 (CP-NODE-50) — no capable/unknown host mis-classification.
+//
+// The cold-start floor and capability tier are decided SOLELY by F4's own
+// classifyProvider + the host-concurrency handshake (classifyCapableHost), never
+// by an external/F3 descriptor. Two symmetric mis-classifications must be
+// impossible:
+//   (a) a CAPABLE host (reports an 8-wide ceiling above the floor) must NOT be
+//       collapsed back to the first-contact floor — its real ceiling binds the
+//       wave (8) and it classifies as capable; and
+//   (b) an UNKNOWN host (first contact, no reported ceiling, no learned
+//       evidence) must NOT escape the floor — it stays NOT capable and its wave
+//       is held at the conservative first-contact floor.
+// Both verdicts come from F4's own classifyProvider/host-concurrency signals.
+// ---------------------------------------------------------------------------
+
+describe("F4 fail-2 [CP-NODE-50]: capable host off the floor, unknown host stays at floor", () => {
+  const FLOOR = 3; // DEFAULT_FIRST_CONTACT_CONCURRENCY
+  const CAPABLE_CEILING = 8;
+
+  it("a capable host is NOT collapsed to the first-contact floor (8-wide ceiling binds, classified capable)", () => {
+    const broker = createBrokeredRepairDispatch();
+    // classifyProvider is F4's OWN classifier; capability, however, is decided by
+    // the injected host ceiling (8 > floor), not the provider type or any
+    // external descriptor. antigravity classifies "unknown" yet a reported
+    // ceiling above the floor still makes it capable and sizes the wave to 8.
+    expect(classifyProvider("antigravity")).toBe("unknown");
+
+    const slots = Array.from({ length: CAPABLE_CEILING }, (_, i) =>
+      slot(`n${i}`, 500),
+    );
+    const decision = broker.broker({
+      providerName: "antigravity",
+      sessionConfig: {},
+      hostModel: null,
+      slots,
+      hostConcurrencyLimit: {
+        active_subagents: CAPABLE_CEILING,
+        source: "session_config",
+      } as any,
+    });
+
+    // The real ceiling binds the wave — it is NOT collapsed down to the floor.
+    expect(decision.capableHost).toBe(true);
+    expect(decision.schedule.max_concurrent).toBe(CAPABLE_CEILING);
+    expect(decision.schedule.max_concurrent).toBeGreaterThan(FLOOR);
+    // And F4's own capability classifier agrees, off the SAME floor.
+    expect(
+      classifyCapableHost({
+        sessionConfig: {},
+        hostConcurrencyLimit: {
+          active_subagents: CAPABLE_CEILING,
+          source: "session_config",
+        } as any,
+        quotaStateEntry: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("an unknown host (first contact, no signal) does NOT escape the capability floor (classified not-capable)", () => {
+    const broker = createBrokeredRepairDispatch();
+    // An unknown provider with NO reported ceiling and NO learned evidence is a
+    // first-contact host: classifyProvider is F4-owned, and with no head-room
+    // signal the capability classifier must hold it at the floor (not capable).
+    expect(classifyProvider("antigravity")).toBe("unknown");
+
+    const slots = Array.from({ length: CAPABLE_CEILING }, (_, i) =>
+      slot(`n${i}`, 500),
+    );
+    const decision = broker.broker({
+      providerName: "antigravity",
+      sessionConfig: {},
+      hostModel: null,
+      slots,
+      // No hostConcurrencyLimit, no quotaStateEntry → pure first contact.
+    });
+
+    // It is NOT classified capable and its wave never escapes above the floor —
+    // an unknown first-contact host stays conservatively sized.
+    expect(decision.capableHost).toBe(false);
+    expect(decision.schedule.max_concurrent).toBeLessThanOrEqual(FLOOR);
+    // F4's own capability classifier agrees: no reported ceiling, no learned
+    // evidence → stays at the floor.
+    expect(
+      classifyCapableHost({
+        sessionConfig: {},
+        hostConcurrencyLimit: null,
+        quotaStateEntry: null,
+      }),
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // waveScheduler.ts shim removed (CP-BLOCK-N-rolling-scheduler atomic-replace).
 // The wave-batch re-export shim was deleted together with the wave-batch
 // dispatch path; the quota primitives (scheduleWave / buildDispatchQuota /
