@@ -1410,3 +1410,37 @@ test("F1 fail-9 [CP-NODE-20 r2]: per-element verdicts are order-canonicalized =>
     "key-order-only differences in persisted verdicts must not change the artifact hash",
   );
 });
+
+// F1 fail-2 [CP-NODE-13]: a per-element verdict must NEVER be keyed on the bare
+// grouping coordinate {unit_id,lens,pass_id} — the result_content_discriminator
+// (source/attempt/stage) is part of the identity, so two results sharing one
+// grouping coordinate but differing only in their discriminator produce DISTINCT
+// keys and never collapse to one verdict.
+test("F1 fail-2 [CP-NODE-13]: per-element verdict never keyed on the bare grouping coordinate (distinct result_content_discriminator never collapses)", () => {
+  const sig = buildTaskContentSignature({ goal: "audit auth", body: "v1" });
+  const grouping = { unit_id: "uG", lens: "security", pass_id: "p1", task_content_signature: sig };
+
+  // Two results, identical grouping coordinate, DISTINCT discriminator.
+  const base = deriveLiveResultKeys({ ...grouping, source: "base" });
+  const redispatch = deriveLiveResultKeys({ ...grouping, source: "redispatch", attempt: 2, stage: "O3" });
+
+  // Distinct keys: the discriminator is part of identity, not the bare coordinate.
+  assert.notEqual(base.content_key, redispatch.content_key, "discriminator distinguishes the contentKey");
+  assert.notEqual(base.idempotency_key, redispatch.idempotency_key, "discriminator distinguishes the idempotencyKey");
+
+  // A baseline recorded for the base result must NOT skip the discriminator-
+  // distinct sibling — i.e. the verdict is not keyed on the bare grouping coord.
+  const baselines = recordResultBaseline(undefined, base);
+  assert.equal(
+    perElementStalenessVerdict(baselines, { ...grouping, source: "redispatch", attempt: 2, stage: "O3" }),
+    "re-derive",
+    "a distinct-discriminator sibling sharing the grouping coordinate must never be false-skipped",
+  );
+  // The base result's own unchanged re-run still skips — proving per-result, not
+  // per-grouping, granularity (the discriminator collapses ONLY identical results).
+  assert.equal(
+    perElementStalenessVerdict(baselines, { ...grouping, source: "base" }),
+    "skipped",
+    "the identical base result still skips — collapse happens per-result, not per grouping coordinate",
+  );
+});
