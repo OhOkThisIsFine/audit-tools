@@ -497,6 +497,84 @@ test("F1 seam-equality: per-element verdict equals the verdict from the contentK
   assert.equal(perElementStalenessVerdict(baselines, coordinate), "skipped");
 });
 
+test("F1 inv-1 [CP-NODE-2]: per-element identity comes only from contentKey seam (seam-equality + discriminator-in-key)", () => {
+  // Seam-equality: deriveLiveResultKeys must reproduce, bit-for-bit, the keys a
+  // caller derives straight from src/shared/contentKey.ts — proving there is NO
+  // parallel/independent hashing path. {unit_id,task_id,lens,pass_id} + the
+  // result_content_discriminator are the SOLE identity inputs.
+  const coordinate = {
+    unit_id: "uX",
+    task_id: "tX",
+    lens: "security",
+    pass_id: "pX",
+    source: "base",
+    task_content_signature: buildTaskContentSignature({
+      task_id: "tX",
+      goal: "confirm seam is the only source of identity",
+    }),
+  };
+  const disc = buildResultContentDiscriminator({ source: "base" });
+  const seamIk = idempotencyKey({
+    unit_id: coordinate.unit_id,
+    lens: coordinate.lens,
+    pass_id: coordinate.pass_id,
+    result_content_discriminator: disc,
+  });
+  const seamCk = contentKey({
+    unit_id: coordinate.unit_id,
+    lens: coordinate.lens,
+    pass_id: coordinate.pass_id,
+    result_content_discriminator: disc,
+    task_content_signature: coordinate.task_content_signature,
+  });
+  const liveKeys = deriveLiveResultKeys(coordinate);
+  assert.equal(
+    liveKeys.idempotency_key,
+    seamIk,
+    "idempotency_key MUST come from the contentKey seam (no parallel hashing)",
+  );
+  assert.equal(
+    liveKeys.content_key,
+    seamCk,
+    "content_key MUST come from the contentKey seam (no parallel hashing)",
+  );
+
+  // task_id is stripped from the signature (FC-002): renumbering task_id alone
+  // must NOT move the seam keys — identity is the discriminated coordinate, not
+  // a task_id-bearing hash.
+  const renumbered = deriveLiveResultKeys({
+    ...coordinate,
+    task_id: "tX-renamed",
+    task_content_signature: buildTaskContentSignature({
+      task_id: "tX-renamed",
+      goal: "confirm seam is the only source of identity",
+    }),
+  });
+  assert.equal(
+    renumbered.content_key,
+    seamCk,
+    "task_id is stripped by the seam — renumbering must not move the contentKey",
+  );
+
+  // Discriminator-in-key: the result_content_discriminator is a key input, so a
+  // distinct same-grouping-coordinate result is NEVER collapsed onto the base.
+  const redispatch = deriveLiveResultKeys({
+    ...coordinate,
+    source: "redispatch",
+    attempt: 1,
+  });
+  assert.notEqual(
+    liveKeys.idempotency_key,
+    redispatch.idempotency_key,
+    "discriminator must be in the idempotencyKey",
+  );
+  assert.notEqual(
+    liveKeys.content_key,
+    redispatch.content_key,
+    "discriminator must be in the contentKey",
+  );
+});
+
 test("F1 discriminator-in-key: two same-grouping-coordinate results with distinct sources produce DISTINCT contentKeys → not collapsed", () => {
   const sig = buildTaskContentSignature({ goal: "audit auth" });
   const base = deriveLiveResultKeys({
