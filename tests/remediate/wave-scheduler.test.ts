@@ -845,6 +845,58 @@ describe("F4 inv-10 — O3 stage-3 re-dispatch flows through the broker chokepoi
   });
 });
 
+// ---------------------------------------------------------------------------
+// F4 fail-8 (CP-NODE-56) — O3 repair re-dispatch is NEVER issued outside the
+// broker. Issuing it outside escapes the single gated chokepoint (quota read,
+// deterministic-local estimate, over-budget refusal, await-completion handoff)
+// and the cap / await-completion accounting. The seam PREVENTS that escape by
+// being the SOLE dispatch surface: createBrokeredRepairDispatch() exposes only
+// broker() + awaitNextCompletion(), with no second sizing path or provider
+// handle to reach around. This asserts the NEGATIVE (no escape hatch) that
+// inv-10 (positive: flows-through-and-sizes-identically) does not.
+// ---------------------------------------------------------------------------
+
+describe("F4 fail-8 — O3 repair re-dispatch never escapes the broker chokepoint", () => {
+  it("the seam exposes ONLY the gated chokepoint methods — no escape hatch", () => {
+    const broker = createBrokeredRepairDispatch();
+    // The entire public dispatch surface is the two gated methods. Anything else
+    // (a raw scheduleWave handle, a provider, a second repair-only sizing path)
+    // would let O3's re-dispatch bypass the cap / await-completion accounting.
+    expect(Object.keys(broker).sort()).toEqual(
+      ["awaitNextCompletion", "broker"].sort(),
+    );
+    expect(typeof broker.broker).toBe("function");
+    expect(typeof broker.awaitNextCompletion).toBe("function");
+    // No provider / scheduler escape handle leaked onto the seam.
+    expect((broker as any).scheduleWave).toBeUndefined();
+    expect((broker as any).provider).toBeUndefined();
+    expect((broker as any).dispatch).toBeUndefined();
+  });
+
+  it("a re-dispatch routed through broker() is gated identically to the first dispatch — one chokepoint, no drift", () => {
+    const broker = createBrokeredRepairDispatch();
+    const hostLimit = { active_subagents: 2, source: "session_config" as const };
+    const slots = [slot("repair-n1", 500), slot("n2", 500), slot("n3", 500)];
+    const args = {
+      providerName: "claude-code" as const,
+      sessionConfig: {},
+      hostModel: null,
+      slots,
+      hostConcurrencyLimit: hostLimit as any,
+    };
+    // The "first" dispatch and the O3 stage-3 re-dispatch both pass through the
+    // SAME broker() chokepoint — so a re-dispatch cannot escape to a separate,
+    // unaccounted path: identical admission, sizing, and binding cap.
+    const first = broker.broker(args);
+    const reDispatch = broker.broker(args);
+    expect(reDispatch.admission).toBe(first.admission);
+    expect(reDispatch.admitted).toBe(first.admitted);
+    expect(reDispatch.schedule.max_concurrent).toBe(first.schedule.max_concurrent);
+    expect(reDispatch.bindingCap).toBe(first.bindingCap);
+    expect(reDispatch.estimatedWaveTokens).toBe(first.estimatedWaveTokens);
+  });
+});
+
 describe("createBrokeredRepairDispatch — awaitNextCompletion()", () => {
   it("passes the raw worker result straight through (no validation)", () => {
     const broker = createBrokeredRepairDispatch();
