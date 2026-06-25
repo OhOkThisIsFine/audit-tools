@@ -19,7 +19,7 @@ import {
 export { shouldBuildDistForPaths, assertWorkspaceInstalled };
 export { _INSTALL_HOST_ORDER, _INSTALL_HOST_DEFINITIONS, _getInstallHostKeys, _getInstallProfile, _renderGeminiCommandToml };
 
-const repoRoot = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const distEntry = join(repoRoot, 'dist', 'audit', 'index.js');
 const packageJsonPath = join(repoRoot, 'package.json');
 const promptAssetPath = join(repoRoot, 'skills', 'audit-code', 'audit-code.prompt.md');
