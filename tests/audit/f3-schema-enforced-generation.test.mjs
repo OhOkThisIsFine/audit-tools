@@ -360,3 +360,60 @@ test("F3 STRUCTURAL guard: F3 source files contain no hardcoded model literal", 
     `F3 files must not hardcode model identities. Violations:\n${violations.join("\n")}`,
   );
 });
+
+test("F3 inv-1 [CP-NODE-22]: structural guard rejects hardcoded model literals in F3 files", async () => {
+  // CP-NODE-22 / OBL-f3-schema-enforced-generation-inv-1: capability is discovered
+  // at runtime — F3's scoped files must carry NO hardcoded model-id literal and NO
+  // per-provider capability constant (CE-003). This guard is STRUCTURAL: it walks
+  // the TypeScript AST of each F3 file and inspects only real string-literal /
+  // template-head tokens (not comments, not identifiers), so a model id mentioned
+  // in a doc comment can't trip it while a literal keyed in code can't slip past.
+  const ts = (await import("typescript")).default;
+
+  // The full F3 scope per the finding — incl. both providers/index.ts registries.
+  const f3Files = [
+    "src/shared/providers/providerFactory.ts",
+    "src/shared/providers/types.ts",
+    "src/audit/providers/index.ts",
+    "src/remediate/providers/index.ts",
+  ];
+
+  // A hardcoded model-id literal (vendor-prefixed family names + the legacy table)
+  // or a per-provider capability/limits constant.
+  const modelIdLiteral =
+    /^(claude-[0-9]|claude-(opus|sonnet|haiku)|gpt-4|gpt-3\.5|gpt-oss|gemini-|llama-|mistral-|o[13]-mini|o1-preview)/i;
+  const capabilityConstantLiteral = /KNOWN_MODEL_LIMITS|MODEL_(LIMITS|TIERS|CAPABILITIES)/;
+
+  const violations = [];
+  for (const rel of f3Files) {
+    const src = await readFile(join(repoRoot, rel), "utf8");
+    const sourceFile = ts.createSourceFile(rel, src, ts.ScriptTarget.Latest, true);
+
+    const visit = (node) => {
+      // Real string-literal tokens only — AST-scoped, so comments are excluded.
+      if (
+        ts.isStringLiteral(node) ||
+        ts.isNoSubstitutionTemplateLiteral(node) ||
+        ts.isTemplateHead(node) ||
+        ts.isTemplateMiddle(node) ||
+        ts.isTemplateTail(node)
+      ) {
+        if (modelIdLiteral.test(node.text)) {
+          violations.push(`${rel}: hardcoded model-id literal "${node.text}"`);
+        }
+      }
+      // Per-provider capability constant referenced by identifier name.
+      if (ts.isIdentifier(node) && capabilityConstantLiteral.test(node.text)) {
+        violations.push(`${rel}: per-provider capability constant '${node.text}'`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+
+  assert.deepEqual(
+    violations,
+    [],
+    `F3 files must discover capability at runtime — no hardcoded model id / capability constant (CE-003). Violations:\n${violations.join("\n")}`,
+  );
+});
