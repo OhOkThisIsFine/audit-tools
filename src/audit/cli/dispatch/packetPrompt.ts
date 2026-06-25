@@ -154,6 +154,7 @@ export function buildTaskSections(
           .map(([key, value]) => `input.${key}: ${value}`)
       : [];
     const isLensVerification = task.tags?.includes("lens_verification") ?? false;
+    const isSelectiveDeepening = task.tags?.includes("selective_deepening") ?? false;
     const coverageTemplate = task.file_paths.map((path) => ({
       path,
       total_lines: task.file_line_counts?.[path] ?? lineIndex[path] ?? 0,
@@ -175,6 +176,12 @@ export function buildTaskSections(
             "Lens verification mode: review the prior result summary in the rationale and use only targeted source checks.",
             "Do not redo every packet and do not write direct findings for this task.",
             "Return findings: [] plus verification metadata. Include followup_tasks only for bounded, specific re-review packets.",
+          ]
+        : []),
+      ...(isSelectiveDeepening
+        ? [
+            "",
+            `Deepening task: set AuditResult.lens to '${task.lens}' and every finding.lens in your result to '${task.lens}'.`,
           ]
         : []),
       "",
@@ -288,6 +295,8 @@ export function buildPacketPrompt(params: {
     "2. affected_files entries are objects with a path key, not plain strings.",
     "3. Only reference files from the packet unless a finding genuinely crosses a boundary.",
     "4. findings: [] is correct when you find nothing genuine.",
+    "5. Do not use TaskCreate, spawn background agents, or launch sub-agents. Write your results",
+    `   directly to ${resultPath} using your Write tool, then reply with the confirmation below.`,
     "",
     "## Final response",
     `After writing the JSON array to ${resultPath}, reply exactly: valid: ${packet.packet_id}, findings=<total finding count>`,
