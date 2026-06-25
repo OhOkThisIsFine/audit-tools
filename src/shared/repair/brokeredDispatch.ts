@@ -33,6 +33,8 @@ import { scheduleWave } from '../quota/scheduler.js';
 import { DEFAULT_FIRST_CONTACT_CONCURRENCY } from '../quota/scheduler.js';
 import { estimateTokensFromBytes, ESTIMATED_PROMPT_OVERHEAD_TOKENS } from '../tokens.js';
 import { resolveContextBudget } from '../tokens.js';
+import { getQuotaStatePath, readQuotaState, writeQuotaState } from '../quota/state.js';
+import { withFileLock } from '../quota/fileLock.js';
 
 /**
  * One unit of work the broker is asked to dispatch. The broker derives a
@@ -193,14 +195,113 @@ function fitWaveToBudget(
 }
 
 /**
+ * Pool key for the broker's cooldown registry: `provider/<model|*>`, the same
+ * `provider/<model>` convention the quota state file uses. Single-sourced here so
+ * a cooldown persisted on one decision is read back on the next for the SAME
+ * provider+model pool (inv-5 → inv-6).
+ */
+function brokerPoolKey(providerName: ResolvedProviderName, hostModel: string | null): string {
+  return `${providerName}/${hostModel && hostModel.length > 0 ? hostModel : '*'}`;
+}
+
+/** Whether an ISO cooldown timestamp is still in the future relative to now. */
+function cooldownActive(cooldownUntil: string | null | undefined): boolean {
+  if (!cooldownUntil) return false;
+  const t = new Date(cooldownUntil).getTime();
+  return Number.isFinite(t) && t > Date.now();
+}
+
+/**
+ * Fire-and-forget durable persistence of a pool cooldown to the on-disk quota
+ * state, guarded by the same shared file lock the quota subsystem uses. This is
+ * intentionally NOT awaited by `broker()` so the broker keeps its synchronous
+ * signature (inv-5 must not turn `broker()` into a Promise — a sibling sync test
+ * reads `result.estimatedWaveTokens` synchronously). The in-memory registry below
+ * is the authoritative in-process readback; this write makes the cooldown survive
+ * across processes. Any failure (no state dir configured, unreadable state) is
+ * swallowed: persistence is best-effort and must never reject unhandled.
+ */
+function persistPoolCooldownBestEffort(poolKey: string, cooldownUntil: string): void {
+  let lockPath: string;
+  try {
+    lockPath = getQuotaStatePath() + '.lock';
+  } catch {
+    // Quota state dir not configured (e.g. unit context) → nothing to persist to.
+    return;
+  }
+  void withFileLock(lockPath, async () => {
+    const state = await readQuotaState();
+    const existing = state.entries[poolKey];
+    const entry: QuotaStateEntry = existing ?? {
+      updated_at: new Date().toISOString(),
+      buckets: {},
+      cooldown_until: null,
+      last_429_at: null,
+    };
+    // Keep the later of any already-persisted cooldown and this one.
+    const prior = entry.cooldown_until ? new Date(entry.cooldown_until).getTime() : 0;
+    const next = new Date(cooldownUntil).getTime();
+    if (!Number.isFinite(prior) || next > prior) {
+      entry.cooldown_until = cooldownUntil;
+    }
+    entry.updated_at = new Date().toISOString();
+    state.entries[poolKey] = entry;
+    await writeQuotaState(state);
+  }).catch(() => {
+    // Best-effort: durability failure must not surface from a sync decision.
+  });
+}
+
+/**
  * Create the concrete broker. The single gated chokepoint: it sizes the wave
  * through the shared `scheduleWave` (one wave-scheduling authority), enforces the
  * over-budget refusal, surfaces the persisted cooldown, classifies the host off
  * the cold-start floor, and passes raw completions straight through to O3.
+ *
+ * inv-5/inv-6 cooldown persistence: when a real-time snapshot drives the schedule
+ * into cooldown (remaining_pct<CRITICAL → throttle to 1 + cooldown_until), the
+ * broker records that cooldown — synchronously in an in-process per-pool registry
+ * AND best-effort to durable quota state — WITHIN the same decision. A later
+ * decision with a transiently-null snapshot reads the registered cooldown back
+ * (merged into the effective quota-state entry) so `scheduleWave`'s existing
+ * active-cooldown path keeps the wave throttled to 1. All of this happens without
+ * making `broker()` asynchronous.
  */
 export function createBrokeredRepairDispatch(): BrokeredRepairDispatch {
+  // In-process, synchronous cooldown registry keyed by `provider/<model|*>`. This
+  // is the authoritative readback inside one broker instance; disk persistence is
+  // an additional best-effort durability layer (see persistPoolCooldownBestEffort).
+  const cooldownRegistry = new Map<string, string>();
+
   return {
     broker(input: BrokerDispatchInput): BrokeredDispatchDecision {
+      const poolKey = brokerPoolKey(input.providerName, input.hostModel ?? null);
+
+      // inv-6: fold any registered (previously persisted) cooldown into the
+      // effective quota-state entry so scheduleWave's active-cooldown path keeps
+      // the wave at 1 even when this decision's snapshot is transiently null.
+      const registered = cooldownRegistry.get(poolKey) ?? null;
+      let effectiveQuotaStateEntry = input.quotaStateEntry ?? null;
+      if (cooldownActive(registered)) {
+        const suppliedActive = cooldownActive(effectiveQuotaStateEntry?.cooldown_until);
+        const supplied = suppliedActive ? effectiveQuotaStateEntry!.cooldown_until : null;
+        const merged =
+          supplied && new Date(supplied).getTime() >= new Date(registered!).getTime()
+            ? supplied
+            : registered!;
+        effectiveQuotaStateEntry = effectiveQuotaStateEntry
+          ? { ...effectiveQuotaStateEntry, cooldown_until: merged }
+          : {
+              updated_at: new Date().toISOString(),
+              buckets: {},
+              cooldown_until: merged,
+              last_429_at: null,
+            };
+      } else if (registered) {
+        // Registered cooldown has expired → drop it so it cannot linger.
+        cooldownRegistry.delete(poolKey);
+      }
+
       const estimatedSlotTokens = input.slots.map(estimateSlotTokens);
       const schedule = scheduleWave({
         providerName: input.providerName,
@@ -208,11 +309,19 @@ export function createBrokeredRepairDispatch(): BrokeredRepairDispatch {
         hostModel: input.hostModel,
         requestedConcurrency: Math.max(1, input.slots.length),
         estimatedSlotTokens,
-        quotaStateEntry: input.quotaStateEntry ?? null,
+        quotaStateEntry: effectiveQuotaStateEntry,
         hostConcurrencyLimit: input.hostConcurrencyLimit ?? null,
         quotaSourceSnapshot: input.quotaSourceSnapshot ?? null,
         discoveredLimits: input.discoveredLimits ?? null,
       });
+
+      // inv-5: persist the cooldown surfaced by THIS decision — synchronously into
+      // the in-process registry (authoritative readback) and best-effort to disk —
+      // so a subsequent null-snapshot decision stays throttled.
+      if (cooldownActive(schedule.cooldown_until)) {
+        cooldownRegistry.set(poolKey, schedule.cooldown_until!);
+        persistPoolCooldownBestEffort(poolKey, schedule.cooldown_until!);
+      }
 
       const capableHost = classifyCapableHost({
         sessionConfig: input.sessionConfig,
