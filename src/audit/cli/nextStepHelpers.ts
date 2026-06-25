@@ -44,7 +44,7 @@ import {
   type DesignReviewPass,
 } from "../orchestrator/designReviewSnapshot.js";
 import { computeArtifactStateSignature } from "../orchestrator/artifactMetadata.js";
-import { decideNextStep, PRIORITY } from "../orchestrator/nextStep.js";
+import { decideNextStep, PRIORITY, decideAuditFrictionCloseout } from "../orchestrator/nextStep.js";
 import { isHostDelegationExecutor } from "../orchestrator/executors.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
@@ -127,7 +127,7 @@ export type NextStepParams = {
 };
 
 export type TerminalStepResult =
-  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
+  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string; triage?: import("audit-tools/shared").FrictionTriageDecision }
   | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string };
 
 /**
@@ -147,7 +147,7 @@ export type NextStepResult =
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
   | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
   | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
+  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string; triage?: import("audit-tools/shared").FrictionTriageDecision }
   | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string };
 
 /**
@@ -198,6 +198,7 @@ export async function buildTerminalStep(
   const promoted = await promoteFinalAuditReport({
     artifactsDir: params.artifactsDir,
   });
+  const triage = await decideAuditFrictionCloseout(params.artifactsDir, "run");
   return {
     kind: "complete",
     state,
@@ -205,6 +206,7 @@ export async function buildTerminalStep(
     finalReportPath: promoted.promoted
       ? promotedAuditReportPath(params.artifactsDir)
       : auditReportPath(params.artifactsDir),
+    triage,
   };
 }
 
@@ -1320,15 +1322,22 @@ export async function runDeterministicForNextStep(
     const promoted = await promoteFinalAuditReport({
       artifactsDir: params.artifactsDir,
     });
+    const finalReportPath = promoted.promoted
+      ? promotedAuditReportPath(params.artifactsDir)
+      : auditReportPath(params.artifactsDir);
+    // Fold friction triage into the terminal step — same pattern as remediate.
+    // Blocks with status "ready" until ≥1 open observation is written; "complete"
+    // once all subjects disposed and open_observations ≥1.
+    const triage = await decideAuditFrictionCloseout(
+      params.artifactsDir,
+      "run",
+    );
     return {
       kind: "complete",
       state,
       bundle,
-      // Promotion copies the report to the artifacts dir's PARENT
-      // (.audit-tools/audit-report.md), not the repo root.
-      finalReportPath: promoted.promoted
-        ? promotedAuditReportPath(params.artifactsDir)
-        : auditReportPath(params.artifactsDir),
+      finalReportPath,
+      triage,
     };
   }
 

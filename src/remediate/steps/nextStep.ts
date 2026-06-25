@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -1559,57 +1559,28 @@ async function presentReportStep(
   state: RemediationState | null,
 ): Promise<RemediationStep> {
   const reportPath = join(dirname(artifactsDir), "remediation-report.md");
-  // Tool-emitted terminal friction-TRIAGE close-out, FOLDED into present_report so it
-  // is one bounded step (parity with audit-code; single-sourced in `audit-tools/shared`).
-  // MANDATORY + BLOCKING: stays "dispose" until every captured mechanical event AND
-  // every surfaced agent-feedback reflection carries a keep|discard|annotate
-  // disposition; an empty set (zero events AND zero reflections) is trivially
-  // "disposed". Never couples to any repo's backlog doc.
+  // Terminal friction-TRIAGE close-out, folded into present_report (single-sourced in
+  // `audit-tools/shared`). MANDATORY + BLOCKING: stays "dispose" until every mechanical
+  // event + reflection is disposed AND ≥1 open observation written. Never trivially
+  // satisfied by an empty event set — the host must actively confirm the friction state.
   const triage = await decideRemediateFrictionCloseout(artifactsDir, state);
-  const pendingBlock =
-    triage.action === "dispose"
-      ? `
-
-## Triage captured friction (BLOCKING close-out)
-
-This run captured friction that MUST be disposed before it can present complete.
-For EACH item below, record a disposition (\`keep\`, \`discard\`, or \`annotate\`)
-against its id into the run's friction record at \`${triage.recordPath}\` (append to
-\`dispositions[]\` as \`{ "target_id": "<id>", "disposition": "keep|discard|annotate",
-optional "annotation": "..." }\`). This is the run's own record under its artifacts
-dir — do NOT edit any repository's tracking/backlog doc.
-
-${triage.pending
-  .map((subject) => `- \`${subject.id}\` (${subject.source}) — ${subject.note}`)
-  .join("\n")}
-`
-      : `
-
-## Run friction triage
-
-No captured friction or agent-feedback reflections required disposition this run
-(empty set → trivially disposed).
-`;
+  const frictionBlock = buildFrictionTriageBlock(triage);
+  const isBlocked = triage.action === "dispose";
   return writeCurrentStep({
     stepKind: "present_report",
-    status: "complete",
+    status: isBlocked ? "ready" : "complete",
     runId: stateRunId(state),
     repoRoot: root,
     artifactsDir,
-    prompt: `
-# Present Remediation Report
-
-Read \`${reportPath}\` and summarize the remediation outcome for the user.
-Mention the resolved, ignored, and deemed-inappropriate counts plus the closing action.
-${pendingBlock}
-Stop after presenting the summary (and disposing captured friction, if any).
-`,
+    prompt: isBlocked
+      ? `# Remediation Run Friction Triage\n\nComplete friction triage before presenting the report.\n${frictionBlock}`
+      : `# Present Remediation Report\n\nRead \`${reportPath}\` and summarize the remediation outcome.\nMention resolved, ignored, and deemed-inappropriate counts plus the closing action.\n${frictionBlock}`,
     allowedCommands: [],
-    stopCondition:
-      "Stop after presenting the remediation report summary and disposing any captured run friction.",
+    stopCondition: isBlocked
+      ? "Complete friction triage (write dispositions and open_observations), then call next-step again."
+      : "Present the remediation report summary and stop.",
     artifactPaths: {
       final_report: reportPath,
-      // Surface the run's friction record (resolved through the shared path module).
       friction_record: triage.recordPath,
     },
   });
