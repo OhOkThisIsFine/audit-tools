@@ -1031,3 +1031,62 @@ test("F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json ups
     );
   }
 });
+
+test("F1 fail-3 [CP-NODE-14]: missing/uncomparable per-element key => stale, never unchanged", () => {
+  // F1 fail-3 regression guard: treating a missing or otherwise-uncomparable
+  // per-element key as `unchanged` (skipped) is a FALSE NEGATIVE — a changed
+  // element would silently be skipped. Every uncomparable shape must fail safe
+  // to `re-derive` and NEVER resolve to `skipped`. This guards angles distinct
+  // from inv-3 (CP-NODE-4): an under-discriminated coordinate, a signature the
+  // seam refuses to key, and non-string (structurally uncomparable) persisted
+  // baseline values.
+  const sig = buildTaskContentSignature({ goal: "g", body: "v1" });
+  const coord = {
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: sig,
+  };
+  const liveKeys = deriveLiveResultKeys(coord);
+
+  // Sanity anchor: a correctly persisted baseline is the ONLY skip path.
+  const good = recordResultBaseline(undefined, liveKeys);
+  assert.equal(perElementStalenessVerdict(good, coord), "skipped");
+
+  // (a) Under-discriminated coordinate (no `source`): the coordinate cannot be
+  // uniquely keyed, so it must never be compared at the grouping granularity.
+  const { source: _drop, ...underDiscriminated } = coord;
+  assert.equal(
+    perElementStalenessVerdict(good, underDiscriminated),
+    "re-derive",
+    "under-discriminated coordinate (missing source) must never skip",
+  );
+
+  // (b) Uncomparable live signature: an empty signature is rejected by the seam
+  // (deriveLiveResultKeys throws) → the element is uncomparable → re-derive.
+  const noSigCoord = { ...coord, task_content_signature: "" };
+  assert.equal(
+    perElementStalenessVerdict(good, noSigCoord),
+    "re-derive",
+    "uncomparable (empty) live signature must never skip",
+  );
+
+  // (c) Structurally-uncomparable persisted baselines: a baseline value that is
+  // not the seam content_key string (null, a number, an object) can never equal
+  // the freshly-derived content_key, so each must fail safe to re-derive.
+  for (const badValue of [null, 0, 42, { content_key: liveKeys.content_key }, ["x"]]) {
+    const corruptStore = { ...good, [liveKeys.idempotency_key]: badValue };
+    const verdict = perElementStalenessVerdict(corruptStore, coord);
+    assert.equal(
+      verdict,
+      "re-derive",
+      `uncomparable persisted baseline (${JSON.stringify(badValue)}) must fail safe to re-derive`,
+    );
+    assert.notEqual(
+      verdict,
+      "skipped",
+      "an uncomparable per-element key must never be treated as unchanged",
+    );
+  }
+});
