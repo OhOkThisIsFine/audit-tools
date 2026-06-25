@@ -15,6 +15,7 @@ import {
   CODEX_DESKTOP_ACTIVE_SUBAGENT_LIMIT,
   createBrokeredRepairDispatch,
   classifyCapableHost,
+  classifyProvider,
   computeDispatchCapacity,
   estimateSlotTokens,
   type BrokeredDispatchSlot,
@@ -551,6 +552,75 @@ describe("classifyCapableHost (off the cold-start floor)", () => {
     expect(
       classifyCapableHost({ sessionConfig: {}, hostConcurrencyLimit: null, quotaStateEntry: entry }),
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F4 inv-7 (CP-NODE-45) — F4-owned classification + driver-tier selection.
+//
+// The broker derives its driver tier (Y-primary vs slot-pull, expressed as the
+// capableHost classification) and cold-start classification from F4's OWN
+// limits.ts `classifyProvider` + the host-concurrency handshake — it consults NO
+// F3 descriptor. The BrokerDispatchInput surface carries no descriptor field; the
+// only signals it reads are the host roster/concurrency the caller injects, and
+// the driver tier follows F4's own classification of those signals.
+// ---------------------------------------------------------------------------
+
+describe("F4 inv-7 — F4-owned classification + driver-tier selection", () => {
+  it("classifyProvider is F4-owned and maps hosted agent backends to 'hosted'", () => {
+    // F4's own classifier — no F3 descriptor involved.
+    expect(classifyProvider("claude-code")).toBe("hosted");
+    expect(classifyProvider("codex")).toBe("hosted");
+    expect(classifyProvider("local-subprocess")).toBe("local");
+    expect(classifyProvider("antigravity")).toBe("unknown");
+  });
+
+  it("driver tier follows F4's classification of the INJECTED host concurrency signal", () => {
+    const broker = createBrokeredRepairDispatch();
+    const base = {
+      providerName: "claude-code" as const,
+      sessionConfig: {},
+      hostModel: null,
+      slots: [slot("n1", 500), slot("n2", 500)],
+    };
+
+    // Host roster reports a ceiling at/below the cold-start floor → slot-pull
+    // tier (not yet capable): F4 classifies it off its OWN floor.
+    const coldStart = broker.broker({
+      ...base,
+      hostConcurrencyLimit: { active_subagents: 1, source: "session_config" } as any,
+    });
+    expect(coldStart.capableHost).toBe(false);
+
+    // Host roster reports head-room above the floor → Y-primary tier (capable):
+    // the tier flips purely from F4's classification of the injected signal.
+    const capable = broker.broker({
+      ...base,
+      hostConcurrencyLimit: { active_subagents: 8, source: "session_config" } as any,
+    });
+    expect(capable.capableHost).toBe(true);
+  });
+
+  it("the broker decision is identical regardless of any F3-style descriptor field (none is consulted)", () => {
+    const broker = createBrokeredRepairDispatch();
+    const input = {
+      providerName: "claude-code" as const,
+      sessionConfig: {},
+      hostModel: null,
+      slots: [slot("n1", 500), slot("n2", 500), slot("n3", 500)],
+      hostConcurrencyLimit: { active_subagents: 8, source: "session_config" } as any,
+    };
+    const plain = broker.broker(input);
+    // Inject an arbitrary F3-shaped descriptor as an extra field; the broker must
+    // ignore it entirely — classification/tier come only from F4's own signals.
+    const withDescriptor = broker.broker({
+      ...input,
+      f3Descriptor: { tier: "slot-pull", driver: "Y-secondary" },
+    } as any);
+    expect(withDescriptor.capableHost).toBe(plain.capableHost);
+    expect(withDescriptor.admitted).toBe(plain.admitted);
+    expect(withDescriptor.bindingCap).toBe(plain.bindingCap);
+    expect(withDescriptor.schedule.max_concurrent).toBe(plain.schedule.max_concurrent);
   });
 });
 
