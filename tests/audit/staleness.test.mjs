@@ -1316,3 +1316,36 @@ test("F1 inv-9 [CP-NODE-10 r2]: git_history.json co-registered in dependencyMap.
     "F1+F6 co-commit unit requires git_history.json in BOTH dependencyMap.ts and dependency-map.md — neither half may land alone",
   );
 });
+
+test("F1 fail-7 [CP-NODE-18 r2]: git_history.json never half-registered (present in dependencyMap.ts iff present in dependency-map.md)", async () => {
+  // F1 fail-7 (CCU-git-history-registration): landing F1's dep-map registration
+  // without F6's producer (or vice versa) in a separate commit yields a
+  // half-registered DAG node. The single scheduler-enforced co-commit unit
+  // prevents either half from landing alone. Distinct angle from inv-9 (which
+  // asserts BOTH sides are PRESENT): this pins the BICONDITIONAL — presence in
+  // the TS adjacency table must equal presence in the declarative .md. It fires
+  // in EITHER drift direction (TS-only OR md-only), catching the "vice versa"
+  // half-registration that a both-present assertion cannot distinguish from a
+  // clean removal.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+
+  const presentInTs = Object.prototype.hasOwnProperty.call(
+    ARTIFACT_DEPENDS_ON_MAP,
+    "git_history.json",
+  );
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const mdPath = join(here, "../../spec/audit/dependency-map.md");
+  const md = readFileSync(mdPath, "utf8");
+  const presentInMd = md
+    .split(/\r?\n/)
+    .some((line) => /`git_history\.json`/.test(line));
+
+  assert.equal(
+    presentInTs,
+    presentInMd,
+    `git_history.json must be co-registered: present in dependencyMap.ts (${presentInTs}) iff present in dependency-map.md (${presentInMd}) — a mismatch is a half-registered DAG node from a non-atomic commit`,
+  );
+});
