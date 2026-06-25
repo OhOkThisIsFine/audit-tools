@@ -755,6 +755,96 @@ describe("F4 inv-1 — single chokepoint clamps N>cap to the host cap", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// F4 inv-10 (CP-NODE-48) — O3 stage-2 patch + stage-3 re-dispatch arrive through
+// the shared BrokeredRepairDispatch seam and flow through F4's broker, so EVERY
+// dispatch (including a repair retry) passes the single chokepoint; land-order-
+// safe (CE-002).
+//
+// O3's emit-validate-repair loop never calls scheduleWave / a provider directly:
+// its stage-3 re-dispatch is issued ONLY via broker.broker(). This proves
+//   (a) the re-dispatch sizes through the SAME scheduleWave authority — identical
+//       max_concurrent + binding_cap as a direct scheduleWave call on the same
+//       inputs (no second, drifting sizing path for repairs), and
+//   (b) land-order safety: the admitted slots are a contiguous PREFIX of the
+//       requested slots in priority order (a re-dispatched, higher-priority
+//       repair slot lands before lower-priority work — never reordered/dropped
+//       out from under an earlier slot).
+// ---------------------------------------------------------------------------
+
+describe("F4 inv-10 — O3 stage-3 re-dispatch flows through the broker chokepoint", () => {
+  const HOST_CAP = 2;
+  const hostLimit = { active_subagents: HOST_CAP, source: "session_config" as const };
+
+  it("re-dispatch sizes through the broker's shared scheduleWave authority + buildConfirmedPools agree", () => {
+    const broker = createBrokeredRepairDispatch();
+    // Stage-3 re-dispatch: O3 re-issues the patched repair slot ahead of the
+    // remaining work, all through the seam.
+    const slots = [slot("repair-n1", 500), slot("n2", 500), slot("n3", 500)];
+
+    const decision = broker.broker({
+      providerName: "claude-code",
+      sessionConfig: {},
+      hostModel: null,
+      slots,
+      hostConcurrencyLimit: hostLimit as any,
+    });
+
+    // The re-dispatch passes the single chokepoint and sizes through the shared
+    // wave-scheduling authority — no separate, drifting repair-only sizing path.
+    expect(decision.admission).toBe("admitted");
+    expect(decision.schedule.max_concurrent).toBe(HOST_CAP);
+    expect(decision.bindingCap).toBe("host_concurrency");
+
+    // The rolling-engine dispatch path (computeDispatchCapacity, the shape
+    // buildConfirmedPools feeds) sizes the SAME re-dispatch identically — one
+    // authority across the repair retry and the normal wave.
+    const capacity = computeDispatchCapacity({
+      pools: [
+        {
+          id: "claude-code/*",
+          providerName: "claude-code",
+          hostModel: null,
+          hostConcurrencyLimit: hostLimit,
+        },
+      ],
+      sessionConfig: {},
+      pendingItemTokens: slots.map(estimateSlotTokens),
+    });
+    expect(decision.schedule.max_concurrent).toBe(
+      capacity.primary.schedule.max_concurrent,
+    );
+    expect(decision.bindingCap).toBe(capacity.binding_cap);
+  });
+
+  it("is land-order-safe: admitted slots are a contiguous priority-order prefix (CE-002)", () => {
+    const broker = createBrokeredRepairDispatch();
+    // Re-dispatched repair slot is highest priority (index 0), followed by the
+    // rest in priority order.
+    const slots = [
+      slot("repair-n1", 500),
+      slot("n2", 500),
+      slot("n3", 500),
+      slot("n4", 500),
+    ];
+
+    const decision = broker.broker({
+      providerName: "claude-code",
+      sessionConfig: {},
+      hostModel: null,
+      slots,
+      hostConcurrencyLimit: hostLimit as any,
+    });
+
+    // The admitted ids are exactly the leading `admitted` slots, in order — the
+    // repair slot lands first and nothing is reordered or skipped.
+    const expectedPrefix = slots.slice(0, decision.admitted).map((s) => s.slotId);
+    expect(decision.admittedSlotIds).toEqual(expectedPrefix);
+    expect(decision.admittedSlotIds[0]).toBe("repair-n1");
+    expect(decision.admitted).toBe(HOST_CAP);
+  });
+});
+
 describe("createBrokeredRepairDispatch — awaitNextCompletion()", () => {
   it("passes the raw worker result straight through (no validation)", () => {
     const broker = createBrokeredRepairDispatch();
