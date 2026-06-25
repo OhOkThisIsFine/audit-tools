@@ -733,3 +733,54 @@ test("F6 fail-6 [CP-NODE-91]: out-of-manifest paths dropped at path-lookup gate,
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("F6 fail-10 [CP-NODE-95]: git_history.json upstream-dep set matches F1 registration {repo_manifest,file_disposition}", async () => {
+  // F6 produces git_history.json by mining only manifest-backed paths, so its
+  // real upstream-dep set is exactly {repo_manifest.json, file_disposition.json}.
+  // F1 registers that set in the literal ARTIFACT_DEPENDS_ON_MAP and in the
+  // spec dep-map. If F6's declared deps drift, or the producer + registration
+  // land in separate commits (half-registration), the registered set diverges
+  // from what F6 actually consumes. This boundary test fails loudly on that
+  // drift / half-registration over git_history.json.
+  const expectedUpstream = ["file_disposition.json", "repo_manifest.json"];
+
+  // 1) Literal-parity: F1's registered upstream set for git_history.json is
+  //    exactly the set F6's producer consumes (manifest + disposition).
+  const registered = ARTIFACT_DEPENDS_ON_MAP["git_history.json"];
+  assert.ok(
+    Array.isArray(registered),
+    "git_history.json is registered in ARTIFACT_DEPENDS_ON_MAP (no half-registration)",
+  );
+  assert.deepEqual(
+    [...registered].sort(),
+    expectedUpstream,
+    "F1's registered upstream deps for git_history.json match F6's consumed set",
+  );
+
+  // 2) Co-commit boundary: the spec dep-map (F1's human-render of the same
+  //    registration) lists git_history.json as downstream of BOTH upstreams.
+  //    Producer + registration co-located => spec and literal agree; a
+  //    separate-commit half-registration desyncs them and trips this.
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const specPath = join(
+    __dirname,
+    "..",
+    "..",
+    "spec",
+    "audit",
+    "dependency-map.md",
+  );
+  const spec = await readFile(specPath, "utf8");
+  const sections = spec.split(/^### /m);
+  for (const upstream of expectedUpstream) {
+    const section = sections.find((s) => s.startsWith(`\`${upstream}\``));
+    assert.ok(
+      section,
+      `spec dep-map has a section for upstream ${upstream}`,
+    );
+    assert.ok(
+      section.includes("`git_history.json`"),
+      `spec dep-map lists git_history.json as downstream of ${upstream} (co-registered, not half-registered)`,
+    );
+  }
+});
