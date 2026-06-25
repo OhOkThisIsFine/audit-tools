@@ -3,6 +3,7 @@ import type {
   ArtifactMetadataEntry,
   ArtifactMetadataManifest,
 } from "../types/artifactMetadata.js";
+import { METADATA_SCHEMA_VERSION } from "../types/artifactMetadata.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
 import { ALL_DAG_ARTIFACTS, ARTIFACT_DEPENDS_ON_MAP } from "./dependencyMap.js";
@@ -76,6 +77,16 @@ export function computeArtifactMetadata(
 ): ArtifactMetadataManifest {
   const artifacts: Record<string, ArtifactMetadataEntry> = {};
   const updated = new Set(updatedArtifacts);
+  // Metadata-migration fail-safe (CE-007): an old-shape (pre-F1) manifest —
+  // absent/older `metadata_schema_version` — must NOT be trusted to skip work off
+  // its still-matching whole-artifact hashes/revisions, and its per-element
+  // baselines (if any) cannot be safely interpreted. Treat it as absent for
+  // reuse/carry-forward so every artifact is recomputed fresh and every element
+  // fails safe to re-derive. The output is always stamped F1-current.
+  const previousIsCurrent =
+    typeof previous?.metadata_schema_version === "number" &&
+    previous.metadata_schema_version >= METADATA_SCHEMA_VERSION;
+  const usablePrevious = previousIsCurrent ? previous : undefined;
   // Enumerate the FULL DAG artifact universe (not just those that depend on
   // something): a pure-input artifact (scope.json, intent_checkpoint.json, …)
   // must still get a metadata entry so its dependents can compare revisions.
@@ -91,7 +102,7 @@ export function computeArtifactMetadata(
     const value = getArtifactValue(bundle, artifactName);
     if (value === undefined || value === null) continue;
 
-    const previousEntry = previous?.artifacts[artifactName];
+    const previousEntry = usablePrevious?.artifacts[artifactName];
     if (previousEntry && !updated.has(artifactName)) {
       artifacts[artifactName] = previousEntry;
       continue;
@@ -105,7 +116,7 @@ export function computeArtifactMetadata(
         .map((dependencyName) => [
           dependencyName,
           artifacts[dependencyName]?.revision ??
-            previous?.artifacts[dependencyName]?.revision ??
+            usablePrevious?.artifacts[dependencyName]?.revision ??
             0,
         ]),
     );
@@ -127,5 +138,16 @@ export function computeArtifactMetadata(
     };
   }
 
-  return { artifacts };
+  const manifest: ArtifactMetadataManifest = {
+    metadata_schema_version: METADATA_SCHEMA_VERSION,
+    artifacts,
+  };
+  // Carry forward the O2↔F1 per-result baseline store ONLY from a recognized
+  // F1-current manifest — an old-shape store cannot be safely reused (its keys
+  // predate the discriminated coordinate), so dropping it makes every element
+  // fail safe to re-derive (CE-007).
+  if (usablePrevious?.result_baselines) {
+    manifest.result_baselines = usablePrevious.result_baselines;
+  }
+  return manifest;
 }

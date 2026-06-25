@@ -6,7 +6,7 @@ const { computeArtifactMetadata, computeArtifactStateSignature } =
 const { computeStaleArtifacts } =
   await import("../../src/audit/orchestrator/staleness.ts");
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.ts");
-const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP } = await import("../../src/audit/orchestrator/dependencyMap.ts");
+const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP, invertDependencyMap } = await import("../../src/audit/orchestrator/dependencyMap.ts");
 const {
   hashArtifactValue,
   stableStringify,
@@ -359,6 +359,7 @@ test("absent dependency with recordedRevision > 0 marks artifact stale", async (
   // with revision 0 and is absent, the artifact should NOT be stale from this branch.
   // Construct metadata manually where the recorded revision for the absent dep is 0.
   const zeroRevisionMetadata = {
+    metadata_schema_version: 1,
     artifacts: {
       "file_disposition.json": {
         revision: 1,
@@ -433,4 +434,1013 @@ test("computeStaleArtifacts returns empty set when artifact_metadata key is pres
   const stale = computeStaleArtifacts({ artifact_metadata: undefined });
   assert.ok(stale instanceof Set, "must return a Set");
   assert.equal(stale.size, 0, "undefined artifact_metadata → no stale artifacts");
+});
+
+// ---------------------------------------------------------------------------
+// F1-granular-staleness boundary tests
+// ---------------------------------------------------------------------------
+
+const {
+  buildTaskContentSignature,
+  buildResultContentDiscriminator,
+  contentKey,
+  idempotencyKey,
+} = await import("../../src/shared/contentKey.ts");
+const {
+  deriveLiveResultKeys,
+  recordResultBaseline,
+  perElementStalenessVerdict,
+  isMetadataManifestCurrent,
+} = await import("../../src/audit/orchestrator/resultBaseline.ts");
+const { METADATA_SCHEMA_VERSION } = await import(
+  "../../src/audit/types/artifactMetadata.ts"
+);
+
+test("F1 inv: computeArtifactMetadata stamps the current metadata_schema_version", () => {
+  const metadata = computeArtifactMetadata(makeBaseBundle());
+  assert.equal(metadata.metadata_schema_version, METADATA_SCHEMA_VERSION);
+  assert.ok(METADATA_SCHEMA_VERSION >= 1);
+});
+
+test("F1 seam-equality: per-element verdict equals the verdict from the contentKey seam directly", () => {
+  const coordinate = {
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: buildTaskContentSignature({ goal: "audit auth" }),
+  };
+  // Derive the keys the same way a caller would, straight from the seam.
+  const disc = buildResultContentDiscriminator({ source: "base" });
+  const seamIk = idempotencyKey({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    result_content_discriminator: disc,
+  });
+  const seamCk = contentKey({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    result_content_discriminator: disc,
+    task_content_signature: coordinate.task_content_signature,
+  });
+  const liveKeys = deriveLiveResultKeys(coordinate);
+  assert.equal(liveKeys.idempotency_key, seamIk, "idempotency_key from the seam");
+  assert.equal(liveKeys.content_key, seamCk, "content_key from the seam");
+
+  // With a baseline recorded at the seam contentKey, an unchanged element is skipped.
+  const baselines = recordResultBaseline(undefined, {
+    idempotency_key: seamIk,
+    content_key: seamCk,
+  });
+  assert.equal(perElementStalenessVerdict(baselines, coordinate), "skipped");
+});
+
+test("F1 inv-1 [CP-NODE-2]: per-element identity comes only from contentKey seam (seam-equality + discriminator-in-key)", () => {
+  // Seam-equality: deriveLiveResultKeys must reproduce, bit-for-bit, the keys a
+  // caller derives straight from src/shared/contentKey.ts — proving there is NO
+  // parallel/independent hashing path. {unit_id,task_id,lens,pass_id} + the
+  // result_content_discriminator are the SOLE identity inputs.
+  const coordinate = {
+    unit_id: "uX",
+    task_id: "tX",
+    lens: "security",
+    pass_id: "pX",
+    source: "base",
+    task_content_signature: buildTaskContentSignature({
+      task_id: "tX",
+      goal: "confirm seam is the only source of identity",
+    }),
+  };
+  const disc = buildResultContentDiscriminator({ source: "base" });
+  const seamIk = idempotencyKey({
+    unit_id: coordinate.unit_id,
+    lens: coordinate.lens,
+    pass_id: coordinate.pass_id,
+    result_content_discriminator: disc,
+  });
+  const seamCk = contentKey({
+    unit_id: coordinate.unit_id,
+    lens: coordinate.lens,
+    pass_id: coordinate.pass_id,
+    result_content_discriminator: disc,
+    task_content_signature: coordinate.task_content_signature,
+  });
+  const liveKeys = deriveLiveResultKeys(coordinate);
+  assert.equal(
+    liveKeys.idempotency_key,
+    seamIk,
+    "idempotency_key MUST come from the contentKey seam (no parallel hashing)",
+  );
+  assert.equal(
+    liveKeys.content_key,
+    seamCk,
+    "content_key MUST come from the contentKey seam (no parallel hashing)",
+  );
+
+  // task_id is stripped from the signature (FC-002): renumbering task_id alone
+  // must NOT move the seam keys — identity is the discriminated coordinate, not
+  // a task_id-bearing hash.
+  const renumbered = deriveLiveResultKeys({
+    ...coordinate,
+    task_id: "tX-renamed",
+    task_content_signature: buildTaskContentSignature({
+      task_id: "tX-renamed",
+      goal: "confirm seam is the only source of identity",
+    }),
+  });
+  assert.equal(
+    renumbered.content_key,
+    seamCk,
+    "task_id is stripped by the seam — renumbering must not move the contentKey",
+  );
+
+  // Discriminator-in-key: the result_content_discriminator is a key input, so a
+  // distinct same-grouping-coordinate result is NEVER collapsed onto the base.
+  const redispatch = deriveLiveResultKeys({
+    ...coordinate,
+    source: "redispatch",
+    attempt: 1,
+  });
+  assert.notEqual(
+    liveKeys.idempotency_key,
+    redispatch.idempotency_key,
+    "discriminator must be in the idempotencyKey",
+  );
+  assert.notEqual(
+    liveKeys.content_key,
+    redispatch.content_key,
+    "discriminator must be in the contentKey",
+  );
+});
+
+test("F1 discriminator-in-key: two same-grouping-coordinate results with distinct sources produce DISTINCT contentKeys → not collapsed", () => {
+  const sig = buildTaskContentSignature({ goal: "audit auth" });
+  const base = deriveLiveResultKeys({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: sig,
+  });
+  const redispatch = deriveLiveResultKeys({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "redispatch",
+    attempt: 1,
+    task_content_signature: sig,
+  });
+  // Same {unit_id,lens,pass_id} grouping coordinate, different discriminator.
+  assert.notEqual(base.idempotency_key, redispatch.idempotency_key);
+  assert.notEqual(base.content_key, redispatch.content_key);
+
+  // A baseline for the base result must NOT skip the re-dispatched result.
+  const baselines = recordResultBaseline(undefined, base);
+  assert.equal(
+    perElementStalenessVerdict(baselines, {
+      unit_id: "u1",
+      lens: "security",
+      pass_id: "p1",
+      source: "redispatch",
+      attempt: 1,
+      task_content_signature: sig,
+    }),
+    "re-derive",
+    "distinct same-coordinate result must not be false-skipped (CE-009)",
+  );
+});
+
+test("F1 inv-2 [CP-NODE-3]: unchanged element skipped, distinct discriminator never collapses (incl. O3 re-dispatch)", () => {
+  const sig = buildTaskContentSignature({ goal: "audit auth", body: "v1" });
+  const baseCoord = {
+    unit_id: "uX",
+    lens: "security",
+    pass_id: "p3",
+    source: "base",
+    task_content_signature: sig,
+  };
+  const baseKeys = deriveLiveResultKeys(baseCoord);
+  const baselines = recordResultBaseline(undefined, baseKeys);
+
+  // Skip-by-construction: persisted contentKey == freshly-computed → unchanged → skip.
+  assert.equal(
+    perElementStalenessVerdict(baselines, baseCoord),
+    "skipped",
+    "unchanged element (identical contentKey) must skip",
+  );
+
+  // O3 stage-3 re-dispatch: same {unit_id,lens,pass_id} grouping coordinate, distinct
+  // discriminator → distinct keys → must NOT false-skip against the base baseline (CE-009).
+  const redispatchCoord = {
+    unit_id: "uX",
+    lens: "security",
+    pass_id: "p3",
+    source: "redispatch",
+    stage: "O3",
+    attempt: 3,
+    task_content_signature: sig,
+  };
+  const redispatchKeys = deriveLiveResultKeys(redispatchCoord);
+  assert.notEqual(
+    redispatchKeys.content_key,
+    baseKeys.content_key,
+    "O3 re-dispatch must have a distinct contentKey from the base result",
+  );
+  assert.equal(
+    perElementStalenessVerdict(baselines, redispatchCoord),
+    "re-derive",
+    "two distinct same-grouping-coordinate results must never collapse to a false skip (CE-009)",
+  );
+
+  // And once the re-dispatch is itself recorded, its own unchanged re-run skips —
+  // proving the skip operates at per-result, not grouping, granularity.
+  const both = recordResultBaseline(baselines, redispatchKeys);
+  assert.equal(perElementStalenessVerdict(both, redispatchCoord), "skipped");
+  assert.equal(perElementStalenessVerdict(both, baseCoord), "skipped");
+});
+
+test("F1 skip-by-construction: unchanged element skipped, mutated element re-derived", () => {
+  const coord = (sig) => ({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: sig,
+  });
+  const sigA = buildTaskContentSignature({ goal: "g", body: "v1" });
+  const keysA = deriveLiveResultKeys(coord(sigA));
+  const baselines = recordResultBaseline(undefined, keysA);
+
+  // Run B — same content: unchanged → skipped.
+  assert.equal(perElementStalenessVerdict(baselines, coord(sigA)), "skipped");
+
+  // Run B — mutated content (benign edit bumps contentKey): re-derive.
+  const sigB = buildTaskContentSignature({ goal: "g", body: "v2 edited" });
+  assert.equal(perElementStalenessVerdict(baselines, coord(sigB)), "re-derive");
+});
+
+test("F1 fail-safe: missing discriminator (no source) → re-derive, never grouping-key compare", () => {
+  const sig = buildTaskContentSignature({ goal: "g" });
+  // First establish a baseline under base so a grouping-key compare COULD falsely skip.
+  const keys = deriveLiveResultKeys({
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: sig,
+  });
+  const baselines = recordResultBaseline(undefined, keys);
+  // Coordinate omitting `source` (the discriminator) → fail-safe stale (CE-009).
+  assert.equal(
+    perElementStalenessVerdict(baselines, {
+      unit_id: "u1",
+      lens: "security",
+      pass_id: "p1",
+      task_content_signature: sig,
+    }),
+    "re-derive",
+  );
+});
+
+test("F1 fail-safe: corrupt/undefined element state → re-derive", () => {
+  const coord = {
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: "", // empty signature → seam throws → fail-safe
+  };
+  assert.equal(perElementStalenessVerdict({}, coord), "re-derive");
+
+  // No baseline recorded for a valid coordinate → first compare → re-derive.
+  const sig = buildTaskContentSignature({ goal: "g" });
+  assert.equal(
+    perElementStalenessVerdict(undefined, {
+      unit_id: "u1",
+      lens: "security",
+      pass_id: "p1",
+      source: "base",
+      task_content_signature: sig,
+    }),
+    "re-derive",
+    "no recorded baseline → never a false skip",
+  );
+});
+
+test("F1 inv-3 [CP-NODE-4]: missing/corrupt per-element key => stale (fail-safe)", () => {
+  // A persisted per-element contentKey that is missing, deleted, or corrupt
+  // (uncomparable) must be treated as CHANGED and re-derived — mirroring the
+  // whole-artifact !currentHash => stale path. We corrupt/delete the persisted
+  // baseline several ways and assert each fails safe to `re-derive`, never a
+  // false `skipped`.
+  const sig = buildTaskContentSignature({ goal: "g", body: "v1" });
+  const coord = {
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: sig,
+  };
+  const liveKeys = deriveLiveResultKeys(coord);
+
+  // Sanity: a correctly persisted baseline skips an unchanged element.
+  const goodBaselines = recordResultBaseline(undefined, liveKeys);
+  assert.equal(perElementStalenessVerdict(goodBaselines, coord), "skipped");
+
+  // (a) Persisted key DELETED from the store → no baseline → re-derive.
+  const deleted = { ...goodBaselines };
+  delete deleted[liveKeys.idempotency_key];
+  assert.equal(
+    perElementStalenessVerdict(deleted, coord),
+    "re-derive",
+    "deleted persisted per-element key must fail safe to re-derive",
+  );
+
+  // (b) Persisted key explicitly undefined (uncomparable) → re-derive.
+  const undef = { ...goodBaselines, [liveKeys.idempotency_key]: undefined };
+  assert.equal(
+    perElementStalenessVerdict(undef, coord),
+    "re-derive",
+    "undefined persisted per-element key must fail safe to re-derive",
+  );
+
+  // (c) Persisted key corrupt (a non-matching/garbage value) → re-derive.
+  const corrupt = { ...goodBaselines, [liveKeys.idempotency_key]: "CORRUPT" };
+  assert.equal(
+    perElementStalenessVerdict(corrupt, coord),
+    "re-derive",
+    "corrupt persisted per-element key must fail safe to re-derive",
+  );
+});
+
+test("F1 metadata-migration fail-safe: old-shape (pre-F1) manifest → ALL present artifacts stale, no throw", () => {
+  const initialBundle = makeBaseBundle();
+  const metadata = computeArtifactMetadata(initialBundle);
+  // Simulate a pre-F1 on-disk manifest: same whole-artifact hashes, but NO
+  // metadata_schema_version (and strip per-element data). The whole-artifact
+  // hashes still MATCH the current artifacts → a naive reader would skip all.
+  const preF1Manifest = {
+    artifacts: Object.fromEntries(
+      Object.entries(metadata.artifacts).map(([name, entry]) => [
+        name,
+        {
+          revision: entry.revision,
+          content_hash: entry.content_hash,
+          dependency_revisions: entry.dependency_revisions,
+        },
+      ]),
+    ),
+  };
+  delete preF1Manifest.metadata_schema_version;
+  assert.equal(isMetadataManifestCurrent(preF1Manifest), false);
+
+  const bundle = { ...initialBundle, artifact_metadata: preF1Manifest };
+  let stale;
+  assert.doesNotThrow(() => {
+    stale = computeStaleArtifacts(bundle);
+  }, "old-shape manifest must degrade, never throw");
+  // Every present DAG artifact is stale (no false-skip off matching hashes).
+  for (const name of ["repo_manifest.json", "file_disposition.json", "unit_manifest.json", "audit-report.md"]) {
+    assert.ok(stale.has(name), `${name} must be all-stale under migration fail-safe`);
+  }
+});
+
+test("F1 metadata-migration fail-safe: strict-decode-mismatch manifest → all-stale, no throw", () => {
+  const initialBundle = makeBaseBundle();
+  // A manifest that would not decode to the F1 shape (garbage entries) but is
+  // present. Absent metadata_schema_version → treated as old-shape → all-stale.
+  const garbageManifest = { artifacts: { "repo_manifest.json": "not-an-entry" } };
+  const bundle = { ...initialBundle, artifact_metadata: garbageManifest };
+  let stale;
+  assert.doesNotThrow(() => {
+    stale = computeStaleArtifacts(bundle);
+  });
+  assert.ok(stale.has("repo_manifest.json"));
+  assert.ok(stale.size > 0, "must degrade to a non-empty stale set");
+});
+
+test("F1 reproducible DAG: persist/reload cycle yields identical stale set + per-element verdicts", () => {
+  const initialBundle = makeBaseBundle();
+  const metadata = computeArtifactMetadata(initialBundle);
+  // Round-trip the manifest through JSON (persist/reload).
+  const reloaded = JSON.parse(JSON.stringify(metadata));
+  assert.equal(reloaded.metadata_schema_version, METADATA_SCHEMA_VERSION);
+
+  const stale1 = computeStaleArtifacts({ ...initialBundle, artifact_metadata: metadata });
+  const stale2 = computeStaleArtifacts({ ...initialBundle, artifact_metadata: reloaded });
+  assert.deepEqual([...stale1].sort(), [...stale2].sort());
+
+  // Per-element verdicts are identical across the reload too.
+  const coord = {
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: buildTaskContentSignature({ goal: "g" }),
+  };
+  const keys = deriveLiveResultKeys(coord);
+  const baselines = recordResultBaseline(undefined, keys);
+  const reloadedBaselines = JSON.parse(JSON.stringify(baselines));
+  assert.equal(
+    perElementStalenessVerdict(baselines, coord),
+    perElementStalenessVerdict(reloadedBaselines, coord),
+  );
+});
+
+test("F1 single-adjacency: ARTIFACT_DEPENDENTS_MAP is the derived inversion of the one canonical table", () => {
+  // Rebuild the inversion independently and assert equality (no second hand-authored list).
+  const rebuilt = {};
+  for (const [artifact, ups] of Object.entries(ARTIFACT_DEPENDS_ON_MAP)) {
+    if (!ups) continue;
+    for (const up of ups) {
+      (rebuilt[up] ??= []).push(artifact);
+    }
+  }
+  const norm = (m) =>
+    Object.fromEntries(
+      Object.entries(m)
+        .map(([k, v]) => [k, [...v].sort()])
+        .sort(([a], [b]) => a.localeCompare(b)),
+    );
+  assert.deepEqual(norm(ARTIFACT_DEPENDENTS_MAP), norm(rebuilt));
+});
+
+test("F1 inv-5 [CP-NODE-6]: dependents map is the derived inversion of the single adjacency table", () => {
+  // ARTIFACT_DEPENDS_ON_MAP is the ONLY hand-authored adjacency; the dependents
+  // map MUST be exactly invertDependencyMap(ARTIFACT_DEPENDS_ON_MAP), not a
+  // second hand-maintained list. Assert against the exported derivation itself
+  // so any drift (or a re-introduced hand-authored dependents table) fails.
+  const norm = (m) =>
+    Object.fromEntries(
+      Object.entries(m)
+        .map(([k, v]) => [k, [...v].sort()])
+        .sort(([a], [b]) => a.localeCompare(b)),
+    );
+  assert.deepEqual(
+    norm(ARTIFACT_DEPENDENTS_MAP),
+    norm(invertDependencyMap(ARTIFACT_DEPENDS_ON_MAP)),
+  );
+});
+
+// F1 inv-7: transcription-not-authorship. The git_history.json upstream edge
+// set F1 registers MUST be EXACTLY F6's declared {repo_manifest, file_disposition}
+// — F1 neither guesses nor infers. Pinning the set so any divergence fails.
+test("inv-7: git_history.json upstream set is exactly F6's declared {repo_manifest, file_disposition}", () => {
+  assert.deepEqual(
+    [...ARTIFACT_DEPENDS_ON_MAP["git_history.json"]].sort(),
+    ["file_disposition.json", "repo_manifest.json"],
+  );
+});
+
+// F1 inv-4 [CP-NODE-5]: old-shape manifest => all-stale, no throw (CE-007).
+// Covers the explicit-older-version variant of the migration fail-safe: a
+// manifest tagged with metadata_schema_version BELOW the current one (not merely
+// absent) is still pre-F1, so its still-matching whole-artifact hashes must
+// NEVER false-skip a present element, and computeStaleArtifacts must never throw.
+test("F1 inv-4 [CP-NODE-5]: old-shape manifest => all-stale, no throw", () => {
+  const initialBundle = makeBaseBundle();
+  const metadata = computeArtifactMetadata(initialBundle);
+  assert.ok(METADATA_SCHEMA_VERSION >= 1);
+
+  // Pre-F1 manifest: an EXPLICIT older schema version (current - 1, floored at 0)
+  // with whole-artifact hashes that still MATCH the live artifacts. A naive
+  // hash-only reader would skip every element off these matching hashes.
+  const olderShapeManifest = {
+    metadata_schema_version: Math.max(0, METADATA_SCHEMA_VERSION - 1),
+    artifacts: Object.fromEntries(
+      Object.entries(metadata.artifacts).map(([name, entry]) => [
+        name,
+        {
+          revision: entry.revision,
+          content_hash: entry.content_hash,
+          dependency_revisions: entry.dependency_revisions,
+        },
+      ]),
+    ),
+  };
+  // Not recognized as F1-current → fail-safe path engages.
+  assert.equal(isMetadataManifestCurrent(olderShapeManifest), false);
+
+  const bundle = { ...initialBundle, artifact_metadata: olderShapeManifest };
+  let stale;
+  assert.doesNotThrow(() => {
+    stale = computeStaleArtifacts(bundle);
+  }, "older-shape manifest must degrade to all-stale, never throw (CE-007)");
+
+  // Never a false-skip off matching whole-artifact hashes: EVERY present DAG
+  // artifact is stale (artifact_metadata.json itself is excluded by the gate).
+  for (const name of [
+    "repo_manifest.json",
+    "file_disposition.json",
+    "unit_manifest.json",
+    "audit-report.md",
+  ]) {
+    assert.ok(stale.has(name), `${name} must be all-stale under inv-4 fail-safe`);
+  }
+  assert.ok(stale.size > 0, "fail-safe must yield a non-empty stale set");
+  assert.equal(
+    stale.has("artifact_metadata.json"),
+    false,
+    "the manifest artifact itself is never marked stale by the gate",
+  );
+});
+
+// F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json upstream
+// edges. The declarative reference (spec/audit/dependency-map.md) and the
+// canonical TS table (ARTIFACT_DEPENDS_ON_MAP) must agree LITERALLY over the
+// transcribed edge set — neither may carry an edge the other omits. The .md is
+// authored in the dependents view (`### <upstream>` → `Downstream:` bullet
+// list); the TS table is the inverse depends-on view. We parse the .md into a
+// dependents map and compare both directions for git_history.json's upstream
+// edges {repo_manifest, file_disposition}: (a) git_history.json's upstream set
+// in the TS table matches the .md, and (b) every .md upstream that lists
+// git_history.json downstream is exactly that TS upstream set. Any divergence
+// (a dropped or extra edge on either side) fails.
+test("F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json upstream edges", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const mdPath = join(here, "../../spec/audit/dependency-map.md");
+  const md = readFileSync(mdPath, "utf8");
+
+  // Parse the declarative map: each `### \`<artifact>\`` heading opens a section;
+  // the bullets under its `Downstream:` line name the artifacts that depend on
+  // it. Build { upstream -> Set(downstream) }, restricted to bullets that are
+  // backticked artifact filenames (prose bullets like "future ..." are ignored).
+  const mdDependents = {};
+  let currentUpstream = null;
+  let inDownstream = false;
+  for (const rawLine of md.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const heading = line.match(/^###\s+`([^`]+)`\s*$/);
+    if (heading) {
+      currentUpstream = heading[1];
+      inDownstream = false;
+      continue;
+    }
+    if (/^Downstream:\s*$/.test(line)) {
+      inDownstream = true;
+      continue;
+    }
+    if (inDownstream && currentUpstream) {
+      const bullet = line.match(/^-\s+`([^`]+)`\s*$/);
+      if (bullet) {
+        (mdDependents[currentUpstream] ??= new Set()).add(bullet[1]);
+      } else if (line.length > 0 && !line.startsWith("-")) {
+        // A non-bullet, non-empty line ends the Downstream block.
+        inDownstream = false;
+      }
+    }
+  }
+
+  // Derive the upstreams that list git_history.json as a downstream, per the .md.
+  const mdGitHistoryUpstreams = Object.entries(mdDependents)
+    .filter(([, downstream]) => downstream.has("git_history.json"))
+    .map(([upstream]) => upstream)
+    .sort();
+
+  const tsGitHistoryUpstreams = [
+    ...ARTIFACT_DEPENDS_ON_MAP["git_history.json"],
+  ].sort();
+
+  // (a) The TS table records git_history.json's declared upstream set.
+  assert.deepEqual(
+    tsGitHistoryUpstreams,
+    ["file_disposition.json", "repo_manifest.json"],
+    "ARTIFACT_DEPENDS_ON_MAP git_history.json upstreams must be exactly {file_disposition, repo_manifest}",
+  );
+
+  // (b) Literal parity, .md ⟺ TS, over the git_history.json edge set: every TS
+  // upstream is reflected in the .md and vice versa (no dropped/extra edge).
+  assert.deepEqual(
+    mdGitHistoryUpstreams,
+    tsGitHistoryUpstreams,
+    "dependency-map.md and ARTIFACT_DEPENDS_ON_MAP must agree literally on git_history.json's upstream edges",
+  );
+
+  // And the .md actually carries the git_history.json downstream bullet under
+  // BOTH upstreams (guards a regression that drops one direction of the edge).
+  for (const upstream of tsGitHistoryUpstreams) {
+    assert.ok(
+      mdDependents[upstream]?.has("git_history.json"),
+      `dependency-map.md must list git_history.json downstream of ${upstream}`,
+    );
+  }
+});
+
+test("F1 fail-3 [CP-NODE-14]: missing/uncomparable per-element key => stale, never unchanged", () => {
+  // F1 fail-3 regression guard: treating a missing or otherwise-uncomparable
+  // per-element key as `unchanged` (skipped) is a FALSE NEGATIVE — a changed
+  // element would silently be skipped. Every uncomparable shape must fail safe
+  // to `re-derive` and NEVER resolve to `skipped`. This guards angles distinct
+  // from inv-3 (CP-NODE-4): an under-discriminated coordinate, a signature the
+  // seam refuses to key, and non-string (structurally uncomparable) persisted
+  // baseline values.
+  const sig = buildTaskContentSignature({ goal: "g", body: "v1" });
+  const coord = {
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: sig,
+  };
+  const liveKeys = deriveLiveResultKeys(coord);
+
+  // Sanity anchor: a correctly persisted baseline is the ONLY skip path.
+  const good = recordResultBaseline(undefined, liveKeys);
+  assert.equal(perElementStalenessVerdict(good, coord), "skipped");
+
+  // (a) Under-discriminated coordinate (no `source`): the coordinate cannot be
+  // uniquely keyed, so it must never be compared at the grouping granularity.
+  const { source: _drop, ...underDiscriminated } = coord;
+  assert.equal(
+    perElementStalenessVerdict(good, underDiscriminated),
+    "re-derive",
+    "under-discriminated coordinate (missing source) must never skip",
+  );
+
+  // (b) Uncomparable live signature: an empty signature is rejected by the seam
+  // (deriveLiveResultKeys throws) → the element is uncomparable → re-derive.
+  const noSigCoord = { ...coord, task_content_signature: "" };
+  assert.equal(
+    perElementStalenessVerdict(good, noSigCoord),
+    "re-derive",
+    "uncomparable (empty) live signature must never skip",
+  );
+
+  // (c) Structurally-uncomparable persisted baselines: a baseline value that is
+  // not the seam content_key string (null, a number, an object) can never equal
+  // the freshly-derived content_key, so each must fail safe to re-derive.
+  for (const badValue of [null, 0, 42, { content_key: liveKeys.content_key }, ["x"]]) {
+    const corruptStore = { ...good, [liveKeys.idempotency_key]: badValue };
+    const verdict = perElementStalenessVerdict(corruptStore, coord);
+    assert.equal(
+      verdict,
+      "re-derive",
+      `uncomparable persisted baseline (${JSON.stringify(badValue)}) must fail safe to re-derive`,
+    );
+    assert.notEqual(
+      verdict,
+      "skipped",
+      "an uncomparable per-element key must never be treated as unchanged",
+    );
+  }
+});
+
+test("F1 inv-8 [CP-NODE-9 r2]: persist/reload recomputes identical stale set (provenance-stripped)", async () => {
+  // F1 inv-8 reproducible-DAG guard, distinct angle from the existing
+  // "persist/reload cycle yields identical stale set" test: that one round-trips
+  // the SAME manifest through JSON. This one proves the *recompute* path is
+  // reproducible across two independent runs whose only difference is PROVENANCE
+  // (wall-clock `generated_at` stamps, a run-id-bearing field). The persisted
+  // content keys/verdicts must recompute an identical stale set on the later
+  // run, with no wall-clock / run-id leakage — guaranteed because
+  // normalizeForMetadataHash strips provenance before hashing.
+  const { normalizeForMetadataHash } = await import(
+    "../../src/audit/orchestrator/artifactFreshness.ts"
+  );
+
+  // Run 1: build manifest at an early wall-clock, then PERSIST + RELOAD it.
+  const run1Bundle = makeBaseBundle();
+  run1Bundle.repo_manifest.generated_at = "2026-01-01T00:00:00Z";
+  const manifest1 = computeArtifactMetadata(run1Bundle);
+  const persisted = JSON.stringify(manifest1);
+  const reloaded = JSON.parse(persisted);
+  assert.equal(reloaded.metadata_schema_version, METADATA_SCHEMA_VERSION);
+
+  // Run 2: a LATER run with identical content but a different wall-clock stamp
+  // (provenance only). recompute metadata against the reloaded baseline.
+  const run2Bundle = makeBaseBundle();
+  run2Bundle.repo_manifest.generated_at = "2026-12-31T23:59:59Z";
+  const manifest2 = computeArtifactMetadata(run2Bundle, reloaded);
+
+  // (a) normalizeForMetadataHash strips the provenance stamp → the two bundles'
+  // normalized repo_manifest forms are byte-identical despite differing stamps.
+  const norm1 = stableStringify(
+    normalizeForMetadataHash("repo_manifest.json", run1Bundle.repo_manifest),
+  );
+  const norm2 = stableStringify(
+    normalizeForMetadataHash("repo_manifest.json", run2Bundle.repo_manifest),
+  );
+  assert.equal(
+    norm1,
+    norm2,
+    "normalizeForMetadataHash must strip generated_at so provenance does not leak into the hash",
+  );
+  assert.ok(
+    !norm2.includes("2026-12-31"),
+    "stripped normalized form must not carry the wall-clock provenance stamp",
+  );
+
+  // (b) No revision churn: the provenance-only delta must NOT bump repo_manifest's
+  // revision, so the recomputed content hash is identical across runs.
+  assert.equal(
+    manifest2.artifacts["repo_manifest.json"].content_hash,
+    reloaded.artifacts["repo_manifest.json"].content_hash,
+    "content hash must be reproducible across runs (no wall-clock leakage)",
+  );
+  assert.equal(
+    manifest2.artifacts["repo_manifest.json"].revision,
+    reloaded.artifacts["repo_manifest.json"].revision,
+    "a provenance-only change must not churn the revision",
+  );
+
+  // (c) The recomputed stale set is IDENTICAL to the persisted/reloaded run's —
+  // the DAG is reproducible across runs.
+  const stalePersisted = computeStaleArtifacts({
+    ...run1Bundle,
+    artifact_metadata: reloaded,
+  });
+  const staleRecomputed = computeStaleArtifacts({
+    ...run2Bundle,
+    artifact_metadata: manifest2,
+  });
+  assert.deepEqual(
+    [...staleRecomputed].sort(),
+    [...stalePersisted].sort(),
+    "persisted + recomputed runs must yield an identical stale set",
+  );
+
+  // (d) The overall state signature (content-hash basis) is identical across the
+  // two runs — a final reproducibility anchor with no run-id/wall-clock leakage.
+  assert.equal(
+    computeArtifactStateSignature({ ...run2Bundle, artifact_metadata: manifest2 }),
+    computeArtifactStateSignature({ ...run1Bundle, artifact_metadata: reloaded }),
+    "artifact state signature must be reproducible across runs",
+  );
+});
+
+test("F1 fail-8 [CP-NODE-19 r2]: provenance (wall-clock/run-id) never leaks into per-element hash", async () => {
+  // F1 fail-8 per-element-hash boundary: distinct from the inv-8 recompute test
+  // above (which proves the *manifest-level* recompute is reproducible). This
+  // one drills into the single primitive — hashArtifactValue, the per-element
+  // content hash — and proves directly that provenance (a wall-clock stamp and a
+  // run-id-bearing field) can NEVER change the digest of an artifact element.
+  // If it could, every rebuild would churn the element's revision and
+  // perpetually re-stale its downstreams. The guarantee comes from
+  // normalizeForMetadataHash stripping provenance before stableStringify.
+  const { normalizeForMetadataHash } = await import(
+    "../../src/audit/orchestrator/artifactFreshness.ts"
+  );
+
+  // Two artifact element values, byte-identical in CONTENT but differing only in
+  // provenance: a wall-clock `generated_at` stamp (early vs. late) plus a
+  // run-id-bearing variant of that same stamp.
+  const semanticContent = {
+    repository: { name: "fixture" },
+    files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: 100 }],
+  };
+  const earlyRun = {
+    generated_at: "2026-01-01T00:00:00.000Z",
+    ...semanticContent,
+  };
+  const lateRun = {
+    generated_at: "2026-12-31T23:59:59.999Z",
+    ...semanticContent,
+  };
+
+  // (a) The per-element content hash is identical across the two runs despite the
+  // differing wall-clock provenance — no leakage into the digest.
+  const hashEarly = hashArtifactValue("repo_manifest.json", earlyRun);
+  const hashLate = hashArtifactValue("repo_manifest.json", lateRun);
+  assert.equal(
+    hashEarly,
+    hashLate,
+    "per-element content hash must not change when only the wall-clock provenance stamp differs",
+  );
+
+  // (b) The normalized + serialized form carries NO trace of either wall-clock
+  // stamp — the stripped bytes never reach stableStringify, so they cannot
+  // possibly reach the digest.
+  const serializedEarly = stableStringify(
+    normalizeForMetadataHash("repo_manifest.json", earlyRun),
+  );
+  const serializedLate = stableStringify(
+    normalizeForMetadataHash("repo_manifest.json", lateRun),
+  );
+  assert.equal(
+    serializedEarly,
+    serializedLate,
+    "stripped normalized forms must be byte-identical across provenance-only deltas",
+  );
+  assert.ok(
+    !serializedEarly.includes("2026-01-01") &&
+      !serializedEarly.includes("2026-12-31"),
+    "stripped normalized form must not carry any wall-clock provenance stamp",
+  );
+
+  // (c) Negative control: a real CONTENT change (not provenance) DOES move the
+  // per-element hash — proving the stripping is surgical, not a blanket no-op.
+  const contentChanged = hashArtifactValue("repo_manifest.json", {
+    generated_at: "2026-01-01T00:00:00.000Z",
+    repository: { name: "fixture" },
+    files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: 101 }],
+  });
+  assert.notEqual(
+    hashEarly,
+    contentChanged,
+    "a genuine content change must still move the per-element hash",
+  );
+
+  // (d) Provenance-stripping holds even for an artifact whose stamp is the ONLY
+  // top-level non-content field, simulating a run-id-bearing element: the same
+  // semantic body under two distinct stamps hashes equal.
+  const runIdEarly = hashArtifactValue("synthesis-narrative.json", {
+    generated_at: "run-2026-01-01T00:00:00Z",
+    theme_count: 3,
+    finding_count: 7,
+  });
+  const runIdLate = hashArtifactValue("synthesis-narrative.json", {
+    generated_at: "run-2026-12-31T23:59:59Z",
+    theme_count: 3,
+    finding_count: 7,
+  });
+  assert.equal(
+    runIdEarly,
+    runIdLate,
+    "run-id-bearing provenance stamp must not leak into a narrative element's per-element hash",
+  );
+});
+
+test("F1 inv-9 [CP-NODE-10 r2]: git_history.json co-registered in dependencyMap.ts AND dependency-map.md", async () => {
+  // F1 inv-9 atomic co-commit guard (CCU-git-history-registration, CE-001): F1's
+  // dep-map-registration half and F6's git_history.json writer+declaration half
+  // are ONE scheduler-enforced co-commit unit — neither may land independently.
+  // Distinct angle from inv-7 (the exact upstream SET) and inv-6 (literal .md⟺TS
+  // parity of that set): this pins the BOTH-SIDES PRESENCE of the registration
+  // itself. If a future change registers git_history.json in only one of the two
+  // sources (TS table OR the .md declarative reference), the atomicity is broken
+  // and this fails — the two halves cannot drift apart.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+
+  // (a) Side 1 — the canonical TS adjacency table keys git_history.json.
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(
+      ARTIFACT_DEPENDS_ON_MAP,
+      "git_history.json",
+    ),
+    "git_history.json MUST be registered as a key in ARTIFACT_DEPENDS_ON_MAP (dependencyMap.ts)",
+  );
+  assert.ok(
+    Array.isArray(ARTIFACT_DEPENDS_ON_MAP["git_history.json"]) &&
+      ARTIFACT_DEPENDS_ON_MAP["git_history.json"].length > 0,
+    "git_history.json's TS registration must carry its upstream edge set, not an empty stub",
+  );
+
+  // (b) Side 2 — the declarative reference (.md) carries git_history.json as a
+  // backticked artifact token. Parse for the literal `git_history.json` bullet so
+  // a prose mention alone does not satisfy the guard.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const mdPath = join(here, "../../spec/audit/dependency-map.md");
+  const md = readFileSync(mdPath, "utf8");
+  const mdHasGitHistory = md
+    .split(/\r?\n/)
+    .some((line) => /`git_history\.json`/.test(line));
+  assert.ok(
+    mdHasGitHistory,
+    "git_history.json MUST be registered in spec/audit/dependency-map.md (co-commit with the TS table)",
+  );
+
+  // (c) Atomicity: BOTH sides present together — the co-commit unit landed whole.
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(
+      ARTIFACT_DEPENDS_ON_MAP,
+      "git_history.json",
+    ) && mdHasGitHistory,
+    "F1+F6 co-commit unit requires git_history.json in BOTH dependencyMap.ts and dependency-map.md — neither half may land alone",
+  );
+});
+
+test("F1 fail-7 [CP-NODE-18 r2]: git_history.json never half-registered (present in dependencyMap.ts iff present in dependency-map.md)", async () => {
+  // F1 fail-7 (CCU-git-history-registration): landing F1's dep-map registration
+  // without F6's producer (or vice versa) in a separate commit yields a
+  // half-registered DAG node. The single scheduler-enforced co-commit unit
+  // prevents either half from landing alone. Distinct angle from inv-9 (which
+  // asserts BOTH sides are PRESENT): this pins the BICONDITIONAL — presence in
+  // the TS adjacency table must equal presence in the declarative .md. It fires
+  // in EITHER drift direction (TS-only OR md-only), catching the "vice versa"
+  // half-registration that a both-present assertion cannot distinguish from a
+  // clean removal.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+
+  const presentInTs = Object.prototype.hasOwnProperty.call(
+    ARTIFACT_DEPENDS_ON_MAP,
+    "git_history.json",
+  );
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const mdPath = join(here, "../../spec/audit/dependency-map.md");
+  const md = readFileSync(mdPath, "utf8");
+  const presentInMd = md
+    .split(/\r?\n/)
+    .some((line) => /`git_history\.json`/.test(line));
+
+  assert.equal(
+    presentInTs,
+    presentInMd,
+    `git_history.json must be co-registered: present in dependencyMap.ts (${presentInTs}) iff present in dependency-map.md (${presentInMd}) — a mismatch is a half-registered DAG node from a non-atomic commit`,
+  );
+});
+
+test("F1 fail-9 [CP-NODE-20 r2]: per-element verdicts are order-canonicalized => key-order-independent stable hash", async () => {
+  // F1 fail-9 (order-canonicalized persisted verdicts): persisting per-element
+  // verdict objects whose keys land in producer-dependent insertion order yields
+  // byte-varying-but-semantically-equal metadata, which then hashes to differing
+  // digests and falsely flags downstream artifacts stale. stableStringify-based
+  // canonicalization (the basis of hashArtifactValue) must collapse key-order
+  // differences so two verdict lists that differ ONLY in element key order — and
+  // in the order of nested keys — produce an identical serialization and hash.
+  const verdictsForward = [
+    {
+      element_id: "src-api-auth",
+      lens: "correctness",
+      grounded: true,
+      evidence: { file: "src/api/auth.ts", line: 42 },
+    },
+    {
+      element_id: "src-api-session",
+      lens: "security",
+      grounded: false,
+      evidence: { line: 7, file: "src/api/session.ts" },
+    },
+  ];
+  // Same data, every object built with a different key insertion order
+  // (including the nested `evidence` object), simulating a different producer run.
+  const verdictsShuffled = [
+    {
+      evidence: { line: 42, file: "src/api/auth.ts" },
+      grounded: true,
+      lens: "correctness",
+      element_id: "src-api-auth",
+    },
+    {
+      grounded: false,
+      evidence: { file: "src/api/session.ts", line: 7 },
+      element_id: "src-api-session",
+      lens: "security",
+    },
+  ];
+
+  // Raw JSON serialization differs byte-for-byte (the failure mode)...
+  assert.notEqual(
+    JSON.stringify(verdictsForward),
+    JSON.stringify(verdictsShuffled),
+    "precondition: the two verdict lists must differ in raw key order, else the test proves nothing",
+  );
+
+  // ...but canonicalization collapses them to an identical serialization...
+  assert.equal(
+    stableStringify(verdictsForward),
+    stableStringify(verdictsShuffled),
+    "stableStringify must order-canonicalize per-element verdicts (and nested keys) so insertion order does not leak",
+  );
+
+  // ...and therefore to an identical artifact hash (no spurious staleness).
+  assert.equal(
+    hashArtifactValue("audit_results.jsonl", verdictsForward),
+    hashArtifactValue("audit_results.jsonl", verdictsShuffled),
+    "key-order-only differences in persisted verdicts must not change the artifact hash",
+  );
+});
+
+// F1 fail-2 [CP-NODE-13]: a per-element verdict must NEVER be keyed on the bare
+// grouping coordinate {unit_id,lens,pass_id} — the result_content_discriminator
+// (source/attempt/stage) is part of the identity, so two results sharing one
+// grouping coordinate but differing only in their discriminator produce DISTINCT
+// keys and never collapse to one verdict.
+test("F1 fail-2 [CP-NODE-13]: per-element verdict never keyed on the bare grouping coordinate (distinct result_content_discriminator never collapses)", () => {
+  const sig = buildTaskContentSignature({ goal: "audit auth", body: "v1" });
+  const grouping = { unit_id: "uG", lens: "security", pass_id: "p1", task_content_signature: sig };
+
+  // Two results, identical grouping coordinate, DISTINCT discriminator.
+  const base = deriveLiveResultKeys({ ...grouping, source: "base" });
+  const redispatch = deriveLiveResultKeys({ ...grouping, source: "redispatch", attempt: 2, stage: "O3" });
+
+  // Distinct keys: the discriminator is part of identity, not the bare coordinate.
+  assert.notEqual(base.content_key, redispatch.content_key, "discriminator distinguishes the contentKey");
+  assert.notEqual(base.idempotency_key, redispatch.idempotency_key, "discriminator distinguishes the idempotencyKey");
+
+  // A baseline recorded for the base result must NOT skip the discriminator-
+  // distinct sibling — i.e. the verdict is not keyed on the bare grouping coord.
+  const baselines = recordResultBaseline(undefined, base);
+  assert.equal(
+    perElementStalenessVerdict(baselines, { ...grouping, source: "redispatch", attempt: 2, stage: "O3" }),
+    "re-derive",
+    "a distinct-discriminator sibling sharing the grouping coordinate must never be false-skipped",
+  );
+  // The base result's own unchanged re-run still skips — proving per-result, not
+  // per-grouping, granularity (the discriminator collapses ONLY identical results).
+  assert.equal(
+    perElementStalenessVerdict(baselines, { ...grouping, source: "base" }),
+    "skipped",
+    "the identical base result still skips — collapse happens per-result, not per grouping coordinate",
+  );
 });

@@ -20,6 +20,7 @@ Downstream:
 - `graph_bundle.json`
 - `critical_flows.json`
 - `risk_register.json`
+- `git_history.json`
 - `coverage_matrix.json`
 - `flow_coverage.json`
 - `audit_tasks.json`
@@ -37,6 +38,7 @@ Downstream:
 - `graph_bundle.json`
 - `critical_flows.json`
 - `risk_register.json`
+- `git_history.json`
 - `coverage_matrix.json`
 - `flow_coverage.json`
 - `audit_tasks.json`

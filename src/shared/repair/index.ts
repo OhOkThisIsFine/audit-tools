@@ -17,3 +17,18 @@ export type {
   RunEmitValidateRepairOptions,
 } from './emitValidateRepair.js';
 export { runEmitValidateRepair } from './emitValidateRepair.js';
+
+// F4 dispatch-broker seam: the single gated F3<->F4 / O3<->F4 chokepoint.
+export type {
+  BrokeredDispatchSlot,
+  BrokerAdmission,
+  BrokeredDispatchDecision,
+  BrokeredCompletion,
+  BrokerDispatchInput,
+  BrokeredRepairDispatch,
+} from './brokeredDispatch.js';
+export {
+  createBrokeredRepairDispatch,
+  estimateSlotTokens,
+  classifyCapableHost,
+} from './brokeredDispatch.js';
