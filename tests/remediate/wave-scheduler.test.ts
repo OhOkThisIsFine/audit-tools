@@ -1411,3 +1411,57 @@ describe("F4 fail-6 [CP-NODE-54]: critical snapshot persists cooldown_until so a
     expect(followUp.schedule.max_concurrent).toBeLessThan(CAPABLE_CEILING);
   });
 });
+
+// ---------------------------------------------------------------------------
+// F4 fail-4 (CP-NODE-52) — readQuotaState failure degrades, never crashes.
+//
+// A failing readQuotaState (corrupt state, lock contention, I/O error) must NOT
+// propagate out of scheduleWave. The quota-enabled path catches the failure,
+// logs a [waveScheduler] diagnostic to stderr, and degrades to the
+// no-learned-entry default wave — non-fatal. The sibling test above pins the
+// stderr diagnostic; this one pins the NEGATIVE contract: the rejection is
+// swallowed (no throw) AND a usable WaveScheduleResult still comes back.
+// ---------------------------------------------------------------------------
+
+describe("F4 fail-4 [CP-NODE-52]: readQuotaState failure => default wave, non-fatal (no throw)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("readQuotaState rejecting does not throw out of scheduleWave; a valid default-wave result is returned", async () => {
+    const quotaModule = await import("../../src/remediate/quota/index.js");
+    const readQuotaStateSpy = vi
+      .spyOn(quotaModule, "readQuotaState")
+      .mockRejectedValue(new Error("simulated lock contention / read failure"));
+
+    // Silence the expected diagnostic so the test output stays clean; its
+    // content is asserted by the sibling stderr test above.
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+
+    let result: WaveScheduleResult | undefined;
+    let threw: unknown;
+    try {
+      result = await scheduleWave({
+        sessionConfig: { quota: { enabled: true } },
+        itemCount: 4,
+        env: {} as any,
+      });
+    } catch (err) {
+      threw = err;
+    } finally {
+      readQuotaStateSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+
+    // Non-fatal: the rejection is swallowed inside scheduleWave.
+    expect(threw).toBeUndefined();
+
+    // It degraded to the no-learned-entry default wave — a usable, valid result.
+    expect(result).toBeDefined();
+    expect(Number.isInteger(result!.max_concurrent)).toBe(true);
+    expect(result!.max_concurrent).toBeGreaterThan(0);
+    expect(result!.resolved_limits).toBeDefined();
+  });
+});
