@@ -1349,3 +1349,64 @@ test("F1 fail-7 [CP-NODE-18 r2]: git_history.json never half-registered (present
     `git_history.json must be co-registered: present in dependencyMap.ts (${presentInTs}) iff present in dependency-map.md (${presentInMd}) — a mismatch is a half-registered DAG node from a non-atomic commit`,
   );
 });
+
+test("F1 fail-9 [CP-NODE-20 r2]: per-element verdicts are order-canonicalized => key-order-independent stable hash", async () => {
+  // F1 fail-9 (order-canonicalized persisted verdicts): persisting per-element
+  // verdict objects whose keys land in producer-dependent insertion order yields
+  // byte-varying-but-semantically-equal metadata, which then hashes to differing
+  // digests and falsely flags downstream artifacts stale. stableStringify-based
+  // canonicalization (the basis of hashArtifactValue) must collapse key-order
+  // differences so two verdict lists that differ ONLY in element key order — and
+  // in the order of nested keys — produce an identical serialization and hash.
+  const verdictsForward = [
+    {
+      element_id: "src-api-auth",
+      lens: "correctness",
+      grounded: true,
+      evidence: { file: "src/api/auth.ts", line: 42 },
+    },
+    {
+      element_id: "src-api-session",
+      lens: "security",
+      grounded: false,
+      evidence: { line: 7, file: "src/api/session.ts" },
+    },
+  ];
+  // Same data, every object built with a different key insertion order
+  // (including the nested `evidence` object), simulating a different producer run.
+  const verdictsShuffled = [
+    {
+      evidence: { line: 42, file: "src/api/auth.ts" },
+      grounded: true,
+      lens: "correctness",
+      element_id: "src-api-auth",
+    },
+    {
+      grounded: false,
+      evidence: { file: "src/api/session.ts", line: 7 },
+      element_id: "src-api-session",
+      lens: "security",
+    },
+  ];
+
+  // Raw JSON serialization differs byte-for-byte (the failure mode)...
+  assert.notEqual(
+    JSON.stringify(verdictsForward),
+    JSON.stringify(verdictsShuffled),
+    "precondition: the two verdict lists must differ in raw key order, else the test proves nothing",
+  );
+
+  // ...but canonicalization collapses them to an identical serialization...
+  assert.equal(
+    stableStringify(verdictsForward),
+    stableStringify(verdictsShuffled),
+    "stableStringify must order-canonicalize per-element verdicts (and nested keys) so insertion order does not leak",
+  );
+
+  // ...and therefore to an identical artifact hash (no spurious staleness).
+  assert.equal(
+    hashArtifactValue("audit_results.jsonl", verdictsForward),
+    hashArtifactValue("audit_results.jsonl", verdictsShuffled),
+    "key-order-only differences in persisted verdicts must not change the artifact hash",
+  );
+});
