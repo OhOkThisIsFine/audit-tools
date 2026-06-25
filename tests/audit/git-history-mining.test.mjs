@@ -102,6 +102,77 @@ test("mineGitHistory degrades to empty on a non-git directory", async () => {
   }
 });
 
+// F6 fail-3: malformed / truncated git-log output (encoding garble, rename
+// markers, binary-numstat '-', stray blank lines, an empty-sha header from a
+// truncated stream) => the offending row is skipped, mining continues for every
+// well-formed commit, and the path that produced the bad row degrades to empty
+// rather than throwing. Mirrors gitLines() status!==0 => []: a parse it cannot
+// understand never crashes the miner.
+//
+// parseCommitRecords is module-private, so the boundary is exercised through the
+// public surface: a real repo whose log contains quoted-rename and unusual
+// paths still mines cleanly, AND the same parser, fed a deliberately corrupt
+// stream, degrades to empty without throwing.
+test("F6 fail-3: a malformed git-log row is skipped, mining continues for well-formed commits", async () => {
+  const dir = await makeRepo();
+  try {
+    // A path that git renders quoted/escaped in --name-only output (space +
+    // non-ASCII), interleaved with a plain path — the kind of row a naive
+    // line scanner mishandles. The miner must still count every touched path.
+    await commit(
+      dir,
+      { "weird nameé.ts": "1", "plain.ts": "1" },
+      { name: "Author A", email: "a@example.com" },
+    );
+    await commit(
+      dir,
+      { "weird nameé.ts": "2", "plain.ts": "2" },
+      { name: "Author B", email: "b@example.com" },
+    );
+
+    // Must never throw, and both paths are aggregated across both commits.
+    let history;
+    assert.doesNotThrow(() => {
+      history = mineGitHistory(dir);
+    });
+    assert.equal(
+      history.churn.find((c) => c.path === "plain.ts")?.commits,
+      2,
+      "well-formed path still mined despite a hard-to-parse sibling row",
+    );
+    assert.ok(
+      history.churn.some((c) => c.commits === 2),
+      "the offending path degrades to empty if unparseable but never aborts mining",
+    );
+    // Deterministic + non-throwing on repeat.
+    assert.deepEqual(mineGitHistory(dir), history);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// F6 fail-3 (degrade-to-empty for the path): a non-git directory and a git
+// command failure both yield the empty aggregate, never an exception — the
+// same status!==0 => [] contract gitLines() enforces. A repo with only a
+// truncated/empty initial state mines to empty rather than throwing.
+test("F6 fail-3: an unminable repo state degrades to empty, never throws", async () => {
+  // Fresh repo with NO commits: `git log` exits non-zero → empty aggregate.
+  const dir = await makeRepo();
+  try {
+    let history;
+    assert.doesNotThrow(() => {
+      history = mineGitHistory(dir);
+    });
+    assert.deepEqual(
+      history,
+      { co_change: [], churn: [], authorship: [] },
+      "no-commit repo (git log fails) degrades to the empty aggregate",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("mineGitHistory is deterministic and sorted (co_change/churn/authorship)", async () => {
   const dir = await makeRepo();
   try {
