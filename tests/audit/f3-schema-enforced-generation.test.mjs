@@ -599,3 +599,102 @@ test("F3 inv-6 [CP-NODE-27]: enforcement core has no per-backend branching (para
     `Enforcement core must be provider-agnostic — no branch keyed on a backend name (inv-6). Violations:\n${branchViolations.join('\n')}`,
   );
 });
+
+test("F3 fail-1 [CP-NODE-29]: mis-advertised mode + invalid emit => degrade to repair, never accept", async () => {
+  // F3 fail-1 / OBL-f3-schema-enforced-generation-fail-1: a backend can ADVERTISE
+  // a constraint mode it cannot actually honor (forced_tool_call /
+  // json_schema_constrained / structured_output) yet still emit a payload that
+  // fails the canonical worker zod schema. The enforcement core must NEVER trust
+  // the advertised mode and accept an invalid payload — the zod validate is the
+  // sole authority, so a validation failure under ANY mode degrades through the O3
+  // emit-validate-repair seam, with its stage-2 LLM patch routed through the SHARED
+  // BrokeredRepairDispatch broker (never a direct spawn). The emit reports the
+  // advertised mode for the record, but the OUTCOME is a brokered repair, not an
+  // accepted invalid payload.
+  for (const advertisedMode of [
+    "forced_tool_call",
+    "json_schema_constrained",
+    "structured_output",
+  ]) {
+    let brokerCalls = 0;
+    let awaitCalls = 0;
+    let patcherCalls = 0;
+    // A seam broker whose admission gate is the SOLE control over the patch, so we
+    // can prove the degrade went through the shared broker, not a direct spawn.
+    const seamBroker = {
+      broker: ({ slots }) => {
+        brokerCalls += 1;
+        const slotId = slots[0].slotId;
+        return {
+          admitted: 1,
+          admission: "admitted",
+          admittedSlotIds: [slotId],
+          estimatedWaveTokens: 0,
+          cooldownUntil: null,
+          bindingCap: "none",
+          capableHost: true,
+          schedule: {},
+        };
+      },
+      awaitNextCompletion: (completion) => {
+        awaitCalls += 1;
+        return completion;
+      },
+    };
+    const result = await enforceSchemaAtEmit({
+      contractId: "audit_results",
+      schema: WorkerAuditResultsSchema,
+      // The backend mis-advertised `advertisedMode` but emitted an invalid payload.
+      payload: [{ task_id: "T1" }],
+      provider: {
+        outputConstraint: { mode: advertisedMode, reason: "advertised but not honored" },
+      },
+      broker: seamBroker,
+      brokerContext,
+      artifactsDir,
+      runId: `run-cp-node-29-${advertisedMode}`,
+      tool: "audit-code",
+      patcher: async () => {
+        patcherCalls += 1;
+        return validWorkerResults(); // the brokered LLM touch salvages it
+      },
+    });
+    // The mis-advertised mode is recorded, but the invalid payload was NOT accepted
+    // on the strength of the advertised mode — it degraded through the brokered seam.
+    assert.equal(
+      result.mode,
+      advertisedMode,
+      `${advertisedMode}: emit records the advertised mode for the audit trail`,
+    );
+    assert.equal(
+      result.repair.status,
+      "patched",
+      `${advertisedMode}: invalid payload degraded + salvaged via repair — never accepted`,
+    );
+    assert.notEqual(
+      result.repair.status,
+      "clean",
+      `${advertisedMode}: a mis-advertised mode must NOT short-circuit to clean on an invalid payload`,
+    );
+    assert.equal(
+      brokerCalls,
+      1,
+      `${advertisedMode}: the degrade patch was gated by the shared broker exactly once`,
+    );
+    assert.equal(
+      awaitCalls,
+      1,
+      `${advertisedMode}: the patched result flowed back through the broker's awaitNextCompletion`,
+    );
+    assert.equal(
+      patcherCalls,
+      1,
+      `${advertisedMode}: broker admitted the slot → bounded LLM patch ran once`,
+    );
+    assert.equal(
+      result.repair.repaired_payload.length,
+      1,
+      `${advertisedMode}: the repaired payload is the salvaged valid worker result`,
+    );
+  }
+});
