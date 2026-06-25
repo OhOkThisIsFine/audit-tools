@@ -291,6 +291,60 @@ test("F6 inv-6: co-change is gated by min joint-commit support; confidence is a 
   }
 });
 
+// F6 fail-5: huge history / wide commits => bounded window guards an
+// O(commits x files^2) co-change blow-up. The fixed window (maxCommits, newest
+// first) is the guard: only commits inside the window contribute to co-change /
+// churn / authorship, so cost is bounded regardless of total history depth.
+test("F6 fail-5: maxCommits bounds the scanned window (older commits outside the window are excluded)", async () => {
+  const dir = await makeRepo();
+  try {
+    // Oldest commit: old.ts & paired.ts co-change once (would be the only
+    // contribution from old.ts if it were scanned).
+    await commit(
+      dir,
+      { "old.ts": "1", "paired.ts": "1" },
+      { name: "Author A", email: "a@example.com" },
+    );
+    // Two newer commits touch new.ts so it stays inside any small window.
+    await commit(dir, { "new.ts": "1" }, { name: "Author B", email: "b@example.com" });
+    await commit(dir, { "new.ts": "2" }, { name: "Author B", email: "b@example.com" });
+
+    // Window of 2 (newest first) excludes the oldest commit entirely.
+    const bounded = mineGitHistory(dir, { maxCommits: 2 });
+    assert.equal(
+      bounded.churn.some((c) => c.path === "old.ts"),
+      false,
+      "commit outside the bounded window does not contribute to churn",
+    );
+    assert.equal(
+      bounded.authorship.some((a) => a.path === "old.ts"),
+      false,
+      "commit outside the bounded window does not contribute to authorship",
+    );
+    assert.equal(
+      bounded.co_change.length,
+      0,
+      "the old co-change pair is excluded; no in-window pair reaches threshold",
+    );
+    assert.deepEqual(
+      bounded.churn.find((c) => c.path === "new.ts"),
+      { path: "new.ts", commits: 2 },
+      "only the two in-window commits count toward new.ts churn",
+    );
+
+    // Unbounded scan DOES see the old commit — proving the window, not absence
+    // of history, is what excludes it.
+    const full = mineGitHistory(dir);
+    assert.equal(
+      full.churn.some((c) => c.path === "old.ts"),
+      true,
+      "without the bound the old commit is in scope (the window is the guard)",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("mineGitHistoryArtifact drops out-of-scope and excluded paths", async () => {
   const dir = await makeRepo();
   try {
