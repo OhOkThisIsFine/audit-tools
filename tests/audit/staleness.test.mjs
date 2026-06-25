@@ -946,3 +946,88 @@ test("F1 inv-4 [CP-NODE-5]: old-shape manifest => all-stale, no throw", () => {
     "the manifest artifact itself is never marked stale by the gate",
   );
 });
+
+// F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json upstream
+// edges. The declarative reference (spec/audit/dependency-map.md) and the
+// canonical TS table (ARTIFACT_DEPENDS_ON_MAP) must agree LITERALLY over the
+// transcribed edge set — neither may carry an edge the other omits. The .md is
+// authored in the dependents view (`### <upstream>` → `Downstream:` bullet
+// list); the TS table is the inverse depends-on view. We parse the .md into a
+// dependents map and compare both directions for git_history.json's upstream
+// edges {repo_manifest, file_disposition}: (a) git_history.json's upstream set
+// in the TS table matches the .md, and (b) every .md upstream that lists
+// git_history.json downstream is exactly that TS upstream set. Any divergence
+// (a dropped or extra edge on either side) fails.
+test("F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json upstream edges", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const mdPath = join(here, "../../spec/audit/dependency-map.md");
+  const md = readFileSync(mdPath, "utf8");
+
+  // Parse the declarative map: each `### \`<artifact>\`` heading opens a section;
+  // the bullets under its `Downstream:` line name the artifacts that depend on
+  // it. Build { upstream -> Set(downstream) }, restricted to bullets that are
+  // backticked artifact filenames (prose bullets like "future ..." are ignored).
+  const mdDependents = {};
+  let currentUpstream = null;
+  let inDownstream = false;
+  for (const rawLine of md.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const heading = line.match(/^###\s+`([^`]+)`\s*$/);
+    if (heading) {
+      currentUpstream = heading[1];
+      inDownstream = false;
+      continue;
+    }
+    if (/^Downstream:\s*$/.test(line)) {
+      inDownstream = true;
+      continue;
+    }
+    if (inDownstream && currentUpstream) {
+      const bullet = line.match(/^-\s+`([^`]+)`\s*$/);
+      if (bullet) {
+        (mdDependents[currentUpstream] ??= new Set()).add(bullet[1]);
+      } else if (line.length > 0 && !line.startsWith("-")) {
+        // A non-bullet, non-empty line ends the Downstream block.
+        inDownstream = false;
+      }
+    }
+  }
+
+  // Derive the upstreams that list git_history.json as a downstream, per the .md.
+  const mdGitHistoryUpstreams = Object.entries(mdDependents)
+    .filter(([, downstream]) => downstream.has("git_history.json"))
+    .map(([upstream]) => upstream)
+    .sort();
+
+  const tsGitHistoryUpstreams = [
+    ...ARTIFACT_DEPENDS_ON_MAP["git_history.json"],
+  ].sort();
+
+  // (a) The TS table records git_history.json's declared upstream set.
+  assert.deepEqual(
+    tsGitHistoryUpstreams,
+    ["file_disposition.json", "repo_manifest.json"],
+    "ARTIFACT_DEPENDS_ON_MAP git_history.json upstreams must be exactly {file_disposition, repo_manifest}",
+  );
+
+  // (b) Literal parity, .md ⟺ TS, over the git_history.json edge set: every TS
+  // upstream is reflected in the .md and vice versa (no dropped/extra edge).
+  assert.deepEqual(
+    mdGitHistoryUpstreams,
+    tsGitHistoryUpstreams,
+    "dependency-map.md and ARTIFACT_DEPENDS_ON_MAP must agree literally on git_history.json's upstream edges",
+  );
+
+  // And the .md actually carries the git_history.json downstream bullet under
+  // BOTH upstreams (guards a regression that drops one direction of the edge).
+  for (const upstream of tsGitHistoryUpstreams) {
+    assert.ok(
+      mdDependents[upstream]?.has("git_history.json"),
+      `dependency-map.md must list git_history.json downstream of ${upstream}`,
+    );
+  }
+});
