@@ -402,3 +402,85 @@ test("detectNodeEcosystem: deterministic marker-file detection", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// F5 inv-2 (consent enforced at the subprocess-SPAWN admission chokepoint):
+// `admitSpawn` is THE single function every candidate flows through before any
+// subprocess can run (`runExternalAnalyzer` calls it before the safety probe and
+// the real spawn). It gates EVERY non-DEFAULT tool on the per-run consent token
+// regardless of AnalyzerSetting — including the `permanent` setting for a
+// pre-installed tool (CE-005) — while DEFAULT tools run UNPROMPTED (no token).
+// This boundary test drives the gate end-to-end through the engine with a spy
+// runner so the "zero subprocesses on consent_denied" half of the invariant is
+// observed mechanically, not just at the pure-function level.
+test("F5 inv-2 [CP-NODE-59]: spawn-admission gates every non-DEFAULT tool on consent (incl. permanent); DEFAULT unprompted", () => {
+  // Pure-function chokepoint: across ALL settings, a non-DEFAULT tool is denied
+  // without a token and admitted with one; DEFAULT is admitted token-free.
+  const nonDefault = candidate({ defaultRun: false });
+  const dflt = candidate({ defaultRun: true });
+  for (const setting of ["auto", "ephemeral", "permanent"]) {
+    assert.equal(
+      typeof admitSpawn(nonDefault, setting, undefined),
+      "string",
+      `non-default + setting=${setting} must be consent_denied without a token`,
+    );
+    assert.equal(
+      admitSpawn(nonDefault, setting, "consent-token"),
+      undefined,
+      `non-default + setting=${setting} is admitted once the per-run token is present`,
+    );
+    assert.equal(
+      admitSpawn(dflt, setting, undefined),
+      undefined,
+      `DEFAULT + setting=${setting} runs unprompted (no token required)`,
+    );
+  }
+
+  // End-to-end through the engine: a spy runner records every subprocess argv.
+  // For a non-DEFAULT tool with NO consent token, the chokepoint must short-
+  // circuit BEFORE the capability probe — i.e. ZERO subprocesses — even when the
+  // operator set the tool to `permanent` (CE-005: a pre-installed permanent tool
+  // still needs the token).
+  const spawned = [];
+  const spy = (argv, cwd) => {
+    spawned.push(argv);
+    return fakeRunner({ toolStdout: findingPayload })(argv, cwd);
+  };
+
+  const deniedOutcome = runExternalAnalyzer(
+    candidate({ id: "eslint", defaultRun: false }),
+    "/root",
+    {
+      run: spy,
+      analyzers: { eslint: "permanent" }, // operator pinned it permanent…
+      // …but supplied NO consentToken for this run.
+    },
+  );
+  assert.equal(deniedOutcome.status.status, "skipped", "consent_denied => skipped");
+  assert.match(deniedOutcome.status.error, /consent token/i);
+  assert.equal(deniedOutcome.results.results.length, 0, "no findings on a denied spawn");
+  assert.equal(
+    spawned.length,
+    0,
+    "consent absent => permanent non-default tool spawns ZERO subprocesses (not even the probe)",
+  );
+
+  // With the per-run token present, the SAME permanent tool is admitted and the
+  // subprocess actually runs (probe + real spawn observed by the spy).
+  const admittedOutcome = runExternalAnalyzer(
+    candidate({ id: "eslint", defaultRun: false }),
+    "/root",
+    { run: spy, analyzers: { eslint: "permanent" }, consentToken: "consent-token" },
+  );
+  assert.equal(admittedOutcome.status.status, "findings", "admitted spawn produces findings");
+  assert.ok(spawned.length >= 1, "admitted spawn invokes the runner at least once");
+
+  // A DEFAULT tool runs UNPROMPTED — no token, yet the subprocess fires.
+  const beforeDefault = spawned.length;
+  const defaultOutcome = runExternalAnalyzer(
+    candidate({ id: "eslint", defaultRun: true }),
+    "/root",
+    { run: spy }, // no consentToken, no analyzers setting
+  );
+  assert.equal(defaultOutcome.status.status, "findings", "DEFAULT tool runs without consent");
+  assert.ok(spawned.length > beforeDefault, "DEFAULT spawn invoked the runner unprompted");
+});
