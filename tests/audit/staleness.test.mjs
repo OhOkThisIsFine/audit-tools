@@ -729,6 +729,52 @@ test("F1 fail-safe: corrupt/undefined element state → re-derive", () => {
   );
 });
 
+test("F1 inv-3 [CP-NODE-4]: missing/corrupt per-element key => stale (fail-safe)", () => {
+  // A persisted per-element contentKey that is missing, deleted, or corrupt
+  // (uncomparable) must be treated as CHANGED and re-derived — mirroring the
+  // whole-artifact !currentHash => stale path. We corrupt/delete the persisted
+  // baseline several ways and assert each fails safe to `re-derive`, never a
+  // false `skipped`.
+  const sig = buildTaskContentSignature({ goal: "g", body: "v1" });
+  const coord = {
+    unit_id: "u1",
+    lens: "security",
+    pass_id: "p1",
+    source: "base",
+    task_content_signature: sig,
+  };
+  const liveKeys = deriveLiveResultKeys(coord);
+
+  // Sanity: a correctly persisted baseline skips an unchanged element.
+  const goodBaselines = recordResultBaseline(undefined, liveKeys);
+  assert.equal(perElementStalenessVerdict(goodBaselines, coord), "skipped");
+
+  // (a) Persisted key DELETED from the store → no baseline → re-derive.
+  const deleted = { ...goodBaselines };
+  delete deleted[liveKeys.idempotency_key];
+  assert.equal(
+    perElementStalenessVerdict(deleted, coord),
+    "re-derive",
+    "deleted persisted per-element key must fail safe to re-derive",
+  );
+
+  // (b) Persisted key explicitly undefined (uncomparable) → re-derive.
+  const undef = { ...goodBaselines, [liveKeys.idempotency_key]: undefined };
+  assert.equal(
+    perElementStalenessVerdict(undef, coord),
+    "re-derive",
+    "undefined persisted per-element key must fail safe to re-derive",
+  );
+
+  // (c) Persisted key corrupt (a non-matching/garbage value) → re-derive.
+  const corrupt = { ...goodBaselines, [liveKeys.idempotency_key]: "CORRUPT" };
+  assert.equal(
+    perElementStalenessVerdict(corrupt, coord),
+    "re-derive",
+    "corrupt persisted per-element key must fail safe to re-derive",
+  );
+});
+
 test("F1 metadata-migration fail-safe: old-shape (pre-F1) manifest → ALL present artifacts stale, no throw", () => {
   const initialBundle = makeBaseBundle();
   const metadata = computeArtifactMetadata(initialBundle);
