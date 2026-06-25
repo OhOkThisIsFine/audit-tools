@@ -1207,3 +1207,58 @@ describe("F4 fail-3 [CP-NODE-51]: token estimate is local estimateTokensFromByte
   });
 });
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// F4 inv-6 (CP-NODE-44) — an active cooldown forces a single-slot wave.
+//
+// A quotaStateEntry.cooldown_until in the FUTURE is an active cooldown: the
+// shared scheduler throttles to max_concurrent=1, stamps binding_cap="cooldown",
+// and SKIPS all cap computation (RPM/TPM/learned/fallback). This is the path the
+// persisted critical-snapshot cooldown (inv-5) feeds into — many cheap slots that
+// would otherwise size a wide wave are collapsed to one solely by the cooldown.
+// ---------------------------------------------------------------------------
+
+describe("F4 inv-6 [CP-NODE-44]: future cooldown_until => max_concurrent=1, binding_cap=cooldown", () => {
+  it("an active (future) cooldown collapses an otherwise-wide wave to a single slot and skips cap computation", () => {
+    const broker = createBrokeredRepairDispatch();
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    // Enough cheap slots that, absent the cooldown, the wave would size well
+    // above 1 — proving the single-slot result comes from the cooldown branch,
+    // not from a slot/budget cap.
+    const decision = broker.broker({
+      providerName: "openai-compatible",
+      sessionConfig: { quota: { enabled: true } } as any,
+      hostModel: null,
+      slots: Array.from({ length: 8 }, (_, i) => slot(`n${i}`, 500)),
+      quotaStateEntry: makeQuotaStateEntry({ cooldown_until: future }),
+    });
+
+    // The schedule itself — not just the rolled-up decision — is the cooldown
+    // branch: a single-slot wave bound by cooldown, carrying the cooldown_until.
+    expect(decision.schedule.max_concurrent).toBe(1);
+    expect(decision.schedule.binding_cap).toBe("cooldown");
+    expect(decision.schedule.cooldown_until).toBe(future);
+    // And the admission honors it: exactly one slot is admitted under cooldown.
+    expect(decision.admitted).toBe(1);
+    expect(decision.bindingCap).toBe("cooldown");
+    expect(decision.cooldownUntil).toBe(future);
+  });
+
+  it("an EXPIRED cooldown_until is NOT active — the wave is sized normally (cap computation runs)", () => {
+    const broker = createBrokeredRepairDispatch();
+    const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const decision = broker.broker({
+      providerName: "openai-compatible",
+      sessionConfig: { quota: { enabled: true } } as any,
+      hostModel: null,
+      slots: Array.from({ length: 8 }, (_, i) => slot(`n${i}`, 500)),
+      quotaStateEntry: makeQuotaStateEntry({ cooldown_until: past }),
+    });
+
+    // A past cooldown is inactive: the cooldown branch is skipped, cap
+    // computation runs, and nothing is bound by cooldown.
+    expect(decision.schedule.binding_cap).not.toBe("cooldown");
+    expect(decision.schedule.cooldown_until).toBeNull();
+    expect(decision.bindingCap).not.toBe("cooldown");
+  });
+});
