@@ -1341,3 +1341,73 @@ describe("F4 inv-6 [CP-NODE-44]: future cooldown_until => max_concurrent=1, bind
     expect(decision.bindingCap).not.toBe("cooldown");
   });
 });
+
+// ---------------------------------------------------------------------------
+// F4 fail-6 (CP-NODE-54) — a CRITICAL snapshot must PERSIST cooldown_until so a
+// later transiently-null snapshot cannot re-expand a CAPABLE host (CE-010).
+//
+// This is the precise latent failure inv-5's in-decision cooldown persistence
+// prevents, hardened against the strongest re-expansion pressure: a host that
+// advertises a real concurrency ceiling ABOVE the cold-start floor (capable).
+// Were the critical snapshot to throttle to 1 but NOT persist cooldown_until,
+// the very next null-snapshot decision for the SAME pool would see only the
+// capable host ceiling and size a wide wave straight back into a still-critical
+// provider. The persisted cooldown must win over capability: the follow-up wave
+// stays at 1, bound by cooldown, even though the host is classified capable.
+// ---------------------------------------------------------------------------
+
+describe("F4 fail-6 [CP-NODE-54]: critical snapshot persists cooldown_until so a later null snapshot cannot re-expand", () => {
+  it("a capable host throttled by a critical snapshot stays at 1 on the next null snapshot (cooldown beats capability)", () => {
+    const broker = createBrokeredRepairDispatch();
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const CAPABLE_CEILING = 8; // well above the cold-start floor (3)
+    const args = {
+      providerName: "openai-compatible" as const,
+      sessionConfig: { quota: { enabled: true } } as any,
+      hostModel: null,
+      // Enough cheap slots that, absent the cooldown, the capable ceiling would
+      // size a wide wave — so a stay-at-1 result can only come from the cooldown.
+      slots: Array.from({ length: CAPABLE_CEILING }, (_, i) => slot(`n${i}`, 500)),
+      // A real reported ceiling above the floor ⟹ the host is capable. This is the
+      // re-expansion pressure the persisted cooldown must override.
+      hostConcurrencyLimit: {
+        active_subagents: CAPABLE_CEILING,
+        source: "session_config",
+      } as any,
+    };
+
+    // Decision 1: a below-CRITICAL snapshot (remaining_pct < 0.1) throttles the
+    // capable host's wave to exactly 1 and surfaces the snapshot's reset_at as the
+    // cooldown — which the broker must PERSIST within this same decision.
+    const critical = broker.broker({
+      ...args,
+      quotaSourceSnapshot: {
+        remaining_pct: 0.05,
+        reset_at: future,
+        captured_at: new Date().toISOString(),
+        source: "test",
+      } as any,
+    });
+    // The host is genuinely capable, yet the critical snapshot still collapses it.
+    expect(critical.capableHost).toBe(true);
+    expect(critical.schedule.max_concurrent).toBe(1);
+    expect(critical.admitted).toBe(1);
+    expect(critical.cooldownUntil).toBe(future);
+
+    // Decision 2: a transiently-null snapshot for the SAME capable pool. With the
+    // cooldown persisted in decision 1, the follow-up reads it back and stays at 1
+    // — it does NOT re-expand to the capable ceiling. This is exactly the
+    // re-expansion fail-6 forbids: cooldown persistence beats host capability.
+    const followUp = broker.broker({
+      ...args,
+      quotaSourceSnapshot: null,
+    });
+    expect(followUp.capableHost).toBe(true);
+    expect(followUp.schedule.max_concurrent).toBe(1);
+    expect(followUp.admitted).toBe(1);
+    expect(followUp.cooldownUntil).toBe(future);
+    expect(followUp.bindingCap).toBe("cooldown");
+    // The wave is NOT re-expanded back up toward the capable ceiling.
+    expect(followUp.schedule.max_concurrent).toBeLessThan(CAPABLE_CEILING);
+  });
+});
