@@ -34,18 +34,19 @@ afterEach(async () => {
 });
 
 describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
-  it("empty set (zero events AND zero reflections) is trivially disposed at the AUDIT terminal", async () => {
+  it("empty set (zero events AND zero reflections) blocks at AUDIT terminal until host writes ≥1 observation", async () => {
     const artifactsDir = join(TEST_DIR, "audit");
     await mkdir(artifactsDir, { recursive: true });
     const runId = "AUDIT-RUN-1";
 
-    const decision = await decideAuditFrictionCloseout(artifactsDir, runId);
-    expect(decision.action).toBe("disposed");
-    expect(decision.pending).toEqual([]);
+    // First call: materializes the record, no subjects, but needs_open_observations.
+    const pending = await decideAuditFrictionCloseout(artifactsDir, runId);
+    expect(pending.action).toBe("dispose");
+    expect(pending.pending).toEqual([]);
+    expect(pending.needs_open_observations).toBe(true);
 
     const path = frictionCapturePath(artifactsDir, runId);
-    expect(decision.recordPath).toBe(path);
-    // A disposed record is persisted once so it never re-loops.
+    expect(pending.recordPath).toBe(path);
     expect(existsSync(path)).toBe(true);
     expect(path).toMatch(/AUDIT-RUN-1\.json$/);
 
@@ -53,19 +54,37 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     expect(artifact.schema_version).toBe(FRICTION_CAPTURE_SCHEMA_VERSION);
     expect(artifact.tool).toBe("audit-code");
     expect(artifact.run_id).toBe(runId);
+
+    // Host adds an observation ("no friction this run" is the valid empty-run entry).
+    const record = await readArtifact(path);
+    record.open_observations = [{ dimension: "other", note: "no friction this run" }];
+    await writeFile(path, JSON.stringify(record) + "\n", "utf8");
+
+    const disposed = await decideAuditFrictionCloseout(artifactsDir, runId);
+    expect(disposed.action).toBe("disposed");
+    expect(disposed.needs_open_observations).toBe(false);
   });
 
-  it("empty set is trivially disposed at the REMEDIATE terminal", async () => {
+  it("empty set blocks at REMEDIATE terminal until host writes ≥1 observation", async () => {
     const artifactsDir = join(TEST_DIR, "remediation");
     await mkdir(artifactsDir, { recursive: true });
     const state = { status: "complete" as const, plan: { plan_id: "REM-RUN-1", findings: [], blocks: [] } } as never;
 
-    const decision = await decideRemediateFrictionCloseout(artifactsDir, state);
-    expect(decision.action).toBe("disposed");
-    expect(decision.recordPath).toMatch(/REM-RUN-1\.json$/);
+    const pending = await decideRemediateFrictionCloseout(artifactsDir, state);
+    expect(pending.action).toBe("dispose");
+    expect(pending.needs_open_observations).toBe(true);
+    expect(pending.recordPath).toMatch(/REM-RUN-1\.json$/);
+
+    // Seed an observation.
+    const record = await readArtifact(pending.recordPath);
+    record.open_observations = [{ dimension: "other", note: "no friction this run" }];
+    await writeFile(pending.recordPath, JSON.stringify(record) + "\n", "utf8");
+
+    const disposed = await decideRemediateFrictionCloseout(artifactsDir, state);
+    expect(disposed.action).toBe("disposed");
   });
 
-  it("DROPS FALSE-GREEN: a captured mechanical event BLOCKS the close-out until disposed", async () => {
+  it("DROPS FALSE-GREEN: a captured mechanical event BLOCKS the close-out until disposed AND ≥1 observation written", async () => {
     const artifactsDir = join(TEST_DIR, "audit");
     await mkdir(artifactsDir, { recursive: true });
     const runId = "A-EVT";
@@ -81,13 +100,25 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     expect(blocked.action).toBe("dispose");
     expect(blocked.pending.map((s) => s.id)).toContain("evt-1");
 
-    // Once disposed, the close-out is satisfied.
+    // Dispose the subject.
     await recordFrictionDisposition(
       artifactsDir,
       runId,
       { target_id: "evt-1", disposition: "keep" },
       "audit-code",
     );
+
+    // Subjects disposed but still needs an open observation.
+    const stillPending = await decideAuditFrictionCloseout(artifactsDir, runId);
+    expect(stillPending.action).toBe("dispose");
+    expect(stillPending.pending).toEqual([]);
+    expect(stillPending.needs_open_observations).toBe(true);
+
+    // Write the observation → fully disposed.
+    const record = await readArtifact(stillPending.recordPath);
+    record.open_observations = [{ dimension: "other", note: "minor validator coercion, known ok" }];
+    await writeFile(stillPending.recordPath, JSON.stringify(record) + "\n", "utf8");
+
     const disposed = await decideAuditFrictionCloseout(artifactsDir, runId);
     expect(disposed.action).toBe("disposed");
     expect(disposed.pending).toEqual([]);
@@ -112,12 +143,24 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     expect(blocked.action).toBe("dispose");
     const reflId = blocked.pending.find((s) => s.source === "reflection")!.id;
 
+    // Dispose the reflection.
     await recordFrictionDisposition(
       artifactsDir,
       runId,
       { target_id: reflId, disposition: "annotate", annotation: "tracked in backlog" },
       "remediate-code",
     );
+
+    // Subjects disposed but still needs open observation.
+    const stillPending = await decideRemediateFrictionCloseout(artifactsDir, state);
+    expect(stillPending.action).toBe("dispose");
+    expect(stillPending.needs_open_observations).toBe(true);
+
+    // Write the observation → fully disposed.
+    const record = await readArtifact(stillPending.recordPath);
+    record.open_observations = [{ dimension: "other", note: "flaky lock tracked" }];
+    await writeFile(stillPending.recordPath, JSON.stringify(record) + "\n", "utf8");
+
     const disposed = await decideRemediateFrictionCloseout(artifactsDir, state);
     expect(disposed.action).toBe("disposed");
   });

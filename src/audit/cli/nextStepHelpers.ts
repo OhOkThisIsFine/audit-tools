@@ -6,7 +6,7 @@
  * concern.
  */
 
-import { unlink } from "node:fs/promises";
+import { access, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   advance,
@@ -195,17 +195,34 @@ export async function buildTerminalStep(
   if (!reportRendered) {
     return { kind: "blocked", state, bundle, reason: blockedReason };
   }
-  const promoted = await promoteFinalAuditReport({
-    artifactsDir: params.artifactsDir,
-  });
+  // Evaluate friction triage BEFORE promotion — promoteFinalAuditReport deletes
+  // artifactsDir (including the friction dir), so reading after promotion always
+  // materializes an empty record and returns status:"ready".
   const triage = await decideAuditFrictionCloseout(params.artifactsDir, "run");
+  const promotedPath = promotedAuditReportPath(params.artifactsDir);
+  const alreadyPromoted = await access(promotedPath).then(() => true).catch(() => false);
+  let finalReportPath: string;
+  if (alreadyPromoted) {
+    finalReportPath = promotedPath;
+  } else {
+    const promoted = await promoteFinalAuditReport({
+      artifactsDir: params.artifactsDir,
+    });
+    finalReportPath = promoted.promoted
+      ? promotedPath
+      : auditReportPath(params.artifactsDir);
+    if (promoted.promoted) {
+      await writeJsonFile(join(params.artifactsDir, "audit_state.json"), {
+        ...state,
+        status: "complete" as const,
+      });
+    }
+  }
   return {
     kind: "complete",
     state,
     bundle,
-    finalReportPath: promoted.promoted
-      ? promotedAuditReportPath(params.artifactsDir)
-      : auditReportPath(params.artifactsDir),
+    finalReportPath,
     triage,
   };
 }
@@ -1319,19 +1336,39 @@ export async function runDeterministicForNextStep(
       progress_summary: decision.reason,
       providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
     });
-    const promoted = await promoteFinalAuditReport({
-      artifactsDir: params.artifactsDir,
-    });
-    const finalReportPath = promoted.promoted
-      ? promotedAuditReportPath(params.artifactsDir)
-      : auditReportPath(params.artifactsDir);
-    // Fold friction triage into the terminal step — same pattern as remediate.
-    // Blocks with status "ready" until ≥1 open observation is written; "complete"
-    // once all subjects disposed and open_observations ≥1.
-    const triage = await decideAuditFrictionCloseout(
-      params.artifactsDir,
-      "run",
-    );
+    // Evaluate friction triage BEFORE promotion — promoteFinalAuditReport deletes
+    // artifactsDir (including the friction dir), so reading after promotion always
+    // materializes an empty record and returns status:"ready".
+    const triage = await decideAuditFrictionCloseout(params.artifactsDir, "run");
+    // Guard against re-promoting on a subsequent next-step call after the
+    // artifacts directory has been cleaned up. promoteFinalAuditReport deletes
+    // artifactsDir; on re-entry the source audit-report.md is gone, so we use
+    // the already-promoted path directly without re-running cleanup.
+    const promotedPath = promotedAuditReportPath(params.artifactsDir);
+    const alreadyPromoted = await access(promotedPath).then(() => true).catch(() => false);
+    let finalReportPath: string;
+    if (alreadyPromoted) {
+      finalReportPath = promotedPath;
+    } else {
+      const promoted = await promoteFinalAuditReport({
+        artifactsDir: params.artifactsDir,
+      });
+      finalReportPath = promoted.promoted
+        ? promotedPath
+        : auditReportPath(params.artifactsDir);
+      // Persist the complete status sentinel so subsequent next-step calls
+      // short-circuit (decideNextStep sees status "complete" and skips the fold).
+      // writeJsonFile creates artifactsDir if promotion cleaned it up.
+      if (promoted.promoted) {
+        // Force status:"complete" — `state` may still reflect the pre-execution
+        // state (e.g. status:"active" if the terminal fired before the last
+        // executor's writeCoreArtifacts was the fold's final word).
+        await writeJsonFile(join(params.artifactsDir, "audit_state.json"), {
+          ...state,
+          status: "complete" as const,
+        });
+      }
+    }
     return {
       kind: "complete",
       state,

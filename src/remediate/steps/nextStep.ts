@@ -220,7 +220,10 @@ function resolveArtifactsDir(root: string, artifactsDir?: string): string {
 }
 
 function stateRunId(state: RemediationState | null): string {
-  return state?.plan?.plan_id ?? randomRunId("REMEDIATE");
+  // When the plan is absent (fully-green close deleted the state, or complete
+  // was persisted without a plan), use the stable fallback "run" so the friction
+  // record path is deterministic across multiple next-step calls on the same run.
+  return state?.plan?.plan_id ?? "run";
 }
 
 function defaultInputCandidates(root: string): string[] {
@@ -1563,9 +1566,16 @@ async function presentReportStep(
   // `audit-tools/shared`). MANDATORY + BLOCKING: stays "dispose" until every mechanical
   // event + reflection is disposed AND ≥1 open observation written. Never trivially
   // satisfied by an empty event set — the host must actively confirm the friction state.
-  const triage = await decideRemediateFrictionCloseout(artifactsDir, state);
-  const frictionBlock = buildFrictionTriageBlock(triage);
-  const isBlocked = triage.action === "dispose";
+  //
+  // When `artifactsDir` was deleted by a fully-green close (close.ts rm -rf on a
+  // green run), there is nowhere to persist the friction record and no mechanical
+  // events to triage — skip the triage entirely and go straight to complete.
+  const artifactsDirExists = existsSync(artifactsDir);
+  const triage = artifactsDirExists
+    ? await decideRemediateFrictionCloseout(artifactsDir, state)
+    : null;
+  const frictionBlock = triage ? buildFrictionTriageBlock(triage) : "";
+  const isBlocked = triage?.action === "dispose";
   return writeCurrentStep({
     stepKind: "present_report",
     status: isBlocked ? "ready" : "complete",
@@ -1581,7 +1591,7 @@ async function presentReportStep(
       : "Present the remediation report summary and stop.",
     artifactPaths: {
       final_report: reportPath,
-      friction_record: triage.recordPath,
+      ...(triage ? { friction_record: triage.recordPath } : {}),
     },
   });
 }
@@ -3215,10 +3225,11 @@ async function handleClosing(
   // Close-complete CROSSES the engine boundary: `complete` is a pre-intake
   // obligation, unreachable from a main-engine transition. Emit the durable
   // report directly, passing exactly what the original recursion reloaded — the
-  // artifact dir is DELETED on a fully-green close (reload → null → randomRunId)
-  // and PRESERVED on a not-green complete (reload → the saved complete state →
-  // its plan_id). `store.loadState()` reproduces both, so present_report is
-  // identical to the cascade. (Regression-locked in next-step-implement-dispatch.)
+  // artifact dir is DELETED on a fully-green close (reload → null → stateRunId
+  // falls back to "run") and PRESERVED on a not-green complete (reload → the
+  // saved complete state → its plan_id). `store.loadState()` reproduces both, so
+  // present_report is identical to the cascade.
+  // (Regression-locked in next-step-implement-dispatch.)
   return {
     kind: "emit",
     step: await handleComplete(root, artifactsDir, await store.loadState()),
