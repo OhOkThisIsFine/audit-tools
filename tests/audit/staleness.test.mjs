@@ -1090,3 +1090,86 @@ test("F1 fail-3 [CP-NODE-14]: missing/uncomparable per-element key => stale, nev
     );
   }
 });
+
+test("F1 inv-8 [CP-NODE-9 r2]: persist/reload recomputes identical stale set (provenance-stripped)", async () => {
+  // F1 inv-8 reproducible-DAG guard, distinct angle from the existing
+  // "persist/reload cycle yields identical stale set" test: that one round-trips
+  // the SAME manifest through JSON. This one proves the *recompute* path is
+  // reproducible across two independent runs whose only difference is PROVENANCE
+  // (wall-clock `generated_at` stamps, a run-id-bearing field). The persisted
+  // content keys/verdicts must recompute an identical stale set on the later
+  // run, with no wall-clock / run-id leakage — guaranteed because
+  // normalizeForMetadataHash strips provenance before hashing.
+  const { normalizeForMetadataHash } = await import(
+    "../../src/audit/orchestrator/artifactFreshness.ts"
+  );
+
+  // Run 1: build manifest at an early wall-clock, then PERSIST + RELOAD it.
+  const run1Bundle = makeBaseBundle();
+  run1Bundle.repo_manifest.generated_at = "2026-01-01T00:00:00Z";
+  const manifest1 = computeArtifactMetadata(run1Bundle);
+  const persisted = JSON.stringify(manifest1);
+  const reloaded = JSON.parse(persisted);
+  assert.equal(reloaded.metadata_schema_version, METADATA_SCHEMA_VERSION);
+
+  // Run 2: a LATER run with identical content but a different wall-clock stamp
+  // (provenance only). recompute metadata against the reloaded baseline.
+  const run2Bundle = makeBaseBundle();
+  run2Bundle.repo_manifest.generated_at = "2026-12-31T23:59:59Z";
+  const manifest2 = computeArtifactMetadata(run2Bundle, reloaded);
+
+  // (a) normalizeForMetadataHash strips the provenance stamp → the two bundles'
+  // normalized repo_manifest forms are byte-identical despite differing stamps.
+  const norm1 = stableStringify(
+    normalizeForMetadataHash("repo_manifest.json", run1Bundle.repo_manifest),
+  );
+  const norm2 = stableStringify(
+    normalizeForMetadataHash("repo_manifest.json", run2Bundle.repo_manifest),
+  );
+  assert.equal(
+    norm1,
+    norm2,
+    "normalizeForMetadataHash must strip generated_at so provenance does not leak into the hash",
+  );
+  assert.ok(
+    !norm2.includes("2026-12-31"),
+    "stripped normalized form must not carry the wall-clock provenance stamp",
+  );
+
+  // (b) No revision churn: the provenance-only delta must NOT bump repo_manifest's
+  // revision, so the recomputed content hash is identical across runs.
+  assert.equal(
+    manifest2.artifacts["repo_manifest.json"].content_hash,
+    reloaded.artifacts["repo_manifest.json"].content_hash,
+    "content hash must be reproducible across runs (no wall-clock leakage)",
+  );
+  assert.equal(
+    manifest2.artifacts["repo_manifest.json"].revision,
+    reloaded.artifacts["repo_manifest.json"].revision,
+    "a provenance-only change must not churn the revision",
+  );
+
+  // (c) The recomputed stale set is IDENTICAL to the persisted/reloaded run's —
+  // the DAG is reproducible across runs.
+  const stalePersisted = computeStaleArtifacts({
+    ...run1Bundle,
+    artifact_metadata: reloaded,
+  });
+  const staleRecomputed = computeStaleArtifacts({
+    ...run2Bundle,
+    artifact_metadata: manifest2,
+  });
+  assert.deepEqual(
+    [...staleRecomputed].sort(),
+    [...stalePersisted].sort(),
+    "persisted + recomputed runs must yield an identical stale set",
+  );
+
+  // (d) The overall state signature (content-hash basis) is identical across the
+  // two runs — a final reproducibility anchor with no run-id/wall-clock leakage.
+  assert.equal(
+    computeArtifactStateSignature({ ...run2Bundle, artifact_metadata: manifest2 }),
+    computeArtifactStateSignature({ ...run1Bundle, artifact_metadata: reloaded }),
+    "artifact state signature must be reproducible across runs",
+  );
+});
