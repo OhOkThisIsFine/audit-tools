@@ -5,6 +5,13 @@
  * it submits the candidate paths to `routeAmendmentRequest`. Unowned paths are
  * granted unilaterally; owned or contended paths are routed back through the
  * seam detect+resolve protocol.
+ *
+ * Grant-time disjointness (INV-SOO-06 / CE-001): `registry.claimAmendment`
+ * additionally refuses a scope-widening grant onto a file another node holds as a
+ * live in-flight scheduling claim, so the in-flight owned-file union can never
+ * become non-disjoint via a post-admission amendment. Such a path is routed as a
+ * `contended` seam (queued until the holder's file frees), exactly like a
+ * sibling-amendment contention.
  */
 
 import type { OwnershipRegistry } from "./ownershipRegistry.js";

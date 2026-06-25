@@ -11,8 +11,55 @@
  * purged on load.
  */
 
-import { writeFileSync, readFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { writeFileSync, readFileSync, mkdirSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
+
+/**
+ * Whether the host filesystem is case-insensitive for path identity. win32 and
+ * darwin default to case-insensitive volumes; linux is case-sensitive. Used so
+ * `src/A.ts` and `src/a.ts` collide on a Windows/macOS volume (one physical
+ * file) but stay distinct on Linux — INV-SOO-09 canonical physical-file identity.
+ */
+const CASE_INSENSITIVE_FS = process.platform === "win32" || process.platform === "darwin";
+
+/**
+ * The single-sourced path canonicalization for ownership identity (INV-SOO-09).
+ *
+ * Resolves a path to a stable physical-file key: absolute (against `root` when
+ * supplied, else cwd), `..`/`.`-collapsed (via `resolve`), separators normalized
+ * to `/`, and case-folded on a case-insensitive filesystem. All spellings of one
+ * file therefore collide, closing the rel/abs/case/`..` mismatch (CE-004).
+ *
+ * Symlink identity is a RECORDED RESIDUAL, not silently treated as disjoint
+ * (INV-SOO-09 / fail-3): when `resolveSymlinks` is set and the path exists, the
+ * realpath is folded in so `link.ts → x.ts` collides; when realpath is
+ * unavailable (path absent, or FS symlink resolution out of scope) the lexical
+ * canonical key is used and the unresolved case degrades to the downstream merge
+ * guard rather than being asserted disjoint here.
+ *
+ * This is the ONLY normalization scheme for ownership identity — callers must
+ * not introduce a second one (failure-mode: path-identity mismatch).
+ */
+export function canonicalizeFilePath(
+  path: string,
+  opts: { root?: string; resolveSymlinks?: boolean } = {},
+): string {
+  const { root, resolveSymlinks = false } = opts;
+  let abs = isAbsolute(path)
+    ? resolve(path)
+    : resolve(root ?? process.cwd(), path);
+  if (resolveSymlinks) {
+    try {
+      abs = realpathSync(abs);
+    } catch {
+      // Symlink/realpath unavailable (path absent or FS resolution out of scope):
+      // keep the lexical key — the unresolved symlink case is a recorded residual
+      // handled by the downstream merge guard, never asserted disjoint here.
+    }
+  }
+  const slashed = abs.split(sep).join("/");
+  return CASE_INSENSITIVE_FS ? slashed.toLowerCase() : slashed;
+}
 
 export interface OwnershipRegistryJson {
   /** nodeId → set of paths from that node's original contract scope */
@@ -43,12 +90,30 @@ export class OwnershipRegistry {
    */
   private amendmentClaims: Map<string, string> = new Map();
 
+  /**
+   * canonical path → nodeId: scheduling-time in-flight WRITER claim. Lifted from
+   * the merge-time amendment signal into scheduling-time admission (INV-SOO):
+   * the rolling scheduler holds at most one in-flight writer per canonical path,
+   * so same-file nodes serialize while different-file nodes parallelize. Keyed by
+   * `canonicalizeFilePath` so all spellings of one file collide (INV-SOO-09).
+   */
+  private inFlightClaims: Map<string, string> = new Map();
+
   /** Optional path for checkpoint persistence. When provided, every mutation
    * atomically writes the registry state to this path. */
   private checkpointPath: string | undefined;
 
-  constructor(checkpointPath?: string) {
+  /** Repo root for canonicalizing relative scope/claim paths to physical identity. */
+  private root: string | undefined;
+
+  constructor(checkpointPath?: string, root?: string) {
     this.checkpointPath = checkpointPath;
+    this.root = root;
+  }
+
+  /** Canonicalize a path to physical-file identity under this registry's root. */
+  private canon(path: string): string {
+    return canonicalizeFilePath(path, { root: this.root });
   }
 
   /**
@@ -76,23 +141,50 @@ export class OwnershipRegistry {
    *  - `'contended'`  — path has been claimed by a live parallel sibling; routes to seam protocol.
    */
   claimAmendment(nodeId: string, path: string): "granted" | "owned" | "contended" {
-    // Check if path is in any OTHER node's contract scope.
+    const key = this.canon(path);
+    // Check if path is in any OTHER node's contract scope (canonical identity).
     for (const [scopeNodeId, scopePaths] of this.contractScopes) {
-      if (scopeNodeId !== nodeId && scopePaths.has(path)) {
+      if (scopeNodeId !== nodeId && this._scopeHasCanonical(scopePaths, key)) {
         return "owned";
       }
     }
 
-    // Check if path has already been amendment-claimed by a live parallel sibling.
-    const existingClaimant = this.amendmentClaims.get(path);
+    // Check if path has already been amendment-claimed by a live parallel sibling
+    // (canonical identity, so a differently-spelled same file collides).
+    const existingClaimant = this._amendmentClaimantByCanonical(key);
     if (existingClaimant !== undefined && existingClaimant !== nodeId) {
       return "contended";
     }
 
-    // Grant: record the claim.
+    // Grant-time disjointness (INV-SOO-06 / CE-001): refuse a scope-widening grant
+    // onto a file another in-flight node is actively writing, so a post-admission
+    // grant can never make the in-flight owned-file union non-disjoint.
+    const inFlightOwner = this.inFlightClaims.get(key);
+    if (inFlightOwner !== undefined && inFlightOwner !== nodeId) {
+      return "contended";
+    }
+
+    // Grant: record the claim under the ORIGINAL spelling (merge attribution reads
+    // the raw path); canonical identity is applied on comparison, not on storage.
     this.amendmentClaims.set(path, nodeId);
     this._persist();
     return "granted";
+  }
+
+  /** The node holding an amendment claim whose canonical key matches `canonicalKey`. */
+  private _amendmentClaimantByCanonical(canonicalKey: string): string | undefined {
+    for (const [p, claimant] of this.amendmentClaims) {
+      if (this.canon(p) === canonicalKey) return claimant;
+    }
+    return undefined;
+  }
+
+  /** Whether a contract-scope set contains a path with the given canonical key. */
+  private _scopeHasCanonical(scopePaths: Set<string>, canonicalKey: string): boolean {
+    for (const p of scopePaths) {
+      if (this.canon(p) === canonicalKey) return true;
+    }
+    return false;
   }
 
   /**
@@ -133,18 +225,152 @@ export class OwnershipRegistry {
    * the path is unowned.
    */
   contractOwner(path: string): string | undefined {
+    const key = this.canon(path);
     for (const [nodeId, scopePaths] of this.contractScopes) {
-      if (scopePaths.has(path)) return nodeId;
+      if (this._scopeHasCanonical(scopePaths, key)) return nodeId;
     }
     return undefined;
   }
 
   /**
    * Return the node ID that has an in-flight amendment claim for this path, or
-   * undefined if uncontended.
+   * undefined if uncontended. Canonical identity (INV-SOO-09).
    */
   amendmentClaimant(path: string): string | undefined {
-    return this.amendmentClaims.get(path);
+    // Exact-spelling hit first (cheap), else canonical match.
+    return (
+      this.amendmentClaims.get(path) ??
+      this._amendmentClaimantByCanonical(this.canon(path))
+    );
+  }
+
+  // ── Scheduling-time file-ownership queries (INV-SOO) ───────────────────────
+
+  /**
+   * Canonical write-scope of a node for scheduling: its contract scope ∪ live
+   * amendment claims, each canonicalized to physical-file identity (INV-SOO-09).
+   */
+  canonicalScope(nodeId: string): Set<string> {
+    const out = new Set<string>();
+    for (const p of this.contractScopes.get(nodeId) ?? []) out.add(this.canon(p));
+    for (const [key, claimant] of this.amendmentClaims) {
+      if (claimant === nodeId) out.add(key);
+    }
+    return out;
+  }
+
+  /**
+   * The union of canonical file paths owned by currently in-flight nodes (their
+   * scheduling claims). The scheduling-time complement of the merge-time owner
+   * signal — a path in this set has a live writer, so a same-file node must wait
+   * (INV-SOO-01).
+   */
+  filesClaimedByInFlight(): Set<string> {
+    return new Set(this.inFlightClaims.keys());
+  }
+
+  /** The node holding the in-flight scheduling claim on `path`, or undefined. */
+  inFlightOwner(path: string): string | undefined {
+    return this.inFlightClaims.get(this.canon(path));
+  }
+
+  /**
+   * Whether `nodeId`'s declared write-scope is file-ownership-DISJOINT from the
+   * current in-flight set — i.e. it shares no canonical path with any OTHER
+   * in-flight node, so it can be admitted without two in-flight writers per file
+   * (INV-SOO-01).
+   *
+   * Conservative empty-scope gating (INV-SOO-01 / CE-008): a node whose declared
+   * scope canonicalizes to the EMPTY set (unresolved/undeclared) is treated as
+   * NON-disjoint — it is NOT admitted as vacuously-disjoint, because an
+   * under-declared writer could collide with anything. Such a node admits only
+   * when no other node is in flight (`requireSoloWhenEmpty`).
+   */
+  isFileOwnershipDisjoint(
+    nodeId: string,
+    declaredScope: Iterable<string>,
+  ): boolean {
+    const scope = new Set<string>();
+    for (const p of declaredScope) scope.add(this.canon(p));
+    if (scope.size === 0) {
+      // Empty/unresolved scope: disjoint only if nothing else is in flight.
+      for (const owner of this.inFlightClaims.values()) {
+        if (owner !== nodeId) return false;
+      }
+      return true;
+    }
+    for (const key of scope) {
+      const owner = this.inFlightClaims.get(key);
+      if (owner !== undefined && owner !== nodeId) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Record `nodeId`'s scheduling-time in-flight WRITER claim over `paths`
+   * (declared scope, canonicalized). Idempotent for a node re-claiming its own
+   * paths (a rate-limited re-queue). Call BEFORE dispatching the node.
+   */
+  claimInFlight(nodeId: string, paths: Iterable<string>): void {
+    let changed = false;
+    for (const p of paths) {
+      const key = this.canon(p);
+      const existing = this.inFlightClaims.get(key);
+      if (existing === nodeId) continue;
+      // Caller guarantees disjointness via isFileOwnershipDisjoint; a foreign
+      // owner here is a precondition violation, surfaced rather than overwritten.
+      if (existing !== undefined && existing !== nodeId) {
+        throw new Error(
+          `OwnershipRegistry.claimInFlight: ${key} already in-flight by ${existing}, ` +
+            `cannot claim for ${nodeId} (file-ownership-disjoint precondition violated).`,
+        );
+      }
+      this.inFlightClaims.set(key, nodeId);
+      changed = true;
+    }
+    if (changed) this._persist();
+  }
+
+  /**
+   * Release `nodeId`'s scheduling-time in-flight claims (and any amendment claims
+   * it holds). Call on a RELEASING disposition (INV-SOO-10):
+   * blocked-final / abandoned / merged / failed-no-retry / no-op-satisfied. A
+   * blocked-PENDING-triage node is still live and must NOT call this — it retains.
+   */
+  releaseInFlight(nodeId: string): void {
+    let changed = false;
+    for (const [key, owner] of this.inFlightClaims) {
+      if (owner === nodeId) {
+        this.inFlightClaims.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) this._persist();
+  }
+
+  /**
+   * Atomic triage-retry claim hand-off A→A' (INV-SOO-07): transfer all of the
+   * failed node's in-flight + amendment claims to its successor in one step, so
+   * there is no observable window in which both hold the file, nor one in which a
+   * foreign same-file node is admitted between release and re-claim. A no-op when
+   * `fromNodeId === toNodeId`.
+   */
+  handoffInFlight(fromNodeId: string, toNodeId: string): void {
+    if (fromNodeId === toNodeId) return;
+    let changed = false;
+    for (const [key, owner] of this.inFlightClaims) {
+      if (owner === fromNodeId) {
+        this.inFlightClaims.set(key, toNodeId);
+        changed = true;
+      }
+    }
+    for (const [key, owner] of this.amendmentClaims) {
+      if (owner === fromNodeId) {
+        this.amendmentClaims.set(key, toNodeId);
+        changed = true;
+      }
+    }
+    if (changed) this._persist();
   }
 
   /** Serialize to a plain JSON-safe object. */
