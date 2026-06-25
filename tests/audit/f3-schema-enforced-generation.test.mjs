@@ -23,7 +23,7 @@ const { createBrokeredRepairDispatch } = await import(
 );
 const { enforceSchemaAtEmit, buildWorkerRepairContract, resolveEmitConstraint } =
   await import("../../src/audit/contracts/schemaEnforcedEmit.ts");
-const { WorkerAuditResultsSchema } = await import(
+const { WorkerAuditResultsSchema, WORKER_SCHEMA_SOURCES } = await import(
   "../../src/audit/contracts/workerSchemas.ts"
 );
 
@@ -292,6 +292,48 @@ test("F3 inv-3: discovery runs exactly ONCE per constructed provider, ZERO per e
       "every emit reads the once-discovered descriptor; no re-discovery",
     );
   }
+});
+
+test("F3 inv-7: enforced schema + registered RepairContract validator both resolve from workerSchemas.ts — no second schema definition (CP-NODE-28)", async () => {
+  // inv-7: the schema enforced at emit AND the schema the registered
+  // RepairContract validates against must be the ONE canonical zod source in
+  // workerSchemas.ts (WORKER_SCHEMA_SOURCES). There must be no second/parallel
+  // definition the two could drift apart on.
+
+  // (a) SINGLE SOURCE — the registry entry's schema is the SAME object identity
+  //     as the exported canonical schema (a second definition would be a
+  //     different object).
+  const registered = WORKER_SCHEMA_SOURCES["audit_results.schema.json"];
+  assert.ok(registered, "audit_results schema is registered in WORKER_SCHEMA_SOURCES");
+  assert.strictEqual(
+    registered.schema,
+    WorkerAuditResultsSchema,
+    "registry source === canonical exported schema (one definition, not a copy)",
+  );
+
+  // (b) The RepairContract validator is built FROM that single source — and a
+  //     contract built from the registry entry validates byte-for-byte the same
+  //     as one built from the exported schema (they are the same schema).
+  const fromExport = buildWorkerRepairContract("audit_results", WorkerAuditResultsSchema);
+  const fromRegistry = buildWorkerRepairContract("audit_results", registered.schema);
+
+  // Clean payload: both contract validators AND the raw schema agree (0 errors).
+  const clean = validWorkerResults();
+  assert.equal(fromExport.validate(clean).errors.length, 0);
+  assert.equal(fromRegistry.validate(clean).errors.length, 0);
+  assert.equal(WorkerAuditResultsSchema.safeParse(clean).success, true);
+
+  // Invalid payload: both contract validators AND the raw schema agree it fails,
+  // proving the enforced schema and the registered validator are one and the same.
+  const bad = [{ task_id: "T1" }];
+  assert.ok(fromExport.validate(bad).errors.length > 0);
+  assert.ok(fromRegistry.validate(bad).errors.length > 0);
+  assert.equal(WorkerAuditResultsSchema.safeParse(bad).success, false);
+  assert.deepEqual(
+    fromRegistry.validate(bad).errors,
+    fromExport.validate(bad).errors,
+    "registry-sourced and export-sourced validators report identical errors — one schema",
+  );
 });
 
 test("F3 STRUCTURAL guard: F3 source files contain no hardcoded model literal", async () => {
