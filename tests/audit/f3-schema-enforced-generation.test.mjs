@@ -213,6 +213,54 @@ test("F3: a refused broker means no LLM touch — O3 falls to the re-dispatch si
   assert.ok(result.repair.redispatch, "re-dispatch signal surfaced");
 });
 
+test("F3 inv-3: discovery runs exactly ONCE per constructed provider, ZERO per emit/dispatch", async () => {
+  // inv-3: OutputConstraintCapability discovery happens once at provider
+  // construction and is then READ at every emit — never re-discovered per
+  // dispatch. Instrument both ends:
+  //   (a) STRUCTURAL — the emit module must never call the discovery fn, so a
+  //       dispatch path can't accidentally recompute it.
+  //   (b) RUNTIME — N emits against one constructed provider observe the SAME
+  //       stamped descriptor object identity (a re-discovery would mint a new
+  //       object), proving zero per-emit discovery.
+
+  // (a) The emit/dispatch source never invokes discovery.
+  const emitSrc = await readFile(
+    join(repoRoot, "src/audit/contracts/schemaEnforcedEmit.ts"),
+    "utf8",
+  );
+  assert.ok(
+    !/discoverOutputConstraintCapability/.test(emitSrc),
+    "emit path must READ the stamped descriptor, never re-discover per emit",
+  );
+
+  // (b) One construction → one descriptor object reused across many emits.
+  const provider = createFreshSessionProvider("local-subprocess", {}, noopDeps);
+  const stamped = provider.outputConstraint;
+  assert.ok(stamped, "construction stamps a descriptor exactly once");
+
+  for (let i = 0; i < 3; i += 1) {
+    const result = await enforceSchemaAtEmit({
+      contractId: "audit_results",
+      schema: WorkerAuditResultsSchema,
+      payload: validWorkerResults(),
+      provider, // same constructed provider across every emit
+      broker: createBrokeredRepairDispatch(),
+      brokerContext,
+      artifactsDir,
+      runId: `run-inv3-${i}`,
+      tool: "audit-code",
+      patcher: async (p) => p,
+    });
+    assert.equal(result.repair.status, "clean");
+    // resolveEmitConstraint must hand back the SAME object the constructor stamped.
+    assert.strictEqual(
+      resolveEmitConstraint(provider),
+      stamped,
+      "every emit reads the once-discovered descriptor; no re-discovery",
+    );
+  }
+});
+
 test("F3 STRUCTURAL guard: F3 source files contain no hardcoded model literal", async () => {
   // Provider-agnostic invariant: F3's files must NEVER key off a model id.
   const f3Files = [
