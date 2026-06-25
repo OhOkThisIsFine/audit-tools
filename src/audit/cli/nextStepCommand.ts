@@ -147,18 +147,23 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   });
 
   if (result.kind === "complete") {
+    const triage = result.triage;
+    const frictionPending = triage?.action === "dispose";
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "present_report",
-      status: "complete",
+      status: frictionPending ? "ready" : "complete",
       runId: null,
       allowedCommands: [],
-      stopCondition: "Present the final report and stop.",
+      stopCondition: frictionPending
+        ? "Complete friction triage (write open_observations and any dispositions), then call next-step again."
+        : "Present the final audit report and stop.",
       repoRoot: root,
       artifactPaths: {
         final_report: result.finalReportPath,
+        ...(triage ? { friction_record: triage.recordPath } : {}),
       },
-      prompt: renderPresentReportPrompt(result.finalReportPath),
+      prompt: renderPresentReportPrompt(result.finalReportPath, triage),
     });
     console.log(JSON.stringify(step, null, 2));
     return;

@@ -168,13 +168,10 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       bundle,
       requireRoot(options.root, "syntax_resolution_executor"),
     ),
-  // Terminal friction-TRIAGE close-out (parity with remediate-code; single-sourced
-  // in `audit-tools/shared`). The blocking triage stays unsatisfied ("dispose")
-  // until every captured mechanical event AND every surfaced agent-feedback
-  // reflection carries a disposition; an empty set is trivially "disposed". The
-  // artifacts dir defaults to the standard `.audit-tools/audit` location; the run id
-  // mirrors the operator-handoff default of "run" when the caller has no explicit
-  // run id.
+  // friction_capture_executor is retained for schema compatibility but is unreachable:
+  // the friction_capture_current obligation is not in deriveAuditState, so the engine
+  // never selects it. The triage now fires in the present_report terminal step
+  // (nextStepHelpers.ts / nextStepCommand.ts) via decideAuditFrictionCloseout.
   friction_capture_executor: async (bundle, { options }) => {
     const artifactsDir =
       options.artifactsDir ??
@@ -185,8 +182,8 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       artifacts_written: ["friction/run.json"],
       progress_summary:
         decision.action === "disposed"
-          ? "Friction triage disposed (all captured items have a disposition)."
-          : `Friction triage blocked: ${decision.pending.length} item(s) await a disposition.`,
+          ? "Friction triage disposed."
+          : `Friction triage pending: ${decision.pending.length} item(s), needs_open_observations=${decision.needs_open_observations}.`,
     };
   },
 };

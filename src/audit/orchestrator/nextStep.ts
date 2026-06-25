@@ -98,15 +98,11 @@ export function decideNextStep(bundle: ArtifactBundle): NextStepDecision {
 }
 
 /**
- * The terminal friction-TRIAGE close-out for the audit half. Thin delegation to the
- * single-sourced `decideFrictionTriage` (`audit-tools/shared`) so the triage shape,
- * disposition vocabulary, blocking semantics, and close-out logic cannot drift from
- * the remediate half. Drops the former false-green (an empty up-front record no
- * longer satisfies): the close-out blocks ("dispose") until every captured
- * mechanical event AND every surfaced agent-feedback reflection carries a
- * disposition; an empty set (zero events AND zero reflections) is trivially
- * "disposed". Keyed only off `(artifactsDir, runId)`; never coupled to any repo's
- * backlog doc.
+ * Terminal friction-TRIAGE close-out for audit. Folded into the `present_report`
+ * terminal step (not a separate executor) so it fires at exactly the right moment.
+ * Blocks ("dispose") until every mechanical event + reflection is disposed AND ≥1
+ * open observation written — empty set no longer trivially satisfies.
+ * Single-sourced in `audit-tools/shared`; parity with remediate.
  */
 export async function decideAuditFrictionCloseout(
   artifactsDir: string,

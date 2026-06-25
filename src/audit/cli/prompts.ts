@@ -2,6 +2,8 @@ import {
   DO_NOT_TOKEN_WRAP_NOTE,
   DISPATCH_PROMPT_HANDOFF_NOTE,
   renderQuotaCoverageNudge,
+  buildFrictionTriageBlock,
+  type FrictionTriageDecision,
 } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
@@ -332,7 +334,19 @@ export function renderRollingDispatchPrompt(params: {
   ].join("\n");
 }
 
-export function renderPresentReportPrompt(finalReportPath: string): string {
+export function renderPresentReportPrompt(
+  finalReportPath: string,
+  triage?: FrictionTriageDecision,
+): string {
+  const frictionBlock = triage ? buildFrictionTriageBlock(triage) : "";
+  if (triage?.action === "dispose") {
+    return [
+      "# audit-code friction triage",
+      "",
+      "Complete friction triage before the audit report is presented.",
+      frictionBlock,
+    ].join("\n");
+  }
   return [
     "# audit-code present report",
     "",
@@ -341,7 +355,7 @@ export function renderPresentReportPrompt(finalReportPath: string): string {
     `Read the final audit report from: ${finalReportPath}`,
     "",
     "Present the completed audit with work blocks first.",
-    "",
+    frictionBlock,
     "Do not run the orchestrator again for this completed audit.",
     "",
   ].join("\n");
