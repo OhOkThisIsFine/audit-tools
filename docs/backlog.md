@@ -7,75 +7,11 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Meta-audit friction capture almost never happens — it's opt-in prompt text at every layer (root cause VERIFIED).**
-  The auditor is supposed to log all friction under the meta-audit rubric; in practice the run's friction record is
-  an empty `[]`. Verified causes: (1) **worker mid-run** — `renderWorkerPrompt.ts:74` asks "Optional … you MAY append
-  one JSON reflection line" to `agent-feedback.jsonl`; optional + a competing extra file write → dropped. (2) **audit-code
-  close-out** — `friction_capture_executor` (`executorRunners.ts:177-190`) is a DETERMINISTIC executor that persists
-  `frictions: []` (`nextStep.ts:140-146`) and immediately satisfies the obligation; its own doc-comment (`nextStep.ts:129`)
-  says "the host **should be prompted** to optionally enrich the record" but NO host-delegation step ever fires — the
-  auditor is never asked, and progress falsely reports "Friction close-out captured." (3) **remediate-code** does prompt at
-  `present_report` (`steps/nextStep.ts:1539-1550`) but explicitly "optional / leave empty if none" — still relies on
-  remembering. Net: the whole pipeline only works if a capable host volunteers friction, violating *enforce-robustness-in-
-  tooling, never host discretion*. **Live meta-meta evidence:** this 2026-06-24 session hit major friction (destructive
-  staleness-cascade wipe, malformed steward output forcing full re-dispatch, wave-not-rolling dispatch, working-dir `cd`
-  drift, next-step backgrounding via pipes, mid-run session-limit) — NONE auto-landed in the friction record; all reached
-  this backlog only because Ethan prompted three times.
-  **Enforcement — CONFIRMED direction (Ethan, 2026-06-24): "auto-capture + mandatory triage" (the most robust; the
-  three parts compose, do all three):**
-  (a) **Auto-capture mechanical friction with zero agent memory** — the tool already *observes* it: task re-dispatches,
-  contract-validation rejects (the steward), 429/session-limit stalls, merge retries, recovery events. Append THOSE to
-  the run's friction record directly as they happen.
-  (b) **Mandatory host-delegation triage step** — replace audit-code's silent deterministic close-out with a blocking
-  host step that surfaces the auto-captured mechanical events + the run's `agent-feedback.jsonl` reflections and makes
-  the host triage each (keep/discard/annotate) — same shape as the remediation review-gate (tool surfaces, host judges).
-  (c) **Drop the "persist empty `[]` up front = satisfied" degrade-clean** so the obligation can't false-green.
-  Apply to BOTH orchestrators (parity). Implementation not yet started. (Diagnosis root cause verified against source.)
-
-- **Ingested results must be an append-only evidence ledger that nothing can destroy; concurrent next-step must not race the artifact tree.**
-  Ingested audit results are expensive, non-deterministic LLM output — they are *evidence*, not a deterministically
-  re-derivable artifact, so the only safe model is one where no code path can ever delete or truncate them. The
-  desired end-state has three parts:
-  (1) **Append-only results ledger, re-associated by content key.** Results are immutable; a re-plan never deletes
-  or overwrites the run dir / results file. When planning changes, results are re-associated to the new task ids by
-  deterministic content key (e.g. `unit_id`/`lens`/task-content), not by truncate-and-regenerate. Results whose task
-  no longer exists are retained as unassigned, never dropped. Re-association stays deterministic (key match) — never
-  LLM-guessed remapping; some results landing "unassigned-but-retained" is acceptable, silent loss is not.
-  (2) **Process lock on the advance/persist critical section.** `next-step` / `merge-and-ingest` take the shared
-  file lock around state-derive-and-persist so two concurrent runs cannot race the artifact tree. The host must not
-  have to "remember" not to run two at once — the tool serializes it.
-  (3) **Semantic-equivalence gate replaces brittle exact-hash staleness on `intent_checkpoint`.** A hand-maintained
-  strip-list of "non-semantic fields" is incomplete by construction (a maintainer must remember to register every
-  new field — the must-remember anti-pattern). Instead: cheap deterministic normalization first, then a bounded LLM
-  judge on any residual mismatch decides whether the *auditable* intent (scope / lenses / constraints) actually
-  changed before cascading a re-derive. The gate is **fail-safe one direction only — uncertain ⇒ treat as changed
-  ⇒ re-derive** — so an LLM false-negative can only cost churn, never wrongly retain stale state. Bounded (one cheap
-  call, only on the rare mismatch) and recorded.
-  Parts (1)+(2) remove the data-loss class entirely; part (3) removes the brittle determinism that triggered it.
-  (Ethan, 2026-06-24.)
-
-- **Layered emit→validate→repair seam, single-sourced over every emitter.** Any agent emitting a structured
-  contract (AuditResult[], findings, plans, ItemSpec, design-review findings, steward verification) can trip one
-  schema error; today audit re-dispatches the whole task from scratch, and remediate's only repair is a
-  heavyweight full-artifact re-emit limited to contract-pipeline artifacts. Replace both with ONE shared seam in
-  `audit-tools/shared` that every emitter funnels through after writing, applied cheapest-first:
-  (1) **deterministic coercion** of malformed *optional* sub-objects — drop/empty them and backfill tool-owned
-  identity, **recording each drop as a warning** (never silent), re-validate;
-  (2) **bounded errors-only LLM patch** for surviving *required*-field failures — feed back ONLY the validation
-  errors + the worker's prior output (the failure delta, no re-derivation), capped (≈1 attempt), re-validate;
-  (3) **re-dispatch** only as last resort once the patch budget is exhausted.
-  Single-sourcing the seam gives audit a repair path it lacks, collapses remediate's bespoke full-regenerate
-  repair into the shared mechanism (parity), and covers ItemSpec/structural emits that have none today.
-  Re-dispatching a whole task on a fixable shape error is pure waste. Generalizes *enforce-robustness-in-tooling,
-  never host discretion*. (Prevention — making malformed output impossible to emit in the first place — is a
-  separate entry under Forward tracks; this seam is the recovery layer for whatever still slips through.)
-  (Ethan, 2026-06-24.)
-
-- **Rolling-dispatch same-file merge serialization starves throughput + can deadlock unique downstream nodes (VERIFIED, Consumers-phase run 2026-06-24).** When many bounded test-nodes append to the SAME file (e.g. all F1 nodes → `tests/audit/staleness.test.mjs`), three mechanics compound into a pathological tail: (1) `merge-implement-results`' lost-update guard blocks every same-file sibling but one *per merge batch*, so a wave of N same-file nodes lands exactly 1 and rejects N-1; (2) the rolling dispatcher orders eligible nodes **numerically**, so it offers same-file clusters together (all F1 before any F3), preventing the "one-per-distinct-file per wave" parallelism that would avoid the guard — the host is forced into ~1-node-per-merge cycles; (3) a node that legitimately needs **no source edit** (its boundary test already landed via a sibling) produces no diff → `verify_passed=false/merged=false` → it never reaches verified-complete → its downstream nodes are blocked forever by `INV-RS-01`, and *resolving the duplicate prereqs as `ignore` deadlocks the genuinely-unique downstream nodes* (had to implement those 5 directly on the branch out-of-band). Also observed: a worker that changed `broker()` to `async` to persist cooldown silently broke a sibling's synchronous `estimatedWaveTokens` test (cross-node API drift the per-node verify can't catch). All of this is squarely the **dispatch-broker + capability-tiered driver** track below — the fixes that subsume it: (a) the broker/driver should schedule by **file-ownership disjointness** (one writer per file in flight), not numeric order, so same-file nodes serialize *across* merges automatically while different-file nodes parallelize; (b) a no-source-change node whose obligation is already satisfied by a merged sibling must reach a **verified-complete "no-op satisfied"** disposition (not rejected-for-no-diff) so it never blocks downstream; (c) cross-node public-API changes (sync→async signatures on a shared seam) need a contract/boundary guard, since per-node isolated verify passes while the integrated tree breaks. Generalizes *enforce-robustness-in-tooling, never host discretion*. (Ethan, 2026-06-24.)
+_No open bugs currently tracked. Foundations O1/O2/O3 (merged `cd089066`), consumers F1–F6, and the rolling-dispatch same-file fix (a/b/c, 2026-06-25) have all shipped. Log new defects here under this heading._
 
 ## Forward tracks
 
-- **Remediator must mechanically decompose + boundary-enforce arbitrary multi-goal scope — stop forcing the host to phase by hand (Ethan, 2026-06-24, VERIFIED recurring).** When `/remediate-code` is pointed at a large multi-item input (e.g. the whole backlog), the contract pipeline produces a correct reconciled design but then expects the host to execute all tracks as ONE run; the independent design-critique repeatedly returns *blocking over-scoping* and the host has to manually re-scope to a phase. This keeps happening and shouldn't — it is the tool's core job, not the host's. The remediator must, by construction: (1) break an arbitrary number of goals/changes into well-defined, well-bounded tasks; (2) **strongly define the boundaries between tasks and write boundary tests that mechanically enforce them** (not prose `seam_adjustments` notes — review concern C-002: edit-order DAGs asserted in prose over shared files like `staleness.ts`/`dispatch.ts` are a host-discretion anti-pattern + latent merge-break); (3) separate the bounded tasks into **parallel work units with mechanical scheduling dependencies** (block A blocks-on block B) so the wave scheduler honors ordering without the host remembering; (4) derive phasing itself (foundations → consumers → review/slivers) from the dependency DAG rather than emitting one monolithic run the critique then rejects. Generalizes *enforce-robustness-in-tooling, never host discretion* and the *no monolithic change* / failure-isolation principles. Consumer modules (F1/F3/F4/F5/F6) shipped 0.30.5; the **foundations remain unshipped** — O1 friction-capture, O2 append-only-ledger+lock, O3 repair-seam (the first three Open-bugs entries above). The full module map, reconciled seams, and verified design invariants (CE-001…006, FC blocking concerns) are the canonical design doc [`backlog-remediation-design.md`](backlog-remediation-design.md).
+- **Remediator must mechanically decompose + boundary-enforce arbitrary multi-goal scope — stop forcing the host to phase by hand (Ethan, 2026-06-24, VERIFIED recurring).** When `/remediate-code` is pointed at a large multi-item input (e.g. the whole backlog), the contract pipeline produces a correct reconciled design but then expects the host to execute all tracks as ONE run; the independent design-critique repeatedly returns *blocking over-scoping* and the host has to manually re-scope to a phase. This keeps happening and shouldn't — it is the tool's core job, not the host's. The remediator must, by construction: (1) break an arbitrary number of goals/changes into well-defined, well-bounded tasks; (2) **strongly define the boundaries between tasks and write boundary tests that mechanically enforce them** (not prose `seam_adjustments` notes — review concern C-002: edit-order DAGs asserted in prose over shared files like `staleness.ts`/`dispatch.ts` are a host-discretion anti-pattern + latent merge-break); (3) separate the bounded tasks into **parallel work units with mechanical scheduling dependencies** (block A blocks-on block B) so the wave scheduler honors ordering without the host remembering; (4) derive phasing itself (foundations → consumers → review/slivers) from the dependency DAG rather than emitting one monolithic run the critique then rejects. Generalizes *enforce-robustness-in-tooling, never host discretion* and the *no monolithic change* / failure-isolation principles. Consumer modules (F1/F3/F4/F5/F6) shipped 0.30.5; the **foundations O1/O2/O3 are also shipped** (merged `cd089066`, content-key seam + append-only idempotent ledger + friction triage + repair seam, with tests — verified 2026-06-25, see `.audit-tools/phase-status-investigation.md`); the prior "foundations remain unshipped" claim was stale handoff drift. The rolling-dispatch same-file merge-serialization fix (a)+(c) shipped 2026-06-25 (file-ownership-disjoint scheduling + cross-node seam-signature guard; (b) no-op-satisfied was already shipped). This forward track (mechanical multi-goal decomposition + boundary-enforce) itself **remains unshipped** — the host still hand-scopes large inputs to one phase. The full module map, reconciled seams, and verified design invariants (CE-001…006, FC blocking concerns) are the canonical design doc [`backlog-remediation-design.md`](backlog-remediation-design.md).
 
 - **Content-addressed, granular staleness — kill whole-artifact re-derive churn.** Staleness today is
   whole-artifact: changing one unit's intent re-stales an entire downstream artifact (e.g. the coverage
