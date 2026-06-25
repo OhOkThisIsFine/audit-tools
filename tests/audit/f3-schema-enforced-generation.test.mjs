@@ -698,3 +698,119 @@ test("F3 fail-1 [CP-NODE-29]: mis-advertised mode + invalid emit => degrade to r
     );
   }
 });
+
+test("F3 fail-4 [CP-NODE-32]: tool-owned identity strip handled by O3 stage-1 coercion, not re-implemented in F3", async () => {
+  // F3 fail-4 / OBL-f3-schema-enforced-generation-fail-4: a backend can honor the
+  // advertised constraint mode and emit a STRUCTURALLY conforming shape, yet strip
+  // a TOOL-OWNED identity field (the assigned task_id) that the worker never owns.
+  // The required property F3 must guarantee is a NEGATIVE one: F3 does NOT carry its
+  // own identity-restore / drop-and-backfill logic. The schema-of-record's coercion
+  // (buildWorkerRepairContract) is an intentional NO-OP — it neither resurrects the
+  // stripped identity nor flags it unrecoverable — so the strip surfaces as a plain
+  // canonical-zod REQUIRED error and degrades through the O3 emit-validate-repair
+  // seam exactly like any other validation failure: the bounded restore happens in
+  // O3's stage-1 coercion / unrecoverable-identity escalation (routed through the
+  // shared F4 broker), never re-implemented inside F3.
+  //
+  // First: prove F3's coercion does NOT salvage the stripped identity itself.
+  const contract = buildWorkerRepairContract("audit_results", WorkerAuditResultsSchema);
+  const stripped = [
+    {
+      // task_id deliberately absent — the tool-owned identity the backend stripped.
+      unit_id: "U1",
+      pass_id: "P1",
+      lens: "correctness",
+      file_coverage: [{ path: "src/x.ts", total_lines: 10 }],
+      findings: [],
+    },
+  ];
+  const coerced = contract.coercion.coerce(stripped);
+  assert.deepEqual(
+    coerced.payload,
+    stripped,
+    "F3 coercion is a NO-OP — it does NOT re-implement identity restore",
+  );
+  assert.equal(coerced.drops.length, 0, "F3 coercion drops nothing of its own");
+  assert.equal(coerced.backfills.length, 0, "F3 coercion backfills no identity itself");
+  assert.equal(
+    coerced.unrecoverableIdentity,
+    false,
+    "F3 coercion does not own the unrecoverable-identity verdict — that is O3's escalation",
+  );
+  const validation = contract.validate(stripped);
+  assert.ok(
+    validation.errors.some((e) => e.path === "0.task_id"),
+    "stripped tool-owned identity surfaces as a canonical-zod REQUIRED error on task_id",
+  );
+  assert.ok(
+    validation.errors.every((e) => e.required),
+    "the identity-strip error gates escalation (required), not silently optional",
+  );
+
+  // Now: prove the strip degrades through the SHARED O3 seam broker — the restore is
+  // a brokered stage-2 LLM touch, not an F3-local fix-up.
+  let brokerCalls = 0;
+  let awaitCalls = 0;
+  let patcherCalls = 0;
+  const seamBroker = {
+    broker: ({ slots }) => {
+      brokerCalls += 1;
+      const slotId = slots[0].slotId;
+      return {
+        admitted: 1,
+        admission: "admitted",
+        admittedSlotIds: [slotId],
+        estimatedWaveTokens: 0,
+        cooldownUntil: null,
+        bindingCap: "none",
+        capableHost: true,
+        schedule: {},
+      };
+    },
+    awaitNextCompletion: (completion) => {
+      awaitCalls += 1;
+      return completion;
+    },
+  };
+  const result = await enforceSchemaAtEmit({
+    contractId: "audit_results",
+    schema: WorkerAuditResultsSchema,
+    // Backend honored the mode (conforming SHAPE) but stripped the tool-owned id.
+    payload: stripped,
+    provider: {
+      outputConstraint: { mode: "structured_output", reason: "honored but identity stripped" },
+    },
+    broker: seamBroker,
+    brokerContext,
+    artifactsDir,
+    runId: "run-cp-node-32-identity-strip",
+    tool: "audit-code",
+    patcher: async () => {
+      patcherCalls += 1;
+      return validWorkerResults(); // the brokered O3 stage restores the tool-owned identity
+    },
+  });
+  assert.equal(
+    result.mode,
+    "structured_output",
+    "the honored mode is recorded — the failure is the stripped identity, not the mode",
+  );
+  assert.equal(
+    result.repair.status,
+    "patched",
+    "the identity strip degraded + was salvaged via the O3 seam, never accepted as-is",
+  );
+  assert.notEqual(
+    result.repair.status,
+    "clean",
+    "a conforming SHAPE must not short-circuit to clean when a tool-owned identity is stripped",
+  );
+  assert.equal(brokerCalls, 1, "the identity-strip restore was gated by the shared broker exactly once");
+  assert.equal(awaitCalls, 1, "the restored result flowed back through the broker's awaitNextCompletion");
+  assert.equal(patcherCalls, 1, "broker admitted the slot → the bounded O3 restore ran once (not in F3)");
+  assert.equal(
+    result.repair.repaired_payload[0].task_id,
+    "T1",
+    "the tool-owned identity is restored by the O3 brokered stage, not by F3",
+  );
+});
