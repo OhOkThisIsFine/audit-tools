@@ -18,6 +18,8 @@ import {
   classifyProvider,
   computeDispatchCapacity,
   estimateSlotTokens,
+  estimateTokensFromBytes,
+  ESTIMATED_PROMPT_OVERHEAD_TOKENS,
   type BrokeredDispatchSlot,
   type CapacityPool,
   type QuotaStateEntry,
@@ -1149,4 +1151,59 @@ describe("F4 fail-2 [CP-NODE-50]: capable host off the floor, unknown host stays
 // normalizeSlotTokens / concurrency helpers) are single-sourced in dispatch.ts
 // and the rolling scheduler consumes them directly. The former TST-aebbb698
 // shim-identity tests were removed with the shim.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// F4 fail-3 (CP-NODE-51) — token estimate is local estimateTokensFromBytes,
+// NEVER a provider token-counting API call.
+//
+// The per-slot/per-wave token estimate must be pure local arithmetic over the
+// shared estimateTokensFromBytes primitive (BYTES_PER_TOKEN=4) plus a fixed
+// prompt overhead — deterministic, offline, non-billable. It must NEVER drift to
+// a provider's network token-counting endpoint. This pins both halves: (a) the
+// estimate equals the local primitive exactly, and (b) a global fetch spy is
+// never touched while estimating a whole brokered wave.
+// ---------------------------------------------------------------------------
+
+describe("F4 fail-3 [CP-NODE-51]: token estimate is local estimateTokensFromBytes, never a provider API call", () => {
+  it("estimateSlotTokens equals estimateTokensFromBytes(bytes) + fixed prompt overhead (local arithmetic, no API)", () => {
+    for (const bytes of [0, 1, 3, 4, 4000, 8001, 1_000_000]) {
+      expect(estimateSlotTokens(slot("s", bytes))).toBe(
+        estimateTokensFromBytes(bytes) + ESTIMATED_PROMPT_OVERHEAD_TOKENS,
+      );
+    }
+  });
+
+  it("a full brokered wave estimate performs ZERO network I/O (fetch spy not called)", () => {
+    const fetchSpy = vi.fn(() => {
+      throw new Error(
+        "provider token-counting API attempted — fail-3 violated (must use local estimateTokensFromBytes)",
+      );
+    });
+    const prevFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = fetchSpy;
+    try {
+      const broker = createBrokeredRepairDispatch();
+      const slots = [slot("n1", 4000), slot("n2", 8000), slot("n3", 2000)];
+      // Host cap admits the first two slots in input order; the wave estimate is
+      // the SUM of the local per-slot estimates — never a remote token count.
+      const expectedWave =
+        estimateTokensFromBytes(4000) +
+        ESTIMATED_PROMPT_OVERHEAD_TOKENS +
+        estimateTokensFromBytes(8000) +
+        ESTIMATED_PROMPT_OVERHEAD_TOKENS;
+      const decision = broker.broker({
+        providerName: "claude-code",
+        sessionConfig: {},
+        hostModel: null,
+        slots,
+        hostConcurrencyLimit: { active_subagents: 2, source: "session_config" } as any,
+      });
+      expect(decision.estimatedWaveTokens).toBe(expectedWave);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      (globalThis as any).fetch = prevFetch;
+    }
+  });
+});
 // ---------------------------------------------------------------------------
