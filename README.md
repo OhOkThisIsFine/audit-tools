@@ -41,8 +41,6 @@ design concepts and standing decisions.
 
 ## audit-code
 
-Skill-first audit orchestration backend for the `/audit-code` product surface.
-
 ### Canonical Product Route
 
 The primary product is `/audit-code` in conversation.
@@ -130,8 +128,6 @@ audit-code prompt-path
 
 Import the reported file into your editor or conversation environment's custom prompt configuration, then invoke `/audit-code` in conversation.
 
-Typical examples include custom instructions, `.cursorrules`, prompt libraries, or comparable editor-specific prompt surfaces.
-
 ### Repo-Local Backend Fallback
 
 The CLI in this repository is backend infrastructure and a repo-local fallback surface.
@@ -162,47 +158,6 @@ Explicit root override still exists for callers running from outside the target 
 audit-code next-step --root /path/to/repo
 ```
 
-For one bounded debug advance that prints the execution envelope
-(`contract_version: "audit-code/v1alpha1"`) instead of a step contract:
-
-```bash
-audit-code advance-audit
-```
-
-For an operator-side artifact consistency check:
-
-```bash
-audit-code validate
-```
-
-That check now covers the artifact bundle plus `session-config.json` and explicit provider readiness.
-
-For native batch ingestion of multiple result files during a debug advance:
-
-```bash
-audit-code advance-audit --batch-results /path/to/audit-results-dir
-```
-
-For task-to-coverage inspection without reverse-engineering multiple artifacts:
-
-```bash
-audit-code explain-task <task_id>
-```
-
-To remove a leftover `.audit-tools/audit/` directory from an interrupted or
-crashed audit:
-
-```bash
-audit-code cleanup
-audit-code cleanup --dry-run   # preview without deleting
-audit-code cleanup --force     # delete even if state is unknown
-```
-
-Refuses to delete if the audit state is `active` or `blocked` (resumable).
-Pass `--force` when `audit_state.json` is missing (crashed run).
-
-The backend wrapper response schema is `schemas/audit-code-v1alpha1.schema.json`.
-
 ### Backend Provider Modes
 
 If `provider` is omitted, the backend defaults to the safest mode:
@@ -222,35 +177,7 @@ If you want best-effort cross-editor or provider routing, opt into:
 }
 ```
 
-Optional backend config:
-
-`.audit-tools/audit/session-config.json`
-
-### Practical Guidance
-
-- use `/audit-code` in conversation as the canonical product surface
-- install once with `npm install -g audit-tools`, then let `/audit-code` run `audit-code ensure --quiet` in each repository
-- use `audit-code install` when you want to repair or force-refresh repo-local host assets
-- use `audit-code prompt-path` to locate the packaged prompt asset
-- use `audit-code` from the repository root only when you need the repo-local backend fallback
-- use omitted provider or `local-subprocess` for the safest deterministic fallback behavior
-- use `provider: "auto"` only when you want best-effort routing across installed backends
-- treat explicit provider bridges as compatibility fallback, not as the intended owner of semantic review
-
-### Build And Test
-
-```bash
-npm install
-npm run test:single -- tests/audit/next-step.test.mjs
-npm run verify:release
-npm run release:patch
-npm run release:patch:publish
-```
-
-When developing from a fresh clone or git worktree, run repo-root `npm install`
-before package checks. Missing `node_modules` can cause misleading type errors.
-
-For GitHub Actions publication and npm Trusted Publishing setup, see `docs/audit-pkg/release.md`.
+Optional backend config: `.audit-tools/audit/session-config.json`
 
 ### Key Docs
 
@@ -265,11 +192,9 @@ For GitHub Actions publication and npm Trusted Publishing setup, see `docs/audit
 
 ## remediate-code
 
-Conversation-first remediation orchestrator for arbitrary repositories. It
-accepts the auditor's `audit-findings.json` (the deterministic machine contract)
-from [audit-code](https://github.com/OhOkThisIsFine/audit-tools), an
-`audit-report.md` or other feedback document (LLM-extracted), or conversational
-feedback — then advances through one backend-rendered step prompt at a time.
+Conversation-first remediation orchestrator. Accepts `audit-findings.json` (the deterministic machine
+contract from audit-code), an `audit-report.md` or other feedback document, or conversational feedback —
+then advances through one backend-rendered step prompt at a time.
 
 ### Primary Usage
 
@@ -291,35 +216,21 @@ You can also start with free-form feedback:
 
 The global loader runs `remediate-code ensure --quiet`, then
 `remediate-code next-step`, reads only the returned `prompt_path`, and follows
-that one prompt. Each prompt carries its own allowed commands and stop
-condition.
-
-If the starting point is not already a structured auditor report, the backend
-first creates an intake brief from the supplied document(s) or conversational
-feedback. It asks for clarification when the goals, non-goals, affected areas,
-or success criteria are ambiguous. The normal remediation workflow starts only
-after that brief is clear enough to convert into bounded findings.
+that one prompt. Each prompt carries its own allowed commands and stop condition.
 
 ### Runtime Artifacts
 
-Active runs use `.audit-tools/remediation/` in the target repository. The current
-state is `.audit-tools/remediation/state.json`, and the current step contract is
-written to:
+Active runs use `.audit-tools/remediation/` in the target repository:
 
+- `.audit-tools/remediation/state.json`
 - `.audit-tools/remediation/steps/current-step.json`
 - `.audit-tools/remediation/steps/current-prompt.md`
 
-After close, the durable outputs are written to `.audit-tools/`:
+After close, durable outputs land at `.audit-tools/`:
 
 - `remediation-report.md`
 - `remediation-outcomes.json`
 - `remediation-closing-result.json`
-
-### Development From Source
-
-The global `npm install -g audit-tools` path is for users. For repository
-development in a fresh clone or git worktree, run `npm install` at the repo root
-before build, check, or test workflows.
 
 ### CLI
 
@@ -329,12 +240,7 @@ before build, check, or test workflows.
 | `remediate-code prepare-implement-dispatch --run-id <id>` | Write bounded implementation prompts |
 | `remediate-code merge-implement-results --run-id <id>` | Validate implementation results and update item state |
 | `remediate-code validate-artifacts` | Validate runtime artifacts |
-| `remediate-code install` | Deprecated alias that repairs global assets and writes no repo-local host files |
 | `remediate-code ensure [--quiet]` | Repair/check global Claude, Codex, and OpenCode assets |
-
-`next-step` is the single canonical execution path. Hosts and IDEs should call
-it repeatedly, read the returned `prompt_path`, follow that one prompt, and then
-call `next-step` again only when the prompt says to continue.
 
 ### Auditor Compatibility
 
@@ -342,39 +248,23 @@ The auditor's canonical `audit-findings.json` is parsed **deterministically** �
 findings, work-block assignments, and synthesis themes are adopted verbatim, with
 no LLM involved. A Markdown `audit-report.md` (or any other free-form or partial
 document) is instead routed through intake synthesis and bounded LLM finding
-extraction, so it cannot silently produce a zero-finding plan. The deterministic
-contract is locked by `tests/fixtures/auditor-contract-audit-findings.json`,
-regenerated with `npm run fixtures:auditor-contract` from audit-code's
-findings renderer.
+extraction, so it cannot silently produce a zero-finding plan.
 
-### Intake
+---
 
-The remediator can start from any of these inputs:
+## Build and Test
 
-- a structured auditor report
-- one or more feedback or planning documents
-- conversational feedback typed directly after `/remediate-code`
-- a mix of documents and conversation
+```bash
+npm install
+npm run build && npm run check
+npm test
+npm run verify:release
+```
 
-Runtime intake artifacts live under `.audit-tools/remediation/intake/`:
+When developing from a fresh clone or git worktree, run `npm install` at the repo root
+before build, check, or test workflows. Missing `node_modules` can cause misleading type errors.
 
-- `source-manifest.json`
-- `conversation-start.md`
-- `intake-summary.json`
-- `intake-clarifications.json`
-- `remediation-brief.md`
-
-Structured auditor reports skip intake and go directly to planning. All other
-starting points go through synthesis first, and ambiguous requests pause for a
-single batched clarification before findings are extracted.
-
-### Closing
-
-The default closing action is `none`. Actions such as `commit`, `push`,
-`open-pr`, `publish`, `tag`, and `custom` record command exit codes and captured
-output in `remediation-closing-result.json`; reports only claim success after
-the command succeeds. Closing is advanced by a generated `next-step` finalization
-command, not the broad compatibility `run` loop.
+For GitHub Actions publication and npm Trusted Publishing setup, see `docs/audit-pkg/release.md`.
 
 ## License
 

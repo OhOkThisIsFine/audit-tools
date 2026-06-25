@@ -15,7 +15,7 @@ const PACKAGE_ROOT = resolve(
 
 export const TOOLING_INPUTS = [
   "audit-code.mjs",
-  "audit-code-wrapper-lib.mjs",
+  "wrapper/audit-code-wrapper-lib.mjs",
   "package.json",
   "dist",
   "schemas",

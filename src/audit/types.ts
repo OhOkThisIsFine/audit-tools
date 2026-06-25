@@ -172,7 +172,7 @@ export const AuditTaskSchema = z.object({
    * contribute to a review prompt. Seeded deterministically at planning
    * (byte-based) and refined/frozen by the estimate-review step. Authoritative
    * input to just-in-time dispatch packetization — see
-   * docs/audit-workflow-design.md.
+   * spec/audit-workflow-design.md.
    */
   token_estimate: z.number().optional(),
   /**

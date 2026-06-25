@@ -22,7 +22,7 @@
   "files": [
     "dist/**",
     "audit-code.mjs",
-    "audit-code-wrapper-*.mjs",
+    "wrapper/**",
     "remediate-code.mjs",
     "dispatch/**",
     "schemas/**",

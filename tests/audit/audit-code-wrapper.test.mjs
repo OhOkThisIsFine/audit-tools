@@ -17,11 +17,11 @@ import { AuditCodeResponseSchema } from "../../src/audit/contracts/wrapperRespon
 import {
   shouldBuildDistForPaths,
   assertWorkspaceInstalled,
-} from "../../audit-code-wrapper-lib.mjs";
+} from "../../wrapper/audit-code-wrapper-lib.mjs";
 import {
   shouldBuildDistForPaths as shouldBuildDistForPathsDirect,
   assertWorkspaceInstalled as assertWorkspaceInstalledDirect,
-} from "../../audit-code-wrapper-build.mjs";
+} from "../../wrapper/audit-code-wrapper-build.mjs";
 import {
   INSTALL_HOST_DEFINITIONS,
   INSTALL_HOST_ORDER,
@@ -31,14 +31,14 @@ import {
   _INSTALL_HOST_DEFINITIONS,
   _getInstallHostKeys,
   _getInstallProfile,
-} from "../../audit-code-wrapper-install-hosts.mjs";
+} from "../../wrapper/audit-code-wrapper-install-hosts.mjs";
 import {
   assertOpenCodeAuditPermissionConfig,
   buildMergedOpenCodeProjectConfig,
   OPENCODE_AUDIT_BASH_PERMISSION,
   OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION,
   renderOpenCodePermissionConfig,
-} from "../../audit-code-wrapper-opencode.mjs";
+} from "../../wrapper/audit-code-wrapper-opencode.mjs";
 const { isCanonicalResultFilename } = await import("../../src/audit/cli/args.ts");
 // Step contracts normalize host-facing paths to forward slashes (drift-plan
 // R3); compare step path fields against the normalized form so the assertions

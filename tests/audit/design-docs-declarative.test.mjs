@@ -43,7 +43,7 @@ const BANNED = [
 
 for (const docName of DESIGN_DOCS) {
   test(`design doc is declarative (no current-state/status language): ${docName}`, () => {
-    const text = readFileSync(join(repoRoot, "docs", docName), "utf8");
+    const text = readFileSync(join(repoRoot, "spec", docName), "utf8");
     const lines = text.split(/\r?\n/);
     const violations = [];
     lines.forEach((line, i) => {

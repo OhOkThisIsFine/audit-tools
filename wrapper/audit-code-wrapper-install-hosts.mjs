@@ -26,7 +26,7 @@ import {
   renderGeminiCommandToml as _renderGeminiCommandTomlImpl,
 } from './audit-code-wrapper-install-renderers.mjs';
 
-const repoRoot = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const promptAssetPath = join(repoRoot, 'skills', 'audit-code', 'audit-code.prompt.md');
 const skillAssetPath = join(repoRoot, 'skills', 'audit-code', 'SKILL.md');
 const INSTALL_MARKER_START = '<!-- audit-code:begin -->';

@@ -9,11 +9,11 @@
 // Wired into `verify:release` so a drifted, missing, or unparseable host asset
 // fails the gate before publish (same class of bug as the A6 requiredPackagedPaths
 // miss). GUI-only checks CI cannot reach (a real /audit-code dispatch inside
-// Antigravity / OpenCode) live in docs/host-validation.md.
+// Antigravity / OpenCode) live in spec/host-validation.md.
 import {
   INSTALL_HOST_ORDER,
   verifyHostsIsolated,
-} from '../../audit-code-wrapper-install-hosts.mjs';
+} from '../../wrapper/audit-code-wrapper-install-hosts.mjs';
 
 const verbose = process.env.AUDIT_CODE_VERBOSE === '1';
 
