@@ -4,11 +4,22 @@
 > `CLAUDE.md`; open work in [`docs/backlog.md`](backlog.md).
 
 **Live:** `audit-tools@0.30.7` on npm (`latest`). `main == audit-tools/main` (remote is `audit-tools`, not
-`origin`), clean tree, both bins → 0.30.7.
+`origin`), both bins → 0.30.7.
 
-**In flight:** nothing — clean, verified, fully pushed, released, global bins reinstalled at 0.30.7.
+**In flight:** `fix(audit): confirm_intent regression` — committed `20964a4`, not yet pushed or published.
 
-**Last landed (2026-06-25, shipped in 0.30.7): rolling-dispatch same-file merge-serialization fix (a)+(c).** `main` carries:
+**Last landed (2026-06-25, not yet published): confirm_intent regression fix (two root causes).**
+- `promoteFinalAuditReport` deletes `artifactsDir` after promoting. Second `next-step` found empty dir →
+  fold replayed → `confirm_intent`. Fix: write `{...state, status:"complete"}` sentinel back to
+  `audit_state.json` (recreated by writeJsonFile). Force `status:"complete"` — the `state` arg to
+  `buildTerminalStep` may carry `status:"active"` (captured pre-executor).
+- `decideAuditFrictionCloseout` called AFTER promotion → friction dir already deleted → returned
+  `status:"ready"`. Fix: call friction triage BEFORE promotion in both terminal paths.
+- Tests: `nextStepUntilPresentReport` needed `mkdir(dirname(friction_record))` before writing observations.
+- Net: fixed 4 tests (3 completion + present_report status). 3 pre-existing failures remain
+  (2 narrative, 1 FINDING-018 write_paths).
+
+**Previously shipped (0.30.7): rolling-dispatch same-file merge-serialization fix (a)+(c).** `main` carries:
 - **(a)** file-ownership-disjoint wave scheduling — `src/remediate/dispatch/ownershipScheduler.ts` (new) +
   `ownershipRegistry.ts`/`amendmentClaim.ts` + `src/remediate/steps/nextStep.ts`: replaces the numeric
   `block_id.localeCompare` in-level admission with one-writer-per-canonical-file sub-wave admission, grant-time
@@ -30,8 +41,8 @@ ledger, friction triage, repair seam, with tests) and shipped in the 0.30.x line
 empty; the only unshipped remediation-program item is the **mechanical multi-goal decompose + boundary-enforce**
 forward track (the host still hand-scopes large inputs to one phase).
 
-**Next — nothing pending.** Pick up the next forward track from [`backlog.md`](backlog.md) (the mechanical
-multi-goal decompose + boundary-enforce remediator track is the highest-leverage open item).
+**Next:** push + publish patch bump for the regression fix. Use `/ship`. Then pick up the next forward
+track from [`backlog.md`](backlog.md) (mechanical multi-goal decompose + boundary-enforce remediator).
 
 **Release:** `env -u CLAUDECODE npm run release:patch:publish` (bumps + tags `vX.Y.Z` + GitHub Release → OIDC
 CI publishes → waits for npm). Recover a bad attempt: `gh release delete vX.Y.Z --cleanup-tag`, forward-bump,
