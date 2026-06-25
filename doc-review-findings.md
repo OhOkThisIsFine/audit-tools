@@ -1,6 +1,6 @@
-# Doc-review findings — 2026-06-24 (run 5)
+# Doc-review findings — 2026-06-25 (run 6)
 
-Run against main HEAD `6178760` → pushed to `28fa490` after applying 2 commits.
+Run against main HEAD `19fb3c7` → pushed to `3bd1aa3` after applying 2 commits.
 
 ---
 
@@ -10,15 +10,22 @@ Two commits pushed to main (discrete and revertible):
 
 | Commit | Summary |
 |---|---|
-| `628454c` | `docs/HANDOFF.md` — version `0.30.0` → `0.30.3` (three release commits since last HANDOFF update) |
-| `28fa490` | `docs/NEW-MACHINE-SETUP.md` L119 — expected version `0.30.0` → `0.30.3` |
+| `b094059` | `docs/HANDOFF.md` — version `0.30.3` → `0.30.5` (two releases since last HANDOFF update: v0.30.4 + v0.30.5) |
+| `3bd1aa3` | `docs/NEW-MACHINE-SETUP.md` L119 — expected version `0.30.3` → `0.30.5` |
+
+**New files added to ledger this run:** `docs/backlog-remediation-plan-of-record.md`, `spec/audit/audit-goals.md`, `spec/audit/dependency-map.md` — all clean (factual claims verified against code).
+
+**Changed docs reviewed, no new issues found:**
+- `CLAUDE.md` — conceptual rewording ("Right tool, not deterministic dogma" replacing "Deterministic by default"); no new stale factual claims.
+- `docs/backlog.md` — large new content (open bugs + forward tracks); all design/aspirational, no stale facts.
+- `docs/contract-authoring-determinism-design.md` — updated to match CLAUDE.md "Right tool" language; consistent.
+- `docs/glossary-ids.md` — new INV-CK/INV-O1/INV-O2/INV-O3 entries; all four file paths verified to exist.
+- `spec/audit/dependency-map.md` — `git_history.json` added as downstream; verified against `dependencyMap.ts:71`.
 
 **Carried from previous runs (Ethan-approved, not yet applied — instruction files):**
 CLAUDE-4, CLAUDE-8, CLAUDE-9, CLAUDE-10, AGENTS-1, AGENTS-2 remain open pending Ethan's approval.
 
 **Carried design decisions:** D-1, D-2, D-4 remain open.
-
-**New files added to ledger this run:** `docs/quota-dispatch-design.md`, `docs/quota-claude-credential-resolution.md` — both clean (factual claims verified against code).
 
 ---
 
