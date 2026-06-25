@@ -28,6 +28,7 @@ import {
   type WorktreeNodeWorker,
 } from "./dispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
+import { ownershipSubWaves } from "../dispatch/ownershipScheduler.js";
 import { prepareHostRollingDispatch, nodeClaimRegistry, nodeSettledPoolsPath } from "./rollingSession.js";
 import type { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
 import { writeCurrentStep } from "./stepWriter.js";
@@ -387,8 +388,14 @@ function blockedByUnsatisfiedDependency(
  * prerequisite is skipped/blocked, not merely pending) is NOT placed in any
  * level — it is dead-ended by `handlePlanning`.
  *
- * Pure and deterministic: levels and the nodes within a level are ordered by
- * block_id so the interposed-rebuild boundaries are stable across runs.
+ * Pure and deterministic: level MEMBERSHIP is fixed by the dependency predicate
+ * (INV-RS-01) and is independent of node order; the interposed-rebuild boundaries
+ * are therefore stable across runs without an in-level numeric sort. In-level
+ * admission ORDER is no longer decided here — it is owned by the file-ownership
+ * scheduler (`ownershipSubWaves`, INV-SOO-04/08), which applies its own explicit
+ * block_id tie-break AFTER the disjointness filter. The numeric
+ * `block_id.localeCompare` admission ordering that used to live here was removed
+ * atomically with that change (INV-SOO-04).
  */
 export function rollingDependencyLevels(
   state: RemediationState,
@@ -398,9 +405,9 @@ export function rollingDependencyLevels(
   if (!plan || !items) return [];
 
   const blockById = new Map(plan.blocks.map((b) => [b.block_id, b]));
-  const pendingBlocks = plan.blocks
-    .filter((b) => b.items.some((id) => items[id]?.status === "pending"))
-    .sort((a, b) => a.block_id.localeCompare(b.block_id));
+  const pendingBlocks = plan.blocks.filter((b) =>
+    b.items.some((id) => items[id]?.status === "pending"),
+  );
 
   // A dependency edge is "completable" only when the dep node is itself pending
   // (will be satisfied by some level) or already verified-complete. A skipped /
@@ -474,6 +481,15 @@ export interface DriveRollingDispatchOptions {
   estimateTokens?: (block: RemediationBlock) => number;
   /** Quota state dir for `recordWaveOutcome` (defaults to leaving it unset). */
   quotaStateDir?: string;
+  /**
+   * A block's declared write-scope, for file-ownership-disjoint admission
+   * (INV-SOO). Defaults to `block.touched_files` (the block's authoritative
+   * declared write set). An empty/unresolved scope is gated conservatively
+   * (admitted only solo) by the ownership scheduler.
+   */
+  scopeForBlock?: (block: RemediationBlock) => string[];
+  /** Repo root for canonical path identity (INV-SOO-09). Defaults to cwd. */
+  root?: string;
 }
 
 export interface DriveRollingDispatchResult {
@@ -533,26 +549,42 @@ export async function driveRollingDispatch(
     }
 
     const blockByPacketId = new Map(level.map((b) => [b.block_id, b]));
-    const packets: RollingDispatchPacket<{ block_id: string }>[] = level.map(
-      (block) => ({
-        id: block.block_id,
-        payload: { block_id: block.block_id },
-        estimatedTokens: estimateTokens(block),
-        complexity: 0.5,
-      }),
+    const scopeForBlock =
+      options.scopeForBlock ?? ((b: RemediationBlock) => b.touched_files ?? []);
+
+    // File-ownership-disjoint admission (INV-SOO): split the level into ordered
+    // sub-waves, each a maximal file-disjoint subset (deterministic block_id
+    // tie-break AFTER the disjointness filter, INV-SOO-08). Same-file nodes land
+    // in successive sub-waves (serialize, INV-SOO-01/02) and a freed file becomes
+    // schedulable for the next sub-wave; different-file nodes share a sub-wave and
+    // parallelize up to the quota cap the dispatcher enforces (INV-SOO-03/05).
+    const subWaves = ownershipSubWaves(
+      level.map((b) => ({ block_id: b.block_id, write_paths: scopeForBlock(b) })),
+      options.root,
     );
 
-    const dispatcher = createRollingDispatcher<{ block_id: string }>({
-      confirmedPools: options.confirmedPools,
-      sessionConfig: options.sessionConfig,
-      dispatchPacket: async (packet, slot) => {
-        const block = blockByPacketId.get(packet.payload.block_id)!;
-        return options.dispatchNode(block, slot);
-      },
-    });
-    dispatcher.enqueue(packets);
-    const results = await dispatcher.run();
-    out.levels.push({ blockIds: level.map((b) => b.block_id), results });
+    const levelResults: RollingDispatchResult<{ block_id: string }>[] = [];
+    for (const wave of subWaves) {
+      const packets: RollingDispatchPacket<{ block_id: string }>[] = wave.map(
+        (node) => ({
+          id: node.block_id,
+          payload: { block_id: node.block_id },
+          estimatedTokens: estimateTokens(blockByPacketId.get(node.block_id)!),
+          complexity: 0.5,
+        }),
+      );
+      const dispatcher = createRollingDispatcher<{ block_id: string }>({
+        confirmedPools: options.confirmedPools,
+        sessionConfig: options.sessionConfig,
+        dispatchPacket: async (packet, slot) => {
+          const block = blockByPacketId.get(packet.payload.block_id)!;
+          return options.dispatchNode(block, slot);
+        },
+      });
+      dispatcher.enqueue(packets);
+      levelResults.push(...(await dispatcher.run()));
+    }
+    out.levels.push({ blockIds: level.map((b) => b.block_id), results: levelResults });
   }
 
   return out;
@@ -841,12 +873,21 @@ export async function driveRollingImplementDispatch(
     return result;
   };
 
+  // Declared write-scope per block, from the dispatch plan — the same authority
+  // the merge-time write-scope gate reads — for file-ownership-disjoint admission
+  // (INV-SOO). A block with no plan scope falls back to its touched_files.
+  const writePathsByBlock = new Map(
+    allBlockScopes.map((s) => [s.block_id, s.write_paths]),
+  );
   await driveRollingDispatch(levels, {
     confirmedPools,
     sessionConfig: options.sessionConfig ?? {},
     dispatchNode: dispatchNodeWithWorktree,
     rebuildSharedBetweenLevels: options.rebuildSharedBetweenLevels,
     quotaStateDir: artifactsDir,
+    root,
+    scopeForBlock: (block) =>
+      writePathsByBlock.get(block.block_id) ?? block.touched_files ?? [],
   });
 
   // Deterministic merge: same path the wave flow uses (tolerant remap, write-scope
