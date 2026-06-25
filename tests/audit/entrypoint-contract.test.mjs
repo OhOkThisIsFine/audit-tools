@@ -17,7 +17,7 @@ test('package bin points audit-code at the wrapper entrypoint', async () => {
 });
 
 test('product docs consistently present /audit-code as the canonical surface', async () => {
-  const readme = await readText('README.audit.md');
+  const readme = await readText('README.md');
   const productDirection = await readText('docs/audit-pkg/product.md');
   const skill = await readText('skills/audit-code/SKILL.md');
   const prompt = await readText('skills/audit-code/audit-code.prompt.md');
