@@ -181,6 +181,7 @@ export function buildTaskSections(
       ...(isSelectiveDeepening
         ? [
             "",
+            `Deepening task: your AuditResult.task_id MUST be exactly '${task.task_id}' — copy it verbatim, do NOT use the packet_id.`,
             `Deepening task: set AuditResult.lens to '${task.lens}' and every finding.lens in your result to '${task.lens}'.`,
           ]
         : []),
