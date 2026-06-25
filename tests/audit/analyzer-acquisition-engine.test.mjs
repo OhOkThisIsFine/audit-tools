@@ -188,6 +188,24 @@ test("runExternalAnalyzer: malformed tool output degrades to parse_error, never 
   assert.equal(out.results.results.length, 0);
 });
 
+test("F5 fail-3: malformed output degrades graph_edges too — no partial/corrupt edges merged", () => {
+  // CP-NODE-68: a parse failure must yield empty results AND no graph_edges, so
+  // nothing partial/corrupt can reach the shared merge seam. A candidate whose
+  // parse() emits edges on success is fed malformed stdout: the parse throws
+  // before any edge is normalized, so graph_edges must be absent/empty.
+  const out = runExternalAnalyzer(
+    candidate({ defaultRun: true, parse: (stdout) => JSON.parse(stdout) }),
+    "/root",
+    { run: fakeRunner({ toolStdout: "not json {{{" }) },
+  );
+  assert.equal(out.status.status, "parse_error");
+  assert.equal(out.results.results.length, 0);
+  assert.ok(
+    !out.results.graph_edges || out.results.graph_edges.length === 0,
+    "no graph_edges may survive a parse failure (no partial/corrupt edges merged)",
+  );
+});
+
 test("runExternalAnalyzer: owned tool is rejected even if it slips past registration", () => {
   const out = runExternalAnalyzer(candidate({ id: "secret-scan", defaultRun: true }), "/root", {
     run: fakeRunner({ toolStdout: findingPayload }),
