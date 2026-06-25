@@ -193,6 +193,56 @@ test("runAcquisitionEngine: one status per candidate; owned rejected; gating app
   assert.equal(results.length, 1, "only the admitted tool with findings contributes results");
 });
 
+test("F5 inv-4: report-skipped-never-silently — exactly one status per in-scope candidate across absent/consent-denied/parse-error paths", () => {
+  // Three in-scope (non-owned) candidates exercising distinct degrade paths:
+  //  - absent runner    → not_resolved (capability probe fails)
+  //  - consent denied   → skipped (non-default, no consent token)
+  //  - parse error      → parse_error (malformed tool stdout)
+  // Plus one owned candidate that must NOT contribute a status (rejected at
+  // registration — i.e. dropped from the in-scope set, never silently from it).
+  //
+  // Route by RUNNER: "absent" uses pipx (probe fails); the others use npx (probe
+  // ok). buildArgv tags the real spawn with --id so the broken path is selectable.
+  const tagged = (id, defaultRun, runner) =>
+    candidate({
+      id,
+      defaultRun,
+      runner,
+      buildArgv: (prefix, root) => [...prefix, '--id', id, root],
+    });
+  const scoped = [
+    tagged('absent', true, 'pipx'),
+    tagged('denied', false, 'npx'),
+    tagged('broken', true, 'npx'),
+  ];
+  const candidates = [...scoped, candidate({ id: 'git-history' })];
+
+  const run = (argv) => {
+    if (argv.includes('--version')) {
+      // pipx (the "absent" runner) is unavailable on this machine; npx is fine.
+      return argv[0] === 'pipx'
+        ? { status: 1, stdout: '', stderr: 'not found', argv, duration_ms: 1, error: new Error('ENOENT') }
+        : { status: 0, stdout: '1.0.0', stderr: '', argv, duration_ms: 1 };
+    }
+    const idIdx = argv.indexOf('--id');
+    const id = idIdx >= 0 ? argv[idIdx + 1] : '';
+    if (id === 'broken') return { status: 0, stdout: 'not json {{{', stderr: '', argv, duration_ms: 1 };
+    return { status: 0, stdout: findingPayload, stderr: '', argv, duration_ms: 1 };
+  };
+
+  const { statuses } = runAcquisitionEngine(candidates, '/root', { run });
+
+  // inv-4 core: status count == in-scope candidate count (owned tool dropped at
+  // registration, NOT silently from the in-scope set).
+  assert.equal(statuses.length, scoped.length, 'exactly one status per in-scope candidate');
+  assert.deepEqual(statuses.map((s) => s.tool).sort(), ['absent', 'broken', 'denied']);
+  assert.equal(statuses.find((s) => s.tool === 'absent').status, 'not_resolved');
+  assert.equal(statuses.find((s) => s.tool === 'denied').status, 'skipped');
+  assert.equal(statuses.find((s) => s.tool === 'broken').status, 'parse_error');
+  // None dropped without a status row.
+  assert.ok(statuses.every((s) => typeof s.status === 'string' && s.status.length > 0));
+});
+
 test("detectNodeEcosystem: deterministic marker-file detection", async () => {
   const root = await mkdtemp(join(tmpdir(), "f5-detect-"));
   try {
