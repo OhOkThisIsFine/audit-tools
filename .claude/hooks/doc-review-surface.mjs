@@ -27,16 +27,33 @@ function git(args, timeout) {
 }
 
 try {
-  // Refresh the remote ref, time-boxed so an unreachable remote can't stall the
-  // session. If it fails we fall back to whatever ref is already local.
+  // Discover the configured remote(s) — never hardcode a remote name (this repo's
+  // is `audit-tools`, not `origin`; hardcoding `origin` silently killed this hook).
+  let remotes = [];
   try {
-    git(['fetch', '--quiet', '--depth=1', 'origin', BRANCH], 5000);
+    remotes = git(['remote'], 3000).split(/\r?\n/).map((r) => r.trim()).filter(Boolean);
   } catch {
-    /* offline / no such branch — use local ref if any */
+    /* no git / no remotes — fall back to local refs below */
   }
 
+  // Refresh the remote ref, time-boxed so an unreachable remote can't stall the
+  // session. If it fails we fall back to whatever ref is already local.
+  for (const remote of remotes) {
+    try {
+      git(['fetch', '--quiet', '--depth=1', remote, BRANCH], 5000);
+      break;
+    } catch {
+      /* offline / no such branch on this remote — try the next */
+    }
+  }
+
+  const refs = [
+    ...remotes.map((r) => `refs/remotes/${r}/${BRANCH}`),
+    BRANCH,
+    'FETCH_HEAD',
+  ];
   let body = '';
-  for (const ref of [`refs/remotes/origin/${BRANCH}`, BRANCH, 'FETCH_HEAD']) {
+  for (const ref of refs) {
     try {
       body = git(['show', `${ref}:${FILE}`], 5000);
       if (body) break;

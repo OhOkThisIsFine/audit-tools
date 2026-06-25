@@ -6,7 +6,7 @@
  * modules compile against it: F3 (schema-enforced-generation) calls the broker
  * at emit, and O3 (emit-validate-repair) issues its stage-2 LLM patch and
  * stage-3 re-dispatch ONLY through the broker (see the broker-handle edge in
- * docs/backlog-remediation-plan-of-record.md §"broker handle (O3<->F4)"). No
+ * docs/backlog-remediation-design.md §"broker handle (O3<->F4)"). No
  * seam consumer ever calls `scheduleWave` / a provider directly — every dispatch
  * decision flows through this single gated chokepoint so quota reads, the
  * deterministic-local token estimate, the over-budget refusal, and the

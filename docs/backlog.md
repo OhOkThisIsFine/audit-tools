@@ -207,6 +207,18 @@ close-out in both orchestrators. Durable design captured in memory + CLAUDE.md._
   re-derive** — so a wrong call can only cost churn, never silently retain stale state. Efficiency-only; defer until
   re-emit churn on these fields is measured as a real cost.
 
+## Doc-set hygiene (enforced)
+
+- **Canonical doc set is mechanically reconciled.** `scripts/check-doc-manifest.mjs`
+  (in `verify:release`) fails the build if any tracked `docs/**/*.md` is absent from the
+  routing table in [`doc-review-guidelines.md`](doc-review-guidelines.md), or a row points
+  at a deleted file. A stray/dated doc can no longer accumulate silently — it must be
+  registered (type + reason) or deleted. The doc-review routine adds the soft layer:
+  existence-review every run + version/date/status strings are escalate-not-auto-bump
+  (a doc whose only diffs are version bumps is a status doc → propose generate-or-retire).
+  Durable design captures go to a canonical design doc or backlog/HANDOFF, **never** a
+  dated `*-plan-of-record.md` in the tracked tree (the gate now rejects the latter).
+
 ## Durable traps (environment / tooling reference)
 
 Standing gotchas worth keeping for any agent (strong or weak):
