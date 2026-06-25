@@ -876,3 +876,56 @@ test("inv-7: git_history.json upstream set is exactly F6's declared {repo_manife
     ["file_disposition.json", "repo_manifest.json"],
   );
 });
+
+// F1 inv-4 [CP-NODE-5]: old-shape manifest => all-stale, no throw (CE-007).
+// Covers the explicit-older-version variant of the migration fail-safe: a
+// manifest tagged with metadata_schema_version BELOW the current one (not merely
+// absent) is still pre-F1, so its still-matching whole-artifact hashes must
+// NEVER false-skip a present element, and computeStaleArtifacts must never throw.
+test("F1 inv-4 [CP-NODE-5]: old-shape manifest => all-stale, no throw", () => {
+  const initialBundle = makeBaseBundle();
+  const metadata = computeArtifactMetadata(initialBundle);
+  assert.ok(METADATA_SCHEMA_VERSION >= 1);
+
+  // Pre-F1 manifest: an EXPLICIT older schema version (current - 1, floored at 0)
+  // with whole-artifact hashes that still MATCH the live artifacts. A naive
+  // hash-only reader would skip every element off these matching hashes.
+  const olderShapeManifest = {
+    metadata_schema_version: Math.max(0, METADATA_SCHEMA_VERSION - 1),
+    artifacts: Object.fromEntries(
+      Object.entries(metadata.artifacts).map(([name, entry]) => [
+        name,
+        {
+          revision: entry.revision,
+          content_hash: entry.content_hash,
+          dependency_revisions: entry.dependency_revisions,
+        },
+      ]),
+    ),
+  };
+  // Not recognized as F1-current → fail-safe path engages.
+  assert.equal(isMetadataManifestCurrent(olderShapeManifest), false);
+
+  const bundle = { ...initialBundle, artifact_metadata: olderShapeManifest };
+  let stale;
+  assert.doesNotThrow(() => {
+    stale = computeStaleArtifacts(bundle);
+  }, "older-shape manifest must degrade to all-stale, never throw (CE-007)");
+
+  // Never a false-skip off matching whole-artifact hashes: EVERY present DAG
+  // artifact is stale (artifact_metadata.json itself is excluded by the gate).
+  for (const name of [
+    "repo_manifest.json",
+    "file_disposition.json",
+    "unit_manifest.json",
+    "audit-report.md",
+  ]) {
+    assert.ok(stale.has(name), `${name} must be all-stale under inv-4 fail-safe`);
+  }
+  assert.ok(stale.size > 0, "fail-safe must yield a non-empty stale set");
+  assert.equal(
+    stale.has("artifact_metadata.json"),
+    false,
+    "the manifest artifact itself is never marked stale by the gate",
+  );
+});
