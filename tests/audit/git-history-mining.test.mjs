@@ -6,7 +6,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-const { mineGitHistory } = await import("../../src/shared/git.ts");
+const { mineGitHistory, isGitRepo } = await import("../../src/shared/git.ts");
 const {
   mineGitHistoryArtifact,
   gitHistoryGraphEdges,
@@ -782,5 +782,90 @@ test("F6 fail-10 [CP-NODE-95]: git_history.json upstream-dep set matches F1 regi
       section.includes("`git_history.json`"),
       `spec dep-map lists git_history.json as downstream of ${upstream} (co-registered, not half-registered)`,
     );
+  }
+});
+
+// F6 fail-1 [CP-NODE-86]: git absent / non-git directory => isGitRepo() false =>
+// the miner short-circuits to the empty aggregate BEFORE issuing any `git log`,
+// so the result is mined:false (empty co_change/churn/authorship), contributes
+// ZERO graph edges and ZERO risk signals, and never throws. This is the
+// gate-at-isGitRepo() sibling of fail-3's status!==0 => [] degrade: when there is
+// no git working tree at all (binary absent, or a plain directory), the first
+// guard in mineGitHistory (`if (!isGitRepo(root)) return empty`) already yields
+// the empty aggregate without touching the log. A non-git temp dir is the
+// canonical stand-in: isGitRepo() is false there exactly as it is when the git
+// binary cannot be found.
+test("F6 fail-1 [CP-NODE-86]: git absent/isGitRepo false => mined:false empty, no throw, zero graph/risk", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "git-absent-fail1-"));
+  try {
+    // Precondition: this directory is genuinely not a git working tree, so the
+    // isGitRepo() gate is the code path under test (same false verdict the
+    // miner would see if the git binary were absent entirely).
+    assert.equal(isGitRepo(dir), false, "temp dir is not a git working tree");
+
+    // 1) Both mining surfaces degrade to the empty aggregate and never throw.
+    let history;
+    assert.doesNotThrow(() => {
+      history = mineGitHistory(dir);
+    }, "non-git/git-absent must not throw (raw miner)");
+    assert.deepEqual(
+      history,
+      { co_change: [], churn: [], authorship: [] },
+      "isGitRepo() false => empty aggregate (mined:false)",
+    );
+
+    let scoped;
+    assert.doesNotThrow(() => {
+      scoped = mineGitHistoryArtifact(dir, manifest(["a.ts", "b.ts"]));
+    }, "non-git/git-absent must not throw (scoped artifact)");
+    assert.deepEqual(
+      scoped,
+      { co_change: [], churn: [], authorship: [] },
+      "scoped artifact also degrades to the empty aggregate",
+    );
+
+    // 2) The empty aggregate projects to zero graph edges and zero risk signals.
+    const units = {
+      units: [{ unit_id: "u1", files: ["a.ts"] }, { unit_id: "u2", files: ["b.ts"] }],
+    };
+    const edges = gitHistoryGraphEdges(history);
+    assert.deepEqual(edges, [], "no history => zero graph edges");
+    const riskSignals = gitHistoryRiskSignals(history, units);
+    assert.equal(riskSignals.size, 0, "no history => zero risk signals");
+
+    // 3) Merging that empty contribution leaves a baseline bundle/register
+    //    unchanged: zero graph/risk contribution end-to-end.
+    const baselineBundle = {
+      graphs: {
+        imports: [{ from: "x.ts", to: "y.ts", kind: "import" }],
+        calls: [],
+        references: [],
+        routes: [],
+      },
+    };
+    const mergedGraph = mergeAnalyzerGraphContribution(baselineBundle, edges);
+    assert.deepEqual(
+      mergedGraph.graphs,
+      baselineBundle.graphs,
+      "empty contribution adds zero graph edges",
+    );
+
+    const baselineRegister = {
+      items: [
+        { unit_id: "u1", risk_score: 2, signals: ["security_relevant"], notes: [] },
+        { unit_id: "u2", risk_score: 1, signals: [], notes: [] },
+      ],
+    };
+    const mergedRisk = mergeAnalyzerRiskSignals(baselineRegister, riskSignals);
+    assert.deepEqual(
+      mergedRisk.items.map((i) => i.signals),
+      [["security_relevant"], []],
+      "empty contribution adds zero risk signals",
+    );
+
+    // 4) Deterministic + non-throwing on repeat.
+    assert.deepEqual(mineGitHistory(dir), history);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });
