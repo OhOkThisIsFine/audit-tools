@@ -507,6 +507,19 @@
       },
       "idempotency_key": {
         "type": "string"
+      },
+      "emit_source": {
+        "type": "string",
+        "enum": [
+          "base",
+          "deepening",
+          "steward",
+          "redispatch"
+        ]
+      },
+      "attempt": {
+        "type": "integer",
+        "minimum": 1
       }
     },
     "required": [

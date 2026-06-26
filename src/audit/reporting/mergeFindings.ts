@@ -342,6 +342,10 @@ export function mergeFindings(
     upsertFinding(merged, finding);
   }
 
+  // Callers pass the supersession-resolved ledger (`selectCurrentResults`) so a
+  // re-dispatched result's fresh findings have already replaced the stale base
+  // record they superseded (O3). mergeFindings stays a pure merge over whatever
+  // result set it is given.
   for (const result of results) {
     for (const finding of result.findings) {
       upsertFinding(merged, finding);

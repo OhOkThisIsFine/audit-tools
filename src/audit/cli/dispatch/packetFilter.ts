@@ -15,6 +15,8 @@ import {
 } from "../../orchestrator/taskAffinityGraph.js";
 import { LARGE_FILE_PACKET_TARGET_LINES } from "./types.js";
 import { resolveDispatchTier, TIER_ORDER } from "./tierRouting.js";
+import { selectCurrentResults } from "../../orchestrator/ledger.js";
+import { computeStaleResultTaskIds } from "../../orchestrator/resultBaseline.js";
 
 // Packet filtering and fitting: budget cap, pending-task derivation,
 // JIT task-graph resolution, per-tier re-fit pass, oversized warnings, and
@@ -55,11 +57,26 @@ export function buildDispatchComplexity(
 }
 
 export function buildPendingAuditTasks(bundle: ArtifactBundle) {
+  // Resolve to the CURRENT result per lineage and re-include any task whose
+  // current result has drifted from its baseline (O3) — single-sourced with the
+  // obligation model in state.ts so dispatch and the gate never disagree on which
+  // tasks still need work. A drifted task re-dispatches even though its stale
+  // result left it status `complete`.
+  const currentResults = selectCurrentResults(bundle.audit_results ?? []);
+  const staleResultTaskIds = computeStaleResultTaskIds(
+    currentResults,
+    bundle.audit_tasks ?? [],
+    bundle.artifact_metadata?.result_baselines,
+  );
   const completedTaskIds = new Set(
-    (bundle.audit_results ?? []).map((result) => result.task_id),
+    currentResults
+      .map((result) => result.task_id)
+      .filter((taskId) => !staleResultTaskIds.has(taskId)),
   );
   const pendingTasks = (bundle.audit_tasks ?? []).filter(
-    (task) => task.status !== "complete" && !completedTaskIds.has(task.task_id),
+    (task) =>
+      staleResultTaskIds.has(task.task_id) ||
+      (task.status !== "complete" && !completedTaskIds.has(task.task_id)),
   );
   const lineIndex = Object.fromEntries(
     pendingTasks.flatMap((task) => Object.entries(task.file_line_counts ?? {})),
