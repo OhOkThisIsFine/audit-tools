@@ -1,4 +1,4 @@
-import { readJsonFile, writeJsonFile } from "audit-tools/shared";
+import { captureStepBoundaryFriction, normalizeRepoPath, readJsonFile, writeJsonFile } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import type { WorkerResult } from "../types/workerResult.js";
@@ -89,6 +89,33 @@ export async function cmdWorkerRun(
             formatAuditResultIssues(warnings) +
             "\n",
         );
+        // Route the deliberately-downgraded total_lines!=actual coverage
+        // mismatch through the single friction chokepoint at this ingest locus
+        // (the validator stays pure and only RETURNS the 'warning'). Best-effort:
+        // captureStepBoundaryFriction swallows every failure, so it can never
+        // break the worker-run ingest.
+        if (task.run_id && task.artifacts_dir) {
+          for (const issue of warnings) {
+            if (!issue.field.startsWith("file_coverage[") ||
+                !issue.field.endsWith("].total_lines")) {
+              continue;
+            }
+            const coveragePath = normalizeRepoPath(issue.path ?? issue.field);
+            await captureStepBoundaryFriction(
+              task.artifacts_dir,
+              task.run_id,
+              {
+                eventType: "coverage_total_lines_mismatch",
+                discriminator: `${issue.result_index}:${coveragePath}`,
+                category: "trap",
+                severity: "low",
+                area: "audit result ingest",
+                note: issue.message,
+              },
+              "audit-code",
+            );
+          }
+        }
       }
       if (errors.length > 0) {
         throw new Error(formatAuditResultValidationError(errors));
