@@ -64,11 +64,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-remediate-pipeline-inv");
 const ARTIFACTS_DIR = join(TEST_DIR, ".audit-tools", "remediation");
 const REPO_DIR = TEST_DIR;
+// The N-B3 citation gate enumerates the working tree via `git ls-files`, so the
+// repo root must be a real git tree (the transient TEST_DIR has no tracked files
+// → git ls-files returns empty → the gate fails closed). Point at the audit-tools
+// repo root; the fixture DAG cites a real tracked path (src/remediate/intake.ts).
+const GIT_REPO_ROOT = join(__dirname, "..", "..");
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 
 const STEP_OPTIONS = {
-  root: TEST_DIR,
+  root: GIT_REPO_ROOT,
   artifactsDir: ARTIFACTS_DIR,
   runId: "CONTRACT-INV-TEST",
 };
@@ -249,6 +254,9 @@ function traceableDag(overrides: Record<string, unknown> = {}) {
         addresses_counterexamples: [],
         depends_on: [],
         verification_obligation_ids: [],
+        // A real tracked path so the promotion-backstop citation gate (N-B3)
+        // grounds the promoted finding against the working tree.
+        files_likely_touched: ["src/remediate/intake.ts"],
         targeted_commands: [],
         status: "pending",
         ...overrides,

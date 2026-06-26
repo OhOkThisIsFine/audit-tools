@@ -42,6 +42,10 @@ import { captureFrictionEvent, type FrictionEvent } from "./captureFrictionEvent
  *  - `no_change_merge`    — a resolved_no_change node merged with no diff.
  *  - `intent_gate_fallback` — intent_checkpoint gate lock-across-judge fallback.
  *  - `quota_escalation`   — a bounded quota re-limit escalation surfaced as friction.
+ *  - `coverage_total_lines_mismatch` — an AuditResult whose
+ *                           `file_coverage[].total_lines` disagrees with the
+ *                           file's actual line count (discriminator: the result
+ *                           index + the mismatching path).
  */
 export type StepBoundaryEventType =
   | "phase_reemit"
@@ -51,6 +55,7 @@ export type StepBoundaryEventType =
   | "no_change_merge"
   | "intent_gate_fallback"
   | "quota_escalation"
+  | "coverage_total_lines_mismatch"
   | (string & {});
 
 /**

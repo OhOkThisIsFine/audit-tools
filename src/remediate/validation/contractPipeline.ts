@@ -330,9 +330,12 @@ export {
   validateEvidenceThreaded,
   validateDigestCoverage,
   validateReconciliationDerivation,
+  validateContractCitationGrounding,
+  enumerateRepoTreePaths,
   deriveNodeModelTier,
   deriveNodeModelTierFromNode,
   type NodeComplexitySignals,
+  type ContractCitationGroundingResult,
 } from "./contractPipelineGates.js";
 
 // ── ConceptualDesignCritique ──────────────────────────────────────────────────

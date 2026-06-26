@@ -227,33 +227,44 @@ describe("B3 semantic staleness — projection + envelope", () => {
     );
   });
 
-  it("the written envelope carries a semantic_hash distinct from a cosmetic-only twin", async () => {
+  it("envelopeSemanticHash recomputes from payload and is identical for a cosmetic-only twin", async () => {
     const a = await writeContractArtifact(artifactsDir, "finalized_module_contracts", makeFinalized());
-    expect(typeof a.semantic_hash).toBe("string");
     const b = await writeContractArtifact(
       artifactsDir,
       "finalized_module_contracts",
       makeFinalized({ rationale: "different", created_at: "2099-01-01T00:00:00.000Z" }),
     );
-    // Different bytes → different content_hash; same meaning → same semantic_hash.
+    // Different bytes → different content_hash; same meaning → same recomputed semantic hash.
     expect(b.content_hash).not.toBe(a.content_hash);
-    expect(b.semantic_hash).toBe(a.semantic_hash);
+    expect(envelopeSemanticHash(b)).toBe(envelopeSemanticHash(a));
   });
 
-  it("envelopeSemanticHash recomputes for a legacy envelope missing the field", async () => {
+  it("envelopeSemanticHash always recomputes from the envelope's current payload (no stored field)", async () => {
     await writeContractArtifact(artifactsDir, "obligation_ledger", makeLedger());
     const env = (await readContractArtifact(artifactsDir, "obligation_ledger"))!;
-    const expected = env.semantic_hash!;
-    // Simulate a legacy envelope written before semantic_hash existed.
-    const legacy: ContractPipelineArtifactEnvelope = { ...env, semantic_hash: undefined };
-    expect(envelopeSemanticHash(legacy)).toBe(expected);
+    // The envelope no longer persists a semantic_hash field (CE-003, delete-legacy).
+    expect(env).not.toHaveProperty("semantic_hash");
+    // The hash is the semantic projection of the current payload — recomputed on read.
+    const expected = envelopeSemanticHash(env);
+    const recomputed = envelopeSemanticHash({ ...env });
+    expect(recomputed).toBe(expected);
+    // An in-place payload edit (header untouched) reconverges on next read: a
+    // load-bearing change yields a different hash, a cosmetic one the same.
+    const loadBearing: ContractPipelineArtifactEnvelope = {
+      ...env,
+      payload: makeLedger("2099-01-01T00:00:00.000Z"),
+    };
+    expect(envelopeSemanticHash(loadBearing)).toBe(expected); // created_at is cosmetic
   });
 
-  it("on-disk envelope round-trips the semantic_hash field", async () => {
+  it("the on-disk envelope persists no semantic_hash field (recompute-on-read design)", async () => {
     await writeContractArtifact(artifactsDir, "goal_spec", { goal_id: GOAL });
     const raw = JSON.parse(
       await readFile(contractArtifactFilePath(artifactsDir, "goal_spec"), "utf8"),
     );
-    expect(typeof raw.semantic_hash).toBe("string");
+    expect(raw).not.toHaveProperty("semantic_hash");
+    // It carries the structural fields the new design relies on instead.
+    expect(typeof raw.content_hash).toBe("string");
+    expect(raw).toHaveProperty("payload");
   });
 });

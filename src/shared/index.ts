@@ -573,6 +573,14 @@ export {
   findingNeedsVerificationBeforeFix,
 } from "./validation/findingGrounding.js";
 
+// Validation: design-finding grounding (S8 = S7 applied to the reviewer; cites a
+// real component path rather than a verbatim span). Single source for both
+// orchestrators so neither forks design-grounding nor cross-area imports it.
+export {
+  groundDesignFinding,
+  groundDesignFindings,
+} from "./validation/designFindingGrounding.js";
+
 // Provider types
 export type {
   WorkerProgress,

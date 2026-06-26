@@ -83,6 +83,14 @@ describe("isEnvelope canonical predicate", () => {
     expect(isEnvelope("string")).toBe(false);
     expect(isEnvelope([1, 2])).toBe(false);
   });
+
+  it("recognizes an envelope with NO stored semantic_hash (vestigial field dropped)", () => {
+    // The store no longer stamps semantic_hash; isEnvelope must still accept the
+    // header (content_hash + artifact_name + payload) so the CLI unwrap works.
+    const env = envelope("goal_spec", makeGoalSpec());
+    expect("semantic_hash" in env).toBe(false);
+    expect(isEnvelope(env)).toBe(true);
+  });
 });
 
 describe("validate-artifact envelope unwrap", () => {

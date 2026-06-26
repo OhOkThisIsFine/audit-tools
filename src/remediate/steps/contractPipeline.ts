@@ -35,6 +35,7 @@ import {
   type ImplementationDAG,
   type ObligationLedger,
   type SessionConfig,
+  captureStepBoundaryFriction,
 } from "audit-tools/shared";
 import {
   CP_ARTIFACT_NAMES,
@@ -84,8 +85,10 @@ import {
   validateEvidenceThreaded,
   validateDigestCoverage,
   validateReconciliationDerivation,
+  validateContractCitationGrounding,
   deriveNodeModelTierFromNode,
 } from "../validation/contractPipeline.js";
+import type { Finding } from "audit-tools/shared";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 import { scheduleWave, type WaveScheduleResult } from "./dispatch.js";
 import { writeCurrentStep } from "./stepWriter.js";
@@ -764,6 +767,106 @@ export async function evaluatePreCriticStructuralGate(
   return null;
 }
 
+// ── M-B3: source-grounded citation gate (repo-tree knownPaths) ────────────────
+//
+// A contract finding that cites a file path or a code symbol must point at
+// something REAL in the working tree. The gate runs at two boundaries:
+//
+//  1. PRE-CRITIC: ground the finalized_module_contracts' `file_scope` citations
+//     (each module declares the files it owns). A module that cites only a path
+//     that does not exist AND no real symbol is hallucinating its scope before
+//     the adversarial budget is ever spent — re-emit contract_finalization.
+//  2. PROMOTION BACKSTOP: ground every promoted extracted-plan finding's
+//     citations before the plan is handed to the document/implement flow.
+//
+// Fail-closed ONLY when the working tree itself is unreadable (git ls-files
+// returns nothing) — a normal run with legitimately new-file scopes is not
+// bricked, because a finding grounds if ANY cited path OR symbol is real.
+
+/**
+ * Map module_decomposition modules to Finding-shaped citations the shared
+ * grounding gate consumes: each module's `file_scope` → affected_files (the
+ * declared paths it owns), its name + responsibilities → summary (for the
+ * symbol-shaped grounding fallback). The decomposition is where file_scope
+ * lives — the finalized contracts carry interface fields (inputs/outputs/
+ * invariants), not paths — so a module that declares only a non-existent
+ * file_scope path is the pre-critic hallucination this catches.
+ *
+ * A module that declares NO file_scope at all contributes no citation (there is
+ * nothing to ground) — it is not a hallucination, just an undeclared scope.
+ */
+function decompositionModulesToCitations(decompositionPayload: unknown): Finding[] {
+  const modules =
+    isRecord(decompositionPayload) && Array.isArray(decompositionPayload.modules)
+      ? (decompositionPayload.modules as unknown[])
+      : [];
+  const citations: Finding[] = [];
+  for (const [i, mod] of modules.entries()) {
+    if (!isRecord(mod)) continue;
+    const fileScope = Array.isArray(mod.file_scope)
+      ? (mod.file_scope as unknown[]).filter((p): p is string => typeof p === "string")
+      : [];
+    if (fileScope.length === 0) continue;
+    const name = typeof mod.name === "string" ? mod.name : `module-${i}`;
+    const responsibilities =
+      typeof mod.responsibilities === "string" ? mod.responsibilities : "";
+    citations.push({
+      id: name,
+      title: name,
+      category: "module_contract",
+      severity: "medium",
+      confidence: "high",
+      lens: "architecture",
+      summary: `${name} ${responsibilities}`,
+      affected_files: fileScope.map((path) => ({ path })),
+    } as Finding);
+  }
+  return citations;
+}
+
+/**
+ * Pre-critic citation grounding over the module decomposition's file scope.
+ * Returns rendered error lines (re-emit contract_finalization) or null when clean
+ * — including a clean fail-closed pass (the gate's own repo-tree issue is surfaced
+ * as an error line so an unreadable tree is loud, never silent).
+ */
+async function evaluatePreCriticCitationGrounding(
+  artifactsDir: string,
+  repoRoot: string,
+): Promise<{ errorLines: string[] } | null> {
+  const decomposition = envelopePayload(
+    await readContractArtifact(artifactsDir, "module_decomposition"),
+  );
+  const citations = decompositionModulesToCitations(decomposition);
+  if (citations.length === 0) return null;
+  const result = validateContractCitationGrounding(citations, repoRoot);
+  const errors = result.issues.filter((issue) => issue.severity === "error");
+  if (errors.length === 0) return null;
+  return { errorLines: errors.map((issue) => `- [${issue.path}] ${issue.message}`) };
+}
+
+/**
+ * Promotion-backstop citation grounding over the promoted extracted-plan
+ * findings. Returns rendered violation lines, or null when every finding grounds.
+ */
+export async function evaluatePromotedPlanCitationGrounding(
+  artifactsDir: string,
+  repoRoot: string,
+): Promise<{ violations: string[] } | null> {
+  const plan = await readOptionalJsonFile<{ findings?: unknown }>(
+    intakePaths(artifactsDir).extractedPlan,
+  );
+  const findings =
+    isRecord(plan) && Array.isArray(plan.findings)
+      ? (plan.findings as Finding[])
+      : [];
+  if (findings.length === 0) return null;
+  const result = validateContractCitationGrounding(findings, repoRoot);
+  const errors = result.issues.filter((issue) => issue.severity === "error");
+  if (errors.length === 0) return null;
+  return { violations: errors.map((issue) => `[${issue.path}] ${issue.message}`) };
+}
+
 // ── DC-3: parallel per-module contract phases ─────────────────────────────────
 //
 // `module_contract_drafting` (→ module_contracts) and `contract_finalization`
@@ -1214,6 +1317,36 @@ ${formatValidationIssues(first.issues)}
     await archiveContractArtifact(artifactsDir, name, "stale");
   }
 
+  // 2a. OBL-m-friction-inv-5 (post_repair_rederive): when a judge needs_repair →
+  //     regenerate-target landed, the re-ingested target makes its downstream
+  //     artifacts stale and they are archived above — the REAL remediate
+  //     post-repair re-derive site (judge → repair target → back-half re-derive).
+  //     Route this backend-observed step-boundary fact through the single CE-005
+  //     chokepoint. Discriminator = repair target artifact id + repair iteration
+  //     count (there is no RepairOutcome.attempt in remediate), so re-recording
+  //     the same re-derive is a collision-free no-op (CE-006).
+  if (staleness.stale.length > 0) {
+    const repairState = await readRepairState(artifactsDir);
+    const lastRepair = repairState.repairs[repairState.repairs.length - 1];
+    if (lastRepair) {
+      const iteration = repairState.repairs.length;
+      await captureStepBoundaryFriction(
+        artifactsDir,
+        runId,
+        {
+          eventType: "post_repair_rederive",
+          discriminator: `${lastRepair.target}:${iteration}`,
+          note:
+            `Post-repair re-derive: repair iteration ${iteration} of "${lastRepair.target}" ` +
+            `made ${staleness.stale.length} downstream artifact(s) stale; they were archived so ` +
+            `the staleness DAG re-derives the back half.`,
+          category: "trap",
+        },
+        "remediate-code",
+      );
+    }
+  }
+
   const nextPhase = nextMissingContractPhase(artifactsDir);
 
   // 2.5. Goal-ID consistency gate (ARC-86b18f1b): every persisted artifact that
@@ -1455,6 +1588,66 @@ ${obligationGate.violations.map((v) => `- ${v}`).join("\n")}
     }
 
     await promoteImplementationDagToExtractedPlan(artifactsDir);
+
+    // 4d. M-B3 source-grounded citation gate (promotion backstop): ground every
+    //     promoted extracted-plan finding's citations against the working tree.
+    //     A finding citing only a non-existent path and no real symbol is a
+    //     hallucinated citation; re-emit implementation_planning (bounded by the
+    //     same dag_regenerations cap). Fail-closed only on an unreadable tree.
+    const citationGate = await evaluatePromotedPlanCitationGrounding(artifactsDir, root);
+    if (citationGate) {
+      const repairState = await readRepairState(artifactsDir);
+      if (repairState.dag_regenerations.length >= MAX_DAG_REGENERATION_ATTEMPTS) {
+        return writeCurrentStep({
+          stepKind: CONTRACT_STEP_KIND,
+          status: "blocked",
+          runId,
+          repoRoot: root,
+          artifactsDir,
+          prompt: `# Citation Grounding Failed ${repairState.dag_regenerations.length + 1} Times
+
+The promoted plan repeatedly cites components that do not exist in the working tree:
+
+${citationGate.violations.map((v) => `- ${v}`).join("\n")}
+
+Report this to the user and stop. The contract pipeline cannot promote a plan whose findings cite non-existent files or symbols; the run needs a corrected implementation_dag.
+`,
+          allowedCommands: [],
+          stopCondition: "Stop after reporting the citation-grounding failure to the user.",
+        });
+      }
+      repairState.dag_regenerations.push({
+        violations: citationGate.violations,
+        at: new Date().toISOString(),
+      });
+      await writeRepairState(artifactsDir, repairState);
+      await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
+      // The grounding-driven re-emit is a backend-observed step-boundary fact:
+      // route it through the single CE-005 chokepoint as phase_reemit.
+      await captureStepBoundaryFriction(
+        artifactsDir,
+        runId,
+        {
+          eventType: "phase_reemit",
+          discriminator: "implementation_planning:citation_grounding:promotion",
+          note:
+            "implementation_planning re-emitted: a promoted plan finding cited a " +
+            "component that does not exist in the working tree (M-B3 citation grounding).",
+          category: "trap",
+        },
+        "remediate-code",
+      );
+      return buildPhaseStep(
+        "implementation_planning",
+        `## Source-Grounded Citation Gate Errors From the Previous Attempt
+
+The previous implementation_dag produced findings that cite components not present in the working tree. Every cited path or symbol must point at something real:
+
+${citationGate.violations.map((v) => `- ${v}`).join("\n")}
+`,
+      );
+    }
+
     return null;
   }
 
@@ -1824,6 +2017,41 @@ ${warningLines}
 The ${preCriticGate.phase} output failed deterministic structural gates. Fix every issue below before adversarial review begins:
 
 ${preCriticGate.errorLines.join("\n")}
+`,
+      );
+    }
+
+    // 5c. M-B3 source-grounded citation gate (pre-critic boundary): ground the
+    //     finalized module contracts' file_scope citations against the working
+    //     tree before the adversarial loop. A module citing only a non-existent
+    //     path and no real symbol is re-emitted to contract_finalization, and the
+    //     grounding-driven re-emit is a backend-observed step-boundary fact routed
+    //     through the single CE-005 chokepoint as phase_reemit.
+    const preCriticCitationGate = await evaluatePreCriticCitationGrounding(
+      artifactsDir,
+      root,
+    );
+    if (preCriticCitationGate) {
+      await captureStepBoundaryFriction(
+        artifactsDir,
+        runId,
+        {
+          eventType: "phase_reemit",
+          discriminator: "contract_finalization:citation_grounding:pre_critic",
+          note:
+            "contract_finalization re-emitted: a module contract cited a component " +
+            "that does not exist in the working tree (M-B3 citation grounding).",
+          category: "trap",
+        },
+        "remediate-code",
+      );
+      return buildPhaseStep(
+        "contract_finalization",
+        `## Source-Grounded Citation Gate Errors
+
+A module contract cites a component that does not exist in the working tree. Every cited path or symbol must point at something real before adversarial review begins:
+
+${preCriticCitationGate.errorLines.join("\n")}
 `,
       );
     }
