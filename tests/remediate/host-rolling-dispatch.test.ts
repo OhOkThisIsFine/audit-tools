@@ -117,11 +117,11 @@ describe("re-dispatch after a stale prior attempt", () => {
 });
 
 describe("acceptNodeWorktree", () => {
-  it("commits, verifies, and merges a successful node's edits into HEAD", () => {
+  it("commits, verifies, and merges a successful node's edits into HEAD", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     const wt = makeWorktreeWithEdit(repo, "A1", "a.ts");
-    const res = acceptNodeWorktree({
+    const res = await acceptNodeWorktree({
       root: repo,
       runId: RID,
       blockId: "A1",
@@ -137,12 +137,12 @@ describe("acceptNodeWorktree", () => {
     expect(existsSync(wt)).toBe(false); // mergeWorktree removes it
   });
 
-  it("treats a success worker that made no edits as no-change (not merged, dropped)", () => {
+  it("treats a success worker that made no edits as no-change (not merged, dropped)", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     const wt = worktreePath(repo, "A2", RID);
     createWorktree(repo, wt, worktreeBranchForBlock("A2", RID)); // no edits
-    const res = acceptNodeWorktree({
+    const res = await acceptNodeWorktree({
       root: repo,
       runId: RID,
       blockId: "A2",
@@ -156,11 +156,11 @@ describe("acceptNodeWorktree", () => {
     expect(existsSync(wt)).toBe(false);
   });
 
-  it("drops a worker-error node without merging", () => {
+  it("drops a worker-error node without merging", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     const wt = makeWorktreeWithEdit(repo, "A3", "a.ts");
-    const res = acceptNodeWorktree({
+    const res = await acceptNodeWorktree({
       root: repo,
       runId: RID,
       blockId: "A3",
@@ -175,13 +175,13 @@ describe("acceptNodeWorktree", () => {
     expect(headHas(repo, "src/a.ts")).toBe(false);
   });
 
-  it("runs the node's additionalVerifyCommands ALONGSIDE the derived verify (task_7d35176d): a failing targeted command gates even when no test files were touched", () => {
+  it("runs the node's additionalVerifyCommands ALONGSIDE the derived verify (task_7d35176d): a failing targeted command gates even when no test files were touched", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     // A non-test edit → the derived verify is just `npm run check` (passes here);
     // the node's own targeted command must still run + gate the merge.
     const wt = makeWorktreeWithEdit(repo, "ADD1", "a.ts");
-    const res = acceptNodeWorktree({
+    const res = await acceptNodeWorktree({
       root: repo,
       runId: RID,
       blockId: "ADD1",
@@ -197,11 +197,11 @@ describe("acceptNodeWorktree", () => {
     expect(headHas(repo, "src/a.ts")).toBe(false);
   });
 
-  it("merges when BOTH the derived verify and the node's additionalVerifyCommands pass", () => {
+  it("merges when BOTH the derived verify and the node's additionalVerifyCommands pass", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     const wt = makeWorktreeWithEdit(repo, "ADD2", "a.ts");
-    const res = acceptNodeWorktree({
+    const res = await acceptNodeWorktree({
       root: repo,
       runId: RID,
       blockId: "ADD2",
@@ -216,11 +216,11 @@ describe("acceptNodeWorktree", () => {
     expect(headHas(repo, "src/a.ts")).toBe(true);
   });
 
-  it("rejects a node whose verify fails: not merged, worktree dropped, main tree clean", () => {
+  it("rejects a node whose verify fails: not merged, worktree dropped, main tree clean", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     const wt = makeWorktreeWithEdit(repo, "A4", "a.ts");
-    const res = acceptNodeWorktree({
+    const res = await acceptNodeWorktree({
       root: repo,
       runId: RID,
       blockId: "A4",
@@ -247,11 +247,11 @@ describe("acceptNodeWorktree", () => {
 // ===========================================================================
 
 describe("acceptNodeWorktree — accept-time write-scope gate", () => {
-  it("merges an in-scope edit (declared write path) without blocking", () => {
+  it("merges an in-scope edit (declared write path) without blocking", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     const wt = makeWorktreeWithEdit(repo, "WS1", "a.ts");
-    const res = acceptNodeWorktree({
+    const res = await acceptNodeWorktree({
       root: repo,
       runId: RID,
       blockId: "WS1",
@@ -265,11 +265,11 @@ describe("acceptNodeWorktree — accept-time write-scope gate", () => {
     expect(headHas(repo, "src/a.ts")).toBe(true);
   });
 
-  it("GRANTS an out-of-declared edit to an UNOWNED file — the gate routes git-actual edits, no self-report needed", () => {
+  it("GRANTS an out-of-declared edit to an UNOWNED file — the gate routes git-actual edits, no self-report needed", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     const wt = makeWorktreeWithEdit(repo, "WS2", "a.ts");
-    const res = acceptNodeWorktree({
+    const res = await acceptNodeWorktree({
       root: repo,
       runId: RID,
       blockId: "WS2",
@@ -287,11 +287,11 @@ describe("acceptNodeWorktree — accept-time write-scope gate", () => {
     expect(headHas(repo, "src/a.ts")).toBe(true);
   });
 
-  it("seam-conflicts an actual edit to a file OWNED by another block — blocked, not landed", () => {
+  it("seam-conflicts an actual edit to a file OWNED by another block — blocked, not landed", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     const wt = makeWorktreeWithEdit(repo, "WS4", "owned.ts");
-    const res = acceptNodeWorktree({
+    const res = await acceptNodeWorktree({
       root: repo,
       runId: RID,
       blockId: "WS4",
@@ -349,7 +349,7 @@ describe("acceptNodeWorktree — rebase-onto-HEAD seam handling", () => {
   const sharedAtHead = (repo: string): string =>
     spawnSync("git", ["show", "HEAD:src/shared.ts"], { cwd: repo, encoding: "utf8", shell: false }).stdout;
 
-  it("auto-merges two nodes that edit DIFFERENT lines of one file (rebase folds in the prior merge)", () => {
+  it("auto-merges two nodes that edit DIFFERENT lines of one file (rebase folds in the prior merge)", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     seedShared(repo, ["A0", "B0", "C0"]);
@@ -357,23 +357,23 @@ describe("acceptNodeWorktree — rebase-onto-HEAD seam handling", () => {
     worktreeEditingShared(repo, "SEAMA", ["A1", "B0", "C0"]); // edits line 1
     worktreeEditingShared(repo, "SEAMB", ["A0", "B0", "C1"]); // edits line 3
 
-    expect(accept(repo, "SEAMA").merged).toBe(true); // first lands; HEAD advances
-    expect(accept(repo, "SEAMB").merged).toBe(true); // rebased onto A's merge; non-overlapping
+    expect((await accept(repo, "SEAMA")).merged).toBe(true); // first lands; HEAD advances
+    expect((await accept(repo, "SEAMB")).merged).toBe(true); // rebased onto A's merge; non-overlapping
 
     const shared = sharedAtHead(repo);
     expect(shared).toContain("A1"); // node A's change survived
     expect(shared).toContain("C1"); // node B's change folded in on top
   });
 
-  it("routes to triage when two nodes edit the SAME line (a true seam the rebase can't merge)", () => {
+  it("routes to triage when two nodes edit the SAME line (a true seam the rebase can't merge)", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     seedShared(repo, ["A0", "B0", "C0"]);
     worktreeEditingShared(repo, "SEAMC", ["AX", "B0", "C0"]);
     worktreeEditingShared(repo, "SEAMD", ["AY", "B0", "C0"]); // same line, different content
 
-    expect(accept(repo, "SEAMC").merged).toBe(true);
-    const b = accept(repo, "SEAMD");
+    expect((await accept(repo, "SEAMC")).merged).toBe(true);
+    const b = await accept(repo, "SEAMD");
     expect(b.merged).toBe(false); // rebase conflict on line 1 → not merged
     expect(b.outcome).toBe("error");
     expect(b.diagnostic).toMatch(/seam|conflict|rebase/i);
