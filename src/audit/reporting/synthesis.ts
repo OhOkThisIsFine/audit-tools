@@ -25,6 +25,7 @@ import type {
 } from "../types/runtimeValidation.js";
 import { buildWorkBlocks, type WorkBlock } from "./workBlocks.js";
 import { mergeFindings } from "./mergeFindings.js";
+import { selectCurrentResults } from "../orchestrator/ledger.js";
 import { assignStableFindingIds } from "./findingIdentity.js";
 
 /**
@@ -193,9 +194,13 @@ export function buildAuditReportModel(params: {
   // re-syntheses. buildWorkBlocks keys its union-find on finding.id, so the
   // locally-scoped, collision-prone ids worker packets emit must be replaced
   // here or unrelated findings fuse into one block.
+  // O3 supersession: resolve the ledger to its CURRENT record per task lineage
+  // before merging, so a re-dispatched result's fresh findings replace the stale
+  // base record they superseded — including findings the re-audit dropped, which
+  // a finding-id upsert alone would leave behind.
   const allFindings = assignStableFindingIds(
     mergeFindings(
-      params.results,
+      selectCurrentResults(params.results),
       params.runtimeValidationReport,
       params.externalAnalyzerResults,
       params.designAssessment,

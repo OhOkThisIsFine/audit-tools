@@ -7,6 +7,8 @@ import type {
   ObligationState,
 } from "../types/auditState.js";
 import { computeStaleArtifacts } from "./staleness.js";
+import { computeStaleResultTaskIds } from "./resultBaseline.js";
+import { selectCurrentResults } from "./ledger.js";
 import {
   unresolvedConstraintClauses,
 } from "./intentInterpreter.js";
@@ -233,8 +235,23 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
     ),
   );
 
+  // A task whose CURRENT (supersession-resolved) result has DRIFTED from its
+  // recorded content-key baseline — the live task content moved since the result
+  // was produced — is no longer satisfied by that stale result and must
+  // re-dispatch (the consume half of the O3 staleness gate; the record + drift
+  // re-keying halves live in the ingestion executor). Resolved over
+  // `selectCurrentResults` so a superseded base record never keeps firing after
+  // its re-dispatch landed.
+  const currentResults = selectCurrentResults(bundle.audit_results ?? []);
+  const staleResultTaskIds = computeStaleResultTaskIds(
+    currentResults,
+    bundle.audit_tasks ?? [],
+    bundle.artifact_metadata?.result_baselines,
+  );
   const completedTaskIds = new Set(
-    (bundle.audit_results ?? []).map((result) => result.task_id),
+    currentResults
+      .map((result) => result.task_id)
+      .filter((taskId) => !staleResultTaskIds.has(taskId)),
   );
   // Tasks deferred by a budget cap (FINDING-013) will never have results, so
   // they must be excluded from the completion check — otherwise the obligation
@@ -257,8 +274,11 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
   const hasPendingAuditTasks =
     bundle.audit_tasks?.some(
       (task) =>
-        task.status !== "complete" &&
-        !completedTaskIds.has(task.task_id) &&
+        // A drifted task counts as pending even though its (stale) result left it
+        // status `complete` — it must re-dispatch. Deferred/stranded still wins.
+        (staleResultTaskIds.has(task.task_id) ||
+          (task.status !== "complete" &&
+            !completedTaskIds.has(task.task_id))) &&
         !deferredTaskIds.has(task.task_id) &&
         !strandedTaskIds.has(task.task_id),
     ) ?? false;

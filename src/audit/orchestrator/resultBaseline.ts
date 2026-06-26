@@ -24,6 +24,7 @@
  */
 import {
   buildResultContentDiscriminator,
+  buildTaskContentSignature,
   contentKey,
   idempotencyKey,
   type ResultEmitSource,
@@ -32,6 +33,8 @@ import {
   METADATA_SCHEMA_VERSION,
   type ArtifactMetadataManifest,
 } from "../types/artifactMetadata.js";
+import type { AuditResult, AuditTask } from "../types.js";
+import { emitSourceFor, maxRedispatchAttempt } from "./ledger.js";
 
 /**
  * The baseline store — the per-logical-result contentKey snapshot, keyed by the
@@ -209,4 +212,178 @@ export function isMetadataManifestCurrent(
   const version = (manifest as { metadata_schema_version?: unknown })
     .metadata_schema_version;
   return typeof version === 'number' && version >= METADATA_SCHEMA_VERSION;
+}
+
+/**
+ * The LIVE task-content signature for a result's owning task, derived at advance
+ * time from the CURRENT task content (never off a stored ledger record). Only the
+ * fields that define the audited material feed the signature — the identity
+ * (`task_id`), lifecycle (`status`, `completed_at`, `completion_reason`), and
+ * provider-neutral routing estimates (`token_estimate`, `risk_estimate`, `tags`)
+ * are deliberately excluded so a benign status flip or estimate refresh never
+ * re-fires staleness. A genuine change to the files/ranges/inputs/rationale under
+ * review moves the signature and re-fires (CE-011). The basis is single-sourced
+ * here so record, consume, and drift-rekey hash identically.
+ */
+export function taskContentSignatureForTask(task: AuditTask): string {
+  return buildTaskContentSignature({
+    unit_id: task.unit_id,
+    pass_id: task.pass_id,
+    lens: task.lens,
+    file_paths: task.file_paths,
+    line_ranges: task.line_ranges,
+    file_line_counts: task.file_line_counts,
+    inputs: task.inputs,
+    rationale: task.rationale,
+  });
+}
+
+/**
+ * Freshly derive a result's live keys from its owning task's current content and
+ * the result's CURRENT emit lineage (`emitSourceFor` reads a persisted
+ * `emit_source`/`attempt` first). Returns undefined when the live keys cannot be
+ * derived (e.g. empty task content, or a redispatch record missing its attempt) —
+ * the caller fails safe.
+ */
+function liveKeysForResult(
+  result: AuditResult,
+  task: AuditTask,
+): { idempotency_key: string; content_key: string } | undefined {
+  try {
+    return deriveLiveResultKeys({
+      unit_id: result.unit_id,
+      lens: result.lens,
+      pass_id: result.pass_id,
+      source: emitSourceFor(result),
+      attempt: result.attempt,
+      task_content_signature: taskContentSignatureForTask(task),
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Record (refresh) the baselines for a batch of just-ingested results to their
+ * LIVE content_key, keyed by each result's CURRENT (possibly re-keyed) lineage.
+ * Called from the ingestion executor AFTER drift re-keying, so a re-dispatched
+ * result refreshes the baseline under its NEW redispatch idempotency_key — which
+ * is the lineage `selectCurrentResults` then resolves to, so staleness clears and
+ * the loop converges. Pure: returns a new store. A result whose owning task is
+ * absent (no derivable live signature) is left untouched.
+ */
+export function refreshResultBaselines(
+  baselines: ResultBaselineStore | undefined,
+  results: readonly AuditResult[],
+  tasksByTaskId: ReadonlyMap<string, AuditTask>,
+): ResultBaselineStore {
+  let store: ResultBaselineStore = { ...(baselines ?? {}) };
+  for (const result of results) {
+    const task = result.task_id
+      ? tasksByTaskId.get(result.task_id)
+      : undefined;
+    if (!task) continue;
+    const liveKeys = liveKeysForResult(result, task);
+    if (!liveKeys) continue;
+    store = recordResultBaseline(store, liveKeys);
+  }
+  return store;
+}
+
+/**
+ * The set of task_ids whose CURRENT result has DRIFTED from its recorded baseline
+ * — the live task content moved since the result was produced. Consumed by the
+ * obligation model + dispatch filter to treat those tasks as not-yet-complete so
+ * they re-dispatch. Caller passes the SUPERSESSION-RESOLVED results
+ * (`selectCurrentResults`) so a superseded base record never keeps firing after
+ * its re-dispatch landed. A result with no matching task, no recorded baseline
+ * (never compared), or an underivable signature is not reported stale here.
+ */
+export function computeStaleResultTaskIds(
+  results: readonly AuditResult[],
+  tasks: readonly AuditTask[],
+  baselines: ResultBaselineStore | undefined,
+): Set<string> {
+  const stale = new Set<string>();
+  if (!baselines) return stale;
+  const tasksByTaskId = new Map(tasks.map((task) => [task.task_id, task]));
+  for (const result of results) {
+    if (!result.task_id) continue;
+    const task = tasksByTaskId.get(result.task_id);
+    if (!task) continue;
+    const liveKeys = liveKeysForResult(result, task);
+    if (!liveKeys) continue;
+    if (isResultStaleAgainstBaseline(baselines, liveKeys)) {
+      stale.add(result.task_id);
+    }
+  }
+  return stale;
+}
+
+/**
+ * Drift re-keying authority (O3). A just-submitted BASE result whose owning task's
+ * live content has drifted from the recorded baseline for its base idempotency_key
+ * is re-keyed `emit_source: 'redispatch'` with the next 1-based `attempt`, and its
+ * stamped ledger keys are cleared so `appendResultsToLedger` re-stamps a DISTINCT
+ * idempotency_key (the append-only ledger accepts the fresh findings instead of
+ * no-opping on the signature-stable base key). Deterministic + fully tool-owned:
+ * the host never authors `emit_source`/`attempt`. Results that are not base, lack
+ * a live task, have no baseline, or have not drifted pass through unchanged.
+ */
+export function rekeyDriftedResults(
+  incoming: readonly AuditResult[],
+  tasksByTaskId: ReadonlyMap<string, AuditTask>,
+  baselines: ResultBaselineStore | undefined,
+  existingLedger: readonly AuditResult[],
+): AuditResult[] {
+  if (!baselines) return [...incoming];
+  return incoming.map((result) => {
+    if (emitSourceFor(result) !== "base") return result;
+    const task = result.task_id ? tasksByTaskId.get(result.task_id) : undefined;
+    if (!task) return result;
+    let signature: string;
+    try {
+      signature = taskContentSignatureForTask(task);
+    } catch {
+      return result;
+    }
+    const coordinate = {
+      unit_id: result.unit_id,
+      lens: result.lens,
+      pass_id: result.pass_id,
+    };
+    let baseIdempotencyKey: string;
+    let liveContentKey: string;
+    try {
+      const discriminator = buildResultContentDiscriminator({ source: "base" });
+      baseIdempotencyKey = idempotencyKey({
+        ...coordinate,
+        result_content_discriminator: discriminator,
+      });
+      liveContentKey = contentKey({
+        ...coordinate,
+        result_content_discriminator: discriminator,
+        task_content_signature: signature,
+      });
+    } catch {
+      return result;
+    }
+    const baseline = baselines[baseIdempotencyKey];
+    if (baseline === undefined || baseline === liveContentKey) {
+      // First ingest (no baseline) or unchanged content — a genuine base result.
+      return result;
+    }
+    // Drift: promote to the next re-dispatch attempt with a fresh idempotency_key.
+    // Attempt count is keyed by task_id (a re-dispatch supersedes the SAME task),
+    // never identity_key (one-to-many over split siblings).
+    const attempt = maxRedispatchAttempt(existingLedger, result.task_id) + 1;
+    return {
+      ...result,
+      emit_source: "redispatch",
+      attempt,
+      instance_id: undefined,
+      identity_key: undefined,
+      idempotency_key: undefined,
+    };
+  });
 }

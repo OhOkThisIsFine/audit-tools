@@ -42,14 +42,77 @@ import type { AuditResult } from "../types.js";
  * `selectiveDeepening/shared.ts#taskIdFor`), so a deepening or steward result
  * that shares a base result's {unit_id, lens, pass_id} coordinate legitimately
  * gets a DISTINCT idempotency_key and both persist (CE-001). Anything else is a
- * base result. (Re-dispatch attempts are not yet stamped on results; when O3
- * adds an attempt counter it maps to `source: 'redispatch'` here.)
+ * base result. (O3 — a base result whose task content DRIFTED from its baseline
+ * is re-keyed `emit_source: 'redispatch'` with an attempt counter by the
+ * ingestion path; that persisted `emit_source` is read first here.)
  */
-function emitSourceFor(result: AuditResult): ResultEmitSource {
+export function emitSourceFor(result: AuditResult): ResultEmitSource {
+  if (result.emit_source) return result.emit_source;
   const taskId = result.task_id ?? "";
   if (taskId.startsWith("steward:")) return "steward";
   if (taskId.startsWith("deepening:")) return "deepening";
   return "base";
+}
+
+/**
+ * The attempt ordinal within a task's base lineage: a base result is attempt 0; a re-dispatch
+ * carries its 1-based `attempt`. A redispatch record with no stamped attempt is
+ * treated as attempt 1 (fail-forward; the keying authority always stamps one).
+ */
+function attemptOf(result: AuditResult): number {
+  if (emitSourceFor(result) === "redispatch") {
+    return typeof result.attempt === "number" && result.attempt >= 1
+      ? result.attempt
+      : 1;
+  }
+  return 0;
+}
+
+/**
+ * The highest re-dispatch attempt already recorded for a task's base lineage,
+ * keyed by `task_id` — NOT identity_key, which is deliberately one-to-many (file-
+ * split sibling tasks of one unit+lens share {unit_id,lens,pass_id} but have
+ * distinct task_ids, so identity-keying would conflate them). A re-dispatch
+ * supersedes the SAME task's earlier result. 0 when the task has only its base
+ * record (or none) — so the next attempt is always `maxRedispatchAttempt + 1`.
+ */
+export function maxRedispatchAttempt(
+  ledger: readonly AuditResult[],
+  task_id: string,
+): number {
+  let max = 0;
+  for (const record of ledger) {
+    if (record.task_id !== task_id) continue;
+    if (emitSourceFor(record) !== "redispatch") continue;
+    const attempt = attemptOf(record);
+    if (attempt > max) max = attempt;
+  }
+  return max;
+}
+
+/**
+ * Resolve the ledger to its CURRENT records (O3 supersession): within each
+ * `task_id` the highest-attempt record wins, so a re-dispatched
+ * result's fresh findings supersede the stale base record they replaced and the
+ * superseded findings never reach synthesis. Keyed on `task_id` (unique per task),
+ * never identity_key (one-to-many over split siblings) so distinct tasks are never
+ * collapsed; `deepening:`/`steward:` results have their own task_ids. Stamped on
+ * read (a pre-O2 ledger still resolves). The append-only ledger on disk is never
+ * mutated — this is a pure read-time projection.
+ */
+export function selectCurrentResults(
+  ledger: readonly AuditResult[],
+): AuditResult[] {
+  const current = new Map<string, AuditResult>();
+  for (const raw of ledger) {
+    const record = stampLedgerKeys(raw);
+    const key = record.task_id;
+    const existing = current.get(key);
+    if (!existing || attemptOf(record) > attemptOf(existing)) {
+      current.set(key, record);
+    }
+  }
+  return [...current.values()];
 }
 
 /**
@@ -74,6 +137,8 @@ export function stampLedgerKeys(result: AuditResult): AuditResult {
       pass_id: result.pass_id,
       result_content_discriminator: buildResultContentDiscriminator({
         source: emitSourceFor(result),
+        // Only consulted for `redispatch`; ignored for base/deepening/steward.
+        attempt: result.attempt,
       }),
     });
   return {

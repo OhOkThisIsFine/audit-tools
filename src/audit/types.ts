@@ -235,5 +235,15 @@ export const AuditResultSchema = z.object({
   instance_id: z.string().optional(),
   identity_key: z.string().optional(),
   idempotency_key: z.string().optional(),
+  // Tool-owned emit lineage (O3). Stamped by the ingestion path, never authored
+  // by a worker: a base result whose owning task's content has DRIFTED from its
+  // recorded baseline is re-keyed `emit_source: 'redispatch'` with a 1-based
+  // `attempt`, giving it a DISTINCT idempotency_key so the append-only ledger
+  // accepts the fresh findings (a same-coordinate replay would otherwise no-op
+  // on the signature-stable base key). `emitSourceFor` reads `emit_source` first;
+  // supersession (`selectCurrentResults`) keeps only the highest attempt per
+  // base lineage so a superseded result's stale findings never reach synthesis.
+  emit_source: z.enum(["base", "deepening", "steward", "redispatch"]).optional(),
+  attempt: z.number().int().min(1).optional(),
 });
 export type AuditResult = z.infer<typeof AuditResultSchema>;

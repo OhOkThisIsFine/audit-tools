@@ -145,9 +145,19 @@ export function computeArtifactMetadata(
   // Carry forward the O2↔F1 per-result baseline store ONLY from a recognized
   // F1-current manifest — an old-shape store cannot be safely reused (its keys
   // predate the discriminated coordinate), so dropping it makes every element
-  // fail safe to re-derive (CE-007).
-  if (usablePrevious?.result_baselines) {
-    manifest.result_baselines = usablePrevious.result_baselines;
+  // fail safe to re-derive (CE-007). The ingestion executor records refreshed
+  // baselines onto the *bundle's* manifest (run.updated), so prefer those over
+  // the pre-executor `usablePrevious` — but only when the bundle manifest is
+  // itself F1-current (same CE-007 gate); otherwise fall back, then drop.
+  const bundleMetadata = bundle.artifact_metadata;
+  const bundleIsCurrent =
+    typeof bundleMetadata?.metadata_schema_version === "number" &&
+    bundleMetadata.metadata_schema_version >= METADATA_SCHEMA_VERSION;
+  const carriedBaselines =
+    (bundleIsCurrent ? bundleMetadata?.result_baselines : undefined) ??
+    usablePrevious?.result_baselines;
+  if (carriedBaselines) {
+    manifest.result_baselines = carriedBaselines;
   }
   return manifest;
 }

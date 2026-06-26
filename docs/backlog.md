@@ -7,6 +7,8 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **File-split sibling tasks collide on `idempotency_key` → the ledger silently drops all but one (pre-existing, discovered 2026-06-25 during O3).** `buildChunkedAuditTasks` gives budget-split (`:part-N`) and large-file split tasks of one unit+lens the SAME `{unit_id, lens, pass_id}` (`taskBuilder.ts:206-248`) but distinct `task_id`s. The O2 ledger's `idempotency_key` is keyed on `{unit_id, lens, pass_id, discriminator}` and EXCLUDES `task_id`, so two `base` sibling results hash to the same `idempotency_key` → `appendResultsToLedger` treats the second as an idempotent replay and **drops it** (INV-2), losing that split's findings + coverage. Fix options: (a) fold `task_id` (or a per-split discriminator) into the result content discriminator so siblings get distinct idempotency keys; (b) give split tasks distinct `pass_id`/`unit_id` at planning. Note O3 supersession deliberately keys on `task_id` (not identity_key) so it does NOT worsen this; it just surfaced it. (Ethan, 2026-06-25.)
+
 - **Friction DETECTION is mechanical-only — no LLM judgement reviews the run, so semantic/process friction goes uncaptured.** Capture is fed by exactly two instrumented call sites (`intentCheckpointGate.ts` semantic-gate, `emitValidateRepair.ts` repair seam) plus the opt-in `agent-feedback.jsonl` worker channel; nothing applies LLM judgement over the conversation/run to *find* friction. **Partially fixed (2026-06-25):** (1) dropped `empty set → trivially disposed` — the close-out now always blocks until ≥1 open observation is written; (2) added `open_observations[]` field + named dimensions (`gate_reloops`, `integration_guard_failures`, `rescopes`, `surprises`, `manual_interventions`, `other`) to the friction record contract — host MUST reflect and write ≥1 entry or the run stays blocked; (3) mechanical events remain seeds/prior, not the whole input; (4) applied to BOTH orchestrators via shared `decideFrictionTriage` + `buildFrictionTriageBlock`. **Remaining:** the prompt relies on host recall/reflection over the run's history — the host CAN write "no friction" as a valid observation and bypass. True LLM-judgement-over-transcript friction detection would require the backend to have access to the conversation transcript (it doesn't), or a per-run log the host appends to. The named-dimensions prompt is the maximum tool-enforcement possible without transcript access. (Ethan, 2026-06-25.)
 - **Selective-deepening tasks never converge — packet result task_id ≠ assigned `deepening:*` id.** Repro
   (run `20260622T023504252Z_audit_tasks_completed_001`): workers returned packet-style task_ids (e.g.
@@ -41,6 +43,23 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   by construction, not re-run-then-deduped. This is the natural partner to the append-only results ledger
   (results keyed by content hash → an unchanged task keeps its result at zero recompute), but it stands alone as a
   general DAG-model change applying to every derived artifact, not just results. (Ethan, 2026-06-24.)
+  - **SHIPPED 2026-06-25 — O3 re-dispatch + record/consume/supersession wired (per-result granular staleness now LIVE).**
+    The seam is no longer unconsumed. Landed atomically: (1) **O3 drift re-keying** — `rekeyDriftedResults`
+    (`resultBaseline.ts`) detects, at ingest, a base result whose live task-content signature drifted from its
+    recorded baseline and promotes it to `emit_source:'redispatch', attempt:N` (persisted on `AuditResult`) so it
+    earns a DISTINCT `idempotency_key` and `appendResultsToLedger` accepts the fresh findings instead of no-opping;
+    (2) **record half** — the ingestion executor refreshes `result_baselines` for the just-ingested batch against
+    live task content, persisted via `computeArtifactMetadata` (prefers the bundle's manifest, CE-007-gated);
+    (3) **consume half** — `computeStaleResultTaskIds` + `state.ts`/`packetFilter.ts` treat a drifted task as
+    not-complete so it re-dispatches (single-sourced across gate + dispatch); (4) **supersession** —
+    `selectCurrentResults` (keyed on `task_id`, NOT one-to-many identity_key) collapses a base lineage to its
+    highest attempt so a re-audit's dropped findings vanish from synthesis (applied at the synthesis call site;
+    `mergeFindings` stays a pure merge). Converges: re-derive fires once, re-dispatch lands fresh findings, the
+    baseline refresh silences the loop. Tests: `tests/audit/o3-redispatch-drift.test.mjs` (drift→rekey→append→
+    supersede→converge, sibling non-collapse) + existing baseline/staleness/dedup suites green. **Still open:** the
+    general DAG-model extension (per-file coverage-matrix elements, per-element baselines for every derived
+    artifact) — `runPlanningExecutor` rebuilds+rewrites `coverage_matrix` whole, so that needs an incremental
+    planning executor, not just a staleness gate. (Ethan, 2026-06-25.)
   - **Investigation 2026-06-25 — premise correction + the real blocker.** The per-element result-baseline seam
     (`src/audit/orchestrator/resultBaseline.ts`: `perElementStalenessVerdict`, `deriveLiveResultKeys`,
     `recordResultBaseline`, `isResultStaleAgainstBaseline`) is **fully built and tested but has ZERO production

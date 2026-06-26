@@ -15,6 +15,10 @@ import {
 } from "./resultIngestion.js";
 import { appendResultsToLedger } from "./ledger.js";
 import {
+  refreshResultBaselines,
+  rekeyDriftedResults,
+} from "./resultBaseline.js";
+import {
   buildAuditPlanMetrics,
   sizeIndexFromManifest,
 } from "./reviewPackets.js";
@@ -135,10 +139,25 @@ export function runResultIngestionExecutor(
         bundle.runtime_validation_report,
       )
     : bundle.runtime_validation_report;
+  // O3 drift re-keying (must run BEFORE the append): a base result whose owning
+  // task content has drifted from its baseline is promoted to the next
+  // `redispatch` attempt so it carries a DISTINCT idempotency_key — otherwise the
+  // append below would no-op on the signature-stable base key and silently drop
+  // the fresh findings.
+  const liveTasksByTaskId = new Map(
+    (bundle.audit_tasks ?? []).map((task) => [task.task_id, task]),
+  );
+  const ingestedResults = rekeyDriftedResults(
+    results,
+    liveTasksByTaskId,
+    bundle.artifact_metadata?.result_baselines,
+    bundle.audit_results ?? [],
+  );
   // Append-only, instance-keyed, IDEMPOTENT on idempotency_key (O2): a replay of
   // an already-ingested logical result is a no-op; distinct results sharing a
-  // coordinate (base vs. deepening/steward) both persist. Never a naive concat.
-  const mergedResults = appendResultsToLedger(bundle.audit_results, results);
+  // coordinate (base vs. deepening/steward/redispatch) all persist. Never a naive
+  // concat.
+  const mergedResults = appendResultsToLedger(bundle.audit_results, ingestedResults);
   const completedAuditTasks = updateAuditTaskStatuses(
     bundle.audit_tasks,
     mergedResults,
@@ -184,9 +203,29 @@ export function runResultIngestionExecutor(
       ),
     }));
   const allDispatchTasks = [...deepenedTasks, ...pendingRequeueTasks];
+  // Record half of the staleness gate: refresh the per-result content-key
+  // baselines for the just-ingested results (under their CURRENT, possibly
+  // re-keyed, lineage) against live task content. A re-dispatched result thus
+  // refreshes the baseline under its new redispatch key — the lineage
+  // `selectCurrentResults` resolves to — so the drift clears and the re-dispatch
+  // loop converges. Carried forward by `computeArtifactMetadata` via the bundle.
+  const priorMetadata = selectiveDeepening.bundle.artifact_metadata;
+  const refreshedBaselines = refreshResultBaselines(
+    priorMetadata?.result_baselines,
+    ingestedResults,
+    liveTasksByTaskId,
+  );
   const finalBundle: ArtifactBundle = {
     ...selectiveDeepening.bundle,
     requeue_tasks: requeuePayload.tasks,
+    ...(priorMetadata
+      ? {
+          artifact_metadata: {
+            ...priorMetadata,
+            result_baselines: refreshedBaselines,
+          },
+        }
+      : {}),
     audit_plan_metrics: buildAuditPlanMetrics(allDispatchTasks, {
       graphBundle: selectiveDeepening.bundle.graph_bundle,
       lineIndex,
