@@ -179,6 +179,23 @@ async function nextStepUntilPresentReport(runNextStep) {
     assert.equal(step.contract_version, STEP_CONTRACT_VERSION);
     detail(`next-step -> ${step.step_kind} (${step.status})`);
     if (step.step_kind === "present_report") {
+      // Mandatory friction triage: present_report pauses at status:"ready" until
+      // the host writes ≥1 open_observation. Seed one the way a host would, then
+      // loop so the next call completes. promoteFinalAuditReport deletes the
+      // artifacts dir, so recreate the friction subdir before writing.
+      if (step.status === "ready" && step.artifact_paths?.friction_record) {
+        let record = {};
+        try {
+          record = JSON.parse(await readFile(step.artifact_paths.friction_record, "utf8"));
+        } catch { /* new record */ }
+        record.open_observations = [
+          ...(record.open_observations ?? []),
+          { dimension: "other", note: "no friction this run" },
+        ];
+        await mkdir(dirname(step.artifact_paths.friction_record), { recursive: true });
+        await writeFile(step.artifact_paths.friction_record, JSON.stringify(record) + "\n");
+        continue;
+      }
       return step;
     }
   }

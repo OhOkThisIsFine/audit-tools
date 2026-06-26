@@ -164,6 +164,38 @@ export const FINALIZATION_CYCLE_TOLERANCE = 16;
 // ── Extracted helpers ─────────────────────────────────────────────────────────
 
 /**
+ * Promote the final report bundle to the repo root — but only once friction
+ * triage is satisfied. Returns the path the present_report step should surface.
+ *
+ * promoteFinalAuditReport copies audit-report.md + audit-findings.json to the
+ * parent `.audit-tools/` dir, then DELETES artifactsDir (so a rerun after a
+ * truly-complete audit starts fresh). That deletion must not happen while
+ * friction triage is still pending ("dispose"): the host has not yet written its
+ * open_observations, and wiping artifactsDir would also drop audit_state /
+ * audit_report, causing the next next-step to replay the fold from scratch (the
+ * confirm_intent regression). So:
+ *   - already promoted (re-entry after a prior complete) → use the promoted path
+ *   - friction pending → DO NOT promote; surface the in-place report so the host
+ *     can read it while finishing triage. artifactsDir stays intact, so the next
+ *     call (after open_observations are written) re-evaluates triage cleanly.
+ *   - friction satisfied → promote (and delete artifactsDir) → rerun starts fresh
+ */
+async function promoteIfFrictionSatisfied(
+  artifactsDir: string,
+  triage: import("audit-tools/shared").FrictionTriageDecision,
+): Promise<string> {
+  const promotedPath = promotedAuditReportPath(artifactsDir);
+  const alreadyPromoted = await access(promotedPath).then(() => true).catch(() => false);
+  if (alreadyPromoted) return promotedPath;
+  if (triage.action === "dispose") {
+    // Friction triage still pending — keep the in-place report, do not delete.
+    return auditReportPath(artifactsDir);
+  }
+  const promoted = await promoteFinalAuditReport({ artifactsDir });
+  return promoted.promoted ? promotedPath : auditReportPath(artifactsDir);
+}
+
+/**
  * Build the terminal step for a deterministic fold that has stopped advancing
  * (no actionable obligation, or a cycle guard fired). A rendered report is the
  * deliverable: if synthesis already produced one — or the state is formally
@@ -195,29 +227,14 @@ export async function buildTerminalStep(
   if (!reportRendered) {
     return { kind: "blocked", state, bundle, reason: blockedReason };
   }
-  // Evaluate friction triage BEFORE promotion — promoteFinalAuditReport deletes
-  // artifactsDir (including the friction dir), so reading after promotion always
-  // materializes an empty record and returns status:"ready".
+  // Evaluate friction triage BEFORE promotion. promoteFinalAuditReport deletes
+  // artifactsDir, so promoting while triage is still pending ("dispose") would
+  // (a) delete the friction record the host must finish writing, and (b) wipe
+  // audit_state/audit_report so the next next-step replays the fold from scratch
+  // (the confirm_intent regression). Defer promotion until triage is satisfied;
+  // until then keep the in-place report so the host can read it.
   const triage = await decideAuditFrictionCloseout(params.artifactsDir, "run");
-  const promotedPath = promotedAuditReportPath(params.artifactsDir);
-  const alreadyPromoted = await access(promotedPath).then(() => true).catch(() => false);
-  let finalReportPath: string;
-  if (alreadyPromoted) {
-    finalReportPath = promotedPath;
-  } else {
-    const promoted = await promoteFinalAuditReport({
-      artifactsDir: params.artifactsDir,
-    });
-    finalReportPath = promoted.promoted
-      ? promotedPath
-      : auditReportPath(params.artifactsDir);
-    if (promoted.promoted) {
-      await writeJsonFile(join(params.artifactsDir, "audit_state.json"), {
-        ...state,
-        status: "complete" as const,
-      });
-    }
-  }
+  const finalReportPath = await promoteIfFrictionSatisfied(params.artifactsDir, triage);
   return {
     kind: "complete",
     state,
@@ -1336,39 +1353,12 @@ export async function runDeterministicForNextStep(
       progress_summary: decision.reason,
       providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
     });
-    // Evaluate friction triage BEFORE promotion — promoteFinalAuditReport deletes
-    // artifactsDir (including the friction dir), so reading after promotion always
-    // materializes an empty record and returns status:"ready".
+    // Evaluate friction triage BEFORE promotion, then promote only once triage
+    // is satisfied (see promoteIfFrictionSatisfied). Promoting while triage is
+    // still pending would delete the friction record the host must finish writing
+    // and wipe audit_state/audit_report (→ confirm_intent replay on re-entry).
     const triage = await decideAuditFrictionCloseout(params.artifactsDir, "run");
-    // Guard against re-promoting on a subsequent next-step call after the
-    // artifacts directory has been cleaned up. promoteFinalAuditReport deletes
-    // artifactsDir; on re-entry the source audit-report.md is gone, so we use
-    // the already-promoted path directly without re-running cleanup.
-    const promotedPath = promotedAuditReportPath(params.artifactsDir);
-    const alreadyPromoted = await access(promotedPath).then(() => true).catch(() => false);
-    let finalReportPath: string;
-    if (alreadyPromoted) {
-      finalReportPath = promotedPath;
-    } else {
-      const promoted = await promoteFinalAuditReport({
-        artifactsDir: params.artifactsDir,
-      });
-      finalReportPath = promoted.promoted
-        ? promotedPath
-        : auditReportPath(params.artifactsDir);
-      // Persist the complete status sentinel so subsequent next-step calls
-      // short-circuit (decideNextStep sees status "complete" and skips the fold).
-      // writeJsonFile creates artifactsDir if promotion cleaned it up.
-      if (promoted.promoted) {
-        // Force status:"complete" — `state` may still reflect the pre-execution
-        // state (e.g. status:"active" if the terminal fired before the last
-        // executor's writeCoreArtifacts was the fold's final word).
-        await writeJsonFile(join(params.artifactsDir, "audit_state.json"), {
-          ...state,
-          status: "complete" as const,
-        });
-      }
-    }
+    const finalReportPath = await promoteIfFrictionSatisfied(params.artifactsDir, triage);
     return {
       kind: "complete",
       state,
