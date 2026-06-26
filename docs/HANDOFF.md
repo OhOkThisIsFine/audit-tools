@@ -3,39 +3,34 @@
 > The single rolling cross-machine handoff: current published state + anything in flight. Durable how-to is in
 > `CLAUDE.md`; open work in [`docs/backlog.md`](backlog.md).
 
-**Live:** `audit-tools@0.30.11` on npm (`latest`). `main` == `audit-tools/main` (release commit `03b3e43c`), clean
-tree, both global bins → 0.30.11. CI publish run: https://github.com/OhOkThisIsFine/audit-tools/releases/tag/v0.30.11
+**Live:** `audit-tools@0.30.16` on npm (`latest`). `main` == `audit-tools/main`, clean tree, both global bins → 0.30.16.
+CI publish run: https://github.com/OhOkThisIsFine/audit-tools/actions/runs/28264441942
 
-**In flight:** nothing — clean, verified, pushed, published 0.30.11, global bins reinstalled.
+**In flight:** an autonomous `/loop` of `/remediate-code docs/backlog.md` (self-paced, one bounded lap at a time → `/ship`
+→ reinstall → next lap) is running until forward-tracks + friction settle. Lap 1 landed below. Each lap re-scopes a
+bounded foundation at intake (auto-phasing still unshipped) and pauses for a host scope/approval decision.
 
-**Last landed (2026-06-26, shipped in 0.30.11): forward-tracks foundations-phase (mechanical decompose + boundary-enforce substrate).**
-- Ran `/remediate-code` on the backlog Forward tracks, scoped (host intake decision) to the 3 enabling foundations
-  (decompose+boundary-enforce / schema-enforced generation / dispatch broker); 4 consumer tracks deferred.
-- Full contract pipeline: 5-module decomposition → 6-node dependency DAG → independent critique (2 blockers) +
-  counterexample (9 CEs) → judge accepted 6 cheap contract fixes → one repair round closed all 6 → re-review
-  **approved**; 3 residuals (CE-002/004/009) acknowledged.
-- Shipped code (mostly verify-before-fix; net-new = the 6 CE fixes + classifier struct + guard tests):
-  `touched_files` first-class+required on `RemediationBlockSchema`/validator; CE-003 block_id-PREFIX partial
-  admission (`admitSubWaveUnderCapacity`); CE-006/007 claim-retaining redispatch (`NodeClaimDisposition`,
-  `redispatchInFlight`); CE-008 merge/overlap/byte-size pinned to `canonicalizeFilePath`; CE-005 single-struct
-  `classifyProvider` (floor constants de-exported); convergence guard tests locking dispatch through broker+boundary.
-- Green on merged `main`: remediate vitest 1919 / 0 fail; audit+shared node:test 3269 / 0 fail; build + check clean.
-- **Headline still open:** the tool does not yet AUTO-derive the phase cut — the foundations-only scope was a host
-  intake decision, not DAG-derived. See `backlog.md` track #1 "STILL OPEN — the headline auto-phasing".
+**Last landed (2026-06-26, shipped in 0.30.16, loop lap 1): accept-node new-file-drop + merged-base-green hardening.**
+- `/remediate-code` scoped to the one live Open-bug (accept-node merge silently dropping a worker-created file → red
+  base → false-quarantines). Naive 2-mode fix reshaped by **2 source-grounded adversarial repair rounds** (converged at
+  a true round-3 fixpoint, within the N=2 cap) into 6 defenses: CE-004 `git ls-files --others --ignored` enumeration;
+  CE-003 source-extension-only force-add under write_paths else fail-loud; CE-002 merged-base `npm run check` in the
+  MAIN checkout (worktree junction is unfaithful); CE-001/005/CD-201 serialize the base-mutating section under a DISTINCT
+  base-branch lock acquired once in `acceptNodeWorktree` (not the non-reentrant per-run `rolling-session.lock`), capture
+  base HEAD OID + `reset --hard`/scoped-clean/self-quarantine on a red check. Files: `src/remediate/steps/dispatch.ts` +
+  `rollingSession.ts`; tests in `tests/remediate/dispatch-worktree.test.ts`.
+- Green on merged `main`: remediate vitest 1944 / 0 fail; full `npm test` exit 0; build + check clean.
+- Logged this lap's full contract-pipeline **host-friction inventory** (categories A/B/C/D/E) to `backlog.md`.
 
 **Trap (release gate):** the release script's local pre-tag gate runs only `npm run check`, but CI runs the full
 `verify:release` (check + check:doc-manifest + test + verify:hosts + 2 smokes). Run `env -u CLAUDECODE npm run
 verify:release` locally **before tagging** to catch doc-manifest / smoke failures `check` alone misses.
 
-**Previously shipped (in npm history):** 0.30.10 per-result granular staleness (O3 re-dispatch); 0.30.9
-confirm_intent deferred-promotion fix; 0.30.7 rolling-dispatch same-file merge-serialization (file-ownership-disjoint
-sub-wave scheduling `INV-SOO-*`, cross-node seam-signature guard `INV-SEAM-*`). Foundations O1/O2/O3 merged `cd089066`.
-
-**Next:**
-1. Highest-leverage open forward tracks ([`backlog.md`](backlog.md)): the **headline auto-phasing** of the
-   decompose track (tool derives the phase cut, not the host); the **general DAG extension** of granular staleness
-   (per-file coverage-matrix elements + incremental `runPlanningExecutor`).
-2. Open bug: file-split sibling `idempotency_key` collision (backlog Open bugs).
+**Next (loop continues):**
+1. Lap 2 scope (host-picked at intake): a bounded foundation toward the **headline auto-phasing** forward track, or the
+   **repair-cap → convergence-termination** track (lap 1 converged within the N=2 cap but a 3rd new CE would have been
+   cut — real data point), or another Open-bugs/friction item. See [`backlog.md`](backlog.md).
+2. The lap-1 host-friction inventory (A/B/C/D/E in `backlog.md`) is itself fixable-tooling backlog to burn down.
 
 **Release:** `env -u CLAUDECODE npm run release:patch:publish` (bumps + tags `vX.Y.Z` + GitHub Release → OIDC
 CI publishes → waits for npm). Recover a bad attempt: `gh release delete vX.Y.Z --cleanup-tag`, forward-bump,
