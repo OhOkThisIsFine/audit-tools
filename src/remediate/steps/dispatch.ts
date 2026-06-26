@@ -32,6 +32,7 @@ import type {
   RollingDispatchResult,
 } from "audit-tools/shared";
 import { probeQuotaSource } from "audit-tools/shared";
+import { captureStepBoundaryFriction } from "audit-tools/shared";
 import { findingLead, renderFindingBadgeBody } from "audit-tools/shared";
 import { runShellCommand } from "../utils/commands.js";
 import {
@@ -3245,6 +3246,26 @@ async function mergeImplementResultsIntoState(
           // git-diff write-scope gate; an actual fix is subject to it.
           if (!isNoChange) {
             resolvedFindingIds.push(itemResult.finding_id);
+          } else {
+            // M-FRICTION (no_change_merge): a resolved_no_change node merged with
+            // no diff is a backend-observed step-boundary fact. Route it through
+            // the single CE-005 chokepoint with the pinned discriminator
+            // (node/block id + finding id) so the de-dup id is collision-free and
+            // re-recording the same fact is a guaranteed no-op (CE-006). Best-effort
+            // and non-fatal — capture never throws into the merge loop.
+            await captureStepBoundaryFriction(
+              options.artifactsDir,
+              runId,
+              {
+                eventType: "no_change_merge",
+                discriminator: `${blockId}:${itemResult.finding_id}`,
+                note:
+                  `Node ${blockId} merged finding ${itemResult.finding_id} as ` +
+                  `resolved_no_change (no diff landed).`,
+                category: "trap",
+              },
+              "remediate-code",
+            );
           }
           // OBL-INV-RSD-06 / OBL-SEAM-RSD-03: use the shared REMEDIATION_STEP
           // constant, never the bare string literal, so this path and any other
@@ -3364,6 +3385,27 @@ async function mergeImplementResultsIntoState(
         `result finding_id(s) recorded as orphan dispositions (not dropped): ` +
         `${orphanResults.map((o) => o.finding_id).join(", ")}\n`,
     );
+    // M-FRICTION (artifact_rejected): each unmatched worker result is an artifact
+    // rejected from the merge (referential-integrity reject). Route each through
+    // the single CE-005 chokepoint with the pinned discriminator (artifact id +
+    // cause token = the orphan disposition) so the de-dup id is collision-free
+    // (CE-006). Best-effort / non-fatal — capture never throws into the merge.
+    for (const orphan of orphanResults) {
+      await captureStepBoundaryFriction(
+        options.artifactsDir,
+        runId,
+        {
+          eventType: "artifact_rejected",
+          discriminator: `${orphan.finding_id}:${orphan.disposition}`,
+          note:
+            `Implement worker result for finding ${orphan.finding_id} was rejected ` +
+            `from the merge (disposition=${orphan.disposition}, ` +
+            `worker_status=${orphan.worker_status}).`,
+          category: "trap",
+        },
+        "remediate-code",
+      );
+    }
   }
 
   // Lost-update / overlapping-edit detection (ARC-f378135d-2 / ARC-c1693139):

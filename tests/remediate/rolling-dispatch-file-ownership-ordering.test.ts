@@ -342,6 +342,153 @@ describe("INV-SOO-09: rel/abs/'..'/case spellings of one file collide", () => {
 });
 
 // ---------------------------------------------------------------------------
+// M-B2: the shared re-export barrel src/shared/index.ts is an OWNED SEAM
+// ---------------------------------------------------------------------------
+
+describe("M-B2: src/shared/index.ts barrel is an owned seam (two otherwise-disjoint nodes serialize on it)", () => {
+  const BARREL = "src/shared/index.ts";
+
+  it("two nodes whose ONLY shared file is the barrel are gated as same-file (serialize), not co-admitted", () => {
+    // Each node edits its own disjoint subdir file AND the shared barrel.
+    const level = [
+      node("B-1", ["src/audit/a.ts", BARREL]),
+      node("B-2", ["src/remediate/b.ts", BARREL]),
+    ];
+    const waves = ownershipSubWaves(level);
+    // The barrel is the single contested key → the two nodes split across two
+    // sub-waves; they are NEVER in flight together (no two writers of the barrel).
+    expect(waves).toHaveLength(2);
+    for (const w of waves) {
+      const barrelWriters = w.filter((n) =>
+        n.write_paths.includes(BARREL),
+      );
+      expect(barrelWriters.length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("the barrel key collides on its canonical identity (rel/'..' spellings serialize)", () => {
+    const level = [
+      node("B-1", [BARREL]),
+      node("B-2", ["src/shared/sub/../index.ts"]),
+    ];
+    const waves = ownershipSubWaves(level, process.cwd());
+    // Same physical barrel file → serialized, never co-admitted.
+    expect(waves).toHaveLength(2);
+  });
+
+  it("the registry single-owns the in-flight barrel: a foreign barrel-touching node is NON-disjoint", () => {
+    const registry = new OwnershipRegistry();
+    registry.initialize([
+      { node_id: "A", write_paths: ["src/audit/a.ts", BARREL] },
+      { node_id: "B", write_paths: ["src/remediate/b.ts", BARREL] },
+    ]);
+    registry.claimInFlight("A", ["src/audit/a.ts", BARREL]);
+    // B shares no file with A EXCEPT the barrel → still gated by the barrel key.
+    expect(
+      registry.isFileOwnershipDisjoint("B", ["src/remediate/b.ts", BARREL]),
+    ).toBe(false);
+    // A node touching neither the barrel nor A's other file parallelizes freely.
+    expect(registry.isFileOwnershipDisjoint("C", ["src/cli/c.ts"])).toBe(true);
+  });
+});
+
+describe("M-B2 (integration): two barrel-only-sharing nodes complete merged with zero triage", () => {
+  const pool: CapacityPool = {
+    id: "stub/*",
+    providerName: "claude-code",
+    hostModel: null,
+    hostConcurrencyLimit: { active_subagents: 8, source: "session_config" },
+  };
+  const session: SessionConfig = { quota: { enabled: false } };
+  const BARREL = "src/shared/index.ts";
+  const block = (id: string, files: string[]): RemediationBlock => ({
+    block_id: id,
+    items: [id],
+    parallel_safe: true,
+    touched_files: files,
+  });
+
+  /**
+   * Drive a single level and record the per-dispatch peak concurrency on the
+   * barrel file. Because the scheduler serializes the two barrel-sharing nodes,
+   * the barrel is never edited by two in-flight workers, so the merge-time
+   * lost-update detector (`detectOverlappingEdits`) never fires → zero triage.
+   */
+  async function run(level: RemediationBlock[]): Promise<{
+    peakBarrelInFlight: number;
+    results: number;
+  }> {
+    let barrelInFlight = 0;
+    let peakBarrelInFlight = 0;
+    let results = 0;
+    await driveRollingDispatch([level], {
+      confirmedPools: [pool],
+      sessionConfig: session,
+      rebuildSharedBetweenLevels: async () => {},
+      root: process.cwd(),
+      dispatchNode: async (b) => {
+        const touchesBarrel = (b.touched_files ?? []).includes(BARREL);
+        if (touchesBarrel) {
+          barrelInFlight += 1;
+          peakBarrelInFlight = Math.max(peakBarrelInFlight, barrelInFlight);
+        }
+        await new Promise((r) => setTimeout(r, 5));
+        if (touchesBarrel) barrelInFlight -= 1;
+        results += 1;
+        return {
+          packet: {
+            id: b.block_id,
+            payload: { block_id: b.block_id },
+            estimatedTokens: 0,
+            complexity: 0.5,
+          },
+          outcome: "success" as const,
+        };
+      },
+    });
+    return { peakBarrelInFlight, results };
+  }
+
+  it("the barrel never has two in-flight writers; both nodes complete", async () => {
+    const level = [
+      block("B-1", ["src/audit/a.ts", BARREL]),
+      block("B-2", ["src/remediate/b.ts", BARREL]),
+    ];
+    const { peakBarrelInFlight, results } = await run(level);
+    // GREEN with the seam guard: barrel writers serialize (peak == 1), so the
+    // overlapping-edit detector never routes either node to triage.
+    expect(peakBarrelInFlight).toBe(1);
+    expect(results).toBe(2);
+  });
+
+  it("RED baseline: ignoring the barrel key (treating the nodes as disjoint) would co-admit two barrel writers", () => {
+    // Simulate the guard REMOVED — disjointness computed over the per-subdir
+    // files ONLY, dropping the barrel key. The two nodes then look disjoint and
+    // would be co-admitted, putting two writers on the barrel at once (the
+    // lost-update hazard this seam prevents).
+    const registry = new OwnershipRegistry();
+    registry.initialize([
+      { node_id: "A", write_paths: ["src/audit/a.ts"] }, // barrel dropped
+      { node_id: "B", write_paths: ["src/remediate/b.ts"] }, // barrel dropped
+    ]);
+    registry.claimInFlight("A", ["src/audit/a.ts"]);
+    // With the barrel absent from the keys, B is (wrongly) judged disjoint.
+    expect(registry.isFileOwnershipDisjoint("B", ["src/remediate/b.ts"])).toBe(true);
+    // Contrast: keeping the barrel key (the shipped behavior) gates B — proving
+    // the guard is what serializes the two nodes.
+    const guarded = new OwnershipRegistry();
+    guarded.initialize([
+      { node_id: "A", write_paths: ["src/audit/a.ts", BARREL] },
+      { node_id: "B", write_paths: ["src/remediate/b.ts", BARREL] },
+    ]);
+    guarded.claimInFlight("A", ["src/audit/a.ts", BARREL]);
+    expect(
+      guarded.isFileOwnershipDisjoint("B", ["src/remediate/b.ts", BARREL]),
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // INV-SOO-10: disposition-aware claim lifecycle
 // ---------------------------------------------------------------------------
 
