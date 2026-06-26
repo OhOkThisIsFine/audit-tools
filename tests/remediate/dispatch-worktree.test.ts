@@ -511,13 +511,20 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
     expect(existsSync(wt)).toBe(false);
   });
 
-  it("FAILS LOUDLY for a NEW file OUTSIDE the declared write scope, naming the file", async () => {
+  it("SKIPS incidental untracked-ignored churn OUTSIDE the write scope (node_modules from running npm) — commits the real tracked edit, no fail-loud", async () => {
+    // Regression for the 0.30.16 P0: the repo-wide ls-files enumeration tripped a
+    // fail-loud on `node_modules/.bin/esbuild` that a worker's `npm run check`
+    // created in its worktree, falsely rejecting every node. Such a file is OUTSIDE
+    // the write scope and incidental — it must be skipped, not block the commit.
     const { repo, ok } = initRepo();
     if (!ok) return;
     const wt = makeWorktree(repo, "NF3");
-    mkdirSync(join(wt, "friction"), { recursive: true });
-    // A new ignored source file, but write scope only covers src/ — out of scope.
-    writeFileSync(join(wt, "friction", "stray.ts"), "export const s = 1;\n");
+    mkdirSync(join(wt, "src"), { recursive: true });
+    // The worker's REAL change: a tracked source edit under the write scope.
+    writeFileSync(join(wt, "src", "a.ts"), "export const a = 1;\n");
+    // Incidental tooling churn: an ignored file outside the write scope (node_modules).
+    mkdirSync(join(wt, "node_modules", ".bin"), { recursive: true });
+    writeFileSync(join(wt, "node_modules", ".bin", "esbuild"), "#!/bin/sh\n");
     const res = await acceptNodeWorktree({
       root: repo,
       runId: RID,
@@ -529,11 +536,11 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
       writePaths: ["src/"],
       mergedBaseCheckCommand: "node --version",
     });
-    expect(res.outcome).toBe("error");
-    expect(res.merged).toBe(false);
-    expect(res.diagnostic).toContain("friction/stray.ts");
-    expect(res.diagnostic).toMatch(/outside .* write scope/i);
-    expect(existsSync(wt)).toBe(false);
+    expect(res.outcome).toBe("success");
+    expect(res.merged).toBe(true);
+    // The real tracked edit landed; the incidental node_modules churn did not.
+    expect(headHas(repo, "src/a.ts")).toBe(true);
+    expect(headHas(repo, "node_modules/.bin/esbuild")).toBe(false);
   });
 
   it("merged-base check RED: rolls the base back to the captured OID bit-identically, quarantines, returns error", async () => {

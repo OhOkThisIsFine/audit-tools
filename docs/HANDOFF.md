@@ -7,8 +7,12 @@
 CI publish run: https://github.com/OhOkThisIsFine/audit-tools/actions/runs/28264441942
 
 **In flight:** an autonomous `/loop` of `/remediate-code docs/backlog.md` (self-paced, one bounded lap at a time → `/ship`
-→ reinstall → next lap) is running until forward-tracks + friction settle. Lap 1 landed below. Each lap re-scopes a
-bounded foundation at intake (auto-phasing still unshipped) and pauses for a host scope/approval decision.
+→ reinstall → next lap) is running until forward-tracks + friction settle. **Lap 2 surfaced a P0 regression in lap-1's
+own 0.30.16 fix** (over-broad new-file enumeration tripping a fail-loud on incidental `node_modules` churn → rejected
+all 4 lap-2 nodes + dropped their verified edits). P0 hotfix landing in 0.30.17 (enumeration scoped to under-write_paths;
+incidental out-of-scope ignored churn skipped, not fail-loud). The 4 lap-2 friction fixes (C1/C4/D2/C5) were lost and
+re-run as **lap 2b** through the fixed tool. Each lap re-scopes a bounded foundation at intake (auto-phasing unshipped)
+and pauses for a host scope/approval decision.
 
 **Last landed (2026-06-26, shipped in 0.30.16, loop lap 1): accept-node new-file-drop + merged-base-green hardening.**
 - `/remediate-code` scoped to the one live Open-bug (accept-node merge silently dropping a worker-created file → red

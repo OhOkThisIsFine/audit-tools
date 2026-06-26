@@ -1000,12 +1000,15 @@ function isUnderWritePaths(rel: string, declaredWritePaths: string[], root: stri
  * Force-add worker-created NEW files that `.gitignore` shadows so genuine new
  * source work lands in the commit. `git add -A` (and any diff) honour `.gitignore`
  * and can ONLY be enumerated via `git ls-files --others --ignored
- * --exclude-standard`. For each such file: a source-extension file UNDER the
- * block's declared write scope is `git add -f`'d so it lands; a non-source file
- * under scope (generated artifact) OR any new file OUTSIDE scope FAILS LOUDLY
- * (returns an error naming the file) rather than committing a half-change.
- * `declaredWritePaths` undefined → the lifecycle unit-test path with no scope:
- * skip force-add entirely (no new-file inclusion, legacy behaviour).
+ * --exclude-standard`. Only files UNDER the block's declared write scope are
+ * considered: a source-extension one is `git add -f`'d so it lands; a non-source
+ * one (generated artifact under a source dir) FAILS LOUDLY rather than committing
+ * build output. An untracked-ignored file OUTSIDE the write scope is incidental
+ * churn (node_modules created by running npm in the worktree, dist/, .audit-tools/,
+ * another module's output) — `git add -A` already skips it, so it is skipped here
+ * too (it must NOT trip a fail-loud; doing so falsely rejected every node whose
+ * worker ran npm in its worktree). `declaredWritePaths` undefined → the lifecycle
+ * unit-test path with no scope: skip force-add entirely (legacy behaviour).
  */
 function forceAddNewSourceFiles(
   worktreeRoot: string,
@@ -1031,25 +1034,28 @@ function forceAddNewSourceFiles(
     .filter((l) => l.length > 0);
   const toForceAdd: string[] = [];
   for (const rel of newFiles) {
-    const underScope = isUnderWritePaths(rel, declaredWritePaths, worktreeRoot);
-    if (underScope && isSourceNewFile(rel)) {
+    // Only files UNDER the node's declared write scope are candidates. An
+    // untracked-ignored file OUTSIDE the write scope is incidental churn the
+    // worker did not author as part of this change — node_modules (e.g.
+    // `node_modules/.bin/esbuild` created by running npm/vitest in the worktree),
+    // `dist/`, `.audit-tools/`, or another module's output. `git add -A` already
+    // skips all of it; it must NOT trip a fail-loud (doing so falsely rejected
+    // every node whose worker ran npm in its worktree). Skip it.
+    if (!isUnderWritePaths(rel, declaredWritePaths, worktreeRoot)) continue;
+    if (isSourceNewFile(rel)) {
       toForceAdd.push(rel);
       continue;
     }
-    if (underScope) {
-      return {
-        ok: false,
-        error:
-          `Worker created a new non-source (generated) file under its write scope: ${rel}. ` +
-          `Only source-extension new files are committed; a generated artifact must not land. ` +
-          `Refusing to commit a half-change.`,
-      };
-    }
+    // Under the declared write scope but NOT a source extension: a generated
+    // artifact (e.g. a `.tsbuildinfo` / generated `.d.ts`) a worker dropped under
+    // a source dir. This is the genuine CE-003 case — fail loudly rather than
+    // committing build output.
     return {
       ok: false,
       error:
-        `Worker created a new file OUTSIDE its declared write scope: ${rel}. ` +
-        `New files must fall under the block's write_paths. Refusing to commit a half-change.`,
+        `Worker created a new non-source (generated) file under its write scope: ${rel}. ` +
+        `Only source-extension new files are committed; a generated artifact must not land. ` +
+        `Refusing to commit a half-change.`,
     };
   }
   for (const rel of toForceAdd) {
