@@ -35,9 +35,18 @@ pipeline ONLY for risky/complex changes; trivial mechanical clusters run lean (o
 gate → ship), skipping the ~40-step ceremony. See project memory [[risk-tier-loop-laps-cheap-vs-heavy]] +
 [[log-all-friction-categories-every-lap]].
 
+**Lap 3 PAUSED mid-pipeline (2026-06-26) — make-the-loop-cheaper is bigger than scoped.** The full pipeline (correctly,
+for a risky routing change) caught TWO blocking design gaps before any code: (1) circularity — the routing signal can't
+use `changeClassification` (a pipeline output unavailable at the `decideNextStep` routing point); re-sourced in design to
+intake-available data (`--lean` + `affected_files` + a path-risk pattern set, fail-closed). (2) STILL OPEN — a
+document→`Finding` synthesis seam is needed: `buildLeanExtractedPlan`/implement are finding-driven, but document intake
+has only `affected_files {path,reason}`, no findings. Needs a design decision (reuse extraction vs new minimal synthesizer)
++ a fresh context. Lap-3 contract state is on disk at the design-repair point (resumable). Full analysis in `backlog.md`
+"Make the loop cheaper" → DESIGN FINDINGS.
+
 **Next (loop continues, run lean unless risky):**
-1. **Make-the-loop-cheaper product fix** (highest leverage — makes every future lap cheaper): extend `leanFastPath`
-   routing to document/conversational input + a change-tier routing gate. See `backlog.md` "Make the loop cheaper".
+1. **Resume lap 3 / make-the-loop-cheaper** — decide the document→Finding synthesis seam, finish the (paused) design
+   repair + implement + ship. Highest leverage (every future lap gets cheaper). See `backlog.md` "Make the loop cheaper".
 2. Remaining host-friction inventory items (A1-A3 ambiguous-direction, B1-B5 tool-should-decide, C2-C4, D1) in `backlog.md`.
 3. P0 follow-up: data-loss on a GENUINE fail-loud (quarantine worker edits before dropping the worktree).
 4. Forward tracks (run the risky ones — auto-phasing, granular-staleness DAG — through the FULL pipeline).
