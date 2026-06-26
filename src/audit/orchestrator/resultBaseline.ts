@@ -27,6 +27,7 @@ import {
   buildTaskContentSignature,
   contentKey,
   idempotencyKey,
+  splitDiscriminatorFromTaskId,
   type ResultEmitSource,
 } from "audit-tools/shared";
 import {
@@ -49,6 +50,13 @@ export interface LiveResultKeyInput {
   unit_id: string;
   lens: string;
   pass_id: string;
+  /**
+   * The result's task_id — its file-split sibling discriminator is derived from
+   * it (N-IDEMPOTENCY) so split siblings of one {unit_id, lens, pass_id}
+   * coordinate freshly compute DISTINCT live keys, matching what
+   * `stampLedgerKeys` stamped. Omitted ⇒ lone-base key (no split component).
+   */
+  task_id?: string;
   /** Tool-owned emit source (base | deepening | steward | redispatch). */
   source: ResultEmitSource;
   /** Required when `source === 'redispatch'`. */
@@ -73,6 +81,7 @@ export function deriveLiveResultKeys(input: LiveResultKeyInput): {
   const discriminator = buildResultContentDiscriminator({
     source: input.source,
     attempt: input.attempt,
+    split_discriminator: splitDiscriminatorFromTaskId(input.task_id, input.lens),
   });
   const coordinate = {
     unit_id: input.unit_id,
@@ -184,6 +193,7 @@ export function perElementStalenessVerdict(
       unit_id: coordinate.unit_id,
       lens: coordinate.lens,
       pass_id: coordinate.pass_id,
+      task_id: coordinate.task_id,
       source: coordinate.source,
       attempt: coordinate.attempt,
       task_content_signature: coordinate.task_content_signature,
@@ -254,6 +264,7 @@ function liveKeysForResult(
       unit_id: result.unit_id,
       lens: result.lens,
       pass_id: result.pass_id,
+      task_id: result.task_id,
       source: emitSourceFor(result),
       attempt: result.attempt,
       task_content_signature: taskContentSignatureForTask(task),
@@ -355,7 +366,13 @@ export function rekeyDriftedResults(
     let baseIdempotencyKey: string;
     let liveContentKey: string;
     try {
-      const discriminator = buildResultContentDiscriminator({ source: "base" });
+      const discriminator = buildResultContentDiscriminator({
+        source: "base",
+        split_discriminator: splitDiscriminatorFromTaskId(
+          result.task_id,
+          result.lens,
+        ),
+      });
       baseIdempotencyKey = idempotencyKey({
         ...coordinate,
         result_content_discriminator: discriminator,
