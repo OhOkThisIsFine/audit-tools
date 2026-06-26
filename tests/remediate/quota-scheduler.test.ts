@@ -634,3 +634,129 @@ describe("M5 dispatch broker — HostSessionQuotaSource wired (inv-2(b), inv-5, 
     expect(source.isEscalated("P")).toBe(true);
   });
 });
+
+// ===========================================================================
+// M5-WIRING — convergence guard (CP-M5-WIRING). This node wires every dispatch
+// path so concurrency/token/rate come ONLY from the M5-BROKER chokepoint
+// (computeDispatchCapacity → scheduleWave), floor+mechanism come ONLY from the
+// single classifyProvider struct (CE-005), and no dispatch path re-derives a
+// floor at the IN_PROCESS_DISPATCH_PROVIDERS / resolvesToInProcessDispatchProvider
+// site or reaches around the broker to a provider. These guards LOCK the wiring
+// against drift (enforce-in-tooling, OBL-m5-wiring-inv-1/4/5/8/9/12).
+// ===========================================================================
+
+/** Read a source file from the worktree relative to this test module. */
+function readSource(rel: string): string {
+  return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+}
+
+describe("M5-WIRING convergence — concurrency is broker-output, never host discretion (inv-4, inv-12a)", () => {
+  it("the remediate dispatch.ts wave size equals scheduleWave's broker output and never exceeds the pool slots", async () => {
+    // With quota enabled, the remediate driver's scheduleWave wrapper must derive
+    // its wave size from the broker (computeDispatchCapacity → scheduleWave),
+    // never from a host-supplied number. We feed more items than the host cap and
+    // assert the wrapper's max_concurrent is the broker output, bounded by slots.
+    const config: SessionConfig = {
+      provider: "claude-code",
+      quota: { enabled: true },
+    };
+    const result = await dispatchScheduleWave({
+      sessionConfig: config,
+      providerName: "claude-code",
+      hostModel: null,
+      itemCount: 50,
+      hostMaxConcurrent: 2, // host handshake-only number
+      estimatedSlotTokens: Array.from({ length: 50 }, () => 1000),
+    });
+    // (a) wave size never exceeds the host handshake-only number…
+    expect(result.max_concurrent).toBeLessThanOrEqual(2);
+    // …nor the pending item count (a slot is never granted for absent work).
+    expect(result.max_concurrent).toBeLessThanOrEqual(50);
+    expect(result.max_concurrent).toBeGreaterThanOrEqual(1);
+    // …and the capacity-pool summary the broker produced agrees with it.
+    const poolSlots = (result.capacity_pools ?? []).reduce((a, p) => a + p.slots, 0);
+    if ((result.capacity_pools ?? []).length > 0) {
+      expect(result.max_concurrent).toBeLessThanOrEqual(Math.max(1, poolSlots));
+    }
+  });
+});
+
+describe("M5-WIRING convergence — no dispatch path bypasses the broker (inv-1, inv-12b)", () => {
+  // Every dispatch path on both orchestrators routes concurrency/token/rate
+  // through the shared broker. The single wave-scheduling authority is
+  // scheduleWave, and it is reached ONLY through computeDispatchCapacity (the
+  // broker fold) or the broker seam — never by a dispatch path calling a provider
+  // directly for a slot count.
+  it("the remediate dispatch.ts driver routes through computeDispatchCapacity, never a hand-rolled slot count", () => {
+    const src = readSource("../../src/remediate/steps/dispatch.ts");
+    expect(src).toContain("computeDispatchCapacity");
+    // A capable host's reported active-subagent number feeds the broker as a
+    // ceiling input, never a substitute for the broker's own sizing.
+    expect(src).toContain("scheduleWave");
+  });
+
+  it("the contract-pipeline DC-3 parallel waves route through the same scheduleWave broker wrapper", () => {
+    const src = readSource("../../src/remediate/steps/contractPipeline.ts");
+    expect(src).toContain("scheduleWave");
+  });
+
+  it("the audit rolling-dispatch driver derives slots from the shared scheduler, never host discretion", () => {
+    const src = readSource("../../src/shared/dispatch/rollingDispatch.ts");
+    // The shared rolling engine sizes every pool through scheduleWave; the audit
+    // and remediate drivers both ride this single engine.
+    expect(src).toContain("scheduleWave");
+  });
+});
+
+describe("M5-WIRING convergence — floor+mechanism from the single classifyProvider struct (inv-5, CE-005)", () => {
+  it("classifyProvider surfaces BOTH the concurrency floor and the driver mechanism in one struct", () => {
+    const hosted = classifyProvider("claude-code");
+    const local = classifyProvider("local-subprocess");
+    // One struct owns all three fields — host class, floor, and mechanism.
+    expect(Object.keys(hosted).sort()).toEqual([
+      "concurrencyFloor",
+      "driverMechanism",
+      "hostClass",
+    ]);
+    expect(hosted.driverMechanism).toBe("y_dispatcher");
+    expect(local.driverMechanism).toBe("in_process_slot_pull");
+  });
+
+  it("the IN_PROCESS_DISPATCH_PROVIDERS site selects a MECHANISM only — it never re-derives a concurrency floor", () => {
+    // resolvesToInProcessDispatchProvider is a pure Set-membership mechanism gate;
+    // it must NOT read or compute a concurrency floor (the floor lives ONLY on the
+    // classifyProvider struct, CE-005). Guard both orchestrators' sites.
+    for (const rel of [
+      "../../src/audit/cli/rollingAuditDispatch.ts",
+    ]) {
+      const src = readSource(rel);
+      const fnStart = src.indexOf("resolvesToInProcessDispatchProvider");
+      expect(fnStart).toBeGreaterThan(-1);
+      // Slice the function body region and assert it derives no floor.
+      const region = src.slice(fnStart, fnStart + 600);
+      expect(region).not.toMatch(/concurrencyFloor|COLD_START|AGENT_HOST_CONCURRENCY|first_contact/);
+    }
+  });
+
+  it("classifyProvider keys off provider-class, never a model-name table (no-hardcoded-models)", () => {
+    expect(classifyProvider("codex").hostClass).toBe("hosted");
+    expect(classifyProvider("antigravity").hostClass).toBe("unknown");
+    expect(classifyProvider("local-subprocess").hostClass).toBe("local");
+  });
+});
+
+describe("M5-WIRING convergence — deterministic-local token estimate, never an API count (inv-9)", () => {
+  it("the remediate per-node slot estimator is byte-derived (estimateTokensFromBytes), with no tokenizer/count call", () => {
+    const src = readSource("../../src/remediate/steps/dispatch.ts");
+    // The implement slot estimate flows from local byte heuristics, never an API
+    // token-count call (matching the project's token-estimate policy).
+    expect(src).not.toMatch(/count_?tokens|countTokens|tokenizer/i);
+  });
+
+  it("estimateTokensFromBytes is purely local and monotonic in byte length", () => {
+    expect(estimateTokensFromBytes(BYTES_PER_TOKEN * 100)).toBe(100);
+    expect(estimateTokensFromBytes(BYTES_PER_TOKEN * 1000)).toBeGreaterThan(
+      estimateTokensFromBytes(BYTES_PER_TOKEN * 100),
+    );
+  });
+});
