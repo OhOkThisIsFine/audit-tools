@@ -10,13 +10,6 @@
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree, both global bins reinstalled to the live release.
 
-## Before the next `/remediate-code` run (one-time hygiene)
-
-- An **obsolete lap-3 contract-pipeline run** is paused on disk (`.audit-tools/remediation`, run
-  `loop-friction-burndown-c1-c4-d2-c5` → a follow-on intake). Its design was the *superseded* lean-path
-  framing. The next `next-step` will resume it as a stale run → `ignore`-close it (or reset the
-  remediation state) before starting fresh. (This is itself bug **#1** below.)
-
 ## Cadence & standing rules (don't re-derive)
 
 - **Risk-tier every lap** ([[risk-tier-loop-laps-cheap-vs-heavy]]): full adversarial contract pipeline only
