@@ -2052,6 +2052,9 @@ export async function promoteImplementationDagToExtractedPlan(
     const deps = ((node as { depends_on?: string[] }).depends_on ?? []).map(
       (depId) => toBlockId(depId),
     );
+    const touchedFiles = [
+      ...new Set(node.output_files ?? node.files_likely_touched ?? []),
+    ];
     return {
       block_id: toBlockId(nodeId),
       items: [nodeId],
@@ -2059,6 +2062,12 @@ export async function promoteImplementationDagToExtractedPlan(
       // wave-dispatched as independent — parallel_safe derives from depends_on.
       parallel_safe: deps.length === 0,
       dependencies: deps,
+      // touched_files is REQUIRED on the block contract; promote the node's
+      // declared write scope so the file-ownership scheduler can read it.
+      touched_files: touchedFiles,
+      ...(node.targeted_commands && node.targeted_commands.length > 0
+        ? { targeted_commands: [...node.targeted_commands] }
+        : {}),
     };
   });
 

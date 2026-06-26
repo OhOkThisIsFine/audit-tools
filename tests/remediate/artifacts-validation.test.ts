@@ -25,7 +25,14 @@ const plan = {
       evidence: ["src/a.ts:1 evidence"],
     },
   ],
-  blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true }],
+  blocks: [
+    {
+      block_id: "B-001",
+      items: ["F-001"],
+      parallel_safe: true,
+      touched_files: ["src/a.ts"],
+    },
+  ],
   project_type: "unknown",
   candidate_closing_actions: ["none"],
 };

@@ -1355,6 +1355,10 @@ function normalizeExtractedPlan(value: unknown): {
           return {
             parallel_safe: true,
             dependencies: [],
+            // touched_files is REQUIRED on the block contract; default to an
+            // empty array so a free-form block that omits it still validates,
+            // while an explicit value on `block` wins via the spread below.
+            touched_files: [],
             ...block,
           };
         })
@@ -1362,6 +1366,7 @@ function normalizeExtractedPlan(value: unknown): {
           block_id: `B-${String(index + 1).padStart(3, "0")}`,
           items: [finding.id],
           parallel_safe: true,
+          touched_files: finding.affected_files.map((af) => af.path),
         }));
   const dedup = deduplicateCrossLensFindings(findings);
   const dedupBlocks = fixupBlocksAfterDedup(

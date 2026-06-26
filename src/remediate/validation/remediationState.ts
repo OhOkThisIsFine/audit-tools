@@ -87,7 +87,12 @@ export function validateRemediationBlock(
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   issues.push(
-    ...requireKeys(value, path, ["block_id", "items", "parallel_safe"]),
+    ...requireKeys(value, path, [
+      "block_id",
+      "items",
+      "parallel_safe",
+      "touched_files",
+    ]),
   );
   if (!isRecord(value)) return issues;
 
@@ -96,6 +101,21 @@ export function validateRemediationBlock(
   }
   if (typeof value.parallel_safe !== "boolean") {
     pushValidationIssue(issues, `${path}.parallel_safe`, "Expected a boolean.");
+  }
+  // touched_files is REQUIRED and array-typed; an empty array is allowed (the
+  // block legitimately touches nothing extra), but an omitted field is rejected
+  // (requireKeys above) so producers cannot silently drop the surface
+  // declaration the file-ownership scheduler depends on (CE-001 chain head).
+  if (
+    value.touched_files !== undefined &&
+    (!Array.isArray(value.touched_files) ||
+      value.touched_files.some((f) => typeof f !== "string"))
+  ) {
+    pushValidationIssue(
+      issues,
+      `${path}.touched_files`,
+      "Expected an array of strings.",
+    );
   }
   if (
     value.dependencies !== undefined &&
