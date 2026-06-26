@@ -41,6 +41,30 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   by construction, not re-run-then-deduped. This is the natural partner to the append-only results ledger
   (results keyed by content hash → an unchanged task keeps its result at zero recompute), but it stands alone as a
   general DAG-model change applying to every derived artifact, not just results. (Ethan, 2026-06-24.)
+  - **Investigation 2026-06-25 — premise correction + the real blocker.** The per-element result-baseline seam
+    (`src/audit/orchestrator/resultBaseline.ts`: `perElementStalenessVerdict`, `deriveLiveResultKeys`,
+    `recordResultBaseline`, `isResultStaleAgainstBaseline`) is **fully built and tested but has ZERO production
+    callers** — `result_baselines` is only *carried forward* in `artifactMetadata.ts:149`, never *recorded* on
+    ingest nor *consumed* in `state.ts`. So per-result granular staleness does not run today; the premise that
+    it "works as the ledger's partner" is false. **Why it was left unconsumed (the real blocker):** the obvious
+    consumer — re-dispatch a task whose live task-content signature drifted from its baseline — is **semantically
+    unsound until O3 lands the redispatch-attempt counter.** `task_id` and `idempotency_key` are both
+    signature-STABLE (keyed on `{unit_id, lens, pass_id, path/source}`, NOT file content), so a content-drift
+    re-dispatch returns a result with the SAME `idempotency_key` → `appendResultsToLedger` no-ops (INV-2) → the
+    fresh findings are **dropped**, and the task would loop re-dispatching with no findings update until the
+    baseline refresh silences it. For the consumer to actually replace stale findings, a drifted re-dispatch must
+    carry `source: 'redispatch', attempt: N` (a DISTINCT idempotency_key so the ledger appends) — the
+    `emitSourceFor`/seam comments already anticipate this ("Re-dispatch attempts are not yet stamped on results;
+    when O3 adds an attempt counter it maps to `source: 'redispatch'`"). **Ordering, therefore:** (O3-redispatch)
+    stamp drifted re-dispatches with an attempt counter → distinct idempotency_key → ledger appends fresh findings;
+    THEN wire record-on-ingest (`refreshResultBaselines` over incoming results vs. live task content, persisted via
+    `computeArtifactMetadata`) + consume-in-derive (a drifted result's task_id treated as not-complete so it
+    re-dispatches, single-sourced across `state.ts` and `cli/dispatch/packetFilter.ts:buildPendingAuditTasks`).
+    Record half refreshes the baseline even on a no-op ledger append so the loop converges. The general
+    DAG-model extension (per-file coverage-matrix elements, per-element baselines for every derived artifact) is a
+    SEPARATE, larger track on top of the wired result path — `coverage_matrix` is per-file
+    (`CoverageFileRecord[]`) and `runPlanningExecutor` currently rebuilds + rewrites it whole, so per-element
+    re-derivation also needs an incremental planning executor, not just a staleness gate. (Ethan, 2026-06-25.)
 
 - **Codebase-wide review for churn / context / enforce-in-tooling — same lens, applied everywhere.** The
   append-only-ledger + granular-staleness + LLM-equivalence-gate work came from one perspective; run that same
