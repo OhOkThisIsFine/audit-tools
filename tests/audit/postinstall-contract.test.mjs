@@ -18,6 +18,12 @@ function runPostinstall(homeDir) {
         ...process.env,
         HOME: homeDir,
         USERPROFILE: homeDir,
+        // These tests assert on skill/permission seeding, not repo-visibility
+        // detection. Pin an explicit visibility so the deliverable-gitignore
+        // unknown-visibility warning never fires here (it would otherwise emit
+        // to stderr on a runner without `gh`, e.g. Linux CI). The visibility
+        // behavior itself is covered by tests/shared/gitignore-artifacts.test.mjs.
+        AUDIT_TOOLS_REPO_VISIBILITY: "private",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
