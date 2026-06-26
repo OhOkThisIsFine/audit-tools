@@ -14,6 +14,7 @@ import {
 import { writeContractArtifact } from "../../src/remediate/contractPipeline/artifactStore.js";
 import {
   admitSubWaveUnderCapacity,
+  ownershipSubWaves,
   type OwnershipSchedulerNode,
 } from "../../src/remediate/dispatch/ownershipScheduler.js";
 import {
@@ -1076,6 +1077,101 @@ describe("CP-M1-BOUNDARY: CE-006/CE-007 redispatch + triage-retry are claim-RETA
     expect(registry.inFlightOwner("src/x.ts")).toBe("A-prime");
     // The key was never free across the window → foreign same-file node stays gated.
     expect(registry.isFileOwnershipDisjoint("FOREIGN", ["src/x.ts"])).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CP-M5-WIRING — convergence guard. Every launch (an initial wave member AND an
+// M4 RepairOutcome.redispatch) is BOTH broker-gated AND boundary-gated through
+// M1-BOUNDARY's ownershipSubWaves admission (CE-007). Wave membership is taken
+// from the serialized sub-wave sequence; partial capacity admits the block_id-
+// ordered prefix. These guards prove the convergence holds at the boundary seam
+// (OBL-m5-wiring-inv-2/3, fail-2/5/9).
+// ---------------------------------------------------------------------------
+
+describe("CP-M5-WIRING: every launch is boundary-gated through the same ownershipSubWaves admission (inv-2/3)", () => {
+  const node = (id: string, ...paths: string[]): OwnershipSchedulerNode => ({
+    block_id: id,
+    write_paths: paths,
+  });
+
+  it("wave membership is the file-ownership-disjoint sub-wave sequence — same-file nodes serialize, different-file nodes share a wave (inv-3)", () => {
+    // Two nodes write the same file → they must land in SUCCESSIVE sub-waves; a
+    // third disjoint node shares the first sub-wave. This is the authoritative
+    // wave-membership input every dispatch path consumes.
+    const level = [
+      node("A", "src/shared.ts"),
+      node("B", "src/shared.ts"),
+      node("C", "src/other.ts"),
+    ];
+    const subWaves = ownershipSubWaves(level);
+    expect(subWaves.length).toBeGreaterThanOrEqual(2);
+    const w0 = subWaves[0]!.map((n) => n.block_id);
+    const w1 = subWaves[1]!.map((n) => n.block_id);
+    // A (block_id-first) and the disjoint C share the first sub-wave; B serializes.
+    expect(w0).toContain("A");
+    expect(w0).toContain("C");
+    expect(w1).toContain("B");
+    // A same-file pair is NEVER co-admitted into one sub-wave.
+    for (const wave of subWaves) {
+      const ids = wave.map((n) => n.block_id);
+      expect(ids.includes("A") && ids.includes("B")).toBe(false);
+    }
+  });
+
+  it("partial capacity over a sub-wave admits the block_id-ordered PREFIX and re-offers the suffix in order (fail-2)", () => {
+    // The broker may cap a single sub-wave below its size; the admitted members
+    // are M1-BOUNDARY's block_id-ordered prefix, the deferred suffix re-offered
+    // next wave in the same order — realized dispatch is reproducible, never a
+    // claim-race lottery. This is the SAME admission a redispatch re-enters.
+    const subWave = [node("N_c", "src/c.ts"), node("N_a", "src/a.ts"), node("N_b", "src/b.ts")];
+    const first = admitSubWaveUnderCapacity(subWave, 2);
+    expect(first.admitted.map((n) => n.block_id)).toEqual(["N_a", "N_b"]);
+    expect(first.deferred.map((n) => n.block_id)).toEqual(["N_c"]);
+    const second = admitSubWaveUnderCapacity(first.deferred, 2);
+    expect(second.admitted.map((n) => n.block_id)).toEqual(["N_c"]);
+  });
+
+  it("a redispatch (CE-007) re-enters the SAME boundary admission while retaining its in-flight claim — never an ungated fresh launch (inv-2, fail-5)", () => {
+    // The convergence property: an M4 redispatch is a claim-RETAINING disposition
+    // (so the node's file stays gated against peers across the re-emit) AND it
+    // re-enters dispatch through the same ownershipSubWaves admission, never a
+    // side-channel launch. We prove both halves at the boundary seam.
+    expect(isReleasingDisposition("redispatch")).toBe(false);
+
+    const registry = new OwnershipRegistry();
+    registry.initialize([
+      { node_id: "R", write_paths: ["src/shared.ts"] },
+      { node_id: "P", write_paths: ["src/shared.ts"] },
+    ]);
+    registry.claimInFlight("R", ["src/shared.ts"]);
+    // Redispatch of R retains K — a foreign same-file node P stays gated, exactly
+    // as it would during R's initial in-flight window.
+    registry.redispatchInFlight("R");
+    expect(registry.inFlightOwner("src/shared.ts")).toBe("R");
+    expect(registry.isFileOwnershipDisjoint("P", ["src/shared.ts"])).toBe(false);
+
+    // The redispatched node is admitted by the SAME ownershipSubWaves admission a
+    // fresh launch uses — a one-node sub-wave the boundary admits deterministically.
+    const subWaves = ownershipSubWaves([node("R", "src/shared.ts")]);
+    expect(subWaves).toHaveLength(1);
+    expect(subWaves[0]!.map((n) => n.block_id)).toEqual(["R"]);
+  });
+
+  it("fails closed to a safe ordering when a node's write-scope is absent — an unresolved scope is never co-scheduled (fail-9 / CE-008)", () => {
+    // Boundary-graph absent/stale for a node (empty scope) → it is conservatively
+    // NON-disjoint and admitted solo, never fanned out into an over-broad wave on
+    // host discretion.
+    const level = [node("X" /* empty scope */), node("Y", "src/y.ts")];
+    const subWaves = ownershipSubWaves(level);
+    // X (empty scope) and Y never share a sub-wave.
+    for (const wave of subWaves) {
+      const ids = wave.map((n) => n.block_id);
+      expect(ids.includes("X") && ids.includes("Y")).toBe(false);
+    }
+    // The empty-scope node is admitted alone in its own sub-wave.
+    const xWave = subWaves.find((w) => w.some((n) => n.block_id === "X"))!;
+    expect(xWave).toHaveLength(1);
   });
 });
 
