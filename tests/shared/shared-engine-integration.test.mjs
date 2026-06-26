@@ -3,7 +3,7 @@
  *
  * Five tests:
  *   1. quota-only throttling — max_concurrent bounded exclusively by RPM
- *   2. capability-tier routing — classifyProvider + agentHostFallbackConcurrency
+ *   2. capability-tier routing — classifyProvider struct (hostClass + concurrencyFloor)
  *   3. free_form_intent never emitted verbatim by shared-layer prompt builders
  *   4. emptied provider pool reaches waiting_for_provider terminal (pending — ProviderPool)
  *   5. per-clause escape-hatch for unencodable hard clause in compound intent
@@ -12,12 +12,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { scheduleWave } = await import("../../src/shared/quota/scheduler.ts");
-const {
-  classifyProvider,
-  agentHostFallbackConcurrency,
-  DEFAULT_AGENT_HOST_CONCURRENCY,
-} = await import("../../src/shared/quota/limits.ts");
+const { scheduleWave, classifyProvider } = await import(
+  "../../src/shared/quota/scheduler.ts"
+);
 const { buildCacheablePrompt } = await import("../../src/shared/prompts.ts");
 const { filterNewProviders, advancePausedState } = await import("../../src/shared/rolling/pausedState.ts");
 const { interpretIntent } = await import("../../src/shared/intent/clauseInterpreter.ts");
@@ -74,44 +71,43 @@ test("quota-only throttling: max_concurrent bounded exclusively by RPM when it i
 // 2. Capability-tier routing
 // ---------------------------------------------------------------------------
 
-test("capability-tier routing: classifyProvider returns correct tier for every ResolvedProviderName", () => {
-  assert.equal(classifyProvider("claude-code"), "hosted", "claude-code → hosted");
-  assert.equal(classifyProvider("codex"), "hosted", "codex → hosted");
-  assert.equal(classifyProvider("opencode"), "local", "opencode → local");
+test("capability-tier routing: classifyProvider returns correct host-class for every ResolvedProviderName", () => {
+  assert.equal(classifyProvider("claude-code").hostClass, "hosted", "claude-code → hosted");
+  assert.equal(classifyProvider("codex").hostClass, "hosted", "codex → hosted");
+  assert.equal(classifyProvider("opencode").hostClass, "local", "opencode → local");
   assert.equal(
-    classifyProvider("local-subprocess"),
+    classifyProvider("local-subprocess").hostClass,
     "local",
     "local-subprocess → local",
   );
   assert.equal(
-    classifyProvider("subprocess-template"),
+    classifyProvider("subprocess-template").hostClass,
     "unknown",
     "subprocess-template → unknown",
   );
-  assert.equal(classifyProvider("vscode-task"), "unknown", "vscode-task → unknown");
-  assert.equal(classifyProvider("antigravity"), "unknown", "antigravity → unknown");
+  assert.equal(classifyProvider("vscode-task").hostClass, "unknown", "vscode-task → unknown");
+  assert.equal(classifyProvider("antigravity").hostClass, "unknown", "antigravity → unknown");
 });
 
-test("capability-tier routing: agentHostFallbackConcurrency returns expected values", () => {
+test("capability-tier routing: classifyProvider.concurrencyFloor lifts capable agent hosts off the cold-start floor", () => {
+  // Capable agent hosts (claude-code / vscode-task) share the lifted agent-host
+  // floor; everything else stays at the conservative cold-start floor — all
+  // surfaced ONLY via the struct's concurrencyFloor (no separable constant).
+  const agentFloor = classifyProvider("claude-code").concurrencyFloor;
+  assert.ok(agentFloor > 3, "claude-code floor lifted above the cold-start floor");
   assert.equal(
-    agentHostFallbackConcurrency("claude-code"),
-    DEFAULT_AGENT_HOST_CONCURRENCY,
-    "claude-code should return DEFAULT_AGENT_HOST_CONCURRENCY",
+    classifyProvider("vscode-task").concurrencyFloor,
+    agentFloor,
+    "vscode-task shares the agent-host floor",
   );
-  assert.equal(
-    agentHostFallbackConcurrency("vscode-task"),
-    DEFAULT_AGENT_HOST_CONCURRENCY,
-    "vscode-task should return DEFAULT_AGENT_HOST_CONCURRENCY",
+  // codex / opencode are not capable agent hosts → conservative cold-start floor.
+  assert.ok(
+    classifyProvider("codex").concurrencyFloor < agentFloor,
+    "codex stays at the cold-start floor",
   );
-  assert.equal(
-    agentHostFallbackConcurrency("codex"),
-    1,
-    "codex should return 1",
-  );
-  assert.equal(
-    agentHostFallbackConcurrency("opencode"),
-    1,
-    "opencode should return 1",
+  assert.ok(
+    classifyProvider("opencode").concurrencyFloor < agentFloor,
+    "opencode stays at the cold-start floor",
   );
 });
 

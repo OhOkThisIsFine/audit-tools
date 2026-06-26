@@ -123,7 +123,7 @@ describe('cross-node seam-signature boundary guard (CP-NODE-2)', () => {
     // Generalized no-PromiseLike guard across every pinned key/derivation entrypoint.
     assertNotPromiseLike(estimateSlotTokens(slot('s1', 512)), 'estimateSlotTokens()');
     assertNotPromiseLike(
-      classifyCapableHost({ sessionConfig }),
+      classifyCapableHost({ providerName: "claude-code", sessionConfig }),
       'classifyCapableHost()',
     );
     assertNotPromiseLike(
@@ -206,7 +206,7 @@ describe('cross-node seam-signature boundary guard (CP-NODE-2)', () => {
     const tokens = estimateSlotTokens(slot('s1', 4096));
     expect(typeof tokens).toBe('number');
 
-    const capable = classifyCapableHost({ sessionConfig });
+    const capable = classifyCapableHost({ providerName: "claude-code", sessionConfig });
     expect(typeof capable).toBe('boolean');
   });
 

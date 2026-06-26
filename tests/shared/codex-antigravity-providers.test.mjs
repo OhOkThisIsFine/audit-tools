@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { PROVIDER_NAMES } = await import("audit-tools/shared/types/sessionConfig");
-const { classifyProvider } = await import("audit-tools/shared/quota/limits");
+const { classifyProvider } = await import("audit-tools/shared/quota/scheduler");
 const {
   resolveFreshSessionProviderName,
   createFreshSessionProvider,
@@ -206,8 +206,8 @@ test("CodexProvider.launch omits --model when unset (codex default applies)", as
 });
 
 test("classifyProvider maps codex to hosted and antigravity to unknown", () => {
-  assert.equal(classifyProvider("codex"), "hosted");
-  assert.equal(classifyProvider("antigravity"), "unknown");
+  assert.equal(classifyProvider("codex").hostClass, "hosted");
+  assert.equal(classifyProvider("antigravity").hostClass, "unknown");
 });
 
 // Guard: the bare-availability codex tie-break is last-resort only — it must NOT

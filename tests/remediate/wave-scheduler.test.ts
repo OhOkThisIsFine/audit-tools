@@ -523,13 +523,19 @@ describe("estimateSlotTokens (deterministic-local)", () => {
 describe("classifyCapableHost (off the cold-start floor)", () => {
   it("a first-contact host with no signal is NOT capable", () => {
     expect(
-      classifyCapableHost({ sessionConfig: {}, hostConcurrencyLimit: null, quotaStateEntry: null }),
+      classifyCapableHost({
+        providerName: "antigravity",
+        sessionConfig: {},
+        hostConcurrencyLimit: null,
+        quotaStateEntry: null,
+      }),
     ).toBe(false);
   });
 
   it("a host reporting a ceiling above the floor IS capable", () => {
     expect(
       classifyCapableHost({
+        providerName: "antigravity",
         sessionConfig: {},
         hostConcurrencyLimit: { active_subagents: 8, source: "session_config" } as any,
         quotaStateEntry: null,
@@ -540,6 +546,7 @@ describe("classifyCapableHost (off the cold-start floor)", () => {
   it("a host reporting a ceiling at/below the floor is NOT capable", () => {
     expect(
       classifyCapableHost({
+        providerName: "antigravity",
         sessionConfig: { quota: { first_contact_concurrency: 3 } } as any,
         hostConcurrencyLimit: { active_subagents: 3, source: "session_config" } as any,
         quotaStateEntry: null,
@@ -552,7 +559,12 @@ describe("classifyCapableHost (off the cold-start floor)", () => {
       buckets: { "6": { weight: 5, last_success_at: "2026-01-01T00:00:00.000Z" } } as any,
     });
     expect(
-      classifyCapableHost({ sessionConfig: {}, hostConcurrencyLimit: null, quotaStateEntry: entry }),
+      classifyCapableHost({
+        providerName: "antigravity",
+        sessionConfig: {},
+        hostConcurrencyLimit: null,
+        quotaStateEntry: entry,
+      }),
     ).toBe(true);
   });
 });
@@ -571,10 +583,10 @@ describe("classifyCapableHost (off the cold-start floor)", () => {
 describe("F4 inv-7 — F4-owned classification + driver-tier selection", () => {
   it("classifyProvider is F4-owned and maps hosted agent backends to 'hosted'", () => {
     // F4's own classifier — no F3 descriptor involved.
-    expect(classifyProvider("claude-code")).toBe("hosted");
-    expect(classifyProvider("codex")).toBe("hosted");
-    expect(classifyProvider("local-subprocess")).toBe("local");
-    expect(classifyProvider("antigravity")).toBe("unknown");
+    expect(classifyProvider("claude-code").hostClass).toBe("hosted");
+    expect(classifyProvider("codex").hostClass).toBe("hosted");
+    expect(classifyProvider("local-subprocess").hostClass).toBe("local");
+    expect(classifyProvider("antigravity").hostClass).toBe("unknown");
   });
 
   it("driver tier follows F4's classification of the INJECTED host concurrency signal", () => {
@@ -585,12 +597,15 @@ describe("F4 inv-7 — F4-owned classification + driver-tier selection", () => {
       hostModel: null,
       slots: [slot("n1", 500), slot("n2", 500)],
     };
+    // The capability threshold is F4's OWN struct floor for this provider
+    // (classifyProvider().concurrencyFloor) — the single classification source.
+    const floor = classifyProvider("claude-code").concurrencyFloor;
 
-    // Host roster reports a ceiling at/below the cold-start floor → slot-pull
-    // tier (not yet capable): F4 classifies it off its OWN floor.
+    // Host roster reports a ceiling at/below the floor → slot-pull tier (not yet
+    // capable): F4 classifies it off its OWN struct floor.
     const coldStart = broker.broker({
       ...base,
-      hostConcurrencyLimit: { active_subagents: 1, source: "session_config" } as any,
+      hostConcurrencyLimit: { active_subagents: floor, source: "session_config" } as any,
     });
     expect(coldStart.capableHost).toBe(false);
 
@@ -598,7 +613,7 @@ describe("F4 inv-7 — F4-owned classification + driver-tier selection", () => {
     // the tier flips purely from F4's classification of the injected signal.
     const capable = broker.broker({
       ...base,
-      hostConcurrencyLimit: { active_subagents: 8, source: "session_config" } as any,
+      hostConcurrencyLimit: { active_subagents: floor + 1, source: "session_config" } as any,
     });
     expect(capable.capableHost).toBe(true);
   });
@@ -1077,7 +1092,7 @@ describe("F4 fail-2 [CP-NODE-50]: capable host off the floor, unknown host stays
     // the injected host ceiling (8 > floor), not the provider type or any
     // external descriptor. antigravity classifies "unknown" yet a reported
     // ceiling above the floor still makes it capable and sizes the wave to 8.
-    expect(classifyProvider("antigravity")).toBe("unknown");
+    expect(classifyProvider("antigravity").hostClass).toBe("unknown");
 
     const slots = Array.from({ length: CAPABLE_CEILING }, (_, i) =>
       slot(`n${i}`, 500),
@@ -1100,6 +1115,7 @@ describe("F4 fail-2 [CP-NODE-50]: capable host off the floor, unknown host stays
     // And F4's own capability classifier agrees, off the SAME floor.
     expect(
       classifyCapableHost({
+        providerName: "antigravity",
         sessionConfig: {},
         hostConcurrencyLimit: {
           active_subagents: CAPABLE_CEILING,
@@ -1115,7 +1131,7 @@ describe("F4 fail-2 [CP-NODE-50]: capable host off the floor, unknown host stays
     // An unknown provider with NO reported ceiling and NO learned evidence is a
     // first-contact host: classifyProvider is F4-owned, and with no head-room
     // signal the capability classifier must hold it at the floor (not capable).
-    expect(classifyProvider("antigravity")).toBe("unknown");
+    expect(classifyProvider("antigravity").hostClass).toBe("unknown");
 
     const slots = Array.from({ length: CAPABLE_CEILING }, (_, i) =>
       slot(`n${i}`, 500),
@@ -1136,6 +1152,7 @@ describe("F4 fail-2 [CP-NODE-50]: capable host off the floor, unknown host stays
     // evidence → stays at the floor.
     expect(
       classifyCapableHost({
+        providerName: "antigravity",
         sessionConfig: {},
         hostConcurrencyLimit: null,
         quotaStateEntry: null,
