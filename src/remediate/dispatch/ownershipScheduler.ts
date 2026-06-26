@@ -116,3 +116,31 @@ export function ownershipSubWaves(
 
   return subWaves;
 }
+
+/**
+ * CE-003 (deterministic partial admission): when the broker caps a single
+ * sub-wave so `total_slots < subWave.length`, the admitted subset is the
+ * block_id-ordered PREFIX of the sub-wave — the first `total_slots` nodes in the
+ * SAME INV-SOO-08 ascending-block_id order — NOT whichever nodes happen to win
+ * a ClaimRegistry race. The deferred suffix is returned so the caller re-offers
+ * it (in the same order) on the next wave. Because both the admitted prefix and
+ * the deferred suffix are block_id-ordered slices of a deterministic sub-wave,
+ * realized dispatch — which work lands this wave vs. is deferred — is
+ * reproducible across two runs over identical state, never a claim-race lottery.
+ *
+ * Pure: re-sorts the sub-wave by the canonical INV-SOO-08 tie-break before
+ * slicing, so the prefix is independent of the order the sub-wave was passed in.
+ * A non-positive `totalSlots` admits nothing; a `totalSlots >= subWave.length`
+ * admits the whole sub-wave with an empty deferred suffix.
+ */
+export function admitSubWaveUnderCapacity(
+  subWave: OwnershipSchedulerNode[],
+  totalSlots: number,
+): { admitted: OwnershipSchedulerNode[]; deferred: OwnershipSchedulerNode[] } {
+  const ordered = [...subWave].sort((a, b) => a.block_id.localeCompare(b.block_id));
+  const slots = Math.max(0, Math.floor(totalSlots));
+  return {
+    admitted: ordered.slice(0, slots),
+    deferred: ordered.slice(slots),
+  };
+}
