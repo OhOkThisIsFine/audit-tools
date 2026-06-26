@@ -3,8 +3,8 @@
 > The single rolling cross-machine handoff: current published state + anything in flight. Durable how-to is in
 > `CLAUDE.md`; open work in [`docs/backlog.md`](backlog.md).
 
-**Live:** `audit-tools@0.30.16` on npm (`latest`). `main` == `audit-tools/main`, clean tree, both global bins → 0.30.16.
-CI publish run: https://github.com/OhOkThisIsFine/audit-tools/actions/runs/28264441942
+**Live:** `audit-tools@0.30.18` on npm (`latest`). `main` == `audit-tools/main`, clean tree, both global bins → 0.30.18.
+Session shipped 0.30.16 (accept-node hardening) → 0.30.17 (P0 fix for it) → 0.30.18 (loop-friction C1/C4/D2/C5, lean).
 
 **In flight:** an autonomous `/loop` of `/remediate-code docs/backlog.md` (self-paced, one bounded lap at a time → `/ship`
 → reinstall → next lap) is running until forward-tracks + friction settle. **Lap 2 surfaced a P0 regression in lap-1's
@@ -30,11 +30,17 @@ and pauses for a host scope/approval decision.
 `verify:release` (check + check:doc-manifest + test + verify:hosts + 2 smokes). Run `env -u CLAUDECODE npm run
 verify:release` locally **before tagging** to catch doc-manifest / smoke failures `check` alone misses.
 
-**Next (loop continues):**
-1. Lap 2 scope (host-picked at intake): a bounded foundation toward the **headline auto-phasing** forward track, or the
-   **repair-cap → convergence-termination** track (lap 1 converged within the N=2 cap but a 3rd new CE would have been
-   cut — real data point), or another Open-bugs/friction item. See [`backlog.md`](backlog.md).
-2. The lap-1 host-friction inventory (A/B/C/D/E in `backlog.md`) is itself fixable-tooling backlog to burn down.
+**Loop cadence (Ethan, 2026-06-26): "keep looping but cheaper" — risk-tier each lap.** Full adversarial contract
+pipeline ONLY for risky/complex changes; trivial mechanical clusters run lean (one implementation agent → full-suite
+gate → ship), skipping the ~40-step ceremony. See project memory [[risk-tier-loop-laps-cheap-vs-heavy]] +
+[[log-all-friction-categories-every-lap]].
+
+**Next (loop continues, run lean unless risky):**
+1. **Make-the-loop-cheaper product fix** (highest leverage — makes every future lap cheaper): extend `leanFastPath`
+   routing to document/conversational input + a change-tier routing gate. See `backlog.md` "Make the loop cheaper".
+2. Remaining host-friction inventory items (A1-A3 ambiguous-direction, B1-B5 tool-should-decide, C2-C4, D1) in `backlog.md`.
+3. P0 follow-up: data-loss on a GENUINE fail-loud (quarantine worker edits before dropping the worktree).
+4. Forward tracks (run the risky ones — auto-phasing, granular-staleness DAG — through the FULL pipeline).
 
 **Release:** `env -u CLAUDECODE npm run release:patch:publish` (bumps + tags `vX.Y.Z` + GitHub Release → OIDC
 CI publishes → waits for npm). Recover a bad attempt: `gh release delete vX.Y.Z --cleanup-tag`, forward-bump,
