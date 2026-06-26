@@ -496,6 +496,30 @@ describe("mergeBlocksSharingFiles", () => {
     expect(merged).toHaveLength(2);
   });
 
+  it("CE-008: merges blocks citing one physical file under different spellings", () => {
+    // `src/x.ts` vs `./src/x.ts` are the SAME physical file; comparing raw
+    // strings would leave them in separate parallel blocks that clobber it.
+    // Pinning the share check to the M1-BOUNDARY canonical identity unions them.
+    const findings = [f("F-1", "src/x.ts"), f("F-2", "./src/x.ts")];
+    const blocks = [
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
+      { block_id: "B-002", items: ["F-2"], parallel_safe: true },
+    ];
+    const merged = mergeBlocksSharingFiles(blocks, findings as any, "/repo");
+    expect(merged).toHaveLength(1);
+    expect(merged[0].items.sort()).toEqual(["F-1", "F-2"]);
+  });
+
+  it("CE-008: distinct files under different spellings still do NOT merge", () => {
+    const findings = [f("F-1", "src/x.ts"), f("F-2", "./src/y.ts")];
+    const blocks = [
+      { block_id: "B-001", items: ["F-1"], parallel_safe: true },
+      { block_id: "B-002", items: ["F-2"], parallel_safe: true },
+    ];
+    const merged = mergeBlocksSharingFiles(blocks, findings as any, "/repo");
+    expect(merged).toHaveLength(2);
+  });
+
   it("remaps an external dependency onto the merged block id", () => {
     // B-001 and B-002 share a file and merge to B-001; B-003 depended on B-002,
     // so after the merge it must depend on B-001 instead.
@@ -1011,6 +1035,26 @@ describe("splitBlocksByContextBudget — directory path exclusion (FINDING-014)"
     const findings = [
       mkFinding("FA", "A", { files: ["src/shared.ts"], evidence: ["e"] }),
       mkFinding("FB", "B", { files: ["src/shared.ts"], evidence: ["e"] }),
+    ];
+    const blocks = [{ block_id: "B-001", items: ["FA", "FB"], parallel_safe: true }];
+
+    const result = splitBlocksByContextBudget(blocks as any, findings as any, DIR_TEST_DIR, 1_000_000);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].items.sort()).toEqual(["FA", "FB"].sort());
+  });
+
+  it("CE-008: same physical file under two spellings groups via canonical overlap", async () => {
+    // FA cites `src/shared.ts`, FB cites `./src/shared.ts` — one physical file.
+    // Canonical overlap keying unions them into ONE group so they never split
+    // into parallel sub-blocks that clobber it. Raw-string keying would treat the
+    // two spellings as distinct files (no overlap) and could split them apart.
+    await mkdir(join(DIR_TEST_DIR, "src"), { recursive: true });
+    await writeFile(join(DIR_TEST_DIR, "src", "shared.ts"), "// small", "utf8");
+
+    const findings = [
+      mkFinding("FA", "A", { files: ["src/shared.ts"], evidence: ["e"] }),
+      mkFinding("FB", "B", { files: ["./src/shared.ts"], evidence: ["e"] }),
     ];
     const blocks = [{ block_id: "B-001", items: ["FA", "FB"], parallel_safe: true }];
 
