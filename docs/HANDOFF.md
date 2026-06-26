@@ -3,21 +3,31 @@
 > The single rolling cross-machine handoff: current published state + anything in flight. Durable how-to is in
 > `CLAUDE.md`; open work in [`docs/backlog.md`](backlog.md).
 
-**Live:** `audit-tools@0.30.7` on npm (`latest`). `main == audit-tools/main` (remote is `audit-tools`, not
-`origin`), both bins → 0.30.7.
+**Live:** `audit-tools@0.30.9` on npm (`latest`). `main == origin/main` (this checkout's remote is `origin`),
+clean tree, both bins → 0.30.9. CI publish run: https://github.com/OhOkThisIsFine/audit-tools/actions/runs/28208489202
 
-**In flight:** `fix(audit): confirm_intent regression` — committed `20964a4`, not yet pushed or published.
+**In flight:** nothing — clean, verified, pushed, published, global bins reinstalled at 0.30.9.
 
-**Last landed (2026-06-25, not yet published): confirm_intent regression fix (two root causes).**
-- `promoteFinalAuditReport` deletes `artifactsDir` after promoting. Second `next-step` found empty dir →
-  fold replayed → `confirm_intent`. Fix: write `{...state, status:"complete"}` sentinel back to
-  `audit_state.json` (recreated by writeJsonFile). Force `status:"complete"` — the `state` arg to
-  `buildTerminalStep` may carry `status:"active"` (captured pre-executor).
-- `decideAuditFrictionCloseout` called AFTER promotion → friction dir already deleted → returned
-  `status:"ready"`. Fix: call friction triage BEFORE promotion in both terminal paths.
-- Tests: `nextStepUntilPresentReport` needed `mkdir(dirname(friction_record))` before writing observations.
-- Net: fixed 4 tests (3 completion + present_report status). 3 pre-existing failures remain
-  (2 narrative, 1 FINDING-018 write_paths).
+**Last landed (2026-06-25, shipped in 0.30.9): confirm_intent regression — proper fix (deferred promotion).**
+- Root cause: `promoteFinalAuditReport` deletes `artifactsDir`, and it ran on the friction-"ready" step
+  (before the host finished triage). The host then wrote `open_observations` into the otherwise-empty
+  recreated dir and called `next-step` → fold replayed → `confirm_intent`.
+- Fix: `promoteIfFrictionSatisfied()` in `nextStepHelpers.ts` — promote (and delete `artifactsDir`) ONLY
+  once `triage.action !== "dispose"`. While friction pending, keep the in-place report + leave artifactsDir
+  intact so the next call re-evaluates triage cleanly. `audit_state.json` is already persisted complete by
+  the last executor, so no write-back needed; a truly-complete rerun still starts fresh (verified by the
+  packaged smoke). Single-sourced across both terminal paths.
+- An earlier write-back band-aid (committed `20964a4`) was superseded — it masked the replay but broke
+  "rerun after completion starts fresh" (the packaged smoke caught it).
+- Also fixed (regressions in unpushed commits, 0.30.7 was green): 2 narrative tests + FINDING-018 write_paths
+  (now 2 paths: per-task + packetResultPath) + packaged-audit smoke friction loop + 5 dead doc-manifest rows
+  (`check:doc-manifest`, part of full CI `verify:release`, was failing on them — the local pre-tag gate only
+  runs `check`, so it slipped through to the first failed CI publish of v0.30.8; v0.30.8 was deleted + skipped).
+- Full suite green: node:test 3266 pass / 0 fail (11 skipped), vitest green, all 4 smokes pass.
+
+**Trap learned this sprint:** the release script's local pre-tag gate runs only `npm run check`, but CI runs the
+full `verify:release` (check + check:doc-manifest + test + verify:hosts + 2 smokes). Run `env -u CLAUDECODE npm
+run verify:release` locally before tagging to catch doc-manifest / smoke failures that `check` alone misses.
 
 **Previously shipped (0.30.7): rolling-dispatch same-file merge-serialization fix (a)+(c).** `main` carries:
 - **(a)** file-ownership-disjoint wave scheduling — `src/remediate/dispatch/ownershipScheduler.ts` (new) +
@@ -41,8 +51,8 @@ ledger, friction triage, repair seam, with tests) and shipped in the 0.30.x line
 empty; the only unshipped remediation-program item is the **mechanical multi-goal decompose + boundary-enforce**
 forward track (the host still hand-scopes large inputs to one phase).
 
-**Next:** push + publish patch bump for the regression fix. Use `/ship`. Then pick up the next forward
-track from [`backlog.md`](backlog.md) (mechanical multi-goal decompose + boundary-enforce remediator).
+**Next — nothing pending.** Pick up the next forward track from [`backlog.md`](backlog.md) (mechanical
+multi-goal decompose + boundary-enforce remediator is the highest-leverage open item).
 
 **Release:** `env -u CLAUDECODE npm run release:patch:publish` (bumps + tags `vX.Y.Z` + GitHub Release → OIDC
 CI publishes → waits for npm). Recover a bad attempt: `gh release delete vX.Y.Z --cleanup-tag`, forward-bump,
