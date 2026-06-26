@@ -12,6 +12,14 @@ import {
   CONTRACT_PIPELINE_PHASE_ORDER,
 } from "../../src/remediate/steps/contractPipelinePrompts.js";
 import { writeContractArtifact } from "../../src/remediate/contractPipeline/artifactStore.js";
+import {
+  admitSubWaveUnderCapacity,
+  type OwnershipSchedulerNode,
+} from "../../src/remediate/dispatch/ownershipScheduler.js";
+import {
+  OwnershipRegistry,
+  isReleasingDisposition,
+} from "../../src/remediate/dispatch/ownershipRegistry.js";
 import { intakePaths } from "../../src/remediate/intake.js";
 import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
@@ -976,6 +984,98 @@ describe("contract-pipeline validators — shared envelope guard (MNT-86b18f1b)"
         `${name} must flag a contract_version mismatch`,
       ).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CP-M1-BOUNDARY — file-ownership boundary enforcement (INV-SOO).
+// CE-003 deterministic partial admission (block_id-ordered PREFIX) +
+// CE-006/CE-007 claim-retaining triage-retry / redispatch dispositions.
+// ---------------------------------------------------------------------------
+
+describe("CP-M1-BOUNDARY: CE-003 partial-capacity admission is the block_id-ordered PREFIX", () => {
+  const wave = (...ids: string[]): OwnershipSchedulerNode[] =>
+    ids.map((id) => ({ block_id: id, write_paths: [`src/${id}.ts`] }));
+
+  it("with total_slots=2 over [B_a,B_b,B_c] the admitted set is exactly {B_a,B_b} on every run", () => {
+    const sub = wave("B_a", "B_b", "B_c");
+    const run1 = admitSubWaveUnderCapacity(sub, 2);
+    const run2 = admitSubWaveUnderCapacity([...sub].reverse(), 2);
+    expect(run1.admitted.map((n) => n.block_id)).toEqual(["B_a", "B_b"]);
+    expect(run1.deferred.map((n) => n.block_id)).toEqual(["B_c"]);
+    // Input order must not leak: reversed input yields the identical prefix.
+    expect(run2.admitted.map((n) => n.block_id)).toEqual(["B_a", "B_b"]);
+    expect(run2.deferred.map((n) => n.block_id)).toEqual(["B_c"]);
+  });
+
+  it("the deferred suffix is re-offered next wave in the SAME block_id order", () => {
+    const sub = wave("B_1", "B_2", "B_3", "B_4");
+    const first = admitSubWaveUnderCapacity(sub, 2);
+    expect(first.admitted.map((n) => n.block_id)).toEqual(["B_1", "B_2"]);
+    // Next wave re-offers only the deferred suffix, still block_id-ordered.
+    const second = admitSubWaveUnderCapacity(first.deferred, 2);
+    expect(second.admitted.map((n) => n.block_id)).toEqual(["B_3", "B_4"]);
+    expect(second.deferred).toHaveLength(0);
+  });
+
+  it("a cap >= sub-wave size admits everything with an empty deferred suffix; a non-positive cap admits nothing", () => {
+    const sub = wave("B_a", "B_b");
+    const full = admitSubWaveUnderCapacity(sub, 5);
+    expect(full.admitted).toHaveLength(2);
+    expect(full.deferred).toHaveLength(0);
+    const none = admitSubWaveUnderCapacity(sub, 0);
+    expect(none.admitted).toHaveLength(0);
+    expect(none.deferred).toHaveLength(2);
+  });
+});
+
+describe("CP-M1-BOUNDARY: CE-006/CE-007 redispatch + triage-retry are claim-RETAINING (INV-SOO-07/10)", () => {
+  it("isReleasingDisposition enumerates redispatch and triage-retry hand-off as claim-RETAINING", () => {
+    // Releasing dispositions free the claim.
+    for (const d of ["merged", "blocked_final", "abandoned", "failed_no_retry", "no_op_satisfied"] as const) {
+      expect(isReleasingDisposition(d)).toBe(true);
+    }
+    // Claim-retaining dispositions keep it held — CE-006 hand-off + CE-007 redispatch.
+    for (const d of ["blocked_pending_triage", "triage_retry_handoff", "redispatch"] as const) {
+      expect(isReleasingDisposition(d)).toBe(false);
+    }
+  });
+
+  it("CE-007: redispatchInFlight retains the in-flight claim so a foreign same-file node stays gated", () => {
+    const registry = new OwnershipRegistry();
+    registry.initialize([{ node_id: "A", write_paths: ["src/x.ts"] }]);
+    registry.claimInFlight("A", ["src/x.ts"]);
+    // A redispatch of A does NOT release K — A keeps the claim across the re-emit.
+    registry.redispatchInFlight("A");
+    expect(registry.inFlightOwner("src/x.ts")).toBe("A");
+    expect(registry.isFileOwnershipDisjoint("FOREIGN", ["src/x.ts"])).toBe(false);
+  });
+
+  it("CE-007: redispatching a node that holds no live claim is a precondition violation", () => {
+    const registry = new OwnershipRegistry();
+    registry.initialize([{ node_id: "A", write_paths: ["src/x.ts"] }]);
+    // A never claimed (or already released) → redispatch must surface, not run ungated.
+    expect(() => registry.redispatchInFlight("A")).toThrow(/holds no live claim/);
+  });
+
+  it("applyDisposition: a claim-retaining disposition keeps K held; a releasing one frees it", () => {
+    const registry = new OwnershipRegistry();
+    registry.initialize([{ node_id: "A", write_paths: ["src/x.ts"] }]);
+    registry.claimInFlight("A", ["src/x.ts"]);
+    registry.applyDisposition("A", "redispatch");
+    expect(registry.inFlightOwner("src/x.ts")).toBe("A"); // retained
+    registry.applyDisposition("A", "merged");
+    expect(registry.inFlightOwner("src/x.ts")).toBeUndefined(); // released
+  });
+
+  it("CE-006: applyDisposition triage_retry_handoff transfers K to A' atomically (never observed unclaimed)", () => {
+    const registry = new OwnershipRegistry();
+    registry.initialize([{ node_id: "A", write_paths: ["src/x.ts"] }]);
+    registry.claimInFlight("A", ["src/x.ts"]);
+    registry.applyDisposition("A", "triage_retry_handoff", "A-prime");
+    expect(registry.inFlightOwner("src/x.ts")).toBe("A-prime");
+    // The key was never free across the window → foreign same-file node stays gated.
+    expect(registry.isFileOwnershipDisjoint("FOREIGN", ["src/x.ts"])).toBe(false);
   });
 });
 

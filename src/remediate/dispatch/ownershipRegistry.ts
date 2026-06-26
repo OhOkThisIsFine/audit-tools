@@ -61,6 +61,52 @@ export function canonicalizeFilePath(
   return CASE_INSENSITIVE_FS ? slashed.toLowerCase() : slashed;
 }
 
+/**
+ * The disposition a node reaches when the rolling engine stops driving it for the
+ * current pass. INV-SOO-10 (releasing-disposition discipline) keys the claim
+ * lifecycle off this: a RELEASING disposition frees the node's in-flight claim
+ * (`releaseInFlight`); a CLAIM-RETAINING disposition keeps it held so no foreign
+ * same-file node can be admitted on the still-contested key.
+ */
+export type NodeClaimDisposition =
+  // Releasing — the node is done with its file(s); the claim is freed.
+  | "merged"
+  | "blocked_final"
+  | "abandoned"
+  | "failed_no_retry"
+  | "no_op_satisfied"
+  // Claim-retaining — the node is still live on its file(s); the claim is held.
+  | "blocked_pending_triage"
+  | "triage_retry_handoff" // CE-006: A→A' hand-off retains K across the window
+  | "redispatch"; // CE-007: an M4 RepairOutcome.redispatch of an in-flight node
+
+/**
+ * Single source of truth for INV-SOO-10: whether `disposition` RELEASES the
+ * node's in-flight file claim. A redispatch (CE-007) and a triage-retry hand-off
+ * (CE-006) are explicitly claim-RETAINING — the key stays held by the node across
+ * the re-emit / recomputation window so the re-run can never run boundary-ungated
+ * alongside a foreign same-file writer. The enumeration is exhaustive (a `never`
+ * fallthrough keeps it in lockstep with `NodeClaimDisposition`).
+ */
+export function isReleasingDisposition(disposition: NodeClaimDisposition): boolean {
+  switch (disposition) {
+    case "merged":
+    case "blocked_final":
+    case "abandoned":
+    case "failed_no_retry":
+    case "no_op_satisfied":
+      return true;
+    case "blocked_pending_triage":
+    case "triage_retry_handoff":
+    case "redispatch":
+      return false;
+    default: {
+      const _exhaustive: never = disposition;
+      return _exhaustive;
+    }
+  }
+}
+
 export interface OwnershipRegistryJson {
   /** nodeId → set of paths from that node's original contract scope */
   contractScopes: Record<string, string[]>;
@@ -371,6 +417,57 @@ export class OwnershipRegistry {
       }
     }
     if (changed) this._persist();
+  }
+
+  /**
+   * Redispatch of an in-flight node (CE-007 / INV-SOO-10): an M4
+   * RepairOutcome.redispatch re-emits the SAME node without releasing its claim.
+   * This is a claim-RETAINING disposition — `nodeId` keeps every in-flight +
+   * amendment claim it holds across the re-emit, so the re-run cannot be admitted
+   * boundary-ungated alongside a foreign same-file writer. A no-op on the registry
+   * by construction (the claim is simply not released); this named affordance
+   * exists so callers route a redispatch through it (and `isReleasingDisposition`)
+   * rather than reasoning about claim retention by hand. Verifies the node still
+   * holds a live claim so a redispatch of an already-released node surfaces as a
+   * precondition violation instead of silently running ungated.
+   */
+  redispatchInFlight(nodeId: string): void {
+    for (const owner of this.inFlightClaims.values()) {
+      if (owner === nodeId) return; // still holds at least one claim — retained.
+    }
+    for (const owner of this.amendmentClaims.values()) {
+      if (owner === nodeId) return;
+    }
+    throw new Error(
+      `OwnershipRegistry.redispatchInFlight: ${nodeId} holds no live claim; ` +
+        `a redispatch must retain an existing claim (claim-retaining disposition, CE-007). ` +
+        `Re-claim via claimInFlight before redispatching.`,
+    );
+  }
+
+  /**
+   * Apply a node's terminal-for-this-pass disposition to its claim lifecycle in
+   * one call (INV-SOO-10). A releasing disposition frees the claim; a
+   * claim-retaining one leaves it held. Single entry-point so the release-vs-retain
+   * decision is never re-derived by callers (auditor-agnostic robustness). For a
+   * `triage_retry_handoff` pass the successor id via `toNodeId` so the claim is
+   * atomically transferred (CE-006) rather than released-then-reclaimed.
+   */
+  applyDisposition(
+    nodeId: string,
+    disposition: NodeClaimDisposition,
+    toNodeId?: string,
+  ): void {
+    if (disposition === "triage_retry_handoff") {
+      this.handoffInFlight(nodeId, toNodeId ?? nodeId);
+      return;
+    }
+    if (isReleasingDisposition(disposition)) {
+      this.releaseInFlight(nodeId);
+      this.releaseAmendments(nodeId);
+      return;
+    }
+    // blocked_pending_triage / redispatch: claim-retaining — leave it held.
   }
 
   /** Serialize to a plain JSON-safe object. */
