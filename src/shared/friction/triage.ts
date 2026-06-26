@@ -1,6 +1,5 @@
 import {
   type FrictionCaptureArtifact,
-  FRICTION_CAPTURE_SCHEMA_VERSION,
   frictionCapturePath,
   sanitizeRunId,
 } from '../io/frictionCapture.js';
@@ -9,9 +8,25 @@ import {
   AGENT_FEEDBACK_FILENAME,
   parseReflectionsNdjson,
 } from '../agentReflections.js';
-import { readOptionalJsonFile, readOptionalTextFile, writeJsonFile } from '../io/json.js';
-import { withFileLock } from '../quota/fileLock.js';
-import type { CapturedFrictionItem } from './captureFrictionEvent.js';
+import { readOptionalJsonFile, readOptionalTextFile } from '../io/json.js';
+import {
+  type CapturedFrictionItem,
+  type FrictionDisposition,
+  type FrictionDispositionRecord,
+  type FrictionOpenObservation,
+  type TriagedFrictionArtifact,
+  appendFrictionUnderLock,
+  frictionLockPath,
+} from './frictionRecord.js';
+
+export type {
+  CapturedFrictionItem,
+  FrictionDisposition,
+  FrictionDispositionRecord,
+  FrictionOpenObservation,
+  TriagedFrictionArtifact,
+} from './frictionRecord.js';
+export { appendFrictionUnderLock, frictionLockPath } from './frictionRecord.js';
 
 /**
  * O1 end-of-run friction TRIAGE — single-sourced for BOTH orchestrators so the
@@ -45,9 +60,6 @@ import type { CapturedFrictionItem } from './captureFrictionEvent.js';
  * so a friction append never races the locked critical section.
  */
 
-/** The triage disposition vocabulary — the host's verdict per captured item. */
-export type FrictionDisposition = 'keep' | 'discard' | 'annotate';
-
 /** The set of valid dispositions, for validation at the contract boundary. */
 export const FRICTION_DISPOSITIONS: readonly FrictionDisposition[] = [
   'keep',
@@ -61,18 +73,6 @@ export function isFrictionDisposition(value: unknown): value is FrictionDisposit
     typeof value === 'string' &&
     (FRICTION_DISPOSITIONS as readonly string[]).includes(value)
   );
-}
-
-/**
- * One triage record: a host disposition against a captured item key. `target_id`
- * is the friction-event id (mechanical sink) or the reflection key (a stable key
- * derived from a surfaced agent-feedback reflection). `annotation` is required
- * only for the `annotate` disposition.
- */
-export interface FrictionDispositionRecord {
-  target_id: string;
-  disposition: FrictionDisposition;
-  annotation?: string;
 }
 
 /** A captured item the host must dispose of, normalized across both sources. */
@@ -98,16 +98,6 @@ export const FRICTION_NAMED_DIMENSIONS = [
   'other',                      // anything not covered above
 ] as const;
 export type FrictionDimension = (typeof FRICTION_NAMED_DIMENSIONS)[number] | string;
-
-/**
- * One proactive friction observation the host records — distinct from a
- * mechanical-event disposition. Every run MUST carry ≥1 entry; "no friction
- * encountered this run" as `other` is a valid observation.
- */
-export interface FrictionOpenObservation {
-  dimension: string;
-  note: string;
-}
 
 /**
  * The mandatory blocking triage decision. `pending` means the close-out is NOT
@@ -146,24 +136,6 @@ function summarizeReflection(reflection: AgentReflection): string {
 function summarizeEvent(item: CapturedFrictionItem): string {
   const sev = item.severity ? `[${item.severity}] ` : '';
   return `${sev}${item.note}`;
-}
-
-/**
- * The per-run friction record the triage reads/writes. Extends the captured
- * artifact (mechanical events) with the host's `dispositions[]` and the
- * host's open `open_observations[]` — the tool owns every field except the
- * host-recorded content.
- */
-export interface TriagedFrictionArtifact
-  extends Omit<FrictionCaptureArtifact, 'frictions'> {
-  frictions: CapturedFrictionItem[];
-  dispositions?: FrictionDispositionRecord[];
-  open_observations?: FrictionOpenObservation[];
-}
-
-/** Where the friction append/triage lock lives (rides O2's withFileLock). */
-export function frictionLockPath(artifactsDir: string, runId: string): string {
-  return `${frictionCapturePath(artifactsDir, sanitizeRunId(runId))}.lock`;
 }
 
 async function readReflections(artifactsDir: string): Promise<AgentReflection[]> {
@@ -304,39 +276,6 @@ export function buildFrictionTriageBlock(triage: FrictionTriageDecision): string
     : `\n### Open observations\n\nAlready recorded (${triage.existing_observations.length} entr${triage.existing_observations.length === 1 ? "y" : "ies"}).\n`;
 
   return `\n## Run friction triage (BLOCKING close-out)\n\nWrite to the friction record at:\n\`${triage.recordPath}\`${pendingSection}${observationSection}\nCall next-step again after writing.\n`;
-}
-
-/**
- * Mutate the per-run friction record under O2's `withFileLock` so a friction
- * append (mechanical event OR host disposition) never races the locked critical
- * section. The mutator receives the current record (a fresh degrade-clean shell
- * when none exists) and returns the next record to persist atomically.
- */
-export async function appendFrictionUnderLock(
-  artifactsDir: string,
-  runId: string,
-  mutate: (record: TriagedFrictionArtifact) => Promise<TriagedFrictionArtifact> | TriagedFrictionArtifact,
-  tool: FrictionCaptureArtifact['tool'] = 'remediate-code',
-): Promise<TriagedFrictionArtifact> {
-  const recordPath = frictionCapturePath(artifactsDir, sanitizeRunId(runId));
-  return withFileLock(frictionLockPath(artifactsDir, runId), async () => {
-    const existing = await readOptionalJsonFile<TriagedFrictionArtifact>(recordPath);
-    const base: TriagedFrictionArtifact = existing ?? {
-      schema_version: FRICTION_CAPTURE_SCHEMA_VERSION,
-      tool,
-      run_id: runId,
-      captured_at: new Date().toISOString(),
-      frictions: [],
-      dispositions: [],
-    };
-    const next = await mutate(base);
-    const persisted: TriagedFrictionArtifact = {
-      ...next,
-      captured_at: new Date().toISOString(),
-    };
-    await writeJsonFile(recordPath, persisted);
-    return persisted;
-  });
 }
 
 /**

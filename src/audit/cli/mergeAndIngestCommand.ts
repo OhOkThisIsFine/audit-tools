@@ -1,6 +1,6 @@
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { isFileMissingError, mapWithConcurrency, readJsonFile, writeJsonFile } from "audit-tools/shared";
+import { captureStepBoundaryFriction, isFileMissingError, mapWithConcurrency, normalizeRepoPath, readJsonFile, writeJsonFile } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { validateAuditResults, defaultFindingLensFromResult } from "../validation/auditResults.js";
@@ -258,6 +258,7 @@ export async function validateAndCollectResults(
   entryByTaskId: Map<string, { result_path: string; task_id: string; packet_id: string }>,
   fallbackByTaskId: Map<string, unknown>,
   packetMembers: Map<string, string[]>,
+  frictionContext?: { runId: string; artifactsDir: string },
 ): Promise<{
   passing: AuditResult[];
   failing: Array<{ task_id: string; errors: string[] }>;
@@ -409,6 +410,35 @@ export async function validateAndCollectResults(
         .filter(i => i.severity === "error")
         .map(i => i.message),
     );
+    // Surface the deliberately-downgraded total_lines!=actual mismatch as
+    // step-boundary friction at the ingest locus (the validator stays pure and
+    // only RETURNS the 'warning'; it never emits). Retain the warning here —
+    // it does not gate ingest — and route it through the single chokepoint so a
+    // run accrues this gameable-coverage signal for triage. Best-effort: the
+    // capture itself swallows every failure, so it can never break ingest.
+    if (frictionContext) {
+      for (const issue of issues) {
+        if (issue.severity !== "warning" ||
+            !issue.field.startsWith("file_coverage[") ||
+            !issue.field.endsWith("].total_lines")) {
+          continue;
+        }
+        const coveragePath = normalizeRepoPath(issue.path ?? issue.field);
+        await captureStepBoundaryFriction(
+          frictionContext.artifactsDir,
+          frictionContext.runId,
+          {
+            eventType: "coverage_total_lines_mismatch",
+            discriminator: `${issue.result_index}:${coveragePath}`,
+            category: "trap",
+            severity: "low",
+            area: "audit result ingest",
+            note: issue.message,
+          },
+          "audit-code",
+        );
+      }
+    }
     if (resultErrors.length === 0) {
       passing.push(obj as AuditResult);
     } else {
@@ -565,6 +595,7 @@ export async function mergeAndIngest(params: {
     entryByTaskId,
     fallbackByTaskId,
     packetMembersByPacketId(resultMap.entries),
+    { runId, artifactsDir },
   );
   if (recoveredCount > 0) {
     process.stderr.write(

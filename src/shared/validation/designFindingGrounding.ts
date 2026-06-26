@@ -11,10 +11,14 @@
  *
  * Before this, design findings were ingested on `Array.isArray()` alone, with no
  * evidence requirement — unlike the schema-gated AuditResult path.
+ *
+ * Single source for both orchestrators (lives in shared next to the quote-and-
+ * verify primitives) so neither orchestrator forks the design-grounding logic and
+ * there is no remediate→audit cross-area import.
  */
-import type { Finding, FindingGrounding } from "audit-tools/shared";
+import type { Finding, FindingGrounding } from "../types/finding.js";
 // Repo-relative path normalizer is single-sourced in shared (drift-plan P7).
-import { normalizeRepoPath } from "audit-tools/shared";
+import { normalizeRepoPath } from "./findingGrounding.js";
 
 /**
  * Ground a single design finding against the set of real repository paths. The

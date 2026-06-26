@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +28,11 @@ import {
   writeContractArtifact,
   type ContractPipelineArtifactName,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
+import {
+  validateContractCitationGrounding,
+  enumerateRepoTreePaths,
+} from "../../src/remediate/validation/contractPipeline.js";
+import type { Finding } from "audit-tools/shared";
 import {
   // MNT-7014a745: consume the single-sourced version constants from the
   // validation module rather than re-declaring them (a bump touches one place).
@@ -250,6 +256,9 @@ function traceableDag(nodeOverrides: Record<string, unknown> = {}) {
         title: "Refactor auth flow",
         description: "Apply the cleanup.",
         satisfies_obligations: ["O-1"],
+        // Cite a real tracked path so the M-B3 source-grounded citation gate
+        // (promotion backstop) grounds this finding against the working tree.
+        output_files: ["src/auth.ts"],
         depends_on: [],
         verification_obligation_ids: [],
         targeted_commands: [],
@@ -269,6 +278,21 @@ async function promptOf(step: { prompt_path: string }): Promise<string> {
 beforeEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
   await mkdir(ARTIFACTS_DIR, { recursive: true });
+  // The M-B3 source-grounded citation gate enumerates the working tree at
+  // STEP_OPTIONS.root via `git ls-files`. Make TEST_DIR its own git repo with
+  // the cited path (src/auth.ts) tracked so promoted findings/module contracts
+  // that cite it ground (and the gate does not fail closed on an empty tree).
+  await mkdir(join(TEST_DIR, "src"), { recursive: true });
+  await writeFile(join(TEST_DIR, "src", "auth.ts"), "export const auth = true;\n", "utf8");
+  // authFlow.ts gives the symbol corpus a non-path-shaped token (`authflow`) so a
+  // bare symbol-only citation can be grounded against a real path segment.
+  await writeFile(join(TEST_DIR, "src", "authFlow.ts"), "export const authFlow = 1;\n", "utf8");
+  const git = (args: string[]) =>
+    spawnSync("git", args, { cwd: TEST_DIR, shell: false, encoding: "utf8" });
+  git(["init"]);
+  git(["config", "user.email", "test@test"]);
+  git(["config", "user.name", "test"]);
+  git(["add", "src/auth.ts", "src/authFlow.ts"]);
 });
 
 afterEach(async () => {
@@ -558,6 +582,92 @@ describe("traceability gate: untraceable implementation_dag nodes never promote"
     expect(plan.findings[0].evidence).toContain(
       "Addresses accepted counterexample: CE-1",
     );
+  });
+});
+
+describe("M-B3: source-grounded citation gate (repo-tree knownPaths)", () => {
+  const mkFinding = (over: Partial<Finding>): Finding =>
+    ({
+      id: "F1",
+      title: "t",
+      category: "c",
+      severity: "medium",
+      confidence: "high",
+      lens: "security",
+      summary: "",
+      affected_files: [],
+      ...over,
+    }) as Finding;
+
+  it("enumerates the working tree via git ls-files (TEST_DIR has src/auth.ts tracked)", () => {
+    const known = enumerateRepoTreePaths(TEST_DIR);
+    expect(known.has("src/auth.ts")).toBe(true);
+  });
+
+  it("passes a finding that cites a real path", () => {
+    const result = validateContractCitationGrounding(
+      [mkFinding({ affected_files: [{ path: "src/auth.ts" }] })],
+      TEST_DIR,
+    );
+    expect(result.treeReadable).toBe(true);
+    expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("passes a symbol-only citation to a REAL symbol", () => {
+    // No path cited; the summary names the symbol `authFlow`, a real segment of
+    // the tracked file src/authFlow.ts.
+    const result = validateContractCitationGrounding(
+      [mkFinding({ summary: "Tighten the authFlow before refresh." })],
+      TEST_DIR,
+    );
+    expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("REJECTS a symbol-only citation to a NON-existent symbol (not excused as 'cites no component')", () => {
+    const result = validateContractCitationGrounding(
+      [mkFinding({ summary: "Refactor nonExistentSymbolXyz before refresh." })],
+      TEST_DIR,
+    );
+    const errors = result.issues.filter((i) => i.severity === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toMatch(/cites no real component/);
+  });
+
+  it("REJECTS a finding whose only cited path does not exist", () => {
+    const result = validateContractCitationGrounding(
+      [mkFinding({ affected_files: [{ path: "src/does-not-exist.ts" }] })],
+      TEST_DIR,
+    );
+    expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(1);
+  });
+
+  it("fails CLOSED only when the working tree is unreadable/empty", () => {
+    // A non-git directory enumerates to an empty set → fail closed.
+    const result = validateContractCitationGrounding(
+      [mkFinding({ affected_files: [{ path: "src/auth.ts" }] })],
+      join(TEST_DIR, "no-such-subdir"),
+    );
+    expect(result.treeReadable).toBe(false);
+    expect(result.issues.filter((i) => i.severity === "error").length).toBeGreaterThan(0);
+    expect(result.issues[0].message).toMatch(/could not enumerate the working tree/i);
+  });
+
+  it("promotion backstop re-emits implementation_planning when a promoted finding cites a hallucinated path", async () => {
+    await writeRawChainThroughJudge();
+    const planningStep = await buildNextContractPipelineStep(STEP_OPTIONS);
+    expect(await promptOf(planningStep!)).toMatch(/Implementation Planning/);
+
+    // A DAG node whose only output_file does not exist in the working tree, and
+    // whose prose names no real symbol.
+    await writeRawArtifact(
+      "implementation_dag",
+      traceableDag({ output_files: ["src/ghost-file-xyz.ts"], description: "do the work" }),
+    );
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    expect(step?.status).toBe("ready");
+    expect(await promptOf(step!)).toMatch(/Source-Grounded Citation Gate Errors/);
+    // The bad DAG was archived and no plan was promoted past the gate.
+    expect(existsSync(contractArtifactFilePath(ARTIFACTS_DIR, "implementation_dag"))).toBe(false);
   });
 });
 

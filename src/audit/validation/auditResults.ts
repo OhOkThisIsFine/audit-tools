@@ -758,6 +758,11 @@ function validateFileCoverageEntry(
       result_index: resultIndex,
       task_id: taskId,
       field: `file_coverage[${j}].total_lines`,
+      // Carry the raw coverage path so an ingest caller can derive the
+      // friction discriminator (`result_index + ':' + normalizeRepoPath(path)`)
+      // without re-parsing it out of the message. `pushIssue` otherwise defaults
+      // `path` to `field`, which would lose the actual file path.
+      path: entry.path as string,
       message: `file_coverage[${j}].total_lines does not match the current line count for '${entry.path}' (expected ${expectedLineCount}, got ${entry.total_lines}). Advisory coverage stat — findings are grounded by quote-and-verify, not by this count.`,
       severity: "warning",
     });

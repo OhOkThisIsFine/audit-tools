@@ -10,9 +10,13 @@ import {
   captureFrictionEvent,
   recordFrictionDisposition,
   collectTriageSubjects,
+  appendFrictionUnderLock,
+  captureStepBoundaryFriction,
+  stepBoundaryEventId,
   AGENT_FEEDBACK_FILENAME,
   type FrictionCaptureArtifact,
   type TriagedFrictionArtifact,
+  type StepBoundaryEventType,
 } from "audit-tools/shared";
 import { decideAuditFrictionCloseout } from "../../src/audit/orchestrator/nextStep.js";
 import { decideRemediateFrictionCloseout } from "../../src/remediate/steps/nextStep.js";
@@ -180,6 +184,80 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     expect(artifact.dispositions?.[0]).toMatchObject({ target_id: "e1", disposition: "discard" });
     // Original mechanical event survives the disposition append.
     expect(artifact.frictions.some((f) => (f as { id: string }).id === "e1")).toBe(true);
+  });
+
+  it("CE-010: a host disposition + open_observation SURVIVE a concurrent late mechanical emit", async () => {
+    const artifactsDir = join(TEST_DIR, "remediation");
+    await mkdir(artifactsDir, { recursive: true });
+    const runId = "R-MERGE";
+
+    // An early mechanical event is captured.
+    await captureFrictionEvent(artifactsDir, runId, { id: "evt-early", note: "early" }, "remediate-code");
+
+    // The host disposes of it and writes an open observation (both under the lock).
+    await recordFrictionDisposition(
+      artifactsDir,
+      runId,
+      { target_id: "evt-early", disposition: "keep", annotation: "known ok" },
+      "remediate-code",
+    );
+    await appendFrictionUnderLock(
+      artifactsDir,
+      runId,
+      (record) => ({
+        ...record,
+        open_observations: [{ dimension: "surprises", note: "host reflected" }],
+      }),
+      "remediate-code",
+    );
+
+    // A LATE mechanical emit arrives (e.g. a re-dispatched seam) — under the old
+    // unlocked rebuild this clobbered dispositions[]/open_observations[].
+    await captureFrictionEvent(artifactsDir, runId, { id: "evt-late", note: "late" }, "remediate-code");
+
+    const artifact = await readArtifact(frictionCapturePath(artifactsDir, runId));
+    // The late event accreted...
+    expect(artifact.frictions.map((f) => (f as { id: string }).id).sort()).toEqual([
+      "evt-early",
+      "evt-late",
+    ]);
+    // ...and the host's disposition + open observation are PRESERVED.
+    expect(artifact.dispositions?.find((d) => d.target_id === "evt-early")).toMatchObject({
+      disposition: "keep",
+      annotation: "known ok",
+    });
+    expect(artifact.open_observations).toEqual([
+      { dimension: "surprises", note: "host reflected" },
+    ]);
+  });
+
+  it("registers the documented `coverage_total_lines_mismatch` step-boundary member (result_index+path discriminator)", async () => {
+    const artifactsDir = join(TEST_DIR, "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    const runId = "A-COV";
+    const eventType: StepBoundaryEventType = "coverage_total_lines_mismatch";
+    const discriminator = "3:src/foo.ts";
+
+    await captureStepBoundaryFriction(
+      artifactsDir,
+      runId,
+      { eventType, discriminator, note: "total_lines 10 != actual 12", severity: "medium" },
+      "audit-code",
+    );
+
+    const artifact = await readArtifact(frictionCapturePath(artifactsDir, runId));
+    const expectedId = stepBoundaryEventId(eventType, runId, discriminator);
+    expect(artifact.frictions.map((f) => (f as { id: string }).id)).toContain(expectedId);
+
+    // Re-emitting the same fact is a no-op (de-dup on the structured id).
+    await captureStepBoundaryFriction(
+      artifactsDir,
+      runId,
+      { eventType, discriminator, note: "total_lines 10 != actual 12", severity: "medium" },
+      "audit-code",
+    );
+    const after = await readArtifact(frictionCapturePath(artifactsDir, runId));
+    expect(after.frictions.filter((f) => (f as { id: string }).id === expectedId)).toHaveLength(1);
   });
 
   it("PARITY: both halves use the SAME single-sourced triage decider (only `tool` differs)", async () => {

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 
 const { renderConceptualReviewPrompt, renderConceptualJudgePrompt, renderDesignReviewPrompt } =
   await import("../../src/audit/orchestrator/designReviewPrompt.ts");
-const { groundDesignFindings, groundDesignFinding } = await import("../../src/audit/validation/designFindingGrounding.ts");
+const { groundDesignFindings, groundDesignFinding } = await import("../../src/shared/validation/designFindingGrounding.ts");
 
 function minimalBundle() {
   return {

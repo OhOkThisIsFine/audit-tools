@@ -85,14 +85,6 @@ export interface ContractPipelineArtifactEnvelope {
   artifact_name: ContractPipelineArtifactName;
   /** SHA-256 of the raw payload bytes — byte identity of this exact emission. */
   content_hash: string;
-  /**
-   * SHA-256 of the artifact's SEMANTIC PROJECTION (load-bearing structure only;
-   * see `semanticProjection`). This — not `content_hash` — is what staleness
-   * records and compares, so a cosmetic upstream edit does not re-stale
-   * downstreams (B3). Optional for forward-compat with envelopes written before
-   * this field existed; `envelopeSemanticHash` recomputes it on read when absent.
-   */
-  semantic_hash?: string;
   /** Semantic-projection hashes of upstream dependency artifacts at write time. */
   dependency_hashes: Partial<Record<ContractPipelineArtifactName, string>>;
   payload: unknown;
@@ -152,18 +144,16 @@ function computeSemanticHash(
 }
 
 /**
- * The semantic hash to compare a dependency against. Prefers the envelope's
- * recorded `semantic_hash`; recomputes from the payload for envelopes written
- * before the field existed (no migration needed — staleness stays correct on the
- * first read of a legacy envelope).
+ * The semantic hash to compare a dependency against. ALWAYS recomputed from the
+ * envelope's current `payload` — never read from a stored header field — so an
+ * in-place edit to a payload (header untouched) reconverges staleness on the next
+ * read. Cosmetic edits project to the same hash (see `semanticProjection`) and so
+ * still do not re-stale downstreams (B3).
  */
 export function envelopeSemanticHash(
   envelope: ContractPipelineArtifactEnvelope,
 ): string {
-  return (
-    envelope.semantic_hash ??
-    computeSemanticHash(envelope.artifact_name, envelope.payload)
-  );
+  return computeSemanticHash(envelope.artifact_name, envelope.payload);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -176,7 +166,6 @@ export async function writeContractArtifact(
 ): Promise<ContractPipelineArtifactEnvelope> {
   await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
   const content_hash = computeHash(payload);
-  const semantic_hash = computeSemanticHash(name, payload);
 
   // Capture each dependency's SEMANTIC-projection hash at write time, so a later
   // cosmetic edit to that dependency (same projection) does not re-stale this
@@ -192,7 +181,6 @@ export async function writeContractArtifact(
   const envelope: ContractPipelineArtifactEnvelope = {
     artifact_name: name,
     content_hash,
-    semantic_hash,
     dependency_hashes,
     payload,
   };
