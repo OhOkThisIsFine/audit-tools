@@ -52,7 +52,7 @@ skills-lock.json
 # >>> audit-tools managed ignores >>>
 # Generated/install artifacts — always ignored (build artifacts, not source).
 .audit-code/
-.audit-tools/*/friction/
+**/friction/
 # Deliverables + meta-audit reflections — ignored because this repo is public.
 .audit-tools/audit-report.md
 .audit-tools/audit-findings.json
