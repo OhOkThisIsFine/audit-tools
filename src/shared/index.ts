@@ -686,10 +686,8 @@ export type {
 export { QuotaUsageSnapshotSchema, probeQuotaSource } from "./quota/quotaSource.js";
 export {
   resolveLimits,
-  classifyProvider,
+  hostClassFor,
   resolveHostModel,
-  agentHostFallbackConcurrency,
-  DEFAULT_AGENT_HOST_CONCURRENCY,
 } from "./quota/limits.js";
 export type {
   ProviderType,
@@ -754,11 +752,11 @@ export { runSlidingWindow } from "./quota/slidingWindow.js";
 export type { SlidingWindowResult } from "./quota/slidingWindow.js";
 export {
   scheduleWave,
+  classifyProvider,
   buildProviderModelKey,
   parseHostModelRoster,
   DEFAULT_SAFETY_MARGIN,
   DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
-  DEFAULT_FIRST_CONTACT_CONCURRENCY,
   QUOTA_REMAINING_PCT_CRITICAL,
   QUOTA_REMAINING_PCT_LOW,
 } from "./quota/scheduler.js";
@@ -766,6 +764,8 @@ export type {
   ScheduleWaveOptions,
   DiscoveredRateLimitsInput,
   HostModelRosterEntry,
+  ProviderClassification,
+  DriverMechanism,
 } from "./quota/scheduler.js";
 export { HostModelRosterEntrySchema } from "./quota/scheduler.js";
 export {

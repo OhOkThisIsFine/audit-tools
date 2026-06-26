@@ -4,7 +4,17 @@ import type { DiscoveredRateLimitsInput } from "./scheduler.js";
 
 export type ProviderType = "hosted" | "local" | "unknown";
 
-export function classifyProvider(providerName: ResolvedProviderName): ProviderType {
+/**
+ * Map a provider to its relative host-class — the coarse capability tier used by
+ * limit resolution and the broker's single classifier ({@link classifyProvider}
+ * in `scheduler.ts`). This is the *bare* class mapping only; the resolved
+ * cold-start / agent-host concurrency floor is NOT exposed here as a separable
+ * constant — it lives solely on the `classifyProvider` struct's `concurrencyFloor`
+ * (INV-BROKER-CLASSIFY-SINGLE-SOURCE / CE-005). Kept in this module (rather than
+ * `scheduler.ts`) so `resolveLimits` can consult the class without importing the
+ * scheduler, preserving the one-directional scheduler→limits dependency.
+ */
+export function hostClassFor(providerName: ResolvedProviderName): ProviderType {
   switch (providerName) {
     case "claude-code":
     case "codex":
@@ -23,26 +33,6 @@ export function classifyProvider(providerName: ResolvedProviderName): ProviderTy
       // its configured model — unknown until a model is configured.
       return "unknown";
   }
-}
-
-// Default parallel wave size for agent-host providers when nothing else
-// constrains concurrency (no host-reported cap, no learned history, no RPM/TPM,
-// no explicit config). These providers delegate to a host that runs fresh
-// subagent sessions in parallel — each with its own context window — so
-// collapsing to serial dispatch (the old default of 1) is pathological for the
-// conversation-first flow. The host's own reported cap still binds at dispatch
-// time, and an explicit quota.unknown_hosted_concurrency still overrides this.
-export const DEFAULT_AGENT_HOST_CONCURRENCY = 8;
-
-// claude-code / vscode-task fall through the hosted/unknown fallback branch but
-// are parallel agent hosts, so they default to parallel dispatch rather than 1.
-// (opencode also fans out but is classified "local" and uses the local path.)
-export function agentHostFallbackConcurrency(
-  providerName: ResolvedProviderName,
-): number {
-  return providerName === "claude-code" || providerName === "vscode-task"
-    ? DEFAULT_AGENT_HOST_CONCURRENCY
-    : 1;
 }
 
 export interface ResolveHostModelOptions {
@@ -152,7 +142,7 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
 
   // 3. Conservative provider defaults. Concurrency caps remain in the scheduler;
   // this rung records that the provider was part of limit resolution.
-  const providerType = classifyProvider(providerName);
+  const providerType = hostClassFor(providerName);
   if (providerType !== "unknown") {
     return { limits: defaults, source: "provider_default", confidence: "low" };
   }

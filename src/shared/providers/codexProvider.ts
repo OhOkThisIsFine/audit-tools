@@ -93,7 +93,7 @@ export class CodexProvider implements FreshSessionProvider {
   /**
    * Best-effort, never-throwing. Codex is a hosted backend whose 429/RPM/TPM
    * ceilings are not introspectable from the CLI, so this returns null today.
-   * Resolution falls back to classifyProvider("codex")=hosted defaults plus the
+   * Resolution falls back to classifyProvider("codex").hostClass=hosted defaults plus the
    * learned-limits subsystem (which absorbs the real usage-limit signal Codex
    * surfaces on stderr when a quota is exhausted).
    */

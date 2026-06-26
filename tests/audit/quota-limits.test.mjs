@@ -1,25 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { resolveLimits, classifyProvider, resolveHostModel } = await import(
+const { resolveLimits, hostClassFor, resolveHostModel } = await import(
   "../../src/shared/quota/limits.ts"
 );
 
-test("classifyProvider maps claude-code to hosted", () => {
-  assert.equal(classifyProvider("claude-code"), "hosted");
+test("hostClassFor maps claude-code to hosted", () => {
+  assert.equal(hostClassFor("claude-code"), "hosted");
 });
 
-test("classifyProvider maps opencode to local", () => {
-  assert.equal(classifyProvider("opencode"), "local");
+test("hostClassFor maps opencode to local", () => {
+  assert.equal(hostClassFor("opencode"), "local");
 });
 
-test("classifyProvider maps local-subprocess to local", () => {
-  assert.equal(classifyProvider("local-subprocess"), "local");
+test("hostClassFor maps local-subprocess to local", () => {
+  assert.equal(hostClassFor("local-subprocess"), "local");
 });
 
-test("classifyProvider maps subprocess-template and vscode-task to unknown", () => {
-  assert.equal(classifyProvider("subprocess-template"), "unknown");
-  assert.equal(classifyProvider("vscode-task"), "unknown");
+test("hostClassFor maps subprocess-template and vscode-task to unknown", () => {
+  assert.equal(hostClassFor("subprocess-template"), "unknown");
+  assert.equal(hostClassFor("vscode-task"), "unknown");
 });
 
 test("resolveLimits uses explicit config when quota.models has an entry", () => {

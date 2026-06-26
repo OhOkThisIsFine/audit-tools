@@ -29,8 +29,7 @@ import type {
 } from '../quota/types.js';
 import type { QuotaUsageSnapshot } from '../quota/quotaSource.js';
 import type { DiscoveredRateLimitsInput } from '../quota/scheduler.js';
-import { scheduleWave } from '../quota/scheduler.js';
-import { DEFAULT_FIRST_CONTACT_CONCURRENCY } from '../quota/scheduler.js';
+import { scheduleWave, classifyProvider } from '../quota/scheduler.js';
 import { estimateTokensFromBytes, ESTIMATED_PROMPT_OVERHEAD_TOKENS } from '../tokens.js';
 import { resolveContextBudget } from '../tokens.js';
 import { getQuotaStatePath, readQuotaState, writeQuotaState } from '../quota/state.js';
@@ -146,13 +145,17 @@ export function estimateSlotTokens(slot: BrokeredDispatchSlot): number {
  * here so both halves classify identically off the SAME floor.
  */
 export function classifyCapableHost(input: {
+  providerName: ResolvedProviderName;
   sessionConfig: SessionConfig;
   hostConcurrencyLimit?: HostConcurrencyLimit | null;
   quotaStateEntry?: QuotaStateEntry | null;
 }): boolean {
+  // Cold-start floor comes from the single classifier struct (CE-005) — there is
+  // no separable floor constant to re-derive it from.
   const floor = Math.max(
     1,
-    input.sessionConfig.quota?.first_contact_concurrency ?? DEFAULT_FIRST_CONTACT_CONCURRENCY,
+    input.sessionConfig.quota?.first_contact_concurrency ??
+      classifyProvider(input.providerName).concurrencyFloor,
   );
   const reported = input.hostConcurrencyLimit?.active_subagents ?? null;
   if (reported != null && reported > floor) return true;
@@ -324,6 +327,7 @@ export function createBrokeredRepairDispatch(): BrokeredRepairDispatch {
       }
 
       const capableHost = classifyCapableHost({
+        providerName: input.providerName,
         sessionConfig: input.sessionConfig,
         hostConcurrencyLimit: input.hostConcurrencyLimit ?? null,
         quotaStateEntry: input.quotaStateEntry ?? null,

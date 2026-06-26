@@ -11,9 +11,9 @@ import type {
 } from "./types.js";
 import type { QuotaUsageSnapshot } from "./quotaSource.js";
 import {
-  agentHostFallbackConcurrency,
-  classifyProvider,
+  hostClassFor,
   resolveLimits,
+  type ProviderType,
 } from "./limits.js";
 import { computeMaxSafeConcurrency, computeRampUpConcurrency } from "./state.js";
 
@@ -147,8 +147,95 @@ export interface ScheduleWaveOptions {
 export const DEFAULT_SAFETY_MARGIN = 0.8;
 /** Half-life (hours) for decaying learned concurrency evidence. */
 export const DEFAULT_EMPIRICAL_HALF_LIFE_HOURS = 24;
-/** Conservative ceiling applied on first contact with an unconfigured provider. */
-export const DEFAULT_FIRST_CONTACT_CONCURRENCY = 3;
+/**
+ * Conservative cold-start ceiling applied on first contact with an unconfigured
+ * provider. Private to this module: it is NOT a separable public export — the
+ * resolved cold-start / agent-host floor is surfaced ONLY via the
+ * {@link classifyProvider} struct's `concurrencyFloor`
+ * (INV-BROKER-CLASSIFY-SINGLE-SOURCE / CE-005), so a call site cannot re-derive
+ * a floor from a standalone constant.
+ */
+const COLD_START_CONCURRENCY = 3;
+
+/**
+ * Parallel cold-start floor for a capable agent host that fans out to fresh
+ * subagent sessions (each with its own context window). Private — surfaced only
+ * through {@link classifyProvider}'s `concurrencyFloor`. Collapsing such a host
+ * to serial dispatch (1) is pathological for the conversation-first flow, so the
+ * floor is lifted when nothing else constrains concurrency. The host's own
+ * reported cap still binds at dispatch time, and an explicit
+ * `quota.unknown_hosted_concurrency` still overrides it.
+ */
+const AGENT_HOST_CONCURRENCY = 8;
+
+/**
+ * How a provider's dispatch slots are driven once admitted by the broker.
+ * - `y_dispatcher`: a thin host-side dispatcher agent (Y) launches fresh
+ *   subagent sessions for each slot (capable agent hosts / command-template
+ *   backends routed through the conversation host).
+ * - `in_process_slot_pull`: the in-process rolling engine pulls slots directly
+ *   against the backend (local subprocess pools, single-shot API backends).
+ */
+export type DriverMechanism = "y_dispatcher" | "in_process_slot_pull";
+
+/**
+ * The SINGLE host-classification struct (INV-BROKER-CLASSIFY-SINGLE-SOURCE /
+ * CE-005, S-BROKER-WIRING-tier-classification decision B). Every dispatch path
+ * reads `hostClass`, `concurrencyFloor`, and `driverMechanism` off this one
+ * struct rather than re-deriving any of them — there is no separable exported
+ * floor constant to re-derive from, and no second cold-start / host-class table
+ * may live in the dispatch layer.
+ */
+export interface ProviderClassification {
+  /**
+   * Relative host-class keyed off provider-class — never a model-name table.
+   * `hosted` (capable hosted-model agent backend), `local` (local subprocess
+   * pool), or `unknown` (operator-configured command-template backend).
+   */
+  hostClass: ProviderType;
+  /**
+   * Resolved cold-start / agent-host concurrency floor for this provider, ALREADY
+   * lifted for a capable agent host. This is the only public surface of the floor
+   * — there is no standalone floor constant to re-derive it from at a call site.
+   */
+  concurrencyFloor: number;
+  /** How admitted slots are driven for this provider. */
+  driverMechanism: DriverMechanism;
+}
+
+/**
+ * Is this provider a capable agent host that fans out to parallel subagent
+ * sessions? Such hosts get the lifted agent-host concurrency floor rather than
+ * the conservative cold-start floor. (opencode also fans out but classifies
+ * `local` and uses the local path, so it is intentionally excluded here.)
+ */
+function isCapableAgentHost(providerName: ResolvedProviderName): boolean {
+  return providerName === "claude-code" || providerName === "vscode-task";
+}
+
+/**
+ * Classify a provider for dispatch in ONE struct: its host-class, its resolved
+ * cold-start / agent-host concurrency floor, and its driver mechanism
+ * (INV-BROKER-CLASSIFY-SINGLE-SOURCE / CE-005). This is the only
+ * classification / cold-start site in the codebase — the broker and every
+ * dispatch path (M5-WIRING) read all three fields off this struct verbatim and
+ * never re-derive a host-class, concurrency floor, or mechanism→floor mapping of
+ * their own. No standalone floor constant is exported, so a second derivation of
+ * the floor is mechanically impossible at any call site.
+ */
+export function classifyProvider(
+  providerName: ResolvedProviderName,
+): ProviderClassification {
+  const hostClass = hostClassFor(providerName);
+  const agentHost = isCapableAgentHost(providerName);
+  return {
+    hostClass,
+    // Capable agent hosts are lifted to the parallel agent-host floor; every
+    // other provider stays at the conservative cold-start floor.
+    concurrencyFloor: agentHost ? AGENT_HOST_CONCURRENCY : COLD_START_CONCURRENCY,
+    driverMechanism: hostClass === "local" ? "in_process_slot_pull" : "y_dispatcher",
+  };
+}
 /**
  * Real-time quota-source `remaining_pct` thresholds. At/under CRITICAL we throttle
  * to a single request; at/under LOW we halve the wave.
@@ -310,12 +397,14 @@ function computeUncappedWaveSize(input: ComputeUncappedWaveSizeInput): UncappedW
     // applyHostConcurrencyLimit() at the call site, so nothing is capped here.
     return { size: current, binding_cap: bindingCap };
   } else {
-    const providerType = classifyProvider(providerName);
+    const classification = classifyProvider(providerName);
+    const agentHostFloor = isCapableAgentHost(providerName)
+      ? classification.concurrencyFloor
+      : 1;
     const fallbackCap =
-      providerType === "local"
+      classification.hostClass === "local"
         ? quota.unknown_local_concurrency
-        : (quota.unknown_hosted_concurrency ??
-          agentHostFallbackConcurrency(providerName));
+        : (quota.unknown_hosted_concurrency ?? agentHostFloor);
     if (fallbackCap === "unlimited") {
       // no cap — "unlimited" intentionally skips clamping
     } else if (typeof fallbackCap === "number" && Number.isFinite(fallbackCap)) {
@@ -338,7 +427,7 @@ function computeUncappedWaveSize(input: ComputeUncappedWaveSizeInput): UncappedW
     ) {
       const firstContactCap = Math.max(
         1,
-        quota.first_contact_concurrency ?? DEFAULT_FIRST_CONTACT_CONCURRENCY,
+        quota.first_contact_concurrency ?? classification.concurrencyFloor,
       );
       if (firstContactCap < current) {
         current = firstContactCap;
