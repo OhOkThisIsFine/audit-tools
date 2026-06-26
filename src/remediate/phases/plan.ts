@@ -35,6 +35,7 @@ import {
   type SessionConfig,
 } from "audit-tools/shared";
 import { createFreshSessionProvider } from "../providers/index.js";
+import { canonicalizeFilePath } from "../dispatch/ownershipRegistry.js";
 import {
   deduplicateCrossLensFindings,
   fixupBlocksAfterDedup,
@@ -410,9 +411,16 @@ function groupFindingsByFileOverlap(findingIds: string[], findings: Finding[], r
       // Directory paths must not drive union-find merges: a broad directory shared
       // by many findings would otherwise collapse them all into one indivisible block.
       if (isDirectoryPath(af.path, repoRoot)) continue;
-      const list = fileToIds.get(af.path) ?? [];
+      // CE-008: key the overlap map by the M1-BOUNDARY canonical physical-file
+      // identity, not the raw spelling, so `src/A.ts`, `./src/A.ts`, `src\A.ts`
+      // (and case variants on a case-insensitive FS) collide on ONE key and the
+      // findings that touch that file are unioned into one block. Comparing raw
+      // strings would leave them in separate blocks that then write the same
+      // physical file in parallel (the clobber CE-008 closes).
+      const key = canonicalizeFilePath(af.path, { root: repoRoot });
+      const list = fileToIds.get(key) ?? [];
       list.push(id);
-      fileToIds.set(af.path, list);
+      fileToIds.set(key, list);
     }
   }
 
@@ -438,11 +446,20 @@ export function estimateGroupTokens(
   findingIds: string[],
   findings: Finding[],
   fileByteCounts: Map<string, number>,
+  // CE-008: when `root` is supplied, file keys are resolved to the M1-BOUNDARY
+  // canonical physical-file identity so a file cited under two spellings is
+  // de-duplicated to ONE entry and resolves to the byte-count map keyed the same
+  // way. When omitted, raw spellings are used as keys (callers that pre-key the
+  // byte-count map by raw path keep working unchanged).
+  root?: string,
 ): number {
+  const fileKey = (p: string): string =>
+    root === undefined ? p : canonicalizeFilePath(p, { root });
   const uniqueFiles = new Set<string>();
   const findingMap = new Map(findings.map((f) => [f.id, f]));
   for (const id of findingIds) {
-    for (const af of findingMap.get(id)?.affected_files ?? []) uniqueFiles.add(af.path);
+    for (const af of findingMap.get(id)?.affected_files ?? [])
+      uniqueFiles.add(fileKey(af.path));
   }
   const totalBytes = [...uniqueFiles].reduce((sum, p) => sum + (fileByteCounts.get(p) ?? 0), 0);
   return (
@@ -457,10 +474,11 @@ function splitOversizedOverlapGroup(
   findings: Finding[],
   fileByteCounts: Map<string, number>,
   contextBudget: number,
+  root?: string,
 ): string[][] {
   if (
     group.length <= 1 ||
-    estimateGroupTokens(group, findings, fileByteCounts) <= contextBudget
+    estimateGroupTokens(group, findings, fileByteCounts, root) <= contextBudget
   ) {
     return [group];
   }
@@ -471,7 +489,7 @@ function splitOversizedOverlapGroup(
     const candidate = [...current, findingId];
     if (
       current.length > 0 &&
-      estimateGroupTokens(candidate, findings, fileByteCounts) > contextBudget
+      estimateGroupTokens(candidate, findings, fileByteCounts, root) > contextBudget
     ) {
       chunks.push(current);
       current = [findingId];
@@ -489,17 +507,23 @@ export function splitBlocksByContextBudget(
   root: string,
   contextBudget: number,
 ): RemediationBlock[] {
-  const allFiles = new Set<string>();
+  // CE-008: index byte counts by the M1-BOUNDARY canonical physical-file identity
+  // so the same file cited under two spellings is sized ONCE (not double-counted)
+  // and `estimateGroupTokens` resolves every spelling to the same entry.
+  const allFiles = new Map<string, string>(); // canonical key -> a raw spelling to stat
   const findingMap = new Map(findings.map((f) => [f.id, f]));
   for (const block of blocks) {
     for (const id of block.items) {
-      for (const af of findingMap.get(id)?.affected_files ?? []) allFiles.add(af.path);
+      for (const af of findingMap.get(id)?.affected_files ?? []) {
+        const key = canonicalizeFilePath(af.path, { root });
+        if (!allFiles.has(key)) allFiles.set(key, af.path);
+      }
     }
   }
 
   const fileByteCounts = new Map<string, number>();
-  for (const filePath of allFiles) {
-    fileByteCounts.set(filePath, fileSizeBytes(filePath, root));
+  for (const [key, rawPath] of allFiles) {
+    fileByteCounts.set(key, fileSizeBytes(rawPath, root));
   }
 
   const result: RemediationBlock[] = [];
@@ -520,9 +544,10 @@ export function splitBlocksByContextBudget(
         findings,
         fileByteCounts,
         contextBudget,
+        root,
       );
       for (const group of groups) {
-        const groupTokens = estimateGroupTokens(group, findings, fileByteCounts);
+        const groupTokens = estimateGroupTokens(group, findings, fileByteCounts, root);
         if (currentItems.length > 0 && currentTokens + groupTokens > contextBudget) {
           subBlocks.push(currentItems);
           currentItems = group;
@@ -749,11 +774,17 @@ export function mergeBlocksSharingFiles(
   const findingMap = new Map(findings.map((f) => [f.id, f]));
   const byId = new Map(blocks.map((b) => [b.block_id, b]));
 
+  // CE-008: a block's file set is keyed by the M1-BOUNDARY canonical physical-file
+  // identity, so two blocks that cite the same file under different spellings
+  // (rel/abs, `./`-prefixed, mixed separators, case on a case-insensitive FS) are
+  // detected as sharing it and merged — never left to clobber it in parallel.
   const fileSet = (b: RemediationBlock): Set<string> => {
     const files = new Set<string>();
     for (const id of b.items) {
       for (const af of findingMap.get(id)?.affected_files ?? []) {
-        if (!isDirectoryPath(af.path, root)) files.add(af.path);
+        if (!isDirectoryPath(af.path, root)) {
+          files.add(canonicalizeFilePath(af.path, { root }));
+        }
       }
     }
     return files;
