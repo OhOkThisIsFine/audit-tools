@@ -128,15 +128,18 @@ test("grounding-single-source/2b: audit-code does not reimplement the grounding 
   );
   assert.match(quote, /audit-tools\/shared/, "quoteGrounding.ts must source the primitives from shared");
 
-  const design = read(join(AUDIT_SRC, "validation", "designFindingGrounding.ts"));
+  // designFindingGrounding.ts now lives in shared (next to findingGrounding.ts)
+  // so both orchestrators consume the single primitive with no cross-area import;
+  // it imports normalizeRepoPath from the sibling shared module, never redefines it.
+  const design = read(join(SHARED_SRC, "validation", "designFindingGrounding.ts"));
   assert.ok(
     !/function\s+normalizeRepoPath\s*\(/.test(design),
     "designFindingGrounding.ts must import normalizeRepoPath from shared, not define it",
   );
   assert.match(
     design,
-    /normalizeRepoPath[^]*from\s+["']audit-tools\/shared["']/,
-    "designFindingGrounding.ts must import normalizeRepoPath from shared",
+    /normalizeRepoPath[^]*from\s+["']\.\/findingGrounding\.js["']/,
+    "designFindingGrounding.ts must import normalizeRepoPath from the shared findingGrounding module",
   );
 });
 
