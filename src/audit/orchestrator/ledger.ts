@@ -31,6 +31,7 @@ import {
   identityKey,
   idempotencyKey,
   newInstanceId,
+  splitDiscriminatorFromTaskId,
 } from "audit-tools/shared";
 import type { AuditResult } from "../types.js";
 
@@ -139,6 +140,12 @@ export function stampLedgerKeys(result: AuditResult): AuditResult {
         source: emitSourceFor(result),
         // Only consulted for `redispatch`; ignored for base/deepening/steward.
         attempt: result.attempt,
+        // File-split sibling discriminator (N-IDEMPOTENCY): empty for a lone task
+        // ⇒ byte-identical legacy key; non-empty ⇒ siblings get distinct keys.
+        split_discriminator: splitDiscriminatorFromTaskId(
+          result.task_id,
+          result.lens,
+        ),
       }),
     });
   return {

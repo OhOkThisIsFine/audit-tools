@@ -94,6 +94,24 @@ export interface ResultContentDiscriminatorInput {
    * idempotencyKey differs from the prior attempt.
    */
   attempt?: number;
+  /**
+   * Per-split discriminator (N-IDEMPOTENCY). File-split sibling tasks of one
+   * unit+lens+pass legitimately share the {unit_id, lens, pass_id} grouping
+   * coordinate but carry DISTINCT task_ids (`…:part-N`, or `…:<filePath>` for a
+   * large-file split). Without a per-split component every sibling base result
+   * would derive the SAME idempotencyKey, so `appendResultsToLedger`'s INV-2 gate
+   * would silently no-op all but the first sibling — dropping the others'
+   * findings. This component (the split's task_id, canonicalized OS-agnostically
+   * via `canonicalSplitDiscriminator`) folds into the discriminator so siblings
+   * get distinct idempotencyKeys and all persist.
+   *
+   * Contract (fold-rule): an EMPTY component (the lone, non-split base task)
+   * yields a discriminator BYTE-IDENTICAL to the legacy lone-base value, so
+   * existing ledger / baseline keys are unchanged. A non-empty component appends
+   * it, so siblings diverge. Tool-owned, never caller-chosen — callers pass the
+   * raw task_id and the canonicalization + emptiness rule live HERE.
+   */
+  split_discriminator?: string;
 }
 
 /** Inputs to `idempotencyKey`: the identity coordinate + the result discriminator. */
@@ -150,14 +168,44 @@ export function buildTaskContentSignature(
 }
 
 /**
+ * Canonicalize a split-discriminator component OS-agnostically (N-IDEMPOTENCY).
+ * A large-file split task_id embeds the file path (`…:<filePath>`), so the raw
+ * value carries the host's path separator — `unit/a.ts` on POSIX vs `unit\a.ts`
+ * on win32 for the SAME logical split. Backslashes are normalized to forward
+ * slashes so the idempotencyKey is byte-identical cross-platform (a win32 run and
+ * a POSIX run of the same split must NOT mint two records). An empty/whitespace
+ * component canonicalizes to the empty string (the lone-base sentinel). This is
+ * the SOLE canonicalization point — callers pass the raw component.
+ */
+export function canonicalSplitDiscriminator(component: string | undefined): string {
+  if (typeof component !== 'string') return '';
+  const trimmed = component.trim();
+  if (trimmed.length === 0) return '';
+  return trimmed.replace(/\\/g, '/');
+}
+
+/**
  * TOOL-OWNED result-content discriminator (C-002 / fail-3). The discriminator
  * string is derived from the emit-source enum (plus the attempt counter for a
  * re-dispatch), never chosen by a caller — because it feeds the signature-STABLE
  * idempotencyKey, an operator-chosen value would be a correctness hazard.
+ *
+ * The per-split component (N-IDEMPOTENCY) folds in identically for every emit
+ * source: an EMPTY canonical component reproduces the legacy lone-base /
+ * lone-source string BYTE-FOR-BYTE (no key churn for non-split tasks), while a
+ * non-empty component appends a `#split:<canonical>` suffix so file-split sibling
+ * tasks sharing a {unit_id, lens, pass_id} coordinate diverge into distinct
+ * idempotencyKeys instead of colliding through the INV-2 gate.
  */
 export function buildResultContentDiscriminator(
   input: ResultContentDiscriminatorInput,
 ): string {
+  const base = baseDiscriminator(input);
+  const split = canonicalSplitDiscriminator(input?.split_discriminator);
+  return split.length === 0 ? base : `${base}#split:${split}`;
+}
+
+function baseDiscriminator(input: ResultContentDiscriminatorInput): string {
   const source = input?.source;
   if (source === 'base' || source === 'deepening' || source === 'steward') {
     return source;
@@ -176,6 +224,32 @@ export function buildResultContentDiscriminator(
   throw new Error(
     `buildResultContentDiscriminator: unknown emit source ${JSON.stringify(source)}`,
   );
+}
+
+/**
+ * Derive the per-split discriminator component from a task_id (N-IDEMPOTENCY).
+ * Split sibling task_ids are `${scope}:${lens}:part-N` or `${scope}:${lens}:<filePath>`;
+ * a lone (non-split) task is exactly `${scope}:${lens}`. The component is the
+ * suffix AFTER the trailing `:${lens}` segment — empty for a lone task (⇒
+ * byte-identical lone-base key), the split-distinguishing tail otherwise. Returns
+ * empty when the task_id/lens are missing or the expected shape is absent (fail
+ * safe to the legacy lone key rather than mint a spurious split). The result is
+ * the RAW tail; `buildResultContentDiscriminator` canonicalizes it.
+ */
+export function splitDiscriminatorFromTaskId(
+  task_id: string | undefined,
+  lens: string | undefined,
+): string {
+  if (typeof task_id !== 'string' || typeof lens !== 'string' || lens.length === 0) {
+    return '';
+  }
+  const marker = `:${lens}`;
+  const at = task_id.lastIndexOf(marker);
+  if (at < 0) return '';
+  const tail = task_id.slice(at + marker.length);
+  // Lone task ends exactly at the lens segment ⇒ no split suffix.
+  if (!tail.startsWith(':')) return '';
+  return tail.slice(1);
 }
 
 function requireField(value: unknown, name: string): string {
