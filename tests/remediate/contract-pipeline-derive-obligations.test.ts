@@ -23,6 +23,8 @@ import {
   buildTestValidatorPlanScaffold,
   buildImplementationDagScaffold,
   acceptedCounterexampleIds,
+  isTestablePhaseObligation,
+  isDagPhaseObligation,
 } from "../../src/remediate/contractPipeline/derive.js";
 import {
   validateObligationLedger,
@@ -279,6 +281,74 @@ describe("artifact scaffolds (S3 skeletons for the partially-derivable phases)",
     });
     expect(ids).toEqual(["CE-1", "CE-3"]);
     expect(acceptedCounterexampleIds(undefined)).toEqual([]);
+  });
+});
+
+describe("C4: single-sourced obligation-membership predicates", () => {
+  it("isTestablePhaseObligation: testable→true, structural→false, unknown-kind→true (conservative)", () => {
+    expect(isTestablePhaseObligation("invariant")).toBe(true);
+    expect(isTestablePhaseObligation("behavioral")).toBe(true);
+    expect(isTestablePhaseObligation("structural")).toBe(false);
+    // Unknown / unexpected kind fails OPEN into the paired-test gate.
+    expect(isTestablePhaseObligation("mystery")).toBe(true);
+  });
+
+  it("isDagPhaseObligation: every kind is covered by the implementation DAG", () => {
+    for (const k of ["invariant", "behavioral", "structural", "mystery"]) {
+      expect(isDagPhaseObligation(k)).toBe(true);
+    }
+  });
+
+  it("a structural obligation goes to the DAG only — never the test plan", () => {
+    // The contract-conformance obligation per module is structural; with no
+    // invariants/failure modes the ledger is structural-only.
+    const ledger = deriveObligationLedger(
+      {
+        goal_id: "G1",
+        module_contracts: [
+          { name: "m", inputs: [], outputs: [], invariants: [], failure_modes: [], validation_boundary: "" },
+        ],
+      },
+      { created_at: CREATED_AT },
+    );
+    expect(ledger.obligations.every((o) => o.kind === "structural")).toBe(true);
+    expect(buildTestValidatorPlanScaffold(ledger).test_specs).toHaveLength(0);
+    expect(buildImplementationDagScaffold(ledger, []).nodes).toHaveLength(
+      ledger.obligations.length,
+    );
+  });
+
+  it("a testable obligation goes to BOTH scaffolds", () => {
+    const ledger = deriveObligationLedger(
+      {
+        goal_id: "G1",
+        module_contracts: [
+          { name: "m", inputs: [], outputs: [], invariants: ["x must hold"], failure_modes: [], validation_boundary: "" },
+        ],
+      },
+      { created_at: CREATED_AT },
+    );
+    const inv = ledger.obligations.find((o) => o.kind === "invariant")!;
+    expect(buildTestValidatorPlanScaffold(ledger).test_specs.map((s) => s.obligation_id)).toContain(inv.id);
+    expect(buildImplementationDagScaffold(ledger, []).nodes.flatMap((n) => n.satisfies_obligations)).toContain(inv.id);
+  });
+
+  it("parity: both scaffolds' membership equals the shared predicates", () => {
+    const ledger = deriveObligationLedger(finalizedContracts(), { created_at: CREATED_AT });
+    const testPlan = buildTestValidatorPlanScaffold(ledger);
+    const dag = buildImplementationDagScaffold(ledger, []);
+
+    const expectedTestable = ledger.obligations
+      .filter((o) => isTestablePhaseObligation(o.kind))
+      .map((o) => o.id)
+      .sort();
+    expect(testPlan.test_specs.map((s) => s.obligation_id).sort()).toEqual(expectedTestable);
+
+    const expectedDag = ledger.obligations
+      .filter((o) => isDagPhaseObligation(o.kind))
+      .map((o) => o.id)
+      .sort();
+    expect(dag.nodes.flatMap((n) => n.satisfies_obligations).sort()).toEqual(expectedDag);
   });
 });
 

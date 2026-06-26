@@ -45,6 +45,29 @@ export interface RemediationState {
    * a `user_halted` marker in the partial report.
    */
   closing_context?: "user_halted";
+  /**
+   * Persisted host-capability handshake. Opaque to the state store: stored and
+   * round-tripped verbatim, never interpreted here (validateState only gates
+   * `status`). The dispatch-build site merges the explicitly-supplied host
+   * options into this so a later call that omits a flag reuses the persisted
+   * value rather than re-flooring it (C1). Fields: can-dispatch-subagents,
+   * max-concurrent, context/output token windows, and the model roster / id.
+   */
+  host_capabilities?: HostCapabilities;
+}
+
+/**
+ * Opaque persisted host-capability handshake (C1). Every field optional — only
+ * the explicitly-supplied fields of a given call are persisted, so an omitted
+ * field never clobbers a previously-stored value.
+ */
+export interface HostCapabilities {
+  can_dispatch_subagents?: boolean;
+  max_concurrent?: number;
+  context_tokens?: number;
+  output_tokens?: number;
+  model_id?: string;
+  models?: unknown;
 }
 
 /** Known status values for RemediationState — used for schema validation on load. */

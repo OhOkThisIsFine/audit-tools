@@ -284,22 +284,57 @@ Self-check before next-step: \`${loaderCommand(`validate-artifact --name impleme
   return undefined;
 }
 
+/** Outcome of an archive attempt. */
+export interface ArchiveOutcome {
+  /**
+   * Timestamped history path the original was moved to, or undefined when the
+   * source did not exist (nothing to archive).
+   */
+  archivedPath?: string;
+  /**
+   * True when the original path is now free for a fresh Write (the move
+   * succeeded, or there was nothing to archive). False when the move failed and
+   * the original was preserved in place — the caller must NOT assume the path is
+   * re-authorable.
+   */
+  originalFree: boolean;
+}
+
 /**
  * Archive an artifact file into `<contract>/history/` instead of deleting it,
- * so a repair loop never silently destroys an LLM output.
+ * so a repair loop never silently destroys an LLM output. On a successful move
+ * the original path is free (a fresh Write recreates it cleanly); if the move
+ * throws, the original is preserved in place (`originalFree: false`) rather than
+ * silently dropped. `renameFn` is a DI seam so a failed history move is testable.
  */
-async function archiveContractArtifact(
+export async function archiveContractArtifact(
   artifactsDir: string,
   name: ContractPipelineArtifactName,
   label: "stale" | "invalid",
-): Promise<void> {
+  renameFn: (from: string, to: string) => Promise<void> = rename,
+): Promise<ArchiveOutcome> {
   const source = contractArtifactFilePath(artifactsDir, name);
-  if (!existsSync(source)) return;
+  if (!existsSync(source)) return { originalFree: true };
   const historyDir = join(contractPipelineDir(artifactsDir), "history");
   await mkdir(historyDir, { recursive: true });
-  await withFsRetry(() =>
-    rename(source, join(historyDir, `${name}.${label}-${Date.now()}.json`)),
-  );
+  const archivedPath = join(historyDir, `${name}.${label}-${Date.now()}.json`);
+  try {
+    await withFsRetry(() => renameFn(source, archivedPath));
+  } catch {
+    // Move failed: preserve the original in place rather than drop it.
+    return { archivedPath, originalFree: false };
+  }
+  return { archivedPath, originalFree: true };
+}
+
+/**
+ * The explicit re-author signpost appended to every inline rejection re-emit:
+ * the prior output was archived, so the worker must Write a fresh complete
+ * artifact at the ORIGINAL path — never Edit the previous (now-archived) file.
+ */
+export function rejectionRewriteInstruction(archivedPath: string | undefined): string {
+  const where = archivedPath ? `\`${archivedPath}\`` : "the contract history directory";
+  return `\n\n> Prior output archived to ${where}; Write a fresh complete artifact at its original path — do NOT Edit the previous file.`;
 }
 
 export interface ContractIngestionResult {
@@ -1297,7 +1332,7 @@ The orchestrator verifies every module shard is present, merges them into \`${PH
   const ingestion = await ingestContractArtifacts(artifactsDir);
   if (ingestion.invalid.length > 0) {
     const first = ingestion.invalid[0];
-    await archiveContractArtifact(artifactsDir, first.name, "invalid");
+    const archived = await archiveContractArtifact(artifactsDir, first.name, "invalid");
     const phase = ARTIFACT_TO_PHASE[first.name] ?? "goal_normalization";
     return buildPhaseStep(
       phase,
@@ -1306,7 +1341,7 @@ The orchestrator verifies every module shard is present, merges them into \`${PH
 The previous \`${first.name}\` output failed validation and was archived. Fix every issue below in the rewritten output:
 
 ${formatValidationIssues(first.issues)}
-`,
+${rejectionRewriteInstruction(archived.archivedPath)}`,
     );
   }
 
@@ -1367,7 +1402,7 @@ ${formatValidationIssues(first.issues)}
       const firstPath = goalIdErrors[0]?.path ?? "";
       const mismatchedArtifact = firstPath.replace(/\.goal_id$/, "") as ContractPipelineArtifactName;
       const phase = ARTIFACT_TO_PHASE[mismatchedArtifact] ?? "goal_normalization";
-      await archiveContractArtifact(artifactsDir, mismatchedArtifact, "invalid");
+      const archived = await archiveContractArtifact(artifactsDir, mismatchedArtifact, "invalid");
       return buildPhaseStep(
         phase,
         `## Goal-ID Consistency Error
@@ -1377,7 +1412,7 @@ Every contract-pipeline artifact must share the same goal_id. The following mism
 ${goalIdErrors.map((i) => `- [${i.path}] ${i.message}`).join("\n")}
 
 Rewrite the output so its goal_id matches the goal_id established in goal_spec.json.
-`,
+${rejectionRewriteInstruction(archived.archivedPath)}`,
       );
     }
   }
@@ -1489,7 +1524,7 @@ Report this to the user and stop. The contract pipeline cannot promote a plan wi
         at: new Date().toISOString(),
       });
       await writeRepairState(artifactsDir, repairState);
-      await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
+      const archived = await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
       return buildPhaseStep(
         "implementation_planning",
         `## Referential Integrity Errors From the Previous Attempt
@@ -1497,7 +1532,7 @@ Report this to the user and stop. The contract pipeline cannot promote a plan wi
 The previous implementation_dag was rejected and archived due to referential integrity violations. Fix every issue below:
 
 ${integrityErrors.map((i) => `- [${i.path}] ${i.message}`).join("\n")}
-`,
+${rejectionRewriteInstruction(archived.archivedPath)}`,
       );
     }
 
@@ -1528,7 +1563,7 @@ Report this to the user and stop. The contract pipeline cannot promote an untrac
         at: new Date().toISOString(),
       });
       await writeRepairState(artifactsDir, repairState);
-      await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
+      const archived = await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
       return buildPhaseStep(
         "implementation_planning",
         `## Traceability Errors From the Previous Attempt
@@ -1536,7 +1571,7 @@ Report this to the user and stop. The contract pipeline cannot promote an untrac
 The previous implementation_dag was rejected and archived. Every node must trace to at least one obligation from the obligation ledger or one judge-accepted counterexample:
 
 ${traceability.violations.map((v) => `- ${v}`).join("\n")}
-`,
+${rejectionRewriteInstruction(archived.archivedPath)}`,
       );
     }
 
@@ -1575,7 +1610,7 @@ Report this to the user and stop. The contract pipeline cannot promote a plan th
         at: new Date().toISOString(),
       });
       await writeRepairState(artifactsDir, repairState);
-      await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
+      const archived = await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
       return buildPhaseStep(
         "implementation_planning",
         `## Contract-Obligation Gate Errors From the Previous Attempt
@@ -1583,7 +1618,7 @@ Report this to the user and stop. The contract pipeline cannot promote a plan th
 The previous implementation_dag (and/or upstream contract artifacts) failed the fail-closed contract-obligation gates. Fix every issue below before the plan can be promoted:
 
 ${obligationGate.violations.map((v) => `- ${v}`).join("\n")}
-`,
+${rejectionRewriteInstruction(archived.archivedPath)}`,
       );
     }
 
@@ -1621,7 +1656,7 @@ Report this to the user and stop. The contract pipeline cannot promote a plan wh
         at: new Date().toISOString(),
       });
       await writeRepairState(artifactsDir, repairState);
-      await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
+      const archived = await archiveContractArtifact(artifactsDir, "implementation_dag", "invalid");
       // The grounding-driven re-emit is a backend-observed step-boundary fact:
       // route it through the single CE-005 chokepoint as phase_reemit.
       await captureStepBoundaryFriction(
@@ -1644,7 +1679,7 @@ Report this to the user and stop. The contract pipeline cannot promote a plan wh
 The previous implementation_dag produced findings that cite components not present in the working tree. Every cited path or symbol must point at something real:
 
 ${citationGate.violations.map((v) => `- ${v}`).join("\n")}
-`,
+${rejectionRewriteInstruction(archived.archivedPath)}`,
       );
     }
 

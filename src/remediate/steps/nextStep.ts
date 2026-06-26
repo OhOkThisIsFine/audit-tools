@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { StateStore, type RemediationState } from "../state/store.js";
+import { StateStore, type RemediationState, type HostCapabilities } from "../state/store.js";
 import type {
   ClarificationRequest,
   Finding,
@@ -187,6 +187,81 @@ export function resolveRollingEngineEnabled(options: {
   if (envValue === "true") return true;
   if (envValue === "false") return false;
   return true;
+}
+
+/** The host-capability fields supplied explicitly on a single next-step call. */
+export interface ExplicitHostCapabilities {
+  can_dispatch_subagents?: boolean;
+  max_concurrent?: number;
+  context_tokens?: number | null;
+  output_tokens?: number | null;
+  model_id?: string | null;
+  models?: unknown;
+}
+
+/** 32k context-window floor, applied ONLY at true first contact (nothing persisted). */
+const HOST_CONTEXT_TOKENS_FLOOR = 32_000;
+
+function finiteOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Pure per-field host-capability resolver (C1). Each field resolves as
+ * `explicit ?? persisted ?? floor` — a per-field merge, never a whole-object
+ * clobber that would drop fields the current call omitted. The 32k context
+ * floor applies ONLY at true first contact (no persisted handshake at all);
+ * once a handshake exists, an omitted field reuses the persisted value rather
+ * than re-flooring. Corrupt / non-finite persisted numbers degrade to undefined
+ * without throwing.
+ *
+ * Returns:
+ *  - `resolved` — the merged capabilities to drive downstream dispatch sizing;
+ *  - `toPersist` — a delta of ONLY the explicitly-supplied fields, so a
+ *    `store.mutate` merge never clobbers omitted fields.
+ */
+export function resolveHostCapabilities(
+  explicit: ExplicitHostCapabilities | undefined,
+  persisted: HostCapabilities | undefined,
+): { resolved: HostCapabilities; toPersist: HostCapabilities } {
+  const exp = explicit ?? {};
+  const per = persisted && typeof persisted === "object" ? persisted : undefined;
+  const firstContact = per === undefined;
+
+  const pick = <T>(e: T | null | undefined, p: T | undefined): T | undefined =>
+    e ?? p ?? undefined;
+
+  const context_tokens =
+    finiteOrUndefined(exp.context_tokens) ??
+    finiteOrUndefined(per?.context_tokens) ??
+    (firstContact ? HOST_CONTEXT_TOKENS_FLOOR : undefined);
+
+  const resolved: HostCapabilities = {
+    can_dispatch_subagents: pick(exp.can_dispatch_subagents, per?.can_dispatch_subagents),
+    max_concurrent: finiteOrUndefined(exp.max_concurrent) ?? finiteOrUndefined(per?.max_concurrent),
+    context_tokens,
+    output_tokens:
+      finiteOrUndefined(exp.output_tokens) ?? finiteOrUndefined(per?.output_tokens),
+    model_id: pick(exp.model_id, per?.model_id),
+    models: exp.models ?? per?.models,
+  };
+
+  // Persist ONLY the explicitly-supplied fields (the delta) — never the floor,
+  // never an omitted field.
+  const toPersist: HostCapabilities = {};
+  if (exp.can_dispatch_subagents !== undefined)
+    toPersist.can_dispatch_subagents = exp.can_dispatch_subagents;
+  if (finiteOrUndefined(exp.max_concurrent) !== undefined)
+    toPersist.max_concurrent = exp.max_concurrent as number;
+  if (finiteOrUndefined(exp.context_tokens) !== undefined)
+    toPersist.context_tokens = exp.context_tokens as number;
+  if (finiteOrUndefined(exp.output_tokens) !== undefined)
+    toPersist.output_tokens = exp.output_tokens as number;
+  if (exp.model_id !== undefined && exp.model_id !== null)
+    toPersist.model_id = exp.model_id;
+  if (exp.models !== undefined) toPersist.models = exp.models;
+
+  return { resolved, toPersist };
 }
 
 function randomRunId(prefix = "RUN"): string {
@@ -1621,6 +1696,39 @@ async function buildImplementDispatchStep(ctx: {
       sessionConfig: sessionConfigImpl,
     });
 
+    // C1: merge the explicitly-supplied host-* options with the persisted
+    // handshake (per-field `explicit ?? persisted ?? floor`), persist ONLY the
+    // explicitly-supplied delta (never clobbering omitted fields), and feed the
+    // resolved values into downstream dispatch sizing. A later call that omits a
+    // flag reuses the persisted value rather than re-flooring.
+    const { resolved: resolvedHostCaps, toPersist: hostCapsDelta } =
+      resolveHostCapabilities(
+        {
+          can_dispatch_subagents: options.hostCanDispatchSubagents,
+          max_concurrent: options.hostMaxConcurrent,
+          context_tokens: options.hostContextTokens,
+          output_tokens: options.hostOutputTokens,
+          model_id: options.hostModelId,
+          models: options.hostModels ?? undefined,
+        },
+        state.host_capabilities,
+      );
+    if (Object.keys(hostCapsDelta).length > 0) {
+      await store.mutate(async (current) => ({
+        ...(current ?? state),
+        host_capabilities: {
+          ...(current?.host_capabilities ?? state.host_capabilities ?? {}),
+          ...hostCapsDelta,
+        },
+      }));
+    }
+    const resolvedHostMaxConcurrent = resolvedHostCaps.max_concurrent;
+    const resolvedHostContextTokens = resolvedHostCaps.context_tokens ?? null;
+    const resolvedHostOutputTokens = resolvedHostCaps.output_tokens ?? null;
+    const resolvedHostModels =
+      (resolvedHostCaps.models as HostModelRosterEntry[] | undefined) ?? null;
+    const resolvedHostModelId = resolvedHostCaps.model_id ?? null;
+
     // A8 host-subagent rolling driver: when the rolling engine is enabled AND the
     // host can dispatch subagents, drive a FULL-ROLLING, worktree-isolated flow via
     // the `accept-node` per-completion callback — the conversation-first co-equal of
@@ -1634,12 +1742,12 @@ async function buildImplementDispatchStep(ctx: {
 
     const runId = stateRunId(state);
     const waveOptsImpl = {
-      hostMaxConcurrent: options.hostMaxConcurrent,
+      hostMaxConcurrent: resolvedHostMaxConcurrent,
       sessionConfig: sessionConfigImpl ?? null,
-      hostContextTokens: options.hostContextTokens,
-      hostOutputTokens: options.hostOutputTokens,
-      hostModels: options.hostModels,
-      hostModelId: options.hostModelId,
+      hostContextTokens: resolvedHostContextTokens,
+      hostOutputTokens: resolvedHostOutputTokens,
+      hostModels: resolvedHostModels,
+      hostModelId: resolvedHostModelId,
     };
 
     // A8 in-process provider driver: when the rolling engine is enabled AND the
@@ -1661,11 +1769,11 @@ async function buildImplementDispatchStep(ctx: {
         // the host-driven paths handle, not a generic target-repo step → no-op here.
         rebuildSharedBetweenLevels: async () => {},
         waveOptions: {
-          hostMaxConcurrent: options.hostMaxConcurrent,
-          hostContextTokens: options.hostContextTokens,
-          hostOutputTokens: options.hostOutputTokens,
-          hostModels: options.hostModels,
-          hostModelId: options.hostModelId,
+          hostMaxConcurrent: resolvedHostMaxConcurrent,
+          hostContextTokens: resolvedHostContextTokens,
+          hostOutputTokens: resolvedHostOutputTokens,
+          hostModels: resolvedHostModels,
+          hostModelId: resolvedHostModelId,
         },
       });
       // null = no eligible pending work this pass; the engine merges internally once
@@ -1688,11 +1796,11 @@ async function buildImplementDispatchStep(ctx: {
       // backend pool is confirmed (the coordinator has nothing to split against).
       const confirmedPools = await buildConfirmedPools({
         sessionConfig: sessionConfigImpl ?? null,
-        hostMaxConcurrent: options.hostMaxConcurrent,
-        hostContextTokens: options.hostContextTokens,
-        hostOutputTokens: options.hostOutputTokens,
-        hostModels: options.hostModels,
-        hostModelId: options.hostModelId,
+        hostMaxConcurrent: resolvedHostMaxConcurrent,
+        hostContextTokens: resolvedHostContextTokens,
+        hostOutputTokens: resolvedHostOutputTokens,
+        hostModels: resolvedHostModels,
+        hostModelId: resolvedHostModelId,
       });
       const backendPools = confirmedPools.filter(isInProcessPool);
 
@@ -3751,10 +3859,6 @@ function buildPreIntakeObligations(
   const ackPath = join(artifactsDir, "confirm_resume_ack.json");
   const interpretationPath = join(artifactsDir, INTENT_INTERPRETATION_FILENAME);
   const reportPath = join(dirname(artifactsDir), "remediation-report.md");
-  // Fires at most once per host call; gates the leftover-report warning so a
-  // re-scan after a transition cannot re-print it (mirrors the cascade's
-  // single fall-through hit).
-  const warned = { value: false };
 
   return [
     {
@@ -3885,27 +3989,6 @@ function buildPreIntakeObligations(
         kind: "emit",
         step: await handleComplete(c.root, c.artifactsDir, state),
       }),
-    },
-    {
-      // Diagnostic (not a gate): a leftover root report will be overwritten when a
-      // fresh/active run completes. A transition (prints once, state unchanged);
-      // its priority slot — after complete_redelivery, before complete — means a
-      // re-presented/complete run never reaches it, exactly as the cascade's
-      // fall-through ordering did.
-      id: "report_warning",
-      derive: (state) =>
-        !warned.value &&
-        existsSync(reportPath) &&
-        state?.status !== "complete"
-          ? "missing"
-          : "satisfied",
-      execute: async (state) => {
-        warned.value = true;
-        process.stderr.write(
-          "[remediate-code] A previous remediation-report.md exists in .audit-tools/; it will be overwritten when this run completes.\n",
-        );
-        return { kind: "transition", state };
-      },
     },
     {
       id: "complete",
