@@ -20,6 +20,8 @@ import {
   inferRepairTarget,
   MAX_CONTRACT_REPAIR_ITERATIONS,
   MAX_DAG_REGENERATION_ATTEMPTS,
+  archiveContractArtifact,
+  rejectionRewriteInstruction,
 } from "../../src/remediate/steps/contractPipeline.js";
 import {
   contractArtifactFilePath,
@@ -972,5 +974,79 @@ describe("inferRepairTarget: judge repair-directive inference (N-R11)", () => {
         { counterexample_id: "CE-X", classification: "out_of_scope", rationale: "nope" },
       ]),
     ).toBe("finalized_module_contracts");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D2: rejected-artifact archive keeps the original path re-authorable + signposts
+// ---------------------------------------------------------------------------
+
+describe("D2: archiveContractArtifact + rejectionRewriteInstruction", () => {
+  it("moves the original to a timestamped history copy and frees the original path for a fresh Write", async () => {
+    await writeRawArtifact("implementation_dag", { goal_id: "G1", nodes: [] });
+    const originalPath = contractArtifactFilePath(ARTIFACTS_DIR, "implementation_dag");
+    expect(existsSync(originalPath)).toBe(true);
+
+    const outcome = await archiveContractArtifact(
+      ARTIFACTS_DIR,
+      "implementation_dag",
+      "invalid",
+    );
+
+    expect(outcome.originalFree).toBe(true);
+    expect(outcome.archivedPath).toBeDefined();
+    // The timestamped history copy exists under <contract>/history/.
+    expect(existsSync(outcome.archivedPath!)).toBe(true);
+    expect(outcome.archivedPath!).toContain("history");
+    // The original path is free — a fresh Write recreates it cleanly.
+    expect(existsSync(originalPath)).toBe(false);
+    await writeFile(originalPath, JSON.stringify({ rewritten: true }) + "\n", "utf8");
+    expect(JSON.parse(await readFile(originalPath, "utf8")).rewritten).toBe(true);
+  });
+
+  it("returns originalFree:true with no archivedPath when the source does not exist", async () => {
+    const outcome = await archiveContractArtifact(
+      ARTIFACTS_DIR,
+      "implementation_dag",
+      "invalid",
+    );
+    expect(outcome.originalFree).toBe(true);
+    expect(outcome.archivedPath).toBeUndefined();
+  });
+
+  it("preserves the original in place when the rename fails (originalFree:false, never silently dropped)", async () => {
+    await writeRawArtifact("implementation_dag", { goal_id: "G1", nodes: [] });
+    const originalPath = contractArtifactFilePath(ARTIFACTS_DIR, "implementation_dag");
+
+    const outcome = await archiveContractArtifact(
+      ARTIFACTS_DIR,
+      "implementation_dag",
+      "invalid",
+      async () => {
+        throw new Error("simulated rename failure");
+      },
+    );
+
+    expect(outcome.originalFree).toBe(false);
+    // The original is preserved in place — never dropped.
+    expect(existsSync(originalPath)).toBe(true);
+  });
+
+  it("rejectionRewriteInstruction signposts the archived path + the fresh-Write-not-Edit rule", () => {
+    const msg = rejectionRewriteInstruction("/x/history/implementation_dag.invalid-1.json");
+    expect(msg).toContain("/x/history/implementation_dag.invalid-1.json");
+    expect(msg).toContain("Write a fresh complete artifact at its original path");
+    expect(msg).toContain("do NOT Edit the previous file");
+  });
+
+  it("a rejection re-emit prompt carries the rewrite signpost", async () => {
+    // Drive an ingestion-invalid re-emit: an unparseable/invalid payload is
+    // archived and its phase re-emitted; the prompt must carry the signpost.
+    await writeRawArtifact("goal_spec", { not: "a valid goal spec" });
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const promptPath = (step as { prompt_path?: string }).prompt_path!;
+    const prompt = await readFile(promptPath, "utf8");
+    expect(prompt).toContain("do NOT Edit the previous file");
+    expect(prompt).toContain("Write a fresh complete artifact at its original path");
   });
 });

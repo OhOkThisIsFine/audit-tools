@@ -188,23 +188,87 @@ describe("createWorktree", () => {
 // ---------------------------------------------------------------------------
 
 describe("removeWorktree", () => {
-  it("calls 'git worktree remove --force <path>'", () => {
-    spawnSyncMock.mockReturnValue(makeSpawnResult(0));
+  const RM_DIRS: string[] = [];
 
-    removeWorktree("/repo", "/repo/.audit-tools/worktrees/remediate-X-Y");
-
-    expect(spawnSyncMock).toHaveBeenCalledWith(
-      "git",
-      ["worktree", "remove", "--force", "/repo/.audit-tools/worktrees/remediate-X-Y"],
-      expect.objectContaining({ cwd: "/repo", shell: false }),
-    );
+  beforeEach(() => {
+    // Route every dispatch.ts git call to real git for this block only.
+    spawnSyncMock.mockImplementation(realSpawnSync as typeof spawnSync);
   });
 
-  it("does not throw on non-zero exit (best-effort)", () => {
-    spawnSyncMock.mockReturnValue(makeSpawnResult(1, "", "some error"));
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const d of RM_DIRS.splice(0)) {
+      try {
+        rmSync(d, { recursive: true, force: true });
+      } catch {
+        // best-effort temp cleanup
+      }
+    }
+  });
 
-    // Should not throw
-    expect(() => removeWorktree("/repo", "/repo/wt")).not.toThrow();
+  function initRepoWithWorktree(): { repo: string; wt: string } {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "rmwt-")));
+    RM_DIRS.push(repo);
+    const git = (...a: string[]) =>
+      realSpawnSync("git", a, { cwd: repo, encoding: "utf8", shell: false });
+    git("init");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeFileSync(join(repo, "f.txt"), "x\n");
+    git("add", "f.txt");
+    git("commit", "-m", "base");
+    const wt = worktreePath(repo, "RMX", "RID");
+    createWorktree(repo, wt, worktreeBranchForBlock("RMX", "RID"));
+    return { repo, wt };
+  }
+
+  it("happy path: an existing worktree path invokes git and is removed", () => {
+    const { repo, wt } = initRepoWithWorktree();
+    expect(existsSync(wt)).toBe(true);
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    removeWorktree(repo, wt);
+
+    expect(existsSync(wt)).toBe(false);
+    expect(stderr).not.toHaveBeenCalled();
+  });
+
+  it("absent path: no spawn, no stderr, no throw (silent no-op)", () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "rmwt-absent-")));
+    RM_DIRS.push(repo);
+    const absent = join(repo, "does", "not", "exist");
+    const spawnSpy = vi.fn(realSpawnSync as typeof spawnSync);
+    spawnSyncMock.mockImplementation(spawnSpy);
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    expect(() => removeWorktree(repo, absent)).not.toThrow();
+
+    expect(spawnSpy).not.toHaveBeenCalled();
+    expect(stderr).not.toHaveBeenCalled();
+  });
+
+  it("existing path, genuine git failure: surfaced on stderr, does not throw", () => {
+    // The path exists but is NOT a registered worktree → `git worktree remove`
+    // fails for a real reason and must still be logged (not the absent no-op).
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "rmwt-fail-")));
+    RM_DIRS.push(repo);
+    const git = (...a: string[]) =>
+      realSpawnSync("git", a, { cwd: repo, encoding: "utf8", shell: false });
+    git("init");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeFileSync(join(repo, "f.txt"), "x\n");
+    git("add", "f.txt");
+    git("commit", "-m", "base");
+    const notAWorktree = join(repo, "plain-dir");
+    mkdirSync(notAWorktree, { recursive: true });
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    expect(() => removeWorktree(repo, notAWorktree)).not.toThrow();
+
+    expect(stderr).toHaveBeenCalled();
+    const msg = stderr.mock.calls.map((c) => String(c[0])).join("");
+    expect(msg).toContain("worktree remove failed");
   });
 });
 

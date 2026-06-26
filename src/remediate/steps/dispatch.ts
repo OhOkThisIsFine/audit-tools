@@ -599,6 +599,10 @@ export function seedUntrackedDeclaredPaths(
 
 /** Remove a git worktree. Best-effort: logs but does not throw on failure. */
 export function removeWorktree(root: string, worktreePath: string): void {
+  // Already-absent worktree = silent no-op: no spawn, no stderr, no throw. A
+  // path that still exists but fails git-remove for another reason is surfaced
+  // exactly as before. We do NOT match on the 'not a working tree' stderr text.
+  if (!existsSync(worktreePath)) return;
   const result = spawnSync(
     "git",
     ["worktree", "remove", "--force", worktreePath],
