@@ -31,6 +31,7 @@ import {
 import {
   validateContractCitationGrounding,
   enumerateRepoTreePaths,
+  isInsideGitWorkTree,
 } from "../../src/remediate/validation/contractPipeline.js";
 import type { Finding } from "audit-tools/shared";
 import {
@@ -641,8 +642,8 @@ describe("M-B3: source-grounded citation gate (repo-tree knownPaths)", () => {
     expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(1);
   });
 
-  it("fails CLOSED only when the working tree is unreadable/empty", () => {
-    // A non-git directory enumerates to an empty set → fail closed.
+  it("fails CLOSED only when the tree is genuinely unreadable (git unavailable / not a repo)", () => {
+    // A non-existent dir is not a git work tree → fail closed (error).
     const result = validateContractCitationGrounding(
       [mkFinding({ affected_files: [{ path: "src/auth.ts" }] })],
       join(TEST_DIR, "no-such-subdir"),
@@ -650,6 +651,29 @@ describe("M-B3: source-grounded citation gate (repo-tree knownPaths)", () => {
     expect(result.treeReadable).toBe(false);
     expect(result.issues.filter((i) => i.severity === "error").length).toBeGreaterThan(0);
     expect(result.issues[0].message).toMatch(/could not enumerate the working tree/i);
+  });
+
+  it("degrades to PASS-WITH-WARNING on a valid but EMPTY git repo (new/never-committed tree)", async () => {
+    // A real git work tree with ZERO tracked files must NOT hard-block: the
+    // citations may be sound, the tree just has nothing committed yet.
+    const emptyRepo = join(TEST_DIR, "empty-repo");
+    await mkdir(emptyRepo, { recursive: true });
+    spawnSync("git", ["init"], { cwd: emptyRepo, shell: false, encoding: "utf8" });
+
+    expect(enumerateRepoTreePaths(emptyRepo).size).toBe(0);
+    expect(isInsideGitWorkTree(emptyRepo)).toBe(true);
+
+    const result = validateContractCitationGrounding(
+      [mkFinding({ affected_files: [{ path: "src/auth.ts" }] })],
+      emptyRepo,
+    );
+    // Readable (it IS a valid tree) → no error → callers (which filter on
+    // severity:error) do not block; a single explanatory warning is surfaced.
+    expect(result.treeReadable).toBe(true);
+    expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
+    const warnings = result.issues.filter((i) => i.severity === "warning");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toMatch(/no tracked files yet/i);
   });
 
   it("promotion backstop re-emits implementation_planning when a promoted finding cites a hallucinated path", async () => {
