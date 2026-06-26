@@ -42,8 +42,14 @@ async function manageArtifactGitignore() {
     // The consuming repo root: npm sets INIT_CWD to the dir `npm install` ran in.
     const repoRoot = process.env.INIT_CWD || process.cwd();
 
-    // Explicit operator override always wins. Accept private/public/track/ignore.
-    const override = resolveVisibilityOverride();
+    // Explicit operator override always wins. Single-sourced parse +
+    // env-var name from shared (accepts private/public/track/ignore).
+    const override =
+      typeof shared.parseVisibilityOverride === "function"
+        ? shared.parseVisibilityOverride(
+            process.env[shared.REPO_VISIBILITY_ENV ?? "AUDIT_TOOLS_REPO_VISIBILITY"],
+          )
+        : resolveVisibilityOverride();
 
     const result = shared.ensureArtifactGitignore({
       repoRoot,
