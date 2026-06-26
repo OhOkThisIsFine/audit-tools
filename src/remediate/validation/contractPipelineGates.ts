@@ -1031,6 +1031,34 @@ export function enumerateRepoTreePaths(repoRoot: string): Set<string> {
 }
 
 /**
+ * Whether `repoRoot` is inside a VALID git working tree, via
+ * `git rev-parse --is-inside-work-tree`. This distinguishes the two reasons
+ * `enumerateRepoTreePaths` can return empty: (a) git missing / not a repo →
+ * `false` (genuinely unreadable — fail-closed); (b) a valid git work tree that
+ * simply has zero tracked files yet (a fresh/never-committed repo) → `true`
+ * (the citations may be sound; degrade to pass-with-warning, never hard-block).
+ * OS-agnostic: `shell: false`. NEVER throws — any failure is treated as not-a-tree.
+ */
+export function isInsideGitWorkTree(repoRoot: string): boolean {
+  let result;
+  try {
+    result = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      shell: false,
+    });
+  } catch {
+    return false;
+  }
+  return (
+    !!result &&
+    result.status === 0 &&
+    typeof result.stdout === "string" &&
+    result.stdout.trim() === "true"
+  );
+}
+
+/**
  * Build the corpus of pre-existing symbol tokens from the known repo paths, so a
  * symbol-shaped citation can be grounded against "a token that actually names a
  * real file or a segment of one". Each path is split on path/extension separators
@@ -1085,13 +1113,27 @@ export function validateContractCitationGrounding(
   const issues: ValidationIssue[] = [];
   const knownPaths = enumerateRepoTreePaths(repoRoot);
 
-  // Fail-closed ONLY when the tree itself is unreadable/empty: nothing can be
-  // grounded, so the gate blocks rather than silently passing every citation.
+  // An empty path set has two distinct causes — distinguish them so a legitimately
+  // new/empty git repo is not hard-blocked (the grounding edge):
+  //   - git missing / not a repo  → genuinely unreadable → ERROR (fail-closed).
+  //   - valid work tree, 0 tracked → nothing to ground against, but the citations
+  //     may be sound → WARNING (pass-with-warning; callers block only on errors).
   if (knownPaths.size === 0) {
+    if (isInsideGitWorkTree(repoRoot)) {
+      pushValidationIssue(
+        issues,
+        "contract_citation_grounding.repo_tree",
+        `The working tree at "${repoRoot}" is a valid git repo but has no tracked files yet (git ls-files is empty) — citation grounding cannot run, so it is SKIPPED with a warning rather than blocking promotion. Citations were not verified against the tree.`,
+        "warning",
+      );
+      // treeReadable: the tree IS readable — it is just empty. No error issue, so
+      // the gate degrades to pass-with-warning (callers filter on severity:error).
+      return { treeReadable: true, issues };
+    }
     pushValidationIssue(
       issues,
       "contract_citation_grounding.repo_tree",
-      `Could not enumerate the working tree at "${repoRoot}" (git ls-files returned no files) — citation grounding cannot run, so the gate fails closed. Verify repo_root points at a git working tree.`,
+      `Could not enumerate the working tree at "${repoRoot}" (git unavailable or not a git work tree) — citation grounding cannot run, so the gate fails closed. Verify repo_root points at a git working tree.`,
     );
     return { treeReadable: false, issues };
   }

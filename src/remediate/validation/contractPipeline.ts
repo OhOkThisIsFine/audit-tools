@@ -332,6 +332,7 @@ export {
   validateReconciliationDerivation,
   validateContractCitationGrounding,
   enumerateRepoTreePaths,
+  isInsideGitWorkTree,
   deriveNodeModelTier,
   deriveNodeModelTierFromNode,
   type NodeComplexitySignals,
