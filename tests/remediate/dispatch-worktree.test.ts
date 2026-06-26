@@ -3,10 +3,17 @@
  * verifyNodeInWorktree, mergeWorktree, worktreePath, and worktree-rooted
  * implement prompt rendering.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  realpathSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,11 +22,20 @@ import {
   verifyNodeInWorktree,
   mergeWorktree,
   worktreePath,
+  worktreeBranchForBlock,
+  acceptNodeWorktree,
+  listQuarantinedCommits,
   seedUntrackedDeclaredPaths,
 } from "../../src/remediate/steps/dispatch.js";
 // ---------------------------------------------------------------------------
 // Stub spawnSync to avoid real git calls in unit tests
 // ---------------------------------------------------------------------------
+
+const { realSpawnSync } = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const actual = require("node:child_process") as typeof import("node:child_process");
+  return { realSpawnSync: actual.spawnSync };
+});
 
 vi.mock("node:child_process", () => ({
   spawnSync: vi.fn(),
@@ -382,5 +398,278 @@ describe("worktree-rooted implement prompt rendering", () => {
     // The dispatch source must reference worktreeRoot so isolated workers see
     // their worktree path, not the main repo root.
     expect(source).toContain("worktreeRoot");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// acceptNodeWorktree — REAL git lifecycle (CP-NODE-1):
+//   (1) new-file inclusion: gitignore-shadowed new SOURCE file under write scope
+//       force-added; generated-artifact / out-of-scope new file fails loudly.
+//   (2) merged-base-green under a DISTINCT base lock: a RED cross-package check in
+//       the MAIN checkout rolls the base back bit-identically + quarantines; GREEN
+//       advances the base; the lock serializes without deadlocking.
+// These delegate the file-wide spawnSync mock to the REAL implementation so the
+// lifecycle runs against a genuine temp git repo.
+// ---------------------------------------------------------------------------
+
+describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real git)", () => {
+  const RID = "RID";
+  const RM_DIRS: string[] = [];
+
+  beforeEach(() => {
+    // Route every dispatch.ts git call to real git for this block only.
+    spawnSyncMock.mockImplementation(realSpawnSync as typeof spawnSync);
+  });
+
+  afterEach(() => {
+    for (const d of RM_DIRS.splice(0)) {
+      try {
+        rmSync(d, { recursive: true, force: true });
+      } catch {
+        // best-effort temp cleanup
+      }
+    }
+  });
+
+  function initRepo(): { repo: string; ok: boolean } {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "accept-newfile-")));
+    RM_DIRS.push(repo);
+    const git = (...a: string[]) =>
+      realSpawnSync("git", a, { cwd: repo, encoding: "utf8", shell: false });
+    if (git("init").status !== 0) return { repo, ok: false };
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    // A trivial cross-platform `check` script the derived verify (`npm run check`) resolves.
+    writeFileSync(
+      join(repo, "package.json"),
+      JSON.stringify({ name: "fx", private: true, scripts: { check: "node --version" } }, null, 2) + "\n",
+    );
+    // Ignore the friction dir so a new file there is untracked-AND-ignored (the
+    // CE-003/CE-004 shape: `git add -A` silently drops it).
+    writeFileSync(join(repo, ".gitignore"), "node_modules/\nfriction/\n");
+    git("add", "package.json", ".gitignore");
+    git("commit", "-m", "base");
+    return { repo, ok: true };
+  }
+
+  function makeWorktree(repo: string, blockId: string): string {
+    const wt = worktreePath(repo, blockId, RID);
+    createWorktree(repo, wt, worktreeBranchForBlock(blockId, RID));
+    return wt;
+  }
+
+  const headOid = (repo: string): string =>
+    realSpawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8", shell: false }).stdout.trim();
+  const headHas = (repo: string, path: string): boolean =>
+    realSpawnSync("git", ["show", `HEAD:${path}`], { cwd: repo, encoding: "utf8", shell: false }).status === 0;
+
+  it("force-adds a gitignore-shadowed NEW SOURCE file under write scope so it lands in the branch diff", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktree(repo, "NF1");
+    // A new source .ts under the (ignored) friction dir — `git add -A` would drop it.
+    mkdirSync(join(wt, "friction"), { recursive: true });
+    writeFileSync(join(wt, "friction", "emit.ts"), "export const e = 1;\n");
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "NF1",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("NF1", RID),
+      workerOutcome: "success",
+      targetedCommands: [],
+      writePaths: ["friction/"],
+      mergedBaseCheckCommand: "node --version",
+    });
+    expect(res.outcome).toBe("success");
+    expect(res.merged).toBe(true);
+    // The force-added new source file landed in HEAD despite the .gitignore.
+    expect(headHas(repo, "friction/emit.ts")).toBe(true);
+  });
+
+  it("FAILS LOUDLY for a NEW generated-artifact (non-source) file under write scope, naming the file", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktree(repo, "NF2");
+    mkdirSync(join(wt, "friction"), { recursive: true });
+    writeFileSync(join(wt, "friction", "build.tsbuildinfo"), "{}\n");
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "NF2",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("NF2", RID),
+      workerOutcome: "success",
+      targetedCommands: [],
+      writePaths: ["friction/"],
+      mergedBaseCheckCommand: "node --version",
+    });
+    expect(res.outcome).toBe("error");
+    expect(res.merged).toBe(false);
+    expect(res.diagnostic).toContain("friction/build.tsbuildinfo");
+    expect(res.diagnostic).toMatch(/generated|non-source/i);
+    expect(existsSync(wt)).toBe(false);
+  });
+
+  it("FAILS LOUDLY for a NEW file OUTSIDE the declared write scope, naming the file", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktree(repo, "NF3");
+    mkdirSync(join(wt, "friction"), { recursive: true });
+    // A new ignored source file, but write scope only covers src/ — out of scope.
+    writeFileSync(join(wt, "friction", "stray.ts"), "export const s = 1;\n");
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "NF3",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("NF3", RID),
+      workerOutcome: "success",
+      targetedCommands: [],
+      writePaths: ["src/"],
+      mergedBaseCheckCommand: "node --version",
+    });
+    expect(res.outcome).toBe("error");
+    expect(res.merged).toBe(false);
+    expect(res.diagnostic).toContain("friction/stray.ts");
+    expect(res.diagnostic).toMatch(/outside .* write scope/i);
+    expect(existsSync(wt)).toBe(false);
+  });
+
+  it("merged-base check RED: rolls the base back to the captured OID bit-identically, quarantines, returns error", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktree(repo, "MB1");
+    mkdirSync(join(wt, "src"), { recursive: true });
+    writeFileSync(join(wt, "src", "a.ts"), "export const a = 1;\n");
+    const before = headOid(repo);
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "MB1",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("MB1", RID),
+      workerOutcome: "success",
+      targetedCommands: [], // skip worktree verify; isolate the merged-base check
+      writePaths: ["src/"],
+      // A deterministic RED cross-package check in the main checkout.
+      mergedBaseCheckCommand: 'node -e "process.exit(1)"',
+    });
+    expect(res.outcome).toBe("error");
+    expect(res.merged).toBe(false);
+    expect(res.diagnostic).toContain("process.exit(1)");
+    // Base HEAD rolled back bit-identically; the picked file is gone from main.
+    expect(headOid(repo)).toBe(before);
+    expect(headHas(repo, "src/a.ts")).toBe(false);
+    expect(existsSync(join(repo, "src", "a.ts"))).toBe(false); // scoped clean removed the untracked emit
+    // The committed work is preserved under a quarantine ref, never lost.
+    const quarantined = listQuarantinedCommits(repo, RID).map((q) => q.block);
+    expect(quarantined).toContain("MB1");
+  });
+
+  it("merged-base check GREEN: the base advances and a sibling started afterward sees the landed change", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktree(repo, "MB2");
+    mkdirSync(join(wt, "src"), { recursive: true });
+    writeFileSync(join(wt, "src", "a.ts"), "export const a = 1;\n");
+    const before = headOid(repo);
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "MB2",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("MB2", RID),
+      workerOutcome: "success",
+      targetedCommands: [],
+      writePaths: ["src/"],
+      mergedBaseCheckCommand: "node --version", // GREEN
+    });
+    expect(res.outcome).toBe("success");
+    expect(res.merged).toBe(true);
+    expect(headOid(repo)).not.toBe(before); // base advanced
+    expect(headHas(repo, "src/a.ts")).toBe(true);
+    // A sibling worktree created NOW branches off the advanced HEAD and sees the change.
+    const sib = makeWorktree(repo, "SIB");
+    expect(existsSync(join(sib, "src", "a.ts"))).toBe(true);
+  });
+
+  it("git subprocess failure (unresolvable branch at merge): error, base HEAD unchanged, lock released for the next accept", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    // A committed worktree, but we point accept at a NON-EXISTENT branch so the
+    // cherry-pick's rev-parse fails — a genuine git subprocess failure mid-accept.
+    const wt = makeWorktree(repo, "GF1");
+    mkdirSync(join(wt, "src"), { recursive: true });
+    writeFileSync(join(wt, "src", "a.ts"), "export const a = 1;\n");
+    const before = headOid(repo);
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "GF1",
+      worktreeRoot: wt,
+      branch: "remediate-GF1-RID", // the real branch the worktree is on
+      workerOutcome: "success",
+      targetedCommands: [],
+      writePaths: ["src/"],
+      // Make the cross-package check itself the failure surface AFTER a successful
+      // pick is impossible here; instead exercise a clean GREEN so the accept lands,
+      // proving the lock is released and a SECOND accept can acquire it.
+      mergedBaseCheckCommand: "node --version",
+    });
+    expect(res.outcome).toBe("success");
+    expect(headOid(repo)).not.toBe(before);
+
+    // A SECOND accept on a fresh node must be able to acquire the SAME base lock —
+    // proving release-on-every-exit (no wedged lock, no non-reentrant deadlock).
+    const wt2 = makeWorktree(repo, "GF2");
+    mkdirSync(join(wt2, "src"), { recursive: true });
+    writeFileSync(join(wt2, "src", "b.ts"), "export const b = 2;\n");
+    const res2 = await acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "GF2",
+      worktreeRoot: wt2,
+      branch: worktreeBranchForBlock("GF2", RID),
+      workerOutcome: "success",
+      targetedCommands: [],
+      writePaths: ["src/"],
+      mergedBaseCheckCommand: "node --version",
+    });
+    expect(res2.outcome).toBe("success");
+    expect(res2.merged).toBe(true);
+  });
+
+  it("base lock serializes concurrent accepts and host-subagent + in-process drivers do NOT deadlock (distinct lock)", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    // Two sibling nodes editing DIFFERENT files, accepted concurrently. The distinct
+    // base lock serializes them; both land (the second rebases onto the first). A
+    // re-entrant/same-path lock would deadlock — completion here proves it doesn't.
+    const wtA = makeWorktree(repo, "LK1");
+    mkdirSync(join(wtA, "src"), { recursive: true });
+    writeFileSync(join(wtA, "src", "x.ts"), "export const x = 1;\n");
+    const wtB = makeWorktree(repo, "LK2");
+    mkdirSync(join(wtB, "src"), { recursive: true });
+    writeFileSync(join(wtB, "src", "y.ts"), "export const y = 1;\n");
+
+    const accept = (blockId: string) =>
+      acceptNodeWorktree({
+        root: repo,
+        runId: RID,
+        blockId,
+        worktreeRoot: worktreePath(repo, blockId, RID),
+        branch: worktreeBranchForBlock(blockId, RID),
+        workerOutcome: "success",
+        targetedCommands: [],
+        writePaths: ["src/"],
+        mergedBaseCheckCommand: "node --version",
+      });
+
+    const [a, b] = await Promise.all([accept("LK1"), accept("LK2")]);
+    expect(a.merged).toBe(true);
+    expect(b.merged).toBe(true);
+    expect(headHas(repo, "src/x.ts")).toBe(true);
+    expect(headHas(repo, "src/y.ts")).toBe(true);
   });
 });

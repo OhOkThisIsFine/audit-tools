@@ -32,6 +32,7 @@ import type {
   RollingDispatchResult,
 } from "audit-tools/shared";
 import { probeQuotaSource } from "audit-tools/shared";
+import { withFileLock } from "audit-tools/shared";
 import { captureStepBoundaryFriction } from "audit-tools/shared";
 import { findingLead, renderFindingBadgeBody } from "audit-tools/shared";
 import { runShellCommand } from "../utils/commands.js";
@@ -792,6 +793,19 @@ export function remediationBranchName(runId: string): string {
   return `remediation/${refSafeSegment(runId, "run")}`;
 }
 
+/**
+ * Lock path for the base-mutating accept critical section (INV-2/CE-001), keyed on
+ * the base repo root + run's remediation branch. DISTINCT from the per-run
+ * `rolling-session.lock` (`withFileLock` is non-reentrant — an exclusive `wx`
+ * create — so the base lock MUST be a different path than the session lock
+ * `advanceHostRolling` already holds, or the nested acquire would self-deadlock).
+ * Both rolling drivers (host-subagent + in-process) serialize the rebase →
+ * cherry-pick → cross-package check → reset sequence through this single lock.
+ */
+export function baseBranchLockPath(root: string, runId: string): string {
+  return join(root, ".audit-tools", "remediation", "runs", refSafeSegment(runId, "run"), "base-branch.lock");
+}
+
 /** Durable ref under which a failed-but-committed node's commit is preserved. */
 function quarantineRef(runId: string, blockId: string): string {
   return `refs/remediation-quarantine/${refSafeSegment(runId, "run")}/${refSafeSegment(blockId, "node")}`;
@@ -912,10 +926,157 @@ export function ensureRemediationBranchCheckedOut(root: string, runId: string): 
  * source edits. Returns `committed:false` (not an error) when the worker made no
  * tracked edits — there is then nothing to verify or merge.
  */
+/**
+ * Source-file extensions a worker is allowed to CREATE as a brand-new untracked
+ * file that `.gitignore` happens to shadow. A new source file (a .ts the build
+ * compiles, a .js shim, a source .json fixture/config) is real work that MUST land
+ * even though `git add -A` honours `.gitignore` and would silently drop it
+ * (CE-003/CE-004 — the dogfood lost a gitignored friction-dir file exactly this
+ * way). A new
+ * file with any OTHER suffix under write scope is a GENERATED artifact (`.tsbuildinfo`,
+ * an emitted `.d.ts`, a coverage dump, …) — committing it would land a stale build
+ * output, so those FAIL LOUDLY rather than commit a half-change.
+ */
+const SOURCE_NEW_FILE_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+]);
+
+/**
+ * A new untracked-ignored file is a SOURCE file (force-add it) iff its extension
+ * is in {@link SOURCE_NEW_FILE_EXTENSIONS} AND it is not a generated declaration
+ * (`.d.ts` / `.d.mts` / `.d.cts`) — a generated `.d.ts` has a `.ts` suffix but is
+ * build output, so it must be excluded from the source set.
+ */
+function isSourceNewFile(rel: string): boolean {
+  const lower = rel.toLowerCase();
+  if (/\.d\.[cm]?ts$/.test(lower)) return false;
+  const dot = lower.lastIndexOf(".");
+  if (dot < 0) return false;
+  return SOURCE_NEW_FILE_EXTENSIONS.has(lower.slice(dot));
+}
+
+/**
+ * Whether a repo-relative path falls UNDER one of the block's declared write
+ * paths. A declared path matches a new file when it is the file itself, a
+ * directory prefix of it (declared `src/x` matches `src/x/new.ts`), or a glob
+ * whose pre-wildcard directory prefix contains it (a leading-wildcard glob like
+ * a friction-dir pattern matches `src/a/friction/new.ts`). Declared paths and the
+ * candidate are normalized to
+ * repo-relative forward-slash form so the comparison is OS-agnostic.
+ */
+function isUnderWritePaths(rel: string, declaredWritePaths: string[], root: string): boolean {
+  const target = toRepoRelative(rel, root);
+  for (const raw of declaredWritePaths) {
+    const declared = toRepoRelative(raw, root);
+    if (declared === target) return true;
+    // Glob: reduce a wildcard pattern to the leading literal dir segment(s)
+    // before the first wildcard and treat that as a containing prefix.
+    const wildcard = declared.search(/[*?[]/);
+    const literalPrefix = (wildcard >= 0 ? declared.slice(0, wildcard) : declared)
+      .replace(/\/+$/, "");
+    if (literalPrefix.length === 0) {
+      // A leading-wildcard glob (a friction-dir style pattern) — match on the
+      // trailing literal segment appearing anywhere in the candidate's path.
+      const trailing = declared.replace(/^[*?/]+/, "").replace(/\/+$/, "");
+      if (trailing.length > 0 && (target === trailing || target.includes(`/${trailing}/`) || target.includes(`${trailing}/`))) {
+        return true;
+      }
+      continue;
+    }
+    if (target === literalPrefix || target.startsWith(`${literalPrefix}/`)) return true;
+  }
+  return false;
+}
+
+/**
+ * Force-add worker-created NEW files that `.gitignore` shadows so genuine new
+ * source work lands in the commit. `git add -A` (and any diff) honour `.gitignore`
+ * and can ONLY be enumerated via `git ls-files --others --ignored
+ * --exclude-standard`. For each such file: a source-extension file UNDER the
+ * block's declared write scope is `git add -f`'d so it lands; a non-source file
+ * under scope (generated artifact) OR any new file OUTSIDE scope FAILS LOUDLY
+ * (returns an error naming the file) rather than committing a half-change.
+ * `declaredWritePaths` undefined → the lifecycle unit-test path with no scope:
+ * skip force-add entirely (no new-file inclusion, legacy behaviour).
+ */
+function forceAddNewSourceFiles(
+  worktreeRoot: string,
+  declaredWritePaths: string[] | undefined,
+): { ok: true } | { ok: false; error: string } {
+  if (declaredWritePaths === undefined) return { ok: true };
+  const ls = spawnSync(
+    "git",
+    ["ls-files", "--others", "--ignored", "--exclude-standard"],
+    { cwd: worktreeRoot, encoding: "utf8", shell: false },
+  );
+  if (ls.error || ls.status !== 0) {
+    return {
+      ok: false,
+      error: `git ls-files (untracked-ignored enumeration) failed: ${
+        (ls.stderr ?? ls.error?.message ?? "").toString().trim()
+      }`,
+    };
+  }
+  const newFiles = (ls.stdout ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim().replace(/\\/g, "/"))
+    .filter((l) => l.length > 0);
+  const toForceAdd: string[] = [];
+  for (const rel of newFiles) {
+    const underScope = isUnderWritePaths(rel, declaredWritePaths, worktreeRoot);
+    if (underScope && isSourceNewFile(rel)) {
+      toForceAdd.push(rel);
+      continue;
+    }
+    if (underScope) {
+      return {
+        ok: false,
+        error:
+          `Worker created a new non-source (generated) file under its write scope: ${rel}. ` +
+          `Only source-extension new files are committed; a generated artifact must not land. ` +
+          `Refusing to commit a half-change.`,
+      };
+    }
+    return {
+      ok: false,
+      error:
+        `Worker created a new file OUTSIDE its declared write scope: ${rel}. ` +
+        `New files must fall under the block's write_paths. Refusing to commit a half-change.`,
+    };
+  }
+  for (const rel of toForceAdd) {
+    const add = spawnSync("git", ["add", "-f", "--", rel], {
+      cwd: worktreeRoot,
+      encoding: "utf8",
+      shell: false,
+    });
+    if (add.status !== 0) {
+      return { ok: false, error: `git add -f ${rel} failed: ${(add.stderr ?? "").trim()}` };
+    }
+  }
+  return { ok: true };
+}
+
 export function commitWorktree(
   worktreeRoot: string,
   message: string,
+  declaredWritePaths?: string[],
 ): { committed: boolean; error?: string } {
+  // Force-add worker-created new SOURCE files that `.gitignore` shadows (and fail
+  // loudly on a generated-artifact / out-of-scope new file) BEFORE `git add -A`,
+  // which on its own silently drops every untracked-ignored path (CE-003/CE-004).
+  const forced = forceAddNewSourceFiles(worktreeRoot, declaredWritePaths);
+  if (!forced.ok) {
+    return { committed: false, error: forced.error };
+  }
   const add = spawnSync("git", ["add", "-A"], {
     cwd: worktreeRoot,
     encoding: "utf8",
@@ -1010,6 +1171,21 @@ export interface AcceptNodeWorktreeParams {
     /** Every block's declared write scope, for amendment ownership adjudication. */
     allBlockScopes: Array<{ block_id: string; write_paths: string[] }>;
   };
+  /**
+   * The block's OWN declared write paths (INV-1). Threaded into `commitWorktree`
+   * so worker-created new SOURCE files under scope are force-added past
+   * `.gitignore` and a generated-artifact / out-of-scope new file fails loudly.
+   * Omit (lifecycle unit tests with no scope) → no new-file inclusion.
+   */
+  writePaths?: string[];
+  /**
+   * The cross-package check command run in the MAIN checkout AFTER the cherry-pick
+   * lands (INV-2): a RED check rolls the base back to its captured HEAD OID. Defaults
+   * to `npm run check`. Tests inject a deterministic pass/fail command (a `t.mock.module`
+   * seam is unusable under tsx/esm). Pass `null` to skip the merged-base check entirely
+   * (legacy lifecycle unit tests on a minimal repo with no check script).
+   */
+  mergedBaseCheckCommand?: string | null;
 }
 
 export interface AcceptNodeWorktreeResult {
@@ -1047,7 +1223,9 @@ export interface AcceptNodeWorktreeResult {
  * verified branch, aborts cleanly on conflict). No state mutation here — the
  * caller persists via `mergeImplementResults`.
  */
-export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNodeWorktreeResult {
+export async function acceptNodeWorktree(
+  params: AcceptNodeWorktreeParams,
+): Promise<AcceptNodeWorktreeResult> {
   const { root, runId, blockId, worktreeRoot: wt, branch, workerOutcome, targetedCommands, additionalVerifyCommands } = params;
   let verifyPassed = false;
   let merged = false;
@@ -1058,9 +1236,10 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
     return { outcome: workerOutcome, verifyPassed, merged };
   }
 
-  const commit = commitWorktree(wt, `remediate ${blockId} (${runId})`);
+  const commit = commitWorktree(wt, `remediate ${blockId} (${runId})`, params.writePaths);
   if (commit.error) {
-    // Could not commit the worker's edits → cannot safely land; drop it.
+    // Could not commit the worker's edits (or a new-file inclusion violation) →
+    // cannot safely land; drop it.
     removeWorktree(root, wt);
     return { outcome: "error", verifyPassed, merged, diagnostic: commit.error };
   }
@@ -1071,85 +1250,158 @@ export function acceptNodeWorktree(params: AcceptNodeWorktreeParams): AcceptNode
     return { outcome: "success", verifyPassed, merged };
   }
 
-  // Rebase the node's branch onto the current remediation HEAD BEFORE verify, so a
-  // sibling that merged after this worktree was created is folded in. Verify, the
-  // write-scope gate, and the cherry-pick then all operate on the FINAL to-be-merged
-  // content (green-at-merge; the later cherry-pick can no longer conflict). A true
-  // hunk conflict here is a genuine seam — preserve the work and route to triage
-  // rather than land a broken merge.
-  const rebase = rebaseBranchOntoHead(root, wt, branch);
-  if (!rebase.ok) {
-    quarantineFailedNodeCommit(root, branch, runId, blockId);
-    removeWorktree(root, wt);
-    return { outcome: "error", verifyPassed, merged, diagnostic: rebase.error };
-  }
-
-  // Verify commands: when the host omits them (real rolling drivers), DERIVE them
-  // from the just-committed branch's touched test files — correct paths/runner by
-  // construction, only this node's own tests, never the whole suite. An explicit
-  // list (or `[]` to skip) overrides; both used by lifecycle unit tests. task_7d35176d:
-  // run the derive AND the node's own build-free `targeted_commands` (deduped) — the
-  // auditor's fix-specific regression checks the derive misses when a fix touches no
-  // test. `additionalVerifyCommands` is ignored on the explicit-override path.
-  const baseCommands =
-    targetedCommands === undefined
-      ? deriveVerifyCommandsFromBranch(root, branch)
-      : targetedCommands;
-  const verifyCommands =
-    targetedCommands === undefined
-      ? [...new Set([...baseCommands, ...buildFreeVerifyCommands(additionalVerifyCommands)])]
-      : baseCommands;
-  const verify =
-    verifyCommands.length > 0
-      ? verifyNodeInWorktree(wt, verifyCommands)
-      : { passed: true, output: "" };
-  verifyPassed = verify.passed;
-  if (!verify.passed) {
-    // Verify failed: do not merge; drop the worktree so the main tree stays clean.
-    // The node DID commit real edits, so preserve them under a durable quarantine
-    // ref before the worktree/branch go away — a tool-verify false-negative must
-    // not destroy a good fix (the dogfood lost one this way). Carry the failing
-    // command + output so triage isn't blind on outcome:error.
-    quarantineFailedNodeCommit(root, branch, runId, blockId);
-    removeWorktree(root, wt);
-    return { outcome: "error", verifyPassed, merged, diagnostic: verify.output };
-  }
-
-  // Write-scope gate (OBL-DS-06), BEFORE the cherry-pick: an out-of-scope or
-  // seam-conflicting edit must never land in the main tree, so it is adjudicated
-  // against the branch's git diff (the ground truth) here rather than reported
-  // after `mergeWorktree` already merged it. The gate routes the node's ACTUAL
-  // out-of-declared edits (git diff, never a self-report): an edit to a file no
-  // sibling block owns widens the effective scope, while one owned by another
-  // block blocks as a seam conflict.
-  if (params.scope) {
-    const decision = enforceAcceptWriteScope({
-      root,
-      branch,
-      blockId,
-      allBlockScopes: params.scope.allBlockScopes,
-    });
-    if (decision.blocked) {
-      // Scope-blocked but the node committed real work — preserve it for recovery.
+  // Base-mutating critical section (INV-2/INV-3/CE-001/CE-002/CE-005) under a DISTINCT
+  // base-branch lock — NOT the per-run rolling-session.lock `advanceHostRolling` holds
+  // (withFileLock is non-reentrant, so a same-path nested acquire would self-deadlock).
+  // Acquired exactly ONCE here so BOTH rolling drivers serialize the rebase →
+  // cherry-pick → cross-package check → reset sequence through one lock. The base HEAD
+  // OID is captured before the cherry-pick so a RED merged-base check rolls the base
+  // back bit-identically. The lock is released on EVERY exit path (success, verify
+  // fail, scope fail, check fail, subprocess fail) by withFileLock's finally.
+  return withFileLock(baseBranchLockPath(root, runId), async () => {
+    // Rebase the node's branch onto the current remediation HEAD BEFORE verify, so a
+    // sibling that merged after this worktree was created is folded in. Verify, the
+    // write-scope gate, and the cherry-pick then all operate on the FINAL to-be-merged
+    // content (green-at-merge; the later cherry-pick can no longer conflict). A true
+    // hunk conflict here is a genuine seam — preserve the work and route to triage
+    // rather than land a broken merge.
+    const rebase = rebaseBranchOntoHead(root, wt, branch);
+    if (!rebase.ok) {
       quarantineFailedNodeCommit(root, branch, runId, blockId);
       removeWorktree(root, wt);
-      return { outcome: "error", verifyPassed, merged: false, diagnostic: decision.reason };
+      return { outcome: "error", verifyPassed, merged, diagnostic: rebase.error };
     }
-  }
 
-  // mergeWorktree cherry-picks the verified branch and removes the worktree (on
-  // success AND on conflict-abort), so no explicit cleanup is needed afterwards.
-  const mergeRes = mergeWorktree(root, wt, branch);
-  merged = mergeRes.success;
-  if (!mergeRes.success) {
-    // Cherry-pick conflict: the committed work would otherwise be orphaned — preserve it.
-    quarantineFailedNodeCommit(root, branch, runId, blockId);
-    return { outcome: "error", verifyPassed, merged, diagnostic: mergeRes.error };
-  }
-  // Landed successfully: clear any quarantine ref left by a prior failed attempt
-  // for this node so the recovery report lists only genuinely-unrecovered work.
-  clearQuarantinedCommit(root, runId, blockId);
-  return { outcome: "success", verifyPassed, merged };
+    // Verify commands: when the host omits them (real rolling drivers), DERIVE them
+    // from the just-committed branch's touched test files — correct paths/runner by
+    // construction, only this node's own tests, never the whole suite. An explicit
+    // list (or `[]` to skip) overrides; both used by lifecycle unit tests. task_7d35176d:
+    // run the derive AND the node's own build-free `targeted_commands` (deduped) — the
+    // auditor's fix-specific regression checks the derive misses when a fix touches no
+    // test. `additionalVerifyCommands` is ignored on the explicit-override path.
+    const baseCommands =
+      targetedCommands === undefined
+        ? deriveVerifyCommandsFromBranch(root, branch)
+        : targetedCommands;
+    const verifyCommands =
+      targetedCommands === undefined
+        ? [...new Set([...baseCommands, ...buildFreeVerifyCommands(additionalVerifyCommands)])]
+        : baseCommands;
+    const verify =
+      verifyCommands.length > 0
+        ? verifyNodeInWorktree(wt, verifyCommands)
+        : { passed: true, output: "" };
+    verifyPassed = verify.passed;
+    if (!verify.passed) {
+      // Verify failed: do not merge; drop the worktree so the main tree stays clean.
+      // The node DID commit real edits, so preserve them under a durable quarantine
+      // ref before the worktree/branch go away — a tool-verify false-negative must
+      // not destroy a good fix (the dogfood lost one this way). Carry the failing
+      // command + output so triage isn't blind on outcome:error.
+      quarantineFailedNodeCommit(root, branch, runId, blockId);
+      removeWorktree(root, wt);
+      return { outcome: "error", verifyPassed, merged, diagnostic: verify.output };
+    }
+
+    // Write-scope gate (OBL-DS-06), BEFORE the cherry-pick: an out-of-scope or
+    // seam-conflicting edit must never land in the main tree, so it is adjudicated
+    // against the branch's git diff (the ground truth) here rather than reported
+    // after `mergeWorktree` already merged it. The gate routes the node's ACTUAL
+    // out-of-declared edits (git diff, never a self-report): an edit to a file no
+    // sibling block owns widens the effective scope, while one owned by another
+    // block blocks as a seam conflict.
+    if (params.scope) {
+      const decision = enforceAcceptWriteScope({
+        root,
+        branch,
+        blockId,
+        allBlockScopes: params.scope.allBlockScopes,
+      });
+      if (decision.blocked) {
+        // Scope-blocked but the node committed real work — preserve it for recovery.
+        quarantineFailedNodeCommit(root, branch, runId, blockId);
+        removeWorktree(root, wt);
+        return { outcome: "error", verifyPassed, merged: false, diagnostic: decision.reason };
+      }
+    }
+
+    // Capture the base HEAD OID BEFORE the cherry-pick so a RED merged-base check can
+    // roll the base back to a bit-identical state.
+    const baseHeadBefore = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      shell: false,
+    });
+    if (baseHeadBefore.error || baseHeadBefore.status !== 0) {
+      quarantineFailedNodeCommit(root, branch, runId, blockId);
+      removeWorktree(root, wt);
+      return {
+        outcome: "error",
+        verifyPassed,
+        merged,
+        diagnostic: `could not capture base HEAD before merge: ${
+          (baseHeadBefore.stderr ?? baseHeadBefore.error?.message ?? "").toString().trim()
+        }`,
+      };
+    }
+    const baseOid = baseHeadBefore.stdout.trim();
+
+    // mergeWorktree cherry-picks the verified branch and removes the worktree (on
+    // success AND on conflict-abort), so no explicit cleanup is needed afterwards.
+    const mergeRes = mergeWorktree(root, wt, branch);
+    merged = mergeRes.success;
+    if (!mergeRes.success) {
+      // Cherry-pick conflict: the committed work would otherwise be orphaned — preserve it.
+      quarantineFailedNodeCommit(root, branch, runId, blockId);
+      return { outcome: "error", verifyPassed, merged, diagnostic: mergeRes.error };
+    }
+
+    // Merged-base-green (INV-2): the cherry-pick landed in the MAIN checkout, where
+    // node_modules is faithful (the worktree's @audit-tools junction resolves to main
+    // and is unfaithful, so the per-node worktree verify cannot catch a cross-package
+    // break). Run the REAL cross-package check in the main tree. On RED, roll the base
+    // back to its captured OID bit-identically, scoped-clean the cherry-pick's emitted
+    // untracked files, quarantine, and fail — never leave a broken base for the sibling.
+    const checkCommand =
+      params.mergedBaseCheckCommand === undefined ? "npm run check" : params.mergedBaseCheckCommand;
+    if (checkCommand !== null) {
+      // Paths the just-landed pick touched, so the scoped clean nukes only those
+      // (never unrelated untracked state). Resolved BEFORE the check runs.
+      const pickedFiles = gitEditedFilesForBranch(root, branch);
+      const check = runShellCommand(checkCommand, { cwd: root, encoding: "utf8" });
+      const checkFailed = !!check.error || check.status !== 0;
+      if (checkFailed) {
+        const detail = check.error
+          ? check.error.message
+          : [check.stdout ?? "", check.stderr ?? ""].filter(Boolean).join("\n");
+        // Roll the base back to its pre-pick OID, bit-identical.
+        spawnSync("git", ["reset", "--hard", baseOid], { cwd: root, shell: false });
+        // Scoped clean: remove only the cherry-pick / check-emitted untracked files
+        // under the paths the pick touched — never a blanket `git clean` that could
+        // nuke unrelated untracked state.
+        if (pickedFiles.available && pickedFiles.files.size > 0) {
+          spawnSync(
+            "git",
+            ["clean", "-fdq", "--", ...[...pickedFiles.files]],
+            { cwd: root, shell: false },
+          );
+        }
+        quarantineFailedNodeCommit(root, branch, runId, blockId);
+        return {
+          outcome: "error",
+          verifyPassed,
+          merged: false,
+          diagnostic: `$ ${checkCommand}\n${detail}`,
+        };
+      }
+    }
+
+    // Landed successfully and the merged base is green: clear any quarantine ref left
+    // by a prior failed attempt for this node so the recovery report lists only
+    // genuinely-unrecovered work.
+    clearQuarantinedCommit(root, runId, blockId);
+    return { outcome: "success", verifyPassed, merged };
+  });
 }
 
 /**
@@ -1282,7 +1534,7 @@ export async function executeNodeInWorktree(args: {
     // actually-touched tests inside acceptNodeWorktree (post-commit) — omit them so a
     // host-authored path can't mis-verify. The write-scope gate adjudicates the node's
     // ACTUAL git edits against every block's declared scope.
-    const accept = acceptNodeWorktree({
+    const accept = await acceptNodeWorktree({
       root,
       runId,
       blockId: block.block_id,
@@ -1291,6 +1543,8 @@ export async function executeNodeInWorktree(args: {
       workerOutcome: result.outcome,
       additionalVerifyCommands,
       scope: { allBlockScopes },
+      // The block's OWN declared write paths (INV-1 new-file inclusion).
+      writePaths: allBlockScopes.find((b) => b.block_id === block.block_id)?.write_paths ?? [],
     });
     await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept);
     return { result, accept };
