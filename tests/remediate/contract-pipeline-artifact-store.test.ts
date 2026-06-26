@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -8,6 +8,7 @@ import {
   detectStaleArtifacts,
   contractArtifactExists,
   contractPipelineDir,
+  contractArtifactFilePath,
   DEPENDENCY_MAP,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 import {
@@ -160,6 +161,51 @@ describe("contract pipeline staleness", () => {
     expect(result.stale).not.toContain("goal_spec");
     expect(result.stale).not.toContain("context_bundle");
     expect(result.stale).toContain("module_decomposition");
+  });
+
+  it("an IN-PLACE load-bearing payload edit (header untouched) re-stales downstream and reconverges on re-read", async () => {
+    await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", makeGoalSpec());
+    await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", makeContextBundle());
+    await writeContractArtifact(ARTIFACTS_DIR, "module_decomposition", makeModuleDecomposition());
+
+    // Edit goal_spec's payload directly on disk WITHOUT touching the stored
+    // header — semantic_hash is no longer recorded, and the recompute-on-read
+    // path must still detect the change. (Previously a cached header hash would
+    // have hidden this edit.)
+    const goalPath = contractArtifactFilePath(ARTIFACTS_DIR, "goal_spec");
+    const stored = JSON.parse(await readFile(goalPath, "utf8"));
+    stored.payload.objective = "A different, load-bearing objective.";
+    await writeFile(goalPath, JSON.stringify(stored), "utf8");
+
+    const result = await detectStaleArtifacts(ARTIFACTS_DIR);
+    // goal_spec's own dependency_hashes are empty (no deps) so it is not stale,
+    // but downstreams recorded the OLD recomputed hash and must now be stale.
+    expect(result.stale).toContain("context_bundle");
+    expect(result.stale).toContain("module_decomposition");
+
+    // Reconverge: rewrite the downstreams against the edited goal_spec.
+    await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", makeContextBundle());
+    await writeContractArtifact(ARTIFACTS_DIR, "module_decomposition", makeModuleDecomposition());
+    const after = await detectStaleArtifacts(ARTIFACTS_DIR);
+    expect(after.stale).not.toContain("context_bundle");
+    expect(after.stale).not.toContain("module_decomposition");
+  });
+
+  it("an IN-PLACE COSMETIC payload edit (same semantic projection) does NOT stale downstream", async () => {
+    await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", makeGoalSpec());
+    await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", makeContextBundle());
+    await writeContractArtifact(ARTIFACTS_DIR, "module_decomposition", makeModuleDecomposition());
+
+    // Edit only a cosmetic field (created_at) — semantic projection strips it,
+    // so the recomputed hash is unchanged and downstreams stay fresh.
+    const goalPath = contractArtifactFilePath(ARTIFACTS_DIR, "goal_spec");
+    const stored = JSON.parse(await readFile(goalPath, "utf8"));
+    stored.payload.created_at = new Date(Date.now() + 100000).toISOString();
+    await writeFile(goalPath, JSON.stringify(stored), "utf8");
+
+    const result = await detectStaleArtifacts(ARTIFACTS_DIR);
+    expect(result.stale).not.toContain("context_bundle");
+    expect(result.stale).not.toContain("module_decomposition");
   });
 
   it("reports absent artifacts correctly when they have never been written", async () => {
