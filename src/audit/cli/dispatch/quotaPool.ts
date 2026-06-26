@@ -8,6 +8,7 @@ import type {
 } from "audit-tools/shared";
 import { DEFAULT_EMPIRICAL_HALF_LIFE_HOURS } from "audit-tools/shared";
 import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource";
+import { HostSessionQuotaSource } from "audit-tools/shared/quota/hostSessionQuotaSource";
 import { resolveFreshSessionProviderName } from "../../providers/index.js";
 import {
   computeDispatchCapacity,
@@ -107,7 +108,13 @@ export async function buildDispatchPool(params: {
   const halfLifeHours =
     sessionConfig.quota?.empirical_half_life_hours ??
     DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
-  const quotaSource = buildQuotaSource({ halfLifeHours });
+  // PREPEND the host-session fixed-window source keyed on the host pool's own
+  // (provider, model) key, so the operator's account-level session wall is a
+  // first-class PRE-WALL source: graduated remaining_pct → LOW/CRITICAL throttle
+  // before a hard 429, paused → cooldown. It gates on the exact key, passing
+  // through for every other pool, so it never masks the proactive/learned sources.
+  const hostSession = new HostSessionQuotaSource({ providerModelKey: quotaProviderKey });
+  const quotaSource = buildQuotaSource({ halfLifeHours, hostSession });
 
   // The capability handshake limits are merged FIRST so they outrank the
   // queried and cached limits for context/output (the discovered-capability

@@ -133,6 +133,18 @@ export interface RollingDispatchConfig<TPacket> {
    * Defaults to DEFAULT_EMPIRICAL_HALF_LIFE_HOURS.
    */
   halfLifeHours?: number;
+  /**
+   * Host-session escalation predicate. When a `rate_limited` packet has been
+   * ESCALATED by the host-session source (its account-level wall re-tripped the
+   * SAME packet past the bounded re-limit guard — an unresettable / clock-skewed
+   * wall), re-queuing it would livelock. Consulted in the rate_limited branch:
+   * an escalated packet is STRANDED (surfaced via the empty-pool terminal) instead
+   * of re-queued, while a non-escalated packet keeps the normal INV-QD-07
+   * transient-exhaustion re-route. The consumer owns feeding the source's
+   * `recordLimit` from the worker ERROR/STATUS channel; this is the read side.
+   * Omit to leave INV-QD-07 behaviour unchanged.
+   */
+  isPacketEscalated?: (packetId: string) => boolean;
 }
 
 /** Options for tuning the dispatcher (intentionally minimal per INV-S05). */
@@ -366,6 +378,7 @@ export function createRollingDispatcher<TPacket>(
     dispatchPacket,
     onResult,
     halfLifeHours = DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
+    isPacketEscalated,
   } = config;
 
   const state: RollingDispatchState<TPacket> = {
@@ -488,6 +501,28 @@ export function createRollingDispatcher<TPacket>(
     // marked completed nor recorded as a result — it remains live work.
     if (result.outcome === "rate_limited") {
       state.exhaustedPoolIds.add(providerSlot.poolId);
+      // Bounded-escalation guard: if the host-session source has ESCALATED this
+      // packet (its account wall re-tripped the SAME packet past the bound — an
+      // unresettable / clock-skewed limit), re-queuing it would livelock. Strand
+      // it instead so it surfaces via the empty-pool terminal (INV-QD-07's
+      // stranding path), rather than re-routing into the wall forever. A
+      // non-escalated packet keeps the normal transient-exhaustion re-route.
+      if (isPacketEscalated?.(packet.id)) {
+        if (!state.completedIds.has(packet.id)) state.strandedIds.add(packet.id);
+        try {
+          process.stderr.write(
+            JSON.stringify({
+              ts: new Date().toISOString(),
+              kind: "rolling_dispatch_stranded_host_session_escalation",
+              packet_id: packet.id,
+              exhausted_pool_id: providerSlot.poolId,
+            }) + "\n",
+          );
+        } catch {
+          // Observability must never abort a run.
+        }
+        return;
+      }
       // Re-queue at the front so the displaced packet is retried before fresh
       // pending work (avoids starving an already-attempted packet).
       if (!state.completedIds.has(packet.id) && !state.pendingQueue.some((q) => q.id === packet.id)) {
