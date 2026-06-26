@@ -37,7 +37,7 @@
  * residual: a contended friction append under the held non-reentrant lock is
  * swallowed best-effort, never blocking the commit).
  */
-import { captureFrictionEvent, hashContent, stableStringify } from 'audit-tools/shared';
+import { captureStepBoundaryFriction, hashContent, stableStringify } from 'audit-tools/shared';
 import type { IntentCheckpoint } from 'audit-tools/shared';
 
 /** A gate verdict over a (prior, new) intent_checkpoint pair. */
@@ -270,11 +270,12 @@ export async function runIntentCheckpointGate<T>(deps: {
     if (deps.artifactsDir && deps.runId) {
       // Fire-and-forget but awaited: captureFrictionEvent is itself best-effort
       // and never throws, so it can never block the commit below.
-      await captureFrictionEvent(
+      await captureStepBoundaryFriction(
         deps.artifactsDir,
         deps.runId,
         {
-          id: `intent-gate-lock-across-judge-fallback:${deps.runId}`,
+          eventType: 'intent_gate_fallback',
+          discriminator: 'lock-across-judge-fallback',
           category: 'trap',
           severity: 'low',
           area: 'intent_checkpoint gate',

@@ -52,7 +52,7 @@
  * repair is recorded through the O1 `captureFrictionEvent` sink (best-effort,
  * never fatal). `warnings` is non-empty whenever `status !== 'clean'`.
  */
-import { captureFrictionEvent } from '../friction/captureFrictionEvent.js';
+import { captureStepBoundaryFriction } from '../friction/stepBoundaryCapture.js';
 import type { FrictionCaptureArtifact } from '../io/frictionCapture.js';
 
 /** A normalized validation error the seam reasons over (validator-agnostic). */
@@ -197,11 +197,12 @@ async function captureRepair(
   note: string,
   severity: 'info' | 'low' | 'medium' | 'high',
 ): Promise<void> {
-  await captureFrictionEvent(
+  await captureStepBoundaryFriction(
     opts.artifactsDir,
     opts.runId,
     {
-      id: `repair:${opts.contract.contractId}:attempt-${opts.attempt ?? 1}:${idSuffix}`,
+      eventType: 'repair_round',
+      discriminator: `${opts.contract.contractId}:attempt-${opts.attempt ?? 1}:${idSuffix}`,
       note,
       severity,
       category: 'trap',

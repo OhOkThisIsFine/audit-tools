@@ -434,6 +434,21 @@ export type {
 } from "./friction/captureFrictionEvent.js";
 export { captureFrictionEvent } from "./friction/captureFrictionEvent.js";
 
+// CE-005 — the single shared backend-observed step-boundary chokepoint. EVERY
+// backend-observed friction fact (the five named, the intent-gate fact, any quota
+// escalation) routes through `captureStepBoundaryFriction` with a CE-006
+// structured percent-encoded collision-free event id. Consumed by both
+// orchestrators so the fact list is structural/extensible, not a per-orchestrator
+// snapshot a new fact can silently bypass.
+export type {
+  StepBoundaryEventType,
+  StepBoundaryFriction,
+} from "./friction/stepBoundaryCapture.js";
+export {
+  captureStepBoundaryFriction,
+  stepBoundaryEventId,
+} from "./friction/stepBoundaryCapture.js";
+
 // O1 end-of-run friction TRIAGE: single-sourced triage step shape, disposition
 // vocabulary (keep|discard|annotate), blocking semantics, and the close-out
 // decider for BOTH orchestrators. Drops false-green; satisfaction = mechanical

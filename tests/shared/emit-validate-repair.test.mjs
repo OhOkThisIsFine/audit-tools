@@ -10,6 +10,15 @@ const { runEmitValidateRepair } = await import(
 const { frictionCapturePath } = await import(
   "../../src/shared/io/frictionCapture.ts"
 );
+const { stepBoundaryEventId } = await import(
+  "../../src/shared/friction/stepBoundaryCapture.ts"
+);
+
+// Repair events route through the CE-005 chokepoint as `repair_round` facts with
+// a CE-006 structured percent-encoded id; the discriminator is the former raw
+// id suffix (`<contractId>:attempt-N:<suffix>`).
+const repairId = (discriminator) =>
+  stepBoundaryEventId("repair_round", "r1", discriminator);
 
 // ── A tiny everything-agnostic contract used to drive the seam. ───────────────
 // Validator: each element must carry a non-empty `unit_id` (REQUIRED) and an
@@ -128,7 +137,7 @@ test("coercion alone clears OPTIONAL errors: status coerced, NO LLM call", async
     assert.equal(out.repaired_payload[0].unit_id, "u1");
     assert.ok(!("opt" in out.repaired_payload[0]), "invalid optional dropped");
     const ids = await frictionIds(dir, "r1");
-    assert.ok(ids.includes("repair:test_contract:attempt-1:drop:[0].opt"));
+    assert.ok(ids.includes(repairId("test_contract:attempt-1:drop:[0].opt")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -146,7 +155,7 @@ test("recoverable per-element identity is backfilled (single element)", async ()
     assert.equal(out.status, "coerced");
     assert.equal(out.repaired_payload[0].unit_id, "recovered-unit");
     const ids = await frictionIds(dir, "r1");
-    assert.ok(ids.includes("repair:test_contract:attempt-1:backfill:[0].unit_id"));
+    assert.ok(ids.includes(repairId("test_contract:attempt-1:backfill:[0].unit_id")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -171,7 +180,7 @@ test("multi-element missing unit_id escalates to unrepairable, never homogenized
     assert.equal(out.redispatch.attempt, 2);
     assert.ok(out.warnings.length > 0);
     const ids = await frictionIds(dir, "r1");
-    assert.ok(ids.includes("repair:test_contract:attempt-1:unrecoverable-identity"));
+    assert.ok(ids.includes(repairId("test_contract:attempt-1:unrecoverable-identity")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -222,7 +231,7 @@ test("LLM patch fails to fix: stage3 re-dispatch signal with advanced attempt", 
     assert.equal(out.redispatch.attempt, 2);
     assert.ok(out.remaining_errors.length > 0);
     const ids = await frictionIds(dir, "r1");
-    assert.ok(ids.includes("repair:test_contract:attempt-1:redispatch"));
+    assert.ok(ids.includes(repairId("test_contract:attempt-1:redispatch")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -256,7 +265,7 @@ test("repeated repair (attempt > 1) records a friction event", async () => {
       attempt: 2,
     });
     const ids = await frictionIds(dir, "r1");
-    assert.ok(ids.includes("repair:test_contract:attempt-2:repeated"));
+    assert.ok(ids.includes(repairId("test_contract:attempt-2:repeated")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
