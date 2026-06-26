@@ -13,8 +13,9 @@
  *  - every node's coordinator claim is released on its terminal outcome, so a peer
  *    driver or the next cycle never re-grabs it.
  *
- * acceptNodeWorktree is synchronous, so the concurrent partition's per-node merges
- * serialize on the event loop — no git index.lock race despite `Promise.all`.
+ * acceptNodeWorktree's base-mutating section runs under a DISTINCT base-branch
+ * lock, so the concurrent partition's per-node merges serialize on that lock — no
+ * git index.lock race despite `Promise.all`.
  */
 
 import { describe, it, expect } from "vitest";
