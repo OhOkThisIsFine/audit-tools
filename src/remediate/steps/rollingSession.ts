@@ -364,7 +364,8 @@ export async function advanceHostRolling(opts: {
       // State supplies the node's own targeted_commands for the verify (task_7d35176d);
       // verify auto-passes when state is absent (parity with the in-process driver).
       const state = await new StateStore(opts.artifactsDir).loadState();
-      const accept = acceptNodeWorktree({
+      const scope = await computeAcceptScope(opts.artifactsDir, opts.runId);
+      const accept = await acceptNodeWorktree({
         root: opts.root,
         runId: opts.runId,
         blockId: opts.blockId,
@@ -375,7 +376,12 @@ export async function advanceHostRolling(opts: {
         // actually-touched tests post-commit (correct paths/runner) AND runs the node's
         // own build-free targeted_commands in addition (task_7d35176d).
         additionalVerifyCommands: state ? targetedCommandsForBlock(state, opts.blockId) : [],
-        scope: await computeAcceptScope(opts.artifactsDir, opts.runId),
+        scope,
+        // The block's OWN declared write paths (INV-1 new-file inclusion). Note the
+        // base-mutating section is now serialized INSIDE acceptNodeWorktree via the
+        // DISTINCT base-branch lock; the outer session lock here still guards the
+        // session-state read-modify-write (a different lock path — no double-acquire).
+        writePaths: scope?.allBlockScopes.find((b) => b.block_id === opts.blockId)?.write_paths ?? [],
       });
       // Persist the tool-owned verify/merge outcome so finalization (mergeImplementResults)
       // blocks a node that self-reported resolved but never actually landed (OBL-DS-06).
