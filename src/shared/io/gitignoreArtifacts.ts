@@ -32,18 +32,28 @@ import { AGENT_FEEDBACK_FILENAME } from "../agentReflections.js";
  * separators in ignore files on every OS.
  */
 
-/** Repo visibility as it drives the conditional ignore decision. */
-export type RepoVisibility = "private" | "public";
+/**
+ * Repo visibility as it drives the conditional ignore decision.
+ *  - `private` => keep deliverables tracked.
+ *  - `public`  => ignore deliverables.
+ *  - `unknown` => no authoritative signal resolved; we fall back to the
+ *    tracked (private-equivalent) default AND emit a loud warning so the
+ *    operator can pin it explicitly. NEVER silently treated as `private`.
+ */
+export type RepoVisibility = "private" | "public" | "unknown";
 
 /**
  * Always-ignored generated assets (build/install artifacts). Forward slashes +
  * trailing slash for directories so git treats them as dir matches on every OS.
  * `.audit-code/` is the host renderer / install-asset + generated-skill tree;
- * the friction CAPTURE sidecar is matched per-artifacts-dir (audit + remediation).
+ * the friction CAPTURE sidecar is matched at ANY depth (an install-time-static,
+ * repo-relative any-depth glob built from the canonical FRICTION_CAPTURE_DIRNAME
+ * path component) so it is ignored wherever it is written, never tied to a single
+ * fixed `.audit-tools/<one-segment>/` layout.
  */
 export const ALWAYS_IGNORE_PATTERNS: readonly string[] = [
   ".audit-code/",
-  `.audit-tools/*/${FRICTION_CAPTURE_DIRNAME}/`,
+  `**/${FRICTION_CAPTURE_DIRNAME}/`,
 ];
 
 /**
@@ -59,6 +69,28 @@ export const VISIBILITY_CONDITIONAL_PATTERNS: readonly string[] = [
   `.audit-tools/${REMEDIATION_OUTCOMES_FILENAME}`,
   `.audit-tools/*/${AGENT_FEEDBACK_FILENAME}`,
 ];
+
+/**
+ * Operator override env var. `private`/`track` => private; `public`/`ignore` =>
+ * public; anything else (incl. unset) => no override. Single-sourced here so the
+ * TS detector and `scripts/postinstall.mjs` agree on the name + accepted values.
+ */
+export const REPO_VISIBILITY_ENV = "AUDIT_TOOLS_REPO_VISIBILITY";
+
+/**
+ * Parse a raw operator-supplied visibility string into a concrete
+ * `private`/`public`, or null when it is unset/unrecognized (=> no override).
+ * Accepts the intent aliases `track` (=> private, keep deliverables tracked) and
+ * `ignore` (=> public, ignore deliverables).
+ */
+export function parseVisibilityOverride(
+  raw: string | null | undefined,
+): "private" | "public" | null {
+  const value = (raw ?? "").trim().toLowerCase();
+  if (value === "private" || value === "track") return "private";
+  if (value === "public" || value === "ignore") return "public";
+  return null;
+}
 
 /** Anchored marker block so re-runs replace OUR lines and never clobber user lines. */
 export const GITIGNORE_BLOCK_BEGIN = "# >>> audit-tools managed ignores >>>";
@@ -79,6 +111,11 @@ export function renderGitignoreBlock(visibility: RepoVisibility): string {
     lines.push(
       "# Deliverables + meta-audit reflections — ignored because this repo is public.",
       ...VISIBILITY_CONDITIONAL_PATTERNS,
+    );
+  } else if (visibility === "unknown") {
+    lines.push(
+      "# Deliverables + meta-audit reflections kept tracked (visibility UNKNOWN —",
+      `# could not resolve; set ${REPO_VISIBILITY_ENV} or pass an override to pin it).`,
     );
   } else {
     lines.push(
@@ -117,14 +154,20 @@ export function mergeGitignoreBlock(existing: string, block: string): string {
 }
 
 /**
- * Detect repo visibility, degrade-safe. Order of authority:
- *  1. An explicit operator override (config flag / env) ALWAYS wins.
- *  2. Otherwise probe `gh repo view --json isPrivate` via the injected runner.
- *  3. If gh is missing/errors/returns unparseable output, fall back to the
- *     default-safe `unknown => private` (keep deliverables tracked). NEVER throws.
+ * Detect repo visibility, degrade-safe. Strict order of authority — each
+ * fallback resolves to the next signal, and ONLY the final, fully-exhausted
+ * fallback yields `unknown` (never a silent `private`):
+ *  1. An explicit operator `override` (config flag) ALWAYS wins.
+ *  2. The `AUDIT_TOOLS_REPO_VISIBILITY` env config/override (read via the
+ *     injected `readEnv`, default `process.env`), parsed by
+ *     {@link parseVisibilityOverride}.
+ *  3. The `gh repo view --json isPrivate` boolean, via the injected `runGh`.
+ *  4. `unknown` — no authoritative signal resolved. Callers fall back to the
+ *     tracked default and warn; we do NOT pretend the repo is private.
  *
- * `runGh` is injected so tests stub it (no live gh, OS-agnostic). It returns the
- * raw stdout of the gh call, or null on any failure.
+ * `runGh`/`readEnv` are injected so tests stub them (no live gh / env, fully
+ * OS-agnostic). `runGh` returns the raw stdout of the gh call, or null on any
+ * failure. NEVER throws.
  */
 export function detectRepoVisibility(params: {
   repoRoot: string;
@@ -132,31 +175,44 @@ export function detectRepoVisibility(params: {
   override?: RepoVisibility | null;
   /** Injected gh runner: returns gh stdout, or null if gh is unavailable/failed. */
   runGh?: (repoRoot: string) => string | null;
+  /** Injected env reader (default `process.env`) so the config/override is testable. */
+  readEnv?: (name: string) => string | undefined;
 }): RepoVisibility {
+  // 1. Explicit operator override wins unconditionally.
   if (params.override === "private" || params.override === "public") {
     return params.override;
   }
-  if (typeof params.runGh !== "function") {
-    return "private";
+
+  // 2. Env config/override.
+  const readEnv =
+    params.readEnv ?? ((name: string) => process.env[name]);
+  const envOverride = parseVisibilityOverride(readEnv(REPO_VISIBILITY_ENV));
+  if (envOverride) {
+    return envOverride;
   }
-  let stdout: string | null = null;
-  try {
-    stdout = params.runGh(params.repoRoot);
-  } catch {
-    return "private";
-  }
-  if (typeof stdout !== "string" || stdout.trim().length === 0) {
-    return "private";
-  }
-  try {
-    const parsed = JSON.parse(stdout) as { isPrivate?: unknown };
-    if (parsed && typeof parsed.isPrivate === "boolean") {
-      return parsed.isPrivate ? "private" : "public";
+
+  // 3. gh isPrivate boolean.
+  if (typeof params.runGh === "function") {
+    let stdout: string | null = null;
+    try {
+      stdout = params.runGh(params.repoRoot);
+    } catch {
+      stdout = null;
     }
-  } catch {
-    // fall through to default-safe
+    if (typeof stdout === "string" && stdout.trim().length > 0) {
+      try {
+        const parsed = JSON.parse(stdout) as { isPrivate?: unknown };
+        if (parsed && typeof parsed.isPrivate === "boolean") {
+          return parsed.isPrivate ? "private" : "public";
+        }
+      } catch {
+        // fall through to unknown
+      }
+    }
   }
-  return "private";
+
+  // 4. Nothing authoritative resolved.
+  return "unknown";
 }
 
 /**
@@ -171,6 +227,10 @@ export function ensureArtifactGitignore(params: {
   repoRoot: string;
   override?: RepoVisibility | null;
   runGh?: (repoRoot: string) => string | null;
+  /** Injected env reader (default `process.env`) so the config/override is testable. */
+  readEnv?: (name: string) => string | undefined;
+  /** Injected warn sink (default `console.warn`) so the unknown-visibility warning is testable. */
+  warn?: (message: string) => void;
   /** Injected readers/writers (default to node:fs) for testability. */
   fileExists?: (path: string) => boolean;
   readFile?: (path: string) => string;
@@ -181,12 +241,23 @@ export function ensureArtifactGitignore(params: {
   const readFile = params.readFile ?? ((p) => readFileSync(p, "utf8"));
   const writeFile =
     params.writeFile ?? ((p, c) => writeFileSync(p, c, "utf8"));
+  const warn = params.warn ?? ((m) => console.warn(m));
 
   const visibility = detectRepoVisibility({
     repoRoot: params.repoRoot,
     override: params.override,
     runGh: params.runGh,
+    readEnv: params.readEnv,
   });
+
+  if (visibility === "unknown") {
+    warn(
+      `[audit-tools] repo visibility could not be determined (gh unavailable and no ` +
+        `override set) — keeping deliverables + meta-audit reflections TRACKED by default. ` +
+        `If this repo is public, set ${REPO_VISIBILITY_ENV}=public (or =private to silence ` +
+        `this warning) before installing, or pass an explicit override.`,
+    );
+  }
 
   try {
     const block = renderGitignoreBlock(visibility);
