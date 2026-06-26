@@ -3,14 +3,12 @@
 > The single rolling cross-machine handoff: current published state + anything in flight. Durable how-to is in
 > `CLAUDE.md`; open work in [`docs/backlog.md`](backlog.md).
 
-**Live:** `audit-tools@0.30.9` on npm (`latest`). `main == origin/main` (remote `origin`), clean tree — but
-**main is now AHEAD of the published 0.30.9** by two commits (granular-staleness feature, unpublished). CI publish
-run for 0.30.9: https://github.com/OhOkThisIsFine/audit-tools/actions/runs/28208489202
+**Live:** `audit-tools@0.30.10` on npm (`latest`). `main == origin/main` (remote `origin`), clean tree, both bins
+→ 0.30.10. CI publish run: https://github.com/OhOkThisIsFine/audit-tools/actions/runs/28213839308
 
-**In flight:** main carries unpublished work (`8205073` O3 granular staleness). Not yet shipped to npm — a
-`release:patch:publish` is the pending decision (see Next).
+**In flight:** nothing — clean, verified, pushed, published, global bins reinstalled at 0.30.10.
 
-**Last landed (2026-06-25, on main, UNPUBLISHED): per-result granular staleness — O3 re-dispatch + record/consume/supersession.**
+**Last landed (2026-06-25, shipped in 0.30.10): per-result granular staleness — O3 re-dispatch + record/consume/supersession.**
 - Wires the previously built-but-unconsumed per-element result-baseline seam. A task whose audited content drifts
   after ingest is re-audited (`rekeyDriftedResults` → `emit_source:'redispatch', attempt:N` → distinct
   idempotency_key so the append-only ledger accepts fresh findings), the drifted task re-dispatches
@@ -63,12 +61,10 @@ ledger, friction triage, repair seam, with tests) and shipped in the 0.30.x line
 empty; the only unshipped remediation-program item is the **mechanical multi-goal decompose + boundary-enforce**
 forward track (the host still hand-scopes large inputs to one phase).
 
-**Next — immediate:** decide whether to `release:patch:publish` the unpublished granular-staleness feature on
-main (→ 0.30.10), or batch it with more work first. Then pick up the next forward track from
-[`backlog.md`](backlog.md): the **general DAG extension** of granular staleness (per-file coverage-matrix
-elements + incremental `runPlanningExecutor`) and the **mechanical multi-goal decompose + boundary-enforce**
-remediator are the highest-leverage open items. Open bug to fix: file-split sibling `idempotency_key` collision
-(backlog Open bugs).
+**Next — nothing pending.** Pick up the next forward track from [`backlog.md`](backlog.md): the **general DAG
+extension** of granular staleness (per-file coverage-matrix elements + incremental `runPlanningExecutor`) and the
+**mechanical multi-goal decompose + boundary-enforce** remediator are the highest-leverage open items. Open bug to
+fix: file-split sibling `idempotency_key` collision (backlog Open bugs).
 
 **Release:** `env -u CLAUDECODE npm run release:patch:publish` (bumps + tags `vX.Y.Z` + GitHub Release → OIDC
 CI publishes → waits for npm). Recover a bad attempt: `gh release delete vX.Y.Z --cleanup-tag`, forward-bump,
