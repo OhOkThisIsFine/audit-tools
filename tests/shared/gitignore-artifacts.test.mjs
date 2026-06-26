@@ -58,15 +58,22 @@ test("deliverables + reflections ABSENT for private, PRESENT for public", () => 
   }
 });
 
-test("friction sidecar ignored at ANY depth (repo-relative ** glob, not single-segment)", () => {
+test("friction sidecar ignored at any depth UNDER the artifact tree (anchored, never shadows source)", () => {
   const frictionPats = ALWAYS_IGNORE_PATTERNS.filter((p) => p.includes("friction"));
   assert.equal(frictionPats.length, 1, "exactly one friction always-ignore pattern");
   const pat = frictionPats[0];
-  // Any-depth glob, not the old single-segment `.audit-tools/*/friction/`.
-  assert.ok(pat.startsWith("**/"), `friction pattern is any-depth: ${pat}`);
+  // Any-depth UNDER the artifact tree — covers `.audit-tools/audit/friction/`,
+  // `.audit-tools/remediation/friction/`, and any nested artifacts dir.
+  assert.ok(pat.startsWith(".audit-tools/"), `friction pattern is anchored to the artifact tree: ${pat}`);
+  assert.ok(pat.includes("**/"), `friction pattern is any-depth under the anchor: ${pat}`);
   assert.ok(pat.endsWith("friction/"), `friction pattern targets the dir: ${pat}`);
-  // Old single-segment form was `.audit-tools/*/friction/`; new form is not pinned there.
-  assert.ok(!pat.includes(".audit-tools/"), "not pinned to a fixed .audit-tools layout");
+  // The anchor is load-bearing: a bare `**/friction/` also matches the
+  // `src/shared/friction/` SOURCE dir (which once dropped a new source file from a
+  // node merge and broke the base build). The pattern must NOT match a source path.
+  assert.ok(
+    !pat.startsWith("**/"),
+    "friction pattern is NOT a bare any-depth glob (would shadow src/shared/friction/)",
+  );
 });
 
 test("patterns are OS-agnostic — forward slashes, LF only", () => {

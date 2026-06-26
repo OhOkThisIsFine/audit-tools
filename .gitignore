@@ -52,9 +52,6 @@ skills-lock.json
 # >>> audit-tools managed ignores >>>
 # Generated/install artifacts — always ignored (build artifacts, not source).
 .audit-code/
-# Runtime friction-capture dirs only — scoped to the artifact tree so it never
-# swallows the src/shared/friction/ SOURCE dir (a bare **/friction/ silently
-# dropped a new source file from a node merge, breaking the base build).
 .audit-tools/**/friction/
 # Deliverables + meta-audit reflections — ignored because this repo is public.
 .audit-tools/audit-report.md
