@@ -2,7 +2,7 @@
 
 The single source of truth for *who tracks which quota and why*. Per-provider
 mechanics — including the Claude credential-resolution specifics (§0) — live in
-[`cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md). This doc is the
+[`cross-provider-quota-matrix.md`](../spec/cross-provider-quota-matrix.md). This doc is the
 model that matrix implements.
 
 ## 1. The frame: conversation-first, inside a host IDE
@@ -197,4 +197,4 @@ throttled separately, then combined into one dispatch-capacity figure.
   stops the run regardless of target headroom.
 
 See also: [[quota-dispatch-vision]] (north star incl. heterogeneous simultaneous
-dispatch), [[cross-provider-quota-matrix]], [[claude-quota-credential-resolution]].
+dispatch), [[cross-provider-quota-matrix]].
