@@ -13,6 +13,7 @@
 // parallel under vitest never clobber each other's scratch state.
 
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { dirname, join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateStore } from "../../../src/remediate/state/store.js";
@@ -294,6 +295,23 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
 
   async function writeCompleteContractPipelineDag(): Promise<void> {
     const created_at = "2026-01-01T00:00:00.000Z";
+    // The N-B3 promotion-backstop citation gate enumerates the working tree via
+    // `git ls-files`; REPO_DIR is a fresh scratch dir with no tracked files, so
+    // without a real git tree the gate fails closed (empty tree = unreadable).
+    // Initialize REPO_DIR as a git repo containing the path the DAG node cites
+    // (src/remediate/intake.ts) so the promoted finding grounds against it.
+    await mkdir(join(REPO_DIR, "src", "remediate"), { recursive: true });
+    await writeFile(
+      join(REPO_DIR, "src", "remediate", "intake.ts"),
+      "// fixture file for citation grounding\nexport {};\n",
+      "utf8",
+    );
+    const git = (...args: string[]) =>
+      spawnSync("git", args, { cwd: REPO_DIR, encoding: "utf8" });
+    git("init", "-q");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    git("add", "src/remediate/intake.ts");
     await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", {
       contract_version: CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
       goal_id: "G1",
@@ -449,6 +467,9 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
           satisfies_obligations: ["O-1"],
           depends_on: [],
           verification_obligation_ids: ["O-1"],
+          // A real tracked path so the promotion-backstop citation gate (N-B3)
+          // grounds the promoted finding against the working tree.
+          files_likely_touched: ["src/remediate/intake.ts"],
           targeted_commands: ["npm test"],
           status: "pending",
         },

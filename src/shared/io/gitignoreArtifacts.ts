@@ -46,14 +46,21 @@ export type RepoVisibility = "private" | "public" | "unknown";
  * Always-ignored generated assets (build/install artifacts). Forward slashes +
  * trailing slash for directories so git treats them as dir matches on every OS.
  * `.audit-code/` is the host renderer / install-asset + generated-skill tree;
- * the friction CAPTURE sidecar is matched at ANY depth (an install-time-static,
- * repo-relative any-depth glob built from the canonical FRICTION_CAPTURE_DIRNAME
- * path component) so it is ignored wherever it is written, never tied to a single
- * fixed `.audit-tools/<one-segment>/` layout.
+ * the friction CAPTURE sidecar is matched at ANY depth UNDER THE ARTIFACT TREE
+ * (an install-time-static, repo-relative any-depth glob built from the canonical
+ * FRICTION_CAPTURE_DIRNAME path component, ANCHORED to `.audit-tools/`) so it is
+ * ignored wherever the runtime writes it (`.audit-tools/audit/friction/`,
+ * `.audit-tools/remediation/friction/`, any nested artifacts dir) without being
+ * tied to a single fixed `.audit-tools/<one-segment>/` layout. The anchor is
+ * load-bearing: a bare unanchored any-depth friction glob also matches the
+ * `src/shared/friction/` SOURCE dir, which once silently dropped a new source file
+ * from a node merge and broke the base build — the friction sidecar only ever lives
+ * under the artifact tree, so anchoring to `.audit-tools/` ignores the sidecar
+ * without shadowing source.
  */
 export const ALWAYS_IGNORE_PATTERNS: readonly string[] = [
   ".audit-code/",
-  `**/${FRICTION_CAPTURE_DIRNAME}/`,
+  `.audit-tools/**/${FRICTION_CAPTURE_DIRNAME}/`,
 ];
 
 /**
