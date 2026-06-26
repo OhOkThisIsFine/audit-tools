@@ -49,10 +49,17 @@ export const HOST_SESSION_QUOTA_SOURCE_NAME = "host_session";
 /** Default number of consecutive non-consuming re-limits of the SAME packet before escalating. */
 export const DEFAULT_MAX_CONSECUTIVE_RE_LIMITS = 3;
 
-/** `remaining_pct` reported while the window is open and no limit has been seen. */
-const WINDOW_OPEN_REMAINING_PCT = 1;
 /** `remaining_pct` reported while the window is paused (limit active, before reset). */
 const WINDOW_PAUSED_REMAINING_PCT = 0;
+/**
+ * `remaining_pct` reported while a limit is active but the window has not yet been
+ * recorded as paused for THIS key — graduated band so the scheduler's CRITICAL
+ * throttle (`QUOTA_REMAINING_PCT_CRITICAL`) fires as the account approaches the
+ * wall rather than only after a hard 429. Used when a limit has been seen this
+ * window cycle but the cooldown has since elapsed and a fresh same-cycle limit is
+ * being tracked.
+ */
+const WINDOW_NEAR_WALL_REMAINING_PCT = 0.05;
 
 /** Injected clock — defaults to the system clock, overridable in tests. */
 export type NowFn = () => number;
@@ -169,10 +176,15 @@ export class HostSessionQuotaSource implements QuotaSource {
   private isPaused(): boolean {
     if (this.cooldownUntilMs == null) return false;
     if (this.now() >= this.cooldownUntilMs) {
-      // Auto-resume: window reopened, clear the pause + the re-limit tracker so
-      // the next limit (a genuinely new exhaustion) starts a fresh count.
+      // Auto-resume: the window reopened, so clear the PAUSE. Do NOT null the
+      // re-limit tracker here — a probe firing between two re-limits of the same
+      // in-flight packet would otherwise silently reset the escalation count and
+      // let an unresettable / clock-skewed wall livelock forever (the packet is
+      // re-dispatched, re-limits, the bound never accrues). The tracker is reset
+      // in {@link recordLimit} instead, and only when a fresh limit proves the
+      // sequence was genuine progress (a NEW packet, or a limit arriving after the
+      // prior window's reset already elapsed before re-dispatch).
       this.cooldownUntilMs = null;
-      this.tracker = null;
       return false;
     }
     return true;
@@ -218,9 +230,21 @@ export class HostSessionQuotaSource implements QuotaSource {
     const resetMs = nowMs + cooldownMs;
 
     // Track consecutive re-limits of the SAME packet. A re-limit is "the same"
-    // when the same packet trips again before the window it last set has
+    // when the same packet trips again BEFORE the window it last set has
     // reopened — i.e. an unresettable / clock-skewed wall, not normal progress.
-    if (this.tracker && this.tracker.packet_id === packetId) {
+    // If instead the prior reset had already elapsed before this fresh limit
+    // arrived, the window genuinely reopened and the packet made progress between
+    // dispatches → this is a NEW exhaustion cycle, so the count restarts. (The
+    // tracker is intentionally NOT cleared on auto-resume so a probe between two
+    // pre-reset re-limits cannot reset the count; the elapsed-reset check here is
+    // what distinguishes genuine progress from a livelock.)
+    const priorResetElapsed =
+      this.tracker != null && nowMs >= this.tracker.last_reset_ms;
+    if (
+      this.tracker &&
+      this.tracker.packet_id === packetId &&
+      !priorResetElapsed
+    ) {
       this.tracker.consecutive_re_limits += 1;
       this.tracker.cumulative_wall_ms += cooldownMs;
       this.tracker.last_reset_ms = resetMs;
@@ -286,8 +310,21 @@ export class HostSessionQuotaSource implements QuotaSource {
     }
 
     const paused = this.isPaused();
+    // Graduated pre-wall band: paused → 0 (hard stop, scheduler cooldowns); a
+    // limit was seen this cycle but the cooldown has since elapsed without a clean
+    // reset → near-wall (CRITICAL throttle). Open with no limit known → the source
+    // has NO usage signal, so it must PASS THROUGH (`not_applicable`, null
+    // snapshot) rather than win the cascade and mask the learned/sliding source.
+    // First snapshot wins in the composite, so asserting a snapshot here would
+    // shadow the reactive learned reading. Composition over masking.
+    if (!paused && this.tracker == null) {
+      return { snapshot: null, status: "not_applicable" };
+    }
+    const remainingPct = paused
+      ? WINDOW_PAUSED_REMAINING_PCT
+      : WINDOW_NEAR_WALL_REMAINING_PCT;
     const snapshot: QuotaUsageSnapshot = {
-      remaining_pct: paused ? WINDOW_PAUSED_REMAINING_PCT : WINDOW_OPEN_REMAINING_PCT,
+      remaining_pct: remainingPct,
       reset_at: paused && this.cooldownUntilMs != null
         ? new Date(this.cooldownUntilMs).toISOString()
         : null,

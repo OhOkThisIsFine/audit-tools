@@ -38,9 +38,11 @@ test("CE-003 channel isolation: a healthy result quoting a limit string never pa
   assert.equal(event.cooldown_until, null);
 
   const probe = await src.probeUsage(KEY);
-  assert.equal(probe.status, "ok");
-  assert.equal(probe.snapshot.remaining_pct, 1, "window stays open — no pause from result content");
-  assert.equal(probe.snapshot.reset_at, null);
+  // Open with no limit known → the source has NO usage signal, so it passes
+  // through (not_applicable / null snapshot) rather than masking the learned
+  // source in the cascade. Composition over masking.
+  assert.equal(probe.status, "not_applicable", "open + no limit → passes through");
+  assert.equal(probe.snapshot, null, "no snapshot asserted while window open with no limit");
   assert.equal(src.cooldownUntil(), null, "no cooldown set");
   assert.equal(escalations.length, 0);
 
@@ -70,10 +72,16 @@ test("reset form 'resets 3:30pm' (clock time) → next-future-occurrence pause, 
   assert.equal(probe.snapshot.remaining_pct, 0, "paused → remaining_pct 0");
   assert.equal(probe.snapshot.reset_at, event.cooldown_until);
 
-  // Advance past the reset → auto-resume.
+  // Advance past the reset → auto-resume. A limit was seen this cycle, so the
+  // source now reports the near-wall band (CRITICAL throttle) rather than passing
+  // through — the account approached the wall, the tracker is still live.
   now.set(resetMs + 1);
   probe = await src.probeUsage(KEY);
-  assert.equal(probe.snapshot.remaining_pct, 1, "window reopened after reset");
+  assert.equal(probe.status, "ok", "window reopened after reset");
+  assert.ok(
+    probe.snapshot.remaining_pct > 0 && probe.snapshot.remaining_pct < 0.1,
+    `near-wall band after a recorded limit; got ${probe.snapshot.remaining_pct}`,
+  );
   assert.equal(probe.snapshot.reset_at, null);
   assert.equal(src.cooldownUntil(), null);
 });
@@ -95,7 +103,12 @@ test("reset form 'Resets in 2h' (duration) → ~2h pause, auto-resume", async ()
   assert.equal((await src.probeUsage(KEY)).snapshot.remaining_pct, 0, "still paused just before reset");
 
   now.set(resetMs + 1);
-  assert.equal((await src.probeUsage(KEY)).snapshot.remaining_pct, 1, "auto-resumed after reset");
+  const resumed = await src.probeUsage(KEY);
+  assert.equal(resumed.status, "ok", "auto-resumed after reset");
+  assert.ok(
+    resumed.snapshot.remaining_pct > 0 && resumed.snapshot.remaining_pct < 0.1,
+    "near-wall band after a recorded limit",
+  );
 });
 
 test("non-consuming re-queue: dropProvider returns the packet to pending, never consumed", async () => {
@@ -198,9 +211,13 @@ test("a fresh genuine limit after auto-resume starts a new (un-escalated) re-lim
   const r2 = src.recordLimit("error", "session limit reached. Resets in 1h", "pkt-y");
   assert.equal(r2.escalation, null, "2 == bound, not yet over");
 
-  // Advance past the reset → auto-resume clears the tracker.
+  // Advance past the reset → window reopened (cooldown cleared). The tracker
+  // survives the auto-resume (so a probe between two pre-reset re-limits can't
+  // silently reset the escalation count); near-wall band is still reported.
   now.advance(2 * 3600_000);
-  assert.equal((await src.probeUsage(KEY)).snapshot.remaining_pct, 1, "resumed");
+  const afterResume = await src.probeUsage(KEY);
+  assert.equal(afterResume.status, "ok", "resumed");
+  assert.equal(src.cooldownUntil(), null, "cooldown cleared on resume");
 
   // A genuinely new limit on the same packet must NOT immediately escalate.
   const fresh = src.recordLimit("error", "session limit reached. Resets in 1h", "pkt-y");

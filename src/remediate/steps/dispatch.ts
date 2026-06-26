@@ -48,6 +48,7 @@ import {
   toPromptPathToken,
   estimateTokensFromBytes,
   buildQuotaSource,
+  HostSessionQuotaSource,
   severityRank,
   findingNeedsVerificationBeforeFix,
   compareTier,
@@ -267,9 +268,16 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
   // The proactive quota snapshot (Claude OAuth source, then learned) so the
   // scheduler can throttle/cooldown from live remaining quota — mirrors
   // audit-code's buildDispatchPool. Cached per key, so one probe per burst.
+  // PREPEND the host-session source keyed on this host pool's own (provider,
+  // model) key — first-class PRE-WALL source (graduated remaining_pct →
+  // LOW/CRITICAL throttle before a 429), gating on the exact key so it never masks
+  // the proactive/learned sources. Mirrors audit-code's buildDispatchPool.
   const quotaSource = buildQuotaSource({
     halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
       ?.empirical_half_life_hours,
+    hostSession: new HostSessionQuotaSource({
+      providerModelKey: buildProviderModelKey(providerName, quotaModelKeySegment),
+    }),
   });
 
   // One capacity pool per reported roster rank (most capable first), each with its
@@ -353,6 +361,9 @@ export async function buildConfirmedPools(input: {
   const quotaSource = buildQuotaSource({
     halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
       ?.empirical_half_life_hours,
+    hostSession: new HostSessionQuotaSource({
+      providerModelKey: buildProviderModelKey(providerName, quotaModelKeySegment),
+    }),
   });
 
   // Host-model pools via the shared host-pool-from-roster core (identical shape across

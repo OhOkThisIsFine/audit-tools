@@ -18,6 +18,18 @@ export interface BuildQuotaSourceOptions {
    * it (e.g. tests) or a stub to inject one.
    */
   claudeOAuth?: QuotaSource | false;
+  /**
+   * The host-session fixed-window source ({@link HostSessionQuotaSource}),
+   * PREPENDED ahead of every proactive source so it answers FIRST for the
+   * provider/model key it owns (own-key precedence via its exact
+   * `providerModelKey` gate — it returns `not_applicable`, passing through, for
+   * any other key, and `not_applicable` for its own key while the window is open
+   * with no limit known). This wires the operator's account-level session wall in
+   * as a first-class PRE-WALL source: its graduated `remaining_pct` lets the
+   * scheduler's LOW / CRITICAL bands throttle BEFORE a hard 429, and its paused
+   * snapshot folds a cooldown in. Omit (default) to leave it unwired. [CE-001/CE-002]
+   */
+  hostSession?: QuotaSource;
 }
 
 export class CompositeQuotaSource implements QuotaSource {
@@ -104,6 +116,13 @@ export class CompositeQuotaSource implements QuotaSource {
  */
 export function buildQuotaSource(options: BuildQuotaSourceOptions = {}): QuotaSource {
   const proactive: QuotaSource[] = [];
+  // The host-session source is PREPENDED before every proactive source: it owns
+  // its exact provider/model key (exact-key gate, not coversProvider), so it
+  // answers first for that key and passes through for all others — never masking
+  // the proactive/learned sources. [CE-001/CE-002]
+  if (options.hostSession) {
+    proactive.push(options.hostSession);
+  }
   if (options.claudeOAuth !== false) {
     proactive.push(options.claudeOAuth ?? new ClaudeOAuthQuotaSource());
   }
