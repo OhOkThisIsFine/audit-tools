@@ -7,11 +7,8 @@
 
 ## Live state
 
-- **`audit-tools@0.30.18`** on npm (`latest`). `main == audit-tools/main` (`99c78ff8`), clean tree, both
-  global bins → 0.30.18.
-- This session shipped **0.30.16** (accept-node new-file-drop + merged-base-green hardening) →
-  **0.30.17** (P0 fix for 0.30.16's over-broad enumeration) → **0.30.18** (loop-friction C1/C4/D2/C5, lean),
-  and produced the **self-scaling-pipeline design of record** ([`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md)).
+- On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
+  audit-tools/main`, clean tree, both global bins reinstalled to the live release.
 
 ## Before the next `/remediate-code` run (one-time hygiene)
 

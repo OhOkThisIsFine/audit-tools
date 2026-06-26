@@ -23,8 +23,8 @@ Each kind of knowledge has exactly one home. Duplication across homes is drift w
 
 | Home | Holds | Explicitly NOT |
 |---|---|---|
-| **`CLAUDE.md`** (+ `AGENTS*.md`) | Durable policy, conventions, standing decisions, durable how-to. The instruction layer. | Current state; file-by-file status. |
-| **design / concept docs** (`docs/*-design.md`, glossary, host-validation, quota/cross-provider) | Timeless architecture: invariants, seams, contracts, the *why*. The model the code implements. | Changelogs; "this run"; dated plans; progress. |
+| **`CLAUDE.md`** (+ `AGENTS.md`) | Durable policy, conventions, standing decisions, durable how-to. The instruction layer. | Current state; file-by-file status. |
+| **design / concept docs** (`spec/` holds the design/research specs — `*-design.md`, host-validation, cross-provider-quota; `docs/` holds living guides like `glossary-ids.md`) | Timeless architecture: invariants, seams, contracts, the *why*. The model the code implements. | Changelogs; "this run"; dated plans; progress. |
 | **`docs/backlog.md`** | A living to-do list: open work, durable traps, future directions. | A status log. Remove an entry once it ships — record the durable contract/rationale in a concept doc, `CLAUDE.md`, or memory, never "where the code is today." |
 | **`docs/HANDOFF.md`** | The single rolling cross-machine handoff: current published state + anything in flight, immediate-next-only. The *one* sanctioned current-state doc. | A changelog; multi-step-out roadmap; anything more than the immediate next. |
 | **project memory** | Cross-session durable facts/preferences/traps and their rationale. | — |
