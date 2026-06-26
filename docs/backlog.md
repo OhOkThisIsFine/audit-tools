@@ -182,7 +182,7 @@ close-out in both orchestrators. Durable design captured in memory + CLAUDE.md._
 - **Cross-provider quota — LIVE-endpoint confirmation.** The per-provider mappings are validated against
   live-*shaped* fixtures and the capacity fold; confirming each source against its **real** endpoint
   (Claude/Codex live; Copilot/Antigravity gated→degrade) is environment-bound and still a recorded-
-  evidence task, not a code gate. Per-provider recipes: [`cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md).
+  evidence task, not a code gate. Per-provider recipes: [`cross-provider-quota-matrix.md`](../spec/cross-provider-quota-matrix.md).
   Red line: self-monitoring own-provider only, never IDE-GUI automation.
 
 ## Deferred / waiting
@@ -190,7 +190,7 @@ close-out in both orchestrators. Durable design captured in memory + CLAUDE.md._
 - **A2 finding-quality oracle** — the `score-audit` scorer is built; it needs operator-authored
   `corpus/<run-id>.labels.json` (hand-labeled real audit runs) before it can score precision/recall/hallucination.
 - **A7 multi-host validation** — `npm run verify:hosts` (automated, in `verify:release`) is built; remaining is
-  the release-time manual GUI checklist run ([`host-validation.md`](host-validation.md)) + a gated Codex
+  the release-time manual GUI checklist run ([`host-validation.md`](../spec/host-validation.md)) + a gated Codex
   live-dispatch e2e.
 - **Manual real-OpenCode validation** that agent-scoped permission allowances propagate to spawned subtasks
   (can't be unit-tested; user-owned). Folds into the A7 checklist.
