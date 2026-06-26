@@ -13,16 +13,21 @@
  *   validateImplementationDAGIntegrity — ARC-86b18f1b-2: referential integrity
  *     and bidirectional coverage for the implementation DAG.
  */
+import { spawnSync } from "node:child_process";
 import {
   type ValidationIssue,
   type DispatchModelTier,
+  type Finding,
   isRecord,
   pushValidationIssue,
+  groundDesignFinding,
+  normalizeRepoPath,
 } from "audit-tools/shared";
 import {
   evaluatePairing,
   obligationScopeAnchors,
   readObligationChangeClassification,
+  extractSymbolTokens,
   type PairingVerdict,
 } from "../contractPipeline/changeClassification.js";
 
@@ -961,6 +966,182 @@ export function deriveNodeModelTierFromNode(nodePayload: unknown): DispatchModel
     counterexampleCount: lenLike(node.addresses_counterexamples),
     highStakesLens: HIGH_STAKES_LENSES.has(lens),
   });
+}
+
+// ── M-B3: source-grounded citation gate (repo-tree knownPaths) ────────────────
+//
+// A contract-pipeline finding (assessment finding, conceptual-critique finding,
+// counterexample) must point at something REAL in the working tree: either a
+// file path that exists, or a code symbol that appears in some real path. A
+// finding that cites only a non-existent path AND only non-existent symbols is
+// `ungrounded` — it points at nothing checkable — and blocks promotion.
+//
+// Why git ls-files and NOT a manifest artifact (CE-001): remediate has no repo
+// manifest (unlike audit-code). Enumerating the working tree at repo_root via
+// `git ls-files` is the authoritative, OS-agnostic source of truth for "what
+// files exist" — never a stale or absent artifact.
+//
+// Symbol-only citations are NOT excused (the gap groundDesignFinding alone
+// leaves): groundDesignFinding rejects a finding that cites no `affected_files`
+// path, but a finding that cites a real-looking symbol in its description and no
+// path would otherwise be waved through as "cites no component". Here a citation
+// that is symbol-shaped only is grounded against the symbol corpus derived from
+// the real path set — a symbol that matches no real path token is rejected.
+//
+// Fail-closed ONLY when the repo-tree enumeration itself fails or returns empty:
+// a normal document/conversation run with legitimately groundless prose findings
+// is NOT bricked — only an UNREADABLE tree (no files at all) blocks, because in
+// that state nothing can be grounded and silently passing would defeat the gate.
+
+/** A finding-shaped citation the gate grounds. Reuses the shared Finding shape. */
+export interface ContractCitationGroundingResult {
+  /** True when the repo tree could be enumerated (≥1 path). */
+  treeReadable: boolean;
+  /** ValidationIssue[] — errors block promotion / re-emit the producing phase. */
+  issues: ValidationIssue[];
+}
+
+/**
+ * Enumerate the working-tree paths at `repoRoot` via `git ls-files`, normalized
+ * through the shared `normalizeRepoPath`. Returns an empty set when git is
+ * unavailable or the tree is empty (caller treats empty as the fail-closed
+ * unreadable-tree signal). OS-agnostic: `shell: false`, forward-slash output.
+ */
+export function enumerateRepoTreePaths(repoRoot: string): Set<string> {
+  const known = new Set<string>();
+  let result;
+  try {
+    result = spawnSync("git", ["ls-files"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      shell: false,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    return known;
+  }
+  if (!result || result.status !== 0 || typeof result.stdout !== "string") {
+    return known;
+  }
+  for (const line of result.stdout.split("\n")) {
+    const path = normalizeRepoPath(line);
+    if (path.length > 0) known.add(path);
+  }
+  return known;
+}
+
+/**
+ * Build the corpus of pre-existing symbol tokens from the known repo paths, so a
+ * symbol-shaped citation can be grounded against "a token that actually names a
+ * real file or a segment of one". Each path is split on path/extension separators
+ * (`/`, `.`, `_`, `-`) into segments (`src/auth.ts` → {src, auth, ts}), so a bare
+ * symbol citation like `auth` grounds against the real file `src/auth.ts`. Single-
+ * letter / very short segments (<3) are dropped as noise.
+ */
+function buildKnownSymbolCorpus(knownPaths: ReadonlySet<string>): Set<string> {
+  const corpus = new Set<string>();
+  for (const path of knownPaths) {
+    for (const segment of path.split(/[/._\-]+/)) {
+      const token = segment.toLowerCase();
+      if (token.length >= 3) corpus.add(token);
+    }
+  }
+  return corpus;
+}
+
+/**
+ * A token is path-shaped when it contains a path separator or a file-extension
+ * dot (`src/a.ts`, `a/b`, `foo.ts`); otherwise it is symbol-shaped (`writeRecord`,
+ * `flush_buffer`). The partition decides which grounding set a citation token is
+ * checked against (CE: a symbol-only citation to a non-existent symbol is
+ * rejected, not excused as "cites no component").
+ */
+function isPathShaped(token: string): boolean {
+  return token.includes("/") || /\.[a-z0-9]+$/i.test(token);
+}
+
+/**
+ * M-B3 — source-grounded citation gate (fail-closed only on an unreadable tree).
+ *
+ * For each finding:
+ *   1. If it cites at least one real `affected_files` path → grounded (delegates
+ *      to the shared `groundDesignFinding` against the repo-tree path set — no
+ *      re-implementation).
+ *   2. Otherwise, partition the citation tokens (affected_files paths that did
+ *      not resolve + symbol tokens from the description) into path-shaped vs
+ *      symbol-shaped. A path-shaped token grounds against the known-path set; a
+ *      symbol-shaped token grounds against the symbol corpus. If ANY token
+ *      grounds, the finding passes. If NONE grounds — including a finding that
+ *      cites only non-existent symbols — it is rejected (error).
+ *
+ * `findings` is the array of finding-shaped citations to ground (each carries
+ * `affected_files` and an optional `description`). `repoRoot` is the working-tree
+ * root enumerated by `git ls-files`.
+ */
+export function validateContractCitationGrounding(
+  findings: readonly Finding[],
+  repoRoot: string,
+): ContractCitationGroundingResult {
+  const issues: ValidationIssue[] = [];
+  const knownPaths = enumerateRepoTreePaths(repoRoot);
+
+  // Fail-closed ONLY when the tree itself is unreadable/empty: nothing can be
+  // grounded, so the gate blocks rather than silently passing every citation.
+  if (knownPaths.size === 0) {
+    pushValidationIssue(
+      issues,
+      "contract_citation_grounding.repo_tree",
+      `Could not enumerate the working tree at "${repoRoot}" (git ls-files returned no files) — citation grounding cannot run, so the gate fails closed. Verify repo_root points at a git working tree.`,
+    );
+    return { treeReadable: false, issues };
+  }
+
+  const knownSymbols = buildKnownSymbolCorpus(knownPaths);
+
+  findings.forEach((finding, index) => {
+    // 1. Real path citation → grounded by the shared design-finding primitive.
+    const pathVerdict = groundDesignFinding(finding, knownPaths);
+    if (pathVerdict.status === "grounded") return;
+
+    // 2. No real path. Gather every citation token and partition it.
+    const tokens = new Set<string>();
+    for (const file of finding.affected_files ?? []) {
+      const normalized = normalizeRepoPath(file?.path ?? "");
+      if (normalized.length > 0) tokens.add(normalized);
+    }
+    // The canonical Finding shape carries no `description`; its prose lives in
+    // `summary` (+ title). Pull candidate symbol tokens from both so a symbol-only
+    // citation is grounded against the real-symbol corpus.
+    for (const token of extractSymbolTokens(`${finding.summary ?? ""} ${finding.title ?? ""}`)) {
+      tokens.add(token);
+    }
+
+    let grounded = false;
+    for (const token of tokens) {
+      if (isPathShaped(token)) {
+        if (knownPaths.has(token)) {
+          grounded = true;
+          break;
+        }
+      } else if (knownSymbols.has(token)) {
+        grounded = true;
+        break;
+      }
+    }
+
+    if (!grounded) {
+      const findingId =
+        typeof finding.id === "string" && finding.id.length > 0 ? finding.id : `#${index}`;
+      const cited = [...tokens].slice(0, 5).join(", ") || "(no path or symbol citation)";
+      pushValidationIssue(
+        issues,
+        `contract_citation_grounding.findings[${findingId}]`,
+        `Finding "${findingId}" cites no real component: no cited path exists in the working tree and no cited symbol (${cited}) names anything in the repository. A finding must point at a real path or a real symbol.`,
+      );
+    }
+  });
+
+  return { treeReadable: true, issues };
 }
 
 // ── (removed) Downstream-only repair propagation — S2, dropped ─────────────────
