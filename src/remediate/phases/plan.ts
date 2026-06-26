@@ -120,6 +120,10 @@ export function parseAuditFindingsReport(report: AuditFindingsReport): {
         items: [...(block.finding_ids ?? [])],
         dependencies: [...(block.depends_on ?? [])],
         parallel_safe: (block.depends_on?.length ?? 0) === 0,
+        // touched_files is REQUIRED on the block contract; the meaningful
+        // surface is derived downstream (mergeBlocksSharingFiles / M1-DECOMPOSE)
+        // from the block's findings — seed it empty here.
+        touched_files: [],
       }))
     : [];
   const themes = Array.isArray(report.themes) ? report.themes : [];
@@ -178,7 +182,7 @@ function assignFindingToBlock(
 ): void {
   let block = blocks.find((candidate) => candidate.block_id === blockId);
   if (!block) {
-    block = { block_id: blockId, items: [], parallel_safe: true };
+    block = { block_id: blockId, items: [], parallel_safe: true, touched_files: [] };
     blocks.push(block);
   }
   block.items.push(finding.id);
@@ -544,6 +548,9 @@ export function splitBlocksByContextBudget(
           items: subBlocks[i],
           parallel_safe: block.parallel_safe,
           dependencies: block.dependencies,
+          // Sub-blocks inherit the parent's declared surface; the per-sub-block
+          // narrowing is a downstream (M1-DECOMPOSE) concern.
+          touched_files: [...(block.touched_files ?? [])],
         });
       }
     }
@@ -600,6 +607,8 @@ function deriveFallbackBlocks(
       block_id: createBlockId(index + 1),
       items: [finding.id],
       parallel_safe: true,
+      // One finding per block — declare its affected files as the block surface.
+      touched_files: finding.affected_files.map((af) => af.path),
     })),
     blockStrategy: "file_overlap",
   };
@@ -823,10 +832,14 @@ export function mergeBlocksSharingFiles(
     // it from deps. Only genuinely merged groups derive parallel_safe afresh.
     const parallel_safe =
       idxs.length === 1 ? groupBlocks[0].parallel_safe : deps.size === 0;
+    const touched_files = [
+      ...new Set(groupBlocks.flatMap((b) => b.touched_files ?? [])),
+    ];
     return {
       block_id: mergedId,
       items,
       parallel_safe,
+      touched_files,
       ...(deps.size > 0 ? { dependencies: [...deps] } : {}),
     };
   });

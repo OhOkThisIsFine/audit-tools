@@ -103,7 +103,14 @@ describe("validateRemediationPlan", () => {
     const plan = {
       plan_id: "plan-1",
       findings: [validFinding],
-      blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true }],
+      blocks: [
+        {
+          block_id: "B-001",
+          items: ["F-001"],
+          parallel_safe: true,
+          touched_files: ["src/foo.ts"],
+        },
+      ],
       project_type: "typescript-node",
       candidate_closing_actions: ["commit"],
     };
@@ -142,8 +149,51 @@ describe("validateRemediationBlock", () => {
       block_id: "B-001",
       items: ["F-001"],
       parallel_safe: true,
+      touched_files: ["src/foo.ts"],
     });
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  // CP-M1-TYPES: touched_files is first-class and REQUIRED on the block contract.
+  it("passes a block with an empty touched_files array (empty allowed)", () => {
+    const issues = validateRemediationBlock({
+      block_id: "B-001",
+      items: ["F-001"],
+      parallel_safe: true,
+      touched_files: [],
+    });
+    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("errors when touched_files is omitted (omitted rejected)", () => {
+    const issues = validateRemediationBlock({
+      block_id: "B-001",
+      items: ["F-001"],
+      parallel_safe: true,
+      // touched_files deliberately omitted
+    });
+    expect(
+      issues.some(
+        (i) =>
+          i.severity === "error" &&
+          (i.path.includes("touched_files") ||
+            i.message.includes("touched_files")),
+      ),
+    ).toBe(true);
+  });
+
+  it("errors when touched_files is present but not an array of strings", () => {
+    const issues = validateRemediationBlock({
+      block_id: "B-001",
+      items: ["F-001"],
+      parallel_safe: true,
+      touched_files: "src/foo.ts",
+    });
+    expect(
+      issues.some(
+        (i) => i.severity === "error" && i.path.includes("touched_files"),
+      ),
+    ).toBe(true);
   });
 
   it("errors when required block fields are malformed", () => {
@@ -165,6 +215,7 @@ describe("validateRemediationBlock", () => {
       items: ["F-002"],
       parallel_safe: false,
       dependencies: ["B-001"],
+      touched_files: [],
     });
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
@@ -174,6 +225,7 @@ describe("validateRemediationBlock", () => {
       block_id: "B-003",
       items: ["F-003"],
       parallel_safe: true,
+      touched_files: [],
       // dependencies deliberately omitted — should be accepted as optional
     });
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);

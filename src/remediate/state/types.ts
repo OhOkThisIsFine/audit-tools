@@ -15,7 +15,16 @@ export const RemediationBlockSchema = z
   .object({
     block_id: z.string(),
     items: z.array(z.string()),
+    /**
+     * Whether this block may run concurrently with its peers. First-class on the
+     * block contract (not derived host-side) so the scheduler reads one source.
+     */
     parallel_safe: z.boolean(),
+    /**
+     * Block ids that must complete before this block runs. First-class (the
+     * serialized schema-first chain head, CE-001): producers emit it, the
+     * scheduler consumes it. Optional — absence means no upstream dependency.
+     */
     dependencies: z.array(z.string()).optional(),
     /**
      * Commands to run as a post-merge verification gate after this block's
@@ -25,10 +34,12 @@ export const RemediationBlockSchema = z
     targeted_commands: z.array(z.string()).optional(),
     /**
      * Repo-relative paths that this block's implementation is expected to touch.
-     * Used by `attributePostMergeFailure` to identify which merged blocks share
-     * an implicated surface when the post-merge gate fails.
+     * First-class and REQUIRED (an empty array is allowed, an omitted field is
+     * rejected by `validateRemediationBlock`): the file-ownership-disjoint
+     * scheduler and `attributePostMergeFailure` both read it, so a block with no
+     * declared surface is a producer bug, not an implicit empty.
      */
-    touched_files: z.array(z.string()).optional(),
+    touched_files: z.array(z.string()),
   })
   .strict();
 export type RemediationBlock = z.infer<typeof RemediationBlockSchema>;
