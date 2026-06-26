@@ -31,13 +31,13 @@ import {
 import {
   artifactTreeLockPath,
   auditReportPath,
+  groundDesignFindings,
   promotedAuditReportPath,
   withFileLock,
 } from "audit-tools/shared";
 import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
-import { groundDesignFindings } from "../validation/designFindingGrounding.js";
 import {
   captureDesignReviewSnapshot,
   isDesignReviewStale,
