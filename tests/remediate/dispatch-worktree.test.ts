@@ -575,6 +575,41 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
     expect(existsSync(wt)).toBe(false);
   });
 
+  it("PRESERVES the worker's real source edits under a quarantine ref when a fail-loud refuses the commit (P0 data-loss)", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktree(repo, "NF2b");
+    // The worker's REAL change: a new source file under the (non-ignored) src dir.
+    mkdirSync(join(wt, "src"), { recursive: true });
+    writeFileSync(join(wt, "src", "real-fix.ts"), "export const fix = 1;\n");
+    // ...alongside an offending generated artifact under the (ignored) friction dir,
+    // which trips the genuine fail-loud commit refusal.
+    mkdirSync(join(wt, "friction"), { recursive: true });
+    writeFileSync(join(wt, "friction", "build.tsbuildinfo"), "{}\n");
+
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "NF2b",
+      worktreeRoot: wt,
+      branch: worktreeBranchForBlock("NF2b", RID),
+      workerOutcome: "success",
+      targetedCommands: [],
+      writePaths: ["src/", "friction/"],
+      mergedBaseCheckCommand: "node --version",
+    });
+
+    // The fail-loud still refuses to LAND the half-change.
+    expect(res.outcome).toBe("error");
+    expect(res.diagnostic).toContain("friction/build.tsbuildinfo");
+    expect(existsSync(wt)).toBe(false);
+    // ...but the worker's real source edit is NOT destroyed — it is preserved under
+    // a durable quarantine ref for recovery (the P0 fix), never silently landed.
+    const quarantined = listQuarantinedCommits(repo, RID).map((q) => q.block);
+    expect(quarantined).toContain("NF2b");
+    expect(headHas(repo, "src/real-fix.ts")).toBe(false);
+  });
+
   it("SKIPS incidental untracked-ignored churn OUTSIDE the write scope (node_modules from running npm) — commits the real tracked edit, no fail-loud", async () => {
     // Regression for the 0.30.16 P0: the repo-wide ls-files enumeration tripped a
     // fail-loud on `node_modules/.bin/esbuild` that a worker's `npm run check`
