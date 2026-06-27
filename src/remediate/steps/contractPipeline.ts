@@ -205,6 +205,15 @@ interface ContractRepairState {
    * stall rather than silently re-repaired.
    */
   repairs: { judge_hash: string; target: string; at: string; accepted_ce_ids?: string[] }[];
+  /**
+   * One entry per conceptual-design-critique-driven design repair (keyed by
+   * critique hash). `blocking_ids` records the blocking critique-item ids the
+   * repair was dispatched to address — the cumulative union is the
+   * "already-addressed" set the critique convergence gate diffs each fresh
+   * critique against, so a re-raised (un-resolved) blocking concern is detected
+   * as a stall rather than silently re-repaired forever.
+   */
+  critique_repairs: { critique_hash: string; at: string; blocking_ids: string[] }[];
   /** One entry per implementation_dag traceability rejection. */
   dag_regenerations: { violations: string[]; at: string }[];
 }
@@ -221,6 +230,7 @@ async function readRepairState(artifactsDir: string): Promise<ContractRepairStat
     state ?? {
       schema_version: "remediate-code-contract-pipeline/repair-state/v1alpha1",
       repairs: [],
+      critique_repairs: [],
       dag_regenerations: [],
     }
   );
@@ -699,6 +709,90 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
     reason: "stall",
     outstanding: acceptedIds,
     note: `The judge re-accepted counterexample(s) that a prior repair already addressed (${acceptedIds.join(", ") || "none newly accepted"}), with no new accepted counterexample this round. The repair loop is not converging on these items. Resolve them with the user — adjust the contract design or accept the counterexamples as known limitations — before the plan can be promoted.`,
+  };
+}
+
+// ── Conceptual-design-critique gate ───────────────────────────────────────────
+
+type CritiqueGate =
+  | { kind: "proceed" }
+  | { kind: "escalate"; reason: "stall" | "runaway"; blocking: string[]; note: string }
+  | { kind: "repair"; critiqueHash: string; blockingIds: string[] };
+
+/** Blocking-severity critique item ids from a conceptual_design_critique payload. */
+function blockingCritiqueIds(critique: unknown): string[] {
+  const items =
+    isRecord(critique) && Array.isArray(critique.items) ? critique.items : [];
+  return items
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .filter((item) => item.severity === "blocking")
+    .map((item) => (typeof item.id === "string" ? item.id : ""))
+    .filter((id) => id.length > 0);
+}
+
+/**
+ * Decide whether the pipeline may advance past the conceptual-design critique.
+ *
+ * The routing signal is MECHANICAL and derived only from the critique items: a
+ * critique carrying ANY `severity: "blocking"` item means the design is not
+ * approved and must be repaired — regardless of the author-stated `verdict`
+ * string. This closes the contradictory-combo gap: a critique that marks items
+ * `blocking` while declaring `approved` / `approved_with_concerns` (which the
+ * pipeline previously waved through, since only a judge verdict ever gated
+ * anything) no longer silently proceeds. Enforce-in-tooling: the verdict label
+ * is advisory display; the blocking-item set is the contract.
+ *
+ * Convergence-terminated, mirroring {@link evaluateJudgeGate}: the first blocking
+ * critique ⇒ repair the design (`finalized_module_contracts`); repairing it
+ * re-stales and re-emits the critique (it depends on the finalized contracts), so
+ * a clean re-critique ⇒ proceed (the fixpoint). A fresh critique whose blocking
+ * ids were ALL already addressed by a prior repair, with none new ⇒ escalate
+ * (stall — the design loop is not converging) rather than repair forever; the
+ * runaway backstop also escalates (loud).
+ */
+export async function evaluateCritiqueGate(artifactsDir: string): Promise<CritiqueGate> {
+  const env = await readContractArtifact(artifactsDir, "conceptual_design_critique");
+  if (!env) return { kind: "proceed" };
+  const critique = envelopePayload(env);
+  const blockingIds = blockingCritiqueIds(critique);
+  if (blockingIds.length === 0) return { kind: "proceed" };
+
+  const repairState = await readRepairState(artifactsDir);
+  const critiqueRepairs = repairState.critique_repairs ?? [];
+  const critiqueHash = env.content_hash;
+  const alreadyHandled = critiqueRepairs.some((r) => r.critique_hash === critiqueHash);
+
+  // Idempotent re-entry: this exact critique already drove a repair (its design
+  // repair has not yet produced a fresh critique). Re-emit the same repair.
+  if (alreadyHandled) {
+    return { kind: "repair", critiqueHash, blockingIds };
+  }
+
+  const addressed = new Set(critiqueRepairs.flatMap((r) => r.blocking_ids ?? []));
+  const newBlocking = blockingIds.filter((id) => !addressed.has(id));
+
+  // Runaway backstop (loud) — pathological non-convergence.
+  if (critiqueRepairs.length >= MAX_CONTRACT_REPAIR_ITERATIONS) {
+    return {
+      kind: "escalate",
+      reason: "runaway",
+      blocking: blockingIds,
+      note: `The conceptual-design critique↔repair loop reached its runaway backstop (${critiqueRepairs.length} repair rounds) while still raising blocking concerns. Review the critique and contract design with the user before proceeding.`,
+    };
+  }
+
+  // Progress: a new blocking concern (or the first round) ⇒ repair the design.
+  if (critiqueRepairs.length === 0 || newBlocking.length > 0) {
+    return { kind: "repair", critiqueHash, blockingIds };
+  }
+
+  // Stall: every blocking concern was already addressed by a prior repair, none
+  // new ⇒ the design loop is not converging ⇒ escalate to the user.
+  return {
+    kind: "escalate",
+    reason: "stall",
+    blocking: blockingIds,
+    note: `The conceptual-design critique re-raised blocking concern(s) that a prior design repair already addressed (${blockingIds.join(", ")}), with none newly raised. The design is not converging on these concerns. Resolve them with the user — revise the contract design or downgrade the concerns to advisory — before the pipeline can proceed.`,
   };
 }
 
@@ -1586,6 +1680,80 @@ Rewrite the output so its goal_id matches the goal_id established in goal_spec.j
 ${rejectionRewriteInstruction(archived.archivedPath)}`,
       );
     }
+  }
+
+  // 2.6. Conceptual-design-critique gate (A1). Once the critique exists, a
+  //      blocking concern routes a design repair BEFORE any downstream artifact
+  //      is derived — closing the gap where a `blocking` item inside a
+  //      non-`rejected` verdict (and even a bare `rejected` verdict) silently
+  //      proceeded because only the judge verdict was ever consumed. The signal
+  //      is mechanical (any blocking item), so the author's verdict label can't
+  //      wave a blocking concern through. Convergence-terminated: repairing the
+  //      finalized contracts re-stales + re-emits the critique, a clean
+  //      re-critique proceeds, a stalled loop escalates to the user.
+  if (contractArtifactExists(artifactsDir, "conceptual_design_critique")) {
+    const gate = await evaluateCritiqueGate(artifactsDir);
+    if (gate.kind === "repair") {
+      const repairState = await readRepairState(artifactsDir);
+      const critiqueRepairs = repairState.critique_repairs ?? [];
+      if (!critiqueRepairs.some((r) => r.critique_hash === gate.critiqueHash)) {
+        critiqueRepairs.push({
+          critique_hash: gate.critiqueHash,
+          at: new Date().toISOString(),
+          blocking_ids: gate.blockingIds,
+        });
+        repairState.critique_repairs = critiqueRepairs;
+        await writeRepairState(artifactsDir, repairState);
+      }
+      const rendered = renderContractRepairPrompt({
+        target: "finalized_module_contracts",
+        instruction:
+          "Revise the design to resolve every BLOCKING concern in the conceptual design critique " +
+          `(${gate.blockingIds.join(", ")}). Read conceptual_design_critique.json for each concern's ` +
+          "description, then rewrite the finalized module contracts so the blocking concerns no longer apply.",
+        artifactPaths,
+        repoRoot: root,
+      });
+      return buildStep({
+        prompt: rendered.prompt,
+        outputPath: rendered.outputPath,
+        stopCondition:
+          "Stop after rewriting finalized_module_contracts to resolve the blocking critique concerns and running next-step.",
+      });
+    }
+    if (gate.kind === "escalate") {
+      await captureStepBoundaryFriction(
+        artifactsDir,
+        runId,
+        {
+          eventType: "repair_round",
+          discriminator: `critique_nonconvergence:${gate.reason}`,
+          note: `Conceptual-design critique↔repair loop escalated (${gate.reason}): ${gate.note}`,
+          category: "trap",
+        },
+        "remediate-code",
+      );
+      return writeCurrentStep({
+        stepKind: CONTRACT_STEP_KIND,
+        status: "blocked",
+        runId,
+        repoRoot: root,
+        artifactsDir,
+        prompt: `# Conceptual-Design Critique Did Not Converge
+
+${gate.note}
+
+## Outstanding blocking concerns
+
+${gate.blocking.map((id) => `- ${id}`).join("\n")}
+
+Read conceptual_design_critique.json, decide with the user how to resolve each blocking concern (revise the contract design and re-run, or downgrade it to advisory), then re-run next-step.`,
+        allowedCommands: [],
+        stopCondition:
+          "Stop — the contract pipeline is blocked on a non-converging conceptual-design critique pending a user decision.",
+      });
+    }
+    // gate.kind === "proceed": fall through.
   }
 
   // 2.7. Deterministic artifact derivation (S1, contract-authoring determinism).

@@ -358,11 +358,16 @@ export interface ContractPipelineRenderInput {
 
 /**
  * Phases whose value is adversarial independence — the reviewer must NOT be the
- * author. Keyed strictly off phase identity: 'critique' (conceptual design
- * critique) and 'critic' (counterexample search). The non-adversarial review
- * phases ('assessment', 'judge') are intentionally excluded.
+ * author of the design under review. Keyed strictly off phase identity:
+ * 'critique' (conceptual design critique), 'critic' (counterexample search), and
+ * 'judge' (adjudicates the critic's counterexamples — a judge who authored the
+ * design systematically dismisses valid counterexamples against it, so the
+ * adjudication is only worth anything from an independent reviewer; memory:
+ * delegate the judge too). The 'assessment' phase is the author's OWN coverage
+ * self-assessment (not an adversarial review of someone else's work), so it is
+ * intentionally excluded.
  */
-const INDEPENDENT_CRITIC_PHASES = new Set(["critique", "critic"]);
+const INDEPENDENT_CRITIC_PHASES = new Set(["critique", "critic", "judge"]);
 
 /**
  * Render the independent-dispatch directive for an adversarial review phase.

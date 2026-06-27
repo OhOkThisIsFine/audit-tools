@@ -380,8 +380,10 @@ describe("contract pipeline prompt renderer — isolation", () => {
 });
 
 describe("contract pipeline — mandatory independent critic (paired positive/negative)", () => {
-  // Adversarial review phases keyed strictly off phase identity.
-  for (const role of ["critique", "critic"] as const) {
+  // Adversarial review phases keyed strictly off phase identity. The judge
+  // adjudicates the critic's counterexamples, so it too must be independent of
+  // the design author (memory: delegate the judge too).
+  for (const role of ["critique", "critic", "judge"] as const) {
     it(`POSITIVE: ${role} MANDATES an independent sub-agent when host can dispatch`, () => {
       const result = renderContractPipelinePrompt({
         role,
@@ -416,9 +418,10 @@ describe("contract pipeline — mandatory independent critic (paired positive/ne
     });
   }
 
-  // Non-adversarial review phases must NOT carry the independent-critic mandate,
-  // regardless of dispatch capability (keyed off phase identity, not assessment/judge).
-  for (const role of ["assessment", "judge"] as const) {
+  // The assessment phase is the author's OWN coverage self-assessment, not an
+  // adversarial review of someone else's work, so it must NOT carry the
+  // independent-critic mandate regardless of dispatch capability.
+  for (const role of ["assessment"] as const) {
     it(`${role} carries no independent-critic directive (true)`, () => {
       const result = renderContractPipelinePrompt({
         role,
