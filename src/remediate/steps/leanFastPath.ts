@@ -30,7 +30,7 @@
 // plan id so this stays trivially unit-testable.
 
 import type { Finding } from "audit-tools/shared";
-import { findingIsGrounded } from "audit-tools/shared";
+import { findingIsGrounded, isRecord } from "audit-tools/shared";
 
 /**
  * Max approved findings the lean path will take — "a handful". Above this, the
@@ -151,6 +151,65 @@ export function evaluateFastPath(findings: Finding[]): FastPathDecision {
   return {
     eligible: true,
     reason: `${findings.length} grounded high-confidence finding(s) across ${files.length} file(s); none systemic, coupled, or architecture-lens`,
+  };
+}
+
+// ── T1 slice 3b — lean-path light adversarial review ────────────────────────────
+//
+// The fast path no longer SKIPS adversarial scrutiny — that would be a
+// zero-scrutiny fork, and remediation legitimately catches upstream (audit)
+// errors. Instead an eligible run runs ONE bounded LIGHT adversarial pass over
+// the approved findings (the floor: light, never off) before the lean plan is
+// trusted. A clear verdict proceeds to the lean plan; a verdict that surfaces a
+// real concern escalates the run (evidence the change is harder than assessed)
+// and routes it to the full contract pipeline. The verdict is a mechanical
+// on-disk gate, NOT a "please self-check" instruction the host might ignore.
+
+export const LEAN_LIGHT_REVIEW_SCHEMA_VERSION =
+  "remediate-code-lean-light-review/v1alpha1" as const;
+
+export type LeanLightReviewDisposition = "clear" | "escalate";
+
+/** The verdict the host writes after the light adversarial pass. */
+export interface LeanLightReviewVerdict {
+  schema_version: typeof LEAN_LIGHT_REVIEW_SCHEMA_VERSION;
+  disposition: LeanLightReviewDisposition;
+  /** The concerns that justify routing to the full pipeline — required (non-empty) when escalating. */
+  concerns?: string[];
+  created_at?: string;
+}
+
+/**
+ * Interpret a host-written light-review verdict, fail-safe toward escalation:
+ * any malformed / ambiguous verdict, or an `escalate` with no stated concern,
+ * routes to the full pipeline. The floor must never silently pass — when in
+ * doubt, escalate (a wrong call costs extra pipeline work, never skipped review).
+ */
+export function interpretLeanLightReviewVerdict(raw: unknown): {
+  disposition: LeanLightReviewDisposition;
+  concerns: string[];
+} {
+  if (!isRecord(raw)) {
+    return { disposition: "escalate", concerns: ["unreadable light-review verdict"] };
+  }
+  const concerns = Array.isArray(raw.concerns)
+    ? raw.concerns.filter((c): c is string => typeof c === "string")
+    : [];
+  if (raw.disposition === "clear") {
+    return { disposition: "clear", concerns: [] };
+  }
+  if (raw.disposition === "escalate") {
+    return {
+      disposition: "escalate",
+      concerns:
+        concerns.length > 0
+          ? concerns
+          : ["light review escalated without a stated concern"],
+    };
+  }
+  return {
+    disposition: "escalate",
+    concerns: ["light-review verdict missing a valid disposition"],
   };
 }
 

@@ -55,6 +55,9 @@ import {
   evaluateFastPath,
   buildLeanExtractedPlan,
   distinctAffectedFiles,
+  interpretLeanLightReviewVerdict,
+  LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
+  type LeanLightReviewDisposition,
 } from "./leanFastPath.js";
 import {
   contractArtifactExists,
@@ -75,7 +78,12 @@ import {
   resolveManifestSources,
   type IntakeSourceManifest,
 } from "../intake.js";
-import { ensureIntakeRiskSignal } from "../riskSignal.js";
+import {
+  ensureIntakeRiskSignal,
+  readIntakeRiskSignal,
+  writeIntakeRiskSignal,
+  escalateRiskSignal,
+} from "../riskSignal.js";
 import type { IntentCheckpoint } from "audit-tools/shared";
 import {
   ambiguityReviewPrompt,
@@ -2388,6 +2396,138 @@ async function runReviewApprovalGate(
   };
 }
 
+// ── T1 slice 3b — lean-path light adversarial review gate ───────────────────────
+//
+// Mirrors the review-approval gate's emit→resume→consume idiom, but the step is
+// WORK (status "ready"), not a human decision — so it runs identically in
+// attended and autonomous modes (the host agent executes the light pass like any
+// phase). Fires (and at most once) only when the fast path is eligible.
+
+function leanLightReviewVerdictPath(artifactsDir: string): string {
+  return join(artifactsDir, "lean_light_review_verdict.json");
+}
+function leanLightReviewDecisionPath(artifactsDir: string): string {
+  return join(artifactsDir, "lean_light_review_decision.json");
+}
+
+interface LeanLightReviewDecisionRecord {
+  schema_version: typeof LEAN_LIGHT_REVIEW_SCHEMA_VERSION;
+  disposition: LeanLightReviewDisposition;
+  concerns: string[];
+  created_at: string;
+}
+
+type LeanLightReviewOutcome =
+  | { kind: "halt"; step: RemediationStep }
+  | { kind: "clear" }
+  | { kind: "escalate"; concerns: string[] };
+
+/** Render the bounded light-adversarial-review prompt over the approved findings. */
+function leanLightReviewPrompt(approved: Finding[], verdictPath: string): string {
+  const findingLines = approved
+    .map((f) => {
+      const files = (f.affected_files ?? [])
+        .map((loc) => loc?.path)
+        .filter((p): p is string => Boolean(p))
+        .join(", ");
+      return `- \`${f.id}\` — ${f.title ?? "(untitled)"}${files ? ` (${files})` : ""}`;
+    })
+    .join("\n");
+  const nextCommand = loaderCommand("next-step");
+  return `# Lean fast path — light adversarial review
+
+These findings cleared the simplicity gate and are headed for the lean fast path (straight to plan→implement, skipping the full contract pipeline). Before they are trusted, do ONE **lightweight adversarial pass** — the floor that replaces the full design loop here. This is proportionate, not an exhaustive counterexample search: remediation legitimately catches upstream audit errors, so nothing skips review entirely.
+
+## Findings to review
+${findingLines || "_(none)_"}
+
+## Your task
+Adopt a brief adversarial stance and ask, across the set:
+- Is any finding actually wrong, already-fixed, or not grounded in the cited code?
+- Would the proposed fix break a caller, an invariant, or an adjacent behavior?
+- Are any two of these coupled / sharing a file in a way that needs seam reconciliation (i.e. NOT really independent)?
+- Is anything subtler or more architectural than the simplicity gate assumed?
+
+Write your verdict to exactly:
+
+\`${verdictPath}\`
+
+\`\`\`json
+{
+  "schema_version": "${LEAN_LIGHT_REVIEW_SCHEMA_VERSION}",
+  "disposition": "clear | escalate",
+  "concerns": ["<required & non-empty when escalate; the concrete concern(s)>"],
+  "created_at": "<ISO-8601>"
+}
+\`\`\`
+
+- **clear** — the light pass surfaced no real concern; the lean path may proceed.
+- **escalate** — a genuine concern surfaced. This is evidence the change is harder than assessed; the run escalates to the full contract pipeline (full independent review). When in doubt, escalate — a wrong call costs extra pipeline work, never a skipped review.
+
+After writing the verdict, run:
+
+\`${nextCommand}\`
+`;
+}
+
+/**
+ * The lean light-review gate. Idempotent across next-step calls: once a decision
+ * is recorded it is consumed directly. Returns a halt step while awaiting the
+ * host's verdict, then `clear` (proceed to the lean plan) or `escalate` (route to
+ * the full pipeline with the concerns).
+ */
+async function runLeanLightReviewGate(
+  root: string,
+  artifactsDir: string,
+  approved: Finding[],
+): Promise<LeanLightReviewOutcome> {
+  const decisionPath = leanLightReviewDecisionPath(artifactsDir);
+  const existing =
+    await readOptionalJsonFile<LeanLightReviewDecisionRecord>(decisionPath);
+  if (existing) {
+    return existing.disposition === "clear"
+      ? { kind: "clear" }
+      : { kind: "escalate", concerns: existing.concerns ?? [] };
+  }
+
+  const verdictPath = leanLightReviewVerdictPath(artifactsDir);
+  if (!existsSync(verdictPath)) {
+    const step = await writeCurrentStep({
+      stepKind: "lean_light_review",
+      status: "ready",
+      runId: randomRunId("LEANREVIEW"),
+      repoRoot: root,
+      artifactsDir,
+      prompt: leanLightReviewPrompt(approved, verdictPath),
+      allowedCommands: [loaderCommand("next-step")],
+      stopCondition:
+        "Stop after writing the lean light-review verdict and running next-step.",
+      artifactPaths: { lean_light_review_verdict: verdictPath },
+    });
+    return { kind: "halt", step };
+  }
+
+  // Verdict present → interpret + record a durable decision, then archive the
+  // consumed verdict so the gate can never re-emit.
+  const raw = await readOptionalJsonFile<unknown>(verdictPath);
+  const interp = interpretLeanLightReviewVerdict(raw);
+  const record: LeanLightReviewDecisionRecord = {
+    schema_version: LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
+    disposition: interp.disposition,
+    concerns: interp.concerns,
+    created_at: new Date().toISOString(),
+  };
+  await writeJsonFile(decisionPath, record);
+  if (existsSync(verdictPath)) {
+    await withFsRetry(() =>
+      rename(verdictPath, `${verdictPath}.consumed-${Date.now()}`),
+    );
+  }
+  return interp.disposition === "clear"
+    ? { kind: "clear" }
+    : { kind: "escalate", concerns: interp.concerns };
+}
+
 /**
  * Re-emit the autonomous-run leftovers (findings left LIVE, neither auto-fixed
  * nor durably rejected) as a standard, re-consumable audit deliverable pair:
@@ -2564,37 +2704,74 @@ async function handleReadyIntakeContractPipeline(
 
         // A1 — conservative lean fast path. When the approved set is a handful
         // of grounded, high-confidence, localized, non-cross-cutting findings,
-        // skip the contract pipeline and synthesize the extracted plan directly;
-        // the plan→implement→close machinery (per-node verify-before-merge + the
-        // final whole-repo gate) is the retained safety net. Any doubt routes to
-        // the full pipeline below. Runs only here — on Path A (structured_audit),
-        // the only intake with a pre-existing finding set to judge.
+        // the run skips the heavy contract DESIGN loop and synthesizes the
+        // extracted plan directly; the plan→implement→close machinery (per-node
+        // verify-before-merge + the final whole-repo gate) is the retained safety
+        // net. Runs only here — on Path A (structured_audit), the only intake
+        // with a pre-existing finding set to judge.
+        //
+        // T1 slice 3b — the fast path is NOT zero-scrutiny: an eligible run first
+        // runs a bounded LIGHT adversarial review over the approved findings (the
+        // floor, never off). A clear verdict proceeds to the lean plan; a verdict
+        // that surfaces a real concern escalates the risk signal (evidence the
+        // work is harder than assessed) and routes to the full pipeline below.
         const fast = evaluateFastPath(gate.approved);
         if (fast.eligible) {
-          const leanPlan = buildLeanExtractedPlan(
-            gate.approved,
-            randomRunId("LEAN"),
-          );
-          await writeJsonFile(intakePaths(artifactsDir).extractedPlan, leanPlan);
-          process.stderr.write(
-            `[remediate-code] Lean fast path: ${fast.reason}. Skipping the contract pipeline; routing straight to plan→implement.\n`,
-          );
-          const planned = await handlePendingExtractedPlan(
+          const review = await runLeanLightReviewGate(
             root,
             artifactsDir,
-            { status: "pending" },
-            leanPlan,
+            gate.approved,
           );
-          if (planned) {
-            return planned;
+          if (review.kind === "halt") {
+            return review.step;
           }
-          // Defensive: a deterministically-built lean plan should always
-          // normalize. If it somehow didn't, handlePendingExtractedPlan removed
-          // the file; fall through to the full pipeline (the safety net) rather
-          // than stalling the run.
-          process.stderr.write(
-            "[remediate-code] Lean fast-path plan failed to materialize; falling back to the contract pipeline.\n",
-          );
+          if (review.kind === "escalate") {
+            // Escalate-on-evidence: raise the signal to at least `medium` so the
+            // full pipeline's adversarial depth is `full` (see slice 3a), then
+            // fall through to the full pipeline.
+            const current = await readIntakeRiskSignal(artifactsDir);
+            if (current) {
+              await writeIntakeRiskSignal(
+                artifactsDir,
+                escalateRiskSignal(current, {
+                  tier: "medium",
+                  reason: `lean light review surfaced a concern: ${review.concerns.join("; ")}`,
+                }),
+              );
+            }
+            process.stderr.write(
+              `[remediate-code] Lean light review escalated (${review.concerns.join("; ")}); routing to the full contract pipeline.\n`,
+            );
+          } else {
+            // Clear verdict → proceed with the lean plan.
+            const leanPlan = buildLeanExtractedPlan(
+              gate.approved,
+              randomRunId("LEAN"),
+            );
+            await writeJsonFile(
+              intakePaths(artifactsDir).extractedPlan,
+              leanPlan,
+            );
+            process.stderr.write(
+              `[remediate-code] Lean fast path: ${fast.reason}; light review clear. Routing to plan→implement.\n`,
+            );
+            const planned = await handlePendingExtractedPlan(
+              root,
+              artifactsDir,
+              { status: "pending" },
+              leanPlan,
+            );
+            if (planned) {
+              return planned;
+            }
+            // Defensive: a deterministically-built lean plan should always
+            // normalize. If it somehow didn't, handlePendingExtractedPlan removed
+            // the file; fall through to the full pipeline (the safety net) rather
+            // than stalling the run.
+            process.stderr.write(
+              "[remediate-code] Lean fast-path plan failed to materialize; falling back to the contract pipeline.\n",
+            );
+          }
         }
 
         // Seed the pipeline with the approved survivors only. When that set is
