@@ -40,7 +40,7 @@ async function buildStructureReadyBundle(root) {
   const prepared = {
     ...intake.updated_bundle,
     auto_fixes_applied: { executed_tools: [], timestamp: "2026-04-22T00:00:00Z" },
-    external_analyzer_results: { tool: "syntax_resolution_executor", results: [] },
+    external_analyzer_results: [{ tool: "syntax_resolution_executor", results: [] }],
     syntax_resolution_status: {
       tool: "syntax_resolution_executor",
       completed_at: "2026-04-22T00:00:00Z",

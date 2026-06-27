@@ -119,7 +119,7 @@ test("intent_priority_boost: high lens stays high (no promotion above high)", ()
 
   const tasks = buildChunkedAuditTasks(coverage, lineIndex, {
     intent_priority_boost: ["security"],
-    external_analyzer_results: {
+    external_analyzer_results: [{
       tool: "semgrep",
       results: [{
         id: "r1",
@@ -128,7 +128,7 @@ test("intent_priority_boost: high lens stays high (no promotion above high)", ()
         summary: "SQL injection",
         severity: "high",
       }],
-    },
+    }],
   });
   const secTasks = tasks.filter((t) => t.lens === "security");
   assert.ok(secTasks.length > 0, "should have security task");

@@ -91,18 +91,20 @@ test("mergeFindings deduplicates duplicate findings and aggregates runtime plus 
         },
       ],
     },
-    {
-      tool: "semgrep",
-      results: [
-        {
-          id: "sg-auth",
-          category: "security",
-          severity: "warning",
-          path: "src/api/auth.ts",
-          summary: "Analyzer corroborates missing auth logging.",
-        },
-      ],
-    },
+    [
+      {
+        tool: "semgrep",
+        results: [
+          {
+            id: "sg-auth",
+            category: "security",
+            severity: "warning",
+            path: "src/api/auth.ts",
+            summary: "Analyzer corroborates missing auth logging.",
+          },
+        ],
+      },
+    ],
   );
 
   assert.equal(merged.length, 2);
@@ -208,7 +210,7 @@ test("buildAuditReportModel forwards external analyzer context into merged findi
         },
       ],
     },
-    externalAnalyzerResults: {
+    externalAnalyzerResults: [{
       tool: "semgrep",
       results: [
         {
@@ -219,7 +221,7 @@ test("buildAuditReportModel forwards external analyzer context into merged findi
           summary: "Analyzer corroboration.",
         },
       ],
-    },
+    }],
   });
 
   assert.equal(report.summary.finding_count, 1);

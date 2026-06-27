@@ -373,7 +373,7 @@ export function buildLensVerificationTasks(params: {
   existingTasks: AuditTask[];
   results: AuditResult[];
   lineIndex?: Record<string, number>;
-  externalAnalyzerResults?: ExternalAnalyzerResults;
+  externalAnalyzerResults?: ExternalAnalyzerResults[];
 }): AuditTask[] {
   const taskById = new Map(params.existingTasks.map((task) => [task.task_id, task]));
   const completedResultIds = new Set(params.results.map((result) => result.task_id));

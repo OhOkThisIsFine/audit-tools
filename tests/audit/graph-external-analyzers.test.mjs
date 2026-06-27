@@ -92,14 +92,14 @@ test("normalizeGenericExternalEdges clamps confidence to [0,1]", () => {
 
 test("external graph_edges enrich the language-neutral edge set, resolved + deterministic", () => {
   const bundle = buildGraphBundle(manifest(["src/a.ts", "src/b.ts"]), undefined, {
-    externalAnalyzerResults: {
+    externalAnalyzerResults: [{
       tool: "codeql",
       graph_edges: [
         { from: "src/a.ts", to: "src/b.ts", confidence: 0.9 },
         { from: "src/a.ts", to: "src/b.ts", confidence: 0.9 }, // dup collapses
       ],
       results: [],
-    },
+    }],
   });
   const edges = analyzerEdgesFor(bundle);
   assert.equal(edges.length, 1);
@@ -112,7 +112,7 @@ test("external graph_edges enrich the language-neutral edge set, resolved + dete
 
 test("external graph_edges with unresolvable / self endpoints are dropped", () => {
   const bundle = buildGraphBundle(manifest(["src/a.ts"]), undefined, {
-    externalAnalyzerResults: {
+    externalAnalyzerResults: [{
       tool: "ast-grep",
       graph_edges: [
         { from: "src/a.ts", to: "vendor/out-of-tree.ts" }, // to unresolvable
@@ -120,7 +120,7 @@ test("external graph_edges with unresolvable / self endpoints are dropped", () =
         { from: "src/a.ts", to: "src/a.ts" }, // self
       ],
       results: [],
-    },
+    }],
   });
   assert.equal(analyzerEdgesFor(bundle).length, 0);
 });
@@ -129,11 +129,11 @@ test("malformed graph_edges degrade to empty; build + deriveGraphSignals never t
   let bundle;
   assert.doesNotThrow(() => {
     bundle = buildGraphBundle(manifest(["src/a.ts"]), undefined, {
-      externalAnalyzerResults: {
+      externalAnalyzerResults: [{
         tool: "broken",
         graph_edges: "not-an-array",
         results: [],
-      },
+      }],
     });
   });
   assert.equal(analyzerEdgesFor(bundle).length, 0);
@@ -142,11 +142,11 @@ test("malformed graph_edges degrade to empty; build + deriveGraphSignals never t
 
 test("deriveGraphSignals stays a pure reader and counts ingested analyzer edges in fan-in/out", () => {
   const bundle = buildGraphBundle(manifest(["src/a.ts", "src/b.ts"]), undefined, {
-    externalAnalyzerResults: {
+    externalAnalyzerResults: [{
       tool: "codeql",
       graph_edges: [{ from: "src/a.ts", to: "src/b.ts" }],
       results: [],
-    },
+    }],
   });
   const before = JSON.stringify(bundle);
   const signals = deriveGraphSignals(bundle);
@@ -309,7 +309,7 @@ test("codeql adapter output drives graph extraction end-to-end", () => {
     ],
   });
   const bundle = buildGraphBundle(manifest(["src/a.ts", "src/b.ts"]), undefined, {
-    externalAnalyzerResults: analyzer,
+    externalAnalyzerResults: [analyzer],
   });
   assert.deepEqual(
     analyzerEdgesFor(bundle).map((e) => [e.from, e.to]),

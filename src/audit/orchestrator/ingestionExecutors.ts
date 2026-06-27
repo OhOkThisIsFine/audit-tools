@@ -1,7 +1,10 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import {
+  upsertExternalToolResults,
+  type ExternalAnalyzerResults,
+} from "../types/externalAnalyzer.js";
 import { runCommand } from "./runtimeCommand.js";
 import { buildFlowCoverage } from "./flowCoverage.js";
 import { buildRequeuePayload } from "./requeueCommand.js";
@@ -377,7 +380,10 @@ export function runExternalAnalyzerImportExecutor(
   return {
     updated: {
       ...bundle,
-      external_analyzer_results: externalResults,
+      external_analyzer_results: upsertExternalToolResults(
+        bundle.external_analyzer_results,
+        externalResults,
+      ),
       coverage_matrix: undefined,
       flow_coverage: undefined,
       runtime_validation_tasks: undefined,

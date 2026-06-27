@@ -308,12 +308,15 @@ test("counts fields accurately reflect tallied symbols, routes, keywords, graph 
     },
   };
 
-  const externalAnalyzerResults = {
-    results: [
-      { id: "rule-1", path: "src/counts.ts", category: "security", rule: "no-secret", summary: "secret found", line_start: 3 },
-      { id: "rule-2", path: "src/other.ts", category: "style", rule: "no-var", summary: "use const", line_start: 1 },
-    ],
-  };
+  const externalAnalyzerResults = [
+    {
+      tool: "test-analyzer",
+      results: [
+        { id: "rule-1", path: "src/counts.ts", category: "security", rule: "no-secret", summary: "secret found", line_start: 3 },
+        { id: "rule-2", path: "src/other.ts", category: "style", rule: "no-var", summary: "use const", line_start: 1 },
+      ],
+    },
+  ];
 
   const summary = buildFileAnchorSummary({
     path: "src/counts.ts",
@@ -333,12 +336,15 @@ test("counts fields accurately reflect tallied symbols, routes, keywords, graph 
 // ── analyzer signal filtering ─────────────────────────────────────────────────
 
 test("analyzer signals are filtered to the given file path (case-insensitive, backslash-normalized)", () => {
-  const externalAnalyzerResults = {
-    results: [
-      { id: "sig-1", path: "src\\Target.ts", category: "security", rule: "rule-a", summary: "match", line_start: 1 },
-      { id: "sig-2", path: "src/unrelated.ts", category: "style", rule: "rule-b", summary: "no match", line_start: 1 },
-    ],
-  };
+  const externalAnalyzerResults = [
+    {
+      tool: "test-analyzer",
+      results: [
+        { id: "sig-1", path: "src\\Target.ts", category: "security", rule: "rule-a", summary: "match", line_start: 1 },
+        { id: "sig-2", path: "src/unrelated.ts", category: "style", rule: "rule-b", summary: "no match", line_start: 1 },
+      ],
+    },
+  ];
 
   // Pass the target path with forward slashes; the analyzer result uses backslashes.
   const summary = buildFileAnchorSummary({

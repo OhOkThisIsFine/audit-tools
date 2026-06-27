@@ -180,7 +180,7 @@ export function buildAuditReportModel(params: {
   coverageMatrix?: CoverageMatrix;
   runtimeValidationReport?: RuntimeValidationReport;
   runtimeValidationTaskManifest?: RuntimeValidationTaskManifest;
-  externalAnalyzerResults?: ExternalAnalyzerResults;
+  externalAnalyzerResults?: ExternalAnalyzerResults[];
   designAssessment?: DesignAssessment;
   /** Active dispatch state; when a partial-completion terminal is set, its stranded count is carried into the summary. */
   activeDispatch?: ActiveDispatchState | null;

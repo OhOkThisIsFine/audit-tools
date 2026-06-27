@@ -73,15 +73,6 @@ function runtimeSummary(report?: RuntimeValidationReport): string[] {
     .map((result) => `${result.task_id}: ${result.status} — ${result.summary}`);
 }
 
-function externalSummary(results?: ExternalAnalyzerResults): string[] {
-  if (!results) {
-    return [];
-  }
-  return results.results.map(
-    (item) => `external:${results.tool}:${item.path}:${item.summary}`,
-  );
-}
-
 function mergeAffectedFiles(existing: Finding, incoming: Finding): void {
   const seen = new Set(
     existing.affected_files.map(
@@ -267,13 +258,15 @@ function relevantRuntimeEvidence(
 
 function relevantExternalEvidence(
   finding: Finding,
-  results?: ExternalAnalyzerResults,
+  results?: ExternalAnalyzerResults[],
 ): string[] {
-  if (!results) return [];
+  if (!results || results.length === 0) return [];
   const findingPaths = new Set(finding.affected_files.map((f) => f.path));
-  return results.results
-    .filter((item) => findingPaths.has(item.path))
-    .map((item) => `external:${results.tool}:${item.path}:${item.summary}`);
+  return results.flatMap((tool) =>
+    tool.results
+      .filter((item) => findingPaths.has(item.path))
+      .map((item) => `external:${tool.tool}:${item.path}:${item.summary}`),
+  );
 }
 
 /**
@@ -323,7 +316,7 @@ function upsertFinding(merged: Map<string, Finding>, finding: Finding): void {
 export function mergeFindings(
   results: AuditResult[],
   runtimeReport?: RuntimeValidationReport,
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
   designAssessment?: DesignAssessment,
 ): Finding[] {
   const merged = new Map<string, Finding>();

@@ -87,7 +87,7 @@ export function deriveRiskConcentration(register: RiskRegister): RiskRegister {
 export function buildRiskRegister(
   unitManifest: UnitManifest,
   criticalFlows?: CriticalFlowManifest,
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
   graphSignals?: GraphSignals,
 ): RiskRegister {
   const flowMap = new Map<string, number>();
@@ -98,8 +98,10 @@ export function buildRiskRegister(
   }
 
   const externalByPath = new Map<string, number>();
-  for (const item of externalAnalyzerResults?.results ?? []) {
-    externalByPath.set(item.path, (externalByPath.get(item.path) ?? 0) + 1);
+  for (const tool of externalAnalyzerResults ?? []) {
+    for (const item of tool.results ?? []) {
+      externalByPath.set(item.path, (externalByPath.get(item.path) ?? 0) + 1);
+    }
   }
 
   const items: RiskItem[] = unitManifest.units.map((unit) => {

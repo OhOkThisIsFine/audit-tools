@@ -119,18 +119,20 @@ test("buildRiskRegister derives deterministic risk signals from units, flows, an
         },
       ],
     },
-    {
-      tool: "eslint",
-      results: [
-        {
-          id: "eslint-1",
-          category: "correctness",
-          severity: "error",
-          path: "src/auth/cacheWriter.ts",
-          summary: "fixture",
-        },
-      ],
-    },
+    [
+      {
+        tool: "eslint",
+        results: [
+          {
+            id: "eslint-1",
+            category: "correctness",
+            severity: "error",
+            path: "src/auth/cacheWriter.ts",
+            summary: "fixture",
+          },
+        ],
+      },
+    ],
   );
 
   const auth = register.items.find((item) => item.unit_id === "auth-cache");
@@ -1147,7 +1149,7 @@ test("buildGraphBundle imports analyzer ownership roots as graph references", ()
   const disposition = buildFileDisposition(repoManifest);
 
   const graph = buildGraphBundle(repoManifest, disposition, {
-    externalAnalyzerResults: {
+    externalAnalyzerResults: [{
       tool: "pyright",
       ownership_roots: [
         {
@@ -1164,7 +1166,7 @@ test("buildGraphBundle imports analyzer ownership roots as graph references", ()
         },
       ],
       results: [],
-    },
+    }],
   });
 
   const ownershipEdges = graph.graphs.references.filter(

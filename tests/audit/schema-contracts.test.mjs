@@ -646,18 +646,20 @@ test("risk register builder caps additive scores at the shared 0..10 scale", () 
         },
       ],
     },
-    {
-      tool: "eslint",
-      generated_at: "2026-04-22T00:00:00Z",
-      results: [
-        {
-          id: "eslint-auth",
-          path: "src/api/auth.ts",
-          severity: "high",
-          message: "Auth issue.",
-        },
-      ],
-    },
+    [
+      {
+        tool: "eslint",
+        generated_at: "2026-04-22T00:00:00Z",
+        results: [
+          {
+            id: "eslint-auth",
+            path: "src/api/auth.ts",
+            severity: "high",
+            message: "Auth issue.",
+          },
+        ],
+      },
+    ],
   );
   assert.equal(riskRegister.items[0].risk_score, 10);
 });

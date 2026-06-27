@@ -104,7 +104,9 @@ function buildIndexes(bundle: ArtifactBundle): BundleIndexes {
   const surfaceEntries = asArray<{ id: string; entrypoint: string }>(bundle.surface_manifest?.surfaces);
   const runtimeValidationTasks = asArray<Pick<RuntimeValidationTask, "id" | "target_paths">>(bundle.runtime_validation_tasks?.tasks);
   const runtimeValidationResults = asArray<{ task_id: string }>(bundle.runtime_validation_report?.results);
-  const externalAnalyzerResults = asArray<{ id: string; path: string }>(bundle.external_analyzer_results?.results);
+  const externalAnalyzerResults = asArray<{ id: string; path: string }>(
+    bundle.external_analyzer_results?.flatMap((tool) => tool.results),
+  );
   const auditTasks = asArray<{ task_id: string; line_ranges?: Array<{ path: string; start: number; end: number }> }>(bundle.audit_tasks);
   const requeueTasks = asArray<{ task_id: string; line_ranges?: Array<{ path: string; start: number; end: number }> }>(bundle.requeue_tasks);
   const coverageFiles = asArray<{ path: string; unit_ids: string[]; audit_status: string; required_lenses: string[]; completed_lenses: string[] }>(bundle.coverage_matrix?.files);
