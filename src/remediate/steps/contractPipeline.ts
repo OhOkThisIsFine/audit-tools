@@ -88,6 +88,10 @@ import {
   reviewSnapshotExists,
 } from "../contractPipeline/reviewSnapshot.js";
 import {
+  captureTestPlanCarry,
+  readTestPlanCarry,
+} from "../contractPipeline/testPlanCarry.js";
+import {
   renderContractPipelinePrompt,
   renderContractRepairPrompt,
   CONTRACT_PIPELINE_PHASE_ORDER,
@@ -301,12 +305,20 @@ async function buildScaffoldSection(
   ) as ObligationLedger | undefined;
 
   if (phase === "test_validator_plan") {
-    const scaffold = buildTestValidatorPlanScaffold(ledger);
+    const prior = await readTestPlanCarry(artifactsDir);
+    const scaffold = buildTestValidatorPlanScaffold(ledger, prior);
     if (scaffold.test_specs.length === 0) return undefined;
+    const carriedCount = scaffold.test_specs.filter(
+      (s) => s.assertions.length > 0,
+    ).length;
     const path = contractArtifactFilePath(artifactsDir, "test_validator_plan");
+    const carryNote =
+      carriedCount > 0
+        ? `\n\n**Carried from the prior round (C3):** ${carriedCount} spec(s) already have assertions — their obligation premise is unchanged, so keep them as-is unless you intend to revise. Only the specs with an EMPTY \`assertions\` array need authoring.`
+        : "";
     return `## Pre-filled Skeleton — fill only the blank slots
 
-The obligation ledger was derived deterministically. Below is the test-plan skeleton: one spec per testable obligation, with \`obligation_id\`, \`name\`, \`kind\`, and \`scope_anchors\` already filled. Fill ONLY each \`assertions\` array — every spec needs at least one positive (satisfied-path) assertion AND one negative (failure-path) assertion. The negative assertion MUST name one of the spec's \`scope_anchors\` (the touched symbol/file) and must not be an unscoped repo-wide scan, or it fails the negative-scoping gate. Do not add, remove, or rename specs. If an obligation is genuinely untestable, replace its spec body with an \`inapplicable_claim\` citing its \`obligation_id\` and a falsifiable reason.
+The obligation ledger was derived deterministically. Below is the test-plan skeleton: one spec per testable obligation, with \`obligation_id\`, \`name\`, \`kind\`, and \`scope_anchors\` already filled. Fill ONLY each \`assertions\` array — every spec needs at least one positive (satisfied-path) assertion AND one negative (failure-path) assertion. The negative assertion MUST name one of the spec's \`scope_anchors\` (the touched symbol/file) and must not be an unscoped repo-wide scan, or it fails the negative-scoping gate. Do not add, remove, or rename specs. If an obligation is genuinely untestable, replace its spec body with an \`inapplicable_claim\` citing its \`obligation_id\` and a falsifiable reason.${carryNote}
 
 \`\`\`json
 ${JSON.stringify(scaffold, null, 2)}
@@ -448,6 +460,11 @@ export async function ingestContractArtifacts(
     // the worker reviewed.
     if (isReviewArtifact(name)) {
       await captureReviewSnapshot(artifactsDir, name, payload, new Date().toISOString());
+    }
+    // C3: snapshot the authored test-plan so a later re-emit can diff-carry the
+    // assertions of unchanged obligations instead of forcing a full re-author.
+    if (name === "test_validator_plan") {
+      await captureTestPlanCarry(artifactsDir, payload, new Date().toISOString());
     }
   }
 

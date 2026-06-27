@@ -29,6 +29,10 @@ import {
   isDagPhaseObligation,
 } from "../../src/remediate/contractPipeline/derive.js";
 import {
+  captureTestPlanCarry,
+  readTestPlanCarry,
+} from "../../src/remediate/contractPipeline/testPlanCarry.js";
+import {
   validateObligationLedger,
   CP_MODULE_DECOMPOSITION_VERSION,
   CP_MODULE_CONTRACTS_VERSION,
@@ -302,6 +306,73 @@ describe("artifact scaffolds (S3 skeletons for the partially-derivable phases)",
     expect(dag.nodes[0].satisfies_obligations.sort()).toEqual(
       ledger.obligations.map((o) => o.id).sort(),
     );
+  });
+
+  it("C3: diff-carry pre-fills assertions for an unchanged obligation, blanks a changed one", () => {
+    const ledger = deriveObligationLedger(finalizedContracts(), { created_at: CREATED_AT });
+    const fresh = buildTestValidatorPlanScaffold(ledger);
+    const spec = fresh.test_specs[0];
+    expect(spec.assertions).toEqual([]);
+
+    // Prior round authored assertions for this obligation; premise unchanged.
+    const prior = {
+      [spec.obligation_id]: {
+        name: spec.name,
+        scope_anchors: spec.scope_anchors,
+        assertions: ["positive: does X", "negative: rejects when " + spec.scope_anchors[0]],
+      },
+    };
+    const carried = buildTestValidatorPlanScaffold(ledger, prior);
+    const carriedSpec = carried.test_specs.find((s) => s.obligation_id === spec.obligation_id)!;
+    expect(carriedSpec.assertions).toEqual(prior[spec.obligation_id].assertions);
+
+    // A changed premise (different name) carries nothing — host re-authors.
+    const staleName = {
+      [spec.obligation_id]: {
+        name: "a different obligation name",
+        scope_anchors: spec.scope_anchors,
+        assertions: ["stale assertion"],
+      },
+    };
+    const notCarried = buildTestValidatorPlanScaffold(ledger, staleName);
+    expect(
+      notCarried.test_specs.find((s) => s.obligation_id === spec.obligation_id)!.assertions,
+    ).toEqual([]);
+
+    // A changed scope-anchor set also blocks carry.
+    const staleAnchors = {
+      [spec.obligation_id]: {
+        name: spec.name,
+        scope_anchors: ["totally-different-symbol"],
+        assertions: ["stale assertion"],
+      },
+    };
+    expect(
+      buildTestValidatorPlanScaffold(ledger, staleAnchors).test_specs.find(
+        (s) => s.obligation_id === spec.obligation_id,
+      )!.assertions,
+    ).toEqual([]);
+  });
+
+  it("C3: captureTestPlanCarry → readTestPlanCarry round-trips authored specs, drops empties", async () => {
+    const dir = ARTIFACTS_DIR;
+    await mkdir(dir, { recursive: true });
+    {
+      await captureTestPlanCarry(
+        dir,
+        {
+          test_specs: [
+            { obligation_id: "OBL-a", name: "A", scope_anchors: ["x"], assertions: ["p", "n"] },
+            { obligation_id: "OBL-b", name: "B", scope_anchors: [], assertions: [] },
+            { obligation_id: "OBL-c", name: "C", inapplicable_claim: { obligation_id: "OBL-c", reason: "n/a" } },
+          ],
+        },
+        CREATED_AT,
+      );
+      const carry = await readTestPlanCarry(dir);
+      expect(Object.keys(carry)).toEqual(["OBL-a"]);
+      expect(carry["OBL-a"]).toEqual({ name: "A", scope_anchors: ["x"], assertions: ["p", "n"] });
+    }
   });
 
   it("D1: every test-plan spec carries non-empty scope_anchors for negative scoping", () => {
