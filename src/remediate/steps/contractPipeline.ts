@@ -59,6 +59,11 @@ import {
   roundTripGranularityForTier,
 } from "../riskSignal.js";
 import {
+  derivePhaseCut,
+  phaseCutModulesFromContracts,
+  renderPhaseCutSection,
+} from "../contractPipeline/phaseCut.js";
+import {
   detectCyclicSeamObligations,
   validateCycleBreak,
   type SeamObligationNode,
@@ -2371,6 +2376,31 @@ ${preCriticCitationGate.errorLines.join("\n")}
       return mergeOutcome;
     }
     return buildParallelModuleWaveStep(nextPhase);
+  }
+
+  // Auto-phasing (T3): at the conceptual-design critique, hand the critic the
+  // tool-DERIVED phase cut so it assesses design quality WITHIN a mechanically
+  // dependency-ordered foundations→consumers phasing, instead of rejecting an
+  // arbitrary N-goal change as "over-scoped" and forcing the host to re-scope by
+  // hand at intake. The cut is derived deterministically from the drafted module
+  // contracts' directional neighbor_needs edges (present by the critique phase);
+  // only injected when there is a genuine multi-phase cut to communicate.
+  if (nextPhase === "critique") {
+    const contractsPayload = envelopePayload(
+      await readContractArtifact(artifactsDir, "module_contracts"),
+    );
+    const cutModules = phaseCutModulesFromContracts(contractsPayload);
+    if (cutModules.length > 1) {
+      const cut = derivePhaseCut(cutModules);
+      if (cut.phases.length > 1) {
+        const reReview = await buildReReviewSection(nextPhase, artifactsDir);
+        const phaseCutSection = renderPhaseCutSection(cut);
+        return buildPhaseStep(
+          "critique",
+          reReview ? `${phaseCutSection}\n${reReview}` : phaseCutSection,
+        );
+      }
+    }
   }
 
   // Granularity collapse (T1 slice 4b): for low-complexity work, fold the framing
