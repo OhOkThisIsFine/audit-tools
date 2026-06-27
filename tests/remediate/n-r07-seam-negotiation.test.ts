@@ -138,6 +138,40 @@ function makeFinalizedModuleContracts() {
   };
 }
 
+// Multi-module fixtures: the seam_reconciliation / contract_finalization HOST
+// steps only exist when there is more than one module (a single-module
+// decomposition collapses them — see degenerate-phase-collapse.test.ts). Tests
+// that assert those steps get emitted must therefore use ≥2 modules.
+function makeMultiModuleDecomposition() {
+  return {
+    contract_version: CP_MODULE_DECOMPOSITION_VERSION,
+    goal_id: "G1",
+    modules: [
+      { name: "mod-a", responsibilities: "Does A.", file_scope: ["src/a.ts"] },
+      { name: "mod-b", responsibilities: "Does B.", file_scope: ["src/b.ts"] },
+    ],
+    created_at: CREATED_AT,
+  };
+}
+
+function makeMultiModuleContracts() {
+  return {
+    contract_version: CP_MODULE_CONTRACTS_VERSION,
+    goal_id: "G1",
+    module_contracts: ["mod-a", "mod-b"].map((name) => ({
+      name,
+      inputs: ["x"],
+      outputs: ["y"],
+      invariants: [],
+      side_effects: [],
+      validation_boundary: "validates x",
+      failure_modes: [],
+      neighbor_needs: [],
+    })),
+    created_at: CREATED_AT,
+  };
+}
+
 // MNT-74af66b4: the explicit `writeSeamChain` helper below is the seam-chain
 // authority used throughout; a parallel FULL_SEAM_CHAIN constant was dead (never
 // referenced) and has been removed to avoid a reader reconciling two encodings.
@@ -444,22 +478,24 @@ describe("buildNextContractPipelineStep emits a step for each seam phase", () =>
     expect(prompt).toMatch(/Per-Module Contract Drafting/);
   });
 
-  it("emits seam_reconciliation step when module_contracts are present", async () => {
+  it("emits seam_reconciliation step when multi-module module_contracts are present", async () => {
+    // ≥2 modules: a real seam exists, so the host step is emitted (a single
+    // module would collapse to an auto-written empty report instead).
     await writeRaw("goal_spec", makeGoalSpec());
     await writeRaw("context_bundle", makeContextBundle());
-    await writeRaw("module_decomposition", makeModuleDecomposition());
-    await writeRaw("module_contracts", makeModuleContracts());
+    await writeRaw("module_decomposition", makeMultiModuleDecomposition());
+    await writeRaw("module_contracts", makeMultiModuleContracts());
 
     const step = await buildNextContractPipelineStep(STEP_OPTIONS);
     const prompt = await promptOf(step!);
     expect(prompt).toMatch(/Seam Reconciliation/);
   });
 
-  it("emits contract_finalization step when seam_reconciliation_report is present", async () => {
+  it("emits contract_finalization step when multi-module seam_reconciliation_report is present", async () => {
     await writeRaw("goal_spec", makeGoalSpec());
     await writeRaw("context_bundle", makeContextBundle());
-    await writeRaw("module_decomposition", makeModuleDecomposition());
-    await writeRaw("module_contracts", makeModuleContracts());
+    await writeRaw("module_decomposition", makeMultiModuleDecomposition());
+    await writeRaw("module_contracts", makeMultiModuleContracts());
     await writeRaw("seam_reconciliation_report", makeSeamReconciliationReport());
 
     const step = await buildNextContractPipelineStep(STEP_OPTIONS);
