@@ -10,6 +10,7 @@ import {
 } from "../reporting/synthesis.js";
 import type { SynthesisNarrative } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
+import { secretFindings } from "../extractors/secrets.js";
 
 function buildBaseFindingsReport(
   bundle: ArtifactBundle,
@@ -26,6 +27,7 @@ function buildBaseFindingsReport(
       runtimeValidationTaskManifest: bundle.runtime_validation_tasks,
       externalAnalyzerResults: bundle.external_analyzer_results,
       designAssessment: bundle.design_assessment,
+      secretFindings: bundle.secrets ? secretFindings(bundle.secrets) : undefined,
       activeDispatch: bundle.active_dispatch,
     }),
   );

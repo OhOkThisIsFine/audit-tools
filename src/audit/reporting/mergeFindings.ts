@@ -325,6 +325,7 @@ export function mergeFindings(
   runtimeReport?: RuntimeValidationReport,
   externalAnalyzerResults?: ExternalAnalyzerResults,
   designAssessment?: DesignAssessment,
+  secretFindings?: Finding[],
 ): Finding[] {
   const merged = new Map<string, Finding>();
 
@@ -339,6 +340,13 @@ export function mergeFindings(
       : []),
   ];
   for (const finding of allDesignFindings) {
+    upsertFinding(merged, finding);
+  }
+
+  // Deterministic secret-scan findings (OWN extractor) — surfaced regardless of
+  // whether a security audit task ran. Upserted alongside design findings so a
+  // worker-produced finding for the same identity merges with it.
+  for (const finding of secretFindings ?? []) {
     upsertFinding(merged, finding);
   }
 
