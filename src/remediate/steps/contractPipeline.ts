@@ -50,6 +50,11 @@ import {
   type ContractPipelineArtifactEnvelope,
 } from "../contractPipeline/artifactStore.js";
 import {
+  readIntakeRiskSignal,
+  adversarialDepthForTier,
+  type AdversarialDepth,
+} from "../riskSignal.js";
+import {
   detectCyclicSeamObligations,
   validateCycleBreak,
   type SeamObligationNode,
@@ -1089,6 +1094,15 @@ export async function buildNextContractPipelineStep(
   const cpDir = contractPipelineDir(artifactsDir);
   const paths = intakePaths(artifactsDir);
 
+  // Adversarial-depth dial (T1 slice 3): derive the depth for the critique /
+  // critic phases from the intake risk signal (the slice-2 shared signal — its
+  // first behavioral consumer). Absent signal ⇒ undefined ⇒ full (fail-safe
+  // toward more scrutiny, handled in the renderer). Floor is `light`, never off.
+  const riskSignal = await readIntakeRiskSignal(artifactsDir);
+  const adversarialDepth: AdversarialDepth | undefined = riskSignal
+    ? adversarialDepthForTier(riskSignal.tier)
+    : undefined;
+
   // Detect the path-A seed file: present only for structured_audit runs.
   const seedPath = pathASeedFilePath(artifactsDir);
   const pathASeedPath = existsSync(seedPath) ? seedPath : undefined;
@@ -1147,6 +1161,7 @@ After writing the output file, run:
       repoRoot: root,
       pathASeedPath,
       hostCanDispatchSubagents: options.hostCanDispatchSubagents,
+      adversarialDepth,
     });
     return buildStep({
       prompt: extraSection ? `${rendered.prompt}\n${extraSection}` : rendered.prompt,

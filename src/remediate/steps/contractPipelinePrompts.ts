@@ -5,6 +5,7 @@
  * schema-grounded rather than embedding raw artifact content.
  */
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
+import type { AdversarialDepth } from "../riskSignal.js";
 import { loaderCommand } from "./prompts.js";
 
 // ── Role definitions ──────────────────────────────────────────────────────────
@@ -346,6 +347,13 @@ export interface ContractPipelineRenderInput {
    * opts out explicitly), so the stronger guarantee is the default.
    */
   hostCanDispatchSubagents?: boolean;
+  /**
+   * Adversarial-depth dial (T1 slice 3), derived from the intake risk signal.
+   * `light` (low-risk) renders critique/critic as an inline lightweight
+   * self-check; `full` (the fail-safe default when omitted) renders the
+   * independent-review mandate. Only affects the adversarial phases.
+   */
+  adversarialDepth?: AdversarialDepth;
 }
 
 /**
@@ -358,15 +366,28 @@ const INDEPENDENT_CRITIC_PHASES = new Set(["critique", "critic"]);
 
 /**
  * Render the independent-dispatch directive for an adversarial review phase.
- * Mandate when the host can dispatch (default / fail-safe); degrade to an
- * explicit inline self-review instruction when it provably cannot. Empty for
- * any non-adversarial phase.
+ *
+ * Depth-gated (T1 slice 3): when `adversarialDepth` is `light` (a low-risk run),
+ * the phase runs as a lightweight inline self-check — the floor, never skipped.
+ * Otherwise (`full`, the fail-safe default) it MANDATES an independent sub-agent
+ * when the host can dispatch, degrading to an explicit inline-self-review
+ * instruction when it provably cannot. Empty for any non-adversarial phase.
  */
 function renderIndependentCriticDirective(
   role: string,
   hostCanDispatchSubagents: boolean | undefined,
+  adversarialDepth: AdversarialDepth | undefined,
 ): string {
   if (!INDEPENDENT_CRITIC_PHASES.has(role)) return "";
+  // Light depth: a low-risk run earns the inline lightweight self-check. This is
+  // the floor — proportionate, never zero. A genuine concern here is evidence
+  // the change is harder than assessed → escalate to full independent review.
+  if (adversarialDepth === "light") {
+    return `\n## Adversarial Review — light inline self-check
+
+The assessed risk for this change is low, so this adversarial phase runs as a **lightweight inline self-check** rather than a full independent review. Do a quick, honest adversarial pass yourself: scan the design for obvious gaps, contradictions, or unhandled cases and record any real concern you find. Keep it proportionate — this is a floor (never skipped), not an exhaustive independent counterexample search. If your self-check surfaces a genuine concern, treat that as evidence the change is harder than assessed and escalate to a full independent review.
+`;
+  }
   // Fail-safe default: undefined ⇒ mandate. A host that genuinely cannot
   // dispatch opts out by passing false explicitly.
   const mandate = hostCanDispatchSubagents !== false;
@@ -448,6 +469,7 @@ export function renderContractPipelinePrompt(
   const independentCriticDirective = renderIndependentCriticDirective(
     input.role,
     input.hostCanDispatchSubagents,
+    input.adversarialDepth,
   );
 
   const prompt = `# ${role.title}

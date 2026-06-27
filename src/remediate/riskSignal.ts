@@ -45,6 +45,26 @@ export function maxRiskTier(a: RiskTier, b: RiskTier): RiskTier {
   return TIER_RANK[a] >= TIER_RANK[b] ? a : b;
 }
 
+/**
+ * Adversarial-depth dial (T1 slice 3). The depth at which the critique /
+ * counterexample phases run, derived from the risk tier:
+ *   - `light` — an inline lightweight self-check, no independent sub-agent;
+ *   - `full`  — full independent critique + counterexample (the earned cost).
+ * The floor is `light`, never "off": even a low-risk change gets a real (if
+ * lightweight) adversarial pass, because remediation legitimately catches
+ * upstream (audit) errors.
+ */
+export type AdversarialDepth = "light" | "full";
+
+/**
+ * Map a risk tier to its adversarial depth. Only `low` earns the light inline
+ * self-check; `medium`/`high` get the full independent review. Fail-safe toward
+ * more scrutiny: an absent/unknown tier resolves to `full`.
+ */
+export function adversarialDepthForTier(tier: RiskTier | undefined): AdversarialDepth {
+  return tier === "low" ? "light" : "full";
+}
+
 /** A single deterministic path-risk family: a repo path family that warrants scrutiny. */
 export interface PathRiskPattern {
   /** Stable label, surfaced in the rationale (e.g. "concurrency"). */
