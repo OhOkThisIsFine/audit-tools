@@ -70,7 +70,11 @@ Not every item has a design gap. For each, decide one of:
 - **ready** — clear enough to act on as written; no judgment owed. Skip.
 - **shipped / stale** — code shows it's already done or obsolete. **Don't fix it
   here** — this skill closes *design gaps*, not bookkeeping; flag it as closable
-  with the proof and let Ethan decide, never silently delete.
+  with the proof and let Ethan decide, never silently delete. Distinguish
+  **fully-shipped** (no open remainder → delete the whole entry on his ok) from
+  **partial** (shipped substrate + still-open work → the open remainder is the real
+  item; trim away the "what shipped" tail). A standalone `_SHIPPED …_` / `**FIXED**`
+  note is by definition fully-shipped — flag it for deletion.
 
 Verify every classification **from code/disk, never from the prose** — an item
 reading "build X" may already be half-built. Present the classification as a
@@ -191,7 +195,14 @@ settles an item:
   principle (not a to-do), it belongs in memory + `CLAUDE.md`, not the backlog —
   write a memory file (per the memory protocol) and add the index line; remove the
   raw item from the backlog since it's now captured.
-- **Shipped/stale confirmed:** remove the entry, citing the proof Ethan agreed to.
+- **Shipped/stale confirmed:** **delete the entry outright** — never rewrite it into
+  a `_SHIPPED …_` / `**FIXED**` / `**DONE**` marker and never leave such a marker
+  standing (a shipped-status note is itself the status-noise the philosophy forbids;
+  `git log` is the history). If the entry is only *partially* shipped, delete the
+  shipped tail and keep only the still-open remainder. If a shipped fix carries a
+  durable trap/convention worth keeping, move it to its durable home (Durable traps,
+  `CLAUDE.md`/memory) in the same edit, then delete the backlog entry — never retain
+  the entry just to host the rule. Cite the proof Ethan agreed to.
 - **Deferred/unchanged:** leave it; optionally tighten wording if Ethan asked.
 
 Only Ethan's explicit agreement triggers a write — never promote on your own read.
