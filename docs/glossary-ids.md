@@ -42,6 +42,7 @@ The grep that backs the guard recognises these family shapes:
 | `INV-RPS` | Remediation plan / cross-lens dedup — distinct structural-anchor identities stay distinct. | `src/remediate/dedup/crossLensDedup.ts` |
 | `INV-RS` | Remediation steps / state machine — ordered-obligation, one-bounded-step, fail-closed final gate. | `src/remediate/steps/nextStep.ts` |
 | `INV-RSD` | Rolling single-tree dispatch — the whole read-modify-write of `state.json` runs under one held lock. | `src/remediate/steps/dispatch.ts` |
+| `INV-PHASE` | Auto-phasing barrier (T3) — a block's foundations→consumers phase ordinal (derived at promotion from the persisted phase cut) is a hard scheduler barrier: a higher-phase block never enters a dispatch level until every lower-phase block is verified-complete. | `src/remediate/steps/nextStep.ts` |
 | `INV-SOO` | Scheduler ownership ordering — file-ownership-disjoint admission (one in-flight writer per canonical file) over declared∪claimed scope, enforced at admission and amendment-grant time, with deterministic tie-break, atomic triage-retry hand-off, and disposition-aware claim lifecycle. | `src/remediate/dispatch/ownershipScheduler.ts`, `src/remediate/dispatch/ownershipRegistry.ts` |
 
 ### Historical single-letter INV spelling (`INV-S05`, `INV-X06`)

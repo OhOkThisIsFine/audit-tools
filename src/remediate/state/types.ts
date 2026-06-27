@@ -40,6 +40,15 @@ export const RemediationBlockSchema = z
      * declared surface is a producer bug, not an implicit empty.
      */
     touched_files: z.array(z.string()),
+    /**
+     * 0-based foundations→consumers phase ordinal (auto-phasing, T3). Derived
+     * mechanically at promotion from the persisted phase cut (the module a block's
+     * obligations belong to). The rolling scheduler treats it as a hard barrier: a
+     * block never dispatches until every lower-ordinal block is verified-complete,
+     * giving a per-phase whole-repo green checkpoint. Optional — absent (or all
+     * blocks sharing one ordinal) means a single phase, i.e. no barrier.
+     */
+    phase_ordinal: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type RemediationBlock = z.infer<typeof RemediationBlockSchema>;

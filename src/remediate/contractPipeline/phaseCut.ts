@@ -40,6 +40,8 @@ export interface PhaseCut {
   phases: PhaseCutPhase[];
   /** True when a dependency cycle was detected (its members were tiered together). */
   has_cycle: boolean;
+  /** Module name → 0-based phase ordinal (foundations = 0). The downstream key. */
+  module_phase: Record<string, number>;
 }
 
 /** Stable label for a tier ordinal. */
@@ -116,7 +118,56 @@ export function derivePhaseCut(modules: PhaseCutModule[]): PhaseCut {
     });
   }
 
-  return { phases, has_cycle: hasCycle };
+  const module_phase: Record<string, number> = {};
+  for (const [name, t] of tier) module_phase[name] = t;
+
+  return { phases, has_cycle: hasCycle, module_phase };
+}
+
+/**
+ * Lowercase-hyphenate a module name into the id fragment the obligation-ledger
+ * derivation uses (`OBL-<slug>-…`). MUST stay in lockstep with `slug` in
+ * `derive.ts` — single-sourced here so the node→phase mapping decodes the exact
+ * fragment the ledger encoded. (Both reduce to lowercase, non-alphanumeric→`-`.)
+ */
+export function moduleSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Resolve the phase ordinal for an implementation-DAG node from the obligation
+ * ids it discharges. Every derived obligation id is `OBL-<moduleSlug>-…`, so the
+ * owning module (hence phase) is recoverable by longest-slug prefix match — no
+ * lossy slug reversal. A node spanning modules in several phases takes the MAX
+ * ordinal (fail-toward-later: it cannot land before the latest module it touches
+ * is reachable). A node whose obligations match no in-scope module slug — a
+ * counterexample-only node, or an obligation from a module dropped from the cut —
+ * defaults to the LAST phase (integration), never front-running a foundation.
+ *
+ * `slugToOrdinal` is the module-phase map re-keyed by `moduleSlug(name)`.
+ */
+export function phaseOrdinalForObligations(
+  obligationIds: readonly string[],
+  slugToOrdinal: Map<string, number>,
+  lastOrdinal: number,
+): number {
+  // Longest-first so a slug that is a prefix of another (e.g. `auth` vs
+  // `auth-service`) resolves to the most specific module.
+  const slugsByLength = [...slugToOrdinal.keys()].sort((a, b) => b.length - a.length);
+  let max = -1;
+  let matchedAny = false;
+  for (const id of obligationIds) {
+    if (!id.startsWith("OBL-")) continue;
+    const rest = id.slice(4);
+    for (const slug of slugsByLength) {
+      if (rest === slug || rest.startsWith(`${slug}-`)) {
+        max = Math.max(max, slugToOrdinal.get(slug) ?? 0);
+        matchedAny = true;
+        break;
+      }
+    }
+  }
+  return matchedAny ? max : lastOrdinal;
 }
 
 /**

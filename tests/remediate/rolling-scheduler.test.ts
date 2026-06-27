@@ -91,6 +91,94 @@ function stateWith(
   };
 }
 
+/** A block carrying an auto-phasing phase ordinal (T3). */
+function phasedBlock(
+  id: string,
+  items: string[],
+  phaseOrdinal: number,
+  dependencies: string[] = [],
+): RemediationBlock {
+  return { ...block(id, items, dependencies), phase_ordinal: phaseOrdinal };
+}
+
+// ===========================================================================
+// INV-PHASE-01: auto-phasing barrier — a higher phase never dispatches until
+// every lower phase is verified-complete (foundations→consumers, T3).
+// ===========================================================================
+
+describe("INV-PHASE-01: phase barrier in rollingDependencyLevels", () => {
+  it("emits only the lowest unfinished phase while a foundation is still pending", () => {
+    const blocks = [
+      phasedBlock("B0", ["F0"], 0),
+      phasedBlock("B1", ["F1"], 1),
+      phasedBlock("B2", ["F2"], 2),
+    ];
+    const st = stateWith(blocks, {
+      F0: item("F0", "B0", "pending"),
+      F1: item("F1", "B1", "pending"),
+      F2: item("F2", "B2", "pending"),
+    });
+    const levels = rollingDependencyLevels(st);
+    // Only phase 0 is eligible; phases 1/2 are barrier-gated, not stacked into
+    // later levels (their barrier needs a VERIFIED-complete phase 0, not merely
+    // a placed one).
+    expect(levels.map((l) => l.map((b) => b.block_id))).toEqual([["B0"]]);
+  });
+
+  it("opens the next phase once the prior phase is verified-complete", () => {
+    const blocks = [
+      phasedBlock("B0", ["F0"], 0),
+      phasedBlock("B1", ["F1"], 1),
+    ];
+    const st = stateWith(blocks, {
+      F0: item("F0", "B0", "resolved"),
+      F1: item("F1", "B1", "pending"),
+    });
+    const levels = rollingDependencyLevels(st);
+    expect(levels.map((l) => l.map((b) => b.block_id))).toEqual([["B1"]]);
+  });
+
+  it("runs same-phase independent blocks together in one level", () => {
+    const blocks = [
+      phasedBlock("B0a", ["F0a"], 0),
+      phasedBlock("B0b", ["F0b"], 0),
+    ];
+    const st = stateWith(blocks, {
+      F0a: item("F0a", "B0a", "pending"),
+      F0b: item("F0b", "B0b", "pending"),
+    });
+    const levels = rollingDependencyLevels(st);
+    expect(levels).toHaveLength(1);
+    expect(levels[0].map((b) => b.block_id).sort()).toEqual(["B0a", "B0b"]);
+  });
+
+  it("a foundation that can never verify-complete (skipped) dead-ends its consumers", () => {
+    const blocks = [
+      phasedBlock("B0", ["F0"], 0),
+      phasedBlock("B1", ["F1"], 1),
+    ];
+    const st = stateWith(blocks, {
+      F0: item("F0", "B0", "ignored"), // skipped → barrier can never clear
+      F1: item("F1", "B1", "pending"),
+    });
+    const levels = rollingDependencyLevels(st);
+    // No level forms: B0 is not pending (skipped) so nothing to place; B1 is
+    // permanently ineligible behind an unsatisfiable phase barrier.
+    expect(levels).toEqual([]);
+  });
+
+  it("ordinal-free blocks collapse to phase 0 — identical to pre-auto-phasing", () => {
+    const blocks = [block("B1", ["F1"]), block("B2", ["F2"], ["B1"])];
+    const st = stateWith(blocks, {
+      F1: item("F1", "B1", "pending"),
+      F2: item("F2", "B2", "pending"),
+    });
+    const levels = rollingDependencyLevels(st);
+    // Both phase 0; B2 still stacks behind its explicit dependency on B1.
+    expect(levels.map((l) => l.map((b) => b.block_id))).toEqual([["B1"], ["B2"]]);
+  });
+});
+
 // ===========================================================================
 // INV-RS-01: verified-complete eligibility — skip != satisfied
 // ===========================================================================
