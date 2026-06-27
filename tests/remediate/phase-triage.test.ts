@@ -585,6 +585,120 @@ describe("runTriagePhase", () => {
     );
   });
 
+  // ── Re-verify-before-retry: reconcile a stale/already-satisfied run ─────────
+  // A lean/hand lap (or a resumed obsolete run) leaves a blocked node whose fix
+  // already landed in the tree. Before retrying, the node's own
+  // `targeted_commands` are re-run against the current tree; if they pass the
+  // node is reconciled to resolved_no_change instead of looping through retries
+  // and human triage. `exit 0`/`exit 1` are shell builtins on both cmd.exe and
+  // /bin/sh; root must exist for the spawn cwd, so use TEST_DIR.
+  function planWithBlocks(
+    blocks: { block_id: string; items: string[]; targeted_commands?: string[] }[],
+  ) {
+    return {
+      plan_id: "P1",
+      findings: [],
+      project_type: "unknown",
+      candidate_closing_actions: [],
+      blocks: blocks.map((b) => ({
+        block_id: b.block_id,
+        items: b.items,
+        parallel_safe: true,
+        touched_files: [],
+        ...(b.targeted_commands ? { targeted_commands: b.targeted_commands } : {}),
+      })),
+    };
+  }
+
+  it("re-verifies a blocked item against the tree and reconciles to resolved_no_change when satisfied (takes precedence over the retry budget)", async () => {
+    const state = makeBaseState({
+      status: "triage",
+      plan: planWithBlocks([
+        { block_id: "B1", items: ["F1"], targeted_commands: ["exit 0"] },
+      ]),
+      items: {
+        F1: {
+          finding_id: "F1",
+          status: "blocked",
+          failure_reason: "test assertion failed",
+          block_id: "B1",
+          // Budget exhausted: without re-verify this would route to human triage.
+          rework_count: 99,
+          infra_rework_count: 99,
+        },
+      },
+    }) as RemediationState;
+
+    const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
+    expect(next.status).toBe("closing");
+    expect(state.items!.F1.status).toBe("resolved_no_change");
+    expectIsoTimestamp(state.items!.F1.completed_at);
+    // Not retried: the contract retry counter must not have advanced.
+    expect(state.items!.F1.rework_count).toBe(99);
+  });
+
+  it("still retries when re-verify fails (finding genuinely unsatisfied in the tree)", async () => {
+    const state = makeBaseState({
+      status: "triage",
+      plan: planWithBlocks([
+        { block_id: "B1", items: ["F1"], targeted_commands: ["exit 1"] },
+      ]),
+      items: {
+        F1: {
+          finding_id: "F1",
+          status: "blocked",
+          failure_reason: "test assertion failed",
+          block_id: "B1",
+        },
+      },
+    }) as RemediationState;
+
+    const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
+    expect(next.status).toBe("implementing");
+    expect(state.items!.F1.status).toBe("pending");
+    expect(state.items!.F1.rework_count).toBe(1);
+  });
+
+  it("reconciles only the satisfied node and routes the rest to human triage (no whole-run abandonment)", async () => {
+    const state = makeBaseState({
+      status: "triage",
+      plan: planWithBlocks([
+        { block_id: "B1", items: ["F1"], targeted_commands: ["exit 0"] },
+        { block_id: "B2", items: ["F2"], targeted_commands: ["exit 1"] },
+      ]),
+      items: {
+        // Already satisfied in the tree → reconciled, not retried.
+        F1: {
+          finding_id: "F1",
+          status: "blocked",
+          failure_reason: "test assertion failed",
+          block_id: "B1",
+          rework_count: 99,
+        },
+        // Genuinely open AND budget-exhausted → stays blocked, routes to triage.
+        F2: {
+          finding_id: "F2",
+          status: "blocked",
+          failure_reason: "test assertion failed",
+          block_id: "B2",
+          rework_count: 99,
+        },
+      },
+    }) as RemediationState;
+
+    const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
+    expect(next.status).toBe("waiting_for_triage");
+    expect(state.items!.F1.status).toBe("resolved_no_change");
+    expect(state.items!.F2.status).toBe("blocked");
+
+    // The triage batch covers only the still-blocked node, not the reconciled one.
+    const { readFile } = await import("node:fs/promises");
+    const batch = JSON.parse(
+      await readFile(join(TEST_DIR, "triage_batch.json"), "utf8"),
+    ) as { items: { finding_id: string }[] };
+    expect(batch.items.map((i) => i.finding_id)).toEqual(["F2"]);
+  });
+
   it("stops auto-retrying an item that has hit the rework cap and routes to human triage", async () => {
     // Regression: a dependency-stranded item (marked blocked by handleDocumenting)
     // must not be auto-retried forever — past the cap it routes to a real triage

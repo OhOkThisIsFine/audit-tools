@@ -6,6 +6,7 @@ import { rename } from "node:fs/promises";
 import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, withFsRetry } from "audit-tools/shared";
 import { validateTriageResolution } from "../validation/remediationState.js";
 import { rationaleAsksForRetry } from "../steps/stepUtils.js";
+import { verifyNodeInWorktree } from "../steps/dispatch.js";
 
 interface TriageResolution {
   items: {
@@ -88,6 +89,42 @@ function retryBlockedItem(
   } else {
     item.rework_count = (item.rework_count ?? 0) + 1;
   }
+}
+
+/**
+ * Re-verify a blocked item against the CURRENT working tree before retrying it.
+ *
+ * Runs the item's block's post-merge `targeted_commands` at the repo root. If
+ * they pass, the finding is already satisfied in the tree — e.g. a lean/hand lap
+ * landed the fix outside this run, or the run is being resumed after the work
+ * already shipped — so retrying would just re-hit an already-fixed state, burn
+ * the retry budget, and dump the item to human triage (the obsolete-run-resume
+ * bug). Reconcile it to `resolved_no_change` instead.
+ *
+ * This is deliberately NODE-GRANULAR, never a coarse whole-run abandon: an
+ * unrelated fix elsewhere cannot make an unrelated node's OWN verification pass,
+ * so only the specifically already-satisfied items close; everything genuinely
+ * open keeps retrying as before. Returns:
+ *   - `"satisfied"`     — commands present and ALL pass (already fixed in tree)
+ *   - `"unsatisfied"`   — commands present and at least one fails (still open)
+ *   - `"indeterminate"` — no `targeted_commands` to check, so we cannot tell
+ *                         (caller falls back to the normal retry path)
+ */
+function reverifyBlockedItemAgainstTree(
+  item: { finding_id: string; block_id?: string },
+  state: RemediationState,
+  options: OrchestratorOptions,
+): "satisfied" | "unsatisfied" | "indeterminate" {
+  const block =
+    (item.block_id
+      ? state.plan?.blocks.find((b) => b.block_id === item.block_id)
+      : undefined) ??
+    state.plan?.blocks.find((b) => b.items.includes(item.finding_id));
+  const commands = block?.targeted_commands;
+  if (!commands || commands.length === 0) return "indeterminate";
+  return verifyNodeInWorktree(options.root, commands).passed
+    ? "satisfied"
+    : "unsatisfied";
 }
 
 async function archiveIfPresent(path: string, suffix: "consumed" | "stale"): Promise<void> {
@@ -208,7 +245,26 @@ export async function runTriagePhase(
       // was approved at the review gate, so transient/contract failures retry
       // autonomously; only budget-exhausted items fall through to a human prompt.
       let autoRetried = false;
+      let reconciledSatisfied = false;
       for (const item of blockedItems) {
+        // Re-verify against the CURRENT tree BEFORE retrying (takes precedence
+        // over the retry budget): if the node's own verification now passes, the
+        // finding is already satisfied — a lean/hand lap landed it, or this is an
+        // obsolete run being resumed after the work shipped — so reconcile to
+        // resolved_no_change rather than re-hitting an already-fixed state.
+        if (reverifyBlockedItemAgainstTree(item, state, options) === "satisfied") {
+          item.status = "resolved_no_change";
+          markTerminal(item);
+          // NB: do not write `last_successful_step` here — dispatch.ts is its
+          // single writer (CE-P3-001 / OBL-INV-RPS-05). The reconciliation is
+          // conveyed by the terminal `resolved_no_change` status + this log.
+          item.failure_reason = undefined;
+          console.log(
+            `[triage] ${item.finding_id}: already satisfied in the working tree — reconciled to resolved_no_change (no retry).`,
+          );
+          reconciledSatisfied = true;
+          continue;
+        }
         // Stop auto-retrying an item that has already been retried the cap
         // number of times for its failure class — leaves it `blocked` so the
         // fall-through below routes the run to a human triage prompt.
@@ -239,8 +295,21 @@ export async function runTriagePhase(
         return { ...state, status: "implementing" };
       }
 
+      // Re-verification may have reconciled some/all blocked items to
+      // resolved_no_change above; only the genuinely-still-open ones remain.
+      const stillBlocked = blockedItems.filter((item) => item.status === "blocked");
+      if (stillBlocked.length === 0) {
+        // Every blocked item was already satisfied in the tree — the run is an
+        // obsolete/already-landed one; close it cleanly instead of looping its
+        // stale nodes through human triage.
+        console.log(
+          "All blocked items already satisfied in the working tree — closing the reconciled run.",
+        );
+        return { ...state, status: "closing" };
+      }
+
       const triageBatch: TriageBatch = {
-        items: blockedItems.map((item) => ({
+        items: stillBlocked.map((item) => ({
           finding_id: item.finding_id,
           failure_reason: item.failure_reason ?? "Unknown error",
           last_successful_step: item.last_successful_step ?? "Unknown step",
@@ -253,7 +322,7 @@ export async function runTriagePhase(
       );
 
       console.error(
-        `\nFound ${blockedItems.length} blocked items. Wrote triage_batch.json.`,
+        `\nFound ${stillBlocked.length} blocked items. Wrote triage_batch.json.`,
       );
       console.error(
         `Please write triage_resolution.json and run again to continue.`,
