@@ -80,15 +80,17 @@ test("admitSpawn: skip is decisive regardless of token", () => {
   assert.ok(typeof admitSpawn(candidate({ defaultRun: true }), "skip", "tok") === "string");
 });
 
-test("registerExternalAnalyzers: own-vs-acquire rejects git-history / secret-scan at registration", () => {
+test("registerExternalAnalyzers: own-vs-acquire rejects git-history at registration", () => {
   const accepted = registerExternalAnalyzers([
     candidate({ id: "git-history" }),
     candidate({ id: "secret-scan" }),
     candidate({ id: "eslint" }),
   ]);
-  assert.deepEqual(accepted.map((c) => c.id), ["eslint"]);
+  // Only git-history is OWNED. Secret scanning is ACQUIRED (gitleaks), so a
+  // candidate named "secret-scan" is no longer rejected.
+  assert.deepEqual(accepted.map((c) => c.id), ["secret-scan", "eslint"]);
   assert.ok(OWNED_TOOL_IDS.has("git-history"));
-  assert.ok(OWNED_TOOL_IDS.has("secret-scan"));
+  assert.equal(OWNED_TOOL_IDS.has("secret-scan"), false);
 });
 
 test("runSafetyGate: missing runner degrades (probe fails → ok:false)", () => {
@@ -207,7 +209,7 @@ test("F5 fail-3: malformed output degrades graph_edges too — no partial/corrup
 });
 
 test("runExternalAnalyzer: owned tool is rejected even if it slips past registration", () => {
-  const out = runExternalAnalyzer(candidate({ id: "secret-scan", defaultRun: true }), "/root", {
+  const out = runExternalAnalyzer(candidate({ id: "git-history", defaultRun: true }), "/root", {
     run: fakeRunner({ toolStdout: findingPayload }),
   });
   assert.equal(out.status.status, "skipped");
@@ -633,7 +635,7 @@ test("F5 fail-4 [CP-NODE-69]: non-DEFAULT tool without consent => consent_denied
 // as an acquired external tool is REJECTED at registration. The own-vs-acquire
 // boundary is enforced mechanically: OWNED_TOOL_IDS can never enter the engine,
 // so an owned id cannot be double-run via the acquisition path.
-test("F5 fail-7 [CP-NODE-72]: an owned signal (git-history/secret-scan) registered as an acquired tool is rejected at registration", () => {
+test("F5 fail-7 [CP-NODE-72]: an owned signal (git-history) registered as an acquired tool is rejected at registration", () => {
   // Every OWNED id, plus a legitimate acquirable tool that MUST survive.
   const ownedCandidates = [...OWNED_TOOL_IDS].map((id) => candidate({ id }));
   const acquirable = candidate({ id: "eslint", defaultRun: true });
