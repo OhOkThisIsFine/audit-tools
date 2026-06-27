@@ -35,19 +35,17 @@ on all downstream work, and is the "redesign before scheduled autonomy" the nort
 ergonomics (T4) → product/analysis tracks (T5) → deferred (T6).
 
 > **Shipped 2026-06-26 (this session), removed from the ordering:** T0 stale-pipeline-state reconcile
-> (0.30.19) and T1 **Slice 1** degenerate-phase collapse (0.30.20). Detail in `git log` + the backlog
-> SHIPPED notes — do not re-action.
+> (0.30.19), T1 **Slice 1** degenerate-phase collapse (0.30.20), and T1 **Slice 2** shared intake
+> risk/complexity signal (`riskSignal.ts`, computed+persisted at intake; no dial consumes it yet — that
+> is Slice 3/4). Detail in `git log` + the backlog SHIPPED notes — do not re-action.
 
 ### T1 — Make the loop cheaper: self-scaling pipeline (HIGHEST compounding leverage)
 Design of record: [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md)
-([[self-scaling-pipeline-not-forked-paths]]). Slice 1 shipped; remaining slices lowest-risk-first:
-1. **Slice 2 — shared intake risk/complexity signal** *(NEXT)*: affected_files + a deterministic configurable
-   path-risk pattern set + intent; computed only from intake-available data (never a pipeline output — the
-   lap-3 circularity); fail toward more scrutiny when uncertain; re-assess hook for escalate-on-evidence.
-2. **Slice 3 — adversarial-depth dial**: critique/counterexample scale light-inline → full-independent by
+([[self-scaling-pipeline-not-forked-paths]]). Slices 1 & 2 shipped; remaining slices lowest-risk-first:
+1. **Slice 3 — adversarial-depth dial** *(NEXT)*: critique/counterexample scale light-inline → full-independent by
    the signal; **floor = light, never zero**; soften the existing structured-audit `leanFastPath`
    skip-everything path to *light review* (audit findings are not blindly trusted).
-3. **Slice 4 — granularity dial**: round-trip count = f(complexity); collapse coherent phases for low
+2. **Slice 4 — granularity dial**: round-trip count = f(complexity); collapse coherent phases for low
    complexity; wire optimistic-start + escalate-on-evidence.
 
 ### T2 — Make the loop converge & safe (enables unattended autonomy)
