@@ -205,30 +205,67 @@ export interface TestValidatorPlanScaffold {
 }
 
 /**
+ * A prior round's authored test spec, keyed by obligation_id, used to diff-carry
+ * unchanged assertions across a re-emit (C3). Carries the identity signals
+ * (`name` + `scope_anchors`) the carry decision is gated on plus the assertions.
+ */
+export interface PriorTestSpec {
+  name: string;
+  scope_anchors: string[];
+  assertions: string[];
+}
+
+function sameStringSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const setB = new Set(b);
+  return a.every((x) => setB.has(x));
+}
+
+/**
  * Build the test-plan skeleton: one spec per *testable* (invariant/behavioral)
  * obligation, with `obligation_id`/`name`/`kind`/`scope_anchors` filled and
  * `assertions` left blank for the model. The model fills only the assertions
  * (each spec needs a paired positive + negative assertion per the OBL-CO-01
  * gate, and the negative must name one of `scope_anchors` per CE-006).
+ *
+ * C3 diff-carry: when `priorByObligation` carries a prior round's authored spec
+ * for an obligation whose premise is UNCHANGED (same `name` + same
+ * `scope_anchors`), its assertions are pre-filled instead of left blank, so an
+ * unchanged obligation is not re-authored from scratch every repair round. A
+ * changed premise (renamed/re-scoped obligation) carries nothing — the host
+ * re-authors it (fail-safe toward re-author, never toward stale carry).
  */
 export function buildTestValidatorPlanScaffold(
   ledger: ObligationLedger | undefined,
+  priorByObligation: Record<string, PriorTestSpec> = {},
 ): TestValidatorPlanScaffold {
   const obligations = ledger?.obligations ?? [];
   return {
     test_specs: obligations
       .filter((o) => isTestablePhaseObligation(o.kind))
-      .map((o) => ({
-        obligation_id: o.id,
-        name: scaffoldName(o),
-        kind: o.kind === "invariant" ? "invariant" : "unit",
-        scope_anchors: obligationScopeAnchors(
+      .map((o) => {
+        const name = scaffoldName(o);
+        const scope_anchors = obligationScopeAnchors(
           o.id,
           o.description,
           readObligationChangeClassification(o),
-        ),
-        assertions: [],
-      })),
+        );
+        const prior = priorByObligation[o.id];
+        const carried =
+          prior &&
+          prior.name === name &&
+          sameStringSet(prior.scope_anchors, scope_anchors) &&
+          prior.assertions.length > 0
+            ? [...prior.assertions]
+            : [];
+        return {
+          obligation_id: o.id,
+          name,
+          kind: o.kind === "invariant" ? "invariant" : "unit",
+          scope_anchors,
+          assertions: carried,
+        };
+      }),
   };
 }
 
