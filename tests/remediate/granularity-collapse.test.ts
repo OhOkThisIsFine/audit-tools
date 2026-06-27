@@ -96,9 +96,9 @@ describe("granularity collapse in buildNextContractPipelineStep", () => {
     const prompt = await readFile(step!.prompt_path, "utf8");
     expect(prompt).toContain("Collapsed Authoring Round-Trip — 3 Phases");
     // All three artifact write-targets are present in the single prompt.
-    expect(prompt).toContain("goal_spec.json");
-    expect(prompt).toContain("context_bundle.json");
-    expect(prompt).toContain("module_decomposition.json");
+    expect(prompt).toContain("goal_spec.input.json");
+    expect(prompt).toContain("context_bundle.input.json");
+    expect(prompt).toContain("module_decomposition.input.json");
     // Exactly one next-step footer for the whole round-trip.
     const nextStepCount = (prompt.match(/next-step/g) ?? []).length;
     expect(nextStepCount).toBeGreaterThan(0);
@@ -116,8 +116,8 @@ describe("granularity collapse in buildNextContractPipelineStep", () => {
 
     const prompt = await readFile(step!.prompt_path, "utf8");
     expect(prompt).toContain("Collapsed Authoring Round-Trip — 2 Phases");
-    expect(prompt).toContain("context_bundle.json");
-    expect(prompt).toContain("module_decomposition.json");
+    expect(prompt).toContain("context_bundle.input.json");
+    expect(prompt).toContain("module_decomposition.input.json");
     expect(step!.stop_condition).toContain("context_collection");
     expect(step!.stop_condition).not.toContain("goal_normalization");
   });

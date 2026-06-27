@@ -29,11 +29,12 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildNextContractPipelineStep,
+  ingestContractArtifacts,
   isParallelModulePhase,
   nextMissingContractPhase,
 } from "../../src/remediate/steps/contractPipeline.js";
 import {
-  contractArtifactFilePath,
+  contractInputFilePath,
   contractPipelineDir,
   contractArtifactExists,
   isEnvelope,
@@ -72,9 +73,13 @@ async function writeRaw(
   name: ContractPipelineArtifactName,
   payload: unknown,
 ): Promise<void> {
-  const path = contractArtifactFilePath(ARTIFACTS_DIR, name);
+  const path = contractInputFilePath(ARTIFACTS_DIR, name);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(payload, null, 2) + "\n", "utf8");
+  // D3: the host writes a plain payload to the input path; the tool derives the
+  // canonical envelope at ingest. Run ingest so the completion gate sees the
+  // upstream phase as done (mirrors what buildNextContractPipelineStep does).
+  await ingestContractArtifacts(ARTIFACTS_DIR);
 }
 
 function makeGoalSpec() {

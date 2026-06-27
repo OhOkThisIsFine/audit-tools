@@ -21,7 +21,7 @@ import { join } from "node:path";
 import {
   writeContractArtifact,
   readContractArtifact,
-  contractArtifactFilePath,
+  contractInputFilePath,
   envelopePayload,
   stampToolCreatedAt,
   type ContractPipelineArtifactName,
@@ -134,7 +134,7 @@ describe("B2 diff-based re-review — snapshot membership + capture", () => {
     await seedCounterexampleDeps();
     // Write a RAW (un-enveloped) counterexample, as a worker would.
     await writeFile(
-      contractArtifactFilePath(artifactsDir, "counterexample"),
+      contractInputFilePath(artifactsDir, "counterexample"),
       JSON.stringify(makeCounterexamplePayload()),
     );
     const result = await ingestContractArtifacts(artifactsDir);
@@ -159,7 +159,7 @@ describe("B4 tool-stamped created_at — host has no clock", () => {
     const payload = makeCounterexamplePayload();
     delete payload.created_at;
     await writeFile(
-      contractArtifactFilePath(artifactsDir, "counterexample"),
+      contractInputFilePath(artifactsDir, "counterexample"),
       JSON.stringify(payload),
     );
     const result = await ingestContractArtifacts(artifactsDir);

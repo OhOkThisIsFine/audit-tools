@@ -25,6 +25,7 @@ import {
 } from "../../src/remediate/steps/contractPipeline.js";
 import {
   contractArtifactFilePath,
+  contractInputFilePath,
   contractPipelineDir,
   readContractArtifact,
   writeContractArtifact,
@@ -78,7 +79,7 @@ async function writeRawArtifact(
   name: ContractPipelineArtifactName,
   payload: unknown,
 ): Promise<void> {
-  const path = contractArtifactFilePath(ARTIFACTS_DIR, name);
+  const path = contractInputFilePath(ARTIFACTS_DIR, name);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(payload, null, 2) + "\n", "utf8");
 }
@@ -635,12 +636,11 @@ describe("traceability gate: untraceable implementation_dag nodes never promote"
       traceableDag({ satisfies_obligations: [], addresses_counterexamples: ["CE-1"] }),
     );
 
-    const result = await validateImplementationDagTraceability(ARTIFACTS_DIR);
-    // Raw files have not been ingested yet in this direct call — ingest first.
+    // D3: the host writes plain payloads to the input path; the tool derives the
+    // canonical envelopes the traceability validator reads. Ingest first.
     await ingestContractArtifacts(ARTIFACTS_DIR);
     const ingestedResult = await validateImplementationDagTraceability(ARTIFACTS_DIR);
     expect(ingestedResult.ok).toBe(true);
-    expect(result.ok).toBe(true); // payload unwrap also handles raw files
 
     await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR);
     const plan = JSON.parse(
@@ -1048,7 +1048,7 @@ describe("inferRepairTarget: judge repair-directive inference (N-R11)", () => {
 describe("D2: archiveContractArtifact + rejectionRewriteInstruction", () => {
   it("moves the original to a timestamped history copy and frees the original path for a fresh Write", async () => {
     await writeRawArtifact("implementation_dag", { goal_id: "G1", nodes: [] });
-    const originalPath = contractArtifactFilePath(ARTIFACTS_DIR, "implementation_dag");
+    const originalPath = contractInputFilePath(ARTIFACTS_DIR, "implementation_dag");
     expect(existsSync(originalPath)).toBe(true);
 
     const outcome = await archiveContractArtifact(
@@ -1080,7 +1080,7 @@ describe("D2: archiveContractArtifact + rejectionRewriteInstruction", () => {
 
   it("preserves the original in place when the rename fails (originalFree:false, never silently dropped)", async () => {
     await writeRawArtifact("implementation_dag", { goal_id: "G1", nodes: [] });
-    const originalPath = contractArtifactFilePath(ARTIFACTS_DIR, "implementation_dag");
+    const originalPath = contractInputFilePath(ARTIFACTS_DIR, "implementation_dag");
 
     const outcome = await archiveContractArtifact(
       ARTIFACTS_DIR,

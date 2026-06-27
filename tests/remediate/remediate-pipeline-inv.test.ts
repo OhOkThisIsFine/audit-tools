@@ -25,7 +25,7 @@ import {
 } from "../../src/remediate/steps/contractPipeline.js";
 import { CONTRACT_PIPELINE_PHASE_ORDER } from "../../src/remediate/steps/contractPipelinePrompts.js";
 import {
-  contractArtifactFilePath,
+  contractInputFilePath,
   contractPipelineDir,
   writeContractArtifact,
   type ContractPipelineArtifactName,
@@ -85,7 +85,7 @@ async function writeRawArtifact(
   name: ContractPipelineArtifactName,
   payload: unknown,
 ): Promise<void> {
-  const path = contractArtifactFilePath(ARTIFACTS_DIR, name);
+  const path = contractInputFilePath(ARTIFACTS_DIR, name);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(payload, null, 2) + "\n", "utf8");
 }

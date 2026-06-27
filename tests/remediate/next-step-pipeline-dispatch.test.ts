@@ -65,7 +65,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     const prompt = await readFile(step.prompt_path, "utf8");
 
     expect(step.step_kind).toBe("contract_pipeline");
-    expect(step.artifact_paths.output).toMatch(/goal_spec\.json$/);
+    expect(step.artifact_paths.output).toMatch(/goal_spec\.input\.json$/);
     expect(prompt).toMatch(/Goal Normalization/);
     expect(prompt).toMatch(/Stop after writing the output file/i);
     expect(prompt).not.toMatch(/Extract Findings From Intake Brief/);
@@ -119,7 +119,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     const prompt = await readFile(step.prompt_path, "utf8");
 
     expect(step.step_kind).toBe("contract_pipeline");
-    expect(step.artifact_paths.output).toMatch(/context_bundle\.json$/);
+    expect(step.artifact_paths.output).toMatch(/context_bundle\.input\.json$/);
     expect(prompt).toMatch(/Context Collection/);
     expect(prompt).not.toMatch(/Design\n/);
     expect(existsSync(join(ARTIFACTS_DIR, "extracted-plan.json"))).toBe(false);
