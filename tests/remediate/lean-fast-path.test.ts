@@ -174,9 +174,12 @@ describe("decideNextStep — lean fast path (integration)", () => {
     const step = await decideNextStep({ root: REPO_DIR });
 
     // No grounding verdict + a medium-confidence finding ⇒ the gate declines and
-    // the run enters the contract pipeline at goal normalization; no lean plan.
+    // the run enters the contract pipeline at the framing phase; no lean plan.
+    // A low-tier run collapses the framing group (T1 slice 4b), so the entry
+    // step's terminal output is module_decomposition.json rather than goal_spec.json;
+    // either way it is authoring the framing, not a lean extracted-plan.
     expect(step.step_kind).toBe("contract_pipeline");
-    expect(step.artifact_paths.output).toMatch(/goal_spec\.json$/);
+    expect(step.artifact_paths.output).toMatch(/(goal_spec|module_decomposition)\.json$/);
     expect(existsSync(join(ARTIFACTS_DIR, "extracted-plan.json"))).toBe(false);
   });
 });
