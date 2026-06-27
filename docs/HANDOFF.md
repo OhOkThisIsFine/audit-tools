@@ -34,39 +34,33 @@ on all downstream work, and is the "redesign before scheduled autonomy" the nort
 ([[autonomous-pipeline-capstone-spec]]). So: loop-infra (T1–T2) → headline capability (T3) → cheap
 ergonomics (T4) → product/analysis tracks (T5) → deferred (T6).
 
-### T1 — Make the loop cheaper: self-scaling pipeline (HIGHEST compounding leverage)
+### T1 — Self-scaling pipeline — ✅ COMPLETE
 Design of record: [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md)
-([[self-scaling-pipeline-not-forked-paths]]). **Slices 1, 2, and 3 (both dials of the adversarial-depth
-slice) shipped** — slice 3a (depth dial on the contract pipeline) 0.30.23, slice 3b (lean fast path softened
-to a mechanically-gated light review: verdict artifact + resume intercept, clear⇒lean plan, concern⇒escalate
-risk signal + full pipeline) 0.30.24. Remaining:
-1. **Slice 4b — granularity collapse** *(NEXT)*: round-trip count = f(complexity); collapse coherent authoring
-   phases into fewer round-trips for low-tier work (the design's "one coherent act of authoring → ONE
-   round-trip producing several artifacts"), keep fine-grained for medium/high. **Slice 4a (escalate-on-evidence
-   / optimistic-start) shipped** — `decompositionRiskEvidence` + an in-band intercept at the top of
-   `buildNextContractPipelineStep` raises the persisted intake risk signal once decomposition reveals the real
-   shape (>1 module ⇒ ≥medium; module file_scope touches a risk subsystem ⇒ high), so the depth dial tightens on
-   the same and every later next-step (idempotent/convergent via `escalateRiskSignal`). 4b builds on 4a: when the
-   collapsed low-tier framing surfaces complexity, the 4a escalation un-collapses the structural seam/finalize
-   phases (already structural, slice 1) and drives full adversarial depth (slice 3a).
+([[self-scaling-pipeline-not-forked-paths]]). All slices shipped: 1 degenerate-collapse, 2 shared signal,
+3a depth dial, 3b lean-light-review, 4a escalate-on-evidence, **4b granularity collapse**
+(`roundTripGranularityForTier`: low ⇒ framing phases fold into ONE round-trip; un-collapses on 4a escalation;
+best-effort fall-back to fine-grained). _Nothing open on this track._
 
 ### T2 — Make the loop converge & safe (enables unattended autonomy)
-4. **repair-cap → convergence-termination** — replace the magic N=2 judge/repair cap with fixpoint
-   termination (stop when a round yields no new accepted counterexample) + escalate-on-stall; hard cap stays
-   only as a loud backstop. *(forward track; lap-1 converged within the cap but a 3rd new CE would've been cut.)*
-5. **Friction detection is mechanical-only** — the meta-audit gap: emitters captured 0 events again this
-   session despite turbulent runs. Needs per-event reconciliation at the step boundary (auto-capture phase
-   re-emit / artifact reject / repair round / no-change merge; close-out forces host to disposition each) so
-   "settled" has a real signal. *(backlog → friction-detection entry; [[meta-audit-friction-must-be-tool-enforced]])*
-6. **P0 follow-up — data-loss on a GENUINE fail-loud** — 0.30.17 removed the false-positive trigger, but a
-   real generated-artifact-under-scope fail-loud still drops the worker's uncommitted edits before removing
-   the worktree. Quarantine (stash/patch) before removal. *(backlog → P0 entry, item 2)*
+4. **repair-cap → convergence-termination — ✅ SHIPPED.** `evaluateJudgeGate` is fixpoint-terminated:
+   approved ⇒ proceed; new accepted CE ⇒ repair; all-already-addressed ⇒ escalate (blocked user-decision);
+   `MAX_CONTRACT_REPAIR_ITERATIONS` is now the loud runaway backstop (2 ⇒ 8).
+5. **Friction detection is mechanical-only — DESCOPED (env-bound).** Recon found `HostSessionQuotaSource.recordLimit`
+   has ZERO production callers, so the whole record→escalate→strand→`quota_escalation`-friction chain is unwired
+   end-to-end (not just the friction tap); validating a fix needs a live rate-limited multi-worker run. Root cause +
+   seam map recorded in backlog → friction-detection entry; folds into the dispatch capability-tiered driver track.
+   *([[meta-audit-friction-must-be-tool-enforced]])*
+6. **P0 — data-loss on a GENUINE fail-loud — ✅ FIXED.** `quarantineUncommittedWorktreeEdits` preserves the
+   worker's uncommitted source edits under a durable quarantine ref before `removeWorktree` on a commit-refusal.
 
 ### T3 — Headline product capability
-7. **Remediator auto-phasing** — take an arbitrary N-goal input and auto-derive the foundations→consumers
-   phase cut from the dependency DAG (today the host picks the phase at intake via AskUserQuestion). The
-   decompose + boundary-enforce + scheduling-dep substrate is shipped; the auto phase-cut is the unshipped
-   core. *(forward track; [[remediator-must-decompose-and-boundary-enforce]])*
+7. **Remediator auto-phasing — phase-cut DERIVATION shipped; downstream threading remains.** New pure
+   `src/remediate/contractPipeline/phaseCut.ts` (`derivePhaseCut` — tier = longest dependency chain, cycle-safe;
+   `phaseCutModulesFromContracts` from drafted `neighbor_needs`), wired at the `critique` dispatch with an
+   anti-over-scoping directive so the critique no longer rejects an N-goal change as too large. **Remaining:**
+   persist the cut as a first-class artifact + thread phase ordinals into `implementation_dag` node `dependencies`
+   (so `rollingDependencyLevels` honours the foundations→consumers ordering end-to-end) + a per-phase whole-repo
+   green checkpoint. *(backlog → remediator-decompose entry; [[remediator-must-decompose-and-boundary-enforce]])*
 
 ### T4 — Remaining host-friction inventory (cheap lean laps once T1 lands)
 8. **A-items (ambiguous backend direction → host had to pick):** A1 blocking-critique-in-non-rejected-verdict
@@ -105,11 +99,11 @@ risk signal + full pipeline) 0.30.24. Remaining:
 
 ## Why this order
 
-- **T1 first** because every later lap pays the pipeline's cost — making it self-scale compounds across all
-  of T3–T5, and turns the T4 host-friction items into cheap lean laps. (Slice 1 shipped; Slice 2 — the shared
-  intake risk signal both dials read — is next.)
-- **T2 next** because convergence-termination + a real friction signal + no-data-loss are what let the loop
-  run *unattended* — the precondition for the scheduled audit→remediate→PR capstone.
+- **T1 (self-scaling pipeline) is COMPLETE** — every later lap now pays a complexity-scaled pipeline cost, and
+  the T4 host-friction items become cheap lean laps.
+- **T2** — convergence-termination ✅ and no-data-loss ✅ shipped; the remaining T2 item (a real friction signal)
+  is env-bound (needs a live rate-limited run) and folds into the dispatch-driver track. These are what let the
+  loop run *unattended* — the precondition for the scheduled audit→remediate→PR capstone.
 - **T3 (auto-phasing)** is the biggest user-facing capability but leans on T1/T2 being solid (it will generate
   many bounded laps).
 - **T4** is incremental ergonomics best done *after* T1 makes them cheap; several B/C items are subsumed by
