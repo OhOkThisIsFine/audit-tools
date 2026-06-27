@@ -19,22 +19,30 @@
 
 ## Slices (each green: `npm run build && npm run check` + touched tests)
 
-- **A — array artifact model.** `external_analyzer_results: ExternalAnalyzerResults[]`. Every consumer iterates;
-  no behaviour change (single-element array preserves today's output). Pure refactor + test updates.
-- **B — binary runner + acquisition seam.** New `binary` `EcosystemRunner`; `runnerProbeArgv`/`runnerPrefix`
-  extended. Acquisition seam `acquireBinary(tool, version, os/arch, { fetch })`: PATH-probe → pinned GitHub-release
-  download → SHA256 verify → cache under tool-cache dir → return resolved path. Injectable `fetch`/runner; pinned
-  version + checksum table (pinning a TOOL version is required for reproducibility — NOT the model-hardcode ban).
-  Unit tests with a fake fetcher (present-on-PATH, absent→download, checksum-mismatch→degrade).
-- **C — candidate registry + adapters.** `EXTERNAL_ANALYZER_CANDIDATES` (gitleaks binary default-on; semgrep pipx;
-  eslint npx). `gitleaks` parse adapter (`gitleaks detect --report-format json` → generic items → security
-  findings). Verify semgrep/eslint adapters already exist (they do). Remove secret-scan from `OWNED_TOOL_IDS`.
-- **D — production wiring.** New executor `runExternalAnalyzerAcquisitionExecutor` + obligation
-  `external_analyzers_current`, placed in the nextStep chain BEFORE `structure_artifacts` (graph/risk/planning
-  consume it). Writes `external_analyzer_results.json` (array). Dependency-map + staleness registration. Consent
-  token sourced from session config (`analyzers.<id>` settings); default set runs without it.
-- **E — surface + close.** Confirm gitleaks findings reach `audit-findings.json` via `mergeFindings`/`externalSummary`
-  (security lens). Docs (HANDOFF/backlog), memory (`deterministic-analyzers-own-vs-acquire`, `live-status`), ship.
+- **A — array artifact model. ✅ DONE (commit f5097e72).** `external_analyzer_results: ExternalAnalyzerResults[]`;
+  every consumer iterates; `upsertExternalToolResults` merges producers by tool id. Behaviour-preserving.
+- **B — binary runner + acquisition seam. ✅ DONE (commit c2a467a2).** `binary` EcosystemRunner +
+  `binaryAcquisition.ts` `resolveBinary`: PATH → cache → pinned GitHub-release download, checksums.txt SHA256-verify
+  BEFORE extract (system `tar`), cache, chmod. Injectable fetcher; `resolveBinaryCandidates` async pre-pass records a
+  status for every binary that didn't resolve. `binary-acquisition.test.mjs`.
+- **C — candidate registry + gitleaks. ✅ DONE (commit 7c393409).** `EXTERNAL_ANALYZER_CANDIDATES`: gitleaks
+  (binary, default-on, pinned 8.21.2, `gitleaks dir … --report-format json`, raw Secret/Match dropped) + semgrep
+  (pipx) + eslint (npx) consent-gated. secret-scan removed from `OWNED_TOOL_IDS` (only git-history owned). Engine
+  reportFile() seam (read a file instead of stdout). `analyzer-candidates.test.mjs`.
+
+- **D — production wiring. ⏳ REMAINING.** New marker artifact `external_analyzer_acquisition.json` +
+  `runExternalAnalyzerAcquisitionExecutor(bundle, root, opts)` (async): `resolveBinaryCandidates` →
+  `runAcquisitionEngine` → upsert results into `external_analyzer_results`; write marker. New obligation
+  `external_analyzers_current` in `state.ts`/`nextStep.ts`, placed AFTER `file_disposition`, BEFORE
+  `structure_artifacts` (graph/risk/planning consume the results). Dependency-map: marker deps
+  `{repo_manifest, file_disposition}`. **Hermeticity gate (decided):** the executor is a NO-OP that writes an empty
+  marker UNLESS acquisition is explicitly enabled via an advance option (`externalAcquisition: {enabled, fetch,
+  consentToken}`) — the real CLI entrypoint sets `enabled:true` + a global-`fetch` adapter; unit/integration tests
+  leave it off, so no subprocess/network runs in the suite (only the enabled CLI path probes/downloads/executes
+  gitleaks). This keeps the 2400-test suite hermetic and protects the trap-prone staleness chain.
+- **E — surface + close. ⏳ REMAINING.** Confirm gitleaks findings reach `audit-findings.json` via `mergeFindings`
+  external evidence (security lens) on an enabled run. Docs (HANDOFF/backlog), memory
+  (`deterministic-analyzers-own-vs-acquire`, `live-status`), delete this plan doc, ship.
 
 ## Invariants to preserve
 
