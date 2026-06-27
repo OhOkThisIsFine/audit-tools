@@ -12,6 +12,15 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 - **Selective-deepening tasks never converge — packet result task_id ≠ assigned `deepening:*` id.** Workers returned packet-style task_ids instead of the assigned `deepening:finding:*`, so merge-and-ingest never matched results to tasks and looped. The prompt-side fix (explicit task_id binding in `buildTaskSections`) is in place but **needs live validation** — can't be verified without a real deepening-capable run. Recovery until validated: quarantine orphan pending `deepening:*` tasks to let synthesis run.
 - **Dispatch capability-tiered driver on top of the (shipped) host-quota wiring.** `HostSessionQuotaSource` is wired first-class into the scheduler (graduated `remaining_pct`, pre-wall LOW/CRITICAL bands, escalation-stranding) and the `rate_limited` non-consuming re-queue is in place. **Remaining:** the capability-tiered *driver* (Y-dispatcher vs slot-pull selection) on top of it — see the broker-driver forward track below.
 
+- **Unwired-but-tested extractor is invisible dead code (friction, 2026-06-27).** F6 git-history mining shipped with
+  a full extractor + 27 passing unit tests but was NEVER called by an executor — green tests + green build, yet the
+  feature did nothing in a real run (caught only by reading the executor). Unit tests at the seam don't prove the seam
+  is *invoked*. Enforceable direction: a mechanical guard that flags an exported extractor entry-point
+  (`build*`/`mine*Artifact` in `src/audit/extractors/`) with zero non-test importers — an instance of the deferred
+  dead-code detection (knip/ts-prune territory, see *own-vs-acquire* / [[graph-signals-thin-substrate-extraction-persist]]).
+  Until then: when adding an extractor, the wiring into `runStructureExecutor` (or its executor) is part of "done", not a
+  follow-up.
+
 ## Forward tracks
 
 - **Content-addressed, granular staleness — kill whole-artifact re-derive churn.** Staleness today is
