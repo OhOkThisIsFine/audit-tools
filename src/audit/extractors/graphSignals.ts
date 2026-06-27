@@ -1,4 +1,5 @@
 import type { GraphBundle, GraphEdge, NodeMetric } from "audit-tools/shared";
+import { GIT_CO_CHANGE_CATEGORY } from "./gitHistory.js";
 
 /** A per-node structural metric surfaced as a flat, deterministically sorted row. */
 export interface NodeMetricSignal {
@@ -93,14 +94,18 @@ export interface GraphSignals {
 
 /**
  * Flatten every edge bucket of a graph bundle into one edge list. `routes` is
- * excluded (it is a `{path,handler,method}` shape, not a `from`/`to` edge);
- * malformed entries (missing string endpoints) are dropped so a bad analyzer
- * output can never throw here.
+ * excluded (it is a `{path,handler,method}` shape, not a `from`/`to` edge); the
+ * `co_change` bucket is excluded too — it is temporal coupling (git-history
+ * mining), not a structural dependency, so it must never feed cycle / hub / seam
+ * detection. Malformed entries (missing string endpoints) are dropped so a bad
+ * analyzer output can never throw here.
  */
 export function allGraphEdges(graphBundle: GraphBundle): GraphEdge[] {
   const edges: GraphEdge[] = [];
   for (const [key, value] of Object.entries(graphBundle.graphs)) {
-    if (key === "routes" || !Array.isArray(value)) continue;
+    if (key === "routes" || key === GIT_CO_CHANGE_CATEGORY || !Array.isArray(value)) {
+      continue;
+    }
     for (const edge of value) {
       if (edge && typeof edge.from === "string" && typeof edge.to === "string") {
         edges.push(edge);
