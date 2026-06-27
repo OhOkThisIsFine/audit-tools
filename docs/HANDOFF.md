@@ -53,21 +53,20 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
 6. **P0 — data-loss on a GENUINE fail-loud — ✅ FIXED.** `quarantineUncommittedWorktreeEdits` preserves the
    worker's uncommitted source edits under a durable quarantine ref before `removeWorktree` on a commit-refusal.
 
-### T3 — Headline product capability
-7. **Remediator auto-phasing — derivation + persistence + ordinal threading + scheduler barrier SHIPPED; one
-   sliver remains.** Phase cut is now PERSISTED as a first-class sidecar `intake/contract/phase_cut.json`
-   (`src/remediate/contractPipeline/phaseCutArtifact.ts`: `ensurePhaseCutArtifact` derives from
-   `finalized_module_contracts`, single-sourced for both the critique render and the DAG promotion — deliberately
-   NOT in `CP_ARTIFACT_NAMES` so it doesn't perturb the LLM-phase staleness DAG). Each promoted block carries a
-   mechanically-derived `phase_ordinal` (max over its node's obligations, mapped to the owning module by the
-   `OBL-<moduleSlug>-…` id fragment via `phaseOrdinalForObligations`; CE-only/unmatched → last phase). The rolling
-   scheduler enforces it as a HARD barrier (INV-PHASE-01, `rollingDependencyLevels`): a higher-phase block never
-   enters a dispatch level until every lower-phase block is verified-complete — foundations→consumers honoured
-   end-to-end. Tests: `phase-cut.test.ts` (module_phase / `phaseOrdinalForObligations` / sidecar persistence),
-   `rolling-scheduler.test.ts` (INV-PHASE-01 barrier). **Remaining sliver:** an EXPLICIT whole-repo test-suite
-   gate run AT each phase boundary and surfaced to the user (today: per-node verify gates each block + the barrier
-   guarantees ordering, but no full-suite run is interposed between phases — only at close). *(backlog →
-   remediator-decompose entry; [[remediator-must-decompose-and-boundary-enforce]])*
+### T3 — Headline product capability — ✅ COMPLETE
+7. **Remediator auto-phasing — derivation + persistence + ordinal threading + scheduler barrier + per-phase
+   boundary gate ALL SHIPPED.** Phase cut is PERSISTED as a first-class sidecar `intake/contract/phase_cut.json`
+   (`src/remediate/contractPipeline/phaseCutArtifact.ts`); each promoted block carries a mechanically-derived
+   `phase_ordinal`; the rolling scheduler enforces a HARD barrier (INV-PHASE-01, `rollingDependencyLevels`):
+   foundations→consumers honoured end-to-end. **The final sliver landed 2026-06-27:** a whole-repo test-suite
+   gate now runs AT each phase boundary — `phaseBoundaryToGate(state)` (pure, reblock-safe: fires once at the
+   untouched entry of each phase P>0) drives `runPhaseBoundaryGate`, interposed in the `implementing` obligation
+   BEFORE `buildImplementDispatchStep`. It reuses the all-terminal gate's machinery (`runToolOwnedFinalGate` +
+   `applyCoarseReblock` + shared `final-gate.json` sidecar, INV-RS-09/CE-003), so a red foundations phase is
+   caught + attributed to that phase before consumers build on it (earlier + more attributable than the close
+   gate), and a no-human host converges deterministically. Tests: `rolling-scheduler.test.ts`
+   (`phaseBoundaryToGate` predicate: phase-0-no-gate, phase-1-entry, no-re-gate-mid-phase, next-boundary,
+   ordinal-free, empty-frontier, dead-ended). _Nothing open on this track._
 
 ### T4 — Remaining host-friction inventory (cheap lean laps once T1 lands)
 8. **A-items (ambiguous backend direction → host had to pick):** A1 blocking-critique-in-non-rejected-verdict
