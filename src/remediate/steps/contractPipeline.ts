@@ -43,6 +43,7 @@ import {
   contractArtifactFilePath,
   contractPipelineDir,
   detectStaleArtifacts,
+  envelopePayload,
   isEnvelope,
   pathASeedFilePath,
   readContractArtifact,
@@ -59,10 +60,11 @@ import {
   roundTripGranularityForTier,
 } from "../riskSignal.js";
 import {
-  derivePhaseCut,
-  phaseCutModulesFromContracts,
+  phaseOrdinalForObligations,
+  moduleSlug,
   renderPhaseCutSection,
 } from "../contractPipeline/phaseCut.js";
+import { ensurePhaseCutArtifact, readPhaseCutArtifact } from "../contractPipeline/phaseCutArtifact.js";
 import {
   detectCyclicSeamObligations,
   validateCycleBreak,
@@ -270,12 +272,6 @@ export async function writeCyclicSeamRepairState(
 }
 
 // ── Envelope handling ─────────────────────────────────────────────────────────
-
-/** Payload of a stored artifact whether or not it has been enveloped yet. */
-function envelopePayload(envelope: ContractPipelineArtifactEnvelope | null): unknown {
-  if (!envelope) return undefined;
-  return isEnvelope(envelope) ? envelope.payload : envelope;
-}
 
 /**
  * Render a pre-filled skeleton section (S3 scaffold) for the partially-derivable
@@ -2382,24 +2378,20 @@ ${preCriticCitationGate.errorLines.join("\n")}
   // tool-DERIVED phase cut so it assesses design quality WITHIN a mechanically
   // dependency-ordered foundations→consumers phasing, instead of rejecting an
   // arbitrary N-goal change as "over-scoped" and forcing the host to re-scope by
-  // hand at intake. The cut is derived deterministically from the drafted module
-  // contracts' directional neighbor_needs edges (present by the critique phase);
-  // only injected when there is a genuine multi-phase cut to communicate.
+  // hand at intake. The cut is derived deterministically from the finalized module
+  // contracts' directional neighbor_needs edges (present by the critique phase) and
+  // PERSISTED as the `phase_cut.json` sidecar here, so the cut the critic sees and
+  // the cut the implementation-DAG promotion enforces are one source. Only injected
+  // into the prompt when there is a genuine multi-phase cut to communicate.
   if (nextPhase === "critique") {
-    const contractsPayload = envelopePayload(
-      await readContractArtifact(artifactsDir, "module_contracts"),
-    );
-    const cutModules = phaseCutModulesFromContracts(contractsPayload);
-    if (cutModules.length > 1) {
-      const cut = derivePhaseCut(cutModules);
-      if (cut.phases.length > 1) {
-        const reReview = await buildReReviewSection(nextPhase, artifactsDir);
-        const phaseCutSection = renderPhaseCutSection(cut);
-        return buildPhaseStep(
-          "critique",
-          reReview ? `${phaseCutSection}\n${reReview}` : phaseCutSection,
-        );
-      }
+    const cut = await ensurePhaseCutArtifact(artifactsDir);
+    if (cut && cut.phases.length > 1) {
+      const reReview = await buildReReviewSection(nextPhase, artifactsDir);
+      const phaseCutSection = renderPhaseCutSection(cut);
+      return buildPhaseStep(
+        "critique",
+        reReview ? `${phaseCutSection}\n${reReview}` : phaseCutSection,
+      );
     }
   }
 
@@ -2546,6 +2538,23 @@ export async function promoteImplementationDagToExtractedPlan(
     }
   }
 
+  // Auto-phasing (T3): read the persisted phase cut and re-key its module-phase
+  // map by `moduleSlug(name)` — the fragment the obligation ledger encodes into
+  // `OBL-<slug>-…` ids. The block phase ordinal is then derived MECHANICALLY from
+  // each node's obligations (never trusting a worker-carried field, which a node
+  // merge could drop), so a foundation block always sorts below the consumers that
+  // depend on it. Absent cut (single module / no finalized contracts) → no
+  // ordinals, i.e. one phase, no barrier.
+  const phaseCut = await readPhaseCutArtifact(artifactsDir);
+  const slugToOrdinal = new Map<string, number>();
+  if (phaseCut) {
+    for (const [name, ordinal] of Object.entries(phaseCut.module_phase)) {
+      slugToOrdinal.set(moduleSlug(name), ordinal);
+    }
+  }
+  const lastOrdinal = Math.max(0, ...slugToOrdinal.values());
+  const hasMultiPhase = phaseCut ? phaseCut.phases.length > 1 : false;
+
   const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
   const findings = nodes.map((node, index) => {
     const id = ensureNodeId(node.id, index);
@@ -2630,6 +2639,19 @@ export async function promoteImplementationDagToExtractedPlan(
     const touchedFiles = [
       ...new Set(node.output_files ?? node.files_likely_touched ?? []),
     ];
+    // Phase ordinal from the union of this node's obligations (max → fail-toward-
+    // later). Only stamped when there is a genuine multi-phase cut, so a single-
+    // phase change carries no ordinal and the scheduler runs no barrier.
+    const phaseOrdinal = hasMultiPhase
+      ? phaseOrdinalForObligations(
+          [
+            ...(node.satisfies_obligations ?? []),
+            ...(node.verification_obligation_ids ?? []),
+          ],
+          slugToOrdinal,
+          lastOrdinal,
+        )
+      : undefined;
     return {
       block_id: toBlockId(nodeId),
       items: [nodeId],
@@ -2640,6 +2662,7 @@ export async function promoteImplementationDagToExtractedPlan(
       // touched_files is REQUIRED on the block contract; promote the node's
       // declared write scope so the file-ownership scheduler can read it.
       touched_files: touchedFiles,
+      ...(phaseOrdinal !== undefined ? { phase_ordinal: phaseOrdinal } : {}),
       ...(node.targeted_commands && node.targeted_commands.length > 0
         ? { targeted_commands: [...node.targeted_commands] }
         : {}),

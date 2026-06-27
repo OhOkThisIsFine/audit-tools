@@ -7,15 +7,23 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   derivePhaseCut,
   phaseCutModulesFromContracts,
+  phaseOrdinalForObligations,
+  moduleSlug,
   type PhaseCutModule,
 } from "../../src/remediate/contractPipeline/phaseCut.js";
 import { buildNextContractPipelineStep } from "../../src/remediate/steps/contractPipeline.js";
 import { writeContractArtifact } from "../../src/remediate/contractPipeline/artifactStore.js";
+import {
+  ensurePhaseCutArtifact,
+  readPhaseCutArtifact,
+  phaseCutFilePath,
+} from "../../src/remediate/contractPipeline/phaseCutArtifact.js";
 
 /** Tier of a named module in a derived cut. */
 function tierOf(
@@ -120,6 +128,68 @@ describe("phaseCutModulesFromContracts", () => {
   });
 });
 
+describe("module_phase map + phaseOrdinalForObligations (node→phase key)", () => {
+  it("exposes a module name → ordinal map alongside the phases", () => {
+    const cut = derivePhaseCut([
+      { name: "core", depends_on: [] },
+      { name: "api", depends_on: ["core"] },
+      { name: "ui", depends_on: ["api"] },
+    ]);
+    expect(cut.module_phase).toEqual({ core: 0, api: 1, ui: 2 });
+  });
+
+  it("moduleSlug matches the obligation-ledger id fragment", () => {
+    expect(moduleSlug("Auth Service")).toBe("auth-service");
+    expect(moduleSlug("core")).toBe("core");
+  });
+
+  it("resolves a node's phase from its obligation ids by module slug", () => {
+    const slugToOrdinal = new Map([
+      ["core", 0],
+      ["api", 1],
+    ]);
+    // Single-module obligations resolve to that module's ordinal.
+    expect(
+      phaseOrdinalForObligations(["OBL-core-contract"], slugToOrdinal, 1),
+    ).toBe(0);
+    expect(
+      phaseOrdinalForObligations(["OBL-api-inv-1"], slugToOrdinal, 1),
+    ).toBe(1);
+  });
+
+  it("takes the MAX ordinal for a node spanning phases (fail-toward-later)", () => {
+    const slugToOrdinal = new Map([
+      ["core", 0],
+      ["api", 2],
+    ]);
+    expect(
+      phaseOrdinalForObligations(
+        ["OBL-core-contract", "OBL-api-fail-1"],
+        slugToOrdinal,
+        2,
+      ),
+    ).toBe(2);
+  });
+
+  it("defaults an unmatched / counterexample-only node to the last phase", () => {
+    const slugToOrdinal = new Map([["core", 0]]);
+    expect(phaseOrdinalForObligations([], slugToOrdinal, 3)).toBe(3);
+    expect(
+      phaseOrdinalForObligations(["OBL-unknown-mod-contract"], slugToOrdinal, 3),
+    ).toBe(3);
+  });
+
+  it("prefers the longest matching slug (prefix disambiguation)", () => {
+    const slugToOrdinal = new Map([
+      ["auth", 0],
+      ["auth-service", 2],
+    ]);
+    expect(
+      phaseOrdinalForObligations(["OBL-auth-service-contract"], slugToOrdinal, 2),
+    ).toBe(2);
+  });
+});
+
 describe("auto-phasing wired into the critique step", () => {
   let root: string;
   let artifactsDir: string;
@@ -210,5 +280,28 @@ describe("auto-phasing wired into the critique step", () => {
     expect(prompt).toContain("api");
     // The anti-over-scoping directive is present.
     expect(prompt).toMatch(/Do NOT reject the work as/i);
+
+    // The cut is PERSISTED as the first-class sidecar (single-sourced for the
+    // downstream implementation-DAG promotion), not just rendered into the prompt.
+    const persisted = await readPhaseCutArtifact(artifactsDir);
+    expect(persisted).not.toBeNull();
+    expect(persisted!.module_phase).toEqual({ core: 0, api: 1 });
+    expect(existsSync(phaseCutFilePath(artifactsDir))).toBe(true);
+  });
+
+  it("ensurePhaseCutArtifact derives + persists the cut idempotently from finalized contracts", async () => {
+    await seedThroughFinalization();
+    const first = await ensurePhaseCutArtifact(artifactsDir);
+    expect(first).not.toBeNull();
+    expect(first!.phases.map((p) => p.modules)).toEqual([["core"], ["api"]]);
+    const firstBytes = await readFile(phaseCutFilePath(artifactsDir), "utf8");
+    // Re-deriving the same DAG yields byte-identical JSON (deterministic).
+    await ensurePhaseCutArtifact(artifactsDir);
+    expect(await readFile(phaseCutFilePath(artifactsDir), "utf8")).toBe(firstBytes);
+  });
+
+  it("returns null (no sidecar) when there are no finalized contracts to phase", async () => {
+    expect(await ensurePhaseCutArtifact(artifactsDir)).toBeNull();
+    expect(existsSync(phaseCutFilePath(artifactsDir))).toBe(false);
   });
 });

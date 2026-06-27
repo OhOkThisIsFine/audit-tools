@@ -188,6 +188,19 @@ export async function writeContractArtifact(
   return envelope;
 }
 
+/**
+ * Payload of a stored artifact whether or not it has been enveloped yet. A null
+ * envelope (absent on disk) yields undefined; a bare payload that was written
+ * without the envelope wrapper is returned as-is. Single-sourced here so every
+ * consumer unwraps identically (cannot drift from `isEnvelope`).
+ */
+export function envelopePayload(
+  envelope: ContractPipelineArtifactEnvelope | null,
+): unknown {
+  if (!envelope) return undefined;
+  return isEnvelope(envelope) ? envelope.payload : envelope;
+}
+
 /** Read a stored artifact envelope, or null if absent. */
 export async function readContractArtifact(
   artifactsDir: string,

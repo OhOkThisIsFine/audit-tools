@@ -54,13 +54,20 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
    worker's uncommitted source edits under a durable quarantine ref before `removeWorktree` on a commit-refusal.
 
 ### T3 — Headline product capability
-7. **Remediator auto-phasing — phase-cut DERIVATION shipped; downstream threading remains.** New pure
-   `src/remediate/contractPipeline/phaseCut.ts` (`derivePhaseCut` — tier = longest dependency chain, cycle-safe;
-   `phaseCutModulesFromContracts` from drafted `neighbor_needs`), wired at the `critique` dispatch with an
-   anti-over-scoping directive so the critique no longer rejects an N-goal change as too large. **Remaining:**
-   persist the cut as a first-class artifact + thread phase ordinals into `implementation_dag` node `dependencies`
-   (so `rollingDependencyLevels` honours the foundations→consumers ordering end-to-end) + a per-phase whole-repo
-   green checkpoint. *(backlog → remediator-decompose entry; [[remediator-must-decompose-and-boundary-enforce]])*
+7. **Remediator auto-phasing — derivation + persistence + ordinal threading + scheduler barrier SHIPPED; one
+   sliver remains.** Phase cut is now PERSISTED as a first-class sidecar `intake/contract/phase_cut.json`
+   (`src/remediate/contractPipeline/phaseCutArtifact.ts`: `ensurePhaseCutArtifact` derives from
+   `finalized_module_contracts`, single-sourced for both the critique render and the DAG promotion — deliberately
+   NOT in `CP_ARTIFACT_NAMES` so it doesn't perturb the LLM-phase staleness DAG). Each promoted block carries a
+   mechanically-derived `phase_ordinal` (max over its node's obligations, mapped to the owning module by the
+   `OBL-<moduleSlug>-…` id fragment via `phaseOrdinalForObligations`; CE-only/unmatched → last phase). The rolling
+   scheduler enforces it as a HARD barrier (INV-PHASE-01, `rollingDependencyLevels`): a higher-phase block never
+   enters a dispatch level until every lower-phase block is verified-complete — foundations→consumers honoured
+   end-to-end. Tests: `phase-cut.test.ts` (module_phase / `phaseOrdinalForObligations` / sidecar persistence),
+   `rolling-scheduler.test.ts` (INV-PHASE-01 barrier). **Remaining sliver:** an EXPLICIT whole-repo test-suite
+   gate run AT each phase boundary and surfaced to the user (today: per-node verify gates each block + the barrier
+   guarantees ordering, but no full-suite run is interposed between phases — only at close). *(backlog →
+   remediator-decompose entry; [[remediator-must-decompose-and-boundary-enforce]])*
 
 ### T4 — Remaining host-friction inventory (cheap lean laps once T1 lands)
 8. **A-items (ambiguous backend direction → host had to pick):** A1 blocking-critique-in-non-rejected-verdict

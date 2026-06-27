@@ -506,12 +506,34 @@ export function rollingDependencyLevels(
   const isPending = (depBlock: RemediationBlock): boolean =>
     depBlock.items.some((id) => items[id]?.status === "pending");
 
+  // Auto-phasing (T3): a block's foundations→consumers phase is a HARD barrier on
+  // top of its explicit dependency edges. A block at phase p may only enter a level
+  // once every block at a STRICTLY LOWER phase is VERIFIED-complete (resolved, not
+  // merely placed) — so a planning pass emits only the lowest unfinished phase, its
+  // foundations land + per-node verify, and the next pass opens the next phase. This
+  // is the end-to-end ordering guarantee (INV-PHASE-01); an explicit whole-repo
+  // suite gate at each phase boundary is the remaining T3 sliver (see backlog).
+  // Absent ordinals (single-phase / non-auto-phased plan) collapse to phase 0 → no
+  // barrier, identical to pre-auto-phasing behaviour.
+  const phaseOf = (block: RemediationBlock): number => block.phase_ordinal ?? 0;
+  const lowerPhaseBlocks = (p: number): RemediationBlock[] =>
+    plan.blocks.filter((b) => phaseOf(b) < p);
+  // The barrier is clear for phase p when every lower-phase block is verified-
+  // complete now; it can NEVER clear if a lower-phase block is skipped/blocked.
+  const phaseBarrierClear = (p: number): boolean =>
+    lowerPhaseBlocks(p).every((b) => isVerifiedNow(b));
+  const phaseBarrierUnsatisfiable = (p: number): boolean =>
+    lowerPhaseBlocks(p).some((b) => !isVerifiedNow(b) && !isPending(b));
+
   const permanentlyIneligible = (block: RemediationBlock): boolean => {
     for (const depId of block.dependencies ?? []) {
       const dep = blockById.get(depId);
       if (!dep) continue; // dangling edge never strands the DAG
       if (!isVerifiedNow(dep) && !isPending(dep)) return true; // skipped/blocked dep
     }
+    // A foundation a lower phase owns that can never verify-complete dead-ends every
+    // consumer above it (same strand semantics as a skipped explicit dependency).
+    if (phaseBarrierUnsatisfiable(phaseOf(block))) return true;
     return false;
   };
 
@@ -521,6 +543,10 @@ export function rollingDependencyLevels(
 
   while (remaining.length > 0) {
     const ready = remaining.filter((block) =>
+      // Phase barrier first: a higher-phase block is never ready until every lower
+      // phase is verified-complete (a foundations→consumers gate the explicit
+      // dependency edges alone don't enforce across modules).
+      phaseBarrierClear(phaseOf(block)) &&
       (block.dependencies ?? []).every((depId) => {
         const dep = blockById.get(depId);
         if (!dep) return true; // dangling edge
