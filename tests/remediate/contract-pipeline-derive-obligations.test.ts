@@ -257,8 +257,13 @@ describe("artifact scaffolds (S3 skeletons for the partially-derivable phases)",
     const ledger = deriveObligationLedger(finalizedContracts(), { created_at: CREATED_AT });
     const scaffold = buildImplementationDagScaffold(ledger, ["CE-001"]);
 
-    // One node per obligation, each covering its obligation, blank judgment slots.
-    expect(scaffold.nodes).toHaveLength(ledger.obligations.length);
+    // B2: ONE node per module (auth-module, logging-module), each grouping that
+    // module's obligations, blank judgment slots — not one node per obligation.
+    const moduleCount = new Set(
+      ledger.obligations.map((o) => o.module).filter(Boolean),
+    ).size;
+    expect(moduleCount).toBe(2);
+    expect(scaffold.nodes).toHaveLength(moduleCount);
     const coveredObligations = new Set(
       scaffold.nodes.flatMap((n) => n.satisfies_obligations),
     );
@@ -271,6 +276,32 @@ describe("artifact scaffolds (S3 skeletons for the partially-derivable phases)",
       scaffold.nodes.some((n) => n.addresses_counterexamples.includes("CE-001")),
     ).toBe(true);
     expect(scaffold.edges).toEqual([]);
+  });
+
+  it("B2: a single-module change with many obligations derives exactly ONE node", () => {
+    const ledger = deriveObligationLedger(
+      {
+        goal_id: "G1",
+        module_contracts: [
+          {
+            name: "one-mod",
+            inputs: [],
+            outputs: [],
+            invariants: ["a holds", "b holds"],
+            failure_modes: ["c fails"],
+            validation_boundary: "",
+          },
+        ],
+      },
+      { created_at: CREATED_AT },
+    );
+    // 1 structural + 2 invariant + 1 behavioral = 4 obligations, all one module.
+    expect(ledger.obligations.length).toBe(4);
+    const dag = buildImplementationDagScaffold(ledger, []);
+    expect(dag.nodes).toHaveLength(1);
+    expect(dag.nodes[0].satisfies_obligations.sort()).toEqual(
+      ledger.obligations.map((o) => o.id).sort(),
+    );
   });
 
   it("D1: every test-plan spec carries non-empty scope_anchors for negative scoping", () => {
