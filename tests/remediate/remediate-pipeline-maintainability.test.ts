@@ -84,8 +84,8 @@ describe("MNT-d86014de: closingOptions string has correct spacing in nextStep.ts
       "utf8",
     );
     // The bug: no spaces around "or" in the closing-options inline string.
-    expect(nextStepSrc).not.toContain('"`commit`or`none`"');
-    // The fix: spaces present.
-    expect(nextStepSrc).toContain('"`commit` or `none`"');
+    expect(nextStepSrc).not.toContain('or `none`"'.replace(/ /g, ""));
+    // The fix: spaces present around the trailing "or `none`".
+    expect(nextStepSrc).toContain('or `none`');
   });
 });

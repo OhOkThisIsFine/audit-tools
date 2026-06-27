@@ -1,5 +1,5 @@
 import { mkdir, rename } from "node:fs/promises";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative, dirname, resolve, isAbsolute } from "node:path";
 import { OwnershipRegistry } from "../dispatch/ownershipRegistry.js";
 import { routeAmendmentRequest } from "../dispatch/amendmentClaim.js";
@@ -946,7 +946,35 @@ export function listQuarantinedCommits(
  * worktree dispatch flow can't run there anyway): returns null without throwing so
  * non-git callers/tests are unaffected. Returns the branch name on success.
  */
-export function ensureRemediationBranchCheckedOut(root: string, runId: string): string | null {
+/** Sidecar recording the base branch the run was launched from (B5). */
+export function remediationBaseBranchPath(artifactsDir: string): string {
+  return join(artifactsDir, "remediation-base-branch.json");
+}
+
+/**
+ * The base branch this run was launched from, recorded when the remediation
+ * branch was first created. `null` when unrecorded (e.g. a detached HEAD at
+ * launch, or a branch created by a prior run) — the opt-in merge-to-base
+ * closing action degrades to "merge manually" rather than guessing a target.
+ */
+export function readRemediationBaseBranch(artifactsDir: string): string | null {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(remediationBaseBranchPath(artifactsDir), "utf8"),
+    );
+    return typeof parsed?.base_branch === "string" && parsed.base_branch.length > 0
+      ? parsed.base_branch
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function ensureRemediationBranchCheckedOut(
+  root: string,
+  runId: string,
+  artifactsDir?: string,
+): string | null {
   const top = gitTopLevel(root);
   if (top === null || canonicalPathKey(top) !== canonicalPathKey(root)) return null;
   const branch = remediationBranchName(runId);
@@ -956,13 +984,29 @@ export function ensureRemediationBranchCheckedOut(root: string, runId: string): 
     shell: false,
   });
   if (current.status === 0 && (current.stdout ?? "").trim() === branch) return branch;
-  const args = gitBranchExists(root, branch) ? ["checkout", branch] : ["checkout", "-b", branch];
+  const branchExisted = gitBranchExists(root, branch);
+  const args = branchExisted ? ["checkout", branch] : ["checkout", "-b", branch];
   const co = spawnSync("git", args, { cwd: root, encoding: "utf8", shell: false });
   if (co.status !== 0) {
     process.stderr.write(
       `[remediate-code] could not switch to remediation branch ${branch}: ${(co.stderr ?? "").trim()}\n`,
     );
     return null;
+  }
+  // First creation: record the branch we came from as the merge-back target (B5).
+  // Only a real branch name — a detached HEAD reports "HEAD" and is skipped.
+  if (!branchExisted && artifactsDir) {
+    const base = current.status === 0 ? (current.stdout ?? "").trim() : "";
+    if (base && base !== "HEAD" && base !== branch) {
+      try {
+        writeFileSync(
+          remediationBaseBranchPath(artifactsDir),
+          JSON.stringify({ base_branch: base }, null, 2),
+        );
+      } catch {
+        // best-effort: an unrecorded base degrades to manual merge, never throws
+      }
+    }
   }
   process.stderr.write(
     `[remediate-code] remediation changes land on branch ${branch} (base branch left untouched)\n`,
@@ -2591,7 +2635,7 @@ export async function prepareImplementDispatch(
   // remediation branch so all landed work accumulates there and the base branch is
   // never modified. Idempotent across waves; only when there is work to land.
   if (candidateBlocks.length > 0 && options.root) {
-    ensureRemediationBranchCheckedOut(options.root, runId);
+    ensureRemediationBranchCheckedOut(options.root, runId, options.artifactsDir);
   }
 
   // Walk the repo for test files ONCE per dispatch (not once per block) and cache

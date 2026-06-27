@@ -4,6 +4,7 @@ export const CLOSING_ACTIONS = [
   "open-pr",
   "publish",
   "tag",
+  "merge-to-base",
   "none",
   "custom",
 ] as const;
