@@ -63,6 +63,7 @@ export function intakePaths(artifactsDir: string): {
   intentCheckpoint: string;
   findingsDigest: string;
   findingEnumeration: string;
+  riskSignal: string;
 } {
   const dir = join(artifactsDir, "intake");
   return {
@@ -76,6 +77,7 @@ export function intakePaths(artifactsDir: string): {
     intentCheckpoint: join(artifactsDir, "intent_checkpoint.json"),
     findingsDigest: join(dir, "findings-digest.json"),
     findingEnumeration: join(dir, "finding-enumeration.json"),
+    riskSignal: join(dir, "risk-signal.json"),
   };
 }
 

@@ -54,6 +54,7 @@ import {
 import {
   evaluateFastPath,
   buildLeanExtractedPlan,
+  distinctAffectedFiles,
 } from "./leanFastPath.js";
 import {
   contractArtifactExists,
@@ -74,6 +75,7 @@ import {
   resolveManifestSources,
   type IntakeSourceManifest,
 } from "../intake.js";
+import { ensureIntakeRiskSignal } from "../riskSignal.js";
 import type { IntentCheckpoint } from "audit-tools/shared";
 import {
   ambiguityReviewPrompt,
@@ -2482,6 +2484,35 @@ async function handleReadyIntakeContractPipeline(
   if (!intake.summary || !isIntakeReady(intake.summary)) {
     return null;
   }
+
+  // Slice 2 — compute & persist the shared intake risk/complexity signal the
+  // self-scaling dials (Slices 3/4) will read. Idempotent: recorded once from
+  // intake-available data only (affected_files + goals + path-risk patterns), so
+  // a later escalate-on-evidence raise is never clobbered. The input is gathered
+  // lazily (only on the run that actually computes), and for structured_audit —
+  // where the top-level summary.affected_files is legitimately empty (paths live
+  // per-finding) — it unions the per-finding affected files so the path-risk
+  // patterns actually fire (fail-closed: a risky-subsystem audit must not land
+  // `low`). No behavior keys on it yet — this establishes the source of truth.
+  await ensureIntakeRiskSignal(artifactsDir, async () => {
+    const summary = intake.summary!;
+    const affectedFiles = summary.affected_files.map((f) => f.path);
+    if (summary.source_type === "structured_audit" && intake.manifest) {
+      const auditSource = resolveManifestSources(root, intake.manifest).resolved.find(
+        (s) => s.type === "structured_audit",
+      );
+      if (auditSource) {
+        try {
+          const parsed = JSON.parse(await readFile(auditSource.path, "utf8")) as unknown;
+          affectedFiles.push(...distinctAffectedFiles(extractAuditFindings(parsed)));
+        } catch {
+          // Unreadable audit source — leave the summary-derived list; an empty
+          // list with non-empty goals still rates conservatively via intent.
+        }
+      }
+    }
+    return { affectedFiles, goals: summary.goals };
+  });
 
   const pipeline = shouldEnterContractPipeline(
     artifactsDir,

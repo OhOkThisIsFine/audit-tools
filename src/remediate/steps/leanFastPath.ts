@@ -57,7 +57,7 @@ export interface FastPathDecision {
 }
 
 /** Distinct affected-file paths across an approved finding set. */
-function distinctAffectedFiles(findings: Finding[]): string[] {
+export function distinctAffectedFiles(findings: Finding[]): string[] {
   const paths = new Set<string>();
   for (const finding of findings) {
     for (const location of finding.affected_files ?? []) {
