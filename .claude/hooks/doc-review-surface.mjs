@@ -10,7 +10,14 @@
 // Read-only and best-effort: any failure (offline, no branch, no git) exits 0
 // silently. The fetch is time-boxed so it never blocks session start for long.
 // Contract: docs/doc-review-guidelines.md → "Output contract".
+//
+// Already-applied items are suppressed via the clear-on-apply ledger
+// (docReviewLedger.mjs): the host records dispositioned IDs against the
+// findings.md commit SHA, and this hook filters them out so a fix that already
+// landed on main stops re-surfacing every session — without waiting for the next
+// nightly to regenerate the branch.
 import { execFileSync } from 'node:child_process';
+import { parseItemId, resolvedIdsFor } from './docReviewLedger.mjs';
 
 const BRANCH = 'doc-review';
 const FILE = 'doc-review-findings.md';
@@ -53,10 +60,14 @@ try {
     'FETCH_HEAD',
   ];
   let body = '';
+  let usedRef = '';
   for (const ref of refs) {
     try {
       body = git(['show', `${ref}:${FILE}`], 5000);
-      if (body) break;
+      if (body) {
+        usedRef = ref;
+        break;
+      }
     } catch {
       /* try next ref */
     }
@@ -72,11 +83,37 @@ try {
   // block with only headers (no list items) as empty.
   if (!open || !/^\s*[-*]\s/m.test(open)) process.exit(0);
 
+  // Resolve the findings.md commit SHA so we can filter items the host already
+  // dispositioned against THIS generation of the block. Failure → don't filter
+  // (surface everything, the pre-ledger behaviour).
+  let sha = '';
+  try {
+    sha = git(['rev-parse', usedRef], 3000).trim();
+  } catch {
+    /* no SHA → resolvedIdsFor('') returns empty set → nothing filtered */
+  }
+  const resolved = resolvedIdsFor(sha);
+
+  // Drop bullet lines whose [ID] is already resolved for this SHA. Non-item
+  // lines (headers, blank lines, continuations) pass through untouched.
+  const filtered = open
+    .split(/\r?\n/)
+    .filter((line) => {
+      const id = parseItemId(line);
+      return !(id && resolved.has(id));
+    })
+    .join('\n')
+    .trim();
+
+  // After filtering, if no list items remain, there's nothing live to surface.
+  if (!filtered || !/^\s*[-*]\s/m.test(filtered)) process.exit(0);
+
   process.stdout.write(
     '# Open doc-review items (nightly routine)\n\n' +
-      'The doc-review routine left items that need you. Review and tell me to ' +
-      'apply or reject; resolved items drop off after the next nightly run.\n\n' +
-      open +
+      'The doc-review routine left items that need you. Review, then have me run ' +
+      '`node .claude/hooks/doc-review-resolve.mjs <ID>...` once applied/rejected ' +
+      'so they stop re-surfacing.\n\n' +
+      filtered +
       '\n',
   );
 } catch {

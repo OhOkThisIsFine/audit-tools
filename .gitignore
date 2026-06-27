@@ -13,6 +13,11 @@ dist/
 !.claude/hooks/session-start.sh
 !.claude/hooks/pre-commit-gate.mjs
 !.claude/hooks/async-typecheck.mjs
+!.claude/hooks/doc-review-surface.mjs
+!.claude/hooks/docReviewLedger.mjs
+!.claude/hooks/doc-review-resolve.mjs
+!.claude/hooks/doc-review-resolve.test.mjs
+!.claude/hooks/doc-review-resolved.json
 !.claude/skills/
 .opencode/
 .vscode/
