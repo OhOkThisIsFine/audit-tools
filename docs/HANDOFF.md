@@ -40,11 +40,15 @@ Design of record: [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-
 slice) shipped** — slice 3a (depth dial on the contract pipeline) 0.30.23, slice 3b (lean fast path softened
 to a mechanically-gated light review: verdict artifact + resume intercept, clear⇒lean plan, concern⇒escalate
 risk signal + full pipeline) 0.30.24. Remaining:
-1. **Slice 4 — granularity dial** *(NEXT)*: round-trip count = f(complexity); collapse coherent phases for
-   low complexity; wire optimistic-start + escalate-on-evidence. The escalate-on-evidence machinery now has a
-   live precedent — 3b's lean-review escalation calls `escalateRiskSignal` + `writeIntakeRiskSignal`; slice 4
-   extends the same evidence→re-assess loop to phase granularity (a decomposition that surfaces a cross-module
-   seam re-fines the round-trip plan).
+1. **Slice 4b — granularity collapse** *(NEXT)*: round-trip count = f(complexity); collapse coherent authoring
+   phases into fewer round-trips for low-tier work (the design's "one coherent act of authoring → ONE
+   round-trip producing several artifacts"), keep fine-grained for medium/high. **Slice 4a (escalate-on-evidence
+   / optimistic-start) shipped** — `decompositionRiskEvidence` + an in-band intercept at the top of
+   `buildNextContractPipelineStep` raises the persisted intake risk signal once decomposition reveals the real
+   shape (>1 module ⇒ ≥medium; module file_scope touches a risk subsystem ⇒ high), so the depth dial tightens on
+   the same and every later next-step (idempotent/convergent via `escalateRiskSignal`). 4b builds on 4a: when the
+   collapsed low-tier framing surfaces complexity, the 4a escalation un-collapses the structural seam/finalize
+   phases (already structural, slice 1) and drives full adversarial depth (slice 3a).
 
 ### T2 — Make the loop converge & safe (enables unattended autonomy)
 4. **repair-cap → convergence-termination** — replace the magic N=2 judge/repair cap with fixpoint

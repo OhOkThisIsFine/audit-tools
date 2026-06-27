@@ -283,6 +283,56 @@ export function escalateRiskSignal(
   };
 }
 
+export interface DecompositionEvidenceInput {
+  /** Number of modules the decomposition produced. */
+  moduleCount: number;
+  /** Union of every module's declared file_scope (repo-relative paths). */
+  fileScopes: readonly string[];
+  config?: RiskSignalConfig;
+}
+
+/**
+ * Derive escalate-on-evidence from a COMPLETED decomposition (self-scaling
+ * pipeline, slice 4 — optimistic-start). A run begins at the cheap intake tier;
+ * once decomposition reveals the work's actual shape, raise the tier where the
+ * evidence demands it so the adversarial-depth dial (and downstream granularity)
+ * tighten:
+ *   - any module file_scope touches a path-risk subsystem ⇒ `high` (a
+ *     correctness-sensitive subsystem the intake affected-file list may not have
+ *     surfaced);
+ *   - >1 module ⇒ cross-module seams exist ⇒ at least `medium` (real complexity
+ *     to isolate — exactly when the fine-grained per-phase gates earn their cost).
+ * Returns undefined when the decomposition reveals no new risk. Pure +
+ * deterministic; the {@link escalateRiskSignal} combinator enforces raise-only.
+ */
+export function decompositionRiskEvidence(
+  input: DecompositionEvidenceInput,
+): RiskEscalationEvidence | undefined {
+  const patterns = input.config?.pathRiskPatterns ?? DEFAULT_PATH_RISK_PATTERNS;
+  const files = Array.from(
+    new Set(input.fileScopes.map(normalizePathForMatch).filter((p) => p.length > 0)),
+  );
+  const matched: string[] = [];
+  for (const family of patterns) {
+    if (files.some((p) => family.pattern.test(p))) {
+      matched.push(family.label);
+    }
+  }
+  if (matched.length > 0) {
+    return {
+      tier: "high",
+      reason: `decomposition file scopes touch risk subsystems: ${matched.join(", ")}`,
+    };
+  }
+  if (input.moduleCount > 1) {
+    return {
+      tier: "medium",
+      reason: `decomposition produced ${input.moduleCount} modules — cross-module seams to isolate`,
+    };
+  }
+  return undefined;
+}
+
 /** Read the persisted intake risk signal, or undefined when none is recorded. */
 export async function readIntakeRiskSignal(
   artifactsDir: string,
