@@ -13,6 +13,11 @@ import type {
   ExternalAnalyzerResults,
   ExternalAnalyzerToolStatus,
 } from "../../types/externalAnalyzer.js";
+import {
+  resolveBinary,
+  type BinarySpec,
+  type BinaryResolveOptions,
+} from "./binaryAcquisition.js";
 
 /**
  * F5 — external analyzer acquisition engine.
@@ -53,8 +58,12 @@ export const OWNED_TOOL_IDS = new Set<string>([
   "secrets",
 ]);
 
-/** Ecosystem runners F5 knows how to drive. */
-export type EcosystemRunner = "npx" | "pipx" | "cargo" | "bundle";
+/**
+ * Ecosystem runners F5 knows how to drive. `npx`/`pipx`/`cargo`/`bundle` acquire
+ * + run a pinned package ephemerally; `binary` runs a standalone release binary
+ * resolved (and downloaded-if-absent) by the binary-acquisition seam.
+ */
+export type EcosystemRunner = "npx" | "pipx" | "cargo" | "bundle" | "binary";
 
 /**
  * One acquirable external analyzer. `defaultRun: true` marks a member of the
@@ -94,6 +103,13 @@ export interface ExternalAnalyzerCandidate {
   detect(root: string): boolean;
   /** Member of the value-curated DEFAULT set (runs without prompting). */
   defaultRun: boolean;
+  /**
+   * Acquisition spec for a `runner: "binary"` candidate — how to probe PATH and,
+   * if absent, download + SHA256-verify the pinned release binary. Resolved ahead
+   * of the (synchronous) engine by `resolveBinaryCandidates`; ignored for the
+   * package-manager runners.
+   */
+  binary?: BinarySpec;
 }
 
 /** Marker-file ecosystem detection — deterministic, no language→tool table. */
@@ -128,6 +144,8 @@ function runnerProbeArgv(runner: EcosystemRunner): string[] {
     case "pipx": return ["pipx", "--version"];
     case "cargo": return ["cargo", "--version"];
     case "bundle": return ["bundle", "--version"];
+    // `binary` is resolved (+ checksum-gated) ahead of the engine — no runner probe.
+    case "binary": return [];
   }
 }
 
@@ -138,6 +156,9 @@ function runnerPrefix(runner: EcosystemRunner, spec: string): string[] {
     case "pipx": return ["pipx", "run", "--spec", spec];
     case "cargo": return ["cargo", spec];
     case "bundle": return ["bundle", "exec", spec];
+    // For `binary` the resolved executable path is supplied via
+    // options.resolvedBinaries and used directly — this is never called.
+    case "binary": return [];
   }
 }
 
@@ -158,6 +179,12 @@ export interface AcquisitionEngineOptions {
   run?: AcquisitionRunner;
   /** Injectable logger; defaults to a no-op (degrade quietly to status records). */
   log?: (...args: unknown[]) => void;
+  /**
+   * Resolved executable path per `runner: "binary"` candidate id, produced by
+   * `resolveBinaryCandidates`. A binary candidate with no entry here is reported
+   * `not_resolved` (acquisition failed / was skipped) and never spawned.
+   */
+  resolvedBinaries?: Record<string, string>;
 }
 
 /**
@@ -264,17 +291,39 @@ export function runExternalAnalyzer(
     };
   }
 
-  // Run-safety gate: capability-probe the runner before the real spawn.
-  const gate = runSafetyGate(candidate, run, root);
-  if (!gate.ok) {
-    log("[f5] %s safety gate failed: %s", candidate.id, gate.reason);
-    return {
-      results: emptyResults(candidate.id),
-      status: { tool: candidate.id, resolved: false, status: "not_resolved", error: gate.reason },
-    };
+  // Resolve the argv prefix. A `binary` candidate is gated by binary-acquisition
+  // (PATH probe / checksum-verified download) AHEAD of the engine, so it skips the
+  // runner probe and uses its resolved executable path; everything else passes the
+  // capability-probe run-safety gate before its first real spawn.
+  let prefix: string[];
+  if (candidate.runner === "binary") {
+    const resolved = options.resolvedBinaries?.[candidate.id];
+    if (!resolved) {
+      log("[f5] %s binary not acquired", candidate.id);
+      return {
+        results: emptyResults(candidate.id),
+        status: {
+          tool: candidate.id,
+          resolved: false,
+          status: "not_resolved",
+          error: "binary not acquired (PATH probe failed and download unavailable)",
+        },
+      };
+    }
+    prefix = [resolved];
+  } else {
+    const gate = runSafetyGate(candidate, run, root);
+    if (!gate.ok) {
+      log("[f5] %s safety gate failed: %s", candidate.id, gate.reason);
+      return {
+        results: emptyResults(candidate.id),
+        status: { tool: candidate.id, resolved: false, status: "not_resolved", error: gate.reason },
+      };
+    }
+    prefix = runnerPrefix(candidate.runner, candidate.spec);
   }
 
-  const argv = candidate.buildArgv(runnerPrefix(candidate.runner, candidate.spec), root);
+  const argv = candidate.buildArgv(prefix, root);
   const command = argv.join(" ");
   let result: RunTrackedResult;
   try {
@@ -354,6 +403,65 @@ export function registerExternalAnalyzers(
     accepted.push(candidate);
   }
   return accepted;
+}
+
+export interface ResolvedBinaries {
+  /** id → resolved executable path/name, for candidates that resolved. */
+  resolvedBinaries: Record<string, string>;
+  /** One status per `binary` candidate that did NOT resolve (skipped/unavailable). */
+  unresolvedStatuses: ExternalAnalyzerToolStatus[];
+}
+
+/**
+ * Resolve (acquiring if absent) the executable for every `runner: "binary"`
+ * candidate, ahead of the synchronous engine. This is where the async network
+ * I/O + checksum gate lives. Owned tools and non-binary candidates are skipped.
+ * Never throws; an unresolved binary yields a `not_resolved`/`skipped` status so
+ * the caller can record the coverage gap (never silently dropped).
+ */
+export async function resolveBinaryCandidates(
+  candidates: ExternalAnalyzerCandidate[],
+  root: string,
+  options: AcquisitionEngineOptions & BinaryResolveOptions = {},
+): Promise<ResolvedBinaries> {
+  const resolvedBinaries: Record<string, string> = {};
+  const unresolvedStatuses: ExternalAnalyzerToolStatus[] = [];
+  for (const candidate of candidates) {
+    if (candidate.runner !== "binary" || !candidate.binary) continue;
+    if (OWNED_TOOL_IDS.has(candidate.id)) continue;
+    if (!candidate.detect(root)) {
+      unresolvedStatuses.push({
+        tool: candidate.id,
+        resolved: false,
+        status: "skipped",
+        error: "ecosystem not detected",
+      });
+      continue;
+    }
+    const setting = settingFor(options.analyzers, candidate.id);
+    const denied = admitSpawn(candidate, setting, options.consentToken);
+    if (denied) {
+      unresolvedStatuses.push({
+        tool: candidate.id,
+        resolved: false,
+        status: "skipped",
+        error: denied,
+      });
+      continue;
+    }
+    const resolution = await resolveBinary(candidate.binary, options);
+    if (resolution.command) {
+      resolvedBinaries[candidate.id] = resolution.command;
+    } else {
+      unresolvedStatuses.push({
+        tool: candidate.id,
+        resolved: false,
+        status: "not_resolved",
+        error: resolution.note ?? "binary unavailable",
+      });
+    }
+  }
+  return { resolvedBinaries, unresolvedStatuses };
 }
 
 export interface RunAllOutcome {
