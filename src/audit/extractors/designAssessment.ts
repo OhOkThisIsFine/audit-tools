@@ -1,7 +1,8 @@
 import type { Finding, UnitManifest } from "../types.js";
 import type { GraphBundle, CriticalFlowManifest, RiskRegister } from "audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
-import { deriveGraphSignals, type GraphSignals } from "./graphSignals.js";
+import { allGraphEdges, deriveGraphSignals, type GraphSignals } from "./graphSignals.js";
+import { GIT_CO_CHANGE_CATEGORY } from "./gitHistory.js";
 
 // ID generation is instance-scoped per build (no shared mutable module state),
 // so repeated/concurrent buildDesignAssessment calls produce independent,
@@ -283,6 +284,71 @@ function detectSeams(
   }));
 }
 
+/**
+ * Confidence floor for a hidden-coupling finding. Co-change confidence is
+ * `0.4 + 0.05*(commits-1)`, so 0.5 ⇒ files that changed together in ≥ 3 commits
+ * — a repeated coupling, not a one-off shared edit.
+ */
+const HIDDEN_COUPLING_CONFIDENCE_FLOOR = 0.5;
+/** Cap on hidden-coupling findings (strongest first) so a churny repo can't flood. */
+const HIDDEN_COUPLING_CAP = 10;
+
+/**
+ * Hidden coupling — files that repeatedly change together (git co-change) yet
+ * have NO structural edge (import / call / reference) connecting them. This is
+ * the coupling static analysis structurally cannot see: a temporal dependency
+ * with no code-level link, which the dependency graph misses entirely. Reads the
+ * `co_change` bucket (git-history mining, F6) and the structural edge set; a
+ * pair backed by any structural edge in either direction is NOT hidden (it is
+ * already visible to the graph) and is dropped. Empty when git-history was not
+ * mined (no `co_change` bucket).
+ */
+function detectHiddenCoupling(
+  graphBundle: GraphBundle,
+  nextId: () => string,
+): Finding[] {
+  const coChange = graphBundle.graphs[GIT_CO_CHANGE_CATEGORY];
+  if (!Array.isArray(coChange) || coChange.length === 0) return [];
+
+  // Structural adjacency (undirected): allGraphEdges excludes the co_change
+  // bucket, so this is purely import/call/reference connectivity.
+  const structural = new Set<string>();
+  for (const edge of allGraphEdges(graphBundle)) {
+    structural.add(`${edge.from} ${edge.to}`);
+    structural.add(`${edge.to} ${edge.from}`);
+  }
+
+  const hidden = coChange
+    .filter(
+      (edge) =>
+        typeof edge.from === "string" &&
+        typeof edge.to === "string" &&
+        (edge.confidence ?? 0) >= HIDDEN_COUPLING_CONFIDENCE_FLOOR &&
+        !structural.has(`${edge.from} ${edge.to}`),
+    )
+    // Strongest coupling first; ties broken by endpoints so id assignment is
+    // reproducible.
+    .sort(
+      (a, b) =>
+        (b.confidence ?? 0) - (a.confidence ?? 0) ||
+        a.from.localeCompare(b.from) ||
+        a.to.localeCompare(b.to),
+    )
+    .slice(0, HIDDEN_COUPLING_CAP);
+
+  return hidden.map((edge) => ({
+    id: nextId(),
+    title: `Hidden coupling: ${edge.from} ↔ ${edge.to}`,
+    category: "hidden_coupling",
+    severity: "medium",
+    confidence: "medium",
+    lens: "architecture" as const,
+    summary: `${edge.from} and ${edge.to} repeatedly change together (${edge.reason ?? "temporal coupling"}) but have no import/call/reference edge between them. This hidden coupling is invisible to static dependency analysis — a change to one likely needs a matching change to the other, with nothing in the code to signal it.`,
+    affected_files: [{ path: edge.from }, { path: edge.to }],
+    systemic: true,
+  }));
+}
+
 export function buildDesignAssessment(params: {
   unitManifest: UnitManifest;
   graphBundle: GraphBundle;
@@ -307,6 +373,9 @@ export function buildDesignAssessment(params: {
     ...detectComplexityHotspots(signals, nextId),
     ...detectDuplication(signals, nextId),
     ...detectSeams(signals, nextId),
+    // Appended last: consumes the git-history co_change bucket, so it adds no
+    // findings (and renumbers nothing) on a run without git-history mining.
+    ...detectHiddenCoupling(params.graphBundle, nextId),
   ];
 
   return {

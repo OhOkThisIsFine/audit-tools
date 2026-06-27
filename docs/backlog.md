@@ -123,8 +123,11 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   rather than replaces provenance so enrichment can't drop it), churn/authorship risk signals merge via
   `mergeAnalyzerRiskSignals`, and the churn × complexity compound — `risk_concentration`, the real risk
   concentration — is derived by `deriveRiskConcentration` (informational; never touches `risk_score`). Persisted as
-  the first-class `git_history.json` artifact. (Forward enhancement still open: an explicit design-assessment
-  "hidden coupling" finding that consumes the `co_change` bucket — the edges are persisted and ready.)
+  the first-class `git_history.json` artifact. The design-assessment **hidden-coupling** finding
+  (`detectHiddenCoupling`, v0.30.35) consumes the `co_change` bucket: co-change pairs (confidence ≥ 0.5, i.e.
+  ≥ 3 shared commits) with NO structural import/call/reference edge surface as `hidden_coupling` architecture
+  findings (strongest-first, capped at 10) — the temporal coupling static analysis cannot see. _Nothing open on
+  this track._
 
 - **Remaining deterministic-analyzer work (DEFERRED).** The external analyzers landed as
   fixture-validated **adapters** (parse + normalize + degrade-to-empty behind the seam); actually
