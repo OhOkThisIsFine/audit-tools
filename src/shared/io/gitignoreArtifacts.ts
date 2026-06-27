@@ -48,15 +48,10 @@ export type RepoVisibility = "private" | "public" | "unknown";
  * `.audit-code/` is the host renderer / install-asset + generated-skill tree;
  * the friction CAPTURE sidecar is matched at ANY depth UNDER THE ARTIFACT TREE
  * (an install-time-static, repo-relative any-depth glob built from the canonical
- * FRICTION_CAPTURE_DIRNAME path component, ANCHORED to `.audit-tools/`) so it is
- * ignored wherever the runtime writes it (`.audit-tools/audit/friction/`,
- * `.audit-tools/remediation/friction/`, any nested artifacts dir) without being
- * tied to a single fixed `.audit-tools/<one-segment>/` layout. The anchor is
- * load-bearing: a bare unanchored any-depth friction glob also matches the
- * `src/shared/friction/` SOURCE dir, which once silently dropped a new source file
- * from a node merge and broke the base build — the friction sidecar only ever lives
- * under the artifact tree, so anchoring to `.audit-tools/` ignores the sidecar
- * without shadowing source.
+ * FRICTION_CAPTURE_DIRNAME path component, ANCHORED to `.audit-tools/`).
+ * The anchor is load-bearing: a bare unanchored any-depth friction glob also
+ * matches the `src/shared/friction/` SOURCE dir, which once silently dropped a
+ * new source file from a node merge and broke the base build.
  */
 export const ALWAYS_IGNORE_PATTERNS: readonly string[] = [
   ".audit-code/",
@@ -64,17 +59,46 @@ export const ALWAYS_IGNORE_PATTERNS: readonly string[] = [
 ];
 
 /**
- * Visibility-conditional ignores: the canonical deliverables (imported from the
- * shared filename constants, never hardcoded literals) promoted into
- * `.audit-tools/`, plus the meta-audit reflections file appended under each
- * artifacts dir. Ignored only when the repo is public.
+ * Public-repo: ignore the WHOLE runtime artifact tree, deliverables included.
+ * A single blanket dir-ignore — nothing under `.audit-tools/` is published.
  */
-export const VISIBILITY_CONDITIONAL_PATTERNS: readonly string[] = [
-  `.audit-tools/${AUDIT_REPORT_FILENAME}`,
-  `.audit-tools/${AUDIT_FINDINGS_FILENAME}`,
-  `.audit-tools/${REMEDIATION_REPORT_FILENAME}`,
-  `.audit-tools/${REMEDIATION_OUTCOMES_FILENAME}`,
-  `.audit-tools/*/${AGENT_FEEDBACK_FILENAME}`,
+export const PUBLIC_TREE_IGNORE = ".audit-tools/" as const;
+
+/**
+ * The canonical deliverables (imported from the shared filename constants, never
+ * hardcoded literals) that a PRIVATE repo keeps TRACKED. Expressed as git
+ * RE-INCLUDE (`!`) lines layered over the runtime-tree ignore below.
+ *
+ * git constraint that drives this whole structure: a file CANNOT be re-included
+ * if a parent directory is excluded. So the runtime tree is ignored at the
+ * CONTENTS level (the per-level star globs in PRIVATE_TREE_PATTERNS) — never the
+ * dir itself — and the dirs holding tracked files are re-included so git
+ * descends into them.
+ */
+export const DELIVERABLE_REINCLUDES: readonly string[] = [
+  `!.audit-tools/${AUDIT_REPORT_FILENAME}`,
+  `!.audit-tools/${AUDIT_FINDINGS_FILENAME}`,
+  `!.audit-tools/${REMEDIATION_REPORT_FILENAME}`,
+  `!.audit-tools/${REMEDIATION_OUTCOMES_FILENAME}`,
+];
+
+/** Re-include of the per-artifacts-dir meta-audit reflections file (nested one level). */
+export const AGENT_FEEDBACK_REINCLUDE = `!.audit-tools/*/${AGENT_FEEDBACK_FILENAME}` as const;
+
+/**
+ * The private-repo selective ignore: ignore everything under `.audit-tools/`
+ * except the tracked deliverables + reflections. Ordering is load-bearing (git
+ * applies patterns top-to-bottom, last match wins):
+ *  1. ignore top-level contents; 2. re-include top-level deliverables;
+ *  3. re-include subdirs (so git descends); 4. ignore subdir contents;
+ *  5. re-include the nested reflections file.
+ */
+export const PRIVATE_TREE_PATTERNS: readonly string[] = [
+  ".audit-tools/*",
+  ...DELIVERABLE_REINCLUDES,
+  "!.audit-tools/*/",
+  ".audit-tools/*/*",
+  AGENT_FEEDBACK_REINCLUDE,
 ];
 
 /**
@@ -83,6 +107,18 @@ export const VISIBILITY_CONDITIONAL_PATTERNS: readonly string[] = [
  * TS detector and `scripts/postinstall.mjs` agree on the name + accepted values.
  */
 export const REPO_VISIBILITY_ENV = "AUDIT_TOOLS_REPO_VISIBILITY";
+
+/**
+ * Committed, in-repo visibility pin. A repo-root file (`.audit-tools-visibility`)
+ * whose contents are parsed by {@link parseVisibilityOverride} (`private`/`track`
+ * => tracked deliverables; `public`/`ignore` => ignored). This is the DURABLE
+ * way to force a decision that disagrees with `gh` detection — e.g. a public repo
+ * that deliberately tracks its deliverables. Unlike the env var it survives across
+ * machines/sessions and (being committed) keeps the generated block stable, so
+ * `ensure` is idempotent instead of fighting gh on every run. Authority sits
+ * between the env override and gh (see {@link detectRepoVisibility}).
+ */
+export const REPO_VISIBILITY_FILE = ".audit-tools-visibility";
 
 /**
  * Parse a raw operator-supplied visibility string into a concrete
@@ -116,17 +152,15 @@ export function renderGitignoreBlock(visibility: RepoVisibility): string {
   ];
   if (visibility === "public") {
     lines.push(
-      "# Deliverables + meta-audit reflections — ignored because this repo is public.",
-      ...VISIBILITY_CONDITIONAL_PATTERNS,
-    );
-  } else if (visibility === "unknown") {
-    lines.push(
-      "# Deliverables + meta-audit reflections kept tracked (visibility UNKNOWN —",
-      `# could not resolve; set ${REPO_VISIBILITY_ENV} or pass an override to pin it).`,
+      "# Whole runtime artifact tree ignored, deliverables included (public repo).",
+      PUBLIC_TREE_IGNORE,
     );
   } else {
     lines.push(
-      "# Deliverables + meta-audit reflections kept tracked (private repo).",
+      visibility === "unknown"
+        ? `# Runtime tree ignored; deliverables + meta-audit reflections kept TRACKED (visibility UNKNOWN — set ${REPO_VISIBILITY_ENV} to pin).`
+        : "# Runtime tree ignored; deliverables + meta-audit reflections kept TRACKED (private repo).",
+      ...PRIVATE_TREE_PATTERNS,
     );
   }
   lines.push(GITIGNORE_BLOCK_END);
@@ -168,13 +202,16 @@ export function mergeGitignoreBlock(existing: string, block: string): string {
  *  2. The `AUDIT_TOOLS_REPO_VISIBILITY` env config/override (read via the
  *     injected `readEnv`, default `process.env`), parsed by
  *     {@link parseVisibilityOverride}.
- *  3. The `gh repo view --json isPrivate` boolean, via the injected `runGh`.
- *  4. `unknown` — no authoritative signal resolved. Callers fall back to the
+ *  3. The committed `.audit-tools-visibility` repo-root file (via the injected
+ *     `readVisibilityFile`, default reads `<repoRoot>/.audit-tools-visibility`) —
+ *     the durable, cross-machine pin that survives gh re-detection.
+ *  4. The `gh repo view --json isPrivate` boolean, via the injected `runGh`.
+ *  5. `unknown` — no authoritative signal resolved. Callers fall back to the
  *     tracked default and warn; we do NOT pretend the repo is private.
  *
- * `runGh`/`readEnv` are injected so tests stub them (no live gh / env, fully
- * OS-agnostic). `runGh` returns the raw stdout of the gh call, or null on any
- * failure. NEVER throws.
+ * `runGh`/`readEnv`/`readVisibilityFile` are injected so tests stub them (no live
+ * gh / env / disk, fully OS-agnostic). Each returns null on any failure and the
+ * function NEVER throws.
  */
 export function detectRepoVisibility(params: {
   repoRoot: string;
@@ -184,6 +221,8 @@ export function detectRepoVisibility(params: {
   runGh?: (repoRoot: string) => string | null;
   /** Injected env reader (default `process.env`) so the config/override is testable. */
   readEnv?: (name: string) => string | undefined;
+  /** Injected reader for the committed pin file; default reads `<repoRoot>/.audit-tools-visibility`. */
+  readVisibilityFile?: (repoRoot: string) => string | null;
 }): RepoVisibility {
   // 1. Explicit operator override wins unconditionally.
   if (params.override === "private" || params.override === "public") {
@@ -198,7 +237,15 @@ export function detectRepoVisibility(params: {
     return envOverride;
   }
 
-  // 3. gh isPrivate boolean.
+  // 3. Committed in-repo pin (durable, survives gh re-detection).
+  const readVisibilityFile =
+    params.readVisibilityFile ?? defaultReadVisibilityFile;
+  const fileOverride = parseVisibilityOverride(readVisibilityFile(params.repoRoot));
+  if (fileOverride) {
+    return fileOverride;
+  }
+
+  // 4. gh isPrivate boolean.
   if (typeof params.runGh === "function") {
     let stdout: string | null = null;
     try {
@@ -218,8 +265,23 @@ export function detectRepoVisibility(params: {
     }
   }
 
-  // 4. Nothing authoritative resolved.
+  // 5. Nothing authoritative resolved.
   return "unknown";
+}
+
+/**
+ * Default reader for the committed `.audit-tools-visibility` pin. Reads
+ * `<repoRoot>/.audit-tools-visibility`, trimmed; returns null on any error
+ * (missing file, unreadable) so the detector degrades to the next tier. Never throws.
+ */
+function defaultReadVisibilityFile(repoRoot: string): string | null {
+  try {
+    const path = join(repoRoot, REPO_VISIBILITY_FILE);
+    if (!existsSync(path)) return null;
+    return readFileSync(path, "utf8").trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -236,6 +298,8 @@ export function ensureArtifactGitignore(params: {
   runGh?: (repoRoot: string) => string | null;
   /** Injected env reader (default `process.env`) so the config/override is testable. */
   readEnv?: (name: string) => string | undefined;
+  /** Injected reader for the committed pin file (default reads `<repoRoot>/.audit-tools-visibility`). */
+  readVisibilityFile?: (repoRoot: string) => string | null;
   /** Injected warn sink (default `console.warn`) so the unknown-visibility warning is testable. */
   warn?: (message: string) => void;
   /** Injected readers/writers (default to node:fs) for testability. */
@@ -255,6 +319,7 @@ export function ensureArtifactGitignore(params: {
     override: params.override,
     runGh: params.runGh,
     readEnv: params.readEnv,
+    readVisibilityFile: params.readVisibilityFile,
   });
 
   if (visibility === "unknown") {

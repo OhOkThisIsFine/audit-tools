@@ -2,7 +2,6 @@ node_modules/
 dist/
 *.tsbuildinfo
 .tmp/
-.audit-tools/
 .audit-artifacts/
 .audit-code/
 # Ignore local Claude state, but track the shared web SessionStart hook + its
@@ -46,15 +45,21 @@ dist/
 .agents/
 skills-lock.json
 
-# Test scratch — vitest test-plan artifacts written under tests/
-.test-plan-artifacts-*/
+# Test scratch — vitest test-plan artifacts written under tests/ (dash and no-dash
+# variants; the nested `.audit-tools/` under here is scratch, never a real deliverable).
+.test-plan-artifacts*/
 
 # >>> audit-tools managed ignores >>>
 # Generated/install artifacts — always ignored (build artifacts, not source).
 .audit-code/
 .audit-tools/**/friction/
-# Deliverables intended TRACKED (private repo) — but NOT yet effective: line 5
-# `.audit-tools/` blanket-ignores the whole dir and git can't re-include files
-# under an excluded directory. Needs a restructure (ignore `.audit-tools/*`
-# contents, re-include the deliverables). See docs/backlog.md.
+# Runtime tree ignored; deliverables + meta-audit reflections kept TRACKED (private repo).
+.audit-tools/*
+!.audit-tools/audit-report.md
+!.audit-tools/audit-findings.json
+!.audit-tools/remediation-report.md
+!.audit-tools/remediation-outcomes.json
+!.audit-tools/*/
+.audit-tools/*/*
+!.audit-tools/*/agent-feedback.jsonl
 # <<< audit-tools managed ignores <<<
