@@ -51,6 +51,9 @@ import {
 } from "../contractPipeline/artifactStore.js";
 import {
   readIntakeRiskSignal,
+  writeIntakeRiskSignal,
+  escalateRiskSignal,
+  decompositionRiskEvidence,
   adversarialDepthForTier,
   type AdversarialDepth,
 } from "../riskSignal.js";
@@ -1098,7 +1101,32 @@ export async function buildNextContractPipelineStep(
   // critic phases from the intake risk signal (the slice-2 shared signal — its
   // first behavioral consumer). Absent signal ⇒ undefined ⇒ full (fail-safe
   // toward more scrutiny, handled in the renderer). Floor is `light`, never off.
-  const riskSignal = await readIntakeRiskSignal(artifactsDir);
+  let riskSignal = await readIntakeRiskSignal(artifactsDir);
+
+  // Escalate-on-evidence (T1 slice 4 — optimistic-start). The run begins at the
+  // cheap intake tier; once decomposition reveals the work's actual shape (a
+  // cross-module seam, a risk subsystem the intake affected-file list missed),
+  // raise the tier so the adversarial-depth dial below tightens in THIS and every
+  // subsequent next-step. Idempotent + convergent: escalateRiskSignal no-ops once
+  // the tier already covers the evidence, so the signal is rewritten only on a
+  // real raise and never re-appends a duplicate rationale.
+  if (riskSignal) {
+    const modules = await readDecomposedModules(artifactsDir);
+    if (modules.length > 0) {
+      const evidence = decompositionRiskEvidence({
+        moduleCount: modules.length,
+        fileScopes: modules.flatMap((m) => m.file_scope),
+      });
+      if (evidence) {
+        const raised = escalateRiskSignal(riskSignal, evidence);
+        if (raised !== riskSignal) {
+          await writeIntakeRiskSignal(artifactsDir, raised);
+          riskSignal = raised;
+        }
+      }
+    }
+  }
+
   const adversarialDepth: AdversarialDepth | undefined = riskSignal
     ? adversarialDepthForTier(riskSignal.tier)
     : undefined;

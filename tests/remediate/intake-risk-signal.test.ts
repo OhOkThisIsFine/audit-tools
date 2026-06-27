@@ -15,6 +15,7 @@ import { join } from "node:path";
 import {
   computeIntakeRiskSignal,
   escalateRiskSignal,
+  decompositionRiskEvidence,
   ensureIntakeRiskSignal,
   readIntakeRiskSignal,
   writeIntakeRiskSignal,
@@ -129,6 +130,70 @@ describe("escalateRiskSignal", () => {
     const same = escalateRiskSignal(base, { tier: "low", reason: "trivial detail" });
     expect(same).toBe(base);
     expect(same.tier).toBe("high");
+  });
+});
+
+describe("decompositionRiskEvidence (slice 4 — optimistic-start escalate-on-evidence)", () => {
+  it("returns undefined for a single, benign module (no escalation)", () => {
+    const ev = decompositionRiskEvidence({
+      moduleCount: 1,
+      fileScopes: ["src/remediate/reporting/render.ts"],
+    });
+    expect(ev).toBeUndefined();
+  });
+
+  it("escalates to medium when decomposition produces more than one module", () => {
+    const ev = decompositionRiskEvidence({
+      moduleCount: 3,
+      fileScopes: ["src/remediate/reporting/a.ts", "src/remediate/reporting/b.ts"],
+    });
+    expect(ev?.tier).toBe("medium");
+    expect(ev?.reason).toContain("3 modules");
+  });
+
+  it("escalates to high when a module file_scope touches a risk subsystem", () => {
+    const ev = decompositionRiskEvidence({
+      moduleCount: 1,
+      fileScopes: ["src/remediate/steps/dispatch.ts"],
+    });
+    expect(ev?.tier).toBe("high");
+    expect(ev?.reason).toContain("dispatch");
+  });
+
+  it("prefers the high path-risk verdict over the medium module-count verdict", () => {
+    const ev = decompositionRiskEvidence({
+      moduleCount: 4,
+      fileScopes: ["src/shared/quota/scheduler.ts", "src/remediate/reporting/r.ts"],
+    });
+    expect(ev?.tier).toBe("high");
+  });
+
+  it("honors a configurable path-risk pattern set", () => {
+    const ev = decompositionRiskEvidence({
+      moduleCount: 1,
+      fileScopes: ["lib/payments/charge.ts"],
+      config: { pathRiskPatterns: [{ label: "payments", pattern: /payments/i }] },
+    });
+    expect(ev?.tier).toBe("high");
+    expect(ev?.reason).toContain("payments");
+  });
+
+  it("composes with escalateRiskSignal to raise a low intake signal, convergently", () => {
+    const base = computeIntakeRiskSignal({
+      affectedFiles: ["src/remediate/reporting/render.ts"],
+      goals: ["small refactor"],
+    });
+    expect(base.tier).toBe("low");
+    const ev = decompositionRiskEvidence({
+      moduleCount: 2,
+      fileScopes: ["src/remediate/reporting/a.ts", "src/remediate/reporting/b.ts"],
+    });
+    const raised = escalateRiskSignal(base, ev!);
+    expect(raised.tier).toBe("medium");
+    expect(raised.escalated).toBe(true);
+    // Re-applying the same evidence is a no-op (convergent — no duplicate rationale).
+    const again = escalateRiskSignal(raised, ev!);
+    expect(again).toBe(raised);
   });
 });
 
