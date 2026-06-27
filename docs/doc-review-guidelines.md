@@ -246,6 +246,28 @@ conversation. Keep the FYI ("what I auto-applied") outside the block.
 
 If there is nothing open, the block is present but empty (hook stays silent).
 
+### Clear-on-apply (between nightly runs)
+
+The nightly is the *primary* clearing mechanism: run N+1 re-scans `main`, sees a
+fixed item, and regenerates the block without it. But that leaves a window —
+between a fix landing on `main` and the next nightly — where every session-start
+re-surfaces the same already-resolved items (the nag observed across sessions on
+AF-1/D-5/D-6/D-7).
+
+So the surface hook also filters against a local **clear-on-apply ledger**
+(`.claude/hooks/doc-review-resolved.json`, keyed by the findings.md commit SHA).
+After the host applies or rejects items, it records them:
+
+```
+node .claude/hooks/doc-review-resolve.mjs <ID>...   # e.g. AF-1 D-5 D-6 D-7
+```
+
+Those IDs stop surfacing immediately — no waiting for the nightly, and no push to
+the `doc-review` branch (which would race the cloud routine that owns it). When
+the nightly regenerates findings.md the SHA changes, the old resolutions expire
+automatically, and any genuinely-new item surfaces. The ledger is committed so
+the disposition is shared across machines.
+
 ## Hard invariants
 
 - Verify from code, never from prose.
