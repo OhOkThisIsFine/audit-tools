@@ -69,8 +69,11 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
    ordinal-free, empty-frontier, dead-ended). _Nothing open on this track._
 
 ### T4 — Remaining host-friction inventory (cheap lean laps once T1 lands)
-8. **A-items (ambiguous backend direction → host had to pick):** A1 blocking-critique-in-non-rejected-verdict
-    should route to repair; A2 judge-independence unstated; A3 merged-base check command unpinned.
+8. **A-items (ambiguous backend direction → host had to pick):** A1 (blocking-critique→repair) + A2
+    (judge marked MANDATORY-independent) **shipped 0.30.29** (`evaluateCritiqueGate` + `INDEPENDENT_CRITIC_PHASES`
+    adds `judge`). **Remaining:** A3 merged-base check command unpinned — pin it, ideally by reusing the
+    final-gate / phase-boundary-gate pinned-command mechanism (not the hardcoded `mergedBaseCheckCommand`
+    default in `dispatch.ts`).
 9. **B-items (tool-should-decide):** B2 DAG node merge-vs-split left to host; B3 advisory-critique items have
     no structural slot; B4 host-invented timestamps; B5 remediation→main merge left to host. (B1 whole-backlog
     phase-cut is subsumed by T3.)
