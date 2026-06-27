@@ -35,7 +35,8 @@ import { probeQuotaSource } from "audit-tools/shared";
 import { withFileLock } from "audit-tools/shared";
 import { captureStepBoundaryFriction } from "audit-tools/shared";
 import { findingLead, renderFindingBadgeBody } from "audit-tools/shared";
-import { runShellCommand } from "../utils/commands.js";
+import { runShellCommand, runCommand } from "../utils/commands.js";
+import { mergedBaseCheckArgv } from "./gateCommands.js";
 import {
   AGENT_FEEDBACK_FILENAME,
   readJsonFile,
@@ -1239,13 +1240,16 @@ export interface AcceptNodeWorktreeParams {
    */
   writePaths?: string[];
   /**
-   * The cross-package check command run in the MAIN checkout AFTER the cherry-pick
-   * lands (INV-2): a RED check rolls the base back to its captured HEAD OID. Defaults
-   * to `npm run check`. Tests inject a deterministic pass/fail command (a `t.mock.module`
-   * seam is unusable under tsx/esm). Pass `null` to skip the merged-base check entirely
-   * (legacy lifecycle unit tests on a minimal repo with no check script).
+   * The cross-package check command (argv) run in the MAIN checkout AFTER the
+   * cherry-pick lands (INV-2): a RED check rolls the base back to its captured HEAD
+   * OID. When omitted, the command is PINNED — derived from the repo via
+   * `mergedBaseCheckArgv` (the `check`-layer of the tool-owned gate set), not a
+   * hardcoded string — and skipped (`null`) on a non-monorepo target. Tests inject a
+   * deterministic pass/fail argv (a `t.mock.module` seam is unusable under tsx/esm).
+   * Pass `null` to skip the merged-base check entirely (legacy lifecycle unit tests
+   * on a minimal repo with no check script).
    */
-  mergedBaseCheckCommand?: string | null;
+  mergedBaseCheckCommand?: string[] | null;
 }
 
 export interface AcceptNodeWorktreeResult {
@@ -1427,13 +1431,18 @@ export async function acceptNodeWorktree(
     // break). Run the REAL cross-package check in the main tree. On RED, roll the base
     // back to its captured OID bit-identically, scoped-clean the cherry-pick's emitted
     // untracked files, quarantine, and fail — never leave a broken base for the sibling.
-    const checkCommand =
-      params.mergedBaseCheckCommand === undefined ? "npm run check" : params.mergedBaseCheckCommand;
-    if (checkCommand !== null) {
+    const checkArgv =
+      params.mergedBaseCheckCommand === undefined
+        ? mergedBaseCheckArgv(root)
+        : params.mergedBaseCheckCommand;
+    if (checkArgv !== null) {
       // Paths the just-landed pick touched, so the scoped clean nukes only those
       // (never unrelated untracked state). Resolved BEFORE the check runs.
       const pickedFiles = gitEditedFilesForBranch(root, branch);
-      const check = runShellCommand(checkCommand, { cwd: root, encoding: "utf8" });
+      // argv via runCommand → runTracked scrubs CLAUDECODE / CLAUDE_CODE_* and applies
+      // the shared Windows `.cmd` wrapping — never `shell: true`.
+      const [checkCmd, ...checkArgs] = checkArgv;
+      const check = runCommand(checkCmd, checkArgs, { cwd: root, encoding: "utf8" });
       const checkFailed = !!check.error || check.status !== 0;
       if (checkFailed) {
         const detail = check.error
@@ -1456,7 +1465,7 @@ export async function acceptNodeWorktree(
           outcome: "error",
           verifyPassed,
           merged: false,
-          diagnostic: `$ ${checkCommand}\n${detail}`,
+          diagnostic: `$ ${checkArgv.join(" ")}\n${detail}`,
         };
       }
     }

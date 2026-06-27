@@ -31,6 +31,7 @@ import {
   COARSE_REBLOCK_BOUND,
   type GateRunner,
 } from "../../src/remediate/steps/nextStep.js";
+import { mergedBaseCheckArgv } from "../../src/remediate/steps/gateCommands.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type { RemediationBlock, RemediationItemState } from "../../src/remediate/state/types.js";
 import type { CapacityPool, ProviderSlot, SessionConfig } from "audit-tools/shared";
@@ -516,6 +517,18 @@ describe("INV-RS-10 / CE-001 / CE-002: tool-owned final gate command list", () =
   it("returns an EMPTY list for a non-audit-tools repo (scoped, not fabricated)", () => {
     expect(toolOwnedFinalGateCommands(join(__dirname, ".does-not-exist"))).toEqual([]);
     expect(isAuditToolsMonorepo(join(__dirname, ".does-not-exist"))).toBe(false);
+  });
+
+  it("A3: the merged-base check is PINNED to the gate's `check`-layer argv (not a hardcoded string)", () => {
+    // Single-sourced from the same derivation as the final gate — the per-node
+    // merged-base check (INV-2) and the final gate can never drift apart.
+    const checkLayer = toolOwnedFinalGateCommands(REPO_ROOT).find((c) => c.layer === "check");
+    expect(mergedBaseCheckArgv(REPO_ROOT)).toEqual(checkLayer?.argv);
+    expect(mergedBaseCheckArgv(REPO_ROOT)).toEqual(["npm", "run", "check"]);
+  });
+
+  it("A3: merged-base check is null (skipped) on a non-audit-tools target", () => {
+    expect(mergedBaseCheckArgv(join(__dirname, ".does-not-exist"))).toBeNull();
   });
 });
 

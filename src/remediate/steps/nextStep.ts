@@ -47,6 +47,11 @@ import { checkAffectedFileIntegrity } from "../utils/fileIntegrity.js";
 import { resolveIntakeStep } from "./intakeResolver.js";
 import { runCommand } from "../utils/commands.js";
 import {
+  isAuditToolsMonorepo,
+  toolOwnedFinalGateCommands,
+  type FinalGateCommandSpec,
+} from "./gateCommands.js";
+import {
   buildNextContractPipelineStep,
   shouldEnterContractPipeline,
   writePathASeedFromFindings,
@@ -1200,64 +1205,13 @@ export async function executeInProcessPartition(params: {
 // gate must converge deterministically, so they are surfaced for a separate
 // pass instead of being able to strand the run.
 
-/** One command in the tool-owned final gate. */
-export interface FinalGateCommandSpec {
-  argv: string[];
-  /** True for commands that neither build nor run a build-prepending test script. */
-  build_free: boolean;
-  /** The package this command's unit suite targets (single-flight key), if any. */
-  package_dir?: string;
-  /** Which layer of the floor this belongs to. */
-  layer: "build" | "check" | "unit";
-}
-
-/**
- * Whether `root` is the audit-tools monorepo — the repo the tool-owned final
- * gate's suite (INV-RS-10, literally the audit-tools build/check/per-package
- * commands) applies to. The gate's command list is audit-tools-specific by
- * design (this remediation run remediates the audit-tools monorepo), so it is
- * scoped to that structure rather than fabricated for an arbitrary target repo.
- */
-export function isAuditToolsMonorepo(root: string): boolean {
-  // Single-package layout: the three subsystems are inlined under src/ and both
-  // bins live at the repo root. (Name kept for continuity; it is now one package.)
-  return (
-    existsSync(join(root, "src", "shared")) &&
-    existsSync(join(root, "src", "audit")) &&
-    existsSync(join(root, "src", "remediate")) &&
-    existsSync(join(root, "audit-code.mjs")) &&
-    existsSync(join(root, "remediate-code.mjs"))
-  );
-}
-
-/**
- * The tool-owned final-gate command list (INV-RS-10) for the audit-tools
- * monorepo. Pure and deterministic so tests can assert: it is non-vacuous
- * (always > 0 build + check + unit commands) for the audit-tools structure,
- * never references `plan.test_command`, every UNIT command is build-free, and no
- * package's unit suite appears twice (single-flight — CE-001). Returns `[]` when
- * `root` is not the audit-tools monorepo (the audit-tools-specific suite is
- * inapplicable there — see `runToolOwnedFinalGate`).
- */
-export function toolOwnedFinalGateCommands(root: string): FinalGateCommandSpec[] {
-  if (!isAuditToolsMonorepo(root)) return [];
-  return [
-    { argv: ["npm", "run", "build"], build_free: false, layer: "build" },
-    { argv: ["npm", "run", "check"], build_free: true, layer: "check" },
-    // BUILD-FREE unit suites at the repo root (single package — no `npm -w`, never
-    // `npm test`, which prepends a build). node:test for shared+audit, vitest for remediate.
-    {
-      argv: ["node", "--import", "tsx/esm", "--test", "tests/shared/*.test.mjs", "tests/audit/*.test.mjs"],
-      build_free: true,
-      layer: "unit",
-    },
-    {
-      argv: ["npx", "vitest", "run"],
-      build_free: true,
-      layer: "unit",
-    },
-  ];
-}
+// `FinalGateCommandSpec`, `isAuditToolsMonorepo`, and `toolOwnedFinalGateCommands`
+// are single-sourced in the leaf module `gateCommands.ts` (so `dispatch.ts` can
+// derive the same pinned merged-base check without an import cycle). Imported above
+// for local use here and re-exported to preserve this module's public surface +
+// test imports.
+export { isAuditToolsMonorepo, toolOwnedFinalGateCommands };
+export type { FinalGateCommandSpec };
 
 /** A command's recorded outcome within a gate run. */
 export interface FinalGateCommandResult {
