@@ -467,30 +467,94 @@ describe("repair cycle: failing verdict triggers one targeted repair and re-deri
     expect(plan.findings[0].evidence).toContain("Satisfies contract obligation: O-1");
   });
 
-  it("proceeds with residual risks once the repair cap is exhausted", async () => {
+  it("escalates to the user when the judge re-accepts an already-addressed counterexample (stall)", async () => {
+    // The runaway backstop is generous; convergence — not a fixed count — is the
+    // normal terminator. A prior repair already addressed CE-1.
     await writeRawChainThroughJudge({ judge: NEEDS_REPAIR_JUDGE });
-    // Two prior repair iterations (distinct judge reports) already happened.
     await mkdir(contractPipelineDir(ARTIFACTS_DIR), { recursive: true });
     await writeFile(
       join(contractPipelineDir(ARTIFACTS_DIR), "repair-state.json"),
       JSON.stringify({
         schema_version: "remediate-code-contract-pipeline/repair-state/v1alpha1",
         repairs: [
-          { judge_hash: "prior-judge-1", target: "finalized_module_contracts", at: CREATED_AT },
-          { judge_hash: "prior-judge-2", target: "obligation_ledger", at: CREATED_AT },
+          {
+            judge_hash: "prior-judge-1",
+            target: "finalized_module_contracts",
+            at: CREATED_AT,
+            accepted_ce_ids: ["CE-1"],
+          },
         ],
         dag_regenerations: [],
       }),
       "utf8",
     );
-    expect(MAX_CONTRACT_REPAIR_ITERATIONS).toBe(2);
+
+    // The fresh judge re-accepts CE-1 (already addressed) with nothing new ⇒ stall.
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+
+    expect(step!.status).toBe("blocked");
+    const prompt = await promptOf(step!);
+    expect(prompt).toMatch(/Judge↔Repair Loop Did Not Converge/);
+    expect(prompt).toMatch(/CE-1/);
+    expect(existsSync(join(ARTIFACTS_DIR, "extracted-plan.json"))).toBe(false);
+  });
+
+  it("keeps repairing past the former N=2 cap while each round surfaces a NEW accepted counterexample", async () => {
+    // Three prior repairs already addressed CE-1..CE-3 (the old fixed cap would
+    // have cut this run off long ago). The fresh judge accepts a genuinely NEW
+    // counterexample, so the run must keep repairing (real convergence progress).
+    const NEW_CE = "CE-9";
+    await writeRawChainThroughJudge({
+      counterexamples: [
+        {
+          id: NEW_CE,
+          claim: "A newly discovered defect.",
+          reproduction_steps: ["Trigger the new path."],
+          expected: "Handled.",
+          actual: "Unhandled.",
+          violated_obligation_ids: ["O-1"],
+        },
+      ],
+      judge: {
+        ...NEEDS_REPAIR_JUDGE,
+        classifications: [
+          {
+            counterexample_id: NEW_CE,
+            classification: "accepted",
+            rationale: "A new real defect not addressed by any prior repair.",
+          },
+        ],
+      },
+    });
+    await mkdir(contractPipelineDir(ARTIFACTS_DIR), { recursive: true });
+    await writeFile(
+      join(contractPipelineDir(ARTIFACTS_DIR), "repair-state.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-contract-pipeline/repair-state/v1alpha1",
+        repairs: [
+          { judge_hash: "prior-1", target: "finalized_module_contracts", at: CREATED_AT, accepted_ce_ids: ["CE-1"] },
+          { judge_hash: "prior-2", target: "obligation_ledger", at: CREATED_AT, accepted_ce_ids: ["CE-2"] },
+          { judge_hash: "prior-3", target: "finalized_module_contracts", at: CREATED_AT, accepted_ce_ids: ["CE-3"] },
+        ],
+        dag_regenerations: [],
+      }),
+      "utf8",
+    );
+    // Three rounds already exceed the former N=2, yet still under the runaway backstop.
+    expect(MAX_CONTRACT_REPAIR_ITERATIONS).toBeGreaterThan(3);
 
     const step = await buildNextContractPipelineStep(STEP_OPTIONS);
 
+    expect(step!.status).not.toBe("blocked");
     const prompt = await promptOf(step!);
-    expect(prompt).toMatch(/Implementation Planning/);
-    expect(prompt).toMatch(/Repair Cap Reached/);
-    expect(prompt).toMatch(/residual risk/i);
+    expect(prompt).toMatch(/Contract Repair/);
+
+    // The new counterexample is now recorded as addressed.
+    const state = JSON.parse(
+      await readFile(join(contractPipelineDir(ARTIFACTS_DIR), "repair-state.json"), "utf8"),
+    );
+    expect(state.repairs).toHaveLength(4);
+    expect(state.repairs[3].accepted_ce_ids).toContain(NEW_CE);
   });
 });
 
