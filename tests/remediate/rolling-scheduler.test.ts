@@ -22,6 +22,7 @@ import {
   dependencyVerifiedComplete,
   isVerifiedCompleteStatus,
   rollingDependencyLevels,
+  phaseBoundaryToGate,
   driveRollingDispatch,
   toolOwnedFinalGateCommands,
   isAuditToolsMonorepo,
@@ -176,6 +177,87 @@ describe("INV-PHASE-01: phase barrier in rollingDependencyLevels", () => {
     const levels = rollingDependencyLevels(st);
     // Both phase 0; B2 still stacks behind its explicit dependency on B1.
     expect(levels.map((l) => l.map((b) => b.block_id))).toEqual([["B1"], ["B2"]]);
+  });
+});
+
+// ===========================================================================
+// T3 per-phase boundary gate — phaseBoundaryToGate predicate. A whole-repo
+// suite gate runs once at the UNTOUCHED entry of each phase P > 0.
+// ===========================================================================
+
+describe("phaseBoundaryToGate: per-phase whole-repo gate trigger (T3)", () => {
+  it("no gate at phase 0 entry (no preceding phase to validate)", () => {
+    const blocks = [phasedBlock("B0", ["F0"], 0), phasedBlock("B1", ["F1"], 1)];
+    const st = stateWith(blocks, {
+      F0: item("F0", "B0", "pending"),
+      F1: item("F1", "B1", "pending"),
+    });
+    expect(phaseBoundaryToGate(st)).toBeNull();
+  });
+
+  it("gates phase 1 entry once foundations (phase 0) are verified-complete", () => {
+    const blocks = [phasedBlock("B0", ["F0"], 0), phasedBlock("B1", ["F1"], 1)];
+    const st = stateWith(blocks, {
+      F0: item("F0", "B0", "resolved"),
+      F1: item("F1", "B1", "pending"),
+    });
+    expect(phaseBoundaryToGate(st)).toBe(1);
+  });
+
+  it("does NOT re-gate mid-phase — once a phase-P block has left pending", () => {
+    // Two phase-1 blocks; one already resolved → phase 1 is no longer pristine.
+    const blocks = [
+      phasedBlock("B0", ["F0"], 0),
+      phasedBlock("B1a", ["F1a"], 1),
+      phasedBlock("B1b", ["F1b"], 1),
+    ];
+    const st = stateWith(blocks, {
+      F0: item("F0", "B0", "resolved"),
+      F1a: item("F1a", "B1a", "resolved"),
+      F1b: item("F1b", "B1b", "pending"),
+    });
+    expect(phaseBoundaryToGate(st)).toBeNull();
+  });
+
+  it("gates the next boundary (phase 2) once phase 1 is fully verified", () => {
+    const blocks = [
+      phasedBlock("B0", ["F0"], 0),
+      phasedBlock("B1", ["F1"], 1),
+      phasedBlock("B2", ["F2"], 2),
+    ];
+    const st = stateWith(blocks, {
+      F0: item("F0", "B0", "resolved"),
+      F1: item("F1", "B1", "resolved"),
+      F2: item("F2", "B2", "pending"),
+    });
+    expect(phaseBoundaryToGate(st)).toBe(2);
+  });
+
+  it("ordinal-free (single-phase) plan never gates per-phase", () => {
+    const blocks = [block("B1", ["F1"]), block("B2", ["F2"], ["B1"])];
+    const st = stateWith(blocks, {
+      F1: item("F1", "B1", "resolved"),
+      F2: item("F2", "B2", "pending"),
+    });
+    expect(phaseBoundaryToGate(st)).toBeNull();
+  });
+
+  it("no gate when the frontier is empty (nothing pending)", () => {
+    const blocks = [phasedBlock("B0", ["F0"], 0), phasedBlock("B1", ["F1"], 1)];
+    const st = stateWith(blocks, {
+      F0: item("F0", "B0", "resolved"),
+      F1: item("F1", "B1", "resolved"),
+    });
+    expect(phaseBoundaryToGate(st)).toBeNull();
+  });
+
+  it("dead-ended consumer (skipped foundation) yields no frontier → no gate", () => {
+    const blocks = [phasedBlock("B0", ["F0"], 0), phasedBlock("B1", ["F1"], 1)];
+    const st = stateWith(blocks, {
+      F0: item("F0", "B0", "ignored"), // barrier can never clear
+      F1: item("F1", "B1", "pending"),
+    });
+    expect(phaseBoundaryToGate(st)).toBeNull();
   });
 });
 

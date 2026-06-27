@@ -573,6 +573,40 @@ export function rollingDependencyLevels(
   return levels;
 }
 
+/**
+ * The phase ordinal whose UNTOUCHED entry a whole-repo test-suite gate must run
+ * before, or null when no per-phase gate is due this pass (auto-phasing, T3 —
+ * the integration checkpoint layered on top of the INV-PHASE-01 ordering
+ * barrier). A gate is due iff:
+ *   - the eligible dispatch frontier this pass (`rollingDependencyLevels`, which
+ *     already applies the phase barrier, so the frontier is a SINGLE phase) is at
+ *     a phase P > 0 — i.e. a lower foundations phase precedes it (and, by the
+ *     barrier, is fully VERIFIED-complete now); AND
+ *   - phase P is at its untouched entry — every block at phase P still has all
+ *     its items `pending` (nothing dispatched yet).
+ * The second clause makes the predicate pure and reblock-safe: it fires exactly
+ * once as foundations→consumers crosses into P, never again on P's later
+ * intra-phase levels, and re-fires only if a coarse re-block reopens the lower
+ * phases and the frontier later re-climbs to P. Phase 0 (and an ordinal-free
+ * single-phase plan) is never gated here — there is no preceding phase to
+ * validate; the all-terminal tool-owned final gate (INV-RS-10) is the whole-repo
+ * checkpoint for the last/only phase.
+ */
+export function phaseBoundaryToGate(state: RemediationState): number | null {
+  const plan = state.plan;
+  const items = state.items;
+  if (!plan || !items) return null;
+  const frontier = rollingDependencyLevels(state).flat();
+  if (frontier.length === 0) return null;
+  const phaseOf = (b: RemediationBlock): number => b.phase_ordinal ?? 0;
+  const dispatchPhase = Math.min(...frontier.map(phaseOf));
+  if (dispatchPhase <= 0) return null;
+  const pristine = plan.blocks
+    .filter((b) => phaseOf(b) === dispatchPhase)
+    .every((b) => b.items.every((id) => items[id]?.status === "pending"));
+  return pristine ? dispatchPhase : null;
+}
+
 /** A single node's dispatch handler for the in-process rolling engine. */
 export type RollingNodeDispatcher = (
   block: RemediationBlock,
@@ -3480,6 +3514,91 @@ function hasResolvedItems(state: RemediationState): boolean {
   );
 }
 
+/**
+ * The tool-owned final gate (INV-RS-10) is disabled for this run — explicitly via
+ * `skipFinalGate` (test hermeticity) or `REMEDIATE_SKIP_FINAL_GATE`. Single-sourced
+ * so the all-terminal gate and the per-phase boundary gate agree.
+ */
+function finalGateDisabled(options: NextStepOptions): boolean {
+  return (
+    options.skipFinalGate === true ||
+    process.env.REMEDIATE_SKIP_FINAL_GATE === "1" ||
+    process.env.REMEDIATE_SKIP_FINAL_GATE === "true"
+  );
+}
+
+/**
+ * Whole-repo test-suite gate at a foundations→consumers PHASE BOUNDARY (T3). Runs
+ * the tool-owned final gate (INV-RS-10) INLINE before the next phase dispatches,
+ * so an integration break introduced by a just-completed foundations phase is
+ * caught — and attributed to that phase — before consumers are built on top of it
+ * (strictly earlier + more attributable than the all-terminal gate, whose red is
+ * unattributable across every phase). Reuses the all-terminal gate's coarse
+ * re-block + bounded auto-terminate machinery (INV-RS-09 / CE-003) and its shared
+ * sidecar so a no-human host converges deterministically.
+ *
+ * Returns a re-block / terminate transition when the gate is RED, or null when no
+ * gate is due this pass OR the gate is GREEN — in which case the caller proceeds
+ * to dispatch the phase.
+ */
+async function runPhaseBoundaryGate(ctx: {
+  root: string;
+  artifactsDir: string;
+  state: RemediationState;
+  options: NextStepOptions;
+  store: StateStore;
+  runLogger: RunLogger;
+}): Promise<RemediateOutcome | null> {
+  const { root, artifactsDir, state, options, store, runLogger } = ctx;
+  if (finalGateDisabled(options)) return null;
+  const phase = phaseBoundaryToGate(state);
+  if (phase == null) return null;
+
+  const sidecar = await readFinalGateSidecar(artifactsDir);
+  if (sidecar.terminated) return null; // bounded backstop already converged
+
+  const gateStart = Date.now();
+  runLogger.event({
+    phase: "next-step",
+    kind: "executor_start",
+    obligation: state.status,
+    note: `phase_boundary_gate phase=${phase}`,
+  });
+  const gate = await runToolOwnedFinalGate(root, { runner: options.finalGateRunner });
+  runLogger.event({
+    phase: "next-step",
+    kind: "executor_end",
+    obligation: state.status,
+    note: `phase_boundary_gate phase=${phase} passed=${gate.passed}`,
+    duration_ms: Date.now() - gateStart,
+  });
+  if (gate.passed) return null; // green → dispatch this phase
+
+  // RED at the boundary: the just-completed lower phases broke the whole-repo
+  // suite. Coarse re-block (INV-RS-09) + bounded auto-terminate (CE-003), exactly
+  // as the all-terminal gate — never the human triage prompt.
+  const failedCmd = gate.results.find((r) => !r.passed);
+  const summary = failedCmd
+    ? `Phase ${phase} boundary gate — failing command: ${failedCmd.argv.join(" ")} (exit ${failedCmd.exit_code}).`
+    : `Phase ${phase} boundary gate failed.`;
+  const decision = applyCoarseReblock(state, sidecar.count, summary);
+  await writeFinalGateSidecar(
+    artifactsDir,
+    decision.next_count,
+    decision.action === "terminal_blocked",
+  );
+  runLogger.event({
+    phase: "next-step",
+    kind: "outcome",
+    obligation: state.status,
+    note: `phase_boundary_coarse_reblock phase=${phase} action=${decision.action} count=${decision.next_count}`,
+  });
+  decision.state.status =
+    decision.action === "reattempt_all" ? "implementing" : "closing";
+  await store.saveState(decision.state);
+  return { kind: "transition", state: decision.state };
+}
+
 async function handleAllTerminalTransition(
   root: string,
   artifactsDir: string,
@@ -3488,10 +3607,7 @@ async function handleAllTerminalTransition(
   options: NextStepOptions,
   runLogger: RunLogger,
 ): Promise<RemediateOutcome> {
-  const gateDisabled =
-    options.skipFinalGate === true ||
-    process.env.REMEDIATE_SKIP_FINAL_GATE === "1" ||
-    process.env.REMEDIATE_SKIP_FINAL_GATE === "true";
+  const gateDisabled = finalGateDisabled(options);
 
   const sidecar = await readFinalGateSidecar(artifactsDir);
 
@@ -4393,6 +4509,18 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         // has left "pending".
         const pendingBlocks = implementableBlocks(s);
         if (pendingBlocks.length > 0) {
+          // Per-phase boundary gate (T3): before opening a phase P > 0, run the
+          // whole-repo suite once over the just-landed foundations. A red re-blocks
+          // here (transition); green / no-boundary falls through to dispatch.
+          const gated = await runPhaseBoundaryGate({
+            root,
+            artifactsDir,
+            state: s,
+            options,
+            store,
+            runLogger,
+          });
+          if (gated) return gated;
           return buildImplementDispatchStep({
             root,
             artifactsDir,
