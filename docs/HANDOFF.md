@@ -34,14 +34,10 @@ on all downstream work, and is the "redesign before scheduled autonomy" the nort
 ([[autonomous-pipeline-capstone-spec]]). So: loop-infra (T1–T2) → headline capability (T3) → cheap
 ergonomics (T4) → product/analysis tracks (T5) → deferred (T6).
 
-> **Shipped 2026-06-26 (this session), removed from the ordering:** T0 stale-pipeline-state reconcile
-> (0.30.19), T1 **Slice 1** degenerate-phase collapse (0.30.20), and T1 **Slice 2** shared intake
-> risk/complexity signal (`riskSignal.ts`, computed+persisted at intake; no dial consumes it yet — that
-> is Slice 3/4). Detail in `git log` + the backlog SHIPPED notes — do not re-action.
-
 ### T1 — Make the loop cheaper: self-scaling pipeline (HIGHEST compounding leverage)
 Design of record: [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md)
-([[self-scaling-pipeline-not-forked-paths]]). Slices 1 & 2 shipped; remaining slices lowest-risk-first:
+([[self-scaling-pipeline-not-forked-paths]]). Slices 1 & 2 (degenerate-phase collapse + shared intake risk
+signal) shipped; remaining slices lowest-risk-first:
 1. **Slice 3 — adversarial-depth dial** *(NEXT)*: critique/counterexample scale light-inline → full-independent by
    the signal; **floor = light, never zero**; soften the existing structured-audit `leanFastPath`
    skip-everything path to *light review* (audit findings are not blindly trusted).
@@ -69,12 +65,12 @@ Design of record: [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-
 ### T4 — Remaining host-friction inventory (cheap lean laps once T1 lands)
 8. **A-items (ambiguous backend direction → host had to pick):** A1 blocking-critique-in-non-rejected-verdict
     should route to repair; A2 judge-independence unstated; A3 merged-base check command unpinned.
-9. **B-items (tool-should-decide):** B1 whole-backlog intake forces a manual phase-cut (→ subsumed by T3);
-    B2 DAG node merge-vs-split left to host; B3 advisory-critique items have no structural slot; B4
-    host-invented timestamps; B5 remediation→main merge left to host.
+9. **B-items (tool-should-decide):** B2 DAG node merge-vs-split left to host; B3 advisory-critique items have
+    no structural slot; B4 host-invented timestamps; B5 remediation→main merge left to host. (B1 whole-backlog
+    phase-cut is subsumed by T3.)
 10. **C/D residue:** C2 host-authored boilerplate for trivial scope (→ subsumed by T1); C3 unchanged
-    obligations re-authored each repair round (no diff-carry); C4 obligation-set differs across phases (the
-    `OBL-…-contract` surprise); D1 CE-006 negative-scoping reports only after write (pre-write anchor hint).
+    obligations re-authored each repair round (no diff-carry); D1 CE-006 negative-scoping reports only after
+    write (pre-write anchor hint); D3 validate-artifact in-place re-wrap (write-plain-then-it-wraps hazard).
     *(all in backlog → "Contract-pipeline host-friction inventory")*
 11. **Selective-deepening task_id convergence** — partial fix needs a live deepening-capable run to validate.
 

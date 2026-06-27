@@ -518,9 +518,15 @@ export {
 export type { RepoVisibility } from "./io/gitignoreArtifacts.js";
 export {
   ALWAYS_IGNORE_PATTERNS,
-  VISIBILITY_CONDITIONAL_PATTERNS,
+  PUBLIC_TREE_IGNORE,
+  DELIVERABLE_REINCLUDES,
+  AGENT_FEEDBACK_REINCLUDE,
+  PRIVATE_TREE_PATTERNS,
   GITIGNORE_BLOCK_BEGIN,
   GITIGNORE_BLOCK_END,
+  REPO_VISIBILITY_ENV,
+  REPO_VISIBILITY_FILE,
+  parseVisibilityOverride,
   renderGitignoreBlock,
   mergeGitignoreBlock,
   detectRepoVisibility,

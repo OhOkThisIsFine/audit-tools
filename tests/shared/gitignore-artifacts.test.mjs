@@ -1,9 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const {
   ALWAYS_IGNORE_PATTERNS,
-  VISIBILITY_CONDITIONAL_PATTERNS,
+  PUBLIC_TREE_IGNORE,
+  DELIVERABLE_REINCLUDES,
+  AGENT_FEEDBACK_REINCLUDE,
+  PRIVATE_TREE_PATTERNS,
   renderGitignoreBlock,
   mergeGitignoreBlock,
   detectRepoVisibility,
@@ -13,6 +20,11 @@ const {
   GITIGNORE_BLOCK_BEGIN,
   GITIGNORE_BLOCK_END,
 } = await import("../../src/shared/io/gitignoreArtifacts.ts");
+
+/** Exact-line membership (avoids `.audit-tools/` substring-matching `.audit-tools/*`). */
+function blockLines(block) {
+  return block.split("\n").map((l) => l.trim());
+}
 
 // readEnv stub that resolves nothing (no env config/override) — keeps the
 // detector from reading the real process.env in tests.
@@ -49,12 +61,75 @@ test("always-ignore patterns present for BOTH private and public", () => {
   }
 });
 
-test("deliverables + reflections ABSENT for private, PRESENT for public", () => {
-  const priv = renderGitignoreBlock("private");
-  const pub = renderGitignoreBlock("public");
-  for (const pat of VISIBILITY_CONDITIONAL_PATTERNS) {
-    assert.ok(!priv.includes(pat), `private must NOT ignore ${pat}`);
-    assert.ok(pub.includes(pat), `public must ignore ${pat}`);
+test("private re-includes deliverables + reflections over a contents-level ignore; public blanket-ignores the tree", () => {
+  const priv = blockLines(renderGitignoreBlock("private"));
+  const pub = blockLines(renderGitignoreBlock("public"));
+
+  // Private: the runtime tree is ignored at the CONTENTS level (never the dir
+  // itself, else re-includes can't work), and every deliverable + reflections
+  // file is re-included.
+  assert.ok(priv.includes(".audit-tools/*"), "private ignores top-level contents");
+  assert.ok(priv.includes(".audit-tools/*/*"), "private ignores subdir contents");
+  assert.ok(!priv.includes(PUBLIC_TREE_IGNORE), "private must NOT blanket-ignore the dir");
+  for (const reinclude of [...DELIVERABLE_REINCLUDES, AGENT_FEEDBACK_REINCLUDE]) {
+    assert.ok(priv.includes(reinclude), `private re-includes ${reinclude}`);
+  }
+
+  // Public: a single blanket dir-ignore, no re-includes.
+  assert.ok(pub.includes(PUBLIC_TREE_IGNORE), "public blanket-ignores the tree");
+  for (const reinclude of [...DELIVERABLE_REINCLUDES, AGENT_FEEDBACK_REINCLUDE]) {
+    assert.ok(!pub.includes(reinclude), `public must NOT re-include ${reinclude}`);
+  }
+});
+
+test("private re-include chain actually tracks deliverables under real git (and ignores runtime state)", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "gi-real-"));
+  try {
+    const git = (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+    git("init", "-q");
+    for (const d of ["audit/steps", "remediation"]) mkdirSync(path.join(dir, ".audit-tools", d), { recursive: true });
+    const files = [
+      ".audit-tools/state.json",
+      ".audit-tools/audit-report.md",
+      ".audit-tools/audit-findings.json",
+      ".audit-tools/remediation-report.md",
+      ".audit-tools/remediation-outcomes.json",
+      ".audit-tools/audit/agent-feedback.jsonl",
+      ".audit-tools/audit/audit_results.jsonl",
+      ".audit-tools/audit/steps/current-step.json",
+      ".audit-tools/remediation/agent-feedback.jsonl",
+    ];
+    for (const f of files) writeFileSync(path.join(dir, f), "x");
+    writeFileSync(path.join(dir, ".gitignore"), renderGitignoreBlock("private") + "\n");
+    const isIgnored = (f) => {
+      try {
+        execFileSync("git", ["-C", dir, "check-ignore", "-q", f]);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    // Tracked (NOT ignored): the 4 deliverables + both reflections files.
+    for (const f of [
+      ".audit-tools/audit-report.md",
+      ".audit-tools/audit-findings.json",
+      ".audit-tools/remediation-report.md",
+      ".audit-tools/remediation-outcomes.json",
+      ".audit-tools/audit/agent-feedback.jsonl",
+      ".audit-tools/remediation/agent-feedback.jsonl",
+    ]) {
+      assert.ok(!isIgnored(f), `${f} must be tracked (not ignored)`);
+    }
+    // Ignored: runtime state.
+    for (const f of [
+      ".audit-tools/state.json",
+      ".audit-tools/audit/audit_results.jsonl",
+      ".audit-tools/audit/steps/current-step.json",
+    ]) {
+      assert.ok(isIgnored(f), `${f} must be ignored`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -80,7 +155,11 @@ test("patterns are OS-agnostic — forward slashes, LF only", () => {
   const block = renderGitignoreBlock("public");
   assert.ok(!block.includes("\\"), "no backslashes");
   assert.ok(!block.includes("\r"), "no CR");
-  for (const pat of [...ALWAYS_IGNORE_PATTERNS, ...VISIBILITY_CONDITIONAL_PATTERNS]) {
+  for (const pat of [
+    ...ALWAYS_IGNORE_PATTERNS,
+    PUBLIC_TREE_IGNORE,
+    ...PRIVATE_TREE_PATTERNS,
+  ]) {
     assert.ok(!pat.includes("\\"), `${pat} uses forward slashes`);
   }
 });
@@ -115,6 +194,62 @@ test("detector: missing/failing gh degrades to UNKNOWN (never silent private), n
   assert.equal(
     detectRepoVisibility({ repoRoot: REPO, runGh: () => "not json", readEnv: noEnv }),
     "unknown",
+  );
+});
+
+test("detector: committed visibility file pins the decision over gh", () => {
+  // Public repo per gh, but the committed file forces track (private).
+  assert.equal(
+    detectRepoVisibility({
+      repoRoot: REPO,
+      readEnv: noEnv,
+      readVisibilityFile: () => "track",
+      runGh: stubGh(false),
+    }),
+    "private",
+  );
+  // File `ignore` => public even if gh says private.
+  assert.equal(
+    detectRepoVisibility({
+      repoRoot: REPO,
+      readEnv: noEnv,
+      readVisibilityFile: () => "ignore",
+      runGh: stubGh(true),
+    }),
+    "public",
+  );
+  // Unrecognized / absent file => falls through to gh.
+  assert.equal(
+    detectRepoVisibility({
+      repoRoot: REPO,
+      readEnv: noEnv,
+      readVisibilityFile: () => null,
+      runGh: stubGh(false),
+    }),
+    "public",
+  );
+});
+
+test("detector authority order: override > env > file > gh > unknown", () => {
+  // env beats the committed file.
+  assert.equal(
+    detectRepoVisibility({
+      repoRoot: REPO,
+      readEnv: (n) => (n === REPO_VISIBILITY_ENV ? "public" : undefined),
+      readVisibilityFile: () => "track",
+      runGh: stubGh(true),
+    }),
+    "public",
+  );
+  // file beats gh.
+  assert.equal(
+    detectRepoVisibility({
+      repoRoot: REPO,
+      readEnv: noEnv,
+      readVisibilityFile: () => "track",
+      runGh: stubGh(false),
+    }),
+    "private",
   );
 });
 
@@ -193,8 +328,11 @@ test("unknown visibility => tracked default + LOUD warning", () => {
     ...fs,
   });
   assert.equal(res.visibility, "unknown");
-  // Tracked default: conditional patterns are NOT ignored.
-  for (const pat of VISIBILITY_CONDITIONAL_PATTERNS) assert.ok(!fs.read().includes(pat));
+  // Tracked default: deliverables re-included, not blanket-ignored.
+  for (const reinclude of [...DELIVERABLE_REINCLUDES, AGENT_FEEDBACK_REINCLUDE]) {
+    assert.ok(fs.read().includes(reinclude));
+  }
+  assert.ok(!blockLines(fs.read()).includes(PUBLIC_TREE_IGNORE));
   // Always-ignore still present.
   for (const pat of ALWAYS_IGNORE_PATTERNS) assert.ok(fs.read().includes(pat));
   // Loud warning emitted, naming the env override.
@@ -207,13 +345,17 @@ test("ensure: private repo tracks deliverables, public ignores them", () => {
   const privRes = ensureArtifactGitignore({ repoRoot: REPO, runGh: stubGh(true), readEnv: noEnv, ...priv });
   assert.equal(privRes.visibility, "private");
   for (const pat of ALWAYS_IGNORE_PATTERNS) assert.ok(priv.read().includes(pat));
-  for (const pat of VISIBILITY_CONDITIONAL_PATTERNS) assert.ok(!priv.read().includes(pat));
+  for (const reinclude of [...DELIVERABLE_REINCLUDES, AGENT_FEEDBACK_REINCLUDE]) {
+    assert.ok(priv.read().includes(reinclude), `private re-includes ${reinclude}`);
+  }
+  assert.ok(!blockLines(priv.read()).includes(PUBLIC_TREE_IGNORE));
 
   const pub = memFs();
   const pubRes = ensureArtifactGitignore({ repoRoot: REPO, runGh: stubGh(false), readEnv: noEnv, ...pub });
   assert.equal(pubRes.visibility, "public");
-  for (const pat of [...ALWAYS_IGNORE_PATTERNS, ...VISIBILITY_CONDITIONAL_PATTERNS]) {
-    assert.ok(pub.read().includes(pat));
+  assert.ok(blockLines(pub.read()).includes(PUBLIC_TREE_IGNORE));
+  for (const reinclude of [...DELIVERABLE_REINCLUDES, AGENT_FEEDBACK_REINCLUDE]) {
+    assert.ok(!pub.read().includes(reinclude));
   }
 });
 
@@ -221,7 +363,10 @@ test("ensure: override flips the conditional decision", () => {
   // gh says public but operator overrides to private => deliverables tracked.
   const fs = memFs();
   ensureArtifactGitignore({ repoRoot: REPO, override: "private", runGh: stubGh(false), readEnv: noEnv, ...fs });
-  for (const pat of VISIBILITY_CONDITIONAL_PATTERNS) assert.ok(!fs.read().includes(pat));
+  for (const reinclude of [...DELIVERABLE_REINCLUDES, AGENT_FEEDBACK_REINCLUDE]) {
+    assert.ok(fs.read().includes(reinclude));
+  }
+  assert.ok(!blockLines(fs.read()).includes(PUBLIC_TREE_IGNORE));
 });
 
 test("ensure: re-run is idempotent (no duplicate blocks)", () => {
@@ -244,7 +389,11 @@ test("ensure: visibility change replaces block in place, never duplicates", () =
   ensureArtifactGitignore({ repoRoot: REPO, runGh: stubGh(false), readEnv: noEnv, ...fs }); // public
   const content = fs.read();
   assert.equal(content.split(GITIGNORE_BLOCK_BEGIN).length - 1, 1);
-  for (const pat of VISIBILITY_CONDITIONAL_PATTERNS) assert.ok(content.includes(pat));
+  // Now public: the blanket tree-ignore is present, the private re-includes gone.
+  assert.ok(blockLines(content).includes(PUBLIC_TREE_IGNORE));
+  for (const reinclude of [...DELIVERABLE_REINCLUDES, AGENT_FEEDBACK_REINCLUDE]) {
+    assert.ok(!content.includes(reinclude));
+  }
 });
 
 test("merge: never clobbers user lines outside markers", () => {
