@@ -1,6 +1,10 @@
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
-import { remediationBranchName, listQuarantinedCommits } from "../steps/dispatch.js";
+import {
+  remediationBranchName,
+  listQuarantinedCommits,
+  readRemediationBaseBranch,
+} from "../steps/dispatch.js";
 import { dirname, extname, isAbsolute, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import {
@@ -507,6 +511,42 @@ export function executeClosingAction(
     run("npm", ["publish"]);
   } else if (action === "tag") {
     run("git", ["tag", "auto-remediation"]);
+  } else if (action === "merge-to-base") {
+    const runId = state.plan?.plan_id ?? "";
+    const branch = remediationBranchName(runId);
+    const base = readRemediationBaseBranch(options.artifactsDir);
+    // No recorded base (detached HEAD at launch, or a branch from a prior run):
+    // never guess a merge target — leave everything untouched and tell the host.
+    if (!base) {
+      return {
+        contract_version: "remediate-code-closing-result/v1alpha1",
+        action,
+        status: "skipped",
+        commands: [
+          {
+            command: ["git", "merge", "--no-ff", branch],
+            exit_code: 1,
+            stderr: `No recorded base branch for this run — merge \`${branch}\` into your base branch manually.`,
+          },
+        ],
+      };
+    }
+    // Check out the base and attempt a no-ff merge so the run lands as one
+    // revertable merge commit. On any conflict, abort and restore the
+    // remediation branch — the base branch is left exactly as it was.
+    if (run("git", ["checkout", base])) {
+      const merged = run("git", [
+        "merge",
+        "--no-ff",
+        branch,
+        "-m",
+        `Merge remediation run ${runId}`,
+      ]);
+      if (!merged) {
+        run("git", ["merge", "--abort"]);
+        run("git", ["checkout", branch]);
+      }
+    }
   } else if (action === "custom" && state.closing_plan!.custom_command?.length) {
     run(state.closing_plan!.custom_command[0], state.closing_plan!.custom_command.slice(1));
   }
@@ -778,7 +818,11 @@ function buildRemediationReportMarkdown(
   // node actually committed a change — a no-change/skip-only run leaves no commits.
   if (entries.resolved.length > 0) {
     const branch = remediationBranchName(state.plan?.plan_id ?? "");
-    reportContent += `## Review\n\nAll code changes were applied on the dedicated branch \`${branch}\` — your base branch was left untouched. Review the diff and merge \`${branch}\` into your base branch.\n\n`;
+    const mergedToBase =
+      closingResult.action === "merge-to-base" && closingResult.status === "success";
+    reportContent += mergedToBase
+      ? `## Review\n\nAll code changes were applied on \`${branch}\` and merged into your base branch as one \`--no-ff\` merge commit (\`Merge remediation run ${state.plan?.plan_id ?? ""}\`). Review the diff; revert the whole run with \`git revert -m 1 <merge-commit>\` if needed.\n\n`
+      : `## Review\n\nAll code changes were applied on the dedicated branch \`${branch}\` — your base branch was left untouched. Review the diff and merge \`${branch}\` into your base branch (or re-run with the \`merge-to-base\` closing action to land it automatically).\n\n`;
   }
 
   reportContent += `## Resolved — Changed Files\n\n`;

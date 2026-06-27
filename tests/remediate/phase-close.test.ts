@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { runClosePhase, collectStagingFiles, buildOutcomeCoverageLedger } from "../../src/remediate/phases/close.js";
+import { runClosePhase, collectStagingFiles, buildOutcomeCoverageLedger, executeClosingAction } from "../../src/remediate/phases/close.js";
+import { remediationBaseBranchPath } from "../../src/remediate/steps/dispatch.js";
 import { readFile, rm, mkdir, writeFile as writeFileAsync } from "node:fs/promises";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -530,6 +531,74 @@ describe("runClosePhase", () => {
         await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
       );
       expect(jsonReport.closing_result.status).toBe("failed");
+    });
+  });
+
+  describe("B5: merge-to-base closing action", () => {
+    function currentBranch(): string {
+      return execSync("git rev-parse --abbrev-ref HEAD", { cwd: REPO_DIR })
+        .toString()
+        .trim();
+    }
+    function setupRemediationBranch(): { base: string } {
+      const base = currentBranch();
+      execSync("git checkout -b remediation/P1", { cwd: REPO_DIR });
+      writeFileSync(join(REPO_DIR, "fix.txt"), "remediation work");
+      execSync("git add . && git commit -m fix", { cwd: REPO_DIR });
+      return { base };
+    }
+
+    it("clean run: --no-ff merges into the recorded base and leaves HEAD on base", () => {
+      const { base } = setupRemediationBranch();
+      writeFileSync(remediationBaseBranchPath(TEST_DIR), JSON.stringify({ base_branch: base }));
+      // End-of-run state: checked out on the remediation branch.
+      const result = executeClosingAction(
+        makeState({ closing_plan: { action: "merge-to-base", pre_authorized: true } }),
+        BASE_OPTIONS,
+      );
+      expect(result.status).toBe("success");
+      expect(currentBranch()).toBe(base);
+      // The fix landed on base as one revertable merge commit.
+      expect(existsSync(join(REPO_DIR, "fix.txt"))).toBe(true);
+      const merges = execSync("git log --merges --oneline", { cwd: REPO_DIR }).toString().trim();
+      expect(merges).toContain("Merge remediation run P1");
+    });
+
+    it("no recorded base: skips, leaves everything untouched, tells host to merge manually", () => {
+      setupRemediationBranch();
+      // No sidecar written.
+      const result = executeClosingAction(
+        makeState({ closing_plan: { action: "merge-to-base", pre_authorized: true } }),
+        BASE_OPTIONS,
+      );
+      expect(result.status).toBe("skipped");
+      expect(currentBranch()).toBe("remediation/P1");
+      expect(result.commands[0]?.stderr).toContain("manually");
+    });
+
+    it("conflict: aborts, restores the remediation branch, base left exactly as it was", () => {
+      const base = currentBranch();
+      // Diverge: base and remediation both edit the same line.
+      writeFileSync(join(REPO_DIR, "shared.txt"), "orig");
+      execSync("git add . && git commit -m orig", { cwd: REPO_DIR });
+      execSync("git checkout -b remediation/P1", { cwd: REPO_DIR });
+      writeFileSync(join(REPO_DIR, "shared.txt"), "remediation");
+      execSync("git add . && git commit -m rem", { cwd: REPO_DIR });
+      execSync(`git checkout ${base}`, { cwd: REPO_DIR });
+      writeFileSync(join(REPO_DIR, "shared.txt"), "base-moved");
+      execSync("git add . && git commit -m base", { cwd: REPO_DIR });
+      execSync("git checkout remediation/P1", { cwd: REPO_DIR });
+      writeFileSync(remediationBaseBranchPath(TEST_DIR), JSON.stringify({ base_branch: base }));
+
+      const result = executeClosingAction(
+        makeState({ closing_plan: { action: "merge-to-base", pre_authorized: true } }),
+        BASE_OPTIONS,
+      );
+      expect(result.status).toBe("failed");
+      // Restored onto the remediation branch; base's content is unchanged.
+      expect(currentBranch()).toBe("remediation/P1");
+      execSync(`git checkout ${base}`, { cwd: REPO_DIR });
+      expect(readFileSync(join(REPO_DIR, "shared.txt")).toString()).toBe("base-moved");
     });
   });
 

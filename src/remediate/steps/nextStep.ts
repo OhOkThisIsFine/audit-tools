@@ -3882,7 +3882,8 @@ async function buildConfirmIntentStep(ctx: {
       ? `\`\`\`json\n${JSON.stringify(draft.filters, null, 2)}\n\`\`\``
       : "(none — remediating all findings)";
 
-    const closingOptions = "`commit` or `none`";
+    const closingOptions =
+      "`commit`, `merge-to-base` (land the run as one revertable `--no-ff` merge into the branch you launched from; safe — aborts and leaves the base untouched on any conflict), or `none`";
 
     prompt = `
 # Confirm Remediation Scope and Intent
