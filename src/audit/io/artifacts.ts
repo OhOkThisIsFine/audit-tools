@@ -17,7 +17,7 @@ import type {
 } from "../types.js";
 import type { AuditState } from "../types/auditState.js";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
-import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, GraphBundle, RiskRegister, SurfaceManifest, IntentCheckpoint, GitHistory, SecretScan } from "audit-tools/shared";
+import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, GraphBundle, RiskRegister, SurfaceManifest, IntentCheckpoint, GitHistory } from "audit-tools/shared";
 import type { ProviderConfirmationResult } from "audit-tools/shared";
 import { PROVIDER_CONFIRMATION_RESULT_VERSION } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
@@ -115,7 +115,6 @@ type ArtifactPayloadMap = {
   flow_coverage: FlowCoverageManifest;
   risk_register: RiskRegister;
   git_history: GitHistory;
-  secrets: SecretScan;
   design_assessment: DesignAssessment;
   analyzer_capability: AnalyzerCapabilityRecord;
 
@@ -249,7 +248,6 @@ export const ARTIFACT_DEFINITIONS = {
   flow_coverage: jsonArtifact("flow_coverage.json", "analysis"),
   risk_register: jsonArtifact("risk_register.json", "analysis"),
   git_history: jsonArtifact("git_history.json", "analysis"),
-  secrets: jsonArtifact("secrets.json", "analysis"),
   design_assessment: jsonArtifact("design_assessment.json", "analysis"),
   analyzer_capability: jsonArtifact("analyzer_capability.json", "analysis"),
   scope: jsonArtifact("scope.json", "execution"),

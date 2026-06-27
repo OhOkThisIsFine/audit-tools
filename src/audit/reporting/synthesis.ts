@@ -182,8 +182,6 @@ export function buildAuditReportModel(params: {
   runtimeValidationTaskManifest?: RuntimeValidationTaskManifest;
   externalAnalyzerResults?: ExternalAnalyzerResults;
   designAssessment?: DesignAssessment;
-  /** Deterministic secret-scan findings (from `secrets.json`), surfaced as security-lens findings. */
-  secretFindings?: Finding[];
   /** Active dispatch state; when a partial-completion terminal is set, its stranded count is carried into the summary. */
   activeDispatch?: ActiveDispatchState | null;
 }): AuditReportModel {
@@ -206,7 +204,6 @@ export function buildAuditReportModel(params: {
       params.runtimeValidationReport,
       params.externalAnalyzerResults,
       params.designAssessment,
-      params.secretFindings,
     ),
   );
   // B4: a tool-executable anchor that REFUTED a claim (status `refuted`, distinct

@@ -129,20 +129,6 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   findings (strongest-first, capped at 10) — the temporal coupling static analysis cannot see. _Nothing open on
   this track._
 
-- **Secret scanning — ✅ SHIPPED (0.30.36).** The second OWN extractor (text/regex+entropy — no ecosystem tool to
-  acquire). Pure detector in `src/shared/secrets.ts` (`detectSecrets(path, content)` + `shannonEntropy`): a curated
-  set of high-signal provider-token formats (AWS/GitHub/GitLab/Slack/Stripe/Google/npm keys, private-key blocks,
-  JWT, basic-auth URLs) plus one entropy-gated heuristic tier (credential-named LHS × long high-entropy RHS,
-  placeholder-filtered). Masks every matched span so the committed `secrets.json` artifact can never itself leak a
-  credential; pure, deterministic (sorted), never throws. The audit extractor `src/audit/extractors/secrets.ts`
-  (`scanSecretsArtifact`) walks in-scope, non-binary, ≤512KB files, scoped to the audited set; `secretRiskSignals`
-  raises `hardcoded_secret` on owning units (lifts the security lens); `secretFindings` projects grouped
-  security-lens `Finding`s. Wired into `runStructureExecutor` (persists `secrets.json`, merges risk signals) and
-  surfaced at synthesis via `mergeFindings` (new `secretFindings` param threaded through `buildAuditReportModel`)
-  so secrets appear in `audit-findings.json` regardless of whether a security task ran. Registered in
-  `dependencyMap.ts` + `spec/audit/dependency-map.md` ({repo_manifest, file_disposition} upstream; report
-  downstream). Tests: `tests/audit/secret-scanning.test.mjs`. _Nothing open on this track._
-
 - **Remaining deterministic-analyzer work (DEFERRED).** The external analyzers landed as
   fixture-validated **adapters** (parse + normalize + degrade-to-empty behind the seam); actually
   **spawning** a live native engine and wiring its real output is the acquisition engine specced under

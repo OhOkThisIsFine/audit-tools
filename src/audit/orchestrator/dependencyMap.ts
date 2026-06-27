@@ -69,11 +69,6 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
   // from the commit log, scoped to the audited file set. Declared upstream deps
   // {repo_manifest, file_disposition} so a manifest/disposition change re-mines.
   "git_history.json": ["repo_manifest.json", "file_disposition.json"],
-  // Deterministic secret scanning (OWN extractor). Scoped to the audited file
-  // set, so a manifest/disposition change re-scans. Declared as an upstream of
-  // the report below so a secrets change re-stales synthesis (secret findings
-  // are merged into audit-findings at synthesis, not via graph/risk).
-  "secrets.json": ["repo_manifest.json", "file_disposition.json"],
   "design_assessment.json": ["unit_manifest.json", "critical_flows.json"],
 
   // Phase 3 — planning & execution. scope.json (delta vs. full) gates coverage;
@@ -167,7 +162,6 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "surface_manifest.json",
     "critical_flows.json",
     "design_assessment.json",
-    "secrets.json",
     "syntax_resolution_status.json",
     "external_analyzer_results.json",
     "coverage_matrix.json",
