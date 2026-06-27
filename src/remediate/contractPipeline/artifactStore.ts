@@ -109,6 +109,25 @@ export function isEnvelope(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * Stamp a tool-owned `created_at` onto a raw artifact payload when the host did
+ * not provide one. The host has no clock — `created_at` is tool bookkeeping, not
+ * a judgment field — so the tool stamps it at the point the payload enters the
+ * tool (ingest + the `validate-artifact` self-check), and the host-facing
+ * schemas no longer ask for it. A payload that already carries a string
+ * `created_at` (e.g. a tool-derived artifact) is returned untouched. The stamp
+ * is a universal non-semantic field (`semanticProjection` strips it), so adding
+ * it never affects staleness. Non-object payloads pass through unchanged — their
+ * own validator reports the shape error.
+ */
+export function stampToolCreatedAt(payload: unknown, now: string): unknown {
+  if (!isRecord(payload)) return payload;
+  if (typeof payload.created_at === "string" && payload.created_at.length > 0) {
+    return payload;
+  }
+  return { ...payload, created_at: now };
+}
+
 export function contractPipelineDir(artifactsDir: string): string {
   return join(artifactsDir, "intake", "contract");
 }

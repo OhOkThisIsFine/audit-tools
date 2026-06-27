@@ -17,12 +17,14 @@ import {
   writeContractArtifact,
   contractArtifactFilePath,
   readContractArtifact,
+  stampToolCreatedAt,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 import {
   deriveObligationLedger,
   buildTestValidatorPlanScaffold,
   buildImplementationDagScaffold,
   acceptedCounterexampleIds,
+  advisoryCritiqueItems,
   isTestablePhaseObligation,
   isDagPhaseObligation,
 } from "../../src/remediate/contractPipeline/derive.js";
@@ -269,6 +271,41 @@ describe("artifact scaffolds (S3 skeletons for the partially-derivable phases)",
       scaffold.nodes.some((n) => n.addresses_counterexamples.includes("CE-001")),
     ).toBe(true);
     expect(scaffold.edges).toEqual([]);
+  });
+
+  it("D1: every test-plan spec carries non-empty scope_anchors for negative scoping", () => {
+    const ledger = deriveObligationLedger(finalizedContracts(), { created_at: CREATED_AT });
+    const scaffold = buildTestValidatorPlanScaffold(ledger);
+    expect(scaffold.test_specs.length).toBeGreaterThan(0);
+    for (const spec of scaffold.test_specs) {
+      expect(Array.isArray(spec.scope_anchors)).toBe(true);
+      // obligationScopeAnchors falls back to the id + description symbols, so a
+      // real obligation always yields at least one anchor for the host to scope to.
+      expect(spec.scope_anchors.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("B3: every DAG node carries a blank addressed_critique_items carrier", () => {
+    const ledger = deriveObligationLedger(finalizedContracts(), { created_at: CREATED_AT });
+    const scaffold = buildImplementationDagScaffold(ledger, ["CE-001"]);
+    expect(scaffold.nodes.every((n) => Array.isArray(n.addressed_critique_items) && n.addressed_critique_items.length === 0)).toBe(true);
+  });
+
+  it("B3: advisoryCritiqueItems extracts only advisory-severity items with ids", () => {
+    const items = advisoryCritiqueItems({
+      items: [
+        { id: "C-1", severity: "blocking", description: "must fix" },
+        { id: "C-2", severity: "advisory", description: "consider X" },
+        { id: "", severity: "advisory", description: "no id" },
+        { severity: "advisory", description: "missing id" },
+        { id: "C-3", severity: "advisory", description: "consider Y" },
+      ],
+    });
+    expect(items).toEqual([
+      { id: "C-2", description: "consider X" },
+      { id: "C-3", description: "consider Y" },
+    ]);
+    expect(advisoryCritiqueItems(undefined)).toEqual([]);
   });
 
   it("acceptedCounterexampleIds extracts only judge-accepted ids", () => {

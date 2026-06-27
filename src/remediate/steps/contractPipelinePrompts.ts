@@ -34,8 +34,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
   "objective": "<single-sentence primary objective>",
   "non_goals": ["<explicit out-of-scope items>"],
   "success_criteria": ["<measurable criteria>"],
-  "source_type": "conversation | document | structured_audit | mixed",
-  "created_at": "<ISO-8601>"
+  "source_type": "conversation | document | structured_audit | mixed"
 }`,
     description:
       "Normalize the remediation objective into a bounded, unambiguous goal spec.",
@@ -48,8 +47,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
   "contract_version": "remediate-code-contract-pipeline/context-bundle/v1alpha1",
   "goal_id": "<from goal_spec>",
   "entries": [{ "path": "<repo-relative>", "kind": "source|test|config|doc", "relevance_reason": "..." }],
-  "context_summary": "<free-text summary>",
-  "created_at": "<ISO-8601>"
+  "context_summary": "<free-text summary>"
 }`,
     description:
       "Collect the code and documentation context relevant to the goal.",
@@ -65,8 +63,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
     "name": "<module-name>",
     "responsibilities": "<brief description of what this module does>",
     "file_scope": ["<repo-relative paths owned by this module>"]
-  }],
-  "created_at": "<ISO-8601>"
+  }]
 }`,
     description:
       "Decompose the goal into a set of named modules with rough responsibilities and file scope. Do not draft seam contracts yet — only identify modules and their file ownership.",
@@ -90,8 +87,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
       "neighbor": "<module-name>",
       "needs": "<what this module needs from that neighbor>"
     }]
-  }],
-  "created_at": "<ISO-8601>"
+  }]
 }`,
     description:
       "For every module in the decomposition, draft a contract covering inputs, outputs, invariants, side-effects, validation boundary, failure modes, and what it needs from each neighbor. Read each module's file scope from the repository before drafting. No single agent owns both sides of a seam.",
@@ -112,8 +108,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
       "decision": "<which side adjusts — A | B | both>",
       "agreed_interface": "<the reconciled interface both sides must adopt>"
     }
-  }],
-  "created_at": "<ISO-8601>"
+  }]
 }`,
     description:
       "Deterministically list every seam mismatch where module A's declared output differs from module B's declared input (or neighbor_need). For each mismatch, decide which side adjusts and what the agreed interface is. A seam_reconciliation_report with no mismatches (all seams already consistent) is valid.",
@@ -134,8 +129,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
     "validation_boundary": "<finalized validation boundary>",
     "failure_modes": ["<failure mode + caller handling>"],
     "seam_adjustments": ["<adjustments made per seam_reconciliation_report, if any>"]
-  }],
-  "created_at": "<ISO-8601>"
+  }]
 }`,
     description:
       "For every module contract in module_contracts, incorporate any reconciliation decisions from seam_reconciliation_report and produce the finalized module contract. Record which seam adjustments were applied.",
@@ -153,8 +147,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
     "resolution_description": "<what was changed and why>",
     "exception_registration": "<scoped exception name when single_authority, otherwise null>"
   }],
-  "status": "no_cycles | resolved",
-  "created_at": "<ISO-8601>"
+  "status": "no_cycles | resolved"
 }`,
     description:
       "Detect and resolve circular interface-definition obligations in the obligation ledger. If no cycles exist, record status=no_cycles and an empty cycles array. For each detected cycle, choose a sanctioned break strategy (mediator module or single authority) and record the resolution. Verify mentally that the break does not re-introduce a cycle before writing the output.",
@@ -177,8 +170,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
     "kind": "invariant|behavioral|structural|test",
     "depends_on": [],
     "status": "pending"
-  }],
-  "created_at": "<ISO-8601>"
+  }]
 }`,
     description:
       "Derive a bounded set of implementation obligations from the goal spec and finalized module contracts. Each invariant in the finalized module contracts yields an invariant obligation; each seam interface yields a test obligation. Derive obligations largely deterministically from the finalized contracts.",
@@ -191,8 +183,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
   "contract_version": "remediate-code-contract-pipeline/conceptual-design-critique/v1alpha1",
   "goal_id": "<from goal_spec>",
   "items": [{ "id": "<id>", "kind": "concern|alternative|suggestion", "description": "...", "severity": "blocking|advisory" }],
-  "verdict": "approved | approved_with_concerns | rejected",
-  "created_at": "<ISO-8601>"
+  "verdict": "approved | approved_with_concerns | rejected"
 }`,
     description:
       "Provide philosophy/alternatives/directions critique of the finalized module contracts.",
@@ -213,8 +204,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
       "obligation_id": "<must match obligation_id above>",
       "reason": "<falsifiable reason checkable against the ledger>"
     }
-  }],
-  "created_at": "<ISO-8601>"
+  }]
 }`,
     description:
       "Convert every obligation in the obligation ledger into a concrete test spec BEFORE any implementation begins. One TestSpec entry per obligation. A worker may flag a planned test inapplicable only by citing the specific obligation_id it disputes and providing a falsifiable reason that can be checked against the ledger — bare rationale is not sufficient. Do not invent obligations not present in the ledger.",
@@ -227,8 +217,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
   "contract_version": "remediate-code-contract-pipeline/contract-assessment-report/v1alpha1",
   "goal_id": "<from goal_spec>",
   "findings": [{ "obligation_id": "<id>", "status": "satisfied|violated|uncertain", "evidence": ["..."], "rationale": "..." }],
-  "verdict": "passed | failed | partial",
-  "created_at": "<ISO-8601>"
+  "verdict": "passed | failed | partial"
 }`,
     description:
       "Assess whether the design spec satisfies all invariants and obligations.",
@@ -247,8 +236,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
     "expected": "<what the design promises>",
     "actual": "<what actually happens under this counterexample>",
     "violated_obligation_ids": ["<obligation_id>"]
-  }],
-  "created_at": "<ISO-8601>"
+  }]
 }`,
     description:
       "Adversarially attack the design: produce concrete counterexamples that falsify design invariants, obligations, or assessment claims. Each counterexample must name the claim it falsifies, concrete reproduction steps, and the obligation(s) it violates. Search hard for inputs, orderings, and edge states the design mishandles; an empty counterexamples array is only acceptable when you genuinely cannot falsify anything.",
@@ -269,8 +257,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
   "repair_directive": {
     "target": "finalized_module_contracts | obligation_ledger | contract_assessment_report",
     "instruction": "<bounded instruction for regenerating the target artifact>"
-  },
-  "created_at": "<ISO-8601>"
+  }
 }`,
     description:
       "Judge every counterexample from the critic: `accepted` (real flaw the contract must address), `out_of_scope` (outside the goal spec), `duplicate`, `invalid` (does not actually falsify the claim), or `residual_risk` (real but tolerable; recorded, not repaired). Verdict is `approved` only when no accepted counterexample demands a contract repair — then omit `repair_directive`. Otherwise verdict is `needs_repair` and `repair_directive` must name the single artifact whose regeneration addresses the accepted counterexamples.",
@@ -288,13 +275,13 @@ const ROLES: Record<string, ContractPipelineRole> = {
     "description": "<bounded task description>",
     "satisfies_obligations": ["<obligation_id>"],
     "addresses_counterexamples": ["<accepted counterexample id, when applicable>"],
+    "addressed_critique_items": ["<advisory conceptual-critique id this node honours, when applicable>"],
     "depends_on": ["<task-id>"],
     "verification_obligation_ids": ["<obligation_id>"],
     "targeted_commands": ["<command to verify>"],
     "status": "pending"
   }],
-  "edges": [{ "from": "<id>", "to": "<id>", "kind": "dependency|verification" }],
-  "created_at": "<ISO-8601>"
+  "edges": [{ "from": "<id>", "to": "<id>", "kind": "dependency|verification" }]
 }`,
     description:
       "Decompose the implementation into a bounded dependency DAG of tasks. Traceability is mandatory: every node must list at least one obligation id from the obligation ledger (in satisfies_obligations or verification_obligation_ids) or one judge-accepted counterexample id (in addresses_counterexamples) — untraceable nodes are rejected. Accepted and residual_risk counterexamples from the judge report must be covered by nodes or verification obligations.",
@@ -311,8 +298,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
     "traces": [{ "trace_id": "<id>", "kind": "requirement|invariant|task|file|command", "label": "...", "evidence": ["..."], "status": "passed|failed" }],
     "overall_status": "passed|failed"
   }],
-  "overall_status": "passed|failed",
-  "created_at": "<ISO-8601>"
+  "overall_status": "passed|failed"
 }`,
     description:
       "Verify all obligations are satisfied and produce the verification report.",
