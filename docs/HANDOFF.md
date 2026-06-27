@@ -37,10 +37,17 @@ ergonomics (T4) → product/analysis tracks (T5) → deferred (T6).
 ### T1 — Make the loop cheaper: self-scaling pipeline (HIGHEST compounding leverage)
 Design of record: [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md)
 ([[self-scaling-pipeline-not-forked-paths]]). Slices 1 & 2 (degenerate-phase collapse + shared intake risk
-signal) shipped; remaining slices lowest-risk-first:
-1. **Slice 3 — adversarial-depth dial** *(NEXT)*: critique/counterexample scale light-inline → full-independent by
-   the signal; **floor = light, never zero**; soften the existing structured-audit `leanFastPath`
-   skip-everything path to *light review* (audit findings are not blindly trusted).
+signal) shipped; **slice 3a (adversarial-depth dial on the contract pipeline) shipped 0.30.23**. Remaining
+slices lowest-risk-first:
+1. **Slice 3b — soften the lean fast path** *(NEXT)*: today `evaluateFastPath` eligible ⇒ `nextStep.ts`
+   ~2572 skips the contract pipeline entirely (ZERO adversarial scrutiny) and routes straight to the lean
+   extracted plan. Design-of-record requires *light review, not a zero-scrutiny fork* — but the floor must be
+   a **mechanical gate, not a prose "please self-check"** (host-discretion is forbidden). So: insert ONE
+   bounded light-adversarial-review step over the approved findings (its own verdict artifact + resume
+   intercept, modeled on the existing review-gate `gate.step` pattern); verdict clear ⇒ proceed to the lean
+   plan, verdict raises a real concern ⇒ escalate the risk signal and route to the full pipeline. Must land
+   as ONE atomic replace of the current skip-fork (atomic-replace invariant). *3a already gives the contract
+   pipeline its depth scaling; 3b is purely the lean-route floor.*
 2. **Slice 4 — granularity dial**: round-trip count = f(complexity); collapse coherent phases for low
    complexity; wire optimistic-start + escalate-on-evidence.
 
