@@ -226,11 +226,17 @@ Standing gotchas worth keeping for any agent (strong or weak):
   clean-tree guard until discarded. Two problems: (1) the regeneration mutates a tracked file as a side effect of
   an unrelated command (should be idempotent against the committed block, or not run on a clean checkout); (2) the
   managed block's deliverable-tracking decision (public⇒ignore vs private⇒track) disagreed with the committed
-  state. **Resolved 2026-06-26 (Ethan): repo is PRIVATE — deliverables are kept TRACKED** (committed the flipped
-  block). **STILL OPEN — the idempotency bug:** the regeneration mutated a tracked file as a side effect of an
-  unrelated command; now that committed state matches the tracked-deliverables generation it should stop dirtying
-  the tree, but the generator must be made idempotent against the committed block (or not run on a clean checkout)
-  so it can't trip the release clean-tree guard again if the detection ever differs.
+  state. **Decision 2026-06-26 (Ethan): repo is PRIVATE — deliverables SHOULD be tracked.** **But the decision is
+  NOT yet honored and the managed-block lines are DEAD:** `.gitignore` line 5 `.audit-tools/` blanket-ignores the
+  whole dir, and git cannot re-include a file whose parent directory is excluded — so adding/removing the
+  deliverable-specific lines (which the generator does) is a no-op. To actually track the 4 deliverables
+  (`audit-report.md`, `audit-findings.json`, `remediation-report.md`, `remediation-outcomes.json`) plus
+  `*/agent-feedback.jsonl`, the ignore must be restructured: ignore `.audit-tools/*` (contents, not the dir) +
+  re-include the deliverables; the nested `*/agent-feedback.jsonl` needs `!.audit-tools/*/` first then the file
+  re-include (edge case). Two coupled fixes: (1) **restructure the ignore** so re-inclusion works (confirm the
+  exact tracked set with Ethan); (2) **fix the generator** to emit the working structure AND be idempotent against
+  the committed block (it currently mutates a tracked file on an unrelated command → dirties the tree → trips the
+  release clean-tree guard). Until both land, deliverables remain untracked despite the decision.
 - **Tool-managed ignore patterns for runtime artifact dirs MUST be anchored to `.audit-tools/`**, never a
   bare `**/<name>/` — an unanchored glob (e.g. `**/friction/`) regenerates on every `ensure`/postinstall and
   can shadow a same-named SOURCE dir (`src/shared/friction/`), which a file-level edit can't fix. (`.audit-code/`

@@ -53,5 +53,8 @@ skills-lock.json
 # Generated/install artifacts — always ignored (build artifacts, not source).
 .audit-code/
 .audit-tools/**/friction/
-# Deliverables + meta-audit reflections kept tracked (private repo).
+# Deliverables intended TRACKED (private repo) — but NOT yet effective: line 5
+# `.audit-tools/` blanket-ignores the whole dir and git can't re-include files
+# under an excluded directory. Needs a restructure (ignore `.audit-tools/*`
+# contents, re-include the deliverables). See docs/backlog.md.
 # <<< audit-tools managed ignores <<<
