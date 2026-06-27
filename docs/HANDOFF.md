@@ -35,10 +35,10 @@ on all downstream work, and is the "redesign before scheduled autonomy" the nort
 ergonomics (T4) → product/analysis tracks (T5) → deferred (T6).
 
 ### T0 — Hygiene / unblock (cheap, do first)
-1. **Stale-pipeline-state friction** — a lean/bypass lap strands the contract-pipeline state, so the next
-   run resumes an obsolete run (hit at lap-3 start). Fix: a run whose target findings are already satisfied
-   in the tree auto-detects+closes; landing work outside the active run reconciles its state.
-   *(backlog → "Lean/bypass lap strands…")*
+1. ~~**Stale-pipeline-state friction**~~ — **SHIPPED 2026-06-26.** Triage now re-verifies each blocked node
+   against the current tree before retrying (`reverifyBlockedItemAgainstTree`); already-satisfied nodes
+   reconcile to `resolved_no_change` instead of resuming an obsolete run. Node-granular, never a whole-run
+   abandon. *(backlog → SHIPPED note)*
 
 ### T1 — Make the loop cheaper: self-scaling pipeline (HIGHEST compounding leverage)
 Design of record: [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md)
