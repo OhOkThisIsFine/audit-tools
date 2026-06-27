@@ -225,10 +225,12 @@ Standing gotchas worth keeping for any agent (strong or weak):
   "kept tracked (private repo)". This dirties the tree on every run and blocked `release:patch:publish`'s
   clean-tree guard until discarded. Two problems: (1) the regeneration mutates a tracked file as a side effect of
   an unrelated command (should be idempotent against the committed block, or not run on a clean checkout); (2) the
-  managed block's deliverable-tracking decision (public⇒ignore vs private⇒track) **disagrees with the committed
-  state** — needs a single source of truth (detect once, or make it config), not a regeneration that fights the
-  commit. Until resolved: discard the `.gitignore` regen before shipping. (Ethan-decision pending: should
-  deliverables be tracked now? see chat.)
+  managed block's deliverable-tracking decision (public⇒ignore vs private⇒track) disagreed with the committed
+  state. **Resolved 2026-06-26 (Ethan): repo is PRIVATE — deliverables are kept TRACKED** (committed the flipped
+  block). **STILL OPEN — the idempotency bug:** the regeneration mutated a tracked file as a side effect of an
+  unrelated command; now that committed state matches the tracked-deliverables generation it should stop dirtying
+  the tree, but the generator must be made idempotent against the committed block (or not run on a clean checkout)
+  so it can't trip the release clean-tree guard again if the detection ever differs.
 - **Tool-managed ignore patterns for runtime artifact dirs MUST be anchored to `.audit-tools/`**, never a
   bare `**/<name>/` — an unanchored glob (e.g. `**/friction/`) regenerates on every `ensure`/postinstall and
   can shadow a same-named SOURCE dir (`src/shared/friction/`), which a file-level edit can't fix. (`.audit-code/`
