@@ -85,11 +85,12 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
     this track._
 10. **C/D residue:** **C3 ✅ SHIPPED** (test-plan diff-carry: `captureTestPlanCarry` snapshots authored specs on
     ingest, `buildTestValidatorPlanScaffold` pre-fills assertions for obligations whose premise is unchanged —
-    fail-safe toward re-author). **D1 ✅ SHIPPED** (per-spec `scope_anchors`). Remaining: C2 host-authored
-    boilerplate for trivial scope (→ subsumed by T1); **D3 — deferred to its own lap** (validate-artifact/ingest
-    in-place envelope re-wrap; the clean fix is host-input vs tool-derived path separation, which collides with the
-    read-list/write-target/canonical-path conflation — no data-loss/correctness bug, purely conceptual, so it is a
-    focused refactor not a lean batch item). *(all in backlog → "Contract-pipeline host-friction inventory")*
+    fail-safe toward re-author). **D1 ✅ SHIPPED** (per-spec `scope_anchors`). **D3 ✅ SHIPPED** — host INPUT path
+    (`<name>.input.json`, `contractInputFilePath`) separated from the tool-owned canonical envelope (`<name>.json`):
+    host writes/reads only plain `.input.json`; ingest derives the envelope (idempotent via semantic-hash, never an
+    in-place re-wrap); `archiveContractArtifact` preserves the host input + clears the canonical so the gate re-fires;
+    every host-facing path points at the input file. Remaining: C2 host-authored boilerplate for trivial scope
+    (→ subsumed by T1). *(all in backlog → "Contract-pipeline host-friction inventory")*
 11. **Selective-deepening task_id convergence** — partial fix needs a live deepening-capable run to validate.
 
 ### T5 — Product / analysis forward tracks

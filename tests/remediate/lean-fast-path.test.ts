@@ -179,7 +179,7 @@ describe("decideNextStep — lean fast path (integration)", () => {
     // step's terminal output is module_decomposition.json rather than goal_spec.json;
     // either way it is authoring the framing, not a lean extracted-plan.
     expect(step.step_kind).toBe("contract_pipeline");
-    expect(step.artifact_paths.output).toMatch(/(goal_spec|module_decomposition)\.json$/);
+    expect(step.artifact_paths.output).toMatch(/(goal_spec|module_decomposition)\.input\.json$/);
     expect(existsSync(join(ARTIFACTS_DIR, "extracted-plan.json"))).toBe(false);
   });
 });

@@ -25,7 +25,7 @@ import {
   detectStaleArtifacts,
   writeContractArtifact,
   readContractArtifact,
-  contractArtifactFilePath,
+  contractInputFilePath,
   contractPipelineDir,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 import type { ContractPipelineArtifactName } from "../../src/remediate/contractPipeline/artifactStore.js";
@@ -57,7 +57,7 @@ const CREATED_AT = "2026-01-01T00:00:00.000Z";
 const STEP_OPTIONS = { root: TEST_DIR, artifactsDir: ARTIFACTS_DIR, runId: "N-R07-TEST" };
 
 async function writeRaw(name: ContractPipelineArtifactName, payload: unknown): Promise<void> {
-  const path = contractArtifactFilePath(ARTIFACTS_DIR, name);
+  const path = contractInputFilePath(ARTIFACTS_DIR, name);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(payload, null, 2) + "\n", "utf8");
 }

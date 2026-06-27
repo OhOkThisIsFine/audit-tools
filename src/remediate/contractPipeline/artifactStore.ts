@@ -1,9 +1,20 @@
 /**
  * Typed read/write helpers for the contract-pipeline artifacts.
- * Each artifact is stored as a JSON file under
- * `<artifactsDir>/intake/contract/`. A content hash is included in the
- * stored envelope so downstream artifacts can detect when an upstream
- * changed, enabling deterministic staleness propagation.
+ *
+ * Two distinct, non-overlapping path roles live under
+ * `<artifactsDir>/intake/contract/` (D3):
+ *
+ * - **Host input** `<name>.input.json` — the plain payload the host *writes*,
+ *   and the plain payload a downstream host *reads* for its upstreams. The
+ *   host's world is entirely plain `.input.json` files; it never sees or
+ *   touches an envelope.
+ * - **Canonical envelope** `<name>.json` — the tool-owned content-hash envelope
+ *   the tool derives at ingest. Purely internal bookkeeping (staleness DAG,
+ *   dependency hashes); every tool-side read goes through `readContractArtifact`.
+ *
+ * No file is ever both: the host writes `<name>.input.json`, the tool owns the
+ * canonical `<name>.json` envelope. This keeps the host-authored INPUT path and
+ * the tool-derived envelope path cleanly separated (no in-place re-wrap).
  *
  * Independence from StateStore is intentional: these helpers operate on the
  * contract-pipeline subdirectory only and do not touch the remediation
@@ -140,6 +151,11 @@ export function pathASeedFilePath(artifactsDir: string): string {
   return join(contractPipelineDir(artifactsDir), "path_a_seed.json");
 }
 
+/**
+ * Canonical envelope path `<name>.json` — the TOOL-owned content-hash envelope.
+ * Host code never reads or writes this; every tool-side consumer reaches it
+ * through `readContractArtifact`.
+ */
 export function contractArtifactFilePath(
   artifactsDir: string,
   name: ContractPipelineArtifactName,
@@ -147,12 +163,31 @@ export function contractArtifactFilePath(
   return join(contractPipelineDir(artifactsDir), `${name}.json`);
 }
 
+/**
+ * Host input path `<name>.input.json` — the plain payload the host writes (and
+ * reads for upstreams). The host never sees the tool's canonical envelope; the
+ * tool reads this at ingest, validates, and derives the canonical `<name>.json`
+ * envelope from it (D3). Keeping the two paths disjoint means the on-disk file
+ * the host wrote is never mutated into an envelope in place.
+ */
+export function contractInputFilePath(
+  artifactsDir: string,
+  name: ContractPipelineArtifactName,
+): string {
+  return join(contractPipelineDir(artifactsDir), `${name}.input.json`);
+}
+
 function computeHash(value: unknown): string {
   return hashContent(JSON.stringify(value), { length: 32 });
 }
 
-/** Hash an artifact's semantic projection (order-independent, stamp-stripped). */
-function computeSemanticHash(
+/**
+ * Hash an artifact's semantic projection (order-independent, stamp-stripped).
+ * Exported so the ingest idempotency guard can compare a freshly-read host input
+ * against the canonical envelope without re-deriving a new (stamp-bearing)
+ * content hash on every next-step.
+ */
+export function payloadSemanticHash(
   name: ContractPipelineArtifactName,
   payload: unknown,
 ): string {
@@ -172,7 +207,7 @@ function computeSemanticHash(
 export function envelopeSemanticHash(
   envelope: ContractPipelineArtifactEnvelope,
 ): string {
-  return computeSemanticHash(envelope.artifact_name, envelope.payload);
+  return payloadSemanticHash(envelope.artifact_name, envelope.payload);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -277,7 +312,7 @@ export async function detectStaleArtifacts(
         stale.add(name);
         break;
       }
-      const recordedHash = envelope.dependency_hashes[dep];
+      const recordedHash = (envelope.dependency_hashes ?? {})[dep];
       if (recordedHash !== envelopeSemanticHash(depEnvelope)) {
         stale.add(name);
         break;

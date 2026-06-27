@@ -41,11 +41,14 @@ import {
   CP_ARTIFACT_NAMES,
   contractArtifactExists,
   contractArtifactFilePath,
+  contractInputFilePath,
   contractPipelineDir,
   detectStaleArtifacts,
   envelopePayload,
+  envelopeSemanticHash,
   isEnvelope,
   pathASeedFilePath,
+  payloadSemanticHash,
   readContractArtifact,
   stampToolCreatedAt,
   writeContractArtifact,
@@ -311,7 +314,7 @@ async function buildScaffoldSection(
     const carriedCount = scaffold.test_specs.filter(
       (s) => s.assertions.length > 0,
     ).length;
-    const path = contractArtifactFilePath(artifactsDir, "test_validator_plan");
+    const path = contractInputFilePath(artifactsDir, "test_validator_plan");
     const carryNote =
       carriedCount > 0
         ? `\n\n**Carried from the prior round (C3):** ${carriedCount} spec(s) already have assertions — their obligation premise is unchanged, so keep them as-is unless you intend to revise. Only the specs with an EMPTY \`assertions\` array need authoring.`
@@ -347,7 +350,7 @@ Self-check before next-step: \`${loaderCommand(`validate-artifact --name test_va
             .map((a) => `- \`${a.id}\`: ${a.description}`)
             .join("\n")}`
         : "";
-    const path = contractArtifactFilePath(artifactsDir, "implementation_dag");
+    const path = contractInputFilePath(artifactsDir, "implementation_dag");
     return `## Pre-filled Skeleton — fill only the blank slots
 
 Below is the implementation-DAG skeleton: ONE node per module (its obligations already grouped), covering every obligation and accepted counterexample. Fill ONLY each node's \`title\`, \`description\`, and \`targeted_commands\`. You MAY further merge or split nodes and add real \`depends_on\`/\`edges\` ordering, as long as every obligation stays covered (in \`satisfies_obligations\` or \`verification_obligation_ids\`) and every accepted counterexample stays in some node's \`addresses_counterexamples\`.${advisoryBlock}
@@ -379,11 +382,19 @@ export interface ArchiveOutcome {
 }
 
 /**
- * Archive an artifact file into `<contract>/history/` instead of deleting it,
- * so a repair loop never silently destroys an LLM output. On a successful move
- * the original path is free (a fresh Write recreates it cleanly); if the move
- * throws, the original is preserved in place (`originalFree: false`) rather than
- * silently dropped. `renameFn` is a DI seam so a failed history move is testable.
+ * Archive an artifact into `<contract>/history/` instead of deleting it, so a
+ * repair loop never silently destroys an LLM output. Two disjoint files exist
+ * per artifact (D3): the host's plain INPUT (`<name>.input.json` — the LLM
+ * emission) and the tool's canonical envelope (`<name>.json` — regenerable
+ * bookkeeping). On a stale/invalid re-emit BOTH are moved to history: the input
+ * to preserve the LLM output AND free its path for a fresh host Write, the
+ * canonical so the completion gate (`contractArtifactExists`) re-fires and the
+ * producing phase re-emits. The returned `archivedPath` references the input
+ * archive when present (what the host re-authors), else the canonical archive.
+ * A tool-derived artifact with no input file (e.g. a merged-shard artifact)
+ * archives only its canonical envelope. If any move throws, the rest are left
+ * in place (`originalFree: false`) rather than silently dropped. `renameFn` is a
+ * DI seam so a failed history move is testable.
  */
 export async function archiveContractArtifact(
   artifactsDir: string,
@@ -391,17 +402,40 @@ export async function archiveContractArtifact(
   label: "stale" | "invalid",
   renameFn: (from: string, to: string) => Promise<void> = rename,
 ): Promise<ArchiveOutcome> {
-  const source = contractArtifactFilePath(artifactsDir, name);
-  if (!existsSync(source)) return { originalFree: true };
+  const inputSource = contractInputFilePath(artifactsDir, name);
+  const canonicalSource = contractArtifactFilePath(artifactsDir, name);
+  const hasInput = existsSync(inputSource);
+  const hasCanonical = existsSync(canonicalSource);
+  if (!hasInput && !hasCanonical) return { originalFree: true };
+
   const historyDir = join(contractPipelineDir(artifactsDir), "history");
   await mkdir(historyDir, { recursive: true });
-  const archivedPath = join(historyDir, `${name}.${label}-${Date.now()}.json`);
-  try {
-    await withFsRetry(() => renameFn(source, archivedPath));
-  } catch {
-    // Move failed: preserve the original in place rather than drop it.
-    return { archivedPath, originalFree: false };
+  const stamp = Date.now();
+  let archivedPath: string | undefined;
+
+  // Preserve the host's plain output (the LLM emission) first, freeing the input
+  // path so the rewrite signpost's fresh Write lands cleanly.
+  if (hasInput) {
+    const dest = join(historyDir, `${name}.${label}-${stamp}.input.json`);
+    archivedPath = dest;
+    try {
+      await withFsRetry(() => renameFn(inputSource, dest));
+    } catch {
+      return { archivedPath, originalFree: false };
+    }
   }
+
+  // Clear the tool-derived canonical envelope so the completion gate re-fires.
+  if (hasCanonical) {
+    const dest = join(historyDir, `${name}.${label}-${stamp}.json`);
+    try {
+      await withFsRetry(() => renameFn(canonicalSource, dest));
+    } catch {
+      return { archivedPath: archivedPath ?? dest, originalFree: false };
+    }
+    archivedPath = archivedPath ?? dest;
+  }
+
   return { archivedPath, originalFree: true };
 }
 
@@ -423,11 +457,13 @@ export interface ContractIngestionResult {
 }
 
 /**
- * Wrap raw worker-written artifact payloads into validated envelopes. Workers
- * write the bare payload the role schema describes; the envelope (content hash
- * + dependency hashes) is the orchestrator's deterministic bookkeeping, added
- * here. CP_ARTIFACT_NAMES is dependency-ordered, so dependencies are enveloped
- * before their dependents and dependency hashes are always available.
+ * Derive validated canonical envelopes from the host's plain INPUT files (D3).
+ * The host writes the bare payload the role schema describes to
+ * `<name>.input.json`; the tool reads it here, validates it, and writes the
+ * content-hash envelope to the canonical `<name>.json` — the host's input file
+ * is never mutated in place. CP_ARTIFACT_NAMES is dependency-ordered, so
+ * dependencies are enveloped before their dependents and dependency hashes are
+ * always available.
  */
 export async function ingestContractArtifacts(
   artifactsDir: string,
@@ -437,13 +473,26 @@ export async function ingestContractArtifacts(
 
   for (const name of CP_ARTIFACT_NAMES) {
     const raw = await readOptionalJsonFile<unknown>(
-      contractArtifactFilePath(artifactsDir, name),
+      contractInputFilePath(artifactsDir, name),
     );
-    if (raw === undefined || raw === null || isEnvelope(raw)) continue;
+    if (raw === undefined || raw === null) continue;
+    // The host writes a plain payload; defensively unwrap if an envelope slipped
+    // into the input path so ingest and the validate-artifact self-check agree.
+    const bare = isEnvelope(raw) ? raw.payload : raw;
 
     // The host has no clock: stamp the tool-owned `created_at` before validation
     // so the host never has to invent a timestamp (B4). No-op when already present.
-    const payload = stampToolCreatedAt(raw, new Date().toISOString());
+    const payload = stampToolCreatedAt(bare, new Date().toISOString());
+
+    // Idempotency: the input file persists across next-step calls, so skip
+    // re-ingesting an input whose canonical envelope already reflects it. The
+    // semantic projection strips the tool-stamped `created_at`, so a no-op
+    // re-ingest is stable (it does NOT re-fire snapshots or rewrite the
+    // envelope); only a genuine host edit re-derives.
+    const existing = await readContractArtifact(artifactsDir, name);
+    if (existing && envelopeSemanticHash(existing) === payloadSemanticHash(name, payload)) {
+      continue;
+    }
 
     const issues = CONTRACT_PIPELINE_VALIDATORS[name](payload, name).filter(
       (issue) => issue.severity === "error",
@@ -1349,10 +1398,14 @@ export async function buildNextContractPipelineStep(
   const seedPath = pathASeedFilePath(artifactsDir);
   const pathASeedPath = existsSync(seedPath) ? seedPath : undefined;
 
-  // Resolve artifact paths for the prompt renderers.
+  // Resolve artifact paths for the prompt renderers. The host's world is the
+  // plain INPUT files (D3): every host-facing path — both where a role WRITES its
+  // output and where it READS its upstreams — is `<name>.input.json`. The tool's
+  // canonical envelopes (`<name>.json`) are derived at ingest and never named to
+  // the host.
   const artifactPaths: Partial<Record<ContractPipelineArtifactName, string>> = {};
   for (const name of CP_ARTIFACT_NAMES) {
-    artifactPaths[name] = join(cpDir, `${name}.json`);
+    artifactPaths[name] = contractInputFilePath(artifactsDir, name);
   }
 
   const buildStep = (params: {
@@ -2243,7 +2296,7 @@ ${cycleDescriptions}
 1. **Mediator module** — Introduce a third obligation/module that both sides depend on. The mediator owns the shared primitive; neither original module defines an interface for the other.
 2. **Single authority** — Designate one obligation/module as the definitive owner of the co-defined interface. The other becomes a consumer only. This is recorded as a named, scoped exception.
 
-To proceed, manually rewrite \`${join(cpDir, "obligation_ledger.json")}\` so that no circular \`depends_on\` references exist, then delete \`${join(cpDir, "cyclic_seam_resolution.json")}\` and \`${cyclicSeamRepairStatePath(artifactsDir)}\` and re-run next-step.
+To proceed, manually rewrite \`${contractInputFilePath(artifactsDir, "obligation_ledger")}\` so that no circular \`depends_on\` references exist, then delete \`${contractInputFilePath(artifactsDir, "cyclic_seam_resolution")}\` and \`${cyclicSeamRepairStatePath(artifactsDir)}\` and re-run next-step.
 
 If you choose to stop instead, this run will remain blocked.
 `,
@@ -2286,7 +2339,7 @@ Manually rewrite the obligation_ledger to remove circular depends_on references,
       .map((c, i) => `Cycle ${i + 1}: [${c.members.join(", ")}]`)
       .join("\n");
 
-    const outputPath = join(cpDir, "cyclic_seam_resolution.json");
+    const outputPath = contractInputFilePath(artifactsDir, "cyclic_seam_resolution");
     const nextCommand = loaderCommand("next-step");
 
     repairState.attempts.push({
@@ -2314,7 +2367,7 @@ For each cycle, choose one:
 
 ## Required Inputs
 
-- \`${join(cpDir, "obligation_ledger.json")}\` (obligation_ledger)
+- \`${contractInputFilePath(artifactsDir, "obligation_ledger")}\` (obligation_ledger)
 
 ## Your Task
 
