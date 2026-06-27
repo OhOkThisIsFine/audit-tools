@@ -65,6 +65,28 @@ export function adversarialDepthForTier(tier: RiskTier | undefined): Adversarial
   return tier === "low" ? "light" : "full";
 }
 
+/**
+ * Round-trip granularity dial (T1 slice 4b). The granularity at which the
+ * authoring phases are gated:
+ *   - `collapsed` — coherent authoring acts fold into ONE round-trip producing
+ *     several artifacts (the ceremony saving — fewer gated steps);
+ *   - `fine`      — every phase its own gated round-trip (failure-isolation +
+ *     per-phase validation, earned only when there is real complexity to isolate).
+ * Only `low` collapses; `medium`/`high` stay fine-grained. Fail-safe toward more
+ * isolation: an absent/unknown tier resolves to `fine`. This composes with
+ * escalate-on-evidence: a run begins collapsed (optimistic-start) and the moment
+ * decomposition raises the tier (slice 4a), the *remaining* phases re-derive
+ * fine-grained — the dial is read per next-step, never frozen at run start.
+ */
+export type RoundTripGranularity = "collapsed" | "fine";
+
+/** Map a risk tier to its round-trip granularity. Only `low` collapses. */
+export function roundTripGranularityForTier(
+  tier: RiskTier | undefined,
+): RoundTripGranularity {
+  return tier === "low" ? "collapsed" : "fine";
+}
+
 /** A single deterministic path-risk family: a repo path family that warrants scrutiny. */
 export interface PathRiskPattern {
   /** Stable label, surfaced in the rationale (e.g. "concurrency"). */

@@ -56,6 +56,7 @@ import {
   decompositionRiskEvidence,
   adversarialDepthForTier,
   type AdversarialDepth,
+  roundTripGranularityForTier,
 } from "../riskSignal.js";
 import {
   detectCyclicSeamObligations,
@@ -138,6 +139,26 @@ const CONTRACT_STEP_KIND: RemediationStepKind = "contract_pipeline";
 const PRE_IMPLEMENTATION_PHASE_ORDER = CONTRACT_PIPELINE_PHASE_ORDER.filter(
   (phase) => phase !== "closing",
 );
+
+/**
+ * Granularity collapse group (T1 slice 4b). The framing phases — goal, context,
+ * decomposition — are ONE coherent act of authoring (scope the change top-down):
+ * they carry no adversarial judgment and no deterministic derivation interleaves
+ * them, so for low-complexity work they fold into a single round-trip producing
+ * all three artifacts instead of three gated steps. The group deliberately STOPS
+ * at decomposition (before module_contract_drafting): keeping the decomposition→
+ * drafting boundary lets the slice-4a escalate-on-evidence intercept inspect the
+ * fresh decomposition and raise the tier — un-collapsing every remaining phase —
+ * before any contract is drafted or the per-module wave fans out. Collapse is
+ * best-effort: any member artifact the worker omits or writes malformed is
+ * re-emitted as its own fine-grained step by `nextMissingContractPhase`, so no
+ * work is ever lost. See `roundTripGranularityForTier`.
+ */
+const FRAMING_COLLAPSE_GROUP = [
+  "goal_normalization",
+  "context_collection",
+  "decomposition",
+] as const;
 
 // ── Bounded-loop caps ─────────────────────────────────────────────────────────
 
@@ -1198,6 +1219,48 @@ After writing the output file, run:
     });
   };
 
+  // T1 slice 4b: emit ONE round-trip whose prompt concatenates the rendered
+  // specs of several consecutive authoring phases. The worker writes every
+  // named artifact top-down (each later phase's inputs are the files it wrote in
+  // the earlier sections of the same round-trip), then runs next-step once. The
+  // group header overrides the per-section "stop after writing" lines so they are
+  // not read as three separate stop points.
+  const buildCollapsedFramingStep = (
+    phases: string[],
+  ): Promise<RemediationStep> => {
+    const sections = phases.map((phase) => {
+      const rendered = renderContractPipelinePrompt({
+        role: phase,
+        artifactPaths,
+        sourcePaths,
+        repoRoot: root,
+        pathASeedPath,
+        hostCanDispatchSubagents: options.hostCanDispatchSubagents,
+        adversarialDepth,
+      });
+      return { phase, rendered };
+    });
+    const outputPaths = sections.map((s) => s.rendered.outputPath);
+    const header = `# Collapsed Authoring Round-Trip — ${phases.length} Phases
+
+This is a low-complexity change, so these ${phases.length} coherent authoring phases are combined into a SINGLE round-trip. Complete EVERY section below — author them top-down, writing each artifact to its named path (each later section's inputs are the files you write in the earlier sections of this same round-trip). Then run next-step ONCE.
+
+Treat any per-section "Stop after writing the output file / do not advance" instruction as scoped to that section only — it does NOT mean stop the round-trip. Finish all sections first.
+
+If you cannot complete a section (an artifact would be malformed), write the ones you can and run next-step: the pipeline re-emits any missing or invalid artifact as its own fine-grained step, so no work is lost.
+
+Artifacts to produce (in order):
+${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
+    const body = sections
+      .map((s) => `\n---\n\n${s.rendered.prompt}`)
+      .join("\n");
+    return buildStep({
+      prompt: `${header}\n${body}`,
+      outputPath: outputPaths[outputPaths.length - 1],
+      stopCondition: `Stop after writing all ${phases.length} collapsed-framing artifacts (${phases.join(", ")}) and running next-step once.`,
+    });
+  };
+
   const buildParallelModuleWaveStep = async (
     phase: ParallelModulePhase,
   ): Promise<RemediationStep> => {
@@ -2210,6 +2273,27 @@ ${preCriticCitationGate.errorLines.join("\n")}
       return mergeOutcome;
     }
     return buildParallelModuleWaveStep(nextPhase);
+  }
+
+  // Granularity collapse (T1 slice 4b): for low-complexity work, fold the framing
+  // suffix [nextPhase..decomposition] into ONE round-trip producing several
+  // artifacts, instead of one gated step per phase. Reads the POST-escalation
+  // riskSignal (slice 4a may have already raised the tier above), so the dial is
+  // never frozen at run start — `fine` for medium/high keeps full per-phase
+  // isolation. Only collapses a genuine multi-phase suffix; a single trailing
+  // framing phase falls through to the normal per-phase dispatch below.
+  if (
+    nextPhase &&
+    roundTripGranularityForTier(riskSignal?.tier) === "collapsed" &&
+    (FRAMING_COLLAPSE_GROUP as readonly string[]).includes(nextPhase)
+  ) {
+    const startIdx = FRAMING_COLLAPSE_GROUP.indexOf(
+      nextPhase as (typeof FRAMING_COLLAPSE_GROUP)[number],
+    );
+    const suffix = FRAMING_COLLAPSE_GROUP.slice(startIdx);
+    if (suffix.length > 1) {
+      return buildCollapsedFramingStep([...suffix]);
+    }
   }
 
   // Skeleton-scaffolded phases (S3): the tool pre-fills structure/ids from the
