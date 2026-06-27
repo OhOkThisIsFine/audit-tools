@@ -143,13 +143,24 @@ describe("decideNextStep — lean fast path (integration)", () => {
       "utf8",
     );
 
+    // T1 slice 3b — the fast path is no longer zero-scrutiny: it first emits a
+    // bounded light adversarial review over the approved findings (the floor).
+    const review = await decideNextStep({ root: REPO_DIR });
+    expect(review.step_kind).toBe("lean_light_review");
+    const extractedPlanPath = join(ARTIFACTS_DIR, "extracted-plan.json");
+    expect(existsSync(extractedPlanPath)).toBe(false); // no plan until it clears
+
+    // A clear verdict proceeds to the lean plan, consumed straight through
+    // planning to implement (the contract pipeline is still skipped).
+    await writeFile(
+      review.artifact_paths.lean_light_review_verdict,
+      JSON.stringify({ disposition: "clear" }),
+      "utf8",
+    );
     const step = await decideNextStep({ root: REPO_DIR });
 
-    // The contract pipeline was skipped: a lean extracted plan was synthesized
-    // and consumed straight through planning to implement.
     expect(step.step_kind).not.toBe("contract_pipeline");
     expect(step.step_kind).toBe("dispatch_implement");
-    const extractedPlanPath = join(ARTIFACTS_DIR, "extracted-plan.json");
     expect(existsSync(extractedPlanPath)).toBe(true);
     const plan = JSON.parse(await readFile(extractedPlanPath, "utf8"));
     expect(plan.source).toBe(LEAN_FAST_PATH_SOURCE);
