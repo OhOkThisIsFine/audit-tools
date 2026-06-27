@@ -129,6 +129,20 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   findings (strongest-first, capped at 10) — the temporal coupling static analysis cannot see. _Nothing open on
   this track._
 
+- **Secret scanning = ACQUIRE via gitleaks (IN FLIGHT — slices A–C done, D–E open).** The from-scratch OWN
+  `detectSecrets` detector briefly shipped as 0.30.36 and was **reverted** (`a10b79cd`) — a hand-rolled secret
+  scanner is a worse gitleaks and breaks the two-tier dependency policy. Secret scanning is now acquired via gitleaks
+  through the (previously unwired) F5 acquisition engine. DONE + committed-green: **A** (`f5097e72`)
+  `external_analyzer_results` → per-tool `ExternalAnalyzerResults[]` with `upsertExternalToolResults`; **B**
+  (`c2a467a2`) `binary` runner + `binaryAcquisition.ts` (PATH→cache→pinned-release download, checksums.txt SHA256
+  verify before `tar` extract, injectable fetcher); **C** (`7c393409`) `EXTERNAL_ANALYZER_CANDIDATES` — gitleaks
+  binary default-on (pinned 8.21.2, raw Secret/Match dropped) + semgrep/eslint consent-gated, secret-scan removed from
+  `OWNED_TOOL_IDS`. **OPEN — D (production wiring):** marker `external_analyzer_acquisition.json` + executor +
+  obligation before `structure_artifacts`, dependency-map; hermeticity gate = no-op unless an advance option
+  `externalAcquisition:{enabled,fetch,consentToken}` enables it (real CLI sets it, test suite stays
+  subprocess/network-free). **E:** surface gitleaks findings in `audit-findings.json` + ship (supersedes 0.30.36).
+  Plan: `spec/audit/analyzer-acquisition-engine-plan.md`. [[deterministic-analyzers-own-vs-acquire]]
+
 - **Remaining deterministic-analyzer work (DEFERRED).** The external analyzers landed as
   fixture-validated **adapters** (parse + normalize + degrade-to-empty behind the seam); actually
   **spawning** a live native engine and wiring its real output is the acquisition engine specced under
