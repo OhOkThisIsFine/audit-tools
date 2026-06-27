@@ -218,6 +218,17 @@ Standing gotchas worth keeping for any agent (strong or weak):
 
 - **Remediate-code worktree branches strand commits off main.** Remediate runs on isolated git worktree branches; those branches are never auto-merged. Any doc or code fix applied inside a remediate run lives on a branch like `remediate-CP-BLOCK-IMPL-*` and never reaches main unless explicitly cherry-picked or merged. Effect: the doc-review nightly routine (which reviews main) keeps re-surfacing the same findings indefinitely. Symptom: same doc-review items reappear every run, including items you believe were already fixed. Fix: after a remediate run that touches docs or code you want on main, merge or cherry-pick the relevant commits before the next nightly run.
 
+- **Tool-managed `.gitignore` block silently regenerates and trips the release clean-tree guard.** Observed
+  2026-06-26 (slice-2 ship): an `ensure`/postinstall regenerated the `>>> audit-tools managed ignores >>>` block,
+  *flipping the deliverable lines from ignored → tracked* (`audit-report.md` / `audit-findings.json` /
+  `remediation-report.md` / `remediation-outcomes.json` / `*/agent-feedback.jsonl`) with a new comment
+  "kept tracked (private repo)". This dirties the tree on every run and blocked `release:patch:publish`'s
+  clean-tree guard until discarded. Two problems: (1) the regeneration mutates a tracked file as a side effect of
+  an unrelated command (should be idempotent against the committed block, or not run on a clean checkout); (2) the
+  managed block's deliverable-tracking decision (public⇒ignore vs private⇒track) **disagrees with the committed
+  state** — needs a single source of truth (detect once, or make it config), not a regeneration that fights the
+  commit. Until resolved: discard the `.gitignore` regen before shipping. (Ethan-decision pending: should
+  deliverables be tracked now? see chat.)
 - **Tool-managed ignore patterns for runtime artifact dirs MUST be anchored to `.audit-tools/`**, never a
   bare `**/<name>/` — an unanchored glob (e.g. `**/friction/`) regenerates on every `ensure`/postinstall and
   can shadow a same-named SOURCE dir (`src/shared/friction/`), which a file-level edit can't fix. (`.audit-code/`
