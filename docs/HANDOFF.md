@@ -75,15 +75,21 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
     `isAuditToolsMonorepo` / `toolOwnedFinalGateCommands` so `dispatch.ts` reuses the gate's `check`-layer argv
     with no import cycle) replaces the hardcoded `"npm run check"` default; runs via `runCommand` (argv +
     CLAUDECODE scrub, no `shell:true`); `null`/skip on a non-monorepo target. _Nothing open on this track._
-9. **B-items (tool-should-decide):** **B3 ✅ SHIPPED** (advisory-critique carrier `addressed_critique_items` +
-    `advisoryCritiqueItems()` surfaced in the DAG skeleton); **B4 ✅ SHIPPED** (`created_at` tool-stamped via
-    `stampToolCreatedAt`, dropped from host schemas — except the lean-light-review verdict, a separate read-path).
-    Remaining: B2 DAG node merge-vs-split left to host (genuine granularity judgment — defer); B5 remediation→main
-    merge left to host. (B1 whole-backlog phase-cut is subsumed by T3.)
-10. **C/D residue:** **D1 ✅ SHIPPED** (test-plan skeleton carries per-spec `scope_anchors`; negatives scopable
-    pre-write). Remaining: C2 host-authored boilerplate for trivial scope (→ subsumed by T1); C3 unchanged
-    obligations re-authored each repair round (no diff-carry); D3 validate-artifact in-place re-wrap
-    (write-plain-then-it-wraps hazard). *(all in backlog → "Contract-pipeline host-friction inventory")*
+9. **B-items (tool-should-decide):** **B2 ✅ SHIPPED** (`buildImplementationDagScaffold` groups a module's
+    obligations into ONE node via a `module` field threaded onto design_spec obligations — 1-module change derives
+    1 node); **B3 ✅ SHIPPED** (advisory-critique carrier `addressed_critique_items` + `advisoryCritiqueItems()`);
+    **B4 ✅ SHIPPED** (`created_at` tool-stamped, dropped from host schemas — except the lean-light-review verdict,
+    a separate read-path); **B5 ✅ SHIPPED** (opt-in `merge-to-base` closing action: tool records launch branch in
+    a sidecar, at close does `git merge --no-ff remediation/<runId>`, aborts+restores on conflict, base untouched
+    by default — kills the strand-trap without changing the safe default). (B1 subsumed by T3.) _Nothing open on
+    this track._
+10. **C/D residue:** **C3 ✅ SHIPPED** (test-plan diff-carry: `captureTestPlanCarry` snapshots authored specs on
+    ingest, `buildTestValidatorPlanScaffold` pre-fills assertions for obligations whose premise is unchanged —
+    fail-safe toward re-author). **D1 ✅ SHIPPED** (per-spec `scope_anchors`). Remaining: C2 host-authored
+    boilerplate for trivial scope (→ subsumed by T1); **D3 — deferred to its own lap** (validate-artifact/ingest
+    in-place envelope re-wrap; the clean fix is host-input vs tool-derived path separation, which collides with the
+    read-list/write-target/canonical-path conflation — no data-loss/correctness bug, purely conceptual, so it is a
+    focused refactor not a lean batch item). *(all in backlog → "Contract-pipeline host-friction inventory")*
 11. **Selective-deepening task_id convergence** — partial fix needs a live deepening-capable run to validate.
 
 ### T5 — Product / analysis forward tracks
