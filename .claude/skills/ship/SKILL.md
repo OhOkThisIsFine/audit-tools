@@ -8,9 +8,8 @@ description: Land and publish audit-tools work end-to-end — verify green, comm
 Run the whole flow; never park at the push/publish boundary. Repo root = the audit-tools checkout.
 Remote `audit-tools`, branch `main` (not origin, not master).
 
-**This is ONE package now** (`audit-tools`, both bins `audit-code` + `remediate-code`). The old
-3-package monorepo (`@audit-tools/shared` / `auditor-lambda` / `remediator-lambda`, `release:changed:*`)
-is gone — A12 collapsed it. Imports use `audit-tools/shared`, never `@audit-tools/shared`.
+**ONE package** (`audit-tools`), shipping both bins `audit-code` + `remediate-code`. Imports use the
+`audit-tools/shared` subpath export — never a separate `@audit-tools/shared` workspace dep.
 
 ## 1. Preflight gate
 
