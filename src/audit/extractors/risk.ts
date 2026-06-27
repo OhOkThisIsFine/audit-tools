@@ -53,6 +53,37 @@ export function mergeAnalyzerRiskSignals(
   };
 }
 
+/** Compound signal name for a unit that is BOTH churn-heavy and complex. */
+const RISK_CONCENTRATION_SIGNAL = "risk_concentration";
+
+/**
+ * Derive the churn × complexity compound signal — the real risk concentration.
+ * Frequent change (`change_hotspot`, from git-history mining) on code that is
+ * also structurally complex (`high_complexity`, from node_metrics) is where bugs
+ * actually concentrate: each measures a different axis, and their coincidence is
+ * a stronger prioritization cue than either alone. Returns a NEW register (input
+ * never mutated). Kept informational (the seam invariant: analyzer-derived
+ * signals never touch `risk_score`, which `buildRiskRegister` owns) — the signal
+ * surfaces the concentration to lenses / synthesis without re-weighting score.
+ * Idempotent: re-running never double-adds (signals are a deduped set).
+ */
+export function deriveRiskConcentration(register: RiskRegister): RiskRegister {
+  return {
+    ...register,
+    items: register.items.map((item) => {
+      const has = new Set(item.signals);
+      if (!has.has("change_hotspot") || !has.has("high_complexity")) {
+        return { ...item };
+      }
+      if (has.has(RISK_CONCENTRATION_SIGNAL)) return { ...item };
+      const merged = [...item.signals, RISK_CONCENTRATION_SIGNAL].sort((a, b) =>
+        a.localeCompare(b),
+      );
+      return { ...item, signals: merged };
+    }),
+  };
+}
+
 export function buildRiskRegister(
   unitManifest: UnitManifest,
   criticalFlows?: CriticalFlowManifest,

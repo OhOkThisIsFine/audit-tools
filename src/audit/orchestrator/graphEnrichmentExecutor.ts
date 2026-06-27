@@ -161,7 +161,12 @@ function buildEnrichedGraph(
         ? { routes: mergeRoutes(floor.graphs.routes ?? [], routeEdges) }
         : {}),
     },
-    analyzers_used: [...new Set(analyzersUsed)].sort(),
+    // Union with the floor's provenance — the floor may already carry analyzers
+    // that contributed BEFORE enrichment (e.g. `git-history` co-change merged in
+    // the structure executor); replacing the list would silently drop them.
+    analyzers_used: [
+      ...new Set([...(floor.analyzers_used ?? []), ...analyzersUsed]),
+    ].sort(),
   };
 }
 

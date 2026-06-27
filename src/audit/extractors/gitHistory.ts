@@ -27,6 +27,14 @@ import { graphEdge, graphLookupKey } from "./graphPathUtils.js";
 
 const GIT_CO_CHANGE_EDGE_KIND = "git-co-change";
 /**
+ * Graph-bundle edge category co-change edges are merged into. DELIBERATELY its
+ * own bucket (not `references`): co-change is temporal coupling, not a structural
+ * dependency, so `allGraphEdges` (graphSignals) skips this category — co-change
+ * never inflates fan-in/out, hubs, cycles, or seams. Consumers that want the
+ * coupling view read `graph_bundle.graphs.co_change` explicitly.
+ */
+const GIT_CO_CHANGE_CATEGORY = "co_change";
+/**
  * Co-change is a soft, historical signal (files that *happened* to change
  * together) — deliberately below the structural reference confidences so it
  * never outweighs a resolved import/reference edge.
@@ -130,6 +138,6 @@ export function gitHistoryRiskSignals(
 }
 
 export type { GitHistory } from "audit-tools/shared";
-export { GIT_CO_CHANGE_EDGE_KIND };
+export { GIT_CO_CHANGE_EDGE_KIND, GIT_CO_CHANGE_CATEGORY };
 export type RiskRegisterForMerge = RiskRegister;
 export type RiskItemForMerge = RiskItem;

@@ -104,8 +104,11 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
 15. **Codebase-wide churn / context / enforce-in-tooling review** — run the append-only/granular-staleness
     perspective over the whole codebase as a dedicated pass.
 16. **Deterministic analyzers — own-vs-acquire acquisition engine** — build the agnostic on-the-fly
-    acquire+run+normalize engine (adapters are fixture-ready); + **git-history mining** as an owned
-    language-agnostic extraction source. *([[deterministic-analyzers-own-vs-acquire]])*
+    acquire+run+normalize engine (adapters are fixture-ready). **Git-history mining ✅ SHIPPED (0.30.34)** —
+    `runStructureExecutor` now wires the (previously unwired) F6 extractor: co-change → own `co_change` graph bucket
+    (skipped by `allGraphEdges` so it never feeds structural signals), churn/authorship risk signals, churn ×
+    complexity `risk_concentration` compound, persisted `git_history.json`. Forward residue: a design-assessment
+    "hidden coupling" finding consuming the `co_change` bucket. *([[deterministic-analyzers-own-vs-acquire]])*
 
 ### T6 — Deferred / waiting (env-bound or low priority)
 17. A2 finding-quality oracle (needs hand-labeled corpus); A7 multi-host GUI checklist + gated Codex e2e;

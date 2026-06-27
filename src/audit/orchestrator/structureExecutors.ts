@@ -3,9 +3,21 @@ import { buildFileDisposition } from "../extractors/disposition.js";
 import {
   buildGraphBundle,
   buildGraphBundleFromFs,
+  mergeAnalyzerGraphContribution,
 } from "../extractors/graph.js";
 import { buildCriticalFlowManifest } from "../extractors/flows.js";
-import { buildRiskRegister } from "../extractors/risk.js";
+import {
+  buildRiskRegister,
+  mergeAnalyzerRiskSignals,
+  deriveRiskConcentration,
+} from "../extractors/risk.js";
+import {
+  mineGitHistoryArtifact,
+  gitHistoryGraphEdges,
+  gitHistoryRiskSignals,
+  GIT_CO_CHANGE_CATEGORY,
+} from "../extractors/gitHistory.js";
+import type { GitHistory } from "audit-tools/shared";
 import { buildSurfaceManifest } from "../extractors/surfaces.js";
 import { buildUnitManifest } from "./unitBuilder.js";
 import { buildDesignAssessment } from "../extractors/designAssessment.js";
@@ -42,12 +54,47 @@ export async function runStructureExecutor(
     surfaceManifest,
     disposition,
   );
+  // Structural graph signals are derived from the dependency graph ONLY —
+  // before git-history co-change edges are merged in — so temporal coupling
+  // never feeds cycle / hub / seam detection (allGraphEdges also skips the
+  // co_change bucket as defense-in-depth).
   const graphSignals = deriveGraphSignals(graphBundle);
-  const riskRegister = buildRiskRegister(
+  const baseRiskRegister = buildRiskRegister(
     unitManifest,
     criticalFlows,
     externalAnalyzerResults,
     graphSignals,
+  );
+
+  // F6 — git-history mining. A deterministic, language-neutral extraction source
+  // (degrades to empty without a root / git): co-change coupling the dependency
+  // graph misses, churn + authorship-breadth risk signals, and the churn ×
+  // complexity compound (the real risk concentration). Merged through the shared
+  // analyzer seams so it can never drift in how it re-enters graph / risk.
+  const gitHistory: GitHistory = root
+    ? mineGitHistoryArtifact(root, bundle.repo_manifest, disposition)
+    : { co_change: [], churn: [], authorship: [] };
+
+  const coChangeEdges = gitHistoryGraphEdges(gitHistory);
+  let graphWithCoChange = mergeAnalyzerGraphContribution(
+    graphBundle,
+    coChangeEdges,
+    { category: GIT_CO_CHANGE_CATEGORY },
+  );
+  if (coChangeEdges.length > 0) {
+    graphWithCoChange = {
+      ...graphWithCoChange,
+      analyzers_used: [
+        ...new Set([...(graphWithCoChange.analyzers_used ?? []), "git-history"]),
+      ].sort(),
+    };
+  }
+
+  const riskRegister = deriveRiskConcentration(
+    mergeAnalyzerRiskSignals(
+      baseRiskRegister,
+      gitHistoryRiskSignals(gitHistory, unitManifest),
+    ),
   );
 
   return {
@@ -56,9 +103,10 @@ export async function runStructureExecutor(
       file_disposition: disposition,
       unit_manifest: unitManifest,
       surface_manifest: surfaceManifest,
-      graph_bundle: graphBundle,
+      graph_bundle: graphWithCoChange,
       critical_flows: criticalFlows,
       risk_register: riskRegister,
+      git_history: gitHistory,
     },
     artifacts_written: [
       "file_disposition.json",
@@ -67,6 +115,7 @@ export async function runStructureExecutor(
       "graph_bundle.json",
       "critical_flows.json",
       "risk_register.json",
+      "git_history.json",
     ],
     progress_summary:
       `Built structure artifacts for ${unitManifest.units.length} units and ${criticalFlows.flows.length} critical flows.` +

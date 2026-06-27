@@ -15,8 +15,20 @@ const {
 const { mergeAnalyzerGraphContribution } = await import(
   "../../src/audit/extractors/graph.ts"
 );
-const { mergeAnalyzerRiskSignals } = await import(
+const { mergeAnalyzerRiskSignals, deriveRiskConcentration } = await import(
   "../../src/audit/extractors/risk.ts"
+);
+const { allGraphEdges, deriveGraphSignals } = await import(
+  "../../src/audit/extractors/graphSignals.ts"
+);
+const { GIT_CO_CHANGE_CATEGORY } = await import(
+  "../../src/audit/extractors/gitHistory.ts"
+);
+const { runStructureExecutor } = await import(
+  "../../src/audit/orchestrator/structureExecutors.ts"
+);
+const { buildRepoManifestFromFs } = await import(
+  "../../src/audit/extractors/fsIntake.ts"
 );
 const { ARTIFACT_DEPENDS_ON_MAP } = await import(
   "../../src/audit/orchestrator/dependencyMap.ts"
@@ -868,6 +880,147 @@ test("F6 fail-1 [CP-NODE-86]: git absent/isGitRepo false => mined:false empty, n
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+// ── F6 wiring (structure-executor integration + compound signal) ──────────────
+
+// deriveRiskConcentration: the churn × complexity compound. Only a unit carrying
+// BOTH change_hotspot (git churn) AND high_complexity (node_metrics) earns
+// risk_concentration — the real risk concentration. Pure, informational
+// (risk_score untouched), idempotent, non-mutating.
+test("deriveRiskConcentration flags only churn × complexity, leaves score, is idempotent", () => {
+  const register = {
+    items: [
+      { unit_id: "both", risk_score: 4, signals: ["change_hotspot", "high_complexity"], notes: [] },
+      { unit_id: "churn-only", risk_score: 2, signals: ["change_hotspot"], notes: [] },
+      { unit_id: "cplx-only", risk_score: 3, signals: ["high_complexity"], notes: [] },
+    ],
+  };
+  const out = deriveRiskConcentration(register);
+  assert.deepEqual(out.items[0].signals, [
+    "change_hotspot",
+    "high_complexity",
+    "risk_concentration",
+  ]);
+  assert.equal(out.items[0].risk_score, 4, "informational — score untouched");
+  assert.deepEqual(out.items[1].signals, ["change_hotspot"], "churn alone is not concentration");
+  assert.deepEqual(out.items[2].signals, ["high_complexity"], "complexity alone is not concentration");
+  // Idempotent + non-mutating.
+  assert.deepEqual(deriveRiskConcentration(out).items[0].signals, out.items[0].signals);
+  assert.deepEqual(register.items[0].signals, ["change_hotspot", "high_complexity"], "input not mutated");
+});
+
+// Co-change is temporal coupling, NOT a structural dependency: it lands in its
+// own `co_change` bucket and allGraphEdges must skip it, so it can never inflate
+// fan-in/out, hubs, cycles, or seams.
+test("allGraphEdges excludes the co_change bucket (temporal coupling never feeds structural signals)", () => {
+  const structuralEdge = { from: "a.ts", to: "b.ts", kind: "import" };
+  const bundle = {
+    graphs: {
+      imports: [structuralEdge],
+      [GIT_CO_CHANGE_CATEGORY]: [
+        { from: "x.ts", to: "y.ts", kind: "git-co-change", direction: "undirected" },
+        { from: "y.ts", to: "x.ts", kind: "git-co-change", direction: "undirected" },
+      ],
+    },
+  };
+  const edges = allGraphEdges(bundle);
+  assert.deepEqual(edges, [structuralEdge], "only the structural edge is flattened; co_change skipped");
+  // And a co-change "cycle" (x↔y) must NOT register as a structural cycle.
+  const signals = deriveGraphSignals(bundle);
+  assert.deepEqual(signals.cycles, [], "co-change reciprocity is not a structural cycle");
+  assert.equal(signals.fanIn.get("x.ts") ?? 0, 0, "co-change does not contribute fan-in");
+});
+
+// The headline wiring: runStructureExecutor now MINES git history end-to-end —
+// produces git_history, merges co-change into the co_change bucket with
+// git-history provenance, and merges churn/authorship risk signals — none of
+// which happened before (the extractor existed but was never called).
+test("runStructureExecutor wires git-history mining: git_history + co_change bucket + provenance + risk signals", async () => {
+  const dir = await makeRepo();
+  try {
+    // a.ts is deliberately complex (many branches → high node-metric complexity)
+    // and churned ≥ 8 times; it co-changes with b.ts every commit. This drives
+    // change_hotspot + high_complexity → risk_concentration, plus a co-change edge.
+    const complexBody = (n) =>
+      `export function f${n}(x){` +
+      Array.from({ length: 12 }, (_, i) => `if(x===${i}){return ${i};}`).join("") +
+      `return -1;}`;
+    for (let i = 0; i < 9; i++) {
+      await commit(
+        dir,
+        { "a.ts": complexBody(i), "b.ts": `export const b=${i};` },
+        { name: "Author A", email: "a@example.com" },
+      );
+    }
+
+    const repoManifest = await buildRepoManifestFromFs({ root: dir });
+    const result = await runStructureExecutor({ repo_manifest: repoManifest }, dir);
+    const { git_history, graph_bundle, risk_register } = result.updated;
+
+    // 1) git_history is now produced and persisted by the executor.
+    assert.ok(git_history, "structure executor produces git_history");
+    assert.ok(result.artifacts_written.includes("git_history.json"));
+    assert.ok(
+      git_history.churn.find((c) => c.path === "a.ts")?.commits >= 8,
+      "a.ts mined as a churn hotspot",
+    );
+
+    // 2) Co-change landed in the co_change bucket (NOT references) with provenance.
+    const coChange = graph_bundle.graphs[GIT_CO_CHANGE_CATEGORY] ?? [];
+    assert.ok(
+      coChange.some(
+        (e) =>
+          (e.from === "a.ts" && e.to === "b.ts") ||
+          (e.from === "b.ts" && e.to === "a.ts"),
+      ),
+      "a.ts/b.ts co-change edge present in the co_change bucket",
+    );
+    assert.ok(
+      (graph_bundle.analyzers_used ?? []).includes("git-history"),
+      "git-history recorded as a contributing analyzer",
+    );
+    // Co-change must NOT have leaked into a structural bucket.
+    assert.equal(
+      (graph_bundle.graphs.references ?? []).some((e) => e.kind === "git-co-change"),
+      false,
+      "co-change does not pollute the references bucket",
+    );
+
+    // 3) Risk signals merged: a.ts's unit carries the churn × complexity compound.
+    const concentrated = risk_register.items.find((it) =>
+      it.signals.includes("risk_concentration"),
+    );
+    assert.ok(
+      concentrated,
+      "a churned + complex unit earns the risk_concentration compound signal",
+    );
+    assert.ok(
+      concentrated.signals.includes("change_hotspot") &&
+        concentrated.signals.includes("high_complexity"),
+      "risk_concentration only when both axes fire",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// Without a root (in-memory / no git), the executor degrades cleanly: empty
+// git_history, no co_change bucket, no git-history provenance — never throws.
+test("runStructureExecutor degrades to empty git-history without a root", async () => {
+  const repoManifest = manifest(["a.ts", "b.ts"]);
+  const result = await runStructureExecutor({ repo_manifest: repoManifest });
+  assert.deepEqual(result.updated.git_history, {
+    co_change: [],
+    churn: [],
+    authorship: [],
+  });
+  assert.ok(result.artifacts_written.includes("git_history.json"));
+  assert.equal(
+    (result.updated.graph_bundle.analyzers_used ?? []).includes("git-history"),
+    false,
+    "no git-history provenance when nothing was mined",
+  );
 });
 
 // F6 inv-8 [CP-NODE-84]: author identity is mailmap-canonical (output changes

@@ -105,12 +105,17 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   per-run user consent (ephemeral, nothing persisted). No exhaustive allowlist to curate.
   (Ethan, 2026-06-24.)
 
-- **Git-history mining as an owned, language-agnostic extraction source.** Mine `git log` (not the AST) for
-  signals static analysis structurally cannot see: co-change coupling (files that change together = hidden coupling
-  the dependency graph misses), churn × complexity hotspots (the real risk concentration), and author concentration
-  / bus-factor. Language-agnostic by nature, purely mechanical, feeds architecture (coupling), maintainability
-  (churn) and the risk register at once. A distinct extraction source (a new input, not just another analyzer behind
-  the adapter seam) — hence its own track. (Ethan, 2026-06-24.)
+- **Git-history mining — ✅ SHIPPED (wired 0.30.34).** Mines `git log` (not the AST) for signals static analysis
+  structurally cannot see. The extractor (`src/audit/extractors/gitHistory.ts`) + shared miner (`src/shared/git.ts`
+  `mineGitHistory`) existed and were unit-tested, but were **never wired into an executor** — `runStructureExecutor`
+  now mines git history end-to-end: co-change coupling lands in its OWN `graph_bundle.graphs.co_change` bucket
+  (`GIT_CO_CHANGE_CATEGORY`, deliberately NOT `references` — `allGraphEdges` skips it so temporal coupling never
+  feeds cycle/hub/seam detection), `git-history` is recorded in `analyzers_used` (and `buildEnrichedGraph` now unions
+  rather than replaces provenance so enrichment can't drop it), churn/authorship risk signals merge via
+  `mergeAnalyzerRiskSignals`, and the churn × complexity compound — `risk_concentration`, the real risk
+  concentration — is derived by `deriveRiskConcentration` (informational; never touches `risk_score`). Persisted as
+  the first-class `git_history.json` artifact. (Forward enhancement still open: an explicit design-assessment
+  "hidden coupling" finding that consumes the `co_change` bucket — the edges are persisted and ready.)
 
 - **Remaining deterministic-analyzer work (DEFERRED).** The external analyzers landed as
   fixture-validated **adapters** (parse + normalize + degrade-to-empty behind the seam); actually
