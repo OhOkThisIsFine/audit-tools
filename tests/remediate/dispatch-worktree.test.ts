@@ -543,7 +543,7 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
       workerOutcome: "success",
       targetedCommands: [],
       writePaths: ["friction/"],
-      mergedBaseCheckCommand: "node --version",
+      mergedBaseCheckCommand: ["node", "--version"],
     });
     expect(res.outcome).toBe("success");
     expect(res.merged).toBe(true);
@@ -566,7 +566,7 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
       workerOutcome: "success",
       targetedCommands: [],
       writePaths: ["friction/"],
-      mergedBaseCheckCommand: "node --version",
+      mergedBaseCheckCommand: ["node", "--version"],
     });
     expect(res.outcome).toBe("error");
     expect(res.merged).toBe(false);
@@ -596,7 +596,7 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
       workerOutcome: "success",
       targetedCommands: [],
       writePaths: ["src/", "friction/"],
-      mergedBaseCheckCommand: "node --version",
+      mergedBaseCheckCommand: ["node", "--version"],
     });
 
     // The fail-loud still refuses to LAND the half-change.
@@ -633,7 +633,7 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
       workerOutcome: "success",
       targetedCommands: [],
       writePaths: ["src/"],
-      mergedBaseCheckCommand: "node --version",
+      mergedBaseCheckCommand: ["node", "--version"],
     });
     expect(res.outcome).toBe("success");
     expect(res.merged).toBe(true);
@@ -659,7 +659,7 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
       targetedCommands: [], // skip worktree verify; isolate the merged-base check
       writePaths: ["src/"],
       // A deterministic RED cross-package check in the main checkout.
-      mergedBaseCheckCommand: 'node -e "process.exit(1)"',
+      mergedBaseCheckCommand: ["node", "-e", "process.exit(1)"],
     });
     expect(res.outcome).toBe("error");
     expect(res.merged).toBe(false);
@@ -689,7 +689,7 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
       workerOutcome: "success",
       targetedCommands: [],
       writePaths: ["src/"],
-      mergedBaseCheckCommand: "node --version", // GREEN
+      mergedBaseCheckCommand: ["node", "--version"], // GREEN
     });
     expect(res.outcome).toBe("success");
     expect(res.merged).toBe(true);
@@ -721,7 +721,7 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
       // Make the cross-package check itself the failure surface AFTER a successful
       // pick is impossible here; instead exercise a clean GREEN so the accept lands,
       // proving the lock is released and a SECOND accept can acquire it.
-      mergedBaseCheckCommand: "node --version",
+      mergedBaseCheckCommand: ["node", "--version"],
     });
     expect(res.outcome).toBe("success");
     expect(headOid(repo)).not.toBe(before);
@@ -740,7 +740,7 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
       workerOutcome: "success",
       targetedCommands: [],
       writePaths: ["src/"],
-      mergedBaseCheckCommand: "node --version",
+      mergedBaseCheckCommand: ["node", "--version"],
     });
     expect(res2.outcome).toBe("success");
     expect(res2.merged).toBe(true);
@@ -769,7 +769,7 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
         workerOutcome: "success",
         targetedCommands: [],
         writePaths: ["src/"],
-        mergedBaseCheckCommand: "node --version",
+        mergedBaseCheckCommand: ["node", "--version"],
       });
 
     const [a, b] = await Promise.all([accept("LK1"), accept("LK2")]);
