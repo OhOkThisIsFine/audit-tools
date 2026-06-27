@@ -21,7 +21,6 @@ import {
   buildNextContractPipelineStep,
   ingestContractArtifacts,
   promoteImplementationDagToExtractedPlan,
-  MAX_CONTRACT_REPAIR_ITERATIONS,
   validateImplementationDagTraceability,
 } from "../../src/remediate/steps/contractPipeline.js";
 import { CONTRACT_PIPELINE_PHASE_ORDER } from "../../src/remediate/steps/contractPipelinePrompts.js";
@@ -389,8 +388,8 @@ describe("INV-remediate-pipeline-02: parallel_safe = (depends_on.length === 0) a
 // (tested via buildNextContractPipelineStep with pre-seeded repair-state.json)
 // ---------------------------------------------------------------------------
 
-describe("INV-remediate-pipeline-03: judge gate is monotonic — cap reached → proceed_residual for new judge hash", () => {
-  it("when repairs.length >= MAX_CONTRACT_REPAIR_ITERATIONS and the judge hash is NEW (not yet handled), proceeds to implementation_planning with residual risks (not infinite repair)", async () => {
+describe("INV-remediate-pipeline-03: judge gate is convergence-terminated — a stalled loop escalates, never repairs forever", () => {
+  it("when a NEW judge re-accepts an already-addressed counterexample with nothing new, escalates to a blocked user-decision (not infinite repair)", async () => {
     const NEEDS_REPAIR_JUDGE = {
       contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
       goal_id: "G1",
@@ -412,15 +411,19 @@ describe("INV-remediate-pipeline-03: judge gate is monotonic — cap reached →
     await ingestContractArtifacts(ARTIFACTS_DIR);
     const cpDir = contractPipelineDir(ARTIFACTS_DIR);
 
-    // Pre-seed repair-state with DIFFERENT (prior) judge hashes filling the cap.
-    // The current judge hash is NOT in this list — so alreadyHandled=false.
-    // Since repairs.length >= cap, the proceed_residual branch fires.
-    expect(MAX_CONTRACT_REPAIR_ITERATIONS).toBe(2);
+    // Pre-seed repair-state: a prior repair already ADDRESSED CE-1, under a
+    // DIFFERENT (prior) judge hash — so the current judge hash is alreadyHandled=false,
+    // but CE-1 is in the addressed set. The fresh judge re-accepts CE-1 with nothing
+    // new ⇒ the loop is not converging ⇒ escalate (not a repair, not infinite loop).
     const repairState = {
       schema_version: "remediate-code-contract-pipeline/repair-state/v1alpha1",
       repairs: [
-        { judge_hash: "prior-judge-hash-1", target: "finalized_module_contracts", at: CREATED_AT },
-        { judge_hash: "prior-judge-hash-2", target: "obligation_ledger", at: CREATED_AT },
+        {
+          judge_hash: "prior-judge-hash-1",
+          target: "finalized_module_contracts",
+          at: CREATED_AT,
+          accepted_ce_ids: ["CE-1"],
+        },
       ],
       dag_regenerations: [],
     };
@@ -428,10 +431,10 @@ describe("INV-remediate-pipeline-03: judge gate is monotonic — cap reached →
 
     const step = await buildNextContractPipelineStep(STEP_OPTIONS);
     expect(step).not.toBeNull();
-    // Must be implementation_planning with residual risks — cap exhausted
+    // Must escalate to a blocked user-decision — the loop is not converging.
+    expect(step!.status).toBe("blocked");
     const prompt = await promptOf(step!);
-    expect(prompt).toMatch(/Implementation Planning/);
-    expect(prompt).toMatch(/Repair Cap Reached/);
+    expect(prompt).toMatch(/Judge↔Repair Loop Did Not Converge/);
     expect(prompt).not.toMatch(/Contract Repair:/);
   });
 

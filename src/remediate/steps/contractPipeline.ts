@@ -163,12 +163,18 @@ const FRAMING_COLLAPSE_GROUP = [
 // ── Bounded-loop caps ─────────────────────────────────────────────────────────
 
 /**
- * Maximum judge-ordered contract repairs per run. After the cap, the run
- * proceeds to implementation planning with the unrepaired counterexamples
- * carried as residual risks — an unbounded critic↔repair oscillation is the
- * failure mode this exists to prevent.
+ * Runaway backstop for the judge↔repair loop — the LOUD exception path, NOT the
+ * normal terminator. The loop normally terminates by *convergence*: it keeps
+ * repairing only while each round surfaces a genuinely NEW accepted counterexample
+ * (real progress), reaches a fixpoint when the judge approves, and escalates to the
+ * user the moment a round re-accepts an already-addressed counterexample without
+ * progress (a stall/oscillation). This ceiling exists only so a pathological run
+ * that keeps minting brand-new accepted counterexamples forever cannot loop without
+ * bound; hitting it is itself an escalation (loud), never a silent proceed. It is
+ * deliberately generous — a genuinely deep but converging design (each round a new
+ * real defect) must not be cut mid-convergence (the failure mode of the former N=2).
  */
-export const MAX_CONTRACT_REPAIR_ITERATIONS = 2;
+export const MAX_CONTRACT_REPAIR_ITERATIONS = 8;
 
 /** Maximum implementation_dag regenerations after traceability rejections. */
 export const MAX_DAG_REGENERATION_ATTEMPTS = 2;
@@ -183,8 +189,15 @@ export const MAX_CYCLIC_SEAM_RESOLUTION_ATTEMPTS = 2;
 
 interface ContractRepairState {
   schema_version: "remediate-code-contract-pipeline/repair-state/v1alpha1";
-  /** One entry per judge-ordered repair step emission (keyed by judge hash). */
-  repairs: { judge_hash: string; target: string; at: string }[];
+  /**
+   * One entry per judge-ordered repair step emission (keyed by judge hash).
+   * `accepted_ce_ids` records the judge-accepted counterexample ids this repair
+   * was dispatched to address — the cumulative union across repairs is the
+   * "already-addressed" set the convergence gate diffs each new judge report
+   * against, so a re-accepted (un-converged) counterexample is detected as a
+   * stall rather than silently re-repaired.
+   */
+  repairs: { judge_hash: string; target: string; at: string; accepted_ce_ids?: string[] }[];
   /** One entry per implementation_dag traceability rejection. */
   dag_regenerations: { violations: string[]; at: string }[];
 }
@@ -597,14 +610,35 @@ function inferRepairDirective(judge: JudgeReport): { target: ExtendedRepairTarge
 
 type JudgeGate =
   | { kind: "proceed" }
-  | { kind: "proceed_residual"; note: string }
-  | { kind: "repair"; directive: { target: ExtendedRepairTarget; instruction: string }; judgeHash: string };
+  | { kind: "escalate"; reason: "stall" | "runaway"; outstanding: string[]; note: string }
+  | {
+      kind: "repair";
+      directive: { target: ExtendedRepairTarget; instruction: string };
+      judgeHash: string;
+      acceptedCeIds: string[];
+    };
+
+/** Judge-accepted counterexample ids from a judge report's classifications. */
+function acceptedCeIdsOf(judge: JudgeReport | undefined): string[] {
+  return (judge?.classifications ?? [])
+    .filter((c) => c.classification === "accepted")
+    .map((c) => c.counterexample_id);
+}
 
 /**
- * Decide whether implementation planning may proceed: an approved judge
- * verdict proceeds; a failing verdict triggers one targeted repair per judge
- * report, capped at MAX_CONTRACT_REPAIR_ITERATIONS — after the cap, the run
- * proceeds with the unrepaired counterexamples recorded as residual risks.
+ * Decide whether implementation planning may proceed. Convergence-terminated,
+ * NOT capped at an arbitrary count:
+ *   - approved verdict ⇒ proceed (the fixpoint);
+ *   - a needs_repair verdict that surfaces a NEW accepted counterexample (one not
+ *     already addressed by a prior repair) ⇒ repair (genuine progress);
+ *   - a needs_repair verdict whose accepted counterexamples were ALL already
+ *     addressed ⇒ escalate (stall/oscillation — the repair loop is not converging,
+ *     surface the outstanding counterexamples to the user instead of silently
+ *     shipping residual risk or looping);
+ *   - the runaway backstop (MAX_CONTRACT_REPAIR_ITERATIONS) ⇒ escalate (loud).
+ * The former fixed N=2 cap that proceeded-with-residual-risk at an arbitrary count
+ * is gone: a deep-but-converging run is no longer cut mid-convergence, and a
+ * genuinely non-converging run is surfaced rather than buried.
  */
 async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
   const judgeEnvelope = await readContractArtifact(artifactsDir, "judge_report");
@@ -617,12 +651,6 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
   const alreadyHandled = repairState.repairs.some(
     (repair) => repair.judge_hash === judgeHash,
   );
-  if (!alreadyHandled && repairState.repairs.length >= MAX_CONTRACT_REPAIR_ITERATIONS) {
-    return {
-      kind: "proceed_residual",
-      note: `The judge verdict remains "needs_repair" after ${repairState.repairs.length} repair iteration(s) (the cap). Proceed anyway: treat every judge-accepted counterexample that remains unaddressed as a residual risk, and cover each one with an implementation or verification node.`,
-    };
-  }
 
   // Map judge.repair_directive.target if present; if absent, infer from classifications.
   const rawDirective = judge.repair_directive;
@@ -634,7 +662,43 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
         instruction: rawDirective.instruction,
       }
     : inferRepairDirective(judge);
-  return { kind: "repair", directive, judgeHash };
+
+  const acceptedIds = acceptedCeIdsOf(judge);
+  const addressed = new Set(
+    repairState.repairs.flatMap((r) => r.accepted_ce_ids ?? []),
+  );
+  const newAccepted = acceptedIds.filter((id) => !addressed.has(id));
+
+  // Idempotent re-entry: this exact judge report already drove a repair (its hash
+  // is recorded). Re-emit the same repair directive; do not re-evaluate convergence
+  // (the repair has not yet produced a fresh judge report).
+  if (alreadyHandled) {
+    return { kind: "repair", directive, judgeHash, acceptedCeIds: newAccepted };
+  }
+
+  // Runaway backstop (loud) — the exception path, not the normal terminator.
+  if (repairState.repairs.length >= MAX_CONTRACT_REPAIR_ITERATIONS) {
+    return {
+      kind: "escalate",
+      reason: "runaway",
+      outstanding: acceptedIds,
+      note: `The judge↔repair loop reached its runaway backstop (${repairState.repairs.length} repair rounds) without converging. Each round was still surfacing accepted counterexamples. This is pathological non-convergence — review the outstanding counterexamples and the contract design with the user before proceeding.`,
+    };
+  }
+
+  // Progress: a new accepted counterexample (or the first round) ⇒ repair.
+  if (repairState.repairs.length === 0 || newAccepted.length > 0) {
+    return { kind: "repair", directive, judgeHash, acceptedCeIds: newAccepted };
+  }
+
+  // Stall: a needs_repair verdict whose every accepted counterexample was already
+  // addressed by a prior repair ⇒ the loop is not converging ⇒ escalate.
+  return {
+    kind: "escalate",
+    reason: "stall",
+    outstanding: acceptedIds,
+    note: `The judge re-accepted counterexample(s) that a prior repair already addressed (${acceptedIds.join(", ") || "none newly accepted"}), with no new accepted counterexample this round. The repair loop is not converging on these items. Resolve them with the user — adjust the contract design or accept the counterexamples as known limitations — before the plan can be promoted.`,
+  };
 }
 
 // ── Traceability gate ─────────────────────────────────────────────────────────
@@ -1597,8 +1661,10 @@ ${rejectionRewriteInstruction(archived.archivedPath)}`,
     }
   }
 
-  // 3. Judge gate: implementation planning is reachable only through an
-  //    approved verdict, a bounded targeted repair, or the repair cap.
+  // 3. Judge gate: implementation planning is reachable only through an approved
+  //    verdict (the fixpoint) or a convergent targeted repair. A stalled /
+  //    non-converging repair loop escalates to the user (blocked) instead of
+  //    silently proceeding with residual risk.
   if (nextPhase === "implementation_planning") {
     const gate = await evaluateJudgeGate(artifactsDir);
     if (gate.kind === "repair") {
@@ -1609,6 +1675,7 @@ ${rejectionRewriteInstruction(archived.archivedPath)}`,
           judge_hash: gate.judgeHash,
           target: repairTarget,
           at: new Date().toISOString(),
+          accepted_ce_ids: gate.acceptedCeIds,
         });
         await writeRepairState(artifactsDir, repairState);
       }
@@ -1624,14 +1691,45 @@ ${rejectionRewriteInstruction(archived.archivedPath)}`,
         stopCondition: `Stop after rewriting "${repairTarget}" per the judge repair directive and running next-step.`,
       });
     }
-    if (gate.kind === "proceed_residual") {
-      return buildPhaseStep(
-        "implementation_planning",
-        `## Repair Cap Reached — Residual Risks
+    if (gate.kind === "escalate") {
+      // Non-convergence (stall or runaway backstop): surface it to the user
+      // loudly rather than promoting a plan over an un-converged contract. The
+      // outstanding accepted counterexamples are named so the user can resolve
+      // them (revise the contract design or accept them as known limitations).
+      await captureStepBoundaryFriction(
+        artifactsDir,
+        runId,
+        {
+          eventType: "repair_round",
+          discriminator: `judge_nonconvergence:${gate.reason}`,
+          note: `Judge↔repair loop escalated (${gate.reason}): ${gate.note}`,
+          category: "trap",
+        },
+        "remediate-code",
+      );
+      return writeCurrentStep({
+        stepKind: CONTRACT_STEP_KIND,
+        status: "blocked",
+        runId,
+        repoRoot: root,
+        artifactsDir,
+        prompt: `# Judge↔Repair Loop Did Not Converge
 
 ${gate.note}
-`,
-      );
+
+## Outstanding accepted counterexamples
+
+${
+  gate.outstanding.length > 0
+    ? gate.outstanding.map((id) => `- ${id}`).join("\n")
+    : "_(none newly accepted this round)_"
+}
+
+Read the judge_report and counterexample artifacts, decide with the user how to resolve each outstanding counterexample (revise the contract design and re-run, or accept it as a known limitation), then re-run next-step.`,
+        allowedCommands: [],
+        stopCondition:
+          "Stop — the contract pipeline is blocked on a non-converging judge↔repair loop pending a user decision.",
+      });
     }
     // gate.kind === "proceed": fall through to the normal phase step below.
   }
