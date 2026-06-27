@@ -338,7 +338,7 @@ Self-check before next-step: \`${loaderCommand(`validate-artifact --name test_va
     const path = contractArtifactFilePath(artifactsDir, "implementation_dag");
     return `## Pre-filled Skeleton — fill only the blank slots
 
-Below is the implementation-DAG skeleton: one node per obligation (covering every obligation and accepted counterexample). Fill ONLY each node's \`title\`, \`description\`, and \`targeted_commands\`. You MAY merge nodes that belong together and add real \`depends_on\`/\`edges\` ordering, as long as every obligation stays covered (in \`satisfies_obligations\` or \`verification_obligation_ids\`) and every accepted counterexample stays in some node's \`addresses_counterexamples\`.${advisoryBlock}
+Below is the implementation-DAG skeleton: ONE node per module (its obligations already grouped), covering every obligation and accepted counterexample. Fill ONLY each node's \`title\`, \`description\`, and \`targeted_commands\`. You MAY further merge or split nodes and add real \`depends_on\`/\`edges\` ordering, as long as every obligation stays covered (in \`satisfies_obligations\` or \`verification_obligation_ids\`) and every accepted counterexample stays in some node's \`addresses_counterexamples\`.${advisoryBlock}
 
 \`\`\`json
 ${JSON.stringify(scaffold, null, 2)}

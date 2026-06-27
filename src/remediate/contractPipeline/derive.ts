@@ -103,6 +103,7 @@ export function deriveObligationLedger(
       depends_on: [],
       status: "pending",
       source: "design_spec",
+      module: mod.name,
     });
 
     mod.invariants.forEach((invariant, i) => {
@@ -113,6 +114,7 @@ export function deriveObligationLedger(
         depends_on: [],
         status: "pending",
         source: "design_spec",
+        module: mod.name,
         change_classification: classifyObligationChange(invariant, baselineSymbols),
       });
     });
@@ -125,6 +127,7 @@ export function deriveObligationLedger(
         depends_on: [],
         status: "pending",
         source: "design_spec",
+        module: mod.name,
         change_classification: classifyObligationChange(failureMode, baselineSymbols),
       });
     });
@@ -300,11 +303,15 @@ export function acceptedCounterexampleIds(judgeReport: unknown): string[] {
 }
 
 /**
- * Build the implementation-DAG skeleton: one node per obligation (covering it),
- * blank title/description/targeted_commands for the model, and accepted
- * counterexamples attached so coverage holds by construction. Empty edges (the
- * derived ledger declares no inter-obligation ordering). Advisory: the model
- * fills the blanks and may merge nodes as long as coverage is preserved.
+ * Build the implementation-DAG skeleton: ONE node per finalized *module*
+ * (grouping all that module's obligations), blank title/description/
+ * targeted_commands for the model, and accepted counterexamples attached so
+ * coverage holds by construction. Grouping by module means a 1-module change
+ * derives 1 node instead of N obligation-nodes the host then has to merge (B2);
+ * obligations with no module home (counterexample/critique-sourced) fall back
+ * to one node each. Empty edges (the derived ledger declares no inter-module
+ * ordering). Advisory: the model fills the blanks and may further merge/split
+ * nodes as long as coverage is preserved.
  */
 export function buildImplementationDagScaffold(
   ledger: ObligationLedger | undefined,
@@ -313,18 +320,35 @@ export function buildImplementationDagScaffold(
   const obligations = (ledger?.obligations ?? []).filter((o) =>
     isDagPhaseObligation(o.kind),
   );
-  const nodes: ImplementationDagScaffoldNode[] = obligations.map((o, i) => ({
-    id: `CP-NODE-${i + 1}`,
-    title: "",
-    description: "",
-    satisfies_obligations: [o.id],
-    addresses_counterexamples: [],
-    addressed_critique_items: [],
-    depends_on: [],
-    verification_obligation_ids: [o.id],
-    targeted_commands: [],
-    status: "pending",
-  }));
+  // Group by module in first-appearance order; obligations with no module key
+  // on their own id (one node each, preserving coverage).
+  const groups: Array<{ key: string; obligations: ObligationEntry[] }> = [];
+  const groupIndex = new Map<string, number>();
+  for (const o of obligations) {
+    const key = o.module ? `module:${o.module}` : `obligation:${o.id}`;
+    let idx = groupIndex.get(key);
+    if (idx === undefined) {
+      idx = groups.length;
+      groupIndex.set(key, idx);
+      groups.push({ key, obligations: [] });
+    }
+    groups[idx].obligations.push(o);
+  }
+  const nodes: ImplementationDagScaffoldNode[] = groups.map((g, i) => {
+    const ids = g.obligations.map((o) => o.id);
+    return {
+      id: `CP-NODE-${i + 1}`,
+      title: "",
+      description: "",
+      satisfies_obligations: [...ids],
+      addresses_counterexamples: [],
+      addressed_critique_items: [],
+      depends_on: [],
+      verification_obligation_ids: [...ids],
+      targeted_commands: [],
+      status: "pending",
+    };
+  });
 
   if (acceptedCeIds.length > 0) {
     if (nodes.length === 0) {

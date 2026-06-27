@@ -79,6 +79,15 @@ export interface ObligationEntry {
   /** Traceability: where this obligation originated. */
   source?: "design_spec" | "critique" | "counterexample" | "manual";
   /**
+   * The finalized module this obligation belongs to (design_spec-sourced
+   * obligations only). Lets the implementation-DAG scaffold group a module's
+   * obligations into ONE node by construction — a 1-module change derives 1
+   * node instead of N (B2) — without the host having to merge. Absent on
+   * obligations with no module home (e.g. counterexample/critique-sourced),
+   * which fall back to one node each.
+   */
+  module?: string;
+  /**
    * DC-5: change-vs-addition classification. Present on testable
    * (invariant/behavioral) obligations the deriver classified; absent on
    * structural obligations (no test burden) and on obligations from sources
