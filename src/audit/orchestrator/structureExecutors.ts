@@ -17,11 +17,7 @@ import {
   gitHistoryRiskSignals,
   GIT_CO_CHANGE_CATEGORY,
 } from "../extractors/gitHistory.js";
-import {
-  scanSecretsArtifact,
-  secretRiskSignals,
-} from "../extractors/secrets.js";
-import type { GitHistory, SecretScan } from "audit-tools/shared";
+import type { GitHistory } from "audit-tools/shared";
 import { buildSurfaceManifest } from "../extractors/surfaces.js";
 import { buildUnitManifest } from "./unitBuilder.js";
 import { buildDesignAssessment } from "../extractors/designAssessment.js";
@@ -94,22 +90,10 @@ export async function runStructureExecutor(
     };
   }
 
-  // Deterministic secret scanning — an OWN extractor (text/regex+entropy, no
-  // ecosystem tool to acquire). Degrades to empty without a root. Its per-unit
-  // `hardcoded_secret` signals merge through the same risk seam so the security
-  // lens is raised on affected units; the concrete findings are surfaced at
-  // synthesis from the persisted `secrets.json` artifact.
-  const secrets: SecretScan = root
-    ? scanSecretsArtifact(root, bundle.repo_manifest, disposition)
-    : { findings: [] };
-
   const riskRegister = deriveRiskConcentration(
     mergeAnalyzerRiskSignals(
-      mergeAnalyzerRiskSignals(
-        baseRiskRegister,
-        gitHistoryRiskSignals(gitHistory, unitManifest),
-      ),
-      secretRiskSignals(secrets, unitManifest),
+      baseRiskRegister,
+      gitHistoryRiskSignals(gitHistory, unitManifest),
     ),
   );
 
@@ -123,7 +107,6 @@ export async function runStructureExecutor(
       critical_flows: criticalFlows,
       risk_register: riskRegister,
       git_history: gitHistory,
-      secrets,
     },
     artifacts_written: [
       "file_disposition.json",
@@ -133,7 +116,6 @@ export async function runStructureExecutor(
       "critical_flows.json",
       "risk_register.json",
       "git_history.json",
-      "secrets.json",
     ],
     progress_summary:
       `Built structure artifacts for ${unitManifest.units.length} units and ${criticalFlows.flows.length} critical flows.` +

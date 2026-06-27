@@ -108,12 +108,8 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
     `runStructureExecutor` now wires the (previously unwired) F6 extractor: co-change → own `co_change` graph bucket
     (skipped by `allGraphEdges` so it never feeds structural signals), churn/authorship risk signals, churn ×
     complexity `risk_concentration` compound, persisted `git_history.json`. **Hidden-coupling design finding
-    SHIPPED (0.30.35)** — `detectHiddenCoupling` surfaces co-change pairs with no structural edge. **Secret
-    scanning ✅ SHIPPED (0.30.36)** — second OWN extractor: pure `detectSecrets` (provider-token formats +
-    entropy-gated heuristic, masked) in `src/shared/secrets.ts`, `scanSecretsArtifact` wired into
-    `runStructureExecutor` (persists `secrets.json`, `hardcoded_secret` risk signal), surfaced at synthesis as
-    security-lens findings. _Both OWN extractors now shipped; remaining own-vs-acquire work is the acquisition
-    engine for ecosystem-specific tools (T6/forward)._ *([[deterministic-analyzers-own-vs-acquire]])*
+    SHIPPED (0.30.35)** — `detectHiddenCoupling` surfaces co-change pairs with no structural edge. Remaining OWN
+    extractor on this track: **secret scanning**. *([[deterministic-analyzers-own-vs-acquire]])*
 
 ### T6 — Deferred / waiting (env-bound or low priority)
 17. A2 finding-quality oracle (needs hand-labeled corpus); A7 multi-host GUI checklist + gated Codex e2e;

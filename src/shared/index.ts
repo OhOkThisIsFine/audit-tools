@@ -367,10 +367,6 @@ export type {
   MineGitHistoryOptions,
 } from "./git.js";
 
-// Secret scanning (deterministic OWN extractor core)
-export { detectSecrets, shannonEntropy } from "./secrets.js";
-export type { SecretFinding, SecretScan } from "./secrets.js";
-
 // Observability
 export type { RunLogEvent, RunLoggerOptions } from "./observability/runLog.js";
 export { RunLogger } from "./observability/runLog.js";

@@ -21,7 +21,6 @@ Downstream:
 - `critical_flows.json`
 - `risk_register.json`
 - `git_history.json`
-- `secrets.json`
 - `coverage_matrix.json`
 - `flow_coverage.json`
 - `audit_tasks.json`
@@ -40,7 +39,6 @@ Downstream:
 - `critical_flows.json`
 - `risk_register.json`
 - `git_history.json`
-- `secrets.json`
 - `coverage_matrix.json`
 - `flow_coverage.json`
 - `audit_tasks.json`
@@ -106,13 +104,6 @@ Downstream:
 ### `design_assessment.json`
 
 Downstream:
-
-- `audit-report.md`
-
-### `secrets.json`
-
-Deterministic secret-scan results (OWN extractor). Upstream: `repo_manifest.json`,
-`file_disposition.json`. Downstream:
 
 - `audit-report.md`
 
