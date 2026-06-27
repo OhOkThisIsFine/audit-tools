@@ -30,6 +30,8 @@ import {
 import {
   buildBaselineSymbolCorpus,
   classifyObligationChange,
+  obligationScopeAnchors,
+  readObligationChangeClassification,
 } from "./changeClassification.js";
 
 /** The finalized-module-contract fields the obligation deriver reads. */
@@ -187,15 +189,24 @@ export interface TestValidatorPlanScaffold {
     obligation_id: string;
     name: string;
     kind: string;
+    /**
+     * The change's scope anchors (touched symbols / file) the negative assertion
+     * must name to pass the CE-006 negative-scoping gate. Derived here so the
+     * host sees them IN the skeleton instead of discovering them only after a
+     * write is rejected (D1). Advisory context — the host reads them, the gate
+     * enforces them; an empty array means no change-scope constraint applies.
+     */
+    scope_anchors: string[];
     assertions: string[];
   }>;
 }
 
 /**
  * Build the test-plan skeleton: one spec per *testable* (invariant/behavioral)
- * obligation, with `obligation_id`/`name`/`kind` filled and `assertions` left
- * blank for the model. The model fills only the assertions (each spec needs a
- * paired positive + negative assertion per the OBL-CO-01 gate).
+ * obligation, with `obligation_id`/`name`/`kind`/`scope_anchors` filled and
+ * `assertions` left blank for the model. The model fills only the assertions
+ * (each spec needs a paired positive + negative assertion per the OBL-CO-01
+ * gate, and the negative must name one of `scope_anchors` per CE-006).
  */
 export function buildTestValidatorPlanScaffold(
   ledger: ObligationLedger | undefined,
@@ -208,6 +219,11 @@ export function buildTestValidatorPlanScaffold(
         obligation_id: o.id,
         name: scaffoldName(o),
         kind: o.kind === "invariant" ? "invariant" : "unit",
+        scope_anchors: obligationScopeAnchors(
+          o.id,
+          o.description,
+          readObligationChangeClassification(o),
+        ),
         assertions: [],
       })),
   };
@@ -219,10 +235,44 @@ export interface ImplementationDagScaffoldNode {
   description: string;
   satisfies_obligations: string[];
   addresses_counterexamples: string[];
+  /**
+   * Advisory conceptual-critique item ids this node addresses (B3). The
+   * conceptual-design critique's `advisory`-severity items have no obligation or
+   * counterexample to attach to, so without a structural slot the host smuggles
+   * them into prose or test assertions. This carrier gives each one a first-class
+   * home: the host records which advisory items a node's implementation honours.
+   * Blank in the skeleton (the host fills it); advisory, so it is not gated.
+   */
+  addressed_critique_items: string[];
   depends_on: string[];
   verification_obligation_ids: string[];
   targeted_commands: string[];
   status: string;
+}
+
+/** An advisory conceptual-critique item the host should account for in the DAG. */
+export interface AdvisoryCritiqueItem {
+  id: string;
+  description: string;
+}
+
+/**
+ * Advisory-severity items from a conceptual_design_critique payload (defensive
+ * read). Blocking items drive the design-repair loop and are consumed there;
+ * advisory items survive past the critique gate and need a structural home in
+ * the implementation DAG — this surfaces them so the skeleton can list them (B3).
+ */
+export function advisoryCritiqueItems(critique: unknown): AdvisoryCritiqueItem[] {
+  const items =
+    isRecord(critique) && Array.isArray(critique.items) ? critique.items : [];
+  return items
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .filter((item) => item.severity === "advisory")
+    .map((item) => ({
+      id: typeof item.id === "string" ? item.id : "",
+      description: typeof item.description === "string" ? item.description : "",
+    }))
+    .filter((item) => item.id.length > 0);
 }
 
 export interface ImplementationDagScaffold {
@@ -269,6 +319,7 @@ export function buildImplementationDagScaffold(
     description: "",
     satisfies_obligations: [o.id],
     addresses_counterexamples: [],
+    addressed_critique_items: [],
     depends_on: [],
     verification_obligation_ids: [o.id],
     targeted_commands: [],
@@ -283,6 +334,7 @@ export function buildImplementationDagScaffold(
         description: "",
         satisfies_obligations: [],
         addresses_counterexamples: [...acceptedCeIds],
+        addressed_critique_items: [],
         depends_on: [],
         verification_obligation_ids: [],
         targeted_commands: [],

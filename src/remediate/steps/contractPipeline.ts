@@ -47,6 +47,7 @@ import {
   isEnvelope,
   pathASeedFilePath,
   readContractArtifact,
+  stampToolCreatedAt,
   writeContractArtifact,
   type ContractPipelineArtifactEnvelope,
 } from "../contractPipeline/artifactStore.js";
@@ -75,6 +76,7 @@ import {
   buildTestValidatorPlanScaffold,
   buildImplementationDagScaffold,
   acceptedCounterexampleIds,
+  advisoryCritiqueItems,
 } from "../contractPipeline/derive.js";
 import { ensureNodeId, toBlockId } from "../contractPipeline/idRegistry.js";
 import {
@@ -304,7 +306,7 @@ async function buildScaffoldSection(
     const path = contractArtifactFilePath(artifactsDir, "test_validator_plan");
     return `## Pre-filled Skeleton — fill only the blank slots
 
-The obligation ledger was derived deterministically. Below is the test-plan skeleton: one spec per testable obligation, with \`obligation_id\`, \`name\`, and \`kind\` already filled. Fill ONLY each \`assertions\` array — every spec needs at least one positive (satisfied-path) assertion AND one negative (failure-path) assertion. Do not add, remove, or rename specs. If an obligation is genuinely untestable, replace its spec body with an \`inapplicable_claim\` citing its \`obligation_id\` and a falsifiable reason.
+The obligation ledger was derived deterministically. Below is the test-plan skeleton: one spec per testable obligation, with \`obligation_id\`, \`name\`, \`kind\`, and \`scope_anchors\` already filled. Fill ONLY each \`assertions\` array — every spec needs at least one positive (satisfied-path) assertion AND one negative (failure-path) assertion. The negative assertion MUST name one of the spec's \`scope_anchors\` (the touched symbol/file) and must not be an unscoped repo-wide scan, or it fails the negative-scoping gate. Do not add, remove, or rename specs. If an obligation is genuinely untestable, replace its spec body with an \`inapplicable_claim\` citing its \`obligation_id\` and a falsifiable reason.
 
 \`\`\`json
 ${JSON.stringify(scaffold, null, 2)}
@@ -322,10 +324,21 @@ Self-check before next-step: \`${loaderCommand(`validate-artifact --name test_va
       acceptedCounterexampleIds(judge),
     );
     if (scaffold.nodes.length === 0) return undefined;
+    const advisory = advisoryCritiqueItems(
+      envelopePayload(
+        await readContractArtifact(artifactsDir, "conceptual_design_critique"),
+      ),
+    );
+    const advisoryBlock =
+      advisory.length > 0
+        ? `\n\nAdvisory conceptual-critique items (no obligation/counterexample of their own — give each a home in some node's \`addressed_critique_items\` and let it shape that node's implementation; do NOT smuggle them into test assertions):\n${advisory
+            .map((a) => `- \`${a.id}\`: ${a.description}`)
+            .join("\n")}`
+        : "";
     const path = contractArtifactFilePath(artifactsDir, "implementation_dag");
     return `## Pre-filled Skeleton — fill only the blank slots
 
-Below is the implementation-DAG skeleton: one node per obligation (covering every obligation and accepted counterexample). Fill ONLY each node's \`title\`, \`description\`, and \`targeted_commands\`. You MAY merge nodes that belong together and add real \`depends_on\`/\`edges\` ordering, as long as every obligation stays covered (in \`satisfies_obligations\` or \`verification_obligation_ids\`) and every accepted counterexample stays in some node's \`addresses_counterexamples\`.
+Below is the implementation-DAG skeleton: one node per obligation (covering every obligation and accepted counterexample). Fill ONLY each node's \`title\`, \`description\`, and \`targeted_commands\`. You MAY merge nodes that belong together and add real \`depends_on\`/\`edges\` ordering, as long as every obligation stays covered (in \`satisfies_obligations\` or \`verification_obligation_ids\`) and every accepted counterexample stays in some node's \`addresses_counterexamples\`.${advisoryBlock}
 
 \`\`\`json
 ${JSON.stringify(scaffold, null, 2)}
@@ -416,21 +429,25 @@ export async function ingestContractArtifacts(
     );
     if (raw === undefined || raw === null || isEnvelope(raw)) continue;
 
-    const issues = CONTRACT_PIPELINE_VALIDATORS[name](raw, name).filter(
+    // The host has no clock: stamp the tool-owned `created_at` before validation
+    // so the host never has to invent a timestamp (B4). No-op when already present.
+    const payload = stampToolCreatedAt(raw, new Date().toISOString());
+
+    const issues = CONTRACT_PIPELINE_VALIDATORS[name](payload, name).filter(
       (issue) => issue.severity === "error",
     );
     if (issues.length > 0) {
       invalid.push({ name, issues });
       continue;
     }
-    await writeContractArtifact(artifactsDir, name, raw);
+    await writeContractArtifact(artifactsDir, name, payload);
     ingested.push(name);
     // Snapshot a freshly-produced review verdict + the upstreams it reviewed, so
     // a later staleness re-emit can be diff-based (B2). No-op for non-review
     // artifacts. Captured at ingest, when the upstreams are in the exact state
     // the worker reviewed.
     if (isReviewArtifact(name)) {
-      await captureReviewSnapshot(artifactsDir, name, raw, new Date().toISOString());
+      await captureReviewSnapshot(artifactsDir, name, payload, new Date().toISOString());
     }
   }
 
@@ -2300,8 +2317,7 @@ Read the obligation_ledger. For each detected cycle, decide which break strategy
       "exception_registration": "<if single_authority: the named scoped exception; otherwise null>"
     }
   ],
-  "status": "resolved",
-  "created_at": "<ISO-8601>"
+  "status": "resolved"
 }
 \`\`\`
 

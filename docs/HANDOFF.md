@@ -75,13 +75,15 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
     `isAuditToolsMonorepo` / `toolOwnedFinalGateCommands` so `dispatch.ts` reuses the gate's `check`-layer argv
     with no import cycle) replaces the hardcoded `"npm run check"` default; runs via `runCommand` (argv +
     CLAUDECODE scrub, no `shell:true`); `null`/skip on a non-monorepo target. _Nothing open on this track._
-9. **B-items (tool-should-decide):** B2 DAG node merge-vs-split left to host; B3 advisory-critique items have
-    no structural slot; B4 host-invented timestamps; B5 remediation→main merge left to host. (B1 whole-backlog
-    phase-cut is subsumed by T3.)
-10. **C/D residue:** C2 host-authored boilerplate for trivial scope (→ subsumed by T1); C3 unchanged
-    obligations re-authored each repair round (no diff-carry); D1 CE-006 negative-scoping reports only after
-    write (pre-write anchor hint); D3 validate-artifact in-place re-wrap (write-plain-then-it-wraps hazard).
-    *(all in backlog → "Contract-pipeline host-friction inventory")*
+9. **B-items (tool-should-decide):** **B3 ✅ SHIPPED** (advisory-critique carrier `addressed_critique_items` +
+    `advisoryCritiqueItems()` surfaced in the DAG skeleton); **B4 ✅ SHIPPED** (`created_at` tool-stamped via
+    `stampToolCreatedAt`, dropped from host schemas — except the lean-light-review verdict, a separate read-path).
+    Remaining: B2 DAG node merge-vs-split left to host (genuine granularity judgment — defer); B5 remediation→main
+    merge left to host. (B1 whole-backlog phase-cut is subsumed by T3.)
+10. **C/D residue:** **D1 ✅ SHIPPED** (test-plan skeleton carries per-spec `scope_anchors`; negatives scopable
+    pre-write). Remaining: C2 host-authored boilerplate for trivial scope (→ subsumed by T1); C3 unchanged
+    obligations re-authored each repair round (no diff-carry); D3 validate-artifact in-place re-wrap
+    (write-plain-then-it-wraps hazard). *(all in backlog → "Contract-pipeline host-friction inventory")*
 11. **Selective-deepening task_id convergence** — partial fix needs a live deepening-capable run to validate.
 
 ### T5 — Product / analysis forward tracks

@@ -20,7 +20,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   writeContractArtifact,
+  readContractArtifact,
   contractArtifactFilePath,
+  envelopePayload,
+  stampToolCreatedAt,
   type ContractPipelineArtifactName,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 import {
@@ -137,6 +140,37 @@ describe("B2 diff-based re-review — snapshot membership + capture", () => {
     const result = await ingestContractArtifacts(artifactsDir);
     expect(result.ingested).toContain("counterexample");
     expect(reviewSnapshotExists(artifactsDir, "counterexample")).toBe(true);
+  });
+});
+
+describe("B4 tool-stamped created_at — host has no clock", () => {
+  it("stampToolCreatedAt fills a missing timestamp and leaves a present one untouched", () => {
+    const stamped = stampToolCreatedAt({ goal_id: GOAL }, AT) as Record<string, unknown>;
+    expect(stamped.created_at).toBe(AT);
+    const present = stampToolCreatedAt({ goal_id: GOAL, created_at: "2020-01-01T00:00:00.000Z" }, AT) as Record<string, unknown>;
+    expect(present.created_at).toBe("2020-01-01T00:00:00.000Z");
+    // Non-object payloads pass through unchanged.
+    expect(stampToolCreatedAt("not-an-object", AT)).toBe("not-an-object");
+  });
+
+  it("ingestContractArtifacts validates + stamps a host payload that omits created_at", async () => {
+    await seedCounterexampleDeps();
+    // A worker writes the bare payload WITHOUT a created_at (it has no clock).
+    const payload = makeCounterexamplePayload();
+    delete payload.created_at;
+    await writeFile(
+      contractArtifactFilePath(artifactsDir, "counterexample"),
+      JSON.stringify(payload),
+    );
+    const result = await ingestContractArtifacts(artifactsDir);
+    expect(result.ingested).toContain("counterexample");
+    expect(result.invalid).toEqual([]);
+    // The on-disk envelope payload now carries a tool-stamped created_at.
+    const stored = envelopePayload(
+      await readContractArtifact(artifactsDir, "counterexample"),
+    ) as Record<string, unknown>;
+    expect(typeof stored.created_at).toBe("string");
+    expect((stored.created_at as string).length).toBeGreaterThan(0);
   });
 });
 

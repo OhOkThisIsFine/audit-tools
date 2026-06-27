@@ -16,6 +16,7 @@ import { CONTRACT_PIPELINE_VALIDATORS } from "./validation/contractPipeline.js";
 import {
   CP_ARTIFACT_NAMES,
   isEnvelope,
+  stampToolCreatedAt,
   type ContractPipelineArtifactName,
 } from "./contractPipeline/artifactStore.js";
 import {
@@ -316,7 +317,10 @@ program
     // Unwrap a stored content-hash envelope so the bare payload is validated
     // against its contract; a plain payload validates as-is. Uses the canonical
     // isEnvelope predicate so CLI self-check and ingest unwrap identically.
-    const payload = isEnvelope(parsed) ? parsed.payload : parsed;
+    const unwrapped = isEnvelope(parsed) ? parsed.payload : parsed;
+    // Stamp the tool-owned `created_at` (host has no clock) so the self-check
+    // matches ingest: a host payload without a timestamp is valid here too (B4).
+    const payload = stampToolCreatedAt(unwrapped, new Date().toISOString());
     const issues = validator(payload, name);
     const errors = issues.filter((issue) => issue.severity === "error");
     console.log(
