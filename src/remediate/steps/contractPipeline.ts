@@ -1434,6 +1434,63 @@ ${rejectionRewriteInstruction(archived.archivedPath)}`,
     return buildNextContractPipelineStep(options);
   }
 
+  // 2.8. Degenerate-phase collapse (self-scaling pipeline, slice 1). A
+  //      single-module decomposition has NO inter-module seams, so
+  //      seam_reconciliation is a structural no-op and contract_finalization is a
+  //      verbatim passthrough of the drafted contracts (no adjustments to apply).
+  //      Auto-satisfy both deterministically — no host round-trip — mirroring the
+  //      obligation_ledger / cyclic_seam no-op fast paths. This is a purely
+  //      structural collapse (module count, available post-decomposition), NOT a
+  //      risk/complexity call, so it needs no signal. The empty seam report makes
+  //      validateReconciliationDerivation pass vacuously; the finalized contracts
+  //      copy the drafted ones, so validateFinalizedModuleContracts (same entry
+  //      validator as drafting) and the obligation-ledger derivation are satisfied.
+  if (nextPhase === "seam_reconciliation" || nextPhase === "contract_finalization") {
+    const modules = await readDecomposedModules(artifactsDir);
+    if (modules.length <= 1) {
+      const drafted = envelopePayload(
+        await readContractArtifact(artifactsDir, "module_contracts"),
+      );
+      const goalId =
+        isRecord(drafted) && typeof drafted.goal_id === "string" ? drafted.goal_id : "";
+      if (nextPhase === "seam_reconciliation") {
+        await writeContractArtifact(artifactsDir, "seam_reconciliation_report", {
+          contract_version:
+            "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
+          goal_id: goalId,
+          mismatches: [],
+          created_at: new Date().toISOString(),
+        });
+      } else {
+        const draftedContracts =
+          isRecord(drafted) && Array.isArray(drafted.module_contracts)
+            ? drafted.module_contracts
+            : [];
+        await writeContractArtifact(artifactsDir, "finalized_module_contracts", {
+          contract_version:
+            "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
+          goal_id: goalId,
+          module_contracts: draftedContracts.map((mod) =>
+            isRecord(mod)
+              ? {
+                  name: mod.name,
+                  inputs: mod.inputs,
+                  outputs: mod.outputs,
+                  invariants: mod.invariants,
+                  side_effects: mod.side_effects,
+                  validation_boundary: mod.validation_boundary,
+                  failure_modes: mod.failure_modes,
+                  seam_adjustments: [],
+                }
+              : mod,
+          ),
+          created_at: new Date().toISOString(),
+        });
+      }
+      return buildNextContractPipelineStep(options);
+    }
+  }
+
   // 3. Judge gate: implementation planning is reachable only through an
   //    approved verdict, a bounded targeted repair, or the repair cap.
   if (nextPhase === "implementation_planning") {

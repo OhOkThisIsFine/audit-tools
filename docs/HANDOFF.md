@@ -43,8 +43,11 @@ ergonomics (T4) → product/analysis tracks (T5) → deferred (T6).
 ### T1 — Make the loop cheaper: self-scaling pipeline (HIGHEST compounding leverage)
 Design of record: [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md)
 ([[self-scaling-pipeline-not-forked-paths]]). Implement slices lowest-risk-first:
-2. **Slice 1 — degenerate-phase collapse** (pure architecture, no risk signal; safest cut): 1 module ⇒
-   skip seam-reconciliation/finalize round-trips; no-adjustment finalize folds into drafting.
+2. ~~**Slice 1 — degenerate-phase collapse**~~ — **SHIPPED 2026-06-26.** A single-module decomposition
+   auto-satisfies `seam_reconciliation` (empty report) + `contract_finalization` (verbatim passthrough of
+   the drafted contracts) with no host round-trip, mirroring the `obligation_ledger`/`cyclic_seam` no-op
+   fast paths (`contractPipeline.ts`, intercept after the obligation-ledger derive). Tests:
+   `degenerate-phase-collapse.test.ts`.
 3. **Slice 2 — shared intake risk/complexity signal**: affected_files + a deterministic configurable
    path-risk pattern set + intent; computed only from intake-available data (never a pipeline output — the
    lap-3 circularity); fail toward more scrutiny when uncertain; re-assess hook for escalate-on-evidence.
