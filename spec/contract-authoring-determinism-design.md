@@ -1,8 +1,7 @@
 # Making contract/obligation/invariant authoring efficient, robust, and weak-model-safe
 
 > **Status:** durable design strategy (concepts + mechanisms + plug-in points). Companion to
-> `spec/remediation-workflow-design.md`. Grounded in a full hand-driven contract-pipeline run
-> (2026-06-14) + a code map of the current authoring/derivation split.
+> `spec/remediation-workflow-design.md`.
 
 ## 0. The one idea
 

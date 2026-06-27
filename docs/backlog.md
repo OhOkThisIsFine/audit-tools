@@ -21,48 +21,12 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   by a stable content hash) so only the work whose inputs genuinely changed re-derives; unchanged work is skipped
   by construction, not re-run-then-deduped. This is the natural partner to the append-only results ledger
   (results keyed by content hash → an unchanged task keeps its result at zero recompute), but it stands alone as a
-  general DAG-model change applying to every derived artifact, not just results. (Ethan, 2026-06-24.)
-  - **SHIPPED 2026-06-25 — O3 re-dispatch + record/consume/supersession wired (per-result granular staleness now LIVE).**
-    The seam is no longer unconsumed. Landed atomically: (1) **O3 drift re-keying** — `rekeyDriftedResults`
-    (`resultBaseline.ts`) detects, at ingest, a base result whose live task-content signature drifted from its
-    recorded baseline and promotes it to `emit_source:'redispatch', attempt:N` (persisted on `AuditResult`) so it
-    earns a DISTINCT `idempotency_key` and `appendResultsToLedger` accepts the fresh findings instead of no-opping;
-    (2) **record half** — the ingestion executor refreshes `result_baselines` for the just-ingested batch against
-    live task content, persisted via `computeArtifactMetadata` (prefers the bundle's manifest, CE-007-gated);
-    (3) **consume half** — `computeStaleResultTaskIds` + `state.ts`/`packetFilter.ts` treat a drifted task as
-    not-complete so it re-dispatches (single-sourced across gate + dispatch); (4) **supersession** —
-    `selectCurrentResults` (keyed on `task_id`, NOT one-to-many identity_key) collapses a base lineage to its
-    highest attempt so a re-audit's dropped findings vanish from synthesis (applied at the synthesis call site;
-    `mergeFindings` stays a pure merge). Converges: re-derive fires once, re-dispatch lands fresh findings, the
-    baseline refresh silences the loop. Tests: `tests/audit/o3-redispatch-drift.test.mjs` (drift→rekey→append→
-    supersede→converge, sibling non-collapse) + existing baseline/staleness/dedup suites green. **Still open:** the
-    general DAG-model extension (per-file coverage-matrix elements, per-element baselines for every derived
-    artifact) — `runPlanningExecutor` rebuilds+rewrites `coverage_matrix` whole, so that needs an incremental
-    planning executor, not just a staleness gate. (Ethan, 2026-06-25.)
-  - **Investigation 2026-06-25 — premise correction + the real blocker.** The per-element result-baseline seam
-    (`src/audit/orchestrator/resultBaseline.ts`: `perElementStalenessVerdict`, `deriveLiveResultKeys`,
-    `recordResultBaseline`, `isResultStaleAgainstBaseline`) is **fully built and tested but has ZERO production
-    callers** — `result_baselines` is only *carried forward* in `artifactMetadata.ts:149`, never *recorded* on
-    ingest nor *consumed* in `state.ts`. So per-result granular staleness does not run today; the premise that
-    it "works as the ledger's partner" is false. **Why it was left unconsumed (the real blocker):** the obvious
-    consumer — re-dispatch a task whose live task-content signature drifted from its baseline — is **semantically
-    unsound until O3 lands the redispatch-attempt counter.** `task_id` and `idempotency_key` are both
-    signature-STABLE (keyed on `{unit_id, lens, pass_id, path/source}`, NOT file content), so a content-drift
-    re-dispatch returns a result with the SAME `idempotency_key` → `appendResultsToLedger` no-ops (INV-2) → the
-    fresh findings are **dropped**, and the task would loop re-dispatching with no findings update until the
-    baseline refresh silences it. For the consumer to actually replace stale findings, a drifted re-dispatch must
-    carry `source: 'redispatch', attempt: N` (a DISTINCT idempotency_key so the ledger appends) — the
-    `emitSourceFor`/seam comments already anticipate this ("Re-dispatch attempts are not yet stamped on results;
-    when O3 adds an attempt counter it maps to `source: 'redispatch'`"). **Ordering, therefore:** (O3-redispatch)
-    stamp drifted re-dispatches with an attempt counter → distinct idempotency_key → ledger appends fresh findings;
-    THEN wire record-on-ingest (`refreshResultBaselines` over incoming results vs. live task content, persisted via
-    `computeArtifactMetadata`) + consume-in-derive (a drifted result's task_id treated as not-complete so it
-    re-dispatches, single-sourced across `state.ts` and `cli/dispatch/packetFilter.ts:buildPendingAuditTasks`).
-    Record half refreshes the baseline even on a no-op ledger append so the loop converges. The general
-    DAG-model extension (per-file coverage-matrix elements, per-element baselines for every derived artifact) is a
-    SEPARATE, larger track on top of the wired result path — `coverage_matrix` is per-file
-    (`CoverageFileRecord[]`) and `runPlanningExecutor` currently rebuilds + rewrites it whole, so per-element
-    re-derivation also needs an incremental planning executor, not just a staleness gate. (Ethan, 2026-06-25.)
+  general DAG-model change applying to every derived artifact, not just results. The **per-result path is shipped**
+  (O3 re-dispatch attempt-counter → distinct `idempotency_key` → ledger appends fresh findings; record-on-ingest
+  baseline refresh + consume-in-derive single-sourced across gate/dispatch; supersession via `selectCurrentResults`).
+  **Still open: the general DAG-model extension** — per-file coverage-matrix elements + per-element baselines for
+  *every* derived artifact, which needs an **incremental planning executor** (`runPlanningExecutor` rebuilds+rewrites
+  `coverage_matrix` whole today), not just a staleness gate. (Ethan, 2026-06-24.)
 
 - **Codebase-wide review for churn / context / enforce-in-tooling — same lens, applied everywhere.** The
   append-only-ledger + granular-staleness + LLM-equivalence-gate work came from one perspective; run that same
@@ -83,8 +47,12 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   schema is enforced at emit time and the malformed-output class is prevented at the source. Apply it everywhere
   a provider supports it; where a provider cannot enforce a schema, that path degrades to the layered repair seam
   (above) as the fallback — prevention first, repair as backstop. Must stay provider-agnostic: discover the
-  enforcement capability per backend, never hardcode it. (Ethan, 2026-06-24.)
-  - **Emit-time seam VERIFIED already-present 2026-06-26** (foundations-phase run, M4-SCHEMA node = `resolved_no_change`): provider-agnostic capability discovery (`discoverOutputConstraintCapability` on the `FreshSessionProvider`, switches on provider KIND + operator config, no model table), strongest-at-emit via `enforceSchemaAtEmit`, degrade-to-`runEmitValidateRepair`, and the ONE-VALIDATOR re-validate floor all exist in `src/shared/providers/*` + `src/audit/contracts/schemaEnforcedEmit.ts` + `src/shared/repair/emitValidateRepair.ts`. **Still open:** CE-004 — the always-on conversation host (`claude-code`) advertises *no* API-level constraint mechanism, so on the primary path this reduces to the ONE-VALIDATOR repair floor (no emit-time prevention); and CE-009 — semantically-wrong-but-schema-valid output (e.g. `total_lines` ≠ actual) is not schema-catchable. Both recorded as acknowledged residual.
+  enforcement capability per backend, never hardcode it. The emit-time seam is **present** (provider-agnostic
+  `discoverOutputConstraintCapability`, strongest-at-emit `enforceSchemaAtEmit`, degrade-to-`runEmitValidateRepair`,
+  ONE-VALIDATOR re-validate floor). **Still open:** **CE-004** — the always-on conversation host (`claude-code`)
+  advertises *no* API-level constraint mechanism, so on the primary path this reduces to the ONE-VALIDATOR repair
+  floor (no emit-time prevention); and **CE-009** — semantically-wrong-but-schema-valid output (e.g. `total_lines`
+  ≠ actual) is not schema-catchable. (Ethan, 2026-06-24.)
 
 - **Tool-enforced dispatch broker with a capability-tiered driver — rolling dispatch the host can't get wrong.**
   Observed 2026-06-24 (Claude Desktop, a known capable host, not first contact): the host ran review packets in
@@ -112,8 +80,11 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   Enforcement (broker), driving (Y / slot-pull), and judgment (the repair + staleness seams) are separate layers:
   Y never judges; bounded judgment lives at its own named seams; and when a judgment call costs a dispatch it flows
   through the same broker like any auditor task. See the enforcement/driving/judgment separation principle in memory.
-  (Ethan, 2026-06-24.)
-  - **Single-source classifier SHIPPED 2026-06-26** (foundations-phase run, M5-BROKER node; CE-005). `classifyProvider` now returns ONE exported struct `{hostClass, concurrencyFloor, driverMechanism}` from `src/shared/quota/scheduler.ts`, and the separable floor constants (`DEFAULT_FIRST_CONTACT_CONCURRENCY` / `DEFAULT_AGENT_HOST_CONCURRENCY` / `agentHostFallbackConcurrency`) are **removed from the public surface** (now private module consts), so no call site can re-derive a concurrency floor — the floor comes only off the struct (capable agent hosts lifted to 8, cold-start 3). The broker primitive itself (`computeDispatchCapacity` never-over-dispatch caps, deterministic-local `estimateTokensFromBytes`, `HostSessionQuotaSource` channel-isolated recordLimit + bounded escalation) was verify-before-fix already-present and is now covered by `tests/remediate/quota-scheduler.test.ts` inv-1..9. **Still open:** the capability-tiered *driver* (Y-dispatcher vs slot-pull selection beyond mechanism-gating) and proactive pre-wall quota-aware pacing remain to wire onto this hardened classifier.
+  The single-source classifier + broker primitive are **shipped** (`classifyProvider` returns ONE
+  `{hostClass, concurrencyFloor, driverMechanism}` struct, floor constants off the public surface;
+  `computeDispatchCapacity` never-over-dispatch caps; `HostSessionQuotaSource` channel-isolated recordLimit +
+  bounded escalation). **Still open:** the capability-tiered *driver* (Y-dispatcher vs slot-pull selection beyond
+  mechanism-gating) and proactive pre-wall quota-aware pacing, to wire onto the hardened classifier. (Ethan, 2026-06-24.)
 
 - **Deterministic analyzers: own-vs-acquire — build the agnostic acquisition engine, don't expand a fixed bundle.**
   A fixed bundle of analyzers fails the everything-agnostic test (it privileges whatever ecosystems we bundled
