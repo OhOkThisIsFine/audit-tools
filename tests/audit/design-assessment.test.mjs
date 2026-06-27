@@ -554,3 +554,88 @@ test("does NOT flag unit fragmentation when <=50 units even if all are single-fi
   const fragFindings = result.findings.filter((f) => f.category === "unit_fragmentation");
   assert.equal(fragFindings.length, 0, "50 single-file units should NOT trigger fragmentation (boundary: >50 required)");
 });
+
+// ── Hidden coupling (consumes the git-history co_change bucket, F6) ────────────
+
+const coChangeBundle = (coChange, structural = {}) => ({
+  graphs: {
+    imports: structural.imports ?? [],
+    calls: structural.calls ?? [],
+    references: structural.references ?? [],
+    co_change: coChange,
+  },
+});
+
+test("hidden coupling: co-change pair with NO structural edge is flagged", () => {
+  const result = buildDesignAssessment(
+    makeParams({
+      graphBundle: coChangeBundle([
+        { from: "a.ts", to: "b.ts", kind: "git-co-change", direction: "undirected", confidence: 0.6, reason: "changed together in 5 commit(s) (temporal coupling)." },
+      ]),
+    }),
+  );
+  const hidden = result.findings.filter((f) => f.category === "hidden_coupling");
+  assert.equal(hidden.length, 1);
+  assert.equal(hidden[0].lens, "architecture");
+  assert.equal(hidden[0].systemic, true);
+  assert.deepEqual(hidden[0].affected_files.map((f) => f.path), ["a.ts", "b.ts"]);
+  assert.match(hidden[0].summary, /no import\/call\/reference edge/);
+});
+
+test("hidden coupling: a structurally-linked co-change pair is NOT hidden (either direction)", () => {
+  const result = buildDesignAssessment(
+    makeParams({
+      graphBundle: coChangeBundle(
+        [{ from: "a.ts", to: "b.ts", kind: "git-co-change", confidence: 0.7 }],
+        // structural edge in the REVERSE direction still counts as visible.
+        { imports: [{ from: "b.ts", to: "a.ts", kind: "import" }] },
+      ),
+    }),
+  );
+  assert.equal(
+    result.findings.filter((f) => f.category === "hidden_coupling").length,
+    0,
+    "a co-change pair the dependency graph already shows is not hidden",
+  );
+});
+
+test("hidden coupling: below the confidence floor (≤2 commits) is not flagged", () => {
+  const result = buildDesignAssessment(
+    makeParams({
+      graphBundle: coChangeBundle([
+        { from: "a.ts", to: "b.ts", kind: "git-co-change", confidence: 0.45 },
+      ]),
+    }),
+  );
+  assert.equal(result.findings.filter((f) => f.category === "hidden_coupling").length, 0);
+});
+
+test("hidden coupling: no co_change bucket (git-history not mined) → no findings, nothing renumbered", () => {
+  const without = buildDesignAssessment(
+    makeParams({
+      graphBundle: {
+        graphs: { imports: [{ from: "a.ts", to: "b.ts" }, { from: "b.ts", to: "c.ts" }, { from: "c.ts", to: "a.ts" }] },
+      },
+    }),
+  );
+  assert.equal(without.findings.filter((f) => f.category === "hidden_coupling").length, 0);
+  // The cycle finding keeps its id regardless of the new detector being appended.
+  const cycle = without.findings.find((f) => f.category === "dependency_cycle");
+  assert.equal(cycle.id, "DA-001");
+});
+
+test("hidden coupling: strongest-first and capped at 10", () => {
+  const many = Array.from({ length: 15 }, (_, i) => ({
+    from: `a${String(i).padStart(2, "0")}.ts`,
+    to: `b${String(i).padStart(2, "0")}.ts`,
+    kind: "git-co-change",
+    confidence: 0.5 + i * 0.01,
+  }));
+  const result = buildDesignAssessment(
+    makeParams({ graphBundle: coChangeBundle(many) }),
+  );
+  const hidden = result.findings.filter((f) => f.category === "hidden_coupling");
+  assert.equal(hidden.length, 10, "capped at 10");
+  // Strongest coupling surfaces first (highest confidence = a14/b14).
+  assert.ok(hidden[0].title.includes("a14.ts"));
+});
