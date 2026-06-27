@@ -144,10 +144,10 @@ test("deriveAuditState requires syntax-resolution marker instead of imported ana
       generated_at: "2026-04-22T00:00:00Z",
       files: [{ path: "src/app.ts", language: "ts", size_bytes: 12 }],
     },
-    external_analyzer_results: {
+    external_analyzer_results: [{
       tool: "semgrep",
       results: [],
-    },
+    }],
   });
   assert.equal(findObligation(importedOnly, "syntax_resolved")?.state, "missing");
 
@@ -157,10 +157,10 @@ test("deriveAuditState requires syntax-resolution marker instead of imported ana
       generated_at: "2026-04-22T00:00:00Z",
       files: [{ path: "src/app.ts", language: "ts", size_bytes: 12 }],
     },
-    external_analyzer_results: {
+    external_analyzer_results: [{
       tool: "syntax_resolution_executor",
       results: [],
-    },
+    }],
     syntax_resolution_status: {
       tool: "syntax_resolution_executor",
       completed_at: "2026-04-22T00:00:00Z",
@@ -185,7 +185,7 @@ test("external analyzer import clears planning-derived outputs in memory", () =>
     },
   );
 
-  assert.equal(run.updated.external_analyzer_results.tool, "semgrep");
+  assert.equal(run.updated.external_analyzer_results[0].tool, "semgrep");
   assert.equal(run.updated.coverage_matrix, undefined);
   assert.equal(run.updated.audit_tasks, undefined);
   assert.equal(run.updated.requeue_tasks, undefined);
@@ -469,7 +469,7 @@ test("selective deepening creates a lens steward for risky completed lens output
   const tasks = buildSelectiveDeepeningTasks({
     existingTasks: securityTasks,
     results,
-    externalAnalyzerResults: {
+    externalAnalyzerResults: [{
       tool: "semgrep",
       generated_at: "2026-04-30T00:00:00Z",
       results: [
@@ -482,7 +482,7 @@ test("selective deepening creates a lens steward for risky completed lens output
           summary: "Token handling signal.",
         },
       ],
-    },
+    }],
   });
 
   const steward = tasks.find((task) =>
@@ -929,10 +929,12 @@ test("buildFlowRequeueTasks ignores malformed analyzer entries but still priorit
         },
       ],
     },
-    {
-      tool: "semgrep",
-      results: [null, { path: 42 }, { path: "src/api/auth.ts" }],
-    },
+    [
+      {
+        tool: "semgrep",
+        results: [null, { path: 42 }, { path: "src/api/auth.ts" }],
+      },
+    ],
   );
 
   assert.equal(tasks.length, 1);
@@ -1106,10 +1108,12 @@ test("buildRequeueTasks ignores malformed analyzer entries but still prioritizes
         },
       ],
     },
-    {
-      tool: "semgrep",
-      results: [undefined, { path: 99 }, { path: "src/api/auth.ts" }],
-    },
+    [
+      {
+        tool: "semgrep",
+        results: [undefined, { path: 99 }, { path: "src/api/auth.ts" }],
+      },
+    ],
   );
 
   assert.equal(tasks.length, 1);
@@ -1373,7 +1377,7 @@ test("lens steward trigger unresolved_external_signal when external path has no 
   const deepeningTasks = buildSelectiveDeepeningTasks({
     existingTasks: tasks,
     results,
-    externalAnalyzerResults: {
+    externalAnalyzerResults: [{
       tool: "semgrep",
       generated_at: "2026-04-30T00:00:00Z",
       results: [
@@ -1386,7 +1390,7 @@ test("lens steward trigger unresolved_external_signal when external path has no 
           summary: "Potential injection.",
         },
       ],
-    },
+    }],
   });
 
   const steward = deepeningTasks.find((task) =>
@@ -1632,21 +1636,23 @@ test("buildExternalSignalTasks skips malformed analyzer results and keeps valid 
       ],
     },
     {},
-    {
-      tool: "semgrep",
-      results: [
-        null,
-        { id: "bad", path: "src/api/auth.ts", category: 7, summary: "oops" },
-        {
-          id: "valid",
-          path: "src/api/auth.ts",
-          category: "security",
-          severity: "error",
-          summary: "Hard-coded credential path needs review",
-          rule: "generic.secrets",
-        },
-      ],
-    },
+    [
+      {
+        tool: "semgrep",
+        results: [
+          null,
+          { id: "bad", path: "src/api/auth.ts", category: 7, summary: "oops" },
+          {
+            id: "valid",
+            path: "src/api/auth.ts",
+            category: "security",
+            severity: "error",
+            summary: "Hard-coded credential path needs review",
+            rule: "generic.secrets",
+          },
+        ],
+      },
+    ],
   );
 
   assert.equal(tasks.length, 1);

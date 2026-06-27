@@ -42,10 +42,12 @@ export function isTrivialAuditPath(
 export function autoCompleteTrivialCoverage(
   coverage: CoverageMatrix,
   lineIndex: Record<string, number>,
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
 ): string[] {
   const externalPaths = new Set(
-    (externalAnalyzerResults?.results ?? []).map((item) => item.path),
+    (externalAnalyzerResults ?? [])
+      .flatMap((tool) => tool.results ?? [])
+      .map((item) => item.path),
   );
   const skipped: string[] = [];
 

@@ -1,9 +1,10 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
-import type {
-  ExternalAnalyzerResults,
-  ExternalAnalyzerResultItem,
-  ExternalAnalyzerToolStatus,
+import {
+  upsertExternalToolResults,
+  type ExternalAnalyzerResults,
+  type ExternalAnalyzerResultItem,
+  type ExternalAnalyzerToolStatus,
 } from "../types/externalAnalyzer.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -279,7 +280,10 @@ export function runSyntaxResolutionExecutor(
     toolStatuses.push(eslint.status);
   }
 
-  const existing = bundle.external_analyzer_results?.results ?? [];
+  const existing =
+    bundle.external_analyzer_results?.find(
+      (tool) => tool.tool === "syntax_resolution_executor",
+    )?.results ?? [];
   const merged = [...existing, ...items];
 
   // Deduplicate by path + rule + summary
@@ -305,7 +309,10 @@ export function runSyntaxResolutionExecutor(
   return {
     updated: {
       ...bundle,
-      external_analyzer_results: resultsArtifact,
+      external_analyzer_results: upsertExternalToolResults(
+        bundle.external_analyzer_results,
+        resultsArtifact,
+      ),
       syntax_resolution_status: {
         tool: "syntax_resolution_executor",
         completed_at: new Date().toISOString(),

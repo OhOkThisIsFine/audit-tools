@@ -12,11 +12,11 @@ import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
  * rules explicit and independently adjustable.
  */
 export function getExternalSignalPaths(
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
 ): Set<string> {
-  const results = Array.isArray(externalAnalyzerResults?.results)
-    ? externalAnalyzerResults.results
-    : [];
+  const results = (externalAnalyzerResults ?? []).flatMap((tool) =>
+    Array.isArray(tool.results) ? tool.results : [],
+  );
   return new Set(
     results
       .map((item) =>

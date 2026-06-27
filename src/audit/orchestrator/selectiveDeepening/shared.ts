@@ -58,7 +58,7 @@ export interface BuildSelectiveDeepeningTaskOptions {
   lineIndex?: Record<string, number>;
   runtimeValidationTasks?: import("../../types/runtimeValidation.js").RuntimeValidationTaskManifest;
   runtimeValidationReport?: import("../../types/runtimeValidation.js").RuntimeValidationReport;
-  externalAnalyzerResults?: ExternalAnalyzerResults;
+  externalAnalyzerResults?: ExternalAnalyzerResults[];
 }
 
 export interface FindingContext {
@@ -179,10 +179,11 @@ export function priorityLabel(
 }
 
 export function getExternalAnalyzerPaths(
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
 ): Set<string> {
   return new Set(
-    (externalAnalyzerResults?.results ?? [])
+    (externalAnalyzerResults ?? [])
+      .flatMap((tool) => tool.results ?? [])
       .map((result) =>
         result && typeof result.path === "string" && result.path.length > 0
           ? result.path

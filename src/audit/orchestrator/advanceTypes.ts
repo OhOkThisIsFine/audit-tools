@@ -28,6 +28,7 @@ export interface AdvanceAuditOptions {
   sizeIndex?: Record<string, number>;
   auditResults?: AuditResult[];
   runtimeValidationUpdates?: RuntimeValidationReport;
+  /** Single imported tool payload (one file = one tool); the import executor upserts it into the bundle's per-tool array. */
   externalAnalyzerResults?: ExternalAnalyzerResults;
   /** Host/provider-supplied synthesis narrative; merged by synthesis_narrative_executor. */
   narrativeResults?: SynthesisNarrative;

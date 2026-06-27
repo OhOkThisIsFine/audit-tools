@@ -34,7 +34,7 @@ export function buildFlowRequeueTasks(
   criticalFlows: CriticalFlowManifest,
   flowCoverage: FlowCoverageManifest,
   coverageMatrix: CoverageMatrix,
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
 ): AuditTask[] {
   const flowMap = new Map(criticalFlows.flows.map((flow) => [flow.id, flow]));
   const coverageByPath = new Map(

@@ -85,7 +85,7 @@ function createDecisionBundle(overrides = {}) {
     repo_manifest: createRepoManifest(),
     file_disposition: { files: [] },
     auto_fixes_applied: { applied: [] },
-    external_analyzer_results: { tool: "eslint", results: [] },
+    external_analyzer_results: [{ tool: "eslint", results: [] }],
     syntax_resolution_status: {
       tool: "syntax_resolution_executor",
       completed_at: "2026-04-22T00:00:00Z",
@@ -139,7 +139,7 @@ test("decideNextStep covers representative priority states", () => {
     repo_manifest: createRepoManifest(),
     file_disposition: { files: [] },
     auto_fixes_applied: { applied: [] },
-    external_analyzer_results: { tool: "eslint", results: [] },
+    external_analyzer_results: [{ tool: "eslint", results: [] }],
     syntax_resolution_status: {
       tool: "syntax_resolution_executor",
       completed_at: "2026-04-22T00:00:00Z",
@@ -215,7 +215,7 @@ test("advanceAudit emits a structured run log threading obligation → executor 
     const preparedBundle = {
       ...intake.updated_bundle,
       auto_fixes_applied: { executed_tools: [], timestamp: "2026-04-22T00:00:00Z" },
-      external_analyzer_results: { tool: "syntax_resolution_executor", results: [] },
+      external_analyzer_results: [{ tool: "syntax_resolution_executor", results: [] }],
       syntax_resolution_status: {
         tool: "syntax_resolution_executor",
         completed_at: "2026-04-22T00:00:00Z",
@@ -409,7 +409,7 @@ test("buildAuditReportModel handles empty inputs and unmatched runtime results c
         },
       ],
     },
-    externalAnalyzerResults: {
+    externalAnalyzerResults: [{
       tool: "semgrep",
       results: [
         {
@@ -420,7 +420,7 @@ test("buildAuditReportModel handles empty inputs and unmatched runtime results c
           summary: "No findings consume this analyzer context yet.",
         },
       ],
-    },
+    }],
   });
 
   assert.equal(report.findings.length, 0);
@@ -693,7 +693,7 @@ test("buildAuditReportModel keeps identity-distinct findings separate while merg
         },
       ],
     },
-    externalAnalyzerResults: {
+    externalAnalyzerResults: [{
       tool: "eslint",
       results: [
         {
@@ -711,7 +711,7 @@ test("buildAuditReportModel keeps identity-distinct findings separate while merg
           summary: "Static analysis corroborated the session-path gap.",
         },
       ],
-    },
+    }],
   });
 
   assert.equal(report.findings.length, 2);

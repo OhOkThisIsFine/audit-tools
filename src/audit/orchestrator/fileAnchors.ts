@@ -229,7 +229,7 @@ export function buildFileAnchorSummary(params: {
   content: string;
   totalLines: number;
   graphBundle?: GraphBundle;
-  externalAnalyzerResults?: ExternalAnalyzerResults;
+  externalAnalyzerResults?: ExternalAnalyzerResults[];
 }): FileAnchorSummary {
   const anchors: FileAnchor[] = [];
   const seen = new Set<string>();
@@ -275,7 +275,8 @@ export function buildFileAnchorSummary(params: {
     });
   }
 
-  const analyzerSignals = (params.externalAnalyzerResults?.results ?? [])
+  const analyzerSignals = (params.externalAnalyzerResults ?? [])
+    .flatMap((tool) => tool.results ?? [])
     .filter((result) => normalizePath(result.path).toLowerCase() === path.toLowerCase())
     .sort(
       (a, b) =>

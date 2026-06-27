@@ -48,7 +48,7 @@ export interface BuildChunkedTaskOptions {
    * never promoted above 'high'.
    */
   intent_priority_boost?: string[];
-  external_analyzer_results?: ExternalAnalyzerResults;
+  external_analyzer_results?: ExternalAnalyzerResults[];
   critical_flows?: CriticalFlowManifest;
 }
 
@@ -260,11 +260,11 @@ function buildCoverageIndex(
 }
 
 function getExternalSignalPaths(
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
 ): Set<string> {
-  const results = Array.isArray(externalAnalyzerResults?.results)
-    ? externalAnalyzerResults.results
-    : [];
+  const results = (externalAnalyzerResults ?? []).flatMap((tool) =>
+    Array.isArray(tool.results) ? tool.results : [],
+  );
   return new Set(
     results
       .map((item) =>
@@ -488,9 +488,9 @@ function sanitizeField(value: string, maxLen: number): string {
 export function buildExternalSignalTasks(
   coverageMatrix: CoverageMatrix,
   _unitLineIndex: UnitLineIndex,
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
 ): AuditTask[] {
-  if (!externalAnalyzerResults) {
+  if (!externalAnalyzerResults || externalAnalyzerResults.length === 0) {
     return [];
   }
 
@@ -498,36 +498,40 @@ export function buildExternalSignalTasks(
   const seen = new Set<string>();
   const coverageByPath = buildCoverageIndex(coverageMatrix);
 
-  for (const result of getExternalSignalResults(externalAnalyzerResults)) {
-    const safeCategory = sanitizeField(result.category, 80);
-    const safePath = sanitizeField(result.path ?? "", 260);
-    const safeSummary = sanitizeField(result.summary ?? "", 200);
+  // One result set per acquired/imported tool; each follow-up task is keyed on
+  // its tool so two analyzers flagging the same path don't collide.
+  for (const toolResults of externalAnalyzerResults) {
+    for (const result of getExternalSignalResults(toolResults)) {
+      const safeCategory = sanitizeField(result.category, 80);
+      const safePath = sanitizeField(result.path ?? "", 260);
+      const safeSummary = sanitizeField(result.summary ?? "", 200);
 
-    const lens = pickAnalyzerLens(safeCategory);
-    const coverage = coverageByPath.get(result.path);
-    if (!coverage || coverage.audit_status === "excluded") {
-      continue;
+      const lens = pickAnalyzerLens(safeCategory);
+      const coverage = coverageByPath.get(result.path);
+      if (!coverage || coverage.audit_status === "excluded") {
+        continue;
+      }
+
+      const id = `analyzer:${toolResults.tool}:${lens}:${safePath}:${result.id}`;
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+
+      tasks.push({
+        task_id: id,
+        unit_id: coverage.unit_ids[0] ?? `analyzer:${safePath}`,
+        pass_id: `analyzer:${toolResults.tool}:${lens}`,
+        lens,
+        file_paths: [result.path],
+        rationale: `Analyzer follow-up for ${safePath} under the ${lens} lens because ${toolResults.tool} reported: ${safeSummary}`,
+        priority: "high",
+        tags: [
+          "external_analyzer_signal",
+          `external_tool:${toolResults.tool}`,
+        ],
+      });
     }
-
-    const id = `analyzer:${externalAnalyzerResults.tool}:${lens}:${safePath}:${result.id}`;
-    if (seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-
-    tasks.push({
-      task_id: id,
-      unit_id: coverage.unit_ids[0] ?? `analyzer:${safePath}`,
-      pass_id: `analyzer:${externalAnalyzerResults.tool}:${lens}`,
-      lens,
-      file_paths: [result.path],
-      rationale: `Analyzer follow-up for ${safePath} under the ${lens} lens because ${externalAnalyzerResults.tool} reported: ${safeSummary}`,
-      priority: "high",
-      tags: [
-        "external_analyzer_signal",
-        `external_tool:${externalAnalyzerResults.tool}`,
-      ],
-    });
   }
 
   return tasks.sort((a, b) => a.task_id.localeCompare(b.task_id));

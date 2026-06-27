@@ -60,7 +60,8 @@ import { extractTestSourceEdges } from "./graphTestSources.js";
 
 export interface BuildGraphBundleOptions {
   fileContents?: Record<string, string>;
-  externalAnalyzerResults?: ExternalAnalyzerResults;
+  /** Results from every acquired/imported external analyzer (one entry per tool). */
+  externalAnalyzerResults?: ExternalAnalyzerResults[];
 }
 
 const MAX_GRAPH_SOURCE_BYTES = 512 * 1024;
@@ -691,15 +692,15 @@ function accumulateCrossFileEdges(
   pathLookup: Map<string, string>,
   options: BuildGraphBundleOptions,
 ): void {
-  acc.references.push(
-    ...extractAnalyzerOwnershipEdges(
-      options.externalAnalyzerResults,
-      pathLookup,
-    ),
-  );
-  acc.references.push(
-    ...extractAnalyzerGraphEdges(options.externalAnalyzerResults, pathLookup),
-  );
+  // One external analyzer result per acquired/imported tool — contribute each
+  // tool's ownership + dataflow edges independently (per-tool `tool` provenance
+  // is preserved in the edge reasons).
+  for (const externalResult of options.externalAnalyzerResults ?? []) {
+    acc.references.push(
+      ...extractAnalyzerOwnershipEdges(externalResult, pathLookup),
+    );
+    acc.references.push(...extractAnalyzerGraphEdges(externalResult, pathLookup));
+  }
   acc.references.push(...extractPytestConftestLinks(pathLookup));
   acc.references.push(
     ...extractBoundedSuiteEdges(

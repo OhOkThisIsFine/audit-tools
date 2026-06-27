@@ -50,11 +50,11 @@ function createBundleWithExisting(items) {
     file_disposition: {
       files: [{ path: "src/app.js", status: "included" }],
     },
-    external_analyzer_results: {
+    external_analyzer_results: [{
       tool: "syntax_resolution_executor",
       results: items,
       tool_statuses: [],
-    },
+    }],
   };
 }
 
@@ -62,9 +62,9 @@ test("syntax resolution skips ESLint when no repo-local ESLint config exists", a
   await withTempRepo(async (root) => {
     const result = runSyntaxResolutionExecutor(createBundle(), root);
 
-    assert.deepEqual(result.updated.external_analyzer_results.results, []);
+    assert.deepEqual(result.updated.external_analyzer_results[0].results, []);
     assert.deepEqual(
-      result.updated.external_analyzer_results.tool_statuses.map((status) => [
+      result.updated.external_analyzer_results[0].tool_statuses.map((status) => [
         status.tool,
         status.status,
       ]),
@@ -83,7 +83,7 @@ test("syntax resolution runs ESLint when repo-local ESLint config exists", async
     const result = runSyntaxResolutionExecutor(createBundle(), root);
 
     assert.equal(existsSync(join(root, "eslint-ran.txt")), true);
-    assert.deepEqual(result.updated.external_analyzer_results.results, [
+    assert.deepEqual(result.updated.external_analyzer_results[0].results, [
       {
         id: "eslint-0",
         category: "maintainability",
@@ -97,7 +97,7 @@ test("syntax resolution runs ESLint when repo-local ESLint config exists", async
       },
     ]);
     assert.deepEqual(
-      result.updated.external_analyzer_results.tool_statuses.map((status) => [
+      result.updated.external_analyzer_results[0].tool_statuses.map((status) => [
         status.tool,
         status.status,
       ]),
@@ -127,7 +127,7 @@ test("syntax resolution maps ESLint severities to the canonical vocabulary (COR-
     );
 
     const result = runSyntaxResolutionExecutor(createBundle(), root);
-    const severities = result.updated.external_analyzer_results.results.map(
+    const severities = result.updated.external_analyzer_results[0].results.map(
       (r) => r.severity,
     );
     assert.deepEqual(severities, ["high", "medium"]);
@@ -156,7 +156,7 @@ test("syntax resolution records unresolved tsc as analyzer diagnostics", async (
         root,
       );
 
-      const tscStatus = result.updated.external_analyzer_results.tool_statuses.find(
+      const tscStatus = result.updated.external_analyzer_results[0].tool_statuses.find(
         (status) => status.tool === "tsc",
       );
       assert.equal(tscStatus.status, "not_resolved");
@@ -177,7 +177,7 @@ test("syntax resolution stores parse failure snippets for malformed ESLint outpu
     );
 
     const result = runSyntaxResolutionExecutor(createBundle(), root);
-    const eslintStatus = result.updated.external_analyzer_results.tool_statuses.find(
+    const eslintStatus = result.updated.external_analyzer_results[0].tool_statuses.find(
       (status) => status.tool === "eslint",
     );
 
@@ -202,7 +202,7 @@ test("syntax resolution preserves existing external_analyzer_results and appends
     const bundle = createBundleWithExisting([preExisting]);
 
     const result = runSyntaxResolutionExecutor(bundle, root);
-    const results = result.updated.external_analyzer_results.results;
+    const results = result.updated.external_analyzer_results[0].results;
 
     assert.equal(results.length, 2);
     assert.equal(results[0].path, preExisting.path);
@@ -234,7 +234,7 @@ test("syntax resolution deduplicates items with matching path:line_start:rule:su
     const bundle = createBundleWithExisting([duplicate]);
 
     const result = runSyntaxResolutionExecutor(bundle, root);
-    const results = result.updated.external_analyzer_results.results;
+    const results = result.updated.external_analyzer_results[0].results;
 
     assert.equal(results.length, 1);
     assert.equal(results[0].id, duplicate.id);
@@ -246,8 +246,8 @@ test("syntax resolution uses empty array when bundle has no external_analyzer_re
     // No ESLint config → ESLint skipped, no new items
     const result = runSyntaxResolutionExecutor(createBundle(), root);
 
-    assert.deepEqual(result.updated.external_analyzer_results.results, []);
-    assert.equal(result.updated.external_analyzer_results.results.length, 0);
+    assert.deepEqual(result.updated.external_analyzer_results[0].results, []);
+    assert.equal(result.updated.external_analyzer_results[0].results.length, 0);
   });
 });
 

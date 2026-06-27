@@ -123,7 +123,7 @@ type ArtifactPayloadMap = {
   coverage_matrix: CoverageMatrix;
   runtime_validation_tasks: RuntimeValidationTaskManifest;
   runtime_validation_report: RuntimeValidationReport;
-  external_analyzer_results: ExternalAnalyzerResults;
+  external_analyzer_results: ExternalAnalyzerResults[];
   syntax_resolution_status: unknown;
   audit_results: AuditResult[];
   audit_tasks: AuditTask[];

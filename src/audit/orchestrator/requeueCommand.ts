@@ -40,7 +40,7 @@ export function buildRequeuePayload(
   matrix: CoverageMatrix,
   criticalFlows?: CriticalFlowManifest,
   flowCoverage?: FlowCoverageManifest,
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
 ) {
   // Dedupe within each source first — each generator may emit duplicate task_ids independently.
   const fileTasks = dedupeTasks(

@@ -38,9 +38,9 @@ function analyzerCategoryToLenses(category: string): Lens[] {
 
 function applyAnalyzerCoverage(
   coverage: CoverageMatrix,
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
 ): void {
-  if (!externalAnalyzerResults) {
+  if (!externalAnalyzerResults || externalAnalyzerResults.length === 0) {
     return;
   }
 
@@ -48,9 +48,9 @@ function applyAnalyzerCoverage(
     coverage.files.map((file) => [file.path, file]),
   );
 
-  const results = Array.isArray(externalAnalyzerResults.results)
-    ? externalAnalyzerResults.results
-    : [];
+  const results = externalAnalyzerResults.flatMap((tool) =>
+    Array.isArray(tool.results) ? tool.results : [],
+  );
   for (const result of results) {
     if (
       !result ||
@@ -78,7 +78,7 @@ export function initializeCoverageFromPlan(
   repoManifest: RepoManifest,
   unitManifest: UnitManifest,
   disposition: FileDisposition,
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
 ): CoverageMatrix {
   const coverage = createCoverageMatrix(
     repoManifest.files.map((file) => file.path),

@@ -16,7 +16,7 @@ function taskPriority(
 
 export function buildRequeueTasks(
   matrix: CoverageMatrix,
-  externalAnalyzerResults?: ExternalAnalyzerResults,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
 ): AuditTask[] {
   const targets = buildRequeueTargets(matrix);
   const tasks: AuditTask[] = [];

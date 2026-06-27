@@ -96,3 +96,19 @@ export const ExternalAnalyzerResultsSchema = z
 export type ExternalAnalyzerResults = z.infer<
   typeof ExternalAnalyzerResultsSchema
 >;
+
+/**
+ * Merge one tool's results into the per-tool array artifact: the entry with the
+ * same `tool` is REPLACED (a fresh run supersedes the prior one); otherwise the
+ * entry is appended. Multiple producers (import / syntax-resolution / the
+ * acquisition engine) each contribute their own tool entry without clobbering
+ * the others. Returns a new array sorted by `tool` for deterministic output.
+ */
+export function upsertExternalToolResults(
+  existing: ExternalAnalyzerResults[] | undefined,
+  incoming: ExternalAnalyzerResults,
+): ExternalAnalyzerResults[] {
+  const next = (existing ?? []).filter((entry) => entry.tool !== incoming.tool);
+  next.push(incoming);
+  return next.sort((a, b) => a.tool.localeCompare(b.tool));
+}
