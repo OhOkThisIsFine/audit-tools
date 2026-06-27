@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   runTracked,
@@ -40,8 +40,8 @@ import {
  *    its `AnalyzerSetting` (auto|ephemeral|permanent) — even a `permanent`,
  *    pre-installed tool cannot spawn without consent (CE-005). The small
  *    value-curated DEFAULT set runs without prompting.
- *  - **Own-vs-acquire boundary.** git-history / secret-scan are OWNED by F6 and
- *    are rejected at registration — never acquired here.
+ *  - **Own-vs-acquire boundary.** git-history is OWNED by F6 and is rejected at
+ *    registration — never acquired here. Secret scanning is ACQUIRED (gitleaks).
  *  - **Run-safety gate written once** (`runSafetyGate`): capability-probe, pin
  *    version, read-only/sandboxed argv, degrade-to-empty.
  *  - **Degrade-to-empty + report-skipped-never-silently.** Every candidate
@@ -49,13 +49,14 @@ import {
  *    throws and never silently drops the candidate.
  */
 
-/** Tool ids OWNED by F6 (git-history mining / secret scanning). Never acquired. */
+/**
+ * Tool ids OWNED by F6 and never acquired. Only git-history mining is OWNED — it
+ * is a truly-agnostic signal with no ecosystem tool. Secret scanning is ACQUIRED
+ * (gitleaks), not owned, so it is deliberately NOT listed here.
+ */
 export const OWNED_TOOL_IDS = new Set<string>([
   "git-history",
   "git-history-mining",
-  "secret-scan",
-  "secret-scanner",
-  "secrets",
 ]);
 
 /**
@@ -99,6 +100,13 @@ export interface ExternalAnalyzerCandidate {
     from?: unknown;
     to?: unknown;
   }>;
+  /**
+   * For tools that ONLY report to a file (e.g. gitleaks) rather than stdout: the
+   * report path the tool was told to write (must match `buildArgv`). When set, the
+   * engine reads this file (degrade-to-"" if absent) and passes its contents to
+   * `parse` instead of stdout, then best-effort removes it. Omit for stdout tools.
+   */
+  reportFile?(root: string): string;
   /** Whether this ecosystem is present (marker file detection). */
   detect(root: string): boolean;
   /** Member of the value-curated DEFAULT set (runs without prompting). */
@@ -355,9 +363,26 @@ export function runExternalAnalyzer(
     };
   }
 
+  // Tools that report to a file (gitleaks) are read from there; stdout tools use
+  // stdout. The report file is best-effort removed after parsing.
+  let parseInput = result.stdout;
+  if (candidate.reportFile) {
+    const reportPath = candidate.reportFile(root);
+    try {
+      parseInput = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
+    } catch {
+      parseInput = "";
+    }
+    try {
+      if (existsSync(reportPath)) rmSync(reportPath, { force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
+
   let items: ReturnType<ExternalAnalyzerCandidate["parse"]>;
   try {
-    items = candidate.parse(result.stdout);
+    items = candidate.parse(parseInput);
   } catch (error) {
     return {
       results: emptyResults(candidate.id),

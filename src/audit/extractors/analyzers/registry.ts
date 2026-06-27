@@ -55,6 +55,11 @@ export type {
   ResolvedBinaries,
 } from "./acquisitionEngine.js";
 export { resolveBinary, expectedSha256For } from "./binaryAcquisition.js";
+export {
+  EXTERNAL_ANALYZER_CANDIDATES,
+  gitleaksCandidate,
+  GITLEAKS_VERSION,
+} from "./candidates.js";
 export type {
   BinarySpec,
   BinaryFetcher,
