@@ -39,6 +39,7 @@ export {
   runExternalAnalyzer,
   registerExternalAnalyzers,
   runAcquisitionEngine,
+  resolveBinaryCandidates,
   detectNodeEcosystem,
   detectPythonEcosystem,
   detectRustEcosystem,
@@ -51,7 +52,15 @@ export type {
   AcquisitionEngineOptions,
   AcquisitionOutcome,
   RunAllOutcome,
+  ResolvedBinaries,
 } from "./acquisitionEngine.js";
+export { resolveBinary, expectedSha256For } from "./binaryAcquisition.js";
+export type {
+  BinarySpec,
+  BinaryFetcher,
+  BinaryResolveOptions,
+  BinaryResolution,
+} from "./binaryAcquisition.js";
 
 function settingFor(
   analyzers: Record<string, AnalyzerSetting> | undefined,
