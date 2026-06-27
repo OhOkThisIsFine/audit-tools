@@ -856,6 +856,56 @@ export function quarantineFailedNodeCommit(
   return { ref, commit };
 }
 
+/**
+ * Preserve a failed-but-UNCOMMITTED node's worktree edits before the worktree is
+ * removed. The verify / scope / merge-fail paths quarantine an already-committed
+ * branch tip; this is the missing twin for the commit-REFUSAL path: when
+ * `commitWorktree` fails loudly (e.g. a generated artifact landed under the write
+ * scope — the genuine CE-003 fail-loud), the worker's real source edits are still
+ * sitting uncommitted in the worktree and would be destroyed by `removeWorktree`.
+ * Stage everything and land a preservation commit on the node's ISOLATED branch
+ * (never cherry-picked into main — it exists only so a durable quarantine ref can
+ * point at the otherwise-lost work), then quarantine that commit. A guard that
+ * destroys good work is worse than the bug it guards. Best-effort; returns the
+ * quarantine ref + commit, or null when there was nothing to preserve / it failed.
+ */
+export function quarantineUncommittedWorktreeEdits(
+  root: string,
+  worktreeRoot: string,
+  branch: string,
+  runId: string,
+  blockId: string,
+): { ref: string; commit: string } | null {
+  // Stage tracked modifications + new (non-ignored) source files. `git add -A`
+  // honours .gitignore, so the incidental ignored churn (node_modules/dist) and
+  // the offending generated artifact stay out — what we preserve is the worker's
+  // real source work.
+  const add = spawnSync("git", ["add", "-A"], {
+    cwd: worktreeRoot,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (add.status !== 0) return null;
+  // Nothing staged → no uncommitted edits to preserve.
+  const staged = spawnSync("git", ["diff", "--cached", "--quiet"], {
+    cwd: worktreeRoot,
+    shell: false,
+  });
+  if (staged.status === 0) return null;
+  const commit = spawnSync(
+    "git",
+    ["commit", "-m", `remediate-quarantine ${blockId} (${runId}) — fail-loud preserve`],
+    { cwd: worktreeRoot, encoding: "utf8", shell: false },
+  );
+  if (commit.status !== 0) {
+    process.stderr.write(
+      `[remediate-code] could not preserve uncommitted edits for ${blockId}: ${(commit.stderr ?? "").trim()}\n`,
+    );
+    return null;
+  }
+  return quarantineFailedNodeCommit(root, branch, runId, blockId);
+}
+
 /** Clear a node's quarantine ref (e.g. once a later re-dispatch landed successfully). Best-effort. */
 export function clearQuarantinedCommit(root: string, runId: string, blockId: string): void {
   spawnSync("git", ["update-ref", "-d", quarantineRef(runId, blockId)], {
@@ -1248,8 +1298,13 @@ export async function acceptNodeWorktree(
 
   const commit = commitWorktree(wt, `remediate ${blockId} (${runId})`, params.writePaths);
   if (commit.error) {
-    // Could not commit the worker's edits (or a new-file inclusion violation) →
-    // cannot safely land; drop it.
+    // Could not commit the worker's edits (e.g. a generated-artifact-under-scope
+    // fail-loud) → cannot safely LAND it, but the worker's real source edits are
+    // still uncommitted in the worktree. Preserve them under a durable quarantine
+    // ref BEFORE removing the worktree (P0 data-loss: a guard must not destroy the
+    // good work alongside the offending artifact), mirroring the verify/scope/
+    // merge-fail quarantine paths below.
+    quarantineUncommittedWorktreeEdits(root, wt, branch, runId, blockId);
     removeWorktree(root, wt);
     return { outcome: "error", verifyPassed, merged, diagnostic: commit.error };
   }
