@@ -90,6 +90,26 @@ auto-applied. Two smells force the question (do not silently "fix" either):
   type + reason-to-exist, fold into an existing canonical doc, or delete."* Never leave it
   unrouted and silently maintained.
 
+## Shipped-entry deletion — a "SHIPPED" note is itself status-noise
+
+`backlog.md` says *"Remove an entry once it ships."* Enforce it literally — a recorded
+"what shipped" is `git log`'s job, not the backlog's:
+
+- **Fully-shipped entry → delete it outright.** When the code proves an entry's work is
+  done (factual, code-anchored), **remove the whole entry**. Do **not** rewrite it into a
+  `_SHIPPED …_` / `**FIXED**` / `**DONE**` note, and do **not** leave such a note standing —
+  a shipped-status marker is exactly the status-noise the philosophy forbids, and these
+  accumulate. A standalone `_SHIPPED_`/`_FIXED_` paragraph or a bullet whose content is only
+  "this shipped" has **no open remainder → delete it** (code-proven removal is auto-apply,
+  same as any shipped-removal; if the proof is incomplete, escalate rather than guess).
+- **Partial entry (shipped substrate + open remainder) → trim to the remainder.** Strip the
+  "what we already shipped" prose and keep only the still-open work + enough context to act
+  on it. The entry stays; its status-log tail goes.
+- **Durable rule worth keeping?** If a shipped fix carries a durable trap/convention (e.g.
+  "anchor ignore patterns to `.audit-tools/`"), that belongs in its durable home (Durable
+  traps, `CLAUDE.md`) — move it there in the same edit, then delete the backlog entry; never
+  retain the entry just to host the rule.
+
 ## Doc-set condensation review — the corpus as a whole (perspective 2)
 
 Once per run, after the per-doc work, step back and review the **whole document set** against
@@ -121,7 +141,7 @@ the check for its type:
 | **instruction / policy** | `CLAUDE.md`, `AGENTS.md` | Factual claims only (file/command/path staleness). Policy & conventions untouchable. | **No — escalate-only.** Highest blast radius: a wrong edit deletes a guardrail governing all agents. |
 | **ops / usage** | `README.md` | Do the documented commands / paths still resolve and run. | factual-stale → yes |
 | **package docs (audit)** | `docs/audit-pkg/product.md`, `docs/audit-pkg/contracts.md`, `docs/audit-pkg/development.md`, `docs/audit-pkg/operator-guide.md`, `docs/audit-pkg/release.md` | Claims vs code/spec (these page the normative `spec/audit/*`); flag current-state / changelog creep. | factual-stale → yes |
-| **backlog** | `docs/backlog.md` | Shipped-detection (item demonstrably built in code → remove, with proof); dedup near-identical raw items; A→B draft (below). Durable-traps section is **reference** — only flag a trap proven fixed-in-tooling. | shipped-removal & dedup → yes; A→B → escalate |
+| **backlog** | `docs/backlog.md` | Shipped-detection (see *Shipped-entry deletion* below — a fully-shipped entry is **deleted outright**, never kept as a `SHIPPED`/`FIXED`/`DONE` marker; a partial entry is **trimmed to its open remainder**); dedup near-identical raw items; A→B draft (below). Durable-traps section is **reference** — only flag a trap proven fixed-in-tooling. | shipped-removal & dedup → yes; A→B → escalate |
 | **handoff** | `docs/HANDOFF.md` | Immediate-next-only (flag multi-step-out / changelog creep); verify each item vs code; a done item → clear it, with proof. | yes |
 | **excluded** | `docs/doc-review-guidelines.md` (this spec), `docs/doc-review-findings.md` (output), `meta-audit-log.md` (append-only log — staleness review is a category error) | — | — |
 
