@@ -9,7 +9,23 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
-- **Latest lap (2026-06-28): C2 — incremental graph-build (T5 #12 residual). Shipped v0.30.45.** The graph build
+- **Latest lap (2026-06-28): T5 #15 X-cluster — RESOLVED (X1 prompt-trim shipped, X2 closed). Shipped v0.30.46.**
+  An adversarial verification pass falsified the review doc's headline ("packets re-inline machine-contract content →
+  one minimal-contract + sidecar-pointers design lap"). Two facts killed the projection: (1) the dispatch contract
+  **never instructs a worker to read a JSON sidecar** (it grants source-file reads only), and (2) the full `Finding` is
+  consumed verbatim at outcomes-write (`close.ts:191` → `remediation-outcomes.json`). A first trace called 12 `Finding`
+  fields "dead in state"; the skeptic pass found only **3 truly dead** (`likelihood`, `reproduction`,
+  `executable_anchor`) — the other 9 are LIVE (cross-lens dedup ranking+merge, leanFastPath gate, reviewNecessity,
+  autonomousGate, intent checkpointFilter, close report, dispatch grounding). So the X2 state-projection is **closed as
+  not-worth-it**. The genuine, zero-behavior-change win shipped (X1): `renderFindingBadgeBody` gained a
+  `showAdvisoryMeta` opt (gates the worker-irrelevant `systemic`/`impact`/`likelihood` badge lines), set false only in
+  the implement-dispatch call; the **Contract Pipeline Traceability** section (pure provenance — goal/obligation ids + a
+  non-runnable copy of `targeted_commands`) was removed from the implement prompt with its now-dead helpers
+  (`contractPipelineTrace{Lines,Bullets}`). The runnable per-node commands still emit (build-free subset) in
+  `perNodeVerificationSection`. Tests flipped to lock the trim (`dispatch-conventions.test.ts`,
+  `next-step-pipeline-dispatch.test.ts`). Full gate green (audit 2508/0, remediate 2071). **T5 #15 closes — nothing
+  scheduled remains; only env-bound T6 is open.**
+- **Prior lap (2026-06-28): C2 — incremental graph-build (T5 #12 residual). Shipped v0.30.45.** The graph build
   re-read + re-regexed + re-metric'd every in-scope file on any one-file change; now each file's per-file edge
   contribution is cached and reused when unchanged, so a single edit only re-extracts that file. Keyed on (REAL
   content hash + global pathLookup hash) — reuse iff both match, any drift re-extracts (fail-safe); cross-file work
@@ -189,9 +205,13 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
     ([`docs/reviews/churn-context-enforce-pass-2026-06-27.md`](reviews/churn-context-enforce-pass-2026-06-27.md)).
     Shipped: auth-session O(auth×files)→O(files), E1 write-scope required-param, E3 load-time executor-registry
     invariant, **E2 incomplete-coverage convergence (v0.30.44)**, **C2 incremental graph-build (v0.30.45)**.
-    **Remaining: X-cluster** — packets re-inline machine-contract content (remediate badge body, full `Finding[]` in
-    state, synthesis/packet/quarantine renders) → one "packet carries minimal contract + sidecar pointers" design lap
-    (verify worker sidecar-read first). Low-value/needs-design-intent items (C3,C5,C6,E4,E5) not scheduled.
+    **X-cluster RESOLVED (v0.30.46):** adversarial verification falsified the "minimal contract + sidecar pointers"
+    premise — workers never read JSON sidecars and the full `Finding` is consumed verbatim at outcomes-write
+    (`close.ts:191`); only 3/12 flagged fields are truly dead (9 are live in dedup/fastpath/review/intent/close), so
+    the X2 state-projection is closed as not-worth-it. Shipped the genuine win — **X1 prompt-render trim**
+    (`showAdvisoryMeta` opt gates worker-irrelevant systemic/impact/likelihood; Contract Pipeline Traceability section
+    removed from the implement prompt with its dead helpers; zero worker-behavior change). Low-value/needs-design-intent
+    items (C3,C5,C6,E4,E5) not scheduled. **T5 #15 now has nothing scheduled.**
 16. **Deterministic analyzers — own-vs-acquire acquisition engine** — build the agnostic on-the-fly
     acquire+run+normalize engine (adapters are fixture-ready). **Git-history mining ✅ SHIPPED (0.30.34)** —
     `runStructureExecutor` now wires the (previously unwired) F6 extractor: co-change → own `co_change` graph bucket

@@ -159,10 +159,13 @@ describe("dispatch prompts carry house style", () => {
     // Repository root is normalized to forward slashes in host-facing prompts (FINDING-004).
     expect(prompt).toContain(`Repository root: ${REPO_DIR.replace(/\\/g, "/")}`);
     expect(prompt).toMatch(/Set the shell\/tool workdir to the repository root/i);
-    expect(prompt).toContain("Contract goal: G1");
-    expect(prompt).toContain("Satisfies obligations: O-1");
-    expect(prompt).toContain("Verification obligations: VO-1");
-    expect(prompt).toContain("Targeted commands: npm test -- auth");
+    // Contract goal/obligation ids + provenance-only targeted_commands are
+    // worker-irrelevant decoration; the implement prompt no longer re-inlines the
+    // Contract Pipeline Traceability section (the runnable per-node commands are
+    // emitted separately as the build-free subset).
+    expect(prompt).not.toContain("Contract goal: G1");
+    expect(prompt).not.toContain("Satisfies obligations: O-1");
+    expect(prompt).not.toContain("Verification obligations: VO-1");
   });
 
   it("implement prompts include attributable verification and PowerShell JSON guidance", async () => {

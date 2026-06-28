@@ -183,9 +183,13 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     expect(state.plan.findings[0].contract_obligation_ids).toEqual(["O-1"]);
     expect(state.plan.findings[0].verification_obligation_ids).toEqual(["O-1"]);
     expect(state.plan.findings[0].targeted_commands).toEqual(["npm test"]);
-    expect(implPrompt).toContain("Contract Pipeline Traceability");
-    expect(implPrompt).toContain("Satisfies obligations: O-1");
-    expect(implPrompt).toContain("Targeted commands: npm test");
+    // The obligation/goal ids and provenance-only targeted_commands stay on the
+    // finding in state (asserted above) but are worker-irrelevant decoration, so
+    // the implement prompt no longer re-inlines the Contract Pipeline
+    // Traceability section. The RUNNABLE per-node commands are emitted separately
+    // (build-free subset only; `npm test` is build-prepending → filtered out).
+    expect(implPrompt).not.toContain("Contract Pipeline Traceability");
+    expect(implPrompt).not.toContain("Satisfies obligations: O-1");
     expect(existsSync(join(ARTIFACTS_DIR, "extracted-plan.json"))).toBe(true);
   });
 
