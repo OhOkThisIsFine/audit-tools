@@ -196,9 +196,15 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 - **A2 finding-quality oracle** — the `score-audit` scorer is built; it needs operator-authored
   `corpus/<run-id>.labels.json` (hand-labeled real audit runs) before it can score precision/recall/hallucination.
-- **A7 multi-host validation** — `npm run verify:hosts` (automated, in `verify:release`) is built; remaining is
-  the release-time manual GUI checklist run ([`host-validation.md`](../spec/host-validation.md)) + a gated Codex
-  live-dispatch e2e.
+- **A7 multi-host validation** — `npm run verify:hosts` (automated, in `verify:release`) is built and green (4 hosts).
+  **Codex live-dispatch e2e is now REAL + passing (v0.30.48, 2026-06-28):** it imported a `runCodexHeadlessAuditDispatch`
+  that was never implemented (always-skipped → latent `TypeError`); implementing + running it live surfaced two real
+  bugs that made headless codex dispatch fail end-to-end on Windows: (1) codex provider missing `--skip-git-repo-check`
+  (codex 0.142.3 refuses `exec` in untrusted/temp dirs, exits 1 pre-work); (2) `spawnLoggedCommand` cmd.exe-shim
+  quote-mangling — Node re-escaped the pre-quoted `cmd /c` command line so codex got malformed paths (`os error 123`),
+  fixed with `windowsVerbatimArguments` (also fixes the opencode provider, same shim). Live e2e now round-trips real
+  review results (RUN_CODEX_E2E=1, codex authenticated). **Remaining:** the release-time manual GUI checklist run
+  ([`host-validation.md`](../spec/host-validation.md)) for the GUI-only hosts (Antigravity/OpenCode).
 - **Manual real-OpenCode validation** that agent-scoped permission allowances propagate to spawned subtasks
   (can't be unit-tested; user-owned). Folds into the A7 checklist.
 - **Gated live e2es** skip without creds: `RUN_NIM_E2E=1`, `AUDIT_TOOLS_LIVE_QUOTA=1`, `RUN_CODEX_E2E=1`,
