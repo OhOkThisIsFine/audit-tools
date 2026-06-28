@@ -4,6 +4,7 @@ import {
   buildGraphBundle,
   buildGraphBundleFromFs,
   mergeAnalyzerGraphContribution,
+  type GraphEdgeCache,
 } from "../extractors/graph.js";
 import { buildCriticalFlowManifest } from "../extractors/flows.js";
 import {
@@ -45,12 +46,21 @@ export async function runStructureExecutor(
     bundle.file_disposition ??
     buildFileDisposition(bundle.repo_manifest, root ? { root } : {});
   const unitManifest = buildUnitManifest(bundle.repo_manifest, disposition);
+  // C2 incremental graph-build: feed the prior per-file edge cache and collect a
+  // refreshed one. buildGraphBundle reuses each file's cached contribution while
+  // the global path set and that file's content are unchanged; any drift
+  // re-extracts (fail-safe). The cache is persisted as a special bundle artifact.
+  const edgeCacheSink: { cache?: GraphEdgeCache } = {};
   const graphBundle = root
     ? await buildGraphBundleFromFs(bundle.repo_manifest, root, disposition, {
         externalAnalyzerResults,
+        priorEdgeCache: bundle.graph_edge_cache,
+        edgeCacheSink,
       })
     : buildGraphBundle(bundle.repo_manifest, disposition, {
         externalAnalyzerResults,
+        priorEdgeCache: bundle.graph_edge_cache,
+        edgeCacheSink,
       });
   const surfaceManifest = buildSurfaceManifest(
     bundle.repo_manifest,
@@ -143,6 +153,7 @@ export async function runStructureExecutor(
       critical_flows: criticalFlows,
       risk_register: riskRegister,
       git_history: gitHistory,
+      graph_edge_cache: edgeCacheSink.cache ?? bundle.graph_edge_cache,
       artifact_metadata: gitHistoryBaseline
         ? withGitHistoryBaseline(bundle.artifact_metadata, gitHistoryBaseline)
         : bundle.artifact_metadata,
