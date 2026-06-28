@@ -17,7 +17,8 @@
   spawns/downloads), marker artifact `external_analyzer_acquisition.json` (DAG deps {repo_manifest,
   file_disposition}). Findings rejoin at the SAME seam as imported analyzers (`buildExternalAnalyzerFollowupTasks`
   → high-priority security tasks → mergeFindings external evidence), so gitleaks secrets surface in
-  audit-findings.json. Do not re-introduce the from-scratch detector. Ship supersedes 0.30.36.
+  audit-findings.json. Do not re-introduce the from-scratch detector. **Shipped v0.30.37** (supersedes 0.30.36);
+  the published bin's secret scanning is now gitleaks via the acquisition engine.
 
 ## Cadence & standing rules (don't re-derive)
 
