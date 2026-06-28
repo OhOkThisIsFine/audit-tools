@@ -686,3 +686,78 @@ export function applyGuidanceFile(
   writeFileSync(target, incoming);
   return target;
 }
+
+/**
+ * Headless Codex audit-dispatch driver for the gated A7 live e2e
+ * (`tests/audit/a7.test.mjs`, `RUN_CODEX_E2E=1`). Mirrors the NIM rolling-audit
+ * e2e but for the codex CLI provider: with `rolling_engine` ON and
+ * `provider: "codex"`, `runDeterministicForNextStep` routes the
+ * `audit_tasks_completed` review through the in-process rolling engine
+ * (`driveRollingAuditDispatch`), which launches the real headless codex CLI per
+ * packet. One bounded review result landing in `audit_results.jsonl` (blocked
+ * terminal) or the promoted `audit-findings.json` (complete terminal) is proof
+ * the dispatch round-tripped real data through ingestion.
+ *
+ * The caller must have advanced the audit to planning (so the next obligation is
+ * the host-delegation dispatch). This driver owns only the codex rolling
+ * dispatch + the result-landing check; fixture/planning setup belongs to the
+ * gated test, keeping this production helper free of test-fixture deps.
+ */
+export async function runCodexHeadlessAuditDispatch(params: {
+  root: string;
+  timeoutMs?: number;
+}): Promise<{ dispatched: boolean }> {
+  const { root } = params;
+  const timeoutMs = params.timeoutMs ?? 120_000;
+  const artifactsDir = join(root, ".audit-tools", "audit");
+  const sessionConfig: SessionConfig = {
+    provider: "codex",
+    dispatch: { rolling_engine: true },
+    timeout_ms: timeoutMs,
+  };
+
+  // Review results land in one of two places depending on how far the fold gets:
+  // the cumulative `audit_results.jsonl` store (run blocks) or the promoted
+  // parent `audit-findings.json` machine contract (run completes — which removes
+  // the artifacts dir and promotes the synthesized findings). Either is proof.
+  const storePath = join(artifactsDir, "audit_results.jsonl");
+  const promotedFindingsPath = join(root, ".audit-tools", "audit-findings.json");
+  const landed = (): boolean => {
+    if (existsSync(promotedFindingsPath)) return true;
+    if (!existsSync(storePath)) return false;
+    return readFileSync(storePath, "utf8")
+      .split("\n")
+      .some((line) => line.trim().length > 0);
+  };
+
+  // One next-step drives the whole review frontier through codex in-process; a
+  // rare first-pass total-invalid blocks cleanly with nothing ingested, so a
+  // bounded retry re-dispatches still-pending tasks (mirrors the NIM e2e).
+  for (let attempt = 0; attempt < 3 && !landed(); attempt += 1) {
+    const result = await runDeterministicForNextStep({
+      root,
+      artifactsDir,
+      selfCliPath: "audit-code",
+      timeoutMs,
+      narrativeEnabled: false,
+      analyzers: {
+        typescript: "skip",
+        python: "skip",
+        css: "skip",
+        html: "skip",
+        sql: "skip",
+      },
+      graphLlmEdgeReasoning: false,
+      sessionConfig,
+    });
+    // The in-process driver consumed the dispatch obligation itself, so it must
+    // never fall through to a host-subagent `semantic_review` dispatch step.
+    if (result.kind === "semantic_review") {
+      throw new Error(
+        "codex rolling dispatch must drive review in-process, not emit a host semantic_review step",
+      );
+    }
+  }
+
+  return { dispatched: landed() };
+}
