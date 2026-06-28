@@ -9,7 +9,20 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
-- **Latest lap (2026-06-28): blocked-item ladder — headroom-track cleanup + A7 automated check. Shipped v0.30.47.**
+- **Latest lap (2026-06-28): A7 Codex live-dispatch e2e made REAL — fixed 2 headless-codex Windows bugs. Shipped v0.30.48.**
+  Working the blocked ladder, the A7 Codex e2e (`tests/audit/a7.test.mjs`, `RUN_CODEX_E2E=1`) imported
+  `runCodexHeadlessAuditDispatch` from `nextStepCommand.ts` — a function that **never existed** (always-skipped test →
+  latent `TypeError`, same class as the vacuous opentoken guard). Implemented it (mirrors the NIM rolling-audit e2e:
+  `provider:codex` + `rolling_engine` on → `runDeterministicForNextStep` routes `audit_tasks_completed` review through
+  the in-process rolling engine, which launches real headless codex per packet; loops until a result lands). Running it
+  live surfaced **two real production bugs** that made headless codex dispatch fail end-to-end on Windows: (1) codex
+  provider missing `--skip-git-repo-check` — codex 0.142.3 refuses `exec` in untrusted/temp dirs and exits 1 pre-work;
+  (2) `spawnLoggedCommand` cmd.exe-shim quote-mangling — Node re-escaped the pre-quoted `cmd /d /s /c "<line>"` so codex
+  received malformed paths (`os error 123`), fixed with `windowsVerbatimArguments` (scoped win32+cmd.exe; **also fixes
+  the opencode provider** — same shim). Live e2e now round-trips real review results (all packets accepted, exitCode 0,
+  ~163s). Test rewritten to deploy the codex host surface + drive a planning-ready fixture (no test-fixture deps in src).
+  Full gate green (audit node:test + remediate vitest 2071/2-skip).
+- **Prior lap (2026-06-28): blocked-item ladder — headroom-track cleanup + A7 automated check. Shipped v0.30.47.**
   Working the deferred/env-bound backlog easiest-first. (1) **Repaired the vacuous `no-opentoken` guard** — it scanned
   the dead pre-A12 `packages/*/src` layout → `walk()` returned nothing → vacuously green, guarding NOTHING (an
   enforce-in-tooling latent failure: a guard that doesn't guard). Now scans the real single-package `src/` + asserts
