@@ -9,7 +9,21 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
-- **Latest lap (2026-06-28): T5 #15 X-cluster — RESOLVED (X1 prompt-trim shipped, X2 closed). Shipped v0.30.46.**
+- **Latest lap (2026-06-28): blocked-item ladder — headroom-track cleanup + A7 automated check. Shipped v0.30.47.**
+  Working the deferred/env-bound backlog easiest-first. (1) **Repaired the vacuous `no-opentoken` guard** — it scanned
+  the dead pre-A12 `packages/*/src` layout → `walk()` returned nothing → vacuously green, guarding NOTHING (an
+  enforce-in-tooling latent failure: a guard that doesn't guard). Now scans the real single-package `src/` + asserts
+  >50 files scanned so a future layout move can't make it vacuous again. Confirmed opentoken plumbing is 100% gone
+  from `src/`. (2) **Deleted `DO_NOT_TOKEN_WRAP_NOTE`** (D7) — its premise (a command-wrapper corrupting JSON stdout)
+  was opentoken-specific; headroom (the replacement) doesn't wrap commands — it's a transparent lossless HTTP proxy
+  that `router:noop`s contract JSON (validated via the MCP compress/retrieve round-trip: original stored, retrieve
+  byte-identical). Removed const + shared re-export + 4 prompt usages (audit ×2, remediate ×2). (3) **A7 automated
+  portion green** — `verify:hosts` passes all 4 hosts (codex/opencode/vscode/antigravity). Full gate green (audit
+  node:test + remediate vitest 2071/2-skip). **Still env-bound (need user/live host):** headroom HTTP-proxy flip
+  (`ANTHROPIC_BASE_URL`→127.0.0.1:8787 in a real session), A7 manual GUI checklist + Codex live e2e, OpenCode
+  permission propagation, gated live e2es (creds), A2 oracle (hand-labeled corpus), live Y-dispatcher (nested-agent
+  host), prose-staleness (defer until churn measured), `queryLimits` (no-op until a provider gains an endpoint).
+- **Prior lap (2026-06-28): T5 #15 X-cluster — RESOLVED (X1 prompt-trim shipped, X2 closed). Shipped v0.30.46.**
   An adversarial verification pass falsified the review doc's headline ("packets re-inline machine-contract content →
   one minimal-contract + sidecar-pointers design lap"). Two facts killed the projection: (1) the dispatch contract
   **never instructs a worker to read a JSON sidecar** (it grants source-file reads only), and (2) the full `Finding` is
