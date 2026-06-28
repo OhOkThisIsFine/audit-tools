@@ -264,6 +264,17 @@ class SpawnRunController {
     try {
       spawnedChild = this.spawnProcess(this.command, this.args, {
         cwd: this.input.repoRoot,
+        // Windows shim path: resolveWindowsShimSpawnCommand wraps a `.cmd`/`.ps1`
+        // launcher as `cmd.exe /d /s /c "<pre-quoted command line>"`, packing the
+        // whole command (with quoted Windows paths) into ONE arg. Node's default
+        // arg-escaping then re-escapes those embedded quotes (`"C:\x"` → `\"C:\x\"`),
+        // which cmd.exe misparses → the launcher receives mangled paths and dies
+        // with `os error 123` (invalid filename syntax). Pass the command line
+        // verbatim so cmd.exe sees exactly the pre-quoted string. We only ever
+        // spawn cmd.exe via that shim, so this is scoped to the wrapped case.
+        windowsVerbatimArguments:
+          process.platform === "win32" &&
+          /(^|[\\/])cmd\.exe$/i.test(this.command),
         // ARC-6d068334: scrub the host's interactive-session markers
         // (CLAUDECODE / CLAUDE_CODE_*) from EVERY process the tool launches,
         // including a provider session spawn — otherwise a worker session (and

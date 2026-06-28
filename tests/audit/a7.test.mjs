@@ -34,6 +34,8 @@ import {
   INSTALL_HOST_DEFINITIONS,
   verifyHostsIsolated,
 } from "../../wrapper/audit-code-wrapper-install-hosts.mjs";
+import { withTempDir } from "./helpers/withTempDir.mjs";
+import { writeFixtureRepo, advanceFixtureToPlanning } from "./helpers/fixture.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -187,31 +189,41 @@ test(
       : "set RUN_CODEX_E2E=1 to run the live Codex headless dispatch e2e",
   },
   async () => {
-    // Deploy the Codex host surface into an isolated temp $HOME, then drive a real
-    // headless Codex dispatch through `audit-code next-step` and assert a bounded
-    // audit step round-trips (a result artifact lands). The live wiring reuses the
-    // production provider routing; this gate only guarantees it is exercised when
-    // a Codex backend is actually present.
-    const { verifyHostsIsolated: verify } = await import(
-      "../../wrapper/audit-code-wrapper-install-hosts.mjs"
-    );
-    const report = await verify({ keepArtifacts: true });
+    // Two-part gate. (1) Deploy the Codex host surface into an isolated temp $HOME
+    // and assert it verifies ok — proof the production codex surface installs.
+    // (2) Drive a REAL headless Codex dispatch through the production rolling
+    // engine over a fixture advanced to planning, and assert one bounded audit
+    // step round-trips (a review result lands). The bare host-surface repo has no
+    // audit state, so the dispatch runs against a planning-ready fixture — exactly
+    // like the NIM rolling-audit e2e, but with the codex CLI as the review worker.
+    const report = await verifyHostsIsolated({ keepArtifacts: true });
     try {
       const codex = report.hosts.find((h) => h.host === "codex");
       assert.ok(codex, "the Codex host surface must deploy");
       assert.equal(codex.status, "ok", "the Codex host surface must verify ok before live dispatch");
-
-      const { runCodexHeadlessAuditDispatch } = await import(
-        "../../src/audit/cli/nextStepCommand.ts"
-      );
-      const outcome = await runCodexHeadlessAuditDispatch({ root: report.repo_root });
-      assert.ok(
-        outcome && outcome.dispatched,
-        "a live Codex headless dispatch must round-trip one bounded audit step",
-      );
     } finally {
       const { rm } = await import("node:fs/promises");
       await rm(report.home_dir, { recursive: true, force: true }).catch(() => {});
     }
+
+    const { runCodexHeadlessAuditDispatch } = await import(
+      "../../src/audit/cli/nextStepCommand.ts"
+    );
+    const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.ts");
+    await withTempDir("codex-headless-audit-e2e-", async (root) => {
+      // Advance the deterministic chain (intake → … → planning) and persist the
+      // bundle so the next obligation is the host-delegation dispatch
+      // (audit_tasks_completed) — the only point the rolling engine takes over.
+      await writeFixtureRepo(root);
+      const { planning } = await advanceFixtureToPlanning(root);
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      await writeCoreArtifacts(artifactsDir, planning.updated_bundle, { prune: true });
+
+      const outcome = await runCodexHeadlessAuditDispatch({ root });
+      assert.ok(
+        outcome && outcome.dispatched,
+        "a live Codex headless dispatch must round-trip one bounded audit step",
+      );
+    });
   },
 );

@@ -180,6 +180,9 @@ test("CodexProvider.launch invokes `codex exec` with stdin prompt + worktree-roo
   assert.match(flat, /workspace-write/);
   assert.match(flat, /--cd/);
   assert.match(flat, /--add-dir/);
+  // Headless dispatch runs in untrusted temp dirs / fresh worktrees; without
+  // this flag `codex exec` refuses to start and exits 1 before doing any work.
+  assert.match(flat, /--skip-git-repo-check/);
   // Prompt is delivered via stdin, never as an argv positional.
   assert.equal(c.input.stdinText, "IMPLEMENT THIS NODE");
   assert.ok(!flat.includes("IMPLEMENT THIS NODE"), "prompt body must not appear in argv");

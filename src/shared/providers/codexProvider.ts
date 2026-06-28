@@ -63,6 +63,12 @@ export class CodexProvider implements FreshSessionProvider {
       "exec",
       "--sandbox",
       sandbox,
+      // Headless dispatch runs in temp dirs / fresh worktrees that codex has not
+      // marked "trusted"; without this flag `codex exec` refuses to start
+      // ("Not inside a trusted directory and --skip-git-repo-check was not
+      // specified") and exits 1 before doing any work. There is no interactive
+      // trust prompt in headless mode, so skip the check unconditionally.
+      "--skip-git-repo-check",
       // Root the agent + its sandbox at the worker's working root (the node's
       // isolated worktree); spawn cwd is set to the same path.
       "--cd",
