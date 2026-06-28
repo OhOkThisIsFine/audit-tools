@@ -9,7 +9,29 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
-- **Latest lap (2026-06-27): T5 #15 E3 — executor-registry coverage made a LOAD-TIME invariant (enforce-in-tooling). Shipped v0.30.43.**
+- **Latest lap (2026-06-28): C2 — incremental graph-build (T5 #12 residual). Shipped v0.30.45.** The graph build
+  re-read + re-regexed + re-metric'd every in-scope file on any one-file change; now each file's per-file edge
+  contribution is cached and reused when unchanged, so a single edit only re-extracts that file. Keyed on (REAL
+  content hash + global pathLookup hash) — reuse iff both match, any drift re-extracts (fail-safe); cross-file work
+  (`accumulateCrossFileEdges`: auth-session/conftest/suite/analyzer) ALWAYS re-runs (global, never cached). The
+  per-file loop body is extracted into `extractPerFileContribution` (behavior-identical, push order preserved →
+  byte-identical bundle). Cache is self-describing (`path_lookup_hash` + per-entry `content_key`) so it needs NO
+  artifact_metadata baseline and is NOT a staleness-DAG node — a special-loaded bundle artifact `graph-edge-cache.json`
+  (read in `loadArtifactBundle`, written in `writeCoreArtifacts`, like `active_dispatch`). Adversarial review hardened
+  the soundness gate: `content_key` is a real content hash ONLY — a hash-less file is never cached/reused (the size
+  fallback would falsely reuse an equal-byte edit), so the cache is sound regardless of whether the manifest enabled
+  hashing. New: `src/audit/orchestrator/graphEdgeCache.ts`; tests `tests/audit/graph-edge-cache.test.mjs` (6).
+  **T5 #12 granular-staleness track is now COMPLETE** (coverage, results, design-review, git-history, graph-build all
+  done). Remaining T5 #15 open: **X-cluster** (minimal-dispatch-contract design lap).
+- **Prior lap (2026-06-28): T5 #15 E2 — bound incomplete-coverage re-dispatch so omitted findings converge. Shipped v0.30.44.**
+  A worker that silently OMITS an assigned finding from its `item_results` (no entry — distinct from blocked/unknown)
+  left it `pending` at merge and dispatch re-dispatched it every wave with NO attempt accounting → unbounded loop.
+  `mergeImplementResultsIntoState` now counts each omission (`incomplete_coverage_attempts`) and at the cap (2) blocks
+  the finding (→ triage) so a no-human run converges (T2 termination). `implementResultCoversFindings` /
+  `resolveCoveredFindingIds` are now alias-aware (same resolution as `collapseItemResults`) so an alias-using-but-complete
+  result isn't falsely re-dispatched forever. Tests in `dispatch-merge-tolerance.test.ts`. (`collapseItemResults`
+  already covered duplicates + unknown ids; E2 was the missing-finding convergence gap.)
+- **Prior lap (2026-06-27): T5 #15 E3 — executor-registry coverage made a LOAD-TIME invariant (enforce-in-tooling). Shipped v0.30.43.**
   `assertExecutorRegistryCoversPriority()` (`src/audit/orchestrator/nextStep.ts`) runs at module load and throws on a
   missing OR ambiguous PRIORITY→executor mapping, so the silent runtime "configuration gap" (`selected_executor: null`,
   a dead-end dispatch step) is now impossible instead of surfaced after a run starts. All PRIORITY ids are covered
@@ -146,16 +168,14 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
 11. **Selective-deepening task_id convergence** — partial fix needs a live deepening-capable run to validate.
 
 ### T5 — Product / analysis forward tracks
-12. **Content-addressed granular staleness — ✅ coverage slice SHIPPED (2026-06-27).** `runPlanningExecutor` preserves
-    prior completion for files whose audit inputs are unchanged via per-file baselines in
-    `artifact_metadata.coverage_element_baselines` (`src/audit/orchestrator/coverageElementBaseline.ts`, mirrors
-    `resultBaseline.ts`; fail-safe; first plan after ship is a no-op). **Incremental structure phase — git-history mine
-    ✅ SHIPPED (2026-06-27):** `runStructureExecutor` reuses the carried `git_history` unless HEAD or the in-scope file
-    set moved (`gitHistoryBaseline.ts`, `headCommit`). **Track effectively complete for the cases that matter** — the
-    targets where re-derive destroys expensive carried state (coverage, results, design-review, git-history) are all
-    done; the other structure artifacts are deterministic+idempotent (preserving = gratuitous); the only residual is
-    incremental graph-build extraction (pathLookup-keyed, careful lap — not a baseline mirror). *(forward track;
-    [[graph-signals-thin-substrate-extraction-persist]])*
+12. **Content-addressed granular staleness — ✅ TRACK COMPLETE (2026-06-28).** Coverage slice
+    (`coverageElementBaseline.ts`), per-result ledger (`resultBaseline.ts`), design-review snapshots, git-history mine
+    (`gitHistoryBaseline.ts`), and now **incremental graph-build (C2, v0.30.45)** — `buildGraphBundle` caches each
+    file's per-file edge contribution keyed (real content hash + global pathLookup hash), reuses unchanged, re-extracts
+    on drift; cross-file work always re-runs (`extractPerFileContribution`, `graphEdgeCache.ts`,
+    `graph-edge-cache.json`). Every target where re-derive destroys expensive carried state is done; the remaining
+    structure artifacts are deterministic+idempotent (preserving = gratuitous). _Nothing open on this track._
+    *([[graph-signals-thin-substrate-extraction-persist]])*
 13. **Tool-enforced dispatch broker — ✅ driver SELECTION + prompt rendering SHIPPED (2026-06-27).**
     `selectDispatchDriver` picks Y-dispatcher vs slot-pull vs in-process off the single classification + live
     frontier/slots (`DISPATCH_Y_DISPATCHER_MIN_ITEMS`); `renderDispatchDriverInstruction` single-sources the host
@@ -165,8 +185,13 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
     gate hard-rejects significant `total_lines` divergence (>2 lines AND >5%) → re-dispatch, small stays S7 advisory
     (`isSignificantLineCountDivergence`). **Residual:** CE-004 (claude-code advertises no API constraint → ONE-VALIDATOR
     repair floor) is env-bound; broader semantic checks are candidates.
-15. **Codebase-wide churn / context / enforce-in-tooling review** — run the append-only/granular-staleness
-    perspective over the whole codebase as a dedicated pass.
+15. **Codebase-wide churn / context / enforce-in-tooling review** — pass run 2026-06-27
+    ([`docs/reviews/churn-context-enforce-pass-2026-06-27.md`](reviews/churn-context-enforce-pass-2026-06-27.md)).
+    Shipped: auth-session O(auth×files)→O(files), E1 write-scope required-param, E3 load-time executor-registry
+    invariant, **E2 incomplete-coverage convergence (v0.30.44)**, **C2 incremental graph-build (v0.30.45)**.
+    **Remaining: X-cluster** — packets re-inline machine-contract content (remediate badge body, full `Finding[]` in
+    state, synthesis/packet/quarantine renders) → one "packet carries minimal contract + sidecar pointers" design lap
+    (verify worker sidecar-read first). Low-value/needs-design-intent items (C3,C5,C6,E4,E5) not scheduled.
 16. **Deterministic analyzers — own-vs-acquire acquisition engine** — build the agnostic on-the-fly
     acquire+run+normalize engine (adapters are fixture-ready). **Git-history mining ✅ SHIPPED (0.30.34)** —
     `runStructureExecutor` now wires the (previously unwired) F6 extractor: co-change → own `co_change` graph bucket

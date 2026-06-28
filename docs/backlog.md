@@ -23,40 +23,6 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
-- **Content-addressed, granular staleness — kill whole-artifact re-derive churn.** Staleness today is
-  whole-artifact: changing one unit's intent re-stales an entire downstream artifact (e.g. the coverage
-  matrix), which re-runs *all* of planning and re-touches *all* results, even for units that didn't change.
-  Desired: staleness keyed at the granularity of the actual unit of work (per-unit / per-task, content-addressed
-  by a stable content hash) so only the work whose inputs genuinely changed re-derives; unchanged work is skipped
-  by construction, not re-run-then-deduped. This is the natural partner to the append-only results ledger
-  (results keyed by content hash → an unchanged task keeps its result at zero recompute), but it stands alone as a
-  general DAG-model change applying to every derived artifact, not just results. The **per-result path is shipped**
-  (O3 re-dispatch attempt-counter → distinct `idempotency_key` → ledger appends fresh findings; record-on-ingest
-  baseline refresh + consume-in-derive single-sourced across gate/dispatch; supersession via `selectCurrentResults`).
-  **✅ Coverage-matrix elements SHIPPED (#12, 2026-06-27).** `runPlanningExecutor` preserves prior completion for
-  files whose audit inputs (content signal + required lenses + unit membership) are unchanged from a per-file baseline
-  (`src/audit/orchestrator/coverageElementBaseline.ts`, mirroring `resultBaseline.ts`): baselines live in
-  `artifact_metadata.coverage_element_baselines` (carried forward on the same CE-007 F1-current gate as
-  `result_baselines`); preservation is fail-safe (no baseline / moved key / missing prior → re-audit); first plan
-  after ship preserves nothing → identical to prior behavior; `taskBuilder` already skips completed lenses so preserved
-  files generate no (or only missing-lens) tasks. **✅ Incremental structure phase — git-history mine SHIPPED
-  (2026-06-27).** `runStructureExecutor` REUSES the carried `git_history` (skipping the full `git log` walk +
-  O(files²) co-change aggregation — the structure phase's costliest deterministic step) when neither HEAD nor the
-  in-scope file set moved since a two-part baseline `{head, scope_key}` in `artifact_metadata.git_history_baseline`
-  (`src/audit/orchestrator/gitHistoryBaseline.ts`, `headCommit` in `src/shared/git.ts`, in-scope set single-sourced
-  via `gitHistoryInScopeKeys`); any drift (no baseline / moved HEAD / scope change / git unavailable) re-mines —
-  fail-safe; carried forward on the same CE-007 F1-current terms as the other baselines.
-  **Where this track stands:** the targets where re-derive *destroys expensive carried-forward state* are now ALL
-  done — coverage-matrix (audit completion), per-result ledger, design-review (snapshot/projection-based,
-  cosmetic-invariant, diff-scoped — `designReviewSnapshot.ts`), and the git-history mine. The OTHER structure
-  artifacts (risk_register / surface / flows / units / graph_bundle) are *deterministic and idempotent*: same
-  inputs → same content hash → no downstream re-stale, so a per-element preservation seam there saves ~0 and is
-  gratuitous complexity (against ideal-code). The one remaining real cost is the **graph build** (per-file FS reads
-  + regex extraction + complexity/duplication metrics, re-run wholesale on any one-file change) — but per-file edge
-  caching is only sound keyed on (file content hash + global pathLookup hash), since import resolution and the
-  cross-file heuristics (conftest/suite/auth-session) are repo-global; that's a careful incremental-extraction lap,
-  not a clean baseline mirror. (Ethan, 2026-06-24; coverage slice + git-history incremental + survey 2026-06-27.)
-
 - **Codebase-wide review for churn / context / enforce-in-tooling — same lens, applied everywhere.** The
   append-only-ledger + granular-staleness + LLM-equivalence-gate work came from one perspective; run that same
   perspective over the *entire* codebase as a dedicated pass. Hunt for: (a) **unnecessary churn** — anywhere we
@@ -79,12 +45,15 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   (`src/audit/orchestrator/nextStep.ts`) throws at module load on a missing OR ambiguous PRIORITY→executor
   mapping, so the silent `selected_executor: null` "configuration gap" dead-end step is impossible. All
   PRIORITY ids covered today → zero behavior change; a future PRIORITY addition without a registry entry
-  fails loudly at load. Test mirrors the property (`orchestration.test.mjs`). Promoted open items: **X-cluster** prompts
-  re-inline content already in the machine contract (remediate badge body,
-  full `Finding[]` in state, synthesis/packet/quarantine renders) → one "packet carries minimal contract
-  + sidecar pointers" design lap (verify worker sidecar-read first); **C2/C4** incremental graph-build
-  extraction = the T5 #12 known residual; **E2** worker item-completeness mechanical reject
-  (verify collapseItemResults doesn't already cover it first). Low-value/needs-design-intent (C3,C5,C6,E4,E5) not scheduled.
+  fails loudly at load. Test mirrors the property (`orchestration.test.mjs`). **E2 ✅ SHIPPED (2026-06-28, v0.30.44)** —
+  `mergeImplementResultsIntoState` accounts each silently-omitted assigned finding (`incomplete_coverage_attempts`)
+  and blocks it at the cap (2) → triage, so an incomplete worker result converges instead of re-dispatching forever;
+  `implementResultCoversFindings`/`resolveCoveredFindingIds` made alias-aware (`collapseItemResults` already covered the
+  duplicate + unknown-id cases). **C2 ✅ SHIPPED (2026-06-28, v0.30.45)** — incremental graph-build (per-file edge
+  cache; see the deleted granular-staleness track). **Remaining: X-cluster** — prompts re-inline content already in the
+  machine contract (remediate badge body, full `Finding[]` in state, synthesis/packet/quarantine renders) → one "packet
+  carries minimal contract + sidecar pointers" design lap (verify worker sidecar-read first).
+  Low-value/needs-design-intent (C3,C5,C6,E4,E5) not scheduled.
 
 - **Schema-enforced generation everywhere possible — make malformed output impossible, not merely repairable.**
   Strict output schemas already exist (e.g. the worker zod schemas) but are shipped to workers only as *advisory
