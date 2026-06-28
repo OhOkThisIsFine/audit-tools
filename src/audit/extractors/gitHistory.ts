@@ -53,20 +53,35 @@ const CHURN_HOTSPOT_FLOOR = 8;
  * shared miner already sorts every list by a total order, and the in-scope
  * filter preserves that order.
  */
+/**
+ * The set of in-scope, graph-normalized path keys the git-history mine is scoped
+ * to: every manifest file that is neither file-excluded nor audit-excluded by
+ * disposition. SINGLE-SOURCED here so the mine's in-scope filter and the
+ * incremental-reuse scope key (`deriveGitHistoryScopeKey`) can never drift in
+ * what "in scope" means.
+ */
+export function gitHistoryInScopeKeys(
+  repoManifest: RepoManifest,
+  disposition?: FileDisposition,
+): string[] {
+  const dispositionMap = buildDispositionMap(disposition);
+  const keys: string[] = [];
+  for (const file of repoManifest.files) {
+    if (file.excluded) continue;
+    const status = dispositionMap.get(file.path);
+    if (status && isAuditExcludedStatus(status)) continue;
+    keys.push(graphLookupKey(file.path));
+  }
+  return keys;
+}
+
 export function mineGitHistoryArtifact(
   root: string,
   repoManifest: RepoManifest,
   disposition?: FileDisposition,
 ): GitHistory {
   const history = mineGitHistory(root);
-  const dispositionMap = buildDispositionMap(disposition);
-  const inScope = new Set<string>();
-  for (const file of repoManifest.files) {
-    if (file.excluded) continue;
-    const status = dispositionMap.get(file.path);
-    if (status && isAuditExcludedStatus(status)) continue;
-    inScope.add(graphLookupKey(file.path));
-  }
+  const inScope = new Set<string>(gitHistoryInScopeKeys(repoManifest, disposition));
 
   const known = (path: string): boolean => inScope.has(graphLookupKey(path));
 

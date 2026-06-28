@@ -39,8 +39,23 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   `artifact_metadata.coverage_element_baselines` (carried forward on the same CE-007 F1-current gate as
   `result_baselines`); preservation is fail-safe (no baseline / moved key / missing prior → re-audit); first plan
   after ship preserves nothing → identical to prior behavior; `taskBuilder` already skips completed lenses so preserved
-  files generate no (or only missing-lens) tasks. **Still open:** the SAME content-addressed per-element model for the
-  *other* derived artifacts (each needs its own incremental executor seam). (Ethan, 2026-06-24; coverage slice 2026-06-27.)
+  files generate no (or only missing-lens) tasks. **✅ Incremental structure phase — git-history mine SHIPPED
+  (2026-06-27).** `runStructureExecutor` REUSES the carried `git_history` (skipping the full `git log` walk +
+  O(files²) co-change aggregation — the structure phase's costliest deterministic step) when neither HEAD nor the
+  in-scope file set moved since a two-part baseline `{head, scope_key}` in `artifact_metadata.git_history_baseline`
+  (`src/audit/orchestrator/gitHistoryBaseline.ts`, `headCommit` in `src/shared/git.ts`, in-scope set single-sourced
+  via `gitHistoryInScopeKeys`); any drift (no baseline / moved HEAD / scope change / git unavailable) re-mines —
+  fail-safe; carried forward on the same CE-007 F1-current terms as the other baselines.
+  **Where this track stands:** the targets where re-derive *destroys expensive carried-forward state* are now ALL
+  done — coverage-matrix (audit completion), per-result ledger, design-review (snapshot/projection-based,
+  cosmetic-invariant, diff-scoped — `designReviewSnapshot.ts`), and the git-history mine. The OTHER structure
+  artifacts (risk_register / surface / flows / units / graph_bundle) are *deterministic and idempotent*: same
+  inputs → same content hash → no downstream re-stale, so a per-element preservation seam there saves ~0 and is
+  gratuitous complexity (against ideal-code). The one remaining real cost is the **graph build** (per-file FS reads
+  + regex extraction + complexity/duplication metrics, re-run wholesale on any one-file change) — but per-file edge
+  caching is only sound keyed on (file content hash + global pathLookup hash), since import resolution and the
+  cross-file heuristics (conftest/suite/auth-session) are repo-global; that's a careful incremental-extraction lap,
+  not a clean baseline mirror. (Ethan, 2026-06-24; coverage slice + git-history incremental + survey 2026-06-27.)
 
 - **Codebase-wide review for churn / context / enforce-in-tooling — same lens, applied everywhere.** The
   append-only-ledger + granular-staleness + LLM-equivalence-gate work came from one perspective; run that same

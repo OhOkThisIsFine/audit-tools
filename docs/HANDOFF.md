@@ -9,8 +9,18 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
-- **Latest lap (2026-06-27): T5 #12 + #14 + #13 actionable slices landed** — content-addressed granular coverage
-  staleness (#12), CE-009 semantic-validity gate on significant `total_lines` divergence (#14), and capability-tiered
+- **Latest lap (2026-06-27): T5 #12 incremental structure phase — git-history mine reuse.** `runStructureExecutor`
+  now reuses the carried `git_history` (skips the full `git log` walk + O(files²) co-change aggregation — the
+  structure phase's costliest deterministic step) when neither HEAD nor the in-scope file set moved since the
+  `{head, scope_key}` baseline in `artifact_metadata.git_history_baseline`; any drift re-mines (fail-safe). New:
+  `src/audit/orchestrator/gitHistoryBaseline.ts`, `headCommit` (`src/shared/git.ts`), `gitHistoryInScopeKeys`
+  single-sourcing the in-scope set. Tests: `tests/audit/git-history-incremental.test.mjs` (7). **Survey finding
+  recorded:** the granular-staleness targets that matter (re-derive destroys expensive state) are now ALL done —
+  coverage, results, design-review, git-history; the remaining structure artifacts are deterministic+idempotent
+  (preserving them is gratuitous), and the only real residual is incremental graph-build extraction (a careful
+  pathLookup-keyed lap, not a baseline mirror). See T5 #12 + backlog.
+- **Prior lap (2026-06-27): T5 #12 coverage + #14 + #13 actionable slices** — content-addressed granular coverage
+  staleness, CE-009 semantic-validity gate on significant `total_lines` divergence (#14), and capability-tiered
   dispatch driver-selection + prompt rendering (#13). See the T5 entries below; full detail in `docs/backlog.md`.
 - **Secret scanning = gitleaks via the acquisition engine — slices A–E COMPLETE.** The from-scratch OWN
   detector (npm `0.30.36`) stays reverted (`a10b79cd`); the working tree wires gitleaks end-to-end through the
@@ -110,8 +120,13 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
 12. **Content-addressed granular staleness — ✅ coverage slice SHIPPED (2026-06-27).** `runPlanningExecutor` preserves
     prior completion for files whose audit inputs are unchanged via per-file baselines in
     `artifact_metadata.coverage_element_baselines` (`src/audit/orchestrator/coverageElementBaseline.ts`, mirrors
-    `resultBaseline.ts`; fail-safe; first plan after ship is a no-op). **Remaining:** the same per-element model for the
-    *other* derived artifacts. *(forward track; [[graph-signals-thin-substrate-extraction-persist]])*
+    `resultBaseline.ts`; fail-safe; first plan after ship is a no-op). **Incremental structure phase — git-history mine
+    ✅ SHIPPED (2026-06-27):** `runStructureExecutor` reuses the carried `git_history` unless HEAD or the in-scope file
+    set moved (`gitHistoryBaseline.ts`, `headCommit`). **Track effectively complete for the cases that matter** — the
+    targets where re-derive destroys expensive carried state (coverage, results, design-review, git-history) are all
+    done; the other structure artifacts are deterministic+idempotent (preserving = gratuitous); the only residual is
+    incremental graph-build extraction (pathLookup-keyed, careful lap — not a baseline mirror). *(forward track;
+    [[graph-signals-thin-substrate-extraction-persist]])*
 13. **Tool-enforced dispatch broker — ✅ driver SELECTION + prompt rendering SHIPPED (2026-06-27).**
     `selectDispatchDriver` picks Y-dispatcher vs slot-pull vs in-process off the single classification + live
     frontier/slots (`DISPATCH_Y_DISPATCHER_MIN_ITEMS`); `renderDispatchDriverInstruction` single-sources the host

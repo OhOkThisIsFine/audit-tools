@@ -356,6 +356,7 @@ export {
   gitRefExists,
   changedFiles,
   fileCommits,
+  headCommit,
   stagedAndUntracked,
   mineGitHistory,
 } from "./git.js";

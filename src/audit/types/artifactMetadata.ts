@@ -24,6 +24,23 @@ export interface ArtifactMetadataEntry {
   element_content_keys?: Record<string, string>;
 }
 
+/**
+ * Incremental-structure-phase baseline for the git-history mine (T5 #12 — the
+ * same content-addressed granular-staleness model, applied to the structure
+ * phase's most expensive deterministic operation). The mined `git_history.json`
+ * is a pure function of (a) the commit graph reachable from HEAD and (b) the
+ * in-scope audited file set; this baseline records both so the structure
+ * executor can REUSE the prior mine — skipping the full `git log` walk + O(files²)
+ * co-change aggregation — whenever neither moved. A drift in either re-mines
+ * (fail-safe).
+ */
+export interface GitHistoryBaseline {
+  /** HEAD commit SHA at the time the carried `git_history.json` was mined. */
+  head: string;
+  /** Content key of the in-scope audited path set the mine was filtered to. */
+  scope_key: string;
+}
+
 export interface ArtifactMetadataManifest {
   /**
    * F1 metadata-shape tag (CE-007). An absent or lower value than
@@ -51,4 +68,13 @@ export interface ArtifactMetadataManifest {
    * `src/audit/orchestrator/coverageElementBaseline.ts`.
    */
   coverage_element_baselines?: Record<string, string>;
+  /**
+   * T5 #12 incremental-structure-phase baseline for the git-history mine. Lives
+   * HERE — in artifact_metadata, OUTSIDE `git_history.json` — so the structure
+   * executor can decide to reuse the prior mine without the artifact carrying its
+   * own provenance. Carried forward across runs on the SAME CE-007 F1-current
+   * terms as `result_baselines` / `coverage_element_baselines`. See
+   * `src/audit/orchestrator/gitHistoryBaseline.ts`.
+   */
+  git_history_baseline?: GitHistoryBaseline;
 }
