@@ -9,7 +9,8 @@ import {
   advanceFixtureToPlanning,
 } from "./helpers/fixture.mjs";
 
-const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.ts");
+const { decideNextStep, PRIORITY } = await import("../../src/audit/orchestrator/nextStep.ts");
+const { EXECUTOR_REGISTRY } = await import("../../src/audit/orchestrator/executors.ts");
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.ts");
 const { RunLogger } = await import("audit-tools/shared");
 const {
@@ -609,6 +610,23 @@ test("decideNextStep reason flags the gap when selected_executor is null", () =>
     );
   }
   // Either branch exercises the relevant code path.
+});
+
+test("every PRIORITY obligation maps to exactly one executor (E3 enforce-in-tooling)", () => {
+  // The module-load invariant in nextStep.ts already throws on a gap; importing
+  // the module above proves it holds today. This mirrors the property so a future
+  // PRIORITY id added without a registry entry (or owned by two executors) fails
+  // here with a named obligation rather than a silent runtime null-executor step.
+  for (const obligationId of PRIORITY) {
+    const owners = EXECUTOR_REGISTRY.filter((executor) =>
+      executor.obligation_ids.includes(obligationId),
+    );
+    assert.equal(
+      owners.length,
+      1,
+      `PRIORITY obligation "${obligationId}" must map to exactly one executor, found ${owners.length} (${owners.map((e) => e.id).join(", ")}).`,
+    );
+  }
 });
 
 test("buildAuditReportModel keeps identity-distinct findings separate while merging re-emissions of one identity across files", () => {

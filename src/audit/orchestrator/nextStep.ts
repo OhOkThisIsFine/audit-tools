@@ -49,6 +49,34 @@ export const PRIORITY: string[] = [
   FRICTION_CAPTURE_OBLIGATION_ID,
 ];
 
+/**
+ * Load-time invariant (E3, enforce-in-tooling): every obligation the priority
+ * scan can select MUST map to exactly one executor in EXECUTOR_REGISTRY. Without
+ * this, adding an id to PRIORITY (or dropping its registry entry) silently yields
+ * a `selected_executor: null` "configuration gap" step at runtime — a latent
+ * failure the auditor-agnostic invariant forbids. Asserting at module load makes
+ * the gap impossible: a missing or ambiguous mapping throws loudly before any run.
+ */
+function assertExecutorRegistryCoversPriority(): void {
+  for (const obligationId of PRIORITY) {
+    const owners = EXECUTOR_REGISTRY.filter((executor) =>
+      executor.obligation_ids.includes(obligationId),
+    );
+    if (owners.length === 0) {
+      throw new Error(
+        `Executor registry configuration gap: PRIORITY obligation "${obligationId}" has no executor in EXECUTOR_REGISTRY. Every scan-selectable obligation must map to exactly one executor.`,
+      );
+    }
+    if (owners.length > 1) {
+      throw new Error(
+        `Executor registry ambiguity: PRIORITY obligation "${obligationId}" is owned by multiple executors (${owners.map((e) => e.id).join(", ")}). Each obligation must map to exactly one executor.`,
+      );
+    }
+  }
+}
+
+assertExecutorRegistryCoversPriority();
+
 // audit-code binds its PRIORITY ordering to the shared scan; the selection
 // mechanism is single-sourced in `audit-tools/shared` (A3) so it cannot drift
 // from remediate-code's. The domain signature (PRIORITY-bound) is kept for the
