@@ -9,7 +9,18 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
-- **Latest lap (2026-06-27): T5 #12 incremental structure phase — git-history mine reuse.** `runStructureExecutor`
+- **Latest lap (2026-06-27): T5 #15 codebase-wide churn / context / enforce-in-tooling review pass.** Three
+  parallel review agents (one per category) swept the repo; verification-tiered findings landed in
+  [`docs/reviews/churn-context-enforce-pass-2026-06-27.md`](reviews/churn-context-enforce-pass-2026-06-27.md).
+  Shipped a clean verified win: **auth-session heuristic O(auth×files)→O(files)** — `extractHeuristicAuthSessionEdges`
+  moved out of the per-file loop into `accumulateCrossFileEdges` (its named cross-file home) with a single
+  index sweep (`src/audit/extractors/graph.ts`); edges identical (uniqueSortedEdges normalizes order). Promoted
+  open items to backlog #15: **E1** write-scope gate `if (params.scope)` optional → make `allBlockScopes`
+  required (verified, highest-certainty enforce win); **X-cluster** prompts re-inline machine-contract content
+  → one "minimal contract + sidecar pointers" design lap; **C2** incremental graph-build extraction = the T5 #12
+  known residual; **E2/E3** worker item-completeness + null-executor rejects. Suite green (audit node:test +
+  remediate vitest 2069).
+- **Prior lap (2026-06-27): T5 #12 incremental structure phase — git-history mine reuse.** `runStructureExecutor`
   now reuses the carried `git_history` (skips the full `git log` walk + O(files²) co-change aggregation — the
   structure phase's costliest deterministic step) when neither HEAD nor the in-scope file set moved since the
   `{head, scope_key}` baseline in `artifact_metadata.git_history_baseline`; any drift re-mines (fail-safe). New:
