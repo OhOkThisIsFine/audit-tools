@@ -5,6 +5,7 @@ import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { AnalyzerSetting, SynthesisNarrative, RunLogger } from "audit-tools/shared";
 import type { EdgeReasoningResults } from "./edgeReasoning.js";
+import type { ExternalAcquisitionAdvanceOptions } from "./acquisitionExecutor.js";
 
 /**
  * Public input/output contract of `advanceAudit`. Lives in this leaf module —
@@ -34,6 +35,14 @@ export interface AdvanceAuditOptions {
   narrativeResults?: SynthesisNarrative;
   /** Per-analyzer resolution policy for the optional graph-enrichment pass. */
   analyzers?: Record<string, AnalyzerSetting>;
+  /**
+   * External-analyzer acquisition gate (Slice D). Absent/`enabled:false` ⇒ the
+   * acquisition executor writes an empty marker and spawns nothing (hermetic;
+   * the unit/integration suite always leaves it off). The real CLI next-step path
+   * sets `enabled:true` + a global-`fetch` adapter so gitleaks (+ consent-gated
+   * semgrep/eslint) acquire + run.
+   */
+  externalAcquisition?: ExternalAcquisitionAdvanceOptions;
   /** Phase 4B gate (session-config `graph.llm_edge_reasoning`); default off. */
   graphLlmEdgeReasoning?: boolean;
   /** Phase 4B host-supplied reason rewrites for low-confidence graph edges. */

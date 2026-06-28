@@ -86,6 +86,7 @@ function createDecisionBundle(overrides = {}) {
     file_disposition: { files: [] },
     auto_fixes_applied: { applied: [] },
     external_analyzer_results: [{ tool: "eslint", results: [] }],
+    external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
     syntax_resolution_status: {
       tool: "syntax_resolution_executor",
       completed_at: "2026-04-22T00:00:00Z",
@@ -140,6 +141,7 @@ test("decideNextStep covers representative priority states", () => {
     file_disposition: { files: [] },
     auto_fixes_applied: { applied: [] },
     external_analyzer_results: [{ tool: "eslint", results: [] }],
+    external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
     syntax_resolution_status: {
       tool: "syntax_resolution_executor",
       completed_at: "2026-04-22T00:00:00Z",
@@ -220,6 +222,7 @@ test("advanceAudit emits a structured run log threading obligation → executor 
         tool: "syntax_resolution_executor",
         completed_at: "2026-04-22T00:00:00Z",
       },
+      external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
     };
     await advanceAudit(preparedBundle, { runLogger });
 

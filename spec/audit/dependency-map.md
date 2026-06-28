@@ -21,6 +21,7 @@ Downstream:
 - `critical_flows.json`
 - `risk_register.json`
 - `git_history.json`
+- `external_analyzer_acquisition.json`
 - `coverage_matrix.json`
 - `flow_coverage.json`
 - `audit_tasks.json`
@@ -39,6 +40,7 @@ Downstream:
 - `critical_flows.json`
 - `risk_register.json`
 - `git_history.json`
+- `external_analyzer_acquisition.json`
 - `coverage_matrix.json`
 - `flow_coverage.json`
 - `audit_tasks.json`
@@ -220,6 +222,18 @@ Downstream:
 - future risk enrichment
 - future synthesis enrichment
 - future planning enrichment
+
+### `external_analyzer_acquisition.json`
+
+The external-analyzer acquisition marker (gitleaks + consent-gated semgrep/eslint).
+Depends on `repo_manifest.json` + `file_disposition.json` (a manifest/disposition
+change re-stales the marker → acquisition re-runs). It is a run-record + staleness
+anchor with no downstream of its own; the findings it produces land in
+`external_analyzer_results.json`, which carries the downstream edges.
+
+Downstream:
+
+- (none — staleness anchor only)
 
 ## Staleness policy examples
 

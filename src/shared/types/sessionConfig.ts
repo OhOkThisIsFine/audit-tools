@@ -306,6 +306,17 @@ export interface GraphConfig {
 }
 
 /**
+ * External-analyzer acquisition (Slice D). Acquisition is default-ON on the real
+ * CLI next-step path; `enabled: false` opts the whole pass out. `consent_token`
+ * unlocks the consent-gated, non-default candidates (semgrep / eslint); gitleaks
+ * (the default-run secret scanner) runs without one.
+ */
+export interface ExternalAcquisitionConfig {
+  enabled?: boolean;
+  consent_token?: string;
+}
+
+/**
  * Per-analyzer resolution policy for the optional graph-enrichment pass
  * (`analyzers.<id>`). Resolution order is repo node_modules → version-keyed
  * analyzer cache → (for `ephemeral`/`permanent`) install into the cache, else
@@ -418,6 +429,13 @@ export interface SessionConfig {
   synthesis?: SynthesisConfig;
   /** Per-analyzer resolution policy for the optional graph-enrichment pass. */
   analyzers?: Record<string, AnalyzerSetting>;
+  /**
+   * External-analyzer acquisition (Slice D — gitleaks + consent-gated
+   * semgrep/eslint). Acquisition is default-ON on the real CLI next-step path
+   * (high-value, low-overhead secret scanning); set `enabled: false` to opt out.
+   * `consent_token` unlocks the non-default candidates (semgrep / eslint).
+   */
+  external_acquisition?: ExternalAcquisitionConfig;
   /** Optional graph-enrichment tuning (Phase 4B edge reasoning). */
   graph?: GraphConfig;
   /** Dispatch fan-out controls (confirmation threshold, packet budget). */

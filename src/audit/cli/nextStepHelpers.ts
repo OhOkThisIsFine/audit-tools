@@ -66,6 +66,7 @@ import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { LOCAL_SUBPROCESS_PROVIDER_NAME } from "../providers/constants.js";
 import { clearDispatchFiles } from "../io/runArtifacts.js";
 import { runAuditStep } from "./auditStep.js";
+import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import {
   writeHandoffOnly,
   ensureSemanticReviewRun,
@@ -117,6 +118,12 @@ export type NextStepParams = {
   narrativeEnabled?: boolean;
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
+  /**
+   * External-analyzer acquisition gate (Slice D). Set by the real CLI next-step
+   * path (`enabled:true` + global-`fetch` adapter); left unset by tests so the
+   * acquisition executor stays a hermetic empty-marker no-op.
+   */
+  externalAcquisition?: ExternalAcquisitionAdvanceOptions;
   since?: string;
   /**
    * Active session config. Threaded so the semantic-review dispatch obligation can
@@ -543,7 +550,7 @@ export async function handleSynthesisNarrativeBranch(
  * filesystem-watching host reads.
  */
 export async function executeAndRecord(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since">,
   analyzers: Record<string, AnalyzerSetting> | undefined,
   decision: ReturnType<typeof decideNextStep>,
   index: number,
@@ -565,6 +572,7 @@ export async function executeAndRecord(
       artifactsDir: params.artifactsDir,
       analyzers,
       graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
+      externalAcquisition: params.externalAcquisition,
       since: params.since,
     });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
@@ -902,6 +910,7 @@ function buildAuditObligations(): AuditObligationDef[] {
     deterministic("file_disposition"),
     deterministic("auto_fixes_applied"),
     deterministic("syntax_resolved"),
+    deterministic("external_analyzers_current"),
     deterministic("structure_artifacts"),
     {
       // Graph enrichment: poll the analyzer-decision / edge-reasoning incoming

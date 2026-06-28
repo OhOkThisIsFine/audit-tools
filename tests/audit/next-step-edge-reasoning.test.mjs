@@ -45,6 +45,7 @@ async function buildStructureReadyBundle(root) {
       tool: "syntax_resolution_executor",
       completed_at: "2026-04-22T00:00:00Z",
     },
+    external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
   };
   const structure = await advanceAudit(prepared);
   return structure.updated_bundle;

@@ -147,6 +147,11 @@ export async function advanceFixtureToPlanning(root) {
       tool: "syntax_resolution_executor",
       completed_at: "2026-04-22T00:00:00Z",
     },
+    // Mark external-analyzer acquisition (Slice D) as already satisfied so the
+    // hand-built step sequence below proceeds straight to structure (acquisition
+    // is a hermetic no-op without an enabled gate; the fixture skips it like the
+    // injected auto-fix / syntax-resolution markers above).
+    external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
   };
 
   const structure = await advanceAudit(preparedBundle);

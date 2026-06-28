@@ -142,6 +142,15 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     narrativeEnabled: sessionConfig.synthesis?.narrative !== false,
     analyzers: sessionConfig.analyzers,
     graphLlmEdgeReasoning: sessionConfig.graph?.llm_edge_reasoning,
+    // Slice D: enable external-analyzer acquisition on the real CLI path (default-on;
+    // session config can opt out). The executor builds its own global-`fetch`
+    // adapter when no fetcher is injected. The unit/integration suite never reaches
+    // here, so acquisition stays a hermetic no-op in tests.
+    externalAcquisition: {
+      enabled: sessionConfig.external_acquisition?.enabled !== false,
+      consentToken: sessionConfig.external_acquisition?.consent_token,
+      analyzers: sessionConfig.analyzers,
+    },
     since: getFlag(argv, "--since"),
     sessionConfig,
   });

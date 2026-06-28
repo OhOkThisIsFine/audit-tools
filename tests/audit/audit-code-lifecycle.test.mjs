@@ -112,7 +112,25 @@ test("audit-code wrapper supports repeated bounded advance-audit invocations wit
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
     assert.equal(fourth.selected_executor, "syntax_resolution_executor");
-    assert.equal(fourth.next_likely_step, "structure_artifacts");
+    assert.equal(fourth.next_likely_step, "external_analyzers_current");
+
+    // External-analyzer acquisition (Slice D) runs between syntax resolution and
+    // structure. Under advance-audit it is NOT enabled (only the CLI next-step
+    // path sets externalAcquisition.enabled), so it writes an empty hermetic
+    // marker and proceeds — nothing is spawned/downloaded.
+    const acquisition = JSON.parse(
+      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
+    );
+    assert.equal(
+      acquisition.selected_executor,
+      "external_analyzer_acquisition_executor",
+    );
+    assert.equal(acquisition.next_likely_step, "structure_artifacts");
+    assert.ok(
+      acquisition.artifacts_written.includes(
+        "external_analyzer_acquisition.json",
+      ),
+    );
 
     const fifth = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
