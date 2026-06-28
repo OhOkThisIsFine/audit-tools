@@ -23,6 +23,16 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
+- **Precise `calls`/import edges via pure-JS `web-tree-sitter` (WASM) — candidate, deferred.** Our graph extraction
+  (`src/audit/extractors/graph.ts`) resolves imports/calls by **regex**, which is approximate. A real AST pass would
+  give precise `calls` edges. The OS-agnostic, no-native-build way (fits our two-tier dep policy + everything-agnostic
+  principle) is **`web-tree-sitter` (WASM grammars)** as a new extractor behind the existing `GraphEdge` contract —
+  borrow the *idea*, not a native toolchain. Surfaced by the 2026-06-28 evaluation of `safishamsi/graphify` (a Python
+  tree-sitter knowledge-graph tool — not adoptable wholesale: native grammar wheels, Python stack, violates
+  no-native-build). Secondary borrows from that eval: god-node/betweenness "surprise" signals, an
+  EXTRACTED/INFERRED/AMBIGUOUS confidence ladder. Eval report: `graphify-evaluation.md` (saved to user Desktop).
+  Efficiency/precision-only; defer until regex edge imprecision is a measured cost.
+  ([[graph-signals-thin-substrate-extraction-persist]])
 - **Codebase-wide review for churn / context / enforce-in-tooling — same lens, applied everywhere.** The
   append-only-ledger + granular-staleness + LLM-equivalence-gate work came from one perspective; run that same
   perspective over the *entire* codebase as a dedicated pass. Hunt for: (a) **unnecessary churn** — anywhere we
