@@ -213,8 +213,18 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   DELETED** — its premise (a command-wrapper corrupting JSON stdout) was specific to the prior opentoken package;
   headroom doesn't wrap commands (transparent lossless HTTP proxy + noop on contract JSON), so the constraint the
   note warned against no longer exists. Removed the const + re-export + 4 prompt usages (audit ×2, remediate ×2).
-  **Still env-bound:** the actual HTTP proxy flip — needs the user's global `ANTHROPIC_BASE_URL` → `127.0.0.1:8787`
-  in a real session (user-owned) before any global env flip.
+  **Proxy validated 2026-06-28 — flip BLOCKED by a real defect (the gate paid off):** started `headroom proxy`
+  (v0.20.15, installed via `uv tool`) and it **crashes on boot in default optimize mode** —
+  `FATAL: Rust extension headroom._core not loadable (ModuleNotFoundError: No module named 'headroom._core')`.
+  Flipping the global `ANTHROPIC_BASE_URL` to it would have bricked Claude Code sessions. Degraded Python-only mode
+  (`HEADROOM_REQUIRE_RUST_CORE=false`) boots fine and forwards correctly (livez/readyz/health 200; a `/v1/messages`
+  POST reached api.anthropic.com and returned an intact upstream 401 for a dummy key) — but degraded = **no
+  optimization**, a pointless no-op forwarder. Root cause: no prebuilt Windows wheel for `headroom-ai`, so
+  `uv tool install headroom-ai --reinstall` builds the Rust core from source and **fails at link** (`error: linking
+  with link.exe failed: exit code 1`) — MSVC `link.exe` (Visual Studio C++ Build Tools) is not available. **To
+  unblock the flip:** install VS Build Tools (C++ workload → provides `link.exe`) then reinstall headroom-ai so
+  `_core` builds, OR run the proxy under WSL/Linux where a prebuilt wheel exists. Until optimize mode boots, do NOT
+  flip the global env (user-owned).
 - **Narrow staleness on prose-heavy artifacts via bounded semantic judgment, not per-field proof.** Prose-heavy
   fields (design_spec narrative, rationales) feed downstream LLM prompts, so a cosmetic edit currently re-fires
   staleness and forces wasteful re-emit even when the meaning is unchanged. The desired narrowing is NOT a
