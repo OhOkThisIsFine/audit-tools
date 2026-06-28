@@ -169,5 +169,16 @@ export function computeArtifactMetadata(
   if (carriedCoverageBaselines) {
     manifest.coverage_element_baselines = carriedCoverageBaselines;
   }
+  // Carry the T5 #12 git-history baseline forward on the SAME terms (CE-007:
+  // only from an F1-current store; prefer the bundle's freshly-recorded baseline
+  // — the structure executor stamps it on run.updated — over the pre-executor
+  // `usablePrevious`). Dropping an old-shape baseline makes the next structure
+  // run re-mine git history (fail-safe).
+  const carriedGitHistoryBaseline =
+    (bundleIsCurrent ? bundleMetadata?.git_history_baseline : undefined) ??
+    usablePrevious?.git_history_baseline;
+  if (carriedGitHistoryBaseline) {
+    manifest.git_history_baseline = carriedGitHistoryBaseline;
+  }
   return manifest;
 }

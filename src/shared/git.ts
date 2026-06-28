@@ -41,6 +41,23 @@ export function gitRefExists(root: string, ref: string): boolean {
 }
 
 /**
+ * The current HEAD commit SHA, or `null` when `root` is not a git repo / the
+ * command fails. Cheap (one `rev-parse`) relative to a full history mine — the
+ * git-history artifact is a pure function of the commit graph reachable from
+ * HEAD, so an unchanged HEAD means an unchanged mine, letting the structure
+ * executor skip the expensive `git log` walk. Never throws.
+ */
+export function headCommit(root: string): string | null {
+  const result = runTracked(["git", "rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (result.status !== 0) return null;
+  const sha = result.stdout.trim();
+  return sha.length > 0 ? sha : null;
+}
+
+/**
  * Files differing between `since` (a ref/SHA) and the current working tree —
  * committed, staged, and unstaged. Backs the auditor's `--since` delta mode.
  */

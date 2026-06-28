@@ -18,6 +18,14 @@ import {
   GIT_CO_CHANGE_CATEGORY,
 } from "../extractors/gitHistory.js";
 import type { GitHistory } from "audit-tools/shared";
+import { headCommit } from "audit-tools/shared";
+import {
+  canReuseGitHistory,
+  deriveGitHistoryScopeKey,
+  readGitHistoryBaseline,
+  withGitHistoryBaseline,
+} from "./gitHistoryBaseline.js";
+import type { GitHistoryBaseline } from "../types/artifactMetadata.js";
 import { buildSurfaceManifest } from "../extractors/surfaces.js";
 import { buildUnitManifest } from "./unitBuilder.js";
 import { buildDesignAssessment } from "../extractors/designAssessment.js";
@@ -71,9 +79,37 @@ export async function runStructureExecutor(
   // graph misses, churn + authorship-breadth risk signals, and the churn ×
   // complexity compound (the real risk concentration). Merged through the shared
   // analyzer seams so it can never drift in how it re-enters graph / risk.
-  const gitHistory: GitHistory = root
-    ? mineGitHistoryArtifact(root, bundle.repo_manifest, disposition)
-    : { co_change: [], churn: [], authorship: [] };
+  //
+  // Incremental structure phase (T5 #12): the mine is the costliest deterministic
+  // step here, but its output is a pure function of (HEAD commit graph, in-scope
+  // file set). When neither moved since the carried baseline, REUSE the prior
+  // `git_history` instead of re-spawning git — any drift re-mines (fail-safe).
+  const gitHistoryHead = root ? headCommit(root) : null;
+  const gitHistoryScopeKey = deriveGitHistoryScopeKey(
+    bundle.repo_manifest,
+    disposition,
+  );
+  const reuseGitHistory =
+    root !== undefined &&
+    canReuseGitHistory({
+      head: gitHistoryHead,
+      scopeKey: gitHistoryScopeKey,
+      priorBaseline: readGitHistoryBaseline(bundle.artifact_metadata),
+      hasPriorArtifact: bundle.git_history !== undefined,
+    });
+  const gitHistory: GitHistory =
+    reuseGitHistory && bundle.git_history
+      ? bundle.git_history
+      : root
+        ? mineGitHistoryArtifact(root, bundle.repo_manifest, disposition)
+        : { co_change: [], churn: [], authorship: [] };
+  // Record a refreshed baseline only when HEAD is known (git available). Reuse
+  // keeps the prior baseline (head/scope already matched); a re-mine stamps the
+  // live head + scope key. No head ⇒ no baseline recorded (re-mines next run).
+  const gitHistoryBaseline: GitHistoryBaseline | undefined =
+    gitHistoryHead !== null
+      ? { head: gitHistoryHead, scope_key: gitHistoryScopeKey }
+      : undefined;
 
   const coChangeEdges = gitHistoryGraphEdges(gitHistory);
   let graphWithCoChange = mergeAnalyzerGraphContribution(
@@ -107,6 +143,9 @@ export async function runStructureExecutor(
       critical_flows: criticalFlows,
       risk_register: riskRegister,
       git_history: gitHistory,
+      artifact_metadata: gitHistoryBaseline
+        ? withGitHistoryBaseline(bundle.artifact_metadata, gitHistoryBaseline)
+        : bundle.artifact_metadata,
     },
     artifacts_written: [
       "file_disposition.json",
