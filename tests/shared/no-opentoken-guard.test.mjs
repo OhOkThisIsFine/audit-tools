@@ -17,13 +17,10 @@ import { fileURLToPath } from "node:url";
 // owned at the top — it cannot be partially satisfied, unlike per-module positives.
 
 const here = dirname(fileURLToPath(import.meta.url));
-// tests/ -> shared/ -> packages/ -> repo root
+// tests/ -> shared/ -> repo root. Single npm package post-A12: all source lives
+// under one src/ tree (the former packages/*/src monorepo layout is gone).
 const repoRoot = join(here, "..", "..");
-const SRC_DIRS = [
-  join(repoRoot, "packages", "shared", "src"),
-  join(repoRoot, "packages", "audit-code", "src"),
-  join(repoRoot, "packages", "remediate-code", "src"),
-];
+const SRC_DIRS = [join(repoRoot, "src")];
 const CODE_EXT = /\.(?:ts|mts|cts|js|mjs|cjs)$/u;
 
 function walk(dir) {
@@ -44,8 +41,10 @@ function walk(dir) {
 
 test("no opentoken references remain anywhere in src", () => {
   const hits = [];
+  let scanned = 0;
   for (const srcDir of SRC_DIRS) {
     for (const file of walk(srcDir)) {
+      scanned += 1;
       const lines = readFileSync(file, "utf8").split(/\r?\n/);
       lines.forEach((line, i) => {
         if (/opentoken/iu.test(line)) {
@@ -54,6 +53,14 @@ test("no opentoken references remain anywhere in src", () => {
       });
     }
   }
+  // Guard against the guard going vacuous: if SRC_DIRS ever stops resolving to
+  // the real source tree (e.g. a layout move), walk() returns nothing and the
+  // hits-are-zero check would pass while scanning nothing. Require real coverage.
+  assert.ok(
+    scanned > 50,
+    `opentoken guard scanned only ${scanned} files — SRC_DIRS no longer points at the source tree; ` +
+      `update it or this guard silently protects nothing.`,
+  );
   assert.equal(
     hits.length,
     0,
