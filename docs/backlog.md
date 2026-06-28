@@ -33,6 +33,22 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   EXTRACTED/INFERRED/AMBIGUOUS confidence ladder. Eval report: `graphify-evaluation.md` (saved to user Desktop).
   Efficiency/precision-only; defer until regex edge imprecision is a measured cost.
   ([[graph-signals-thin-substrate-extraction-persist]])
+- **Three borrow-level leads from the `affaan-m/ecc` evaluation (2026-06-28).** ecc itself is not adoptable/applicable
+  (agent-config distribution OS, wrong domain/stack — see `ecc-evaluation.md` on user Desktop), but a deeper pass
+  surfaced three idea/reference-level leads worth acting on, none requiring vendoring:
+  1. **Windows spawn-safety hardening** (highest value). ecc's `scripts/hooks/mcp-health-check.js` handles the same
+     Windows shim class as our `resolveWindowsShimSpawnCommand` (`src/shared/providers/opencodeLaunch.ts`) +
+     `spawnLoggedCommand.ts`, and additionally guards **CVE-2024-27980** (Windows `.cmd`/`.bat` arg shell-metachar
+     injection — only shell-wrap `.cmd`/`.bat`, with a metachar-safety check) and does `taskkill /T` **tree-kill** so
+     shell-wrapped children don't orphan on cancel. Action: (a) borrow the bare-command extension-probe fallback;
+     (b) confirm our provider cancel/timeout path **tree-kills** on Windows (cmd.exe-wrapped children); (c) security-
+     review our spawn path for CVE-2024-27980 (we just added `windowsVerbatimArguments` to the cmd.exe shim — verify
+     arg-injection safety). Relates to the just-shipped headless-codex Windows spawn fixes.
+  2. **Worktree shared-dep sync** — ecc2's `sync_shared_dependency_dirs` (`ecc2/src/worktree/mod.rs`) mechanizes
+     node_modules sync into fresh worktrees; directly addresses [[worktree-tests-miss-integration-guards]] /
+     fresh-worktree-no-node_modules. Borrow-idea for our per-node remediation worktree setup.
+  3. **Hook bypass coverage** — ecc's `block-no-verify.js` also blocks the `git -c core.hooksPath=` bypass; confirm
+     our `.claude/hooks/` commit gate (`pre-commit-gate.mjs`) blocks that vector too, not just `--no-verify`.
 - **Codebase-wide review for churn / context / enforce-in-tooling — same lens, applied everywhere.** The
   append-only-ledger + granular-staleness + LLM-equivalence-gate work came from one perspective; run that same
   perspective over the *entire* codebase as a dedicated pass. Hunt for: (a) **unnecessary churn** — anywhere we
