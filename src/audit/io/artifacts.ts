@@ -42,6 +42,11 @@ import {
   type DesignReviewSnapshotBundle,
 } from "../orchestrator/designReviewSnapshot.js";
 import {
+  loadGraphEdgeCache,
+  writeGraphEdgeCache,
+} from "../orchestrator/graphEdgeCache.js";
+import type { GraphEdgeCache } from "../extractors/graph.js";
+import {
   AGENT_FEEDBACK_FILENAME,
   isFileMissingError,
   parseReflectionsNdjson,
@@ -173,6 +178,14 @@ export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
    * projection of the structural inputs it reviewed. Absent until first review.
    */
   design_review_snapshots?: DesignReviewSnapshotBundle;
+  /**
+   * Per-file graph-edge cache (C2 incremental graph-build). Loaded specially like
+   * `active_dispatch` — a single JSON file at the artifacts root, not an
+   * `ARTIFACT_DEFINITIONS` entry — because it is an internal, self-describing
+   * incremental-reuse cache, not a deliverable or a staleness-DAG node. The
+   * structure executor reads it as the prior cache and returns a refreshed one.
+   */
+  graph_edge_cache?: GraphEdgeCache;
 };
 export type ArtifactBundleKey = keyof ArtifactPayloadMap;
 type ArtifactPhase =
@@ -349,6 +362,14 @@ export async function loadArtifactBundle(
     bundle.design_review_snapshots = designReviewSnapshots;
   }
 
+  // Per-file graph-edge cache (C2): loaded specially like active-dispatch so the
+  // structure executor can reuse unchanged files' contributions. Absent on a fresh
+  // run / before the first structure build.
+  const graphEdgeCache = await loadGraphEdgeCache(root);
+  if (graphEdgeCache !== undefined) {
+    bundle.graph_edge_cache = graphEdgeCache;
+  }
+
   // Schema-version guards (ARC-dd468422): versioned artifacts must carry the
   // exact expected schema_version or the load fails with a diagnosable error.
   // Checked after the loop so the error message can name both values.
@@ -402,6 +423,15 @@ export async function writeCoreArtifacts(
         if (!isFileMissingError(error)) throw error;
       }
     }
+  }
+
+  // Per-file graph-edge cache (C2): written specially here — symmetric with the
+  // special read in loadArtifactBundle — so every persist seam handles it without
+  // per-seam edits. It is not an ARTIFACT_DEFINITIONS entry (internal cache, not a
+  // staleness-DAG node); a stale cache is self-invalidating via its path_lookup_hash
+  // / content_key, so it is never pruned, only overwritten on the next structure build.
+  if (bundle.graph_edge_cache !== undefined) {
+    await writeGraphEdgeCache(root, bundle.graph_edge_cache);
   }
 }
 

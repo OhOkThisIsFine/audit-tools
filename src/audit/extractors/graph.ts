@@ -9,6 +9,7 @@ import type {
   NodeMetrics,
   RouteEdge,
 } from "audit-tools/shared";
+import { hashContent, stableStringify } from "audit-tools/shared";
 import { computeNodeMetricsForFile } from "./analyzers/complexityDuplication.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
@@ -62,6 +63,47 @@ export interface BuildGraphBundleOptions {
   fileContents?: Record<string, string>;
   /** Results from every acquired/imported external analyzer (one entry per tool). */
   externalAnalyzerResults?: ExternalAnalyzerResults[];
+  /**
+   * Per-file edge cache from a prior build (C2 incremental graph-build). A file's
+   * cached contribution is reused only while BOTH the global `path_lookup_hash`
+   * still matches (no file added/removed/disposition-changed → import resolution and
+   * the cross-file heuristics are unaffected) AND that file's `content_key` is
+   * unchanged. Any drift falls back to a fresh extraction (fail-safe).
+   */
+  priorEdgeCache?: GraphEdgeCache;
+  /**
+   * Out-param: when present, `buildGraphBundle` deposits the freshly-built per-file
+   * edge cache here (covering every in-scope file, reused or re-extracted) so the
+   * caller can persist it for the next incremental build. The bundle itself never
+   * carries the cache.
+   */
+  edgeCacheSink?: { cache?: GraphEdgeCache };
+}
+
+/** One file's cached per-file edge contribution (everything the per-file loop body produces). */
+export interface PerFileGraphContribution {
+  imports: GraphEdge[];
+  calls: GraphEdge[];
+  references: GraphEdge[];
+  heuristics: GraphEdge[];
+  routes: RouteEdge[];
+  metrics?: NodeMetrics[string];
+}
+
+/** A cache entry: the file's content key + its per-file contribution. */
+export interface GraphEdgeCacheEntry {
+  content_key: string;
+  contribution: PerFileGraphContribution;
+}
+
+/**
+ * The persisted per-file graph-edge cache (C2). `path_lookup_hash` is the hash of
+ * the global in-scope path set; entries are valid only while it matches the fresh
+ * build's hash. Keyed by repo-manifest file path.
+ */
+export interface GraphEdgeCache {
+  path_lookup_hash: string;
+  entries: Record<string, GraphEdgeCacheEntry>;
 }
 
 const MAX_GRAPH_SOURCE_BYTES = 512 * 1024;
@@ -452,7 +494,10 @@ export async function buildGraphBundleFromFs(
   repoManifest: RepoManifest,
   root: string,
   disposition?: FileDisposition,
-  options: Pick<BuildGraphBundleOptions, "externalAnalyzerResults"> = {},
+  options: Pick<
+    BuildGraphBundleOptions,
+    "externalAnalyzerResults" | "priorEdgeCache" | "edgeCacheSink"
+  > = {},
 ): Promise<GraphBundle> {
   const rootPath = resolve(root);
   const dispositionMap = buildDispositionMap(disposition);
@@ -642,6 +687,62 @@ function extractContentEdgesForFile(
   fileRoutes.push(...frameworkRoutes.routes);
 }
 
+/**
+ * Produce ONE file's per-file edge contribution — exactly the work the per-file
+ * loop body used to do inline, into a private accumulator so it can be cached
+ * (C2). Pure in (filePath, content, pathLookup); push order is preserved so the
+ * deduped/sorted bundle is byte-identical to the pre-cache build.
+ */
+function extractPerFileContribution(
+  filePath: string,
+  content: string | undefined,
+  pathLookup: Map<string, string>,
+): PerFileGraphContribution {
+  const local: GraphEdgeAccumulator = {
+    imports: [],
+    calls: [],
+    references: [],
+    routes: [],
+    heuristics: [],
+  };
+  local.heuristics.push(...extractHeuristicContainerEdges(filePath));
+
+  const fileRoutes: RouteEdge[] = [];
+  let metrics: NodeMetrics[string] | undefined;
+  if (content) {
+    extractContentEdgesForFile(filePath, content, pathLookup, local, fileRoutes);
+    metrics = computeNodeMetricsForFile(filePath, content);
+  }
+  fileRoutes.push(...extractConventionalRouteEvidence(filePath, content));
+  if (fileRoutes.length === 0) {
+    const fallbackRoute = fallbackRouteEdge(filePath);
+    if (fallbackRoute) {
+      fileRoutes.push(fallbackRoute);
+    }
+  }
+  local.routes.push(...fileRoutes);
+  local.references.push(...extractTestSourceEdges(filePath, pathLookup));
+
+  return {
+    imports: local.imports,
+    calls: local.calls,
+    references: local.references,
+    heuristics: local.heuristics,
+    routes: local.routes,
+    metrics,
+  };
+}
+
+/**
+ * Hash the global in-scope path set (the resolvable `pathLookup` values). This is
+ * the per-file extractors' ONLY repo-global input, so a matching hash guarantees
+ * import resolution and the cross-file heuristics see the same world a cached
+ * contribution was built against. Values are sorted so ordering never moves the hash.
+ */
+function hashPathLookup(pathLookup: Map<string, string>): string {
+  return hashContent(stableStringify([...pathLookup.values()].sort()));
+}
+
 /** Concrete (all-present) graph map produced by `buildGraphBundle`. */
 interface BuiltGraphs {
   imports: GraphEdge[];
@@ -781,35 +882,61 @@ export function buildGraphBundle(
   // (computeNodeMetricsForFile returns undefined → absent, never zero-filled).
   const nodeMetrics: NodeMetrics = {};
 
+  // C2 incremental graph-build: per-file contributions are cacheable on
+  // (content_key + global pathLookup hash). Reuse is gated by a matching
+  // path_lookup_hash (the per-file extractors' only global input), then per-file
+  // by content_key. Only compute the hash / collect entries when caching is in play.
+  const cacheEnabled =
+    options.priorEdgeCache !== undefined || options.edgeCacheSink !== undefined;
+  const pathLookupHash = cacheEnabled ? hashPathLookup(pathLookup) : "";
+  const reusableEntries =
+    options.priorEdgeCache &&
+    options.priorEdgeCache.path_lookup_hash === pathLookupHash
+      ? options.priorEdgeCache.entries
+      : undefined;
+  const freshEntries: Record<string, GraphEdgeCacheEntry> = {};
+
   for (const file of repoManifest.files) {
     const status = dispositionMap.get(file.path);
     if (file.excluded || (status && isAuditExcludedStatus(status))) {
       continue;
     }
 
-    acc.heuristics.push(...extractHeuristicContainerEdges(file.path));
-
     const content = options.fileContents?.[file.path];
-    const fileRoutes: RouteEdge[] = [];
-    if (content) {
-      extractContentEdgesForFile(file.path, content, pathLookup, acc, fileRoutes);
-      const metrics = computeNodeMetricsForFile(file.path, content);
-      if (metrics) {
-        nodeMetrics[file.path] = metrics;
-      }
+    // content_key is a REAL content hash only. A size-based fallback would treat
+    // equal-byte-length-but-different content as a cache hit (an equal-size edit
+    // would be falsely reused), so a file with no content hash is NEVER cached or
+    // reused — it always re-extracts (fail-safe). The cache thus stays sound
+    // regardless of whether the upstream manifest enabled hashing (auditor-agnostic
+    // robustness: never rely on the caller having passed hash_files).
+    const contentHash = file.hash;
+    const cached = contentHash !== undefined ? reusableEntries?.[file.path] : undefined;
+    const contribution =
+      cached && cached.content_key === contentHash
+        ? cached.contribution
+        : extractPerFileContribution(file.path, content, pathLookup);
+
+    acc.imports.push(...contribution.imports);
+    acc.calls.push(...contribution.calls);
+    acc.references.push(...contribution.references);
+    acc.heuristics.push(...contribution.heuristics);
+    acc.routes.push(...contribution.routes);
+    if (contribution.metrics) {
+      nodeMetrics[file.path] = contribution.metrics;
     }
-    fileRoutes.push(...extractConventionalRouteEvidence(file.path, content));
-    if (fileRoutes.length === 0) {
-      const fallbackRoute = fallbackRouteEdge(file.path);
-      if (fallbackRoute) {
-        fileRoutes.push(fallbackRoute);
-      }
+    if (options.edgeCacheSink && contentHash !== undefined) {
+      freshEntries[file.path] = { content_key: contentHash, contribution };
     }
-    acc.routes.push(...fileRoutes);
-    acc.references.push(...extractTestSourceEdges(file.path, pathLookup));
   }
 
   accumulateCrossFileEdges(acc, pathLookup, options, repoManifest, dispositionMap);
+
+  if (options.edgeCacheSink) {
+    options.edgeCacheSink.cache = {
+      path_lookup_hash: pathLookupHash,
+      entries: freshEntries,
+    };
+  }
 
   const graphs = {
     imports: uniqueSortedEdges(acc.imports),
