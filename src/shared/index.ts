@@ -784,6 +784,8 @@ export type { SlidingWindowResult } from "./quota/slidingWindow.js";
 export {
   scheduleWave,
   classifyProvider,
+  selectDispatchDriver,
+  DISPATCH_Y_DISPATCHER_MIN_ITEMS,
   buildProviderModelKey,
   parseHostModelRoster,
   DEFAULT_SAFETY_MARGIN,
@@ -797,8 +799,12 @@ export type {
   HostModelRosterEntry,
   ProviderClassification,
   DriverMechanism,
+  DispatchDriverStrategy,
+  DispatchDriverSelection,
+  SelectDispatchDriverInput,
 } from "./quota/scheduler.js";
 export { HostModelRosterEntrySchema } from "./quota/scheduler.js";
+export { renderDispatchDriverInstruction } from "./quota/dispatchDriverPrompt.js";
 export {
   computeDispatchCapacity,
   summarizeDispatchCapacityPools,

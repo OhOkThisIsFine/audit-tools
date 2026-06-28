@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import type { HostModelRosterEntry, SessionConfig } from "audit-tools/shared";
+import type { HostModelRosterEntry, SessionConfig, ResolvedProviderName } from "audit-tools/shared";
+import { classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { createFreshSessionProvider } from "../providers/index.js";
@@ -97,6 +98,23 @@ export async function renderSemanticReviewStep(params: {
   });
   const mergeCommand = mergeAndIngestCommand(artifactsDir, activeReviewRun.run_id);
   const continueCommand = nextStepCommand(root, artifactsDir);
+
+  // S-BROKER-WIRING: choose the dispatch DRIVER off the single classification +
+  // the live packet frontier / concurrency cap, and render the matching host
+  // instruction. Only meaningful when there is a quota (a real fan-out); the
+  // no-quota path launches one subagent per entry with no rolling loop.
+  const hostProvider: ResolvedProviderName =
+    (sessionConfig as { provider?: ResolvedProviderName }).provider ?? "claude-code";
+  const driverInstruction = dispatch.dispatch_quota_path
+    ? renderDispatchDriverInstruction(
+        selectDispatchDriver({
+          classification: classifyProvider(hostProvider),
+          eligibleItemCount: dispatch.packet_count,
+          slots: dispatch.max_concurrent_agents,
+        }),
+        "`max_concurrent_agents`",
+      )
+    : undefined;
   return writeCurrentStep({
     artifactsDir,
     stepKind: "dispatch_review",
@@ -138,6 +156,7 @@ export async function renderSemanticReviewStep(params: {
           dispatchQuotaPath: dispatch.dispatch_quota_path,
           hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
           hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
+          driverInstruction,
         })
       : renderDispatchReviewPrompt({
           root,
@@ -147,6 +166,7 @@ export async function renderSemanticReviewStep(params: {
           dispatchQuotaPath: dispatch.dispatch_quota_path,
           hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
           hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
+          driverInstruction,
         }),
     access: {
       read_paths: [

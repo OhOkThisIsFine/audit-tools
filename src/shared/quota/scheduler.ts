@@ -236,6 +236,88 @@ export function classifyProvider(
     driverMechanism: hostClass === "local" ? "in_process_slot_pull" : "y_dispatcher",
   };
 }
+
+/**
+ * Minimum eligible-item count at/above which it is worth delegating the rolling
+ * dispatch loop to a dedicated dispatcher subagent (Y) on a capable agent host.
+ * Below it, spinning a separate dispatcher costs more (an extra agent + its
+ * context) than it saves, so the top host drives the loop directly (slot-pull).
+ * A tuning constant, not a hard limit — both strategies use the SAME broker and
+ * concurrency cap; only who runs the refill loop differs.
+ */
+export const DISPATCH_Y_DISPATCHER_MIN_ITEMS = 6;
+
+/**
+ * How the admitted dispatch slots are actually DRIVEN this dispatch, resolved
+ * from the provider classification plus the live frontier size and slot count.
+ * Distinct from {@link DriverMechanism} (a static provider property): the same
+ * `y_dispatcher` provider drives `slot_pull` for a small frontier and only
+ * escalates to a dedicated dispatcher agent once the frontier is large enough to
+ * pay for it.
+ * - `y_dispatcher`: delegate the rolling refill loop to ONE dispatcher subagent.
+ * - `slot_pull`: the top host runs the rolling refill loop itself.
+ * - `in_process`: the in-process rolling engine pulls slots directly (local).
+ */
+export type DispatchDriverStrategy = "y_dispatcher" | "slot_pull" | "in_process";
+
+export interface DispatchDriverSelection {
+  strategy: DispatchDriverStrategy;
+  /** Human-readable rationale (for the dispatch plan + logs). */
+  reason: string;
+}
+
+export interface SelectDispatchDriverInput {
+  /** The provider classification (its `driverMechanism` gates the choice). */
+  classification: ProviderClassification;
+  /** Number of currently-eligible nodes/packets in the dispatch frontier. */
+  eligibleItemCount: number;
+  /** Admitted concurrency for this dispatch (broker `total_slots`). */
+  slots: number;
+  /** Override the dispatcher-agent threshold (defaults to the constant). */
+  threshold?: number;
+}
+
+/**
+ * Choose the dispatch DRIVER for this dispatch (S-BROKER-WIRING: the
+ * capability-tiered driver-selection half of the dispatch broker track). The
+ * broker and concurrency cap are identical across strategies — this picks ONLY
+ * who runs the rolling refill loop, so the host can't get it wrong by prose:
+ *
+ * - A `local` provider always uses the in-process rolling engine.
+ * - A capable agent host (`y_dispatcher` mechanism) with a real rolling loop to
+ *   run (more than one slot) AND a frontier at/above the threshold delegates the
+ *   loop to a dedicated dispatcher subagent (keeps the top host's context clean).
+ * - Otherwise (one slot, or a small frontier) the top host drives the loop
+ *   itself — no dispatcher-agent overhead for a handful of nodes.
+ */
+export function selectDispatchDriver(
+  input: SelectDispatchDriverInput,
+): DispatchDriverSelection {
+  const threshold = input.threshold ?? DISPATCH_Y_DISPATCHER_MIN_ITEMS;
+  if (input.classification.driverMechanism === "in_process_slot_pull") {
+    return {
+      strategy: "in_process",
+      reason: "local provider — the in-process rolling engine pulls slots directly",
+    };
+  }
+  if (input.slots <= 1) {
+    return {
+      strategy: "slot_pull",
+      reason: "single concurrency slot — no rolling loop to delegate; host drives serially",
+    };
+  }
+  if (input.eligibleItemCount < threshold) {
+    return {
+      strategy: "slot_pull",
+      reason: `frontier (${input.eligibleItemCount}) below the dispatcher-agent threshold (${threshold}) — host drives the rolling loop directly`,
+    };
+  }
+  return {
+    strategy: "y_dispatcher",
+    reason: `frontier (${input.eligibleItemCount}) ≥ threshold (${threshold}) with ${input.slots} slots — delegate the rolling loop to a dedicated dispatcher subagent`,
+  };
+}
+
 /**
  * Real-time quota-source `remaining_pct` thresholds. At/under CRITICAL we throttle
  * to a single request; at/under LOW we halve the wave.

@@ -12,8 +12,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { scheduleWave, classifyProvider } = await import(
+const { scheduleWave, classifyProvider, selectDispatchDriver, DISPATCH_Y_DISPATCHER_MIN_ITEMS } = await import(
   "../../src/shared/quota/scheduler.ts"
+);
+const { renderDispatchDriverInstruction } = await import(
+  "../../src/shared/quota/dispatchDriverPrompt.ts"
 );
 const { buildCacheablePrompt } = await import("../../src/shared/prompts.ts");
 const { filterNewProviders, advancePausedState } = await import("../../src/shared/rolling/pausedState.ts");
@@ -109,6 +112,79 @@ test("capability-tier routing: classifyProvider.concurrencyFloor lifts capable a
     classifyProvider("opencode").concurrencyFloor < agentFloor,
     "opencode stays at the cold-start floor",
   );
+});
+
+// ---------------------------------------------------------------------------
+// 2b. capability-tiered driver selection (S-BROKER-WIRING #13)
+// ---------------------------------------------------------------------------
+
+test("selectDispatchDriver: local provider always uses the in-process engine", () => {
+  const sel = selectDispatchDriver({
+    classification: classifyProvider("opencode"),
+    eligibleItemCount: 50,
+    slots: 8,
+  });
+  assert.equal(sel.strategy, "in_process", "local provider → in_process regardless of frontier size");
+});
+
+test("selectDispatchDriver: a single slot drives slot-pull (no loop to delegate)", () => {
+  const sel = selectDispatchDriver({
+    classification: classifyProvider("claude-code"),
+    eligibleItemCount: 50,
+    slots: 1,
+  });
+  assert.equal(sel.strategy, "slot_pull", "one slot → host drives serially, no dispatcher agent");
+});
+
+test("selectDispatchDriver: a small frontier drives slot-pull even on a capable agent host", () => {
+  const sel = selectDispatchDriver({
+    classification: classifyProvider("claude-code"),
+    eligibleItemCount: DISPATCH_Y_DISPATCHER_MIN_ITEMS - 1,
+    slots: 8,
+  });
+  assert.equal(sel.strategy, "slot_pull", "frontier below the threshold → host drives directly");
+});
+
+test("selectDispatchDriver: a large frontier on a capable agent host delegates to a dispatcher subagent", () => {
+  const sel = selectDispatchDriver({
+    classification: classifyProvider("claude-code"),
+    eligibleItemCount: DISPATCH_Y_DISPATCHER_MIN_ITEMS,
+    slots: 8,
+  });
+  assert.equal(sel.strategy, "y_dispatcher", "frontier at/above the threshold with multiple slots → delegate the loop");
+  assert.match(sel.reason, /delegate the rolling loop/i);
+});
+
+test("selectDispatchDriver: an explicit threshold override is honored", () => {
+  const sel = selectDispatchDriver({
+    classification: classifyProvider("vscode-task"),
+    eligibleItemCount: 3,
+    slots: 4,
+    threshold: 3,
+  });
+  assert.equal(sel.strategy, "y_dispatcher", "frontier 3 ≥ override threshold 3 → delegate");
+});
+
+test("renderDispatchDriverInstruction: prose matches the chosen strategy and embeds the slots label", () => {
+  const y = renderDispatchDriverInstruction(
+    { strategy: "y_dispatcher", reason: "x" },
+    "`max_concurrent_agents`",
+  );
+  assert.match(y, /dedicated dispatcher subagent/i);
+  assert.match(y, /`max_concurrent_agents`/);
+
+  const pull = renderDispatchDriverInstruction(
+    { strategy: "slot_pull", reason: "x" },
+    "**4**",
+  );
+  assert.match(pull, /drive the (rolling )?loop directly|drive the loop yourself/i);
+  assert.match(pull, /\*\*4\*\*/);
+
+  const inproc = renderDispatchDriverInstruction(
+    { strategy: "in_process", reason: "x" },
+    "N",
+  );
+  assert.match(inproc, /in-process rolling engine/i);
 });
 
 // ---------------------------------------------------------------------------
