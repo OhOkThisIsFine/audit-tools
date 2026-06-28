@@ -74,12 +74,17 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   `undefined` on a plan-read failure — it falls back to `{ allBlockScopes: [] }` (empty registry owns nothing
   → every edit unowned-and-granted, no false block, while the git-probe fail-closed path still fires), so the
   enforcement is the type and the always-run gate, not host/state discretion. Lifecycle tests that don't
-  exercise scope pass `{ allBlockScopes: [] }` (sound no-op). Promoted open items: **X-cluster** prompts
+  exercise scope pass `{ allBlockScopes: [] }` (sound no-op). **E3 ✅ SHIPPED (2026-06-27, v0.30.43)** —
+  executor-registry coverage is now a LOAD-TIME invariant: `assertExecutorRegistryCoversPriority()`
+  (`src/audit/orchestrator/nextStep.ts`) throws at module load on a missing OR ambiguous PRIORITY→executor
+  mapping, so the silent `selected_executor: null` "configuration gap" dead-end step is impossible. All
+  PRIORITY ids covered today → zero behavior change; a future PRIORITY addition without a registry entry
+  fails loudly at load. Test mirrors the property (`orchestration.test.mjs`). Promoted open items: **X-cluster** prompts
   re-inline content already in the machine contract (remediate badge body,
   full `Finding[]` in state, synthesis/packet/quarantine renders) → one "packet carries minimal contract
   + sidecar pointers" design lap (verify worker sidecar-read first); **C2/C4** incremental graph-build
-  extraction = the T5 #12 known residual; **E2/E3** worker item-completeness + null-executor mechanical
-  rejects (verify no downstream coverage first). Low-value/needs-design-intent (C3,C5,C6,E4,E5) not scheduled.
+  extraction = the T5 #12 known residual; **E2** worker item-completeness mechanical reject
+  (verify collapseItemResults doesn't already cover it first). Low-value/needs-design-intent (C3,C5,C6,E4,E5) not scheduled.
 
 - **Schema-enforced generation everywhere possible — make malformed output impossible, not merely repairable.**
   Strict output schemas already exist (e.g. the worker zod schemas) but are shipped to workers only as *advisory
