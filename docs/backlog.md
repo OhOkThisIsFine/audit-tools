@@ -65,7 +65,16 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   into a prompt or a step (diff-only / delta-only feeds are one strategy among others); (c) **enforce-via-tooling
   prevention** — anywhere a correctness property is currently held by host/maintainer discretion that could be
   made impossible-to-get-wrong at the abstraction so the issue never arises. Not limited to the named techniques —
-  the goal is the perspective, applied broadly. (Ethan, 2026-06-24.)
+  the goal is the perspective, applied broadly. (Ethan, 2026-06-24.) **PASS RUN 2026-06-27** — full
+  findings in [`docs/reviews/churn-context-enforce-pass-2026-06-27.md`](reviews/churn-context-enforce-pass-2026-06-27.md).
+  Shipped this pass: auth-session heuristic O(auth×files)→O(files) (moved to `accumulateCrossFileEdges`,
+  single index sweep). Promoted open items: **E1** write-scope gate `if (params.scope)` is optional
+  (`dispatch.ts:1426`) — make `allBlockScopes` required + fail-loud (verified, highest-certainty enforce
+  win); **X-cluster** prompts re-inline content already in the machine contract (remediate badge body,
+  full `Finding[]` in state, synthesis/packet/quarantine renders) → one "packet carries minimal contract
+  + sidecar pointers" design lap (verify worker sidecar-read first); **C2/C4** incremental graph-build
+  extraction = the T5 #12 known residual; **E2/E3** worker item-completeness + null-executor mechanical
+  rejects (verify no downstream coverage first). Low-value/needs-design-intent (C3,C5,C6,E4,E5) not scheduled.
 
 - **Schema-enforced generation everywhere possible — make malformed output impossible, not merely repairable.**
   Strict output schemas already exist (e.g. the worker zod schemas) but are shipped to workers only as *advisory

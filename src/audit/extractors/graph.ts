@@ -520,28 +520,37 @@ function extractHeuristicContainerEdges(filePath: string): GraphEdge[] {
 }
 
 /**
- * Heuristic security edge: an auth-named (non-session) file is linked to every
+ * Heuristic security edge: every auth-named (non-session) file is linked to every
  * session-named file by naming convention, flagging likely auth↔session coupling.
+ *
+ * Cross-file by nature, so it runs ONCE after the per-file pass with a single
+ * index sweep (auth + session paths collected in one walk) rather than re-scanning
+ * the whole manifest for each auth file — O(files) instead of O(auth × files).
  */
 function extractHeuristicAuthSessionEdges(
-  filePath: string,
   repoManifest: RepoManifest,
   dispositionMap: Map<string, FileDisposition["files"][number]["status"]>,
 ): GraphEdge[] {
-  const normalized = filePath.toLowerCase();
-  if (!(normalized.includes("auth") && normalized.includes("session") === false)) {
-    return [];
+  const authPaths: string[] = [];
+  const sessionPaths: string[] = [];
+  for (const file of repoManifest.files) {
+    const status = dispositionMap.get(file.path);
+    if (file.excluded || (status && isAuditExcludedStatus(status))) continue;
+    const normalized = file.path.toLowerCase();
+    const isSession = normalized.includes("session");
+    if (isSession) {
+      sessionPaths.push(file.path);
+    } else if (normalized.includes("auth")) {
+      authPaths.push(file.path);
+    }
   }
   const edges: GraphEdge[] = [];
-  for (const other of repoManifest.files) {
-    if (other.path === filePath) continue;
-    const otherStatus = dispositionMap.get(other.path);
-    if (otherStatus && isAuditExcludedStatus(otherStatus)) continue;
-    if (other.path.toLowerCase().includes("session")) {
+  for (const authPath of authPaths) {
+    for (const sessionPath of sessionPaths) {
       edges.push(
         graphEdge({
-          from: filePath,
-          to: other.path,
+          from: authPath,
+          to: sessionPath,
           kind: EDGE_KIND.heuristicAuthSession,
           confidence: AUTH_SESSION_EDGE_CONFIDENCE,
           reason:
@@ -691,7 +700,12 @@ function accumulateCrossFileEdges(
   acc: GraphEdgeAccumulator,
   pathLookup: Map<string, string>,
   options: BuildGraphBundleOptions,
+  repoManifest: RepoManifest,
+  dispositionMap: Map<string, FileDisposition["files"][number]["status"]>,
 ): void {
+  acc.heuristics.push(
+    ...extractHeuristicAuthSessionEdges(repoManifest, dispositionMap),
+  );
   // One external analyzer result per acquired/imported tool — contribute each
   // tool's ownership + dataflow edges independently (per-tool `tool` provenance
   // is preserved in the edge reasons).
@@ -774,9 +788,6 @@ export function buildGraphBundle(
     }
 
     acc.heuristics.push(...extractHeuristicContainerEdges(file.path));
-    acc.heuristics.push(
-      ...extractHeuristicAuthSessionEdges(file.path, repoManifest, dispositionMap),
-    );
 
     const content = options.fileContents?.[file.path];
     const fileRoutes: RouteEdge[] = [];
@@ -798,7 +809,7 @@ export function buildGraphBundle(
     acc.references.push(...extractTestSourceEdges(file.path, pathLookup));
   }
 
-  accumulateCrossFileEdges(acc, pathLookup, options);
+  accumulateCrossFileEdges(acc, pathLookup, options, repoManifest, dispositionMap);
 
   const graphs = {
     imports: uniqueSortedEdges(acc.imports),
