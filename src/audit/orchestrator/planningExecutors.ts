@@ -25,6 +25,13 @@ import { computeRiskEstimate } from "./auditTaskUtils.js";
 import { buildTaskAffinityGraph } from "./taskAffinityGraph.js";
 import { resolveEffectiveLenses } from "./lensSelection.js";
 import { autoCompleteTrivialCoverage } from "./trivialAudit.js";
+import {
+  applyContentAddressedPreservation,
+  coverageContentSignature,
+  readCoverageElementBaselines,
+  recordCoverageElementBaselines,
+  withCoverageElementBaselines,
+} from "./coverageElementBaseline.js";
 import { interpretFreeFormIntentForAudit } from "./intentInterpreter.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { AuditTask, Lens } from "../types.js";
@@ -149,6 +156,23 @@ export async function runPlanningExecutor(
     coverage,
     bundle.intent_checkpoint?.excluded_scope,
   );
+  // T5 #12 content-addressed GRANULAR staleness: preserve prior completion for
+  // files whose audit inputs (content signal + required lenses + unit membership)
+  // are unchanged from the recorded baseline, so a re-plan triggered by an
+  // unrelated upstream change doesn't re-audit files that didn't move. First plan
+  // (no baseline) preserves nothing → identical to prior behavior. Then re-record
+  // the per-element baselines for THIS coverage so the next re-plan can compare.
+  const coverageContentSig = coverageContentSignature(bundle.repo_manifest);
+  const preservedCount = applyContentAddressedPreservation(
+    coverage,
+    bundle.coverage_matrix,
+    readCoverageElementBaselines(bundle.artifact_metadata),
+    coverageContentSig,
+  );
+  const refreshedCoverageBaselines = recordCoverageElementBaselines(
+    coverage,
+    coverageContentSig,
+  );
   const flowCoverage = buildFlowCoverage(bundle.critical_flows, coverage);
   const runtimeCommand = await discoverRuntimeValidationCommand(root);
   const runtimeValidationTasks = buildRuntimeValidationTasks({
@@ -267,6 +291,10 @@ export async function runPlanningExecutor(
       task_affinity_graph: taskAffinityGraph,
       requeue_tasks: requeuePayload.tasks,
       audit_report: undefined,
+      artifact_metadata: withCoverageElementBaselines(
+        bundle.artifact_metadata,
+        refreshedCoverageBaselines,
+      ),
     },
     artifacts_written: [
       "scope.json",
@@ -283,6 +311,9 @@ export async function runPlanningExecutor(
       scopeSummary +
       (skippedTrivialPaths.length > 0
         ? ` Skipped ${skippedTrivialPaths.length} trivial path${skippedTrivialPaths.length === 1 ? "" : "s"} from semantic review.`
+        : "") +
+      (preservedCount > 0
+        ? ` Preserved prior completion for ${preservedCount} unchanged file${preservedCount === 1 ? "" : "s"} (content-addressed staleness).`
         : "") +
       (intentExcludedPaths.length > 0
         ? ` Excluded ${intentExcludedPaths.length} path${intentExcludedPaths.length === 1 ? "" : "s"} per the intent checkpoint.`

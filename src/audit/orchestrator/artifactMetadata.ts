@@ -159,5 +159,15 @@ export function computeArtifactMetadata(
   if (carriedBaselines) {
     manifest.result_baselines = carriedBaselines;
   }
+  // Carry the T5 #12 coverage-element baselines forward on the SAME terms as the
+  // result baselines (CE-007: only from an F1-current store; prefer the bundle's
+  // freshly-recorded set over the pre-executor `usablePrevious`). Dropping an
+  // old-shape store makes every coverage element fail safe to re-audit.
+  const carriedCoverageBaselines =
+    (bundleIsCurrent ? bundleMetadata?.coverage_element_baselines : undefined) ??
+    usablePrevious?.coverage_element_baselines;
+  if (carriedCoverageBaselines) {
+    manifest.coverage_element_baselines = carriedCoverageBaselines;
+  }
   return manifest;
 }
