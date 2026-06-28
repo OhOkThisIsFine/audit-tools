@@ -33,9 +33,14 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   general DAG-model change applying to every derived artifact, not just results. The **per-result path is shipped**
   (O3 re-dispatch attempt-counter → distinct `idempotency_key` → ledger appends fresh findings; record-on-ingest
   baseline refresh + consume-in-derive single-sourced across gate/dispatch; supersession via `selectCurrentResults`).
-  **Still open: the general DAG-model extension** — per-file coverage-matrix elements + per-element baselines for
-  *every* derived artifact, which needs an **incremental planning executor** (`runPlanningExecutor` rebuilds+rewrites
-  `coverage_matrix` whole today), not just a staleness gate. (Ethan, 2026-06-24.)
+  **✅ Coverage-matrix elements SHIPPED (#12, 2026-06-27).** `runPlanningExecutor` preserves prior completion for
+  files whose audit inputs (content signal + required lenses + unit membership) are unchanged from a per-file baseline
+  (`src/audit/orchestrator/coverageElementBaseline.ts`, mirroring `resultBaseline.ts`): baselines live in
+  `artifact_metadata.coverage_element_baselines` (carried forward on the same CE-007 F1-current gate as
+  `result_baselines`); preservation is fail-safe (no baseline / moved key / missing prior → re-audit); first plan
+  after ship preserves nothing → identical to prior behavior; `taskBuilder` already skips completed lenses so preserved
+  files generate no (or only missing-lens) tasks. **Still open:** the SAME content-addressed per-element model for the
+  *other* derived artifacts (each needs its own incremental executor seam). (Ethan, 2026-06-24; coverage slice 2026-06-27.)
 
 - **Codebase-wide review for churn / context / enforce-in-tooling — same lens, applied everywhere.** The
   append-only-ledger + granular-staleness + LLM-equivalence-gate work came from one perspective; run that same
@@ -58,10 +63,15 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   (above) as the fallback — prevention first, repair as backstop. Must stay provider-agnostic: discover the
   enforcement capability per backend, never hardcode it. The emit-time seam is **present** (provider-agnostic
   `discoverOutputConstraintCapability`, strongest-at-emit `enforceSchemaAtEmit`, degrade-to-`runEmitValidateRepair`,
-  ONE-VALIDATOR re-validate floor). **Still open:** **CE-004** — the always-on conversation host (`claude-code`)
-  advertises *no* API-level constraint mechanism, so on the primary path this reduces to the ONE-VALIDATOR repair
-  floor (no emit-time prevention); and **CE-009** — semantically-wrong-but-schema-valid output (e.g. `total_lines`
-  ≠ actual) is not schema-catchable. (Ethan, 2026-06-24.)
+  ONE-VALIDATOR re-validate floor). **CE-009 SHIPPED (#14, 2026-06-27)** — the semantic-validity gate now catches the
+  canonical schema-valid-but-wrong case: a `total_lines` that diverges from disk past BOTH an absolute floor (>2 lines)
+  AND a ratio (>5%) is a hard-reject routed to re-dispatch (the worker's file view materially disagrees with disk → its
+  findings' line refs are grounded against a stale/wrong version); small mismatches keep the S7 advisory warning.
+  `isSignificantLineCountDivergence` single-sources the threshold (`src/audit/validation/auditResults.ts`). **Still
+  open:** **CE-004** — the always-on conversation host (`claude-code`) advertises *no* API-level constraint mechanism,
+  so on the primary path this reduces to the ONE-VALIDATOR repair floor (no emit-time prevention) — env-bound on a
+  provider gaining a constraint endpoint; and broader semantic-validity checks beyond `total_lines` (fabricated paths,
+  out-of-range spans are already gated; more are candidates). (Ethan, 2026-06-24; CE-009 slice 2026-06-27.)
 
 - **Tool-enforced dispatch broker with a capability-tiered driver — rolling dispatch the host can't get wrong.**
   Observed 2026-06-24 (Claude Desktop, a known capable host, not first contact): the host ran review packets in
@@ -92,8 +102,14 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   The single-source classifier + broker primitive are **shipped** (`classifyProvider` returns ONE
   `{hostClass, concurrencyFloor, driverMechanism}` struct, floor constants off the public surface;
   `computeDispatchCapacity` never-over-dispatch caps; `HostSessionQuotaSource` channel-isolated recordLimit +
-  bounded escalation). **Still open:** the capability-tiered *driver* (Y-dispatcher vs slot-pull selection beyond
-  mechanism-gating) and proactive pre-wall quota-aware pacing, to wire onto the hardened classifier. (Ethan, 2026-06-24.)
+  bounded escalation). **Driver SELECTION + prompt rendering SHIPPED (#13, 2026-06-27)** — `selectDispatchDriver`
+  resolves Y-dispatcher vs slot-pull (vs in-process) off the single classification + the live frontier size and slot
+  count (`DISPATCH_Y_DISPATCHER_MIN_ITEMS` threshold; a small frontier or single slot drives slot-pull, a large
+  frontier on a capable agent host delegates the rolling loop to a dedicated dispatcher subagent);
+  `renderDispatchDriverInstruction` single-sources the host instruction so audit + remediate can't drift, and both
+  orchestrators' rolling dispatch prompts now render the tool-chosen driver instead of a static "maintain N concurrent"
+  line. **Still open (env-bound):** live Y-dispatcher validation (needs a nested-agent host + a live run) and
+  proactive pre-wall quota-aware pacing. (Ethan, 2026-06-24; driver-selection slice 2026-06-27.)
 
 - **Deterministic analyzers: own-vs-acquire — build the agnostic acquisition engine, don't expand a fixed bundle.**
   A fixed bundle of analyzers fails the everything-agnostic test (it privileges whatever ecosystems we bundled

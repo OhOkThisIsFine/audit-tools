@@ -9,6 +9,9 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
+- **Latest lap (2026-06-27): T5 #12 + #14 + #13 actionable slices landed** — content-addressed granular coverage
+  staleness (#12), CE-009 semantic-validity gate on significant `total_lines` divergence (#14), and capability-tiered
+  dispatch driver-selection + prompt rendering (#13). See the T5 entries below; full detail in `docs/backlog.md`.
 - **Secret scanning = gitleaks via the acquisition engine — slices A–E COMPLETE.** The from-scratch OWN
   detector (npm `0.30.36`) stays reverted (`a10b79cd`); the working tree wires gitleaks end-to-end through the
   acquisition engine: new `external_analyzers_current` obligation + `external_analyzer_acquisition_executor`
@@ -104,13 +107,20 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
 11. **Selective-deepening task_id convergence** — partial fix needs a live deepening-capable run to validate.
 
 ### T5 — Product / analysis forward tracks
-12. **Content-addressed granular staleness — general DAG extension** — per-file coverage-matrix elements +
-    per-element baselines + an incremental planning executor (the result-path is shipped; the general
-    DAG-model change remains). *(forward track; [[graph-signals-thin-substrate-extraction-persist]])*
-13. **Tool-enforced dispatch broker — capability-tiered driver** — `HostSessionQuotaSource` + single-struct
-    classifier shipped; the Y-dispatcher-vs-slot-pull driver + proactive pre-wall pacing remain. *(forward track)*
-14. **Schema-enforced generation everywhere** — emit-time seam present; CE-004 (claude-code advertises no
-    API constraint → ONE-VALIDATOR repair floor) + CE-009 (semantically-wrong-but-schema-valid) are residual.
+12. **Content-addressed granular staleness — ✅ coverage slice SHIPPED (2026-06-27).** `runPlanningExecutor` preserves
+    prior completion for files whose audit inputs are unchanged via per-file baselines in
+    `artifact_metadata.coverage_element_baselines` (`src/audit/orchestrator/coverageElementBaseline.ts`, mirrors
+    `resultBaseline.ts`; fail-safe; first plan after ship is a no-op). **Remaining:** the same per-element model for the
+    *other* derived artifacts. *(forward track; [[graph-signals-thin-substrate-extraction-persist]])*
+13. **Tool-enforced dispatch broker — ✅ driver SELECTION + prompt rendering SHIPPED (2026-06-27).**
+    `selectDispatchDriver` picks Y-dispatcher vs slot-pull vs in-process off the single classification + live
+    frontier/slots (`DISPATCH_Y_DISPATCHER_MIN_ITEMS`); `renderDispatchDriverInstruction` single-sources the host
+    instruction across both orchestrators. **Remaining (env-bound):** live Y-dispatcher validation (nested-agent host)
+    + proactive pre-wall pacing. *(forward track)*
+14. **Schema-enforced generation everywhere** — emit-time seam present; **CE-009 SHIPPED (2026-06-27):** semantic-validity
+    gate hard-rejects significant `total_lines` divergence (>2 lines AND >5%) → re-dispatch, small stays S7 advisory
+    (`isSignificantLineCountDivergence`). **Residual:** CE-004 (claude-code advertises no API constraint → ONE-VALIDATOR
+    repair floor) is env-bound; broader semantic checks are candidates.
 15. **Codebase-wide churn / context / enforce-in-tooling review** — run the append-only/granular-staleness
     perspective over the whole codebase as a dedicated pass.
 16. **Deterministic analyzers — own-vs-acquire acquisition engine** — build the agnostic on-the-fly
