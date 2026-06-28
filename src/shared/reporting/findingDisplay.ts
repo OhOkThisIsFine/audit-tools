@@ -53,6 +53,13 @@ export interface FindingDisplayOptions {
   summarizeEvidence?: boolean;
   /** Render the grounding line (always, even when no verdict). Default true. */
   showGrounding?: boolean;
+  /**
+   * Render the advisory severity-color lines (`- Systemic` / `- Impact` /
+   * `- Likelihood`). These orient a human reader but an implement worker never
+   * acts on them, so a worker-dispatch view sets this false to drop the
+   * decoration. Default true.
+   */
+  showAdvisoryMeta?: boolean;
   /** Render the `- Files:` line. Default true. */
   showFiles?: boolean;
   /** Render the `- Details:` (full summary) line. Default true. */
@@ -121,6 +128,7 @@ export function renderFindingBadgeBody(
     maxFiles = DEFAULT_MAX_FILES,
     summarizeEvidence = true,
     showGrounding = true,
+    showAdvisoryMeta = true,
     showFiles = true,
     showDetails = true,
     showEvidence = true,
@@ -136,14 +144,16 @@ export function renderFindingBadgeBody(
   if (showGrounding) {
     lines.push(findingGroundingLine(finding));
   }
-  if (finding.systemic === true) {
-    lines.push("- Systemic: yes");
-  }
-  if (finding.impact) {
-    lines.push(`- Impact: ${finding.impact}`);
-  }
-  if (finding.likelihood) {
-    lines.push(`- Likelihood: ${finding.likelihood}`);
+  if (showAdvisoryMeta) {
+    if (finding.systemic === true) {
+      lines.push("- Systemic: yes");
+    }
+    if (finding.impact) {
+      lines.push(`- Impact: ${finding.impact}`);
+    }
+    if (finding.likelihood) {
+      lines.push(`- Likelihood: ${finding.likelihood}`);
+    }
   }
 
   const files = finding.affected_files ?? [];

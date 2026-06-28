@@ -2249,34 +2249,6 @@ export function buildImplementModelHint(
   return { tier: "standard", reasons: ["default_implement_block"] };
 }
 
-function contractPipelineTraceLines(finding: Finding): string[] {
-  const lines: string[] = [];
-  if (finding.contract_goal_id) {
-    lines.push(`Contract goal: ${finding.contract_goal_id}`);
-  }
-  if (finding.contract_obligation_ids?.length) {
-    lines.push(`Satisfies obligations: ${finding.contract_obligation_ids.join(", ")}`);
-  }
-  if (finding.verification_obligation_ids?.length) {
-    lines.push(`Verification obligations: ${finding.verification_obligation_ids.join(", ")}`);
-  }
-  if (finding.targeted_commands?.length) {
-    // Provenance only: the DAG's recorded targeted commands. This is the
-    // "Contract Pipeline Traceability" section (what the node's contract said),
-    // NOT a runnable directive. The runnable per-node verify commands the
-    // renderer emits are the build-free subset in `perNodeVerificationSection`
-    // (residual CE-001 is enforced there, where the worker is told to RUN them).
-    lines.push(`Targeted commands: ${finding.targeted_commands.join(" | ")}`);
-  }
-  return lines;
-}
-
-function contractPipelineTraceBullets(finding: Finding): string {
-  const lines = contractPipelineTraceLines(finding);
-  if (lines.length === 0) return "";
-  return `\n## Contract Pipeline Traceability\n\n${lines.map((line) => `- ${line}`).join("\n")}\n`;
-}
-
 /**
  * G1 + INV-GND-02: a finding that the auditor's grounding pass marked ungrounded
  * — or that carries NO grounding verdict (undefined → treated as ungrounded) —
@@ -2527,7 +2499,7 @@ ${items
 
 ${findingLead(finding.summary)}
 
-${renderFindingBadgeBody(finding, { showGrounding: false, showFiles: false, showDetails: false, showEvidence: false }).join("\n")}
+${renderFindingBadgeBody(finding, { showGrounding: false, showAdvisoryMeta: false, showFiles: false, showDetails: false, showEvidence: false }).join("\n")}
 - Files: ${itemReadFiles(finding, spec).map(resolveFilePath).join(", ")}
 - Details: ${finding.summary}
 ${clarification ? `- Clarified scope (decided with the user — act on THIS): ${clarification}\n` : ""}${groundingVerificationBullet(finding)}
@@ -2536,7 +2508,6 @@ ${spec ? `- Concrete change: ${spec.concrete_change}
       .map((test) => `${test.name}: ${test.assertions.join("; ")}`)
       .join(" | ")}` : ""}
 ${upstreamExpectationsBullets(finding)}
-${contractPipelineTraceBullets(finding)}
 `,
   )
   .join("\n")}

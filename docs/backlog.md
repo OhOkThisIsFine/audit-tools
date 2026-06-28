@@ -53,7 +53,20 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   cache; see the deleted granular-staleness track). **Remaining: X-cluster** — prompts re-inline content already in the
   machine contract (remediate badge body, full `Finding[]` in state, synthesis/packet/quarantine renders) → one "packet
   carries minimal contract + sidecar pointers" design lap (verify worker sidecar-read first).
-  Low-value/needs-design-intent (C3,C5,C6,E4,E5) not scheduled.
+  Low-value/needs-design-intent (C3,C5,C6,E4,E5) not scheduled. **X-cluster RESOLVED (2026-06-28)** —
+  adversarial verification FALSIFIED the "minimal dispatch contract + sidecar pointers" premise: workers
+  do not read JSON sidecars (the dispatch contract grants source reads but never instructs a sidecar read),
+  and the full `Finding` is genuinely consumed at outcomes-write time (`close.ts:191` stores it verbatim
+  into `remediation-outcomes.json`). Of the 12 fields flagged as "dead in state", only 3 are truly unread
+  (`likelihood`, `reproduction`, `executable_anchor`); the other 9 are LIVE (dedup ranking/merge,
+  leanFastPath gate, reviewNecessity, autonomousGate, intent checkpointFilter, close report, dispatch
+  grounding). So the X2 state-projection is **closed as not-worth-it** (a 3-optional-field trim doesn't earn
+  the carry-forward-key + outcomes round-trip complexity). The genuine win — **X1 prompt-render trim** —
+  shipped: `renderFindingBadgeBody` gained a `showAdvisoryMeta` opt (gates the worker-irrelevant
+  `systemic`/`impact`/`likelihood` lines), set false in the implement-dispatch call, and the Contract
+  Pipeline Traceability section (pure provenance: goal/obligation ids + a non-runnable copy of
+  targeted_commands) was removed from the implement prompt with its now-dead helpers. Zero worker-behavior
+  change; the runnable per-node commands still emit (build-free subset) in `perNodeVerificationSection`.
 
 - **Schema-enforced generation everywhere possible — make malformed output impossible, not merely repairable.**
   Strict output schemas already exist (e.g. the worker zod schemas) but are shipped to workers only as *advisory
