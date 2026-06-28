@@ -105,6 +105,20 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
     ),
   );
 
+  // External-analyzer acquisition (Slice D): runs AFTER intake, BEFORE structure
+  // (graph/risk/planning consume external_analyzer_results). Satisfied when the
+  // marker exists + is fresh w.r.t. {repo_manifest, file_disposition}.
+  obligations.push(
+    obligation(
+      "external_analyzers_current",
+      staleOrSatisfied(
+        staleArtifacts,
+        ["external_analyzer_acquisition.json"],
+        has(bundle.external_analyzer_acquisition),
+      ),
+    ),
+  );
+
   const structureReady =
     has(bundle.unit_manifest) &&
     has(bundle.surface_manifest) &&

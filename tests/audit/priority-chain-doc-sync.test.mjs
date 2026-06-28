@@ -36,8 +36,8 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
 
   assert.equal(
     ids.length,
-    18,
-    `Expected 18 obligation ids in the CLAUDE.md chain sentence, found ${ids.length}: ${ids.join(", ")}`,
+    19,
+    `Expected 19 obligation ids in the CLAUDE.md chain sentence, found ${ids.length}: ${ids.join(", ")}`,
   );
 
   // doc == code: same ids, same order.
@@ -50,8 +50,8 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
   // Spot-check the endpoints and key obligations.
   assert.equal(PRIORITY[0], "provider_confirmation");
   assert.equal(PRIORITY[1], "repo_manifest");
-  assert.equal(PRIORITY[16], "synthesis_narrative_current");
-  assert.equal(PRIORITY[17], "friction_capture_current");
+  assert.equal(PRIORITY[17], "synthesis_narrative_current");
+  assert.equal(PRIORITY[18], "friction_capture_current");
 
   assert.ok(PRIORITY.includes("graph_enrichment_current"));
   assert.ok(PRIORITY.includes("design_assessment_current"));
@@ -60,12 +60,15 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
   assert.ok(!PRIORITY.includes("design_review_completed"), "design_review_completed should no longer be in PRIORITY");
 
   // provider_confirmation is the session gate at index 0; intake follows.
-  // graph/design obligations sit after structure_artifacts (index 5);
+  // external-analyzer acquisition (Slice D) sits at index 5, after syntax_resolved
+  // and before structure_artifacts (index 6); graph/design obligations follow;
   // intent checkpoint sits after design_assessment_current, before design_review_contract_completed.
-  assert.equal(PRIORITY.indexOf("graph_enrichment_current"), 6);
-  assert.equal(PRIORITY.indexOf("design_assessment_current"), 7);
-  assert.equal(PRIORITY.indexOf("intent_checkpoint_current"), 8);
-  assert.equal(PRIORITY.indexOf("design_review_contract_completed"), 9);
-  assert.equal(PRIORITY.indexOf("design_review_conceptual_completed"), 10);
-  assert.equal(PRIORITY.indexOf("planning_artifacts"), 11);
+  assert.equal(PRIORITY.indexOf("external_analyzers_current"), 5);
+  assert.equal(PRIORITY.indexOf("structure_artifacts"), 6);
+  assert.equal(PRIORITY.indexOf("graph_enrichment_current"), 7);
+  assert.equal(PRIORITY.indexOf("design_assessment_current"), 8);
+  assert.equal(PRIORITY.indexOf("intent_checkpoint_current"), 9);
+  assert.equal(PRIORITY.indexOf("design_review_contract_completed"), 10);
+  assert.equal(PRIORITY.indexOf("design_review_conceptual_completed"), 11);
+  assert.equal(PRIORITY.indexOf("planning_artifacts"), 12);
 });

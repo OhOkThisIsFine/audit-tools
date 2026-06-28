@@ -78,6 +78,15 @@ test("committed fixture repo supports external analyzer import and deterministic
     const syntaxResolution = await advanceAudit(bundle, { root });
     bundle = syntaxResolution.updated_bundle;
 
+    // External-analyzer acquisition (Slice D) runs before structure; not enabled
+    // here (no externalAcquisition option), so it writes a hermetic empty marker.
+    const acquisition = await advanceAudit(bundle, { root });
+    bundle = acquisition.updated_bundle;
+    assert.equal(
+      acquisition.selected_executor,
+      "external_analyzer_acquisition_executor",
+    );
+
     const structure = await advanceAudit(bundle);
     bundle = structure.updated_bundle;
 

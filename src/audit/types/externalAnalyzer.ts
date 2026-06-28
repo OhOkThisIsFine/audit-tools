@@ -98,6 +98,29 @@ export type ExternalAnalyzerResults = z.infer<
 >;
 
 /**
+ * Marker artifact written by the external-analyzer acquisition executor
+ * (`external_analyzer_acquisition.json`). It records THAT acquisition ran for the
+ * current {repo_manifest, file_disposition} and WITH WHAT outcome per candidate —
+ * the obligation `external_analyzers_current` is satisfied when this marker is
+ * present + fresh. The normalized findings themselves live in
+ * `external_analyzer_results.json` (the per-tool array); this marker is the
+ * provenance/run record + the staleness anchor, so a manifest/disposition change
+ * re-stales it and re-runs acquisition. `enabled: false` is the hermetic no-op
+ * (acquisition was not explicitly enabled for this advance) — no subprocess or
+ * network ran; `tool_statuses` is empty.
+ */
+export const ExternalAnalyzerAcquisitionMarkerSchema = z
+  .object({
+    generated_at: z.string().optional(),
+    enabled: z.boolean(),
+    tool_statuses: z.array(ExternalAnalyzerToolStatusSchema),
+  })
+  .strict();
+export type ExternalAnalyzerAcquisitionMarker = z.infer<
+  typeof ExternalAnalyzerAcquisitionMarkerSchema
+>;
+
+/**
  * Merge one tool's results into the per-tool array artifact: the entry with the
  * same `tool` is REPLACED (a fresh run supersedes the prior one); otherwise the
  * entry is appended. Multiple producers (import / syntax-resolution / the

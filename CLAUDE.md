@@ -88,7 +88,7 @@ Obligation-driven. Each invocation executes the highest-priority valid next step
 3. Dispatch to one executor
 4. Persist + return execution summary
 
-The priority chain in `nextStep.ts`: `provider_confirmation` → `repo_manifest` → `file_disposition` → `auto_fixes_applied` → `syntax_resolved` → `structure_artifacts` → `graph_enrichment_current` → `design_assessment_current` → `intent_checkpoint_current` → `design_review_contract_completed` → `design_review_conceptual_completed` → `planning_artifacts` → `audit_tasks_completed` → `audit_results_ingested` → `runtime_validation_current` → `synthesis_current` → `synthesis_narrative_current` → `friction_capture_current`
+The priority chain in `nextStep.ts`: `provider_confirmation` → `repo_manifest` → `file_disposition` → `auto_fixes_applied` → `syntax_resolved` → `external_analyzers_current` → `structure_artifacts` → `graph_enrichment_current` → `design_assessment_current` → `intent_checkpoint_current` → `design_review_contract_completed` → `design_review_conceptual_completed` → `planning_artifacts` → `audit_tasks_completed` → `audit_results_ingested` → `runtime_validation_current` → `synthesis_current` → `synthesis_narrative_current` → `friction_capture_current`
 
 Synthesis emits `audit-findings.json` (machine contract); `audit-report.md` is its render. `synthesis_narrative_current` layers LLM narrative (themes/exec summary/top risks); omits cleanly without provider.
 

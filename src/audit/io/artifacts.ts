@@ -21,7 +21,10 @@ import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, GraphB
 import type { ProviderConfirmationResult } from "audit-tools/shared";
 import { PROVIDER_CONFIRMATION_RESULT_VERSION } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
-import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type {
+  ExternalAnalyzerResults,
+  ExternalAnalyzerAcquisitionMarker,
+} from "../types/externalAnalyzer.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
 import type { AuditPlanMetrics } from "../types/reviewPlanning.js";
 import type { TaskAffinityGraph } from "../orchestrator/taskAffinityGraph.js";
@@ -124,6 +127,7 @@ type ArtifactPayloadMap = {
   runtime_validation_tasks: RuntimeValidationTaskManifest;
   runtime_validation_report: RuntimeValidationReport;
   external_analyzer_results: ExternalAnalyzerResults[];
+  external_analyzer_acquisition: ExternalAnalyzerAcquisitionMarker;
   syntax_resolution_status: unknown;
   audit_results: AuditResult[];
   audit_tasks: AuditTask[];
@@ -263,6 +267,10 @@ export const ARTIFACT_DEFINITIONS = {
   external_analyzer_results: jsonArtifact(
     "external_analyzer_results.json",
     "execution",
+  ),
+  external_analyzer_acquisition: jsonArtifact(
+    "external_analyzer_acquisition.json",
+    "analysis",
   ),
   syntax_resolution_status: jsonArtifact(
     "syntax_resolution_status.json",

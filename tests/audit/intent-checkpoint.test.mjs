@@ -24,6 +24,7 @@ function readyForIntentBundle() {
     file_disposition: { files: [{ path: "src/a.ts", status: "included" }] },
     auto_fixes_applied: {},
     syntax_resolution_status: {},
+    external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
     unit_manifest: { units: [] },
     surface_manifest: { surfaces: [] },
     graph_bundle: { graphs: {} },

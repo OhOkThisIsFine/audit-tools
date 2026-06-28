@@ -28,6 +28,7 @@ import type { AuditResult } from "../types.js";
 import type { AnalyzerSetting, SynthesisNarrative } from "audit-tools/shared";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
+import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 
 async function maybeArchiveLegacyPendingResults(
   auditResultsPath: string | undefined,
@@ -64,6 +65,7 @@ export async function runAuditStep(options: {
   edgeReasoningResultsPath?: string;
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
+  externalAcquisition?: ExternalAcquisitionAdvanceOptions;
   since?: string;
   runLog?: boolean;
 }) {
@@ -96,6 +98,7 @@ async function runAuditStepLocked(
     edgeReasoningResultsPath?: string;
     analyzers?: Record<string, AnalyzerSetting>;
     graphLlmEdgeReasoning?: boolean;
+    externalAcquisition?: ExternalAcquisitionAdvanceOptions;
     since?: string;
     runLog?: boolean;
   },
@@ -193,6 +196,7 @@ async function runAuditStepLocked(
     edgeReasoningResults,
     analyzers: options.analyzers,
     graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
+    externalAcquisition: options.externalAcquisition,
     since: options.since,
     preferredExecutor: options.preferredExecutor,
     runLogger,

@@ -24,6 +24,7 @@ import {
 import { runAutoFixExecutor } from "./autoFixExecutor.js";
 import { runSyntaxResolutionExecutor } from "./syntaxResolutionExecutor.js";
 import { runGraphEnrichmentExecutor } from "./graphEnrichmentExecutor.js";
+import { runExternalAnalyzerAcquisitionExecutor } from "./acquisitionExecutor.js";
 import { resolveAuditScope } from "./scope.js";
 
 /**
@@ -87,6 +88,12 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
     ),
   // root is intentionally optional: present → buildGraphBundleFromFs, absent →
   // manifest-only buildGraphBundle.
+  external_analyzer_acquisition_executor: async (bundle, { options }) =>
+    runExternalAnalyzerAcquisitionExecutor(
+      bundle,
+      options.root,
+      options.externalAcquisition,
+    ),
   structure_executor: async (bundle, { options }) =>
     runStructureExecutor(bundle, options.root),
   graph_enrichment_executor: async (bundle, { options }) =>

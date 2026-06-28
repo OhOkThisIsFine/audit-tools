@@ -69,6 +69,17 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
   // from the commit log, scoped to the audited file set. Declared upstream deps
   // {repo_manifest, file_disposition} so a manifest/disposition change re-mines.
   "git_history.json": ["repo_manifest.json", "file_disposition.json"],
+  // External-analyzer acquisition marker (Slice D): records THAT the acquisition
+  // engine ran for the current intake + WITH WHAT per-candidate outcome. Declared
+  // upstream deps {repo_manifest, file_disposition} so a manifest/disposition
+  // change re-stales the marker → acquisition re-runs (and the freshly-written
+  // external_analyzer_results.json re-stales its own downstreams). The findings
+  // array (external_analyzer_results.json) stays a leaf upstream of planning; this
+  // marker is the run-record + staleness anchor the obligation gates on.
+  "external_analyzer_acquisition.json": [
+    "repo_manifest.json",
+    "file_disposition.json",
+  ],
   "design_assessment.json": ["unit_manifest.json", "critical_flows.json"],
 
   // Phase 3 — planning & execution. scope.json (delta vs. full) gates coverage;

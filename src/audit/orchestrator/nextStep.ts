@@ -28,6 +28,7 @@ export const PRIORITY: string[] = [
   "file_disposition",
   "auto_fixes_applied",
   "syntax_resolved",
+  "external_analyzers_current",
   "structure_artifacts",
   "graph_enrichment_current",
   "design_assessment_current",

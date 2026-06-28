@@ -31,6 +31,11 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["intent_checkpoint_current"],
   },
   {
+    id: "external_analyzer_acquisition_executor",
+    kind: "deterministic",
+    obligation_ids: ["external_analyzers_current"],
+  },
+  {
     id: "structure_executor",
     kind: "deterministic",
     obligation_ids: ["structure_artifacts"],

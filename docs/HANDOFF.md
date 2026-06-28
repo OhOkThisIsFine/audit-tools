@@ -9,10 +9,15 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
-- **⚠️ npm `0.30.36` contains the from-scratch OWN secret detector that was REVERTED locally** (`a10b79cd`).
-  The working tree replaces it with the gitleaks-acquisition track (slices A–C committed, D–E pending — see T5 #16).
-  The next ship (Slice E) supersedes 0.30.36; until then the published bin's "secret scanning" is the abandoned
-  hand-rolled detector, not gitleaks. Do not re-introduce the from-scratch detector.
+- **Secret scanning = gitleaks via the acquisition engine — slices A–E COMPLETE.** The from-scratch OWN
+  detector (npm `0.30.36`) stays reverted (`a10b79cd`); the working tree wires gitleaks end-to-end through the
+  acquisition engine: new `external_analyzers_current` obligation + `external_analyzer_acquisition_executor`
+  (between `syntax_resolved` and `structure_artifacts`), hermetic gate (`AdvanceAuditOptions.externalAcquisition.
+  {enabled,fetch,consentToken}` — disabled everywhere except the real CLI next-step path, so the suite never
+  spawns/downloads), marker artifact `external_analyzer_acquisition.json` (DAG deps {repo_manifest,
+  file_disposition}). Findings rejoin at the SAME seam as imported analyzers (`buildExternalAnalyzerFollowupTasks`
+  → high-priority security tasks → mergeFindings external evidence), so gitleaks secrets surface in
+  audit-findings.json. Do not re-introduce the from-scratch detector. Ship supersedes 0.30.36.
 
 ## Cadence & standing rules (don't re-derive)
 
@@ -113,16 +118,14 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
     (skipped by `allGraphEdges` so it never feeds structural signals), churn/authorship risk signals, churn ×
     complexity `risk_concentration` compound, persisted `git_history.json`. **Hidden-coupling design finding
     SHIPPED (0.30.35)** — `detectHiddenCoupling` surfaces co-change pairs with no structural edge.
-    **⚠️ Secret scanning — own-vs-acquire CORRECTED (in flight, NOT shipped).** The 0.30.36 from-scratch OWN
-    secret detector was **reverted** (`a10b79cd`): a hand-rolled regex+entropy scanner is a worse gitleaks and
-    violates the two-tier dependency policy. Secret scanning is now **ACQUIRED via gitleaks** through the
-    (already-existing-but-unwired) acquisition engine. **THE IMMEDIATE NEXT STEP** — slices A/B/C are committed +
-    green (`f5097e72`/`c2a467a2`/`7c393409`), see [`spec/audit/analyzer-acquisition-engine-plan.md`](../spec/audit/analyzer-acquisition-engine-plan.md):
-    array artifact model, binary runner + checksum-verified download seam, and the gitleaks candidate are DONE but
-    **not yet invoked by the advance loop**. Resume at **Slice D — production wiring** (new
-    `external_analyzer_acquisition.json` marker + executor + obligation before `structure_artifacts`, with the
-    decided hermeticity gate so the test suite stays subprocess/network-free), then **Slice E — surface + ship**.
-    *([[deterministic-analyzers-own-vs-acquire]])*
+    **✅ Secret scanning — own-vs-acquire CORRECTED + SHIPPED via gitleaks.** All five slices A–E done: array
+    artifact model (`f5097e72`), binary runner + checksum-verified download seam (`c2a467a2`), gitleaks candidate
+    (`7c393409`), **D production wiring** (`external_analyzers_current` obligation + `external_analyzer_acquisition_executor`
+    + marker artifact + hermetic `externalAcquisition.{enabled,fetch,consentToken}` gate; tests
+    `acquisition-executor.test.mjs`), **E surface** (findings rejoin via `buildExternalAnalyzerFollowupTasks` →
+    mergeFindings, same seam as imported analyzers). Default-ON on the real CLI next-step path (gitleaks pinned
+    8.21.2, PATH→cache→checksum-verified download); `session-config.external_acquisition.enabled:false` opts out;
+    `consent_token` unlocks semgrep/eslint. _Nothing open on this track._ *([[deterministic-analyzers-own-vs-acquire]])*
 
 ### T6 — Deferred / waiting (env-bound or low priority)
 17. A2 finding-quality oracle (needs hand-labeled corpus); A7 multi-host GUI checklist + gated Codex e2e;
