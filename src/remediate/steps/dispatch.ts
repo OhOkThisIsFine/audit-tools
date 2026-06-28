@@ -1906,12 +1906,54 @@ function pendingOrDocumentedFindingIdsForBlock(
   });
 }
 
+/**
+ * Bound on incomplete-coverage re-dispatch (E2): after this many merges observe a
+ * worker silently omitting an assigned finding from its `item_results`, the finding
+ * is blocked (→ triage) so the run converges instead of re-dispatching the same
+ * worker indefinitely. Mirrors the other small convergence caps (DAG/cyclic-seam = 2).
+ */
+const MAX_INCOMPLETE_COVERAGE_ATTEMPTS = 2;
+
+/**
+ * Resolve the set of finding ids a worker result actually covers, alias-aware:
+ * a worker may legitimately report a finding by its block id or an obligation
+ * alias (the exact resolution `collapseItemResults` applies). Coverage/completeness
+ * decisions MUST use this — a raw `finding_id` set would treat an alias-using-but-
+ * complete result as incomplete and re-dispatch it forever.
+ */
+function resolveCoveredFindingIds(
+  result: ImplementWorkerResult,
+  block: RemediationBlock,
+  state: RemediationState,
+): Set<string> {
+  const knownFindingIds = new Set(Object.keys(state.items ?? {}));
+  const aliasMap = buildBlockAliasMap(block, state);
+  const covered = new Set<string>();
+  for (const entry of result.item_results) {
+    let targetId = entry.finding_id;
+    if (!knownFindingIds.has(targetId)) {
+      const nodeId = fromBlockId(targetId);
+      if (nodeId && knownFindingIds.has(nodeId)) {
+        targetId = nodeId;
+      } else {
+        const remapped = aliasMap.get(targetId);
+        if (!remapped) continue;
+        targetId = remapped;
+      }
+    }
+    covered.add(targetId);
+  }
+  return covered;
+}
+
 function implementResultCoversFindings(
   result: ImplementWorkerResult,
   findingIds: string[],
+  block: RemediationBlock,
+  state: RemediationState,
 ): boolean {
-  const resultIds = new Set(result.item_results.map((item) => item.finding_id));
-  return findingIds.every((findingId) => resultIds.has(findingId));
+  const covered = resolveCoveredFindingIds(result, block, state);
+  return findingIds.every((findingId) => covered.has(findingId));
 }
 
 async function archiveIncompleteImplementResult(resultPath: string): Promise<void> {
@@ -2671,7 +2713,7 @@ export async function prepareImplementDispatch(
     const pendingFindingIds = pendingOrDocumentedFindingIdsForBlock(block, state);
     const existingResult = await tryLoadExistingImplementResult(item.result_path);
     if (existingResult) {
-      if (implementResultCoversFindings(existingResult, pendingFindingIds)) {
+      if (implementResultCoversFindings(existingResult, pendingFindingIds, block, state)) {
         reconciledCount++;
         continue;
       }
@@ -3412,7 +3454,7 @@ async function mergeImplementResultsIntoState(
     const pendingFindingIds = pendingOrDocumentedFindingIdsForBlock(block, state);
     if (
       !existingResult ||
-      !implementResultCoversFindings(existingResult, pendingFindingIds)
+      !implementResultCoversFindings(existingResult, pendingFindingIds, block, state)
     ) {
       continue;
     }
@@ -3688,6 +3730,33 @@ async function mergeImplementResultsIntoState(
         markTerminal(stateItem);
         stateItem.failure_reason =
           itemResult.failure_reason ?? "Implementation worker blocked.";
+      }
+    }
+
+    // E2 convergence: a worker may silently OMIT an assigned finding (return no
+    // item_results entry for it) — distinct from reporting it blocked or returning
+    // an unknown id (both handled above). The collapsed loop leaves an omitted
+    // finding untouched (still pending), so without accounting it re-dispatches
+    // forever. Bound it: count each omission and, at the cap, block the finding
+    // (→ triage) so a no-human run converges instead of looping (T2 termination).
+    if (owningBlock) {
+      const coveredFindingIds = new Set(collapsed.map((entry) => entry.finding_id));
+      for (const findingId of owningBlock.items) {
+        if (coveredFindingIds.has(findingId)) continue;
+        const stateItem = state.items[findingId];
+        // Only a still-`pending` item is genuinely awaiting this worker's result;
+        // terminal / needs_clarification / in-flight states are not "omitted".
+        if (!stateItem || stateItem.status !== "pending") continue;
+        const attempts = (stateItem.incomplete_coverage_attempts ?? 0) + 1;
+        stateItem.incomplete_coverage_attempts = attempts;
+        if (attempts >= MAX_INCOMPLETE_COVERAGE_ATTEMPTS) {
+          stateItem.status = "blocked";
+          markTerminal(stateItem);
+          stateItem.failure_reason =
+            `Implementation worker for block ${blockId} omitted this finding from its ` +
+            `item_results across ${attempts} dispatch(es) (no entry returned, neither ` +
+            `resolved nor blocked); blocking to converge instead of re-dispatching indefinitely.`;
+        }
       }
     }
 
