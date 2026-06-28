@@ -41,4 +41,14 @@ export interface ArtifactMetadataManifest {
    * `src/audit/orchestrator/resultBaseline.ts`.
    */
   result_baselines?: Record<string, string>;
+  /**
+   * T5 #12 content-addressed GRANULAR staleness for the coverage matrix:
+   * per-coverage-file baseline `contentKey`, keyed by file path. Lives HERE — in
+   * artifact_metadata, OUTSIDE the coverage artifact — so the planning executor
+   * can preserve completion for files whose audit inputs are unchanged on a
+   * re-plan without mutating the coverage matrix. Carried forward across runs
+   * exactly like `result_baselines` (same CE-007 F1-current gate). See
+   * `src/audit/orchestrator/coverageElementBaseline.ts`.
+   */
+  coverage_element_baselines?: Record<string, string>;
 }
