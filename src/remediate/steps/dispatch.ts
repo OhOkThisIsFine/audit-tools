@@ -1265,14 +1265,16 @@ export interface AcceptNodeWorktreeParams {
    */
   additionalVerifyCommands?: string[];
   /**
-   * Accept-time write-scope inputs (OBL-DS-06). When present, the write-scope
-   * gate runs HERE — after the verify, BEFORE the cherry-pick — so an out-of-scope
-   * or seam-conflicting edit is PREVENTED from landing in the main tree rather than
-   * reported post-hoc once it is already merged. Both rolling drivers supply it;
-   * unit tests that exercise the verify/merge lifecycle in isolation omit it (the
-   * gate is then skipped, matching the legacy lifecycle).
+   * Accept-time write-scope inputs (OBL-DS-06). The write-scope gate runs HERE —
+   * after the verify, BEFORE the cherry-pick — so an out-of-scope or seam-conflicting
+   * edit is PREVENTED from landing in the main tree rather than reported post-hoc once
+   * it is already merged. REQUIRED (not optional): both rolling drivers always derive
+   * it from the plan, so a production caller can never silently skip the gate — that
+   * enforcement is the type, not host discretion (E1). A lifecycle test that does not
+   * exercise scope passes `{ allBlockScopes: [] }`: an empty registry owns nothing, so
+   * every edit is unowned-and-granted → the gate is a sound no-op, never a skip.
    */
-  scope?: {
+  scope: {
     /** Every block's declared write scope, for amendment ownership adjudication. */
     allBlockScopes: Array<{ block_id: string; write_paths: string[] }>;
   };
@@ -1423,19 +1425,17 @@ export async function acceptNodeWorktree(
     // out-of-declared edits (git diff, never a self-report): an edit to a file no
     // sibling block owns widens the effective scope, while one owned by another
     // block blocks as a seam conflict.
-    if (params.scope) {
-      const decision = enforceAcceptWriteScope({
-        root,
-        branch,
-        blockId,
-        allBlockScopes: params.scope.allBlockScopes,
-      });
-      if (decision.blocked) {
-        // Scope-blocked but the node committed real work — preserve it for recovery.
-        quarantineFailedNodeCommit(root, branch, runId, blockId);
-        removeWorktree(root, wt);
-        return { outcome: "error", verifyPassed, merged: false, diagnostic: decision.reason };
-      }
+    const decision = enforceAcceptWriteScope({
+      root,
+      branch,
+      blockId,
+      allBlockScopes: params.scope.allBlockScopes,
+    });
+    if (decision.blocked) {
+      // Scope-blocked but the node committed real work — preserve it for recovery.
+      quarantineFailedNodeCommit(root, branch, runId, blockId);
+      removeWorktree(root, wt);
+      return { outcome: "error", verifyPassed, merged: false, diagnostic: decision.reason };
     }
 
     // Capture the base HEAD OID BEFORE the cherry-pick so a RED merged-base check can

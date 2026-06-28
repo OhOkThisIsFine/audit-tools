@@ -9,7 +9,16 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
-- **Latest lap (2026-06-27): T5 #15 codebase-wide churn / context / enforce-in-tooling review pass.** Three
+- **Latest lap (2026-06-27): T5 #15 E1 — accept-time write-scope gate made UNCONDITIONAL (enforce-in-tooling).**
+  `AcceptNodeWorktreeParams.scope` is now REQUIRED (was optional → `if (params.scope)` could silently skip the
+  OBL-DS-06 write-scope gate before the cherry-pick); `computeAcceptScope` no longer returns `undefined` on a
+  plan-read failure — it falls back to `{ allBlockScopes: [] }` (empty registry owns nothing → every edit
+  unowned-and-granted, no false block, git-probe fail-closed path still fires). The gate is the type + the
+  always-run call, never host/state discretion. Both rolling drivers already supplied scope; lifecycle tests
+  that don't exercise scope pass `{ allBlockScopes: [] }` (sound no-op). `src/remediate/steps/dispatch.ts` +
+  `rollingSession.ts`; tests updated in `dispatch-worktree.test.ts` + `host-rolling-dispatch.test.ts`. Suite green
+  (remediate vitest 2069; audit node:test). Remaining T5 #15 open items unchanged (X-cluster, C2/C4, E2/E3).
+- **Prior lap (2026-06-27): T5 #15 codebase-wide churn / context / enforce-in-tooling review pass.** Three
   parallel review agents (one per category) swept the repo; verification-tiered findings landed in
   [`docs/reviews/churn-context-enforce-pass-2026-06-27.md`](reviews/churn-context-enforce-pass-2026-06-27.md).
   Shipped a clean verified win: **auth-session heuristic O(auth×files)→O(files)** — `extractHeuristicAuthSessionEdges`

@@ -68,9 +68,14 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   the goal is the perspective, applied broadly. (Ethan, 2026-06-24.) **PASS RUN 2026-06-27** — full
   findings in [`docs/reviews/churn-context-enforce-pass-2026-06-27.md`](reviews/churn-context-enforce-pass-2026-06-27.md).
   Shipped this pass: auth-session heuristic O(auth×files)→O(files) (moved to `accumulateCrossFileEdges`,
-  single index sweep). Promoted open items: **E1** write-scope gate `if (params.scope)` is optional
-  (`dispatch.ts:1426`) — make `allBlockScopes` required + fail-loud (verified, highest-certainty enforce
-  win); **X-cluster** prompts re-inline content already in the machine contract (remediate badge body,
+  single index sweep). **E1 ✅ SHIPPED (2026-06-27)** — the accept-time write-scope gate is now
+  UNCONDITIONAL: `AcceptNodeWorktreeParams.scope` is REQUIRED (was optional → `if (params.scope)` could
+  silently skip the gate), so a production caller can never skip it; `computeAcceptScope` no longer returns
+  `undefined` on a plan-read failure — it falls back to `{ allBlockScopes: [] }` (empty registry owns nothing
+  → every edit unowned-and-granted, no false block, while the git-probe fail-closed path still fires), so the
+  enforcement is the type and the always-run gate, not host/state discretion. Lifecycle tests that don't
+  exercise scope pass `{ allBlockScopes: [] }` (sound no-op). Promoted open items: **X-cluster** prompts
+  re-inline content already in the machine contract (remediate badge body,
   full `Finding[]` in state, synthesis/packet/quarantine renders) → one "packet carries minimal contract
   + sidecar pointers" design lap (verify worker sidecar-read first); **C2/C4** incremental graph-build
   extraction = the T5 #12 known residual; **E2/E3** worker item-completeness + null-executor mechanical
