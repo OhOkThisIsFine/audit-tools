@@ -10,6 +10,7 @@ const { validateArtifactBundle } = await import("../../src/audit/validation/arti
 const {
   formatAuditResultIssues,
   validateAuditResults,
+  isSignificantLineCountDivergence,
 } = await import("../../src/audit/validation/auditResults.ts");
 const {
   validateConfiguredProviderEnvironment,
@@ -1159,5 +1160,98 @@ test("TST-6f9f6681-2: validateSessionConfig rejects routing_tiers where deep_at 
         /deep_at must be >= standard_at/i.test(issue.message),
     ),
     `expected deep_at < standard_at ordering error; got: ${JSON.stringify(issues)}`,
+  );
+});
+
+// ── CE-009: semantic-validity gate on significant total_lines divergence ───────
+
+test("isSignificantLineCountDivergence: small deltas stay advisory, large diverge", () => {
+  // Past neither threshold → advisory (S7).
+  assert.equal(isSignificantLineCountDivergence(12, 10), false, "diff 2 (floor) stays advisory");
+  assert.equal(isSignificantLineCountDivergence(990, 1000), false, "10/1000 = 1% under ratio stays advisory");
+  // Past both thresholds → significant.
+  assert.equal(isSignificantLineCountDivergence(13, 10), true, "diff 3 on a 10-line file is significant");
+  assert.equal(isSignificantLineCountDivergence(900, 1000), true, "100/1000 = 10% over ratio is significant");
+  // expected 0 → any delta past the absolute floor is significant (no ratio).
+  assert.equal(isSignificantLineCountDivergence(2, 0), false, "diff 2 at expected 0 stays advisory");
+  assert.equal(isSignificantLineCountDivergence(3, 0), true, "diff 3 at expected 0 is significant");
+});
+
+test("validateAuditResults: significant total_lines divergence is a hard-reject error (CE-009)", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        // Worker claims 40 lines; disk has 100 → 60% divergence → stale/wrong view.
+        file_coverage: [{ path: "src/api/auth.ts", total_lines: 40 }],
+        findings: [],
+      },
+    ],
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts"],
+        rationale: "fixture",
+      },
+    ],
+    { lineIndex: { "src/api/auth.ts": 100 } },
+  );
+
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.field === "file_coverage[0].total_lines" &&
+        issue.severity === "error" &&
+        /diverges materially from the current line count/i.test(issue.message),
+    ),
+    `expected a hard-reject error for significant divergence; got: ${JSON.stringify(issues)}`,
+  );
+});
+
+test("validateAuditResults: small total_lines mismatch stays an advisory warning (S7)", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        // 98 vs 100 → diff 2, under both thresholds → advisory.
+        file_coverage: [{ path: "src/api/auth.ts", total_lines: 98 }],
+        findings: [],
+      },
+    ],
+    [
+      {
+        task_id: "task-1",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts"],
+        rationale: "fixture",
+      },
+    ],
+    { lineIndex: { "src/api/auth.ts": 100 } },
+  );
+
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.field === "file_coverage[0].total_lines" &&
+        issue.severity === "warning" &&
+        /does not match the current line count/i.test(issue.message),
+    ),
+    `expected an advisory warning for a small mismatch; got: ${JSON.stringify(issues)}`,
+  );
+  assert.equal(
+    issues.filter((i) => i.severity === "error").length,
+    0,
+    "a small mismatch must not produce any hard-reject error",
   );
 });
