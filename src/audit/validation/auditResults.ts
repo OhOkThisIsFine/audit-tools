@@ -11,6 +11,35 @@ import {
 
 export type IssueSeverity = "error" | "warning";
 
+// CE-009 semantic-validity gate — significant line-count divergence.
+//
+// A `total_lines` that merely differs from disk by a line or two is an S7
+// advisory (counting conventions: CRLF, a trailing newline, an off-by-one in
+// the worker's tally) and stays a warning — a *match* is never trusted as
+// proof-of-reading, so a small *mismatch* is not trusted as proof of error
+// either. But a divergence beyond BOTH thresholds means the worker's view of the
+// file disagrees materially with the current file — the line refs in its
+// findings are grounded against a different (stale/wrong) version — so it is a
+// genuine schema-valid-but-semantically-wrong result: a hard reject routed to
+// re-dispatch, not a coverage stat to log and move past. Gating needs BOTH an
+// absolute floor (so tiny files with a 1-line delta aren't a "100%" diverge) and
+// a ratio (so large files with a handful of off-by-N lines stay advisory).
+const LINE_COUNT_DIVERGENCE_ABS_FLOOR = 2;
+const LINE_COUNT_DIVERGENCE_RATIO = 0.05;
+
+/**
+ * True when a declared `total_lines` diverges from the actual line count by
+ * enough to treat the result as semantically wrong (CE-009), rather than an S7
+ * advisory. Requires divergence past BOTH the absolute floor and the ratio; an
+ * `expected` of 0 makes any delta past the floor significant (no ratio to take).
+ */
+export function isSignificantLineCountDivergence(got: number, expected: number): boolean {
+  const diff = Math.abs(got - expected);
+  if (diff <= LINE_COUNT_DIVERGENCE_ABS_FLOOR) return false;
+  if (expected <= 0) return true;
+  return diff / expected > LINE_COUNT_DIVERGENCE_RATIO;
+}
+
 export function normalizeCoveragePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "");
 }
@@ -748,12 +777,16 @@ function validateFileCoverageEntry(
   }
   const expectedLineCount = entryNorm.length > 0 ? normLineIndex.get(entryNorm) : undefined;
   if (Number.isInteger(entry.total_lines) && typeof expectedLineCount === "number" && Number(entry.total_lines) !== expectedLineCount) {
-    // Advisory only (S7 anti-hallucination): total_lines is a coverage stat, not
-    // a proof of reading. A matching line count attests breadth, is gameable
-    // (read the count from a listing, never open the body), and proves nothing
-    // about whether a finding is true — findings are now grounded by
-    // quote-and-verify (`quoteGrounding.ts`), so this mismatch is a warning, not
-    // a gate.
+    const got = Number(entry.total_lines);
+    const significant = isSignificantLineCountDivergence(got, expectedLineCount);
+    // CE-009 semantic-validity gate. A SIGNIFICANT divergence (past both the
+    // absolute floor and the ratio) is schema-valid-but-semantically-wrong: the
+    // worker's file view materially disagrees with disk, so its findings' line
+    // refs are grounded against a stale/wrong version — hard-reject → re-dispatch.
+    // A SMALL mismatch stays the S7 advisory warning (total_lines is a gameable
+    // coverage stat, never trusted as proof-of-reading, so a 1–2 line counting
+    // delta is not trusted as proof of error either; findings are grounded by
+    // quote-and-verify in `quoteGrounding.ts`).
     pushIssue(issues, {
       result_index: resultIndex,
       task_id: taskId,
@@ -763,8 +796,10 @@ function validateFileCoverageEntry(
       // without re-parsing it out of the message. `pushIssue` otherwise defaults
       // `path` to `field`, which would lose the actual file path.
       path: entry.path as string,
-      message: `file_coverage[${j}].total_lines does not match the current line count for '${entry.path}' (expected ${expectedLineCount}, got ${entry.total_lines}). Advisory coverage stat — findings are grounded by quote-and-verify, not by this count.`,
-      severity: "warning",
+      message: significant
+        ? `file_coverage[${j}].total_lines diverges materially from the current line count for '${entry.path}' (expected ${expectedLineCount}, got ${got}). The worker's view of this file disagrees with disk, so its findings' line references are grounded against a stale or wrong version — re-audit against the current file.`
+        : `file_coverage[${j}].total_lines does not match the current line count for '${entry.path}' (expected ${expectedLineCount}, got ${got}). Advisory coverage stat — findings are grounded by quote-and-verify, not by this count.`,
+      severity: significant ? "error" : "warning",
     });
   }
 
