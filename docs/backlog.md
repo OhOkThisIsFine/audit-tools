@@ -202,13 +202,22 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   bugs that made headless codex dispatch fail end-to-end on Windows: (1) codex provider missing `--skip-git-repo-check`
   (codex 0.142.3 refuses `exec` in untrusted/temp dirs, exits 1 pre-work); (2) `spawnLoggedCommand` cmd.exe-shim
   quote-mangling — Node re-escaped the pre-quoted `cmd /c` command line so codex got malformed paths (`os error 123`),
-  fixed with `windowsVerbatimArguments` (also fixes the opencode provider, same shim). Live e2e now round-trips real
-  review results (RUN_CODEX_E2E=1, codex authenticated). **Remaining:** the release-time manual GUI checklist run
-  ([`host-validation.md`](../spec/host-validation.md)) for the GUI-only hosts (Antigravity/OpenCode).
+  fixed with `windowsVerbatimArguments` (also fixes the opencode provider, same shim). **Generalized into ONE
+  provider-matrix e2e (2026-06-28):** the per-provider hardcoded tests (a7 codex e2e + nim-rolling-audit e2e) were
+  replaced by `tests/audit/provider-matrix-dispatch-e2e.test.mjs` (gate `RUN_PROVIDER_MATRIX_E2E=1`), which runs the
+  SAME bounded in-process dispatch round-trip through EVERY available provider — candidate set from the production
+  `discoverProviders` layer (+ `api_key_env` presence for the API provider), unavailable ones skipped with the
+  discovery layer's own reason, fails if nothing was reachable. Driver generalized to provider-agnostic
+  `runInProcessAuditDispatch({root, sessionConfig})`. Verified live: codex ✔ + openai-compatible/NIM ✔ both
+  round-tripped; opencode skipped (not installed). Adding a backend now needs no new test. **Remaining:** the
+  release-time manual GUI checklist run ([`host-validation.md`](../spec/host-validation.md)) for the GUI-only hosts
+  (Antigravity/OpenCode).
 - **Manual real-OpenCode validation** that agent-scoped permission allowances propagate to spawned subtasks
   (can't be unit-tested; user-owned). Folds into the A7 checklist.
-- **Gated live e2es** skip without creds: `RUN_NIM_E2E=1`, `AUDIT_TOOLS_LIVE_QUOTA=1`, `RUN_CODEX_E2E=1`,
-  `RUN_AUTONOMY_E2E=1`.
+- **Gated live e2es** skip without creds: `RUN_PROVIDER_MATRIX_E2E=1` (in-process audit dispatch across all
+  available providers — codex + openai-compatible/NIM live-verified 2026-06-28), `RUN_NIM_E2E=1` (hybrid-spill +
+  remediate rolling), `AUDIT_TOOLS_LIVE_QUOTA=1`, `RUN_AUTONOMY_E2E=1` (autonomy capstone a9 — still
+  NIM-hardcoded; candidate for the same provider-matrix generalization).
 - **Provider `queryLimits`** deferred — an absent method and a `null` return are handled identically, so stubs
   change nothing; revisit if a provider gains a real proactive rate-limit endpoint.
 - **headroom proxy** — enable + validate the `headroom proxy` (auto-compresses tool-output traffic) in one
