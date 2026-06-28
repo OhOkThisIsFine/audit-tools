@@ -9,7 +9,18 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
-- **Latest lap (2026-06-28): A7 Codex live-dispatch e2e made REAL — fixed 2 headless-codex Windows bugs. Shipped v0.30.48.**
+- **Latest lap (2026-06-28): provider-matrix live-dispatch e2e — generalized per-provider tests into one.**
+  Per Ethan's "generalize, don't fork per provider": the hardcoded per-provider live-dispatch tests (a7 codex e2e +
+  nim-rolling-audit e2e) are replaced by ONE `tests/audit/provider-matrix-dispatch-e2e.test.mjs` (gate
+  `RUN_PROVIDER_MATRIX_E2E=1`) that runs the SAME bounded in-process dispatch round-trip through EVERY available
+  provider — candidate set driven by the production `discoverProviders` layer (+ `api_key_env` presence for the API
+  provider), unavailable ones skipped with the discovery layer's own reason, fails loudly if nothing was reachable.
+  Driver generalized: `runCodexHeadlessAuditDispatch` → provider-agnostic `runInProcessAuditDispatch({root,
+  sessionConfig})`. **Verified live:** codex ✔ (139s) + openai-compatible/NIM ✔ (61s) both round-tripped real review
+  results; opencode skipped (not installed). Adding an in-process backend now needs no new test. No npm publish (the
+  driver is test-only infra; no shipped CLI behavior changed). Full gate green (2071/2-skip). _Follow-up:_ the
+  autonomy capstone (a9) is still NIM-hardcoded — same generalization candidate.
+- **Prior lap (2026-06-28): A7 Codex live-dispatch e2e made REAL — fixed 2 headless-codex Windows bugs. Shipped v0.30.48.**
   Working the blocked ladder, the A7 Codex e2e (`tests/audit/a7.test.mjs`, `RUN_CODEX_E2E=1`) imported
   `runCodexHeadlessAuditDispatch` from `nextStepCommand.ts` — a function that **never existed** (always-skipped test →
   latent `TypeError`, same class as the vacuous opentoken guard). Implemented it (mirrors the NIM rolling-audit e2e:
