@@ -383,4 +383,11 @@ export interface RemediationItemState {
    * `rework_count` so the two failure classes can have independent retry budgets.
    */
   infra_rework_count?: number;
+  /**
+   * Times a worker returned a block result that did NOT cover this still-pending
+   * finding — i.e. silently omitted its `item_results` entry (E2). Bounds the
+   * incomplete-coverage re-dispatch so the run converges (blocks the finding once
+   * the cap is hit) instead of re-dispatching the same worker indefinitely.
+   */
+  incomplete_coverage_attempts?: number;
 }

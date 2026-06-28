@@ -349,6 +349,90 @@ describe("mergeImplementResults — tolerance end-to-end", () => {
 });
 
 // ---------------------------------------------------------------------------
+// E2 convergence: a worker that silently OMITS an assigned finding from its
+// item_results (no entry at all) must converge — bounded re-dispatch, then block
+// — rather than re-dispatch the same worker indefinitely.
+// ---------------------------------------------------------------------------
+
+describe("mergeImplementResults — E2 incomplete-coverage convergence", () => {
+  function makeTwoFindingState(): RemediationState {
+    const findingX = makeNodeFinding();
+    const findingY: Finding = {
+      ...makeNodeFinding(),
+      id: "N-y",
+      title: "Node Y",
+      summary: "Do Y.",
+      affected_files: [{ path: "src/y.ts" }],
+      contract_obligation_ids: ["OBL-Y-01"],
+      verification_obligation_ids: ["OBL-Y-VERIFY"],
+    } as Finding;
+    const block: RemediationBlock = {
+      block_id: "CP-BLOCK-N-x",
+      items: [findingX.id, findingY.id],
+      parallel_safe: true,
+    };
+    const mkItem = (id: string) => ({
+      finding_id: id,
+      status: "pending" as const,
+      block_id: block.block_id,
+      item_spec: {
+        finding_id: id,
+        concrete_change: `do ${id}`,
+        tests_to_write: [{ name: "t", assertions: ["passes"] }],
+        not_applicable_steps: [],
+      },
+    });
+    return {
+      status: "implementing",
+      plan: {
+        plan_id: "PLAN-1",
+        findings: [findingX, findingY],
+        blocks: [block],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+      },
+      items: { "N-x": mkItem("N-x"), "N-y": mkItem("N-y") },
+      closing_plan: { action: "none" },
+    } as unknown as RemediationState;
+  }
+
+  it("counts an omitted finding and blocks it once the cap (2) is hit, converging instead of looping", async () => {
+    await saveState(makeTwoFindingState());
+
+    // Worker covers N-x but OMITS N-y entirely (no item_results entry).
+    const after1 = await mergeWith([
+      { finding_id: "N-x", status: "resolved", evidence: ["vitest run -> 3 pass"] },
+    ]);
+    // The covered finding lands; the omitted one is accounted but still pending
+    // (one chance left) — NOT silently dropped, NOT blocked yet.
+    expect(after1.items!["N-x"].status).toBe("resolved");
+    expect(after1.items!["N-y"].status).toBe("pending");
+    expect(after1.items!["N-y"].incomplete_coverage_attempts).toBe(1);
+
+    // A second merge still omitting N-y hits the cap → converges to blocked (triage).
+    const after2 = await mergeWith([
+      { finding_id: "N-x", status: "resolved", evidence: ["vitest run -> 3 pass"] },
+    ]);
+    expect(after2.items!["N-y"].incomplete_coverage_attempts).toBe(2);
+    expect(after2.items!["N-y"].status).toBe("blocked");
+    expect(after2.items!["N-y"].failure_reason).toMatch(/omitted this finding/i);
+  });
+
+  it("does not penalize a finding the worker covered via an alias (alias-aware coverage)", async () => {
+    await saveState(makeTwoFindingState());
+    // N-y reported under its obligation alias; N-x under its bare id → both covered,
+    // no omission accounting.
+    const merged = await mergeWith([
+      { finding_id: "N-x", status: "resolved", evidence: ["ok"] },
+      { finding_id: "OBL-Y-01", status: "resolved", evidence: ["ok"] },
+    ]);
+    expect(merged.items!["N-x"].status).toBe("resolved");
+    expect(merged.items!["N-y"].status).toBe("resolved");
+    expect(merged.items!["N-y"].incomplete_coverage_attempts).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Merge-state gate: a self-reported "resolved" node whose tool-owned verify/merge
 // did NOT land its edits must be routed to triage, never left resolved. Regression
 // for the rolling-driver gap where acceptNodeWorktree's {merged} outcome was
