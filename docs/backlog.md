@@ -258,6 +258,12 @@ Standing gotchas worth keeping for any agent (strong or weak):
   echo PASS || echo "FAIL=$?"`. (Mis-reading a masked exit shipped a release whose CI then failed.)
 - **Global `-g` install defers `postinstall`** (npm allow-scripts) → the host-integration deploy silently
   skips; finish with `npm i -g --allow-scripts=audit-tools` or `node "$(npm root -g)/audit-tools/scripts/postinstall.mjs"`.
+- **A global junction to a LIVE working tree silently shadows a registry install.** If the global
+  `audit-tools` is a `Junction` → the working tree (from a prior `npm link`), `npm i -g audit-tools`
+  does NOT replace it, and bins run your working-tree dist; invoking a bin *through* the junction path
+  can also produce odd artifacts (seen: `remediate-code --version` silent via junction, correct when the
+  same dist ran direct). Fix: `npm rm -g audit-tools` FIRST, then reinstall, and verify
+  `(Get-Item <globaldir>).LinkType` is empty before trusting the smoke. (See [[audit-code-global-bin-traps]].)
 - **The Bash tool mangles Windows backslash paths** (`C:\a\b` → `C:ab`) → use forward slashes or the
   PowerShell tool for absolute-path commands.
 - **PowerShell**: assign `foreach` output to a var before piping to `ConvertTo-Json`; `-Filter` is not regex
