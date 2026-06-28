@@ -186,18 +186,20 @@ async function declaredPathsForBlockSafe(
  * scope (from the persisted dispatch plan). The gate adjudicates the node's ACTUAL
  * git edits (ground truth) against these scopes — it never reads a worker
  * self-report. If the plan can't be read (it should always exist for an active
- * rolling session), the gate is skipped rather than enforced against a guessed
- * scope that could falsely block a correct fix.
+ * rolling session), the gate still runs against an EMPTY registry rather than being
+ * skipped: an empty registry owns nothing, so every edit is unowned-and-granted (no
+ * false block from a guessed scope) while the git-probe fail-closed path still fires.
+ * The gate is therefore unconditional — never skipped on host/state discretion (E1).
  */
 async function computeAcceptScope(
   artifactsDir: string,
   runId: string,
-): Promise<{ allBlockScopes: Array<{ block_id: string; write_paths: string[] }> } | undefined> {
+): Promise<{ allBlockScopes: Array<{ block_id: string; write_paths: string[] }> }> {
   let allBlockScopes: Array<{ block_id: string; write_paths: string[] }>;
   try {
     allBlockScopes = blockScopesFromPlan(await readDispatchPlan(artifactsDir, runId, "implement"));
   } catch {
-    return undefined;
+    allBlockScopes = [];
   }
   return { allBlockScopes };
 }
@@ -381,7 +383,7 @@ export async function advanceHostRolling(opts: {
         // base-mutating section is now serialized INSIDE acceptNodeWorktree via the
         // DISTINCT base-branch lock; the outer session lock here still guards the
         // session-state read-modify-write (a different lock path — no double-acquire).
-        writePaths: scope?.allBlockScopes.find((b) => b.block_id === opts.blockId)?.write_paths ?? [],
+        writePaths: scope.allBlockScopes.find((b) => b.block_id === opts.blockId)?.write_paths ?? [],
       });
       // Persist the tool-owned verify/merge outcome so finalization (mergeImplementResults)
       // blocks a node that self-reported resolved but never actually landed (OBL-DS-06).
