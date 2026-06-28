@@ -688,33 +688,31 @@ export function applyGuidanceFile(
 }
 
 /**
- * Headless Codex audit-dispatch driver for the gated A7 live e2e
- * (`tests/audit/a7.test.mjs`, `RUN_CODEX_E2E=1`). Mirrors the NIM rolling-audit
- * e2e but for the codex CLI provider: with `rolling_engine` ON and
- * `provider: "codex"`, `runDeterministicForNextStep` routes the
- * `audit_tasks_completed` review through the in-process rolling engine
- * (`driveRollingAuditDispatch`), which launches the real headless codex CLI per
- * packet. One bounded review result landing in `audit_results.jsonl` (blocked
- * terminal) or the promoted `audit-findings.json` (complete terminal) is proof
- * the dispatch round-tripped real data through ingestion.
+ * Provider-agnostic headless audit-dispatch driver for the gated provider-matrix
+ * live e2e (`tests/audit/provider-matrix-dispatch-e2e.test.mjs`). With
+ * `rolling_engine` ON and any in-process dispatch provider
+ * (`IN_PROCESS_DISPATCH_PROVIDERS`: openai-compatible / codex / opencode),
+ * `runDeterministicForNextStep` routes the `audit_tasks_completed` review through
+ * the in-process rolling engine (`driveRollingAuditDispatch`), which launches the
+ * real backend per packet. One bounded review result landing in
+ * `audit_results.jsonl` (blocked terminal) or the promoted `audit-findings.json`
+ * (complete terminal) is proof the dispatch round-tripped real data through
+ * ingestion — regardless of which provider drove it.
  *
- * The caller must have advanced the audit to planning (so the next obligation is
- * the host-delegation dispatch). This driver owns only the codex rolling
- * dispatch + the result-landing check; fixture/planning setup belongs to the
- * gated test, keeping this production helper free of test-fixture deps.
+ * The caller passes the provider's `sessionConfig` and must have advanced the
+ * audit to planning (so the next obligation is the host-delegation dispatch).
+ * This driver owns only the rolling dispatch + the result-landing check;
+ * fixture/planning setup belongs to the gated test, keeping this production
+ * helper free of test-fixture deps and free of any per-provider branching.
  */
-export async function runCodexHeadlessAuditDispatch(params: {
+export async function runInProcessAuditDispatch(params: {
   root: string;
+  sessionConfig: SessionConfig;
   timeoutMs?: number;
 }): Promise<{ dispatched: boolean }> {
-  const { root } = params;
-  const timeoutMs = params.timeoutMs ?? 120_000;
+  const { root, sessionConfig } = params;
+  const timeoutMs = params.timeoutMs ?? sessionConfig.timeout_ms ?? 120_000;
   const artifactsDir = join(root, ".audit-tools", "audit");
-  const sessionConfig: SessionConfig = {
-    provider: "codex",
-    dispatch: { rolling_engine: true },
-    timeout_ms: timeoutMs,
-  };
 
   // Review results land in one of two places depending on how far the fold gets:
   // the cumulative `audit_results.jsonl` store (run blocks) or the promoted
@@ -730,9 +728,9 @@ export async function runCodexHeadlessAuditDispatch(params: {
       .some((line) => line.trim().length > 0);
   };
 
-  // One next-step drives the whole review frontier through codex in-process; a
-  // rare first-pass total-invalid blocks cleanly with nothing ingested, so a
-  // bounded retry re-dispatches still-pending tasks (mirrors the NIM e2e).
+  // One next-step drives the whole review frontier through the provider
+  // in-process; a rare first-pass total-invalid blocks cleanly with nothing
+  // ingested, so a bounded retry re-dispatches still-pending tasks.
   for (let attempt = 0; attempt < 3 && !landed(); attempt += 1) {
     const result = await runDeterministicForNextStep({
       root,
@@ -754,7 +752,8 @@ export async function runCodexHeadlessAuditDispatch(params: {
     // never fall through to a host-subagent `semantic_review` dispatch step.
     if (result.kind === "semantic_review") {
       throw new Error(
-        "codex rolling dispatch must drive review in-process, not emit a host semantic_review step",
+        `${sessionConfig.provider} rolling dispatch must drive review in-process, ` +
+          "not emit a host semantic_review step",
       );
     }
   }
