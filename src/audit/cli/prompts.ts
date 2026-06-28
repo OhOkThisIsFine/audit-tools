@@ -69,6 +69,7 @@ function buildDispatchDataLines(
   dispatchPlanPath: string,
   dispatchQuotaPath: string | null,
   sessionLimitNote: string,
+  driverInstruction?: string,
 ): string[] {
   return dispatchQuotaPath
     ? [
@@ -80,6 +81,10 @@ function buildDispatchDataLines(
         "Use `max_concurrent_agents` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before dispatching.",
         "",
         "Maintain up to `max_concurrent_agents` subagents running simultaneously. As each completes and its result is captured, immediately dispatch the next pending entry. If you hit a rate limit (429/TPM/RPM), pause until the reset time clears, then continue.",
+        // S-BROKER-WIRING: the tool-chosen driver (delegate the rolling loop to a
+        // dispatcher subagent vs. drive it from the top host). Single-sourced via
+        // renderDispatchDriverInstruction so audit + remediate can't drift.
+        ...(driverInstruction ? ["", driverInstruction] : []),
         "",
         sessionLimitNote,
       ]
@@ -100,6 +105,7 @@ export function renderDispatchReviewPrompt(params: {
   dispatchQuotaPath: string | null;
   hostCanRestrictSubagentTools: boolean;
   hostCanSelectSubagentModel: boolean;
+  driverInstruction?: string;
 }): string {
   const mergeCommand = mergeAndIngestCommand(
     params.artifactsDir,
@@ -120,6 +126,7 @@ export function renderDispatchReviewPrompt(params: {
     params.dispatchPlanPath,
     params.dispatchQuotaPath,
     'If a subagent reports a host session/usage limit (e.g. "hit your session limit · resets <time>") instead of submitting its result, do not immediately re-dispatch it: run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
+    params.driverInstruction,
   );
 
   const quotaCoverageNudge = renderQuotaCoverageNudge(
@@ -274,6 +281,7 @@ export function renderRollingDispatchPrompt(params: {
   dispatchQuotaPath: string | null;
   hostCanRestrictSubagentTools: boolean;
   hostCanSelectSubagentModel: boolean;
+  driverInstruction?: string;
 }): string {
   const mergeCommand = mergeAndIngestCommand(params.artifactsDir, params.runId);
   const continueCommand = nextStepCommand(params.root, params.artifactsDir);
@@ -289,6 +297,7 @@ export function renderRollingDispatchPrompt(params: {
     params.dispatchPlanPath,
     params.dispatchQuotaPath,
     'If a subagent reports a host session/usage limit instead of emitting its result, run merge-and-ingest with the results you did get, then wait until the stated reset time before running next-step to re-dispatch the remaining packets.',
+    params.driverInstruction,
   );
 
   return [

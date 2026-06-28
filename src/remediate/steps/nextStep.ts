@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DO_NOT_TOKEN_WRAP_NOTE, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -1904,6 +1904,17 @@ async function buildImplementDispatchStep(ctx: {
         await mergeImplementResults({ root, artifactsDir }, runId);
         return { kind: "transition", state: await store.loadState() };
       }
+      // S-BROKER-WIRING: pick the dispatch DRIVER (delegate the rolling loop to a
+      // dedicated dispatcher subagent vs. drive it from the top host) off the
+      // single classification + the live frontier/slot count — not host prose.
+      const hostProvider: ResolvedProviderName =
+        (sessionConfigImpl as { provider?: ResolvedProviderName } | null | undefined)?.provider ??
+        "claude-code";
+      const driverSelection = selectDispatchDriver({
+        classification: classifyProvider(hostProvider),
+        eligibleItemCount: rolling.session.frontier.length,
+        slots: rolling.session.slots,
+      });
       const rollMerge = loaderCommand(`merge-implement-results --run-id ${runId}`);
       const rollNext = loaderCommand("next-step");
       const acceptCmd = loaderCommand(`accept-node --id <BLOCK_ID> --run-id ${runId}`);
@@ -1928,6 +1939,8 @@ node and call \`accept-node\` as each finishes.
 
 Concurrency target: **${rolling.session.slots}** subagents at once (the quota
 scheduler's \`max_concurrent_agents\`), NOT a wave cap.
+
+${renderDispatchDriverInstruction(driverSelection, `**${rolling.session.slots}**`)}
 
 Spawn ONE subagent for EACH initial node below. Give the subagent that node's
 \`prompt\`, and set its working directory to the node's **worktree** path. The
