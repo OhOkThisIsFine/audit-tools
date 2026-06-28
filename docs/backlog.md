@@ -206,14 +206,15 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 - **Provider `queryLimits`** deferred — an absent method and a `null` return are handled identically, so stubs
   change nothing; revisit if a provider gains a real proactive rate-limit endpoint.
 - **headroom proxy** — enable + validate the `headroom proxy` (auto-compresses tool-output traffic) in one
-  opt-in session before any global env flip; delete the vestigial `DO_NOT_TOKEN_WRAP_NOTE` in `prompts.ts` if
-  proxy traffic doesn't need it. **Partial progress (2026-06-28):** opentoken command-wrapper plumbing confirmed
+  opt-in session before any global env flip. **Progress (2026-06-28):** opentoken command-wrapper plumbing confirmed
   100% gone from `src/` (the `no-opentoken-guard` test was scanning the dead pre-A12 `packages/*/src` layout →
   vacuously green; fixed to scan `src/` + assert non-vacuous coverage). headroom MCP compression engine validated
-  lossless (original stored, `retrieve` returns byte-identical) and `router:noop`s contract JSON. **Still env-bound:**
-  the HTTP proxy flip is the actual gate — it needs the user's global `ANTHROPIC_BASE_URL` → `127.0.0.1:8787` in a
-  real session (user-owned); until that's validated the note stays (it's still-correct host advice, not removed on
-  partial evidence).
+  lossless (original stored, `retrieve` returns byte-identical) and `router:noop`s contract JSON. **`DO_NOT_TOKEN_WRAP_NOTE`
+  DELETED** — its premise (a command-wrapper corrupting JSON stdout) was specific to the prior opentoken package;
+  headroom doesn't wrap commands (transparent lossless HTTP proxy + noop on contract JSON), so the constraint the
+  note warned against no longer exists. Removed the const + re-export + 4 prompt usages (audit ×2, remediate ×2).
+  **Still env-bound:** the actual HTTP proxy flip — needs the user's global `ANTHROPIC_BASE_URL` → `127.0.0.1:8787`
+  in a real session (user-owned) before any global env flip.
 - **Narrow staleness on prose-heavy artifacts via bounded semantic judgment, not per-field proof.** Prose-heavy
   fields (design_spec narrative, rationales) feed downstream LLM prompts, so a cosmetic edit currently re-fires
   staleness and forces wasteful re-emit even when the meaning is unchanged. The desired narrowing is NOT a
