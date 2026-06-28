@@ -1,5 +1,4 @@
 import {
-  DO_NOT_TOKEN_WRAP_NOTE,
   DISPATCH_PROMPT_HANDOFF_NOTE,
   renderQuotaCoverageNudge,
   buildFrictionTriageBlock,
@@ -154,8 +153,6 @@ export function renderDispatchReviewPrompt(params: {
     "**File access pre-approval:** Each dispatch plan entry includes an `access` object with `read_paths`, `write_paths`, and `forbidden_patterns`. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` and `entry.access.write_paths` for each subagent. Do not grant broad workspace or task-results directory write access. Workers should not access files outside their declared paths.",
     "",
     "**After all packets complete:**",
-    "",
-    DO_NOT_TOKEN_WRAP_NOTE,
     "",
     "Run exactly:",
     "",
@@ -325,8 +322,6 @@ export function renderRollingDispatchPrompt(params: {
     "**File access pre-approval:** Each dispatch plan entry includes an `access` object. If your host supports per-subagent file access restrictions, pre-approve exactly `entry.access.read_paths` for reading and grant write access to that subagent's `entry.result_path` (the one file it writes). Do not grant broader workspace or task-results directory write access.",
     "",
     "**After all packets complete:**",
-    "",
-    DO_NOT_TOKEN_WRAP_NOTE,
     "",
     "Run exactly:",
     "",

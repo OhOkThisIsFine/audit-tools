@@ -18,7 +18,7 @@ this doc is the architecture those track against.
 | F4 | dispatch-broker-and-driver | single gated broker (read-quota / deterministic-local estimate / refuse-over-budget / await-completion) + capability-tiered Y/slot-pull driver + classify capable hosts off cold-start floor |
 | F5 | analyzer-acquisition-engine | own-only-agnostic; acquire ecosystem-native tools on demand (probe→run→normalize via adapter→degrade-to-empty); mechanical run-safety gate + default set + per-run consent, no allowlist |
 | F6 | git-history-mining | owned language-agnostic `git_history.json`: co-change coupling, churn×complexity, author concentration/bus-factor → graph/risk/maintainability |
-| D | deferred-code-slivers | D7 `prompts.ts` `DO_NOT_TOKEN_WRAP_NOTE` deletion (gated), D8 prose-staleness narrowing (gated), D1–D6 surface-external-blocker-only |
+| D | deferred-code-slivers | D7 `prompts.ts` `DO_NOT_TOKEN_WRAP_NOTE` deletion ✅ DONE 2026-06-28 (opentoken-specific; headroom is lossless/noop so the constraint no longer exists), D8 prose-staleness narrowing (gated), D1–D6 surface-external-blocker-only |
 
 ## Reconciled seams (single source of truth per seam)
 

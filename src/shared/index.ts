@@ -839,7 +839,6 @@ export {
 export type { CacheablePromptParts } from "./prompts.js";
 export {
   buildCacheablePrompt,
-  DO_NOT_TOKEN_WRAP_NOTE,
   DISPATCH_PROMPT_HANDOFF_NOTE,
 } from "./prompts.js";
 
