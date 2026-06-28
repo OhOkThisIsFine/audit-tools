@@ -9,7 +9,16 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
-- **Latest lap (2026-06-27): T5 #15 E1 — accept-time write-scope gate made UNCONDITIONAL (enforce-in-tooling).**
+- **Latest lap (2026-06-27): T5 #15 E3 — executor-registry coverage made a LOAD-TIME invariant (enforce-in-tooling). Shipped v0.30.43.**
+  `assertExecutorRegistryCoversPriority()` (`src/audit/orchestrator/nextStep.ts`) runs at module load and throws on a
+  missing OR ambiguous PRIORITY→executor mapping, so the silent runtime "configuration gap" (`selected_executor: null`,
+  a dead-end dispatch step) is now impossible instead of surfaced after a run starts. All PRIORITY ids are covered
+  today (verified) → zero behavior change; the guard makes a future PRIORITY addition without a registry entry fail
+  loudly at load. Regression test mirrors the property (`orchestration.test.mjs`). Full gate green (audit node:test +
+  remediate vitest 2069/2 skipped). Remaining T5 #15 open: X-cluster (minimal-dispatch-contract design lap), C2/C4
+  (incremental graph-build = T5 #12 residual), E2 (worker item_results completeness — verify collapseItemResults
+  coverage first).
+- **Prior lap (2026-06-27): T5 #15 E1 — accept-time write-scope gate made UNCONDITIONAL (enforce-in-tooling).**
   `AcceptNodeWorktreeParams.scope` is now REQUIRED (was optional → `if (params.scope)` could silently skip the
   OBL-DS-06 write-scope gate before the cherry-pick); `computeAcceptScope` no longer returns `undefined` on a
   plan-read failure — it falls back to `{ allBlockScopes: [] }` (empty registry owns nothing → every edit
