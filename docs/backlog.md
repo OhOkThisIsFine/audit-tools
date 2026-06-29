@@ -263,14 +263,15 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   optimization**, a pointless no-op forwarder. Root cause: no prebuilt Windows wheel for `headroom-ai`, so
   `uv tool install headroom-ai --reinstall` builds the Rust core from source and **fails at link** (`error: linking
   with link.exe failed: exit code 1`) — MSVC `link.exe` (Visual Studio C++ Build Tools) is not available; no
-  Windows wheel exists on PyPI (macOS-arm64 + manylinux only). **RESOLVED 2026-06-28 via WSL (Option B) — proxy now
-  RUNS durably:** WSL Ubuntu 26.04 (systemd active), `uv tool install "headroom-ai[proxy]"` (manylinux wheel → `_core`
-  present, no build; the `[proxy]` extra is REQUIRED or it errors "Proxy dependencies not installed"), durable systemd
-  service `headroom-proxy` (`--host 0.0.0.0 --port 8787`, enabled + active, Restart=on-failure). Optimize mode ENABLED,
-  reachable from Windows via WSL2 localhost-forwarding (`http://127.0.0.1:8787`, livez/readyz/health 200, `/v1/messages`
-  forwards intact). Full setup in project memory ([[headroom-proxy-broken-windows-no-rust-core]]). **Still pending
-  (user-owned):** the one opt-in session that confirms contract JSON survives the proxy's compression, before flipping
-  the GLOBAL `ANTHROPIC_BASE_URL`; and a Windows login trigger so WSL (hence the proxy) is up at session start.
+  Windows wheel exists on PyPI (macOS-arm64 + manylinux only). **RESOLVED 2026-06-28 — proxy now runs NATIVELY on
+  Windows** (an interim WSL setup was built then torn down): installed VS Build Tools (VCTools workload), built
+  `headroom-ai[proxy]` 0.27.0 from the `vcvars64` MSVC env (so the real `link.exe` is used, not the MSYS one) →
+  `_core` loads, optimize mode ENABLED. Runs as `headroom.exe proxy --port 8787` via scheduled task `HeadroomProxy`
+  (hidden restart-loop VBS); `127.0.0.1:8787` livez/health 200, `/v1/messages` forwards intact. No WSL/VM/keepalive.
+  Traps captured in project memory ([[headroom-proxy-broken-windows-no-rust-core]]): MCP-server-locks-install on
+  reinstall (remove+readd the `headroom` MCP), `vcvars` env required, every upgrade rebuilds from source (keep the
+  toolchain). **Still pending (user-owned):** the one opt-in session confirming contract JSON survives the proxy's
+  compression before flipping the GLOBAL `ANTHROPIC_BASE_URL` (use the `claude-headroom.cmd` Desktop launcher).
 - **Narrow staleness on prose-heavy artifacts via bounded semantic judgment, not per-field proof.** Prose-heavy
   fields (design_spec narrative, rationales) feed downstream LLM prompts, so a cosmetic edit currently re-fires
   staleness and forces wasteful re-emit even when the meaning is unchanged. The desired narrowing is NOT a
