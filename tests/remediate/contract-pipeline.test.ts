@@ -13,7 +13,6 @@ import {
 } from "../../src/remediate/steps/contractPipelinePrompts.js";
 import { writeContractArtifact } from "../../src/remediate/contractPipeline/artifactStore.js";
 import {
-  admitSubWaveUnderCapacity,
   ownershipSubWaves,
   type OwnershipSchedulerNode,
 } from "../../src/remediate/dispatch/ownershipScheduler.js";
@@ -994,42 +993,6 @@ describe("contract-pipeline validators — shared envelope guard (MNT-86b18f1b)"
 // CE-006/CE-007 claim-retaining triage-retry / redispatch dispositions.
 // ---------------------------------------------------------------------------
 
-describe("CP-M1-BOUNDARY: CE-003 partial-capacity admission is the block_id-ordered PREFIX", () => {
-  const wave = (...ids: string[]): OwnershipSchedulerNode[] =>
-    ids.map((id) => ({ block_id: id, write_paths: [`src/${id}.ts`] }));
-
-  it("with total_slots=2 over [B_a,B_b,B_c] the admitted set is exactly {B_a,B_b} on every run", () => {
-    const sub = wave("B_a", "B_b", "B_c");
-    const run1 = admitSubWaveUnderCapacity(sub, 2);
-    const run2 = admitSubWaveUnderCapacity([...sub].reverse(), 2);
-    expect(run1.admitted.map((n) => n.block_id)).toEqual(["B_a", "B_b"]);
-    expect(run1.deferred.map((n) => n.block_id)).toEqual(["B_c"]);
-    // Input order must not leak: reversed input yields the identical prefix.
-    expect(run2.admitted.map((n) => n.block_id)).toEqual(["B_a", "B_b"]);
-    expect(run2.deferred.map((n) => n.block_id)).toEqual(["B_c"]);
-  });
-
-  it("the deferred suffix is re-offered next wave in the SAME block_id order", () => {
-    const sub = wave("B_1", "B_2", "B_3", "B_4");
-    const first = admitSubWaveUnderCapacity(sub, 2);
-    expect(first.admitted.map((n) => n.block_id)).toEqual(["B_1", "B_2"]);
-    // Next wave re-offers only the deferred suffix, still block_id-ordered.
-    const second = admitSubWaveUnderCapacity(first.deferred, 2);
-    expect(second.admitted.map((n) => n.block_id)).toEqual(["B_3", "B_4"]);
-    expect(second.deferred).toHaveLength(0);
-  });
-
-  it("a cap >= sub-wave size admits everything with an empty deferred suffix; a non-positive cap admits nothing", () => {
-    const sub = wave("B_a", "B_b");
-    const full = admitSubWaveUnderCapacity(sub, 5);
-    expect(full.admitted).toHaveLength(2);
-    expect(full.deferred).toHaveLength(0);
-    const none = admitSubWaveUnderCapacity(sub, 0);
-    expect(none.admitted).toHaveLength(0);
-    expect(none.deferred).toHaveLength(2);
-  });
-});
-
 describe("CP-M1-BOUNDARY: CE-006/CE-007 redispatch + triage-retry are claim-RETAINING (INV-SOO-07/10)", () => {
   it("isReleasingDisposition enumerates redispatch and triage-retry hand-off as claim-RETAINING", () => {
     // Releasing dispositions free the claim.
@@ -1117,19 +1080,6 @@ describe("CP-M5-WIRING: every launch is boundary-gated through the same ownershi
       const ids = wave.map((n) => n.block_id);
       expect(ids.includes("A") && ids.includes("B")).toBe(false);
     }
-  });
-
-  it("partial capacity over a sub-wave admits the block_id-ordered PREFIX and re-offers the suffix in order (fail-2)", () => {
-    // The broker may cap a single sub-wave below its size; the admitted members
-    // are M1-BOUNDARY's block_id-ordered prefix, the deferred suffix re-offered
-    // next wave in the same order — realized dispatch is reproducible, never a
-    // claim-race lottery. This is the SAME admission a redispatch re-enters.
-    const subWave = [node("N_c", "src/c.ts"), node("N_a", "src/a.ts"), node("N_b", "src/b.ts")];
-    const first = admitSubWaveUnderCapacity(subWave, 2);
-    expect(first.admitted.map((n) => n.block_id)).toEqual(["N_a", "N_b"]);
-    expect(first.deferred.map((n) => n.block_id)).toEqual(["N_c"]);
-    const second = admitSubWaveUnderCapacity(first.deferred, 2);
-    expect(second.admitted.map((n) => n.block_id)).toEqual(["N_c"]);
   });
 
   it("a redispatch (CE-007) re-enters the SAME boundary admission while retaining its in-flight claim — never an ungated fresh launch (inv-2, fail-5)", () => {

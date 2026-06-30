@@ -131,45 +131,6 @@ export function classifyObligationChange(
   };
 }
 
-/** An LLM verdict that confirms or overrides the deterministic classification. */
-export interface LlmClassificationVerdict {
-  change_kind: "change" | "addition";
-  /** When the LLM marks a change, the symbols it says are touched (scope anchors). */
-  touched_symbols?: string[];
-  rationale?: string;
-}
-
-/**
- * Merge an LLM verdict onto the deterministic classification, recording the
- * provenance. The LLM may CONFIRM (same verdict) or OVERRIDE (different verdict);
- * either way the result is recorded so the classification is never silent. When
- * the LLM overrides to a change but names no anchors, the deterministically
- * extracted touched symbols are preserved (a change always needs an anchor set).
- */
-export function applyLlmConfirmation(
-  deterministic: ObligationChangeClassification,
-  llm: LlmClassificationVerdict,
-): ObligationChangeClassification {
-  const confirmed = llm.change_kind === deterministic.change_kind;
-  const touched =
-    llm.change_kind === "change"
-      ? dedupe([
-          // Normalize LLM-provided anchors to the same lowercased form the
-          // deterministic extractor uses, so the recorded anchor set is consistent.
-          ...(llm.touched_symbols ?? []).map((s) =>
-            typeof s === "string" ? s.toLowerCase() : s,
-          ),
-          ...deterministic.touched_symbols,
-        ])
-      : [];
-  return {
-    change_kind: llm.change_kind,
-    touched_symbols: touched,
-    determined_by: confirmed ? "llm_confirmed" : "llm_override",
-    ...(llm.rationale ? { rationale: llm.rationale } : {}),
-  };
-}
-
 // ── Anti-rot scope predicate (CE-006) ──────────────────────────────────────────
 
 /**

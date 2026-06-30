@@ -7,7 +7,6 @@ const {
   deriveBrowserExtensionLensesForPath,
   inferBrowserExtensionUnitKind,
   buildBrowserExtensionSurfacesFromGraph,
-  chromeExtensionRiskSignalsForManifest,
 } = await import("../../src/audit/extractors/browserExtension.ts");
 
 // ── isBrowserExtensionManifestPath ───────────────────────────────────────────
@@ -275,78 +274,4 @@ test("output surfaces are sorted by entrypoint then kind", () => {
   assert.equal(surfaces.length, 2);
   assert.equal(surfaces[0].entrypoint, "a/bg.js");
   assert.equal(surfaces[1].entrypoint, "z/content.js");
-});
-
-// ── chromeExtensionRiskSignalsForManifest ────────────────────────────────────
-
-test("chromeExtensionRiskSignalsForManifest returns [] for invalid JSON", () => {
-  assert.deepEqual(chromeExtensionRiskSignalsForManifest("not json :::"), []);
-});
-
-test("chromeExtensionRiskSignalsForManifest returns [] for non-object JSON", () => {
-  assert.deepEqual(chromeExtensionRiskSignalsForManifest('"a string"'), []);
-  assert.deepEqual(chromeExtensionRiskSignalsForManifest("[1,2,3]"), []);
-});
-
-test("chromeExtensionRiskSignalsForManifest returns [] for manifest with no manifest_version", () => {
-  const content = JSON.stringify({ name: "ext", permissions: ["tabs"] });
-  // No manifest_version means isBrowserExtensionManifest returns false.
-  assert.deepEqual(chromeExtensionRiskSignalsForManifest(content), []);
-});
-
-test("chromeExtensionRiskSignalsForManifest returns [] when no high-risk permissions are present", () => {
-  const content = JSON.stringify({
-    manifest_version: 3,
-    background: { service_worker: "sw.js" },
-    permissions: ["storage", "alarms"],
-  });
-  assert.deepEqual(chromeExtensionRiskSignalsForManifest(content), []);
-});
-
-test("chromeExtensionRiskSignalsForManifest returns matched HIGH_RISK tokens from permissions array", () => {
-  const content = JSON.stringify({
-    manifest_version: 3,
-    background: { service_worker: "sw.js" },
-    permissions: ["tabs", "scripting", "storage"],
-  });
-  const result = chromeExtensionRiskSignalsForManifest(content);
-  assert.ok(result.includes("tabs"), "expected 'tabs' in result");
-  assert.ok(result.includes("scripting"), "expected 'scripting' in result");
-  assert.ok(!result.includes("storage"), "expected 'storage' NOT in result");
-});
-
-test("chromeExtensionRiskSignalsForManifest matches tokens in optional_permissions", () => {
-  const content = JSON.stringify({
-    manifest_version: 3,
-    background: { service_worker: "sw.js" },
-    optional_permissions: ["<all_urls>"],
-  });
-  const result = chromeExtensionRiskSignalsForManifest(content);
-  assert.ok(result.includes("<all_urls>"), "expected '<all_urls>' in result");
-});
-
-test("chromeExtensionRiskSignalsForManifest matches tokens in host_permissions", () => {
-  const content = JSON.stringify({
-    manifest_version: 3,
-    background: { service_worker: "sw.js" },
-    host_permissions: ["<all_urls>"],
-  });
-  const result = chromeExtensionRiskSignalsForManifest(content);
-  assert.ok(result.includes("<all_urls>"), "expected '<all_urls>' in result");
-});
-
-test("chromeExtensionRiskSignalsForManifest deduplicates tokens present in multiple permission arrays", () => {
-  const content = JSON.stringify({
-    manifest_version: 3,
-    background: { service_worker: "sw.js" },
-    permissions: ["tabs"],
-    optional_permissions: ["tabs"],
-    host_permissions: ["tabs"],
-  });
-  const result = chromeExtensionRiskSignalsForManifest(content);
-  assert.equal(
-    result.filter((t) => t === "tabs").length,
-    1,
-    "expected 'tabs' to appear exactly once despite being in three arrays",
-  );
 });

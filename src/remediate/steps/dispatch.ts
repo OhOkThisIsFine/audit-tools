@@ -2805,51 +2805,6 @@ function gitBranchExists(root: string, branch: string): boolean {
   return !probe.error && probe.status === 0;
 }
 
-/**
- * The set of repo-relative paths the worker ACTUALLY edited, read from git
- * (tracked modifications + staged + untracked-not-ignored). This is the ground
- * truth for write-scope enforcement; the worker's self-reported `amended_files`
- * is advisory only and is never trusted for the scope gate.
- *
- * Fail-closed: when `root` IS a git repo but a probe errors, returns
- * `{ available: false, reason: "probe_failed" }` so the caller blocks rather than
- * silently trusting an unverifiable edit set. When `root` is not a git repo at
- * all (no worktree workflow, no diff ground truth), returns
- * `{ available: false, reason: "not_a_repo" }` so the caller skips the gate.
- */
-export function gitEditedFiles(root: string): GitEditedFiles {
-  if (!isGitWorkTree(root)) {
-    return { available: false, reason: "not_a_repo", error: "root is not a git work tree" };
-  }
-  // `git diff --name-only HEAD` covers tracked working-tree + staged changes
-  // against the last commit; `ls-files --others --exclude-standard` adds new
-  // untracked files that aren't gitignored.
-  const diff = spawnSync(
-    "git",
-    ["diff", "--name-only", "HEAD"],
-    { cwd: root, encoding: "utf8", shell: false },
-  );
-  if (diff.error || typeof diff.status !== "number" || diff.status !== 0) {
-    const detail = (diff.stderr ?? diff.error?.message ?? "git diff failed").toString().trim();
-    return { available: false, reason: "probe_failed", error: detail };
-  }
-  const others = spawnSync(
-    "git",
-    ["ls-files", "--others", "--exclude-standard"],
-    { cwd: root, encoding: "utf8", shell: false },
-  );
-  if (others.error || typeof others.status !== "number" || others.status !== 0) {
-    const detail = (others.stderr ?? others.error?.message ?? "git ls-files failed").toString().trim();
-    return { available: false, reason: "probe_failed", error: detail };
-  }
-  const files = new Set<string>();
-  for (const line of `${diff.stdout}\n${others.stdout}`.split(/\r?\n/)) {
-    const p = line.trim();
-    if (p.length > 0) files.add(p.replace(/\\/g, "/"));
-  }
-  return { available: true, files };
-}
-
 /** Normalize a declared path (absolute, repo-relative, or back-slashed) to a repo-relative forward-slash string. */
 function toRepoRelative(p: string, root: string): string {
   const normalizedRoot = root.replace(/\\/g, "/").replace(/\/$/, "");

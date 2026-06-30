@@ -121,30 +121,6 @@ export function renderCommand(argv: string[]): string {
   return renderPromptCommand(argv);
 }
 
-export function summarizeLaunchExit(result: {
-  accepted?: boolean;
-  exitCode?: number | null;
-  signal?: string | null;
-  command?: string;
-  stdoutPath?: string;
-  stderrPath?: string;
-  error?: string;
-}): string | null {
-  if (result.accepted !== false && !result.error) {
-    return null;
-  }
-  const parts = [
-    result.signal
-      ? `signal ${result.signal}`
-      : `exit code ${result.exitCode ?? "unknown"}`,
-    result.command ? `command: ${result.command}` : null,
-    result.stdoutPath ? `stdout: ${result.stdoutPath}` : null,
-    result.stderrPath ? `stderr: ${result.stderrPath}` : null,
-    result.error ?? null,
-  ].filter((part): part is string => Boolean(part));
-  return parts.join("; ");
-}
-
 export function taskResultPath(taskResultsDir: string, taskId: string): string {
   return join(taskResultsDir, artifactNameForId(taskId, "json"));
 }

@@ -36,7 +36,6 @@ import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import {
   classifyObligationChange,
-  applyLlmConfirmation,
   buildBaselineSymbolCorpus,
   negativeAssertionIsScoped,
   evaluatePairing,
@@ -123,42 +122,6 @@ describe("classifyObligationChange (deterministic FIRST pass)", () => {
     expect(corpus.has("writerecord")).toBe(true);
     expect(corpus.has("flushbuffer")).toBe(true);
     expect(corpus.has("src/store.ts")).toBe(true);
-  });
-});
-
-// ── inv-2: LLM confirmation / override is recorded ─────────────────────────────
-
-describe("applyLlmConfirmation (recorded judgment)", () => {
-  it("inv-2: records an LLM confirmation that agrees with the deterministic verdict", () => {
-    const det = classifyObligationChange("writeRecord returns ack", new Set(["writerecord"]));
-    const merged = applyLlmConfirmation(det, { change_kind: "change", rationale: "agreed" });
-    expect(merged.change_kind).toBe("change");
-    expect(merged.determined_by).toBe("llm_confirmed");
-    expect(merged.rationale).toBe("agreed");
-    // Deterministically-found anchors are preserved through a confirmation.
-    expect(merged.touched_symbols).toContain("writerecord");
-  });
-
-  it("inv-2: records an LLM override that disagrees, and clears anchors for an addition", () => {
-    const det = classifyObligationChange("writeRecord returns ack", new Set(["writerecord"]));
-    const merged = applyLlmConfirmation(det, {
-      change_kind: "addition",
-      rationale: "the symbol is newly introduced in this change",
-    });
-    expect(merged.change_kind).toBe("addition");
-    expect(merged.determined_by).toBe("llm_override");
-    expect(merged.touched_symbols).toEqual([]);
-  });
-
-  it("inv-2: an override TO a change merges the LLM's anchors with the deterministic ones", () => {
-    const det = classifyObligationChange("adds a new flag", new Set()); // addition
-    const merged = applyLlmConfirmation(det, {
-      change_kind: "change",
-      touched_symbols: ["parseFlags"],
-    });
-    expect(merged.change_kind).toBe("change");
-    expect(merged.determined_by).toBe("llm_override");
-    expect(merged.touched_symbols).toContain("parseflags");
   });
 });
 

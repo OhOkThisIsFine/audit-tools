@@ -17,8 +17,6 @@ const { buildFlowCoverage } =
 const { buildFlowRequeueTasks } =
   await import("../../src/audit/orchestrator/flowRequeue.ts");
 const { buildRequeueTasks } = await import("../../src/audit/orchestrator/requeue.ts");
-const { buildExternalSignalTasks } =
-  await import("../../src/audit/orchestrator/taskBuilder.ts");
 const { buildSelectiveDeepeningTasks } =
   await import("../../src/audit/orchestrator/selectiveDeepening.ts");
 const { ingestAuditResults } =
@@ -1619,45 +1617,6 @@ test("lensVerificationTriggers totalLines: first-owner semantics — second sour
     !steward.tags.includes("trigger:large_lens_surface"),
     "large_lens_surface must NOT fire when first-owner totalLines < 2000",
   );
-});
-
-test("buildExternalSignalTasks skips malformed analyzer results and keeps valid ones", () => {
-  const tasks = buildExternalSignalTasks(
-    {
-      files: [
-        {
-          path: "src/api/auth.ts",
-          unit_ids: ["src-api-auth"],
-          classification_status: "classified",
-          audit_status: "pending",
-          required_lenses: ["security"],
-          completed_lenses: [],
-        },
-      ],
-    },
-    {},
-    [
-      {
-        tool: "semgrep",
-        results: [
-          null,
-          { id: "bad", path: "src/api/auth.ts", category: 7, summary: "oops" },
-          {
-            id: "valid",
-            path: "src/api/auth.ts",
-            category: "security",
-            severity: "error",
-            summary: "Hard-coded credential path needs review",
-            rule: "generic.secrets",
-          },
-        ],
-      },
-    ],
-  );
-
-  assert.equal(tasks.length, 1);
-  assert.equal(tasks[0].task_id, "analyzer:semgrep:security:src/api/auth.ts:valid");
-  assert.equal(tasks[0].priority, "high");
 });
 
 // ── conflictGroups spread-guard tests ────────────────────────────────────────

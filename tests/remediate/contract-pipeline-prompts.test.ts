@@ -3,7 +3,6 @@ import { join } from "node:path";
 import {
   renderContractPipelinePrompt,
   renderContractRepairPrompt,
-  listContractPipelineRoles,
   CONTRACT_PIPELINE_PHASE_ORDER,
 } from "../../src/remediate/steps/contractPipelinePrompts.js";
 import { contractPipelineDir } from "../../src/remediate/contractPipeline/artifactStore.js";
@@ -51,13 +50,6 @@ describe("contract pipeline prompt renderer — all roles", () => {
     "implementation_planning",
     "closing",
   ];
-
-  it("supports all expected role names", () => {
-    const roles = listContractPipelineRoles();
-    for (const role of EXPECTED_ROLES) {
-      expect(roles).toContain(role);
-    }
-  });
 
   it("phase order covers all expected roles", () => {
     for (const role of EXPECTED_ROLES) {

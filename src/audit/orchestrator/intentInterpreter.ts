@@ -155,14 +155,3 @@ export function unresolvedConstraintClauses(
   return unresolved;
 }
 
-/**
- * True when the intent checkpoint has at least one unencodable free_form_intent
- * clause the host has not yet answered. The orchestrator treats this as a
- * not-yet-satisfied `intent_checkpoint_current` obligation so the blocking
- * `confirm_intent` step re-fires (no clause silently dropped).
- */
-export function hasUnresolvedConstraintClauses(
-  checkpoint: IntentCheckpoint | undefined,
-): boolean {
-  return unresolvedConstraintClauses(checkpoint).length > 0;
-}

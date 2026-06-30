@@ -19,7 +19,6 @@ const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.t
 const {
   interpretFreeFormIntentForAudit,
   unresolvedConstraintClauses,
-  hasUnresolvedConstraintClauses,
 } = await import("../../src/audit/orchestrator/intentInterpreter.ts");
 const { interpretFreeFormIntent, runPlanningExecutor } = await import("../../src/audit/orchestrator/planningExecutors.ts");
 const { runIntentCheckpointAutoComplete } = await import("../../src/audit/orchestrator/intentCheckpointExecutor.ts");
@@ -199,7 +198,6 @@ await test("answering the checkpoint question via constraint_clauses satisfies t
       },
     ],
   });
-  assert.equal(hasUnresolvedConstraintClauses(bundle.intent_checkpoint), false);
   assert.equal(
     obligationState(bundle, "intent_checkpoint_current").state,
     "satisfied",
@@ -214,7 +212,6 @@ await test("an empty host_answer does NOT resolve the blocking clause", () => {
       { text: UNENCODABLE, checkpoint_question: question, host_answer: "   " },
     ],
   });
-  assert.equal(hasUnresolvedConstraintClauses(bundle.intent_checkpoint), true);
   assert.equal(
     obligationState(bundle, "intent_checkpoint_current").state,
     "missing",
@@ -229,8 +226,6 @@ await test("headless auto-complete records unencodable clauses instead of droppi
   const recorded = run.updated.intent_checkpoint.constraint_clauses ?? [];
   assert.equal(recorded.length, 1, "the unencodable clause must be recorded");
   assert.ok(recorded[0].host_answer && recorded[0].host_answer.length > 0);
-  // The gate now converges (obligation satisfied on the rewritten checkpoint).
-  assert.equal(hasUnresolvedConstraintClauses(run.updated.intent_checkpoint), false);
 });
 
 await test("headless auto-complete leaves an already-current checkpoint unchanged", () => {

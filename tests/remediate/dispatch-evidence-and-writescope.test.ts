@@ -37,7 +37,6 @@ import {
   enforceWriteScope,
   adjudicateWriteScope,
   verifyCommandsForEdits,
-  gitEditedFiles,
   buildNodeDisposition,
   attributeSiblingRed,
   worktreeBranchForBlock,
@@ -473,31 +472,6 @@ describe("verifyCommandsForEdits — derive per-node verify from touched tests (
       "node --import tsx/esm --test tests/audit/a.test.mjs tests/audit/b.test.mjs",
       "npx vitest run tests/remediate/c.test.ts",
     ]);
-  });
-});
-
-describe("gitEditedFiles — real repo vs non-repo", () => {
-  it("reports not_a_repo for a directory outside any git work tree", async () => {
-    // A freshly-created temp dir under the test tree is still inside the
-    // audit-tools work tree, so create an isolated dir outside it via os.tmpdir.
-    const os = await import("node:os");
-    const fs = await import("node:fs/promises");
-    const base = await fs.mkdtemp(join(os.tmpdir(), "no-git-"));
-    try {
-      const result = gitEditedFiles(base);
-      // os.tmpdir() is not under a git work tree.
-      expect(result.available).toBe(false);
-      if (!result.available) expect(result.reason).toBe("not_a_repo");
-    } finally {
-      await fs.rm(base, { recursive: true, force: true });
-    }
-  });
-
-  it("returns an available edit set when run inside this git repo", () => {
-    // The repo root of audit-tools is a real git work tree.
-    const result = gitEditedFiles(process.cwd());
-    expect(result.available).toBe(true);
-    if (result.available) expect(result.files instanceof Set).toBe(true);
   });
 });
 

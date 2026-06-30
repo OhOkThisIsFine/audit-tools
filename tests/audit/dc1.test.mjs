@@ -25,7 +25,6 @@ const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.t
 const {
   interpretFreeFormIntentForAudit,
   unresolvedConstraintClauses,
-  hasUnresolvedConstraintClauses,
 } = await import("../../src/audit/orchestrator/intentInterpreter.ts");
 const { runIntentCheckpointAutoComplete } = await import(
   "../../src/audit/orchestrator/intentCheckpointExecutor.ts"
@@ -125,7 +124,6 @@ await test("CE-004: a constraint with the right clause_id but a STALE question s
       },
     ],
   });
-  assert.equal(hasUnresolvedConstraintClauses(bundle.intent_checkpoint), false);
   assert.equal(
     obligationState(bundle, "intent_checkpoint_current").state,
     "satisfied",
@@ -283,8 +281,6 @@ await test("headless auto-complete records each clause keyed on clause_id and co
     assert.ok(entry.clause_id && entry.clause_id.length > 0, "each entry carries a clause_id");
     assert.ok(entry.host_answer && entry.host_answer.length > 0);
   }
-  // Gate converges on the rewritten checkpoint (no loop).
-  assert.equal(hasUnresolvedConstraintClauses(run.updated.intent_checkpoint), false);
 });
 
 // ── 4. Single shared interpreter — drift guards ─────────────────────────────

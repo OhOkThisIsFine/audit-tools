@@ -139,89 +139,6 @@ export function computeContentHash(content: string): string {
   return hashContent(content, { length: 16 });
 }
 
-// ── Conversation source auto-registration ─────────────────────────────────────
-
-/**
- * Registration record written into the source manifest for an auto-discovered
- * intake/*.md conversation file (INV-ID-07, INV-ID-04).
- */
-export interface ConversationSourceRecord {
-  path: string;
-  content_hash: string;
-}
-
-/**
- * Scan `<intakeDir>` for `conversation-start.md` and any other `*.md` files,
- * then return IntakeSource entries for any that are not already registered
- * (keyed by path + content-hash, INV-ID-04).
- *
- * REGISTRATION-ONLY: this function reads file contents only to compute hashes;
- * it never writes or creates the .md files (INV-ID-07).
- *
- * Returns the new sources to add. Callers must merge them into the manifest and
- * persist; this function does not mutate any persisted state.
- */
-export async function scanConversationSources(
-  intakeDir: string,
-  existingRecords: ConversationSourceRecord[],
-): Promise<{ sources: IntakeSource[]; records: ConversationSourceRecord[] }> {
-  const { readFile } = await import("node:fs/promises");
-  const candidates: string[] = [];
-
-  // Always check conversation-start.md first.
-  const conversationStart = join(intakeDir, "conversation-start.md");
-  if (existsSync(conversationStart)) {
-    candidates.push(conversationStart);
-  }
-
-  // Scan for other *.md files in the intake dir.
-  if (existsSync(intakeDir)) {
-    try {
-      const entries = await readdir(intakeDir);
-      for (const entry of entries) {
-        if (
-          entry.endsWith(".md") &&
-          entry !== "conversation-start.md" &&
-          entry !== "remediation-brief.md"
-        ) {
-          candidates.push(join(intakeDir, entry));
-        }
-      }
-    } catch {
-      // directory unreadable — skip
-    }
-  }
-
-  const existingByPath = new Map(existingRecords.map((r) => [r.path, r.content_hash]));
-  const newSources: IntakeSource[] = [];
-  const newRecords: ConversationSourceRecord[] = [];
-
-  for (const candidatePath of candidates) {
-    let content: string;
-    try {
-      content = await readFile(candidatePath, "utf8");
-    } catch {
-      continue;
-    }
-    const hash = computeContentHash(content);
-    const existing = existingByPath.get(candidatePath);
-    if (existing === hash) {
-      // Already registered with same content — skip (INV-ID-04 idempotency).
-      continue;
-    }
-    // New or content-changed: register (replace keyed on path).
-    const isConvStart = candidatePath.endsWith("conversation-start.md");
-    newSources.push({
-      type: "conversation",
-      path: candidatePath,
-      label: isConvStart ? "conversation-start" : `intake-${candidatePath.split(/[\\/]/).pop()?.replace(/\.md$/, "") ?? "doc"}`,
-    });
-    newRecords.push({ path: candidatePath, content_hash: hash });
-  }
-
-  return { sources: newSources, records: newRecords };
-}
-
 // ── Findings digest + enumeration ─────────────────────────────────────────────
 
 export const FINDINGS_DIGEST_SCHEMA_VERSION =
@@ -270,12 +187,6 @@ export interface FindingEnumeration {
   schema_version: typeof FINDING_ENUMERATION_SCHEMA_VERSION;
   total_count: number;
   findings: FindingEnumerationEntry[];
-}
-
-/** Marker emitted for document/non-enumerable sources. */
-export interface NonEnumerableMarker {
-  is_enumerable: false;
-  reason: string;
 }
 
 /**
@@ -347,35 +258,6 @@ export function buildFindingEnumeration(report: AuditFindingsReport): FindingEnu
       summary: f.summary,
     })),
   };
-}
-
-/**
- * Persist `findings-digest.json` + `finding-enumeration.json` for an
- * enumerable (structured_audit) source, or `{ is_enumerable: false }` for a
- * document source (INV-ID-08).
- *
- * Content-hash keyed idempotency: if the digest already exists with the same
- * total_count and the same content_hash of the source report, skips the write.
- */
-export async function writeIntakeDigestArtifacts(
-  paths: ReturnType<typeof intakePaths>,
-  report: AuditFindingsReport | null,
-): Promise<void> {
-  if (report === null) {
-    // Document / non-enumerable source.
-    const marker: NonEnumerableMarker = {
-      is_enumerable: false,
-      reason: "source is a document or conversation, not a structured audit report",
-    };
-    await writeJsonFile(paths.findingsDigest, marker);
-    await writeJsonFile(paths.findingEnumeration, marker);
-    return;
-  }
-
-  const digest = buildFindingsDigest(report);
-  const enumeration = buildFindingEnumeration(report);
-  await writeJsonFile(paths.findingsDigest, digest);
-  await writeJsonFile(paths.findingEnumeration, enumeration);
 }
 
 export function sourceManifestsEquivalent(

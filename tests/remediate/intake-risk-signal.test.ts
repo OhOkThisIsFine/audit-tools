@@ -20,7 +20,6 @@ import {
   readIntakeRiskSignal,
   writeIntakeRiskSignal,
   maxRiskTier,
-  riskTierRank,
   type IntakeRiskSignal,
 } from "../../src/remediate/riskSignal.js";
 
@@ -55,12 +54,12 @@ describe("computeIntakeRiskSignal", () => {
     expect(sig.inputs.matched_path_risks.length).toBeGreaterThan(0);
   });
 
-  it("bumps to at least medium on intent-risk keywords alone", () => {
+  it("bumps to medium on intent-risk keywords alone", () => {
     const sig = computeIntakeRiskSignal({
       affectedFiles: ["src/remediate/reporting/render.ts"],
       goals: ["harden the auth token refresh against a security issue"],
     });
-    expect(riskTierRank(sig.tier)).toBeGreaterThanOrEqual(riskTierRank("medium"));
+    expect(sig.tier).toBe("medium");
     expect(sig.inputs.matched_intent_risks).toContain("security");
   });
 
@@ -197,10 +196,8 @@ describe("decompositionRiskEvidence (slice 4 — optimistic-start escalate-on-ev
   });
 });
 
-describe("maxRiskTier / riskTierRank", () => {
-  it("orders the tiers and picks the higher one", () => {
-    expect(riskTierRank("low")).toBeLessThan(riskTierRank("medium"));
-    expect(riskTierRank("medium")).toBeLessThan(riskTierRank("high"));
+describe("maxRiskTier", () => {
+  it("picks the higher tier", () => {
     expect(maxRiskTier("low", "high")).toBe("high");
     expect(maxRiskTier("medium", "low")).toBe("medium");
   });

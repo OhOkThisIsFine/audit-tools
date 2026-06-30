@@ -496,11 +496,6 @@ A \`status: "ok"\` result means the structure is valid; otherwise fix the report
   return { prompt, outputPath, role };
 }
 
-/** Return the ordered list of valid role names. */
-export function listContractPipelineRoles(): string[] {
-  return Object.keys(ROLES);
-}
-
 /** Return the dependency order for pipeline phase progression. */
 export const CONTRACT_PIPELINE_PHASE_ORDER: string[] = [
   "goal_normalization",

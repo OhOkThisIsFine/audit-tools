@@ -88,15 +88,6 @@ export function applyFileCoverage(
   }
 }
 
-export function findUncoveredFiles(
-  matrix: CoverageMatrix,
-): CoverageFileRecord[] {
-  return matrix.files.filter((file) => {
-    if (file.audit_status === "excluded") return false;
-    return file.audit_status !== "complete";
-  });
-}
-
 export function buildRequeueTargets(matrix: CoverageMatrix): Array<{
   path: string;
   missing_lenses: string[];

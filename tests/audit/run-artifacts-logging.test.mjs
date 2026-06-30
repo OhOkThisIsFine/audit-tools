@@ -6,7 +6,6 @@ import { join } from "node:path";
 
 const {
   writeWorkerTaskFiles,
-  writeDispatchBatchFiles,
   clearDispatchFiles,
   getRunPaths,
 } = await import("../../src/audit/io/runArtifacts.ts");
@@ -67,25 +66,6 @@ await test("OBS-226efbae: writeWorkerTaskFiles with no log parameter succeeds on
   } finally {
     await rm(artifactsDir, { recursive: true, force: true });
   }
-});
-
-// ── writeDispatchBatchFiles ──────────────────────────────────────────────────
-
-await test("OBS-226efbae: writeDispatchBatchFiles emits log event with function name when write fails", async () => {
-  // Use a null byte in artifactsDir to force an immediate failure.
-  const badArtifactsDir = join(tmpdir(), "audit-obs-batch-\x00-bad");
-
-  const events = [];
-  const log = { event: (name, data) => events.push({ name, data }) };
-
-  await assert.rejects(
-    () => writeDispatchBatchFiles(badArtifactsDir, [], [], log),
-  );
-
-  assert.equal(events.length, 1, "exactly one log event emitted");
-  assert.equal(events[0].name, "dispatch_io_error");
-  assert.equal(events[0].data.function, "writeDispatchBatchFiles");
-  assert.ok(typeof events[0].data.error === "string" && events[0].data.error.length > 0);
 });
 
 // ── clearDispatchFiles ───────────────────────────────────────────────────────

@@ -35,11 +35,6 @@ export type RiskTier = "low" | "medium" | "high";
 
 const TIER_RANK: Record<RiskTier, number> = { low: 0, medium: 1, high: 2 };
 
-/** Numeric rank for ordering / comparison. */
-export function riskTierRank(tier: RiskTier): number {
-  return TIER_RANK[tier];
-}
-
 /** The higher (more scrutiny) of two tiers. Fail-closed combinator. */
 export function maxRiskTier(a: RiskTier, b: RiskTier): RiskTier {
   return TIER_RANK[a] >= TIER_RANK[b] ? a : b;

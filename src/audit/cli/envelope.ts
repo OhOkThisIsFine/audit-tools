@@ -89,10 +89,6 @@ export function isLlmDispatchExecutor(id: string | null): boolean {
   return id === "agent" || id === "rolling_dispatch_executor";
 }
 
-export function shouldRunInlineExecutor(selectedExecutor: string | null): boolean {
-  return selectedExecutor !== null && !isLlmDispatchExecutor(selectedExecutor);
-}
-
 export function buildBlockedAuditState(params: {
   state: AuditState;
   obligationId: string | null;

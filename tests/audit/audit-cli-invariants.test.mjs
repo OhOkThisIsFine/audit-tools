@@ -189,35 +189,17 @@ test("INV-audit-cli-06: buildEnvelope includes contract_version in output", () =
   assert.equal(envelope.progress_made, true);
 });
 
-// ── INV-audit-cli-07: shouldRunInlineExecutor excludes dispatch executors ──────
-// 'agent' and 'rolling_dispatch_executor' must never be run inline — they
-// require host delegation. null → no executor selected → also not inline.
+// ── INV-audit-cli-07: isLlmDispatchExecutor classifies dispatch executors ──────
+// 'agent' and 'rolling_dispatch_executor' are LLM dispatch executors that require
+// host delegation; local/headless executors are not. null → no executor selected.
 
-const { shouldRunInlineExecutor, isLlmDispatchExecutor } = await import("../../src/audit/cli/envelope.ts");
+const { isLlmDispatchExecutor } = await import("../../src/audit/cli/envelope.ts");
 
 test("INV-audit-cli-07: agent and rolling_dispatch_executor are LLM dispatch executors", () => {
   assert.ok(isLlmDispatchExecutor("agent"), "'agent' is a dispatch executor");
   assert.ok(isLlmDispatchExecutor("rolling_dispatch_executor"), "'rolling_dispatch_executor' is a dispatch executor");
   assert.ok(!isLlmDispatchExecutor("local-subprocess"), "'local-subprocess' is not a dispatch executor");
   assert.ok(!isLlmDispatchExecutor(null), "null is not a dispatch executor");
-});
-
-test("INV-audit-cli-07: shouldRunInlineExecutor returns false for dispatch executors and null", () => {
-  assert.equal(shouldRunInlineExecutor("agent"), false);
-  assert.equal(shouldRunInlineExecutor("rolling_dispatch_executor"), false);
-  assert.equal(shouldRunInlineExecutor(null), false);
-});
-
-test("INV-audit-cli-07: shouldRunInlineExecutor returns true for inline executors", () => {
-  for (const executor of [
-    "local-subprocess",
-    "claude-code",
-    "codex",
-    "graph_enrichment_executor",
-    "design_review_contract_executor",
-  ]) {
-    assert.equal(shouldRunInlineExecutor(executor), true, `${executor} should run inline`);
-  }
 });
 
 // ── INV-audit-cli-08: NextStepParams carries no token-wrap option (COR-0ae3577b) ──
