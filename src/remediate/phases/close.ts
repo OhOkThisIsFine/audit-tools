@@ -949,10 +949,12 @@ function buildRemediationReportMarkdown(
  * state. Failures are non-fatal but recorded via structured RunLogger context
  * (OBS-003) rather than a bare console.warn.
  *
- * The artifacts directory is only deleted on a fully-green close (all items
- * resolved, combined test passed, closing action succeeded). When the run is
- * not fully green — e2e failed, combined test failed, or closing action failed —
- * the artifacts directory is preserved for diagnosis.
+ * The artifacts directory is only deleted on a fully-green close (no blocked
+ * items, combined + e2e tests passed, and the closing action genuinely
+ * completed — succeeded, or was the `action === "none"` no-op). When the run is
+ * not fully green — e2e failed, combined test failed, an item is blocked, or the
+ * closing action failed OR was skipped without completing (e.g. merge-to-base
+ * with no recorded base) — the artifacts directory is preserved for diagnosis.
  */
 async function cleanupTempBranchesAndArtifacts(
   options: OrchestratorOptions,
@@ -1007,10 +1009,19 @@ async function cleanupTempBranchesAndArtifacts(
   const anyBlocked = Object.values(completeState.items ?? {}).some(
     (it) => it.status === "blocked",
   );
+  // A closing action genuinely completed only when it succeeded, OR it was a
+  // skipped no-op (`action === "none"` — nothing was configured to do). A
+  // *skipped non-none* close did NOT complete: e.g. merge-to-base with no
+  // recorded base leaves the run unmerged and returns status "skipped". Treating
+  // that as green would delete the (gitignored, unrecoverable) artifacts dir for
+  // a run that never landed. So skipped is green only for the action=none no-op.
+  const closingCompleted =
+    closingResult.status === "success" ||
+    (closingResult.status === "skipped" && closingResult.action === "none");
   const fullyGreen =
     combinedTest.passed &&
     e2eResult.passed &&
-    closingResult.status !== "failed" &&
+    closingCompleted &&
     !anyBlocked;
 
   if (!fullyGreen) {
@@ -1019,7 +1030,7 @@ async function cleanupTempBranchesAndArtifacts(
       kind: "artifact_write",
       obligation: "closing",
       artifact: options.artifactsDir,
-      note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, closing=${closingResult.status}, anyBlocked=${anyBlocked})`,
+      note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, closing=${closingResult.status}, closingAction=${closingResult.action}, anyBlocked=${anyBlocked})`,
     });
     return;
   }

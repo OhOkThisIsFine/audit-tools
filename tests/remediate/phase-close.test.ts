@@ -989,6 +989,35 @@ describe("runClosePhase", () => {
       expect(existsSync(TEST_DIR)).toBe(true);
     });
 
+    // CP-NODE-4: a skipped NON-none close (e.g. merge-to-base with no recorded
+    // base) did NOT genuinely complete — the run never landed. fullyGreen must be
+    // false so the (gitignored, unrecoverable) artifacts dir is preserved, not
+    // deleted as if the run succeeded.
+    it("preserves artifacts directory when merge-to-base is skipped (no recorded base)", async () => {
+      // Put HEAD on the remediation branch with a committed fix, but write NO
+      // base-branch sidecar → executeClosingAction returns status 'skipped'.
+      execSync("git checkout -b remediation/P1", { cwd: REPO_DIR });
+      writeFileSync(join(REPO_DIR, "fix.txt"), "remediation work");
+      execSync("git add . && git commit -m fix", { cwd: REPO_DIR });
+
+      const state = makeState({
+        closing_plan: { action: "merge-to-base", pre_authorized: true },
+        items: {
+          F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
+        },
+      });
+
+      const next = await runClosePhase(state, BASE_OPTIONS);
+      expect(next.status).toBe("complete");
+
+      const jsonReport = JSON.parse(
+        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
+      );
+      expect(jsonReport.closing_result.status).toBe("skipped");
+      // Artifacts dir preserved: the skipped merge means the run is NOT green.
+      expect(existsSync(TEST_DIR)).toBe(true);
+    });
+
     it("deletes artifacts directory on fully-green close", async () => {
       const state = makeState({
         closing_plan: { action: "none", pre_authorized: true },
