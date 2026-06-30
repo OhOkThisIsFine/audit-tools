@@ -80,6 +80,10 @@ function makeTask(taskId, lens = "correctness", filePaths, overrides = {}) {
 test("FND-OBS-c8d43100: buildSelectiveDeepeningTasks emits a strategy_summary structured log line to stderr", () => {
   const stderrLines = [];
   const origWrite = process.stderr.write.bind(process.stderr);
+  // The info-level strategy_summary line is gated on AUDIT_CODE_VERBOSE (it is
+  // diagnostic noise on a normal run); set it so the contract line is emitted.
+  const prevVerbose = process.env.AUDIT_CODE_VERBOSE;
+  process.env.AUDIT_CODE_VERBOSE = "1";
   process.stderr.write = (chunk) => { stderrLines.push(String(chunk)); return true; };
   try {
     buildSelectiveDeepeningTasks({
@@ -89,6 +93,8 @@ test("FND-OBS-c8d43100: buildSelectiveDeepeningTasks emits a strategy_summary st
     });
   } finally {
     process.stderr.write = origWrite;
+    if (prevVerbose === undefined) delete process.env.AUDIT_CODE_VERBOSE;
+    else process.env.AUDIT_CODE_VERBOSE = prevVerbose;
   }
 
   const summaryLines = stderrLines.filter((l) => {
