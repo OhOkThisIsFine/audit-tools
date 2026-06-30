@@ -544,50 +544,32 @@ test("loadArtifactBundle throws ArtifactSchemaVersionError for mismatched provid
   });
 });
 
-test("audit-code src/ has no circular imports — madge reports zero cycles (ARC-1fa005bb)", async () => {
+test("audit-code src/ has no circular imports — in-process cycle check reports zero cycles (ARC-1fa005bb)", async () => {
   // ARC-1fa005bb: a dep-cycle was alleged (index.ts -> cli.ts -> io/ -> index.ts).
   // The STILL-REAL verdict confirmed the cycle does NOT exist in current source.
   // This regression guard keeps it that way: if any future edit closes a real cycle,
   // the check fails deterministically here before it can reach production.
+  //
+  // The check is fully in-process (built-ins only). It replaces the former
+  // `npx madge --circular` guard — madge is not a declared dependency, so npx
+  // fetched it on demand: the guard was network/cache-dependent and silently
+  // passed when madge failed to resolve. The deterministic walker reads the same
+  // relative-import graph and detects cycles with a colored DFS.
   const { fileURLToPath } = await import("node:url");
   const { dirname, join: pathJoin } = await import("node:path");
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
-  const execFileAsync = promisify(execFile);
+  const { findImportCycles, formatCycle } = await import("./helpers/importCycles.mjs");
 
   const __dir = dirname(fileURLToPath(import.meta.url));
+  const repoRoot = pathJoin(__dir, "..", "..");
   const entrypoint = pathJoin(__dir, "../../src/audit/index.ts");
 
-  // madge --circular with --extensions ts lists cycles; exit code 0 + no cycle
-  // lines in output = no cycles.  In non-TTY (execFile) mode madge writes the
-  // "No circular dependency found!" confirmation to stderr and the processed-file
-  // summary to stdout; cycle entries (if any) go to stdout as well.
-  let stdout = "";
-  let stderr = "";
-  let exitCode = 0;
-  try {
-    const result = await execFileAsync(
-      "npx",
-      ["madge", "--circular", "--extensions", "ts", entrypoint],
-      { cwd: pathJoin(__dir, "..", ".."), shell: true },
-    );
-    stdout = result.stdout;
-    stderr = result.stderr;
-  } catch (err) {
-    // madge exits non-zero when it finds cycles
-    stdout = err.stdout ?? "";
-    stderr = err.stderr ?? "";
-    exitCode = err.code ?? 1;
-  }
+  const cycles = await findImportCycles(entrypoint);
 
-  // Cycle-free: exit code 0 AND "No circular dependency found!" on stderr.
-  const hasNoCycles =
-    exitCode === 0 && stderr.includes("No circular dependency found!");
-  assert.ok(
-    hasNoCycles,
-    `Circular imports detected in packages/audit-code/src/. ` +
-    `madge stdout:\n${stdout}\nmadge stderr:\n${stderr}\n` +
-    `Fix by ensuring no import chain forms a cycle. ` +
-    `(ARC-1fa005bb regression guard)`,
+  assert.deepEqual(
+    cycles,
+    [],
+    `Circular imports detected in src/audit/. ` +
+      `Cycles:\n${cycles.map((c) => "  " + formatCycle(c, repoRoot)).join("\n")}\n` +
+      `Fix by ensuring no import chain forms a cycle. (ARC-1fa005bb regression guard)`,
   );
 });

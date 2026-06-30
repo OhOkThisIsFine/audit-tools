@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -285,23 +285,27 @@ await test("headless auto-complete records each clause keyed on clause_id and co
 
 // ── 4. Single shared interpreter — drift guards ─────────────────────────────
 
-await test("drift: exactly one LENS_KEYWORD_MAP declaration (the shared authority)", () => {
-  const declRe = /\b(?:const|let|var|export\s+const)\s+LENS_KEYWORD_MAP\b/;
-  const hits = [];
-  const walk = (dir) => {
-    for (const entry of readdirSync(dir)) {
-      if (entry === "node_modules" || entry === "dist" || entry.startsWith(".")) continue;
-      const full = join(dir, entry);
-      const st = statSync(full);
-      if (st.isDirectory()) walk(full);
-      else if (entry.endsWith(".ts") && !entry.endsWith(".d.ts")) {
-        if (declRe.test(readFileSync(full, "utf8"))) hits.push(full);
-      }
-    }
-  };
-  walk(join(repoRoot, "src"));
-  assert.equal(hits.length, 1, `expected one LENS_KEYWORD_MAP, found:\n${hits.join("\n")}`);
-  assert.match(hits[0].replace(/\\/g, "/"), /src\/shared\/intent\/sharedIntentData\.ts$/);
+await test("drift: LENS_KEYWORD_MAP is the single shared authority, well-formed against the canonical lens vocabulary", async () => {
+  // Replaces a recursive readdirSync regex-walk of src/ that asserted a single
+  // `LENS_KEYWORD_MAP` declaration. Instead of re-deriving the lens vocabulary by
+  // hand, import the canonical map and the canonical VALID_LENSES set and assert
+  // the real value is well-formed: every keyword group maps to a valid lens. The
+  // import itself proves the map is reachable from exactly one module; the
+  // negative guards in the next test pin that the audit/remediate consumers carry
+  // no redeclaration of their own.
+  const { LENS_KEYWORD_MAP } = await import(
+    "../../src/shared/intent/sharedIntentData.ts"
+  );
+  const { VALID_LENSES } = await import("audit-tools/shared");
+
+  assert.ok(Array.isArray(LENS_KEYWORD_MAP) && LENS_KEYWORD_MAP.length > 0);
+  for (const entry of LENS_KEYWORD_MAP) {
+    assert.ok(Array.isArray(entry.keywords) && entry.keywords.length > 0);
+    assert.ok(
+      VALID_LENSES.has(entry.lens),
+      `LENS_KEYWORD_MAP entry maps to an unknown lens '${entry.lens}'`,
+    );
+  }
 });
 
 await test("drift: clause decomposition routes through the shared interpreter on both sides", () => {

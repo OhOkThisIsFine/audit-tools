@@ -6,12 +6,14 @@ import { fileURLToPath } from "node:url";
 
 // Lockstep guard: the file-lock description in CLAUDE.md must stay in step with
 // the actual backoff/stale constants in the single source of truth
-// (`audit-tools/shared` `quota/fileLock.ts`). The constants are read from the
-// source text (RETRY_INTERVAL_INITIAL_MS / RETRY_INTERVAL_MAX_MS are module-
-// private, STALE_LOCK_MS is exported) so the test needs no new exports and tracks
-// the real values. This closes the drift that left the doc claiming a stale
-// "20ms initial backoff, 250ms max, 20 retries" long after the lock moved to the
-// shared exponential 50ms->500ms backoff with a 30s stale window.
+// (`audit-tools/shared` `quota/fileLock.ts`). The stale threshold is read from
+// the production export (`STALE_LOCK_MS`) — the real runtime value, not a regex
+// scrape. The two RETRY_INTERVAL_* constants are module-private, so they are
+// still read from source text. This closes the drift that left the doc claiming a
+// stale "20ms initial backoff, 250ms max, 20 retries" long after the lock moved
+// to the shared exponential 50ms->500ms backoff with a 30s stale window.
+
+const { STALE_LOCK_MS } = await import("audit-tools/shared");
 
 const here = dirname(fileURLToPath(import.meta.url));
 // tests/audit/ -> repo root
@@ -35,13 +37,14 @@ test("CLAUDE.md file-lock description matches the shared withFileLock constants"
 
   const initialMs = readNumericConst(fileLockSrc, "RETRY_INTERVAL_INITIAL_MS");
   const maxMs = readNumericConst(fileLockSrc, "RETRY_INTERVAL_MAX_MS");
-  const staleMs = readNumericConst(fileLockSrc, "STALE_LOCK_MS");
+  // Stale threshold comes from the production export, not a source scrape.
+  const staleMs = STALE_LOCK_MS;
 
   // Sanity-check we parsed the live values (guards against a regex that silently
   // matched the wrong literal).
   assert.equal(initialMs, 50, "Expected RETRY_INTERVAL_INITIAL_MS === 50 in fileLock.ts");
   assert.equal(maxMs, 500, "Expected RETRY_INTERVAL_MAX_MS === 500 in fileLock.ts");
-  assert.equal(staleMs, 30_000, "Expected STALE_LOCK_MS === 30000 in fileLock.ts");
+  assert.equal(staleMs, 30_000, "Expected STALE_LOCK_MS === 30000 (production export)");
 
   // Locate the single sentence in CLAUDE.md that documents store.ts's lock.
   const lockLine = claudeMd

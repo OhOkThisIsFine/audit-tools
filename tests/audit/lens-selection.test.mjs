@@ -6,6 +6,7 @@ const {
   MANDATORY_LENSES,
   isMandatoryLens,
 } = await import("../../src/audit/orchestrator/lensSelection.ts");
+const { LENSES } = await import("audit-tools/shared");
 
 // ── MANDATORY_LENSES ─────────────────────────────────────────────────────────
 
@@ -25,13 +26,13 @@ test("omitted selection resolves to the full all-lenses set", () => {
   for (const mandatory of MANDATORY_LENSES) {
     assert.ok(set.has(mandatory), `missing mandatory lens: ${mandatory}`);
   }
-  // Should be 11 lenses (from LENSES const).
-  assert.equal(lenses.length, 11);
+  // Full set == the shared canonical lens vocabulary (no magic literal).
+  assert.equal(lenses.length, LENSES.length);
 });
 
 test("null selection also resolves to the full set", () => {
   const lenses = resolveEffectiveLenses(null);
-  assert.equal(lenses.length, 11);
+  assert.equal(lenses.length, LENSES.length);
 });
 
 // ── resolveEffectiveLenses — focused selection ────────────────────────────────
