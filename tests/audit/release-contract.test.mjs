@@ -291,3 +291,58 @@ test("linked and packaged smoke contracts preserve operator diagnostics and isol
   assert.match(packagingDoc, /NODE_AUTH_TOKEN/);
   assert.match(packagingDoc, /NPM_TOKEN/);
 });
+
+test("update-languages writes the real extractor map path and the header points back at the script", async () => {
+  // The generated map lives at src/audit/extractors/languageMap.generated.ts.
+  // From scripts/audit/, the correct relative path is ../../src/audit/extractors.
+  // A stale ../src/extractors target silently writes scripts/src/extractors and
+  // never regenerates the real file.
+  const script = normalizeLineEndings(await readText("scripts/audit/update-languages.mjs"));
+  assert.match(
+    script,
+    /"\.\.\/\.\.\/src\/audit\/extractors\/languageMap\.generated\.ts"/,
+    "update-languages must target src/audit/extractors/languageMap.generated.ts",
+  );
+  assert.doesNotMatch(script, /"\.\.\/src\/extractors\//);
+  assert.match(script, /scripts\/audit\/update-languages\.mjs/);
+
+  // The real generated file exists at the targeted location.
+  const generated = await readText("src/audit/extractors/languageMap.generated.ts");
+  assert.match(generated, /LANGUAGE_BY_EXTENSION/);
+});
+
+test("audit-code test-suite CI triggers on package.json and the workflow file itself", async () => {
+  const testSuite = await readWorkflow("audit-code-test-suite.yml");
+  // A package.json change (scripts/deps) or a workflow change must re-run CI;
+  // otherwise a broken script/dep edit ships without a gate.
+  assert.match(testSuite, /- package\.json\n/);
+  assert.match(testSuite, /- \.github\/workflows\/audit-code-test-suite\.yml\n/);
+});
+
+test("audit-code postinstall fails non-zero when an install step fails (parity with remediate)", async () => {
+  const auditPostinstall = normalizeLineEndings(
+    await readText("scripts/audit/postinstall.mjs"),
+  );
+  const remediatePostinstall = normalizeLineEndings(
+    await readText("scripts/remediate/postinstall.mjs"),
+  );
+  for (const source of [auditPostinstall, remediatePostinstall]) {
+    assert.match(
+      source,
+      /if \(failed > 0\) \{\s*process\.exitCode = 1;\s*\}/,
+      "postinstall must surface failures as a non-zero exit",
+    );
+  }
+});
+
+test("dead-code gate config is single-sourced in knip.json, not split into the npm script", async () => {
+  const knip = JSON.parse(await readText("knip.json"));
+  assert.deepEqual(knip.include, ["exports", "types", "nsExports", "nsTypes"]);
+  const packageJson = JSON.parse(await readText("package.json"));
+  assert.equal(packageJson.scripts?.["check:deadcode"], "knip --no-config-hints");
+  assert.doesNotMatch(
+    packageJson.scripts?.["check:deadcode"] ?? "",
+    /--include/,
+    "issue-type filter must live in knip.json, not inline in the script",
+  );
+});
