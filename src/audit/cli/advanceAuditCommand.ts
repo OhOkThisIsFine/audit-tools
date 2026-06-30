@@ -13,6 +13,14 @@ export async function cmdAdvanceAudit(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
   warnIfNotGitRepo(root);
   const artifactsDir = getArtifactsDir(argv);
+  // Reject mutually-exclusive ingest flags BEFORE any destructive work. The
+  // stale-artifact cleanup below mutates the artifacts dir, so validating the
+  // invocation first guarantees a bad `--results --batch-results` call throws
+  // with artifacts intact instead of after they have already been swept.
+  const batchResultsDir = getBatchResultsDir(argv);
+  if (batchResultsDir && getFlag(argv, "--results")) {
+    throw new Error("Use either --results <file> or --batch-results <dir>, not both.");
+  }
   await cleanupStaleArtifactsDir(artifactsDir);
   await mkdir(artifactsDir, { recursive: true });
   await ensureSupervisorDirs(artifactsDir);
@@ -28,10 +36,6 @@ export async function cmdAdvanceAudit(argv: string[]): Promise<void> {
     throw error;
   }
   const providerName = resolveRunProviderName(argv, sessionConfig);
-  const batchResultsDir = getBatchResultsDir(argv);
-  if (batchResultsDir && getFlag(argv, "--results")) {
-    throw new Error("Use either --results <file> or --batch-results <dir>, not both.");
-  }
   if (batchResultsDir) {
     const result = await ingestBatchAuditResults({
       root,

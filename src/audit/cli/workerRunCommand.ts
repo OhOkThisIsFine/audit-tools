@@ -1,8 +1,8 @@
-import { captureStepBoundaryFriction, normalizeRepoPath, readJsonFile, writeJsonFile } from "audit-tools/shared";
+import { readJsonFile, writeJsonFile } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import type { WorkerResult } from "../types/workerResult.js";
-import { validateAuditResults, formatAuditResultIssues } from "../validation/auditResults.js";
+import { validateAuditResults, formatAuditResultIssues, emitCoverageLineCountFriction } from "../validation/auditResults.js";
 import { runAuditStep } from "./auditStep.js";
 import { buildLineIndexForPaths } from "./lineIndex.js";
 import { WORKER_RESULT_CONTRACT_VERSION, formatAuditResultValidationError } from "./workerResult.js";
@@ -90,31 +90,15 @@ export async function cmdWorkerRun(
             "\n",
         );
         // Route the deliberately-downgraded total_lines!=actual coverage
-        // mismatch through the single friction chokepoint at this ingest locus
-        // (the validator stays pure and only RETURNS the 'warning'). Best-effort:
-        // captureStepBoundaryFriction swallows every failure, so it can never
-        // break the worker-run ingest.
+        // mismatch through the single shared friction chokepoint at this ingest
+        // locus (the validator stays pure and only RETURNS the 'warning'). Same
+        // policy as merge-and-ingest — single-sourced so the two cannot drift.
         if (task.run_id && task.artifacts_dir) {
-          for (const issue of warnings) {
-            if (!issue.field.startsWith("file_coverage[") ||
-                !issue.field.endsWith("].total_lines")) {
-              continue;
-            }
-            const coveragePath = normalizeRepoPath(issue.path ?? issue.field);
-            await captureStepBoundaryFriction(
-              task.artifacts_dir,
-              task.run_id,
-              {
-                eventType: "coverage_total_lines_mismatch",
-                discriminator: `${issue.result_index}:${coveragePath}`,
-                category: "trap",
-                severity: "low",
-                area: "audit result ingest",
-                note: issue.message,
-              },
-              "audit-code",
-            );
-          }
+          await emitCoverageLineCountFriction(
+            task.artifacts_dir,
+            task.run_id,
+            warnings,
+          );
         }
       }
       if (errors.length > 0) {

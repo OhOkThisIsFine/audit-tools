@@ -316,13 +316,25 @@ export async function countLines(path: string): Promise<number> {
 
 export async function listBatchResultFiles(batchDir: string): Promise<string[]> {
   const entries = await readdir(batchDir, { withFileTypes: true });
+  // Admit ONLY canonical result filenames (<stem>_<digest>[.suffix].json). A
+  // bare `*.json` filter would ingest any stray JSON co-located in the dir — a
+  // session-config, a schema pointer, an editor scratch file — as if it were an
+  // audit result. The canonical-name gate is the same one merge-and-ingest uses
+  // to tell real result files apart from spurious ones.
   const files = entries
-    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.toLowerCase().endsWith(".json") &&
+        isCanonicalResultFilename(entry.name),
+    )
     .map((entry) => join(batchDir, entry.name))
     .sort((a, b) => a.localeCompare(b));
 
   if (files.length === 0) {
-    throw new Error(`No JSON audit result files found in ${batchDir}.`);
+    throw new Error(
+      `No canonical audit result files (<stem>_<digest>.json) found in ${batchDir}.`,
+    );
   }
 
   return files;

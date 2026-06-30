@@ -9,8 +9,9 @@ import {
   verifyFindingAnchor,
 } from "../validation/anchorGrounding.js";
 import { loadDispatchResultMap } from "./dispatch.js";
-import { fromBase64Url, getArtifactsDir, getFlag, taskResultPath } from "./args.js";
+import { fromBase64Url, getArtifactsDir, getFlag, getRootDir, taskResultPath } from "./args.js";
 import type { AuditTask } from "../types.js";
+import type { WorkerTask } from "../types/workerSession.js";
 
 export async function cmdValidateResult(argv: string[]): Promise<void> {
   const rawRunId = getFlag(argv, "--run-id");
@@ -58,15 +59,28 @@ export async function cmdValidateResult(argv: string[]): Promise<void> {
   let allTasks: AuditTask[] = [];
   try { allTasks = await readJsonFile<AuditTask[]>(tasksPath); } catch { /* may not exist */ }
 
+  // Ground findings against the CONFIGURED repository root, never process.cwd().
+  // The dispatched run records its repo root in task.json (repo_root); a worker
+  // invoked from any other directory would otherwise re-read cited spans against
+  // the wrong tree and spuriously flag every finding ungrounded. Fall back to
+  // the resolved --root (still not raw cwd) if task.json is absent.
+  let repoRoot = getRootDir(argv);
+  try {
+    const workerTask = await readJsonFile<WorkerTask>(join(runDir, "task.json"));
+    if (typeof workerTask.repo_root === "string" && workerTask.repo_root.trim() !== "") {
+      repoRoot = workerTask.repo_root;
+    }
+  } catch { /* no task.json — fall back to resolved --root */ }
+
   const matchingTasks = allTasks.filter(t => t.task_id === taskId);
   const lineIndex = matchingTasks[0]?.file_line_counts ?? {};
   const issues = validateAuditResults([obj], matchingTasks, { lineIndex });
   const errors = issues.filter(i => i.severity === "error");
 
   // S7 grounding self-check: re-verify each finding against disk (repo root =
-  // cwd; the worker runs from the repository root) before submitting — re-read
-  // the cited verbatim span (tier-1) and run any executable anchor (tier-2), so
-  // the worker fixes a hallucinated quote or a refuted behavior claim first.
+  // the configured run root, resolved above) before submitting — re-read the
+  // cited verbatim span (tier-1) and run any executable anchor (tier-2), so the
+  // worker fixes a hallucinated quote or a refuted behavior claim first.
   // Advisory — it does not change the valid/invalid exit code.
   const rawFindings = (obj as { findings?: unknown }).findings;
   const validFindings: Finding[] = Array.isArray(rawFindings)
@@ -82,8 +96,8 @@ export async function cmdValidateResult(argv: string[]): Promise<void> {
     validFindings,
     ANCHOR_GROUNDING_CONCURRENCY,
     async (finding) => {
-      const tier1 = await verifyFindingGrounding(process.cwd(), finding);
-      const anchor = await verifyFindingAnchor(process.cwd(), finding);
+      const tier1 = await verifyFindingGrounding(repoRoot, finding);
+      const anchor = await verifyFindingAnchor(repoRoot, finding);
       const grounding = combineGroundingWithAnchor(tier1, anchor);
       return grounding.status === "ungrounded"
         ? `${finding.id}: ${grounding.reason ?? "ungrounded"}`
