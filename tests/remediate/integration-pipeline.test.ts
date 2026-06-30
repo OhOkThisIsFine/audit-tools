@@ -1096,33 +1096,33 @@ describe("ownership-gated affected_files amendment", () => {
 describe("infra-node live-surface verification: isInfraModifyingBlock", () => {
   it("block touching nextStep.ts is identified as infra-modifying", () => {
     expect(
-      isInfraModifyingBlock(["packages/remediate-code/src/steps/nextStep.ts"]),
+      isInfraModifyingBlock(["src/remediate/steps/nextStep.ts"]),
     ).toBe(true);
   });
 
   it("block touching dispatch.ts is identified as infra-modifying", () => {
     expect(
-      isInfraModifyingBlock(["packages/remediate-code/src/steps/dispatch.ts"]),
+      isInfraModifyingBlock(["src/remediate/steps/dispatch.ts"]),
     ).toBe(true);
   });
 
   it("block touching store.ts is identified as infra-modifying", () => {
     expect(
-      isInfraModifyingBlock(["packages/remediate-code/src/state/store.ts"]),
+      isInfraModifyingBlock(["src/remediate/state/store.ts"]),
     ).toBe(true);
   });
 
   it("block touching only plan.ts is NOT infra-modifying", () => {
     expect(
-      isInfraModifyingBlock(["packages/remediate-code/src/phases/plan.ts"]),
+      isInfraModifyingBlock(["src/remediate/phases/plan.ts"]),
     ).toBe(false);
   });
 
   it("block with mixed infra and non-infra paths IS infra-modifying", () => {
     expect(
       isInfraModifyingBlock([
-        "packages/remediate-code/src/phases/plan.ts",
-        "packages/remediate-code/src/steps/nextStep.ts",
+        "src/remediate/phases/plan.ts",
+        "src/remediate/steps/nextStep.ts",
       ]),
     ).toBe(true);
   });
@@ -1142,7 +1142,7 @@ describe("infra-node live-surface verification: isInfraModifyingBlock", () => {
             confidence: "high",
             lens: "correctness",
             summary: "Fix the dispatcher.",
-            affected_files: [{ path: "packages/remediate-code/src/steps/nextStep.ts" }],
+            affected_files: [{ path: "src/remediate/steps/nextStep.ts" }],
             evidence: ["src/steps/nextStep.ts:1"],
           },
         ],
@@ -1165,7 +1165,7 @@ describe("infra-node live-surface verification: isInfraModifyingBlock", () => {
             finding_id: "F-001",
             concrete_change: "fix dispatcher",
             no_change: false,
-            touched_files: ["packages/remediate-code/src/steps/nextStep.ts"],
+            touched_files: ["src/remediate/steps/nextStep.ts"],
             tests_to_write: [],
             not_applicable_steps: [],
           },

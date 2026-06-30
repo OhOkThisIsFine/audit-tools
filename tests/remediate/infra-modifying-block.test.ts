@@ -8,55 +8,50 @@ import type { Finding } from "audit-tools/shared";
 // isInfraModifyingBlock — predicate unit tests
 // ---------------------------------------------------------------------------
 
-describe("isInfraModifyingBlock returns true for engine files", () => {
+// Post-A12 the package is single-tree: infra modules live at
+// `src/remediate/...`, NOT the former `packages/remediate-code/src/...`. These
+// cases pin the predicate to the REAL on-disk layout — they would all fail
+// against the stale pre-A12 path list (which matched nothing after the collapse,
+// so every infra block rendered as non-infra).
+describe("isInfraModifyingBlock returns true for engine files (current src/remediate layout)", () => {
   it("predicate returns true when write_paths includes nextStep.ts", () => {
-    expect(
-      isInfraModifyingBlock(["packages/remediate-code/src/steps/nextStep.ts"]),
-    ).toBe(true);
+    expect(isInfraModifyingBlock(["src/remediate/steps/nextStep.ts"])).toBe(true);
   });
 
   it("predicate returns true when write_paths includes dispatch.ts", () => {
-    expect(
-      isInfraModifyingBlock(["packages/remediate-code/src/steps/dispatch.ts"]),
-    ).toBe(true);
+    expect(isInfraModifyingBlock(["src/remediate/steps/dispatch.ts"])).toBe(true);
   });
 
   it("predicate returns true when write_paths includes store.ts", () => {
-    expect(
-      isInfraModifyingBlock(["packages/remediate-code/src/state/store.ts"]),
-    ).toBe(true);
-  });
-
-  it("predicate returns true when write_paths includes waveScheduler.ts", () => {
-    expect(
-      isInfraModifyingBlock(["packages/remediate-code/src/steps/waveScheduler.ts"]),
-    ).toBe(true);
+    expect(isInfraModifyingBlock(["src/remediate/state/store.ts"])).toBe(true);
   });
 
   it("predicate returns true when write_paths includes contractPipeline.ts", () => {
-    expect(
-      isInfraModifyingBlock(["packages/remediate-code/src/steps/contractPipeline.ts"]),
-    ).toBe(true);
+    expect(isInfraModifyingBlock(["src/remediate/steps/contractPipeline.ts"])).toBe(true);
   });
 
   it("predicate returns true when write_paths includes stepWriter.ts", () => {
-    expect(
-      isInfraModifyingBlock(["packages/remediate-code/src/steps/stepWriter.ts"]),
-    ).toBe(true);
+    expect(isInfraModifyingBlock(["src/remediate/steps/stepWriter.ts"])).toBe(true);
   });
 
   it("predicate returns true for absolute path ending in the infra segment", () => {
     expect(
+      isInfraModifyingBlock(["/some/absolute/repo/src/remediate/steps/dispatch.ts"]),
+    ).toBe(true);
+  });
+
+  it("predicate returns true for Windows-style absolute path (backslashes normalized)", () => {
+    expect(
       isInfraModifyingBlock([
-        "/some/absolute/repo/packages/remediate-code/src/steps/dispatch.ts",
+        "C:\\Code\\audit-tools\\src\\remediate\\steps\\dispatch.ts",
       ]),
     ).toBe(true);
   });
 
-  it("predicate returns true for Windows-style absolute path (backslashes)", () => {
+  it("predicate returns true for a worktree absolute path (the dogfood spelling)", () => {
     expect(
       isInfraModifyingBlock([
-        "C:\\Code\\audit-tools\\packages\\remediate-code\\src\\steps\\dispatch.ts",
+        "C:\\Code\\audit-tools\\.audit-tools\\worktrees\\remediate-X\\src\\remediate\\state\\store.ts",
       ]),
     ).toBe(true);
   });
@@ -64,8 +59,8 @@ describe("isInfraModifyingBlock returns true for engine files", () => {
   it("predicate returns true when infra path is mixed with non-infra paths", () => {
     expect(
       isInfraModifyingBlock([
-        "packages/remediate-code/src/phases/plan.ts",
-        "packages/remediate-code/src/steps/dispatch.ts",
+        "src/remediate/phases/plan.ts",
+        "src/remediate/steps/dispatch.ts",
       ]),
     ).toBe(true);
   });
@@ -73,16 +68,12 @@ describe("isInfraModifyingBlock returns true for engine files", () => {
 
 describe("isInfraModifyingBlock returns false for non-infra files", () => {
   it("predicate returns false when write_paths contains only plan.ts", () => {
-    expect(
-      isInfraModifyingBlock(["packages/remediate-code/src/phases/plan.ts"]),
-    ).toBe(false);
+    expect(isInfraModifyingBlock(["src/remediate/phases/plan.ts"])).toBe(false);
   });
 
   it("predicate returns false when write_paths contains only a test file path", () => {
     expect(
-      isInfraModifyingBlock([
-        "packages/remediate-code/tests/next-step.test.ts",
-      ]),
+      isInfraModifyingBlock(["tests/remediate/next-step.test.ts"]),
     ).toBe(false);
   });
 
@@ -90,21 +81,34 @@ describe("isInfraModifyingBlock returns false for non-infra files", () => {
     expect(isInfraModifyingBlock([])).toBe(false);
   });
 
+  it("predicate returns false for the now-removed waveScheduler.ts (inlined into dispatch)", () => {
+    // waveScheduler.ts no longer exists post-inlining; it must NOT be flagged.
+    expect(
+      isInfraModifyingBlock(["src/remediate/steps/waveScheduler.ts"]),
+    ).toBe(false);
+  });
+
   it("predicate returns false for unrelated source files", () => {
     expect(
       isInfraModifyingBlock([
-        "packages/remediate-code/src/intake.ts",
-        "packages/remediate-code/src/reporting/report.ts",
+        "src/remediate/intake.ts",
+        "src/remediate/reporting/report.ts",
       ]),
     ).toBe(false);
   });
 
-  it("predicate returns false for partial path match that is not a suffix", () => {
-    // 'dispatch.ts' as a standalone basename in another package should not match
+  it("predicate returns false for a same-basename file in another area (src/audit)", () => {
+    // 'dispatch.ts' under src/audit must not match src/remediate's infra entry.
     expect(
-      isInfraModifyingBlock([
-        "packages/audit-code/src/steps/dispatch.ts",
-      ]),
+      isInfraModifyingBlock(["src/audit/steps/dispatch.ts"]),
+    ).toBe(false);
+  });
+
+  it("predicate returns false for the stale pre-A12 monorepo path", () => {
+    // The old packages/remediate-code/... spelling no longer corresponds to any
+    // real file and must not be treated as infra.
+    expect(
+      isInfraModifyingBlock(["packages/remediate-code/src/steps/dispatch.ts"]),
     ).toBe(false);
   });
 });
@@ -146,7 +150,7 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
     confidence: "medium",
     lens: "maintainability",
     summary: "Something to fix.",
-    affected_files: [{ path: "packages/remediate-code/src/steps/dispatch.ts" }],
+    affected_files: [{ path: "src/remediate/steps/dispatch.ts" }],
     evidence: [],
     ...overrides,
   };
@@ -209,7 +213,7 @@ describe("implementPrompt includes live-surface verification section for infra-m
 
   it("rendered prompt contains 'Infra-modifying block' heading when isInfraModifyingBlock is true", async () => {
     await makeMinimalState(artifactsDir, [
-      "packages/remediate-code/src/steps/dispatch.ts",
+      "src/remediate/steps/dispatch.ts",
     ]);
 
     const plan = await prepareImplementDispatch(
@@ -228,7 +232,7 @@ describe("implementPrompt includes live-surface verification section for infra-m
     // build-free (no worker-side `npm run build`) to avoid racing the central
     // build's dist/. (Replaces the prior rebuild-instruction expectation.)
     await makeMinimalState(artifactsDir, [
-      "packages/remediate-code/src/steps/dispatch.ts",
+      "src/remediate/steps/dispatch.ts",
     ]);
 
     const plan = await prepareImplementDispatch(
@@ -243,7 +247,7 @@ describe("implementPrompt includes live-surface verification section for infra-m
 
   it("infra section does NOT instruct npm test -w (build-prepending) — uses a build-free runner", async () => {
     await makeMinimalState(artifactsDir, [
-      "packages/remediate-code/src/steps/dispatch.ts",
+      "src/remediate/steps/dispatch.ts",
     ]);
 
     const plan = await prepareImplementDispatch(
@@ -262,7 +266,7 @@ describe("implementPrompt includes live-surface verification section for infra-m
     // brick the live dispatcher; the host owns the central build and any dist
     // rollback. (Replaces the prior 'Snapshot dist' expectation.)
     await makeMinimalState(artifactsDir, [
-      "packages/remediate-code/src/steps/dispatch.ts",
+      "src/remediate/steps/dispatch.ts",
     ]);
 
     const plan = await prepareImplementDispatch(
@@ -277,7 +281,7 @@ describe("implementPrompt includes live-surface verification section for infra-m
 
   it("rendered prompt does NOT contain infra section when isInfraModifyingBlock is false", async () => {
     await makeMinimalState(artifactsDir, [
-      "packages/remediate-code/src/phases/plan.ts",
+      "src/remediate/phases/plan.ts",
     ]);
 
     const plan = await prepareImplementDispatch(
