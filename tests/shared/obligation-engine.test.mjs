@@ -3,12 +3,14 @@
 // authority on order AND membership; only missing/stale are actionable.
 import test from "node:test";
 import assert from "node:assert/strict";
+// Import the SOURCE engine module (not the built dist) so this suite never
+// races the central build's dist/ and exercises the exact code under audit.
 import {
   findFirstActionableObligation,
   findNextObligation,
   advance,
   DEFAULT_MAX_TRANSITIONS,
-} from "../../dist/shared/index.js";
+} from "../../src/shared/engine/obligationEngine.ts";
 
 const PRIORITY = ["a", "b", "c", "d"];
 

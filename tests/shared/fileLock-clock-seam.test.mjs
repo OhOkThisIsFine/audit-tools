@@ -6,34 +6,16 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import {
+  STALE_LOCK_MS,
+  makeClock,
+  withTempDir,
+  tmpLockPath,
+} from "./fileLockTestSupport.mjs";
 
-const { acquireLock, releaseLock, FileLockTimeoutError, STALE_LOCK_MS } =
+const { acquireLock, releaseLock, FileLockTimeoutError } =
   await import("../../src/shared/quota/fileLock.ts");
-
-/** Controllable clock: now() reads it; advance(ms) steps it forward. */
-function makeClock(start = 1_000_000) {
-  let t = start;
-  const now = () => t;
-  now.advance = (ms) => { t += ms; };
-  return now;
-}
-
-async function withTempDir(fn) {
-  const dir = await mkdtemp(join(tmpdir(), "audit-tools-filelock-clock-"));
-  try {
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
-
-function tmpLockPath(dir) {
-  return join(dir, `test-lock-${randomUUID()}.lock`);
-}
 
 test("STALE_LOCK_MS is exported and unchanged (30s)", () => {
   assert.equal(STALE_LOCK_MS, 30_000);
