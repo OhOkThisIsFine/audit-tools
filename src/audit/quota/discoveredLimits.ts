@@ -17,9 +17,29 @@ export interface DiscoveredLimitsCacheEntry {
   requests_per_minute?: number;
   input_tokens_per_minute?: number;
   output_tokens_per_minute?: number;
+  /** Discovered context window for the dispatch model (capability handshake). */
+  context_tokens?: number;
+  /** Discovered output cap for the dispatch model (capability handshake). */
+  output_tokens?: number;
   discovered_at: string;
   source: string;
 }
+
+/**
+ * The single-sourced numeric limit field set — the keys shared by
+ * {@link DiscoveredRateLimits} and {@link DiscoveredLimitsCacheEntry}. Persist,
+ * lookup, and change-detection all iterate this list so no discovered field can
+ * be silently dropped on the cache round-trip. Values stay runtime-discovered;
+ * this only enumerates the field names, never any model-specific limit value.
+ */
+export const DISCOVERED_LIMIT_FIELDS = [
+  "requests_per_minute",
+  "input_tokens_per_minute",
+  "output_tokens_per_minute",
+  "context_tokens",
+  "output_tokens",
+] as const satisfies readonly (keyof DiscoveredRateLimits &
+  keyof DiscoveredLimitsCacheEntry)[];
 
 export interface DiscoveredLimitsCache {
   version: 1;
@@ -71,22 +91,17 @@ export async function updateDiscoveredLimits(
     discovered_at: new Date().toISOString(),
     source: limits.source,
   };
-  if (limits.requests_per_minute != null) {
-    entry.requests_per_minute = limits.requests_per_minute;
-  }
-  if (limits.input_tokens_per_minute != null) {
-    entry.input_tokens_per_minute = limits.input_tokens_per_minute;
-  }
-  if (limits.output_tokens_per_minute != null) {
-    entry.output_tokens_per_minute = limits.output_tokens_per_minute;
+  for (const field of DISCOVERED_LIMIT_FIELDS) {
+    const value = limits[field];
+    if (value != null) {
+      entry[field] = value;
+    }
   }
   // Skip the write if the effective limit values are unchanged (source/timestamp
   // may differ, but only write when a numeric limit actually changed).
   if (
     existing &&
-    existing.requests_per_minute === entry.requests_per_minute &&
-    existing.input_tokens_per_minute === entry.input_tokens_per_minute &&
-    existing.output_tokens_per_minute === entry.output_tokens_per_minute
+    DISCOVERED_LIMIT_FIELDS.every((field) => existing[field] === entry[field])
   ) {
     return;
   }
@@ -100,18 +115,14 @@ export async function lookupDiscoveredLimits(
   const cache = await readDiscoveredLimitsCache();
   const entry = cache.entries[providerModelKey];
   if (!entry) return null;
-  if (
-    entry.requests_per_minute == null &&
-    entry.input_tokens_per_minute == null &&
-    entry.output_tokens_per_minute == null
-  )
+  if (DISCOVERED_LIMIT_FIELDS.every((field) => entry[field] == null)) {
     return null;
-  return {
-    requests_per_minute: entry.requests_per_minute ?? null,
-    input_tokens_per_minute: entry.input_tokens_per_minute ?? null,
-    output_tokens_per_minute: entry.output_tokens_per_minute ?? null,
-    source: entry.source,
-  };
+  }
+  const result: DiscoveredRateLimits = { source: entry.source };
+  for (const field of DISCOVERED_LIMIT_FIELDS) {
+    result[field] = entry[field] ?? null;
+  }
+  return result;
 }
 
 export function mergeDiscoveredLimits(
@@ -124,11 +135,9 @@ export function mergeDiscoveredLimits(
       merged = { ...source };
       continue;
     }
-    merged.requests_per_minute ??= source.requests_per_minute;
-    merged.input_tokens_per_minute ??= source.input_tokens_per_minute;
-    merged.output_tokens_per_minute ??= source.output_tokens_per_minute;
-    merged.context_tokens ??= source.context_tokens;
-    merged.output_tokens ??= source.output_tokens;
+    for (const field of DISCOVERED_LIMIT_FIELDS) {
+      merged[field] ??= source[field];
+    }
   }
   return merged;
 }
