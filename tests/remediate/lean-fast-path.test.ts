@@ -11,6 +11,7 @@ import {
   MAX_FAST_PATH_FINDINGS,
   MAX_FAST_PATH_FILES,
   LEAN_FAST_PATH_SOURCE,
+  LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
 } from "../../src/remediate/steps/leanFastPath.js";
 import { createNextStepHarness, AUDIT_FIXTURE } from "./helpers/nextStepHarness.js";
 
@@ -154,7 +155,10 @@ describe("decideNextStep — lean fast path (integration)", () => {
     // planning to implement (the contract pipeline is still skipped).
     await writeFile(
       review.artifact_paths.lean_light_review_verdict,
-      JSON.stringify({ disposition: "clear" }),
+      JSON.stringify({
+        schema_version: LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
+        disposition: "clear",
+      }),
       "utf8",
     );
     const step = await decideNextStep({ root: REPO_DIR });

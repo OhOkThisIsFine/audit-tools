@@ -13,7 +13,10 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
-import { interpretLeanLightReviewVerdict } from "../../src/remediate/steps/leanFastPath.js";
+import {
+  interpretLeanLightReviewVerdict,
+  LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
+} from "../../src/remediate/steps/leanFastPath.js";
 import { readIntakeRiskSignal } from "../../src/remediate/riskSignal.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 
@@ -23,7 +26,12 @@ const FAST_PATH_FIXTURE = fileURLToPath(
 
 describe("interpretLeanLightReviewVerdict (fail-safe toward escalation)", () => {
   it("clear disposition clears with no concerns", () => {
-    expect(interpretLeanLightReviewVerdict({ disposition: "clear" })).toEqual({
+    expect(
+      interpretLeanLightReviewVerdict({
+        schema_version: LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
+        disposition: "clear",
+      }),
+    ).toEqual({
       disposition: "clear",
       concerns: [],
     });
@@ -32,6 +40,7 @@ describe("interpretLeanLightReviewVerdict (fail-safe toward escalation)", () => 
   it("escalate carries the stated concerns", () => {
     expect(
       interpretLeanLightReviewVerdict({
+        schema_version: LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
         disposition: "escalate",
         concerns: ["FIX-1 breaks a caller"],
       }),
@@ -39,9 +48,24 @@ describe("interpretLeanLightReviewVerdict (fail-safe toward escalation)", () => 
   });
 
   it("escalate with no concern is still an escalation (with a synthesized reason)", () => {
-    const r = interpretLeanLightReviewVerdict({ disposition: "escalate" });
+    const r = interpretLeanLightReviewVerdict({
+      schema_version: LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
+      disposition: "escalate",
+    });
     expect(r.disposition).toBe("escalate");
     expect(r.concerns.length).toBeGreaterThan(0);
+  });
+
+  it("a verdict missing/with a wrong schema_version fails safe to escalate", () => {
+    expect(
+      interpretLeanLightReviewVerdict({ disposition: "clear" }).disposition,
+    ).toBe("escalate");
+    expect(
+      interpretLeanLightReviewVerdict({
+        schema_version: "wrong/v9",
+        disposition: "clear",
+      }).disposition,
+    ).toBe("escalate");
   });
 
   it("a malformed / non-object verdict fails safe to escalate", () => {

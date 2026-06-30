@@ -183,6 +183,18 @@ export function interpretLeanLightReviewVerdict(raw: unknown): {
   if (!isRecord(raw)) {
     return { disposition: "escalate", concerns: ["unreadable light-review verdict"] };
   }
+  // Schema-version gate: a verdict that does not carry the exact expected
+  // schema_version is not a trustworthy light-review emission (it may be a stale,
+  // mis-shaped, or wrong-contract artifact). Fail safe toward escalation rather
+  // than trusting an unversioned `clear`.
+  if (raw.schema_version !== LEAN_LIGHT_REVIEW_SCHEMA_VERSION) {
+    return {
+      disposition: "escalate",
+      concerns: [
+        `light-review verdict schema_version must be "${LEAN_LIGHT_REVIEW_SCHEMA_VERSION}"`,
+      ],
+    };
+  }
   const concerns = Array.isArray(raw.concerns)
     ? raw.concerns.filter((c): c is string => typeof c === "string")
     : [];

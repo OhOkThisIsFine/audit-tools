@@ -363,6 +363,87 @@ describe("clean run: approved judge verdict proceeds to implementation planning"
   });
 });
 
+// ---------------------------------------------------------------------------
+// CP-NODE-3: state-transition equivalence fixture
+//
+// Pins the full phase-progression table of buildNextContractPipelineStep:
+// for each prefix of the artifact chain, the next emitted step advances to the
+// expected phase. This is the behavior-preservation guarantee for the function's
+// state machine — any future (behavior-preserving) decomposition of
+// buildNextContractPipelineStep must keep every transition below identical.
+// ---------------------------------------------------------------------------
+
+describe("CP-NODE-3: buildNextContractPipelineStep state-transition equivalence", () => {
+  // [artifacts already on disk] → [regex the NEXT step's prompt must match].
+  // The single-module `payloads()` fixture keeps every phase a discrete step
+  // (no parallel-wave fan-out; no degenerate collapse for this chain length).
+  const TRANSITIONS: Array<{ present: readonly string[]; expectNext: RegExp }> = [
+    { present: [], expectNext: /Goal Normalization/ },
+    { present: ["goal_spec"], expectNext: /Context Collection/ },
+    { present: ["goal_spec", "context_bundle"], expectNext: /Module Decomposition/ },
+    {
+      present: ["goal_spec", "context_bundle", "module_decomposition"],
+      expectNext: /Contract Drafting/,
+    },
+    {
+      // Single-module decomposition: there are no cross-module seams to
+      // reconcile and finalization is not a separate gate, so the machine
+      // advances straight to the conceptual design critique.
+      present: CHAIN_THROUGH_JUDGE.slice(0, 4),
+      expectNext: /Conceptual Design Critique/,
+    },
+    {
+      present: CHAIN_THROUGH_JUDGE.slice(0, 6),
+      expectNext: /Conceptual Design Critique/,
+    },
+    {
+      present: CHAIN_THROUGH_JUDGE.slice(0, 7),
+      expectNext: /Test and Validator Plan/,
+    },
+    {
+      present: CHAIN_THROUGH_JUDGE.slice(0, 10),
+      expectNext: /Contract Assessment/,
+    },
+    {
+      present: CHAIN_THROUGH_JUDGE.slice(0, 11),
+      expectNext: /Adversarial Critic/,
+    },
+    {
+      present: CHAIN_THROUGH_JUDGE.slice(0, 12),
+      expectNext: /Adversarial Judge/,
+    },
+    {
+      present: CHAIN_THROUGH_JUDGE.slice(0, 13),
+      expectNext: /Implementation Planning/,
+    },
+  ];
+
+  for (const { present, expectNext } of TRANSITIONS) {
+    it(`with [${present.join(", ") || "∅"}] present → next is ${expectNext.source}`, async () => {
+      const all = payloads();
+      for (const name of present) {
+        await writeRawArtifact(name as ContractPipelineArtifactName, all[name as keyof typeof all]);
+      }
+      const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+      expect(step).not.toBeNull();
+      expect(step!.step_kind).toBe("contract_pipeline");
+      expect(await promptOf(step!)).toMatch(expectNext);
+    });
+  }
+
+  it("a fully approved + traceable + grounded chain terminates (returns null — pipeline complete)", async () => {
+    await writeRawChainThroughJudge();
+    // Promote a traceable, source-grounded DAG (cites a real tracked path).
+    const planningStep = await buildNextContractPipelineStep(STEP_OPTIONS);
+    expect(await promptOf(planningStep!)).toMatch(/Implementation Planning/);
+    await writeRawArtifact("implementation_dag", traceableDag());
+    const done = await buildNextContractPipelineStep(STEP_OPTIONS);
+    expect(done).toBeNull();
+    // The promoted plan SURVIVES because its citations grounded.
+    expect(existsSync(intakePaths(ARTIFACTS_DIR).extractedPlan)).toBe(true);
+  });
+});
+
 describe("repair cycle: failing verdict triggers one targeted repair and re-derivation", () => {
   const NEEDS_REPAIR_JUDGE = {
     contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
@@ -758,6 +839,12 @@ describe("M-B3: source-grounded citation gate (repo-tree knownPaths)", () => {
     expect(await promptOf(step!)).toMatch(/Source-Grounded Citation Gate Errors/);
     // The bad DAG was archived and no plan was promoted past the gate.
     expect(existsSync(contractArtifactFilePath(ARTIFACTS_DIR, "implementation_dag"))).toBe(false);
+    // CP-NODE-3: the plan is promoted to extracted-plan.json BEFORE the citation
+    // gate runs; on grounding failure the ungrounded marker must be REMOVED so a
+    // subsequent next-step cannot read it via readExtractedPlanIfPresent and
+    // complete the pipeline on hallucinated citations. No pipelineComplete unless
+    // the promoted plan grounds.
+    expect(existsSync(intakePaths(ARTIFACTS_DIR).extractedPlan)).toBe(false);
   });
 });
 

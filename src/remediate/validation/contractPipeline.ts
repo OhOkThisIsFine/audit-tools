@@ -556,7 +556,6 @@ export function validateImplementationDAG(
   if (!Array.isArray(v.nodes)) {
     pushValidationIssue(issues, `${path}.nodes`, `${path}.nodes must be an array.`);
   } else {
-    const nodeIds = new Set<string>();
     for (const [i, node] of v.nodes.entries()) {
       if (!isRecord(node)) {
         pushValidationIssue(issues, `${path}.nodes[${i}]`, `${path}.nodes[${i}] must be an object.`);
@@ -584,7 +583,16 @@ export function validateImplementationDAG(
           pushValidationIssue(issues, `${path}.nodes[${i}].expected_changes`, `${path}.nodes[${i}].expected_changes must be a string when present.`);
         }
       }
-      if (typeof node.id === "string") nodeIds.add(node.id);
+    }
+  }
+  // Node ids referenced by edges must point at a declared node. The nodeIds set
+  // is built in the node loop above; an edge whose from/to names a non-existent
+  // node is a dangling reference (referential-integrity violation) that would
+  // otherwise promote into a plan whose block dependencies cite phantom nodes.
+  const declaredNodeIds = new Set<string>();
+  if (Array.isArray(v.nodes)) {
+    for (const node of v.nodes) {
+      if (isRecord(node) && typeof node.id === "string") declaredNodeIds.add(node.id);
     }
   }
   if (!Array.isArray(v.edges)) {
@@ -598,6 +606,20 @@ export function validateImplementationDAG(
       requireString(edge.from, `${path}.edges[${i}].from`, issues);
       requireString(edge.to, `${path}.edges[${i}].to`, issues);
       requireOneOf(edge.kind, ["dependency", "verification"], `${path}.edges[${i}].kind`, issues);
+      if (typeof edge.from === "string" && edge.from.length > 0 && !declaredNodeIds.has(edge.from)) {
+        pushValidationIssue(
+          issues,
+          `${path}.edges[${i}].from`,
+          `${path}.edges[${i}].from "${edge.from}" does not reference a declared node id.`,
+        );
+      }
+      if (typeof edge.to === "string" && edge.to.length > 0 && !declaredNodeIds.has(edge.to)) {
+        pushValidationIssue(
+          issues,
+          `${path}.edges[${i}].to`,
+          `${path}.edges[${i}].to "${edge.to}" does not reference a declared node id.`,
+        );
+      }
     }
   }
   requireString(v.created_at, `${path}.created_at`, issues);
