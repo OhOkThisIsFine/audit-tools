@@ -266,7 +266,7 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
     `consent_token` unlocks semgrep/eslint. _Nothing open on this track._ *([[deterministic-analyzers-own-vs-acquire]])*
 
 ### T6 — Deferred / waiting (env-bound or low priority)
-17. A2 finding-quality oracle (needs hand-labeled corpus); A7 multi-host GUI checklist + gated Codex e2e;
+17. A2 finding-quality oracle (needs hand-labeled corpus); A7 multi-host GUI checklist;
     manual OpenCode permission-propagation validation; gated live e2es (`RUN_NIM_E2E` etc.); provider
     `queryLimits` (revisit if a provider gains a proactive endpoint); **headroom proxy** validate-before-flip;
     narrow-staleness on prose-heavy artifacts (bounded semantic judgment, defer until churn is measured).
