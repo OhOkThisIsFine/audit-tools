@@ -123,8 +123,11 @@ export type SharedProviderConfirmationRead =
 export function currentProviderRoster(
   sessionConfig: SessionConfig,
   env: NodeJS.ProcessEnv = process.env,
+  detectCommand?: (command: string) => boolean,
 ): ResolvedProviderName[] {
-  const names = discoverProviders(sessionConfig, env).map((p) => p.name);
+  const names = discoverProviders(sessionConfig, env, detectCommand).map(
+    (p) => p.name,
+  );
   return sortRoster(names);
 }
 
@@ -156,17 +159,32 @@ function rostersEqual(
  * to fall back to it) and stamps the schema version, session-level flag, and
  * confirmation timestamp.
  *
+ * SECURITY (self-spawn exclusion): a provider that `discoverProviders` flags as
+ * `selfSpawnBlocked` (claude-code under `CLAUDECODE`, codex under `CODEX`) is set
+ * `excluded: true` AND carries the machine-readable `self_spawn_blocked` flag, so
+ * it is OUT of the dispatchable pool by default — launching it would self-spawn a
+ * fresh agent from inside an active session of the same agent. The operator can
+ * deliberately re-include it by naming it in `include`; that overrides the
+ * exclusion (the host still always retains the local-subprocess fallback).
+ *
  * @param sessionConfig - Current session config; may be an empty `{}`.
  * @param env           - Process env snapshot; defaults to `process.env`.
  * @param exclude       - Provider names to pre-exclude (from a prior gate).
+ * @param include       - Provider names the operator explicitly opts back IN,
+ *   overriding the default self-spawn-blocked exclusion for those names.
+ * @param detectCommand - Injectable PATH-detection hook, forwarded to
+ *   `discoverProviders` so tests can drive discovery deterministically.
  */
 export function buildSharedProviderConfirmation(
   sessionConfig: SessionConfig = {},
   env: NodeJS.ProcessEnv = process.env,
   exclude: ResolvedProviderName[] = [],
+  include: ResolvedProviderName[] = [],
+  detectCommand?: (command: string) => boolean,
 ): SharedProviderConfirmation {
-  const discovered = discoverProviders(sessionConfig, env);
+  const discovered = discoverProviders(sessionConfig, env, detectCommand);
   const excludeSet = new Set<ResolvedProviderName>(exclude);
+  const includeSet = new Set<ResolvedProviderName>(include);
 
   const pool: ConfirmedPoolEntry[] = [];
 
@@ -182,10 +200,19 @@ export function buildSharedProviderConfirmation(
   }
 
   for (const provider of discovered) {
+    // Self-spawn-blocked providers are excluded from the dispatchable pool by
+    // default; the operator can opt one back in via `include`. An operator-named
+    // `exclude` always wins. The machine-readable flag rides along so downstream
+    // consumers never have to parse `reason`.
+    const blocked = provider.selfSpawnBlocked === true;
+    const operatorIncluded = includeSet.has(provider.name);
+    const excluded =
+      excludeSet.has(provider.name) || (blocked && !operatorIncluded);
     pool.push({
       name: provider.name,
       capability_tier: provider.capabilityTier,
-      excluded: excludeSet.has(provider.name),
+      excluded,
+      ...(blocked ? { self_spawn_blocked: true } : {}),
       reason: provider.reason,
     });
   }

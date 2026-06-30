@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type { FreshSessionProvider, ProviderRateLimits } from "./types.js";
 import {
@@ -6,6 +5,7 @@ import {
   hasConfiguredOpenAiCompatible,
   hasConfiguredOpenCode,
 } from "./providerFactory.js";
+import { commandExists, isSelfSpawnBlocked } from "./providerPathGuard.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -19,6 +19,17 @@ export interface DiscoveredProvider {
   capabilityTier: CapabilityTier;
   quotaState?: ProviderRateLimits | null;
   detected: boolean;
+  /**
+   * Machine-readable self-spawn-blocked flag. True when the provider is detected
+   * on PATH but cannot be launched as a fresh subprocess because the host is
+   * already inside an active session of that same agent (claude-code while
+   * `CLAUDECODE` is set, codex while `CODEX` is set). The Gate-0 confirmation
+   * EXCLUDES a self-spawn-blocked provider from the dispatchable pool unless the
+   * operator explicitly includes it — a free-text `reason` string is advisory
+   * only and must never be the thing a downstream consumer parses to make that
+   * security decision.
+   */
+  selfSpawnBlocked?: boolean;
   reason?: string;
 }
 
@@ -62,13 +73,6 @@ function defaultCapabilityTier(name: ResolvedProviderName): CapabilityTier {
   }
 }
 
-/** Probe PATH for a single command. Returns true if the command resolves. */
-function commandExists(command: string): boolean {
-  const lookupCommand = process.platform === "win32" ? "where" : "which";
-  const result = spawnSync(lookupCommand, [command], { stdio: "ignore" });
-  return result.status === 0;
-}
-
 /**
  * CLI probe table: maps the binary name as it appears on PATH to the canonical
  * ResolvedProviderName and any config command override to try first.
@@ -110,17 +114,22 @@ const CLI_PROBES: CliProbe[] = [
  *
  * @param sessionConfig - Current session config (may be empty `{}`).
  * @param env           - Process env snapshot; defaults to `process.env`.
+ * @param detectCommand - Injectable PATH-detection hook (defaults to the
+ *   single-sourced `commandExists`). Lets tests drive discovery deterministically
+ *   without a real CLI on PATH, so the self-spawn-blocked security obligations are
+ *   testable red-before-green regardless of what is installed in CI.
  */
 export function discoverProviders(
   sessionConfig: SessionConfig,
   env: NodeJS.ProcessEnv = process.env,
+  detectCommand: (command: string) => boolean = commandExists,
 ): DiscoveredProvider[] {
   const discovered: DiscoveredProvider[] = [];
 
   for (const probe of CLI_PROBES) {
     const command =
       (probe.configCommand(sessionConfig) ?? "").trim() || probe.defaultCommand;
-    const available = commandExists(command);
+    const available = detectCommand(command);
 
     if (!available) continue;
 
@@ -140,17 +149,18 @@ export function discoverProviders(
       commandExists: (cmd: string) => cmd === command,
     });
 
-    // If auto-resolution wouldn't pick this provider (e.g. self-spawn blocked),
-    // still surface it — but note the restriction in `reason`.
-    const blocked =
-      (probe.providerName === "claude-code" && Boolean(env.CLAUDECODE)) ||
-      (probe.providerName === "codex" && Boolean(env.CODEX));
+    // Machine-readable self-spawn-blocked flag, derived from the single-sourced
+    // guard. A self-spawn-blocked provider is still SURFACED (the operator may
+    // override) but carries the flag so Gate-0 can EXCLUDE it from the
+    // dispatchable pool without parsing the advisory `reason` string.
+    const blocked = isSelfSpawnBlocked(probe.providerName, env);
 
     discovered.push({
       name: probe.providerName,
       command,
       capabilityTier: defaultCapabilityTier(probe.providerName),
       detected: true,
+      selfSpawnBlocked: blocked,
       reason: blocked
         ? `detected on PATH but cannot self-spawn from within an active ${probe.providerName} session`
         : resolvedName === probe.providerName

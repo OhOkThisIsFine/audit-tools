@@ -37,6 +37,15 @@ export interface ConfirmedPoolEntry {
    * (or by self-spawn guard). Excluded entries are recorded but not dispatched.
    */
   excluded: boolean;
+  /**
+   * Machine-readable self-spawn-blocked flag. True when this provider was
+   * detected on PATH but cannot be launched as a fresh subprocess from inside an
+   * active session of that same agent (claude-code under `CLAUDECODE`, codex
+   * under `CODEX`). Such an entry is `excluded: true` by default — and so out of
+   * the dispatchable pool — unless the operator explicitly re-includes it. This
+   * flag is the security signal; `reason` is advisory text only.
+   */
+  self_spawn_blocked?: boolean;
   /** Optional reason for exclusion or detection restriction. */
   reason?: string;
 }

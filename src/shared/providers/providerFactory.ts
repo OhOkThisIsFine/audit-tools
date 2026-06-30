@@ -1,8 +1,8 @@
-import { spawnSync } from "node:child_process";
 import type {
   FreshSessionProvider,
   OutputConstraintCapability,
 } from "./types.js";
+import { commandExists, isSelfSpawnBlocked } from "./providerPathGuard.js";
 import type {
   ResolvedProviderName,
   SessionConfig,
@@ -51,12 +51,6 @@ export function hasConfiguredOpenAiCompatible(
   return Boolean(config?.base_url?.trim()) && Boolean(config?.model?.trim());
 }
 
-function commandExists(command: string): boolean {
-  const lookupCommand = process.platform === "win32" ? "where" : "which";
-  const result = spawnSync(lookupCommand, [command], { stdio: "ignore" });
-  return result.status === 0;
-}
-
 /**
  * Snapshot of the environment + session-config signals the auto-resolver reads.
  * Captured once so `chooseAutoProvider` is a pure function of these inputs.
@@ -84,17 +78,18 @@ function getAutoProviderContext(
   env: NodeJS.ProcessEnv,
   lookupCommand: (command: string) => boolean,
 ): AutoProviderContext {
-  const insideClaudeCode = Boolean(env.CLAUDECODE);
+  // Self-spawn signals come from the single-sourced guard so the auto-resolver
+  // and Gate-0 discovery agree byte-for-byte on what "inside an active session"
+  // means (the `CLAUDECODE` / `CODEX` in-session env convention).
+  // Note: `CODEX_*` vars in quota/hostLimits.ts denote Anthropic's "Codex
+  // Desktop" originator — a distinct concept from the OpenAI Codex CLI.
+  // These signals are the behavioral contract; regression-tested in
+  // packages/shared/tests/codex-antigravity-providers.test.mjs.
+  const insideClaudeCode = isSelfSpawnBlocked("claude-code", env);
   const claudeCommand = sessionConfig.claude_code?.command ?? "claude";
   const opencodeCommand = sessionConfig.opencode?.command ?? "opencode";
   const codexCommand = sessionConfig.codex?.command ?? "codex";
-  // In-session env signal for the OpenAI Codex CLI: `CODEX=1`, mirroring
-  // the `CLAUDECODE` / `OPENCODE` convention used by other agentic CLIs.
-  // Note: `CODEX_*` vars in quota/hostLimits.ts denote Anthropic's "Codex
-  // Desktop" originator — a distinct concept from the OpenAI Codex CLI.
-  // This signal is the behavioral contract; it is regression-tested in
-  // packages/shared/tests/codex-antigravity-providers.test.mjs.
-  const insideCodex = Boolean(env.CODEX);
+  const insideCodex = isSelfSpawnBlocked("codex", env);
   return {
     inVSCode: (env.TERM_PROGRAM ?? "").toLowerCase() === "vscode",
     insideOpenCode: Boolean(env.OPENCODE),
