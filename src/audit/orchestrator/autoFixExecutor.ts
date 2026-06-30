@@ -88,6 +88,43 @@ function runFormatter(
   }
 }
 
+/**
+ * Group the eligible (non-excluded) disposition file paths by lowercased
+ * extension. Auto-fix formatters MUST run only over the audited in-scope files —
+ * never over `.`/the whole repo (a write-scope violation that would reformat
+ * gitignored, vendored, or out-of-scope sibling files). The returned paths are
+ * the exact targets each formatter is invoked against.
+ */
+export function buildInScopePathsByExtension(
+  bundle: ArtifactBundle,
+): Map<string, string[]> {
+  const byExtension = new Map<string, string[]>();
+  for (const file of bundle.file_disposition!.files) {
+    if (isAuditExcludedStatus(file.status)) continue;
+    const match = file.path.match(/\.([^.]+)$/);
+    if (!match) continue;
+    const extension = match[1].toLowerCase();
+    const paths = byExtension.get(extension) ?? [];
+    paths.push(file.path);
+    byExtension.set(extension, paths);
+  }
+  return byExtension;
+}
+
+/** Collect the in-scope paths whose extension is in `extensions`, sorted+deduped. */
+function pathsForExtensions(
+  byExtension: Map<string, string[]>,
+  extensions: string[],
+): string[] {
+  const collected = new Set<string>();
+  for (const extension of extensions) {
+    for (const path of byExtension.get(extension) ?? []) {
+      collected.add(path);
+    }
+  }
+  return [...collected].sort((a, b) => a.localeCompare(b));
+}
+
 export async function runAutoFixExecutor(
   bundle: ArtifactBundle,
   root: string,
@@ -96,69 +133,68 @@ export async function runAutoFixExecutor(
     throw new Error("Cannot run auto fix executor without file_disposition");
   }
 
-  const extensions = new Set<string>();
-  for (const file of bundle.file_disposition.files) {
-    if (!isAuditExcludedStatus(file.status)) {
-      const match = file.path.match(/\.([^.]+)$/);
-      if (match) {
-        extensions.add(match[1].toLowerCase());
-      }
-    }
-  }
+  const byExtension = buildInScopePathsByExtension(bundle);
 
   const executedTools: string[] = [];
   const failedTools: string[] = [];
   const toolTimings: { tool: string; duration_ms: number }[] = [];
 
-  // JS, TS, HTML, CSS, JSON, YAML, MD
-  if (
-    (await hasPrettierConfig(root)) &&
-    (extensions.has("ts") ||
-      extensions.has("js") ||
-      extensions.has("tsx") ||
-      extensions.has("jsx") ||
-      extensions.has("html") ||
-      extensions.has("css") ||
-      extensions.has("json") ||
-      extensions.has("yml") ||
-      extensions.has("yaml") ||
-      extensions.has("md"))
-  ) {
+  // JS, TS, HTML, CSS, JSON, YAML, MD — restricted to the audited in-scope files.
+  const prettierPaths = pathsForExtensions(byExtension, [
+    "ts",
+    "js",
+    "tsx",
+    "jsx",
+    "html",
+    "css",
+    "json",
+    "yml",
+    "yaml",
+    "md",
+  ]);
+  if (prettierPaths.length > 0 && (await hasPrettierConfig(root))) {
+    const display = `prettier --write (${prettierPaths.length} in-scope file${prettierPaths.length === 1 ? "" : "s"})`;
     runFormatter(root, "prettier", [
       ...resolveNodeTool(
         root,
         join("node_modules", "prettier", "bin", "prettier.cjs"),
-        ["--write", "."],
-        "prettier --write .",
+        ["--write", ...prettierPaths],
+        display,
       ),
-      { command: "prettier", args: ["--write", "."], display: "prettier --write ." },
-      { command: "npx", args: ["--yes", "prettier", "--write", "."], display: "npx --yes prettier --write ." },
+      { command: "prettier", args: ["--write", ...prettierPaths], display },
+      { command: "npx", args: ["--yes", "prettier", "--write", ...prettierPaths], display },
     ], executedTools, failedTools, toolTimings);
   }
 
   // Python
-  if (extensions.has("py")) {
+  const pythonPaths = pathsForExtensions(byExtension, ["py"]);
+  if (pythonPaths.length > 0) {
+    const display = `black (${pythonPaths.length} in-scope file${pythonPaths.length === 1 ? "" : "s"})`;
     runFormatter(root, "black", [
-      { command: "black", args: ["."], display: "black ." },
-      { command: "python", args: ["-m", "black", "."], display: "python -m black ." },
-      { command: "uvx", args: ["black", "."], display: "uvx black ." },
-      { command: "pipx", args: ["run", "black", "."], display: "pipx run black ." },
+      { command: "black", args: [...pythonPaths], display },
+      { command: "python", args: ["-m", "black", ...pythonPaths], display },
+      { command: "uvx", args: ["black", ...pythonPaths], display },
+      { command: "pipx", args: ["run", "black", ...pythonPaths], display },
     ], executedTools, failedTools, toolTimings);
   }
 
   // SQL
-  if (extensions.has("sql")) {
+  const sqlPaths = pathsForExtensions(byExtension, ["sql"]);
+  if (sqlPaths.length > 0) {
+    const display = `sqlfluff fix --force (${sqlPaths.length} in-scope file${sqlPaths.length === 1 ? "" : "s"})`;
     runFormatter(root, "sqlfluff", [
-      { command: "sqlfluff", args: ["fix", "--force", "."], display: "sqlfluff fix --force ." },
-      { command: "uvx", args: ["sqlfluff", "fix", "--force", "."], display: "uvx sqlfluff fix --force ." },
-      { command: "pipx", args: ["run", "sqlfluff", "fix", "--force", "."], display: "pipx run sqlfluff fix --force ." },
+      { command: "sqlfluff", args: ["fix", "--force", ...sqlPaths], display },
+      { command: "uvx", args: ["sqlfluff", "fix", "--force", ...sqlPaths], display },
+      { command: "pipx", args: ["run", "sqlfluff", "fix", "--force", ...sqlPaths], display },
     ], executedTools, failedTools, toolTimings);
   }
 
   // Go
-  if (extensions.has("go")) {
+  const goPaths = pathsForExtensions(byExtension, ["go"]);
+  if (goPaths.length > 0) {
+    const display = `gofmt -w (${goPaths.length} in-scope file${goPaths.length === 1 ? "" : "s"})`;
     runFormatter(root, "gofmt", [
-      { command: "gofmt", args: ["-w", "."], display: "gofmt -w ." },
+      { command: "gofmt", args: ["-w", ...goPaths], display },
     ], executedTools, failedTools, toolTimings);
   }
 

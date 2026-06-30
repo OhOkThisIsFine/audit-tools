@@ -190,16 +190,20 @@ export function buildSelectiveDeepeningTasks(
   // FND-OBS-c8d43100: emit a structured summary of which strategies fired so
   // operators can understand deepening decisions. Deepening is self-bounding
   // (each qualifying item deepened at most once), so there is no budget to report.
-  process.stderr.write(
-    JSON.stringify({
-      ts: new Date().toISOString(),
-      source: "audit-code:selectiveDeepening",
-      event: "strategy_summary",
-      level: "info",
-      created: created.length,
-      strategy_contributions: strategyContributions,
-    }) + "\n",
-  );
+  // This is info-level diagnostic noise — gate it on AUDIT_CODE_VERBOSE so a normal
+  // run's stderr stays clean (matching the reviewPackets verbose-gating pattern).
+  if (process.env.AUDIT_CODE_VERBOSE) {
+    process.stderr.write(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        source: "audit-code:selectiveDeepening",
+        event: "strategy_summary",
+        level: "info",
+        created: created.length,
+        strategy_contributions: strategyContributions,
+      }) + "\n",
+    );
+  }
 
   return created;
 }

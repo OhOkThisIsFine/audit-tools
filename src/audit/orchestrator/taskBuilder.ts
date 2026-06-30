@@ -84,28 +84,6 @@ function taskPriority(
   return base;
 }
 
-function pickAnalyzerLens(category: string): string {
-  const normalized = category.toLowerCase();
-  if (
-    normalized.includes("security") ||
-    normalized.includes("secret") ||
-    normalized.includes("dependency")
-  )
-    return "security";
-  if (normalized.includes("data")) return "data_integrity";
-  if (normalized.includes("tests") || normalized.includes("coverage"))
-    return "tests";
-  if (normalized.includes("reliability") || normalized.includes("concurrency"))
-    return "reliability";
-  if (
-    normalized.includes("maintainability") ||
-    normalized.includes("lint") ||
-    normalized.includes("style")
-  )
-    return "maintainability";
-  return "correctness";
-}
-
 const DEFAULT_FILE_SPLIT_THRESHOLD = 5000;
 const DEFAULT_MAX_TASK_LINES = 3000;
 const DEFAULT_MAX_TASK_FILES = 0;
@@ -273,22 +251,6 @@ function getExternalSignalPaths(
           : null,
       )
       .filter((path): path is string => path !== null),
-  );
-}
-
-function getExternalSignalResults(
-  externalAnalyzerResults?: ExternalAnalyzerResults,
-): ExternalAnalyzerResults["results"] {
-  if (!Array.isArray(externalAnalyzerResults?.results)) {
-    return [];
-  }
-  return externalAnalyzerResults.results.filter(
-    (item): item is ExternalAnalyzerResults["results"][number] =>
-      Boolean(item) &&
-      typeof item.path === "string" &&
-      typeof item.category === "string" &&
-      typeof item.summary === "string" &&
-      typeof item.id === "string",
   );
 }
 
@@ -478,10 +440,5 @@ export function buildChunkedAuditTasks(
     if (priorityDelta !== 0) return priorityDelta;
     return a.task_id.localeCompare(b.task_id);
   });
-}
-
-/** Strip control characters and newlines, then truncate to maxLen. */
-function sanitizeField(value: string, maxLen: number): string {
-  return value.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, maxLen).trimEnd();
 }
 
