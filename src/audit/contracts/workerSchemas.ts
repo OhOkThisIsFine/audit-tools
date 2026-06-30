@@ -62,7 +62,11 @@ export const WorkerAuditTaskSchema = AuditTaskSchema.extend({
           start: z.number().int().min(1),
           end: z.number().int().min(1),
         })
-        .strict(),
+        .strict()
+        .refine((range) => range.end >= range.start, {
+          message: "line range end must be >= start",
+          path: ["end"],
+        }),
     )
     .optional(),
   token_estimate: z.number().min(0).optional(),
