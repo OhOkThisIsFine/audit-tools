@@ -133,14 +133,6 @@ export function detectPythonEcosystem(root: string): boolean {
   return hasAnyMarker(root, ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"]);
 }
 
-export function detectRustEcosystem(root: string): boolean {
-  return hasAnyMarker(root, ["Cargo.toml"]);
-}
-
-export function detectRubyEcosystem(root: string): boolean {
-  return hasAnyMarker(root, ["Gemfile"]);
-}
-
 /**
  * Map a runner to the capability-probe argv (`--version`) and the argv prefix
  * used to run a pinned tool ephemerally. No OS→runner assumption is baked in:

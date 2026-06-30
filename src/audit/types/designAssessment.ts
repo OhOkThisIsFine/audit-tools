@@ -17,12 +17,3 @@ export interface DesignAssessment {
   conceptual_reviewed?: boolean;
 }
 
-/**
- * Derived backward-compat alias: true only when both passes are done.
- */
-export function isDesignReviewed(assessment: DesignAssessment): boolean {
-  return (
-    assessment.contract_reviewed === true &&
-    assessment.conceptual_reviewed === true
-  );
-}

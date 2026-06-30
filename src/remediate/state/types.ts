@@ -86,9 +86,6 @@ export const REMEDIATION_STEP = {
   VERIFY_AGAINST_DOCUMENTATION: "Verify Code Against Documentation",
 } as const;
 
-export type RemediationStepName =
-  (typeof REMEDIATION_STEP)[keyof typeof REMEDIATION_STEP];
-
 export const ItemSpecSchema = z
   .object({
     finding_id: z.string(),
@@ -162,7 +159,6 @@ export const ClosingActionPreviewSchema = z
     commit_message: z.string(),
   })
   .strict();
-export type ClosingActionPreview = z.infer<typeof ClosingActionPreviewSchema>;
 
 export const ClosingPlanSchema = z
   .object({

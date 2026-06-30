@@ -170,15 +170,6 @@ export const LEAN_LIGHT_REVIEW_SCHEMA_VERSION =
 
 export type LeanLightReviewDisposition = "clear" | "escalate";
 
-/** The verdict the host writes after the light adversarial pass. */
-export interface LeanLightReviewVerdict {
-  schema_version: typeof LEAN_LIGHT_REVIEW_SCHEMA_VERSION;
-  disposition: LeanLightReviewDisposition;
-  /** The concerns that justify routing to the full pipeline — required (non-empty) when escalating. */
-  concerns?: string[];
-  created_at?: string;
-}
-
 /**
  * Interpret a host-written light-review verdict, fail-safe toward escalation:
  * any malformed / ambiguous verdict, or an `escalate` with no stated concern,

@@ -154,5 +154,3 @@ export function gitHistoryRiskSignals(
 
 export type { GitHistory } from "audit-tools/shared";
 export { GIT_CO_CHANGE_EDGE_KIND, GIT_CO_CHANGE_CATEGORY };
-export type RiskRegisterForMerge = RiskRegister;
-export type RiskItemForMerge = RiskItem;

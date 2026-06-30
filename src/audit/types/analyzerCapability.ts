@@ -8,9 +8,6 @@ import { AnalyzerResolutionSchema } from "../extractors/analyzers/types.js";
 // live in `graph_bundle.json` (with `analyzers_used[]` provenance).
 
 export const AnalyzerCapabilityStatusSchema = z.enum(["applied", "omitted"]);
-export type AnalyzerCapabilityStatus = z.infer<
-  typeof AnalyzerCapabilityStatusSchema
->;
 
 export const AnalyzerCapabilityEntrySchema = z
   .object({

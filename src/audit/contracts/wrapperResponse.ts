@@ -103,5 +103,3 @@ export const AuditCodeResponseSchema = z
     handoff: HandoffSchema.optional(),
   })
   .strict();
-
-export type AuditCodeResponse = z.infer<typeof AuditCodeResponseSchema>;

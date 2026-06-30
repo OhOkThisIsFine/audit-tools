@@ -48,8 +48,6 @@ export interface ActiveReviewRun {
   worker_command: string[];
 }
 
-export const CONFIG_ERROR_BLOCKER_PREFIX = "config-error:";
-
 export interface AuditCodeHandoff {
   status: AuditTopLevelStatus;
   repo_root: string;

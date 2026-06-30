@@ -34,11 +34,6 @@ export function phaseCutFilePath(artifactsDir: string): string {
   return join(contractPipelineDir(artifactsDir), PHASE_CUT_FILE);
 }
 
-/** Derive the cut payload from a finalized-module-contracts payload (pure). */
-export function derivePhaseCutPayload(finalizedContractsPayload: unknown): PhaseCut {
-  return derivePhaseCut(phaseCutModulesFromContracts(finalizedContractsPayload));
-}
-
 /** Read the persisted cut, or null if it has not been written yet. */
 export async function readPhaseCutArtifact(
   artifactsDir: string,

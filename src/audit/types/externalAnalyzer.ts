@@ -51,9 +51,6 @@ export const ExternalAnalyzerOwnershipRootSchema = z
     reason: z.string().optional(),
   })
   .strict();
-export type ExternalAnalyzerOwnershipRoot = z.infer<
-  typeof ExternalAnalyzerOwnershipRootSchema
->;
 
 export const ExternalAnalyzerToolStatusSchema = z
   .object({

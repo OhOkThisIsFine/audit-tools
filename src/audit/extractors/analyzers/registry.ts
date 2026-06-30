@@ -24,10 +24,6 @@ export const ANALYZER_REGISTRY: LanguageAnalyzer[] = [
   sqlAnalyzer,
 ];
 
-export function getAnalyzerById(id: string): LanguageAnalyzer | undefined {
-  return ANALYZER_REGISTRY.find((analyzer) => analyzer.id === id);
-}
-
 // F5 external analyzer acquisition engine (on-demand ecosystem-native tools run
 // ephemerally + normalized through the adapter seam). Re-exported here so the
 // analyzer registry is the single entry point for both the in-tree
@@ -42,8 +38,6 @@ export {
   resolveBinaryCandidates,
   detectNodeEcosystem,
   detectPythonEcosystem,
-  detectRustEcosystem,
-  detectRubyEcosystem,
 } from "./acquisitionEngine.js";
 export type {
   EcosystemRunner,

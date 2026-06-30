@@ -21,7 +21,6 @@ export const FlowCoverageRecordSchema = z
     notes: z.array(z.string()).optional(),
   })
   .strict();
-export type FlowCoverageRecord = z.infer<typeof FlowCoverageRecordSchema>;
 
 /** Aggregated flow coverage written beside the critical flow manifest. */
 export const FlowCoverageManifestSchema = z

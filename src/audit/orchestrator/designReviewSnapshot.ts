@@ -73,13 +73,6 @@ export function designReviewSnapshotPath(
   return join(snapshotDir(artifactsDir), `${pass}.json`);
 }
 
-export function designReviewSnapshotExists(
-  artifactsDir: string,
-  pass: DesignReviewPass,
-): boolean {
-  return existsSync(designReviewSnapshotPath(artifactsDir, pass));
-}
-
 export async function readDesignReviewSnapshot(
   artifactsDir: string,
   pass: DesignReviewPass,

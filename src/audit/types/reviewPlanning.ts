@@ -90,7 +90,6 @@ export const PacketQualitySchema = z.object({
   largest_unexplained_packet_id: z.string().optional(),
   largest_unexplained_packet_files: z.number(),
 });
-export type PacketQuality = z.infer<typeof PacketQualitySchema>;
 
 export const AuditPlanMetricsSchema = z.object({
   generated_at: z.string(),
