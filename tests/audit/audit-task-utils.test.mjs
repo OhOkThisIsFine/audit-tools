@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 const { LENS_ORDER, priorityRank, sortLenses, computeRiskEstimate } =
   await import("../../src/audit/orchestrator/auditTaskUtils.ts");
 const { LENS_REGISTRY, ALL_LENSES, isLens } = await import("../../src/audit/types.ts");
+const { LENSES } = await import("audit-tools/shared");
 
 // ── priorityRank ──────────────────────────────────────────────────────────────
 
@@ -150,8 +151,8 @@ test("LENS_REGISTRY covers all ALL_LENSES entries", () => {
   const registryIds = LENS_REGISTRY.map((d) => d.id);
   assert.equal(
     registryIds.length,
-    11,
-    "LENS_REGISTRY should have 11 entries (one per lens)",
+    LENSES.length,
+    "LENS_REGISTRY should have one entry per canonical lens (LENSES)",
   );
   for (const lens of ALL_LENSES) {
     assert.ok(
