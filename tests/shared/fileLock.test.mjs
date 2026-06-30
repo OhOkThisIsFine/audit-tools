@@ -1,41 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, utimes, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm, writeFile, utimes, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import {
+  STALE_LOCK_MS,
+  withTempDir,
+  tmpLockPath,
+  makeCapturingLogger,
+} from "./fileLockTestSupport.mjs";
 
 const { acquireLock, releaseLock, withFileLock, FileLockTimeoutError } =
   await import("../../src/shared/quota/fileLock.ts");
 
-/**
- * Minimal in-memory RunLogger stand-in that captures event calls without
- * writing to disk. Mirrors the RunLogger.event(RunLogEvent) signature.
- */
-function makeCapturingLogger() {
-  const events = [];
-  return {
-    events,
-    event(ev) {
-      events.push({ ...ev });
-    },
-  };
-}
-
-/** Create a unique lock path inside the OS temp dir (does not create the file). */
-function tmpLockPath(dir) {
-  return join(dir, `test-lock-${randomUUID()}.lock`);
-}
-
-/** Utility: run fn with a fresh temp dir, clean up after regardless. */
-async function withTempDir(fn) {
-  const dir = await mkdtemp(join(tmpdir(), "audit-tools-filelock-"));
-  try {
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+// A back-dated mtime guaranteed to read as stale: any time older than the
+// exported STALE_LOCK_MS threshold qualifies, so derive it from the export
+// (drift-guard) rather than a hand-copied 60_000 literal.
+const STALE_BACKDATE_MS = STALE_LOCK_MS * 2;
 
 // ---------------------------------------------------------------------------
 // 1. FileLockTimeoutError shape
@@ -143,9 +124,9 @@ test("acquireLock unlinks a stale lock file and acquires successfully", async ()
   await withTempDir(async (dir) => {
     const lockPath = tmpLockPath(dir);
 
-    // Write the lock file and back-date its mtime by 60 s (well past the 30 s stale threshold).
+    // Write the lock file and back-date its mtime well past the STALE_LOCK_MS stale threshold.
     await writeFile(lockPath, "", { flag: "wx" });
-    const past = new Date(Date.now() - 60_000);
+    const past = new Date(Date.now() - STALE_BACKDATE_MS);
     await utimes(lockPath, past, past);
 
     // acquireLock should detect the stale lock, unlink it, and succeed.
@@ -178,9 +159,9 @@ test("stale-lock removal emits a structured log event with kind=step and note=st
     const lockPath = join(dir, `stale-lock-log-${randomUUID()}.lock`);
     const logger = makeCapturingLogger();
 
-    // Create a lock file with a mtime > STALE_LOCK_MS (30 s) in the past.
+    // Create a lock file with a mtime older than STALE_LOCK_MS in the past.
     await writeFile(lockPath, "", { flag: "wx" });
-    const past = new Date(Date.now() - 60_000);
+    const past = new Date(Date.now() - STALE_BACKDATE_MS);
     await utimes(lockPath, past, past);
 
     const token = await acquireLock(lockPath, 2000, logger);
@@ -331,9 +312,9 @@ test("acquireLock still detects and removes a stale lock with throttled stat", a
   await withTempDir(async (dir) => {
     const lockPath = join(dir, `stale-throttle-${randomUUID()}.lock`);
 
-    // Create a lock with an mtime more than STALE_LOCK_MS (30s) in the past.
+    // Create a lock with an mtime older than STALE_LOCK_MS in the past.
     await writeFile(lockPath, "", { flag: "wx" });
-    const past = new Date(Date.now() - 60_000);
+    const past = new Date(Date.now() - STALE_BACKDATE_MS);
     await utimes(lockPath, past, past);
 
     // acquireLock must still detect and remove the stale lock even with
@@ -409,8 +390,8 @@ test("stale-lock steal does not cascade when original holder releases", async ()
     // Holder A acquires the lock and captures token A.
     const tokenA = await acquireLock(lockPath);
 
-    // Back-date the lock mtime so it looks stale (> 30 s old).
-    const past = new Date(Date.now() - 60_000);
+    // Back-date the lock mtime so it looks stale (older than STALE_LOCK_MS).
+    const past = new Date(Date.now() - STALE_BACKDATE_MS);
     await utimesFs(lockPath, past, past);
 
     // Holder B steals the stale lock: detect stale, unlink, re-acquire.
@@ -611,7 +592,7 @@ test("concurrent acquirers racing a stale lock keep strict mutual exclusion (max
 
     // Plant a stale lock (older than STALE_LOCK_MS) that every acquirer must steal.
     await wf(lockPath, "stale-holder-token", { flag: "wx" });
-    const past = new Date(Date.now() - 60_000);
+    const past = new Date(Date.now() - STALE_BACKDATE_MS);
     await ut(lockPath, past, past);
 
     const N = 5;
