@@ -242,6 +242,10 @@ describe("implementPrompt includes live-surface verification section for infra-m
 
     const promptText = readFileSync(plan.items[0].prompt_path, "utf8");
     expect(promptText).toContain("npm run check");
+    // The stale pre-A12 workspace build directive must never resurface. (The
+    // current `npm run build` string legitimately appears in the section's
+    // "do NOT run `npm run build`" prose, so this negative stays spelled to the
+    // dead -w directive form rather than matching that prohibition.)
     expect(promptText).not.toContain("npm run build -w packages/remediate-code");
   });
 
@@ -256,6 +260,9 @@ describe("implementPrompt includes live-surface verification section for infra-m
     );
 
     const promptText = readFileSync(plan.items[0].prompt_path, "utf8");
+    // The stale pre-A12 workspace test directive must never resurface. (`npm test`
+    // appears in the section's "do NOT run `npm test`" prose, so this negative
+    // stays spelled to the dead -w directive form, not the prohibition.)
     expect(promptText).not.toContain("npm test -w packages/remediate-code");
     // The build-free runner is what the worker is pointed at instead.
     expect(promptText).toContain("npx vitest run");

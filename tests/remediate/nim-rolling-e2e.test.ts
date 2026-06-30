@@ -14,8 +14,8 @@
 //
 // SKIPPED unless RUN_NIM_E2E=1 (and NVIDIA_API_KEY is set): it hits the live NIM
 // endpoint, so it must never run in the normal suite / CI. Run it with:
-//   RUN_NIM_E2E=1 npx vitest run tests/nim-rolling-e2e.test.ts
-// from packages/remediate-code (NVIDIA_API_KEY must be in the environment).
+//   RUN_NIM_E2E=1 npx vitest run tests/remediate/nim-rolling-e2e.test.ts
+// from the repo root (NVIDIA_API_KEY must be in the environment).
 
 import { afterAll, describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";

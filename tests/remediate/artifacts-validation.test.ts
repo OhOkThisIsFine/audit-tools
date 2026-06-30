@@ -4,6 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateStore, type RemediationState } from "../../src/remediate/state/store.js";
 import { validateArtifacts, validateImplementWorkerResult } from "../../src/remediate/validation/artifacts.js";
+import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-artifact-validation");
@@ -184,7 +185,7 @@ describe("validateImplementWorkerResult (exported, ValidationIssue[] return styl
 
   it("returns issues when item_results array is missing", () => {
     const issues = validateImplementWorkerResult(
-      { contract_version: "remediate-code-worker-result/v1alpha1", phase: "implement" },
+      { contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION, phase: "implement" },
       "test-path",
     );
     const errorIssues = issues.filter((i) => i.severity === "error");
@@ -195,7 +196,7 @@ describe("validateImplementWorkerResult (exported, ValidationIssue[] return styl
   it("returns issues when phase is not implement", () => {
     const issues = validateImplementWorkerResult(
       {
-        contract_version: "remediate-code-worker-result/v1alpha1",
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
         phase: "document",
         item_results: [],
       },
@@ -205,8 +206,7 @@ describe("validateImplementWorkerResult (exported, ValidationIssue[] return styl
     expect(errorIssues.map((i) => i.message).join(" ")).toMatch(/phase/i);
   });
 
-  it("returns empty issues for a well-formed implement worker result", async () => {
-    const { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } = await import("../../src/remediate/steps/types.js");
+  it("returns empty issues for a well-formed implement worker result", () => {
     const issues = validateImplementWorkerResult(
       {
         contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,

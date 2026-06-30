@@ -58,7 +58,7 @@ function makeNodeFinding(overrides: Record<string, unknown> = {}): Finding {
       severity: "high",
       lens: "correctness",
       summary: "Implement the dispatch seam.",
-      affected_files: [{ path: "packages/remediate-code/src/steps/dispatch.ts" }],
+      affected_files: [{ path: "src/remediate/steps/dispatch.ts" }],
     }),
     ...overrides,
   } as Finding;
@@ -158,9 +158,9 @@ describe("implement prompt renderer — build-free per-node verification (CE-001
       // of the runnable per-node verify directives (residual CE-001).
       targeted_commands: [
         "npm run check",
-        "npx vitest run packages/remediate-code/tests/dispatch-evidence-and-writescope.test.ts",
-        "npm run build -w packages/remediate-code",
-        "npm test -w packages/remediate-code",
+        "npx vitest run tests/remediate/dispatch-evidence-and-writescope.test.ts",
+        "npm run build",
+        "npm test",
       ],
     });
     const prompt = await renderPrompt(makeImplementingState(finding));
@@ -172,7 +172,7 @@ describe("implement prompt renderer — build-free per-node verification (CE-001
     expect(verifySection).toContain("npm run check");
     // The build-free node command survives into the runnable directives.
     expect(runnableCommands).toContain(
-      "npx vitest run packages/remediate-code/tests/dispatch-evidence-and-writescope.test.ts",
+      "npx vitest run tests/remediate/dispatch-evidence-and-writescope.test.ts",
     );
     // The build / build-prepending commands are filtered out of the runnable
     // command block (they may still appear under the provenance-only "Contract
@@ -184,22 +184,28 @@ describe("implement prompt renderer — build-free per-node verification (CE-001
   });
 
   it("an infra-modifying node's section is also build-free (no npm run build / npm test directive)", async () => {
-    // A node whose declared write scope is the live dispatch engine. It carries
-    // no build commands, so the whole prompt must be free of the -w build/test
-    // forms (the infra section no longer instructs a worker-side build).
+    // A node whose declared write scope is the live dispatch engine (the current
+    // single-package `src/remediate/steps/dispatch.ts`, matched by
+    // isInfraModifyingBlock). It carries no build commands, so the whole prompt
+    // must be free of build/test directives (the infra section no longer
+    // instructs a worker-side build).
     const finding = makeNodeFinding({
-      affected_files: [{ path: "packages/remediate-code/src/steps/dispatch.ts" }],
+      affected_files: [{ path: "src/remediate/steps/dispatch.ts" }],
     });
     const state = makeImplementingState(finding);
     state.items![finding.id].item_spec!.touched_files = [
-      "packages/remediate-code/src/steps/dispatch.ts",
+      "src/remediate/steps/dispatch.ts",
     ];
     const prompt = await renderPrompt(state);
 
     expect(prompt).toContain("Infra-modifying block");
-    expect(prompt).not.toMatch(/npm run build -w packages\/remediate-code/);
-    expect(prompt).not.toMatch(/npm test -w packages\/remediate-code/);
+    // The infra section must point the worker at a build-free runner, never a
+    // build/test directive. Scope the negative to the runnable fenced command
+    // block(s) so it does not match the "do NOT run `npm run build`" PROSE.
     const infraSection = sectionOf(prompt, "Infra-modifying block");
+    const infraFenced = (infraSection.match(/```\n([\s\S]*?)```/g) || []).join("\n");
+    expect(infraFenced).not.toMatch(/npm run build\b/);
+    expect(infraFenced).not.toMatch(/\bnpm test\b/);
     expect(infraSection).toContain("npm run check");
   });
 });
@@ -236,10 +242,10 @@ describe("isBuildFreeVerifyCommand", () => {
 
   it("rejects build and build-prepending commands", () => {
     expect(isBuildFreeVerifyCommand("npm run build")).toBe(false);
-    expect(isBuildFreeVerifyCommand("npm run build -w packages/remediate-code")).toBe(false);
+    expect(isBuildFreeVerifyCommand("npm run build --if-present")).toBe(false);
     expect(isBuildFreeVerifyCommand("npm test")).toBe(false);
     expect(isBuildFreeVerifyCommand("npm t")).toBe(false);
-    expect(isBuildFreeVerifyCommand("npm test -w packages/remediate-code")).toBe(false);
+    expect(isBuildFreeVerifyCommand("npm test -- tests/remediate/x.test.ts")).toBe(false);
     expect(isBuildFreeVerifyCommand("npm run test")).toBe(false);
     expect(isBuildFreeVerifyCommand("tsc -b")).toBe(false);
     expect(isBuildFreeVerifyCommand("tsc --build")).toBe(false);
