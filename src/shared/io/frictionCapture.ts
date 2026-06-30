@@ -74,10 +74,35 @@ export function frictionCapturePath(artifactsDir: string, runId: string): string
   return join(frictionCaptureDir(artifactsDir), `${sanitizeRunId(runId)}.json`);
 }
 
-/** Reduce a run id to a stable, filename-safe token (OS-agnostic). */
+/**
+ * Encode a run id to a stable, filename-safe, OS-agnostic token that is
+ * INJECTIVE: distinct run ids ALWAYS map to distinct tokens, so distinct runs
+ * never collide on the same friction artifact path.
+ *
+ * Each character outside the safe set `[A-Za-z0-9._-]` is percent-encoded
+ * (`_xx`, hex of its UTF-8 bytes), and a literal `_` is itself escaped (`_5f`)
+ * so the encoding is unambiguously reversible. A naive `replace(/.../, "-")`
+ * collapse is many-to-one (`a/b` and `a-b` both → `a-b`); this is one-to-one.
+ *
+ * The empty run id encodes to the reserved sentinel `_` (which no non-empty id
+ * can produce, since a non-empty id always emits at least one char and a bare
+ * `_` would have been escaped to `_5f`), preserving a non-empty filename stem.
+ */
 export function sanitizeRunId(runId: string): string {
-  const cleaned = runId.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  return cleaned.length > 0 ? cleaned : "run";
+  if (runId.length === 0) {
+    return "_";
+  }
+  let out = "";
+  for (const ch of runId) {
+    if (ch !== "_" && /^[A-Za-z0-9.\-]$/.test(ch)) {
+      out += ch;
+      continue;
+    }
+    for (const byte of Buffer.from(ch, "utf8")) {
+      out += "_" + byte.toString(16).padStart(2, "0");
+    }
+  }
+  return out;
 }
 
 /**
