@@ -1,0 +1,159 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+// ---------------------------------------------------------------------------
+// CP-NODE-6 — provider confirmation must EXCLUDE self-spawn-blocked backends.
+//
+// A claude-code / codex provider detected on PATH while the host is already
+// inside an active session of that same agent (CLAUDECODE / CODEX set) cannot be
+// launched as a fresh subprocess — doing so would self-spawn. The Gate-0
+// confirmation must:
+//   - carry a MACHINE-READABLE blocked flag (not just a free-text reason),
+//   - EXCLUDE the blocked provider from the dispatchable pool by default,
+//   - allow the operator to explicitly re-include it,
+//   - ALWAYS retain the local-subprocess fallback,
+//   - single-source the PATH guard with a test-injectable detection hook.
+// ---------------------------------------------------------------------------
+
+const {
+  discoverProviders,
+} = await import("../../src/shared/providers/providerConfirmation.ts");
+const {
+  buildSharedProviderConfirmation,
+  currentProviderRoster,
+} = await import("../../src/shared/providers/sharedProviderConfirmation.ts");
+const {
+  isSelfSpawnBlocked,
+  commandExists,
+  setCommandExistsForTesting,
+} = await import("../../src/shared/providers/providerPathGuard.ts");
+
+// A PATH-detection hook that claims EVERY probed command exists, so discovery is
+// deterministic regardless of what CLIs are installed in CI.
+const detectAll = () => true;
+
+// ── machine-readable self-spawn flag ─────────────────────────────────────────
+
+test("isSelfSpawnBlocked is the single-sourced, machine-readable guard", () => {
+  assert.equal(isSelfSpawnBlocked("claude-code", { CLAUDECODE: "1" }), true);
+  assert.equal(isSelfSpawnBlocked("claude-code", {}), false);
+  assert.equal(isSelfSpawnBlocked("codex", { CODEX: "1" }), true);
+  assert.equal(isSelfSpawnBlocked("codex", {}), false);
+  // Providers without a self-spawn hazard are never blocked.
+  assert.equal(isSelfSpawnBlocked("opencode", { OPENCODE: "1" }), false);
+  assert.equal(isSelfSpawnBlocked("local-subprocess", {}), false);
+});
+
+test("discoverProviders stamps a machine-readable selfSpawnBlocked flag", () => {
+  const inSession = discoverProviders({}, { CLAUDECODE: "1" }, detectAll);
+  const claude = inSession.find((p) => p.name === "claude-code");
+  assert.ok(claude, "claude-code is still surfaced (operator may override)");
+  assert.equal(
+    claude.selfSpawnBlocked,
+    true,
+    "claude-code must carry a machine-readable selfSpawnBlocked flag in a CLAUDECODE session",
+  );
+
+  const clean = discoverProviders({}, {}, detectAll);
+  const claudeClean = clean.find((p) => p.name === "claude-code");
+  assert.ok(claudeClean);
+  assert.notEqual(
+    claudeClean.selfSpawnBlocked,
+    true,
+    "claude-code must NOT be flagged blocked outside a CLAUDECODE session",
+  );
+});
+
+// ── exclusion from the confirmed pool ────────────────────────────────────────
+
+test("a self-spawn-blocked provider is EXCLUDED from the confirmed pool by default", () => {
+  const built = buildSharedProviderConfirmation(
+    {},
+    { CLAUDECODE: "1" },
+    [],
+    [],
+    detectAll,
+  );
+  const claude = built.provider_pool.find((e) => e.name === "claude-code");
+  assert.ok(claude, "claude-code is recorded in the pool");
+  assert.equal(
+    claude.excluded,
+    true,
+    "a self-spawn-blocked claude-code must be excluded from the dispatchable pool",
+  );
+  assert.equal(
+    claude.self_spawn_blocked,
+    true,
+    "the pool entry must carry the machine-readable self_spawn_blocked flag",
+  );
+});
+
+test("a NON-blocked provider stays included in the confirmed pool", () => {
+  const built = buildSharedProviderConfirmation({}, {}, [], [], detectAll);
+  const claude = built.provider_pool.find((e) => e.name === "claude-code");
+  assert.ok(claude);
+  assert.equal(claude.excluded, false, "claude-code is dispatchable outside a CLAUDECODE session");
+  assert.notEqual(claude.self_spawn_blocked, true);
+});
+
+test("the operator can explicitly re-include a self-spawn-blocked provider", () => {
+  const built = buildSharedProviderConfirmation(
+    {},
+    { CLAUDECODE: "1" },
+    [],
+    ["claude-code"],
+    detectAll,
+  );
+  const claude = built.provider_pool.find((e) => e.name === "claude-code");
+  assert.ok(claude);
+  assert.equal(
+    claude.excluded,
+    false,
+    "an operator opt-in overrides the default self-spawn exclusion",
+  );
+  // The machine-readable flag still records WHY it would otherwise be excluded.
+  assert.equal(claude.self_spawn_blocked, true);
+});
+
+test("an operator exclude always wins over an include", () => {
+  const built = buildSharedProviderConfirmation(
+    {},
+    { CLAUDECODE: "1" },
+    ["claude-code"],
+    ["claude-code"],
+    detectAll,
+  );
+  const claude = built.provider_pool.find((e) => e.name === "claude-code");
+  assert.ok(claude);
+  assert.equal(claude.excluded, true, "explicit exclude wins over include");
+});
+
+// ── always-available local-subprocess fallback ───────────────────────────────
+
+test("local-subprocess fallback is ALWAYS retained, even inside a blocked session", () => {
+  const built = buildSharedProviderConfirmation(
+    {},
+    { CLAUDECODE: "1", CODEX: "1" },
+    [],
+    [],
+    detectAll,
+  );
+  const local = built.provider_pool.find((e) => e.name === "local-subprocess");
+  assert.ok(local, "local-subprocess must always be in the pool");
+  assert.equal(local.excluded, false, "the fallback is never excluded");
+});
+
+// ── test-injectable PATH-detection hook ──────────────────────────────────────
+
+test("setCommandExistsForTesting drives discovery deterministically and restores", () => {
+  try {
+    setCommandExistsForTesting(() => true);
+    assert.equal(commandExists("definitely-not-a-real-binary-xyz"), true);
+    const roster = currentProviderRoster({}, {});
+    assert.ok(roster.includes("claude-code"), "injected hook surfaces claude-code");
+  } finally {
+    setCommandExistsForTesting(null);
+  }
+  // Restored: the bogus binary no longer resolves.
+  assert.equal(commandExists("definitely-not-a-real-binary-xyz"), false);
+});

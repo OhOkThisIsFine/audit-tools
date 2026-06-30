@@ -17,6 +17,7 @@ export type RunLogEventKind =
   | "scope"
   | "outcome"
   | "provider_launch"
+  | "provider_done"
   | "step"
   | "state"
   | "error";

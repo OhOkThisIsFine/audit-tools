@@ -684,6 +684,11 @@ export {
   buildProviderConfirmationDisplay,
   applyProviderConfirmationSelections,
 } from "./providers/providerConfirmation.js";
+export {
+  commandExists,
+  isSelfSpawnBlocked,
+  setCommandExistsForTesting,
+} from "./providers/providerPathGuard.js";
 
 // Quota
 export type {
