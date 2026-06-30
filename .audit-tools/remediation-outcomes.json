@@ -1,301 +1,36 @@
 {
-  "contract_version": "remediate-code-outcomes/v1alpha1",
-  "total": 4,
-  "by_outcome": {
-    "resolved": 0,
-    "verified_no_change": 0,
-    "inappropriate": 0,
-    "ignored": 4,
-    "blocked": 0
+  "schema_version": "remediate-code-outcomes/v1alpha1",
+  "run_id": "audit-full-sweep-20260630",
+  "completed_at": "2026-06-30",
+  "source": ".audit-tools/audit-report.md (186 verified-real findings)",
+  "strategy": "Contract-pipeline plan (15 disjoint module nodes) implemented in isolated worktrees; per-node isolated verify deadlocked (source nodes vs separate test nodes + whole-suite verify), so finalized via COMBINED RECONCILIATION (operator-chosen): each node committed, all commits cherry-picked onto one integration branch, full suite run once on the union.",
+  "verification": {
+    "build": "pass",
+    "typecheck": "pass",
+    "remediate_vitest": "2093 passed / 0 failed / 2 skipped",
+    "audit_node_test": "2487 passed / 0 failed",
+    "true_green": "run with CLAUDECODE unset"
   },
-  "by_lens": {
-    "security": {
-      "ignored": 4
-    }
-  },
-  "started_at": "2026-06-26T21:18:59.281Z",
-  "completed_at": "2026-06-26T22:40:21.043Z",
-  "duration_ms": 4527883,
-  "outcomes": [
-    {
-      "finding_id": "CP-NODE-1",
-      "lens": "security",
-      "file_exts": [],
-      "outcome": "ignored",
-      "rework_count": 2,
-      "closing_status": "skipped",
-      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
-      "reason": "Already shipped in 0.30.18 via the lean lap-2b path (C1 capability persistence landed on main). This contract-pipeline run is obsolete — do not retry.",
-      "started_at": "2026-06-26T21:24:53.160Z",
-      "completed_at": "2026-06-26T22:40:21.043Z",
-      "duration_ms": 4527883,
-      "finding": {
-        "category": "General",
-        "affected_files": [],
-        "evidence": [
-          "Satisfies contract obligation: OBL-capability-handshake-persistence-contract",
-          "Satisfies contract obligation: OBL-capability-handshake-persistence-inv-1",
-          "Satisfies contract obligation: OBL-capability-handshake-persistence-inv-2",
-          "Satisfies contract obligation: OBL-capability-handshake-persistence-inv-3",
-          "Satisfies contract obligation: OBL-capability-handshake-persistence-fail-1",
-          "Satisfies contract obligation: OBL-capability-handshake-persistence-fail-2",
-          "Verifies contract obligation: OBL-capability-handshake-persistence-contract",
-          "Verifies contract obligation: OBL-capability-handshake-persistence-inv-1",
-          "Verifies contract obligation: OBL-capability-handshake-persistence-inv-2",
-          "Verifies contract obligation: OBL-capability-handshake-persistence-inv-3",
-          "Verifies contract obligation: OBL-capability-handshake-persistence-fail-1",
-          "Verifies contract obligation: OBL-capability-handshake-persistence-fail-2"
-        ],
-        "id": "CP-NODE-1",
-        "title": "C1+C5a: persist host capability handshake on RemediationState; drop report-overwrite warning",
-        "severity": "high",
-        "confidence": "high",
-        "lens": "security",
-        "summary": "Files: src/remediate/index.ts, src/remediate/steps/nextStep.ts, src/remediate/state/store.ts. Add a host_capabilities field to RemediationState (store.ts ~18-48) round-tripped by StateStore.mutate; validateState must accept it. In resolveHostDispatchCapability (nextStep.ts ~126-190), resolve each capability field as explicitFlag ?? persistedField ?? floor (per-field merge — commander leaves omitted --host-* options undefined, so omitted is distinguishable from explicit); persist the EXPLICITLY-supplied fields back to state on any call that supplies them (fill-the-gap, override-dominant; corrupt/absent persisted value degrades to flags-or-floor, never throws). True first contact (no persisted, no flags) keeps the 32k floor unchanged. Remove the report-overwrite warning process.stderr.write at nextStep.ts ~3905 (C5a). Tests: persisted handshake reused when omitted; per-field override; warning absent; first-contact floored; corrupt degrades.",
-        "concrete_change": "Files: src/remediate/index.ts, src/remediate/steps/nextStep.ts, src/remediate/state/store.ts. Add a host_capabilities field to RemediationState (store.ts ~18-48) round-tripped by StateStore.mutate; validateState must accept it. In resolveHostDispatchCapability (nextStep.ts ~126-190), resolve each capability field as explicitFlag ?? persistedField ?? floor (per-field merge — commander leaves omitted --host-* options undefined, so omitted is distinguishable from explicit); persist the EXPLICITLY-supplied fields back to state on any call that supplies them (fill-the-gap, override-dominant; corrupt/absent persisted value degrades to flags-or-floor, never throws). True first contact (no persisted, no flags) keeps the 32k floor unchanged. Remove the report-overwrite warning process.stderr.write at nextStep.ts ~3905 (C5a). Tests: persisted handshake reused when omitted; per-field override; warning absent; first-contact floored; corrupt degrades.",
-        "contract_goal_id": "loop-friction-burndown-c1-c4-d2-c5",
-        "contract_obligation_ids": [
-          "OBL-capability-handshake-persistence-contract",
-          "OBL-capability-handshake-persistence-inv-1",
-          "OBL-capability-handshake-persistence-inv-2",
-          "OBL-capability-handshake-persistence-inv-3",
-          "OBL-capability-handshake-persistence-fail-1",
-          "OBL-capability-handshake-persistence-fail-2"
-        ],
-        "verification_obligation_ids": [
-          "OBL-capability-handshake-persistence-contract",
-          "OBL-capability-handshake-persistence-inv-1",
-          "OBL-capability-handshake-persistence-inv-2",
-          "OBL-capability-handshake-persistence-inv-3",
-          "OBL-capability-handshake-persistence-fail-1",
-          "OBL-capability-handshake-persistence-fail-2"
-        ],
-        "addresses_counterexamples": [],
-        "model_tier": "deep",
-        "targeted_commands": [
-          "npx vitest run tests/remediate/next-step.test.ts"
-        ],
-        "preconditions": [],
-        "expected_changes": ""
-      },
-      "block_id": "CP-BLOCK-CP-NODE-1",
-      "block_dependencies": [],
-      "final_status": "ignored"
-    },
-    {
-      "finding_id": "CP-NODE-11",
-      "lens": "security",
-      "file_exts": [],
-      "outcome": "ignored",
-      "rework_count": 2,
-      "closing_status": "skipped",
-      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
-      "reason": "Already shipped in 0.30.18 via lean lap-2b (D2 rejected-artifact signpost landed on main). Obsolete run — do not retry.",
-      "started_at": "2026-06-26T21:24:53.380Z",
-      "completed_at": "2026-06-26T22:40:21.043Z",
-      "duration_ms": 4527663,
-      "finding": {
-        "category": "General",
-        "affected_files": [],
-        "evidence": [
-          "Satisfies contract obligation: OBL-rejected-artifact-edit-safety-contract",
-          "Satisfies contract obligation: OBL-rejected-artifact-edit-safety-inv-1",
-          "Satisfies contract obligation: OBL-rejected-artifact-edit-safety-inv-2",
-          "Satisfies contract obligation: OBL-rejected-artifact-edit-safety-fail-1",
-          "Verifies contract obligation: OBL-rejected-artifact-edit-safety-contract",
-          "Verifies contract obligation: OBL-rejected-artifact-edit-safety-inv-1",
-          "Verifies contract obligation: OBL-rejected-artifact-edit-safety-inv-2",
-          "Verifies contract obligation: OBL-rejected-artifact-edit-safety-fail-1"
-        ],
-        "id": "CP-NODE-11",
-        "title": "D2: rejected-artifact archive keeps original path re-authorable + signposted message",
-        "severity": "high",
-        "confidence": "high",
-        "lens": "security",
-        "summary": "File: src/remediate/steps/contractPipeline.ts ONLY. archiveContractArtifact (~291-303) moves the rejected artifact to history/<name>.<label>-<ts>.json (retained for audit) so the ORIGINAL path is free; ensure the rejection re-emit messages (~1300/1306/1497) explicitly state the prior output was archived (to <history path>) and instruct a full rewrite (Write, not Edit). If the history/ move fails, preserve the original at its path (degrade, never silently drop). Tests: after reject+archive, a fresh Write to the original path succeeds; the re-emit message contains the archive signpost; the history copy exists; a failed history move preserves the original.",
-        "concrete_change": "File: src/remediate/steps/contractPipeline.ts ONLY. archiveContractArtifact (~291-303) moves the rejected artifact to history/<name>.<label>-<ts>.json (retained for audit) so the ORIGINAL path is free; ensure the rejection re-emit messages (~1300/1306/1497) explicitly state the prior output was archived (to <history path>) and instruct a full rewrite (Write, not Edit). If the history/ move fails, preserve the original at its path (degrade, never silently drop). Tests: after reject+archive, a fresh Write to the original path succeeds; the re-emit message contains the archive signpost; the history copy exists; a failed history move preserves the original.",
-        "contract_goal_id": "loop-friction-burndown-c1-c4-d2-c5",
-        "contract_obligation_ids": [
-          "OBL-rejected-artifact-edit-safety-contract",
-          "OBL-rejected-artifact-edit-safety-inv-1",
-          "OBL-rejected-artifact-edit-safety-inv-2",
-          "OBL-rejected-artifact-edit-safety-fail-1"
-        ],
-        "verification_obligation_ids": [
-          "OBL-rejected-artifact-edit-safety-contract",
-          "OBL-rejected-artifact-edit-safety-inv-1",
-          "OBL-rejected-artifact-edit-safety-inv-2",
-          "OBL-rejected-artifact-edit-safety-fail-1"
-        ],
-        "addresses_counterexamples": [],
-        "model_tier": "deep",
-        "targeted_commands": [
-          "npx vitest run tests/remediate/contract-pipeline-adversarial.test.ts"
-        ],
-        "preconditions": [],
-        "expected_changes": ""
-      },
-      "block_id": "CP-BLOCK-CP-NODE-11",
-      "block_dependencies": [],
-      "final_status": "ignored"
-    },
-    {
-      "finding_id": "CP-NODE-15",
-      "lens": "security",
-      "file_exts": [],
-      "outcome": "ignored",
-      "rework_count": 2,
-      "closing_status": "skipped",
-      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
-      "reason": "Already shipped in 0.30.18 via lean lap-2b (C5b worktree-remove precheck landed on main). Obsolete run — do not retry.",
-      "started_at": "2026-06-26T21:24:53.485Z",
-      "completed_at": "2026-06-26T22:40:21.043Z",
-      "duration_ms": 4527558,
-      "finding": {
-        "category": "General",
-        "affected_files": [],
-        "evidence": [
-          "Satisfies contract obligation: OBL-worktree-remove-noise-contract",
-          "Satisfies contract obligation: OBL-worktree-remove-noise-inv-1",
-          "Satisfies contract obligation: OBL-worktree-remove-noise-fail-1",
-          "Verifies contract obligation: OBL-worktree-remove-noise-contract",
-          "Verifies contract obligation: OBL-worktree-remove-noise-inv-1",
-          "Verifies contract obligation: OBL-worktree-remove-noise-fail-1"
-        ],
-        "id": "CP-NODE-15",
-        "title": "C5b: suppress worktree-remove noise only for the already-absent case via path-existence precheck",
-        "severity": "high",
-        "confidence": "high",
-        "lens": "security",
-        "summary": "File: src/remediate/steps/dispatch.ts ONLY. In removeWorktree (~610), precheck whether the worktree path exists / is a registered working tree BEFORE running git worktree remove; if it is already absent, treat as a no-op success and write nothing to stderr (OS/locale-agnostic — do NOT match on the 'not a working tree' stderr text). A genuine, unexpected removal failure (path exists but removal fails for another reason) is still logged/surfaced exactly as today. Tests: removeWorktree on an absent path -> no stderr, no throw; a non-absent removal failure -> still surfaced.",
-        "concrete_change": "File: src/remediate/steps/dispatch.ts ONLY. In removeWorktree (~610), precheck whether the worktree path exists / is a registered working tree BEFORE running git worktree remove; if it is already absent, treat as a no-op success and write nothing to stderr (OS/locale-agnostic — do NOT match on the 'not a working tree' stderr text). A genuine, unexpected removal failure (path exists but removal fails for another reason) is still logged/surfaced exactly as today. Tests: removeWorktree on an absent path -> no stderr, no throw; a non-absent removal failure -> still surfaced.",
-        "contract_goal_id": "loop-friction-burndown-c1-c4-d2-c5",
-        "contract_obligation_ids": [
-          "OBL-worktree-remove-noise-contract",
-          "OBL-worktree-remove-noise-inv-1",
-          "OBL-worktree-remove-noise-fail-1"
-        ],
-        "verification_obligation_ids": [
-          "OBL-worktree-remove-noise-contract",
-          "OBL-worktree-remove-noise-inv-1",
-          "OBL-worktree-remove-noise-fail-1"
-        ],
-        "addresses_counterexamples": [],
-        "model_tier": "standard",
-        "targeted_commands": [
-          "npx vitest run tests/remediate/dispatch-worktree.test.ts"
-        ],
-        "preconditions": [],
-        "expected_changes": ""
-      },
-      "block_id": "CP-BLOCK-CP-NODE-15",
-      "block_dependencies": [],
-      "final_status": "ignored"
-    },
-    {
-      "finding_id": "CP-NODE-7",
-      "lens": "security",
-      "file_exts": [],
-      "outcome": "ignored",
-      "rework_count": 2,
-      "closing_status": "skipped",
-      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
-      "reason": "Already shipped in 0.30.18 via lean lap-2b (C4 single-source obligation membership landed on main). Obsolete run — do not retry.",
-      "started_at": "2026-06-26T21:24:53.275Z",
-      "completed_at": "2026-06-26T22:40:21.043Z",
-      "duration_ms": 4527768,
-      "finding": {
-        "category": "General",
-        "affected_files": [],
-        "evidence": [
-          "Satisfies contract obligation: OBL-obligation-set-consistency-contract",
-          "Satisfies contract obligation: OBL-obligation-set-consistency-inv-1",
-          "Satisfies contract obligation: OBL-obligation-set-consistency-inv-2",
-          "Satisfies contract obligation: OBL-obligation-set-consistency-fail-1",
-          "Verifies contract obligation: OBL-obligation-set-consistency-contract",
-          "Verifies contract obligation: OBL-obligation-set-consistency-inv-1",
-          "Verifies contract obligation: OBL-obligation-set-consistency-inv-2",
-          "Verifies contract obligation: OBL-obligation-set-consistency-fail-1"
-        ],
-        "id": "CP-NODE-7",
-        "title": "C4: single-source the obligation-membership predicate shared by both scaffolds",
-        "severity": "high",
-        "confidence": "high",
-        "lens": "security",
-        "summary": "File: src/remediate/contractPipeline/derive.ts ONLY (in-scope). Extract ONE shared predicate/function (off TESTABLE_KINDS) deciding obligation-kind membership, and have BOTH buildTestValidatorPlanScaffold (~173-187) and buildImplementationDagScaffold (~232-268) derive their obligation set from it: testable (invariant/behavioral) -> both phases; structural OBL-<module>-contract -> implementation_dag only (covered by validateImplementationDAGIntegrity, never required in the test plan); unknown kind -> conservatively treated as testable (must appear in test plan, no silent drop). Add a drift lock-test asserting the two scaffolds use the same predicate and a structural obligation never lands in the test plan nor drops from the DAG, while a testable obligation missing from the test plan still fails the paired/coverage gate. NOTE (residual, out-of-scope): a separate TESTABLE_KINDS duplicate exists in contractPipelineGates.ts ~438 — do NOT edit gates.ts this node (out of declared write scope); leave a code comment in derive.ts noting the gates.ts duplicate as a follow-up unification.",
-        "concrete_change": "File: src/remediate/contractPipeline/derive.ts ONLY (in-scope). Extract ONE shared predicate/function (off TESTABLE_KINDS) deciding obligation-kind membership, and have BOTH buildTestValidatorPlanScaffold (~173-187) and buildImplementationDagScaffold (~232-268) derive their obligation set from it: testable (invariant/behavioral) -> both phases; structural OBL-<module>-contract -> implementation_dag only (covered by validateImplementationDAGIntegrity, never required in the test plan); unknown kind -> conservatively treated as testable (must appear in test plan, no silent drop). Add a drift lock-test asserting the two scaffolds use the same predicate and a structural obligation never lands in the test plan nor drops from the DAG, while a testable obligation missing from the test plan still fails the paired/coverage gate. NOTE (residual, out-of-scope): a separate TESTABLE_KINDS duplicate exists in contractPipelineGates.ts ~438 — do NOT edit gates.ts this node (out of declared write scope); leave a code comment in derive.ts noting the gates.ts duplicate as a follow-up unification.",
-        "contract_goal_id": "loop-friction-burndown-c1-c4-d2-c5",
-        "contract_obligation_ids": [
-          "OBL-obligation-set-consistency-contract",
-          "OBL-obligation-set-consistency-inv-1",
-          "OBL-obligation-set-consistency-inv-2",
-          "OBL-obligation-set-consistency-fail-1"
-        ],
-        "verification_obligation_ids": [
-          "OBL-obligation-set-consistency-contract",
-          "OBL-obligation-set-consistency-inv-1",
-          "OBL-obligation-set-consistency-inv-2",
-          "OBL-obligation-set-consistency-fail-1"
-        ],
-        "addresses_counterexamples": [],
-        "model_tier": "deep",
-        "targeted_commands": [
-          "npx vitest run tests/remediate/contract-pipeline-derive.test.ts"
-        ],
-        "preconditions": [],
-        "expected_changes": ""
-      },
-      "block_id": "CP-BLOCK-CP-NODE-7",
-      "block_dependencies": [],
-      "final_status": "ignored"
-    }
+  "nodes": [
+    { "id": "CP-NODE-1", "module": "remediate-nextstep", "status": "resolved", "summary": "input_conflict prompt names remediation-outcomes.json; lens/severity prose + provider accessor single-sourced; behavior-preserving extraction of final-gate cluster to finalGate.ts with equivalence test." },
+    { "id": "CP-NODE-2", "module": "remediate-dispatch", "status": "resolved", "summary": "INFRA_FILE_PATHS replaced with src/remediate/-derived matcher (win32-normalized) so isInfraModifyingBlock is live again (HIGH); invalid result files archived not swallowed; pool-construction preamble single-sourced." },
+    { "id": "CP-NODE-3", "module": "remediate-contract-pipeline", "status": "resolved", "summary": "ungrounded extracted-plan marker removed on citation-grounding failure (HIGH security); archive originalFree honored; DAG edge referential validation; lean-verdict schema_version; phase-list single-sourced; resolveAdversarialDepth extracted. 2 of 7 sub-claims rejected as not-a-bug (document validator never existed; moduleSlug already single-sourced)." },
+    { "id": "CP-NODE-4", "module": "remediate-close", "status": "resolved", "summary": "fullyGreen now means genuinely-completed close; skipped non-none merge-to-base no longer deletes artifacts (HIGH); none/no-op green path preserved." },
+    { "id": "CP-NODE-5", "module": "shared-dispatch-quota", "status": "resolved", "summary": "roster pool hostModel derived from poolKey at the single construction seam (HIGH model-routing) — all dispatch drivers correct-by-construction; fileLock injectable clock seam added (STALE_LOCK_MS unchanged)." },
+    { "id": "CP-NODE-6", "module": "shared-providers", "status": "resolved", "summary": "self-spawn-blocked providers carry a machine-readable flag and are excluded from the confirmed pool by default; commandExists/self-spawn/PATH guard single-sourced (new providerPathGuard.ts) with injectable detection hook; provider_done telemetry vocab added." },
+    { "id": "CP-NODE-7", "module": "shared-io", "status": "resolved", "summary": "sanitizeRunId replaced with injective _xx byte-escape encoding so distinct runIds map to distinct friction paths (collision fixed); import surface + idempotent capture preserved." },
+    { "id": "CP-NODE-8", "module": "audit-cli", "status": "resolved", "summary": "flag mutual-exclusion validated BEFORE destructive cleanupStaleArtifactsDir (HIGH); batch ingest admits only canonical result filenames; validate-result grounds against configured repo_root not cwd; line-count failure policy single-sourced." },
+    { "id": "CP-NODE-9", "module": "audit-extractors", "status": "resolved", "summary": "App Router empty-segment route normalized to '/' so app/route.ts yields root route; HTML_RESOURCE_ATTRIBUTE single-sourced (exported from analyzers/html.ts, duplicate deleted from browserExtension.ts) with drift guard." },
+    { "id": "CP-NODE-10", "module": "audit-orchestrator", "status": "resolved", "summary": "auto-fix formatters scoped to eligible disposition files not '.' (write-scope); win32 shim basename classification; strategy_summary gated on AUDIT_CODE_VERBOSE; 3 dead taskBuilder functions deleted. rekeyDriftedResults guard already present." },
+    { "id": "CP-NODE-11", "module": "audit-contracts-validation", "status": "resolved", "summary": "worker line-range end>=start refinement (schema regenerated, drift-guarded); discovered-limit field set single-sourced incl. context_tokens/output_tokens. Secondary ungrounded sub-claims (permission-bypass surfacing, normalizer drops, coverage lookup, DesignAssessment) left per verify-before-fix." },
+    { "id": "CP-NODE-12", "module": "scripts-config-deploy", "status": "resolved", "summary": "update-languages.mjs target path fixed to repo src/audit/extractors; CI path filters include package.json + workflow; audit postinstall exits non-zero on missing required asset; knip dead-code gate single-sourced. 2 claims rejected (smoke already captures one response; opencode MCP calls not actually removed)." },
+    { "id": "CP-NODE-13", "module": "tests-remediate", "status": "resolved", "summary": "stale packages/remediate-code/ fixtures re-pinned to src/remediate/; version literals -> exported constants; source-text drift sentinels -> type-level/exported-surface assertions." },
+    { "id": "CP-NODE-14", "module": "tests-audit", "status": "resolved", "summary": "fragile npx-madge guard replaced with in-process cycle detector; magic-11 -> LENSES.length; recursive single-decl walk -> import LENS_KEYWORD_MAP/VALID_LENSES; STALE_LOCK_MS imported not scraped." },
+    { "id": "CP-NODE-15", "module": "tests-shared", "status": "resolved", "summary": "fileLock tests driven via injected clock seam; copied threshold literals -> imported STALE_LOCK_MS; shared fileLock test-support module; obligation-engine imports source not dist." }
   ],
-  "ended_at": "2026-06-26T22:40:21.055Z",
-  "step_count": 4,
-  "combined_test_result": {
-    "passed": true,
-    "duration_ms": 0
-  },
-  "closing_result": {
-    "action": "none",
-    "status": "skipped",
-    "commands": []
-  },
-  "plan_coverage": {
-    "contract_version": "remediate-code-coverage/v1alpha1",
-    "plan_id": "loop-friction-burndown-c1-c4-d2-c5",
-    "source_finding_count": 4,
-    "planned_count": 4,
-    "folded_count": 0,
-    "dropped_count": 0,
-    "checkpoint_dropped_count": 0,
-    "phantom_dropped_count": 0,
-    "declined_review_count": 0,
-    "entries": [
-      {
-        "finding_id": "CP-NODE-1",
-        "title": "C1+C5a: persist host capability handshake on RemediationState; drop report-overwrite warning",
-        "disposition": "planned",
-        "block_id": "CP-BLOCK-CP-NODE-1"
-      },
-      {
-        "finding_id": "CP-NODE-7",
-        "title": "C4: single-source the obligation-membership predicate shared by both scaffolds",
-        "disposition": "planned",
-        "block_id": "CP-BLOCK-CP-NODE-7"
-      },
-      {
-        "finding_id": "CP-NODE-11",
-        "title": "D2: rejected-artifact archive keeps original path re-authorable + signposted message",
-        "disposition": "planned",
-        "block_id": "CP-BLOCK-CP-NODE-11"
-      },
-      {
-        "finding_id": "CP-NODE-15",
-        "title": "C5b: suppress worktree-remove noise only for the already-absent case via path-existence precheck",
-        "disposition": "planned",
-        "block_id": "CP-BLOCK-CP-NODE-15"
-      }
-    ]
-  }
+  "reconciliation_fixes": [
+    "tests/audit/audit-dispatch-observability.test.mjs — set AUDIT_CODE_VERBOSE so the now-gated strategy_summary line emits.",
+    "tests/audit/audit-code-completion.test.mjs — batch fixture renamed to canonical <stem>_<12hex>.json so node-8's stricter filter admits it."
+  ],
+  "notes": "Several findings were adversarially verified false at implementation (workers applied verify-before-fix): document-vs-implement validator, already-single-sourced moduleSlug, opencode MCP-removal, and a cluster of ungrounded audit-contracts sub-claims — these are recorded as verified-already-correct, not silently dropped."
 }
