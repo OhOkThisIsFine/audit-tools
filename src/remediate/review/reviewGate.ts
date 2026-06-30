@@ -28,7 +28,6 @@ import {
 } from "./reviewNecessity.js";
 
 export const REVIEW_REQUEST_SCHEMA_VERSION = "remediate-code-review-request/v1" as const;
-export const REVIEW_RESOLUTION_SCHEMA_VERSION = "remediate-code-review-resolution/v1" as const;
 
 /** One reviewable item, with the tool-owned deterministic fields populated. */
 export interface ReviewItemEntry {

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/audit/index.ts!",
+    "src/remediate/index.ts!",
+    "scripts/**/*.mjs!"
+  ],
+  "project": ["src/**/*.ts!"],
+  "ignore": ["dist/**"],
+  "ignoreBinaries": ["gitleaks"],
+  "ignoreExportsUsedInFile": true
+}

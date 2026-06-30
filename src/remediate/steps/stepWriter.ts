@@ -1,9 +1,4 @@
-import {
-  writeStepContract,
-  stepsDir as sharedStepsDir,
-  currentStepPath as sharedCurrentStepPath,
-  currentPromptPath as sharedCurrentPromptPath,
-} from "audit-tools/shared";
+import { writeStepContract } from "audit-tools/shared";
 import {
   REMEDIATION_STEP_CONTRACT_VERSION,
   type RemediationStep,
@@ -21,19 +16,6 @@ export interface WriteStepInput {
   allowedCommands?: string[];
   stopCondition: string;
   artifactPaths?: Record<string, string>;
-}
-
-/** `<artifactsDir>/steps` — re-exported from the shared path authority. */
-export function stepsDir(artifactsDir: string): string {
-  return sharedStepsDir(artifactsDir);
-}
-
-export function currentStepPath(artifactsDir: string): string {
-  return sharedCurrentStepPath(artifactsDir);
-}
-
-export function currentPromptPath(artifactsDir: string): string {
-  return sharedCurrentPromptPath(artifactsDir);
 }
 
 /**

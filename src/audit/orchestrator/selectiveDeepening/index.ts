@@ -203,9 +203,3 @@ export function buildSelectiveDeepeningTasks(
 
   return created;
 }
-
-export const selectiveDeepeningTestUtils = {
-  DEEPENING_TAG,
-  LENS_VERIFICATION_TAG,
-  LENS_VERIFICATION_FOLLOWUP_TAG,
-};

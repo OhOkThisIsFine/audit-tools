@@ -37,17 +37,4 @@ export interface WorkerTask {
 // existing local import surface.
 export { resolveWorkerTaskTimeoutMs } from "audit-tools/shared";
 
-export function resolveWorkerTaskMaxRetries(
-  task: Pick<WorkerTask, "max_retries">,
-  fallbackRetries: number,
-): number {
-  if (
-    typeof task.max_retries === "number" &&
-    Number.isFinite(task.max_retries) &&
-    task.max_retries >= 0
-  ) {
-    return Math.floor(task.max_retries);
-  }
-  return fallbackRetries;
-}
 

@@ -5,6 +5,5 @@
 // the original module path so importers and tests are unaffected.
 export {
   buildSelectiveDeepeningTasks,
-  selectiveDeepeningTestUtils,
 } from "./selectiveDeepening/index.js";
 export type { BuildSelectiveDeepeningTaskOptions } from "./selectiveDeepening/index.js";

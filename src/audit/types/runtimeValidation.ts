@@ -4,15 +4,8 @@ export const RuntimeValidationKindSchema = z.enum([
   "unit-risk-check",
   "critical-flow-check",
 ]);
-export const RUNTIME_VALIDATION_KINDS = RuntimeValidationKindSchema.options;
-export type RuntimeValidationKind = z.infer<typeof RuntimeValidationKindSchema>;
 
 export const RuntimeValidationPrioritySchema = z.enum(["high", "medium", "low"]);
-export const RUNTIME_VALIDATION_PRIORITIES =
-  RuntimeValidationPrioritySchema.options;
-export type RuntimeValidationPriority = z.infer<
-  typeof RuntimeValidationPrioritySchema
->;
 
 export const RuntimeValidationStatusSchema = z.enum([
   "pending",
@@ -21,7 +14,6 @@ export const RuntimeValidationStatusSchema = z.enum([
   "inconclusive",
   "not_required",
 ]);
-export const RUNTIME_VALIDATION_STATUSES = RuntimeValidationStatusSchema.options;
 export type RuntimeValidationStatus = z.infer<
   typeof RuntimeValidationStatusSchema
 >;

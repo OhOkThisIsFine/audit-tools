@@ -83,10 +83,6 @@ export function resolveHostDispatchCapability(options: {
   ) ?? true;
 }
 
-export function toBase64Url(value: string): string {
-  return Buffer.from(value, "utf8").toString("base64url");
-}
-
 export function fromBase64Url(value: string): string {
   return Buffer.from(value, "base64url").toString("utf8");
 }

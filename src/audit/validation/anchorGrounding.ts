@@ -72,8 +72,6 @@ export const ANCHOR_GROUNDING_CONCURRENCY = Math.max(
   Math.min(8, availableParallelism()),
 );
 
-/** Outcome of actually running an anchor command (injectable for tests). */
-export type AnchorRunOutcome = AllowlistedExecOutcome;
 export type AnchorRunner = AllowlistedExecRunner;
 
 /**

@@ -45,7 +45,8 @@
     "test:shared": "npm run build && node --import tsx/esm --test tests/shared/*.test.mjs",
     "test:remediate": "vitest run",
     "test:single": "npm run build && node --import tsx/esm --test",
-    "verify:release": "npm run check && npm run check:doc-manifest && npm test && npm run verify:hosts && npm run smoke:packaged-audit-code && npm run smoke:packaged-remediate-code",
+    "verify:release": "npm run check && npm run check:deadcode && npm run check:doc-manifest && npm test && npm run verify:hosts && npm run smoke:packaged-audit-code && npm run smoke:packaged-remediate-code",
+    "check:deadcode": "knip --include exports,types,nsExports,nsTypes --no-config-hints",
     "check:doc-manifest": "node scripts/check-doc-manifest.mjs",
     "verify:hosts": "node scripts/audit/verify-hosts.mjs",
     "smoke:linked-audit-code": "node scripts/audit/smoke-linked-audit-code.mjs",
@@ -75,6 +76,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
+    "knip": "^6.23.0",
     "linguist-languages": "^9.3.2",
     "tree-sitter-wasms": "^0.1.13",
     "tsx": "^4.19.0",

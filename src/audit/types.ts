@@ -48,11 +48,6 @@ export const LENS_REGISTRY: readonly LensDefinition[] = [
  * wrongly rejected in flow requeue). */
 export const ALL_LENSES: readonly Lens[] = LENS_REGISTRY.map((d) => d.id);
 
-/** Lenses enabled by default (all entries in the registry with default_enabled true). */
-export const ENABLED_LENSES: readonly Lens[] = LENS_REGISTRY
-  .filter((d) => d.default_enabled)
-  .map((d) => d.id);
-
 export function isLens(value: unknown): value is Lens {
   return (
     typeof value === "string" && (ALL_LENSES as readonly string[]).includes(value)
@@ -67,7 +62,6 @@ export const FileRecordSchema = z.object({
   excluded: z.boolean().optional(),
   exclusion_reason: z.string().optional(),
 });
-export type FileRecord = z.infer<typeof FileRecordSchema>;
 
 export const RepoManifestSchema = z.object({
   repository: z.object({
@@ -127,8 +121,6 @@ export const ClassificationStatusSchema = z.enum([
   "out_of_scope_intent",
 ]);
 
-export const CLASSIFICATION_STATUSES = ClassificationStatusSchema.options;
-
 export type ClassificationStatus = z.infer<typeof ClassificationStatusSchema>;
 
 export const CoverageFileRecordSchema = z.object({
@@ -145,8 +137,6 @@ export const CoverageMatrixSchema = z.object({
   files: z.array(CoverageFileRecordSchema),
 });
 export type CoverageMatrix = z.infer<typeof CoverageMatrixSchema>;
-
-export type AuditTaskStatus = "pending" | "complete";
 
 export const AuditTaskSchema = z.object({
   task_id: z.string(),
@@ -203,7 +193,6 @@ export const AuditVerificationSchema = z.object({
   confidence_concerns: z.array(z.string()).optional(),
   followup_tasks: z.array(AuditTaskSchema).optional(),
 });
-export type AuditVerification = z.infer<typeof AuditVerificationSchema>;
 
 export const AuditResultSchema = z.object({
   task_id: z.string(),
