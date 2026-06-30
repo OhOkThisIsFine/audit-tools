@@ -435,25 +435,6 @@ export async function writeCoreArtifacts(
   }
 }
 
-export async function cleanupIntermediateArtifacts(
-  root: string,
-): Promise<string[]> {
-  const deleted: string[] = [];
-  for (const [, definition] of ARTIFACT_ENTRIES) {
-    const path = join(root, definition.fileName);
-    try {
-      await unlink(path);
-      deleted.push(definition.fileName);
-    } catch (error) {
-      if (isFileMissingError(error)) {
-        continue;
-      }
-      throw error;
-    }
-  }
-  return deleted;
-}
-
 export async function promoteFinalAuditReport(params: {
   artifactsDir: string;
 }, options: {

@@ -449,7 +449,6 @@ const {
 const {
   deriveLiveResultKeys,
   recordResultBaseline,
-  perElementStalenessVerdict,
   isMetadataManifestCurrent,
 } = await import("../../src/audit/orchestrator/resultBaseline.ts");
 const { METADATA_SCHEMA_VERSION } = await import(
@@ -488,13 +487,6 @@ test("F1 seam-equality: per-element verdict equals the verdict from the contentK
   const liveKeys = deriveLiveResultKeys(coordinate);
   assert.equal(liveKeys.idempotency_key, seamIk, "idempotency_key from the seam");
   assert.equal(liveKeys.content_key, seamCk, "content_key from the seam");
-
-  // With a baseline recorded at the seam contentKey, an unchanged element is skipped.
-  const baselines = recordResultBaseline(undefined, {
-    idempotency_key: seamIk,
-    content_key: seamCk,
-  });
-  assert.equal(perElementStalenessVerdict(baselines, coordinate), "skipped");
 });
 
 test("F1 inv-1 [CP-NODE-2]: per-element identity comes only from contentKey seam (seam-equality + discriminator-in-key)", () => {
@@ -595,24 +587,9 @@ test("F1 discriminator-in-key: two same-grouping-coordinate results with distinc
   // Same {unit_id,lens,pass_id} grouping coordinate, different discriminator.
   assert.notEqual(base.idempotency_key, redispatch.idempotency_key);
   assert.notEqual(base.content_key, redispatch.content_key);
-
-  // A baseline for the base result must NOT skip the re-dispatched result.
-  const baselines = recordResultBaseline(undefined, base);
-  assert.equal(
-    perElementStalenessVerdict(baselines, {
-      unit_id: "u1",
-      lens: "security",
-      pass_id: "p1",
-      source: "redispatch",
-      attempt: 1,
-      task_content_signature: sig,
-    }),
-    "re-derive",
-    "distinct same-coordinate result must not be false-skipped (CE-009)",
-  );
 });
 
-test("F1 inv-2 [CP-NODE-3]: unchanged element skipped, distinct discriminator never collapses (incl. O3 re-dispatch)", () => {
+test("F1 inv-2 [CP-NODE-3]: distinct discriminator yields a distinct contentKey (incl. O3 re-dispatch)", () => {
   const sig = buildTaskContentSignature({ goal: "audit auth", body: "v1" });
   const baseCoord = {
     unit_id: "uX",
@@ -622,17 +599,9 @@ test("F1 inv-2 [CP-NODE-3]: unchanged element skipped, distinct discriminator ne
     task_content_signature: sig,
   };
   const baseKeys = deriveLiveResultKeys(baseCoord);
-  const baselines = recordResultBaseline(undefined, baseKeys);
-
-  // Skip-by-construction: persisted contentKey == freshly-computed → unchanged → skip.
-  assert.equal(
-    perElementStalenessVerdict(baselines, baseCoord),
-    "skipped",
-    "unchanged element (identical contentKey) must skip",
-  );
 
   // O3 stage-3 re-dispatch: same {unit_id,lens,pass_id} grouping coordinate, distinct
-  // discriminator → distinct keys → must NOT false-skip against the base baseline (CE-009).
+  // discriminator → distinct keys (CE-009).
   const redispatchCoord = {
     unit_id: "uX",
     lens: "security",
@@ -647,131 +616,6 @@ test("F1 inv-2 [CP-NODE-3]: unchanged element skipped, distinct discriminator ne
     redispatchKeys.content_key,
     baseKeys.content_key,
     "O3 re-dispatch must have a distinct contentKey from the base result",
-  );
-  assert.equal(
-    perElementStalenessVerdict(baselines, redispatchCoord),
-    "re-derive",
-    "two distinct same-grouping-coordinate results must never collapse to a false skip (CE-009)",
-  );
-
-  // And once the re-dispatch is itself recorded, its own unchanged re-run skips —
-  // proving the skip operates at per-result, not grouping, granularity.
-  const both = recordResultBaseline(baselines, redispatchKeys);
-  assert.equal(perElementStalenessVerdict(both, redispatchCoord), "skipped");
-  assert.equal(perElementStalenessVerdict(both, baseCoord), "skipped");
-});
-
-test("F1 skip-by-construction: unchanged element skipped, mutated element re-derived", () => {
-  const coord = (sig) => ({
-    unit_id: "u1",
-    lens: "security",
-    pass_id: "p1",
-    source: "base",
-    task_content_signature: sig,
-  });
-  const sigA = buildTaskContentSignature({ goal: "g", body: "v1" });
-  const keysA = deriveLiveResultKeys(coord(sigA));
-  const baselines = recordResultBaseline(undefined, keysA);
-
-  // Run B — same content: unchanged → skipped.
-  assert.equal(perElementStalenessVerdict(baselines, coord(sigA)), "skipped");
-
-  // Run B — mutated content (benign edit bumps contentKey): re-derive.
-  const sigB = buildTaskContentSignature({ goal: "g", body: "v2 edited" });
-  assert.equal(perElementStalenessVerdict(baselines, coord(sigB)), "re-derive");
-});
-
-test("F1 fail-safe: missing discriminator (no source) → re-derive, never grouping-key compare", () => {
-  const sig = buildTaskContentSignature({ goal: "g" });
-  // First establish a baseline under base so a grouping-key compare COULD falsely skip.
-  const keys = deriveLiveResultKeys({
-    unit_id: "u1",
-    lens: "security",
-    pass_id: "p1",
-    source: "base",
-    task_content_signature: sig,
-  });
-  const baselines = recordResultBaseline(undefined, keys);
-  // Coordinate omitting `source` (the discriminator) → fail-safe stale (CE-009).
-  assert.equal(
-    perElementStalenessVerdict(baselines, {
-      unit_id: "u1",
-      lens: "security",
-      pass_id: "p1",
-      task_content_signature: sig,
-    }),
-    "re-derive",
-  );
-});
-
-test("F1 fail-safe: corrupt/undefined element state → re-derive", () => {
-  const coord = {
-    unit_id: "u1",
-    lens: "security",
-    pass_id: "p1",
-    source: "base",
-    task_content_signature: "", // empty signature → seam throws → fail-safe
-  };
-  assert.equal(perElementStalenessVerdict({}, coord), "re-derive");
-
-  // No baseline recorded for a valid coordinate → first compare → re-derive.
-  const sig = buildTaskContentSignature({ goal: "g" });
-  assert.equal(
-    perElementStalenessVerdict(undefined, {
-      unit_id: "u1",
-      lens: "security",
-      pass_id: "p1",
-      source: "base",
-      task_content_signature: sig,
-    }),
-    "re-derive",
-    "no recorded baseline → never a false skip",
-  );
-});
-
-test("F1 inv-3 [CP-NODE-4]: missing/corrupt per-element key => stale (fail-safe)", () => {
-  // A persisted per-element contentKey that is missing, deleted, or corrupt
-  // (uncomparable) must be treated as CHANGED and re-derived — mirroring the
-  // whole-artifact !currentHash => stale path. We corrupt/delete the persisted
-  // baseline several ways and assert each fails safe to `re-derive`, never a
-  // false `skipped`.
-  const sig = buildTaskContentSignature({ goal: "g", body: "v1" });
-  const coord = {
-    unit_id: "u1",
-    lens: "security",
-    pass_id: "p1",
-    source: "base",
-    task_content_signature: sig,
-  };
-  const liveKeys = deriveLiveResultKeys(coord);
-
-  // Sanity: a correctly persisted baseline skips an unchanged element.
-  const goodBaselines = recordResultBaseline(undefined, liveKeys);
-  assert.equal(perElementStalenessVerdict(goodBaselines, coord), "skipped");
-
-  // (a) Persisted key DELETED from the store → no baseline → re-derive.
-  const deleted = { ...goodBaselines };
-  delete deleted[liveKeys.idempotency_key];
-  assert.equal(
-    perElementStalenessVerdict(deleted, coord),
-    "re-derive",
-    "deleted persisted per-element key must fail safe to re-derive",
-  );
-
-  // (b) Persisted key explicitly undefined (uncomparable) → re-derive.
-  const undef = { ...goodBaselines, [liveKeys.idempotency_key]: undefined };
-  assert.equal(
-    perElementStalenessVerdict(undef, coord),
-    "re-derive",
-    "undefined persisted per-element key must fail safe to re-derive",
-  );
-
-  // (c) Persisted key corrupt (a non-matching/garbage value) → re-derive.
-  const corrupt = { ...goodBaselines, [liveKeys.idempotency_key]: "CORRUPT" };
-  assert.equal(
-    perElementStalenessVerdict(corrupt, coord),
-    "re-derive",
-    "corrupt persisted per-element key must fail safe to re-derive",
   );
 });
 
@@ -831,22 +675,6 @@ test("F1 reproducible DAG: persist/reload cycle yields identical stale set + per
   const stale1 = computeStaleArtifacts({ ...initialBundle, artifact_metadata: metadata });
   const stale2 = computeStaleArtifacts({ ...initialBundle, artifact_metadata: reloaded });
   assert.deepEqual([...stale1].sort(), [...stale2].sort());
-
-  // Per-element verdicts are identical across the reload too.
-  const coord = {
-    unit_id: "u1",
-    lens: "security",
-    pass_id: "p1",
-    source: "base",
-    task_content_signature: buildTaskContentSignature({ goal: "g" }),
-  };
-  const keys = deriveLiveResultKeys(coord);
-  const baselines = recordResultBaseline(undefined, keys);
-  const reloadedBaselines = JSON.parse(JSON.stringify(baselines));
-  assert.equal(
-    perElementStalenessVerdict(baselines, coord),
-    perElementStalenessVerdict(reloadedBaselines, coord),
-  );
 });
 
 test("F1 single-adjacency: ARTIFACT_DEPENDENTS_MAP is the derived inversion of the one canonical table", () => {
@@ -1028,65 +856,6 @@ test("F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json ups
     assert.ok(
       mdDependents[upstream]?.has("git_history.json"),
       `dependency-map.md must list git_history.json downstream of ${upstream}`,
-    );
-  }
-});
-
-test("F1 fail-3 [CP-NODE-14]: missing/uncomparable per-element key => stale, never unchanged", () => {
-  // F1 fail-3 regression guard: treating a missing or otherwise-uncomparable
-  // per-element key as `unchanged` (skipped) is a FALSE NEGATIVE — a changed
-  // element would silently be skipped. Every uncomparable shape must fail safe
-  // to `re-derive` and NEVER resolve to `skipped`. This guards angles distinct
-  // from inv-3 (CP-NODE-4): an under-discriminated coordinate, a signature the
-  // seam refuses to key, and non-string (structurally uncomparable) persisted
-  // baseline values.
-  const sig = buildTaskContentSignature({ goal: "g", body: "v1" });
-  const coord = {
-    unit_id: "u1",
-    lens: "security",
-    pass_id: "p1",
-    source: "base",
-    task_content_signature: sig,
-  };
-  const liveKeys = deriveLiveResultKeys(coord);
-
-  // Sanity anchor: a correctly persisted baseline is the ONLY skip path.
-  const good = recordResultBaseline(undefined, liveKeys);
-  assert.equal(perElementStalenessVerdict(good, coord), "skipped");
-
-  // (a) Under-discriminated coordinate (no `source`): the coordinate cannot be
-  // uniquely keyed, so it must never be compared at the grouping granularity.
-  const { source: _drop, ...underDiscriminated } = coord;
-  assert.equal(
-    perElementStalenessVerdict(good, underDiscriminated),
-    "re-derive",
-    "under-discriminated coordinate (missing source) must never skip",
-  );
-
-  // (b) Uncomparable live signature: an empty signature is rejected by the seam
-  // (deriveLiveResultKeys throws) → the element is uncomparable → re-derive.
-  const noSigCoord = { ...coord, task_content_signature: "" };
-  assert.equal(
-    perElementStalenessVerdict(good, noSigCoord),
-    "re-derive",
-    "uncomparable (empty) live signature must never skip",
-  );
-
-  // (c) Structurally-uncomparable persisted baselines: a baseline value that is
-  // not the seam content_key string (null, a number, an object) can never equal
-  // the freshly-derived content_key, so each must fail safe to re-derive.
-  for (const badValue of [null, 0, 42, { content_key: liveKeys.content_key }, ["x"]]) {
-    const corruptStore = { ...good, [liveKeys.idempotency_key]: badValue };
-    const verdict = perElementStalenessVerdict(corruptStore, coord);
-    assert.equal(
-      verdict,
-      "re-derive",
-      `uncomparable persisted baseline (${JSON.stringify(badValue)}) must fail safe to re-derive`,
-    );
-    assert.notEqual(
-      verdict,
-      "skipped",
-      "an uncomparable per-element key must never be treated as unchanged",
     );
   }
 });
@@ -1427,20 +1196,4 @@ test("F1 fail-2 [CP-NODE-13]: per-element verdict never keyed on the bare groupi
   // Distinct keys: the discriminator is part of identity, not the bare coordinate.
   assert.notEqual(base.content_key, redispatch.content_key, "discriminator distinguishes the contentKey");
   assert.notEqual(base.idempotency_key, redispatch.idempotency_key, "discriminator distinguishes the idempotencyKey");
-
-  // A baseline recorded for the base result must NOT skip the discriminator-
-  // distinct sibling — i.e. the verdict is not keyed on the bare grouping coord.
-  const baselines = recordResultBaseline(undefined, base);
-  assert.equal(
-    perElementStalenessVerdict(baselines, { ...grouping, source: "redispatch", attempt: 2, stage: "O3" }),
-    "re-derive",
-    "a distinct-discriminator sibling sharing the grouping coordinate must never be false-skipped",
-  );
-  // The base result's own unchanged re-run still skips — proving per-result, not
-  // per-grouping, granularity (the discriminator collapses ONLY identical results).
-  assert.equal(
-    perElementStalenessVerdict(baselines, { ...grouping, source: "base" }),
-    "skipped",
-    "the identical base result still skips — collapse happens per-result, not per grouping coordinate",
-  );
 });

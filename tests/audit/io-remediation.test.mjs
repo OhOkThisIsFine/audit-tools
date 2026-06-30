@@ -18,7 +18,6 @@ const {
   writeNdjsonFile,
 } = await import("audit-tools/shared/io/json");
 const {
-  cleanupIntermediateArtifacts,
   getArtifactValue,
   loadArtifactBundle,
   promoteFinalAuditReport,
@@ -30,7 +29,6 @@ const {
   clearDispatchFiles,
   ensureSupervisorDirs,
   getRunPaths,
-  writeDispatchBatchFiles,
   writeWorkerTaskFiles,
 } = await import("../../src/audit/io/runArtifacts.ts");
 
@@ -151,12 +149,6 @@ test("artifact bundle definitions round-trip joined paths, falsey values, and cl
       stableToolingManifestValues(loaded.tooling_manifest),
     );
 
-    const deleted = await cleanupIntermediateArtifacts(tempDir);
-    assert.ok(deleted.includes("repo_manifest.json"));
-    assert.ok(deleted.includes("audit_results.jsonl"));
-    assert.ok(deleted.includes("audit-report.md"));
-    assert.equal(existsSync(join(tempDir, "repo_manifest.json")), false);
-    assert.equal(existsSync(join(tempDir, "audit-report.md")), false);
   });
 });
 
@@ -366,72 +358,6 @@ test("clearDispatchFiles is a no-op when the dispatch directory does not exist",
       false,
       "clearDispatchFiles must not create the dispatch directory",
     );
-  });
-});
-
-test("parallel dispatch helper preserves the whole worker batch in shared dispatch artifacts", async () => {
-  await withTempDir("audit-code-run-dispatch-batch-", async (tempDir) => {
-    const artifactsDir = join(tempDir, ".audit-tools/audit");
-    await ensureSupervisorDirs(artifactsDir);
-
-    await writeDispatchBatchFiles(
-      artifactsDir,
-      [
-        {
-          run_id: "run-1",
-          task_path: join(artifactsDir, "runs", "run-1", "task.json"),
-          prompt_path: join(artifactsDir, "runs", "run-1", "prompt.md"),
-          result_path: join(artifactsDir, "runs", "run-1", "result.json"),
-          status_path: join(artifactsDir, "runs", "run-1", "status.json"),
-          audit_results_path: join(artifactsDir, "runs", "run-1", "run-results.json"),
-          pending_audit_tasks_path: join(artifactsDir, "runs", "run-1", "pending-audit-tasks.json"),
-        },
-        {
-          run_id: "run-2",
-          task_path: join(artifactsDir, "runs", "run-2", "task.json"),
-          prompt_path: join(artifactsDir, "runs", "run-2", "prompt.md"),
-          result_path: join(artifactsDir, "runs", "run-2", "result.json"),
-          status_path: join(artifactsDir, "runs", "run-2", "status.json"),
-          audit_results_path: join(artifactsDir, "runs", "run-2", "run-results.json"),
-          pending_audit_tasks_path: join(artifactsDir, "runs", "run-2", "pending-audit-tasks.json"),
-        },
-      ],
-      [
-        {
-          task_id: "audit-1",
-          unit_id: "unit-1",
-          pass_id: "pass-1",
-          lens: "security",
-          file_paths: ["src/a.ts"],
-          rationale: "fixture",
-        },
-        {
-          task_id: "audit-2",
-          unit_id: "unit-2",
-          pass_id: "pass-2",
-          lens: "reliability",
-          file_paths: ["src/b.ts"],
-          rationale: "fixture",
-        },
-      ],
-    );
-
-    const dispatchSummary = JSON.parse(
-      await readFile(join(artifactsDir, "dispatch", "current-task.json"), "utf8"),
-    );
-    assert.equal(dispatchSummary.mode, "parallel-batch");
-    assert.equal(dispatchSummary.run_count, 2);
-    assert.deepEqual(
-      dispatchSummary.runs.map((run) => run.run_id),
-      ["run-1", "run-2"],
-    );
-    assert.match(
-      await readFile(join(artifactsDir, "dispatch", "current-prompt.md"), "utf8"),
-      /run-1[\s\S]*run-2/i,
-    );
-    assert.ok(existsSync(join(artifactsDir, "dispatch", "audit-result.schema.json")));
-    assert.ok(existsSync(join(artifactsDir, "dispatch", "audit-results.schema.json")));
-    assert.ok(existsSync(join(artifactsDir, "dispatch", "finding.schema.json")));
   });
 });
 

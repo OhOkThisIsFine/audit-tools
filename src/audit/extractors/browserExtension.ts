@@ -484,17 +484,3 @@ export function buildBrowserExtensionSurfacesFromGraph(
   );
 }
 
-export function chromeExtensionRiskSignalsForManifest(content: string): string[] {
-  const manifest = parseJsonObject(content);
-  if (!manifest || !isBrowserExtensionManifest(manifest)) {
-    return [];
-  }
-  const permissions = [
-    ...asStringArray(manifest.permissions),
-    ...asStringArray(manifest.optional_permissions),
-    ...asStringArray(manifest.host_permissions),
-  ];
-  return HIGH_RISK_PERMISSION_TOKENS.filter((token) =>
-    permissions.some((permission) => permission === token),
-  );
-}

@@ -294,31 +294,6 @@ export function validateFinalizedModuleContracts(
 
 // ── DesignSpec ────────────────────────────────────────────────────────────────
 
-export function validateDesignSpec(
-  value: unknown,
-  path = "design_spec",
-): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  const v = validateEnvelope(value, path, CONTRACT_PIPELINE_DESIGN_SPEC_VERSION, issues);
-  if (!v) return issues;
-  requireString(v.design_narrative, `${path}.design_narrative`, issues);
-  if (!Array.isArray(v.invariants)) {
-    pushValidationIssue(issues, `${path}.invariants`, `${path}.invariants must be an array.`);
-  } else {
-    for (const [i, inv] of v.invariants.entries()) {
-      if (!isRecord(inv)) {
-        pushValidationIssue(issues, `${path}.invariants[${i}]`, `${path}.invariants[${i}] must be an object.`);
-        continue;
-      }
-      requireString(inv.id, `${path}.invariants[${i}].id`, issues);
-      requireString(inv.description, `${path}.invariants[${i}].description`, issues);
-    }
-  }
-  requireStringArray(v.affected_paths, `${path}.affected_paths`, issues);
-  requireString(v.created_at, `${path}.created_at`, issues);
-  return issues;
-}
-
 // ── DesignSpec structural gates + cross-artifact gates ────────────────────────
 // Extracted to contractPipelineGates.ts (MNT-86b18f1b). Re-exported here for
 // backward-compatible imports — callers do not need to update their import paths.

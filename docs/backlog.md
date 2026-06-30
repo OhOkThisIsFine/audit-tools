@@ -25,20 +25,18 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   Fits the dispatch capability-tiered driver track. [[meta-audit-friction-must-be-tool-enforced]]
 - **Selective-deepening tasks never converge — packet result task_id ≠ assigned `deepening:*` id.** Workers returned packet-style task_ids instead of the assigned `deepening:finding:*`, so merge-and-ingest never matched results to tasks and looped. The prompt-side fix (explicit task_id binding in `buildTaskSections`) is in place but **needs live validation** — can't be verified without a real deepening-capable run. Recovery until validated: quarantine orphan pending `deepening:*` tasks to let synthesis run.
 
-- **Dead-code gate — adopt a vetted whole-codebase unused-export tool (knip).** Failure class to kill: a fully
-  unit-tested exported symbol that is never wired into any production code path — green tests + green build, yet it does
-  nothing in a real run (first hit: a git-history extractor, fully tested but never called by any executor; the seam
-  unit tests proved the functions work in isolation, not that they are *invoked*). The desired end-state is NOT a narrow
-  hand-rolled guard scoped to one module family and keyed off a name pattern — that re-solves one corner of a general
-  problem, is regex-approximate (misses re-exports / dynamic imports — the exact silent-miss the two-tier dependency
-  policy warns against), and rots as new code uses other names. Instead: adopt a vetted, pure-JS, maintained dead-code
-  detector (knip) as a **build-gate check over our own source**, failing the gate on any exported symbol with zero
-  non-test consumers anywhere — adapters, providers, extractors, helpers alike — with an explicit allow-list for genuine
-  public-API / entry-point exports. This is a dev/CI gate on audit-tools' own TypeScript source (same category as the
-  tsc / vitest gates we already run on ourselves); it does NOT bear on the product's language-neutrality, which
-  constrains only what the audit *engine* assumes about *target* codebases. Subsumes the deferred general dead-code
-  track. One-time cost: clean up the existing unused exports the first run surfaces + curate the allow-list. Until
-  landed, wiring a new export into its production path is part of "done", not a follow-up.
+- **Dead-code gate — SHIPPED (knip default-mode); production-mode tested-but-unwired sweep is a manual track.**
+  `npm run check:deadcode` (`knip --include exports,types,nsExports,nsTypes`, in `verify:release`) fails the build on
+  any exported symbol with **zero consumers anywhere — including tests** (`knip.json`, `ignoreExportsUsedInFile:true`,
+  entries = the real TS roots `src/audit/index.ts` + `src/remediate/index.ts` since the `.mjs` bins shell out to
+  `dist/`). Wiring a new export into its production path is now part of "done". First run deleted 35 truly-dead symbols.
+  **Why default-mode, not the literal "zero non-test consumers":** knip `--production` (which would catch the
+  tested-but-unwired class directly) has REAL false positives — it can't trace dispatch-table / re-export-alias / dynamic
+  wiring, so live functions like `runPlanPhase` / `resolveFreshSessionProviderName` flag as unused. It is therefore NOT
+  gate-able. The tested-but-unwired class (the original git-history-extractor failure) is instead worked as a periodic
+  **manual audit**: `knip --production` → filter to symbols with zero *grep-detectable* production callers (grep DOES
+  find the dispatch/alias cases knip misses, so a grep-zero is a reliable dead signal) → delete symbol + orphaned tests.
+  One such sweep ran this sprint (candidates manifested, ~26 confirmed dead + deleted). Re-run when worthwhile.
   [[deterministic-analyzers-own-vs-acquire]]
 
 ## Forward tracks

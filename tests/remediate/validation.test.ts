@@ -341,7 +341,6 @@ describe("basic validation helpers", () => {
 import {
   validateGoalSpec,
   validateContextBundle,
-  validateDesignSpec,
   validateDesignSpecGates,
   validateConceptualDesignCritique,
   validateObligationLedger,
@@ -739,37 +738,6 @@ describe("contract pipeline validators", () => {
     it("rejects invalid status", () => {
       const issues = validateCyclicSeamResolution({ ...valid, status: "unknown_status" });
       expect(issues.some((i) => i.path.includes("status"))).toBe(true);
-    });
-  });
-
-  describe("validateDesignSpec", () => {
-    const validDesignSpec = {
-      contract_version: CONTRACT_PIPELINE_DESIGN_SPEC_VERSION,
-      goal_id: "G-001",
-      design_narrative: "A clear design narrative.",
-      invariants: [{ id: "INV-1", description: "No duplicate keys" }],
-      affected_paths: ["src/foo.ts"],
-      created_at: new Date().toISOString(),
-    };
-
-    it("accepts a well-formed DesignSpec", () => {
-      expect(validateDesignSpec(validDesignSpec).filter((i) => i.severity === "error")).toHaveLength(0);
-    });
-
-    it("rejects wrong contract_version", () => {
-      const issues = validateDesignSpec({ ...validDesignSpec, contract_version: "wrong/v999" });
-      expect(issues.some((i) => i.path.includes("contract_version"))).toBe(true);
-    });
-
-    it("rejects missing goal_id", () => {
-      const { goal_id: _, ...noGoalId } = validDesignSpec;
-      const issues = validateDesignSpec(noGoalId);
-      expect(issues.some((i) => i.path.includes("goal_id"))).toBe(true);
-    });
-
-    it("rejects missing design_narrative", () => {
-      const issues = validateDesignSpec({ ...validDesignSpec, design_narrative: "" });
-      expect(issues.some((i) => i.path.includes("design_narrative"))).toBe(true);
     });
   });
 });

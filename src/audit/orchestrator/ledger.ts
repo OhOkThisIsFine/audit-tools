@@ -189,24 +189,3 @@ export function appendResultsToLedger(
   return ledger;
 }
 
-/**
- * Re-associate ledger records to tasks. Groups one-to-many by `identity_key`
- * (multiple distinct results legitimately share a coordinate — base vs. deepening
- * / steward) and resolves logical identity by `idempotency_key`. Records are
- * stamped on read if a legacy entry predates the keys, so a ledger written before
- * O2 still groups correctly. RETAIN-UNASSIGNED: every record appears in exactly
- * one group keyed by its identity_key — none is dropped because its task is
- * absent (INV-3); the caller decides what to do with a group whose task is gone.
- */
-export function groupLedgerByIdentity(
-  ledger: AuditResult[],
-): Map<string, AuditResult[]> {
-  const byIdentity = new Map<string, AuditResult[]>();
-  for (const raw of ledger) {
-    const record = stampLedgerKeys(raw);
-    const group = byIdentity.get(record.identity_key!) ?? [];
-    group.push(record);
-    byIdentity.set(record.identity_key!, group);
-  }
-  return byIdentity;
-}

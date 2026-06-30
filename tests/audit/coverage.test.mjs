@@ -9,7 +9,6 @@ const {
   markExcludedPath,
   applyUnitCoverage,
   applyFileCoverage,
-  findUncoveredFiles,
   buildRequeueTargets,
 } = await import("../../src/audit/coverage.ts");
 
@@ -155,7 +154,7 @@ test("markExcludedPath and applyUnitCoverage find records correctly via index an
   assert.doesNotThrow(() => applyUnitCoverage(matrix, "missing.ts", "unit-x", ["correctness"]));
 });
 
-test("findUncoveredFiles and buildRequeueTargets report only outstanding work", () => {
+test("buildRequeueTargets reports only outstanding work", () => {
   const matrix = createCoverageMatrix([
     "complete.ts",
     "partial.ts",
@@ -171,12 +170,6 @@ test("findUncoveredFiles and buildRequeueTargets report only outstanding work", 
     { path: "complete.ts", total_lines: 10, pass_id: "p:correctness", lens: "correctness" },
     { path: "partial.ts", total_lines: 10, pass_id: "p:correctness", lens: "correctness" },
   ]);
-
-  const uncovered = findUncoveredFiles(matrix).map((f) => f.path);
-  assert.ok(!uncovered.includes("excluded.ts"), "excluded files are omitted");
-  assert.ok(!uncovered.includes("complete.ts"), "complete files are omitted");
-  assert.ok(uncovered.includes("partial.ts"), "partial files are included");
-  assert.ok(uncovered.includes("pending.ts"), "pending files are included");
 
   const targets = buildRequeueTargets(matrix);
   const byPath = new Map(targets.map((t) => [t.path, t.missing_lenses]));

@@ -250,65 +250,6 @@ export async function writeWorkerTaskFiles(
   }
 }
 
-export async function writeDispatchBatchFiles(
-  artifactsDir: string,
-  runs: DispatchBatchRun[],
-  currentTasks: AuditTask[],
-  log?: { event: (name: string, data: Record<string, unknown>) => void },
-): Promise<void> {
-  try {
-    const summary = {
-      contract_version: "audit-code-dispatch/v1alpha1",
-      mode: "parallel-batch",
-      run_count: runs.length,
-      current_tasks_path: join(artifactsDir, "dispatch", CURRENT_TASKS_FILENAME),
-      runs,
-    };
-    const promptLines = [
-      "# audit-code parallel dispatch",
-      "",
-      `This batch launched ${runs.length} deferred review run(s).`,
-      "Each run keeps its own task.json, prompt.md, result.json, and status.json under .audit-tools/audit/runs/<run_id>/.",
-      "Use current-tasks.json for the combined task list. The per-run files below are operational references for launched workers; do not read per-run prompt or schema files unless debugging a failed dispatch.",
-      "",
-      "Runs:",
-      ...runs.flatMap((run) => [
-        `- ${run.run_id}`,
-        `  task: ${run.task_path}`,
-        `  prompt (worker-owned; do not read during normal orchestration): ${run.prompt_path}`,
-        `  result: ${run.result_path}`,
-        `  status: ${run.status_path}`,
-        ...(run.audit_results_path
-          ? [`  audit results: ${run.audit_results_path}`]
-          : []),
-        ...(run.pending_audit_tasks_path
-          ? [`  pending tasks: ${run.pending_audit_tasks_path}`]
-          : []),
-      ]),
-      "",
-    ];
-
-    await writeJsonFile(join(artifactsDir, "dispatch", CURRENT_TASK_FILENAME), summary);
-    await writeFile(
-      join(artifactsDir, "dispatch", CURRENT_PROMPT_FILENAME),
-      promptLines.join("\n"),
-      "utf8",
-    );
-    await writeJsonFile(
-      join(artifactsDir, "dispatch", CURRENT_TASKS_FILENAME),
-      currentTasks,
-    );
-    await writeDispatchSchemaFiles(artifactsDir);
-  } catch (err) {
-    log?.event("dispatch_io_error", {
-      run_id: "batch",
-      function: "writeDispatchBatchFiles",
-      error: String(err),
-    });
-    throw err;
-  }
-}
-
 export async function clearDispatchFiles(
   artifactsDir: string,
   log?: { event: (name: string, data: Record<string, unknown>) => void },

@@ -3,10 +3,8 @@ import assert from "node:assert/strict";
 
 const {
   resolveEffectiveLenses,
-  validateLensSelection,
   MANDATORY_LENSES,
   isMandatoryLens,
-  isLensEffective,
 } = await import("../../src/audit/orchestrator/lensSelection.ts");
 
 // ── MANDATORY_LENSES ─────────────────────────────────────────────────────────
@@ -77,32 +75,6 @@ test("custom lenses are de-duplicated", () => {
   assert.equal(lenses.filter((l) => l === "whimsy").length, 1);
 });
 
-// ── validateLensSelection ─────────────────────────────────────────────────────
-
-test("validateLensSelection returns empty issues for undefined", () => {
-  assert.deepEqual(validateLensSelection(undefined), []);
-});
-
-test("validateLensSelection returns empty issues for null", () => {
-  assert.deepEqual(validateLensSelection(null), []);
-});
-
-test("validateLensSelection returns empty issues for a valid lens array", () => {
-  const issues = validateLensSelection(["security", "performance"]);
-  assert.equal(issues.filter((i) => i.severity === "error").length, 0);
-});
-
-test("validateLensSelection rejects a non-array value", () => {
-  const issues = validateLensSelection("security");
-  assert.ok(issues.some((i) => i.severity === "error"));
-});
-
-test("validateLensSelection warns on unknown lens names (custom lenses accepted)", () => {
-  const issues = validateLensSelection(["performance", "bogus_lens"]);
-  assert.ok(issues.some((i) => i.path.includes("[1]") && i.severity === "warning"));
-  assert.ok(!issues.some((i) => i.severity === "error"));
-});
-
 // ── isMandatoryLens ───────────────────────────────────────────────────────────
 
 test("isMandatoryLens returns true for mandatory lenses", () => {
@@ -115,19 +87,6 @@ test("isMandatoryLens returns true for mandatory lenses", () => {
 test("isMandatoryLens returns false for non-mandatory lenses", () => {
   assert.ok(!isMandatoryLens("performance"));
   assert.ok(!isMandatoryLens("tests"));
-});
-
-// ── isLensEffective ───────────────────────────────────────────────────────────
-
-test("isLensEffective returns true for lenses in the effective set", () => {
-  const effective = resolveEffectiveLenses(["performance"]);
-  assert.ok(isLensEffective("performance", effective));
-  assert.ok(isLensEffective("security", effective)); // mandatory
-});
-
-test("isLensEffective returns false for lenses not in the effective set", () => {
-  const effective = resolveEffectiveLenses(["performance"]);
-  assert.ok(!isLensEffective("architecture", effective));
 });
 
 // ── TST-4510f094: exclude-then-re-union round-trip ────────────────────────────

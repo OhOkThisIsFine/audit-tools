@@ -1,24 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { shouldRunInlineExecutor, buildManualReviewBlocker, buildBlockedAuditState } =
+const { buildManualReviewBlocker, buildBlockedAuditState } =
   await import("../../src/audit/cli/envelope.ts");
-
-// ── shouldRunInlineExecutor ─────────────────────────────────────────────────
-
-test("shouldRunInlineExecutor returns false for null", () => {
-  assert.equal(shouldRunInlineExecutor(null), false);
-});
-
-test("shouldRunInlineExecutor returns false for 'agent'", () => {
-  assert.equal(shouldRunInlineExecutor("agent"), false);
-});
-
-test("shouldRunInlineExecutor returns true for non-null non-agent executor", () => {
-  assert.equal(shouldRunInlineExecutor("claude-code"), true);
-  assert.equal(shouldRunInlineExecutor("local-subprocess"), true);
-  assert.equal(shouldRunInlineExecutor("codex"), true);
-});
 
 // ── buildManualReviewBlocker ────────────────────────────────────────────────
 // local-subprocess = headless/local provider that CANNOT dispatch sub-agents →

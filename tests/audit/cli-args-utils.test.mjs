@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve, sep } from "node:path";
 
 const {
-  summarizeLaunchExit,
   resolveHostDispatchCapability,
   optionalBooleanEnv,
   getArtifactsDir,
@@ -21,59 +20,6 @@ const ARGS_SOURCE_PATH = resolve(
   "cli",
   "args.ts",
 );
-
-// ---------------------------------------------------------------------------
-// summarizeLaunchExit
-// ---------------------------------------------------------------------------
-
-test("summarizeLaunchExit returns null on happy path: accepted=true, no error", () => {
-  assert.strictEqual(summarizeLaunchExit({ accepted: true, exitCode: 0 }), null);
-});
-
-test("summarizeLaunchExit returns null on happy path: empty object (accepted not false, no error)", () => {
-  assert.strictEqual(summarizeLaunchExit({}), null);
-});
-
-test("summarizeLaunchExit returns exit code string when accepted=false (no signal)", () => {
-  const result = summarizeLaunchExit({ accepted: false, exitCode: 1 });
-  assert.ok(result !== null, "expected non-null result");
-  assert.ok(result.includes("exit code 1"), `expected 'exit code 1' in: ${result}`);
-});
-
-test("summarizeLaunchExit uses signal when present instead of exit code", () => {
-  const result = summarizeLaunchExit({ accepted: false, signal: "SIGTERM" });
-  assert.ok(result !== null, "expected non-null result");
-  assert.ok(result.includes("signal SIGTERM"), `expected 'signal SIGTERM' in: ${result}`);
-  assert.ok(!result.includes("exit code"), `expected no 'exit code' in: ${result}`);
-});
-
-test("summarizeLaunchExit includes error message when error is present (accepted omitted)", () => {
-  const result = summarizeLaunchExit({ error: "spawn failed" });
-  assert.ok(result !== null, "expected non-null result");
-  assert.ok(result.includes("spawn failed"), `expected 'spawn failed' in: ${result}`);
-});
-
-test("summarizeLaunchExit includes optional command/stdoutPath/stderrPath when provided", () => {
-  const result = summarizeLaunchExit({
-    accepted: false,
-    exitCode: 2,
-    command: "node foo.js",
-    stdoutPath: "/tmp/out.log",
-    stderrPath: "/tmp/err.log",
-  });
-  assert.ok(result !== null, "expected non-null result");
-  assert.ok(result.includes("command: node foo.js"), `expected command in: ${result}`);
-  assert.ok(result.includes("stdout: /tmp/out.log"), `expected stdout in: ${result}`);
-  assert.ok(result.includes("stderr: /tmp/err.log"), `expected stderr in: ${result}`);
-});
-
-test("summarizeLaunchExit omits optional fields when absent", () => {
-  const result = summarizeLaunchExit({ accepted: false, exitCode: 1 });
-  assert.ok(result !== null, "expected non-null result");
-  assert.ok(!result.includes("command:"), `unexpected 'command:' in: ${result}`);
-  assert.ok(!result.includes("stdout:"), `unexpected 'stdout:' in: ${result}`);
-  assert.ok(!result.includes("stderr:"), `unexpected 'stderr:' in: ${result}`);
-});
 
 // ---------------------------------------------------------------------------
 // resolveHostDispatchCapability

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { appendResultsToLedger, stampLedgerKeys, groupLedgerByIdentity } =
+const { appendResultsToLedger, stampLedgerKeys } =
   await import("../../src/audit/orchestrator/ledger.ts");
 
 function baseResult(over = {}) {
@@ -66,22 +66,4 @@ test("appendResultsToLedger — base vs deepening share a coordinate but both pe
 test("appendResultsToLedger — dedupes replays within a single batch", () => {
   const ledger = appendResultsToLedger([], [baseResult(), baseResult()]);
   assert.equal(ledger.length, 1);
-});
-
-test("groupLedgerByIdentity — one-to-many grouping by identity_key; retains every record", () => {
-  const ledger = appendResultsToLedger(
-    [],
-    [
-      baseResult({ task_id: "t1" }),
-      baseResult({ task_id: "deepening:x:abc" }),
-      baseResult({ task_id: "t2", unit_id: "u2" }),
-    ],
-  );
-  const groups = groupLedgerByIdentity(ledger);
-  // u1 coordinate has two records (base + deepening); u2 has one.
-  const sizes = [...groups.values()].map((g) => g.length).sort();
-  assert.deepEqual(sizes, [1, 2]);
-  // RETAIN-UNASSIGNED: no record dropped — total across groups equals ledger size.
-  const total = [...groups.values()].reduce((n, g) => n + g.length, 0);
-  assert.equal(total, ledger.length);
 });

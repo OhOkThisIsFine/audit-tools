@@ -4,7 +4,7 @@ import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const { buildAuditCodeHandoff, writeAuditCodeHandoffArtifacts } = await import("../../src/audit/supervisor/operatorHandoff.ts");
-const { appendRunLedgerEntry, loadRunLedger } = await import("../../src/audit/supervisor/runLedger.ts");
+const { loadRunLedger } = await import("../../src/audit/supervisor/runLedger.ts");
 const { getSessionConfigPath, loadSessionConfig, persistAnalyzerSettings } = await import("../../src/audit/supervisor/sessionConfig.ts");
 
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
@@ -28,59 +28,6 @@ function makeHandoffArtifactPaths(artifactsDir, incomingDir) {
     runtime_validation_tasks: null,
   };
 }
-
-function buildRunLedgerEntry(runId) {
-  return {
-    run_id: runId,
-    provider: "local-subprocess",
-    obligation_id: "audit_tasks_completed",
-    selected_executor: "agent",
-    status: "blocked",
-    started_at: "2026-04-22T12:00:00Z",
-    ended_at: "2026-04-22T12:01:00Z",
-    result_path: join("results", `${runId}.json`),
-  };
-}
-
-test("appendRunLedgerEntry keeps concurrent writes without losing runs", async () => {
-  await withTempDir("audit-code-run-ledger-", async (artifactsDir) => {
-    const entries = Array.from({ length: 12 }, (_, index) =>
-      buildRunLedgerEntry(`run-${index}`),
-    );
-
-    await Promise.all(
-      entries.map((entry) => appendRunLedgerEntry(artifactsDir, entry)),
-    );
-
-    const ledger = await loadRunLedger(artifactsDir);
-    assert.equal(ledger.runs.length, entries.length);
-    assert.deepEqual(
-      [...new Set(ledger.runs.map((entry) => entry.run_id))].sort(),
-      entries.map((entry) => entry.run_id).sort(),
-    );
-
-    const persisted = JSON.parse(
-      await readFile(join(artifactsDir, "run-ledger.json"), "utf8"),
-    );
-    assert.equal(Array.isArray(persisted.runs), true);
-    assert.equal(persisted.runs.length, entries.length);
-  });
-});
-
-test("appendRunLedgerEntry preserves insertion order for sequential writes", async () => {
-  await withTempDir("audit-code-run-ledger-order-", async (artifactsDir) => {
-    const orderedRunIds = ["run-1", "run-2", "run-3"];
-    for (const runId of orderedRunIds) {
-      await appendRunLedgerEntry(artifactsDir, buildRunLedgerEntry(runId));
-    }
-
-    const ledger = await loadRunLedger(artifactsDir);
-    assert.deepEqual(
-      ledger.runs.map((entry) => entry.run_id),
-      orderedRunIds,
-    );
-  });
-});
 
 test("loadRunLedger rejects malformed ledger shapes instead of masking them", async () => {
   await withTempDir("audit-code-run-ledger-invalid-", async (artifactsDir) => {
