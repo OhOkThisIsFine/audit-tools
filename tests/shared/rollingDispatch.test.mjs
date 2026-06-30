@@ -13,6 +13,10 @@ const {
 
 const { setQuotaStateDir } = await import("../../src/shared/quota/state.ts");
 
+const { HostSessionQuotaSource } = await import(
+  "../../src/shared/quota/hostSessionQuotaSource.ts"
+);
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -434,6 +438,60 @@ test("createRollingDispatcher — when every pool exhausts, the packet is strand
   // The only pool was dropped after its first rate_limited; bounded retries.
   assert.ok(attempts >= 1, "packet attempted at least once before stranding");
   assert.ok(dispatcher.getState().exhaustedPoolIds.has("only-pool"));
+});
+
+test("createRollingDispatcher — host-session source wired via recordRateLimit/isPacketEscalated strands a same-packet account wall BEFORE all pools exhaust", async () => {
+  await setupTmpQuotaDir();
+  // Four pools that ALL rate-limit p1 with a parseable host-session-limit string.
+  // The retained source escalates the same packet once its bounded re-limit count
+  // is exceeded; the dispatcher then STRANDS it instead of re-routing to the next
+  // surviving pool — so a pool is left un-attempted, proving the early strand.
+  const LIMIT_TEXT = "session limit reached. Resets in 1h";
+  const escalations = [];
+  const hostSession = new HostSessionQuotaSource({
+    providerModelKey: "claude-code::host",
+    maxConsecutiveReLimits: 2,
+    onEscalation: (e) => escalations.push(e),
+  });
+
+  const attemptedPools = new Set();
+  const dispatcher = createRollingDispatcher(
+    {
+      confirmedPools: [makePool("pool-a"), makePool("pool-b"), makePool("pool-c"), makePool("pool-d")],
+      sessionConfig: unlimitedSession(),
+      dispatchPacket: async (packet, slot) => {
+        attemptedPools.add(slot.poolId);
+        return { packet, outcome: "rate_limited", rateLimit: { channel: "error", text: LIMIT_TEXT } };
+      },
+      recordRateLimit: (packet, result) =>
+        hostSession.recordLimit(
+          result.rateLimit?.channel ?? "error",
+          result.rateLimit?.text ?? "",
+          packet.id,
+        ),
+      isPacketEscalated: (id) => hostSession.isEscalated(id),
+    },
+    { maxConcurrentPerPool: 1 },
+  );
+
+  dispatcher.enqueue([makePacket("p1")]);
+  const results = await dispatcher.run();
+
+  // p1 escalated (count 3 > bound 2) → stranded, not completed.
+  assert.equal(results.length, 0, "escalated packet produces no completion result");
+  const terminal = dispatcher.getTerminal();
+  assert.ok(terminal !== null, "escalated packet surfaces a terminal");
+  assert.deepEqual(terminal.stranded_ids, ["p1"]);
+
+  // onEscalation fired exactly once for p1.
+  assert.equal(escalations.length, 1, "host-session source escalated once");
+  assert.equal(escalations[0].packet_id, "p1");
+  assert.ok(hostSession.isEscalated("p1"), "source marks p1 escalated");
+
+  // Early strand: the 4th pool was never attempted (escalation fired on the 3rd
+  // re-limit), so the strand is the ESCALATION guard, not pool exhaustion.
+  assert.equal(attemptedPools.size, 3, "stranded after 3 re-limits, before the 4th pool");
+  assert.ok(!attemptedPools.has("pool-d"), "the surviving 4th pool was never reached");
 });
 
 test("createRollingDispatcher — dispatch callback that rejects is contained (resolves as error, never rejects run)", async () => {

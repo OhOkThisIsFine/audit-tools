@@ -145,7 +145,7 @@ export function makeProviderNodeDispatcher(
       const stderrText = (await readOptionalTextFile(stderrPath)) ?? "";
       const limitCheck = detectRateLimitFromChannel("error", stderrText);
       if (limitCheck.isRateLimited) {
-        return { packet, outcome: "rate_limited" };
+        return { packet, outcome: "rate_limited", rateLimit: { channel: "error", text: stderrText } };
       }
 
       // The worker writes its result file per the prompt; confirm it landed and
@@ -157,7 +157,7 @@ export function makeProviderNodeDispatcher(
         const stdoutText = (await readOptionalTextFile(stdoutPath)) ?? "";
         const stdoutLimitCheck = detectRateLimitFromChannel("status", stdoutText);
         if (stdoutLimitCheck.isRateLimited) {
-          return { packet, outcome: "rate_limited" };
+          return { packet, outcome: "rate_limited", rateLimit: { channel: "status", text: stdoutText } };
         }
         return {
           packet,

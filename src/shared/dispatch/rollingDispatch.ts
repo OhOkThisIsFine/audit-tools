@@ -42,6 +42,7 @@ import {
 } from "../quota/scheduler.js";
 import { recordWaveOutcome, readQuotaState } from "../quota/state.js";
 import { buildEmptyPoolTerminal } from "../quota/capacity.js";
+import type { WorkerOutputChannel } from "../quota/errorParsing.js";
 import { tierRank } from "./tierRank.js";
 
 // ---------------------------------------------------------------------------
@@ -74,6 +75,16 @@ export interface RollingDispatchResult<TPacket> {
   /** Actual tokens consumed, if the provider reports it. */
   actualTokens?: number;
   error?: unknown;
+  /**
+   * The worker ERROR/STATUS channel evidence that classified a `rate_limited`
+   * outcome. Carried so the consumer's `recordRateLimit` hook can re-validate it
+   * through a channel-isolated host-session source (CE-003) and accrue the
+   * bounded re-limit escalation count. Absent on non-rate_limited outcomes (and
+   * on a rate_limited outcome a provider classified by exit-code rather than a
+   * limit string — that path keeps the normal transient re-route, never an
+   * account-wall escalation).
+   */
+  rateLimit?: { channel: WorkerOutputChannel; text: string };
 }
 
 /** Identity of the provider/model pool selected for a dispatch. */
@@ -145,6 +156,20 @@ export interface RollingDispatchConfig<TPacket> {
    * Omit to leave INV-QD-07 behaviour unchanged.
    */
   isPacketEscalated?: (packetId: string) => boolean;
+  /**
+   * The write side of the host-session escalation guard: invoked at the
+   * `rate_limited` observation point BEFORE {@link isPacketEscalated} is consulted,
+   * so the consumer can feed its host-session source's channel-isolated
+   * `recordLimit` and let a same-packet account wall accrue the bounded re-limit
+   * count. The freshly-recorded escalation is then read back through
+   * `isPacketEscalated` in the same pass — strand-instead-of-requeue. Receives the
+   * packet and its result (carrying `rateLimit` channel/text evidence). Omit to
+   * leave the source unfed (no escalation can ever fire).
+   */
+  recordRateLimit?: (
+    packet: RollingDispatchPacket<TPacket>,
+    result: RollingDispatchResult<TPacket>,
+  ) => void;
 }
 
 /** Options for tuning the dispatcher (intentionally minimal per INV-S05). */
@@ -379,6 +404,7 @@ export function createRollingDispatcher<TPacket>(
     onResult,
     halfLifeHours = DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
     isPacketEscalated,
+    recordRateLimit,
   } = config;
 
   const state: RollingDispatchState<TPacket> = {
@@ -501,6 +527,11 @@ export function createRollingDispatcher<TPacket>(
     // marked completed nor recorded as a result — it remains live work.
     if (result.outcome === "rate_limited") {
       state.exhaustedPoolIds.add(providerSlot.poolId);
+      // Feed the host-session source FIRST (write side): a channel-isolated
+      // recordLimit accrues the same-packet bounded re-limit count and may escalate
+      // this packet — which the isPacketEscalated read below then observes in the
+      // SAME pass. Best-effort; the source swallows its own failures.
+      recordRateLimit?.(packet, result);
       // Bounded-escalation guard: if the host-session source has ESCALATED this
       // packet (its account wall re-tripped the SAME packet past the bound — an
       // unresettable / clock-skewed limit), re-queuing it would livelock. Strand
