@@ -116,7 +116,13 @@ export function resolveRuntimeValidationSpawnCommand(
     );
     return { command: executable, args };
   }
-  const packageManager = executable.replace(/\.(cmd|bat)$/i, "").toLowerCase();
+  // Classify on the BASENAME, not the raw executable: an absolute/relative shim
+  // path (e.g. "C:\\tools\\npm.cmd" or "./node_modules/.bin/npm.cmd") must still be
+  // recognized as a package-manager shim so it is wrapped through cmd.exe. Splitting
+  // the directory off first prevents the path prefix from defeating the includes()
+  // membership test below.
+  const basename = executable.split(/[\\/]/).pop() ?? executable;
+  const packageManager = basename.replace(/\.(cmd|bat)$/i, "").toLowerCase();
   if (["npm", "npx", "pnpm", "yarn"].includes(packageManager)) {
     process.stderr.write(
       JSON.stringify({
