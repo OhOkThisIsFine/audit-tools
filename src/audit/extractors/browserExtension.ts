@@ -7,6 +7,7 @@ import {
   normalizeGraphPath,
   resolveCandidate,
 } from "./graphPathUtils.js";
+import { HTML_RESOURCE_ATTRIBUTE } from "./analyzers/html.js";
 
 export const BROWSER_EXTENSION_HEURISTIC_NOTE =
   "Chrome extension manifest and HTML asset references were resolved deterministically from local paths; verify unusual dynamic registration manually.";
@@ -317,15 +318,6 @@ export function extractChromeExtensionManifestEdges(
 
   return edges;
 }
-
-// tag → the attribute that carries its resource reference. Mirrors html.ts so
-// both the regex floor and the tree-sitter analyzer track the same relationships.
-// Changes to which tags are tracked need only be made here and in html.ts.
-const HTML_RESOURCE_ATTRIBUTE: Record<string, string> = {
-  script: "src",
-  link: "href",
-  img: "src",
-};
 
 function extractHtmlAttributeReferences(
   content: string,
